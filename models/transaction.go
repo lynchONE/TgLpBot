@@ -10,10 +10,10 @@ import (
 type TransactionType string
 
 const (
-	TxTypeSwap          TransactionType = "swap"
-	TxTypeAddLiquidity  TransactionType = "add_liquidity"
+	TxTypeSwap            TransactionType = "swap"
+	TxTypeAddLiquidity    TransactionType = "add_liquidity"
 	TxTypeRemoveLiquidity TransactionType = "remove_liquidity"
-	TxTypeApprove       TransactionType = "approve"
+	TxTypeApprove         TransactionType = "approve"
 )
 
 // TransactionStatus represents the status of transaction
@@ -27,38 +27,38 @@ const (
 
 // Transaction represents a blockchain transaction
 type Transaction struct {
-	ID              uint              `gorm:"primaryKey" json:"id"`
-	UserID          uint              `gorm:"not null;index" json:"user_id"`
-	TxHash          string            `gorm:"size:66;uniqueIndex" json:"tx_hash"`
-	Type            TransactionType   `gorm:"size:20;not null;index" json:"type"`
-	Status          TransactionStatus `gorm:"size:20;not null;index" json:"status"`
-	
-	FromAddress     string            `gorm:"size:42;not null" json:"from_address"`
-	ToAddress       string            `gorm:"size:42;not null" json:"to_address"`
-	
+	ID     uint              `gorm:"primaryKey" json:"id"`
+	UserID uint              `gorm:"not null;index" json:"user_id"`
+	TaskID uint              `gorm:"index" json:"task_id"`
+	TxHash string            `gorm:"size:66;uniqueIndex" json:"tx_hash"`
+	Type   TransactionType   `gorm:"size:20;not null;index" json:"type"`
+	Status TransactionStatus `gorm:"size:20;not null;index" json:"status"`
+
+	FromAddress string `gorm:"size:42;not null" json:"from_address"`
+	ToAddress   string `gorm:"size:42;not null" json:"to_address"`
+
 	// Transaction details
-	TokenInAddress  string            `gorm:"size:42" json:"token_in_address"`
-	TokenOutAddress string            `gorm:"size:42" json:"token_out_address"`
-	AmountIn        string            `gorm:"type:varchar(78)" json:"amount_in"`
-	AmountOut       string            `gorm:"type:varchar(78)" json:"amount_out"`
-	
-	GasPrice        string            `gorm:"type:varchar(78)" json:"gas_price"`
-	GasUsed         uint64            `gorm:"default:0" json:"gas_used"`
-	
-	BlockNumber     uint64            `gorm:"default:0;index" json:"block_number"`
-	
-	ErrorMessage    string            `gorm:"type:text" json:"error_message,omitempty"`
-	
-	CreatedAt       time.Time         `json:"created_at"`
-	UpdatedAt       time.Time         `json:"updated_at"`
-	DeletedAt       gorm.DeletedAt    `gorm:"index" json:"-"`
-	
-	// Relationships
-	User            User              `gorm:"foreignKey:UserID" json:"user,omitempty"`
+	TokenInAddress  string `gorm:"size:42" json:"token_in_address"`
+	TokenOutAddress string `gorm:"size:42" json:"token_out_address"`
+	AmountIn        string `gorm:"type:varchar(78)" json:"amount_in"`
+	AmountOut       string `gorm:"type:varchar(78)" json:"amount_out"`
+
+	GasPrice string `gorm:"type:varchar(78)" json:"gas_price"`
+	GasUsed  uint64 `gorm:"default:0" json:"gas_used"`
+
+	BlockNumber uint64 `gorm:"default:0;index" json:"block_number"`
+
+	ErrorMessage string `gorm:"type:text" json:"error_message,omitempty"`
+
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+
+	// Relationships (without foreign key constraints in database)
+	User User `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:NO ACTION,OnDelete:NO ACTION" json:"user,omitempty"`
 }
 
 // TableName specifies the table name for Transaction model
 func (Transaction) TableName() string {
 	return "transactions"
 }
-

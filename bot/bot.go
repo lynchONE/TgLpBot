@@ -2,8 +2,10 @@ package bot
 
 import (
 	"TgLpBot/config"
+	"TgLpBot/models"
 	"TgLpBot/services"
 	"log"
+	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -15,6 +17,10 @@ type Bot struct {
 	walletService    *services.WalletService
 	liquidityService *services.LiquidityService
 	okxService       *services.OKXDexService
+	poolService      *services.PoolService
+	strategyService  *services.StrategyService
+	configService    *services.GlobalConfigService
+	taskService      *services.StrategyTaskService
 }
 
 // NewBot creates a new bot instance
@@ -23,26 +29,89 @@ func NewBot() (*Bot, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	api.Debug = false
 	log.Printf("Authorized on account %s", api.Self.UserName)
-	
-	return &Bot{
+
+	bot := &Bot{
 		api:              api,
 		userService:      services.NewUserService(),
 		walletService:    services.NewWalletService(),
 		liquidityService: services.NewLiquidityService(),
 		okxService:       services.NewOKXDexService(),
-	}, nil
+		poolService:      services.NewPoolService(),
+		strategyService:  services.NewStrategyService(),
+		configService:    services.NewGlobalConfigService(),
+		taskService:      services.NewStrategyTaskService(),
+	}
+
+	// Set Strategy Notifier
+	bot.strategyService.SetNotifier(func(userID uint, message string) {
+		user, err := bot.userService.GetUserByID(userID)
+		if err == nil {
+			bot.sendMessage(user.TelegramID, message)
+		} else {
+			log.Printf("Failed to notify user %d: %v", userID, err)
+		}
+	})
+
+	// Set bot commands
+	if err := bot.setCommands(); err != nil {
+		log.Printf("Warning: Failed to set bot commands: %v", err)
+	}
+
+	return bot, nil
+}
+
+// setCommands sets the bot command menu
+func (b *Bot) setCommands() error {
+	commands := []tgbotapi.BotCommand{
+		{
+			Command:     "start",
+			Description: "开始使用机器人",
+		},
+		{
+			Command:     "positions",
+			Description: "查看我的仓位",
+		},
+		{
+			Command:     "config",
+			Description: "全局配置",
+		},
+		{
+			Command:     "transactions",
+			Description: "查看交易历史",
+		},
+		{
+			Command:     "wallet",
+			Description: "管理钱包",
+		},
+		{
+			Command:     "help",
+			Description: "显示帮助信息",
+		},
+	}
+
+	cfg := tgbotapi.NewSetMyCommands(commands...)
+	_, err := b.api.Request(cfg)
+	if err != nil {
+		return err
+	}
+
+	log.Println("Bot commands set successfully")
+	return nil
 }
 
 // Start starts the bot
 func (b *Bot) Start() {
+	// Start strategy service
+	b.strategyService.Start()
+
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
-	
+
 	updates := b.api.GetUpdatesChan(u)
-	
+
 	for update := range updates {
 		if update.Message != nil {
 			b.handleMessage(update.Message)
@@ -64,16 +133,16 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 	)
 	if err != nil {
 		log.Printf("Error getting/creating user: %v", err)
-		b.sendMessage(message.Chat.ID, "Error processing your request. Please try again.")
+		b.sendMessage(message.Chat.ID, "处理您的请求时出错，请重试。")
 		return
 	}
-	
+
 	// Handle commands
 	if message.IsCommand() {
 		b.handleCommand(message, user)
 		return
 	}
-	
+
 	// Handle text messages based on user state
 	b.handleText(message, user)
 }
@@ -87,27 +156,34 @@ func (b *Bot) handleCommand(message *tgbotapi.Message, user *models.User) {
 		b.handleHelp(message, user)
 	case "wallet":
 		b.handleWallet(message, user)
-	case "addlp":
-		b.handleAddLP(message, user)
-	case "removelp":
-		b.handleRemoveLP(message, user)
+	case "newposition":
+		b.handleNewPosition(message, user)
+	case "positions":
+		b.handlePositions(message, user)
 	case "config":
 		b.handleConfig(message, user)
 	case "balance":
 		b.handleBalance(message, user)
 	case "transactions":
 		b.handleTransactions(message, user)
+	case "cancel":
+		b.handleCancel(message, user)
 	default:
-		b.sendMessage(message.Chat.ID, "Unknown command. Use /help to see available commands.")
+		b.sendMessage(message.Chat.ID, "未知命令。使用 /help 查看可用命令。")
 	}
 }
 
 // sendMessage sends a text message
-func (b *Bot) sendMessage(chatID int64, text string) {
+// sendMessage sends a text message
+func (b *Bot) sendMessage(chatID int64, text string) (tgbotapi.Message, error) {
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = "Markdown"
-	if _, err := b.api.Send(msg); err != nil {
+	// msg.DisableWebPagePreview = true // 保持一致性，如果之前没有这里也不加，或者加上。原代码没有 disable preview
+	if sentMsg, err := b.api.Send(msg); err != nil {
 		log.Printf("Error sending message: %v", err)
+		return tgbotapi.Message{}, err
+	} else {
+		return sentMsg, nil
 	}
 }
 
@@ -129,7 +205,7 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		log.Printf("Error getting user: %v", err)
 		return
 	}
-	
+
 	// Handle different callback actions
 	switch {
 	case query.Data == "create_wallet":
@@ -138,10 +214,53 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleImportWallet(query, user)
 	case query.Data == "view_wallets":
 		b.handleViewWallets(query, user)
-	case query.Data[:10] == "set_wallet":
+	case strings.HasPrefix(query.Data, "set_wallet_"):
 		b.handleSetDefaultWallet(query, user)
-	case query.Data[:13] == "delete_wallet":
+	case strings.HasPrefix(query.Data, "delete_wallet_"):
 		b.handleDeleteWallet(query, user)
+	case strings.HasPrefix(query.Data, "confirm_delete_"):
+		b.handleConfirmDeleteWallet(query, user)
+	case query.Data == "back_to_wallets":
+		b.handleViewWallets(query, user)
+	// Position confirmation callbacks
+	case query.Data == "confirm_position":
+		b.handleConfirmPosition(query, user)
+	case query.Data == "cancel_position":
+		b.handleCancelPosition(query, user)
+	case query.Data == "back_to_input":
+		b.handleBackToInput(query, user)
+	// Global config callbacks
+	case query.Data == "config_rebalance_timeout":
+		b.handleConfigRebalanceTimeout(query, user)
+	case query.Data == "config_stop_loss_toggle":
+		b.handleConfigStopLossToggle(query, user)
+	case query.Data == "config_stop_loss_delay":
+		b.handleConfigStopLossDelay(query, user)
+	case query.Data == "config_slippage":
+		b.handleConfigSlippage(query, user)
+	case query.Data == "config_reinvest_toggle":
+		b.handleConfigReinvestToggle(query, user)
+	case query.Data == "config_residual_tolerance":
+		b.handleConfigResidualTolerance(query, user)
+	case query.Data == "view_config":
+		b.handleViewConfig(query, user)
+	// Task management callbacks
+	case strings.HasPrefix(query.Data, "task_view_"):
+		b.handleTaskView(query, user)
+	case strings.HasPrefix(query.Data, "task_stop_"):
+		b.handleTaskStop(query, user)
+	case strings.HasPrefix(query.Data, "task_toggle_reinvest_"):
+		b.handleTaskToggleReinvest(query, user)
+	case strings.HasPrefix(query.Data, "task_toggle_stoploss_"):
+		b.handleTaskToggleStopLoss(query, user)
+	case strings.HasPrefix(query.Data, "task_set_slippage_"):
+		b.handleTaskSetSlippage(query, user)
+	case strings.HasPrefix(query.Data, "task_set_rebalance_"):
+		b.handleTaskSetRebalanceTimeout(query, user)
+	case strings.HasPrefix(query.Data, "task_set_stoploss_delay_"):
+		b.handleTaskSetStopLossDelay(query, user)
+	case strings.HasPrefix(query.Data, "task_set_residual_"):
+		b.handleTaskSetResidualTolerance(query, user)
 	default:
 		// Answer callback to remove loading state
 		callback := tgbotapi.NewCallback(query.ID, "")
@@ -151,6 +270,6 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 
 // Stop stops the bot
 func (b *Bot) Stop() {
+	b.strategyService.Stop()
 	b.api.StopReceivingUpdates()
 }
-

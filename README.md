@@ -1,14 +1,15 @@
 # TgLpBot - Telegram Liquidity Pool Bot
 
-A Telegram bot for managing liquidity pools on Binance Smart Chain (BSC). Add and remove liquidity using USDT with optimal swap routes via OKX DEX aggregator.
+A Telegram bot for managing concentrated-liquidity positions on Binance Smart Chain (BSC) (V3 pool address / V4 PoolId). Deposit and withdraw using USDT with swaps routed via the OKX DEX aggregator.
 
 ## Features
 
 - 💼 **Wallet Management**: Create or import wallets with encrypted private key storage
-- 💰 **Add Liquidity**: Add liquidity to any BSC pool using only USDT
-- 📤 **Remove Liquidity**: Remove liquidity and receive USDT
-- 🔄 **Optimal Routing**: Uses OKX DEX aggregator for best swap rates
-- ⚡ **Zap Contract**: Custom smart contract for single-token liquidity operations
+- 📈 **Create Positions**: Open V3/V4 positions from USDT (tick-range based)
+- 📉 **Exit Positions**: Close positions back to USDT
+- 🔄 **Optimal Routing**: Uses OKX DEX aggregator for swaps
+- ⚡ **ZapV3V4Improved**: On-chain mint/rebalance entry for V3/V4
+- 🧠 **Strategy Tasks**: Monitor range and auto-reopen (optional)
 - 📊 **Transaction Tracking**: Monitor all your transactions
 - 🔒 **Secure**: AES-256 encryption for private keys
 
@@ -19,7 +20,12 @@ TgLpBot/
 ├── blockchain/          # Blockchain interaction layer
 │   ├── client.go       # BSC client initialization
 │   ├── erc20.go        # ERC20 token interactions
-│   └── zap.go          # Zap contract bindings
+│   ├── okx.go          # OKX tx types
+│   ├── v3_pool.go      # V3 pool reads
+│   ├── v3_position_manager.go # V3 position manager calls
+│   ├── v4_pool.go      # V4 pool reads
+│   ├── v4_position_manager.go # V4 position manager calls
+│   └── zap_v3v4_improved.go   # ZapV3V4Improved bindings
 ├── bot/                # Telegram bot handlers
 │   ├── bot.go          # Bot initialization
 │   ├── handlers.go     # Command handlers
@@ -27,20 +33,22 @@ TgLpBot/
 ├── config/             # Configuration management
 │   └── config.go
 ├── contracts/          # Smart contracts
-│   └── LiquidityZap.sol # Zap contract for single-token LP
+│   └── contracts/ZapV3V4Improved.sol # Unified V3/V4 zap
 ├── database/           # Database layer
 │   ├── mysql.go        # MySQL connection
 │   └── redis.go        # Redis connection
 ├── models/             # Data models
 │   ├── user.go
 │   ├── wallet.go
-│   ├── lp_config.go
+│   ├── strategy.go
 │   └── transaction.go
 ├── services/           # Business logic
 │   ├── user.go
 │   ├── wallet.go
-│   ├── liquidity.go
-│   └── okx_dex.go
+│   ├── liquidity_enter.go
+│   ├── liquidity_exit.go
+│   ├── okx_dex.go
+│   └── okx_swap.go
 ├── .env.example        # Environment variables template
 ├── go.mod
 └── main.go
@@ -121,22 +129,18 @@ ENCRYPTION_KEY=your_32_byte_hex_key_here
 OKX_API_KEY=your_okx_api_key
 OKX_SECRET_KEY=your_okx_secret_key
 OKX_PASSPHRASE=your_okx_passphrase
+OKX_SWAP_ROUTER=0x...  # OKX DEX Router 地址
+OKX_TOKEN_APPROVE_ADDRESS=0x...  # OKX DEX TokenApprove 合约地址（BSC: 0x40aA958dd87FC8305b97f2BA922CDdCa374bcD7f）
 ```
 
 ### 6. Deploy Zap Contract
 
-Deploy the `contracts/LiquidityZap.sol` contract to BSC:
+Deploy the `contracts/contracts/ZapV3V4Improved.sol` contract to BSC:
 
-1. Compile the contract using Hardhat, Truffle, or Remix
-2. Deploy with PancakeSwap Router address: `0x10ED43C718714eb63d5aA57B78B54704E256024E`
-3. Update `ZAP_CONTRACT_ADDRESS` in `.env` with the deployed address
+1. Compile and deploy (constructor arg: WETH; use WBNB on BSC mainnet `0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c`)
+2. Update `ZAP_V3_ADDRESS` (and `ZAP_V4_ADDRESS`) in `.env` with the deployed address
 
-Example using Remix:
-- Open [Remix IDE](https://remix.ethereum.org/)
-- Create a new file and paste the contract code
-- Compile with Solidity 0.8.0+
-- Deploy to BSC Mainnet with router address
-- Copy the deployed contract address
+This repo includes a Hardhat deploy script in `contracts/` (see `contracts/README.md`).
 
 ### 7. Generate encryption key
 
@@ -207,9 +211,9 @@ sudo systemctl status tglpbot
 - `/help` - Show help and available commands
 - `/wallet` - Manage wallets (create, import, view)
 - `/balance` - Check wallet balances
-- `/addlp` - Add liquidity with USDT
-- `/removelp` - Remove liquidity to USDT
-- `/config` - Configure LP pool parameters
+- `/newposition` - Create a new position
+- `/positions` - View and manage positions
+- `/config` - Global config
 - `/transactions` - View transaction history
 
 ### Workflow
@@ -219,19 +223,14 @@ sudo systemctl status tglpbot
    /wallet → Create Wallet or Import Wallet
    ```
 
-2. **Configure LP Pool**
+2. **Create a Position (V3/V4)**
    ```
-   /config → Enter pool address
-   ```
-
-3. **Add Liquidity**
-   ```
-   /addlp → Enter pool address → Enter USDT amount → Set slippage
+   /newposition (or send a pool address / PoolId) → Enter tick range → Enter amount → Confirm
    ```
 
-4. **Remove Liquidity**
+3. **Manage Positions**
    ```
-   /removelp → Enter pool address → Enter LP amount → Set slippage
+   /positions
    ```
 
 ## Security Considerations
@@ -272,6 +271,15 @@ The Zap contract includes:
 - Verify token approvals
 - Check slippage settings
 - Ensure Zap contract is deployed
+
+### OKX Swap 调用失败 (Swap call failed)
+**常见原因**：
+1. **未配置 OKX_TOKEN_APPROVE_ADDRESS**：OKX DEX 使用单独的 TokenApprove 合约接收代币 approve，而非直接 approve 给 Router。
+   - BSC 主网地址: `0x40aA958dd87FC8305b97f2BA922CDdCa374bcD7f`
+   - 请在 `.env` 中添加: `OKX_TOKEN_APPROVE_ADDRESS=0x40aA958dd87FC8305b97f2BA922CDdCa374bcD7f`
+2. **OKX calldata 过期**：OKX 返回的 swap 数据有 deadline（通常几分钟），如果交易确认慢，可能过期。
+3. **滑点设置太小**：如果价格变动超过设置的滑点，swap 会失败。
+4. **Zap 合约代币余额不足**：确保用户已经 approve 足够的代币给 Zap 合约。
 
 ### Redis connection errors
 - Verify Redis is running
@@ -329,4 +337,118 @@ For issues and questions:
 - [ ] Automated rebalancing
 - [ ] Gas optimization
 - [ ] Web dashboard
+
+## V4 Update (2025-12-12)
+
+### 1. Enhanced V4 Pool Query
+- Refactored to use `PoolManager.poolKeys` for direct on-chain token retrieval.
+- This checks if the `PoolManager` contract stores the keys for the given PoolId.
+- Includes error handling for empty responses to prevent crashes.
+
+### 2. Automated Strategy Monitoring
+- **New Feature**: Added background Strategy Service (`StrategyService`).
+- **Workflow**:
+  1. User confirms position creation.
+  2. System creates a strategy task.
+  3. Service monitors pool tick every 30 seconds.
+  4. **Stop Loss/Take Profit**: If price goes out of tick range:
+     - Automatically executes Zap Out (Liquidity -> USDT).
+     - Updates task status to `Waiting`.
+  5. **Auto Reopen**:
+     - Waits for configured delay (default 5 mins).
+     - Automatically executes Zap In (USDT -> Liquidity).
+     - Updates task status to `Running`.
+
+### 3. Zap Contract Integration
+- V3 entry uses `ZapV3V4Improved.zap(...)`.
+- V4 entry uses `ZapV3V4Improved.zapV4WithRebalance(...)`.
+- Exits use the V3 NFT Position Manager and the V4 PositionManager directly.
+
+### Usage
+1. Send a V3 pool address or V4 PoolId to bot.
+2. Enter Tick Range (e.g., `-887220,887220`) or a percentage range (e.g., `5 100`).
+3. Enter Amount.
+4. Click "Confirm".
+5. Use `/positions` to check status.
+
+
+## 2025-12-14 Zap 合约重构更新
+
+### 1. 合约升级
+- 启用 ZapSimple.sol，替代旧的 ZapV3V4Improved.sol。
+- 合约地址已更新至 .env (ZAP_V3_ADDRESS / ZAP_V4_ADDRESS)。
+
+### 2. 开仓流程 (Enter V3)
+- **原子化操作**：不再分步 approve/swap/add，而是通过 Zap 合约一次性完成。
+- **OKX 路由**：Go 代码先调用 OKX API 获取最优路径 calldata，然后透传给 Zap 合约执行。
+- **流程**：calculateOptimalSwap -> OKX API -> ZapSimple.zapInV3。
+
+### 3. 撤仓流程 (Exit V3)
+- **原子化操作**：使用 ZapSimple.zapOutV3 进行一键撤出流动性并收集手续费。
+- **后续处理**：Go 代码负责将撤回的 token0/token1 兑换回 USDT。
+- **NFT 处理**：撤仓时 NFT 会被 Approve 给 Zap 合约。
+
+### 4. 其他
+- V4 功能暂时标记为待实现。
+- 删除所有旧合约相关代码。
+
+## 2025-12-15 TokenID 保存和验证修复
+
+### 问题描述
+用户在停止任务时遇到 "Invalid token ID" 错误。经过分析发现，问题出现在三个环节：
+1. **解析环节**：从交易 receipt 解析 tokenId 时可能返回 0
+2. **保存环节**：没有验证 tokenId 是否为 "0" 就保存到数据库
+3. **使用环节**：停止任务时没有检查 tokenId 是否为 "0"
+
+### 修复内容
+
+#### 1. 增强 TokenID 解析验证
+- **文件**: `services/liquidity_enter.go`
+- **修改**: 在 `parseZapInV3FromReceipt` 函数中添加验证，确保解析到的 tokenId 不为 0
+- **效果**: 防止无效的 tokenId 被返回
+
+#### 2. 增强 TokenID 保存验证
+- **文件**: `bot/position_callbacks.go`
+- **修改**: 在保存 tokenId 到数据库前，验证其不为空且不为 "0"
+- **效果**: 防止无效的 tokenId 被保存到数据库
+
+#### 3. 增强停止任务验证
+- **文件**: `bot/task_callbacks.go`
+- **修改**: 在检查是否可以退出时，验证 tokenId 不为空且不为 "0"
+- **效果**: 对于无效 tokenId 的任务，显示友好的错误提示而不是合约 revert 错误
+
+#### 4. 增强退出流动性验证
+- **文件**: `services/liquidity_exit.go`
+- **修改**: 在 V3 和 V4 退出逻辑中，添加 tokenId 有效性检查
+- **效果**: 防止传入无效的 tokenId 导致合约调用失败
+
+#### 5. 任务面板显示头寸 ID
+- **文件**: `bot/task_views.go`
+- **修改**: 在任务详情卡片中显示头寸 ID（V3TokenID 或 V4TokenID）
+- **效果**: 用户可以直接在任务面板查看头寸 ID，方便验证和追踪
+
+### 使用说明
+- 创建任务成功后，任务面板会显示 🎫 头寸 ID
+- 如果头寸 ID 为空或为 0，停止任务时会显示友好的错误提示
+- 建议在创建任务后检查任务详情，确认头寸 ID 已正确保存
+
+### 技术细节
+**TokenID 解析问题**：Solidity 事件中，`indexed uint256` 类型的参数会被存储为 keccak256 hash，而不是原始值。因此无法直接从 `ZapInV3` 事件的 topics 中解析 tokenId。
+
+**解决方案**：从 `NonfungiblePositionManager` 合约的 `IncreaseLiquidity` 事件中解析 tokenId。该事件在 mint 新头寸时触发，tokenId 作为第一个 indexed 参数，可以正确解析。
+
+**价格范围计算**：
+- Uniswap V3 中，tick 表示 token1/token0 的价格（价格 = 1.0001 ^ tick）
+- 如果 token0 是 USDT，价格范围直接显示为 token1 以 USDT 计价
+- 如果 token1 是 USDT，需要取倒数（1/价格）来显示 token0 以 USDT 计价
+- 这样确保价格范围始终显示为"另一个币以 USDT 计价"的范围
+
+### 交易链接显示
+停止任务时，机器人会自动收集所有相关交易哈希并显示 BSCScan 链接：
+- **撤出流动性** - ZapOut 交易
+- **兑换 Token0→USDT** - 将 token0 兑换成 USDT
+- **兑换 Token1→USDT** - 将 token1 兑换成 USDT
+
+每个交易都带有描述说明，可以直接点击查看详情。
+
 

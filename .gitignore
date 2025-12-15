@@ -25,7 +25,9 @@ go.work
 # Database
 *.db
 data/
-
+/contracts/node_modules/
+/contracts/artifacts/
+/contracts/cache/
 # IDE
 .vscode/
 .idea/

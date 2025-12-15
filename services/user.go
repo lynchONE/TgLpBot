@@ -20,7 +20,7 @@ func NewUserService() *UserService {
 // GetOrCreateUser gets or creates a user by Telegram ID
 func (s *UserService) GetOrCreateUser(telegramID int64, username, firstName, lastName, languageCode string) (*models.User, error) {
 	var user models.User
-	
+
 	err := database.DB.Where("telegram_id = ?", telegramID).First(&user).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -33,16 +33,16 @@ func (s *UserService) GetOrCreateUser(telegramID int64, username, firstName, las
 				LanguageCode: languageCode,
 				IsActive:     true,
 			}
-			
+
 			if err := database.DB.Create(&user).Error; err != nil {
 				return nil, fmt.Errorf("failed to create user: %w", err)
 			}
-			
+
 			return &user, nil
 		}
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
-	
+
 	// Update user info if changed
 	updated := false
 	if user.Username != username {
@@ -61,13 +61,13 @@ func (s *UserService) GetOrCreateUser(telegramID int64, username, firstName, las
 		user.LanguageCode = languageCode
 		updated = true
 	}
-	
+
 	if updated {
 		if err := database.DB.Save(&user).Error; err != nil {
 			return nil, fmt.Errorf("failed to update user: %w", err)
 		}
 	}
-	
+
 	return &user, nil
 }
 
@@ -111,4 +111,3 @@ func (s *UserService) DeactivateUser(id uint) error {
 func (s *UserService) ActivateUser(id uint) error {
 	return database.DB.Model(&models.User{}).Where("id = ?", id).Update("is_active", true).Error
 }
-

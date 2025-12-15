@@ -32,17 +32,17 @@ func (s *WalletService) CreateWallet(userID uint, name string) (*models.Wallet, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate private key: %w", err)
 	}
-	
+
 	// Get address from private key
 	address := crypto.PubkeyToAddress(privateKey.PublicKey)
-	
+
 	// Encrypt private key
 	privateKeyHex := hex.EncodeToString(crypto.FromECDSA(privateKey))
 	encryptedPrivateKey, err := s.encryptPrivateKey(privateKeyHex)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encrypt private key: %w", err)
 	}
-	
+
 	// Create wallet record
 	wallet := &models.Wallet{
 		UserID:              userID,
@@ -51,11 +51,11 @@ func (s *WalletService) CreateWallet(userID uint, name string) (*models.Wallet, 
 		Name:                name,
 		IsDefault:           false,
 	}
-	
+
 	if err := database.DB.Create(wallet).Error; err != nil {
 		return nil, fmt.Errorf("failed to create wallet: %w", err)
 	}
-	
+
 	return wallet, nil
 }
 
@@ -66,10 +66,10 @@ func (s *WalletService) ImportWallet(userID uint, privateKeyHex, name string) (*
 	if err != nil {
 		return nil, fmt.Errorf("invalid private key: %w", err)
 	}
-	
+
 	// Get address from private key
 	address := crypto.PubkeyToAddress(privateKey.PublicKey)
-	
+
 	// Check if wallet already exists
 	var existingWallet models.Wallet
 	err = database.DB.Where("address = ?", address.Hex()).First(&existingWallet).Error
@@ -78,13 +78,13 @@ func (s *WalletService) ImportWallet(userID uint, privateKeyHex, name string) (*
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, fmt.Errorf("failed to check existing wallet: %w", err)
 	}
-	
+
 	// Encrypt private key
 	encryptedPrivateKey, err := s.encryptPrivateKey(privateKeyHex)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encrypt private key: %w", err)
 	}
-	
+
 	// Create wallet record
 	wallet := &models.Wallet{
 		UserID:              userID,
@@ -93,11 +93,11 @@ func (s *WalletService) ImportWallet(userID uint, privateKeyHex, name string) (*
 		Name:                name,
 		IsDefault:           false,
 	}
-	
+
 	if err := database.DB.Create(wallet).Error; err != nil {
 		return nil, fmt.Errorf("failed to import wallet: %w", err)
 	}
-	
+
 	return wallet, nil
 }
 
@@ -135,12 +135,12 @@ func (s *WalletService) SetDefaultWallet(userID uint, walletID uint) error {
 	if err := database.DB.Model(&models.Wallet{}).Where("user_id = ?", userID).Update("is_default", false).Error; err != nil {
 		return fmt.Errorf("failed to unset default wallets: %w", err)
 	}
-	
+
 	// Set new default wallet
 	if err := database.DB.Model(&models.Wallet{}).Where("id = ? AND user_id = ?", walletID, userID).Update("is_default", true).Error; err != nil {
 		return fmt.Errorf("failed to set default wallet: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -167,22 +167,22 @@ func (s *WalletService) encryptPrivateKey(privateKeyHex string) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("invalid encryption key: %w", err)
 	}
-	
+
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", fmt.Errorf("failed to create cipher: %w", err)
 	}
-	
+
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return "", fmt.Errorf("failed to create GCM: %w", err)
 	}
-	
+
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return "", fmt.Errorf("failed to generate nonce: %w", err)
 	}
-	
+
 	ciphertext := gcm.Seal(nonce, nonce, []byte(privateKeyHex), nil)
 	return hex.EncodeToString(ciphertext), nil
 }
@@ -193,33 +193,33 @@ func (s *WalletService) decryptPrivateKey(encryptedHex string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid encryption key: %w", err)
 	}
-	
+
 	ciphertext, err := hex.DecodeString(encryptedHex)
 	if err != nil {
 		return "", fmt.Errorf("invalid encrypted data: %w", err)
 	}
-	
+
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", fmt.Errorf("failed to create cipher: %w", err)
 	}
-	
+
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return "", fmt.Errorf("failed to create GCM: %w", err)
 	}
-	
+
 	nonceSize := gcm.NonceSize()
 	if len(ciphertext) < nonceSize {
 		return "", errors.New("ciphertext too short")
 	}
-	
+
 	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
 	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to decrypt: %w", err)
 	}
-	
+
 	return string(plaintext), nil
 }
 
@@ -227,4 +227,3 @@ func (s *WalletService) decryptPrivateKey(encryptedHex string) (string, error) {
 func (s *WalletService) GetWalletAddress(wallet *models.Wallet) common.Address {
 	return common.HexToAddress(wallet.Address)
 }
-

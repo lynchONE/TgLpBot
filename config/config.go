@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -12,9 +13,15 @@ type Config struct {
 	// Telegram
 	TelegramBotToken string
 
+	// Uniswap V4
+	UniswapV4PoolManagerAddress     string
+	UniswapV4StateViewAddress       string
+	UniswapV4PositionManagerAddress string
+	UniswapV4Debug                  bool
+
 	// BSC Network
-	BSCRpcURL   string
-	BSCChainID  int64
+	BSCRpcURL  string
+	BSCChainID int64
 
 	// Database
 	MySQLHost     string
@@ -30,13 +37,20 @@ type Config struct {
 	RedisDB       int
 
 	// OKX DEX API
-	OKXDexAPIURL  string
-	OKXAPIKey     string
-	OKXSecretKey  string
-	OKXPassphrase string
+	OKXDexAPIURL           string
+	OKXAPIKey              string
+	OKXSecretKey           string
+	OKXPassphrase          string
+	OKXSwapRouter          string
+	OKXTokenApproveAddress string // OKX DEX 的 TokenApprove 合约地址
 
 	// Contracts
-	ZapContractAddress string
+	ZapV3Address string
+	ZapV4Address string
+
+	// V3 Position Managers (optional defaults)
+	PancakeV3PositionManagerAddress string
+	UniswapV3PositionManagerAddress string
 
 	// Encryption
 	EncryptionKey string
@@ -46,19 +60,29 @@ type Config struct {
 	GasLimit    uint64
 
 	// Token Addresses
-	USDTAddress          string
-	BUSDAddress          string
-	WBNBAddress          string
-	PancakeRouterV2      string
-	PancakeFactoryV2     string
+	USDTAddress      string
+	BUSDAddress      string
+	WBNBAddress      string
+	PancakeRouterV2  string
+	PancakeFactoryV2 string
+
+	// V3 Swap Router (链上 swap 用)
+	PancakeV3SwapRouter string
+	UniswapV3SwapRouter string
 }
 
 var AppConfig *Config
 
 func LoadConfig() error {
+	log.Println("========================================")
+	log.Println("📋 开始加载配置...")
+	log.Println("========================================")
+
 	// Load .env file
 	if err := godotenv.Load(); err != nil {
-		log.Println("Warning: .env file not found, using environment variables")
+		log.Println("⚠️  警告: .env 文件未找到，使用环境变量")
+	} else {
+		log.Println("✅ .env 文件加载成功")
 	}
 
 	chainID, _ := strconv.ParseInt(getEnv("BSC_CHAIN_ID", "56"), 10, 64)
@@ -69,6 +93,12 @@ func LoadConfig() error {
 	AppConfig = &Config{
 		// Telegram
 		TelegramBotToken: getEnv("TELEGRAM_BOT_TOKEN", ""),
+
+		// Uniswap V4
+		UniswapV4PoolManagerAddress:     getEnv("UNISWAP_V4_POOL_MANAGER_ADDRESS", ""),
+		UniswapV4StateViewAddress:       getEnv("UNISWAP_V4_STATE_VIEW_ADDRESS", ""),
+		UniswapV4PositionManagerAddress: getEnv("UNISWAP_V4_POSITION_MANAGER_ADDRESS", ""),
+		UniswapV4Debug:                  getEnvBool("UNISWAP_V4_DEBUG", false),
 
 		// BSC Network
 		BSCRpcURL:  getEnv("BSC_RPC_URL", "https://bsc-dataseed1.binance.org/"),
@@ -88,13 +118,20 @@ func LoadConfig() error {
 		RedisDB:       redisDB,
 
 		// OKX DEX API
-		OKXDexAPIURL:  getEnv("OKX_DEX_API_URL", "https://www.okx.com/api/v5/dex/aggregator"),
-		OKXAPIKey:     getEnv("OKX_API_KEY", ""),
-		OKXSecretKey:  getEnv("OKX_SECRET_KEY", ""),
-		OKXPassphrase: getEnv("OKX_PASSPHRASE", ""),
+		OKXDexAPIURL:           getEnv("OKX_DEX_API_URL", "https://www.okx.com/api/v5/dex/aggregator"),
+		OKXAPIKey:              getEnv("OKX_API_KEY", ""),
+		OKXSecretKey:           getEnv("OKX_SECRET_KEY", ""),
+		OKXPassphrase:          getEnv("OKX_PASSPHRASE", ""),
+		OKXSwapRouter:          getEnv("OKX_SWAP_ROUTER", ""),
+		OKXTokenApproveAddress: getEnv("OKX_TOKEN_APPROVE_ADDRESS", ""),
 
 		// Contracts
-		ZapContractAddress: getEnv("ZAP_CONTRACT_ADDRESS", ""),
+		ZapV3Address: getEnv("ZAP_V3_ADDRESS", ""),
+		ZapV4Address: getEnv("ZAP_V4_ADDRESS", ""),
+
+		// V3 Position Managers
+		PancakeV3PositionManagerAddress: getEnv("PANCAKE_V3_NPM_ADDRESS", ""),
+		UniswapV3PositionManagerAddress: getEnv("UNISWAP_V3_NPM_ADDRESS", ""),
 
 		// Encryption
 		EncryptionKey: getEnv("ENCRYPTION_KEY", ""),
@@ -109,9 +146,45 @@ func LoadConfig() error {
 		WBNBAddress:      getEnv("WBNB_ADDRESS", "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"),
 		PancakeRouterV2:  getEnv("PANCAKE_ROUTER_V2", "0x10ED43C718714eb63d5aA57B78B54704E256024E"),
 		PancakeFactoryV2: getEnv("PANCAKE_FACTORY_V2", "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"),
+
+		// V3 Swap Router (PancakeSwap V3 SwapRouter on BSC)
+		PancakeV3SwapRouter: getEnv("PANCAKE_V3_SWAP_ROUTER", "0x1b81D678ffb9C0263b24A97847620C99d213eB14"),
+		// V3 Swap Router (Uniswap V3 SwapRouter02 on BSC)
+		UniswapV3SwapRouter: getEnv("UNISWAP_V3_SWAP_ROUTER", "0xB971eF87ede563556b2ED4b1C0b0019111Dd85d2"),
 	}
 
+	// 打印关键配置信息（隐藏敏感信息）
+	log.Println("📝 配置信息:")
+	log.Printf("   - Telegram Bot Token: %s", maskString(AppConfig.TelegramBotToken))
+	log.Printf("   - Uniswap V4 PoolManager: %s", AppConfig.UniswapV4PoolManagerAddress)
+	log.Printf("   - Uniswap V4 StateView: %s", AppConfig.UniswapV4StateViewAddress)
+	log.Printf("   - Uniswap V4 PositionManager: %s", AppConfig.UniswapV4PositionManagerAddress)
+	log.Printf("   - Uniswap V4 Debug: %v", AppConfig.UniswapV4Debug)
+	log.Printf("   - Zap V3: %s", AppConfig.ZapV3Address)
+	log.Printf("   - Zap V4: %s", AppConfig.ZapV4Address)
+	log.Printf("   - OKX Swap Router: %s", AppConfig.OKXSwapRouter)
+	log.Printf("   - OKX TokenApprove: %s", AppConfig.OKXTokenApproveAddress)
+	log.Printf("   - Pancake V3 NPM: %s", AppConfig.PancakeV3PositionManagerAddress)
+	log.Printf("   - Uniswap V3 NPM: %s", AppConfig.UniswapV3PositionManagerAddress)
+	log.Printf("   - BSC RPC URL: %s", AppConfig.BSCRpcURL)
+	log.Printf("   - BSC Chain ID: %d", AppConfig.BSCChainID)
+	log.Printf("   - MySQL: %s@%s:%s/%s", AppConfig.MySQLUser, AppConfig.MySQLHost, AppConfig.MySQLPort, AppConfig.MySQLDatabase)
+	log.Printf("   - Redis: %s:%s (DB: %d)", AppConfig.RedisHost, AppConfig.RedisPort, AppConfig.RedisDB)
+	log.Println("✅ 配置加载完成")
+	log.Println("========================================")
+
 	return nil
+}
+
+// maskString masks sensitive string for logging
+func maskString(s string) string {
+	if s == "" {
+		return "<未设置>"
+	}
+	if len(s) <= 8 {
+		return "***"
+	}
+	return s[:4] + "..." + s[len(s)-4:]
 }
 
 func getEnv(key, defaultValue string) string {
@@ -122,6 +195,21 @@ func getEnv(key, defaultValue string) string {
 	return value
 }
 
+func getEnvBool(key string, defaultValue bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return defaultValue
+	}
+	switch strings.ToLower(value) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return defaultValue
+	}
+}
+
 func (c *Config) GetMySQLDSN() string {
 	return c.MySQLUser + ":" + c.MySQLPassword + "@tcp(" + c.MySQLHost + ":" + c.MySQLPort + ")/" + c.MySQLDatabase + "?charset=utf8mb4&parseTime=True&loc=Local"
 }
@@ -129,4 +217,3 @@ func (c *Config) GetMySQLDSN() string {
 func (c *Config) GetRedisAddr() string {
 	return c.RedisHost + ":" + c.RedisPort
 }
-

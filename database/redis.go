@@ -20,13 +20,13 @@ func InitRedis() error {
 		Password: config.AppConfig.RedisPassword,
 		DB:       config.AppConfig.RedisDB,
 	})
-	
+
 	// Test connection
 	_, err := RedisClient.Ping(ctx).Result()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Redis: %w", err)
 	}
-	
+
 	log.Println("Redis connected successfully")
 	return nil
 }
@@ -63,13 +63,13 @@ func DeleteUserSession(telegramID int64, key string) error {
 func ClearUserSession(telegramID int64) error {
 	pattern := fmt.Sprintf("session:%d:*", telegramID)
 	iter := RedisClient.Scan(ctx, 0, pattern, 0).Iterator()
-	
+
 	for iter.Next(ctx) {
 		if err := RedisClient.Del(ctx, iter.Val()).Err(); err != nil {
 			return err
 		}
 	}
-	
+
 	return iter.Err()
 }
 
@@ -95,4 +95,3 @@ func ExistsCache(key string) (bool, error) {
 	result, err := RedisClient.Exists(ctx, key).Result()
 	return result > 0, err
 }
-

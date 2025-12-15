@@ -7,13 +7,21 @@
     "test": "hardhat test",
     "deploy:testnet": "hardhat run scripts/deploy.js --network bscTestnet",
     "deploy:mainnet": "hardhat run scripts/deploy.js --network bscMainnet",
+    "deploy-zap:testnet": "hardhat run scripts/deploy_zap_simple.js --network bscTestnet",
+    "deploy-zap:mainnet": "hardhat run scripts/deploy_zap_simple.js --network bscMainnet",
     "verify:testnet": "hardhat verify --network bscTestnet",
     "verify:mainnet": "hardhat verify --network bscMainnet"
   },
   "devDependencies": {
-    "@nomicfoundation/hardhat-toolbox": "^3.0.0",
-    "hardhat": "^2.19.0",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "ethers": "^6.4.0",
+    "@nomicfoundation/hardhat-ethers": "^3.0.0",
+    "@nomicfoundation/hardhat-verify": "^1.0.0",
+    "hardhat": "^2.19.0"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.4.0",
+    "@uniswap/v4-core": "^1.0.2",
+    "@uniswap/v4-periphery": "^1.0.3"
   }
 }
-

@@ -7,6 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
@@ -102,9 +103,9 @@ func NewERC20(address common.Address, client *ethclient.Client) (*ERC20, error) 
 	if err != nil {
 		return nil, err
 	}
-	
+
 	contract := bind.NewBoundContract(address, parsed, client, client, client)
-	
+
 	return &ERC20{
 		contract: contract,
 		address:  address,
@@ -172,12 +173,11 @@ func (e *ERC20) Allowance(opts *bind.CallOpts, owner, spender common.Address) (*
 }
 
 // Approve creates an approval transaction
-func (e *ERC20) Approve(opts *bind.TransactOpts, spender common.Address, amount *big.Int) (*bind.BoundContract, error) {
-	return e.contract, e.contract.Transact(opts, "approve", spender, amount)
+func (e *ERC20) Approve(opts *bind.TransactOpts, spender common.Address, amount *big.Int) (*types.Transaction, error) {
+	return e.contract.Transact(opts, "approve", spender, amount)
 }
 
 // Transfer creates a transfer transaction
-func (e *ERC20) Transfer(opts *bind.TransactOpts, recipient common.Address, amount *big.Int) (*bind.BoundContract, error) {
-	return e.contract, e.contract.Transact(opts, "transfer", recipient, amount)
+func (e *ERC20) Transfer(opts *bind.TransactOpts, recipient common.Address, amount *big.Int) (*types.Transaction, error) {
+	return e.contract.Transact(opts, "transfer", recipient, amount)
 }
-
