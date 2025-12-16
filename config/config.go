@@ -13,6 +13,9 @@ type Config struct {
 	// Telegram
 	TelegramBotToken string
 
+	// Access Control
+	AdminWalletAddress string
+
 	// Uniswap V4
 	UniswapV4PoolManagerAddress     string
 	UniswapV4StateViewAddress       string
@@ -94,6 +97,9 @@ func LoadConfig() error {
 		// Telegram
 		TelegramBotToken: getEnv("TELEGRAM_BOT_TOKEN", ""),
 
+		// Access Control
+		AdminWalletAddress: strings.TrimSpace(getEnv("ADMIN_WALLET_ADDRESS", "")),
+
 		// Uniswap V4
 		UniswapV4PoolManagerAddress:     getEnv("UNISWAP_V4_POOL_MANAGER_ADDRESS", ""),
 		UniswapV4StateViewAddress:       getEnv("UNISWAP_V4_STATE_VIEW_ADDRESS", ""),
@@ -156,6 +162,7 @@ func LoadConfig() error {
 	// 打印关键配置信息（隐藏敏感信息）
 	log.Println("📝 配置信息:")
 	log.Printf("   - Telegram Bot Token: %s", maskString(AppConfig.TelegramBotToken))
+	log.Printf("   - Admin Wallet Address: %s", AppConfig.AdminWalletAddress)
 	log.Printf("   - Uniswap V4 PoolManager: %s", AppConfig.UniswapV4PoolManagerAddress)
 	log.Printf("   - Uniswap V4 StateView: %s", AppConfig.UniswapV4StateViewAddress)
 	log.Printf("   - Uniswap V4 PositionManager: %s", AppConfig.UniswapV4PositionManagerAddress)

@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"TgLpBot/database"
 	"TgLpBot/models"
 	"fmt"
 	"log"
@@ -46,6 +47,21 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 	pair := task.Token0Symbol + "/" + task.Token1Symbol
 	if strings.TrimSpace(pair) == "/" {
 		pair = "-"
+	}
+
+	// Display actual invested amount (USDT delta) if we have an open trade record.
+	amountLine := fmt.Sprintf("金额：%.2f USDT", task.AmountUSDT)
+	if database.DB != nil && task.ID != 0 {
+		var openRec models.TradeRecord
+		if err := database.DB.
+			Where("user_id = ? AND task_id = ? AND status = ?", task.UserID, task.ID, models.TradeStatusOpen).
+			Order("opened_at DESC").
+			First(&openRec).Error; err == nil {
+			actual := strings.TrimSpace(openRec.OpenUSDTSpent)
+			if actual != "" && actual != "0" {
+				amountLine = fmt.Sprintf("开仓：%s USDT (目标 %.2f USDT)", formatWei(actual), task.AmountUSDT)
+			}
+		}
 	}
 
 	// 构建头寸 ID 信息
@@ -98,7 +114,7 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 🔗 池子：`+"`%s`"+`%s
 
 📊 Tick 范围：%d → %d%s
-💰 金额：%.2f USDT
+💰 %s
 
 ⚙️ 策略配置：
 ⏱️ 再平衡超时：%d 秒
@@ -117,7 +133,7 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 		task.TickLower,
 		task.TickUpper,
 		priceRangeInfo,
-		task.AmountUSDT,
+		amountLine,
 		task.ReopenDelaySeconds,
 		task.SlippageTolerance,
 		boolToOnOff(task.StopLossEnabled),

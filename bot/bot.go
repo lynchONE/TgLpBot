@@ -5,6 +5,7 @@ import (
 	"TgLpBot/models"
 	"TgLpBot/services"
 	"log"
+	"strconv"
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -13,6 +14,7 @@ import (
 // Bot represents the Telegram bot
 type Bot struct {
 	api              *tgbotapi.BotAPI
+	accessService    *services.AccessService
 	userService      *services.UserService
 	walletService    *services.WalletService
 	liquidityService *services.LiquidityService
@@ -21,6 +23,7 @@ type Bot struct {
 	strategyService  *services.StrategyService
 	configService    *services.GlobalConfigService
 	taskService      *services.StrategyTaskService
+	snapshotService  *services.BalanceSnapshotService
 }
 
 // NewBot creates a new bot instance
@@ -35,6 +38,7 @@ func NewBot() (*Bot, error) {
 
 	bot := &Bot{
 		api:              api,
+		accessService:    services.NewAccessService(),
 		userService:      services.NewUserService(),
 		walletService:    services.NewWalletService(),
 		liquidityService: services.NewLiquidityService(),
@@ -43,6 +47,7 @@ func NewBot() (*Bot, error) {
 		strategyService:  services.NewStrategyService(),
 		configService:    services.NewGlobalConfigService(),
 		taskService:      services.NewStrategyTaskService(),
+		snapshotService:  services.NewBalanceSnapshotService(),
 	}
 
 	// Set Strategy Notifier
@@ -79,16 +84,16 @@ func (b *Bot) setCommands() error {
 			Description: "全局配置",
 		},
 		{
-			Command:     "transactions",
-			Description: "查看交易历史",
+			Command:     "profit",
+			Description: "余额走势",
 		},
 		{
 			Command:     "wallet",
 			Description: "管理钱包",
 		},
 		{
-			Command:     "help",
-			Description: "显示帮助信息",
+			Command:     "transactions",
+			Description: "查看交易历史",
 		},
 	}
 
@@ -106,6 +111,9 @@ func (b *Bot) setCommands() error {
 func (b *Bot) Start() {
 	// Start strategy service
 	b.strategyService.Start()
+	if b.snapshotService != nil {
+		b.snapshotService.Start()
+	}
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
@@ -166,8 +174,12 @@ func (b *Bot) handleCommand(message *tgbotapi.Message, user *models.User) {
 		b.handleBalance(message, user)
 	case "transactions":
 		b.handleTransactions(message, user)
+	case "profit":
+		b.handleProfit(message, user)
 	case "cancel":
 		b.handleCancel(message, user)
+	case "admin":
+		b.handleAdmin(message, user)
 	default:
 		b.sendMessage(message.Chat.ID, "未知命令。使用 /help 查看可用命令。")
 	}
@@ -208,6 +220,47 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 
 	// Handle different callback actions
 	switch {
+	// Admin callbacks
+	case query.Data == "admin_auth_codes":
+		b.handleAdminAuthCodes(query, user)
+	case query.Data == "admin_create_code":
+		b.handleAdminCreateCode(query, user)
+	case strings.HasPrefix(query.Data, "admin_quick_code_"):
+		b.handleAdminQuickCode(query, user)
+	case query.Data == "admin_custom_code":
+		b.handleAdminCustomCode(query, user)
+	case query.Data == "admin_users":
+		b.handleAdminUsers(query, user)
+	case query.Data == "admin_user_search":
+		b.handleAdminUserSearch(query, user)
+	case strings.HasPrefix(query.Data, "admin_users_page_"):
+		page, _ := strconv.Atoi(strings.TrimPrefix(query.Data, "admin_users_page_"))
+		b.handleAdminUsersPage(query, user, page)
+	case strings.HasPrefix(query.Data, "admin_user_edit_"):
+		b.handleAdminUserEdit(query, user)
+	case strings.HasPrefix(query.Data, "admin_user_"):
+		b.handleAdminUserDetail(query, user)
+	case strings.HasPrefix(query.Data, "admin_revoke_"):
+		b.handleAdminUserRevoke(query, user)
+	case strings.HasPrefix(query.Data, "admin_restore_"):
+		b.handleAdminUserRestore(query, user)
+	case query.Data == "admin_announcement":
+		b.handleAdminAnnouncement(query, user)
+	case query.Data == "admin_announce_normal":
+		b.handleAdminAnnounceNormal(query, user)
+	case query.Data == "admin_announce_pinned":
+		b.handleAdminAnnouncePinned(query, user)
+	case query.Data == "admin_back":
+		b.handleAdminBack(query, user)
+	case strings.HasPrefix(query.Data, "admin_code_edit_"):
+		b.handleAdminCodeEdit(query, user)
+	case strings.HasPrefix(query.Data, "admin_code_disable_"):
+		b.handleAdminCodeDisable(query, user)
+	case strings.HasPrefix(query.Data, "admin_code_enable_"):
+		b.handleAdminCodeEnable(query, user)
+	case strings.HasPrefix(query.Data, "admin_code_"):
+		b.handleAdminCodeDetail(query, user)
+	// Wallet callbacks
 	case query.Data == "create_wallet":
 		b.handleCreateWallet(query, user)
 	case query.Data == "import_wallet":
@@ -261,6 +314,8 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleTaskSetStopLossDelay(query, user)
 	case strings.HasPrefix(query.Data, "task_set_residual_"):
 		b.handleTaskSetResidualTolerance(query, user)
+	case query.Data == "view_profit":
+		b.handleViewProfit(query, user)
 	default:
 		// Answer callback to remove loading state
 		callback := tgbotapi.NewCallback(query.ID, "")
@@ -271,5 +326,8 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 // Stop stops the bot
 func (b *Bot) Stop() {
 	b.strategyService.Stop()
+	if b.snapshotService != nil {
+		b.snapshotService.Stop()
+	}
 	b.api.StopReceivingUpdates()
 }

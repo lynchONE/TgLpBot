@@ -163,6 +163,9 @@ func (s *LiquidityService) EnterTaskFromUSDT(userID uint, task *models.StrategyT
 	if blockchain.Client == nil || blockchain.ChainID == nil {
 		return nil, fmt.Errorf("blockchain client not initialized")
 	}
+	if task == nil {
+		return nil, fmt.Errorf("task is nil")
+	}
 
 	wallet, err := s.walletService.GetDefaultWallet(userID)
 	if err != nil {
@@ -185,13 +188,52 @@ func (s *LiquidityService) EnterTaskFromUSDT(userID uint, task *models.StrategyT
 	}
 
 	usdtAddr := common.HexToAddress(config.AppConfig.USDTAddress)
+
+	// Capture balance before entering (used for "actual invested" and gas cost).
+	usdtBefore, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
+	if usdtBefore == nil {
+		usdtBefore = big.NewInt(0)
+	}
+	bnbBefore, _ := blockchain.GetBalance(walletAddr)
+	if bnbBefore == nil {
+		bnbBefore = big.NewInt(0)
+	}
+
 	version := strings.ToLower(strings.TrimSpace(task.PoolVersion))
+	var res *EnterResult
 	switch version {
 	case "v4":
-		return s.enterV4FromUSDT(privateKey, walletAddr, usdtAddr, usdtAmount, task)
+		res, err = s.enterV4FromUSDT(privateKey, walletAddr, usdtAddr, usdtAmount, task)
 	default:
-		return s.enterV3FromUSDT(privateKey, walletAddr, usdtAddr, usdtAmount, task)
+		res, err = s.enterV3FromUSDT(privateKey, walletAddr, usdtAddr, usdtAmount, task)
 	}
+	if err != nil {
+		return nil, err
+	}
+
+	usdtAfter, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
+	if usdtAfter == nil {
+		usdtAfter = big.NewInt(0)
+	}
+	bnbAfter, _ := blockchain.GetBalance(walletAddr)
+	if bnbAfter == nil {
+		bnbAfter = big.NewInt(0)
+	}
+
+	// Actual USDT spent (delta) for this enter.
+	actualSpent := new(big.Int).Sub(usdtBefore, usdtAfter)
+	if actualSpent.Sign() < 0 {
+		actualSpent = big.NewInt(0)
+	}
+	// Gas spent in native BNB (delta).
+	gasSpent := new(big.Int).Sub(bnbBefore, bnbAfter)
+	if gasSpent.Sign() < 0 {
+		gasSpent = big.NewInt(0)
+	}
+
+	_ = NewTradeRecordService().CreateOpenRecord(task, res.TxHash, actualSpent, gasSpent)
+
+	return res, nil
 }
 
 func (s *LiquidityService) okxSlippageDecimal(slippagePercent float64) string {

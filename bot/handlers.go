@@ -39,6 +39,9 @@ func (b *Bot) handleStart(message *tgbotapi.Message, user *models.User) {
 ⚠️ *安全提示：*
 您的私钥已加密并安全存储。切勿与任何人分享您的私钥！`, user.FirstName)
 
+	// 添加授权状态
+	text += b.formatAccessStatus(user)
+
 	b.sendMessage(message.Chat.ID, text)
 }
 
@@ -56,6 +59,7 @@ func (b *Bot) handleHelp(message *tgbotapi.Message, user *models.User) {
 /config - 全局配置（滑点、止损、再平衡等）
 
 *信息查询：*
+/profit - 余额走势
 /transactions - 查看交易历史
 /help - 显示此帮助信息
 
@@ -79,6 +83,9 @@ func (b *Bot) handleWallet(message *tgbotapi.Message, user *models.User) {
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("👀 查看钱包", "view_wallets"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📈 余额走势", "view_profit"),
 		),
 	)
 
@@ -150,6 +157,21 @@ func (b *Bot) getWalletBalances(address string) (string, string) {
 
 // handleNewPosition handles the /newposition command
 func (b *Bot) handleNewPosition(message *tgbotapi.Message, user *models.User) {
+	// 检查授权
+	if !b.checkUserAuthorized(message.Chat.ID, user) {
+		return
+	}
+
+	// 检查任务额度
+	check, _ := b.accessService.CheckUserAccess(user.ID, time.Now())
+	if !check.IsAdmin && check.Access != nil {
+		taskCount, _ := b.accessService.CountUserActiveTasks(user.ID)
+		if taskCount >= int64(check.Access.MaxActiveTasks) {
+			b.sendMessage(message.Chat.ID, fmt.Sprintf("❌ 您已达到活跃任务数量上限 (%d)。\n\n请先停止其他任务，或联系管理员提升额度。", check.Access.MaxActiveTasks))
+			return
+		}
+	}
+
 	// Check if user has a wallet
 	wallets, err := b.walletService.GetUserWallets(user.ID)
 	if err != nil || len(wallets) == 0 {
@@ -210,170 +232,102 @@ func (b *Bot) handleConfig(message *tgbotapi.Message, user *models.User) {
 
 // handleTransactions handles the /transactions command
 func (b *Bot) handleTransactions(message *tgbotapi.Message, user *models.User) {
-	var transactions []models.Transaction
+	var records []models.TradeRecord
 	err := database.DB.Where("user_id = ?", user.ID).
-		Order("created_at DESC").
+		Order("opened_at DESC").
 		Limit(10).
-		Find(&transactions).Error
+		Find(&records).Error
 
 	if err != nil {
 		b.sendMessage(message.Chat.ID, "获取交易记录时出错。")
 		return
 	}
 
-	if len(transactions) == 0 {
+	if len(records) == 0 {
 		b.sendMessage(message.Chat.ID, "您还没有任何交易记录。")
 		return
 	}
 
-	text := "📊 *最近的交易：*\n\n"
+	text := "📊 *最近的开/撤仓记录：*\n\n"
 
-	// Preload related tasks for richer pool display.
-	taskByID := make(map[uint]models.StrategyTask)
-	var taskIDs []uint
-	for _, tx := range transactions {
-		if tx.TaskID != 0 {
-			taskIDs = append(taskIDs, tx.TaskID)
-		}
-	}
-	if len(taskIDs) > 0 {
-		seen := make(map[uint]struct{}, len(taskIDs))
-		uniqueIDs := make([]uint, 0, len(taskIDs))
-		for _, id := range taskIDs {
-			if _, ok := seen[id]; ok {
-				continue
-			}
-			seen[id] = struct{}{}
-			uniqueIDs = append(uniqueIDs, id)
-		}
-
-		var tasks []models.StrategyTask
-		if err := database.DB.Where("user_id = ? AND id IN ?", user.ID, uniqueIDs).Find(&tasks).Error; err == nil {
-			for i := range tasks {
-				taskByID[tasks[i].ID] = tasks[i]
-			}
-		}
-	}
-
-	for _, tx := range transactions {
-		// Emoji based on type
-		actionEmoji := "📝"
-		actionName := "未知"
-		switch tx.Type {
-		case models.TxTypeAddLiquidity:
-			actionEmoji = "🟢"
-			actionName = "加仓"
-		case models.TxTypeRemoveLiquidity:
-			actionEmoji = "🔴"
-			actionName = "撤仓"
-		case models.TxTypeSwap:
-			actionEmoji = "🔄"
-			actionName = "兑换"
-		case models.TxTypeApprove:
-			actionEmoji = "🔐"
-			actionName = "授权"
+	for i, rec := range records {
+		statusEmoji := "📝"
+		statusText := string(rec.Status)
+		switch rec.Status {
+		case models.TradeStatusOpen:
+			statusEmoji = "🟢"
+			statusText = "进行中"
+		case models.TradeStatusClosed:
+			statusEmoji = "✅"
+			statusText = "已结束"
+		case models.TradeStatusOrphaned:
+			statusEmoji = "⚠️"
+			statusText = "记录缺失"
+		case models.TradeStatusAborted:
+			statusEmoji = "⚠️"
+			statusText = "已中止"
 		}
 
-		// Format time
-		timeStr := tx.CreatedAt.Format("01-02 15:04")
-
-		// Format amount
-		// Assuming AmountIn or AmountOut is the main value.
-		// For LP Add, we spent AmountIn (USDT).
-		// For LP Remove, we got AmountOut (USDT).
-		amountStr := "0"
-		if tx.AmountIn != "" && tx.AmountIn != "0" {
-			// Convert wei to ether-like float for display if needed, but string might be raw wei.
-			// Currently our models.Transaction stores raw string. We should format it.
-			// Since we don't have easy utils here, let's just use a simple divider if it looks large.
-			if len(tx.AmountIn) > 6 {
-				// Rough approximation or assume input was already formatted?
-				// In liquidity_enter.go we stored amount0In.String() which is raw wei (big.Int).
-				// We need to parse and format.
-				amountStr = formatWei(tx.AmountIn)
-			} else {
-				amountStr = tx.AmountIn
-			}
-		} else if tx.AmountOut != "" && tx.AmountOut != "0" {
-			amountStr = formatWei(tx.AmountOut)
+		pair := strings.TrimSpace(rec.Token0Symbol) + "/" + strings.TrimSpace(rec.Token1Symbol)
+		if strings.TrimSpace(pair) == "/" {
+			pair = "-"
 		}
 
-		poolInfo := formatTxPoolInfo(&tx, taskByID)
-
-		text += fmt.Sprintf("🕒 %s | %s %s | %s U\n", timeStr, actionEmoji, actionName, amountStr)
-		text += fmt.Sprintf("🏊 %s\n", poolInfo)
-		if strings.TrimSpace(tx.TxHash) != "" {
-			text += fmt.Sprintf("🔗 [查看交易](https://bscscan.com/tx/%s)\n", tx.TxHash)
+		poolId := strings.TrimSpace(rec.PoolId)
+		if poolId == "" {
+			poolId = "-"
 		}
+		exchange := strings.TrimSpace(rec.Exchange)
+		if exchange == "" {
+			exchange = "-"
+		}
+
+		openTime := rec.OpenedAt.Format("01-02 15:04")
+		text += fmt.Sprintf("%d. %s *%s* (%s)\n", i+1, statusEmoji, exchange, statusText)
+		text += fmt.Sprintf("🕒 开仓：%s\n", openTime)
+		text += fmt.Sprintf("🏊 %s | 池子合约：`%s`\n", pair, poolId)
+		text += fmt.Sprintf("🟢 投入：%s USDT | Gas：%s BNB\n", formatWei(rec.OpenUSDTSpent), formatWeiDecimals(rec.OpenGasSpentWei, 6))
+
+		if rec.ClosedAt != nil {
+			text += fmt.Sprintf("🔴 撤出：%s USDT | Gas：%s BNB\n", formatWei(rec.CloseUSDTReceived), formatWeiDecimals(rec.CloseGasSpentWei, 6))
+			text += fmt.Sprintf("📈 收益：%s USDT (%.2f%%)\n", formatWei(rec.ProfitUSDT), rec.ProfitPct)
+		}
+
+		var links []string
+		if strings.TrimSpace(rec.OpenTxHash) != "" {
+			links = append(links, fmt.Sprintf("[开仓Tx](https://bscscan.com/tx/%s)", strings.TrimSpace(rec.OpenTxHash)))
+		}
+		if strings.TrimSpace(rec.CloseTxHash) != "" {
+			links = append(links, fmt.Sprintf("[撤仓Tx](https://bscscan.com/tx/%s)", strings.TrimSpace(rec.CloseTxHash)))
+		}
+		if len(links) > 0 {
+			text += "🔗 " + strings.Join(links, " | ") + "\n"
+		}
+
 		text += "\n"
 	}
 
 	b.sendMessage(message.Chat.ID, text)
 }
 
-// formatWei helper to format large numbers roughly to 2 decimals
+// formatWei helper to format 18-decimal wei strings into human readable decimals.
 func formatWei(weiStr string) string {
-	f := new(big.Float)
-	f.SetString(weiStr)
-	// Assume 18 decimals for display simplicity
-	f.Quo(f, big.NewFloat(1e18))
-	return fmt.Sprintf("%.2f", f)
+	return formatWeiDecimals(weiStr, 2)
 }
 
-func formatTxPoolInfo(tx *models.Transaction, taskByID map[uint]models.StrategyTask) string {
-	if tx != nil && tx.TaskID != 0 {
-		if task, ok := taskByID[tx.TaskID]; ok {
-			return formatTaskPoolInfo(&task)
-		}
+func formatWeiDecimals(weiStr string, decimals int) string {
+	weiStr = strings.TrimSpace(weiStr)
+	if weiStr == "" {
+		weiStr = "0"
 	}
-
-	inAddr := strings.TrimSpace(tx.TokenInAddress)
-	outAddr := strings.TrimSpace(tx.TokenOutAddress)
-	if inAddr == "" {
-		inAddr = "-"
-	} else {
-		inAddr = shortenHex(inAddr)
+	v, ok := new(big.Int).SetString(weiStr, 10)
+	if !ok {
+		return "0"
 	}
-	if outAddr == "" {
-		outAddr = "-"
-	} else {
-		outAddr = shortenHex(outAddr)
-	}
-	return fmt.Sprintf("输入：`%s` → 输出：`%s`", inAddr, outAddr)
-}
-
-func formatTaskPoolInfo(task *models.StrategyTask) string {
-	pair := formatPair(task.Token0Symbol, task.Token1Symbol)
-
-	poolAddr := strings.TrimSpace(task.PoolId)
-	if poolAddr == "" {
-		poolAddr = "-"
-	}
-	exchange := strings.TrimSpace(task.Exchange)
-	if exchange == "" {
-		exchange = "-"
-	}
-
-	return strings.Join([]string{
-		pair,
-		fmt.Sprintf("池子合约：`%s`", poolAddr),
-		fmt.Sprintf("交易所：%s", exchange),
-	}, " | ")
-}
-
-func formatPair(sym0, sym1 string) string {
-	s0 := strings.TrimSpace(sym0)
-	s1 := strings.TrimSpace(sym1)
-	if s0 == "" && s1 == "" {
-		return "-"
-	}
-	if s0 == "" {
-		s0 = "-"
-	}
-	if s1 == "" {
-		s1 = "-"
-	}
-	return s0 + "/" + s1
+	r := new(big.Rat).SetInt(v)
+	denom := new(big.Rat).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+	r.Quo(r, denom)
+	return r.FloatString(decimals)
 }
 
 // isPoolIdentifier checks if the input is a valid pool identifier
@@ -451,6 +405,19 @@ func (b *Bot) handleText(message *tgbotapi.Message, user *models.User) {
 		b.handleTaskStopLossDelayInput(message.Chat.ID, user, message.Text)
 	case "awaiting_task_residual_tolerance":
 		b.handleTaskResidualToleranceInput(message.Chat.ID, user, message.Text)
+	// 授权码和管理员相关输入
+	case "awaiting_auth_code":
+		b.handleRedeemCode(message, user)
+	case "awaiting_auth_code_params":
+		b.handleAuthCodeParamsInput(message, user)
+	case "awaiting_announcement":
+		b.handleAnnouncementInput(message, user)
+	case "awaiting_code_edit_params":
+		b.handleCodeEditInput(message, user)
+	case "awaiting_user_search":
+		b.handleUserSearchInput(message, user)
+	case "awaiting_user_edit_params":
+		b.handleUserEditInput(message, user)
 	default:
 		// Unknown state, check if it's a pool identifier
 		text := strings.TrimSpace(message.Text)
@@ -465,6 +432,27 @@ func (b *Bot) handleText(message *tgbotapi.Message, user *models.User) {
 
 // handleCreateWallet handles wallet creation callback
 func (b *Bot) handleCreateWallet(query *tgbotapi.CallbackQuery, user *models.User) {
+	// 检查授权
+	check, _ := b.accessService.CheckUserAccess(user.ID, time.Now())
+	if !check.Allowed {
+		callback := tgbotapi.NewCallback(query.ID, "未授权")
+		b.api.Send(callback)
+		b.sendMessage(query.Message.Chat.ID, "⚠️ 您尚未获得使用授权。\n\n请输入授权码进行激活，或联系管理员获取授权码。")
+		database.SetUserSession(user.TelegramID, "state", "awaiting_auth_code", 30*time.Minute)
+		return
+	}
+
+	// 检查钱包数量额度
+	if !check.IsAdmin && check.Access != nil {
+		walletCount, _ := b.accessService.CountUserWallets(user.ID)
+		if walletCount >= int64(check.Access.MaxWallets) {
+			callback := tgbotapi.NewCallback(query.ID, "达到上限")
+			b.api.Send(callback)
+			b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("❌ 您已达到钱包数量上限 (%d)。\n\n请删除不需要的钱包，或联系管理员提升额度。", check.Access.MaxWallets))
+			return
+		}
+	}
+
 	// Answer callback
 	callback := tgbotapi.NewCallback(query.ID, "正在创建钱包...")
 	b.api.Send(callback)

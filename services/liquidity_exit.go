@@ -48,6 +48,9 @@ func (s *LiquidityService) ExitTaskToUSDT(userID uint, task *models.StrategyTask
 	if blockchain.Client == nil || blockchain.ChainID == nil {
 		return nil, fmt.Errorf("blockchain client not initialized")
 	}
+	if task == nil {
+		return nil, fmt.Errorf("task is nil")
+	}
 
 	wallet, err := s.walletService.GetDefaultWallet(userID)
 	if err != nil {
@@ -66,12 +69,60 @@ func (s *LiquidityService) ExitTaskToUSDT(userID uint, task *models.StrategyTask
 	walletAddr := s.walletService.GetWalletAddress(wallet)
 	usdtAddr := common.HexToAddress(config.AppConfig.USDTAddress)
 
+	// Capture balance before exiting (used for "actual received" and gas cost).
+	usdtBefore, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
+	if usdtBefore == nil {
+		usdtBefore = big.NewInt(0)
+	}
+	bnbBefore, _ := blockchain.GetBalance(walletAddr)
+	if bnbBefore == nil {
+		bnbBefore = big.NewInt(0)
+	}
+
+	var txHashes []string
 	switch strings.ToLower(strings.TrimSpace(task.PoolVersion)) {
 	case "v4":
-		return s.exitV4ToUSDT(privateKey, walletAddr, usdtAddr, task)
+		txHashes, err = s.exitV4ToUSDT(privateKey, walletAddr, usdtAddr, task)
 	default:
-		return s.exitV3ToUSDT(privateKey, walletAddr, usdtAddr, task)
+		txHashes, err = s.exitV3ToUSDT(privateKey, walletAddr, usdtAddr, task)
 	}
+	if err != nil {
+		return nil, err
+	}
+
+	usdtAfter, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
+	if usdtAfter == nil {
+		usdtAfter = big.NewInt(0)
+	}
+	bnbAfter, _ := blockchain.GetBalance(walletAddr)
+	if bnbAfter == nil {
+		bnbAfter = big.NewInt(0)
+	}
+
+	// Actual USDT received (delta) for this exit.
+	actualReceived := new(big.Int).Sub(usdtAfter, usdtBefore)
+	if actualReceived.Sign() < 0 {
+		actualReceived = big.NewInt(0)
+	}
+	// Gas spent in native BNB (delta).
+	gasSpent := new(big.Int).Sub(bnbBefore, bnbAfter)
+	if gasSpent.Sign() < 0 {
+		gasSpent = big.NewInt(0)
+	}
+
+	mainHash := ""
+	if len(txHashes) > 0 {
+		parts := strings.Split(txHashes[0], "|")
+		if len(parts) >= 2 {
+			mainHash = strings.TrimSpace(parts[1])
+		} else {
+			mainHash = strings.TrimSpace(txHashes[0])
+		}
+	}
+
+	_ = NewTradeRecordService().CloseLatestOpenRecord(task, mainHash, actualReceived, gasSpent)
+
+	return txHashes, nil
 }
 
 func (s *LiquidityService) buildAuth(privateKey *ecdsa.PrivateKey, nonce uint64, value *big.Int, gasLimit uint64) (*bind.TransactOpts, error) {

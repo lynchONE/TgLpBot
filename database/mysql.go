@@ -62,6 +62,11 @@ func autoMigrate() error {
 		&models.GlobalConfig{},
 		&models.Position{},
 		&models.Transaction{},
+		&models.AuthCode{},
+		&models.UserAccess{},
+		&models.Announcement{},
+		&models.TradeRecord{},
+		&models.WalletBalanceSnapshot{},
 		&models.StrategyTask{},
 	)
 }
