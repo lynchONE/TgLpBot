@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  height: 100%;
+}
+
+:root {
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+  @apply dark:bg-[#0d0e10] dark:text-slate-100;
+}
+
+/* Custom scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 #e2e8f0;
+}
+
+.dark * {
+  scrollbar-color: #2c2d32 #1a1b1e;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #e2e8f0;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: #1a1b1e;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #2c2d32;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #3c3d42;
+}
+
+/* Keep tables visually integrated with cards */
+.ant-table-wrapper .ant-table {
+  background: transparent;
+}
