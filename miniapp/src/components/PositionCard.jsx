@@ -89,17 +89,6 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
     const openPool = () => poolLink && openLink(poolLink);
     const openToken = (addr) => addr && openLink(`https://bscscan.com/token/${addr}`);
 
-    const tickProgress = useMemo(() => {
-        const current = Number(position?.current_tick ?? 0);
-        const lower = Number(position?.tick_lower ?? 0);
-        const upper = Number(position?.tick_upper ?? 0);
-        const den = upper - lower;
-        if (!Number.isFinite(current) || !Number.isFinite(lower) || !Number.isFinite(upper) || den <= 0) return null;
-        const p = (current - lower) / den;
-        if (!Number.isFinite(p)) return null;
-        return Math.max(0, Math.min(1, p));
-    }, [position?.current_tick, position?.tick_lower, position?.tick_upper]);
-
     const currentPriceBase = useMemo(() => priceFromTick(position?.current_tick), [position?.current_tick]);
     const currentPrice = stableIndex === 0 ? safeInvert(currentPriceBase) : currentPriceBase;
 
@@ -110,6 +99,15 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
     const rangeReady = Number.isFinite(rangeLower) && Number.isFinite(rangeUpper);
     const rangeMin = rangeReady ? Math.min(rangeLower, rangeUpper) : null;
     const rangeMax = rangeReady ? Math.max(rangeLower, rangeUpper) : null;
+
+    const priceProgress = useMemo(() => {
+        if (!Number.isFinite(currentPrice) || !Number.isFinite(rangeMin) || !Number.isFinite(rangeMax)) return null;
+        const den = rangeMax - rangeMin;
+        if (!Number.isFinite(den) || den <= 0) return null;
+        const p = (currentPrice - rangeMin) / den;
+        if (!Number.isFinite(p)) return null;
+        return Math.max(0, Math.min(1, p));
+    }, [currentPrice, rangeMin, rangeMax]);
 
     const currentPriceText = Number.isFinite(currentPrice)
         ? `${formatPrice(currentPrice)}${quoteSymbol ? ` ${quoteSymbol}` : ''}`
@@ -243,11 +241,11 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
                     </div>
                 </div>
 
-                {tickProgress !== null ? (
+                {priceProgress !== null ? (
                     <div className="mt-2 h-2 w-full rounded-full bg-zinc-200 dark:bg-white/10">
                         <div
                             className={`h-2 rounded-full ${position?.in_range ? 'bg-emerald-500' : 'bg-rose-500'}`}
-                            style={{ width: `${Math.round(tickProgress * 100)}%` }}
+                            style={{ width: `${Math.round(priceProgress * 100)}%` }}
                         />
                     </div>
                 ) : null}
