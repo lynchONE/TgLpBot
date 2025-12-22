@@ -63,6 +63,7 @@ func NewRealtimePositionsService() *RealtimePositionsService {
 
 type RealtimePositionsResponse struct {
 	Wallet          RealtimeWallet     `json:"wallet"`
+	Summary         RealtimeSummary    `json:"summary"`
 	Positions       []RealtimePosition `json:"positions"`
 	PollIntervalSec int                `json:"poll_interval_sec"`
 	UpdatedAt       time.Time          `json:"updated_at"`
@@ -70,9 +71,18 @@ type RealtimePositionsResponse struct {
 }
 
 type RealtimeWallet struct {
-	Address       string `json:"address"`
-	BNBBalance    string `json:"bnb_balance"`
-	BNBBalanceWEI string `json:"bnb_balance_wei,omitempty"`
+	Address       string  `json:"address"`
+	BNBBalance    string  `json:"bnb_balance"`
+	BNBBalanceWEI string  `json:"bnb_balance_wei,omitempty"`
+	BNBPriceUSD   float64 `json:"bnb_price_usd"`
+	BNBUSD        float64 `json:"bnb_usd"`
+}
+
+type RealtimeSummary struct {
+	WalletUSD   float64 `json:"wallet_usd"`
+	PositionUSD float64 `json:"position_usd"`
+	FeeUSD      float64 `json:"fee_usd"`
+	TotalUSD    float64 `json:"total_usd"`
 }
 
 type RealtimePosition struct {
@@ -89,6 +99,7 @@ type RealtimePosition struct {
 	RangePercent float64    `json:"range_percent"`
 	OutOfRange   string     `json:"out_of_range"`
 	RunningSince *time.Time `json:"running_since,omitempty"`
+	HasLiquidity bool       `json:"has_liquidity"`
 
 	TokenRows []RealtimeTokenRow `json:"token_rows"`
 	Totals    RealtimeTotals     `json:"totals"`
@@ -164,11 +175,20 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 		bnbBalWei = big.NewInt(0)
 	}
 
+	const wbnb = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"
+	bnbPriceUSD := 0.0
+	if prices, err := s.priceService.GetUSDPrices("bsc", []string{wbnb}); err == nil {
+		bnbPriceUSD = prices[wbnb]
+	}
+	bnbUSD := toFloat(bnbBalWei, 18) * bnbPriceUSD
+
 	resp := &RealtimePositionsResponse{
 		Wallet: RealtimeWallet{
 			Address:       walletAddr.Hex(),
 			BNBBalance:    formatUnits(bnbBalWei, 18, 6),
 			BNBBalanceWEI: bnbBalWei.String(),
+			BNBPriceUSD:   bnbPriceUSD,
+			BNBUSD:        bnbUSD,
 		},
 		PollIntervalSec: 1,
 		UpdatedAt:       time.Now(),
@@ -276,6 +296,30 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 		return positions[i].Title < positions[j].Title
 	})
 	resp.Positions = positions
+
+	// Build a summary across all positions (dedupe wallet balances by token address).
+	summary := RealtimeSummary{}
+	walletTokenUSD := make(map[string]float64)
+	for _, p := range positions {
+		summary.PositionUSD += p.Totals.PositionUSD
+		summary.FeeUSD += p.Totals.FeeUSD
+		for _, row := range p.TokenRows {
+			addr := strings.ToLower(strings.TrimSpace(row.Address))
+			if addr == "" {
+				continue
+			}
+			if prev, ok := walletTokenUSD[addr]; !ok || row.WalletUSD > prev {
+				walletTokenUSD[addr] = row.WalletUSD
+			}
+		}
+	}
+	for _, v := range walletTokenUSD {
+		summary.WalletUSD += v
+	}
+	summary.WalletUSD += bnbUSD
+	summary.TotalUSD = summary.WalletUSD + summary.PositionUSD + summary.FeeUSD
+	resp.Summary = summary
+
 	return resp, nil
 }
 
@@ -550,6 +594,7 @@ func (s *RealtimePositionsService) buildV3Position(
 		exchange = "V3"
 	}
 
+	hasLiquidity := liq != nil && liq.Sign() > 0
 	return &RealtimePosition{
 		Version:      "v3",
 		Exchange:     exchange,
@@ -564,6 +609,7 @@ func (s *RealtimePositionsService) buildV3Position(
 		RangePercent: rangePct,
 		OutOfRange:   outOfRangeText,
 		RunningSince: runningSince,
+		HasLiquidity: hasLiquidity,
 		TokenRows:    []RealtimeTokenRow{row0, row1},
 		Totals:       totals,
 	}, warn
@@ -659,6 +705,7 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 	}
 	title := fmt.Sprintf("auto-pool-%s-%s-%s-%.2f%%", exchangeShort(exchange, "UniV4"), row0.Symbol, row1.Symbol, float64(task.Fee)/10000.0)
 
+	hasLiquidity := liq != nil && liq.Sign() > 0
 	return &RealtimePosition{
 		Version:      "v4",
 		Exchange:     exchange,
@@ -673,6 +720,7 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		RangePercent: rangePct,
 		OutOfRange:   formatOutOfRange(task, task.TickLower, task.TickUpper, currentTick),
 		RunningSince: &task.CreatedAt,
+		HasLiquidity: hasLiquidity,
 		TokenRows:    []RealtimeTokenRow{row0, row1},
 		Totals:       totals,
 	}, ""
