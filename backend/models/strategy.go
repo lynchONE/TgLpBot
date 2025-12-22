@@ -69,6 +69,14 @@ type StrategyTask struct {
 	LastCheckTime   time.Time      `json:"last_check_time"`
 	ErrorMessage    string         `gorm:"type:text" json:"error_message"`
 
+	// Exit retry state (keep task Status as running when exit fails).
+	ExitPendingAction string     `gorm:"size:20;default:''" json:"exit_pending_action"` // manual_stop | stoploss | rebalance
+	ExitPendingReason string     `gorm:"type:text" json:"exit_pending_reason"`
+	ExitRetryCount    int        `gorm:"default:0" json:"exit_retry_count"` // number of failed attempts
+	ExitNextRetryAt   *time.Time `json:"exit_next_retry_at"`
+	ExitLastError     string     `gorm:"type:text" json:"exit_last_error"`
+	ExitGiveUpAt      *time.Time `json:"exit_give_up_at"`
+
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`

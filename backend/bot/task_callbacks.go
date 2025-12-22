@@ -89,6 +89,26 @@ func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 		return
 	}
 
+	// If there's already a pending exit retry, don't start another on-chain exit in the bot handler.
+	if strings.TrimSpace(task.ExitPendingAction) != "" && task.ExitGiveUpAt == nil {
+		// Allow switching a pending rebalance/stoploss exit into a manual stop (so it won't re-enter after exit).
+		if strings.TrimSpace(task.ExitPendingAction) != "manual_stop" {
+			_ = b.taskService.Update(user.ID, taskID, map[string]interface{}{
+				"exit_pending_action": "manual_stop",
+				"exit_pending_reason": "🛑 手动停止",
+				"exit_next_retry_at":  nil, // retry ASAP in strategy loop
+				"exit_give_up_at":     nil,
+				"error_message":       "",
+			})
+			b.sendMessage(query.Message.Chat.ID, "🛑 已切换为手动停止：系统将继续撤出并兑换 USDT（最多重试 3 次）。")
+		} else {
+			b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("⏳ 正在撤出中（已失败 %d 次，最多 3 次），请稍候…", task.ExitRetryCount))
+		}
+		task, _ = b.taskService.GetByID(user.ID, taskID)
+		b.sendMessageWithKeyboard(query.Message.Chat.ID, b.formatTaskCard(task), b.taskKeyboard(task))
+		return
+	}
+
 	now := time.Now()
 
 	currentLiq := strings.TrimSpace(task.CurrentLiquidity)
@@ -134,6 +154,26 @@ func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 		}
 	}()
 
+	// Reset any previous give-up state when user manually stops again.
+	if task.ExitGiveUpAt != nil || task.ExitRetryCount > 0 || strings.TrimSpace(task.ExitLastError) != "" || task.ExitNextRetryAt != nil {
+		_ = b.taskService.Update(user.ID, taskID, map[string]interface{}{
+			"exit_pending_action": "",
+			"exit_pending_reason": "",
+			"exit_retry_count":    0,
+			"exit_next_retry_at":  nil,
+			"exit_last_error":     "",
+			"exit_give_up_at":     nil,
+			"error_message":       "",
+		})
+		// Update in-memory task snapshot for this handler.
+		task.ExitPendingAction = ""
+		task.ExitPendingReason = ""
+		task.ExitRetryCount = 0
+		task.ExitNextRetryAt = nil
+		task.ExitLastError = ""
+		task.ExitGiveUpAt = nil
+	}
+
 	_ = b.taskService.Update(user.ID, taskID, map[string]interface{}{
 		"status":        models.StrategyStatusStopping,
 		"error_message": "",
@@ -141,11 +181,18 @@ func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 
 	txHashes, err := b.liquidityService.ExitTaskToUSDT(user.ID, task, true)
 	if err != nil {
+		nextAt := now.Add(10 * time.Second)
 		_ = b.taskService.Update(user.ID, taskID, map[string]interface{}{
-			"status":        models.StrategyStatusError,
-			"error_message": fmt.Sprintf("manual stop exit failed: %v", err),
+			"status":              models.StrategyStatusRunning,
+			"exit_pending_action": "manual_stop",
+			"exit_pending_reason": "🛑 手动停止",
+			"exit_retry_count":    1,
+			"exit_next_retry_at":  &nextAt,
+			"exit_last_error":     fmt.Sprintf("%v", err),
+			"exit_give_up_at":     nil,
+			"error_message":       "",
 		})
-		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("❌ 停止任务失败：%v", err))
+		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("❌ 撤出失败：%v\n系统将自动重试（1/3），任务保持运行中。", err))
 		task, _ = b.taskService.GetByID(user.ID, taskID)
 		b.sendMessageWithKeyboard(query.Message.Chat.ID, b.formatTaskCard(task), b.taskKeyboard(task))
 		return
@@ -176,11 +223,17 @@ func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 	}
 
 	updates := map[string]interface{}{
-		"status":             models.StrategyStatusStopped,
-		"current_liquidity":  "0",
-		"out_of_range_since": nil,
-		"error_message":      "",
-		"last_exit_time":     &now,
+		"status":              models.StrategyStatusStopped,
+		"current_liquidity":   "0",
+		"out_of_range_since":  nil,
+		"error_message":       "",
+		"last_exit_time":      &now,
+		"exit_pending_action": "",
+		"exit_pending_reason": "",
+		"exit_retry_count":    0,
+		"exit_next_retry_at":  nil,
+		"exit_last_error":     "",
+		"exit_give_up_at":     nil,
 	}
 	if err := b.taskService.Update(user.ID, taskID, updates); err != nil {
 		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("停止任务失败：%v", err))

@@ -77,7 +77,6 @@ const storage = {
 
 const STORAGE_THEME = 'tglp_theme';
 const STORAGE_POLL_SEC = 'tglp_poll_interval_sec';
-const STORAGE_SHOW_CLOSED = 'tglp_show_closed';
 
 function formatUsd(v) {
     const n = Number(v || 0);
@@ -110,7 +109,6 @@ export default function App() {
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [pollOverrideSec, setPollOverrideSec] = useState(null);
     const [pollDraftSec, setPollDraftSec] = useState('');
-    const [showClosedPositions, setShowClosedPositions] = useState(false);
 
     const serverPollIntervalSec = Math.max(1, Number(data?.poll_interval_sec || 1));
     const pollIntervalSec = Math.max(1, Number(pollOverrideSec || serverPollIntervalSec || 1));
@@ -122,10 +120,46 @@ export default function App() {
     const summary = data?.summary;
     const positions = data?.positions || [];
 
+    const walletUsdFromTokens = useMemo(() => {
+        const byAddr = new Map();
+        for (const p of positions) {
+            const rows = p?.token_rows || [];
+            for (const row of rows) {
+                const addr = String(row?.address || '').trim().toLowerCase();
+                if (!addr) continue;
+                const usd = Number(row?.wallet_usd || 0);
+                if (!Number.isFinite(usd)) continue;
+                const prev = byAddr.get(addr);
+                if (prev === undefined || usd > prev) byAddr.set(addr, usd);
+            }
+        }
+        let sum = 0;
+        for (const v of byAddr.values()) sum += v;
+        return sum;
+    }, [positions]);
+
+    const totalsFromPositions = useMemo(() => {
+        let positionUsd = 0;
+        let feeUsd = 0;
+        for (const p of positions) {
+            positionUsd += Number(p?.totals?.position_usd || 0);
+            feeUsd += Number(p?.totals?.fee_usd || 0);
+        }
+        return { positionUsd, feeUsd };
+    }, [positions]);
+
+    const totalUsd = useMemo(() => {
+        const server = typeof summary?.total_usd === 'number' ? summary.total_usd : null;
+        const walletUsd = walletUsdFromTokens + (typeof bnbUsd === 'number' ? bnbUsd : 0);
+        const computed = walletUsd + totalsFromPositions.positionUsd + totalsFromPositions.feeUsd;
+        if (server !== null && server > 0) return server;
+        if (computed > 0) return computed;
+        return server ?? computed;
+    }, [summary?.total_usd, walletUsdFromTokens, bnbUsd, totalsFromPositions.positionUsd, totalsFromPositions.feeUsd]);
+
     const visiblePositions = useMemo(() => {
-        if (showClosedPositions) return positions;
         return positions.filter((p) => p?.has_liquidity !== false);
-    }, [positions, showClosedPositions]);
+    }, [positions]);
 
     const apiBaseUrl = useMemo(() => resolveApiBaseUrl(), []);
 
@@ -143,8 +177,6 @@ export default function App() {
         if (Number.isFinite(savedPoll) && savedPoll >= 1) {
             setPollOverrideSec(Math.floor(savedPoll));
         }
-
-        setShowClosedPositions(storage.get(STORAGE_SHOW_CLOSED) === '1');
     }, []);
 
     useEffect(() => {
@@ -154,8 +186,8 @@ export default function App() {
 
         const tg = getTelegramWebApp();
         try {
-            tg?.setHeaderColor?.(isDark ? '#0b0c0f' : '#f8fafc');
-            tg?.setBackgroundColor?.(isDark ? '#0b0c0f' : '#f8fafc');
+            tg?.setHeaderColor?.(isDark ? '#0b0f14' : '#fafafa');
+            tg?.setBackgroundColor?.(isDark ? '#0b0f14' : '#fafafa');
         } catch {
             // ignore
         }
@@ -199,39 +231,45 @@ export default function App() {
     }, [apiBaseUrl, initData, pollIntervalSec]);
 
     const applyPollDraft = () => {
-        const n = Number(pollDraftSec);
+        const raw = String(pollDraftSec || '').trim();
+        const m = raw.match(/\d+/);
+        if (!m) return;
+        const n = Number(m[0]);
         if (!Number.isFinite(n)) return;
-        const v = Math.max(1, Math.min(60, Math.floor(n)));
+        const v = Math.max(1, Math.min(300, Math.floor(n)));
         setPollOverrideSec(v);
         storage.set(STORAGE_POLL_SEC, String(v));
+        setSettingsOpen(false);
     };
 
     const clearPollOverride = () => {
         setPollOverrideSec(null);
         setPollDraftSec('');
         storage.remove(STORAGE_POLL_SEC);
+        setSettingsOpen(false);
     };
 
     const setQuickPoll = (sec) => {
-        const v = Math.max(1, Math.min(60, Math.floor(Number(sec) || 1)));
+        const v = Math.max(1, Math.min(300, Math.floor(Number(sec) || 1)));
         setPollOverrideSec(v);
         storage.set(STORAGE_POLL_SEC, String(v));
         setPollDraftSec(String(v));
+        setSettingsOpen(false);
     };
 
     const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
 
     return (
-        <div className="min-h-screen px-4 py-4 pb-[calc(16px+env(safe-area-inset-bottom))]">
+        <div className="min-h-screen max-w-[720px] px-4 py-4 pb-[calc(16px+env(safe-area-inset-bottom))] mx-auto">
             <header className="mb-4">
                 <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-fuchsia-500/15 text-fuchsia-600 ring-1 ring-fuchsia-500/25 dark:bg-fuchsia-500/15 dark:text-fuchsia-300 dark:ring-fuchsia-500/25">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-700 ring-1 ring-emerald-500/20 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/25">
                             <Icon path={icons.bot} className="h-5 w-5" />
                         </div>
                         <div>
                             <div className="text-lg font-extrabold tracking-tight">实时仓位</div>
-                            <div className="mt-0.5 text-xs text-slate-500 dark:text-white/40">
+                            <div className="mt-0.5 text-xs text-zinc-500 dark:text-white/40">
                                 {walletAddress ? `钱包：${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '加载钱包中...'}
                             </div>
                         </div>
@@ -241,15 +279,15 @@ export default function App() {
                         <button
                             type="button"
                             onClick={toggleTheme}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-slate-200 bg-white/70 text-slate-700 shadow-sm hover:bg-white active:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/80"
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 shadow-sm hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
                             aria-label="切换主题"
                         >
-                            <Icon path={theme === 'dark' ? icons.sun : icons.moon} className="h-5 w-5" />
+                            <Icon path={theme === 'dark' ? icons.moon : icons.sun} className="h-5 w-5" />
                         </button>
                         <button
                             type="button"
                             onClick={() => setSettingsOpen(true)}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-slate-200 bg-white/70 text-slate-700 shadow-sm hover:bg-white active:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/80"
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 shadow-sm hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
                             aria-label="设置"
                         >
                             <Icon path={icons.gear} className="h-5 w-5" />
@@ -257,42 +295,21 @@ export default function App() {
                     </div>
                 </div>
 
-                <div className="mt-3 rounded-3xl border border-slate-200 bg-white/70 p-4 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5">
+                <div className="mt-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
                     <div className="flex items-start justify-between gap-4">
                         <div>
-                            <div className="text-[11px] text-slate-500 dark:text-white/40">钱包总余额（涉及代币）</div>
-                            <div className="mt-0.5 text-2xl font-extrabold tabular-nums text-slate-900 dark:text-fuchsia-300">
-                                {formatUsd(summary?.wallet_usd)}
+                            <div className="text-[11px] text-zinc-500 dark:text-white/40">总余额</div>
+                            <div className="mt-0.5 text-2xl font-extrabold tabular-nums text-zinc-900 dark:text-emerald-300">
+                                {formatUsd(totalUsd)}
                             </div>
-                            <div className="mt-1 text-[11px] text-slate-500 dark:text-white/40 tabular-nums">
+                            <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40 tabular-nums">
                                 {bnbBalance} BNB{typeof bnbUsd === 'number' ? ` ≈ ${formatUsd(bnbUsd)}` : ''}
                             </div>
                         </div>
                         <div className="text-right">
-                            <div className="text-[11px] text-slate-500 dark:text-white/40">自动刷新</div>
+                            <div className="text-[11px] text-zinc-500 dark:text-white/40">自动刷新</div>
                             <div className="text-sm font-semibold tabular-nums">{pollIntervalSec}s</div>
-                            <div className="mt-1 text-[11px] text-slate-500 dark:text-white/40">{formatRelativeTime(updatedAt)}</div>
-                        </div>
-                    </div>
-
-                    <div className="mt-3 grid grid-cols-3 gap-2">
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-white/10 dark:bg-black/20">
-                            <div className="text-[11px] text-slate-500 dark:text-white/40">仓位</div>
-                            <div className="mt-0.5 text-sm font-semibold tabular-nums text-sky-700 dark:text-sky-300">
-                                {formatUsd(summary?.position_usd)}
-                            </div>
-                        </div>
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-white/10 dark:bg-black/20">
-                            <div className="text-[11px] text-slate-500 dark:text-white/40">手续费</div>
-                            <div className="mt-0.5 text-sm font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
-                                {formatUsd(summary?.fee_usd)}
-                            </div>
-                        </div>
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-white/10 dark:bg-black/20">
-                            <div className="text-[11px] text-slate-500 dark:text-white/40">总计</div>
-                            <div className="mt-0.5 text-sm font-extrabold tabular-nums text-fuchsia-700 dark:text-fuchsia-300">
-                                {formatUsd(summary?.total_usd)}
-                            </div>
+                            <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40">{formatRelativeTime(updatedAt)}</div>
                         </div>
                     </div>
                 </div>
@@ -305,13 +322,13 @@ export default function App() {
             ) : null}
 
             {loading && !data ? (
-                <div className="rounded-2xl border border-slate-200 bg-white/70 p-6 text-sm text-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
                     加载中...
                 </div>
             ) : null}
 
             {!loading && data && visiblePositions.length === 0 ? (
-                <div className="rounded-2xl border border-slate-200 bg-white/70 p-6 text-sm text-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
                     暂无仓位。请先在机器人里创建/导入钱包并开仓。
                 </div>
             ) : null}
@@ -348,13 +365,13 @@ export default function App() {
                         onClick={() => setSettingsOpen(false)}
                         aria-label="关闭设置"
                     />
-                    <div className="absolute inset-x-0 bottom-0 rounded-t-3xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#0f1116]">
+                    <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
                         <div className="flex items-center justify-between">
-                            <div className="text-sm font-semibold text-slate-900 dark:text-white/90">设置</div>
+                            <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">设置</div>
                             <button
                                 type="button"
                                 onClick={() => setSettingsOpen(false)}
-                                className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-slate-200 bg-white/70 text-slate-700 hover:bg-white active:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/80"
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
                                 aria-label="关闭"
                             >
                                 <Icon path={icons.close} className="h-5 w-5" />
@@ -362,9 +379,9 @@ export default function App() {
                         </div>
 
                         <div className="mt-4 space-y-4">
-                            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-white/10 dark:bg-black/20">
-                                <div className="text-xs font-semibold text-slate-900 dark:text-white/80">自动刷新</div>
-                                <div className="mt-0.5 text-[11px] text-slate-500 dark:text-white/40">
+                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">自动刷新</div>
+                                <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
                                     当前：{pollIntervalSec}s（{pollOverrideSec ? '自定义' : `默认 ${serverPollIntervalSec}s`})
                                 </div>
                                 <div className="mt-3 flex flex-wrap gap-2">
@@ -375,8 +392,8 @@ export default function App() {
                                             onClick={() => setQuickPoll(sec)}
                                             className={`rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 ${
                                                 pollOverrideSec === sec
-                                                    ? 'bg-fuchsia-500/15 text-fuchsia-700 ring-fuchsia-500/25 dark:text-fuchsia-300'
-                                                    : 'bg-white/70 text-slate-700 ring-slate-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
+                                                    ? 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/25 dark:text-emerald-300'
+                                                    : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
                                             }`}
                                         >
                                             {sec}s
@@ -385,7 +402,7 @@ export default function App() {
                                     <button
                                         type="button"
                                         onClick={clearPollOverride}
-                                        className="rounded-xl bg-white/70 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
+                                        className="rounded-xl bg-white/70 px-3 py-1.5 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
                                     >
                                         跟随默认
                                     </button>
@@ -395,47 +412,24 @@ export default function App() {
                                     <input
                                         value={pollDraftSec}
                                         onChange={(e) => setPollDraftSec(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                                e.preventDefault();
+                                                applyPollDraft();
+                                            }
+                                        }}
                                         inputMode="numeric"
-                                        className="w-28 rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none ring-0 placeholder:text-slate-400 focus:border-fuchsia-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
-                                        placeholder="1-60"
+                                        className="w-28 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                        placeholder="1-300"
                                     />
                                     <button
                                         type="button"
                                         onClick={applyPollDraft}
-                                        className="rounded-xl bg-fuchsia-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-fuchsia-600 active:bg-fuchsia-700"
+                                        className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-600 active:bg-emerald-700"
                                     >
-                                        应用
+                                        确定
                                     </button>
                                 </div>
-                            </div>
-
-                            <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-white/10 dark:bg-black/20">
-                                <div>
-                                    <div className="text-xs font-semibold text-slate-900 dark:text-white/80">显示已清仓</div>
-                                    <div className="mt-0.5 text-[11px] text-slate-500 dark:text-white/40">流动性为 0 的任务</div>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setShowClosedPositions((v) => {
-                                            const next = !v;
-                                            storage.set(STORAGE_SHOW_CLOSED, next ? '1' : '0');
-                                            return next;
-                                        });
-                                    }}
-                                    className={`h-8 w-14 rounded-full p-1 ring-1 transition ${
-                                        showClosedPositions
-                                            ? 'bg-emerald-500/20 ring-emerald-500/30'
-                                            : 'bg-slate-200 ring-slate-300 dark:bg-white/10 dark:ring-white/10'
-                                    }`}
-                                    aria-label="切换显示已清仓"
-                                >
-                                    <div
-                                        className={`h-6 w-6 rounded-full bg-white shadow transition ${
-                                            showClosedPositions ? 'translate-x-6' : 'translate-x-0'
-                                        }`}
-                                    />
-                                </button>
                             </div>
                         </div>
                     </div>

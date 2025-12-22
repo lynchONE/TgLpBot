@@ -89,6 +89,11 @@ func (s *StrategyService) processTask(task *models.StrategyTask, tickCache map[s
 	// Update last check time
 	database.DB.Model(task).Update("last_check_time", time.Now())
 
+	// If an exit is pending (e.g. previous exit failed), retry it first and skip other logic.
+	if s.processExitRetry(task) {
+		return
+	}
+
 	if task.Status == models.StrategyStatusRunning {
 		s.handleRunningTask(task, tickCache)
 	} else if task.Status == models.StrategyStatusWaiting {
@@ -122,13 +127,33 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 	inRange := currentTick >= task.TickLower && currentTick <= task.TickUpper
 
 	if inRange {
+		updates := map[string]interface{}{}
+
 		// 如果之前超出范围，现在回到范围内，重置计时并通知用户
 		if task.OutOfRangeSince != nil {
-			database.DB.Model(task).Updates(map[string]interface{}{"out_of_range_since": nil})
+			updates["out_of_range_since"] = nil
 			s.notify(task.UserID, fmt.Sprintf("✅ 任务 #%d 价格已回到区间范围\nTick: %d (范围: %d - %d)",
 				task.ID, currentTick, task.TickLower, task.TickUpper))
 			log.Printf("[Strategy] 任务 #%d 价格回到区间，重置再平衡计时", task.ID)
 		}
+
+		// Clear any previous exit retry give-up state once price is back in range.
+		if task.ExitGiveUpAt != nil || task.ExitRetryCount != 0 || task.ExitLastError != "" || task.ExitNextRetryAt != nil {
+			updates["exit_retry_count"] = 0
+			updates["exit_next_retry_at"] = nil
+			updates["exit_last_error"] = ""
+			updates["exit_give_up_at"] = nil
+		}
+
+		if len(updates) > 0 {
+			database.DB.Model(task).Updates(updates)
+			task.OutOfRangeSince = nil
+			task.ExitRetryCount = 0
+			task.ExitNextRetryAt = nil
+			task.ExitLastError = ""
+			task.ExitGiveUpAt = nil
+		}
+
 		return
 	}
 
@@ -361,94 +386,19 @@ func (s *StrategyService) calculateRangeFromPercentage(task *models.StrategyTask
 }
 
 func (s *StrategyService) executeStopLoss(task *models.StrategyTask, now time.Time, reason string) {
-	log.Printf("[Strategy] 任务 #%d %s，执行退出", task.ID, reason)
-	s.notify(task.UserID, fmt.Sprintf("%s，正在撤出...", reason))
-
-	if _, err := s.liquidityService.ExitTaskToUSDT(task.UserID, task, true); err != nil {
-		log.Printf("[Strategy] 任务 #%d 止损退出失败: %v", task.ID, err)
-		s.notify(task.UserID, fmt.Sprintf("❌ 止损撤出失败: %v", err))
-		database.DB.Model(task).Updates(map[string]interface{}{
-			"status":        models.StrategyStatusError,
-			"error_message": fmt.Sprintf("stoploss exit failed: %v", err),
-		})
+	if task.ExitGiveUpAt != nil {
 		return
 	}
 
-	updates := map[string]interface{}{
-		"status":             models.StrategyStatusStopped,
-		"last_exit_time":     &now,
-		"current_liquidity":  "0",
-		"out_of_range_since": nil,
-		"error_message":      "",
-	}
-	database.DB.Model(task).Updates(updates)
-	s.notify(task.UserID, fmt.Sprintf("✅ %s 完成，任务已停止。", reason))
+	log.Printf("[Strategy] 任务 #%d %s，执行退出", task.ID, reason)
+	s.requestExitToUSDT(task, exitActionStopLoss, reason)
 }
 
 func (s *StrategyService) executeRebalance(task *models.StrategyTask, currentTick int, now time.Time, reason string) {
+	if task.ExitGiveUpAt != nil {
+		return
+	}
+
 	log.Printf("[Strategy] 任务 #%d %s，执行再平衡", task.ID, reason)
-	s.notify(task.UserID, fmt.Sprintf("%s，正在执行再平衡...", reason))
-
-	// 1. Exit
-	if _, err := s.liquidityService.ExitTaskToUSDT(task.UserID, task, true); err != nil {
-		log.Printf("[Strategy] 任务 #%d 再平衡退出失败: %v", task.ID, err)
-		s.notify(task.UserID, fmt.Sprintf("❌ 再平衡撤出失败: %v", err))
-		database.DB.Model(task).Updates(map[string]interface{}{
-			"status":        models.StrategyStatusError,
-			"error_message": fmt.Sprintf("rebalance exit failed: %v", err),
-		})
-		return
-	}
-
-	// 2. Calculate New Range
-	tickLower, tickUpper, err := s.calculateRangeFromPercentage(task, currentTick)
-	if err != nil {
-		log.Printf("[Strategy] 任务 #%d 计算新 tick 范围失败: %v", task.ID, err)
-		s.notify(task.UserID, fmt.Sprintf("❌ 再平衡计算范围失败: %v", err))
-		database.DB.Model(task).Updates(map[string]interface{}{
-			"status":        models.StrategyStatusError,
-			"error_message": fmt.Sprintf("rebalance range calc failed: %v", err),
-		})
-		return
-	}
-
-	// 3. Update Task Params
-	task.TickLower = tickLower
-	task.TickUpper = tickUpper
-	// Must clear these to avoid confusion in Enter
-	task.V3TokenID = ""
-	task.V4TokenID = ""
-	task.CurrentLiquidity = "0"
-
-	// 4. Enter Immediately
-	s.notify(task.UserID, "🔄 再平衡撤出已完成，正在按新价格重新开仓...")
-	enterRes, err := s.liquidityService.EnterTaskFromUSDT(task.UserID, task)
-	if err != nil {
-		log.Printf("[Strategy] 任务 #%d 再平衡开仓失败: %v", task.ID, err)
-		s.notify(task.UserID, fmt.Sprintf("❌ 再平衡开仓失败: %v。任务已暂停。", err))
-		database.DB.Model(task).Updates(map[string]interface{}{
-			"status":        models.StrategyStatusError,
-			"error_message": fmt.Sprintf("rebalance enter failed: %v", err),
-			"tick_lower":    tickLower, // Save the calculated ticks anyway
-			"tick_upper":    tickUpper,
-		})
-		return
-	}
-
-	// 5. Update Task Success
-	updates := map[string]interface{}{
-		"status":                      models.StrategyStatusRunning,
-		"tick_lower":                  tickLower,
-		"tick_upper":                  tickUpper,
-		"last_rebalance_at":           &now,
-		"last_exit_time":              &now, // technically re-entered, but marks the event
-		"current_liquidity":           enterRes.CurrentLiquidity,
-		"v3_position_manager_address": enterRes.V3PositionManagerAddress,
-		"v3_token_id":                 enterRes.V3TokenID,
-		"v4_token_id":                 enterRes.V4TokenID,
-		"out_of_range_since":          nil,
-		"error_message":               "",
-	}
-	database.DB.Model(task).Updates(updates)
-	s.notify(task.UserID, fmt.Sprintf("✅ 再平衡完成！\n新 Tick 范围: %d - %d\n交易哈希: `%s`", tickLower, tickUpper, enterRes.TxHash))
+	s.requestExitToUSDT(task, exitActionRebalance, reason)
 }
