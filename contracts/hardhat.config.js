@@ -20,8 +20,8 @@ module.exports = {
       chainId: 97,
       accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
     },
-    bscMainnet: {
-      url: "https://bsc-dataseed1.binance.org/",
+    bsc: {
+      url: process.env.BSC_RPC_URL || "https://bsc-dataseed1.binance.org/",
       chainId: 56,
       accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
     },

@@ -2,9 +2,11 @@ package database
 
 import (
 	"TgLpBot/config"
+	"TgLpBot/security"
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -41,16 +43,64 @@ func CloseRedis() error {
 
 // Session management functions
 
+const sessionEncryptedPrefix = "enc:"
+
 // SetUserSession stores user session data
 func SetUserSession(telegramID int64, key string, value interface{}, expiration time.Duration) error {
 	sessionKey := fmt.Sprintf("session:%d:%s", telegramID, key)
 	return RedisClient.Set(ctx, sessionKey, value, expiration).Err()
 }
 
+// SetUserSessionEncrypted stores user session data encrypted with the app ENCRYPTION_KEY.
+func SetUserSessionEncrypted(telegramID int64, key string, plaintext string, expiration time.Duration) error {
+	if config.AppConfig == nil {
+		return fmt.Errorf("config not loaded")
+	}
+	encKey, err := security.DecodeHexKey32(config.AppConfig.EncryptionKey)
+	if err != nil {
+		return err
+	}
+	cipherHex, err := security.EncryptAESGCMToHex(encKey, []byte(plaintext))
+	if err != nil {
+		return err
+	}
+	return SetUserSession(telegramID, key, sessionEncryptedPrefix+cipherHex, expiration)
+}
+
 // GetUserSession retrieves user session data
 func GetUserSession(telegramID int64, key string) (string, error) {
 	sessionKey := fmt.Sprintf("session:%d:%s", telegramID, key)
 	return RedisClient.Get(ctx, sessionKey).Result()
+}
+
+// GetUserSessionDecrypted retrieves encrypted session data stored by SetUserSessionEncrypted.
+func GetUserSessionDecrypted(telegramID int64, key string) (string, error) {
+	raw, err := GetUserSession(telegramID, key)
+	if err != nil {
+		return "", err
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if !strings.HasPrefix(raw, sessionEncryptedPrefix) {
+		// Backward compat: older sessions stored plaintext.
+		return raw, nil
+	}
+	raw = strings.TrimPrefix(raw, sessionEncryptedPrefix)
+
+	if config.AppConfig == nil {
+		return "", fmt.Errorf("config not loaded")
+	}
+	encKey, err := security.DecodeHexKey32(config.AppConfig.EncryptionKey)
+	if err != nil {
+		return "", err
+	}
+	plaintext, err := security.DecryptAESGCMHex(encKey, raw)
+	if err != nil {
+		return "", err
+	}
+	return string(plaintext), nil
 }
 
 // DeleteUserSession deletes user session data

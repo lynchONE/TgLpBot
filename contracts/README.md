@@ -1,10 +1,10 @@
-# ZapV3V4Improved Contract
+# Zap Contracts
 
 This folder contains the on-chain zap helper contract used by TgLpBot.
 
 ## Contract
 
-- `contracts/ZapV3V4Improved.sol`: unified V3/V4 zap (mint/increase + V4 rebalance entry).
+- `contracts/ZapSimple.sol`: V3/V4 zap (OKX swap + mint; V3/V4 withdraw helpers).
 
 ## Build
 
@@ -37,9 +37,20 @@ npm run deploy:mainnet
 npm run deploy:testnet
 ```
 
-The deploy script prints suggested bot `.env` keys (`ZAP_V3_ADDRESS`, `ZAP_V4_ADDRESS`). You can set both to the same `ZapV3V4Improved` address.
+The deploy script prints suggested bot `.env` keys (`ZAP_V3_ADDRESS`, `ZAP_V4_ADDRESS`). You can set both to the same `ZapSimple` address.
+
+### Trusted address config (recommended)
+
+`ZapSimple` restricts external calls (OKX router / TokenApprove / PositionManagers). The deploy script will auto-call `setTrustedAddresses` if you provide:
+
+```env
+OKX_SWAP_ROUTER=0x...
+OKX_TOKEN_APPROVE_ADDRESS=0x40aA958dd87FC8305b97f2BA922CDdCa374bcD7f
+V3_POSITION_MANAGER_ADDRESS=0x...
+UNISWAP_V4_POSITION_MANAGER_ADDRESS=0x...
+```
 
 ## Notes
 
-- TgLpBot builds OKX `/swap` calldata with `userWalletAddress=<ZapV3V4Improved>` and passes it as `swapCalls` to `ZapV3V4Improved`, so swap + mint happen atomically and dust is refunded by the contract.
+- TgLpBot builds OKX `/swap` calldata with `userWalletAddress=<ZapSimple>` and passes it to `ZapSimple` (`SwapParams.callData`), so swap + mint happen atomically and dust is refunded by the contract.
 - Exiting positions is done via the V3 NFT Position Manager and the V4 PositionManager (the zap contract does not provide an “exit to USDT” helper).

@@ -15,7 +15,26 @@ func NewTradeRecordService() *TradeRecordService {
 	return &TradeRecordService{}
 }
 
-func (s *TradeRecordService) CreateOpenRecord(task *models.StrategyTask, openTxHash string, openUSDTSpentWei, openGasSpentWei *big.Int) error {
+func (s *TradeRecordService) GetLatestOpenRecord(userID uint, taskID uint) (*models.TradeRecord, error) {
+	var rec models.TradeRecord
+	err := database.DB.
+		Where("user_id = ? AND task_id = ? AND status = ?", userID, taskID, models.TradeStatusOpen).
+		Order("opened_at DESC").
+		First(&rec).Error
+	if err != nil {
+		return nil, err
+	}
+	return &rec, nil
+}
+
+func (s *TradeRecordService) CreateOpenRecord(
+	task *models.StrategyTask,
+	openTxHash string,
+	openUSDTSpentWei *big.Int,
+	openGasSpentWei *big.Int,
+	dust0Wei *big.Int,
+	dust1Wei *big.Int,
+) error {
 	if task == nil {
 		return fmt.Errorf("task is nil")
 	}
@@ -42,6 +61,8 @@ func (s *TradeRecordService) CreateOpenRecord(task *models.StrategyTask, openTxH
 		OpenTxHash:        strings.TrimSpace(openTxHash),
 		OpenUSDTSpent:     safeBigIntString(openUSDTSpentWei),
 		OpenGasSpentWei:   safeBigIntString(openGasSpentWei),
+		OpenDust0:         safeBigIntString(dust0Wei),
+		OpenDust1:         safeBigIntString(dust1Wei),
 		Status:            models.TradeStatusOpen,
 		CloseUSDTReceived: "0",
 		CloseGasSpentWei:  "0",

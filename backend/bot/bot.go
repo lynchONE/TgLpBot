@@ -24,6 +24,7 @@ type Bot struct {
 	configService    *services.GlobalConfigService
 	taskService      *services.StrategyTaskService
 	snapshotService  *services.BalanceSnapshotService
+	pnlService       *services.PnLService
 }
 
 // NewBot creates a new bot instance
@@ -48,6 +49,7 @@ func NewBot() (*Bot, error) {
 		configService:    services.NewGlobalConfigService(),
 		taskService:      services.NewStrategyTaskService(),
 		snapshotService:  services.NewBalanceSnapshotService(),
+		pnlService:       services.NewPnLService(),
 	}
 
 	// Set Strategy Notifier
@@ -335,6 +337,8 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 	// Task management callbacks
 	case strings.HasPrefix(query.Data, "task_view_"):
 		b.handleTaskView(query, user)
+	case strings.HasPrefix(query.Data, "task_stop_refresh_"):
+		b.handleTaskStopRefresh(query, user)
 	case strings.HasPrefix(query.Data, "task_stop_"):
 		b.handleTaskStop(query, user)
 	case strings.HasPrefix(query.Data, "task_toggle_reinvest_"):
@@ -345,6 +349,8 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleTaskSetSlippage(query, user)
 	case strings.HasPrefix(query.Data, "task_set_rebalance_"):
 		b.handleTaskSetRebalanceTimeout(query, user)
+	case strings.HasPrefix(query.Data, "task_swap_dust_"):
+		b.handleTaskSwapDust(query, user)
 	case strings.HasPrefix(query.Data, "task_set_stoploss_delay_"):
 		b.handleTaskSetStopLossDelay(query, user)
 	case strings.HasPrefix(query.Data, "task_set_residual_"):

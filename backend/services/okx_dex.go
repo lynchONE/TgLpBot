@@ -163,7 +163,9 @@ func (s *OKXDexService) GetSwapData(req SwapRequest) (*SwapResponse, error) {
 	url := fmt.Sprintf("%s/swap?chainId=%s&fromTokenAddress=%s&toTokenAddress=%s&amount=%s&slippage=%s&userWalletAddress=%s",
 		s.apiURL, req.ChainID, req.FromTokenAddress, req.ToTokenAddress, req.Amount, req.Slippage, req.UserWalletAddress)
 
-	log.Printf("[OKX API] 请求 URL: %s", url)
+	if config.AppConfig != nil && config.AppConfig.OKXDebug {
+		log.Printf("[OKX API] 请求 URL: %s", url)
+	}
 
 	httpReq, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -185,7 +187,9 @@ func (s *OKXDexService) GetSwapData(req SwapRequest) (*SwapResponse, error) {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	log.Printf("[OKX API] 响应原始数据: %s", string(body))
+	if config.AppConfig != nil && config.AppConfig.OKXDebug {
+		log.Printf("[OKX API] 响应原始数据: %s", string(body))
+	}
 
 	var swapResp SwapResponse
 	if err := json.Unmarshal(body, &swapResp); err != nil {
@@ -197,7 +201,7 @@ func (s *OKXDexService) GetSwapData(req SwapRequest) (*SwapResponse, error) {
 	}
 
 	// 打印详细响应信息
-	if len(swapResp.Data) > 0 {
+	if config.AppConfig != nil && config.AppConfig.OKXDebug && len(swapResp.Data) > 0 {
 		tx := swapResp.Data[0].Tx
 		log.Printf("[OKX API] 响应详情:")
 		log.Printf("  tx.from: %s", tx.From)

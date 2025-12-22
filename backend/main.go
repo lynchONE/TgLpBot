@@ -38,6 +38,14 @@ func main() {
 	}
 	defer database.CloseMySQL()
 
+	// Security: migrate any legacy plaintext wallet private keys to encrypted storage.
+	ws := services.NewWalletService()
+	if migrated, err := ws.MigratePlaintextPrivateKeys(); err != nil {
+		log.Fatalf("❌ 私钥加密迁移失败: %v", err)
+	} else if migrated > 0 {
+		log.Printf("✅ 已加密迁移 %d 个钱包私钥", migrated)
+	}
+
 	// Initialize Redis
 	log.Println("========================================")
 	log.Println("📮 开始初始化 Redis...")
@@ -58,6 +66,7 @@ func main() {
 		config.AppConfig.ClickHouseDB,
 		config.AppConfig.ClickHouseUser,
 		config.AppConfig.ClickHousePassword,
+		config.AppConfig.ClickHouseDebug,
 	)
 	if err != nil {
 		log.Printf("⚠️ ClickHouse 连接失败: %v", err)

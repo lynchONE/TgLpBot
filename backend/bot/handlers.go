@@ -218,7 +218,17 @@ func (b *Bot) handlePositions(message *tgbotapi.Message, user *models.User) {
 	b.sendMessage(message.Chat.ID, fmt.Sprintf("📊 *我的仓位*\n\n共 %d 个任务：", len(tasks)))
 	for i := range tasks {
 		task := tasks[i]
-		b.sendMessageWithKeyboard(message.Chat.ID, b.formatTaskCard(&task), b.taskKeyboard(&task))
+		// Send task card with auto-refresh
+		msgConfig := tgbotapi.NewMessage(message.Chat.ID, b.formatTaskCardWithRefresh(&task))
+		msgConfig.ParseMode = "Markdown"
+		msgConfig.ReplyMarkup = b.taskKeyboardWithRefresh(&task)
+		msgConfig.DisableWebPagePreview = true
+
+		msg, err := b.api.Send(msgConfig)
+		if err == nil && msg.MessageID != 0 {
+			// Start auto-refresh for this message
+			b.startTaskAutoRefresh(message.Chat.ID, msg.MessageID, task.ID, user.ID)
+		}
 	}
 }
 

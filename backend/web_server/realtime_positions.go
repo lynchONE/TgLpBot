@@ -22,8 +22,14 @@ func (s *Server) handleRealtimePositions(w http.ResponseWriter, r *http.Request)
 			initData = strings.TrimSpace(r.URL.Query().Get("init_data"))
 		}
 	case http.MethodPost:
+		r.Body = http.MaxBytesReader(w, r.Body, 8*1024)
 		var req realtimePositionsRequest
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		dec := json.NewDecoder(r.Body)
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
 		initData = strings.TrimSpace(req.InitData)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

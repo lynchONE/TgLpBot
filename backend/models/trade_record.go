@@ -31,6 +31,8 @@ type TradeRecord struct {
 	OpenTxHash      string    `gorm:"size:66" json:"open_tx_hash"`
 	OpenUSDTSpent   string    `gorm:"type:varchar(78)" json:"open_usdt_spent"`    // wei (1e18)
 	OpenGasSpentWei string    `gorm:"type:varchar(78)" json:"open_gas_spent_wei"` // BNB wei (1e18)
+	OpenDust0       string    `gorm:"type:varchar(78)" json:"open_dust0"`         // token0 dust wei
+	OpenDust1       string    `gorm:"type:varchar(78)" json:"open_dust1"`         // token1 dust wei
 
 	ClosedAt          *time.Time        `gorm:"index" json:"closed_at"`
 	CloseTxHash       string            `gorm:"size:66" json:"close_tx_hash"`

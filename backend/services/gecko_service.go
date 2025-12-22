@@ -17,7 +17,6 @@ import (
 type GeckoService struct {
 	ClickHouse *ClickHouseService
 	Client     *http.Client
-	GraphAPI   *TheGraphAPI
 
 	feeCache   map[string]float64
 	feeCacheMu sync.RWMutex
@@ -27,7 +26,6 @@ func NewGeckoService(ch *ClickHouseService) *GeckoService {
 	return &GeckoService{
 		ClickHouse: ch,
 		Client:     &http.Client{Timeout: 30 * time.Second},
-		GraphAPI:   NewTheGraphAPI(),
 		feeCache:   make(map[string]float64),
 	}
 }
@@ -190,20 +188,7 @@ func (s *GeckoService) resolvePoolFeePercentage(network string, p GeckoPoolData)
 		}
 	}
 
-	// 4) The Graph token API fallback (returns fee in pips; percent = fee / 10000)
-	if s.GraphAPI != nil {
-		poolData, err := s.GraphAPI.QueryPool(network, p.Attributes.Address)
-		if err == nil && poolData != nil && poolData.Fee > 0 {
-			fee := float64(poolData.Fee) / 10000.0
-			if fee > 0 {
-				s.feeCacheMu.Lock()
-				s.feeCache[addr] = fee
-				s.feeCacheMu.Unlock()
-				return fee
-			}
-		}
-	}
-
+	// 无法解析手续费，返回 0
 	return 0
 }
 

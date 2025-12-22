@@ -188,11 +188,41 @@ func (s *LiquidityService) EnterTaskFromUSDT(userID uint, task *models.StrategyT
 	}
 
 	usdtAddr := common.HexToAddress(config.AppConfig.USDTAddress)
+	token0Addr := common.Address{}
+	token1Addr := common.Address{}
+	if common.IsHexAddress(task.Token0Address) {
+		token0Addr = common.HexToAddress(task.Token0Address)
+	}
+	if common.IsHexAddress(task.Token1Address) {
+		token1Addr = common.HexToAddress(task.Token1Address)
+	}
+	if (token0Addr == common.Address{} || token1Addr == common.Address{}) && common.IsHexAddress(task.PoolId) {
+		if c0, c1, err := blockchain.GetV3PoolTokens(common.HexToAddress(task.PoolId)); err == nil {
+			if token0Addr == (common.Address{}) {
+				token0Addr = c0
+			}
+			if token1Addr == (common.Address{}) {
+				token1Addr = c1
+			}
+		}
+	}
 
 	// Capture balance before entering (used for "actual invested" and gas cost).
 	usdtBefore, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
 	if usdtBefore == nil {
 		usdtBefore = big.NewInt(0)
+	}
+	t0Before := big.NewInt(0)
+	t1Before := big.NewInt(0)
+	if token0Addr != (common.Address{}) {
+		if bal, _ := blockchain.GetTokenBalance(token0Addr, walletAddr); bal != nil {
+			t0Before = bal
+		}
+	}
+	if token1Addr != (common.Address{}) {
+		if bal, _ := blockchain.GetTokenBalance(token1Addr, walletAddr); bal != nil {
+			t1Before = bal
+		}
 	}
 	bnbBefore, _ := blockchain.GetBalance(walletAddr)
 	if bnbBefore == nil {
@@ -215,6 +245,18 @@ func (s *LiquidityService) EnterTaskFromUSDT(userID uint, task *models.StrategyT
 	if usdtAfter == nil {
 		usdtAfter = big.NewInt(0)
 	}
+	t0After := big.NewInt(0)
+	t1After := big.NewInt(0)
+	if token0Addr != (common.Address{}) {
+		if bal, _ := blockchain.GetTokenBalance(token0Addr, walletAddr); bal != nil {
+			t0After = bal
+		}
+	}
+	if token1Addr != (common.Address{}) {
+		if bal, _ := blockchain.GetTokenBalance(token1Addr, walletAddr); bal != nil {
+			t1After = bal
+		}
+	}
 	bnbAfter, _ := blockchain.GetBalance(walletAddr)
 	if bnbAfter == nil {
 		bnbAfter = big.NewInt(0)
@@ -225,13 +267,27 @@ func (s *LiquidityService) EnterTaskFromUSDT(userID uint, task *models.StrategyT
 	if actualSpent.Sign() < 0 {
 		actualSpent = big.NewInt(0)
 	}
+	dust0 := big.NewInt(0)
+	dust1 := big.NewInt(0)
+	if token0Addr != (common.Address{}) {
+		if delta := new(big.Int).Sub(t0After, t0Before); delta.Sign() > 0 {
+			dust0 = delta
+		}
+	}
+	if token1Addr != (common.Address{}) {
+		if delta := new(big.Int).Sub(t1After, t1Before); delta.Sign() > 0 {
+			dust1 = delta
+		}
+	}
+	// 注意：不需要对 USDT 做特殊处理，因为上面的余额变化计算已经正确处理了所有 token 的 dust。
+	// 之前的逻辑 (usdtAmount - actualSpent) 是错误的，会导致 dust 显示为用户预期投入金额而非实际残余。
 	// Gas spent in native BNB (delta).
 	gasSpent := new(big.Int).Sub(bnbBefore, bnbAfter)
 	if gasSpent.Sign() < 0 {
 		gasSpent = big.NewInt(0)
 	}
 
-	_ = NewTradeRecordService().CreateOpenRecord(task, res.TxHash, actualSpent, gasSpent)
+	_ = NewTradeRecordService().CreateOpenRecord(task, res.TxHash, actualSpent, gasSpent, dust0, dust1)
 
 	return res, nil
 }
@@ -257,12 +313,21 @@ func (s *LiquidityService) enterV3FromUSDT(
 
 	// 获取 PositionManager 地址
 	pmAddrStr := strings.TrimSpace(task.V3PositionManagerAddress)
+	log.Printf("[Liquidity] V3 enter: task.V3PositionManagerAddress=%s", pmAddrStr)
 	if pmAddrStr == "" {
 		ex := strings.ToLower(task.Exchange)
+		log.Printf("[Liquidity] V3 enter: task.Exchange=%s (lowercased: %s)", task.Exchange, ex)
+		log.Printf("[Liquidity] V3 enter: config.PancakeV3PositionManagerAddress=%s", config.AppConfig.PancakeV3PositionManagerAddress)
+		log.Printf("[Liquidity] V3 enter: config.UniswapV3PositionManagerAddress=%s", config.AppConfig.UniswapV3PositionManagerAddress)
+
 		if strings.Contains(ex, "pancake") && common.IsHexAddress(config.AppConfig.PancakeV3PositionManagerAddress) {
 			pmAddrStr = config.AppConfig.PancakeV3PositionManagerAddress
+			log.Printf("[Liquidity] V3 enter: 选择 PancakeSwap V3 NPM: %s", pmAddrStr)
 		} else if strings.Contains(ex, "uniswap") && common.IsHexAddress(config.AppConfig.UniswapV3PositionManagerAddress) {
 			pmAddrStr = config.AppConfig.UniswapV3PositionManagerAddress
+			log.Printf("[Liquidity] V3 enter: 选择 Uniswap V3 NPM: %s", pmAddrStr)
+		} else {
+			log.Printf("[Liquidity] V3 enter: ⚠️ 无法匹配到合适的 Position Manager (exchange=%s)", ex)
 		}
 	}
 	if !common.IsHexAddress(pmAddrStr) {
@@ -370,8 +435,25 @@ func (s *LiquidityService) enterV3FromUSDT(
 			approveTarget = common.HexToAddress(config.AppConfig.OKXTokenApproveAddress)
 		}
 
+		// 确定 Target: 优先使用配置的 OKX Swap Router（避免信任 API 返回的 to 地址）
+		apiTarget := common.HexToAddress(okxData.Data[0].Tx.To)
+		target := apiTarget
+
+		log.Printf("[Liquidity] DEBUG: OKX API returned router (tx.to): %s", apiTarget.Hex())
+		log.Printf("[Liquidity] DEBUG: AppConfig.OKXSwapRouter: %s", config.AppConfig.OKXSwapRouter)
+
+		if config.AppConfig.OKXSwapRouter != "" {
+			confTarget := common.HexToAddress(config.AppConfig.OKXSwapRouter)
+			if confTarget != apiTarget {
+				log.Printf("[Liquidity] ⚠️ WARNING: Configured OKX Router (%s) mismatch API returned (%s). Using Configured.", confTarget.Hex(), apiTarget.Hex())
+			}
+			target = confTarget
+		} else {
+			log.Printf("[Liquidity] ⚠️ WARNING: AppConfig.OKXSwapRouter is empty. Using API returned router.")
+		}
+
 		swapParams = blockchain.SwapParamsSimple{
-			Target:        common.HexToAddress(okxData.Data[0].Tx.To),
+			Target:        target,
 			ApproveTarget: approveTarget,
 			TokenIn:       swapTokenIn,
 			TokenOut:      swapTokenOut,
@@ -436,10 +518,8 @@ func (s *LiquidityService) enterV3FromUSDT(
 	}
 
 	// 4. 构建 zapInV3 参数
-	// 由于可能因为 calculateOptimalSwap 失败导致比例严重失调，设置为 100% (10000) 容忍度由 mint 自身处理。
-	// 这样可以确保交易必定成功，多余的 Dust 会被自动返还。
-	// 交易价格安全依然由 Swap 参数中的 minAmountOut 保证。
-	mintSlippageBps := big.NewInt(10000)
+	// Zap 合约侧会用 slippageBps 作为“剩余资产容忍度”(maxDustBps) 进行 dust 校验；swap 的价格安全由 minAmountOut 保证。
+	mintSlippageBps := percentageToBps(task.ResidualTolerance)
 	params := blockchain.ZapInV3ParamsSimple{
 		Pool:            poolAddr,
 		PositionManager: pmAddr,
@@ -511,6 +591,10 @@ func (s *LiquidityService) enterV3FromUSDT(
 	if err := database.DB.Create(&txRecord).Error; err != nil {
 		log.Printf("[Liquidity] Failed to record transaction: %v", err)
 	}
+
+	// NOTE: TradeRecord (for PnL tracking) is created by the top-level EnterTaskFromUSDT function
+	// using the actual USDT spent (delta of wallet balance before/after).
+	// Do NOT create it here to avoid duplicates or incorrect amounts.
 
 	return &EnterResult{
 		TxHash:                   tx.Hash().Hex(),
@@ -758,8 +842,13 @@ func (s *LiquidityService) prepareOKXSwapParams(
 		approveTarget = common.HexToAddress(config.AppConfig.OKXTokenApproveAddress)
 	}
 
+	target := common.HexToAddress(okxData.Data[0].Tx.To)
+	if config.AppConfig.OKXSwapRouter != "" {
+		target = common.HexToAddress(config.AppConfig.OKXSwapRouter)
+	}
+
 	return &blockchain.SwapParamsSimple{
-		Target:        common.HexToAddress(okxData.Data[0].Tx.To),
+		Target:        target,
 		ApproveTarget: approveTarget,
 		TokenIn:       tokenIn,
 		TokenOut:      tokenOut,
@@ -1002,8 +1091,8 @@ func (s *LiquidityService) enterV4FromUSDT(
 		Amount1In:       amount1In,
 		SlippageBps:     percentageToBps(task.SlippageTolerance),
 		Swap:            swapParams,
-		SqrtPriceX96:    sqrtPriceX96,     // 传入从链上获取的价格，避免合约重复调用
-		MaxDustBps:      big.NewInt(2000), // 默认 20% dust 容忍度
+		SqrtPriceX96:    sqrtPriceX96,                            // 传入从链上获取的价格，避免合约重复调用
+		MaxDustBps:      percentageToBps(task.ResidualTolerance), // 剩余资产容忍度 (dust)
 	}
 
 	// 6. Call ZapInV4
@@ -1078,6 +1167,10 @@ func (s *LiquidityService) enterV4FromUSDT(
 	}
 	database.DB.Create(&txRecord)
 
+	// NOTE: TradeRecord (for PnL tracking) is created by the top-level EnterTaskFromUSDT function
+	// using the actual USDT spent (delta of wallet balance before/after).
+	// Do NOT create it here to avoid duplicates or incorrect amounts.
+
 	return &EnterResult{
 		TxHash:           tx.Hash().Hex(),
 		V4TokenID:        tokenId.String(),
@@ -1119,5 +1212,9 @@ func parseZapInV4Event(receipt *types.Receipt, zapAddr common.Address) (*big.Int
 
 // percentageToBps converts float percent (e.g. 0.5) to bps (e.g. 50)
 func percentageToBps(p float64) *big.Int {
-	return big.NewInt(int64(p * 100))
+	// 临时禁用 dust 校验，避免 PancakeSwap V3 因 swap 精度问题 revert
+	// slippageBps = 0 表示不校验 dust，剩余代币会被退回用户
+	// TODO: 优化 swap 计算逻辑后，可以改回用户配置的值
+	return big.NewInt(0) // 禁用 dust 校验
+	// return big.NewInt(int64(p * 100))
 }

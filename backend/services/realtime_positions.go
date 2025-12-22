@@ -457,6 +457,7 @@ func (s *RealtimePositionsService) buildV3Position(
 	// Get tick and sqrtP (poolID required). If missing, we still return a card but tick/amounts may be 0.
 	currentTick := 0
 	var sqrtP *big.Int
+	hasSlot0 := false
 	if poolID != "" && common.IsHexAddress(poolID) {
 		poolAddr := common.HexToAddress(poolID)
 		sp, t, err := blockchain.GetV3PoolSlot0(poolAddr)
@@ -465,6 +466,7 @@ func (s *RealtimePositionsService) buildV3Position(
 		} else {
 			sqrtP = sp
 			currentTick = t
+			hasSlot0 = true
 		}
 	} else {
 		// Best-effort pool resolve from Pancake V3 factory (covers most BSC V3 LPs).
@@ -475,6 +477,7 @@ func (s *RealtimePositionsService) buildV3Position(
 			if err == nil {
 				sqrtP = sp
 				currentTick = t
+				hasSlot0 = true
 				if exchange == "V3" || strings.TrimSpace(exchange) == "" {
 					exchange = "PancakeSwap V3"
 				}
@@ -495,6 +498,21 @@ func (s *RealtimePositionsService) buildV3Position(
 
 	if rangePct <= 0 && currentTick != 0 {
 		rangePct = estimateRangePercent(currentTick, tickLower, tickUpper)
+	}
+
+	if hasSlot0 && poolID != "" && common.IsHexAddress(poolID) {
+		poolAddr := common.HexToAddress(poolID)
+		if fee0, fee1, feeErr := calcV3UnclaimedFees(poolAddr, currentTick, info); feeErr == nil {
+			owed0 = fee0
+			owed1 = fee1
+		} else {
+			msg := fmt.Sprintf("V3 手续费计算失败: tokenId=%s err=%v", tokenId.String(), feeErr)
+			if warn == "" {
+				warn = msg
+			} else {
+				warn = warn + "; " + msg
+			}
+		}
 	}
 
 	// Compute amounts in position
@@ -600,8 +618,27 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 	price0 := prices[strings.ToLower(c0.Hex())]
 	price1 := prices[strings.ToLower(c1.Hex())]
 
-	row0 := buildTokenRow(c0, meta0, price0, w0, amt0Raw, big.NewInt(0))
-	row1 := buildTokenRow(c1, meta1, price1, w1, amt1Raw, big.NewInt(0))
+	owed0 := big.NewInt(0)
+	owed1 := big.NewInt(0)
+	if common.IsHexAddress(config.AppConfig.UniswapV4PositionManagerAddress) {
+		tokenID, parseErr := parseBigInt(tokenId)
+		if parseErr == nil && tokenID.Sign() > 0 {
+			v4pmAddr := common.HexToAddress(config.AppConfig.UniswapV4PositionManagerAddress)
+			if v4pm, err := blockchain.NewV4PositionManager(v4pmAddr, blockchain.Client); err == nil {
+				if pos, err := v4pm.Positions(nil, tokenID); err == nil && pos != nil {
+					if pos.TokensOwed0 != nil {
+						owed0 = pos.TokensOwed0
+					}
+					if pos.TokensOwed1 != nil {
+						owed1 = pos.TokensOwed1
+					}
+				}
+			}
+		}
+	}
+
+	row0 := buildTokenRow(c0, meta0, price0, w0, amt0Raw, owed0)
+	row1 := buildTokenRow(c1, meta1, price1, w1, amt1Raw, owed1)
 
 	totals := RealtimeTotals{
 		WalletUSD:   row0.WalletUSD + row1.WalletUSD,

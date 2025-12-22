@@ -98,23 +98,52 @@ interface INonfungiblePositionManager {
     function collect(CollectParams calldata params) external payable returns (uint256 amount0, uint256 amount1);
     function burn(uint256 tokenId) external payable;
     function safeTransferFrom(address from, address to, uint256 tokenId) external;
+    function getApproved(uint256 tokenId) external view returns (address);
     function ownerOf(uint256 tokenId) external view returns (address);
+    function isApprovedForAll(address owner, address operator) external view returns (bool);
 }
 contract ZapSimple is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
 
     /*//////////////////////////////////////////////////////////////
-                               CONSTANTS
+                                CONSTANTS
     //////////////////////////////////////////////////////////////*/
 
     uint256 private constant Q96 = 2**96;
 
-    // Maximum dust threshold: 20% of input value (default)
-    uint256 public constant MAX_DUST_BPS = 2000; // 20%
+    uint256 private constant BPS_DENOMINATOR = 10_000;
 
     /*//////////////////////////////////////////////////////////////
-                                EVENTS
+                                 CONFIG
     //////////////////////////////////////////////////////////////*/
+
+    /// @notice Trusted OKX DEX router (BSC)
+    address public okxSwapRouter;
+
+    /// @notice Trusted OKX TokenApprove contract (BSC)
+    address public okxTokenApprove;
+
+    /// @notice Trusted V3 NonfungiblePositionManager (Pancake/Uniswap V3 style)
+    address public v3PositionManager;
+
+    /// @notice Optional allowlist for additional trusted V3 NPMs (to support multiple V3 deployments)
+    mapping(address => bool) public trustedV3PositionManagers;
+
+    /// @notice Trusted V4 PositionManager
+    address public v4PositionManager;
+
+    /*//////////////////////////////////////////////////////////////
+                                 EVENTS
+    //////////////////////////////////////////////////////////////*/
+
+    event TrustedAddressesUpdated(
+        address okxSwapRouter,
+        address okxTokenApprove,
+        address v3PositionManager,
+        address v4PositionManager
+    );
+
+    event TrustedV3PositionManagerUpdated(address indexed positionManager, bool trusted);
 
     event ZapInV3(
         address indexed user,
@@ -189,7 +218,7 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         address recipient;
         uint256 amount0In;        // 用户输入的 token0 数量
         uint256 amount1In;        // 用户输入的 token1 数量
-        uint256 slippageBps;      // 滑点保护 (100 = 1%)
+        uint256 slippageBps;      // 作为 maxDustBps 使用(100=1%, 0=不校验); swap 滑点由 swap.minAmountOut 保护
         SwapParams swap;          // OKX swap 参数
     }
 
@@ -215,8 +244,8 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         uint256 amount1In;
         uint256 slippageBps;      // 滑点保护 (100 = 1%)
         SwapParams swap;          // OKX swap 参数
-        uint160 sqrtPriceX96;     // 当前价格 (从 Go 代码传入，避免链上重复调用)
-        uint256 maxDustBps;       // 最大 dust 容忍度 (100 = 1%, 0 = 使用默认 1%)
+        uint160 sqrtPriceX96;     // 当前价格提示 (用于链上价格偏差校验)
+        uint256 maxDustBps;       // 最大 dust 容忍度 (100 = 1%, 0 = 不校验)
     }
 
     /// @notice Zap 结果
@@ -236,8 +265,34 @@ contract ZapSimple is ReentrancyGuard, Ownable {
     constructor() Ownable(msg.sender) {}
 
     /*//////////////////////////////////////////////////////////////
-                          CORE FUNCTIONS
+                           CORE FUNCTIONS
     //////////////////////////////////////////////////////////////*/
+
+    /// @notice Sets trusted external addresses (onlyOwner).
+    /// @dev Set these before enabling production usage; unsafe if left unset.
+    function setTrustedAddresses(
+        address _okxSwapRouter,
+        address _okxTokenApprove,
+        address _v3PositionManager,
+        address _v4PositionManager
+    ) external onlyOwner {
+        okxSwapRouter = _okxSwapRouter;
+        okxTokenApprove = _okxTokenApprove;
+        v3PositionManager = _v3PositionManager;
+        v4PositionManager = _v4PositionManager;
+        emit TrustedAddressesUpdated(_okxSwapRouter, _okxTokenApprove, _v3PositionManager, _v4PositionManager);
+    }
+
+    /// @notice Adds/removes trusted V3 NPMs (onlyOwner).
+    /// @dev `v3PositionManager` remains the primary/default, but calls can use any allowlisted manager.
+    function setTrustedV3PositionManagers(address[] calldata positionManagers, bool trusted) external onlyOwner {
+        for (uint256 i = 0; i < positionManagers.length; i++) {
+            address pm = positionManagers[i];
+            require(pm != address(0), "Invalid PM address");
+            trustedV3PositionManagers[pm] = trusted;
+            emit TrustedV3PositionManagerUpdated(pm, trusted);
+        }
+    }
 
     /**
      * @notice 计算最优 swap 数量
@@ -257,18 +312,39 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         uint256 amount1In
     ) external view returns (bool zeroForOne, uint256 amountToSwap) {
         (uint160 sqrtPriceX96, , , , , , ) = IUniswapV3Pool(pool).slot0();
+        require(sqrtPriceX96 > 0, "Invalid SqrtPrice");
         
         // 计算 tick 范围的 sqrt 价格
         uint160 sqrtPriceLower = _getSqrtPriceAtTick(tickLower);
         uint160 sqrtPriceUpper = _getSqrtPriceAtTick(tickUpper);
 
-        // 计算理想比例
-        (uint256 ideal0, uint256 ideal1) = _getIdealAmounts(
-            sqrtPriceX96,
-            sqrtPriceLower,
-            sqrtPriceUpper,
-            amount0In + amount1In // 简化：使用总输入
-        );
+        // 价格在范围外，目标是单边资产
+        if (sqrtPriceX96 <= sqrtPriceLower) {
+            // 目标是 token0，优先把 token1 全部换成 token0
+            return (false, amount1In);
+        }
+        if (sqrtPriceX96 >= sqrtPriceUpper) {
+            // 目标是 token1，优先把 token0 全部换成 token1
+            return (true, amount0In);
+        }
+
+        // 将总输入统一换算为 token1 价值，避免单位混淆
+        uint256 totalValueInToken1 = _calculateValueInToken1(amount0In, amount1In, sqrtPriceX96);
+        if (totalValueInToken1 == 0) {
+            return (true, 0);
+        }
+
+        uint256 ratio0 = uint256(sqrtPriceUpper) - uint256(sqrtPriceX96);
+        uint256 ratio1 = uint256(sqrtPriceX96) - uint256(sqrtPriceLower);
+        uint256 ratioSum = ratio0 + ratio1;
+        if (ratioSum == 0) {
+            return (true, 0);
+        }
+
+        // 以 token1 价值比例分配，再转换为 token0 数量
+        uint256 value0InToken1 = FullMath.mulDiv(totalValueInToken1, ratio0, ratioSum);
+        uint256 ideal0 = _amount0FromValueInToken1(value0InToken1, sqrtPriceX96);
+        uint256 ideal1 = totalValueInToken1 - value0InToken1;
 
         // 确定 swap 方向和数量
         if (amount0In > ideal0 && ideal0 > 0) {
@@ -297,8 +373,25 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         returns (ZapResult memory result)
     {
         require(params.token0 < params.token1, "Tokens not sorted");
+        require(params.pool != address(0), "Invalid pool");
         require(params.amount0In > 0 || params.amount1In > 0, "Zero amount");
-        require(params.slippageBps <= 10000, "Slippage too high");
+        require(params.slippageBps <= BPS_DENOMINATOR, "Slippage too high");
+        require(params.positionManager != address(0), "Invalid PM address");
+        require(v3PositionManager != address(0), "V3 PM not set");
+        require(
+            params.positionManager == v3PositionManager || trustedV3PositionManagers[params.positionManager],
+            "Untrusted PM"
+        );
+        require(params.tickLower < params.tickUpper, "Invalid ticks");
+        require(params.recipient != address(0), "Invalid recipient");
+
+        // Sanity check pool tokens match params (prevents misconfiguration).
+        require(IUniswapV3Pool(params.pool).token0() == params.token0, "Pool token0 mismatch");
+        require(IUniswapV3Pool(params.pool).token1() == params.token1, "Pool token1 mismatch");
+
+        // Track pre-existing balances to avoid mixing/refunding other users' funds.
+        uint256 token0BalBefore = IERC20(params.token0).balanceOf(address(this));
+        uint256 token1BalBefore = IERC20(params.token1).balanceOf(address(this));
 
         // 1. 拉取代币
         if (params.amount0In > 0) {
@@ -308,14 +401,23 @@ contract ZapSimple is ReentrancyGuard, Ownable {
             IERC20(params.token1).safeTransferFrom(msg.sender, address(this), params.amount1In);
         }
 
+        uint256 token0BalAfterPull = IERC20(params.token0).balanceOf(address(this));
+        uint256 token1BalAfterPull = IERC20(params.token1).balanceOf(address(this));
+        uint256 token0DeltaAfterPull = token0BalAfterPull - token0BalBefore;
+        uint256 token1DeltaAfterPull = token1BalAfterPull - token1BalBefore;
+
         // 2. 执行 OKX swap（如果需要）
         if (params.swap.amountIn > 0 && params.swap.callData.length > 0) {
+            _validateSwapParams(params.token0, params.token1, params.swap, token0DeltaAfterPull, token1DeltaAfterPull);
             _executeSwap(params.swap);
         }
 
         // 3. 获取 swap 后的余额
-        uint256 bal0 = IERC20(params.token0).balanceOf(address(this));
-        uint256 bal1 = IERC20(params.token1).balanceOf(address(this));
+        uint256 token0BalAfterSwap = IERC20(params.token0).balanceOf(address(this));
+        uint256 token1BalAfterSwap = IERC20(params.token1).balanceOf(address(this));
+        uint256 bal0 = token0BalAfterSwap - token0BalBefore;
+        uint256 bal1 = token1BalAfterSwap - token1BalBefore;
+        require(bal0 > 0 || bal1 > 0, "No tokens after swap");
 
         // 4. 添加流动性
         uint24 poolFee = IUniswapV3Pool(params.pool).fee();
@@ -328,13 +430,28 @@ contract ZapSimple is ReentrancyGuard, Ownable {
             tickUpper: params.tickUpper,
             amount0: bal0,
             amount1: bal1,
-            slippageBps: params.slippageBps,
             recipient: params.recipient
         }));
 
+        // 5. Dust 校验（使用 slippageBps 作为“剩余资产容忍度”/maxDustBps，0 = 不校验）
+        uint256 dust0 = IERC20(params.token0).balanceOf(address(this)) - token0BalBefore;
+        uint256 dust1 = IERC20(params.token1).balanceOf(address(this)) - token1BalBefore;
+        result.dust0 = dust0;
+        result.dust1 = dust1;
+
+        if (params.slippageBps > 0) {
+            (uint160 sqrtPriceX96, , , , , , ) = IUniswapV3Pool(params.pool).slot0();
+            uint256 inputValue = _calculateValueInToken1(bal0, bal1, sqrtPriceX96);
+            uint256 dustValue = _calculateValueInToken1(dust0, dust1, sqrtPriceX96);
+            if (inputValue > 0) {
+                uint256 dustBps = FullMath.mulDiv(dustValue, BPS_DENOMINATOR, inputValue);
+                require(dustBps <= params.slippageBps, "Dust exceeds limit");
+            }
+        }
+
         // 5. 返还剩余代币
-        _refundDust(params.token0, msg.sender);
-        _refundDust(params.token1, msg.sender);
+        _refundDelta(params.token0, msg.sender, token0BalBefore);
+        _refundDelta(params.token1, msg.sender, token1BalBefore);
 
         emit ZapInV3(msg.sender, params.pool, result.tokenId, result.amount0Used, result.amount1Used, result.liquidity);
     }
@@ -346,16 +463,24 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         address positionManager,
         uint256 tokenId,
         address recipient,
-        uint256 slippageBps
+        uint256 amount0Min,
+        uint256 amount1Min
     ) external nonReentrant returns (uint256 amount0, uint256 amount1) {
+        require(positionManager != address(0), "Invalid PM address");
+        require(v3PositionManager != address(0), "V3 PM not set");
+        require(
+            positionManager == v3PositionManager || trustedV3PositionManagers[positionManager],
+            "Untrusted PM"
+        );
+        require(recipient != address(0), "Invalid recipient");
         INonfungiblePositionManager npm = INonfungiblePositionManager(positionManager);
         
         // 获取仓位信息
         (
             ,
             ,
-            address token0,
-            address token1,
+            ,
+            ,
             ,
             ,
             ,
@@ -367,23 +492,18 @@ contract ZapSimple is ReentrancyGuard, Ownable {
 
         require(liquidity > 0, "No liquidity");
 
-        // 转移 NFT 到合约
-        npm.safeTransferFrom(msg.sender, address(this), tokenId);
-
-        // 减少流动性
-        uint256 minAmount0 = 0;
-        uint256 minAmount1 = 0;
-        if (slippageBps < 10000) {
-            // 这里简化处理，实际应该基于当前价格计算
-            minAmount0 = 0;
-            minAmount1 = 0;
-        }
+        address owner = npm.ownerOf(tokenId);
+        require(owner == msg.sender, "Not owner");
+        require(
+            npm.getApproved(tokenId) == address(this) || npm.isApprovedForAll(owner, address(this)),
+            "NFT not approved"
+        );
 
         npm.decreaseLiquidity(INonfungiblePositionManager.DecreaseLiquidityParams({
             tokenId: tokenId,
             liquidity: liquidity,
-            amount0Min: minAmount0,
-            amount1Min: minAmount1,
+            amount0Min: amount0Min,
+            amount1Min: amount1Min,
             deadline: block.timestamp
         }));
 
@@ -394,9 +514,6 @@ contract ZapSimple is ReentrancyGuard, Ownable {
             amount0Max: type(uint128).max,
             amount1Max: type(uint128).max
         }));
-
-        // 销毁 NFT
-        npm.burn(tokenId);
 
         emit ZapOutV3(msg.sender, tokenId, amount0, amount1);
     }
@@ -410,6 +527,13 @@ contract ZapSimple is ReentrancyGuard, Ownable {
      */
     function _executeSwap(SwapParams calldata swap) internal {
         require(swap.amountIn > 0, "Zero swap amount");
+        require(okxSwapRouter != address(0), "OKX router not set");
+        require(swap.target == okxSwapRouter, "Untrusted swap target");
+        if (okxTokenApprove != address(0)) {
+            require(swap.approveTarget == okxTokenApprove, "Untrusted approve target");
+        } else {
+            require(swap.approveTarget == address(0), "Approve target not allowed");
+        }
 
         // Approve
         address spender = swap.approveTarget != address(0) ? swap.approveTarget : swap.target;
@@ -453,7 +577,6 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         int24 tickUpper;
         uint256 amount0;
         uint256 amount1;
-        uint256 slippageBps;
         address recipient;
     }
 
@@ -466,9 +589,9 @@ contract ZapSimple is ReentrancyGuard, Ownable {
             IERC20(p.token1).forceApprove(p.positionManager, p.amount1);
         }
 
-        // 计算最小接受数量
-        uint256 amount0Min = p.amount0 * (10000 - p.slippageBps) / 10000;
-        uint256 amount1Min = p.amount1 * (10000 - p.slippageBps) / 10000;
+        // Use dust checks instead of mint min-amounts (min amounts are unreliable when price is out of range).
+        uint256 amount0Min = 0;
+        uint256 amount1Min = 0;
 
         // Mint
         (
@@ -507,11 +630,33 @@ contract ZapSimple is ReentrancyGuard, Ownable {
     /**
      * @notice 返还剩余代币
      */
-    function _refundDust(address token, address to) internal {
-        uint256 balance = IERC20(token).balanceOf(address(this));
-        if (balance > 0) {
-            IERC20(token).safeTransfer(to, balance);
+    function _refundDelta(address token, address to, uint256 balanceBefore) internal {
+        uint256 balanceAfter = IERC20(token).balanceOf(address(this));
+        uint256 delta = balanceAfter - balanceBefore;
+        if (delta > 0) {
+            IERC20(token).safeTransfer(to, delta);
         }
+    }
+
+    function _validateSwapParams(
+        address token0,
+        address token1,
+        SwapParams calldata swap,
+        uint256 token0Available,
+        uint256 token1Available
+    ) internal view {
+        require(swap.target == okxSwapRouter, "Untrusted swap target");
+        if (okxTokenApprove != address(0)) {
+            require(swap.approveTarget == okxTokenApprove, "Untrusted approve target");
+        } else {
+            require(swap.approveTarget == address(0), "Approve target not allowed");
+        }
+        require(swap.tokenIn == token0 || swap.tokenIn == token1, "Invalid swap tokenIn");
+        require(swap.tokenOut == token0 || swap.tokenOut == token1, "Invalid swap tokenOut");
+        require(swap.tokenIn != swap.tokenOut, "Swap tokens same");
+
+        uint256 maxIn = swap.tokenIn == token0 ? token0Available : token1Available;
+        require(swap.amountIn <= maxIn, "Swap amount exceeds input");
     }
 
     /**
@@ -582,18 +727,6 @@ contract ZapSimple is ReentrancyGuard, Ownable {
                             V4 FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
-    // V4 Action types (from Uniswap V4 PositionManager)
-    uint256 constant MINT_POSITION = 1;
-    uint256 constant INCREASE_LIQUIDITY = 2;
-    uint256 constant DECREASE_LIQUIDITY = 3;
-    uint256 constant BURN_POSITION = 4;
-    uint256 constant TAKE_PAIR = 5;
-    uint256 constant SETTLE_PAIR = 6;
-    uint256 constant SETTLE = 11;
-    uint256 constant TAKE = 12;
-    uint256 constant CLOSE_CURRENCY = 9;
-    uint256 constant SWEEP = 15;
-
     // Permit2 address (same on all chains)
     address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
@@ -608,12 +741,17 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         PoolKeySimple memory poolKey = params.poolKey;
         require(poolKey.currency0 < poolKey.currency1, "Tokens not sorted");
         require(params.amount0In > 0 || params.amount1In > 0, "Zero amount");
-        require(params.slippageBps <= 10000, "Slippage too high");
-        require(params.maxDustBps <= 10000, "MaxDust too high");
+        require(params.slippageBps <= BPS_DENOMINATOR, "Slippage too high");
+        require(params.maxDustBps <= BPS_DENOMINATOR, "MaxDust too high");
+        require(params.positionManager != address(0), "Invalid PM address");
+        require(v4PositionManager != address(0), "V4 PM not set");
+        require(params.positionManager == v4PositionManager, "Untrusted PM");
+        require(params.tickLower < params.tickUpper, "Invalid ticks");
+        require(params.recipient != address(0), "Invalid recipient");
 
-        // 记录输入金额用于 dust 计算
-        uint256 inputAmount0 = params.amount0In;
-        uint256 inputAmount1 = params.amount1In;
+        // Track pre-existing balances to avoid mixing/refunding other users' funds.
+        uint256 token0BalBefore = IERC20(poolKey.currency0).balanceOf(address(this));
+        uint256 token1BalBefore = IERC20(poolKey.currency1).balanceOf(address(this));
 
         // 1. 拉取代币
         if (params.amount0In > 0) {
@@ -623,29 +761,52 @@ contract ZapSimple is ReentrancyGuard, Ownable {
             IERC20(poolKey.currency1).safeTransferFrom(msg.sender, address(this), params.amount1In);
         }
 
+        uint256 token0BalAfterPull = IERC20(poolKey.currency0).balanceOf(address(this));
+        uint256 token1BalAfterPull = IERC20(poolKey.currency1).balanceOf(address(this));
+        uint256 token0DeltaAfterPull = token0BalAfterPull - token0BalBefore;
+        uint256 token1DeltaAfterPull = token1BalAfterPull - token1BalBefore;
+
         // 2. 执行 OKX swap（如果需要）
         if (params.swap.amountIn > 0 && params.swap.callData.length > 0) {
+            _validateSwapParams(poolKey.currency0, poolKey.currency1, params.swap, token0DeltaAfterPull, token1DeltaAfterPull);
             _executeSwap(params.swap);
         }
 
         // 3. 获取 swap 后的余额
-        uint256 bal0 = IERC20(poolKey.currency0).balanceOf(address(this));
-        uint256 bal1 = IERC20(poolKey.currency1).balanceOf(address(this));
+        uint256 token0BalAfterSwap = IERC20(poolKey.currency0).balanceOf(address(this));
+        uint256 token1BalAfterSwap = IERC20(poolKey.currency1).balanceOf(address(this));
+        uint256 bal0 = token0BalAfterSwap - token0BalBefore;
+        uint256 bal1 = token1BalAfterSwap - token1BalBefore;
 
         require(bal0 > 0 || bal1 > 0, "No tokens after swap");
-        require(params.positionManager != address(0), "Invalid PM address");
 
-        // 4. 使用传入的 sqrtPriceX96（如果提供了，避免链上调用 StateView）
-        uint160 sqrtPriceX96 = params.sqrtPriceX96;
-        if (sqrtPriceX96 == 0) {
-            // 如果没有传入，则使用 tick 范围中点估算
-            sqrtPriceX96 = TickMath.getSqrtRatioAtTick((params.tickLower + params.tickUpper) / 2);
+        // 4. 构建 V4 PoolKey (用于获取 PoolId 和 Mint)
+        PoolKey memory v4PoolKey = PoolKey({
+            currency0: Currency.wrap(poolKey.currency0),
+            currency1: Currency.wrap(poolKey.currency1),
+            fee: poolKey.fee,
+            tickSpacing: poolKey.tickSpacing,
+            hooks: poolKey.hooks
+        });
+
+        // 5. 获取实时价格 (强制使用链上最新价格，避免 Revert)
+        PoolId poolId = PoolIdLibrary.toId(v4PoolKey);
+        (uint160 sqrtPriceX96, , , ) = IStateView(params.stateView).getSlot0(poolId);
+        require(sqrtPriceX96 > 0, "Invalid SqrtPrice");
+
+        // 若传入了价格参数，则校验其与链上价格的偏差
+        if (params.sqrtPriceX96 > 0 && params.slippageBps > 0) {
+            uint256 provided = uint256(params.sqrtPriceX96);
+            uint256 current = uint256(sqrtPriceX96);
+            uint256 diff = provided > current ? provided - current : current - provided;
+            uint256 diffBps = FullMath.mulDiv(diff, BPS_DENOMINATOR, current);
+            require(diffBps <= params.slippageBps, "Price moved");
         }
 
-        // 5. Mint V4 position
-        result = _mintV4Position(
+        // 6. Mint V4 position
+        (uint256 tokenId, uint128 liquidity) = _mintV4Position(
             params.positionManager,
-            poolKey,
+            v4PoolKey,
             params.tickLower,
             params.tickUpper,
             bal0,
@@ -656,34 +817,31 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         );
 
         // 6. 获取 dust 并设置结果
-        result.dust0 = IERC20(poolKey.currency0).balanceOf(address(this));
-        result.dust1 = IERC20(poolKey.currency1).balanceOf(address(this));
+        uint256 dust0 = IERC20(poolKey.currency0).balanceOf(address(this)) - token0BalBefore;
+        uint256 dust1 = IERC20(poolKey.currency1).balanceOf(address(this)) - token1BalBefore;
+
+        result.tokenId = tokenId;
+        result.liquidity = liquidity;
+        result.dust0 = dust0;
+        result.dust1 = dust1;
+        result.amount0Used = bal0 - dust0;
+        result.amount1Used = bal1 - dust1;
 
         // 7. Dust 验证
-        uint256 effectiveMaxDustBps = params.maxDustBps > 0 ? params.maxDustBps : MAX_DUST_BPS;
-        uint256 inputValue = _calculateValueInToken1(inputAmount0, inputAmount1, sqrtPriceX96);
-        uint256 dustValue = _calculateValueInToken1(result.dust0, result.dust1, sqrtPriceX96);
-        
-        if (inputValue > 0) {
-            require(
-                dustValue * 10000 <= inputValue * effectiveMaxDustBps,
-                "Dust exceeds limit"
-            );
+        if (params.maxDustBps > 0) {
+            uint256 inputValue = _calculateValueInToken1(bal0, bal1, sqrtPriceX96);
+            uint256 dustValue = _calculateValueInToken1(dust0, dust1, sqrtPriceX96);
+            if (inputValue > 0) {
+                uint256 dustBps = FullMath.mulDiv(dustValue, BPS_DENOMINATOR, inputValue);
+                require(dustBps <= params.maxDustBps, "Dust exceeds limit");
+            }
         }
 
         // 8. 退还 dust
-        _refundDust(poolKey.currency0, msg.sender);
-        _refundDust(poolKey.currency1, msg.sender);
+        _refundDelta(poolKey.currency0, msg.sender, token0BalBefore);
+        _refundDelta(poolKey.currency1, msg.sender, token1BalBefore);
 
-        // 构建 poolId 用于事件
-        PoolKey memory v4PoolKeyForEvent = PoolKey({
-            currency0: Currency.wrap(poolKey.currency0),
-            currency1: Currency.wrap(poolKey.currency1),
-            fee: poolKey.fee,
-            tickSpacing: poolKey.tickSpacing,
-            hooks: poolKey.hooks
-        });
-        emit ZapInV4(msg.sender, keccak256(abi.encode(v4PoolKeyForEvent)), result.tokenId, result.amount0Used, result.amount1Used, result.liquidity);
+        emit ZapInV4(msg.sender, keccak256(abi.encode(v4PoolKey)), result.tokenId, result.amount0Used, result.amount1Used, result.liquidity);
     }
 
     /**
@@ -695,42 +853,72 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         PoolKey calldata poolKey,
         address recipient
     ) external nonReentrant returns (uint256 amount0, uint256 amount1) {
+        require(positionManager != address(0), "Invalid PM address");
+        require(v4PositionManager != address(0), "V4 PM not set");
+        require(positionManager == v4PositionManager, "Untrusted PM");
+        require(recipient != address(0), "Invalid recipient");
+        address currency0 = Currency.unwrap(poolKey.currency0);
+        address currency1 = Currency.unwrap(poolKey.currency1);
+        require(currency0 != address(0) && currency1 != address(0), "Native currency not supported");
+        require(currency0 < currency1, "Tokens not sorted");
         // V4 撤仓逻辑
-        // 需要通过 modifyLiquidities 执行 DECREASE_LIQUIDITY + BURN_POSITION
-        
-        // 获取 NFT
-        IERC721(positionManager).transferFrom(msg.sender, address(this), tokenId);
+        // 需要通过 modifyLiquidities 执行 DECREASE_LIQUIDITY + TAKE_PAIR
 
-        // 获取当前流动性 - V4 需要通过 PositionManager 查询
-        // 暂时简化处理，使用 CLOSE_CURRENCY 关闭全部
-        
-        bytes memory actions = new bytes(4);
-        actions[0] = bytes1(uint8(DECREASE_LIQUIDITY));
-        actions[1] = bytes1(uint8(TAKE));
-        actions[2] = bytes1(uint8(TAKE));
-        actions[3] = bytes1(uint8(BURN_POSITION));
+        IERC721 nft = IERC721(positionManager);
+        address owner = nft.ownerOf(tokenId);
+        require(owner == msg.sender, "Not owner");
+        require(
+            nft.getApproved(tokenId) == address(this) || nft.isApprovedForAll(owner, address(this)),
+            "NFT not approved"
+        );
 
-        bytes[] memory params = new bytes[](4);
+        uint256 bal0Before = IERC20(currency0).balanceOf(recipient);
+        uint256 bal1Before = IERC20(currency1).balanceOf(recipient);
+
+        // 获取当前流动性 - 优先读取 PositionManager.positions，失败则回退到 sentinel
+        uint128 liquidity = type(uint128).max;
+        try IPositionManager(positionManager).positions(tokenId) returns (
+            uint96,
+            address,
+            address,
+            address,
+            uint24,
+            int24,
+            int24,
+            uint128 posLiquidity,
+            uint256,
+            uint256,
+            uint128,
+            uint128
+        ) {
+            require(posLiquidity > 0, "No liquidity");
+            liquidity = posLiquidity;
+        } catch {
+            // fallback to sentinel; PositionManager may not expose positions()
+        }
+        
+        bytes memory actions = new bytes(2);
+        actions[0] = bytes1(Actions.DECREASE_LIQUIDITY);
+        actions[1] = bytes1(Actions.TAKE_PAIR);
+
+        bytes[] memory params = new bytes[](2);
         
         // DECREASE_LIQUIDITY params: (tokenId, liquidity, amount0Min, amount1Min, hookData)
         // 使用 type(uint128).max 减少全部流动性
-        params[0] = abi.encode(tokenId, type(uint128).max, uint256(0), uint256(0), bytes(""));
+        params[0] = abi.encode(tokenId, liquidity, uint256(0), uint256(0), bytes(""));
         
-        // TAKE params: (currency, recipient, amount) - 0 = take all
-        params[1] = abi.encode(poolKey.currency0, recipient, uint256(0));
-        params[2] = abi.encode(poolKey.currency1, recipient, uint256(0));
-        
-        // BURN_POSITION params: (tokenId)
-        params[3] = abi.encode(tokenId);
+        // TAKE_PAIR params: (currency0, currency1, recipient)
+        params[1] = abi.encode(poolKey.currency0, poolKey.currency1, recipient);
 
         bytes memory unlockData = abi.encode(actions, params);
 
         // Execute
         IPositionManager(positionManager).modifyLiquidities(unlockData, block.timestamp);
 
-        // Get amounts (simplified - actual amounts from events)
-        amount0 = 0;
-        amount1 = 0;
+        uint256 bal0After = IERC20(currency0).balanceOf(recipient);
+        uint256 bal1After = IERC20(currency1).balanceOf(recipient);
+        amount0 = bal0After > bal0Before ? bal0After - bal0Before : 0;
+        amount1 = bal1After > bal1Before ? bal1After - bal1Before : 0;
 
         emit ZapOutV4(msg.sender, tokenId, amount0, amount1);
     }
@@ -748,7 +936,7 @@ contract ZapSimple is ReentrancyGuard, Ownable {
      */
     function _mintV4Position(
         address positionManager,
-        PoolKeySimple memory poolKey,
+        PoolKey memory poolKey,
         int24 tickLower,
         int24 tickUpper,
         uint256 amount0,
@@ -756,9 +944,12 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         uint256 /* slippageBps */,
         address recipient,
         uint160 sqrtPriceX96
-    ) internal returns (ZapResult memory result) {
-        address token0 = poolKey.currency0;
-        address token1 = poolKey.currency1;
+    ) internal returns (uint256 tokenId, uint128 liquidity) {
+        address token0 = Currency.unwrap(poolKey.currency0);
+        address token1 = Currency.unwrap(poolKey.currency1);
+
+        require(amount0 <= type(uint128).max, "amount0 too large");
+        require(amount1 <= type(uint128).max, "amount1 too large");
 
         // Setup Permit2 allowances for V4 PositionManager
         uint48 expiration = uint48(block.timestamp + 3600);
@@ -773,7 +964,6 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         }
 
         // Calculate liquidity using actual current price
-        uint128 liquidity;
         {
             uint160 sqrtRatioAX96 = TickMath.getSqrtRatioAtTick(tickLower);
             uint160 sqrtRatioBX96 = TickMath.getSqrtRatioAtTick(tickUpper);
@@ -782,14 +972,8 @@ contract ZapSimple is ReentrancyGuard, Ownable {
             );
         }
 
-        // Build V4 PoolKey with Currency type
-        PoolKey memory v4PoolKey = PoolKey({
-            currency0: Currency.wrap(token0),
-            currency1: Currency.wrap(token1),
-            fee: poolKey.fee,
-            tickSpacing: poolKey.tickSpacing,
-            hooks: poolKey.hooks
-        });
+        // PoolKey is passed in directly
+        // PoolKey memory v4PoolKey = poolKey;
 
         // Build actions: MINT_POSITION (0x02) + SETTLE_PAIR (0x0d)
         bytes memory actions = new bytes(2);
@@ -798,12 +982,12 @@ contract ZapSimple is ReentrancyGuard, Ownable {
 
         // MINT_POSITION params
         bytes memory mintParams = abi.encode(
-            v4PoolKey, tickLower, tickUpper, uint256(liquidity),
+            poolKey, tickLower, tickUpper, uint256(liquidity),
             uint128(amount0), uint128(amount1), recipient, bytes("")
         );
 
         // SETTLE_PAIR params
-        bytes memory settlePairParams = abi.encode(v4PoolKey.currency0, v4PoolKey.currency1);
+        bytes memory settlePairParams = abi.encode(poolKey.currency0, poolKey.currency1);
 
         // Combine params
         bytes[] memory params = new bytes[](2);
@@ -816,20 +1000,11 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         IPositionManager(positionManager).modifyLiquidities(unlockData, block.timestamp + 300);
 
         // Get tokenId
-        uint256 tokenId = IPositionManager(positionManager).nextTokenId() - 1;
+        tokenId = IPositionManager(positionManager).nextTokenId() - 1;
 
         // Reset Permit2 approvals
         IERC20(token0).forceApprove(PERMIT2, 0);
         IERC20(token1).forceApprove(PERMIT2, 0);
-
-        result = ZapResult({
-            tokenId: tokenId,
-            liquidity: liquidity,
-            amount0Used: amount0,
-            amount1Used: amount1,
-            dust0: 0,
-            dust1: 0
-        });
     }
 
     /**
@@ -851,6 +1026,14 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         value = amount0InToken1 + amount1;
     }
 
+    function _amount0FromValueInToken1(uint256 valueInToken1, uint160 sqrtPriceX96) internal pure returns (uint256 amount0) {
+        if (valueInToken1 == 0) {
+            return 0;
+        }
+        amount0 = FullMath.mulDiv(valueInToken1, Q96, uint256(sqrtPriceX96));
+        amount0 = FullMath.mulDiv(amount0, Q96, uint256(sqrtPriceX96));
+    }
+
     /*//////////////////////////////////////////////////////////////
                            ADMIN FUNCTIONS
     //////////////////////////////////////////////////////////////*/
@@ -860,7 +1043,8 @@ contract ZapSimple is ReentrancyGuard, Ownable {
      */
     function emergencyWithdraw(address token, uint256 amount) external onlyOwner {
         if (token == address(0)) {
-            payable(owner()).transfer(amount);
+            (bool ok, ) = payable(owner()).call{value: amount}("");
+            require(ok, "ETH transfer failed");
         } else {
             IERC20(token).safeTransfer(owner(), amount);
         }
@@ -884,4 +1068,7 @@ contract ZapSimple is ReentrancyGuard, Ownable {
 // ERC721 interface
 interface IERC721 {
     function transferFrom(address from, address to, uint256 tokenId) external;
+    function ownerOf(uint256 tokenId) external view returns (address);
+    function getApproved(uint256 tokenId) external view returns (address);
+    function isApprovedForAll(address owner, address operator) external view returns (bool);
 }

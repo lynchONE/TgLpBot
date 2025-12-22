@@ -2,6 +2,7 @@ package blockchain
 
 import (
 	"fmt"
+	"log"
 	"math/big"
 	"strings"
 
@@ -143,15 +144,17 @@ type V3PositionManager struct {
 }
 
 type V3PositionInfo struct {
-	Token0      common.Address
-	Token1      common.Address
-	Fee         uint64
-	TickLower   int
-	TickUpper   int
-	Liquidity   *big.Int
-	TokensOwed0 *big.Int
-	TokensOwed1 *big.Int
-	PositionRaw []interface{}
+	Token0                   common.Address
+	Token1                   common.Address
+	Fee                      uint64
+	TickLower                int
+	TickUpper                int
+	Liquidity                *big.Int
+	FeeGrowthInside0LastX128 *big.Int
+	FeeGrowthInside1LastX128 *big.Int
+	TokensOwed0              *big.Int
+	TokensOwed1              *big.Int
+	PositionRaw              []interface{}
 }
 
 type V3DecreaseLiquidityParams struct {
@@ -296,6 +299,8 @@ func (m *V3PositionManager) Positions(opts *bind.CallOpts, tokenId *big.Int) (*V
 	tickLowerBI, okTL := result[5].(*big.Int)
 	tickUpperBI, okTU := result[6].(*big.Int)
 	liq, okL := result[7].(*big.Int)
+	feeGrowth0, okFG0 := result[8].(*big.Int)
+	feeGrowth1, okFG1 := result[9].(*big.Int)
 	owed0, okO0 := result[10].(*big.Int)
 	owed1, okO1 := result[11].(*big.Int)
 
@@ -313,22 +318,34 @@ func (m *V3PositionManager) Positions(opts *bind.CallOpts, tokenId *big.Int) (*V
 	if !okL || liq == nil {
 		liq = big.NewInt(0)
 	}
+	if !okFG0 || feeGrowth0 == nil {
+		feeGrowth0 = big.NewInt(0)
+	}
+	if !okFG1 || feeGrowth1 == nil {
+		feeGrowth1 = big.NewInt(0)
+	}
 	if !okO0 || owed0 == nil {
+		// Log the actual type to debug why parsing failed
+		log.Printf("[V3PM] TokensOwed0 解析失败: tokenId=%s okO0=%v type=%T value=%v", tokenId.String(), okO0, result[10], result[10])
 		owed0 = big.NewInt(0)
 	}
 	if !okO1 || owed1 == nil {
+		// Log the actual type to debug why parsing failed
+		log.Printf("[V3PM] TokensOwed1 解析失败: tokenId=%s okO1=%v type=%T value=%v", tokenId.String(), okO1, result[11], result[11])
 		owed1 = big.NewInt(0)
 	}
 
 	return &V3PositionInfo{
-		Token0:      token0,
-		Token1:      token1,
-		Fee:         fee,
-		TickLower:   int(tickLowerBI.Int64()),
-		TickUpper:   int(tickUpperBI.Int64()),
-		Liquidity:   liq,
-		TokensOwed0: owed0,
-		TokensOwed1: owed1,
-		PositionRaw: result,
+		Token0:                   token0,
+		Token1:                   token1,
+		Fee:                      fee,
+		TickLower:                int(tickLowerBI.Int64()),
+		TickUpper:                int(tickUpperBI.Int64()),
+		Liquidity:                liq,
+		FeeGrowthInside0LastX128: feeGrowth0,
+		FeeGrowthInside1LastX128: feeGrowth1,
+		TokensOwed0:              owed0,
+		TokensOwed1:              owed1,
+		PositionRaw:              result,
 	}, nil
 }

@@ -1,10 +1,13 @@
 package config
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"strconv"
 	"strings"
+
+	"TgLpBot/security"
 
 	"github.com/joho/godotenv"
 )
@@ -47,6 +50,7 @@ type Config struct {
 	OKXPassphrase          string
 	OKXSwapRouter          string
 	OKXTokenApproveAddress string // OKX DEX 的 TokenApprove 合约地址
+	OKXDebug               bool
 
 	// ClickHouse
 	ClickHouseAddr     string
@@ -143,6 +147,7 @@ func LoadConfig() error {
 		OKXPassphrase:          getEnv("OKX_PASSPHRASE", ""),
 		OKXSwapRouter:          getEnv("OKX_SWAP_ROUTER", ""),
 		OKXTokenApproveAddress: getEnv("OKX_TOKEN_APPROVE_ADDRESS", ""),
+		OKXDebug:               getEnvBool("OKX_DEBUG", false),
 
 		// ClickHouse
 		ClickHouseAddr:     getEnv("CLICKHOUSE_ADDR", "localhost:9000"),
@@ -160,7 +165,7 @@ func LoadConfig() error {
 		UniswapV3PositionManagerAddress: getEnv("UNISWAP_V3_NPM_ADDRESS", ""),
 
 		// Encryption
-		EncryptionKey: getEnv("ENCRYPTION_KEY", ""),
+		EncryptionKey: security.NormalizeHexString(getEnv("ENCRYPTION_KEY", "")),
 
 		// Gas
 		MaxGasPrice: maxGasPrice,
@@ -182,6 +187,11 @@ func LoadConfig() error {
 		V4NFTScanFromBlock: v4NFTScanFromBlock,
 	}
 
+	// Enforce encryption key to avoid storing/decrypting private keys insecurely.
+	if _, err := security.DecodeHexKey32(AppConfig.EncryptionKey); err != nil {
+		return fmt.Errorf("invalid ENCRYPTION_KEY: %w", err)
+	}
+
 	// 打印关键配置信息（隐藏敏感信息）
 	log.Println("📝 配置信息:")
 	log.Printf("   - Telegram Bot Token: %s", maskString(AppConfig.TelegramBotToken))
@@ -195,6 +205,7 @@ func LoadConfig() error {
 	log.Printf("   - Zap V4: %s", AppConfig.ZapV4Address)
 	log.Printf("   - OKX Swap Router: %s", AppConfig.OKXSwapRouter)
 	log.Printf("   - OKX TokenApprove: %s", AppConfig.OKXTokenApproveAddress)
+	log.Printf("   - OKX Debug: %v", AppConfig.OKXDebug)
 	log.Printf("   - Pancake V3 NPM: %s", AppConfig.PancakeV3PositionManagerAddress)
 	log.Printf("   - Uniswap V3 NPM: %s", AppConfig.UniswapV3PositionManagerAddress)
 	log.Printf("   - BSC RPC URL: %s", AppConfig.BSCRpcURL)

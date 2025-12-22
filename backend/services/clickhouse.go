@@ -12,7 +12,7 @@ type ClickHouseService struct {
 	Conn driver.Conn
 }
 
-func NewClickHouseService(addr, db, user, password string) (*ClickHouseService, error) {
+func NewClickHouseService(addr, db, user, password string, debug bool) (*ClickHouseService, error) {
 	conn, err := clickhouse.Open(&clickhouse.Options{
 		Addr: []string{addr},
 		Auth: clickhouse.Auth{
@@ -21,7 +21,7 @@ func NewClickHouseService(addr, db, user, password string) (*ClickHouseService, 
 			Password: password,
 		},
 		Protocol:     clickhouse.HTTP,
-		Debug:        true,
+		Debug:        debug,
 		MaxOpenConns: 20,
 		MaxIdleConns: 5,
 	})

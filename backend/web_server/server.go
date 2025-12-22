@@ -34,8 +34,12 @@ func (s *Server) Start(port string) {
 	handler := corsMiddleware(mux)
 
 	server := &http.Server{
-		Addr:    ":" + port,
-		Handler: handler,
+		Addr:              ":" + port,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	go func() {
@@ -91,11 +95,16 @@ type PoolResponse struct {
 var poolFeeFromNameRegex = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*%\s*$`)
 
 func (s *Server) handleGetPools(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	if s.ClickHouse == nil || s.ClickHouse.Conn == nil {
 		http.Error(w, "ClickHouse not configured", http.StatusServiceUnavailable)
 		return
 	}
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
 	var pools []PoolResponse
 
 	// Simple top 50 query
@@ -134,10 +143,13 @@ func (s *Server) handleGetPools(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	cfg := map[string]string{
-		"zap_v3":       config.AppConfig.ZapV3Address,
-		"zap_v4":       config.AppConfig.ZapV4Address,
-		"admin_wallet": config.AppConfig.AdminWalletAddress,
+		"zap_v3": config.AppConfig.ZapV3Address,
+		"zap_v4": config.AppConfig.ZapV4Address,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(cfg)

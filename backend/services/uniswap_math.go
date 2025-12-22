@@ -12,6 +12,7 @@ const (
 
 var (
 	q96        = new(big.Int).Lsh(big.NewInt(1), 96)
+	q128       = new(big.Int).Lsh(big.NewInt(1), 128)
 	maxUint256 = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
 )
 

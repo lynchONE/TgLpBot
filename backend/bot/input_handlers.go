@@ -31,8 +31,14 @@ func (b *Bot) handlePrivateKeyInput(message *tgbotapi.Message, user *models.User
 	}
 
 	// Store private key temporarily
-	database.SetUserSession(user.TelegramID, "temp_private_key", privateKey, 10*time.Minute)
-	database.SetUserSession(user.TelegramID, "state", "awaiting_wallet_name", 10*time.Minute)
+	if err := database.SetUserSessionEncrypted(user.TelegramID, "temp_private_key", privateKey, 10*time.Minute); err != nil {
+		b.sendMessage(message.Chat.ID, "保存会话失败，请稍后重试。")
+		return
+	}
+	if err := database.SetUserSession(user.TelegramID, "state", "awaiting_wallet_name", 10*time.Minute); err != nil {
+		b.sendMessage(message.Chat.ID, "保存会话失败，请稍后重试。")
+		return
+	}
 
 	text := "请输入此钱包的名称："
 	b.sendMessage(message.Chat.ID, text)
@@ -48,7 +54,7 @@ func (b *Bot) handleWalletNameInput(message *tgbotapi.Message, user *models.User
 	}
 
 	// Get stored private key
-	privateKey, err := database.GetUserSession(user.TelegramID, "temp_private_key")
+	privateKey, err := database.GetUserSessionDecrypted(user.TelegramID, "temp_private_key")
 	if err != nil {
 		b.sendMessage(message.Chat.ID, "会话已过期。请使用 /wallet 重新开始。")
 		database.ClearUserSession(user.TelegramID)
@@ -424,12 +430,8 @@ func (b *Bot) createPositionTask(chatID int64, user *models.User) {
 	cfg, cfgErr := b.configService.GetOrCreate(user.ID)
 	if cfgErr != nil {
 		b.sendMessage(chatID, fmt.Sprintf("❌ 获取全局配置失败: %v", cfgErr))
-		database.ClearUserSession(user.TelegramID)
 		return
 	}
-
-	// Clear session
-	database.ClearUserSession(user.TelegramID)
 
 	// Create Strategy Task
 	task := &models.StrategyTask{
@@ -464,7 +466,7 @@ func (b *Bot) createPositionTask(chatID int64, user *models.User) {
 		return
 	}
 
-	b.sendMessage(chatID, "⛓️ 任务已创建，正在用 USDT 开仓（OKX 路由 + Zap）...")
+	b.sendMessage(chatID, "⛓️ 任务已创建，正在用 USDT 开仓...")
 
 	enterRes, err := b.liquidityService.EnterTaskFromUSDT(user.ID, task)
 	if err != nil {
@@ -509,7 +511,17 @@ func (b *Bot) createPositionTask(chatID int64, user *models.User) {
 	}
 
 	b.sendMessage(chatID, fmt.Sprintf("✅ 开仓成功！交易哈希：`%s`", enterRes.TxHash))
-	b.sendMessageWithKeyboard(chatID, b.formatTaskCard(task), b.taskKeyboard(task))
+
+	// 成功后清除会话
+	database.ClearUserSession(user.TelegramID)
+
+	msgConfig := tgbotapi.NewMessage(chatID, b.formatTaskCardWithRefresh(task))
+	msgConfig.ParseMode = "Markdown"
+	msgConfig.ReplyMarkup = b.taskKeyboardWithRefresh(task)
+	msgConfig.DisableWebPagePreview = true
+	if msg, err := b.api.Send(msgConfig); err == nil && msg.MessageID != 0 {
+		b.startTaskAutoRefresh(chatID, msg.MessageID, task.ID, user.ID)
+	}
 }
 
 // handlePositionAmount handles position amount input

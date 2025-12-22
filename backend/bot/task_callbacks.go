@@ -33,7 +33,40 @@ func (b *Bot) handleTaskView(query *tgbotapi.CallbackQuery, user *models.User) {
 		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("获取任务失败：%v", err))
 		return
 	}
-	b.sendMessageWithKeyboard(query.Message.Chat.ID, b.formatTaskCard(task), b.taskKeyboard(task))
+
+	// Send task card with refresh UI
+	msgConfig := tgbotapi.NewMessage(query.Message.Chat.ID, b.formatTaskCardWithRefresh(task))
+	msgConfig.ParseMode = "Markdown"
+	msgConfig.ReplyMarkup = b.taskKeyboardWithRefresh(task)
+	msgConfig.DisableWebPagePreview = true
+
+	msg, err := b.api.Send(msgConfig)
+	if err == nil && msg.MessageID != 0 {
+		// Start auto-refresh for this message
+		b.startTaskAutoRefresh(query.Message.Chat.ID, msg.MessageID, task.ID, user.ID)
+	}
+}
+
+// handleTaskStopRefresh stops auto-refresh for a task card
+func (b *Bot) handleTaskStopRefresh(query *tgbotapi.CallbackQuery, user *models.User) {
+	b.api.Send(tgbotapi.NewCallback(query.ID, "已停止自动刷新"))
+
+	// Stop refresh
+	b.stopTaskAutoRefresh(query.Message.Chat.ID, query.Message.MessageID)
+
+	// Update keyboard to remove stop refresh button
+	taskID, err := parseTaskID("task_stop_refresh_", query.Data)
+	if err == nil {
+		task, err := b.taskService.GetByID(user.ID, taskID)
+		if err == nil {
+			editKeyboard := tgbotapi.NewEditMessageReplyMarkup(
+				query.Message.Chat.ID,
+				query.Message.MessageID,
+				b.taskKeyboard(task),
+			)
+			b.api.Send(editKeyboard)
+		}
+	}
 }
 
 func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
@@ -109,7 +142,7 @@ func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 		"error_message": "",
 	})
 
-	txHashes, err := b.liquidityService.ExitTaskToUSDT(user.ID, task)
+	txHashes, err := b.liquidityService.ExitTaskToUSDT(user.ID, task, true)
 	if err != nil {
 		_ = b.taskService.Update(user.ID, taskID, map[string]interface{}{
 			"status":        models.StrategyStatusError,
@@ -289,6 +322,70 @@ func (b *Bot) handleTaskSetRebalanceTimeout(query *tgbotapi.CallbackQuery, user 
 	if promptMsg.MessageID != 0 {
 		database.SetUserSession(user.TelegramID, "prompt_msg_id", fmt.Sprintf("%d", promptMsg.MessageID), 30*time.Minute)
 	}
+}
+
+func (b *Bot) handleTaskSwapDust(query *tgbotapi.CallbackQuery, user *models.User) {
+	b.api.Send(tgbotapi.NewCallback(query.ID, "正在兑换残余..."))
+	taskID, err := parseTaskID("task_swap_dust_", query.Data)
+	if err != nil {
+		b.sendMessage(query.Message.Chat.ID, "无效的任务ID")
+		return
+	}
+	task, err := b.taskService.GetByID(user.ID, taskID)
+	if err != nil {
+		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("获取任务失败：%v", err))
+		return
+	}
+
+	loadingMsg, _ := b.sendMessage(query.Message.Chat.ID, "⏳ 正在兑换残余代币为 USDT，请稍候...")
+	defer func() {
+		if loadingMsg.MessageID != 0 {
+			b.api.Send(tgbotapi.NewDeleteMessage(loadingMsg.Chat.ID, loadingMsg.MessageID))
+		}
+	}()
+
+	txHashes, err := b.liquidityService.SwapTaskDustToUSDT(user.ID, task)
+	if err != nil {
+		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("❌ 兑换残余失败：%v", err))
+		task, _ = b.taskService.GetByID(user.ID, taskID)
+		b.sendMessageWithKeyboard(query.Message.Chat.ID, b.formatTaskCard(task), b.taskKeyboard(task))
+		return
+	}
+
+	if len(txHashes) == 0 {
+		b.sendMessage(query.Message.Chat.ID, "✅ 残余资产已是 USDT 或无需兑换。")
+	} else {
+		var txLinksText string
+		txLinksText = "✅ 残余代币已提交兑换：\n"
+		for i, txInfo := range txHashes {
+			parts := strings.Split(txInfo, "|")
+			if len(parts) == 2 {
+				desc := parts[0]
+				txHash := parts[1]
+				txLinksText += fmt.Sprintf("%d. **%s**\n   [查看交易](https://bscscan.com/tx/%s)\n", i+1, desc, txHash)
+			} else {
+				txLinksText += fmt.Sprintf("%d. [查看交易](https://bscscan.com/tx/%s)\n", i+1, txInfo)
+			}
+		}
+		b.sendMessage(query.Message.Chat.ID, txLinksText)
+	}
+
+	task, _ = b.taskService.GetByID(user.ID, taskID)
+	editMsg := tgbotapi.NewEditMessageText(
+		query.Message.Chat.ID,
+		query.Message.MessageID,
+		b.formatTaskCard(task),
+	)
+	editMsg.ParseMode = "Markdown"
+	editMsg.DisableWebPagePreview = true
+	b.api.Send(editMsg)
+
+	editKeyboard := tgbotapi.NewEditMessageReplyMarkup(
+		query.Message.Chat.ID,
+		query.Message.MessageID,
+		b.taskKeyboard(task),
+	)
+	b.api.Send(editKeyboard)
 }
 
 func (b *Bot) handleTaskSetStopLossDelay(query *tgbotapi.CallbackQuery, user *models.User) {

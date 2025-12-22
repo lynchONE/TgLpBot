@@ -122,17 +122,22 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 	inRange := currentTick >= task.TickLower && currentTick <= task.TickUpper
 
 	if inRange {
+		// 如果之前超出范围，现在回到范围内，重置计时并通知用户
 		if task.OutOfRangeSince != nil {
 			database.DB.Model(task).Updates(map[string]interface{}{"out_of_range_since": nil})
+			s.notify(task.UserID, fmt.Sprintf("✅ 任务 #%d 价格已回到区间范围\nTick: %d (范围: %d - %d)",
+				task.ID, currentTick, task.TickLower, task.TickUpper))
+			log.Printf("[Strategy] 任务 #%d 价格回到区间，重置再平衡计时", task.ID)
 		}
 		return
 	}
 
 	// Out of Range Logic
 	now := time.Now()
-	if task.OutOfRangeSince == nil {
+	isFirstTimeOutOfRange := (task.OutOfRangeSince == nil)
+
+	if isFirstTimeOutOfRange {
 		database.DB.Model(task).Updates(map[string]interface{}{"out_of_range_since": &now})
-		// Initialize for duration check in next cycle (or immediate check below if delay is 0)
 		task.OutOfRangeSince = &now
 	}
 
@@ -144,6 +149,16 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 
 	// 1. Price > TickUpper (涨破)
 	if isUp {
+		// 首次检测到涨破，立即通知用户
+		if isFirstTimeOutOfRange {
+			s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 涨破区间上界\n"+
+				"当前 Tick: %d\n"+
+				"区间上界: %d\n"+
+				"如果 %s 内不回到区间，将自动执行再平衡",
+				task.ID, currentTick, task.TickUpper, formatDelayTime(task.ReopenDelaySeconds)))
+			log.Printf("[Strategy] 任务 #%d 涨破区间，开始再平衡倒计时 %ds", task.ID, task.ReopenDelaySeconds)
+		}
+
 		// Threshold: ReopenDelaySeconds (Rebalance Timeout)
 		threshold := time.Duration(task.ReopenDelaySeconds) * time.Second
 		if duration >= threshold {
@@ -156,6 +171,25 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 	if isDown {
 		if task.StopLossEnabled {
 			// Case A: StopLoss Enabled
+			// 首次检测到跌破，立即通知用户
+			if isFirstTimeOutOfRange {
+				stopLossSec := task.StopLossDelaySeconds
+				if stopLossSec == 0 {
+					s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 跌破区间下界\n"+
+						"当前 Tick: %d\n"+
+						"区间下界: %d\n"+
+						"将立即执行止损",
+						task.ID, currentTick, task.TickLower))
+				} else {
+					s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 跌破区间下界\n"+
+						"当前 Tick: %d\n"+
+						"区间下界: %d\n"+
+						"如果 %s 内不回到区间，将自动执行止损",
+						task.ID, currentTick, task.TickLower, formatDelayTime(stopLossSec)))
+				}
+				log.Printf("[Strategy] 任务 #%d 跌破区间，开始止损倒计时 %ds", task.ID, task.StopLossDelaySeconds)
+			}
+
 			// Threshold: StopLossDelaySeconds
 			threshold := time.Duration(task.StopLossDelaySeconds) * time.Second
 			if duration >= threshold {
@@ -163,6 +197,16 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 			}
 		} else {
 			// Case B: StopLoss Disabled -> Treat as Rebalance
+			// 首次检测到跌破，立即通知用户
+			if isFirstTimeOutOfRange {
+				s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 跌破区间下界\n"+
+					"当前 Tick: %d\n"+
+					"区间下界: %d\n"+
+					"如果 %s 内不回到区间，将自动执行再平衡",
+					task.ID, currentTick, task.TickLower, formatDelayTime(task.ReopenDelaySeconds)))
+				log.Printf("[Strategy] 任务 #%d 跌破区间，开始再平衡倒计时 %ds", task.ID, task.ReopenDelaySeconds)
+			}
+
 			// Threshold: ReopenDelaySeconds
 			threshold := time.Duration(task.ReopenDelaySeconds) * time.Second
 			if duration >= threshold {
@@ -173,7 +217,14 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 	}
 }
 
-// notify sends a notification to the user
+// formatDelayTime 格式化延迟时间，小于60秒显示秒，否则显示分钟
+func formatDelayTime(seconds int) string {
+	if seconds < 60 {
+		return fmt.Sprintf("%d 秒", seconds)
+	}
+	return fmt.Sprintf("%d 分钟", seconds/60)
+}
+
 func (s *StrategyService) notify(userID uint, message string) {
 	if s.notifier != nil {
 		s.notifier(userID, message)
@@ -313,7 +364,7 @@ func (s *StrategyService) executeStopLoss(task *models.StrategyTask, now time.Ti
 	log.Printf("[Strategy] 任务 #%d %s，执行退出", task.ID, reason)
 	s.notify(task.UserID, fmt.Sprintf("%s，正在撤出...", reason))
 
-	if _, err := s.liquidityService.ExitTaskToUSDT(task.UserID, task); err != nil {
+	if _, err := s.liquidityService.ExitTaskToUSDT(task.UserID, task, true); err != nil {
 		log.Printf("[Strategy] 任务 #%d 止损退出失败: %v", task.ID, err)
 		s.notify(task.UserID, fmt.Sprintf("❌ 止损撤出失败: %v", err))
 		database.DB.Model(task).Updates(map[string]interface{}{
@@ -339,7 +390,7 @@ func (s *StrategyService) executeRebalance(task *models.StrategyTask, currentTic
 	s.notify(task.UserID, fmt.Sprintf("%s，正在执行再平衡...", reason))
 
 	// 1. Exit
-	if _, err := s.liquidityService.ExitTaskToUSDT(task.UserID, task); err != nil {
+	if _, err := s.liquidityService.ExitTaskToUSDT(task.UserID, task, true); err != nil {
 		log.Printf("[Strategy] 任务 #%d 再平衡退出失败: %v", task.ID, err)
 		s.notify(task.UserID, fmt.Sprintf("❌ 再平衡撤出失败: %v", err))
 		database.DB.Model(task).Updates(map[string]interface{}{

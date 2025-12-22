@@ -1,7 +1,6 @@
 package bot
 
 import (
-	"TgLpBot/database"
 	"TgLpBot/models"
 	"fmt"
 	"log"
@@ -50,17 +49,52 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 	}
 
 	// Display actual invested amount (USDT delta) if we have an open trade record.
-	amountLine := fmt.Sprintf("金额：%.2f USDT", task.AmountUSDT)
-	if database.DB != nil && task.ID != 0 {
-		var openRec models.TradeRecord
-		if err := database.DB.
-			Where("user_id = ? AND task_id = ? AND status = ?", task.UserID, task.ID, models.TradeStatusOpen).
-			Order("opened_at DESC").
-			First(&openRec).Error; err == nil {
-			actual := strings.TrimSpace(openRec.OpenUSDTSpent)
-			if actual != "" && actual != "0" {
-				amountLine = fmt.Sprintf("开仓：%s USDT (目标 %.2f USDT)", formatWei(actual), task.AmountUSDT)
+	// Calculate PnL
+	amountLine := fmt.Sprintf("初始投入：%.2f USDT", task.AmountUSDT)
+	if b.pnlService != nil {
+		pnl, err := b.pnlService.GetTaskPnL(task)
+		if err != nil {
+			log.Printf("[TaskView] Get PnL failed for task #%d: %v", task.ID, err)
+			// Fallback to simpler display
+			amountLine += "\n(获取实时收益失败)"
+		} else {
+			// Format PnL
+			sign := "+"
+			if pnl.AbsolutePnLUSDT < 0 {
+				sign = ""
 			}
+			emojiStr := "🟢"
+			if pnl.AbsolutePnLUSDT < 0 {
+				emojiStr = "🔴"
+			}
+
+			dustLine := ""
+			dustParts := make([]string, 0, 2)
+			if pnl.DustToken0 > 0 {
+				dustParts = append(dustParts, fmt.Sprintf("%.4f %s", pnl.DustToken0, task.Token0Symbol))
+			}
+			if pnl.DustToken1 > 0 {
+				dustParts = append(dustParts, fmt.Sprintf("%.4f %s", pnl.DustToken1, task.Token1Symbol))
+			}
+			if len(dustParts) > 0 {
+				dustLine = fmt.Sprintf("\n🧹 开仓残余：%s (≈%.2f USDT)", strings.Join(dustParts, " + "), pnl.DustValueUSDT)
+			}
+
+			// 使用 InitialCostUSDT（实际投入的 USDT）与交易历史保持一致
+			actualInvested := pnl.InitialCostUSDT
+			if actualInvested <= 0 {
+				actualInvested = task.AmountUSDT
+			}
+
+			amountLine = fmt.Sprintf(
+				"📊 资产状况：\n💵 当前价值：%.2f USDT\n📈 绝对盈亏：%s%.2f USDT %s\n🎁 未领手续费：%.2f USDT%s\n💰 实际投入：%.2f USDT (预期 %.2f USDT)",
+				pnl.CurrentValueUSDT,
+				sign, pnl.AbsolutePnLUSDT, emojiStr,
+				pnl.UnclaimedFeesUSDT,
+				dustLine,
+				actualInvested,
+				task.AmountUSDT,
+			)
 		}
 	}
 
@@ -107,13 +141,18 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 		priceRangeInfo = fmt.Sprintf("\n💹 价格范围：%.6f - %.6f", priceLower, priceUpper)
 	}
 
+	rangePctText := ""
+	if task.RangePercentage > 0 {
+		rangePctText = fmt.Sprintf(" (±%.2f%%)", task.RangePercentage)
+	}
+
 	return fmt.Sprintf(`%s *任务 #%d* (%s)
 
 🏦 交易所：%s
 💱 交易对：%s
 🔗 池子：`+"`%s`"+`%s
 
-📊 Tick 范围：%d → %d%s
+📊 Tick 范围：%d → %d%s%s
 💰 %s
 
 ⚙️ 策略配置：
@@ -132,6 +171,7 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 		positionInfo,
 		task.TickLower,
 		task.TickUpper,
+		rangePctText,
 		priceRangeInfo,
 		amountLine,
 		task.ReopenDelaySeconds,
@@ -165,6 +205,7 @@ func (b *Bot) taskKeyboard(task *models.StrategyTask) tgbotapi.InlineKeyboardMar
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("⏱️ 再平衡超时 (%ds)", task.ReopenDelaySeconds), "task_set_rebalance_"+idStr),
+			tgbotapi.NewInlineKeyboardButtonData("🧹 兑换残余", "task_swap_dust_"+idStr),
 		),
 	)
 }

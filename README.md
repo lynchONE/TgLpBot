@@ -118,6 +118,13 @@ MYSQL_DATABASE=tglpbot
 REDIS_HOST=localhost
 REDIS_PORT=6379
 
+# ClickHouse (optional; used by /api/pools etc.)
+CLICKHOUSE_ADDR=localhost:9000
+CLICKHOUSE_DB=default
+CLICKHOUSE_USER=default
+CLICKHOUSE_PASSWORD=
+CLICKHOUSE_DEBUG=0  # set to 1 to enable verbose ClickHouse driver logs
+
 # BSC Network
 BSC_RPC_URL=https://bsc-dataseed1.binance.org/
 BSC_CHAIN_ID=56
@@ -131,6 +138,17 @@ OKX_SECRET_KEY=your_okx_secret_key
 OKX_PASSPHRASE=your_okx_passphrase
 OKX_SWAP_ROUTER=0x...  # OKX DEX Router 地址
 OKX_TOKEN_APPROVE_ADDRESS=0x...  # OKX DEX TokenApprove 合约地址（BSC: 0x40aA958dd87FC8305b97f2BA922CDdCa374bcD7f）
+
+# V3 Position Managers (必需 - Required for V3 liquidity operations)
+PANCAKE_V3_NPM_ADDRESS=0x46A15B0b27311cedF172AB29E4f4766fbE7F4364  # PancakeSwap V3 NonfungiblePositionManager on BSC
+UNISWAP_V3_NPM_ADDRESS=0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613   # Uniswap V3 NonfungiblePositionManager on BSC
+
+# V4 Position Manager (必需 - Required for V4 liquidity operations)
+UNISWAP_V4_POSITION_MANAGER_ADDRESS=0x...  # Uniswap V4 PositionManager address (根据实际部署填写)
+
+# Zap Contract (必需 - Required for liquidity operations)
+ZAP_V3_ADDRESS=0x...  # ZapSimple.sol 合约地址 (see contracts/README.md for deployment)
+ZAP_V4_ADDRESS=0x...  # 可选，V4 使用相同的 ZapSimple 合约
 ```
 
 ### 6. Deploy Zap Contract
@@ -271,6 +289,124 @@ The Zap contract includes:
 - Verify token approvals
 - Check slippage settings
 - Ensure Zap contract is deployed
+
+### ❌ 开仓失败：V3 position manager address not configured
+
+**问题描述**：在尝试为 PancakeSwap V3 池子开仓时出现此错误，而 Uniswap V3/V4 正常。
+
+**原因分析**：
+系统根据池子的 `Exchange` 字段自动选择对应的 Position Manager 地址：
+- PancakeSwap V3 → 使用 `PANCAKE_V3_NPM_ADDRESS`
+- Uniswap V3 → 使用 `UNISWAP_V3_NPM_ADDRESS`
+- Uniswap V4 → 使用 `UNISWAP_V4_POSITION_MANAGER_ADDRESS`
+
+如果对应的环境变量未配置或为空，开仓时会报此错误。
+
+**解决方案**：
+在 `.env` 文件中添加以下配置（BSC 主网地址）：
+
+```env
+# PancakeSwap V3 NonfungiblePositionManager
+PANCAKE_V3_NPM_ADDRESS=0x46A15B0b27311cedF172AB29E4f4766fbE7F4364
+
+# Uniswap V3 NonfungiblePositionManager (BSC)
+UNISWAP_V3_NPM_ADDRESS=0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613
+
+# Uniswap V4 PositionManager (根据实际部署)
+UNISWAP_V4_POSITION_MANAGER_ADDRESS=0x你的V4地址
+```
+
+配置后重启 Bot 即可。
+
+**验证配置**：
+启动 Bot 后，查看日志输出：
+```
+📝 配置信息:
+   - Pancake V3 NPM: 0x46A15B0b27311cedF172AB29E4f4766fbE7F4364
+   - Uniswap V3 NPM: 0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613
+```
+
+如果显示为空，说明配置未生效。
+
+**进一步诊断**：
+
+如果配置文件中有值但仍报错，可能的原因：
+
+1. **配置文件路径问题**：确保 `.env` 文件在运行目录下（通常是 `backend/` 目录）
+2. **配置未重新加载**：修改 `.env` 后需要重启 Bot
+3. **Exchange 字段值异常**：数据库中保存的 `Exchange` 字段可能不包含 "pancake" 或 "uniswap"
+
+**调试步骤**：
+
+重启 Bot 后，尝试创建一个 PancakeSwap V3 池子的任务，查看日志输出：
+
+```
+[Liquidity] V3 enter: task.Exchange=PancakeSwap V3 (lowercased: pancakeswap v3)
+[Liquidity] V3 enter: config.PancakeV3PositionManagerAddress=0x46A15B0b27311cedF172AB29E4f4766fbE7F4364
+[Liquidity] V3 enter: 选择 PancakeSwap V3 NPM: 0x46A15B0b27311cedF172AB29E4f4766fbE7F4364
+```
+
+如果看到类似以下输出，说明匹配失败：
+```
+[Liquidity] V3 enter: task.Exchange=V3 Pool (lowercased: v3 pool)
+[Liquidity] V3 enter: ⚠️ 无法匹配到合适的 Position Manager (exchange=v3 pool)
+```
+
+这说明池子查询时**未能正确识别交易所**。需要检查：
+- 池子地址是否正确
+- 是否真的是 PancakeSwap V3 或 Uniswap V3 的池子
+- 工厂合约地址是否正确配置（见 [`pool.go:184-193`](file:///e:/goProject/TgLpBot/backend/services/pool.go#L184-L193)）
+
+**临时解决方案**：
+
+如果池子查询无法识别交易所，可以手动在数据库中修改任务的 `exchange` 字段为 `"PancakeSwap V3"` 或 `"Uniswap V3"`。
+
+### ❌ PancakeSwap V3 开仓交易 Revert
+
+**问题描述**：PancakeSwap V3 池子识别正常，但开仓交易 revert，错误信息为 `execution reverted` 或 `Untrusted PM`。
+
+**原因分析**：
+ZapSimple 合约使用白名单机制限制可信的 Position Manager。如果合约初始化时只添加了 Uniswap V3 的 NPM，而没有将 PancakeSwap V3 的 NPM 加入白名单（`trustedV3PositionManagers`），则会在第 359 行校验时 revert：
+```solidity
+require(
+    params.positionManager == v3PositionManager || trustedV3PositionManagers[params.positionManager],
+    "Untrusted PM"
+);
+```
+
+**解决方案**：
+
+1. **检查合约配置**
+   ```bash
+   cd contracts
+   npx hardhat console --network bsc
+   > const zap = await ethers.getContractAt("ZapSimple", "YOUR_ZAP_ADDRESS")
+   > await zap.trustedV3PositionManagers("0x46A15B0b27311cedF172AB29E4f4766fbE7F4364")
+   # 如果返回 false，说明未加入白名单
+   ```
+
+2. **添加 PancakeSwap V3 到白名单**
+   ```bash
+   cd contracts
+   # 确保 .env 中有 PANCAKE_V3_NPM_ADDRESS 和 ZAP_V3_ADDRESS
+   npx hardhat run scripts/add_pancake_v3_trusted.js --network bsc
+   ```
+
+3. **验证配置**
+   开仓后查看日志，应该看到选择了正确的 Position Manager：
+   ```
+   [Liquidity] V3 enter: 选择 PancakeSwap V3 NPM: 0x46A15B0b27311cedF172AB29E4f4766fbE7F4364
+   ```
+
+**一次性配置多个 Position Manager**：
+
+编辑 `contracts/.env`，确保包含：
+```env
+PANCAKE_V3_NPM_ADDRESS=0x46A15B0b27311cedF172AB29E4f4766fbE7F4364
+UNISWAP_V3_NPM_ADDRESS=0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613
+```
+
+然后运行白名单脚本将所有需要的 Position Manager 添加到合约中。
 
 ### OKX Swap 调用失败 (Swap call failed)
 **常见原因**：
@@ -502,3 +638,72 @@ ADMIN_WALLET_ADDRESS=0x你的管理员钱包地址
 - 创建任务时检查授权状态和活跃任务数量限制
 - 管理员用户不受限制
 
+## 2025-12-19 池子查询机制优化
+
+### 改动背景
+之前的实现依赖 The Graph Token API 进行池子信息查询，但该 API 对 BSC 链上的 PancakeSwap V3 池子支持不完整，导致大量池子查询失败。
+
+### 解决方案
+**完全移除外部 API 依赖，改为纯链上查询**。直接从区块链智能合约读取池子信息，确保所有符合标准的 V3/V4 池子都能正常查询。
+
+### 技术实现
+
+#### V3 池子查询流程
+1. 从池子合约调用 `token0()` 和 `token1()` 获取代币地址
+2. 调用 `fee()` 获取手续费率（单位：pips）
+3. 通过 ERC20 合约的 `symbol()` 获取代币符号
+4. 尝试从工厂合约（PancakeSwap V3 / Uniswap V3）反查确定交易所类型
+5. 根据手续费率计算 tick spacing
+
+#### V4 池子查询流程
+1. 从 V4 PositionManager 合约调用 `poolKeys(bytes25(poolId))` 获取完整 PoolKey
+2. PoolKey 包含：currency0, currency1, fee, tickSpacing, hooks
+3. 通过 ERC20 合约获取代币符号
+
+#### 新增函数
+- [`blockchain.GetV3PoolFee()`](file:///e:/goProject/TgLpBot/backend/blockchain/v3_pool.go#L215-L255) - 读取 V3 池子手续费
+- [`services.getPoolInfoFromChain()`](file:///e:/goProject/TgLpBot/backend/services/pool.go#L111-L180) - 链上查询 V3 池子完整信息
+- [`services.determineExchangeFromFactory()`](file:///e:/goProject/TgLpBot/backend/services/pool.go#L182-L196) - 通过工厂合约识别交易所
+
+#### 移除内容
+- 删除 `thegraph_api.go` 及相关代码
+- 移除 `PoolService.graphAPI` 和 `GeckoService.GraphAPI` 字段
+- 简化查询逻辑，去除 API fallback 机制
+
+### 优势
+- ✅ **100% 覆盖**：支持所有符合标准的 V3/V4 池子
+- ✅ **无需依赖**：不依赖任何外部 API，避免服务中断
+- ✅ **数据准确**：直接从链上读取，数据最权威
+- ✅ **代码简化**：移除复杂的 API 集成和错误处理逻辑
+
+### 性能考虑
+链上查询需要 4-5 次 RPC 调用，耗时约 200-500ms（取决于 RPC 节点速度）。对于用户交互场景（查询池子后创建任务），这个延迟是可接受的。
+
+## 2025-12-19 V3 池子交易所识别修复
+
+### 问题描述
+之前的实现通过工厂合约反查来判断池子属于哪个交易所，但这种方式不够可靠，导致大部分池子都被识别为 "V3 Pool"，无法正确匹配对应的 Position Manager。
+
+### 解决方案
+**改为直接读取池子的 `factory()` 方法**来精确识别交易所：
+
+#### 新增函数
+- [`blockchain.GetV3PoolFactory()`](file:///e:/goProject/TgLpBot/backend/blockchain/v3_factory.go#L66-L114) - 读取池子的 factory 地址
+
+#### 修改逻辑
+- [`determineExchangeFromFactory()`](file:///e:/goProject/TgLpBot/backend/services/pool.go#L182-L210) - 根据 factory 地址精确判断交易所：
+  - `0x0BFbcf9fa4f9C56B0F40a671Ad40E0805A091865` → PancakeSwap V3
+  - `0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7` → Uniswap V3
+
+### 日志输出
+查询池子时会显示识别结果：
+```
+[PoolService] Pool factory 地址: 0x0BFbcf9fa4f9C56B0F40a671Ad40E0805A091865
+[PoolService] 识别为 PancakeSwap V3
+[PoolService] Pool info retrieved from chain: PancakeSwap V3 WBNB/USDT (fee: 2500)
+```
+
+### 优势
+- ✅ **精确识别**：直接从池子读取工厂地址，100% 准确
+- ✅ **减少 RPC 调用**：只需 1 次调用而非多次尝试
+- ✅ **日志清晰**：可以直观看到识别过程

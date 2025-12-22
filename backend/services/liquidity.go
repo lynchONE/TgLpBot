@@ -17,15 +17,17 @@ import (
 
 // LiquidityService handles liquidity operations
 type LiquidityService struct {
-	walletService *WalletService
-	okxService    *OKXDexService
+	walletService      *WalletService
+	okxService         *OKXDexService
+	tradeRecordService *TradeRecordService
 }
 
 // NewLiquidityService creates a new liquidity service
 func NewLiquidityService() *LiquidityService {
 	return &LiquidityService{
-		walletService: NewWalletService(),
-		okxService:    NewOKXDexService(),
+		walletService:      NewWalletService(),
+		okxService:         NewOKXDexService(),
+		tradeRecordService: NewTradeRecordService(),
 	}
 }
 

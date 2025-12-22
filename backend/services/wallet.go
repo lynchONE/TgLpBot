@@ -4,17 +4,16 @@ import (
 	"TgLpBot/config"
 	"TgLpBot/database"
 	"TgLpBot/models"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"gorm.io/gorm"
+
+	"TgLpBot/security"
 )
 
 // WalletService handles wallet operations
@@ -146,7 +145,77 @@ func (s *WalletService) SetDefaultWallet(userID uint, walletID uint) error {
 
 // GetPrivateKey decrypts and returns the private key
 func (s *WalletService) GetPrivateKey(wallet *models.Wallet) (string, error) {
-	return s.decryptPrivateKey(wallet.EncryptedPrivateKey)
+	if wallet == nil {
+		return "", errors.New("wallet is nil")
+	}
+
+	plain, err := s.decryptPrivateKey(wallet.EncryptedPrivateKey)
+	if err == nil {
+		return plain, nil
+	}
+
+	// Backward-compat / migration: if the DB contains plaintext private keys, re-encrypt in-place.
+	candidate := normalizeHexPrivateKey(wallet.EncryptedPrivateKey)
+	if _, kerr := crypto.HexToECDSA(candidate); kerr != nil {
+		return "", err
+	}
+	encrypted, eerr := s.encryptPrivateKey(candidate)
+	if eerr != nil {
+		return "", fmt.Errorf("failed to encrypt legacy plaintext key: %w", eerr)
+	}
+	if database.DB != nil && wallet.ID != 0 {
+		_ = database.DB.Model(&models.Wallet{}).Where("id = ?", wallet.ID).Update("encrypted_private_key", encrypted).Error
+	}
+	wallet.EncryptedPrivateKey = encrypted
+	return candidate, nil
+}
+
+// MigratePlaintextPrivateKeys encrypts any legacy plaintext keys found in the wallets table.
+// It is safe to run multiple times.
+func (s *WalletService) MigratePlaintextPrivateKeys() (int, error) {
+	if database.DB == nil {
+		return 0, errors.New("database not initialized")
+	}
+
+	var wallets []models.Wallet
+	if err := database.DB.Find(&wallets).Error; err != nil {
+		return 0, fmt.Errorf("load wallets failed: %w", err)
+	}
+
+	migrated := 0
+	for i := range wallets {
+		w := &wallets[i]
+		if w == nil {
+			continue
+		}
+
+		plain, err := s.decryptPrivateKey(w.EncryptedPrivateKey)
+		if err == nil {
+			plain = normalizeHexPrivateKey(plain)
+			if _, kerr := crypto.HexToECDSA(plain); kerr != nil {
+				return migrated, fmt.Errorf("wallet %d has invalid decrypted private key", w.ID)
+			}
+			continue
+		}
+
+		candidate := normalizeHexPrivateKey(w.EncryptedPrivateKey)
+		if _, kerr := crypto.HexToECDSA(candidate); kerr != nil {
+			// Not decryptable and not a valid plaintext key => refuse to guess.
+			return migrated, fmt.Errorf("wallet %d (%s) private key is unreadable (decrypt failed)", w.ID, w.Address)
+		}
+
+		encrypted, eerr := s.encryptPrivateKey(candidate)
+		if eerr != nil {
+			return migrated, fmt.Errorf("wallet %d encrypt failed: %w", w.ID, eerr)
+		}
+
+		if uerr := database.DB.Model(&models.Wallet{}).Where("id = ?", w.ID).Update("encrypted_private_key", encrypted).Error; uerr != nil {
+			return migrated, fmt.Errorf("wallet %d update failed: %w", w.ID, uerr)
+		}
+		migrated++
+	}
+
+	return migrated, nil
 }
 
 // DeleteWallet deletes a wallet
@@ -163,67 +232,45 @@ func (s *WalletService) DeleteWallet(userID uint, walletID uint) error {
 
 // encryptPrivateKey encrypts a private key using AES
 func (s *WalletService) encryptPrivateKey(privateKeyHex string) (string, error) {
-	key, err := hex.DecodeString(config.AppConfig.EncryptionKey)
+	key, err := getEncryptionKey()
 	if err != nil {
-		return "", fmt.Errorf("invalid encryption key: %w", err)
+		return "", err
 	}
-
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return "", fmt.Errorf("failed to create cipher: %w", err)
-	}
-
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", fmt.Errorf("failed to create GCM: %w", err)
-	}
-
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return "", fmt.Errorf("failed to generate nonce: %w", err)
-	}
-
-	ciphertext := gcm.Seal(nonce, nonce, []byte(privateKeyHex), nil)
-	return hex.EncodeToString(ciphertext), nil
+	privateKeyHex = normalizeHexPrivateKey(privateKeyHex)
+	return security.EncryptAESGCMToHex(key, []byte(privateKeyHex))
 }
 
 // decryptPrivateKey decrypts a private key using AES
 func (s *WalletService) decryptPrivateKey(encryptedHex string) (string, error) {
-	key, err := hex.DecodeString(config.AppConfig.EncryptionKey)
+	key, err := getEncryptionKey()
 	if err != nil {
-		return "", fmt.Errorf("invalid encryption key: %w", err)
+		return "", err
 	}
-
-	ciphertext, err := hex.DecodeString(encryptedHex)
+	plaintext, err := security.DecryptAESGCMHex(key, encryptedHex)
 	if err != nil {
-		return "", fmt.Errorf("invalid encrypted data: %w", err)
+		return "", err
 	}
-
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return "", fmt.Errorf("failed to create cipher: %w", err)
-	}
-
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", fmt.Errorf("failed to create GCM: %w", err)
-	}
-
-	nonceSize := gcm.NonceSize()
-	if len(ciphertext) < nonceSize {
-		return "", errors.New("ciphertext too short")
-	}
-
-	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
-	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to decrypt: %w", err)
-	}
-
-	return string(plaintext), nil
+	return normalizeHexPrivateKey(string(plaintext)), nil
 }
 
 // GetWalletAddress returns the address as common.Address
 func (s *WalletService) GetWalletAddress(wallet *models.Wallet) common.Address {
 	return common.HexToAddress(wallet.Address)
+}
+
+func getEncryptionKey() ([]byte, error) {
+	if config.AppConfig == nil {
+		return nil, errors.New("config not loaded")
+	}
+	key, err := security.DecodeHexKey32(config.AppConfig.EncryptionKey)
+	if err != nil {
+		return nil, err
+	}
+	return key, nil
+}
+
+func normalizeHexPrivateKey(s string) string {
+	s = strings.TrimSpace(s)
+	s = security.NormalizeHexString(s)
+	return s
 }

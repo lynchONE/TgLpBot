@@ -129,14 +129,14 @@ const ZapSimpleABI = `[
       { "internalType": "address", "name": "positionManager", "type": "address" },
       { "internalType": "uint256", "name": "tokenId", "type": "uint256" },
       { "internalType": "address", "name": "recipient", "type": "address" },
-      { "internalType": "uint256", "name": "slippageBps", "type": "uint256" }
+      { "internalType": "uint256", "name": "amount0Min", "type": "uint256" },
+      { "internalType": "uint256", "name": "amount1Min", "type": "uint256" }
     ],
     "name": "zapOutV3",
     "outputs": [
       { "internalType": "uint256", "name": "amount0", "type": "uint256" },
       { "internalType": "uint256", "name": "amount1", "type": "uint256" }
     ],
-    "stateMutability": "nonpayable",
     "stateMutability": "nonpayable",
     "type": "function"
   },
@@ -319,6 +319,6 @@ func (z *ZapSimple) ZapInV4(opts *bind.TransactOpts, params ZapInV4ParamsSimple)
 }
 
 // ZapOutV3 V3 撤仓
-func (z *ZapSimple) ZapOutV3(opts *bind.TransactOpts, positionManager common.Address, tokenId *big.Int, recipient common.Address, slippageBps *big.Int) (*types.Transaction, error) {
-	return z.contract.Transact(opts, "zapOutV3", positionManager, tokenId, recipient, slippageBps)
+func (z *ZapSimple) ZapOutV3(opts *bind.TransactOpts, positionManager common.Address, tokenId *big.Int, recipient common.Address, amount0Min *big.Int, amount1Min *big.Int) (*types.Transaction, error) {
+	return z.contract.Transact(opts, "zapOutV3", positionManager, tokenId, recipient, amount0Min, amount1Min)
 }
