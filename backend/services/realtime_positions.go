@@ -589,7 +589,7 @@ func (s *RealtimePositionsService) buildV3Position(
 	}
 	totals.TotalUSD = totals.WalletUSD + totals.PositionUSD + totals.FeeUSD
 
-	title := fmt.Sprintf("auto-pool-%s-%s-%s-%.2f%%", exchangeShort(exchange, "UniV3"), row0.Symbol, row1.Symbol, fee)
+	title := fmt.Sprintf("%s-%s-%s-%.2f%%", exchangeShort(exchange, "UniV3"), row0.Symbol, row1.Symbol, fee)
 	if strings.TrimSpace(exchange) == "" {
 		exchange = "V3"
 	}
@@ -703,7 +703,7 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 	if exchange == "" {
 		exchange = "Uniswap V4"
 	}
-	title := fmt.Sprintf("auto-pool-%s-%s-%s-%.2f%%", exchangeShort(exchange, "UniV4"), row0.Symbol, row1.Symbol, float64(task.Fee)/10000.0)
+	title := fmt.Sprintf("%s-%s-%s-%.2f%%", exchangeShort(exchange, "UniV4"), row0.Symbol, row1.Symbol, float64(task.Fee)/10000.0)
 
 	hasLiquidity := liq != nil && liq.Sign() > 0
 	return &RealtimePosition{

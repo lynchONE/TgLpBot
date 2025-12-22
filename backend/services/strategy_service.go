@@ -168,9 +168,8 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 
 	duration := time.Since(*task.OutOfRangeSince)
 
-	// Determine direction
-	isUp := currentTick > task.TickUpper
-	isDown := currentTick < task.TickLower
+	// Determine direction (based on stable price if available).
+	_, _, isUp, isDown := priceDirectionFromTicks(task, task.TickLower, task.TickUpper, currentTick)
 
 	// 1. Price > TickUpper (涨破)
 	if isUp {

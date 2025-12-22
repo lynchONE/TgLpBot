@@ -20,6 +20,36 @@ const formatUsd = (v) => {
     return `$${n.toFixed(2)}`;
 };
 
+const STABLE_SYMBOLS = new Set(['USDT', 'USDC', 'BUSD', 'DAI']);
+
+const normalizeSymbol = (value) => String(value || '').trim().toUpperCase();
+
+const isStableSymbol = (symbol) => STABLE_SYMBOLS.has(normalizeSymbol(symbol));
+
+const priceFromTick = (tick) => {
+    const n = Number(tick);
+    if (!Number.isFinite(n)) return null;
+    const v = Math.pow(1.0001, n);
+    if (!Number.isFinite(v)) return null;
+    return v;
+};
+
+const safeInvert = (value) => {
+    if (!Number.isFinite(value) || value === 0) return null;
+    const v = 1 / value;
+    return Number.isFinite(v) ? v : null;
+};
+
+const formatPrice = (value) => {
+    if (!Number.isFinite(value)) return '--';
+    const abs = Math.abs(value);
+    if (abs >= 1000) return value.toFixed(2);
+    if (abs >= 100) return value.toFixed(3);
+    if (abs >= 1) return value.toFixed(4);
+    if (abs >= 0.01) return value.toFixed(6);
+    return value.toFixed(8);
+};
+
 const pillClassForStatus = (label) => {
     if (label?.includes('错误'))
         return 'bg-red-500/10 text-red-700 ring-red-500/20 dark:bg-red-500/15 dark:text-red-300 dark:ring-red-500/30';
@@ -33,6 +63,18 @@ const pillClassForStatus = (label) => {
 export default function PositionCard({ position, walletAddress, bnbBalance, pollIntervalSec, updatedAt }) {
     const token0 = position?.token_rows?.[0];
     const token1 = position?.token_rows?.[1];
+    const stableIndex = useMemo(() => {
+        if (isStableSymbol(token0?.symbol)) return 0;
+        if (isStableSymbol(token1?.symbol)) return 1;
+        const p0 = Number(token0?.price_usd);
+        if (Number.isFinite(p0) && p0 > 0.98 && p0 < 1.02) return 0;
+        const p1 = Number(token1?.price_usd);
+        if (Number.isFinite(p1) && p1 > 0.98 && p1 < 1.02) return 1;
+        return -1;
+    }, [token0?.symbol, token1?.symbol, token0?.price_usd, token1?.price_usd]);
+    const baseSymbol = stableIndex === 0 ? token1?.symbol : token0?.symbol;
+    const quoteSymbol = stableIndex === 0 ? token0?.symbol : token1?.symbol;
+    const pairLabel = baseSymbol && quoteSymbol ? `${baseSymbol}/${quoteSymbol}` : baseSymbol || quoteSymbol || '';
 
     const titleRight = useMemo(() => formatUsd(position?.totals?.total_usd), [position?.totals?.total_usd]);
 
@@ -57,6 +99,25 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
         if (!Number.isFinite(p)) return null;
         return Math.max(0, Math.min(1, p));
     }, [position?.current_tick, position?.tick_lower, position?.tick_upper]);
+
+    const currentPriceBase = useMemo(() => priceFromTick(position?.current_tick), [position?.current_tick]);
+    const currentPrice = stableIndex === 0 ? safeInvert(currentPriceBase) : currentPriceBase;
+
+    const rangeLowerBase = useMemo(() => priceFromTick(position?.tick_lower), [position?.tick_lower]);
+    const rangeUpperBase = useMemo(() => priceFromTick(position?.tick_upper), [position?.tick_upper]);
+    const rangeLower = stableIndex === 0 ? safeInvert(rangeLowerBase) : rangeLowerBase;
+    const rangeUpper = stableIndex === 0 ? safeInvert(rangeUpperBase) : rangeUpperBase;
+    const rangeReady = Number.isFinite(rangeLower) && Number.isFinite(rangeUpper);
+    const rangeMin = rangeReady ? Math.min(rangeLower, rangeUpper) : null;
+    const rangeMax = rangeReady ? Math.max(rangeLower, rangeUpper) : null;
+
+    const currentPriceText = Number.isFinite(currentPrice)
+        ? `${formatPrice(currentPrice)}${quoteSymbol ? ` ${quoteSymbol}` : ''}`
+        : '--';
+    const rangeText = rangeReady
+        ? `${formatPrice(rangeMin)} ~ ${formatPrice(rangeMax)}${quoteSymbol ? ` ${quoteSymbol}` : ''}`
+        : '--';
+    const pairMetaText = pairLabel ? `${pairLabel} · ` : '';
 
     return (
         <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
@@ -163,19 +224,15 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
             <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-[11px] text-zinc-600 dark:border-white/10 dark:bg-[#0f1116] dark:text-white/60">
                 <div className="grid grid-cols-3 gap-2">
                     <div>
-                        <div className="text-zinc-500 dark:text-white/40">Tick</div>
-                        <div className="mt-0.5 font-semibold text-zinc-900 dark:text-white/80 tabular-nums">
-                            {position?.current_tick ?? 0}
-                        </div>
+                        <div className="text-zinc-500 dark:text-white/40">现价</div>
+                        <div className="mt-0.5 font-semibold text-zinc-900 dark:text-white/80 tabular-nums">{currentPriceText}</div>
                         <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
-                            ±{Number(position?.range_percent || 0).toFixed(1)}%
+                            {pairMetaText}±{Number(position?.range_percent || 0).toFixed(1)}%
                         </div>
                     </div>
                     <div>
-                        <div className="text-zinc-500 dark:text-white/40">区间</div>
-                        <div className="mt-0.5 font-semibold text-zinc-900 dark:text-white/80 tabular-nums">
-                            {position?.tick_lower ?? 0} ~ {position?.tick_upper ?? 0}
-                        </div>
+                        <div className="text-zinc-500 dark:text-white/40">价格区间</div>
+                        <div className="mt-0.5 font-semibold text-zinc-900 dark:text-white/80 tabular-nums">{rangeText}</div>
                         <div className={`mt-0.5 text-[11px] ${position?.in_range ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300'}`}>
                             {position?.in_range ? '区间内' : '超范围'}
                         </div>
