@@ -1,5 +1,6 @@
 export async function fetchRealtimePositions({ apiBaseUrl, initData, signal }) {
-    const url = `${apiBaseUrl.replace(/\/$/, '')}/api/realtime_positions`;
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/realtime_positions`;
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

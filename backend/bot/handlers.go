@@ -44,13 +44,13 @@ func (b *Bot) handleStart(message *tgbotapi.Message, user *models.User) {
 	// 添加授权状态
 	text += b.formatAccessStatus(user)
 
-	// If configured, show an explicit Mini App入口（除了 chat menu button 之外）
+	// If configured, show Mini App入口按钮
 	if config.AppConfig != nil {
 		url := strings.TrimSpace(config.AppConfig.TelegramWebAppURL)
 		if url != "" {
 			msg := tgbotapi.NewMessage(message.Chat.ID, text)
 			msg.ParseMode = "Markdown"
-			msg.ReplyMarkup = newWebAppInlineKeyboardMarkup("🚀 打开实时仓位", url)
+			msg.ReplyMarkup = newWebAppInlineKeyboardMarkup("实时仓位", url)
 			if _, err := b.api.Send(msg); err != nil {
 				log.Printf("Error sending start message with webapp button: %v", err)
 			}
@@ -86,6 +86,19 @@ func (b *Bot) handleHelp(message *tgbotapi.Message, user *models.User) {
 4. 使用 /positions 查看和管理您的仓位
 
 如需支持，请联系 @yoursupport`
+
+	if config.AppConfig != nil {
+		url := strings.TrimSpace(config.AppConfig.TelegramWebAppURL)
+		if url != "" {
+			msg := tgbotapi.NewMessage(message.Chat.ID, text)
+			msg.ParseMode = "Markdown"
+			msg.ReplyMarkup = newWebAppInlineKeyboardMarkup("实时仓位", url)
+			if _, err := b.api.Send(msg); err != nil {
+				log.Printf("Error sending help message with webapp button: %v", err)
+			}
+			return
+		}
+	}
 
 	b.sendMessage(message.Chat.ID, text)
 }

@@ -53,6 +53,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    ports:
+      - "8080:8080"
     networks:
       - tglpbot-network
     logging:
@@ -68,4 +70,3 @@ networks:
 volumes:
   mysql_data:
   redis_data:
-

@@ -15,5 +15,28 @@ VITE_API_BASE_URL=http://localhost:8080
 
 ## 部署
 
-部署到 Vercel 后，将部署地址填到后端的 `TELEGRAM_WEBAPP_URL`（`backend/.env`）。
+1) 部署到 Vercel 后，将 *Production 域名*（建议用 `xxx.vercel.app` 或自定义域名，避免使用带随机后缀的单次 Deployment URL）填到后端的 `TELEGRAM_WEBAPP_URL`（`backend/.env`）。
 
+> 如果是把整个仓库导入 Vercel，请在 Project Settings 里把 Root Directory 设为 `miniapp/`。
+
+2) 配置 Mini App 调用后端 API 的方式（二选一）：
+
+**方式 A（推荐，后端有 HTTPS 域名）**：在 Vercel 环境变量设置
+
+```bash
+VITE_API_BASE_URL=https://<你的后端域名>
+```
+
+**方式 B（后端只有 HTTP/端口）**：使用 Vercel Function 代理（`miniapp/api/realtime_positions.js`）
+
+```bash
+BACKEND_API_BASE_URL=http://<你的服务器IP>:8080
+```
+
+> 方式 B 不要求后端支持 HTTPS；浏览器只访问 Vercel（HTTPS），由 Vercel 服务器转发到后端（HTTP）。
+> 可用 `https://<你的Vercel域名>/api/config` 快速验证代理是否连通后端。
+
+3) 在 @BotFather 为你的 Bot 配置 WebApp 允许域名（`/setdomain`），填你的 Vercel/自定义域名；否则 WebApp 按钮可能打不开。
+
+常见报错排查：
+- 页面提示 `DEPLOYMENT_NOT_FOUND`：`TELEGRAM_WEBAPP_URL` 指向了不存在/已删除的 Vercel 部署链接，请换成稳定的 Production 域名。

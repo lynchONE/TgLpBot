@@ -14,8 +14,9 @@ import (
 
 type Config struct {
 	// Telegram
-	TelegramBotToken  string
-	TelegramWebAppURL string
+	TelegramBotToken       string
+	TelegramWebAppURL      string
+	TelegramMenuButtonMode string // commands|default|web_app
 
 	// Access Control
 	AdminWalletAddress string
@@ -111,8 +112,9 @@ func LoadConfig() error {
 
 	AppConfig = &Config{
 		// Telegram
-		TelegramBotToken:  getEnv("TELEGRAM_BOT_TOKEN", ""),
-		TelegramWebAppURL: strings.TrimSpace(getEnv("TELEGRAM_WEBAPP_URL", "")),
+		TelegramBotToken:       getEnv("TELEGRAM_BOT_TOKEN", ""),
+		TelegramWebAppURL:      normalizeTelegramWebAppURL(getEnv("TELEGRAM_WEBAPP_URL", "")),
+		TelegramMenuButtonMode: normalizeTelegramMenuButtonMode(getEnv("TELEGRAM_MENU_BUTTON_MODE", "commands")),
 
 		// Access Control
 		AdminWalletAddress: strings.TrimSpace(getEnv("ADMIN_WALLET_ADDRESS", "")),
@@ -196,6 +198,7 @@ func LoadConfig() error {
 	log.Println("📝 配置信息:")
 	log.Printf("   - Telegram Bot Token: %s", maskString(AppConfig.TelegramBotToken))
 	log.Printf("   - Telegram WebApp URL: %s", AppConfig.TelegramWebAppURL)
+	log.Printf("   - Telegram Menu Button Mode: %s", AppConfig.TelegramMenuButtonMode)
 	log.Printf("   - Admin Wallet Address: %s", AppConfig.AdminWalletAddress)
 	log.Printf("   - Uniswap V4 PoolManager: %s", AppConfig.UniswapV4PoolManagerAddress)
 	log.Printf("   - Uniswap V4 StateView: %s", AppConfig.UniswapV4StateViewAddress)
@@ -217,6 +220,34 @@ func LoadConfig() error {
 	log.Println("========================================")
 
 	return nil
+}
+
+func normalizeTelegramWebAppURL(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
+	}
+	lower := strings.ToLower(v)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		return v
+	}
+	if strings.HasPrefix(lower, "localhost") || strings.HasPrefix(lower, "127.0.0.1") || strings.HasPrefix(lower, "0.0.0.0") {
+		return "http://" + v
+	}
+	return "https://" + v
+}
+
+func normalizeTelegramMenuButtonMode(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	switch v {
+	case "commands", "default", "web_app":
+		return v
+	case "":
+		return "commands"
+	default:
+		log.Printf("⚠️  Unknown TELEGRAM_MENU_BUTTON_MODE=%q; fallback to \"commands\"", v)
+		return "commands"
+	}
 }
 
 // maskString masks sensitive string for logging

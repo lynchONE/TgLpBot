@@ -112,29 +112,44 @@ func (b *Bot) setCommands() error {
 	return nil
 }
 
-type webAppMenuButton struct {
-	Type   string `json:"type"`
-	Text   string `json:"text"`
-	WebApp struct {
-		URL string `json:"url"`
-	} `json:"web_app"`
+type chatMenuButton struct {
+	Type   string      `json:"type"`
+	Text   string      `json:"text,omitempty"`
+	WebApp *webAppInfo `json:"web_app,omitempty"`
 }
 
 func (b *Bot) setMenuButton() error {
 	if config.AppConfig == nil {
 		return nil
 	}
-	url := strings.TrimSpace(config.AppConfig.TelegramWebAppURL)
-	if url == "" {
-		log.Println("TELEGRAM_WEBAPP_URL not set; skip setting chat menu button")
-		return nil
+
+	mode := strings.ToLower(strings.TrimSpace(config.AppConfig.TelegramMenuButtonMode))
+	if mode == "" {
+		mode = "commands"
 	}
 
-	btn := webAppMenuButton{
-		Type: "web_app",
-		Text: "实时仓位",
+	var btn any
+	switch mode {
+	case "web_app":
+		url := strings.TrimSpace(config.AppConfig.TelegramWebAppURL)
+		if url == "" {
+			log.Println("TELEGRAM_WEBAPP_URL not set; fallback to commands menu button")
+			btn = chatMenuButton{Type: "commands"}
+		} else {
+			btn = chatMenuButton{
+				Type:   "web_app",
+				Text:   "实时仓位",
+				WebApp: &webAppInfo{URL: url},
+			}
+		}
+	case "default":
+		btn = chatMenuButton{Type: "default"}
+	case "commands":
+		btn = chatMenuButton{Type: "commands"}
+	default:
+		log.Printf("Unknown TELEGRAM_MENU_BUTTON_MODE=%q; fallback to commands", mode)
+		btn = chatMenuButton{Type: "commands"}
 	}
-	btn.WebApp.URL = url
 
 	params := tgbotapi.Params{}
 	if err := params.AddInterface("menu_button", btn); err != nil {
@@ -237,13 +252,24 @@ func (b *Bot) sendMessage(chatID int64, text string) (tgbotapi.Message, error) {
 }
 
 // sendMessageWithKeyboard sends a message with inline keyboard
-func (b *Bot) sendMessageWithKeyboard(chatID int64, text string, keyboard tgbotapi.InlineKeyboardMarkup) {
+func (b *Bot) sendMessageWithKeyboard(chatID int64, text string, replyMarkup any) {
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = "Markdown"
-	msg.ReplyMarkup = keyboard
+	msg.ReplyMarkup = replyMarkup
 	if _, err := b.api.Send(msg); err != nil {
 		log.Printf("Error sending message: %v", err)
 	}
+}
+
+func (b *Bot) editMessageReplyMarkup(chatID int64, messageID int, replyMarkup any) error {
+	params := tgbotapi.Params{}
+	params.AddFirstValid("chat_id", chatID, "")
+	params.AddNonZero("message_id", messageID)
+	if err := params.AddInterface("reply_markup", replyMarkup); err != nil {
+		return err
+	}
+	_, err := b.api.MakeRequest("editMessageReplyMarkup", params)
+	return err
 }
 
 // handleCallbackQuery handles callback queries from inline keyboards

@@ -1,8 +1,10 @@
 package bot
 
 import (
+	"TgLpBot/config"
 	"TgLpBot/models"
 	"fmt"
+	"strings"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -16,7 +18,7 @@ func (b *Bot) formatTaskCardWithRefresh(task *models.StrategyTask) string {
 }
 
 // taskKeyboardWithRefresh adds a refresh control button
-func (b *Bot) taskKeyboardWithRefresh(task *models.StrategyTask) tgbotapi.InlineKeyboardMarkup {
+func (b *Bot) taskKeyboardWithRefresh(task *models.StrategyTask) any {
 	idStr := fmt.Sprintf("%d", task.ID)
 
 	stopText := "🛑 停止任务"
@@ -28,7 +30,7 @@ func (b *Bot) taskKeyboardWithRefresh(task *models.StrategyTask) tgbotapi.Inline
 
 	stopLossText := fmt.Sprintf("⚡ 秒止损：%s", boolToOnOff(task.StopLossEnabled))
 	reinvestText := fmt.Sprintf("🔁 复投：%s", boolToOnOff(task.AutoReinvest))
-	return tgbotapi.NewInlineKeyboardMarkup(
+	base := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(stopText, "task_stop_"+idStr),
 			tgbotapi.NewInlineKeyboardButtonData("⏸️ 停止刷新", "task_stop_refresh_"+idStr),
@@ -42,4 +44,9 @@ func (b *Bot) taskKeyboardWithRefresh(task *models.StrategyTask) tgbotapi.Inline
 			tgbotapi.NewInlineKeyboardButtonData("🧹 兑换残余", "task_swap_dust_"+idStr),
 		),
 	)
+
+	if config.AppConfig == nil || strings.TrimSpace(config.AppConfig.TelegramWebAppURL) == "" {
+		return base
+	}
+	return newInlineKeyboardMarkupWithWebAppRow(base, "实时仓位", config.AppConfig.TelegramWebAppURL)
 }

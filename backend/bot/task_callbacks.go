@@ -59,12 +59,9 @@ func (b *Bot) handleTaskStopRefresh(query *tgbotapi.CallbackQuery, user *models.
 	if err == nil {
 		task, err := b.taskService.GetByID(user.ID, taskID)
 		if err == nil {
-			editKeyboard := tgbotapi.NewEditMessageReplyMarkup(
-				query.Message.Chat.ID,
-				query.Message.MessageID,
-				b.taskKeyboard(task),
-			)
-			b.api.Send(editKeyboard)
+			if err := b.editMessageReplyMarkup(query.Message.Chat.ID, query.Message.MessageID, b.taskKeyboard(task)); err != nil {
+				log.Printf("[Bot] Failed to update task keyboard: %v", err)
+			}
 		}
 	}
 }
@@ -204,12 +201,9 @@ func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 	b.api.Send(editMsg)
 
 	// 更新按钮
-	editKeyboard := tgbotapi.NewEditMessageReplyMarkup(
-		query.Message.Chat.ID,
-		query.Message.MessageID,
-		b.taskKeyboard(task),
-	)
-	b.api.Send(editKeyboard)
+	if err := b.editMessageReplyMarkup(query.Message.Chat.ID, query.Message.MessageID, b.taskKeyboard(task)); err != nil {
+		log.Printf("[Bot] Failed to update task keyboard: %v", err)
+	}
 }
 
 func (b *Bot) handleTaskToggleReinvest(query *tgbotapi.CallbackQuery, user *models.User) {
@@ -243,12 +237,9 @@ func (b *Bot) handleTaskToggleReinvest(query *tgbotapi.CallbackQuery, user *mode
 	editMsg.DisableWebPagePreview = true
 	b.api.Send(editMsg)
 
-	editKeyboard := tgbotapi.NewEditMessageReplyMarkup(
-		query.Message.Chat.ID,
-		query.Message.MessageID,
-		b.taskKeyboard(task),
-	)
-	b.api.Send(editKeyboard)
+	if err := b.editMessageReplyMarkup(query.Message.Chat.ID, query.Message.MessageID, b.taskKeyboard(task)); err != nil {
+		log.Printf("[Bot] Failed to update task keyboard: %v", err)
+	}
 }
 
 func (b *Bot) handleTaskToggleStopLoss(query *tgbotapi.CallbackQuery, user *models.User) {
@@ -282,12 +273,9 @@ func (b *Bot) handleTaskToggleStopLoss(query *tgbotapi.CallbackQuery, user *mode
 	editMsg.DisableWebPagePreview = true
 	b.api.Send(editMsg)
 
-	editKeyboard := tgbotapi.NewEditMessageReplyMarkup(
-		query.Message.Chat.ID,
-		query.Message.MessageID,
-		b.taskKeyboard(task),
-	)
-	b.api.Send(editKeyboard)
+	if err := b.editMessageReplyMarkup(query.Message.Chat.ID, query.Message.MessageID, b.taskKeyboard(task)); err != nil {
+		log.Printf("[Bot] Failed to update task keyboard: %v", err)
+	}
 }
 
 func (b *Bot) handleTaskSetSlippage(query *tgbotapi.CallbackQuery, user *models.User) {
@@ -380,12 +368,9 @@ func (b *Bot) handleTaskSwapDust(query *tgbotapi.CallbackQuery, user *models.Use
 	editMsg.DisableWebPagePreview = true
 	b.api.Send(editMsg)
 
-	editKeyboard := tgbotapi.NewEditMessageReplyMarkup(
-		query.Message.Chat.ID,
-		query.Message.MessageID,
-		b.taskKeyboard(task),
-	)
-	b.api.Send(editKeyboard)
+	if err := b.editMessageReplyMarkup(query.Message.Chat.ID, query.Message.MessageID, b.taskKeyboard(task)); err != nil {
+		log.Printf("[Bot] Failed to update task keyboard: %v", err)
+	}
 }
 
 func (b *Bot) handleTaskSetStopLossDelay(query *tgbotapi.CallbackQuery, user *models.User) {

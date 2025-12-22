@@ -111,13 +111,10 @@ func (b *Bot) refreshTaskCard(session *AutoRefreshSession) {
 		return
 	}
 
-	// Update keyboard
-	editKeyboard := tgbotapi.NewEditMessageReplyMarkup(
-		session.ChatID,
-		session.MessageID,
-		b.taskKeyboardWithRefresh(task),
-	)
-	b.api.Send(editKeyboard)
+	// Update keyboard (needs custom markup to support WebApp button)
+	if err := b.editMessageReplyMarkup(session.ChatID, session.MessageID, b.taskKeyboardWithRefresh(task)); err != nil {
+		log.Printf("[Bot] Failed to refresh task keyboard: %v", err)
+	}
 
 	log.Printf("[Bot] Refreshed task #%d card", session.TaskID)
 }

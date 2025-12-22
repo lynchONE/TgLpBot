@@ -3,7 +3,32 @@ import PositionCard from './components/PositionCard.jsx';
 import { fetchRealtimePositions } from './lib/api';
 import { getTelegramWebApp } from './lib/telegram';
 
-const defaultApiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+function resolveApiBaseUrl() {
+    const queryApiBase = new URLSearchParams(window.location.search).get('apiBaseUrl');
+    if (queryApiBase && queryApiBase.trim()) return queryApiBase.trim();
+
+    const envBase = String(import.meta.env.VITE_API_BASE_URL || '').trim();
+    if (envBase) {
+        try {
+            const pageProto = window.location.protocol;
+            const envProto = new URL(envBase).protocol;
+            if (pageProto === 'https:' && envProto === 'http:') {
+                return '';
+            }
+        } catch {
+            // ignore URL parse errors and keep envBase as-is
+        }
+        return envBase;
+    }
+
+    const host = window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') {
+        return 'http://localhost:8080';
+    }
+
+    // Production default: same-origin `/api/*` (e.g. via Vercel Function proxy)
+    return '';
+}
 
 function useInitData() {
     const [initData, setInitData] = useState('');
@@ -39,7 +64,7 @@ export default function App() {
     const bnbBalance = data?.wallet?.bnb_balance || '0.000000';
     const positions = data?.positions || [];
 
-    const apiBaseUrl = useMemo(() => defaultApiBaseUrl, []);
+    const apiBaseUrl = useMemo(() => resolveApiBaseUrl(), []);
 
     useEffect(() => {
         if (!initData) return;

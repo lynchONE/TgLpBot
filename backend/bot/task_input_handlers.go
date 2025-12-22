@@ -4,6 +4,7 @@ import (
 	"TgLpBot/database"
 	"TgLpBot/models"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 
@@ -93,12 +94,9 @@ func (b *Bot) handleTaskRebalanceTimeoutInput(message *tgbotapi.Message, user *m
 			editMsg.DisableWebPagePreview = true
 			b.api.Send(editMsg)
 
-			editKeyboard := tgbotapi.NewEditMessageReplyMarkup(
-				chatID,
-				cardMsgID,
-				b.taskKeyboard(task),
-			)
-			b.api.Send(editKeyboard)
+			if err := b.editMessageReplyMarkup(chatID, cardMsgID, b.taskKeyboard(task)); err != nil {
+				log.Printf("[Bot] Failed to update task keyboard: %v", err)
+			}
 			return
 		}
 	}

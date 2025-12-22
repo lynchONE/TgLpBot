@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"TgLpBot/config"
 	"TgLpBot/models"
 	"fmt"
 	"log"
@@ -183,7 +184,7 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 	)
 }
 
-func (b *Bot) taskKeyboard(task *models.StrategyTask) tgbotapi.InlineKeyboardMarkup {
+func (b *Bot) taskKeyboard(task *models.StrategyTask) any {
 	idStr := fmt.Sprintf("%d", task.ID)
 
 	stopText := "🛑 停止任务"
@@ -195,7 +196,7 @@ func (b *Bot) taskKeyboard(task *models.StrategyTask) tgbotapi.InlineKeyboardMar
 
 	stopLossText := fmt.Sprintf("⚡ 秒止损：%s", boolToOnOff(task.StopLossEnabled))
 	reinvestText := fmt.Sprintf("🔁 复投：%s", boolToOnOff(task.AutoReinvest))
-	return tgbotapi.NewInlineKeyboardMarkup(
+	base := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(stopText, "task_stop_"+idStr),
 		),
@@ -208,4 +209,9 @@ func (b *Bot) taskKeyboard(task *models.StrategyTask) tgbotapi.InlineKeyboardMar
 			tgbotapi.NewInlineKeyboardButtonData("🧹 兑换残余", "task_swap_dust_"+idStr),
 		),
 	)
+
+	if config.AppConfig == nil || strings.TrimSpace(config.AppConfig.TelegramWebAppURL) == "" {
+		return base
+	}
+	return newInlineKeyboardMarkupWithWebAppRow(base, "实时仓位", config.AppConfig.TelegramWebAppURL)
 }
