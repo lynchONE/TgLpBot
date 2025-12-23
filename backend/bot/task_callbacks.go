@@ -244,6 +244,8 @@ func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 	task, _ = b.taskService.GetByID(user.ID, taskID)
 	finalText := "✅ *任务已停止* (流动性已撤出)\n" + txLinksText + b.formatTaskCard(task)
 
+	log.Printf("[Bot] Final message for task #%d (txLinksText len=%d): %s", taskID, len(txLinksText), txLinksText)
+
 	editMsg := tgbotapi.NewEditMessageText(
 		query.Message.Chat.ID,
 		query.Message.MessageID,
@@ -251,7 +253,11 @@ func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 	)
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
-	b.api.Send(editMsg)
+	if resp, err := b.api.Send(editMsg); err != nil {
+		log.Printf("[Bot] Failed to edit message for task #%d: %v", taskID, err)
+	} else {
+		log.Printf("[Bot] Message edited successfully for task #%d, msgID=%d", taskID, resp.MessageID)
+	}
 
 	// 更新按钮
 	if err := b.editMessageReplyMarkup(query.Message.Chat.ID, query.Message.MessageID, b.taskKeyboard(task)); err != nil {
