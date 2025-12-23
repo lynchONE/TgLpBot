@@ -26,12 +26,18 @@ const normalizeSymbol = (value) => String(value || '').trim().toUpperCase();
 
 const isStableSymbol = (symbol) => STABLE_SYMBOLS.has(normalizeSymbol(symbol));
 
-const priceFromTick = (tick) => {
+const priceFromTick = (tick, decimals0 = 18, decimals1 = 18) => {
     const n = Number(tick);
     if (!Number.isFinite(n)) return null;
+    const dec0 = Number(decimals0);
+    const dec1 = Number(decimals1);
+    if (!Number.isFinite(dec0) || !Number.isFinite(dec1)) return null;
     const v = Math.pow(1.0001, n);
     if (!Number.isFinite(v)) return null;
-    return v;
+    const scale = Math.pow(10, dec0 - dec1);
+    const adjusted = v * scale;
+    if (!Number.isFinite(adjusted)) return null;
+    return adjusted;
 };
 
 const safeInvert = (value) => {
@@ -41,13 +47,27 @@ const safeInvert = (value) => {
 };
 
 const formatPrice = (value) => {
-    if (!Number.isFinite(value)) return '--';
-    const abs = Math.abs(value);
-    if (abs >= 1000) return value.toFixed(2);
-    if (abs >= 100) return value.toFixed(3);
-    if (abs >= 1) return value.toFixed(4);
-    if (abs >= 0.01) return value.toFixed(6);
-    return value.toFixed(8);
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '--';
+    if (n === 0) return '0';
+    const sign = n < 0 ? '-' : '';
+    let s = Math.abs(n).toFixed(18).replace(/\.?0+$/, '');
+    if (!s.includes('.')) return `${sign}${s}`;
+    const [intPart, fracRaw] = s.split('.');
+    const frac = fracRaw || '';
+    let nonZero = 0;
+    let cut = frac.length;
+    for (let i = 0; i < frac.length; i++) {
+        if (frac[i] !== '0') {
+            nonZero += 1;
+            if (nonZero === 2) {
+                cut = i + 1;
+                break;
+            }
+        }
+    }
+    const trimmed = frac.slice(0, cut);
+    return trimmed ? `${sign}${intPart}.${trimmed}` : `${sign}${intPart}`;
 };
 
 const pillClassForStatus = (label) => {
@@ -89,11 +109,23 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
     const openPool = () => poolLink && openLink(poolLink);
     const openToken = (addr) => addr && openLink(`https://bscscan.com/token/${addr}`);
 
-    const currentPriceBase = useMemo(() => priceFromTick(position?.current_tick), [position?.current_tick]);
+    const decimals0 = useMemo(() => Number(token0?.decimals ?? 18), [token0?.decimals]);
+    const decimals1 = useMemo(() => Number(token1?.decimals ?? 18), [token1?.decimals]);
+
+    const currentPriceBase = useMemo(
+        () => priceFromTick(position?.current_tick, decimals0, decimals1),
+        [position?.current_tick, decimals0, decimals1]
+    );
     const currentPrice = stableIndex === 0 ? safeInvert(currentPriceBase) : currentPriceBase;
 
-    const rangeLowerBase = useMemo(() => priceFromTick(position?.tick_lower), [position?.tick_lower]);
-    const rangeUpperBase = useMemo(() => priceFromTick(position?.tick_upper), [position?.tick_upper]);
+    const rangeLowerBase = useMemo(
+        () => priceFromTick(position?.tick_lower, decimals0, decimals1),
+        [position?.tick_lower, decimals0, decimals1]
+    );
+    const rangeUpperBase = useMemo(
+        () => priceFromTick(position?.tick_upper, decimals0, decimals1),
+        [position?.tick_upper, decimals0, decimals1]
+    );
     const rangeLower = stableIndex === 0 ? safeInvert(rangeLowerBase) : rangeLowerBase;
     const rangeUpper = stableIndex === 0 ? safeInvert(rangeUpperBase) : rangeUpperBase;
     const rangeReady = Number.isFinite(rangeLower) && Number.isFinite(rangeUpper);

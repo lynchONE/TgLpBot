@@ -4,51 +4,14 @@ import (
 	"TgLpBot/blockchain"
 	"TgLpBot/config"
 	"TgLpBot/models"
+	"TgLpBot/services"
 	"fmt"
 	"log"
-	"math"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
-
-// tickToPrice 将 tick 转换为价格
-// 价格 = 1.0001 ^ tick
-func tickToPrice(tick int) float64 {
-	return math.Pow(1.0001, float64(tick))
-}
-
-var stableSymbols = map[string]struct{}{
-	"USDT": {},
-	"USDC": {},
-	"BUSD": {},
-	"DAI":  {},
-}
-
-func isStableSymbol(symbol string) bool {
-	_, ok := stableSymbols[strings.ToUpper(strings.TrimSpace(symbol))]
-	return ok
-}
-
-func formatPriceValue(price float64) string {
-	if math.IsNaN(price) || math.IsInf(price, 0) {
-		return "--"
-	}
-	abs := math.Abs(price)
-	switch {
-	case abs >= 1000:
-		return fmt.Sprintf("%.2f", price)
-	case abs >= 100:
-		return fmt.Sprintf("%.3f", price)
-	case abs >= 1:
-		return fmt.Sprintf("%.4f", price)
-	case abs >= 0.01:
-		return fmt.Sprintf("%.6f", price)
-	default:
-		return fmt.Sprintf("%.8f", price)
-	}
-}
 
 func getCurrentTickForTask(task *models.StrategyTask) (int, error) {
 	version := strings.ToLower(strings.TrimSpace(task.PoolVersion))
@@ -74,50 +37,30 @@ func getCurrentTickForTask(task *models.StrategyTask) (int, error) {
 	}
 }
 
-func formatCurrentPriceInfo(task *models.StrategyTask) string {
+func buildPriceDisplayLines(task *models.StrategyTask) (string, string) {
+	currentLine := "💵 当前价格：--"
+	rangeLine := "💹 价格范围：--"
+
 	if task == nil {
-		return "💵 当前价格：--"
+		return currentLine, rangeLine
 	}
 
 	currentTick, err := getCurrentTickForTask(task)
 	if err != nil {
 		log.Printf("[TaskView] Current tick query failed for task #%d: %v", task.ID, err)
-		return "💵 当前价格：--"
-	}
-
-	price := tickToPrice(currentTick)
-	if price <= 0 || math.IsNaN(price) || math.IsInf(price, 0) {
-		return "💵 当前价格：--"
-	}
-
-	token0 := strings.TrimSpace(task.Token0Symbol)
-	token1 := strings.TrimSpace(task.Token1Symbol)
-	token0Upper := strings.ToUpper(token0)
-	token1Upper := strings.ToUpper(token1)
-
-	base := token0
-	quote := token1
-	if isStableSymbol(token0Upper) {
-		if price == 0 {
-			return "💵 当前价格：--"
-		}
-		price = 1.0 / price
-		base = token1
-		quote = token0
-	} else if isStableSymbol(token1Upper) {
-		base = token0
-		quote = token1
 	} else {
-		return "💵 当前价格：--"
+		price, base, quote, ok := services.BuildPriceDisplay(task, currentTick)
+		if ok {
+			currentLine = fmt.Sprintf("💵 当前价格：1 %s ≈ %s %s", base, services.FormatPriceValue(price), quote)
+		}
 	}
 
-	if strings.TrimSpace(base) == "" {
-		base = "-"
+	lower, upper, _, quote, ok := services.BuildRangeDisplay(task, task.TickLower, task.TickUpper)
+	if ok {
+		rangeLine = fmt.Sprintf("💹 价格范围：%s - %s %s", services.FormatPriceValue(lower), services.FormatPriceValue(upper), quote)
 	}
-	if strings.TrimSpace(quote) == "" {
-		quote = "-"
-	}
-	return fmt.Sprintf("💵 当前价格：1 %s ≈ %s %s", base, formatPriceValue(price), quote)
+
+	return currentLine, rangeLine
 }
 
 func formatTaskStatus(status models.StrategyStatus) (string, string) {
@@ -213,51 +156,7 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 		positionInfo = fmt.Sprintf("\n🎫 头寸 ID：`%s`", v4TokenId)
 	}
 
-	// 计算价格范围（始终显示非 USDT 币种以 USDT 计价）
-	// tick 表示 token1/token0 的价格
-	priceLower := tickToPrice(task.TickLower)
-	priceUpper := tickToPrice(task.TickUpper)
-
-	// 判断哪个是 USDT
-	var priceRangeInfo string
-	token0Upper := strings.ToUpper(strings.TrimSpace(task.Token0Symbol))
-	token1Upper := strings.ToUpper(strings.TrimSpace(task.Token1Symbol))
-	quoteSymbol := "USDT"
-	if isStableSymbol(token0Upper) {
-		quoteSymbol = token0Upper
-	} else if isStableSymbol(token1Upper) {
-		quoteSymbol = token1Upper
-	}
-
-	log.Printf("[TaskView] Task #%d: token0=%s token1=%s priceLower=%.6f priceUpper=%.6f",
-		task.ID, token0Upper, token1Upper, priceLower, priceUpper)
-
-	if math.IsNaN(priceLower) || math.IsInf(priceLower, 0) || math.IsNaN(priceUpper) || math.IsInf(priceUpper, 0) {
-		priceRangeInfo = "💹 价格范围：--"
-	} else if isStableSymbol(token0Upper) {
-		// token0 是 USDT，price = token1/USDT，需要取倒数
-		if priceLower > 0 && priceUpper > 0 {
-			priceInUSDTLower := 1.0 / priceUpper
-			priceInUSDTUpper := 1.0 / priceLower
-			if priceInUSDTLower > priceInUSDTUpper {
-				priceInUSDTLower, priceInUSDTUpper = priceInUSDTUpper, priceInUSDTLower
-			}
-			log.Printf("[TaskView] Task #%d: token0=USDT, inverted price range: %.6f - %.6f", task.ID, priceInUSDTLower, priceInUSDTUpper)
-			priceRangeInfo = fmt.Sprintf("💹 价格范围：%s - %s %s", formatPriceValue(priceInUSDTLower), formatPriceValue(priceInUSDTUpper), quoteSymbol)
-		} else {
-			priceRangeInfo = "💹 价格范围：计算错误"
-		}
-	} else if isStableSymbol(token1Upper) {
-		// token1 是 USDT，price = USDT/token0，直接使用
-		if priceLower > priceUpper {
-			priceLower, priceUpper = priceUpper, priceLower
-		}
-		log.Printf("[TaskView] Task #%d: token1=USDT, direct price range: %.6f - %.6f", task.ID, priceLower, priceUpper)
-		priceRangeInfo = fmt.Sprintf("💹 价格范围：%s - %s %s", formatPriceValue(priceLower), formatPriceValue(priceUpper), quoteSymbol)
-	} else {
-		// 都不是稳定币，避免误导
-		priceRangeInfo = "💹 价格范围：--"
-	}
+	currentPriceInfo, priceRangeInfo := buildPriceDisplayLines(task)
 
 	rangePctText := ""
 	if task.RangePercentage > 0 {
@@ -288,7 +187,7 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 		pair,
 		shortenHex(task.PoolId),
 		positionInfo,
-		formatCurrentPriceInfo(task),
+		currentPriceInfo,
 		priceRangeInfo,
 		rangePctText,
 		amountLine,

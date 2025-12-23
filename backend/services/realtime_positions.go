@@ -43,6 +43,7 @@ type cachedRealtimePositions struct {
 type cachedTokenMeta struct {
 	symbol   string
 	decimals int
+	expires  time.Time
 }
 
 type cachedV4TokenIDs struct {
@@ -108,6 +109,7 @@ type RealtimePosition struct {
 type RealtimeTokenRow struct {
 	Address  string  `json:"address"`
 	Symbol   string  `json:"symbol"`
+	Decimals int     `json:"decimals"`
 	PriceUSD float64 `json:"price_usd"`
 
 	WalletAmount   string  `json:"wallet_amount"`
@@ -728,25 +730,37 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 
 func (s *RealtimePositionsService) getTokenMeta(addr common.Address) cachedTokenMeta {
 	key := strings.ToLower(addr.Hex())
+	now := time.Now()
 	s.tokenMetaMu.RLock()
-	if m, ok := s.tokenMeta[key]; ok {
+	if m, ok := s.tokenMeta[key]; ok && m.expires.After(now) {
 		s.tokenMetaMu.RUnlock()
 		return m
 	}
 	s.tokenMetaMu.RUnlock()
 
 	symbol := ""
-	decimals := 18
-	if sym, err := blockchain.GetTokenSymbol(addr); err == nil && strings.TrimSpace(sym) != "" {
-		symbol = strings.TrimSpace(sym)
-	} else {
+	decimals := defaultTokenDecimals
+	ttl := 24 * time.Hour
+
+	if blockchain.Client == nil {
 		symbol = addr.Hex()
-	}
-	if dec, err := blockchain.GetTokenDecimals(addr); err == nil && dec > 0 {
-		decimals = int(dec)
+		ttl = 5 * time.Minute
+	} else {
+		if sym, err := blockchain.GetTokenSymbol(addr); err == nil && strings.TrimSpace(sym) != "" {
+			symbol = strings.TrimSpace(sym)
+		} else {
+			symbol = addr.Hex()
+			ttl = 5 * time.Minute
+		}
+		if dec, err := blockchain.GetTokenDecimals(addr); err == nil && dec > 0 {
+			decimals = int(dec)
+		} else {
+			decimals = defaultTokenDecimals
+			ttl = 5 * time.Minute
+		}
 	}
 
-	m := cachedTokenMeta{symbol: symbol, decimals: decimals}
+	m := cachedTokenMeta{symbol: symbol, decimals: decimals, expires: now.Add(ttl)}
 	s.tokenMetaMu.Lock()
 	s.tokenMeta[key] = m
 	s.tokenMetaMu.Unlock()
@@ -761,6 +775,7 @@ func buildTokenRow(token common.Address, meta cachedTokenMeta, priceUSD float64,
 	return RealtimeTokenRow{
 		Address:        token.Hex(),
 		Symbol:         meta.symbol,
+		Decimals:       meta.decimals,
 		PriceUSD:       priceUSD,
 		PriceUSDText:   fmt.Sprintf("$%.4f", priceUSD),
 		WalletAmount:   fmt.Sprintf("%.2f", w),
@@ -842,8 +857,11 @@ func formatOutOfRange(task *models.StrategyTask, tickLower, tickUpper int, curre
 		return "0/0"
 	}
 	threshold := task.ReopenDelaySeconds
-	if currentTick != 0 && currentTick < tickLower && task.StopLossEnabled && task.StopLossDelaySeconds > 0 {
-		threshold = task.StopLossDelaySeconds
+	if currentTick != 0 && task.StopLossEnabled && task.StopLossDelaySeconds > 0 {
+		_, _, _, priceDown := priceDirectionFromTicks(task, tickLower, tickUpper, currentTick)
+		if priceDown {
+			threshold = task.StopLossDelaySeconds
+		}
 	}
 	if threshold <= 0 {
 		return "0/0"

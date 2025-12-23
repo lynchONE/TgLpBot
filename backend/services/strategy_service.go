@@ -125,6 +125,7 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 	log.Printf("[Strategy] 任务 #%d 监控中: Tick %d (范围 %d - %d)", task.ID, currentTick, task.TickLower, task.TickUpper)
 
 	inRange := currentTick >= task.TickLower && currentTick <= task.TickUpper
+	alertLines := formatRangeAlertLines(task, task.TickLower, task.TickUpper, currentTick)
 
 	if inRange {
 		updates := map[string]interface{}{}
@@ -132,8 +133,8 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 		// 如果之前超出范围，现在回到范围内，重置计时并通知用户
 		if task.OutOfRangeSince != nil {
 			updates["out_of_range_since"] = nil
-			s.notify(task.UserID, fmt.Sprintf("✅ 任务 #%d 价格已回到区间范围\nTick: %d (范围: %d - %d)",
-				task.ID, currentTick, task.TickLower, task.TickUpper))
+			s.notify(task.UserID, fmt.Sprintf("✅ 任务 #%d 价格已回到区间范围\n%s\n%s\n%s",
+				task.ID, alertLines.current, alertLines.lower, alertLines.upper))
 			log.Printf("[Strategy] 任务 #%d 价格回到区间，重置再平衡计时", task.ID)
 		}
 
@@ -168,18 +169,18 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 
 	duration := time.Since(*task.OutOfRangeSince)
 
-	// Determine direction (based on stable price if available).
+	// Determine direction (use stable price when possible).
 	_, _, isUp, isDown := priceDirectionFromTicks(task, task.TickLower, task.TickUpper, currentTick)
 
-	// 1. Price > TickUpper (涨破)
+	// 1. Price above range (涨破)
 	if isUp {
 		// 首次检测到涨破，立即通知用户
 		if isFirstTimeOutOfRange {
 			s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 涨破区间上界\n"+
-				"当前 Tick: %d\n"+
-				"区间上界: %d\n"+
+				"%s\n"+
+				"%s\n"+
 				"如果 %s 内不回到区间，将自动执行再平衡",
-				task.ID, currentTick, task.TickUpper, formatDelayTime(task.ReopenDelaySeconds)))
+				task.ID, alertLines.current, alertLines.upper, formatDelayTime(task.ReopenDelaySeconds)))
 			log.Printf("[Strategy] 任务 #%d 涨破区间，开始再平衡倒计时 %ds", task.ID, task.ReopenDelaySeconds)
 		}
 
@@ -191,7 +192,7 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 		return
 	}
 
-	// 2. Price < TickLower (跌破)
+	// 2. Price below range (跌破)
 	if isDown {
 		if task.StopLossEnabled {
 			// Case A: StopLoss Enabled
@@ -200,16 +201,16 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 				stopLossSec := task.StopLossDelaySeconds
 				if stopLossSec == 0 {
 					s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 跌破区间下界\n"+
-						"当前 Tick: %d\n"+
-						"区间下界: %d\n"+
+						"%s\n"+
+						"%s\n"+
 						"将立即执行止损",
-						task.ID, currentTick, task.TickLower))
+						task.ID, alertLines.current, alertLines.lower))
 				} else {
 					s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 跌破区间下界\n"+
-						"当前 Tick: %d\n"+
-						"区间下界: %d\n"+
+						"%s\n"+
+						"%s\n"+
 						"如果 %s 内不回到区间，将自动执行止损",
-						task.ID, currentTick, task.TickLower, formatDelayTime(stopLossSec)))
+						task.ID, alertLines.current, alertLines.lower, formatDelayTime(stopLossSec)))
 				}
 				log.Printf("[Strategy] 任务 #%d 跌破区间，开始止损倒计时 %ds", task.ID, task.StopLossDelaySeconds)
 			}
@@ -224,10 +225,10 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 			// 首次检测到跌破，立即通知用户
 			if isFirstTimeOutOfRange {
 				s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 跌破区间下界\n"+
-					"当前 Tick: %d\n"+
-					"区间下界: %d\n"+
+					"%s\n"+
+					"%s\n"+
 					"如果 %s 内不回到区间，将自动执行再平衡",
-					task.ID, currentTick, task.TickLower, formatDelayTime(task.ReopenDelaySeconds)))
+					task.ID, alertLines.current, alertLines.lower, formatDelayTime(task.ReopenDelaySeconds)))
 				log.Printf("[Strategy] 任务 #%d 跌破区间，开始再平衡倒计时 %ds", task.ID, task.ReopenDelaySeconds)
 			}
 
