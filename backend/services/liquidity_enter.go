@@ -33,6 +33,106 @@ type EnterResult struct {
 	CurrentLiquidity string
 }
 
+type EntrySwapRequiredError struct {
+	TokenSymbol string
+}
+
+func (e *EntrySwapRequiredError) Error() string {
+	if e == nil || strings.TrimSpace(e.TokenSymbol) == "" {
+		return "entry swap required"
+	}
+	return fmt.Sprintf("entry swap required: pool does not contain USDT (need %s)", strings.TrimSpace(e.TokenSymbol))
+}
+
+type entryTokenCandidate struct {
+	Symbol  string
+	Address common.Address
+}
+
+type entryTokenPlan struct {
+	Token0       common.Address
+	Token1       common.Address
+	EntryToken   common.Address
+	EntrySymbol  string
+	RequiresSwap bool
+}
+
+func entryTokenCandidates() []entryTokenCandidate {
+	if config.AppConfig == nil {
+		return nil
+	}
+	var out []entryTokenCandidate
+	add := func(symbol, addr string) {
+		addr = strings.TrimSpace(addr)
+		if !common.IsHexAddress(addr) {
+			return
+		}
+		out = append(out, entryTokenCandidate{
+			Symbol:  symbol,
+			Address: common.HexToAddress(addr),
+		})
+	}
+	add("USDT", config.AppConfig.USDTAddress)
+	add("USDC", config.AppConfig.USDCAddress)
+	add("WBNB", config.AppConfig.WBNBAddress)
+	return out
+}
+
+func (s *LiquidityService) planEntryToken(task *models.StrategyTask) (*entryTokenPlan, error) {
+	if task == nil {
+		return nil, fmt.Errorf("task is nil")
+	}
+	token0, token1, err := s.resolveTaskTokenAddresses(task)
+	if err != nil {
+		return nil, err
+	}
+	candidates := entryTokenCandidates()
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("no entry token configured")
+	}
+
+	for _, cand := range candidates {
+		if cand.Symbol != "USDT" {
+			continue
+		}
+		if token0 == cand.Address || token1 == cand.Address {
+			return &entryTokenPlan{
+				Token0:       token0,
+				Token1:       token1,
+				EntryToken:   cand.Address,
+				EntrySymbol:  cand.Symbol,
+				RequiresSwap: false,
+			}, nil
+		}
+	}
+
+	for _, cand := range candidates {
+		if cand.Symbol == "USDT" {
+			continue
+		}
+		if token0 == cand.Address || token1 == cand.Address {
+			return &entryTokenPlan{
+				Token0:       token0,
+				Token1:       token1,
+				EntryToken:   cand.Address,
+				EntrySymbol:  cand.Symbol,
+				RequiresSwap: true,
+			}, nil
+		}
+	}
+
+	supported := make([]string, 0, len(candidates))
+	for _, cand := range candidates {
+		if cand.Symbol != "" {
+			supported = append(supported, cand.Symbol)
+		}
+	}
+	if len(supported) == 0 {
+		return nil, fmt.Errorf("pool does not contain a supported entry token")
+	}
+	return nil, fmt.Errorf("pool does not contain a supported entry token (%s)", strings.Join(supported, "/"))
+}
+
 func floatUSDTToWei(amount float64) (*big.Int, error) {
 	if amount <= 0 {
 		return nil, fmt.Errorf("amount must be > 0")
@@ -187,25 +287,16 @@ func (s *LiquidityService) EnterTaskFromUSDT(userID uint, task *models.StrategyT
 		return nil, err
 	}
 
+	if !common.IsHexAddress(config.AppConfig.USDTAddress) {
+		return nil, fmt.Errorf("USDT address not set")
+	}
 	usdtAddr := common.HexToAddress(config.AppConfig.USDTAddress)
-	token0Addr := common.Address{}
-	token1Addr := common.Address{}
-	if common.IsHexAddress(task.Token0Address) {
-		token0Addr = common.HexToAddress(task.Token0Address)
+	plan, err := s.planEntryToken(task)
+	if err != nil {
+		return nil, err
 	}
-	if common.IsHexAddress(task.Token1Address) {
-		token1Addr = common.HexToAddress(task.Token1Address)
-	}
-	if (token0Addr == common.Address{} || token1Addr == common.Address{}) && common.IsHexAddress(task.PoolId) {
-		if c0, c1, err := blockchain.GetV3PoolTokens(common.HexToAddress(task.PoolId)); err == nil {
-			if token0Addr == (common.Address{}) {
-				token0Addr = c0
-			}
-			if token1Addr == (common.Address{}) {
-				token1Addr = c1
-			}
-		}
-	}
+	token0Addr := plan.Token0
+	token1Addr := plan.Token1
 
 	// Capture balance before entering (used for "actual invested" and gas cost).
 	usdtBefore, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
@@ -229,13 +320,31 @@ func (s *LiquidityService) EnterTaskFromUSDT(userID uint, task *models.StrategyT
 		bnbBefore = big.NewInt(0)
 	}
 
+	entryToken := usdtAddr
+	entryAmount := usdtAmount
+	if plan.RequiresSwap {
+		if !task.AllowEntrySwap {
+			return nil, &EntrySwapRequiredError{TokenSymbol: plan.EntrySymbol}
+		}
+		log.Printf("[Liquidity] Entry swap: USDT -> %s amount=%s", plan.EntrySymbol, usdtAmount.String())
+		swapped, err := s.swapExactInViaOKX(privateKey, walletAddr, usdtAddr, plan.EntryToken, usdtAmount, task.SlippageTolerance)
+		if err != nil {
+			return nil, fmt.Errorf("swap USDT to %s failed: %w", plan.EntrySymbol, err)
+		}
+		if swapped == nil || swapped.Sign() <= 0 {
+			return nil, fmt.Errorf("swap USDT to %s returned 0", plan.EntrySymbol)
+		}
+		entryToken = plan.EntryToken
+		entryAmount = swapped
+	}
+
 	version := strings.ToLower(strings.TrimSpace(task.PoolVersion))
 	var res *EnterResult
 	switch version {
 	case "v4":
-		res, err = s.enterV4FromUSDT(privateKey, walletAddr, usdtAddr, usdtAmount, task)
+		res, err = s.enterV4FromToken(privateKey, walletAddr, entryToken, entryAmount, task)
 	default:
-		res, err = s.enterV3FromUSDT(privateKey, walletAddr, usdtAddr, usdtAmount, task)
+		res, err = s.enterV3FromToken(privateKey, walletAddr, entryToken, entryAmount, task)
 	}
 	if err != nil {
 		return nil, err
@@ -300,11 +409,11 @@ func (s *LiquidityService) okxSlippageDecimal(slippagePercent float64) string {
 	return fmt.Sprintf("%.6f", sl)
 }
 
-func (s *LiquidityService) enterV3FromUSDT(
+func (s *LiquidityService) enterV3FromToken(
 	privateKey *ecdsa.PrivateKey,
 	walletAddr common.Address,
-	usdtAddr common.Address,
-	usdtAmount *big.Int,
+	tokenIn common.Address,
+	amountIn *big.Int,
 	task *models.StrategyTask,
 ) (*EnterResult, error) {
 	if !common.IsHexAddress(config.AppConfig.ZapV3Address) {
@@ -352,17 +461,17 @@ func (s *LiquidityService) enterV3FromUSDT(
 
 	zapAddr := common.HexToAddress(config.AppConfig.ZapV3Address)
 
-	if token0 != usdtAddr && token1 != usdtAddr {
-		return nil, fmt.Errorf("V3 pool does not contain USDT")
+	if token0 != tokenIn && token1 != tokenIn {
+		return nil, fmt.Errorf("V3 pool does not contain entry token")
 	}
 
 	// 确定输入金额
 	amount0In := big.NewInt(0)
 	amount1In := big.NewInt(0)
-	if token0 == usdtAddr {
-		amount0In = new(big.Int).Set(usdtAmount)
+	if token0 == tokenIn {
+		amount0In = new(big.Int).Set(amountIn)
 	} else {
-		amount1In = new(big.Int).Set(usdtAmount)
+		amount1In = new(big.Int).Set(amountIn)
 	}
 
 	// 创建 ZapSimple 实例
@@ -375,8 +484,8 @@ func (s *LiquidityService) enterV3FromUSDT(
 	zeroForOne, swapAmount, err := s.calculateOptimalSwapLocal(poolAddr, task.TickLower, task.TickUpper, amount0In, amount1In)
 	if err != nil {
 		log.Printf("[Liquidity] V3 enter: Local calculateOptimalSwap 失败: %v，回退使用一半金额", err)
-		swapAmount = new(big.Int).Div(usdtAmount, big.NewInt(2))
-		zeroForOne = (token0 == usdtAddr)
+		swapAmount = new(big.Int).Div(amountIn, big.NewInt(2))
+		zeroForOne = (token0 == tokenIn)
 	}
 	log.Printf("[Liquidity] V3 enter: 最优 swap: zeroForOne=%v swapAmount=%s", zeroForOne, swapAmount.String())
 
@@ -570,6 +679,10 @@ func (s *LiquidityService) enterV3FromUSDT(
 	}
 
 	// Record transaction
+	tokenOut := token0
+	if tokenIn == token0 {
+		tokenOut = token1
+	}
 	txRecord := models.Transaction{
 		UserID:          task.UserID,
 		TaskID:          task.ID,
@@ -578,15 +691,14 @@ func (s *LiquidityService) enterV3FromUSDT(
 		Status:          models.TxStatusConfirmed,
 		FromAddress:     walletAddr.Hex(),
 		ToAddress:       pmAddr.Hex(),
-		TokenInAddress:  token0.Hex(), // Mainly USDT
-		TokenOutAddress: token1.Hex(), // The other token
-		AmountIn:        amount0In.String(),
+		TokenInAddress:  tokenIn.Hex(),
+		TokenOutAddress: tokenOut.Hex(),
+		AmountIn:        amountIn.String(),
 		AmountOut:       "0", // Initial position doesn't have immediate output
 		BlockNumber:     receipt.BlockNumber.Uint64(),
 		GasUsed:         receipt.GasUsed,
 	}
-	// If token0 is not USDT (unlikely in this bot's context but possible), swap assignments or just log as is.
-	// For "USDT -> Token" style, AmountIn is USDT.
+	// Record entry token and the opposite pool token for reference.
 
 	if err := database.DB.Create(&txRecord).Error; err != nil {
 		log.Printf("[Liquidity] Failed to record transaction: %v", err)
@@ -858,11 +970,11 @@ func (s *LiquidityService) prepareOKXSwapParams(
 	}, nil
 }
 
-func (s *LiquidityService) enterV4FromUSDT(
+func (s *LiquidityService) enterV4FromToken(
 	privateKey *ecdsa.PrivateKey,
 	walletAddr common.Address,
-	usdtAddr common.Address,
-	usdtAmount *big.Int,
+	tokenIn common.Address,
+	amountIn *big.Int,
 	task *models.StrategyTask,
 ) (*EnterResult, error) {
 	if !common.IsHexAddress(config.AppConfig.ZapV4Address) {
@@ -1024,22 +1136,20 @@ func (s *LiquidityService) enterV4FromUSDT(
 	}
 
 	// Determine Token0/Token1 and Amounts
-	// We have USDT. We assume USDT is one of c0 or c1.
+	// We assume entry token is one of c0 or c1.
 	var amount0In, amount1In *big.Int
-	var tokenIn, tokenOut common.Address
+	var tokenOut common.Address
 
-	if c0 == usdtAddr {
-		amount0In = usdtAmount
+	if c0 == tokenIn {
+		amount0In = amountIn
 		amount1In = big.NewInt(0)
-		tokenIn = c0
 		tokenOut = c1
-	} else if c1 == usdtAddr {
+	} else if c1 == tokenIn {
 		amount0In = big.NewInt(0)
-		amount1In = usdtAmount
-		tokenIn = c1
+		amount1In = amountIn
 		tokenOut = c0
 	} else {
-		return nil, fmt.Errorf("V4 pool does not contain USDT")
+		return nil, fmt.Errorf("V4 pool does not contain entry token")
 	}
 
 	// 3. Calculate Optimal Swap
@@ -1065,11 +1175,11 @@ func (s *LiquidityService) enterV4FromUSDT(
 	}
 
 	// 5. Construct ZapInV4 Params
-	// Approve USDT to Zap Contract
-	log.Printf("[Liquidity] DEBUG: About to approve USDT to Zap. usdtAmount=%s zapAddr=%s", usdtAmount.String(), zapAddr.Hex())
-	if err := s.approveToken(privateKey, walletAddr, usdtAddr, zapAddr, usdtAmount); err != nil {
+	// Approve entry token to Zap Contract
+	log.Printf("[Liquidity] DEBUG: About to approve entry token to Zap. amount=%s token=%s zapAddr=%s", amountIn.String(), tokenIn.Hex(), zapAddr.Hex())
+	if err := s.approveToken(privateKey, walletAddr, tokenIn, zapAddr, amountIn); err != nil {
 		log.Printf("[Liquidity] DEBUG: approveToken failed: %v", err)
-		return nil, fmt.Errorf("approve USDT to zap failed: %w", err)
+		return nil, fmt.Errorf("approve entry token to zap failed: %w", err)
 	}
 
 	poolKeySimple := blockchain.PoolKeySimple{
@@ -1157,9 +1267,9 @@ func (s *LiquidityService) enterV4FromUSDT(
 		Status:          models.TxStatusConfirmed,
 		FromAddress:     walletAddr.Hex(),
 		ToAddress:       zapAddr.Hex(),
-		TokenInAddress:  tokenIn.Hex(), // USDT
-		TokenOutAddress: task.PoolId,   // Pool ID
-		AmountIn:        usdtAmount.String(),
+		TokenInAddress:  tokenIn.Hex(),
+		TokenOutAddress: task.PoolId, // Pool ID
+		AmountIn:        amountIn.String(),
 		AmountOut:       "0",
 		BlockNumber:     receipt.BlockNumber.Uint64(),
 		GasUsed:         receipt.GasUsed,

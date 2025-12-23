@@ -3,9 +3,10 @@ package bot
 import (
 	"TgLpBot/database"
 	"TgLpBot/models"
+	"TgLpBot/services"
+	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -76,10 +77,15 @@ func (b *Bot) handleConfirmPosition(query *tgbotapi.CallbackQuery, user *models.
 		return
 	}
 
-	b.sendMessage(query.Message.Chat.ID, "⛓️ 任务已创建，正在用 USDT 开仓...")
+	b.sendMessage(query.Message.Chat.ID, "⛓️ 任务已创建，正在准备开仓...")
 
 	enterRes, err := b.liquidityService.EnterTaskFromUSDT(user.ID, task)
 	if err != nil {
+		var swapErr *services.EntrySwapRequiredError
+		if errors.As(err, &swapErr) {
+			b.promptEntrySwap(query.Message.Chat.ID, task, swapErr.TokenSymbol)
+			return
+		}
 		_ = database.DB.Model(task).Updates(map[string]interface{}{
 			"status":        models.StrategyStatusError,
 			"error_message": fmt.Sprintf("enter failed: %v", err),
@@ -89,35 +95,9 @@ func (b *Bot) handleConfirmPosition(query *tgbotapi.CallbackQuery, user *models.
 		return
 	}
 
-	// 验证并保存 tokenId
-	updates := map[string]interface{}{
-		"current_liquidity": enterRes.CurrentLiquidity,
-		"error_message":     "",
-	}
-
-	// 验证 V3 tokenId
-	v3TokenId := strings.TrimSpace(enterRes.V3TokenID)
-	if v3TokenId != "" && v3TokenId != "0" {
-		updates["v3_position_manager_address"] = enterRes.V3PositionManagerAddress
-		updates["v3_token_id"] = enterRes.V3TokenID
-	}
-
-	// 验证 V4 tokenId
-	v4TokenId := strings.TrimSpace(enterRes.V4TokenID)
-	if v4TokenId != "" && v4TokenId != "0" {
-		updates["v4_token_id"] = enterRes.V4TokenID
-	}
-
-	_ = database.DB.Model(task).Updates(updates).Error
-
-	// Update in-memory task for display
-	task.CurrentLiquidity = enterRes.CurrentLiquidity
-	if v3TokenId != "" && v3TokenId != "0" {
-		task.V3PositionManagerAddress = enterRes.V3PositionManagerAddress
-		task.V3TokenID = enterRes.V3TokenID
-	}
-	if v4TokenId != "" && v4TokenId != "0" {
-		task.V4TokenID = enterRes.V4TokenID
+	if err := b.applyEnterResult(task, enterRes); err != nil {
+		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("更新任务失败：%v", err))
+		return
 	}
 
 	b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("✅ 开仓成功！交易哈希：`%s`", enterRes.TxHash))

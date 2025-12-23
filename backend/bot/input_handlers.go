@@ -6,6 +6,7 @@ import (
 	"TgLpBot/database"
 	"TgLpBot/models"
 	"TgLpBot/services"
+	"errors"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -299,7 +300,11 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 			}
 		}
 		addr := common.HexToAddress(defaultWallet.Address)
-		usdtAddr := common.HexToAddress("0x55d398326f99059fF775485246999027B3197955")
+		usdtAddrStr := "0x55d398326f99059fF775485246999027B3197955"
+		if config.AppConfig != nil && common.IsHexAddress(config.AppConfig.USDTAddress) {
+			usdtAddrStr = config.AppConfig.USDTAddress
+		}
+		usdtAddr := common.HexToAddress(usdtAddrStr)
 		usdtBal, err := blockchain.GetTokenBalance(usdtAddr, addr)
 		if err == nil {
 			usdtFloat := new(big.Float).SetInt(usdtBal)
@@ -466,10 +471,16 @@ func (b *Bot) createPositionTask(chatID int64, user *models.User) {
 		return
 	}
 
-	b.sendMessage(chatID, "⛓️ 任务已创建，正在用 USDT 开仓...")
+	b.sendMessage(chatID, "⛓️ 任务已创建，正在准备开仓...")
 
 	enterRes, err := b.liquidityService.EnterTaskFromUSDT(user.ID, task)
 	if err != nil {
+		var swapErr *services.EntrySwapRequiredError
+		if errors.As(err, &swapErr) {
+			b.promptEntrySwap(chatID, task, swapErr.TokenSymbol)
+			_ = database.ClearUserSession(user.TelegramID)
+			return
+		}
 		_ = database.DB.Model(task).Updates(map[string]interface{}{
 			"status":        models.StrategyStatusError,
 			"error_message": fmt.Sprintf("enter failed: %v", err),
@@ -479,35 +490,9 @@ func (b *Bot) createPositionTask(chatID int64, user *models.User) {
 		return
 	}
 
-	// 验证并保存 tokenId
-	updates := map[string]interface{}{
-		"current_liquidity": enterRes.CurrentLiquidity,
-		"error_message":     "",
-	}
-
-	// 验证 V3 tokenId
-	v3TokenId := strings.TrimSpace(enterRes.V3TokenID)
-	if v3TokenId != "" && v3TokenId != "0" {
-		updates["v3_position_manager_address"] = enterRes.V3PositionManagerAddress
-		updates["v3_token_id"] = enterRes.V3TokenID
-	}
-
-	// 验证 V4 tokenId
-	v4TokenId := strings.TrimSpace(enterRes.V4TokenID)
-	if v4TokenId != "" && v4TokenId != "0" {
-		updates["v4_token_id"] = enterRes.V4TokenID
-	}
-
-	_ = database.DB.Model(task).Updates(updates).Error
-
-	// Update in-memory task for display
-	task.CurrentLiquidity = enterRes.CurrentLiquidity
-	if v3TokenId != "" && v3TokenId != "0" {
-		task.V3PositionManagerAddress = enterRes.V3PositionManagerAddress
-		task.V3TokenID = enterRes.V3TokenID
-	}
-	if v4TokenId != "" && v4TokenId != "0" {
-		task.V4TokenID = enterRes.V4TokenID
+	if err := b.applyEnterResult(task, enterRes); err != nil {
+		b.sendMessage(chatID, fmt.Sprintf("更新任务失败：%v", err))
+		return
 	}
 
 	b.sendMessage(chatID, fmt.Sprintf("✅ 开仓成功！交易哈希：`%s`", enterRes.TxHash))

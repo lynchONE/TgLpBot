@@ -23,6 +23,37 @@ var stableSymbols = map[string]struct{}{
 	"DAI":  {},
 }
 
+func isStableSymbol(sym string) bool {
+	sym = strings.ToUpper(strings.TrimSpace(sym))
+	_, ok := stableSymbols[sym]
+	return ok
+}
+
+func isStableAddress(addr string) bool {
+	if config.AppConfig == nil {
+		return false
+	}
+	addr = strings.ToLower(strings.TrimSpace(addr))
+	if !common.IsHexAddress(addr) {
+		return false
+	}
+	stables := []string{
+		config.AppConfig.USDTAddress,
+		config.AppConfig.USDCAddress,
+		config.AppConfig.BUSDAddress,
+	}
+	for _, stable := range stables {
+		stable = strings.ToLower(strings.TrimSpace(stable))
+		if stable == "" || !common.IsHexAddress(stable) {
+			continue
+		}
+		if addr == stable {
+			return true
+		}
+	}
+	return false
+}
+
 const defaultTokenDecimals = 18
 
 const (
@@ -65,26 +96,19 @@ func stableSideFromTask(task *models.StrategyTask) int {
 	}
 
 	token0Addr, token1Addr := resolveTokenAddresses(task)
-	if config.AppConfig != nil && common.IsHexAddress(config.AppConfig.USDTAddress) {
-		usdtAddr := strings.ToLower(strings.TrimSpace(config.AppConfig.USDTAddress))
-		if usdtAddr != "" {
-			t0 := strings.ToLower(strings.TrimSpace(token0Addr))
-			t1 := strings.ToLower(strings.TrimSpace(token1Addr))
-			if common.IsHexAddress(t0) && t0 == usdtAddr {
-				return 0
-			}
-			if common.IsHexAddress(t1) && t1 == usdtAddr {
-				return 1
-			}
-		}
+	if isStableAddress(token0Addr) {
+		return 0
+	}
+	if isStableAddress(token1Addr) {
+		return 1
 	}
 
 	sym0 := strings.ToUpper(strings.TrimSpace(task.Token0Symbol))
 	sym1 := strings.ToUpper(strings.TrimSpace(task.Token1Symbol))
-	if _, ok := stableSymbols[sym0]; ok {
+	if isStableSymbol(sym0) {
 		return 0
 	}
-	if _, ok := stableSymbols[sym1]; ok {
+	if isStableSymbol(sym1) {
 		return 1
 	}
 	return stableUnknown

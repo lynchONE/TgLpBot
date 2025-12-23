@@ -259,6 +259,8 @@ func (s *PnLService) calculateUSDTValue(
 ) (totalUSDT, feesUSDT, holdUSDT float64) {
 	token0Symbol := strings.ToUpper(strings.TrimSpace(task.Token0Symbol))
 	token1Symbol := strings.ToUpper(strings.TrimSpace(task.Token1Symbol))
+	isStable0 := isStableSymbol(token0Symbol) || isStableAddress(task.Token0Address)
+	isStable1 := isStableSymbol(token1Symbol) || isStableAddress(task.Token1Address)
 
 	// Determine price relation
 	// sqrtPriceX96 = sqrt(token1/token0) * 2^96
@@ -280,8 +282,8 @@ func (s *PnLService) calculateUSDTValue(
 	h0 := weiToFloat(hold0, 18)
 	h1 := weiToFloat(hold1, 18)
 
-	if token0Symbol == "USDT" {
-		// Token0 is USDT. Value = T0 + T1 * (Price of T1 in T0)
+	if isStable0 && !isStable1 {
+		// Token0 is stable. Value = T0 + T1 * (Price of T1 in stable)
 		// priceToken1PerToken0 means 1 T0 = P T1. So Price of T1 in T0 = 1/P.
 		priceT1InUSDT := 0.0
 		if priceToken1PerToken0 > 0 {
@@ -291,14 +293,18 @@ func (s *PnLService) calculateUSDTValue(
 		totalUSDT = t0 + t1*priceT1InUSDT
 		feesUSDT = f0 + f1*priceT1InUSDT
 		holdUSDT = h0 + h1*priceT1InUSDT
-	} else if token1Symbol == "USDT" {
-		// Token1 is USDT. Value = T1 + T0 * (Price of T0 in T1)
-		// priceToken1PerToken0 means 1 T0 = P T1. Since T1 is USDT, P is Price of T0 in USDT.
+	} else if isStable1 && !isStable0 {
+		// Token1 is stable. Value = T1 + T0 * (Price of T0 in stable)
+		// priceToken1PerToken0 means 1 T0 = P T1. Since T1 is stable, P is Price of T0 in stable terms.
 		priceT0InUSDT := priceToken1PerToken0
 
 		totalUSDT = t1 + t0*priceT0InUSDT
 		feesUSDT = f1 + f0*priceT0InUSDT
 		holdUSDT = h1 + h0*priceT0InUSDT
+	} else if isStable0 && isStable1 {
+		totalUSDT = t0 + t1
+		feesUSDT = f0 + f1
+		holdUSDT = h0 + h1
 	} else {
 		// Neither is USDT (e.g. ETH/BTC). Fallback or use DB price?
 		// For simplicity, return 0 or rely on task.AmountUSDT estimate if logic fails.

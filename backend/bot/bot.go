@@ -345,6 +345,10 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleCancelPosition(query, user)
 	case query.Data == "back_to_input":
 		b.handleBackToInput(query, user)
+	case strings.HasPrefix(query.Data, "entry_swap_allow_"):
+		b.handleEntrySwapAllow(query, user)
+	case strings.HasPrefix(query.Data, "entry_swap_cancel_"):
+		b.handleEntrySwapCancel(query, user)
 	// Global config callbacks
 	case query.Data == "config_rebalance_timeout":
 		b.handleConfigRebalanceTimeout(query, user)

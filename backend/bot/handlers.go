@@ -169,8 +169,11 @@ func (b *Bot) getWalletBalances(address string) (string, string) {
 			bnbBalance = fmt.Sprintf("%.6f", bnbFloat)
 		}
 
-		// Get USDT balance (BSC USDT: 0x55d398326f99059fF775485246999027B3197955)
-		usdtAddr := common.HexToAddress("0x55d398326f99059fF775485246999027B3197955")
+		usdtAddrStr := "0x55d398326f99059fF775485246999027B3197955"
+		if config.AppConfig != nil && common.IsHexAddress(config.AppConfig.USDTAddress) {
+			usdtAddrStr = config.AppConfig.USDTAddress
+		}
+		usdtAddr := common.HexToAddress(usdtAddrStr)
 		usdtBal, err := blockchain.GetTokenBalance(usdtAddr, addr)
 		if err == nil {
 			// USDT has 18 decimals on BSC

@@ -77,6 +77,7 @@ type Config struct {
 
 	// Token Addresses
 	USDTAddress      string
+	USDCAddress      string
 	BUSDAddress      string
 	WBNBAddress      string
 	PancakeRouterV2  string
@@ -175,6 +176,7 @@ func LoadConfig() error {
 
 		// Token Addresses
 		USDTAddress:      getEnv("USDT_ADDRESS", "0x55d398326f99059fF775485246999027B3197955"),
+		USDCAddress:      getEnv("USDC_ADDRESS", "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d"),
 		BUSDAddress:      getEnv("BUSD_ADDRESS", "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56"),
 		WBNBAddress:      getEnv("WBNB_ADDRESS", "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"),
 		PancakeRouterV2:  getEnv("PANCAKE_ROUTER_V2", "0x10ED43C718714eb63d5aA57B78B54704E256024E"),

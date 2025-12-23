@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import PositionCard from './components/PositionCard.jsx';
 import { fetchRealtimePositions } from './lib/api';
 import { getTelegramWebApp } from './lib/telegram';
-import { formatRelativeTime } from './lib/time';
 
 function resolveApiBaseUrl() {
     const queryApiBase = new URLSearchParams(window.location.search).get('apiBaseUrl');
@@ -309,7 +308,6 @@ export default function App() {
                         <div className="text-right">
                             <div className="text-[11px] text-zinc-500 dark:text-white/40">自动刷新</div>
                             <div className="text-sm font-semibold tabular-nums">{pollIntervalSec}s</div>
-                            <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40">{formatRelativeTime(updatedAt)}</div>
                         </div>
                     </div>
                 </div>

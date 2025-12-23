@@ -140,6 +140,10 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
         if (!Number.isFinite(p)) return null;
         return Math.max(0, Math.min(1, p));
     }, [currentPrice, rangeMin, rangeMax]);
+    const progressPercent = useMemo(() => {
+        if (priceProgress === null) return null;
+        return Math.max(0, Math.min(100, priceProgress * 100));
+    }, [priceProgress]);
 
     const currentPriceText = Number.isFinite(currentPrice)
         ? `${formatPrice(currentPrice)}${quoteSymbol ? ` ${quoteSymbol}` : ''}`
@@ -264,7 +268,7 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
                         <div className="text-zinc-500 dark:text-white/40">价格区间</div>
                         <div className="mt-0.5 font-semibold text-zinc-900 dark:text-white/80 tabular-nums">{rangeText}</div>
                         <div className={`mt-0.5 text-[11px] ${position?.in_range ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300'}`}>
-                            {position?.in_range ? '区间内' : '超范围'}
+                            {position?.in_range ? '区间内' : '区间外'}
                         </div>
                     </div>
                     <div className="text-right">
@@ -273,23 +277,37 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
                     </div>
                 </div>
 
-                {priceProgress !== null ? (
-                    <div className="mt-2 h-2 w-full rounded-full bg-zinc-200 dark:bg-white/10">
-                        <div
-                            className={`h-2 rounded-full ${position?.in_range ? 'bg-emerald-500' : 'bg-rose-500'}`}
-                            style={{ width: `${Math.round(priceProgress * 100)}%` }}
-                        />
+                {progressPercent !== null ? (
+                    <div className="mt-3">
+                        <div className="relative h-3 w-full">
+                            <div className="absolute inset-0 overflow-hidden rounded-full bg-zinc-200/80 dark:bg-white/10">
+                                <div className="absolute inset-0 bg-gradient-to-r from-rose-500/20 via-amber-400/15 to-emerald-500/20" />
+                                <div
+                                    className={`absolute inset-y-0 left-0 rounded-full shadow-sm transition-[width] duration-500 ease-out ${
+                                        position?.in_range
+                                            ? 'bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-600'
+                                            : 'bg-gradient-to-r from-rose-400 via-rose-500 to-rose-600'
+                                    }`}
+                                    style={{ width: `${progressPercent}%` }}
+                                />
+                                <div className="absolute inset-y-0 left-1/2 w-px bg-zinc-400/60 dark:bg-white/25" />
+                            </div>
+                            <div
+                                className={`pointer-events-none absolute top-1/2 z-10 flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white shadow-md ring-2 transition-[left] duration-500 ease-out ${
+                                    position?.in_range ? 'ring-emerald-500/70' : 'ring-rose-500/70'
+                                } dark:bg-[#0f1116]`}
+                                style={{ left: `${progressPercent}%` }}
+                            >
+                                <div className={`h-1.5 w-1.5 rounded-full ${position?.in_range ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                            </div>
+                        </div>
                     </div>
                 ) : null}
 
-                <div className="mt-2 grid grid-cols-4 gap-2">
+                <div className="mt-3 grid grid-cols-3 gap-2">
                     <div>
                         <div className="text-zinc-500 dark:text-white/40">间隔</div>
                         <div className="mt-0.5 font-semibold text-zinc-900 dark:text-white/80 tabular-nums">{pollIntervalSec}s</div>
-                    </div>
-                    <div>
-                        <div className="text-zinc-500 dark:text-white/40">超范围</div>
-                        <div className="mt-0.5 font-semibold text-zinc-900 dark:text-white/80 tabular-nums">{position?.out_of_range}</div>
                     </div>
                     <div>
                         <div className="text-zinc-500 dark:text-white/40">运行</div>
