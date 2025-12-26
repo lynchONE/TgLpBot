@@ -75,6 +75,10 @@ func NewBot() (*Bot, error) {
 
 // setCommands sets the bot command menu
 func (b *Bot) setCommands() error {
+	if err := b.clearCommands(); err != nil {
+		log.Printf("Warning: Failed to clear bot commands: %v", err)
+	}
+
 	commands := []tgbotapi.BotCommand{
 		{
 			Command:     "start",
@@ -110,6 +114,13 @@ func (b *Bot) setCommands() error {
 
 	log.Println("Bot commands set successfully")
 	return nil
+}
+
+func (b *Bot) clearCommands() error {
+	// 只清除默认 scope 的命令
+	cfg := tgbotapi.NewDeleteMyCommandsWithScope(tgbotapi.NewBotCommandScopeDefault())
+	_, err := b.api.Request(cfg)
+	return err
 }
 
 type chatMenuButton struct {

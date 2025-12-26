@@ -35,12 +35,7 @@ func (b *Bot) handleTaskView(query *tgbotapi.CallbackQuery, user *models.User) {
 	}
 
 	// Send task card with refresh UI
-	msgConfig := tgbotapi.NewMessage(query.Message.Chat.ID, b.formatTaskCardWithRefresh(task))
-	msgConfig.ParseMode = "Markdown"
-	msgConfig.ReplyMarkup = b.taskKeyboardWithRefresh(task)
-	msgConfig.DisableWebPagePreview = true
-
-	msg, err := b.api.Send(msgConfig)
+	msg, err := b.sendTaskCardMessage(query.Message.Chat.ID, b.formatTaskCardWithRefresh(task), b.taskKeyboardWithRefresh(task))
 	if err == nil && msg.MessageID != 0 {
 		// Start auto-refresh for this message
 		b.startTaskAutoRefresh(query.Message.Chat.ID, msg.MessageID, task.ID, user.ID)

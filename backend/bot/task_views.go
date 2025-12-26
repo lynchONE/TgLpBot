@@ -51,13 +51,23 @@ func buildPriceDisplayLines(task *models.StrategyTask) (string, string) {
 	} else {
 		price, base, quote, ok := services.BuildPriceDisplay(task, currentTick)
 		if ok {
-			currentLine = fmt.Sprintf("💵 当前价格：1 %s ≈ %s %s", base, services.FormatPriceValue(price), quote)
+			currentLine = fmt.Sprintf(
+				"💵 当前价格：1 %s ≈ %s %s",
+				escapeTelegramMarkdown(base),
+				services.FormatPriceValue(price),
+				escapeTelegramMarkdown(quote),
+			)
 		}
 	}
 
 	lower, upper, _, quote, ok := services.BuildRangeDisplay(task, task.TickLower, task.TickUpper)
 	if ok {
-		rangeLine = fmt.Sprintf("💹 价格范围：%s - %s %s", services.FormatPriceValue(lower), services.FormatPriceValue(upper), quote)
+		rangeLine = fmt.Sprintf(
+			"💹 价格范围：%s - %s %s",
+			services.FormatPriceValue(lower),
+			services.FormatPriceValue(upper),
+			escapeTelegramMarkdown(quote),
+		)
 	}
 
 	return currentLine, rangeLine
@@ -90,10 +100,17 @@ func shortenHex(s string) string {
 
 func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 	emoji, statusText := formatTaskStatus(task.Status)
+	exchange := strings.TrimSpace(task.Exchange)
+	if exchange == "" {
+		exchange = "-"
+	}
+	exchange = escapeTelegramMarkdown(exchange)
+
 	pair := task.Token0Symbol + "/" + task.Token1Symbol
 	if strings.TrimSpace(pair) == "/" {
 		pair = "-"
 	}
+	pair = escapeTelegramMarkdown(pair)
 
 	// Display actual invested amount (USDT delta) if we have an open trade record.
 	// Calculate PnL
@@ -118,29 +135,29 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 			dustLine := ""
 			dustParts := make([]string, 0, 2)
 			if pnl.DustToken0 > 0 {
-				dustParts = append(dustParts, fmt.Sprintf("%.4f %s", pnl.DustToken0, task.Token0Symbol))
+				dustParts = append(dustParts, fmt.Sprintf("%.4f %s", pnl.DustToken0, escapeTelegramMarkdown(task.Token0Symbol)))
 			}
 			if pnl.DustToken1 > 0 {
-				dustParts = append(dustParts, fmt.Sprintf("%.4f %s", pnl.DustToken1, task.Token1Symbol))
+				dustParts = append(dustParts, fmt.Sprintf("%.4f %s", pnl.DustToken1, escapeTelegramMarkdown(task.Token1Symbol)))
 			}
 			if len(dustParts) > 0 {
 				dustLine = fmt.Sprintf("\n🧹 开仓残余：%s (≈%.2f USDT)", strings.Join(dustParts, " + "), pnl.DustValueUSDT)
 			}
 
-			// 使用 InitialCostUSDT（实际投入的 USDT）与交易历史保持一致
-			actualInvested := pnl.InitialCostUSDT
+			// 使用 NetInvestedUSDT（净投入 = 实际支出 - 残余价值）更准确反映仓位内金额
+			actualInvested := pnl.NetInvestedUSDT
 			if actualInvested <= 0 {
 				actualInvested = task.AmountUSDT
 			}
 
 			amountLine = fmt.Sprintf(
-				"📊 资产状况：\n💵 当前价值：%.2f USDT\n📈 绝对盈亏：%s%.2f USDT %s\n🎁 未领手续费：%.2f USDT%s\n💰 实际投入：%.2f USDT (预期 %.2f USDT)",
-				pnl.CurrentValueUSDT,
+				"📊 资产状况：\n📈 绝对盈亏：%s%.2f USDT %s\n💵 当前价值：%.2f USDT\n🎁 未领手续费：%.2f USDT\n💰 实际投入：%.2f USDT (预期 %.2f USDT)%s",
 				sign, pnl.AbsolutePnLUSDT, emojiStr,
+				pnl.HoldingsUSDT,
 				pnl.UnclaimedFeesUSDT,
-				dustLine,
 				actualInvested,
 				task.AmountUSDT,
+				dustLine,
 			)
 		}
 	}
@@ -183,7 +200,7 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 		emoji,
 		task.ID,
 		statusText,
-		task.Exchange,
+		exchange,
 		pair,
 		shortenHex(task.PoolId),
 		positionInfo,

@@ -44,6 +44,13 @@ const v4PositionManagerABI = `[
     ],
     "stateMutability": "view",
     "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "uint256", "name": "tokenId", "type": "uint256" }],
+    "name": "positionInfo",
+    "outputs": [{ "internalType": "uint256", "name": "info", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
   }
 ]`
 
@@ -63,6 +70,8 @@ type V4PositionInfo struct {
 	FeeGrowthInside1LastX128 *big.Int
 	TokensOwed0              *big.Int
 	TokensOwed1              *big.Int
+	PoolId25                 string
+	HasSubscriber            bool
 	PositionRaw              []interface{}
 }
 
@@ -141,4 +150,19 @@ func (m *V4PositionManager) Positions(opts *bind.CallOpts, tokenId *big.Int) (*V
 		TokensOwed1:              owed1,
 		PositionRaw:              result,
 	}, nil
+}
+
+func (m *V4PositionManager) PositionInfoPacked(opts *bind.CallOpts, tokenId *big.Int) (*big.Int, error) {
+	var result []interface{}
+	if err := m.contract.Call(opts, &result, "positionInfo", tokenId); err != nil {
+		return nil, err
+	}
+	if len(result) < 1 {
+		return nil, fmt.Errorf("unexpected positionInfo return length: %d", len(result))
+	}
+	raw, ok := result[0].(*big.Int)
+	if !ok || raw == nil {
+		return nil, fmt.Errorf("unexpected positionInfo return type: %T", result[0])
+	}
+	return raw, nil
 }

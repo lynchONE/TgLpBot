@@ -7,6 +7,7 @@ import (
 	"TgLpBot/models"
 	"context"
 	"fmt"
+	"log"
 	"math"
 	"math/big"
 	"sort"
@@ -646,6 +647,32 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		liq = big.NewInt(0)
 	}
 
+	owed0 := big.NewInt(0)
+	owed1 := big.NewInt(0)
+	if common.IsHexAddress(config.AppConfig.UniswapV4PositionManagerAddress) {
+		tokenID, parseErr := parseBigInt(tokenId)
+		if parseErr == nil && tokenID.Sign() > 0 {
+			v4pmAddr := common.HexToAddress(config.AppConfig.UniswapV4PositionManagerAddress)
+			pos, posErr := blockchain.GetV4PositionInfo(v4pmAddr, poolManager, task.PoolId, tokenID)
+			if posErr != nil {
+				log.Printf("[Realtime] V4 position info read failed: tokenId=%s err=%v", tokenId, posErr)
+			}
+			if pos != nil {
+				if pos.Liquidity != nil && pos.Liquidity.Sign() > 0 {
+					liq = pos.Liquidity
+				}
+				if pos.TickLower == 0 && pos.TickUpper == 0 {
+					pos.TickLower = task.TickLower
+					pos.TickUpper = task.TickUpper
+				}
+				if fee0, fee1, feeErr := calcV4UnclaimedFees(task.PoolId, currentTick, pos); feeErr == nil {
+					owed0 = fee0
+					owed1 = fee1
+				}
+			}
+		}
+	}
+
 	sqrtA, _ := SqrtRatioAtTick(int32(task.TickLower))
 	sqrtB, _ := SqrtRatioAtTick(int32(task.TickUpper))
 	amt0Raw, amt1Raw := AmountsForLiquidity(sqrtP, sqrtA, sqrtB, liq)
@@ -665,25 +692,6 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 	prices, _ := s.priceService.GetUSDPrices("bsc", []string{c0.Hex(), c1.Hex()})
 	price0 := prices[strings.ToLower(c0.Hex())]
 	price1 := prices[strings.ToLower(c1.Hex())]
-
-	owed0 := big.NewInt(0)
-	owed1 := big.NewInt(0)
-	if common.IsHexAddress(config.AppConfig.UniswapV4PositionManagerAddress) {
-		tokenID, parseErr := parseBigInt(tokenId)
-		if parseErr == nil && tokenID.Sign() > 0 {
-			v4pmAddr := common.HexToAddress(config.AppConfig.UniswapV4PositionManagerAddress)
-			if v4pm, err := blockchain.NewV4PositionManager(v4pmAddr, blockchain.Client); err == nil {
-				if pos, err := v4pm.Positions(nil, tokenID); err == nil && pos != nil {
-					if pos.TokensOwed0 != nil {
-						owed0 = pos.TokensOwed0
-					}
-					if pos.TokensOwed1 != nil {
-						owed1 = pos.TokensOwed1
-					}
-				}
-			}
-		}
-	}
 
 	row0 := buildTokenRow(c0, meta0, price0, w0, amt0Raw, owed0)
 	row1 := buildTokenRow(c1, meta1, price1, w1, amt1Raw, owed1)

@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"TgLpBot/models"
 	"fmt"
 	"log"
 	"sync"
@@ -90,6 +91,13 @@ func (b *Bot) refreshTaskCard(session *AutoRefreshSession) {
 	task, err := b.taskService.GetByID(session.UserID, session.TaskID)
 	if err != nil {
 		log.Printf("[Bot] Failed to get task #%d for refresh: %v", session.TaskID, err)
+		return
+	}
+
+	// 如果任务已停止或出错，停止自动刷新
+	if task.Status == models.StrategyStatusStopped || task.Status == models.StrategyStatusError {
+		log.Printf("[Bot] Task #%d is %s, stopping auto-refresh", session.TaskID, task.Status)
+		b.stopTaskAutoRefresh(session.ChatID, session.MessageID)
 		return
 	}
 

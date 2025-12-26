@@ -111,3 +111,13 @@ func (s *UserService) DeactivateUser(id uint) error {
 func (s *UserService) ActivateUser(id uint) error {
 	return database.DB.Model(&models.User{}).Where("id = ?", id).Update("is_active", true).Error
 }
+
+// GetAllUserTelegramIDs returns all user Telegram IDs
+func (s *UserService) GetAllUserTelegramIDs() ([]int64, error) {
+	var ids []int64
+	err := database.DB.Model(&models.User{}).Pluck("telegram_id", &ids).Error
+	if err != nil {
+		return nil, fmt.Errorf("获取用户ID列表失败: %w", err)
+	}
+	return ids, nil
+}

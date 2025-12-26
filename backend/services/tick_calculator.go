@@ -22,43 +22,94 @@ func NewTickCalculator() *TickCalculator {
 func (tc *TickCalculator) CalculateTickFromPercentage(currentTick int, percentage float64, tickSpacing int) (int, int) {
 	// 计算价格变化对应的 tick 变化
 	// price = 1.0001^tick
-	// 对于 x% 的价格变化:
-	// 上限价格 = 当前价格 * (1 + x/100)
-	// 下限价格 = 当前价格 * (1 - x/100)
+	// 对于 x% 的价格变化，tick 偏移量 = log(1 + x/100) / log(1.0001)
 
-	// tick 变化 = log(价格变化) / log(1.0001)
+	// 使用对称算法：取上涨和下跌偏移量的平均值作为对称偏移
 	priceMultiplierUpper := 1.0 + (percentage / 100.0)
 	priceMultiplierLower := 1.0 - (percentage / 100.0)
 
-	// 计算 tick 偏移量
-	tickOffsetUpper := int(math.Log(priceMultiplierUpper) / math.Log(1.0001))
-	tickOffsetLower := int(math.Log(priceMultiplierLower) / math.Log(1.0001))
+	tickOffsetUpper := math.Abs(math.Log(priceMultiplierUpper) / math.Log(1.0001))
+	tickOffsetLower := math.Abs(math.Log(priceMultiplierLower) / math.Log(1.0001))
 
-	// 计算目标 tick
-	tickUpper := currentTick + tickOffsetUpper
-	tickLower := currentTick + tickOffsetLower
+	// 取平均值作为对称偏移量
+	symmetricOffset := int((tickOffsetUpper + tickOffsetLower) / 2)
+
+	// 确保偏移量至少是一个 tickSpacing
+	if symmetricOffset < tickSpacing {
+		symmetricOffset = tickSpacing
+	}
+
+	// 计算对称的 tick 范围
+	tickUpper := currentTick + symmetricOffset
+	tickLower := currentTick - symmetricOffset
 
 	// 调整到 tick spacing 的倍数
-	tickUpper = tc.RoundToTickSpacing(tickUpper, tickSpacing)
-	tickLower = tc.RoundToTickSpacing(tickLower, tickSpacing)
+	// 为了保持对称，两边都使用四舍五入到最近的 tickSpacing 倍数
+	tickLower = tc.RoundToNearestTickSpacing(tickLower, tickSpacing)
+	tickUpper = tc.RoundToNearestTickSpacing(tickUpper, tickSpacing)
+
+	// 额外保护：确保 tickUpper > currentTick 且 tickLower < currentTick
+	if tickUpper <= currentTick {
+		tickUpper = tc.RoundUpToTickSpacing(currentTick+1, tickSpacing)
+	}
+	if tickLower >= currentTick {
+		tickLower = tc.RoundDownToTickSpacing(currentTick-1, tickSpacing)
+	}
 
 	return tickLower, tickUpper
 }
 
-// RoundToTickSpacing rounds a tick to the nearest valid tick spacing
-func (tc *TickCalculator) RoundToTickSpacing(tick int, tickSpacing int) int {
-	// 向下取整到最接近的 tick spacing 倍数
+// RoundToNearestTickSpacing rounds a tick to the NEAREST valid tick spacing (四舍五入)
+func (tc *TickCalculator) RoundToNearestTickSpacing(tick int, tickSpacing int) int {
 	remainder := tick % tickSpacing
 	if remainder == 0 {
 		return tick
 	}
 
+	// 计算向下取整和向上取整的结果
+	down := tick - remainder
+	up := down + tickSpacing
+	if tick < 0 {
+		down = tick - remainder - tickSpacing
+		up = tick - remainder
+	}
+
+	// 选择更接近的那个
+	if math.Abs(float64(tick-down)) <= math.Abs(float64(tick-up)) {
+		return down
+	}
+	return up
+}
+
+// RoundDownToTickSpacing rounds a tick DOWN to the nearest valid tick spacing
+func (tc *TickCalculator) RoundDownToTickSpacing(tick int, tickSpacing int) int {
+	remainder := tick % tickSpacing
+	if remainder == 0 {
+		return tick
+	}
 	// 如果是负数,需要特殊处理
 	if tick < 0 {
 		return tick - remainder - tickSpacing
 	}
-
 	return tick - remainder
+}
+
+// RoundUpToTickSpacing rounds a tick UP to the nearest valid tick spacing
+func (tc *TickCalculator) RoundUpToTickSpacing(tick int, tickSpacing int) int {
+	remainder := tick % tickSpacing
+	if remainder == 0 {
+		return tick
+	}
+	// 如果是负数,需要特殊处理
+	if tick < 0 {
+		return tick - remainder
+	}
+	return tick - remainder + tickSpacing
+}
+
+// RoundToTickSpacing rounds a tick to the nearest valid tick spacing (向下取整，保留用于兼容)
+func (tc *TickCalculator) RoundToTickSpacing(tick int, tickSpacing int) int {
+	return tc.RoundDownToTickSpacing(tick, tickSpacing)
 }
 
 // CalculatePriceFromTick calculates price from tick

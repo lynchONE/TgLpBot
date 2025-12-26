@@ -435,12 +435,13 @@ func FormatPriceValue(price float64) string {
 		return sign + intPart
 	}
 
+	// 保留 4 位有效非零数字（原来是 2 位）
 	nonZero := 0
 	cut := len(fracPart)
 	for i := 0; i < len(fracPart); i++ {
 		if fracPart[i] != '0' {
 			nonZero++
-			if nonZero == 2 {
+			if nonZero == 4 {
 				cut = i + 1
 				break
 			}

@@ -25,6 +25,9 @@ func calcV4UnclaimedFees(poolID string, currentTick int, pos *blockchain.V4Posit
 	if pos.Liquidity == nil || pos.Liquidity.Sign() == 0 {
 		return owed0, owed1, nil
 	}
+	if pos.FeeGrowthInside0LastX128 == nil || pos.FeeGrowthInside1LastX128 == nil {
+		return owed0, owed1, fmt.Errorf("position feeGrowthInside last missing")
+	}
 
 	// 检查配置
 	if config.AppConfig == nil {

@@ -10,9 +10,18 @@ import (
 	"math"
 	"math/big"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 )
+
+// BNB 价格缓存
+var bnbPriceCache = struct {
+	mu      sync.RWMutex
+	price   float64
+	expires time.Time
+}{}
 
 type PnLService struct{}
 
@@ -195,20 +204,24 @@ func (s *PnLService) getV4CurrentValue(task *models.StrategyTask) (totalVal, fee
 		tokenId, parseErr := parseBigInt(task.V4TokenID)
 		if parseErr == nil && tokenId.Sign() > 0 {
 			v4pmAddr := common.HexToAddress(config.AppConfig.UniswapV4PositionManagerAddress)
-			v4pm, pmErr := blockchain.NewV4PositionManager(v4pmAddr, blockchain.Client)
-			if pmErr == nil {
-				pos, posErr := v4pm.Positions(nil, tokenId)
-				if posErr == nil && pos != nil {
-					v4pos = pos
-					if pos.TokensOwed0 != nil {
-						fees0 = pos.TokensOwed0
-					}
-					if pos.TokensOwed1 != nil {
-						fees1 = pos.TokensOwed1
-					}
-					if liquidity.Sign() == 0 && pos.Liquidity != nil && pos.Liquidity.Sign() > 0 {
-						liquidity = pos.Liquidity
-					}
+			poolMgr := common.Address{}
+			if common.IsHexAddress(config.AppConfig.UniswapV4PoolManagerAddress) {
+				poolMgr = common.HexToAddress(config.AppConfig.UniswapV4PoolManagerAddress)
+			}
+			pos, posErr := blockchain.GetV4PositionInfo(v4pmAddr, poolMgr, task.PoolId, tokenId)
+			if posErr != nil {
+				log.Printf("[PnL] V4 position info read failed: tokenId=%s err=%v", task.V4TokenID, posErr)
+			}
+			if pos != nil {
+				v4pos = pos
+				if pos.TokensOwed0 != nil {
+					fees0 = pos.TokensOwed0
+				}
+				if pos.TokensOwed1 != nil {
+					fees1 = pos.TokensOwed1
+				}
+				if pos.Liquidity != nil && pos.Liquidity.Sign() > 0 {
+					liquidity = pos.Liquidity
 				}
 			}
 		}
@@ -240,6 +253,10 @@ func (s *PnLService) getV4CurrentValue(task *models.StrategyTask) (totalVal, fee
 	// 2. Calculate Amounts
 	tickLower := int32(task.TickLower)
 	tickUpper := int32(task.TickUpper)
+	if v4pos != nil && (v4pos.TickLower != 0 || v4pos.TickUpper != 0) && v4pos.TickLower < v4pos.TickUpper {
+		tickLower = int32(v4pos.TickLower)
+		tickUpper = int32(v4pos.TickUpper)
+	}
 	sqrtPriceA, _ := SqrtRatioAtTick(tickLower)
 	sqrtPriceB, _ := SqrtRatioAtTick(tickUpper)
 
@@ -306,14 +323,107 @@ func (s *PnLService) calculateUSDTValue(
 		feesUSDT = f0 + f1
 		holdUSDT = h0 + h1
 	} else {
-		// Neither is USDT (e.g. ETH/BTC). Fallback or use DB price?
-		// For simplicity, return 0 or rely on task.AmountUSDT estimate if logic fails.
-		// User specifically mentioned USDT pairs.
-		log.Printf("Warning: Neither token is USDT for PnL calc. Task #%d", task.ID)
-		return 0, 0, 0
+		// Neither is USDT (e.g. KGST/WBNB). Try to estimate value via WBNB price.
+		// Check if either token is WBNB, and use approximate WBNB price to estimate.
+		isWBNB0 := strings.ToUpper(token0Symbol) == "WBNB" || strings.ToUpper(token0Symbol) == "BNB" ||
+			strings.EqualFold(task.Token0Address, config.AppConfig.WBNBAddress)
+		isWBNB1 := strings.ToUpper(token1Symbol) == "WBNB" || strings.ToUpper(token1Symbol) == "BNB" ||
+			strings.EqualFold(task.Token1Address, config.AppConfig.WBNBAddress)
+
+		// Get real-time BNB price from PancakeSwap V3 WBNB/USDT pool
+		bnbPriceUSDT := s.getBNBPriceUSDT()
+
+		if isWBNB0 && !isWBNB1 {
+			// Token0 is WBNB, price is in WBNB terms
+			// Value = T0_WBNB * BNB_USDT_Price + T1 * (T1_price_in_WBNB * BNB_USDT_Price)
+			// priceToken1PerToken0 = amount of T1 per 1 WBNB
+			// So T1 price in WBNB = 1 / priceToken1PerToken0
+			priceT1InWBNB := 0.0
+			if priceToken1PerToken0 > 0 {
+				priceT1InWBNB = 1.0 / priceToken1PerToken0
+			}
+			totalUSDT = t0*bnbPriceUSDT + t1*priceT1InWBNB*bnbPriceUSDT
+			feesUSDT = f0*bnbPriceUSDT + f1*priceT1InWBNB*bnbPriceUSDT
+			holdUSDT = h0*bnbPriceUSDT + h1*priceT1InWBNB*bnbPriceUSDT
+			log.Printf("[PnL] 非稳定币对 %s/%s: 使用 WBNB(Token0) 价格估算, bnbPrice=%.2f", token0Symbol, token1Symbol, bnbPriceUSDT)
+		} else if isWBNB1 && !isWBNB0 {
+			// Token1 is WBNB
+			// priceToken1PerToken0 = amount of WBNB per 1 T0
+			// So T0 price in WBNB = priceToken1PerToken0
+			priceT0InWBNB := priceToken1PerToken0
+			totalUSDT = t1*bnbPriceUSDT + t0*priceT0InWBNB*bnbPriceUSDT
+			feesUSDT = f1*bnbPriceUSDT + f0*priceT0InWBNB*bnbPriceUSDT
+			holdUSDT = h1*bnbPriceUSDT + h0*priceT0InWBNB*bnbPriceUSDT
+			log.Printf("[PnL] 非稳定币对 %s/%s: 使用 WBNB(Token1) 价格估算, bnbPrice=%.2f", token0Symbol, token1Symbol, bnbPriceUSDT)
+		} else {
+			// Neither is WBNB or stable, cannot estimate
+			log.Printf("[PnL] 警告: 无法估算非稳定币对 %s/%s 的 USDT 价值 (Task #%d)", token0Symbol, token1Symbol, task.ID)
+			return 0, 0, 0
+		}
 	}
 
 	return totalUSDT, feesUSDT, holdUSDT
+}
+
+// PancakeSwap V3 WBNB/USDT 池子地址 (费率 0.01%)
+const pancakeV3WBNBUSDTPool = "0x172fcD41E0913e95784454622d1c3724f546f849"
+
+// getBNBPriceUSDT 从 PancakeSwap V3 WBNB/USDT 池子获取 BNB 实时价格
+func (s *PnLService) getBNBPriceUSDT() float64 {
+	// 缓存机制：避免频繁调用链上
+	bnbPriceCache.mu.RLock()
+	if bnbPriceCache.expires.After(time.Now()) {
+		price := bnbPriceCache.price
+		bnbPriceCache.mu.RUnlock()
+		return price
+	}
+	bnbPriceCache.mu.RUnlock()
+
+	// 从链上获取价格
+	if blockchain.Client == nil {
+		log.Printf("[PnL] 区块链客户端未初始化，使用默认 BNB 价格")
+		return 700.0 // fallback
+	}
+
+	poolAddr := common.HexToAddress(pancakeV3WBNBUSDTPool)
+	sqrtPriceX96, _, err := blockchain.GetV3PoolSlot0(poolAddr)
+	if err != nil {
+		log.Printf("[PnL] 从 PancakeSwap 获取 BNB 价格失败: %v，使用默认价格", err)
+		return 700.0 // fallback
+	}
+
+	// 计算价格
+	// PancakeSwap V3 USDT/WBNB 池子：Token0 = USDT, Token1 = WBNB
+	// sqrtPriceX96 = sqrt(Token1/Token0) = sqrt(WBNB/USDT) * 2^96
+	// price = (sqrtPriceX96 / 2^96)^2 = WBNB per USDT
+	// 所以需要取倒数得到 USDT per WBNB (即 BNB 的 USDT 价格)
+	p := new(big.Float).SetInt(sqrtPriceX96)
+	q := new(big.Float).SetInt(q96)
+	p.Quo(p, q)
+	p.Mul(p, p)
+	priceWBNBperUSDT, _ := p.Float64()
+
+	// 取倒数得到 USDT per WBNB
+	priceF64 := 0.0
+	if priceWBNBperUSDT > 0 {
+		priceF64 = 1.0 / priceWBNBperUSDT
+	}
+
+	// WBNB has 18 decimals, USDT has 18 decimals on BSC
+	// No adjustment needed since both are 18 decimals
+	if priceF64 <= 0 || priceF64 > 100000 {
+		log.Printf("[PnL] BNB 价格异常: %.2f (原始值: %.10f)，使用默认价格", priceF64, priceWBNBperUSDT)
+		return 700.0
+	}
+
+	// 更新缓存
+	bnbPriceCache.mu.Lock()
+	bnbPriceCache.price = priceF64
+	bnbPriceCache.expires = time.Now().Add(30 * time.Second)
+	bnbPriceCache.mu.Unlock()
+
+	log.Printf("[PnL] 从 PancakeSwap 获取 BNB 价格: %.2f USDT", priceF64)
+	return priceF64
 }
 
 func weiToFloat(wei *big.Int, decimals int) float64 {

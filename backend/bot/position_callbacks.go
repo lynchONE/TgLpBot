@@ -101,11 +101,7 @@ func (b *Bot) handleConfirmPosition(query *tgbotapi.CallbackQuery, user *models.
 	}
 
 	b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("✅ 开仓成功！交易哈希：`%s`", enterRes.TxHash))
-	msgConfig := tgbotapi.NewMessage(query.Message.Chat.ID, b.formatTaskCardWithRefresh(task))
-	msgConfig.ParseMode = "Markdown"
-	msgConfig.ReplyMarkup = b.taskKeyboardWithRefresh(task)
-	msgConfig.DisableWebPagePreview = true
-	if msg, err := b.api.Send(msgConfig); err == nil && msg.MessageID != 0 {
+	if msg, err := b.sendTaskCardMessage(query.Message.Chat.ID, b.formatTaskCardWithRefresh(task), b.taskKeyboardWithRefresh(task)); err == nil && msg.MessageID != 0 {
 		b.startTaskAutoRefresh(query.Message.Chat.ID, msg.MessageID, task.ID, user.ID)
 	}
 	b.sendMessage(query.Message.Chat.ID, "✅ 任务已开始监控。\n\n使用 /positions 查看所有任务。")

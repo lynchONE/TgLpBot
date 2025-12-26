@@ -392,7 +392,7 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 	// 直接创建任务，不需要确认
 	b.sendMessage(message.Chat.ID, fmt.Sprintf(`📊 *任务参数*
 
-📈 百分比范围：±%.4f%%
+📈 百分比范围：±%.6f%%
 🎯 当前 Tick：%d
 📊 Tick 范围：%d 到 %d
 💰 投入金额：%.2f USDT
@@ -500,11 +500,7 @@ func (b *Bot) createPositionTask(chatID int64, user *models.User) {
 	// 成功后清除会话
 	database.ClearUserSession(user.TelegramID)
 
-	msgConfig := tgbotapi.NewMessage(chatID, b.formatTaskCardWithRefresh(task))
-	msgConfig.ParseMode = "Markdown"
-	msgConfig.ReplyMarkup = b.taskKeyboardWithRefresh(task)
-	msgConfig.DisableWebPagePreview = true
-	if msg, err := b.api.Send(msgConfig); err == nil && msg.MessageID != 0 {
+	if msg, err := b.sendTaskCardMessage(chatID, b.formatTaskCardWithRefresh(task), b.taskKeyboardWithRefresh(task)); err == nil && msg.MessageID != 0 {
 		b.startTaskAutoRefresh(chatID, msg.MessageID, task.ID, user.ID)
 	}
 }

@@ -47,7 +47,7 @@ func (b *Bot) handleStart(message *tgbotapi.Message, user *models.User) {
 	// If configured, show Mini App入口按钮
 	if config.AppConfig != nil {
 		url := strings.TrimSpace(config.AppConfig.TelegramWebAppURL)
-		if url != "" {
+		if isValidWebAppURL(url) {
 			msg := tgbotapi.NewMessage(message.Chat.ID, text)
 			msg.ParseMode = "Markdown"
 			msg.ReplyMarkup = newWebAppInlineKeyboardMarkup("实时仓位", url)
@@ -89,7 +89,7 @@ func (b *Bot) handleHelp(message *tgbotapi.Message, user *models.User) {
 
 	if config.AppConfig != nil {
 		url := strings.TrimSpace(config.AppConfig.TelegramWebAppURL)
-		if url != "" {
+		if isValidWebAppURL(url) {
 			msg := tgbotapi.NewMessage(message.Chat.ID, text)
 			msg.ParseMode = "Markdown"
 			msg.ReplyMarkup = newWebAppInlineKeyboardMarkup("实时仓位", url)
@@ -235,12 +235,7 @@ func (b *Bot) handlePositions(message *tgbotapi.Message, user *models.User) {
 	for i := range tasks {
 		task := tasks[i]
 		// Send task card with auto-refresh
-		msgConfig := tgbotapi.NewMessage(message.Chat.ID, b.formatTaskCardWithRefresh(&task))
-		msgConfig.ParseMode = "Markdown"
-		msgConfig.ReplyMarkup = b.taskKeyboardWithRefresh(&task)
-		msgConfig.DisableWebPagePreview = true
-
-		msg, err := b.api.Send(msgConfig)
+		msg, err := b.sendTaskCardMessage(message.Chat.ID, b.formatTaskCardWithRefresh(&task), b.taskKeyboardWithRefresh(&task))
 		if err == nil && msg.MessageID != 0 {
 			// Start auto-refresh for this message
 			b.startTaskAutoRefresh(message.Chat.ID, msg.MessageID, task.ID, user.ID)

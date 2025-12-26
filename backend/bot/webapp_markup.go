@@ -4,6 +4,7 @@ package bot
 // We send WebApp inline keyboard markup via custom JSON structures.
 
 import (
+	"net/url"
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -38,7 +39,7 @@ func newWebAppInlineKeyboardMarkup(buttonText, url string) webAppInlineKeyboardM
 
 func newInlineKeyboardMarkupWithWebAppRow(base tgbotapi.InlineKeyboardMarkup, buttonText, url string) any {
 	url = strings.TrimSpace(url)
-	if url == "" {
+	if !isValidWebAppURL(url) {
 		return base
 	}
 
@@ -66,4 +67,19 @@ func newInlineKeyboardMarkupWithWebAppRow(base tgbotapi.InlineKeyboardMarkup, bu
 	})
 
 	return out
+}
+
+func isValidWebAppURL(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	if parsed.Scheme != "https" || parsed.Host == "" {
+		return false
+	}
+	return true
 }
