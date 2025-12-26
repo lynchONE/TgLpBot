@@ -129,7 +129,9 @@ func (s *LiquidityService) ExitTaskToUSDT(userID uint, task *models.StrategyTask
 		}
 	}
 
-	_ = NewTradeRecordService().CloseLatestOpenRecord(task, mainHash, actualReceived, gasSpent)
+	// 获取 BNB 价格用于计算 Gas 的 USDT 价值
+	bnbPriceUSDT := NewPnLService().GetBNBPriceUSDT()
+	_ = NewTradeRecordService().CloseLatestOpenRecord(task, mainHash, actualReceived, gasSpent, bnbPriceUSDT)
 	if mainHash != "" {
 		if err := database.DB.Model(&models.Transaction{}).Where("tx_hash = ? AND task_id = ?", mainHash, task.ID).Updates(map[string]interface{}{
 			"amount_out": actualReceived.String(),

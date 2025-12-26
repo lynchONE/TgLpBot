@@ -331,7 +331,7 @@ func (s *PnLService) calculateUSDTValue(
 			strings.EqualFold(task.Token1Address, config.AppConfig.WBNBAddress)
 
 		// Get real-time BNB price from PancakeSwap V3 WBNB/USDT pool
-		bnbPriceUSDT := s.getBNBPriceUSDT()
+		bnbPriceUSDT := s.GetBNBPriceUSDT()
 
 		if isWBNB0 && !isWBNB1 {
 			// Token0 is WBNB, price is in WBNB terms
@@ -368,8 +368,8 @@ func (s *PnLService) calculateUSDTValue(
 // PancakeSwap V3 WBNB/USDT 池子地址 (费率 0.01%)
 const pancakeV3WBNBUSDTPool = "0x172fcD41E0913e95784454622d1c3724f546f849"
 
-// getBNBPriceUSDT 从 PancakeSwap V3 WBNB/USDT 池子获取 BNB 实时价格
-func (s *PnLService) getBNBPriceUSDT() float64 {
+// GetBNBPriceUSDT 从 PancakeSwap V3 WBNB/USDT 池子获取 BNB 实时价格
+func (s *PnLService) GetBNBPriceUSDT() float64 {
 	// 缓存机制：避免频繁调用链上
 	bnbPriceCache.mu.RLock()
 	if bnbPriceCache.expires.After(time.Now()) {

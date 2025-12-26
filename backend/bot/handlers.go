@@ -329,7 +329,8 @@ func (b *Bot) handleTransactions(message *tgbotapi.Message, user *models.User) {
 
 		if rec.ClosedAt != nil {
 			text += fmt.Sprintf("🔴 撤出：%s USDT | Gas：%s BNB\n", formatWei(rec.CloseUSDTReceived), formatWeiDecimals(rec.CloseGasSpentWei, 6))
-			text += fmt.Sprintf("📈 收益：%s USDT (%.2f%%)\n", formatWei(rec.ProfitUSDT), rec.ProfitPct)
+			text += fmt.Sprintf("⛽ 总Gas费：%s USDT\n", formatWei(rec.TotalGasUSDT))
+			text += fmt.Sprintf("📈 收益：%s USDT (%.2f%%) _已扣除Gas_\n", formatWei(rec.ProfitUSDT), rec.ProfitPct)
 		}
 
 		var links []string

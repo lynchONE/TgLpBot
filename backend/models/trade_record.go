@@ -38,7 +38,8 @@ type TradeRecord struct {
 	CloseTxHash       string            `gorm:"size:66" json:"close_tx_hash"`
 	CloseUSDTReceived string            `gorm:"type:varchar(78)" json:"close_usdt_received"`    // wei (1e18)
 	CloseGasSpentWei  string            `gorm:"type:varchar(78)" json:"close_gas_spent_wei"`    // BNB wei (1e18)
-	ProfitUSDT        string            `gorm:"type:varchar(78)" json:"profit_usdt"`            // wei (may be negative)
+	TotalGasUSDT      string            `gorm:"type:varchar(78)" json:"total_gas_usdt"`         // 开仓+平仓 Gas 的 USDT 价值 (1e18)
+	ProfitUSDT        string            `gorm:"type:varchar(78)" json:"profit_usdt"`            // wei (may be negative), 已扣除 Gas
 	ProfitPct         float64           `gorm:"type:decimal(10,4);default:0" json:"profit_pct"` // (profit/open)*100
 	Status            TradeRecordStatus `gorm:"size:12;index" json:"status"`
 

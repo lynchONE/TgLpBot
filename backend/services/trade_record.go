@@ -73,7 +73,7 @@ func (s *TradeRecordService) CreateOpenRecord(
 	return database.DB.Create(rec).Error
 }
 
-func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, closeTxHash string, closeUSDTReceivedWei, closeGasSpentWei *big.Int) error {
+func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, closeTxHash string, closeUSDTReceivedWei, closeGasSpentWei *big.Int, bnbPriceUSDT float64) error {
 	if task == nil {
 		return fmt.Errorf("task is nil")
 	}
@@ -90,7 +90,12 @@ func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, cl
 	// create a closed record with unknown open fields to avoid losing the exit summary.
 	if err != nil {
 		openZero := big.NewInt(0)
+		// 计算 Gas 的 USDT 价值
+		totalGasWei := nonNilBigInt(closeGasSpentWei)
+		totalGasUSDT := calcGasUSDT(totalGasWei, bnbPriceUSDT)
+
 		profit := new(big.Int).Sub(nonNilBigInt(closeUSDTReceivedWei), openZero)
+		profit.Sub(profit, totalGasUSDT) // 扣除 Gas 费用
 		profitPct := calcProfitPct(profit, openZero)
 
 		closed := &models.TradeRecord{
@@ -109,6 +114,7 @@ func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, cl
 			CloseTxHash:       strings.TrimSpace(closeTxHash),
 			CloseUSDTReceived: safeBigIntString(closeUSDTReceivedWei),
 			CloseGasSpentWei:  safeBigIntString(closeGasSpentWei),
+			TotalGasUSDT:      safeBigIntString(totalGasUSDT),
 			ProfitUSDT:        profit.String(),
 			ProfitPct:         profitPct,
 			Status:            models.TradeStatusClosed,
@@ -117,7 +123,15 @@ func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, cl
 	}
 
 	openSpent, _ := parseBigInt(rec.OpenUSDTSpent)
+	openGasWei, _ := parseBigInt(rec.OpenGasSpentWei)
+
+	// 计算开仓+平仓 Gas 的 USDT 总价值
+	totalGasWei := new(big.Int).Add(openGasWei, nonNilBigInt(closeGasSpentWei))
+	totalGasUSDT := calcGasUSDT(totalGasWei, bnbPriceUSDT)
+
+	// 收益 = 撤出USDT - 投入USDT - 总Gas(USDT)
 	profit := new(big.Int).Sub(nonNilBigInt(closeUSDTReceivedWei), openSpent)
+	profit.Sub(profit, totalGasUSDT) // 扣除 Gas 费用
 	profitPct := calcProfitPct(profit, openSpent)
 
 	updates := map[string]interface{}{
@@ -125,12 +139,28 @@ func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, cl
 		"close_tx_hash":       strings.TrimSpace(closeTxHash),
 		"close_usdt_received": safeBigIntString(closeUSDTReceivedWei),
 		"close_gas_spent_wei": safeBigIntString(closeGasSpentWei),
+		"total_gas_usdt":      safeBigIntString(totalGasUSDT),
 		"profit_usdt":         profit.String(),
 		"profit_pct":          profitPct,
 		"status":              models.TradeStatusClosed,
 	}
 
 	return database.DB.Model(&models.TradeRecord{}).Where("id = ?", rec.ID).Updates(updates).Error
+}
+
+// calcGasUSDT 将 BNB Gas (wei) 转换为 USDT (wei)
+func calcGasUSDT(gasWei *big.Int, bnbPriceUSDT float64) *big.Int {
+	if gasWei == nil || gasWei.Sign() <= 0 || bnbPriceUSDT <= 0 {
+		return big.NewInt(0)
+	}
+	// gasWei 是 BNB 的 wei 单位 (1e18)
+	// USDT 也是 1e18 精度
+	// USDT = gasWei * bnbPriceUSDT
+	gasFloat := new(big.Float).SetInt(gasWei)
+	priceFloat := new(big.Float).SetFloat64(bnbPriceUSDT)
+	result := new(big.Float).Mul(gasFloat, priceFloat)
+	resultInt, _ := result.Int(nil)
+	return resultInt
 }
 
 func safeBigIntString(v *big.Int) string {
