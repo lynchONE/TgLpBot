@@ -59,6 +59,39 @@ func (tc *TickCalculator) CalculateTickFromPercentage(currentTick int, percentag
 	return tickLower, tickUpper
 }
 
+// CalculateTickFromPercentages calculates an ASYMMETRIC tick range based on separate lower/upper percentages.
+// lowerPct/upperPct: 价格范围百分比 (如 5 表示 5%)
+// Returns: tickLower, tickUpper
+func (tc *TickCalculator) CalculateTickFromPercentages(currentTick int, lowerPct float64, upperPct float64, tickSpacing int) (int, int) {
+	priceMultiplierUpper := 1.0 + (upperPct / 100.0)
+	priceMultiplierLower := 1.0 - (lowerPct / 100.0)
+
+	tickOffsetUpper := math.Abs(math.Log(priceMultiplierUpper) / math.Log(1.0001))
+	tickOffsetLower := math.Abs(math.Log(priceMultiplierLower) / math.Log(1.0001))
+
+	upperOffset := int(tickOffsetUpper)
+	lowerOffset := int(tickOffsetLower)
+
+	if upperOffset < tickSpacing {
+		upperOffset = tickSpacing
+	}
+	if lowerOffset < tickSpacing {
+		lowerOffset = tickSpacing
+	}
+
+	tickUpper := tc.RoundUpToTickSpacing(currentTick+upperOffset, tickSpacing)
+	tickLower := tc.RoundDownToTickSpacing(currentTick-lowerOffset, tickSpacing)
+
+	if tickUpper <= currentTick {
+		tickUpper = tc.RoundUpToTickSpacing(currentTick+1, tickSpacing)
+	}
+	if tickLower >= currentTick {
+		tickLower = tc.RoundDownToTickSpacing(currentTick-1, tickSpacing)
+	}
+
+	return tickLower, tickUpper
+}
+
 // RoundToNearestTickSpacing rounds a tick to the NEAREST valid tick spacing (四舍五入)
 func (tc *TickCalculator) RoundToNearestTickSpacing(tick int, tickSpacing int) int {
 	remainder := tick % tickSpacing

@@ -107,7 +107,7 @@ func (s *StrategyService) processExitRetry(task *models.StrategyTask) bool {
 		s.notify(task.UserID, fmt.Sprintf("🔄 %s失败，正在第 %d/%d 次重试撤出并兑换 USDT...", reason, attempt, exitMaxAttempts))
 	}
 
-	txHashes, err := s.liquidityService.ExitTaskToUSDT(task.UserID, task, true)
+	txHashes, err := s.liquidityService.ExitTaskToUSDTWithOptions(task.UserID, task, true, TxOptions{GasMultiplier: task.ExitGasMultiplier})
 	if err != nil {
 		s.onExitAttemptFailed(task, attempt, err)
 		return true
@@ -190,6 +190,7 @@ func (s *StrategyService) clearExitRetryState(task *models.StrategyTask) {
 	updates := map[string]interface{}{
 		"exit_pending_action": "",
 		"exit_pending_reason": "",
+		"exit_gas_multiplier": 1.0,
 		"exit_retry_count":    0,
 		"exit_next_retry_at":  nil,
 		"exit_last_error":     "",
@@ -199,6 +200,7 @@ func (s *StrategyService) clearExitRetryState(task *models.StrategyTask) {
 
 	task.ExitPendingAction = ""
 	task.ExitPendingReason = ""
+	task.ExitGasMultiplier = 1.0
 	task.ExitRetryCount = 0
 	task.ExitNextRetryAt = nil
 	task.ExitLastError = ""

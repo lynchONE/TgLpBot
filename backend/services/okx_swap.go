@@ -108,7 +108,7 @@ func (s *LiquidityService) swapExactInViaOKX(
 		tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), to.Hex(), approveAddr.Hex())
 
 	// Approve TokenApprove 合约 to spend tokenIn
-	if err := s.approveToken(privateKey, walletAddr, tokenIn, approveAddr, amountIn); err != nil {
+	if err := s.approveToken(privateKey, walletAddr, tokenIn, approveAddr, amountIn, TxOptions{}); err != nil {
 		return nil, fmt.Errorf("approve TokenApprove contract failed: %w", err)
 	}
 

@@ -21,6 +21,8 @@ type Bot struct {
 	okxService       *services.OKXDexService
 	poolService      *services.PoolService
 	strategyService  *services.StrategyService
+	autoLPService    *services.AutoLPService
+	autoLPCfgService *services.AutoLPUserConfigService
 	configService    *services.GlobalConfigService
 	taskService      *services.StrategyTaskService
 	snapshotService  *services.BalanceSnapshotService
@@ -28,7 +30,7 @@ type Bot struct {
 }
 
 // NewBot creates a new bot instance
-func NewBot() (*Bot, error) {
+func NewBot(ch *services.ClickHouseService) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(config.AppConfig.TelegramBotToken)
 	if err != nil {
 		return nil, err
@@ -46,6 +48,8 @@ func NewBot() (*Bot, error) {
 		okxService:       services.NewOKXDexService(),
 		poolService:      services.NewPoolService(),
 		strategyService:  services.NewStrategyService(),
+		autoLPService:    services.NewAutoLPService(ch),
+		autoLPCfgService: services.NewAutoLPUserConfigService(),
 		configService:    services.NewGlobalConfigService(),
 		taskService:      services.NewStrategyTaskService(),
 		snapshotService:  services.NewBalanceSnapshotService(),
@@ -61,6 +65,18 @@ func NewBot() (*Bot, error) {
 			log.Printf("Failed to notify user %d: %v", userID, err)
 		}
 	})
+
+	// Set AutoLP Notifier (reuse the same user->telegram mapping)
+	if bot.autoLPService != nil {
+		bot.autoLPService.SetNotifier(func(userID uint, message string) {
+			user, err := bot.userService.GetUserByID(userID)
+			if err == nil {
+				bot.sendMessage(user.TelegramID, message)
+			} else {
+				log.Printf("Failed to notify user %d: %v", userID, err)
+			}
+		})
+	}
 
 	// Set bot commands
 	if err := bot.setCommands(); err != nil {
@@ -83,6 +99,10 @@ func (b *Bot) setCommands() error {
 		{
 			Command:     "start",
 			Description: "开始使用机器人",
+		},
+		{
+			Command:     "auto",
+			Description: "AutoLP 自动开仓配置",
 		},
 		{
 			Command:     "positions",
@@ -174,6 +194,9 @@ func (b *Bot) setMenuButton() error {
 func (b *Bot) Start() {
 	// Start strategy service
 	b.strategyService.Start()
+	if b.autoLPService != nil {
+		b.autoLPService.Start()
+	}
 	if b.snapshotService != nil {
 		b.snapshotService.Start()
 	}
@@ -223,6 +246,8 @@ func (b *Bot) handleCommand(message *tgbotapi.Message, user *models.User) {
 	switch message.Command() {
 	case "start":
 		b.handleStart(message, user)
+	case "auto":
+		b.handleAuto(message, user)
 	case "help":
 		b.handleHelp(message, user)
 	case "wallet":
@@ -255,6 +280,16 @@ func (b *Bot) sendMessage(chatID int64, text string) (tgbotapi.Message, error) {
 	msg.ParseMode = "Markdown"
 	// msg.DisableWebPagePreview = true // 保持一致性，如果之前没有这里也不加，或者加上。原代码没有 disable preview
 	if sentMsg, err := b.api.Send(msg); err != nil {
+		// Fallback: if markdown entities are invalid, resend as plain text to avoid losing notifications.
+		if strings.Contains(err.Error(), "can't parse entities") {
+			msg.ParseMode = ""
+			if sentMsg2, err2 := b.api.Send(msg); err2 == nil {
+				return sentMsg2, nil
+			} else {
+				log.Printf("Error sending message (Markdown): %v; fallback plain text failed: %v", err, err2)
+				return tgbotapi.Message{}, err2
+			}
+		}
 		log.Printf("Error sending message: %v", err)
 		return tgbotapi.Message{}, err
 	} else {
@@ -268,8 +303,42 @@ func (b *Bot) sendMessageWithKeyboard(chatID int64, text string, replyMarkup any
 	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = replyMarkup
 	if _, err := b.api.Send(msg); err != nil {
+		if strings.Contains(err.Error(), "can't parse entities") {
+			msg.ParseMode = ""
+			if _, err2 := b.api.Send(msg); err2 == nil {
+				return
+			} else {
+				log.Printf("Error sending message (Markdown): %v; fallback plain text failed: %v", err, err2)
+				return
+			}
+		}
 		log.Printf("Error sending message: %v", err)
 	}
+}
+
+func (b *Bot) editMessageText(chatID int64, messageID int, text string) error {
+	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
+	editMsg.ParseMode = "Markdown"
+	editMsg.DisableWebPagePreview = true
+
+	if _, err := b.api.Send(editMsg); err != nil {
+		// Ignore no-op edits.
+		if strings.Contains(err.Error(), "message is not modified") {
+			return nil
+		}
+		// Fallback: if markdown entities are invalid, resend as plain text.
+		if strings.Contains(err.Error(), "can't parse entities") {
+			editMsg.ParseMode = ""
+			if _, err2 := b.api.Send(editMsg); err2 == nil {
+				return nil
+			} else {
+				log.Printf("Error editing message (Markdown): %v; fallback plain text failed: %v", err, err2)
+				return err2
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 func (b *Bot) editMessageReplyMarkup(chatID int64, messageID int, replyMarkup any) error {
@@ -360,6 +429,25 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleEntrySwapAllow(query, user)
 	case strings.HasPrefix(query.Data, "entry_swap_cancel_"):
 		b.handleEntrySwapCancel(query, user)
+	// AutoLP config callbacks
+	case query.Data == "auto_cfg_toggle":
+		b.handleAutoConfigToggle(query, user)
+	case query.Data == "auto_cfg_refresh":
+		b.handleAutoConfigRefresh(query, user)
+	case query.Data == "auto_cfg_set_total":
+		b.handleAutoConfigSetTotal(query, user)
+	case query.Data == "auto_cfg_set_max_tasks":
+		b.handleAutoConfigSetMaxTasks(query, user)
+	case query.Data == "auto_cfg_set_take_profit":
+		b.handleAutoConfigSetTakeProfit(query, user)
+	case query.Data == "auto_cfg_set_stop_loss":
+		b.handleAutoConfigSetStopLoss(query, user)
+	case query.Data == "auto_cfg_cancel_input":
+		b.handleAutoCancelInput(query, user)
+	case query.Data == "auto_view_strategy":
+		b.handleAutoViewStrategy(query, user)
+	case query.Data == "auto_view_config":
+		b.handleAutoViewConfig(query, user)
 	// Global config callbacks
 	case query.Data == "config_rebalance_timeout":
 		b.handleConfigRebalanceTimeout(query, user)
@@ -408,6 +496,9 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 // Stop stops the bot
 func (b *Bot) Stop() {
 	b.strategyService.Stop()
+	if b.autoLPService != nil {
+		b.autoLPService.Stop()
+	}
 	if b.snapshotService != nil {
 		b.snapshotService.Stop()
 	}

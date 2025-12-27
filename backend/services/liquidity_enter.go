@@ -257,6 +257,11 @@ func splitTotalAmount(total *big.Int, needNonZero0 bool, needNonZero1 bool) (*bi
 }
 
 func (s *LiquidityService) EnterTaskFromUSDT(userID uint, task *models.StrategyTask) (*EnterResult, error) {
+	return s.EnterTaskFromUSDTWithOptions(userID, task, TxOptions{})
+}
+
+func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *models.StrategyTask, opts TxOptions) (*EnterResult, error) {
+	opts.GasMultiplier = normalizeGasMultiplier(opts.GasMultiplier)
 	if config.AppConfig == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
@@ -342,9 +347,9 @@ func (s *LiquidityService) EnterTaskFromUSDT(userID uint, task *models.StrategyT
 	var res *EnterResult
 	switch version {
 	case "v4":
-		res, err = s.enterV4FromToken(privateKey, walletAddr, entryToken, entryAmount, task)
+		res, err = s.enterV4FromToken(privateKey, walletAddr, entryToken, entryAmount, task, opts)
 	default:
-		res, err = s.enterV3FromToken(privateKey, walletAddr, entryToken, entryAmount, task)
+		res, err = s.enterV3FromToken(privateKey, walletAddr, entryToken, entryAmount, task, opts)
 	}
 	if err != nil {
 		return nil, err
@@ -415,6 +420,7 @@ func (s *LiquidityService) enterV3FromToken(
 	tokenIn common.Address,
 	amountIn *big.Int,
 	task *models.StrategyTask,
+	opts TxOptions,
 ) (*EnterResult, error) {
 	if !common.IsHexAddress(config.AppConfig.ZapV3Address) {
 		return nil, fmt.Errorf("ZAP_V3_ADDRESS not set")
@@ -576,7 +582,7 @@ func (s *LiquidityService) enterV3FromToken(
 	// 3. Approve 代币给 Zap 合约
 	if amount0In.Sign() > 0 {
 		log.Printf("[Liquidity] V3 enter: approve token0=%s to Zap amount=%s", token0.Hex(), amount0In.String())
-		if err := s.approveToken(privateKey, walletAddr, token0, zapAddr, amount0In); err != nil {
+		if err := s.approveToken(privateKey, walletAddr, token0, zapAddr, amount0In, opts); err != nil {
 			return nil, fmt.Errorf("approve token0 failed: %w", err)
 		}
 		// Double check allowance
@@ -602,7 +608,7 @@ func (s *LiquidityService) enterV3FromToken(
 	}
 	if amount1In.Sign() > 0 {
 		log.Printf("[Liquidity] V3 enter: approve token1=%s to Zap amount=%s", token1.Hex(), amount1In.String())
-		if err := s.approveToken(privateKey, walletAddr, token1, zapAddr, amount1In); err != nil {
+		if err := s.approveToken(privateKey, walletAddr, token1, zapAddr, amount1In, opts); err != nil {
 			return nil, fmt.Errorf("approve token1 failed: %w", err)
 		}
 		// Double check allowance and balance
@@ -650,7 +656,7 @@ func (s *LiquidityService) enterV3FromToken(
 	if err != nil {
 		return nil, err
 	}
-	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), config.AppConfig.GasLimit)
+	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), config.AppConfig.GasLimit, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -976,6 +982,7 @@ func (s *LiquidityService) enterV4FromToken(
 	tokenIn common.Address,
 	amountIn *big.Int,
 	task *models.StrategyTask,
+	opts TxOptions,
 ) (*EnterResult, error) {
 	if !common.IsHexAddress(config.AppConfig.ZapV4Address) {
 		return nil, fmt.Errorf("ZAP_V4_ADDRESS not set")
@@ -1177,7 +1184,7 @@ func (s *LiquidityService) enterV4FromToken(
 	// 5. Construct ZapInV4 Params
 	// Approve entry token to Zap Contract
 	log.Printf("[Liquidity] DEBUG: About to approve entry token to Zap. amount=%s token=%s zapAddr=%s", amountIn.String(), tokenIn.Hex(), zapAddr.Hex())
-	if err := s.approveToken(privateKey, walletAddr, tokenIn, zapAddr, amountIn); err != nil {
+	if err := s.approveToken(privateKey, walletAddr, tokenIn, zapAddr, amountIn, opts); err != nil {
 		log.Printf("[Liquidity] DEBUG: approveToken failed: %v", err)
 		return nil, fmt.Errorf("approve entry token to zap failed: %w", err)
 	}
@@ -1215,7 +1222,7 @@ func (s *LiquidityService) enterV4FromToken(
 	if err != nil {
 		return nil, err
 	}
-	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), config.AppConfig.GasLimit)
+	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), config.AppConfig.GasLimit, opts)
 	if err != nil {
 		return nil, err
 	}

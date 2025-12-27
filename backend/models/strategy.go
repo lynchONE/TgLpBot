@@ -23,6 +23,9 @@ type StrategyTask struct {
 	UserID uint   `gorm:"not null;index" json:"user_id"`
 	PoolId string `gorm:"size:66;not null;index" json:"pool_id"` // V3 pool address (0x...) or V4 PoolId (0x...32 bytes)
 
+	// IsAuto marks tasks created by the AutoLP system (manual tasks are false).
+	IsAuto bool `gorm:"default:false;index" json:"is_auto"`
+
 	// Pool meta (cached for display)
 	PoolVersion  string `gorm:"size:10;default:'v3'" json:"pool_version"`
 	Exchange     string `gorm:"size:50" json:"exchange"`
@@ -48,6 +51,9 @@ type StrategyTask struct {
 	TickUpper int `gorm:"not null" json:"tick_upper"`
 	// RangePercentage is the +/- percentage used to compute tickLower/tickUpper (for rebalancing around current tick)
 	RangePercentage float64 `gorm:"type:decimal(10,4);default:0" json:"range_percentage"`
+	// RangeLowerPercentage/RangeUpperPercentage allow asymmetric ranges (when set > 0).
+	RangeLowerPercentage float64 `gorm:"type:decimal(10,4);default:0" json:"range_lower_percentage"`
+	RangeUpperPercentage float64 `gorm:"type:decimal(10,4);default:0" json:"range_upper_percentage"`
 
 	// Position Info
 	AmountUSDT       float64 `gorm:"type:decimal(20,8)" json:"amount_usdt"`     // Initial/Current USDT amount
@@ -73,7 +79,8 @@ type StrategyTask struct {
 	// Exit retry state (keep task Status as running when exit fails).
 	ExitPendingAction string     `gorm:"size:20;default:''" json:"exit_pending_action"` // manual_stop | stoploss | rebalance
 	ExitPendingReason string     `gorm:"type:text" json:"exit_pending_reason"`
-	ExitRetryCount    int        `gorm:"default:0" json:"exit_retry_count"` // number of failed attempts
+	ExitGasMultiplier float64    `gorm:"type:decimal(6,2);default:1.0" json:"exit_gas_multiplier"` // Gas multiplier for the next exit attempt (auto strategy may set to 2.0)
+	ExitRetryCount    int        `gorm:"default:0" json:"exit_retry_count"`                        // number of failed attempts
 	ExitNextRetryAt   *time.Time `json:"exit_next_retry_at"`
 	ExitLastError     string     `gorm:"type:text" json:"exit_last_error"`
 	ExitGiveUpAt      *time.Time `json:"exit_give_up_at"`

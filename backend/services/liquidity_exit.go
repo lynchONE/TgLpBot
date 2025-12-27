@@ -42,6 +42,11 @@ func parseBigIntFlexible(s string) (*big.Int, error) {
 }
 
 func (s *LiquidityService) ExitTaskToUSDT(userID uint, task *models.StrategyTask, sweepWallet bool) ([]string, error) {
+	return s.ExitTaskToUSDTWithOptions(userID, task, sweepWallet, TxOptions{})
+}
+
+func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.StrategyTask, sweepWallet bool, opts TxOptions) ([]string, error) {
+	opts.GasMultiplier = normalizeGasMultiplier(opts.GasMultiplier)
 	if config.AppConfig == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
@@ -83,9 +88,9 @@ func (s *LiquidityService) ExitTaskToUSDT(userID uint, task *models.StrategyTask
 	swapDeltas := !sweepWallet
 	switch strings.ToLower(strings.TrimSpace(task.PoolVersion)) {
 	case "v4":
-		txHashes, err = s.exitV4ToUSDT(privateKey, walletAddr, usdtAddr, task, swapDeltas)
+		txHashes, err = s.exitV4ToUSDT(privateKey, walletAddr, usdtAddr, task, swapDeltas, opts)
 	default:
-		txHashes, err = s.exitV3ToUSDT(privateKey, walletAddr, usdtAddr, task, swapDeltas)
+		txHashes, err = s.exitV3ToUSDT(privateKey, walletAddr, usdtAddr, task, swapDeltas, opts)
 	}
 	if err != nil {
 		return nil, err
@@ -217,12 +222,12 @@ func (s *LiquidityService) swapWalletTokensToUSDT(
 	return txHashes, nil
 }
 
-func (s *LiquidityService) buildAuth(privateKey *ecdsa.PrivateKey, nonce uint64, value *big.Int, gasLimit uint64) (*bind.TransactOpts, error) {
+func (s *LiquidityService) buildAuth(privateKey *ecdsa.PrivateKey, nonce uint64, value *big.Int, gasLimit uint64, opts TxOptions) (*bind.TransactOpts, error) {
 	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, blockchain.ChainID)
 	if err != nil {
 		return nil, err
 	}
-	gasPrice, err := blockchain.GetGasPrice()
+	gasPrice, err := blockchain.GetGasPriceWithMultiplier(normalizeGasMultiplier(opts.GasMultiplier))
 	if err != nil {
 		return nil, err
 	}
@@ -331,7 +336,7 @@ func unpackRevertReasonFromError(err error) string {
 	return reason
 }
 
-func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr common.Address, usdtAddr common.Address, task *models.StrategyTask, swapDeltas bool) ([]string, error) {
+func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr common.Address, usdtAddr common.Address, task *models.StrategyTask, swapDeltas bool, opts TxOptions) ([]string, error) {
 	var txHashes []string
 
 	// Capture initial USDT balance for calculating output
@@ -418,10 +423,10 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	if !isApprovedForAll {
 		// 首次使用，设置 setApprovalForAll（一次性授权所有 NFT）
 		log.Printf("[Liquidity] V3 exit: Setting ApprovalForAll for Zap contract (one-time setup)")
-		if err := s.setNFTApprovalForAll(privateKey, walletAddr, pmAddr, zapAddr, true); err != nil {
+		if err := s.setNFTApprovalForAll(privateKey, walletAddr, pmAddr, zapAddr, true, opts); err != nil {
 			// 如果 setApprovalForAll 失败，降级到单个 approve
 			log.Printf("[Liquidity] Warning: setApprovalForAll failed, falling back to single approve: %v", err)
-			if err := s.approveNFT(privateKey, walletAddr, pmAddr, zapAddr, tokenId); err != nil {
+			if err := s.approveNFT(privateKey, walletAddr, pmAddr, zapAddr, tokenId, opts); err != nil {
 				return nil, fmt.Errorf("approve NFT failed: %w", err)
 			}
 		}
@@ -444,7 +449,7 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	if err != nil {
 		return nil, err
 	}
-	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), config.AppConfig.GasLimit)
+	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), config.AppConfig.GasLimit, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -548,7 +553,7 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 }
 
 // approveNFT checks approval and approves if needed (ERC721)
-func (s *LiquidityService) approveNFT(privateKey *ecdsa.PrivateKey, walletAddr, tokenAddr, spender common.Address, tokenId *big.Int) error {
+func (s *LiquidityService) approveNFT(privateKey *ecdsa.PrivateKey, walletAddr, tokenAddr, spender common.Address, tokenId *big.Int, opts TxOptions) error {
 	// 简单的 ERC721 ABI 用于 getApproved 和 approve
 	const erc721ABI = `[{"constant":true,"inputs":[{"name":"tokenId","type":"uint256"}],"name":"getApproved","outputs":[{"name":"","type":"address"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"to","type":"address"},{"name":"tokenId","type":"uint256"}],"name":"approve","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"}]`
 
@@ -579,7 +584,7 @@ func (s *LiquidityService) approveNFT(privateKey *ecdsa.PrivateKey, walletAddr, 
 	if err != nil {
 		return err
 	}
-	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), config.AppConfig.GasLimit)
+	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), config.AppConfig.GasLimit, opts)
 	if err != nil {
 		return err
 	}
@@ -593,7 +598,7 @@ func (s *LiquidityService) approveNFT(privateKey *ecdsa.PrivateKey, walletAddr, 
 	return err
 }
 
-func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr common.Address, usdtAddr common.Address, task *models.StrategyTask, swapDeltas bool) ([]string, error) {
+func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr common.Address, usdtAddr common.Address, task *models.StrategyTask, swapDeltas bool, opts TxOptions) ([]string, error) {
 	var txHashes []string
 
 	if !common.IsHexAddress(config.AppConfig.UniswapV4PoolManagerAddress) {
@@ -696,7 +701,7 @@ func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	if err != nil {
 		return nil, err
 	}
-	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), config.AppConfig.GasLimit)
+	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), config.AppConfig.GasLimit, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -953,7 +958,7 @@ func (s *LiquidityService) swapExactInViaOKXWithHash(
 		tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), to.Hex(), approveAddr.Hex())
 
 	// Approve TokenApprove 合约
-	if err := s.approveToken(privateKey, walletAddr, tokenIn, approveAddr, amountIn); err != nil {
+	if err := s.approveToken(privateKey, walletAddr, tokenIn, approveAddr, amountIn, TxOptions{}); err != nil {
 		return "", fmt.Errorf("approve TokenApprove contract failed: %w", err)
 	}
 
@@ -1025,6 +1030,7 @@ func (s *LiquidityService) setNFTApprovalForAll(
 	nftContract common.Address,
 	operator common.Address,
 	approved bool,
+	opts TxOptions,
 ) error {
 	const erc721ABI = `[{"constant":false,"inputs":[{"name":"operator","type":"address"},{"name":"approved","type":"bool"}],"name":"setApprovalForAll","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"}]`
 
@@ -1038,7 +1044,7 @@ func (s *LiquidityService) setNFTApprovalForAll(
 		return err
 	}
 
-	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), config.AppConfig.GasLimit)
+	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), config.AppConfig.GasLimit, opts)
 	if err != nil {
 		return err
 	}

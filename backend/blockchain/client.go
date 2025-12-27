@@ -149,6 +149,42 @@ func GetGasPrice() (*big.Int, error) {
 	return gasPrice, nil
 }
 
+// GetGasPriceWithMultiplier returns suggestGasPrice*multiplier clamped by MAX_GAS_PRICE.
+func GetGasPriceWithMultiplier(multiplier float64) (*big.Int, error) {
+	if Client == nil {
+		return nil, fmt.Errorf("blockchain client not initialized")
+	}
+	if config.AppConfig == nil {
+		return nil, fmt.Errorf("config not loaded")
+	}
+	if multiplier <= 0 {
+		multiplier = 1
+	}
+
+	gasPrice, err := Client.SuggestGasPrice(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get gas price: %w", err)
+	}
+
+	if multiplier != 1 {
+		r := new(big.Rat).SetInt(gasPrice)
+		m := new(big.Rat)
+		if _, ok := m.SetString(fmt.Sprintf("%.6f", multiplier)); ok {
+			r.Mul(r, m)
+			scaled := new(big.Int).Quo(r.Num(), r.Denom())
+			if scaled.Sign() > 0 {
+				gasPrice = scaled
+			}
+		}
+	}
+
+	maxGasPrice := big.NewInt(config.AppConfig.MaxGasPrice)
+	if gasPrice.Cmp(maxGasPrice) > 0 {
+		return maxGasPrice, nil
+	}
+	return gasPrice, nil
+}
+
 // SignTransaction signs a transaction with private key
 func SignTransaction(tx *types.Transaction, privateKeyHex string) (*types.Transaction, error) {
 	privateKey, err := crypto.HexToECDSA(privateKeyHex)

@@ -126,7 +126,7 @@ func (b *Bot) handleBackToInput(query *tgbotapi.CallbackQuery, user *models.User
 	b.api.Send(callback)
 
 	// Reset state to awaiting_tick_range
-	database.SetUserSession(user.TelegramID, "state", "awaiting_tick_range", 30*60) // 30 minutes
+	database.SetUserSession(user.TelegramID, "state", "awaiting_tick_range", 30*time.Minute) // 30 minutes
 
 	text := `🔙 *返回输入*
 

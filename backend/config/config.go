@@ -59,6 +59,7 @@ type Config struct {
 	ClickHouseUser     string
 	ClickHousePassword string
 	ClickHouseDebug    bool
+	ClickHouseResetAll bool
 
 	// Contracts
 	ZapV3Address string
@@ -89,6 +90,41 @@ type Config struct {
 
 	// Mini App / Realtime positions
 	V4NFTScanFromBlock uint64
+
+	// Auto LP (PoolM scanner + optional executor)
+	AutoLPEnabled                 bool
+	AutoLPExecuteEnabled          bool
+	AutoLPNotifyTopCandidate      bool
+	AutoLPDebug                   bool
+	AutoLPPoolMBaseURL            string
+	AutoLPChain                   string
+	AutoLPProtocols               string
+	AutoLPTimeframeShortMinutes   int
+	AutoLPTimeframeLongMinutes    int
+	AutoLPScanIntervalSeconds     int
+	AutoLPFetchDelayMillis        int
+	AutoLPUserID                  int
+	AutoLPAmountUSDT              float64
+	AutoLPBaseWidthPercentage     float64
+	AutoLPMaxActiveTasks          int
+	AutoLPMinPoolValueUSD         float64
+	AutoLPMinFeePercentage        float64
+	AutoLPMinTotalFees5m          float64
+	AutoLPMinTotalVolume5m        float64
+	AutoLPMinTx5m                 int
+	AutoLPMinTx60m                int
+	AutoLPMinFeeApr5m             float64
+	AutoLPMinFeeApr60m            float64
+	AutoLPRequireStableSymbol     string
+	AutoLPMaxSurgeRatio           float64
+	AutoLPMaxCandidates           int
+	AutoLPAllowEntrySwap          bool
+	AutoLPExitVolumeThreshold     float64
+	AutoLPHeatDownScans           int
+	AutoLPEmergencyGasMultiplier  float64
+	AutoLPWidthSidewaysPercent    float64
+	AutoLPWidthMildUptrendPercent float64
+	AutoLPWidthRapidPumpPercent   float64
 }
 
 var AppConfig *Config
@@ -110,6 +146,31 @@ func LoadConfig() error {
 	maxGasPrice, _ := strconv.ParseInt(getEnv("MAX_GAS_PRICE", "5000000000"), 10, 64)
 	gasLimit, _ := strconv.ParseUint(getEnv("GAS_LIMIT", "500000"), 10, 64)
 	v4NFTScanFromBlock, _ := strconv.ParseUint(strings.TrimSpace(getEnv("V4_NFT_SCAN_FROM_BLOCK", "0")), 10, 64)
+	autoLPShortTF, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_TIMEFRAME_SHORT_MINUTES", "5")))
+	autoLPLongTF, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_TIMEFRAME_LONG_MINUTES", "60")))
+	autoLPScanInterval, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_SCAN_INTERVAL_SECONDS", "60")))
+	autoLPFetchDelayMillis, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_FETCH_DELAY_MILLIS", "250")))
+	autoLPUserID, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_USER_ID", "0")))
+	autoLPAmountUSDT, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_AMOUNT_USDT", "0")), 64)
+	autoLPBaseWidthPct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_BASE_WIDTH_PERCENT", "5")), 64)
+	autoLPMaxActiveTasks, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_MAX_ACTIVE_TASKS", "1")))
+	autoLPMinPoolValueUSD, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_POOL_VALUE_USD", "50000")), 64)
+	autoLPMinFeePct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_FEE_PERCENTAGE", "0.2")), 64)
+	autoLPMinTotalFees5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_TOTAL_FEES_5M", "100")), 64)
+	autoLPMinTotalVolume5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_TOTAL_VOLUME_5M", "5000")), 64)
+	autoLPMinTx5m, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_MIN_TX_5M", "0")))
+	autoLPMinTx60m, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_MIN_TX_60M", "0")))
+	autoLPMinFeeApr5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_FEE_APR_5M", "0")), 64)
+	autoLPMinFeeApr60m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_FEE_APR_60M", "0")), 64)
+	autoLPMaxSurgeRatio, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MAX_SURGE_RATIO", "0")), 64)
+	autoLPMaxCandidates, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_MAX_CANDIDATES", "20")))
+	autoLPExitVolThreshold, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_AUTO_EXIT_VOLUME_THRESHOLD", "0.5")), 64)
+	autoLPHeatDownScans, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_HEAT_DOWN_SCANS", "6")))
+	autoLPEmergencyGasMult, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_EMERGENCY_GAS_MULTIPLIER", "2.0")), 64)
+	autoLPDebug := getEnvBool("AUTO_LP_DEBUG", false)
+	autoLPWidthSideways, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_SIDEWAYS_PERCENT", "2.0")), 64)
+	autoLPWidthMildUp, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_MILD_UPTREND_PERCENT", "5.0")), 64)
+	autoLPWidthRapidPump, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_RAPID_PUMP_PERCENT", "15.0")), 64)
 
 	AppConfig = &Config{
 		// Telegram
@@ -158,6 +219,7 @@ func LoadConfig() error {
 		ClickHouseUser:     getEnv("CLICKHOUSE_USER", "default"),
 		ClickHousePassword: getEnv("CLICKHOUSE_PASSWORD", ""),
 		ClickHouseDebug:    getEnvBool("CLICKHOUSE_DEBUG", false),
+		ClickHouseResetAll: getEnvBool("CLICKHOUSE_RESET_ALL", false),
 
 		// Contracts
 		ZapV3Address: getEnv("ZAP_V3_ADDRESS", ""),
@@ -189,6 +251,41 @@ func LoadConfig() error {
 
 		// Mini App / Realtime positions
 		V4NFTScanFromBlock: v4NFTScanFromBlock,
+
+		// Auto LP (PoolM scanner + optional executor)
+		AutoLPEnabled:                 getEnvBool("AUTO_LP_ENABLED", false),
+		AutoLPExecuteEnabled:          getEnvBool("AUTO_LP_EXECUTE_ENABLED", false),
+		AutoLPNotifyTopCandidate:      getEnvBool("AUTO_LP_NOTIFY_TOP_CANDIDATE", false),
+		AutoLPDebug:                   autoLPDebug,
+		AutoLPPoolMBaseURL:            strings.TrimSpace(getEnv("AUTO_LP_POOLM_BASE_URL", "")),
+		AutoLPChain:                   strings.TrimSpace(getEnv("AUTO_LP_CHAIN", "bsc")),
+		AutoLPProtocols:               strings.TrimSpace(getEnv("AUTO_LP_PROTOCOLS", "v3,v4")),
+		AutoLPTimeframeShortMinutes:   autoLPShortTF,
+		AutoLPTimeframeLongMinutes:    autoLPLongTF,
+		AutoLPScanIntervalSeconds:     autoLPScanInterval,
+		AutoLPFetchDelayMillis:        autoLPFetchDelayMillis,
+		AutoLPUserID:                  autoLPUserID,
+		AutoLPAmountUSDT:              autoLPAmountUSDT,
+		AutoLPBaseWidthPercentage:     autoLPBaseWidthPct,
+		AutoLPMaxActiveTasks:          autoLPMaxActiveTasks,
+		AutoLPMinPoolValueUSD:         autoLPMinPoolValueUSD,
+		AutoLPMinFeePercentage:        autoLPMinFeePct,
+		AutoLPMinTotalFees5m:          autoLPMinTotalFees5m,
+		AutoLPMinTotalVolume5m:        autoLPMinTotalVolume5m,
+		AutoLPMinTx5m:                 autoLPMinTx5m,
+		AutoLPMinTx60m:                autoLPMinTx60m,
+		AutoLPMinFeeApr5m:             autoLPMinFeeApr5m,
+		AutoLPMinFeeApr60m:            autoLPMinFeeApr60m,
+		AutoLPRequireStableSymbol:     strings.TrimSpace(getEnv("AUTO_LP_REQUIRE_STABLE_SYMBOL", "USDT")),
+		AutoLPMaxSurgeRatio:           autoLPMaxSurgeRatio,
+		AutoLPMaxCandidates:           autoLPMaxCandidates,
+		AutoLPAllowEntrySwap:          getEnvBool("AUTO_LP_ALLOW_ENTRY_SWAP", false),
+		AutoLPExitVolumeThreshold:     autoLPExitVolThreshold,
+		AutoLPHeatDownScans:           autoLPHeatDownScans,
+		AutoLPEmergencyGasMultiplier:  autoLPEmergencyGasMult,
+		AutoLPWidthSidewaysPercent:    autoLPWidthSideways,
+		AutoLPWidthMildUptrendPercent: autoLPWidthMildUp,
+		AutoLPWidthRapidPumpPercent:   autoLPWidthRapidPump,
 	}
 
 	// Enforce encryption key to avoid storing/decrypting private keys insecurely.
@@ -218,6 +315,22 @@ func LoadConfig() error {
 	log.Printf("   - MySQL: %s@%s:%s/%s", AppConfig.MySQLUser, AppConfig.MySQLHost, AppConfig.MySQLPort, AppConfig.MySQLDatabase)
 	log.Printf("   - Redis: %s:%s (DB: %d)", AppConfig.RedisHost, AppConfig.RedisPort, AppConfig.RedisDB)
 	log.Printf("   - V4 NFT Scan From Block: %d", AppConfig.V4NFTScanFromBlock)
+	log.Printf("   - AutoLP Enabled: %v", AppConfig.AutoLPEnabled)
+	log.Printf("   - AutoLP Execute Enabled: %v", AppConfig.AutoLPExecuteEnabled)
+	log.Printf("   - AutoLP Debug: %v", AppConfig.AutoLPDebug)
+	log.Printf("   - AutoLP UserID: %d", AppConfig.AutoLPUserID)
+	log.Printf("   - AutoLP Chain: %s", AppConfig.AutoLPChain)
+	log.Printf("   - AutoLP Protocols: %s", AppConfig.AutoLPProtocols)
+	log.Printf("   - AutoLP Timeframes: %d/%d minutes", AppConfig.AutoLPTimeframeShortMinutes, AppConfig.AutoLPTimeframeLongMinutes)
+	log.Printf("   - AutoLP Scan Interval: %d seconds", AppConfig.AutoLPScanIntervalSeconds)
+	log.Printf("   - AutoLP Fetch Delay: %d ms", AppConfig.AutoLPFetchDelayMillis)
+	log.Printf("   - AutoLP Amount USDT: %.2f", AppConfig.AutoLPAmountUSDT)
+	log.Printf("   - AutoLP Base Width Percentage: %.4f", AppConfig.AutoLPBaseWidthPercentage)
+	log.Printf("   - AutoLP Width Sideways Percentage: %.4f", AppConfig.AutoLPWidthSidewaysPercent)
+	log.Printf("   - AutoLP Width MildUptrend Percentage: %.4f", AppConfig.AutoLPWidthMildUptrendPercent)
+	log.Printf("   - AutoLP Width RapidPump Percentage: %.4f", AppConfig.AutoLPWidthRapidPumpPercent)
+	log.Printf("   - AutoLP Max Active Tasks: %d", AppConfig.AutoLPMaxActiveTasks)
+	log.Printf("   - AutoLP Require Stable (已不用于筛选): %s", AppConfig.AutoLPRequireStableSymbol)
 	log.Println("✅ 配置加载完成")
 	log.Println("========================================")
 

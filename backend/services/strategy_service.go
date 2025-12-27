@@ -374,11 +374,28 @@ func (s *StrategyService) calculateRangeFromPercentage(task *models.StrategyTask
 	if task.TickSpacing <= 0 {
 		return 0, 0, fmt.Errorf("tick spacing not set")
 	}
-	if task.RangePercentage <= 0 || task.RangePercentage >= 100 {
+	tc := NewTickCalculator()
+
+	// Default: symmetric rangePercentage (manual tasks).
+	lowerPct := task.RangePercentage
+	upperPct := task.RangePercentage
+
+	// Auto tasks may use asymmetric lower/upper percentages.
+	if task.RangeLowerPercentage > 0 && task.RangeUpperPercentage > 0 {
+		lowerPct = task.RangeLowerPercentage
+		upperPct = task.RangeUpperPercentage
+	}
+
+	if lowerPct <= 0 || upperPct <= 0 || lowerPct >= 100 || upperPct >= 100 {
 		return 0, 0, fmt.Errorf("range percentage not set")
 	}
-	tc := NewTickCalculator()
-	tickLower, tickUpper := tc.CalculateTickFromPercentage(currentTick, task.RangePercentage, task.TickSpacing)
+
+	var tickLower, tickUpper int
+	if task.RangeLowerPercentage > 0 && task.RangeUpperPercentage > 0 {
+		tickLower, tickUpper = tc.CalculateTickFromPercentages(currentTick, lowerPct, upperPct, task.TickSpacing)
+	} else {
+		tickLower, tickUpper = tc.CalculateTickFromPercentage(currentTick, task.RangePercentage, task.TickSpacing)
+	}
 	if err := tc.ValidateTickRange(tickLower, tickUpper, task.TickSpacing); err != nil {
 		return 0, 0, err
 	}

@@ -73,10 +73,7 @@ func main() {
 		log.Println("💡 /api/pools 等依赖 ClickHouse 的接口将不可用")
 	} else {
 		log.Println("✅ ClickHouse 连接成功")
-
-		// Start Gecko Service
-		geckoService := services.NewGeckoService(chService)
-		geckoService.StartScheduler()
+		chService.StartDailyRetentionCleanup()
 	}
 
 	// Start Web Server (always on; some endpoints may be disabled if ClickHouse is unavailable)
@@ -100,7 +97,7 @@ func main() {
 	log.Println("========================================")
 	log.Println("🤖 开始创建 Telegram Bot...")
 	log.Println("========================================")
-	telegramBot, err := bot.NewBot()
+	telegramBot, err := bot.NewBot(chService)
 	if err != nil {
 		log.Fatalf("❌ Bot 创建失败: %v", err)
 	}

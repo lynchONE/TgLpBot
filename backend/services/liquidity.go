@@ -22,6 +22,21 @@ type LiquidityService struct {
 	tradeRecordService *TradeRecordService
 }
 
+type TxOptions struct {
+	// GasMultiplier multiplies suggested gasPrice (e.g. 2.0 for emergency). 0 means 1.0.
+	GasMultiplier float64
+}
+
+func normalizeGasMultiplier(v float64) float64 {
+	if v <= 0 {
+		return 1
+	}
+	if v > 10 {
+		return 10
+	}
+	return v
+}
+
 // NewLiquidityService creates a new liquidity service
 func NewLiquidityService() *LiquidityService {
 	return &LiquidityService{
@@ -36,6 +51,7 @@ func (s *LiquidityService) approveToken(
 	privateKey *ecdsa.PrivateKey,
 	from, token, spender common.Address,
 	amount *big.Int,
+	opts TxOptions,
 ) error {
 	// Check current allowance
 	erc20, err := blockchain.NewERC20(token, blockchain.Client)
@@ -61,7 +77,7 @@ func (s *LiquidityService) approveToken(
 		return err
 	}
 
-	gasPrice, err := blockchain.GetGasPrice()
+	gasPrice, err := blockchain.GetGasPriceWithMultiplier(normalizeGasMultiplier(opts.GasMultiplier))
 	if err != nil {
 		return err
 	}
