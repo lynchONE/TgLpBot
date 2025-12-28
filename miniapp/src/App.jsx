@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import PositionCard from './components/PositionCard.jsx';
-import { fetchRealtimePositions } from './lib/api';
+import { fetchAdminRealtimePositions, fetchAdminRealtimeUsers, fetchRealtimePositions } from './lib/api';
 import { getTelegramWebApp } from './lib/telegram';
+import { formatRelativeTime } from './lib/time';
 
 function resolveApiBaseUrl() {
     const queryApiBase = new URLSearchParams(window.location.search).get('apiBaseUrl');
@@ -83,6 +84,21 @@ function formatUsd(v) {
     return `$${n.toFixed(2)}`;
 }
 
+function formatUserLabel(user) {
+    if (!user) return '未知用户';
+    const username = String(user.username || '').trim();
+    if (username) return `@${username}`;
+    const first = String(user.first_name || '').trim();
+    const last = String(user.last_name || '').trim();
+    const full = `${first} ${last}`.trim();
+    if (full) return full;
+    const telegramId = String(user.telegram_id || '').trim();
+    if (telegramId) return `TG ${telegramId}`;
+    const userId = String(user.user_id || '').trim();
+    if (userId) return `用户 ${userId}`;
+    return '未知用户';
+}
+
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
         <path d={path} />
@@ -103,21 +119,45 @@ export default function App() {
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const pollRef = useRef(null);
+    const [viewMode, setViewMode] = useState('positions');
+    const [adminUsers, setAdminUsers] = useState([]);
+    const [adminUsersError, setAdminUsersError] = useState('');
+    const [adminUsersLoading, setAdminUsersLoading] = useState(false);
+    const [adminSelectedUserId, setAdminSelectedUserId] = useState(null);
+    const [adminPositions, setAdminPositions] = useState(null);
+    const [adminPositionsError, setAdminPositionsError] = useState('');
+    const [adminPositionsLoading, setAdminPositionsLoading] = useState(false);
+    const adminUsersPollRef = useRef(null);
+    const adminPositionsPollRef = useRef(null);
+    const adminSelectedRef = useRef(null);
 
     const [theme, setTheme] = useState('dark');
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [pollOverrideSec, setPollOverrideSec] = useState(null);
     const [pollDraftSec, setPollDraftSec] = useState('');
 
-    const serverPollIntervalSec = Math.max(1, Number(data?.poll_interval_sec || 1));
+    const serverPollIntervalSec = Math.max(1, Number(data?.poll_interval_sec || adminPositions?.poll_interval_sec || 1));
     const pollIntervalSec = Math.max(1, Number(pollOverrideSec || serverPollIntervalSec || 1));
-    const updatedAt = data?.updated_at;
+    const adminListPollSec = Math.max(3, pollIntervalSec);
+    const isAdmin = Boolean(data?.is_admin || adminPositions?.is_admin);
+    const showAdmin = isAdmin && viewMode === 'admin';
 
-    const walletAddress = data?.wallet?.address || '';
-    const bnbBalance = data?.wallet?.bnb_balance || '0.000000';
-    const bnbUsd = data?.wallet?.bnb_usd;
-    const summary = data?.summary;
-    const positions = data?.positions || [];
+    const adminSelectedUser = useMemo(() => {
+        if (!adminSelectedUserId) return null;
+        return adminUsers.find((u) => Number(u?.user_id) === Number(adminSelectedUserId)) || null;
+    }, [adminUsers, adminSelectedUserId]);
+
+    const activeData = showAdmin ? adminPositions : data;
+    const updatedAt = activeData?.updated_at;
+
+    const walletAddress = activeData?.wallet?.address || '';
+    const bnbBalance = activeData?.wallet?.bnb_balance || '0.000000';
+    const bnbUsd = activeData?.wallet?.bnb_usd;
+    const summary = activeData?.summary;
+    const positions = activeData?.positions || [];
+
+    const activeError = showAdmin ? adminPositionsError : error;
+    const activeLoading = showAdmin ? adminPositionsLoading : loading;
 
     const walletUsdFromTokens = useMemo(() => {
         const byAddr = new Map();
@@ -161,6 +201,12 @@ export default function App() {
     }, [positions]);
 
     const apiBaseUrl = useMemo(() => resolveApiBaseUrl(), []);
+
+    useEffect(() => {
+        if (!isAdmin && viewMode === 'admin') {
+            setViewMode('positions');
+        }
+    }, [isAdmin, viewMode]);
 
     useEffect(() => {
         const tg = getTelegramWebApp();
@@ -229,6 +275,101 @@ export default function App() {
         };
     }, [apiBaseUrl, initData, pollIntervalSec]);
 
+    useEffect(() => {
+        if (!initData || !showAdmin) return;
+        let aborted = false;
+        const controller = new AbortController();
+
+        const run = async () => {
+            setAdminUsersLoading(true);
+            setAdminUsersError('');
+            try {
+                const resp = await fetchAdminRealtimeUsers({
+                    apiBaseUrl,
+                    initData,
+                    limit: 50,
+                    signal: controller.signal,
+                });
+                if (aborted) return;
+                const users = Array.isArray(resp?.users) ? resp.users : [];
+                setAdminUsers(users);
+            } catch (e) {
+                if (aborted) return;
+                setAdminUsersError(String(e?.message || e));
+            } finally {
+                if (!aborted) setAdminUsersLoading(false);
+            }
+        };
+
+        run();
+
+        if (adminUsersPollRef.current) clearInterval(adminUsersPollRef.current);
+        adminUsersPollRef.current = setInterval(run, adminListPollSec * 1000);
+
+        return () => {
+            aborted = true;
+            controller.abort();
+            if (adminUsersPollRef.current) clearInterval(adminUsersPollRef.current);
+        };
+    }, [apiBaseUrl, initData, showAdmin, adminListPollSec]);
+
+    useEffect(() => {
+        if (!showAdmin) return;
+        if (!adminUsers.length) {
+            setAdminSelectedUserId(null);
+            setAdminPositions(null);
+            return;
+        }
+        const exists = adminUsers.some((u) => Number(u?.user_id) === Number(adminSelectedUserId));
+        if (!exists) {
+            setAdminSelectedUserId(adminUsers[0].user_id);
+        }
+    }, [showAdmin, adminUsers, adminSelectedUserId]);
+
+    useEffect(() => {
+        if (!initData || !showAdmin || !adminSelectedUserId) return;
+        let aborted = false;
+        const controller = new AbortController();
+
+        const selectedChanged = adminSelectedRef.current !== adminSelectedUserId;
+        adminSelectedRef.current = adminSelectedUserId;
+        if (selectedChanged) {
+            setAdminPositions(null);
+            setAdminPositionsError('');
+        }
+
+        const run = async () => {
+            setAdminPositionsLoading(true);
+            setAdminPositionsError('');
+            try {
+                const resp = await fetchAdminRealtimePositions({
+                    apiBaseUrl,
+                    initData,
+                    userId: adminSelectedUserId,
+                    signal: controller.signal,
+                });
+                if (aborted) return;
+                setAdminPositions(resp);
+            } catch (e) {
+                if (aborted) return;
+                setAdminPositionsError(String(e?.message || e));
+            } finally {
+                if (!aborted) setAdminPositionsLoading(false);
+            }
+        };
+
+        run();
+
+        if (adminPositionsPollRef.current) clearInterval(adminPositionsPollRef.current);
+        adminPositionsPollRef.current = setInterval(run, pollIntervalSec * 1000);
+
+        return () => {
+            aborted = true;
+            controller.abort();
+            if (adminPositionsPollRef.current) clearInterval(adminPositionsPollRef.current);
+        };
+    }, [apiBaseUrl, initData, showAdmin, adminSelectedUserId, pollIntervalSec]);
+
     const applyPollDraft = () => {
         const raw = String(pollDraftSec || '').trim();
         const m = raw.match(/\d+/);
@@ -257,6 +398,25 @@ export default function App() {
     };
 
     const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
+    const headerTitle = showAdmin ? '管理面板' : '实时仓位';
+    const headerSubtext = showAdmin
+        ? adminSelectedUser
+            ? `用户：${formatUserLabel(adminSelectedUser)}`
+            : adminUsersLoading && adminUsers.length === 0
+                ? '加载用户中...'
+                : adminUsers.length
+                    ? `运行中用户：${adminUsers.length}`
+                    : '暂无运行任务'
+        : walletAddress
+            ? `钱包：${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
+            : '加载钱包中...';
+    const showSummaryCard = !showAdmin || Boolean(adminPositions);
+    const adminSummaryPlaceholder = adminSelectedUserId
+        ? adminPositionsLoading
+            ? '加载用户仓位中...'
+            : '用户仓位暂不可用'
+        : '请选择用户查看实时仓位';
+    const showEmptyPositions = !activeLoading && activeData && visiblePositions.length === 0;
 
     return (
         <div className="min-h-screen max-w-[720px] px-4 py-4 pb-[calc(16px+env(safe-area-inset-bottom))] mx-auto">
@@ -267,10 +427,8 @@ export default function App() {
                             <Icon path={icons.bot} className="h-5 w-5" />
                         </div>
                         <div>
-                            <div className="text-lg font-extrabold tracking-tight">实时仓位</div>
-                            <div className="mt-0.5 text-xs text-zinc-500 dark:text-white/40">
-                                {walletAddress ? `钱包：${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '加载钱包中...'}
-                            </div>
+                            <div className="text-lg font-extrabold tracking-tight">{headerTitle}</div>
+                            <div className="mt-0.5 text-xs text-zinc-500 dark:text-white/40">{headerSubtext}</div>
                         </div>
                     </div>
 
@@ -294,61 +452,183 @@ export default function App() {
                     </div>
                 </div>
 
-                <div className="mt-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
-                    <div className="flex items-start justify-between gap-4">
-                        <div>
-                            <div className="text-[11px] text-zinc-500 dark:text-white/40">总余额</div>
-                            <div className="mt-0.5 text-2xl font-extrabold tabular-nums text-zinc-900 dark:text-emerald-300">
-                                {formatUsd(totalUsd)}
+                {isAdmin ? (
+                    <div className="mt-3 grid grid-cols-2 gap-1 rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5">
+                        <button
+                            type="button"
+                            onClick={() => setViewMode('positions')}
+                            aria-pressed={viewMode === 'positions'}
+                            className={`rounded-xl px-3 py-2 transition ${
+                                viewMode === 'positions'
+                                    ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
+                                    : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
+                            }`}
+                        >
+                            实时仓位
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setViewMode('admin')}
+                            aria-pressed={viewMode === 'admin'}
+                            className={`rounded-xl px-3 py-2 transition ${
+                                viewMode === 'admin'
+                                    ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
+                                    : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
+                            }`}
+                        >
+                            管理
+                        </button>
+                    </div>
+                ) : null}
+
+                {showSummaryCard ? (
+                    <div className="mt-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                        <div className="flex items-start justify-between gap-4">
+                            <div>
+                                <div className="text-[11px] text-zinc-500 dark:text-white/40">总余额</div>
+                                <div className="mt-0.5 text-2xl font-extrabold tabular-nums text-zinc-900 dark:text-emerald-300">
+                                    {formatUsd(totalUsd)}
+                                </div>
+                                <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40 tabular-nums">
+                                    {bnbBalance} BNB{typeof bnbUsd === 'number' ? ` ≈ ${formatUsd(bnbUsd)}` : ''}
+                                </div>
                             </div>
-                            <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40 tabular-nums">
-                                {bnbBalance} BNB{typeof bnbUsd === 'number' ? ` ≈ ${formatUsd(bnbUsd)}` : ''}
+                            <div className="text-right">
+                                <div className="text-[11px] text-zinc-500 dark:text-white/40">自动刷新</div>
+                                <div className="text-sm font-semibold tabular-nums">{pollIntervalSec}s</div>
                             </div>
-                        </div>
-                        <div className="text-right">
-                            <div className="text-[11px] text-zinc-500 dark:text-white/40">自动刷新</div>
-                            <div className="text-sm font-semibold tabular-nums">{pollIntervalSec}s</div>
                         </div>
                     </div>
-                </div>
+                ) : (
+                    <div className="mt-3 rounded-2xl border border-zinc-200 bg-white/70 p-4 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                        {adminSummaryPlaceholder}
+                    </div>
+                )}
             </header>
 
-            {error ? (
-                <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-200">
-                    {error}
+            {showAdmin ? (
+                <div className="mb-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                    <div className="flex items-center justify-between">
+                        <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">运行中用户</div>
+                        <div className="text-[11px] text-zinc-500 dark:text-white/40">{adminUsers.length} 人</div>
+                    </div>
+
+                    {adminUsersError ? (
+                        <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
+                            {adminUsersError}
+                        </div>
+                    ) : null}
+
+                    {adminUsersLoading && adminUsers.length === 0 ? (
+                        <div className="mt-3 rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                            加载中...
+                        </div>
+                    ) : null}
+
+                    {!adminUsersLoading && adminUsers.length === 0 ? (
+                        <div className="mt-3 rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                            暂无运行任务用户
+                        </div>
+                    ) : null}
+
+                    {adminUsers.length ? (
+                        <div className="mt-3 space-y-2">
+                            {adminUsers.map((u) => {
+                                const selected = Number(u?.user_id) === Number(adminSelectedUserId);
+                                const label = formatUserLabel(u);
+                                const updatedText = formatRelativeTime(u?.updated_at) || '--';
+                                return (
+                                    <button
+                                        key={u.user_id}
+                                        type="button"
+                                        onClick={() => {
+                                            if (Number(u?.user_id) === Number(adminSelectedUserId)) return;
+                                            setAdminSelectedUserId(u.user_id);
+                                            setAdminPositions(null);
+                                            setAdminPositionsError('');
+                                        }}
+                                        className={`w-full rounded-xl border p-3 text-left transition ${
+                                            selected
+                                                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-900 dark:text-emerald-100'
+                                                : 'border-zinc-200 bg-white/70 text-zinc-900 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10'
+                                        }`}
+                                    >
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div>
+                                                <div className="text-sm font-semibold">{label}</div>
+                                                <div
+                                                    className={`mt-0.5 text-[11px] ${
+                                                        selected ? 'text-emerald-700/80 dark:text-emerald-200/80' : 'text-zinc-500 dark:text-white/40'
+                                                    }`}
+                                                >
+                                                    {u.telegram_id ? `TG ${u.telegram_id}` : 'TG --'} · ID {u.user_id}
+                                                </div>
+                                            </div>
+                                            <div className="text-right">
+                                                <div className={`text-xs font-semibold ${selected ? 'text-emerald-700 dark:text-emerald-200' : 'text-zinc-700 dark:text-white/70'}`}>
+                                                    {u.active_tasks} 个任务
+                                                </div>
+                                                <div
+                                                    className={`mt-0.5 text-[11px] ${
+                                                        selected ? 'text-emerald-700/70 dark:text-emerald-200/70' : 'text-zinc-500 dark:text-white/40'
+                                                    }`}
+                                                >
+                                                    {updatedText}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    ) : null}
                 </div>
             ) : null}
 
-            {loading && !data ? (
+            {activeError ? (
+                <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-200">
+                    {activeError}
+                </div>
+            ) : null}
+
+            {showAdmin && !adminSelectedUserId ? (
+                <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                    请选择用户查看实时仓位。
+                </div>
+            ) : null}
+
+            {activeLoading && !activeData ? (
                 <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
                     加载中...
                 </div>
             ) : null}
 
-            {!loading && data && visiblePositions.length === 0 ? (
+            {showEmptyPositions ? (
                 <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
                     暂无仓位。请先在机器人里创建/导入钱包并开仓。
                 </div>
             ) : null}
 
             <div className="space-y-4">
-                {visiblePositions.map((p) => (
-                    <PositionCard
-                        key={`${p.version}:${p.position_id}`}
-                        position={p}
-                        walletAddress={walletAddress}
-                        bnbBalance={bnbBalance}
-                        pollIntervalSec={pollIntervalSec}
-                        updatedAt={updatedAt}
-                    />
-                ))}
+                {activeData
+                    ? visiblePositions.map((p) => (
+                          <PositionCard
+                              key={`${p.version}:${p.position_id}`}
+                              position={p}
+                              walletAddress={walletAddress}
+                              bnbBalance={bnbBalance}
+                              pollIntervalSec={pollIntervalSec}
+                              updatedAt={updatedAt}
+                          />
+                      ))
+                    : null}
             </div>
 
-            {data?.warnings?.length ? (
+            {activeData?.warnings?.length ? (
                 <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-700 dark:text-amber-200">
                     <div className="font-semibold">提示</div>
                     <ul className="mt-1 list-disc space-y-1 pl-4">
-                        {data.warnings.map((w, i) => (
+                        {activeData.warnings.map((w, i) => (
                             <li key={String(i)}>{w}</li>
                         ))}
                     </ul>

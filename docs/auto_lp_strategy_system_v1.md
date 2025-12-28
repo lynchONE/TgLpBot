@@ -90,6 +90,7 @@ V1.0 需要同时请求：
 
 - `current_pool_value > 50,000`
 - `fee_percentage > 0.2`
+- `total_fees / current_pool_value > 0.05%`（费用率，5m）
 - `total_fees > 100`
 - `total_volume > 5,000`
 
@@ -129,6 +130,7 @@ V1.0 需要同时请求：
 
 - 强共振：5m 状态方向与 60m 趋势一致 → 仓位 *2（余额不足时降级为 1x）
 - 背离：5m 方向与 60m 趋势相反 → 区间加宽（避免诱多/诱空）
+- 共振门槛：若启用 `AUTO_LP_RESONANCE_MIN_FEE_RATE_5M` / `AUTO_LP_RESONANCE_MIN_TOTAL_VOLUME_5M` / `AUTO_LP_RESONANCE_MIN_ABS_Z60`，任一不达标则共振视为 NONE（独立于硬筛）
 
 相关实现：`backend/services/auto_lp_service.go`。
 
@@ -189,12 +191,16 @@ V1.0 不重复造轮子，复用现有 `StrategyService`：
 
 - `AUTO_LP_MIN_POOL_VALUE_USD`
 - `AUTO_LP_MIN_FEE_PERCENTAGE`
+- `AUTO_LP_MIN_FEE_RATE_5M`（5m 手续费 / TVL，百分比）
 - `AUTO_LP_MIN_TOTAL_FEES_5M`
 - `AUTO_LP_MIN_TOTAL_VOLUME_5M`
 - `AUTO_LP_MIN_TX_5M` / `AUTO_LP_MIN_TX_60M`
 - `AUTO_LP_MIN_FEE_APR_5M` / `AUTO_LP_MIN_FEE_APR_60M`
 - `AUTO_LP_MAX_SURGE_RATIO`
 - `AUTO_LP_MAX_CANDIDATES`
+- `AUTO_LP_RESONANCE_MIN_FEE_RATE_5M`（共振门槛：5m 手续费 / TVL，百分比）
+- `AUTO_LP_RESONANCE_MIN_TOTAL_VOLUME_5M`（共振门槛：5m 成交量）
+- `AUTO_LP_RESONANCE_MIN_ABS_Z60`（共振门槛：|Z60|）
 - `AUTO_LP_REQUIRE_STABLE_SYMBOL`（保留字段：当前版本不用于筛选）
 - `AUTO_LP_WIDTH_SIDEWAYS_PERCENT` / `AUTO_LP_WIDTH_MILD_UPTREND_PERCENT` / `AUTO_LP_WIDTH_RAPID_PUMP_PERCENT`
 

@@ -22,6 +22,7 @@ type Bot struct {
 	poolService      *services.PoolService
 	strategyService  *services.StrategyService
 	autoLPService    *services.AutoLPService
+	smartLPMonitor   *services.SmartLPMonitor
 	autoLPCfgService *services.AutoLPUserConfigService
 	configService    *services.GlobalConfigService
 	taskService      *services.StrategyTaskService
@@ -49,6 +50,7 @@ func NewBot(ch *services.ClickHouseService) (*Bot, error) {
 		poolService:      services.NewPoolService(),
 		strategyService:  services.NewStrategyService(),
 		autoLPService:    services.NewAutoLPService(ch),
+		smartLPMonitor:   services.NewSmartLPMonitor(ch),
 		autoLPCfgService: services.NewAutoLPUserConfigService(),
 		configService:    services.NewGlobalConfigService(),
 		taskService:      services.NewStrategyTaskService(),
@@ -196,6 +198,9 @@ func (b *Bot) Start() {
 	b.strategyService.Start()
 	if b.autoLPService != nil {
 		b.autoLPService.Start()
+	}
+	if b.smartLPMonitor != nil {
+		b.smartLPMonitor.Start()
 	}
 	if b.snapshotService != nil {
 		b.snapshotService.Start()
@@ -498,6 +503,9 @@ func (b *Bot) Stop() {
 	b.strategyService.Stop()
 	if b.autoLPService != nil {
 		b.autoLPService.Stop()
+	}
+	if b.smartLPMonitor != nil {
+		b.smartLPMonitor.Stop()
 	}
 	if b.snapshotService != nil {
 		b.snapshotService.Stop()

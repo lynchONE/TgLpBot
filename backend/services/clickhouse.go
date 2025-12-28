@@ -170,6 +170,39 @@ func (s *ClickHouseService) Migrate(ctx context.Context) error {
 		TTL ts + INTERVAL 24 HOUR
 		`,
 		`ALTER TABLE auto_lp_analysis MODIFY TTL ts + INTERVAL 24 HOUR`,
+		`
+		CREATE TABLE IF NOT EXISTS smart_lp_events (
+			ts DateTime,
+			event_seq UInt64,
+			chain LowCardinality(String),
+			pool_version LowCardinality(String),
+			pool_id String,
+			wallet_address String,
+			action LowCardinality(String),
+			token_id String,
+			amount0 String,
+			amount1 String,
+			liquidity_delta String,
+			tx_hash String,
+			block_number UInt64,
+			log_index UInt32,
+			contract_address String,
+			source LowCardinality(String),
+			ingest_id UUID DEFAULT generateUUIDv4()
+		) ENGINE = ReplacingMergeTree(ingest_id)
+		PARTITION BY toDate(ts)
+		ORDER BY (tx_hash, log_index)
+		TTL ts + INTERVAL 15 DAY
+		`,
+		`ALTER TABLE smart_lp_events MODIFY TTL ts + INTERVAL 15 DAY`,
+		`
+		CREATE TABLE IF NOT EXISTS smart_lp_scan_state (
+			id UInt8,
+			last_block UInt64,
+			updated_at DateTime
+		) ENGINE = ReplacingMergeTree(updated_at)
+		ORDER BY id
+		`,
 	}
 
 	for _, q := range queries {

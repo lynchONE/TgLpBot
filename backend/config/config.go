@@ -92,39 +92,50 @@ type Config struct {
 	V4NFTScanFromBlock uint64
 
 	// Auto LP (PoolM scanner + optional executor)
-	AutoLPEnabled                 bool
-	AutoLPExecuteEnabled          bool
-	AutoLPNotifyTopCandidate      bool
-	AutoLPDebug                   bool
-	AutoLPPoolMBaseURL            string
-	AutoLPChain                   string
-	AutoLPProtocols               string
-	AutoLPTimeframeShortMinutes   int
-	AutoLPTimeframeLongMinutes    int
-	AutoLPScanIntervalSeconds     int
-	AutoLPFetchDelayMillis        int
-	AutoLPUserID                  int
-	AutoLPAmountUSDT              float64
-	AutoLPBaseWidthPercentage     float64
-	AutoLPMaxActiveTasks          int
-	AutoLPMinPoolValueUSD         float64
-	AutoLPMinFeePercentage        float64
-	AutoLPMinTotalFees5m          float64
-	AutoLPMinTotalVolume5m        float64
-	AutoLPMinTx5m                 int
-	AutoLPMinTx60m                int
-	AutoLPMinFeeApr5m             float64
-	AutoLPMinFeeApr60m            float64
-	AutoLPRequireStableSymbol     string
-	AutoLPMaxSurgeRatio           float64
-	AutoLPMaxCandidates           int
-	AutoLPAllowEntrySwap          bool
-	AutoLPExitVolumeThreshold     float64
-	AutoLPHeatDownScans           int
-	AutoLPEmergencyGasMultiplier  float64
-	AutoLPWidthSidewaysPercent    float64
-	AutoLPWidthMildUptrendPercent float64
-	AutoLPWidthRapidPumpPercent   float64
+	AutoLPEnabled                   bool
+	AutoLPExecuteEnabled            bool
+	AutoLPNotifyTopCandidate        bool
+	AutoLPDebug                     bool
+	AutoLPPoolMBaseURL              string
+	AutoLPChain                     string
+	AutoLPProtocols                 string
+	AutoLPTimeframeShortMinutes     int
+	AutoLPTimeframeLongMinutes      int
+	AutoLPScanIntervalSeconds       int
+	AutoLPFetchDelayMillis          int
+	AutoLPUserID                    int
+	AutoLPAmountUSDT                float64
+	AutoLPBaseWidthPercentage       float64
+	AutoLPMaxActiveTasks            int
+	AutoLPMinPoolValueUSD           float64
+	AutoLPMinFeePercentage          float64
+	AutoLPMinFeeRate5m              float64
+	AutoLPMinTotalFees5m            float64
+	AutoLPMinTotalVolume5m          float64
+	AutoLPMinTx5m                   int
+	AutoLPMinTx60m                  int
+	AutoLPMinFeeApr5m               float64
+	AutoLPMinFeeApr60m              float64
+	AutoLPRequireStableSymbol       string
+	AutoLPMaxSurgeRatio             float64
+	AutoLPMaxCandidates             int
+	AutoLPResonanceMinFeeRate5m     float64
+	AutoLPResonanceMinTotalVolume5m float64
+	AutoLPResonanceMinAbsZ60        float64
+	AutoLPAllowEntrySwap            bool
+	AutoLPExitVolumeThreshold       float64
+	AutoLPHeatDownScans             int
+	AutoLPEmergencyGasMultiplier    float64
+	AutoLPWidthSidewaysPercent      float64
+	AutoLPWidthMildUptrendPercent   float64
+	AutoLPWidthRapidPumpPercent     float64
+
+	// Smart LP (monitor external contract -> NPM events)
+	SmartLPEnabled             bool
+	SmartLPContractAddress     string
+	SmartLPScorePerWallet      float64
+	SmartLPMinWallets          int
+	SmartLPScanIntervalSeconds int
 }
 
 var AppConfig *Config
@@ -156,8 +167,12 @@ func LoadConfig() error {
 	autoLPMaxActiveTasks, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_MAX_ACTIVE_TASKS", "1")))
 	autoLPMinPoolValueUSD, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_POOL_VALUE_USD", "50000")), 64)
 	autoLPMinFeePct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_FEE_PERCENTAGE", "0.2")), 64)
+	autoLPMinFeeRate5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_FEE_RATE_5M", "0")), 64)
 	autoLPMinTotalFees5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_TOTAL_FEES_5M", "100")), 64)
 	autoLPMinTotalVolume5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_TOTAL_VOLUME_5M", "5000")), 64)
+	autoLPResMinFeeRate5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_RESONANCE_MIN_FEE_RATE_5M", "0")), 64)
+	autoLPResMinTotalVolume5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_RESONANCE_MIN_TOTAL_VOLUME_5M", "0")), 64)
+	autoLPResMinAbsZ60, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_RESONANCE_MIN_ABS_Z60", "0")), 64)
 	autoLPMinTx5m, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_MIN_TX_5M", "0")))
 	autoLPMinTx60m, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_MIN_TX_60M", "0")))
 	autoLPMinFeeApr5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_FEE_APR_5M", "0")), 64)
@@ -171,6 +186,9 @@ func LoadConfig() error {
 	autoLPWidthSideways, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_SIDEWAYS_PERCENT", "2.0")), 64)
 	autoLPWidthMildUp, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_MILD_UPTREND_PERCENT", "5.0")), 64)
 	autoLPWidthRapidPump, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_RAPID_PUMP_PERCENT", "15.0")), 64)
+	smartLPScorePerWallet, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("SMART_LP_SCORE_PER_WALLET", "100")), 64)
+	smartLPMinWallets, _ := strconv.Atoi(strings.TrimSpace(getEnv("SMART_LP_MIN_WALLETS", "3")))
+	smartLPScanInterval, _ := strconv.Atoi(strings.TrimSpace(getEnv("SMART_LP_SCAN_INTERVAL_SECONDS", "60")))
 
 	AppConfig = &Config{
 		// Telegram
@@ -253,39 +271,49 @@ func LoadConfig() error {
 		V4NFTScanFromBlock: v4NFTScanFromBlock,
 
 		// Auto LP (PoolM scanner + optional executor)
-		AutoLPEnabled:                 getEnvBool("AUTO_LP_ENABLED", false),
-		AutoLPExecuteEnabled:          getEnvBool("AUTO_LP_EXECUTE_ENABLED", false),
-		AutoLPNotifyTopCandidate:      getEnvBool("AUTO_LP_NOTIFY_TOP_CANDIDATE", false),
-		AutoLPDebug:                   autoLPDebug,
-		AutoLPPoolMBaseURL:            strings.TrimSpace(getEnv("AUTO_LP_POOLM_BASE_URL", "")),
-		AutoLPChain:                   strings.TrimSpace(getEnv("AUTO_LP_CHAIN", "bsc")),
-		AutoLPProtocols:               strings.TrimSpace(getEnv("AUTO_LP_PROTOCOLS", "v3,v4")),
-		AutoLPTimeframeShortMinutes:   autoLPShortTF,
-		AutoLPTimeframeLongMinutes:    autoLPLongTF,
-		AutoLPScanIntervalSeconds:     autoLPScanInterval,
-		AutoLPFetchDelayMillis:        autoLPFetchDelayMillis,
-		AutoLPUserID:                  autoLPUserID,
-		AutoLPAmountUSDT:              autoLPAmountUSDT,
-		AutoLPBaseWidthPercentage:     autoLPBaseWidthPct,
-		AutoLPMaxActiveTasks:          autoLPMaxActiveTasks,
-		AutoLPMinPoolValueUSD:         autoLPMinPoolValueUSD,
-		AutoLPMinFeePercentage:        autoLPMinFeePct,
-		AutoLPMinTotalFees5m:          autoLPMinTotalFees5m,
-		AutoLPMinTotalVolume5m:        autoLPMinTotalVolume5m,
-		AutoLPMinTx5m:                 autoLPMinTx5m,
-		AutoLPMinTx60m:                autoLPMinTx60m,
-		AutoLPMinFeeApr5m:             autoLPMinFeeApr5m,
-		AutoLPMinFeeApr60m:            autoLPMinFeeApr60m,
-		AutoLPRequireStableSymbol:     strings.TrimSpace(getEnv("AUTO_LP_REQUIRE_STABLE_SYMBOL", "USDT")),
-		AutoLPMaxSurgeRatio:           autoLPMaxSurgeRatio,
-		AutoLPMaxCandidates:           autoLPMaxCandidates,
-		AutoLPAllowEntrySwap:          getEnvBool("AUTO_LP_ALLOW_ENTRY_SWAP", false),
-		AutoLPExitVolumeThreshold:     autoLPExitVolThreshold,
-		AutoLPHeatDownScans:           autoLPHeatDownScans,
-		AutoLPEmergencyGasMultiplier:  autoLPEmergencyGasMult,
-		AutoLPWidthSidewaysPercent:    autoLPWidthSideways,
-		AutoLPWidthMildUptrendPercent: autoLPWidthMildUp,
-		AutoLPWidthRapidPumpPercent:   autoLPWidthRapidPump,
+		AutoLPEnabled:                   getEnvBool("AUTO_LP_ENABLED", false),
+		AutoLPExecuteEnabled:            getEnvBool("AUTO_LP_EXECUTE_ENABLED", false),
+		AutoLPNotifyTopCandidate:        getEnvBool("AUTO_LP_NOTIFY_TOP_CANDIDATE", false),
+		AutoLPDebug:                     autoLPDebug,
+		AutoLPPoolMBaseURL:              strings.TrimSpace(getEnv("AUTO_LP_POOLM_BASE_URL", "")),
+		AutoLPChain:                     strings.TrimSpace(getEnv("AUTO_LP_CHAIN", "bsc")),
+		AutoLPProtocols:                 strings.TrimSpace(getEnv("AUTO_LP_PROTOCOLS", "v3,v4")),
+		AutoLPTimeframeShortMinutes:     autoLPShortTF,
+		AutoLPTimeframeLongMinutes:      autoLPLongTF,
+		AutoLPScanIntervalSeconds:       autoLPScanInterval,
+		AutoLPFetchDelayMillis:          autoLPFetchDelayMillis,
+		AutoLPUserID:                    autoLPUserID,
+		AutoLPAmountUSDT:                autoLPAmountUSDT,
+		AutoLPBaseWidthPercentage:       autoLPBaseWidthPct,
+		AutoLPMaxActiveTasks:            autoLPMaxActiveTasks,
+		AutoLPMinPoolValueUSD:           autoLPMinPoolValueUSD,
+		AutoLPMinFeePercentage:          autoLPMinFeePct,
+		AutoLPMinFeeRate5m:              autoLPMinFeeRate5m,
+		AutoLPMinTotalFees5m:            autoLPMinTotalFees5m,
+		AutoLPMinTotalVolume5m:          autoLPMinTotalVolume5m,
+		AutoLPMinTx5m:                   autoLPMinTx5m,
+		AutoLPMinTx60m:                  autoLPMinTx60m,
+		AutoLPMinFeeApr5m:               autoLPMinFeeApr5m,
+		AutoLPMinFeeApr60m:              autoLPMinFeeApr60m,
+		AutoLPRequireStableSymbol:       strings.TrimSpace(getEnv("AUTO_LP_REQUIRE_STABLE_SYMBOL", "USDT")),
+		AutoLPMaxSurgeRatio:             autoLPMaxSurgeRatio,
+		AutoLPMaxCandidates:             autoLPMaxCandidates,
+		AutoLPResonanceMinFeeRate5m:     autoLPResMinFeeRate5m,
+		AutoLPResonanceMinTotalVolume5m: autoLPResMinTotalVolume5m,
+		AutoLPResonanceMinAbsZ60:        autoLPResMinAbsZ60,
+		AutoLPAllowEntrySwap:            getEnvBool("AUTO_LP_ALLOW_ENTRY_SWAP", false),
+		AutoLPExitVolumeThreshold:       autoLPExitVolThreshold,
+		AutoLPHeatDownScans:             autoLPHeatDownScans,
+		AutoLPEmergencyGasMultiplier:    autoLPEmergencyGasMult,
+		AutoLPWidthSidewaysPercent:      autoLPWidthSideways,
+		AutoLPWidthMildUptrendPercent:   autoLPWidthMildUp,
+		AutoLPWidthRapidPumpPercent:     autoLPWidthRapidPump,
+
+		SmartLPEnabled:             getEnvBool("SMART_LP_ENABLED", false),
+		SmartLPContractAddress:     strings.TrimSpace(getEnv("SMART_LP_CONTRACT_ADDRESS", "0x17ef7601103792929E01832c0DC3901a55Cf7922")),
+		SmartLPScorePerWallet:      smartLPScorePerWallet,
+		SmartLPMinWallets:          smartLPMinWallets,
+		SmartLPScanIntervalSeconds: smartLPScanInterval,
 	}
 
 	// Enforce encryption key to avoid storing/decrypting private keys insecurely.

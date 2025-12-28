@@ -61,6 +61,7 @@ func autoMigrate() error {
 		&models.LPConfig{},
 		&models.GlobalConfig{},
 		&models.AutoLPUserConfig{},
+		&models.AutoLPEvent{},
 		&models.Position{},
 		&models.Transaction{},
 		&models.AuthCode{},

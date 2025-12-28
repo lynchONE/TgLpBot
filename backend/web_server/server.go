@@ -30,6 +30,8 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/pools", s.handleGetPools)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/realtime_positions", s.handleRealtimePositions)
+	mux.HandleFunc("/api/admin/realtime_users", s.handleAdminRealtimeUsers)
+	mux.HandleFunc("/api/admin/realtime_positions", s.handleAdminRealtimePositions)
 
 	handler := corsMiddleware(mux)
 

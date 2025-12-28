@@ -22,6 +22,10 @@ type AutoLPUserConfig struct {
 	TakeProfitUSDT float64 `gorm:"type:decimal(20,8);default:0" json:"take_profit_usdt"` // disable AutoLP when profit >= TakeProfitUSDT
 	MaxActiveTasks int     `gorm:"default:1" json:"max_active_tasks"`                    // max concurrent AutoLP tasks
 
+	// LastEnabledAt marks the start time of the current/last AutoLP run.
+	LastEnabledAt  *time.Time `json:"last_enabled_at"`
+	LastDisabledAt *time.Time `json:"last_disabled_at"`
+
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`

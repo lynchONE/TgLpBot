@@ -4,6 +4,7 @@ import (
 	"TgLpBot/config"
 	"TgLpBot/database"
 	"TgLpBot/models"
+	"TgLpBot/services"
 	"fmt"
 	"log"
 	"strconv"
@@ -26,7 +27,7 @@ func (b *Bot) handleAuto(message *tgbotapi.Message, user *models.User) {
 		return
 	}
 	_ = database.SetUserSession(user.TelegramID, autoMenuViewKey, autoMenuViewCfg, 24*time.Hour)
-	b.refreshAutoMenuFromSession(message.Chat.ID, user, "")
+	b.openAutoMenu(message.Chat.ID, user, "")
 }
 
 func (b *Bot) openAutoMenu(chatID int64, user *models.User, notice string) {
@@ -79,9 +80,9 @@ func autoInputPrompt(state string) string {
 	case "awaiting_auto_max_tasks":
 		return "⏳ 请输入 AutoLP 最大任务数（整数，>=1），例如：`3`"
 	case "awaiting_auto_take_profit":
-		return "⏳ 请输入盈利多少 USDT 关闭 AutoLP（0 表示不启用），例如：`100` 或 `0`"
+		return "⏳ 请输入盈利多少 USDT 关闭 AutoLP 并撤出自动仓位（0 表示不启用），例如：`100` 或 `0`"
 	case "awaiting_auto_stop_loss":
-		return "⏳ 请输入亏损多少 USDT 关闭 AutoLP（0 表示不启用），例如：`50` 或 `0`"
+		return "⏳ 请输入亏损多少 USDT 关闭 AutoLP 并撤出自动仓位（0 表示不启用），例如：`50` 或 `0`"
 	default:
 		return ""
 	}
@@ -145,6 +146,8 @@ func (b *Bot) buildAutoMenu(user *models.User, notice string) (string, any, stri
 			promptLine = "\n\n" + prompt + "\n发送 /cancel 取消操作，或点下方「取消设置」。"
 		}
 
+		statsBlock := b.autoStatsText(user, cfg)
+
 		text := fmt.Sprintf(`🤖 *AutoLP 自动开仓配置*
 
 %s*状态*：%s
@@ -154,8 +157,9 @@ func (b *Bot) buildAutoMenu(user *models.User, notice string) (string, any, stri
 *盈利关闭*：%s
 *亏损关闭*：%s
 
+%s
 达到最大任务数后将不再开新仓，需等有仓位撤仓后才会继续开新仓。
-盈利/亏损阈值仅用于“关闭 AutoLP 开新仓”，不会强制平掉已有仓位。%s`,
+盈利/亏损触发后会关闭 AutoLP，并自动撤出当前自动仓位。%s`,
 			noticeLine,
 			boolToOnOff(cfg.Enabled),
 			cfg.TotalAmountUSDT,
@@ -163,6 +167,7 @@ func (b *Bot) buildAutoMenu(user *models.User, notice string) (string, any, stri
 			perTask,
 			tp,
 			sl,
+			statsBlock,
 			promptLine,
 		)
 
@@ -214,8 +219,8 @@ func (b *Bot) autoStrategyText() string {
 
 *怎么选池子*
 • 从手续费榜单抓取 5/15/60/360 分钟数据
-• 只看 5 分钟维度做“硬筛”：TVL、费率、手续费、成交量必须达标（阈值由服务端配置）
-• 对通过硬筛的池子计算 Z5 / Z60，并按评分选 Top（评分主要由 5m 手续费与 TVL 决定，共振加权，暴跌淘汰）
+• 只看 5 分钟维度做“硬筛”：TVL、费率、费用率(5m手续费/TVL)、手续费、成交量必须达标（阈值由服务端配置）
+• 对通过硬筛的池子计算 Z5 / Z60，并按评分选 Top（评分主要由 5m 手续费与 TVL 决定，共振需满足费用率/成交量/|Z60|阈值）
 
 *怎么制定开仓策略*
 • 状态机（基于 Z5）：急涨 / 震荡 / 温和上涨 才会作为候选开仓
@@ -229,5 +234,66 @@ func (b *Bot) autoStrategyText() string {
 • 热度消失：5m 交易笔数连续下降 N 次
 • 另外仍复用原有任务监控逻辑：出区间后按配置执行再平衡/止损
 
-说明：上述阈值/宽度参数来自服务端配置；你在 /auto 里设置的“总投入/最大任务数/盈亏关闭”用于控制每个用户的自动开新仓行为。`
+说明：上述阈值/宽度参数来自服务端配置；你在 /auto 里设置的“总投入/最大任务数/盈亏关闭”用于控制每个用户的自动开新仓，并在触发盈亏关闭时撤出当前自动仓位。`
+}
+
+func (b *Bot) autoStatsText(user *models.User, cfg *models.AutoLPUserConfig) string {
+	if user == nil || cfg == nil {
+		return ""
+	}
+	if !cfg.Enabled {
+		return "📊 *本次 Auto 任务执行*\nAutoLP 已关闭，暂无运行统计。"
+	}
+
+	stats, err := services.NewAutoLPStatsService().GetUserStats(user.ID, cfg)
+	if err != nil || stats == nil {
+		return "📊 *本次 Auto 任务执行*\n统计暂不可用"
+	}
+
+	windowLine := "全部历史"
+	if stats.WindowStart != nil {
+		cst := time.FixedZone("CST", 8*60*60)
+		startStr := stats.WindowStart.In(cst).Format("01-02 15:04")
+		endStr := "至今"
+		if stats.WindowEnd != nil {
+			endStr = stats.WindowEnd.In(cst).Format("01-02 15:04")
+		}
+		label := strings.TrimSpace(stats.WindowLabel)
+		if label != "" && label != "全部历史" {
+			windowLine = fmt.Sprintf("%s（%s - %s）", label, startStr, endStr)
+		} else {
+			windowLine = fmt.Sprintf("%s - %s", startStr, endStr)
+		}
+	} else if strings.TrimSpace(stats.WindowLabel) != "" {
+		windowLine = strings.TrimSpace(stats.WindowLabel)
+	}
+
+	bestLine := "无"
+	if strings.TrimSpace(stats.BestPair) != "" {
+		bestLine = fmt.Sprintf("%s（%s USDT）", escapeTelegramMarkdown(stats.BestPair), formatWei(stats.BestProfit))
+	}
+
+	worstLine := "无"
+	if strings.TrimSpace(stats.WorstPair) != "" {
+		worstLine = fmt.Sprintf("%s（%s USDT）", escapeTelegramMarkdown(stats.WorstPair), formatWei(stats.WorstProfit))
+	}
+
+	return fmt.Sprintf(`📊 *本次 Auto 任务执行*
+*统计周期*：%s
+*开仓次数*：%d
+*再平衡次数*：%d
+*撤退卫士*：%d
+*Gas 消耗*：%s USDT
+*累计收益*：%s USDT
+*盈利交易对*：%s
+*亏损交易对*：%s`,
+		windowLine,
+		stats.OpenCount,
+		stats.RebalanceCount,
+		stats.GuardCount,
+		formatWei(stats.GasUSDT),
+		formatWei(stats.ProfitUSDT),
+		bestLine,
+		worstLine,
+	)
 }

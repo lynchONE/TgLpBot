@@ -32,13 +32,23 @@ func (b *Bot) handleAutoConfigToggle(query *tgbotapi.CallbackQuery, user *models
 	}
 
 	if cfg.Enabled {
-		if _, err := b.autoLPCfgService.Update(user.ID, map[string]interface{}{"enabled": false}); err != nil {
+		now := time.Now()
+		if _, err := b.autoLPCfgService.Update(user.ID, map[string]interface{}{
+			"enabled":          false,
+			"last_disabled_at": now,
+		}); err != nil {
 			_ = b.refreshAutoMenu(query.Message.Chat.ID, query.Message.MessageID, user, fmt.Sprintf("❌ 关闭 AutoLP 失败：%v", err))
 			return
 		}
+		notice := "已关闭 AutoLP，并开始撤出当前自动仓位。"
+		if b.autoLPService == nil {
+			notice = "⚠️ 已关闭 AutoLP，但服务未初始化，未能发起撤仓。"
+		} else if err := b.autoLPService.RequestExitForAutoTasks(user.ID, "🛑 AutoLP 已关闭", 1.0); err != nil {
+			notice = fmt.Sprintf("⚠️ 已关闭 AutoLP，但发起撤仓失败：%v", err)
+		}
 		_ = database.DeleteUserSession(user.TelegramID, "state")
 		b.api.Send(tgbotapi.NewCallback(query.ID, "已关闭"))
-		_ = b.refreshAutoMenu(query.Message.Chat.ID, query.Message.MessageID, user, "")
+		_ = b.refreshAutoMenu(query.Message.Chat.ID, query.Message.MessageID, user, notice)
 		return
 	}
 
@@ -82,7 +92,12 @@ func (b *Bot) handleAutoConfigToggle(query *tgbotapi.CallbackQuery, user *models
 		}
 	}
 
-	if _, err := b.autoLPCfgService.Update(user.ID, map[string]interface{}{"enabled": true}); err != nil {
+	now := time.Now()
+	if _, err := b.autoLPCfgService.Update(user.ID, map[string]interface{}{
+		"enabled":          true,
+		"last_enabled_at":  now,
+		"last_disabled_at": nil,
+	}); err != nil {
 		_ = b.refreshAutoMenu(query.Message.Chat.ID, query.Message.MessageID, user, fmt.Sprintf("❌ 开启 AutoLP 失败：%v", err))
 		return
 	}

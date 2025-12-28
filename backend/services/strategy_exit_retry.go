@@ -300,6 +300,9 @@ func (s *StrategyService) executeRebalanceAfterExit(task *models.StrategyTask, n
 		"error_message":               "",
 	}
 	database.DB.Model(task).Updates(updates)
+	if task.IsAuto {
+		_ = NewAutoLPEventService().Record(task, models.AutoLPEventRebalance, "")
+	}
 	s.notify(task.UserID, fmt.Sprintf("✅ 再平衡完成！\n新 Tick 范围: %d - %d\n交易哈希: `%s`", tickLower, tickUpper, enterRes.TxHash))
 }
 

@@ -68,6 +68,7 @@ type RealtimePositionsResponse struct {
 	Summary         RealtimeSummary    `json:"summary"`
 	Positions       []RealtimePosition `json:"positions"`
 	PollIntervalSec int                `json:"poll_interval_sec"`
+	IsAdmin         bool               `json:"is_admin"`
 	UpdatedAt       time.Time          `json:"updated_at"`
 	Warnings        []string           `json:"warnings,omitempty"`
 }
