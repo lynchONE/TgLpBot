@@ -3,6 +3,7 @@ package blockchain
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"strings"
 
 	"github.com/ethereum/go-ethereum"
@@ -36,7 +37,7 @@ func GetV3PoolFromFactory(factory common.Address, tokenA common.Address, tokenB 
 		return common.Address{}, err
 	}
 
-	data, err := parsed.Pack("getPool", tokenA, tokenB, uint32(fee))
+	data, err := parsed.Pack("getPool", tokenA, tokenB, new(big.Int).SetUint64(fee))
 	if err != nil {
 		return common.Address{}, err
 	}

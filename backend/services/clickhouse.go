@@ -189,7 +189,7 @@ func (s *ClickHouseService) Migrate(ctx context.Context) error {
 			contract_address String,
 			source LowCardinality(String),
 			ingest_id UUID DEFAULT generateUUIDv4()
-		) ENGINE = ReplacingMergeTree(ingest_id)
+		) ENGINE = ReplacingMergeTree(ts)
 		PARTITION BY toDate(ts)
 		ORDER BY (tx_hash, log_index)
 		TTL ts + INTERVAL 15 DAY

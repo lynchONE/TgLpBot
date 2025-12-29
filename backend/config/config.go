@@ -132,6 +132,7 @@ type Config struct {
 
 	// Smart LP (monitor external contract -> NPM events)
 	SmartLPEnabled             bool
+	SmartLPDebug               bool
 	SmartLPContractAddress     string
 	SmartLPScorePerWallet      float64
 	SmartLPMinWallets          int
@@ -186,6 +187,7 @@ func LoadConfig() error {
 	autoLPWidthSideways, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_SIDEWAYS_PERCENT", "2.0")), 64)
 	autoLPWidthMildUp, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_MILD_UPTREND_PERCENT", "5.0")), 64)
 	autoLPWidthRapidPump, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_RAPID_PUMP_PERCENT", "15.0")), 64)
+	smartLPDebug := getEnvBool("SMART_LP_DEBUG", false)
 	smartLPScorePerWallet, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("SMART_LP_SCORE_PER_WALLET", "100")), 64)
 	smartLPMinWallets, _ := strconv.Atoi(strings.TrimSpace(getEnv("SMART_LP_MIN_WALLETS", "3")))
 	smartLPScanInterval, _ := strconv.Atoi(strings.TrimSpace(getEnv("SMART_LP_SCAN_INTERVAL_SECONDS", "60")))
@@ -310,6 +312,7 @@ func LoadConfig() error {
 		AutoLPWidthRapidPumpPercent:     autoLPWidthRapidPump,
 
 		SmartLPEnabled:             getEnvBool("SMART_LP_ENABLED", false),
+		SmartLPDebug:               smartLPDebug,
 		SmartLPContractAddress:     strings.TrimSpace(getEnv("SMART_LP_CONTRACT_ADDRESS", "0x17ef7601103792929E01832c0DC3901a55Cf7922")),
 		SmartLPScorePerWallet:      smartLPScorePerWallet,
 		SmartLPMinWallets:          smartLPMinWallets,
@@ -359,6 +362,10 @@ func LoadConfig() error {
 	log.Printf("   - AutoLP Width RapidPump Percentage: %.4f", AppConfig.AutoLPWidthRapidPumpPercent)
 	log.Printf("   - AutoLP Max Active Tasks: %d", AppConfig.AutoLPMaxActiveTasks)
 	log.Printf("   - AutoLP Require Stable (已不用于筛选): %s", AppConfig.AutoLPRequireStableSymbol)
+	log.Printf("   - SmartLP Enabled: %v", AppConfig.SmartLPEnabled)
+	log.Printf("   - SmartLP Debug: %v", AppConfig.SmartLPDebug)
+	log.Printf("   - SmartLP Contract Address: %s", AppConfig.SmartLPContractAddress)
+	log.Printf("   - SmartLP Scan Interval: %d seconds", AppConfig.SmartLPScanIntervalSeconds)
 	log.Println("✅ 配置加载完成")
 	log.Println("========================================")
 
