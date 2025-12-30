@@ -218,6 +218,25 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 	}
 	bnbUSD := toFloat(bnbBalWei, 18) * bnbPriceUSD
 
+	// Track standalone wallet tokens (e.g., USDT) even when there are no positions.
+	extraWalletTokenUSD := make(map[string]float64)
+	usdtAddrStr := "0x55d398326f99059fF775485246999027B3197955"
+	if config.AppConfig != nil && common.IsHexAddress(config.AppConfig.USDTAddress) {
+		usdtAddrStr = config.AppConfig.USDTAddress
+	}
+	if common.IsHexAddress(usdtAddrStr) {
+		usdtAddr := common.HexToAddress(usdtAddrStr)
+		if usdtBal := s.getWalletTokenBalance(usdtAddr, walletAddr); usdtBal != nil && usdtBal.Sign() > 0 {
+			meta := s.getTokenMeta(usdtAddr)
+			prices, _ := s.priceService.GetUSDPrices("bsc", []string{usdtAddr.Hex()})
+			price := prices[strings.ToLower(usdtAddr.Hex())]
+			usd := toFloat(usdtBal, meta.decimals) * price
+			if usd > 0 {
+				extraWalletTokenUSD[strings.ToLower(usdtAddr.Hex())] = usd
+			}
+		}
+	}
+
 	resp := &RealtimePositionsResponse{
 		Wallet: RealtimeWallet{
 			Address:       walletAddr.Hex(),
@@ -347,6 +366,14 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 			if prev, ok := walletTokenUSD[addr]; !ok || row.WalletUSD > prev {
 				walletTokenUSD[addr] = row.WalletUSD
 			}
+		}
+	}
+	for addr, usd := range extraWalletTokenUSD {
+		if usd <= 0 {
+			continue
+		}
+		if prev, ok := walletTokenUSD[addr]; !ok || usd > prev {
+			walletTokenUSD[addr] = usd
 		}
 	}
 	for _, v := range walletTokenUSD {

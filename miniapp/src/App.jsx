@@ -416,7 +416,7 @@ export default function App() {
             ? '加载用户仓位中...'
             : '用户仓位暂不可用'
         : '请选择用户查看实时仓位';
-    const showEmptyPositions = !activeLoading && activeData && visiblePositions.length === 0;
+    const showEmptyPositions = Boolean(activeData) && visiblePositions.length === 0;
 
     return (
         <div className="min-h-screen max-w-[720px] px-4 py-4 pb-[calc(16px+env(safe-area-inset-bottom))] mx-auto">
