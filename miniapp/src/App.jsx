@@ -605,7 +605,7 @@ export default function App() {
 
             {showEmptyPositions ? (
                 <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                    暂无仓位。请先在机器人里创建/导入钱包并开仓。
+                    暂无仓位。请先在机器人里导入钱包并开仓。
                 </div>
             ) : null}
 
