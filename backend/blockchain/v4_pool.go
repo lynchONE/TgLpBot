@@ -223,8 +223,16 @@ func filterLogsWithFallback(ctx context.Context, query ethereum.FilterQuery) ([]
 // GetUniswapV4PoolKeyFromPositionManager reads PositionManager.poolKeys(bytes25(poolId)).
 // Note: the mapping may be unset (tickSpacing=0) until the first position is minted via this PositionManager.
 func GetUniswapV4PoolKeyFromPositionManager(positionManager common.Address, poolID string) (common.Address, common.Address, uint64, int, common.Address, error) {
+	return GetUniswapV4PoolKeyFromPositionManagerCtx(context.Background(), positionManager, poolID)
+}
+
+// GetUniswapV4PoolKeyFromPositionManagerCtx reads PositionManager.poolKeys(bytes25(poolId)) with a caller-provided context.
+func GetUniswapV4PoolKeyFromPositionManagerCtx(ctx context.Context, positionManager common.Address, poolID string) (common.Address, common.Address, uint64, int, common.Address, error) {
 	if Client == nil {
 		return common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("blockchain client not initialized")
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	if (positionManager == common.Address{}) {
 		return common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("uniswap v4 position manager address not configured")
@@ -247,7 +255,7 @@ func GetUniswapV4PoolKeyFromPositionManager(positionManager common.Address, pool
 
 	v4Debugf("posm poolKeys: PositionManager=%s PoolId=%s (bytes25=%x)", positionManager.Hex(), poolID, poolId25)
 	msg := ethereum.CallMsg{To: &positionManager, Data: data}
-	raw, err := Client.CallContract(context.Background(), msg, nil)
+	raw, err := Client.CallContract(ctx, msg, nil)
 	if err != nil {
 		return common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("call positionManager.poolKeys failed: %w", err)
 	}

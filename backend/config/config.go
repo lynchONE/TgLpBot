@@ -28,8 +28,9 @@ type Config struct {
 	UniswapV4Debug                  bool
 
 	// BSC Network
-	BSCRpcURL  string
-	BSCChainID int64
+	BSCRpcURL   string
+	BSCRpcWSURL string
+	BSCChainID  int64
 
 	// Database
 	MySQLHost     string
@@ -137,6 +138,9 @@ type Config struct {
 	SmartLPScorePerWallet      float64
 	SmartLPMinWallets          int
 	SmartLPScanIntervalSeconds int
+	SmartLPMaxBlocksPerScan    int
+	SmartLPRPCTimeoutSeconds   int
+	SmartLPScanTimeoutSeconds  int
 }
 
 var AppConfig *Config
@@ -191,6 +195,9 @@ func LoadConfig() error {
 	smartLPScorePerWallet, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("SMART_LP_SCORE_PER_WALLET", "100")), 64)
 	smartLPMinWallets, _ := strconv.Atoi(strings.TrimSpace(getEnv("SMART_LP_MIN_WALLETS", "3")))
 	smartLPScanInterval, _ := strconv.Atoi(strings.TrimSpace(getEnv("SMART_LP_SCAN_INTERVAL_SECONDS", "60")))
+	smartLPMaxBlocksPerScan, _ := strconv.Atoi(strings.TrimSpace(getEnv("SMART_LP_MAX_BLOCKS_PER_SCAN", "200")))
+	smartLPRPCTimeoutSeconds, _ := strconv.Atoi(strings.TrimSpace(getEnv("SMART_LP_RPC_TIMEOUT_SECONDS", "30")))
+	smartLPScanTimeoutSeconds, _ := strconv.Atoi(strings.TrimSpace(getEnv("SMART_LP_SCAN_TIMEOUT_SECONDS", "600")))
 
 	AppConfig = &Config{
 		// Telegram
@@ -208,8 +215,9 @@ func LoadConfig() error {
 		UniswapV4Debug:                  getEnvBool("UNISWAP_V4_DEBUG", false),
 
 		// BSC Network
-		BSCRpcURL:  getEnv("BSC_RPC_URL", "https://bsc-dataseed1.binance.org/"),
-		BSCChainID: chainID,
+		BSCRpcURL:   getEnv("BSC_RPC_URL", "https://bsc-dataseed1.binance.org/"),
+		BSCRpcWSURL: strings.TrimSpace(getEnv("BSC_RPC_WS_URL", "")),
+		BSCChainID:  chainID,
 
 		// Database
 		MySQLHost:     getEnv("MYSQL_HOST", "localhost"),
@@ -317,6 +325,9 @@ func LoadConfig() error {
 		SmartLPScorePerWallet:      smartLPScorePerWallet,
 		SmartLPMinWallets:          smartLPMinWallets,
 		SmartLPScanIntervalSeconds: smartLPScanInterval,
+		SmartLPMaxBlocksPerScan:    smartLPMaxBlocksPerScan,
+		SmartLPRPCTimeoutSeconds:   smartLPRPCTimeoutSeconds,
+		SmartLPScanTimeoutSeconds:  smartLPScanTimeoutSeconds,
 	}
 
 	// Enforce encryption key to avoid storing/decrypting private keys insecurely.
@@ -342,6 +353,7 @@ func LoadConfig() error {
 	log.Printf("   - Pancake V3 NPM: %s", AppConfig.PancakeV3PositionManagerAddress)
 	log.Printf("   - Uniswap V3 NPM: %s", AppConfig.UniswapV3PositionManagerAddress)
 	log.Printf("   - BSC RPC URL: %s", AppConfig.BSCRpcURL)
+	log.Printf("   - BSC RPC WS URL: %s", AppConfig.BSCRpcWSURL)
 	log.Printf("   - BSC Chain ID: %d", AppConfig.BSCChainID)
 	log.Printf("   - MySQL: %s@%s:%s/%s", AppConfig.MySQLUser, AppConfig.MySQLHost, AppConfig.MySQLPort, AppConfig.MySQLDatabase)
 	log.Printf("   - Redis: %s:%s (DB: %d)", AppConfig.RedisHost, AppConfig.RedisPort, AppConfig.RedisDB)
@@ -366,6 +378,9 @@ func LoadConfig() error {
 	log.Printf("   - SmartLP Debug: %v", AppConfig.SmartLPDebug)
 	log.Printf("   - SmartLP Contract Address: %s", AppConfig.SmartLPContractAddress)
 	log.Printf("   - SmartLP Scan Interval: %d seconds", AppConfig.SmartLPScanIntervalSeconds)
+	log.Printf("   - SmartLP Max Blocks Per Scan: %d", AppConfig.SmartLPMaxBlocksPerScan)
+	log.Printf("   - SmartLP RPC Timeout: %d seconds", AppConfig.SmartLPRPCTimeoutSeconds)
+	log.Printf("   - SmartLP Scan Timeout: %d seconds", AppConfig.SmartLPScanTimeoutSeconds)
 	log.Println("✅ 配置加载完成")
 	log.Println("========================================")
 

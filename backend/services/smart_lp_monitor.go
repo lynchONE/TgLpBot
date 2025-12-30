@@ -10,11 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ethereum/go-ethereum"
+	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 var erc20TransferID = crypto.Keccak256Hash([]byte("Transfer(address,address,uint256)"))
@@ -24,6 +26,41 @@ type SmartLPMonitor struct {
 
 	stopChan chan struct{}
 	ticker   *time.Ticker
+	interval time.Duration
+}
+
+type smartLPV3Pos struct {
+	token0 common.Address
+	token1 common.Address
+	fee    uint64
+	ok     bool
+}
+
+type smartLPV4Tokens struct {
+	t0 common.Address
+	t1 common.Address
+	ok bool
+}
+
+type smartLPReceiptScanner struct {
+	debug       bool
+	chain       string
+	callTimeout time.Duration
+
+	v3ManagersSet map[common.Address]struct{}
+	pmCache       map[common.Address]*blockchain.V3PositionManager
+	v3Args        abi.Arguments
+	v3PosCache    map[string]smartLPV3Pos
+	v3PoolCache   map[string]common.Address
+
+	hasV4         bool
+	v4PoolManager common.Address
+	v4Args        abi.Arguments
+	tokensCache   map[string]smartLPV4Tokens
+
+	increaseID common.Hash
+	decreaseID common.Hash
+	modifyID   common.Hash
 }
 
 type smartLPEvent struct {
@@ -54,6 +91,7 @@ func NewSmartLPMonitor(ch *ClickHouseService) *SmartLPMonitor {
 		ch:       ch,
 		stopChan: make(chan struct{}),
 		ticker:   time.NewTicker(interval),
+		interval: interval,
 	}
 }
 
@@ -61,6 +99,27 @@ func (s *SmartLPMonitor) Start() {
 	if config.AppConfig == nil || !config.AppConfig.SmartLPEnabled {
 		log.Println("[SmartLP] disabled (SMART_LP_ENABLED=0)")
 		return
+	}
+	if err := s.resetScanStateToHead(); err != nil {
+		log.Printf("[SmartLP] reset scan state to head failed: %v", err)
+	}
+
+	if wsURL := smartLPWebsocketURL(); wsURL != "" {
+		if s.ticker != nil {
+			s.ticker.Stop()
+			s.ticker = nil
+		}
+		log.Printf("[SmartLP] websocket enabled url=%s", wsURL)
+		go s.runWebsocket(wsURL)
+		return
+	}
+
+	if config.AppConfig != nil && config.AppConfig.SmartLPDebug {
+		if s != nil && s.interval > 0 {
+			log.Printf("[SmartLP] websocket not configured; using polling interval=%s", s.interval)
+		} else {
+			log.Printf("[SmartLP] websocket not configured; using polling mode")
+		}
 	}
 	go s.runLoop()
 }
@@ -81,6 +140,7 @@ func (s *SmartLPMonitor) Stop() {
 
 func (s *SmartLPMonitor) runLoop() {
 	log.Println("[SmartLP] monitor started")
+	s.runOnce()
 	for {
 		select {
 		case <-s.ticker.C:
@@ -92,7 +152,7 @@ func (s *SmartLPMonitor) runLoop() {
 	}
 }
 
-func (s *SmartLPMonitor) runOnce() {
+func (s *SmartLPMonitor) runWebsocket(wsURL string) {
 	if config.AppConfig == nil || !config.AppConfig.SmartLPEnabled {
 		return
 	}
@@ -104,12 +164,16 @@ func (s *SmartLPMonitor) runOnce() {
 		log.Println("[SmartLP] blockchain client not initialized")
 		return
 	}
-	if !common.IsHexAddress(config.AppConfig.SmartLPContractAddress) {
-		log.Println("[SmartLP] SMART_LP_CONTRACT_ADDRESS invalid")
+
+	monitorAddrList := parseHexAddressList(config.AppConfig.SmartLPContractAddress)
+	if len(monitorAddrList) == 0 {
+		log.Println("[SmartLP] SMART_LP_CONTRACT_ADDRESS invalid/empty")
 		return
 	}
-
-	monitorAddr := common.HexToAddress(config.AppConfig.SmartLPContractAddress)
+	monitorAddrs := make(map[common.Address]struct{}, len(monitorAddrList))
+	for _, addr := range monitorAddrList {
+		monitorAddrs[addr] = struct{}{}
+	}
 
 	v3Managers := make([]common.Address, 0, 2)
 	if common.IsHexAddress(config.AppConfig.PancakeV3PositionManagerAddress) {
@@ -130,7 +194,298 @@ func (s *SmartLPMonitor) runOnce() {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	debug := config.AppConfig != nil && config.AppConfig.SmartLPDebug
+
+	chain := strings.ToLower(strings.TrimSpace(config.AppConfig.AutoLPChain))
+	if chain == "" {
+		chain = "bsc"
+	}
+
+	callTimeout := 30 * time.Second
+	if config.AppConfig != nil && config.AppConfig.SmartLPRPCTimeoutSeconds > 0 {
+		callTimeout = time.Duration(config.AppConfig.SmartLPRPCTimeoutSeconds) * time.Second
+	}
+
+	scanner := newSmartLPReceiptScanner(chain, callTimeout, debug, v3Managers, v4PoolManager)
+
+	subscribeAddrs := make([]common.Address, 0, len(v3Managers)+1)
+	subscribeAddrs = append(subscribeAddrs, v3Managers...)
+	if hasV4 {
+		subscribeAddrs = append(subscribeAddrs, v4PoolManager)
+	}
+	if len(subscribeAddrs) == 0 {
+		log.Println("[SmartLP] websocket: no subscribe addresses (no V3/V4 managers)")
+		return
+	}
+
+	backoff := 1 * time.Second
+	for {
+		if err := s.runWebsocketSession(wsURL, subscribeAddrs, monitorAddrList, monitorAddrs, scanner); err != nil {
+			select {
+			case <-s.stopChan:
+				log.Println("[SmartLP] websocket monitor stopped")
+				return
+			default:
+			}
+			if debug {
+				log.Printf("[SmartLP] websocket session ended: %v (reconnecting after %s)", err, backoff)
+			} else {
+				log.Printf("[SmartLP] websocket session ended (reconnecting after %s): %v", backoff, err)
+			}
+
+			t := time.NewTimer(backoff)
+			select {
+			case <-s.stopChan:
+				t.Stop()
+				log.Println("[SmartLP] websocket monitor stopped")
+				return
+			case <-t.C:
+			}
+			if backoff < 30*time.Second {
+				backoff *= 2
+				if backoff > 30*time.Second {
+					backoff = 30 * time.Second
+				}
+			}
+			continue
+		}
+
+		log.Println("[SmartLP] websocket monitor stopped")
+		return
+	}
+}
+
+func (s *SmartLPMonitor) runWebsocketSession(wsURL string, subscribeAddrList []common.Address, monitorAddrList []common.Address, monitorAddrs map[common.Address]struct{}, scanner *smartLPReceiptScanner) error {
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancelDial()
+	go func() {
+		select {
+		case <-s.stopChan:
+			cancelDial()
+		case <-dialCtx.Done():
+		}
+	}()
+
+	client, err := ethclient.DialContext(dialCtx, wsURL)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	firstTopics := make([]common.Hash, 0, 3)
+	if scanner != nil && len(scanner.v3ManagersSet) > 0 {
+		firstTopics = append(firstTopics, scanner.increaseID, scanner.decreaseID)
+	}
+	if scanner != nil && scanner.hasV4 {
+		firstTopics = append(firstTopics, scanner.modifyID)
+	}
+	if len(firstTopics) == 0 {
+		return fmt.Errorf("no subscribe topics configured")
+	}
+
+	logCh := make(chan types.Log, 512)
+	subCtx, cancelSub := context.WithCancel(context.Background())
+	defer cancelSub()
+	go func() {
+		select {
+		case <-s.stopChan:
+			cancelSub()
+		case <-subCtx.Done():
+		}
+	}()
+
+	sub, err := client.SubscribeFilterLogs(subCtx, ethereum.FilterQuery{
+		Addresses: subscribeAddrList,
+		Topics:    [][]common.Hash{firstTopics},
+	}, logCh)
+	if err != nil {
+		return err
+	}
+	defer sub.Unsubscribe()
+
+	if scanner != nil && scanner.debug {
+		addrStrs := make([]string, 0, len(subscribeAddrList))
+		for _, a := range subscribeAddrList {
+			addrStrs = append(addrStrs, strings.ToLower(a.Hex()))
+		}
+		monStrs := make([]string, 0, len(monitorAddrList))
+		for _, a := range monitorAddrList {
+			monStrs = append(monStrs, strings.ToLower(a.Hex()))
+		}
+		log.Printf("[SmartLP] websocket subscribed addrs=%d topics=%d addr_list=%s monitor_contracts=%s", len(subscribeAddrList), len(firstTopics), strings.Join(addrStrs, ","), strings.Join(monStrs, ","))
+	} else {
+		log.Printf("[SmartLP] websocket subscribed addrs=%d topics=%d monitor_contracts=%d", len(subscribeAddrList), len(firstTopics), len(monitorAddrList))
+	}
+
+	txQueue := make(chan common.Hash, 2048)
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		s.smartLPWebsocketWorker(txQueue, monitorAddrs, scanner)
+	}()
+
+	seenTx := make(map[common.Hash]time.Time)
+	cleanupTicker := time.NewTicker(20 * time.Minute)
+	defer cleanupTicker.Stop()
+
+	for {
+		select {
+		case <-s.stopChan:
+			close(txQueue)
+			<-workerDone
+			return nil
+		case err := <-sub.Err():
+			close(txQueue)
+			<-workerDone
+			if err == nil {
+				return fmt.Errorf("websocket subscription ended")
+			}
+			return err
+		case lg := <-logCh:
+			if lg.Removed {
+				continue
+			}
+			if (lg.TxHash == common.Hash{}) {
+				continue
+			}
+			txHash := lg.TxHash
+			if _, ok := seenTx[txHash]; ok {
+				continue
+			}
+			seenTx[txHash] = time.Now()
+
+			select {
+			case txQueue <- txHash:
+			default:
+				if scanner != nil && scanner.debug {
+					log.Printf("[SmartLP] websocket tx queue full; drop tx=%s", strings.ToLower(txHash.Hex()))
+				}
+				delete(seenTx, txHash)
+			}
+		case <-cleanupTicker.C:
+			cutoff := time.Now().Add(-2 * time.Hour)
+			for h, t := range seenTx {
+				if t.Before(cutoff) {
+					delete(seenTx, h)
+				}
+			}
+		}
+	}
+}
+
+func (s *SmartLPMonitor) smartLPWebsocketWorker(txQueue <-chan common.Hash, monitorAddrs map[common.Address]struct{}, scanner *smartLPReceiptScanner) {
+	if s == nil || s.ch == nil || s.ch.Conn == nil {
+		return
+	}
+	if scanner == nil {
+		return
+	}
+
+	for txHash := range txQueue {
+		if blockchain.Client == nil || blockchain.ChainID == nil {
+			continue
+		}
+
+		txCtx, cancel := context.WithTimeout(context.Background(), scanner.callTimeout)
+		tx, _, err := blockchain.Client.TransactionByHash(txCtx, txHash)
+		cancel()
+		if err != nil || tx == nil {
+			if scanner.debug {
+				log.Printf("[SmartLP] websocket get tx failed tx=%s err=%v", strings.ToLower(txHash.Hex()), err)
+			}
+			continue
+		}
+
+		if tx.To() == nil {
+			continue
+		}
+		contractTo := *tx.To()
+		if monitorAddrs != nil {
+			if _, ok := monitorAddrs[contractTo]; !ok {
+				continue
+			}
+		}
+
+		fromAddr, err := types.Sender(types.LatestSignerForChainID(blockchain.ChainID), tx)
+		if err != nil {
+			if scanner.debug {
+				log.Printf("[SmartLP] websocket derive sender failed tx=%s err=%v", strings.ToLower(txHash.Hex()), err)
+			}
+			continue
+		}
+
+		receiptCtx, cancel := context.WithTimeout(context.Background(), scanner.callTimeout)
+		receipt, err := blockchain.Client.TransactionReceipt(receiptCtx, txHash)
+		cancel()
+		if err != nil || receipt == nil {
+			if scanner.debug {
+				log.Printf("[SmartLP] websocket receipt fetch failed tx=%s err=%v", strings.ToLower(txHash.Hex()), err)
+			}
+			continue
+		}
+
+		events := scanner.scanReceipt(context.Background(), receipt, fromAddr, contractTo, txHash)
+		if len(events) == 0 {
+			continue
+		}
+
+		insertCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		err = s.insertEvents(insertCtx, events)
+		cancel()
+		if err != nil {
+			log.Printf("[SmartLP] insert events failed: %v", err)
+			continue
+		}
+		log.Printf("[SmartLP] inserted events: %d", len(events))
+	}
+}
+
+func (s *SmartLPMonitor) runOnce() {
+	if config.AppConfig == nil || !config.AppConfig.SmartLPEnabled {
+		return
+	}
+	if s.ch == nil || s.ch.Conn == nil {
+		log.Println("[SmartLP] clickhouse not initialized")
+		return
+	}
+	if blockchain.Client == nil || blockchain.ChainID == nil {
+		log.Println("[SmartLP] blockchain client not initialized")
+		return
+	}
+	monitorAddrList := parseHexAddressList(config.AppConfig.SmartLPContractAddress)
+	if len(monitorAddrList) == 0 {
+		log.Println("[SmartLP] SMART_LP_CONTRACT_ADDRESS invalid/empty")
+		return
+	}
+	monitorAddrs := make(map[common.Address]struct{}, len(monitorAddrList))
+	for _, addr := range monitorAddrList {
+		monitorAddrs[addr] = struct{}{}
+	}
+
+	v3Managers := make([]common.Address, 0, 2)
+	if common.IsHexAddress(config.AppConfig.PancakeV3PositionManagerAddress) {
+		v3Managers = append(v3Managers, common.HexToAddress(config.AppConfig.PancakeV3PositionManagerAddress))
+	}
+	if common.IsHexAddress(config.AppConfig.UniswapV3PositionManagerAddress) {
+		v3Managers = append(v3Managers, common.HexToAddress(config.AppConfig.UniswapV3PositionManagerAddress))
+	}
+
+	var v4PoolManager common.Address
+	hasV4 := common.IsHexAddress(config.AppConfig.UniswapV4PoolManagerAddress)
+	if hasV4 {
+		v4PoolManager = common.HexToAddress(config.AppConfig.UniswapV4PoolManagerAddress)
+	}
+
+	if len(v3Managers) == 0 && !hasV4 {
+		log.Println("[SmartLP] no V3/V4 managers configured")
+		return
+	}
+
+	scanTimeout := 10 * time.Minute
+	if config.AppConfig != nil && config.AppConfig.SmartLPScanTimeoutSeconds > 0 {
+		scanTimeout = time.Duration(config.AppConfig.SmartLPScanTimeoutSeconds) * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), scanTimeout)
 	defer cancel()
 
 	head, err := blockchain.Client.BlockNumber(ctx)
@@ -158,27 +513,38 @@ func (s *SmartLPMonitor) runOnce() {
 	}
 
 	from := last + 1
-	to := head
-	log.Printf("[SmartLP] scanning blocks %d-%d (v3_managers=%d v4=%v)", from, to, len(v3Managers), hasV4)
-
-	events := make([]smartLPEvent, 0)
-	if len(v3Managers) > 0 {
-		v3Events, err := s.scanV3Logs(ctx, from, to, monitorAddr, v3Managers)
-		if err != nil {
-			log.Printf("[SmartLP] scan V3 logs failed: %v", err)
-			return
-		}
-		log.Printf("[SmartLP] v3 logs scanned: %d events", len(v3Events))
-		events = append(events, v3Events...)
+	headBlock := head
+	to := headBlock
+	maxBlocks := 200
+	if config.AppConfig != nil && config.AppConfig.SmartLPMaxBlocksPerScan > 0 {
+		maxBlocks = config.AppConfig.SmartLPMaxBlocksPerScan
 	}
-	if hasV4 {
-		v4Events, err := s.scanV4Logs(ctx, from, to, monitorAddr, v4PoolManager)
-		if err != nil {
-			log.Printf("[SmartLP] scan V4 logs failed: %v", err)
-			return
+	if maxBlocks > 0 {
+		maxU := uint64(maxBlocks)
+		if maxU > 0 && from+maxU-1 < to {
+			to = from + maxU - 1
 		}
-		log.Printf("[SmartLP] v4 logs scanned: %d events", len(v4Events))
-		events = append(events, v4Events...)
+	}
+	log.Printf("[SmartLP] scanning blocks %d-%d (head=%d mode=receipts v3_managers=%d v4=%v)", from, to, headBlock, len(v3Managers), hasV4)
+
+	events, lastScanned, err := s.scanBlocks(ctx, from, to, monitorAddrs, v3Managers, v4PoolManager)
+	if err != nil {
+		log.Printf("[SmartLP] scan blocks failed: %v", err)
+		if len(events) > 0 {
+			if err := s.insertEvents(ctx, events); err != nil {
+				log.Printf("[SmartLP] insert events failed: %v", err)
+				return
+			}
+			log.Printf("[SmartLP] inserted events: %d", len(events))
+		}
+		if lastScanned >= from {
+			if err := s.saveLastScannedBlock(ctx, lastScanned); err != nil {
+				log.Printf("[SmartLP] update scan state failed: %v", err)
+				return
+			}
+			log.Printf("[SmartLP] partial scan completed (last=%d head=%d)", lastScanned, headBlock)
+		}
+		return
 	}
 
 	if len(events) > 0 {
@@ -191,11 +557,41 @@ func (s *SmartLPMonitor) runOnce() {
 		log.Printf("[SmartLP] no events found in range")
 	}
 
-	if err := s.saveLastScannedBlock(ctx, head); err != nil {
+	if err := s.saveLastScannedBlock(ctx, lastScanned); err != nil {
 		log.Printf("[SmartLP] update scan state failed: %v", err)
 		return
 	}
-	log.Printf("[SmartLP] scan completed (last=%d)", head)
+	log.Printf("[SmartLP] scan completed (last=%d head=%d)", lastScanned, headBlock)
+}
+
+func (s *SmartLPMonitor) resetScanStateToHead() error {
+	if config.AppConfig == nil || !config.AppConfig.SmartLPEnabled {
+		return nil
+	}
+	if s == nil || s.ch == nil || s.ch.Conn == nil {
+		return fmt.Errorf("clickhouse not initialized")
+	}
+	if blockchain.Client == nil {
+		return fmt.Errorf("blockchain client not initialized")
+	}
+
+	rpcTimeout := 30 * time.Second
+	if config.AppConfig.SmartLPRPCTimeoutSeconds > 0 {
+		rpcTimeout = time.Duration(config.AppConfig.SmartLPRPCTimeoutSeconds) * time.Second
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), rpcTimeout)
+	defer cancel()
+
+	head, err := blockchain.Client.BlockNumber(ctx)
+	if err != nil {
+		return err
+	}
+	if err := s.saveLastScannedBlock(ctx, head); err != nil {
+		return err
+	}
+	log.Printf("[SmartLP] scan state reset to head=%d (skip backfill)", head)
+	return nil
 }
 
 func (s *SmartLPMonitor) loadLastScannedBlock(ctx context.Context) (uint64, bool, error) {
@@ -303,206 +699,117 @@ func isRetryableClickHouseError(err error) bool {
 	}
 }
 
-func (s *SmartLPMonitor) scanV3Logs(ctx context.Context, from, to uint64, monitorAddr common.Address, managers []common.Address) ([]smartLPEvent, error) {
+func isRetryableRPCError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "context deadline exceeded"):
+		return true
+	case strings.Contains(msg, "timeout"):
+		return true
+	case strings.Contains(msg, "i/o timeout"):
+		return true
+	case strings.Contains(msg, "connection reset"):
+		return true
+	case strings.Contains(msg, "broken pipe"):
+		return true
+	case strings.Contains(msg, "eof"):
+		return true
+	case strings.Contains(msg, "too many requests"):
+		return true
+	case strings.Contains(msg, "rate limit"):
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monitorAddrs map[common.Address]struct{}, v3Managers []common.Address, v4PoolManager common.Address) ([]smartLPEvent, uint64, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if s == nil {
+		return nil, 0, fmt.Errorf("smartlp monitor is nil")
+	}
+	if blockchain.Client == nil || blockchain.ChainID == nil {
+		return nil, 0, fmt.Errorf("blockchain client not initialized")
+	}
+	if blockchain.Client.Client() == nil {
+		return nil, 0, fmt.Errorf("rpc client not initialized")
+	}
+
+	debug := config.AppConfig != nil && config.AppConfig.SmartLPDebug
+
+	chain := strings.ToLower(strings.TrimSpace(config.AppConfig.AutoLPChain))
+	if chain == "" {
+		chain = "bsc"
+	}
+
+	callTimeout := 30 * time.Second
+	if config.AppConfig != nil && config.AppConfig.SmartLPRPCTimeoutSeconds > 0 {
+		callTimeout = time.Duration(config.AppConfig.SmartLPRPCTimeoutSeconds) * time.Second
+	}
+
+	events := make([]smartLPEvent, 0)
+	lastScanned := uint64(0)
+	if from > 0 {
+		lastScanned = from - 1
+	}
+
+	// V3 setup (PositionManager events parsed from receipt logs)
 	increaseID := crypto.Keccak256Hash([]byte("IncreaseLiquidity(uint256,uint128,uint256,uint256)"))
 	decreaseID := crypto.Keccak256Hash([]byte("DecreaseLiquidity(uint256,uint128,uint256,uint256)"))
 
-	uint128Ty, _ := abi.NewType("uint128", "", nil)
-	uint256Ty, _ := abi.NewType("uint256", "", nil)
-	v3Args := abi.Arguments{
-		{Type: uint128Ty},
-		{Type: uint256Ty},
-		{Type: uint256Ty},
-	}
+	v3ManagersSet := make(map[common.Address]struct{}, len(v3Managers))
+	pmCache := make(map[common.Address]*blockchain.V3PositionManager, len(v3Managers))
 
-	pmCache := make(map[common.Address]*blockchain.V3PositionManager)
-	for _, addr := range managers {
-		if pm, err := blockchain.NewV3PositionManager(addr, blockchain.Client); err == nil {
-			pmCache[addr] = pm
+	var v3Args abi.Arguments
+	if len(v3Managers) > 0 {
+		uint128Ty, _ := abi.NewType("uint128", "", nil)
+		uint256Ty, _ := abi.NewType("uint256", "", nil)
+		v3Args = abi.Arguments{
+			{Type: uint128Ty},
+			{Type: uint256Ty},
+			{Type: uint256Ty},
+		}
+
+		for _, addr := range v3Managers {
+			v3ManagersSet[addr] = struct{}{}
+			if pm, err := blockchain.NewV3PositionManager(addr, blockchain.Client); err == nil {
+				pmCache[addr] = pm
+			} else if debug {
+				log.Printf("[SmartLP] init v3 position manager failed addr=%s err=%v", strings.ToLower(addr.Hex()), err)
+			}
 		}
 	}
 
-	chain := strings.ToLower(strings.TrimSpace(config.AppConfig.AutoLPChain))
-	if chain == "" {
-		chain = "bsc"
+	type v3Pos struct {
+		token0 common.Address
+		token1 common.Address
+		fee    uint64
+		ok     bool
 	}
+	v3PosCache := make(map[string]v3Pos)
+	v3PoolCache := make(map[string]common.Address)
 
-	events := make([]smartLPEvent, 0)
-	txCache := make(map[common.Hash]txMeta)
-
-	debug := config.AppConfig != nil && config.AppConfig.SmartLPDebug
-	rawLogs := 0
-	metaErrs := 0
-	toMismatches := 0
-	posErrs := 0
-	poolErrs := 0
-	unpackErrs := 0
-
-	step := uint64(2000)
-	for start := from; start <= to; {
-		end := start + step - 1
-		if end > to {
-			end = to
-		}
-
-		query := ethereum.FilterQuery{
-			FromBlock: big.NewInt(int64(start)),
-			ToBlock:   big.NewInt(int64(end)),
-			Addresses: managers,
-			Topics:    [][]common.Hash{{increaseID, decreaseID}},
-		}
-
-		logs, err := blockchain.Client.FilterLogs(ctx, query)
-		if err != nil {
-			if isEthGetLogsRangeLimited(err) && step > 10 {
-				step = 10
-				continue
-			}
-			return nil, err
-		}
-		rawLogs += len(logs)
-
-		for _, lg := range logs {
-			if len(lg.Topics) == 0 {
-				continue
-			}
-			action := ""
-			switch lg.Topics[0] {
-			case increaseID:
-				action = "add"
-			case decreaseID:
-				action = "remove"
-			default:
-				continue
-			}
-
-			meta, ok := txCache[lg.TxHash]
-			if !ok {
-				m, err := loadTxMeta(ctx, lg.TxHash)
-				if err != nil {
-					metaErrs++
-					if debug && metaErrs <= 3 {
-						log.Printf("[SmartLP] v3 tx meta fetch failed tx=%s err=%v", strings.ToLower(lg.TxHash.Hex()), err)
-					}
-					continue
-				}
-				meta = m
-				txCache[lg.TxHash] = meta
-			}
-			if !meta.ok || meta.to != monitorAddr {
-				toMismatches++
-				continue
-			}
-
-			if len(lg.Topics) < 2 {
-				continue
-			}
-			tokenID := new(big.Int).SetBytes(lg.Topics[1].Bytes())
-			if tokenID == nil || tokenID.Sign() <= 0 {
-				continue
-			}
-
-			decoded, err := v3Args.Unpack(lg.Data)
-			if err != nil || len(decoded) < 3 {
-				unpackErrs++
-				continue
-			}
-
-			liq, _ := decoded[0].(*big.Int)
-			amount0, _ := decoded[1].(*big.Int)
-			amount1, _ := decoded[2].(*big.Int)
-			if liq == nil {
-				liq = big.NewInt(0)
-			}
-			if amount0 == nil {
-				amount0 = big.NewInt(0)
-			}
-			if amount1 == nil {
-				amount1 = big.NewInt(0)
-			}
-
-			pm := pmCache[lg.Address]
-			if pm == nil {
-				continue
-			}
-			pos, err := pm.Positions(nil, tokenID)
-			if err != nil {
-				posErrs++
-				if debug && posErrs <= 3 {
-					log.Printf("[SmartLP] v3 positions call failed npm=%s token_id=%s tx=%s err=%v", strings.ToLower(lg.Address.Hex()), tokenID.String(), strings.ToLower(lg.TxHash.Hex()), err)
-				}
-				continue
-			}
-
-			poolAddr, err := resolveV3PoolAddress(lg.Address, pos.Token0, pos.Token1, pos.Fee)
-			if err != nil {
-				poolErrs++
-				if debug && poolErrs <= 3 {
-					log.Printf("[SmartLP] v3 resolve pool failed npm=%s token0=%s token1=%s fee=%d tx=%s err=%v", strings.ToLower(lg.Address.Hex()), strings.ToLower(pos.Token0.Hex()), strings.ToLower(pos.Token1.Hex()), pos.Fee, strings.ToLower(lg.TxHash.Hex()), err)
-				}
-				continue
-			}
-
-			eventSeq := uint64(lg.BlockNumber)*1_000_000 + uint64(lg.Index)
-			events = append(events, smartLPEvent{
-				ts:              time.Now(),
-				eventSeq:        eventSeq,
-				chain:           chain,
-				poolVersion:     "v3",
-				poolID:          strings.ToLower(poolAddr.Hex()),
-				walletAddress:   strings.ToLower(meta.from.Hex()),
-				action:          action,
-				tokenID:         tokenID.String(),
-				amount0:         amount0.String(),
-				amount1:         amount1.String(),
-				liquidityDelta:  liq.String(),
-				txHash:          strings.ToLower(lg.TxHash.Hex()),
-				blockNumber:     lg.BlockNumber,
-				logIndex:        uint32(lg.Index),
-				contractAddress: strings.ToLower(monitorAddr.Hex()),
-				source:          "v3_npm",
-			})
-		}
-
-		start = end + 1
-	}
-
-	if debug {
-		log.Printf("[SmartLP] v3 scan summary raw_logs=%d meta_err=%d to_mismatch=%d unpack_err=%d positions_err=%d pool_resolve_err=%d recorded=%d",
-			rawLogs, metaErrs, toMismatches, unpackErrs, posErrs, poolErrs, len(events),
-		)
-	}
-	return events, nil
-}
-
-func (s *SmartLPMonitor) scanV4Logs(ctx context.Context, from, to uint64, monitorAddr common.Address, poolManager common.Address) ([]smartLPEvent, error) {
+	// V4 setup (PoolManager ModifyLiquidity events parsed from receipt logs)
+	hasV4 := v4PoolManager != (common.Address{})
 	modifyID := crypto.Keccak256Hash([]byte("ModifyLiquidity(bytes32,address,int24,int24,int256,bytes32)"))
 
-	int24Ty, _ := abi.NewType("int24", "", nil)
-	int256Ty, _ := abi.NewType("int256", "", nil)
-	bytes32Ty, _ := abi.NewType("bytes32", "", nil)
-	v4Args := abi.Arguments{
-		{Type: int24Ty},
-		{Type: int24Ty},
-		{Type: int256Ty},
-		{Type: bytes32Ty},
+	var v4Args abi.Arguments
+	if hasV4 {
+		int24Ty, _ := abi.NewType("int24", "", nil)
+		int256Ty, _ := abi.NewType("int256", "", nil)
+		bytes32Ty, _ := abi.NewType("bytes32", "", nil)
+		v4Args = abi.Arguments{
+			{Type: int24Ty},
+			{Type: int24Ty},
+			{Type: int256Ty},
+			{Type: bytes32Ty},
+		}
 	}
-
-	chain := strings.ToLower(strings.TrimSpace(config.AppConfig.AutoLPChain))
-	if chain == "" {
-		chain = "bsc"
-	}
-
-	events := make([]smartLPEvent, 0)
-	txCache := make(map[common.Hash]txMeta)
-	receiptCache := make(map[common.Hash]*types.Receipt)
-
-	debug := config.AppConfig != nil && config.AppConfig.SmartLPDebug
-	rawLogs := 0
-	metaErrs := 0
-	toMismatches := 0
-	unpackErrs := 0
-	receiptErrs := 0
 
 	type v4Tokens struct {
 		t0 common.Address
@@ -511,56 +818,504 @@ func (s *SmartLPMonitor) scanV4Logs(ctx context.Context, from, to uint64, monito
 	}
 	tokensCache := make(map[string]v4Tokens)
 
-	step := uint64(2000)
-	for start := from; start <= to; {
-		end := start + step - 1
-		if end > to {
-			end = to
-		}
+	type rpcTx struct {
+		Hash common.Hash     `json:"hash"`
+		From common.Address  `json:"from"`
+		To   *common.Address `json:"to"`
+	}
+	type rpcBlock struct {
+		Transactions []rpcTx `json:"transactions"`
+	}
 
-		query := ethereum.FilterQuery{
-			FromBlock: big.NewInt(int64(start)),
-			ToBlock:   big.NewInt(int64(end)),
-			Addresses: []common.Address{poolManager},
-			Topics:    [][]common.Hash{{modifyID}},
-		}
+	blocksScanned := 0
+	txsScanned := 0
+	candidateTxs := 0
+	receiptErrs := 0
+	unpackErrs := 0
+	posErrs := 0
+	poolErrs := 0
+	v3Raw := 0
+	v4Raw := 0
 
-		logs, err := blockchain.Client.FilterLogs(ctx, query)
+	lastProgressLog := time.Now()
+	logProgress := func(bn uint64) {
+		if !debug && time.Since(lastProgressLog) < 20*time.Second {
+			return
+		}
+		lastProgressLog = time.Now()
+		log.Printf("[SmartLP] progress block=%d/%d candidates=%d events=%d", bn, to, candidateTxs, len(events))
+	}
+
+	for bn := from; bn <= to; bn++ {
+		var blk rpcBlock
+
+		var err error
+		for attempt := 1; attempt <= 3; attempt++ {
+			if ctx.Err() != nil {
+				return events, lastScanned, ctx.Err()
+			}
+
+			blockCtx, cancel := context.WithTimeout(ctx, callTimeout)
+			err = blockchain.Client.Client().CallContext(blockCtx, &blk, "eth_getBlockByNumber", fmt.Sprintf("0x%x", bn), true)
+			cancel()
+			if err == nil {
+				break
+			}
+			if attempt >= 3 || !isRetryableRPCError(err) {
+				break
+			}
+			if debug {
+				log.Printf("[SmartLP] getBlock retrying block=%d attempt=%d err=%v", bn, attempt, err)
+			}
+
+			delay := time.Duration(attempt) * 500 * time.Millisecond
+			t := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				return events, lastScanned, ctx.Err()
+			case <-t.C:
+			}
+		}
 		if err != nil {
-			if isEthGetLogsRangeLimited(err) && step > 10 {
-				step = 10
+			return events, lastScanned, fmt.Errorf("eth_getBlockByNumber failed block=%d: %w", bn, err)
+		}
+		blocksScanned++
+		logProgress(bn)
+
+		txsScanned += len(blk.Transactions)
+
+		for _, tx := range blk.Transactions {
+			if (tx.Hash == common.Hash{}) {
 				continue
 			}
-			return nil, err
-		}
-		rawLogs += len(logs)
+			if tx.To == nil || *tx.To == (common.Address{}) {
+				continue
+			}
+			contractTo := *tx.To
+			if monitorAddrs != nil {
+				if _, ok := monitorAddrs[contractTo]; !ok {
+					continue
+				}
+			}
+			candidateTxs++
 
-		for _, lg := range logs {
+			fromAddr := tx.From
+
+			receiptCtx, cancel := context.WithTimeout(ctx, callTimeout)
+			receipt, err := blockchain.Client.TransactionReceipt(receiptCtx, tx.Hash)
+			cancel()
+			if err != nil {
+				receiptErrs++
+				if debug && receiptErrs <= 3 {
+					log.Printf("[SmartLP] receipt fetch failed tx=%s err=%v", strings.ToLower(tx.Hash.Hex()), err)
+				}
+				continue
+			}
+
+			for _, lg := range receipt.Logs {
+				if lg == nil || len(lg.Topics) == 0 {
+					continue
+				}
+
+				// V3: IncreaseLiquidity/DecreaseLiquidity logs on V3 position managers
+				if len(v3ManagersSet) > 0 {
+					if _, ok := v3ManagersSet[lg.Address]; ok {
+						v3Raw++
+
+						action := ""
+						switch lg.Topics[0] {
+						case increaseID:
+							action = "add"
+						case decreaseID:
+							action = "remove"
+						default:
+							continue
+						}
+
+						if len(lg.Topics) < 2 {
+							continue
+						}
+						tokenID := new(big.Int).SetBytes(lg.Topics[1].Bytes())
+						if tokenID == nil || tokenID.Sign() <= 0 {
+							continue
+						}
+
+						decoded, err := v3Args.Unpack(lg.Data)
+						if err != nil || len(decoded) < 3 {
+							unpackErrs++
+							continue
+						}
+						liq, _ := decoded[0].(*big.Int)
+						amount0, _ := decoded[1].(*big.Int)
+						amount1, _ := decoded[2].(*big.Int)
+						if liq == nil {
+							liq = big.NewInt(0)
+						}
+						if amount0 == nil {
+							amount0 = big.NewInt(0)
+						}
+						if amount1 == nil {
+							amount1 = big.NewInt(0)
+						}
+
+						posKey := strings.ToLower(lg.Address.Hex()) + "|" + tokenID.String()
+						pos, ok := v3PosCache[posKey]
+						if !ok {
+							pm := pmCache[lg.Address]
+							if pm == nil {
+								v3PosCache[posKey] = v3Pos{ok: false}
+							} else {
+								callCtx, cancel := context.WithTimeout(ctx, callTimeout)
+								p, err := pm.Positions(&bind.CallOpts{Context: callCtx}, tokenID)
+								cancel()
+								if err != nil {
+									posErrs++
+									if debug && posErrs <= 3 {
+										log.Printf("[SmartLP] v3 positions call failed npm=%s token_id=%s tx=%s err=%v", strings.ToLower(lg.Address.Hex()), tokenID.String(), strings.ToLower(tx.Hash.Hex()), err)
+									}
+									v3PosCache[posKey] = v3Pos{ok: false}
+								} else {
+									v3PosCache[posKey] = v3Pos{token0: p.Token0, token1: p.Token1, fee: p.Fee, ok: true}
+								}
+							}
+							pos = v3PosCache[posKey]
+						}
+						if !pos.ok {
+							continue
+						}
+
+						poolKey := strings.ToLower(lg.Address.Hex()) + "|" + strings.ToLower(pos.token0.Hex()) + "|" + strings.ToLower(pos.token1.Hex()) + "|" + fmt.Sprintf("%d", pos.fee)
+						poolAddr, ok := v3PoolCache[poolKey]
+						if !ok {
+							pool, err := resolveV3PoolAddress(ctx, callTimeout, lg.Address, pos.token0, pos.token1, pos.fee)
+							if err != nil {
+								poolErrs++
+								if debug && poolErrs <= 3 {
+									log.Printf("[SmartLP] v3 resolve pool failed npm=%s token0=%s token1=%s fee=%d tx=%s err=%v", strings.ToLower(lg.Address.Hex()), strings.ToLower(pos.token0.Hex()), strings.ToLower(pos.token1.Hex()), pos.fee, strings.ToLower(tx.Hash.Hex()), err)
+								}
+								v3PoolCache[poolKey] = common.Address{}
+							} else {
+								v3PoolCache[poolKey] = pool
+							}
+							poolAddr = v3PoolCache[poolKey]
+						}
+						if poolAddr == (common.Address{}) {
+							continue
+						}
+
+						eventSeq := bn*1_000_000 + uint64(lg.Index)
+						events = append(events, smartLPEvent{
+							ts:              time.Now(),
+							eventSeq:        eventSeq,
+							chain:           chain,
+							poolVersion:     "v3",
+							poolID:          strings.ToLower(poolAddr.Hex()),
+							walletAddress:   strings.ToLower(fromAddr.Hex()),
+							action:          action,
+							tokenID:         tokenID.String(),
+							amount0:         amount0.String(),
+							amount1:         amount1.String(),
+							liquidityDelta:  liq.String(),
+							txHash:          strings.ToLower(tx.Hash.Hex()),
+							blockNumber:     bn,
+							logIndex:        uint32(lg.Index),
+							contractAddress: strings.ToLower(contractTo.Hex()),
+							source:          "v3_npm",
+						})
+						continue
+					}
+				}
+
+				// V4: ModifyLiquidity logs on V4 PoolManager
+				if hasV4 && lg.Address == v4PoolManager && lg.Topics[0] == modifyID {
+					v4Raw++
+					if len(lg.Topics) < 2 {
+						continue
+					}
+
+					decoded, err := v4Args.Unpack(lg.Data)
+					if err != nil || len(decoded) < 4 {
+						unpackErrs++
+						continue
+					}
+					liqDelta, _ := decoded[2].(*big.Int)
+					if liqDelta == nil || liqDelta.Sign() == 0 {
+						continue
+					}
+
+					action := "add"
+					if liqDelta.Sign() < 0 {
+						action = "remove"
+					}
+
+					poolID := strings.ToLower(lg.Topics[1].Hex())
+
+					amount0 := "0"
+					amount1 := "0"
+
+					toks, ok := tokensCache[poolID]
+					if !ok {
+						var c0, c1 common.Address
+						var tokErr error
+						if config.AppConfig != nil && common.IsHexAddress(config.AppConfig.UniswapV4PositionManagerAddress) {
+							posm := common.HexToAddress(config.AppConfig.UniswapV4PositionManagerAddress)
+							callCtx, cancel := context.WithTimeout(ctx, callTimeout)
+							c0, c1, _, _, _, tokErr = blockchain.GetUniswapV4PoolKeyFromPositionManagerCtx(callCtx, posm, poolID)
+							cancel()
+						} else {
+							tokErr = fmt.Errorf("UNISWAP_V4_POSITION_MANAGER_ADDRESS not set")
+						}
+						if tokErr != nil {
+							c0, c1, _, _, _, tokErr = blockchain.GetUniswapV4PoolKeyFromInitializeEvent(v4PoolManager, poolID)
+						}
+						if tokErr == nil {
+							toks = v4Tokens{t0: c0, t1: c1, ok: true}
+						} else {
+							toks = v4Tokens{ok: false}
+							if debug {
+								log.Printf("[SmartLP] v4 resolve tokens failed pool_id=%s err=%v", poolID, tokErr)
+							}
+						}
+						tokensCache[poolID] = toks
+					}
+
+					if toks.ok {
+						amount0 = netErc20TransferMagnitude(receipt, toks.t0, fromAddr, action)
+						amount1 = netErc20TransferMagnitude(receipt, toks.t1, fromAddr, action)
+					}
+
+					eventSeq := bn*1_000_000 + uint64(lg.Index)
+					events = append(events, smartLPEvent{
+						ts:              time.Now(),
+						eventSeq:        eventSeq,
+						chain:           chain,
+						poolVersion:     "v4",
+						poolID:          poolID,
+						walletAddress:   strings.ToLower(fromAddr.Hex()),
+						action:          action,
+						tokenID:         "",
+						amount0:         amount0,
+						amount1:         amount1,
+						liquidityDelta:  liqDelta.String(),
+						txHash:          strings.ToLower(tx.Hash.Hex()),
+						blockNumber:     bn,
+						logIndex:        uint32(lg.Index),
+						contractAddress: strings.ToLower(contractTo.Hex()),
+						source:          "v4_pool_manager",
+					})
+					continue
+				}
+			}
+		}
+
+		if debug && (blocksScanned == 1 || blocksScanned%10 == 0 || bn == to) {
+			log.Printf("[SmartLP] scanned block=%d txs=%d candidates=%d events=%d", bn, len(blk.Transactions), candidateTxs, len(events))
+		}
+
+		lastScanned = bn
+	}
+
+	if debug {
+		log.Printf("[SmartLP] receipt scan summary blocks=%d txs=%d candidates=%d receipt_err=%d unpack_err=%d v3_raw=%d v4_raw=%d v3_pos_err=%d v3_pool_err=%d recorded=%d",
+			blocksScanned, txsScanned, candidateTxs, receiptErrs, unpackErrs, v3Raw, v4Raw, posErrs, poolErrs, len(events),
+		)
+	}
+	return events, lastScanned, nil
+}
+
+func newSmartLPReceiptScanner(chain string, callTimeout time.Duration, debug bool, v3Managers []common.Address, v4PoolManager common.Address) *smartLPReceiptScanner {
+	sc := &smartLPReceiptScanner{
+		debug:       debug,
+		chain:       chain,
+		callTimeout: callTimeout,
+
+		v3ManagersSet: make(map[common.Address]struct{}, len(v3Managers)),
+		pmCache:       make(map[common.Address]*blockchain.V3PositionManager, len(v3Managers)),
+		v3PosCache:    make(map[string]smartLPV3Pos),
+		v3PoolCache:   make(map[string]common.Address),
+
+		hasV4:         v4PoolManager != (common.Address{}),
+		v4PoolManager: v4PoolManager,
+		tokensCache:   make(map[string]smartLPV4Tokens),
+
+		increaseID: crypto.Keccak256Hash([]byte("IncreaseLiquidity(uint256,uint128,uint256,uint256)")),
+		decreaseID: crypto.Keccak256Hash([]byte("DecreaseLiquidity(uint256,uint128,uint256,uint256)")),
+		modifyID:   crypto.Keccak256Hash([]byte("ModifyLiquidity(bytes32,address,int24,int24,int256,bytes32)")),
+	}
+
+	if len(v3Managers) > 0 {
+		uint128Ty, _ := abi.NewType("uint128", "", nil)
+		uint256Ty, _ := abi.NewType("uint256", "", nil)
+		sc.v3Args = abi.Arguments{
+			{Type: uint128Ty},
+			{Type: uint256Ty},
+			{Type: uint256Ty},
+		}
+
+		for _, addr := range v3Managers {
+			sc.v3ManagersSet[addr] = struct{}{}
+			if blockchain.Client == nil {
+				continue
+			}
+			if pm, err := blockchain.NewV3PositionManager(addr, blockchain.Client); err == nil {
+				sc.pmCache[addr] = pm
+			} else if debug {
+				log.Printf("[SmartLP] init v3 position manager failed addr=%s err=%v", strings.ToLower(addr.Hex()), err)
+			}
+		}
+	}
+
+	if sc.hasV4 {
+		int24Ty, _ := abi.NewType("int24", "", nil)
+		int256Ty, _ := abi.NewType("int256", "", nil)
+		bytes32Ty, _ := abi.NewType("bytes32", "", nil)
+		sc.v4Args = abi.Arguments{
+			{Type: int24Ty},
+			{Type: int24Ty},
+			{Type: int256Ty},
+			{Type: bytes32Ty},
+		}
+	}
+
+	return sc
+}
+
+func (sc *smartLPReceiptScanner) scanReceipt(ctx context.Context, receipt *types.Receipt, fromAddr common.Address, contractTo common.Address, txHash common.Hash) []smartLPEvent {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if sc == nil || receipt == nil {
+		return nil
+	}
+
+	txHashStr := strings.ToLower(txHash.Hex())
+	contractToStr := strings.ToLower(contractTo.Hex())
+	fromStr := strings.ToLower(fromAddr.Hex())
+
+	events := make([]smartLPEvent, 0)
+	for _, lg := range receipt.Logs {
+		if lg == nil || len(lg.Topics) == 0 {
+			continue
+		}
+
+		// V3: IncreaseLiquidity/DecreaseLiquidity logs on V3 position managers
+		if len(sc.v3ManagersSet) > 0 {
+			if _, ok := sc.v3ManagersSet[lg.Address]; ok {
+				action := ""
+				switch lg.Topics[0] {
+				case sc.increaseID:
+					action = "add"
+				case sc.decreaseID:
+					action = "remove"
+				default:
+					action = ""
+				}
+				if action == "" {
+					goto v4
+				}
+
+				if len(lg.Topics) < 2 {
+					goto v4
+				}
+				tokenID := new(big.Int).SetBytes(lg.Topics[1].Bytes())
+				if tokenID == nil || tokenID.Sign() <= 0 {
+					goto v4
+				}
+
+				decoded, err := sc.v3Args.Unpack(lg.Data)
+				if err != nil || len(decoded) < 3 {
+					goto v4
+				}
+				liq, _ := decoded[0].(*big.Int)
+				amount0, _ := decoded[1].(*big.Int)
+				amount1, _ := decoded[2].(*big.Int)
+				if liq == nil {
+					liq = big.NewInt(0)
+				}
+				if amount0 == nil {
+					amount0 = big.NewInt(0)
+				}
+				if amount1 == nil {
+					amount1 = big.NewInt(0)
+				}
+
+				posKey := strings.ToLower(lg.Address.Hex()) + "|" + tokenID.String()
+				pos, ok := sc.v3PosCache[posKey]
+				if !ok {
+					pm := sc.pmCache[lg.Address]
+					if pm == nil {
+						sc.v3PosCache[posKey] = smartLPV3Pos{ok: false}
+					} else {
+						callCtx, cancel := context.WithTimeout(ctx, sc.callTimeout)
+						p, err := pm.Positions(&bind.CallOpts{Context: callCtx}, tokenID)
+						cancel()
+						if err != nil {
+							if sc.debug {
+								log.Printf("[SmartLP] v3 positions call failed npm=%s token_id=%s tx=%s err=%v", strings.ToLower(lg.Address.Hex()), tokenID.String(), txHashStr, err)
+							}
+							sc.v3PosCache[posKey] = smartLPV3Pos{ok: false}
+						} else {
+							sc.v3PosCache[posKey] = smartLPV3Pos{token0: p.Token0, token1: p.Token1, fee: p.Fee, ok: true}
+						}
+					}
+					pos = sc.v3PosCache[posKey]
+				}
+				if !pos.ok {
+					goto v4
+				}
+
+				poolKey := strings.ToLower(lg.Address.Hex()) + "|" + strings.ToLower(pos.token0.Hex()) + "|" + strings.ToLower(pos.token1.Hex()) + "|" + fmt.Sprintf("%d", pos.fee)
+				poolAddr, ok := sc.v3PoolCache[poolKey]
+				if !ok {
+					pool, err := resolveV3PoolAddress(ctx, sc.callTimeout, lg.Address, pos.token0, pos.token1, pos.fee)
+					if err != nil {
+						if sc.debug {
+							log.Printf("[SmartLP] v3 resolve pool failed npm=%s token0=%s token1=%s fee=%d tx=%s err=%v", strings.ToLower(lg.Address.Hex()), strings.ToLower(pos.token0.Hex()), strings.ToLower(pos.token1.Hex()), pos.fee, txHashStr, err)
+						}
+						sc.v3PoolCache[poolKey] = common.Address{}
+					} else {
+						sc.v3PoolCache[poolKey] = pool
+					}
+					poolAddr = sc.v3PoolCache[poolKey]
+				}
+				if poolAddr == (common.Address{}) {
+					goto v4
+				}
+
+				bn := lg.BlockNumber
+				eventSeq := bn*1_000_000 + uint64(lg.Index)
+				events = append(events, smartLPEvent{
+					ts:              time.Now(),
+					eventSeq:        eventSeq,
+					chain:           sc.chain,
+					poolVersion:     "v3",
+					poolID:          strings.ToLower(poolAddr.Hex()),
+					walletAddress:   fromStr,
+					action:          action,
+					tokenID:         tokenID.String(),
+					amount0:         amount0.String(),
+					amount1:         amount1.String(),
+					liquidityDelta:  liq.String(),
+					txHash:          txHashStr,
+					blockNumber:     bn,
+					logIndex:        uint32(lg.Index),
+					contractAddress: contractToStr,
+					source:          "v3_npm",
+				})
+				continue
+			}
+		}
+
+	v4:
+		// V4: ModifyLiquidity logs on V4 PoolManager
+		if sc.hasV4 && lg.Address == sc.v4PoolManager && lg.Topics[0] == sc.modifyID {
 			if len(lg.Topics) < 2 {
 				continue
 			}
 
-			meta, ok := txCache[lg.TxHash]
-			if !ok {
-				m, err := loadTxMeta(ctx, lg.TxHash)
-				if err != nil {
-					metaErrs++
-					if debug && metaErrs <= 3 {
-						log.Printf("[SmartLP] v4 tx meta fetch failed tx=%s err=%v", strings.ToLower(lg.TxHash.Hex()), err)
-					}
-					continue
-				}
-				meta = m
-				txCache[lg.TxHash] = meta
-			}
-			if !meta.ok || meta.to != monitorAddr {
-				toMismatches++
-				continue
-			}
-
-			decoded, err := v4Args.Unpack(lg.Data)
+			decoded, err := sc.v4Args.Unpack(lg.Data)
 			if err != nil || len(decoded) < 4 {
-				unpackErrs++
 				continue
 			}
 			liqDelta, _ := decoded[2].(*big.Int)
@@ -577,82 +1332,63 @@ func (s *SmartLPMonitor) scanV4Logs(ctx context.Context, from, to uint64, monito
 
 			amount0 := "0"
 			amount1 := "0"
-			if meta.ok && (meta.from != common.Address{}) {
-				toks, ok := tokensCache[poolID]
-				if !ok {
-					var c0, c1 common.Address
-					var tokErr error
-					if config.AppConfig != nil && common.IsHexAddress(config.AppConfig.UniswapV4PositionManagerAddress) {
-						posm := common.HexToAddress(config.AppConfig.UniswapV4PositionManagerAddress)
-						c0, c1, _, _, _, tokErr = blockchain.GetUniswapV4PoolKeyFromPositionManager(posm, poolID)
-					} else {
-						tokErr = fmt.Errorf("UNISWAP_V4_POSITION_MANAGER_ADDRESS not set")
-					}
-					if tokErr != nil {
-						c0, c1, _, _, _, tokErr = blockchain.GetUniswapV4PoolKeyFromInitializeEvent(poolManager, poolID)
-					}
-					if tokErr == nil {
-						toks = v4Tokens{t0: c0, t1: c1, ok: true}
-					} else {
-						toks = v4Tokens{ok: false}
-						if debug {
-							log.Printf("[SmartLP] v4 resolve tokens failed pool_id=%s err=%v", poolID, tokErr)
-						}
-					}
-					tokensCache[poolID] = toks
-				}
 
-				if toks.ok {
-					rcpt, ok := receiptCache[lg.TxHash]
-					if !ok {
-						r, err := blockchain.Client.TransactionReceipt(ctx, lg.TxHash)
-						if err != nil {
-							receiptErrs++
-							if debug && receiptErrs <= 3 {
-								log.Printf("[SmartLP] v4 receipt fetch failed tx=%s err=%v", strings.ToLower(lg.TxHash.Hex()), err)
-							}
-						} else {
-							rcpt = r
-							receiptCache[lg.TxHash] = r
-						}
-					}
-					if rcpt != nil {
-						amount0 = netErc20TransferMagnitude(rcpt, toks.t0, meta.from, action)
-						amount1 = netErc20TransferMagnitude(rcpt, toks.t1, meta.from, action)
+			toks, ok := sc.tokensCache[poolID]
+			if !ok {
+				var c0, c1 common.Address
+				var tokErr error
+				if config.AppConfig != nil && common.IsHexAddress(config.AppConfig.UniswapV4PositionManagerAddress) {
+					posm := common.HexToAddress(config.AppConfig.UniswapV4PositionManagerAddress)
+					callCtx, cancel := context.WithTimeout(ctx, sc.callTimeout)
+					c0, c1, _, _, _, tokErr = blockchain.GetUniswapV4PoolKeyFromPositionManagerCtx(callCtx, posm, poolID)
+					cancel()
+				} else {
+					tokErr = fmt.Errorf("UNISWAP_V4_POSITION_MANAGER_ADDRESS not set")
+				}
+				if tokErr != nil {
+					c0, c1, _, _, _, tokErr = blockchain.GetUniswapV4PoolKeyFromInitializeEvent(sc.v4PoolManager, poolID)
+				}
+				if tokErr == nil {
+					toks = smartLPV4Tokens{t0: c0, t1: c1, ok: true}
+				} else {
+					toks = smartLPV4Tokens{ok: false}
+					if sc.debug {
+						log.Printf("[SmartLP] v4 resolve tokens failed pool_id=%s err=%v", poolID, tokErr)
 					}
 				}
+				sc.tokensCache[poolID] = toks
 			}
 
-			eventSeq := uint64(lg.BlockNumber)*1_000_000 + uint64(lg.Index)
+			if toks.ok {
+				amount0 = netErc20TransferMagnitude(receipt, toks.t0, fromAddr, action)
+				amount1 = netErc20TransferMagnitude(receipt, toks.t1, fromAddr, action)
+			}
+
+			bn := lg.BlockNumber
+			eventSeq := bn*1_000_000 + uint64(lg.Index)
 			events = append(events, smartLPEvent{
 				ts:              time.Now(),
 				eventSeq:        eventSeq,
-				chain:           chain,
+				chain:           sc.chain,
 				poolVersion:     "v4",
 				poolID:          poolID,
-				walletAddress:   strings.ToLower(meta.from.Hex()),
+				walletAddress:   fromStr,
 				action:          action,
 				tokenID:         "",
 				amount0:         amount0,
 				amount1:         amount1,
 				liquidityDelta:  liqDelta.String(),
-				txHash:          strings.ToLower(lg.TxHash.Hex()),
-				blockNumber:     lg.BlockNumber,
+				txHash:          txHashStr,
+				blockNumber:     bn,
 				logIndex:        uint32(lg.Index),
-				contractAddress: strings.ToLower(monitorAddr.Hex()),
+				contractAddress: contractToStr,
 				source:          "v4_pool_manager",
 			})
+			continue
 		}
-
-		start = end + 1
 	}
 
-	if debug {
-		log.Printf("[SmartLP] v4 scan summary raw_logs=%d meta_err=%d to_mismatch=%d unpack_err=%d receipt_err=%d recorded=%d",
-			rawLogs, metaErrs, toMismatches, unpackErrs, receiptErrs, len(events),
-		)
-	}
-	return events, nil
+	return events
 }
 
 func netErc20TransferMagnitude(receipt *types.Receipt, token common.Address, wallet common.Address, action string) string {
@@ -706,29 +1442,13 @@ func netErc20TransferMagnitude(receipt *types.Receipt, token common.Address, wal
 	}
 }
 
-type txMeta struct {
-	from common.Address
-	to   common.Address
-	ok   bool
-}
-
-func loadTxMeta(ctx context.Context, hash common.Hash) (txMeta, error) {
-	tx, _, err := blockchain.Client.TransactionByHash(ctx, hash)
-	if err != nil {
-		return txMeta{}, err
+func resolveV3PoolAddress(ctx context.Context, callTimeout time.Duration, npm common.Address, token0 common.Address, token1 common.Address, fee uint64) (common.Address, error) {
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	if tx.To() == nil {
-		return txMeta{ok: false}, nil
+	if callTimeout <= 0 {
+		callTimeout = 15 * time.Second
 	}
-	signer := types.LatestSignerForChainID(blockchain.ChainID)
-	from, err := types.Sender(signer, tx)
-	if err != nil {
-		return txMeta{}, err
-	}
-	return txMeta{from: from, to: *tx.To(), ok: true}, nil
-}
-
-func resolveV3PoolAddress(npm common.Address, token0 common.Address, token1 common.Address, fee uint64) (common.Address, error) {
 	var factories []common.Address
 	pancakeFactory := common.HexToAddress("0x0BFbcf9fa4f9C56B0F40a671Ad40E0805A091865")
 	uniswapFactory := common.HexToAddress("0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7")
@@ -745,7 +1465,9 @@ func resolveV3PoolAddress(npm common.Address, token0 common.Address, token1 comm
 	}
 
 	for _, factory := range factories {
-		pool, err := blockchain.GetV3PoolFromFactory(factory, token0, token1, fee)
+		callCtx, cancel := context.WithTimeout(ctx, callTimeout)
+		pool, err := blockchain.GetV3PoolFromFactoryCtx(callCtx, factory, token0, token1, fee)
+		cancel()
 		if err != nil {
 			continue
 		}
@@ -756,10 +1478,50 @@ func resolveV3PoolAddress(npm common.Address, token0 common.Address, token1 comm
 	return common.Address{}, fmt.Errorf("v3 pool not found")
 }
 
-func isEthGetLogsRangeLimited(err error) bool {
-	if err == nil {
-		return false
+func parseHexAddressList(raw string) []common.Address {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "eth_getLogs") && strings.Contains(msg, "10 block range")
+
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		switch r {
+		case ',', ';', ' ', '\t', '\n', '\r':
+			return true
+		default:
+			return false
+		}
+	})
+
+	addrs := make([]common.Address, 0, len(fields))
+	seen := make(map[string]struct{}, len(fields))
+	for _, f := range fields {
+		f = strings.TrimSpace(f)
+		if f == "" || !common.IsHexAddress(f) {
+			continue
+		}
+		addr := common.HexToAddress(f)
+		key := strings.ToLower(addr.Hex())
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		addrs = append(addrs, addr)
+	}
+	return addrs
+}
+
+func smartLPWebsocketURL() string {
+	if config.AppConfig == nil {
+		return ""
+	}
+	wsURL := strings.TrimSpace(config.AppConfig.BSCRpcWSURL)
+	if wsURL != "" {
+		return wsURL
+	}
+	rpcURL := strings.TrimSpace(config.AppConfig.BSCRpcURL)
+	if strings.HasPrefix(rpcURL, "ws://") || strings.HasPrefix(rpcURL, "wss://") {
+		return rpcURL
+	}
+	return ""
 }

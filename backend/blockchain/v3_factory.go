@@ -28,8 +28,15 @@ const v3FactoryABI = `[
 ]`
 
 func GetV3PoolFromFactory(factory common.Address, tokenA common.Address, tokenB common.Address, fee uint64) (common.Address, error) {
+	return GetV3PoolFromFactoryCtx(context.Background(), factory, tokenA, tokenB, fee)
+}
+
+func GetV3PoolFromFactoryCtx(ctx context.Context, factory common.Address, tokenA common.Address, tokenB common.Address, fee uint64) (common.Address, error) {
 	if Client == nil {
 		return common.Address{}, fmt.Errorf("blockchain client not initialized")
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	parsed, err := abi.JSON(strings.NewReader(v3FactoryABI))
@@ -43,7 +50,7 @@ func GetV3PoolFromFactory(factory common.Address, tokenA common.Address, tokenB 
 	}
 
 	msg := ethereum.CallMsg{To: &factory, Data: data}
-	raw, err := Client.CallContract(context.Background(), msg, nil)
+	raw, err := Client.CallContract(ctx, msg, nil)
 	if err != nil {
 		return common.Address{}, err
 	}
