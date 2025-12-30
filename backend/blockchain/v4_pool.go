@@ -527,9 +527,11 @@ func GetUniswapV4PoolCurrentTickViaStateView(stateView common.Address, poolManag
 	}
 
 	v4Debugf("stateview tick: StateView=%s PoolManager=%s PoolId=%s", stateView.Hex(), poolManager.Hex(), poolID)
-	code, codeErr := Client.CodeAt(context.Background(), stateView, nil)
-	if codeErr == nil {
-		v4Debugf("stateview tick: StateView code size=%d bytes", len(code))
+	if v4DebugEnabled() {
+		code, codeErr := Client.CodeAt(context.Background(), stateView, nil)
+		if codeErr == nil {
+			v4Debugf("stateview tick: StateView code size=%d bytes", len(code))
+		}
 	}
 
 	parsedABI, err := abi.JSON(strings.NewReader(uniswapV4StateViewABISingleArg))
@@ -544,7 +546,9 @@ func GetUniswapV4PoolCurrentTickViaStateView(stateView common.Address, poolManag
 
 	v4Debugf("stateview tick: calling getSlot0(bytes32) calldata=%s", common.Bytes2Hex(data))
 	msg := ethereum.CallMsg{To: &stateView, Data: data}
-	raw, err := Client.CallContract(context.Background(), msg, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	raw, err := callContractWithRetry(ctx, msg)
 	if err != nil {
 		return 0, fmt.Errorf("call state view getSlot0 failed: %w", err)
 	}
@@ -599,7 +603,9 @@ func GetUniswapV4PoolSlot0ViaStateView(stateView common.Address, poolManager com
 
 	v4Debugf("stateview slot0: calling getSlot0(bytes32) calldata=%s", common.Bytes2Hex(data))
 	msg := ethereum.CallMsg{To: &stateView, Data: data}
-	raw, err := Client.CallContract(context.Background(), msg, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	raw, err := callContractWithRetry(ctx, msg)
 	if err != nil {
 		return nil, 0, fmt.Errorf("call state view getSlot0 failed: %w", err)
 	}

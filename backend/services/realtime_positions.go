@@ -32,6 +32,15 @@ type RealtimePositionsService struct {
 	tokenMetaMu sync.RWMutex
 	tokenMeta   map[string]cachedTokenMeta
 
+	balanceMu sync.RWMutex
+	balance   map[string]cachedTokenBalance
+
+	v3Slot0Mu sync.RWMutex
+	v3Slot0   map[string]cachedV3Slot0
+
+	v4Slot0Mu sync.RWMutex
+	v4Slot0   map[string]cachedV4Slot0
+
 	v4ScanMu    sync.RWMutex
 	v4ScanCache map[string]cachedV4TokenIDs
 }
@@ -47,9 +56,29 @@ type cachedTokenMeta struct {
 	expires  time.Time
 }
 
+type cachedTokenBalance struct {
+	value     *big.Int
+	updatedAt time.Time
+	expires   time.Time
+}
+
 type cachedV4TokenIDs struct {
 	ids     []string
 	expires time.Time
+}
+
+type cachedV3Slot0 struct {
+	sqrtPriceX96 *big.Int
+	tick         int
+	updatedAt    time.Time
+	expires      time.Time
+}
+
+type cachedV4Slot0 struct {
+	sqrtPriceX96 *big.Int
+	tick         int
+	updatedAt    time.Time
+	expires      time.Time
 }
 
 func NewRealtimePositionsService() *RealtimePositionsService {
@@ -59,6 +88,9 @@ func NewRealtimePositionsService() *RealtimePositionsService {
 		priceService:  NewTokenPriceService(),
 		cache:         make(map[uint]cachedRealtimePositions),
 		tokenMeta:     make(map[string]cachedTokenMeta),
+		balance:       make(map[string]cachedTokenBalance),
+		v3Slot0:       make(map[string]cachedV3Slot0),
+		v4Slot0:       make(map[string]cachedV4Slot0),
 		v4ScanCache:   make(map[string]cachedV4TokenIDs),
 	}
 }
@@ -473,6 +505,12 @@ func (s *RealtimePositionsService) buildV3Position(
 	owed1 := info.TokensOwed1
 	fee := float64(info.Fee) / 10000.0
 
+	// Ignore empty positions (NFT not burned but liquidity already removed).
+	// This reduces RPC calls and avoids noisy warnings for "no position" wallets.
+	if liq == nil || liq.Sign() == 0 {
+		return nil, ""
+	}
+
 	meta0 := s.getTokenMeta(token0)
 	meta1 := s.getTokenMeta(token1)
 
@@ -508,26 +546,32 @@ func (s *RealtimePositionsService) buildV3Position(
 	hasSlot0 := false
 	if poolID != "" && common.IsHexAddress(poolID) {
 		poolAddr := common.HexToAddress(poolID)
-		sp, t, err := blockchain.GetV3PoolSlot0(poolAddr)
-		if err != nil {
+		sp, t, usedStale, age, err := s.getV3Slot0(poolAddr)
+		if err != nil && sp == nil {
 			warn = fmt.Sprintf("读取 V3 Pool slot0 失败: pool=%s tokenId=%s err=%v", poolID, tokenId.String(), err)
 		} else {
 			sqrtP = sp
 			currentTick = t
 			hasSlot0 = true
+			if usedStale && err != nil {
+				warn = fmt.Sprintf("V3 slot0 RPC 限流/失败，已使用缓存（%ds 前）。建议调大自动刷新或更换 BSC RPC：tokenId=%s", int(age.Seconds()), tokenId.String())
+			}
 		}
 	} else {
 		// Best-effort pool resolve from Pancake V3 factory (covers most BSC V3 LPs).
 		pancakeFactory := common.HexToAddress("0x0BFbcf9fa4f9C56B0F40a671Ad40E0805A091865")
 		if pool, err := blockchain.GetV3PoolFromFactory(pancakeFactory, token0, token1, info.Fee); err == nil && pool != (common.Address{}) {
 			poolID = pool.Hex()
-			sp, t, err := blockchain.GetV3PoolSlot0(pool)
-			if err == nil {
+			sp, t, usedStale, age, err := s.getV3Slot0(pool)
+			if err == nil || sp != nil {
 				sqrtP = sp
 				currentTick = t
 				hasSlot0 = true
 				if exchange == "V3" || strings.TrimSpace(exchange) == "" {
 					exchange = "PancakeSwap V3"
+				}
+				if usedStale && err != nil {
+					warn = fmt.Sprintf("V3 slot0 RPC 限流/失败，已使用缓存（%ds 前）。建议调大自动刷新或更换 BSC RPC：tokenId=%s", int(age.Seconds()), tokenId.String())
 				}
 			}
 		}
@@ -569,14 +613,8 @@ func (s *RealtimePositionsService) buildV3Position(
 	amt0Raw, amt1Raw := AmountsForLiquidity(sqrtP, sqrtA, sqrtB, liq)
 
 	// Wallet balances
-	w0, _ := blockchain.GetTokenBalance(token0, walletAddr)
-	w1, _ := blockchain.GetTokenBalance(token1, walletAddr)
-	if w0 == nil {
-		w0 = big.NewInt(0)
-	}
-	if w1 == nil {
-		w1 = big.NewInt(0)
-	}
+	w0 := s.getWalletTokenBalance(token0, walletAddr)
+	w1 := s.getWalletTokenBalance(token1, walletAddr)
 
 	// Prices
 	prices, _ := s.priceService.GetUSDPrices("bsc", []string{token0.Hex(), token1.Hex()})
@@ -638,14 +676,23 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		return nil, fmt.Sprintf("V4 tokenId=%s 缺少 token0/token1 信息", tokenId)
 	}
 
-	sqrtP, currentTick, err := blockchain.GetUniswapV4PoolSlot0ViaStateView(stateView, poolManager, task.PoolId)
-	if err != nil {
-		return nil, fmt.Sprintf("读取 V4 slot0 失败: poolId=%s tokenId=%s err=%v", task.PoolId, tokenId, err)
+	liq, ok := new(big.Int).SetString(strings.TrimSpace(task.CurrentLiquidity), 10)
+	if !ok || liq == nil || liq.Sign() == 0 {
+		// Ignore empty positions (stale tasks / already exited).
+		return nil, ""
 	}
 
-	liq, _ := new(big.Int).SetString(strings.TrimSpace(task.CurrentLiquidity), 10)
-	if liq == nil {
-		liq = big.NewInt(0)
+	var warn string
+	sqrtP, currentTick, usedStale, age, err := s.getV4Slot0(stateView, poolManager, task.PoolId)
+	if err != nil && sqrtP == nil {
+		errMsg := strings.ToLower(err.Error())
+		if strings.Contains(errMsg, "429") || strings.Contains(errMsg, "too many requests") || strings.Contains(errMsg, "rate limit") {
+			return nil, fmt.Sprintf("读取 V4 slot0 失败（RPC 限流 429），请稍后重试或在设置里调大自动刷新/更换 BSC RPC：tokenId=%s", tokenId)
+		}
+		return nil, fmt.Sprintf("读取 V4 slot0 失败: tokenId=%s err=%v", tokenId, err)
+	}
+	if usedStale && err != nil {
+		warn = fmt.Sprintf("V4 slot0 RPC 限流/失败，已使用缓存（%ds 前）。建议调大自动刷新或更换 BSC RPC：tokenId=%s", int(age.Seconds()), tokenId)
 	}
 
 	owed0 := big.NewInt(0)
@@ -678,14 +725,8 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 	sqrtB, _ := SqrtRatioAtTick(int32(task.TickUpper))
 	amt0Raw, amt1Raw := AmountsForLiquidity(sqrtP, sqrtA, sqrtB, liq)
 
-	w0, _ := blockchain.GetTokenBalance(c0, walletAddr)
-	w1, _ := blockchain.GetTokenBalance(c1, walletAddr)
-	if w0 == nil {
-		w0 = big.NewInt(0)
-	}
-	if w1 == nil {
-		w1 = big.NewInt(0)
-	}
+	w0 := s.getWalletTokenBalance(c0, walletAddr)
+	w1 := s.getWalletTokenBalance(c1, walletAddr)
 
 	meta0 := s.getTokenMeta(c0)
 	meta1 := s.getTokenMeta(c1)
@@ -734,7 +775,7 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		HasLiquidity: hasLiquidity,
 		TokenRows:    []RealtimeTokenRow{row0, row1},
 		Totals:       totals,
-	}, ""
+	}, warn
 }
 
 func (s *RealtimePositionsService) getTokenMeta(addr common.Address) cachedTokenMeta {
@@ -774,6 +815,138 @@ func (s *RealtimePositionsService) getTokenMeta(addr common.Address) cachedToken
 	s.tokenMeta[key] = m
 	s.tokenMetaMu.Unlock()
 	return m
+}
+
+func (s *RealtimePositionsService) getWalletTokenBalance(tokenAddress, walletAddress common.Address) *big.Int {
+	if (tokenAddress == common.Address{}) || (walletAddress == common.Address{}) {
+		return big.NewInt(0)
+	}
+
+	now := time.Now()
+	key := strings.ToLower(walletAddress.Hex()) + "|" + strings.ToLower(tokenAddress.Hex())
+
+	s.balanceMu.RLock()
+	if c, ok := s.balance[key]; ok && c.value != nil && c.expires.After(now) {
+		v := new(big.Int).Set(c.value)
+		s.balanceMu.RUnlock()
+		return v
+	}
+	var staleVal *big.Int
+	var staleAt time.Time
+	if c, ok := s.balance[key]; ok && c.value != nil {
+		staleVal = new(big.Int).Set(c.value)
+		staleAt = c.updatedAt
+	}
+	s.balanceMu.RUnlock()
+
+	bal, err := blockchain.GetTokenBalance(tokenAddress, walletAddress)
+	if err == nil && bal != nil {
+		s.balanceMu.Lock()
+		s.balance[key] = cachedTokenBalance{
+			value:     new(big.Int).Set(bal),
+			updatedAt: now,
+			expires:   now.Add(8 * time.Second),
+		}
+		s.balanceMu.Unlock()
+		return bal
+	}
+
+	// Best-effort fallback (keeps UI usable when RPC is rate-limited).
+	if staleVal != nil && !staleAt.IsZero() && now.Sub(staleAt) <= 60*time.Second {
+		return staleVal
+	}
+
+	return big.NewInt(0)
+}
+
+func (s *RealtimePositionsService) getV3Slot0(poolAddress common.Address) (*big.Int, int, bool, time.Duration, error) {
+	if (poolAddress == common.Address{}) {
+		return nil, 0, false, 0, fmt.Errorf("empty pool address")
+	}
+
+	now := time.Now()
+	key := strings.ToLower(poolAddress.Hex())
+
+	s.v3Slot0Mu.RLock()
+	if c, ok := s.v3Slot0[key]; ok && c.sqrtPriceX96 != nil && c.expires.After(now) {
+		sqrt := new(big.Int).Set(c.sqrtPriceX96)
+		tick := c.tick
+		s.v3Slot0Mu.RUnlock()
+		return sqrt, tick, false, 0, nil
+	}
+	var staleSqrt *big.Int
+	var staleTick int
+	var staleAt time.Time
+	if c, ok := s.v3Slot0[key]; ok && c.sqrtPriceX96 != nil {
+		staleSqrt = new(big.Int).Set(c.sqrtPriceX96)
+		staleTick = c.tick
+		staleAt = c.updatedAt
+	}
+	s.v3Slot0Mu.RUnlock()
+
+	sqrt, tick, err := blockchain.GetV3PoolSlot0(poolAddress)
+	if err == nil && sqrt != nil {
+		s.v3Slot0Mu.Lock()
+		s.v3Slot0[key] = cachedV3Slot0{
+			sqrtPriceX96: new(big.Int).Set(sqrt),
+			tick:         tick,
+			updatedAt:    now,
+			expires:      now.Add(5 * time.Second),
+		}
+		s.v3Slot0Mu.Unlock()
+		return sqrt, tick, false, 0, nil
+	}
+
+	// Best-effort fallback (keeps UI usable when RPC is rate-limited).
+	if staleSqrt != nil && !staleAt.IsZero() && now.Sub(staleAt) <= 30*time.Second {
+		return staleSqrt, staleTick, true, now.Sub(staleAt), err
+	}
+	return nil, 0, false, 0, err
+}
+
+func (s *RealtimePositionsService) getV4Slot0(stateView common.Address, poolManager common.Address, poolID string) (*big.Int, int, bool, time.Duration, error) {
+	now := time.Now()
+	poolIDKey := strings.ToLower(strings.TrimSpace(poolID))
+	if poolIDKey != "" && !strings.HasPrefix(poolIDKey, "0x") {
+		poolIDKey = "0x" + poolIDKey
+	}
+	key := strings.ToLower(stateView.Hex()) + "|" + strings.ToLower(poolManager.Hex()) + "|" + poolIDKey
+
+	s.v4Slot0Mu.RLock()
+	if c, ok := s.v4Slot0[key]; ok && c.sqrtPriceX96 != nil && c.expires.After(now) {
+		sqrt := new(big.Int).Set(c.sqrtPriceX96)
+		tick := c.tick
+		s.v4Slot0Mu.RUnlock()
+		return sqrt, tick, false, 0, nil
+	}
+	var staleSqrt *big.Int
+	var staleTick int
+	var staleAt time.Time
+	if c, ok := s.v4Slot0[key]; ok && c.sqrtPriceX96 != nil {
+		staleSqrt = new(big.Int).Set(c.sqrtPriceX96)
+		staleTick = c.tick
+		staleAt = c.updatedAt
+	}
+	s.v4Slot0Mu.RUnlock()
+
+	sqrt, tick, err := blockchain.GetUniswapV4PoolSlot0ViaStateView(stateView, poolManager, poolID)
+	if err == nil && sqrt != nil {
+		s.v4Slot0Mu.Lock()
+		s.v4Slot0[key] = cachedV4Slot0{
+			sqrtPriceX96: new(big.Int).Set(sqrt),
+			tick:         tick,
+			updatedAt:    now,
+			expires:      now.Add(5 * time.Second),
+		}
+		s.v4Slot0Mu.Unlock()
+		return sqrt, tick, false, 0, nil
+	}
+
+	// Best-effort fallback (keeps UI usable when RPC is rate-limited).
+	if staleSqrt != nil && !staleAt.IsZero() && now.Sub(staleAt) <= 30*time.Second {
+		return staleSqrt, staleTick, true, now.Sub(staleAt), err
+	}
+	return nil, 0, false, 0, err
 }
 
 func buildTokenRow(token common.Address, meta cachedTokenMeta, priceUSD float64, walletAmt, posAmt, feeAmt *big.Int) RealtimeTokenRow {

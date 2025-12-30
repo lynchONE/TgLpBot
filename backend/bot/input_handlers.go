@@ -102,7 +102,7 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
 	// Check if user has a wallet first
 	wallets, err := b.walletService.GetUserWallets(user.ID)
 	if err != nil || len(wallets) == 0 {
-		b.sendMessage(message.Chat.ID, "⚠️ 您还没有钱包。请先使用 /wallet 创建或导入一个钱包。")
+		b.sendMessage(message.Chat.ID, "⚠️ 您还没有钱包。请先使用 /wallet 导入一个钱包。")
 		database.ClearUserSession(user.TelegramID)
 		return
 	}

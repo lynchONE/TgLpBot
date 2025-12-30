@@ -99,7 +99,7 @@ func (b *Bot) sendProfitChart(chatID int64, user *models.User) {
 
 	wallet, err := b.walletService.GetDefaultWallet(user.ID)
 	if err != nil {
-		b.sendMessage(chatID, "您还没有任何钱包。请先使用 /wallet 创建或导入钱包。")
+		b.sendMessage(chatID, "您还没有任何钱包。请先使用 /wallet 导入钱包。")
 		return
 	}
 

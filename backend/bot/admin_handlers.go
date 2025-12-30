@@ -994,7 +994,7 @@ func (b *Bot) handleRedeemCode(message *tgbotapi.Message, user *models.User) {
 • 钱包上限: %d
 • 任务上限: %d
 
-现在您可以使用 /wallet 创建钱包开始使用了。`, activeToText, authCode.MaxWallets, authCode.MaxActiveTasks)
+现在您可以使用 /wallet 导入钱包开始使用了。`, activeToText, authCode.MaxWallets, authCode.MaxActiveTasks)
 
 	b.sendMessage(message.Chat.ID, text)
 }

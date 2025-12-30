@@ -70,7 +70,7 @@ func (b *Bot) handleAutoConfigToggle(query *tgbotapi.CallbackQuery, user *models
 	// Require a wallet.
 	wallets, err := b.walletService.GetUserWallets(user.ID)
 	if err != nil || len(wallets) == 0 {
-		_ = b.refreshAutoMenu(query.Message.Chat.ID, query.Message.MessageID, user, "您还没有任何钱包。请先使用 /wallet 创建一个。")
+		_ = b.refreshAutoMenu(query.Message.Chat.ID, query.Message.MessageID, user, "您还没有任何钱包。请先使用 /wallet 导入一个。")
 		return
 	}
 

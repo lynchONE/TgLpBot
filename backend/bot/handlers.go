@@ -81,7 +81,7 @@ func (b *Bot) handleHelp(message *tgbotapi.Message, user *models.User) {
 /help - 显示此帮助信息
 
 *使用方法：*
-1. 首先，使用 /wallet 创建或导入钱包
+1. 首先，使用 /wallet 导入钱包
 2. 使用 /config 配置全局参数（滑点、止损阈值、再平衡超时）
 3. 使用 /newposition 创建新仓位（输入池子地址、tick范围、投入金额）
 4. 使用 /positions 查看和管理您的仓位
@@ -108,7 +108,6 @@ func (b *Bot) handleHelp(message *tgbotapi.Message, user *models.User) {
 func (b *Bot) handleWallet(message *tgbotapi.Message, user *models.User) {
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("➕ 创建钱包", "create_wallet"),
 			tgbotapi.NewInlineKeyboardButtonData("📥 导入钱包", "import_wallet"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
@@ -127,7 +126,7 @@ func (b *Bot) handleWallet(message *tgbotapi.Message, user *models.User) {
 func (b *Bot) handleBalance(message *tgbotapi.Message, user *models.User) {
 	wallets, err := b.walletService.GetUserWallets(user.ID)
 	if err != nil || len(wallets) == 0 {
-		b.sendMessage(message.Chat.ID, "您还没有任何钱包。使用 /wallet 创建一个。")
+		b.sendMessage(message.Chat.ID, "您还没有任何钱包。使用 /wallet 导入一个。")
 		return
 	}
 
@@ -208,7 +207,7 @@ func (b *Bot) handleNewPosition(message *tgbotapi.Message, user *models.User) {
 	// Check if user has a wallet
 	wallets, err := b.walletService.GetUserWallets(user.ID)
 	if err != nil || len(wallets) == 0 {
-		b.sendMessage(message.Chat.ID, "您还没有任何钱包。请先使用 /wallet 创建一个。")
+		b.sendMessage(message.Chat.ID, "您还没有任何钱包。请先使用 /wallet 导入一个。")
 		return
 	}
 
@@ -482,6 +481,11 @@ func (b *Bot) handleText(message *tgbotapi.Message, user *models.User) {
 
 // handleCreateWallet handles wallet creation callback
 func (b *Bot) handleCreateWallet(query *tgbotapi.CallbackQuery, user *models.User) {
+	callback := tgbotapi.NewCallback(query.ID, "暂不支持创建钱包")
+	b.api.Send(callback)
+	b.sendMessage(query.Message.Chat.ID, "当前仅支持导入钱包。请使用 /wallet 选择“导入钱包”。")
+	return
+
 	// 检查授权
 	check, _ := b.accessService.CheckUserAccess(user.ID, time.Now())
 	if !check.Allowed {
@@ -550,7 +554,7 @@ func (b *Bot) handleViewWallets(query *tgbotapi.CallbackQuery, user *models.User
 
 	wallets, err := b.walletService.GetUserWallets(user.ID)
 	if err != nil || len(wallets) == 0 {
-		b.sendMessage(query.Message.Chat.ID, "您还没有任何钱包。请先创建或导入一个钱包。")
+		b.sendMessage(query.Message.Chat.ID, "您还没有任何钱包。请先导入一个钱包。")
 		return
 	}
 
