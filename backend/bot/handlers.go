@@ -485,42 +485,6 @@ func (b *Bot) handleCreateWallet(query *tgbotapi.CallbackQuery, user *models.Use
 	b.api.Send(callback)
 	b.sendMessage(query.Message.Chat.ID, "当前仅支持导入钱包。请使用 /wallet 选择“导入钱包”。")
 	return
-
-	// 检查授权
-	check, _ := b.accessService.CheckUserAccess(user.ID, time.Now())
-	if !check.Allowed {
-		callback := tgbotapi.NewCallback(query.ID, "未授权")
-		b.api.Send(callback)
-		b.sendMessage(query.Message.Chat.ID, "⚠️ 您尚未获得使用授权。\n\n请输入授权码进行激活，或联系管理员获取授权码。")
-		database.SetUserSession(user.TelegramID, "state", "awaiting_auth_code", 30*time.Minute)
-		return
-	}
-
-	// 检查钱包数量额度
-	if !check.IsAdmin && check.Access != nil {
-		walletCount, _ := b.accessService.CountUserWallets(user.ID)
-		if walletCount >= int64(check.Access.MaxWallets) {
-			callback := tgbotapi.NewCallback(query.ID, "达到上限")
-			b.api.Send(callback)
-			b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("❌ 您已达到钱包数量上限 (%d)。\n\n请删除不需要的钱包，或联系管理员提升额度。", check.Access.MaxWallets))
-			return
-		}
-	}
-
-	// Answer callback
-	callback := tgbotapi.NewCallback(query.ID, "正在创建钱包...")
-	b.api.Send(callback)
-
-	// Create wallet
-	wallet, err := b.walletService.CreateWallet(user.ID, "钱包 "+strconv.Itoa(int(time.Now().Unix())))
-	if err != nil {
-		b.sendMessage(query.Message.Chat.ID, "创建钱包时出错。请重试。")
-		return
-	}
-
-	text := fmt.Sprintf("✅ *钱包创建成功！*\n\n*地址：* `%s`\n\n*名称：* %s\n\n⚠️ *重要提示：* 请备份您的钱包！如需要，您可以稍后导出私钥。\n\n使用 /balance 查看您的钱包余额。", wallet.Address, wallet.Name)
-
-	b.sendMessage(query.Message.Chat.ID, text)
 }
 
 // handleImportWallet handles wallet import callback
