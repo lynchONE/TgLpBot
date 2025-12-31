@@ -129,6 +129,10 @@ CLICKHOUSE_DEBUG=0  # set to 1 to enable verbose ClickHouse driver logs
 BSC_RPC_URL=https://bsc-dataseed1.binance.org/
 BSC_CHAIN_ID=56
 
+# Liquidity exit RPC sync (optional; prevents missing tokens on swap when public RPC lags)
+EXIT_TOKEN_SYNC_TIMEOUT_SECONDS=30
+EXIT_TOKEN_SYNC_POLL_MILLIS=500
+
 # Encryption (generate a random 32-byte hex string)
 ENCRYPTION_KEY=your_32_byte_hex_key_here
 
@@ -707,3 +711,173 @@ ADMIN_WALLET_ADDRESS=0x你的管理员钱包地址
 - ✅ **精确识别**：直接从池子读取工厂地址，100% 准确
 - ✅ **减少 RPC 调用**：只需 1 次调用而非多次尝试
 - ✅ **日志清晰**：可以直观看到识别过程
+
+## 2025-12-31 撤退卫士交易记录修复
+
+### 问题描述
+在 auto 模式下，撤退卫士（止损/再平衡）执行撤出流动性时，`TradeRecord.CloseUSDTReceived`（撤出金额）显示为 0，但实际钱包中确实收到了 USDT。这导致收益计算错误。
+
+### 问题根因
+在 `ExitTaskToUSDTWithOptions` 函数中，当 `sweepWallet=true` 时（auto 模式默认启用），流程如下：
+
+1. 调用 `exitV3ToUSDT`（或 V4），此时 `swapDeltas=false`，**内部不执行 swap**
+2. 调用 `swapWalletTokensToUSDT` 执行真正的 swap
+
+如果 `swapWalletTokensToUSDT` 返回任何错误（包括验证时发现钱包仍有少量余额），函数会在第 125-134 行**提前返回**，跳过：
+- 余额差额计算
+- `CloseLatestOpenRecord` 调用
+- `Transaction.AmountOut` 更新
+
+这导致 `TradeRecord` 不会被更新，`CloseUSDTReceived` 保持为创建时的初始值 "0"。
+
+### 修复方案
+重构 `ExitTaskToUSDTWithOptions` 函数逻辑：
+
+1. **先计算，后返回**：无论是否有错误，都先计算实际收到的 USDT 和消耗的 Gas
+2. **条件更新**：只要有实际收到的金额（`actualReceived > 0`）或有交易哈希，就更新交易记录
+3. **最后返回错误**：在更新记录后再返回错误，确保数据不丢失
+
+### 涉及文件
+- [`services/liquidity_exit.go`](file:///e:/goProject/TgLpBot/backend/services/liquidity_exit.go) - `ExitTaskToUSDTWithOptions` 函数
+
+### 效果
+- ✅ **即使部分失败也会记录**：撤出成功但 swap 失败时，仍能记录已收到的 USDT
+- ✅ **收益计算正确**：`TradeRecord.ProfitUSDT` 和 `ProfitPct` 能正确反映实际盈亏
+- ✅ **交易历史完整**：`/transactions` 命令显示正确的撤出金额
+
+## 2025-12-31 AutoLP 止损逻辑修复
+
+### 问题描述
+用户刚开启 AutoLP 模式，就立即触发之前的亏损关闭条件，导致 AutoLP 被自动关闭。
+
+### 问题根因
+`sumAutoRealizedProfitWei` 函数在计算累计收益时，没有过滤 `LastEnabledAt` 时间。这导致系统会累加用户**所有历史** auto 任务的收益，包括上一次开启 AutoLP 时的亏损。
+
+当用户重新开启 AutoLP 时：
+1. 系统立即检查止盈/止损条件
+2. 查询出历史累计亏损（如 -10.71 USDT）
+3. 发现累计亏损超过设置的止损阈值（如 10 USDT）
+4. 立即触发亏损关闭
+
+### 修复方案
+修改 `sumAutoRealizedProfitWei` 函数，添加 `lastEnabledAt` 参数：
+- 只计算 `LastEnabledAt` 之后关闭的交易记录的收益
+- 每次重新开启 AutoLP 时，收益计算会从 0 开始
+
+### 涉及文件
+- [`services/auto_lp_service.go`](file:///e:/goProject/TgLpBot/backend/services/auto_lp_service.go):
+  - `applyUserStopConditions` 函数：传入 `cfg.LastEnabledAt`
+  - `sumAutoRealizedProfitWei` 函数：添加时间过滤逻辑
+
+### 效果
+- ✅ **每次开启独立计算**：重新开启 AutoLP 后，从 0 开始计算收益
+- ✅ **历史不影响当前**：之前的亏损不会影响新一轮的止盈/止损判断
+- ✅ **止损逻辑正常**：只有本轮运行期间的亏损才会触发止损
+
+## 2025-12-31 Allowance 检查偶发失败修复
+
+### 问题描述
+AutoLP 自动开仓时偶发出现 `allowance token1 insufficient: 0 < 30000000000000000000` 错误，第二次自动开仓没有这个问题。
+
+### 问题根因
+这是一个 **RPC 节点状态同步延迟** 问题。当 approve 交易刚被确认时，RPC 节点可能还没有同步到最新的状态，导致紧接着的 `Allowance` 查询读取到旧的状态（0）。
+
+流程：
+1. `approveToken` 发送 approve 交易并等待确认
+2. 交易确认后立即查询 `Allowance`
+3. 由于 RPC 节点状态延迟，查询结果可能是旧值（0）
+4. 导致 `allowance insufficient` 错误
+
+### 修复方案
+在检查 allowance 失败时，添加 **2 秒延迟后重试** 机制：
+- 第一次检查失败时打印日志，等待 2 秒
+- 重新查询 allowance
+- 如果仍然失败才报错
+
+### 涉及文件
+- [`services/liquidity_enter.go`](file:///e:/goProject/TgLpBot/backend/services/liquidity_enter.go): `enterV3FromToken` 函数中的 token0 和 token1 allowance 检查
+
+### 效果
+- ✅ **解决偶发失败**：RPC 节点延迟不再导致开仓失败
+- ✅ **日志可追溯**：如果触发重试会打印日志，便于排查
+- ✅ **不影响正常情况**：已授权的情况下不会有额外延迟
+
+## 2025-12-31 开仓 Gas 费记录为 0 修复
+
+### 问题描述
+AutoLP 自动开仓的交易记录中，Gas 费显示为 `0.000000 BNB`。
+
+### 问题根因
+在 `EnterTaskFromUSDTWithOptions` 函数中，开仓交易完成后立即查询 BNB 余额，RPC 节点可能还没有同步最新状态，导致 `bnbBefore` 和 `bnbAfter` 相同，计算出的 `gasSpent` 为 0。
+
+### 修复方案
+1. 在查询 `After` 余额之前添加 **500ms 延迟**，等待 RPC 节点状态同步
+2. 添加 **日志跟踪**：输出 `bnbBefore`、`bnbAfter`、`gasSpent` 的值，便于调试
+
+### 涉及文件
+- [`services/liquidity_enter.go`](file:///e:/goProject/TgLpBot/backend/services/liquidity_enter.go): `EnterTaskFromUSDTWithOptions` 函数
+
+### 效果
+- ✅ **Gas 费记录正确**：等待状态同步后读取余额，确保差额计算准确
+- ✅ **日志可追溯**：可以在日志中看到余额变化详情
+
+## 2025-12-31 撤出流动性记录修复
+
+### 问题描述
+1. **撤出金额显示为 0**：auto 模式撤退卫士撤出流动性后，交易记录中的撤出金额（`AmountOut`）显示为 0
+2. **分两次兑换代币**：撤出后分别兑换"钱包余额的代币"和"流动性返还的代币"
+
+### 问题根因
+当 `sweepWallet=true`（auto 模式默认启用）时：
+1. `exitV3ToUSDT` 中 `swapDeltas=false`，不执行 swap
+2. 但仍然创建 `Transaction` 记录，此时 `AmountOut = usdtAfter - usdtBefore = 0`（因为还没有 swap）
+3. 后续虽然顶层有更新逻辑，但因为记录已存在且 `AmountOut` 是字符串"0"，更新逻辑未能正确执行
+
+### 修复方案
+1. **`exitV3ToUSDT`**：只有当 `swapDeltas=true` 时才创建 `Transaction` 记录
+2. **`ExitTaskToUSDTWithOptions`**：改进 Transaction 记录逻辑为 **Upsert** 模式：
+   - 先尝试更新已有记录（`swapDeltas=true` 时 `exitV3ToUSDT` 已创建）
+   - 如果记录不存在则创建新记录（`sweepWallet` 模式）
+
+### 关于"分两次兑换"
+这是设计如此。`sweepWallet` 模式会清仓钱包中**所有**非 USDT 代币，包括：
+- 之前开仓残余的代币
+- 本次撤出返还的代币
+
+这样可以确保完全清仓，但日志显示可能是多次兑换。
+
+### 涉及文件
+- [`services/liquidity_exit.go`](file:///e:/goProject/TgLpBot/backend/services/liquidity_exit.go):
+  - `exitV3ToUSDT`: 条件创建 Transaction 记录
+  - `ExitTaskToUSDTWithOptions`: Upsert 逻辑
+
+### 效果
+- ✅ **撤出金额正确记录**：交易记录中显示正确的 USDT 撤出金额
+- ✅ **避免重复记录**：不会创建 AmountOut=0 的无效记录
+
+## 2025-12-31 同一代币重复兑换问题修复
+
+### 问题描述
+同一种代币被分两次兑换：先兑换"钱包余额的代币"，再兑换"流动性返还的代币"，浪费 Gas。
+
+### 问题根因
+`swapWalletTokensToUSDT` 函数在 swap 完成后会校验余额（第 341-356 行）。由于 swap 可能有滑点或小额残余，校验发现残余时返回错误，触发重试机制：
+
+1. **第一次调用**：撤出 LP + swap 代币 → 校验发现小额残余 → 返回错误
+2. **重试调用**：LP 已空（跳过撤出）+ **再次 swap 同一代币的残余部分**
+
+### 修复方案
+修改 `swapWalletTokensToUSDT` 的校验逻辑：
+- 将"因残余返回错误"改为"仅打印警告日志"
+- 只有 swap 本身失败才返回错误
+
+### 涉及文件
+- [`services/liquidity_exit.go`](file:///e:/goProject/TgLpBot/backend/services/liquidity_exit.go):
+  - `ExitTaskToUSDTWithOptions`: 在 `swapWalletTokensToUSDT` 调用前添加 1 秒延迟
+  - `swapWalletTokensToUSDT`: 移除因残余返回错误的逻辑
+
+### 效果
+- ✅ **一次性兑换完成**：等待 RPC 同步后，一次获取所有代币余额（残余 + 撤出返还的）
+- ✅ **节省 Gas**：不会因 RPC 延迟导致分两次兑换同一代币
+- ✅ **日志可追溯**：如有残余会打印警告日志
+

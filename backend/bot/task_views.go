@@ -7,6 +7,7 @@ import (
 	"TgLpBot/services"
 	"fmt"
 	"log"
+	"math"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -98,6 +99,28 @@ func shortenHex(s string) string {
 	return s[:10] + "..." + s[len(s)-8:]
 }
 
+func formatDustAmount(amount float64) string {
+	if amount == 0 {
+		return "0"
+	}
+	abs := math.Abs(amount)
+	sigDigits := 4
+	exp := math.Floor(math.Log10(abs))
+	decimals := sigDigits - 1 - int(exp)
+	if decimals < 0 {
+		decimals = 0
+	}
+	if decimals > 8 {
+		decimals = 8
+	}
+	scale := math.Pow(10, float64(decimals))
+	rounded := math.Round(amount*scale) / scale
+	if rounded == 0 {
+		return "0"
+	}
+	return fmt.Sprintf("%.*f", decimals, rounded)
+}
+
 func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 	emoji, statusText := formatTaskStatus(task.Status)
 	exchange := strings.TrimSpace(task.Exchange)
@@ -135,10 +158,16 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 			dustLine := ""
 			dustParts := make([]string, 0, 2)
 			if pnl.DustToken0 > 0 {
-				dustParts = append(dustParts, fmt.Sprintf("%.4f %s", pnl.DustToken0, escapeTelegramMarkdown(task.Token0Symbol)))
+				formatted := formatDustAmount(pnl.DustToken0)
+				if formatted != "0" {
+					dustParts = append(dustParts, fmt.Sprintf("%s %s", formatted, escapeTelegramMarkdown(task.Token0Symbol)))
+				}
 			}
 			if pnl.DustToken1 > 0 {
-				dustParts = append(dustParts, fmt.Sprintf("%.4f %s", pnl.DustToken1, escapeTelegramMarkdown(task.Token1Symbol)))
+				formatted := formatDustAmount(pnl.DustToken1)
+				if formatted != "0" {
+					dustParts = append(dustParts, fmt.Sprintf("%s %s", formatted, escapeTelegramMarkdown(task.Token1Symbol)))
+				}
 			}
 			if len(dustParts) > 0 {
 				dustLine = fmt.Sprintf("\n🧹 开仓残余：%s (≈%.2f USDT)", strings.Join(dustParts, " + "), pnl.DustValueUSDT)
@@ -176,7 +205,14 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 	currentPriceInfo, priceRangeInfo := buildPriceDisplayLines(task)
 
 	rangePctText := ""
-	if task.RangePercentage > 0 {
+	if task.RangeLowerPercentage > 0 && task.RangeUpperPercentage > 0 {
+		avg := (task.RangeLowerPercentage + task.RangeUpperPercentage) / 2.0
+		if math.Abs(task.RangeLowerPercentage-task.RangeUpperPercentage) >= 0.01 {
+			rangePctText = fmt.Sprintf(" (L %.2f%% / U %.2f%%)", task.RangeLowerPercentage, task.RangeUpperPercentage)
+		} else {
+			rangePctText = fmt.Sprintf(" (±%.2f%%)", avg)
+		}
+	} else if task.RangePercentage > 0 {
 		rangePctText = fmt.Sprintf(" (±%.2f%%)", task.RangePercentage)
 	}
 

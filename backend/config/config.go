@@ -77,6 +77,10 @@ type Config struct {
 	MaxGasPrice int64
 	GasLimit    uint64
 
+	// Liquidity exit balance sync (RPC lag handling)
+	ExitTokenSyncTimeoutSeconds int
+	ExitTokenSyncPollMillis     int
+
 	// Token Addresses
 	USDTAddress      string
 	USDCAddress      string
@@ -124,8 +128,9 @@ type Config struct {
 	AutoLPResonanceMinTotalVolume5m float64
 	AutoLPResonanceMinAbsZ60        float64
 	AutoLPAllowEntrySwap            bool
-	AutoLPExitVolumeThreshold       float64
-	AutoLPHeatDownScans             int
+	AutoLPGuardWindowSeconds        int
+	AutoLPGuardVolumeDropPercent    float64
+	AutoLPGuardPriceTxDropPercent   float64
 	AutoLPEmergencyGasMultiplier    float64
 	AutoLPWidthSidewaysPercent      float64
 	AutoLPWidthMildUptrendPercent   float64
@@ -137,6 +142,7 @@ type Config struct {
 	SmartLPContractAddress     string
 	SmartLPScorePerWallet      float64
 	SmartLPMinWallets          int
+	SmartLPRecentWindowMinutes int // 自动开单所需的时间窗口（分钟），默认10分钟
 	SmartLPScanIntervalSeconds int
 	SmartLPMaxBlocksPerScan    int
 	SmartLPRPCTimeoutSeconds   int
@@ -184,8 +190,9 @@ func LoadConfig() error {
 	autoLPMinFeeApr60m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_FEE_APR_60M", "0")), 64)
 	autoLPMaxSurgeRatio, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MAX_SURGE_RATIO", "0")), 64)
 	autoLPMaxCandidates, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_MAX_CANDIDATES", "20")))
-	autoLPExitVolThreshold, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_AUTO_EXIT_VOLUME_THRESHOLD", "0.5")), 64)
-	autoLPHeatDownScans, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_HEAT_DOWN_SCANS", "6")))
+	autoLPGuardWindowSeconds, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_GUARD_WINDOW_SECONDS", "120")))
+	autoLPGuardVolumeDropPct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_VOLUME_DROP_PERCENT", "0.30")), 64)
+	autoLPGuardPriceTxDropPct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_PRICE_TX_DROP_PERCENT", "0.10")), 64)
 	autoLPEmergencyGasMult, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_EMERGENCY_GAS_MULTIPLIER", "2.0")), 64)
 	autoLPDebug := getEnvBool("AUTO_LP_DEBUG", false)
 	autoLPWidthSideways, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_SIDEWAYS_PERCENT", "2.0")), 64)
@@ -195,9 +202,12 @@ func LoadConfig() error {
 	smartLPScorePerWallet, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("SMART_LP_SCORE_PER_WALLET", "100")), 64)
 	smartLPMinWallets, _ := strconv.Atoi(strings.TrimSpace(getEnv("SMART_LP_MIN_WALLETS", "3")))
 	smartLPScanInterval, _ := strconv.Atoi(strings.TrimSpace(getEnv("SMART_LP_SCAN_INTERVAL_SECONDS", "60")))
+	smartLPRecentWindowMinutes, _ := strconv.Atoi(strings.TrimSpace(getEnv("SMART_LP_RECENT_WINDOW_MINUTES", "10")))
 	smartLPMaxBlocksPerScan, _ := strconv.Atoi(strings.TrimSpace(getEnv("SMART_LP_MAX_BLOCKS_PER_SCAN", "200")))
 	smartLPRPCTimeoutSeconds, _ := strconv.Atoi(strings.TrimSpace(getEnv("SMART_LP_RPC_TIMEOUT_SECONDS", "30")))
 	smartLPScanTimeoutSeconds, _ := strconv.Atoi(strings.TrimSpace(getEnv("SMART_LP_SCAN_TIMEOUT_SECONDS", "600")))
+	exitTokenSyncTimeoutSeconds, _ := strconv.Atoi(strings.TrimSpace(getEnv("EXIT_TOKEN_SYNC_TIMEOUT_SECONDS", "30")))
+	exitTokenSyncPollMillis, _ := strconv.Atoi(strings.TrimSpace(getEnv("EXIT_TOKEN_SYNC_POLL_MILLIS", "500")))
 
 	AppConfig = &Config{
 		// Telegram
@@ -264,6 +274,9 @@ func LoadConfig() error {
 		MaxGasPrice: maxGasPrice,
 		GasLimit:    gasLimit,
 
+		ExitTokenSyncTimeoutSeconds: exitTokenSyncTimeoutSeconds,
+		ExitTokenSyncPollMillis:     exitTokenSyncPollMillis,
+
 		// Token Addresses
 		USDTAddress:      getEnv("USDT_ADDRESS", "0x55d398326f99059fF775485246999027B3197955"),
 		USDCAddress:      getEnv("USDC_ADDRESS", "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d"),
@@ -287,7 +300,7 @@ func LoadConfig() error {
 		AutoLPDebug:                     autoLPDebug,
 		AutoLPPoolMBaseURL:              strings.TrimSpace(getEnv("AUTO_LP_POOLM_BASE_URL", "")),
 		AutoLPChain:                     strings.TrimSpace(getEnv("AUTO_LP_CHAIN", "bsc")),
-		AutoLPProtocols:                 strings.TrimSpace(getEnv("AUTO_LP_PROTOCOLS", "v3,v4")),
+		AutoLPProtocols:                 strings.TrimSpace(getEnv("AUTO_LP_PROTOCOLS", "pcsv3,univ3,univ4")),
 		AutoLPTimeframeShortMinutes:     autoLPShortTF,
 		AutoLPTimeframeLongMinutes:      autoLPLongTF,
 		AutoLPScanIntervalSeconds:       autoLPScanInterval,
@@ -312,8 +325,9 @@ func LoadConfig() error {
 		AutoLPResonanceMinTotalVolume5m: autoLPResMinTotalVolume5m,
 		AutoLPResonanceMinAbsZ60:        autoLPResMinAbsZ60,
 		AutoLPAllowEntrySwap:            getEnvBool("AUTO_LP_ALLOW_ENTRY_SWAP", false),
-		AutoLPExitVolumeThreshold:       autoLPExitVolThreshold,
-		AutoLPHeatDownScans:             autoLPHeatDownScans,
+		AutoLPGuardWindowSeconds:        autoLPGuardWindowSeconds,
+		AutoLPGuardVolumeDropPercent:    autoLPGuardVolumeDropPct,
+		AutoLPGuardPriceTxDropPercent:   autoLPGuardPriceTxDropPct,
 		AutoLPEmergencyGasMultiplier:    autoLPEmergencyGasMult,
 		AutoLPWidthSidewaysPercent:      autoLPWidthSideways,
 		AutoLPWidthMildUptrendPercent:   autoLPWidthMildUp,
@@ -324,6 +338,7 @@ func LoadConfig() error {
 		SmartLPContractAddress:     strings.TrimSpace(getEnv("SMART_LP_CONTRACT_ADDRESS", "0x17ef7601103792929E01832c0DC3901a55Cf7922")),
 		SmartLPScorePerWallet:      smartLPScorePerWallet,
 		SmartLPMinWallets:          smartLPMinWallets,
+		SmartLPRecentWindowMinutes: smartLPRecentWindowMinutes,
 		SmartLPScanIntervalSeconds: smartLPScanInterval,
 		SmartLPMaxBlocksPerScan:    smartLPMaxBlocksPerScan,
 		SmartLPRPCTimeoutSeconds:   smartLPRPCTimeoutSeconds,
@@ -363,7 +378,7 @@ func LoadConfig() error {
 	log.Printf("   - AutoLP Debug: %v", AppConfig.AutoLPDebug)
 	log.Printf("   - AutoLP UserID: %d", AppConfig.AutoLPUserID)
 	log.Printf("   - AutoLP Chain: %s", AppConfig.AutoLPChain)
-	log.Printf("   - AutoLP Protocols: %s", AppConfig.AutoLPProtocols)
+	log.Printf("   - AutoLP DEXes: %s", AppConfig.AutoLPProtocols)
 	log.Printf("   - AutoLP Timeframes: %d/%d minutes", AppConfig.AutoLPTimeframeShortMinutes, AppConfig.AutoLPTimeframeLongMinutes)
 	log.Printf("   - AutoLP Scan Interval: %d seconds", AppConfig.AutoLPScanIntervalSeconds)
 	log.Printf("   - AutoLP Fetch Delay: %d ms", AppConfig.AutoLPFetchDelayMillis)

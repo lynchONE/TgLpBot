@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,35 @@ const defaultPoolMBaseURL = "https://mapi.poolm.xyz"
 type PoolMClient struct {
 	baseURL    string
 	httpClient *http.Client
+}
+
+type PoolMStringList []string
+
+func (s *PoolMStringList) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || bytes.Equal(data, []byte("null")) {
+		*s = nil
+		return nil
+	}
+	if data[0] == '[' {
+		var out []string
+		if err := json.Unmarshal(data, &out); err != nil {
+			return err
+		}
+		*s = out
+		return nil
+	}
+	var single string
+	if err := json.Unmarshal(data, &single); err == nil {
+		single = strings.TrimSpace(single)
+		if single == "" {
+			*s = nil
+		} else {
+			*s = []string{single}
+		}
+		return nil
+	}
+	return fmt.Errorf("invalid string list: %s", string(data))
 }
 
 type poolMRateLimitBody struct {
@@ -43,7 +73,8 @@ func NewPoolMClient(baseURL string) *PoolMClient {
 type PoolMTopFeesResponse struct {
 	Success           bool            `json:"success"`
 	Timeframe         string          `json:"timeframe"`
-	RequestedProtocol string          `json:"requested_protocol"`
+	RequestedProtocol PoolMStringList `json:"requested_protocol"`
+	RequestedDex      PoolMStringList `json:"requested_dex"`
 	RequestedChain    string          `json:"requested_chain"`
 	TotalPools        int             `json:"total_pools"`
 	Data              []PoolMFeePool  `json:"data"`
@@ -54,6 +85,7 @@ type PoolMTopFeesResponse struct {
 type PoolMFeePool struct {
 	Chain           string `json:"chain"`
 	ProtocolVersion string `json:"protocol_version"`
+	Dex             string `json:"dex"`
 
 	// For V3: pool address (0x...20 bytes). For V4: PoolId (0x...32 bytes).
 	PoolAddress string `json:"pool_address"`
@@ -64,10 +96,10 @@ type PoolMFeePool struct {
 
 	Token0Symbol   string `json:"token0_symbol"`
 	Token1Symbol   string `json:"token1_symbol"`
-	Token0Address  string `json:"token0_address"`
-	Token1Address  string `json:"token1_address"`
 	Token0Name     string `json:"token0_name"`
 	Token1Name     string `json:"token1_name"`
+	Token0Address  string `json:"token0_address"`
+	Token1Address  string `json:"token1_address"`
 	Token0Decimals int    `json:"token0_decimals"`
 	Token1Decimals int    `json:"token1_decimals"`
 
@@ -86,17 +118,17 @@ type PoolMFeePool struct {
 	LastSwapAt           string  `json:"last_swap_at"`
 }
 
-func (c *PoolMClient) TopFees(ctx context.Context, timeframeMinutes int, protocol string, chain string) (*PoolMTopFeesResponse, error) {
+func (c *PoolMClient) TopFees(ctx context.Context, timeframeMinutes int, chain string, dex string) (*PoolMTopFeesResponse, error) {
 	if timeframeMinutes <= 0 {
 		return nil, fmt.Errorf("invalid timeframeMinutes: %d", timeframeMinutes)
 	}
-	protocol = strings.ToLower(strings.TrimSpace(protocol))
 	chain = strings.ToLower(strings.TrimSpace(chain))
-	if protocol == "" {
-		return nil, fmt.Errorf("protocol is required")
-	}
+	dex = strings.ToLower(strings.TrimSpace(dex))
 	if chain == "" {
 		return nil, fmt.Errorf("chain is required")
+	}
+	if dex == "" {
+		return nil, fmt.Errorf("dex is required")
 	}
 
 	u, err := url.Parse(c.baseURL)
@@ -105,8 +137,8 @@ func (c *PoolMClient) TopFees(ctx context.Context, timeframeMinutes int, protoco
 	}
 	u.Path = strings.TrimRight(u.Path, "/") + fmt.Sprintf("/api/pools/top-fees/%d", timeframeMinutes)
 	q := u.Query()
-	q.Set("protocol", protocol)
 	q.Set("chain", chain)
+	q.Set("dex", dex)
 	u.RawQuery = q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)

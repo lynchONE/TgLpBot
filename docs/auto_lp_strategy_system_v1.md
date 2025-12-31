@@ -6,7 +6,7 @@
 
 1) **数据采集层（Scanner Thread）**：轮询 PoolM API，抓取 Top Fees 池子（`5/15/60/360` 分钟维度）。
 2) **策略计算层（Analyzer Thread）**：基于 ClickHouse 的价格历史计算 `Z5/Z60`，并按状态机 + 共振规则输出区间宽度与执行动作。
-3) **执行控制层（Executor & Guardian）**：复用现有 Zap 合约开仓；对 `is_auto=true` 的任务做退出卫士（止损/量价衰减/热度消失）。
+3) **执行控制层（Executor & Guardian）**：复用现有 Zap 合约开仓；对 `is_auto=true` 的任务做退出卫士（5m 成交量回落 / 价格+交易笔数回落）。
 
 > V1.0 原则：默认只扫描不交易；自动开仓必须显式开启配置。
 
@@ -22,7 +22,7 @@
 
 API：
 
-`https://mapi.poolm.xyz/api/pools/top-fees/{timeframe}?protocol={v3|v4}&chain=bsc`
+`https://mapi.poolm.xyz/api/pools/top-fees/{timeframe}?chain=bsc&dex=pcsv3,univ3,univ4`
 
 V1.0 需要同时请求：
 
@@ -43,7 +43,15 @@ V1.0 需要同时请求：
 {
   "success": true,
   "timeframe": "5 minutes",
-  "requested_protocol": "v3",
+  "requested_protocol": [
+    "v3",
+    "v4"
+  ],
+  "requested_dex": [
+    "PancakeswapV3",
+    "UniswapV3",
+    "UniswapV4"
+  ],
   "requested_chain": "bsc",
   "total_pools": 100,
   "data": [
@@ -116,7 +124,7 @@ V1.0 需要同时请求：
 
 状态与宽度：
 
-- `CRASH (Z5 < -3)`：紧急止损，撤出并停止
+- `CRASH (Z5 < -3)`：极端下跌（不作为开仓候选）
 - `RAPID_PUMP (Z5 > +3)`：使用 `AUTO_LP_WIDTH_RAPID_PUMP_PERCENT`，贴边（下 10% / 上 90%）
 - `SIDEWAYS (|Z5| < 0.5)`：使用 `AUTO_LP_WIDTH_SIDEWAYS_PERCENT`，对称（下 50% / 上 50%）
 - `MILD_UPTREND (0.5 < Z5 < 1.5)`：使用 `AUTO_LP_WIDTH_MILD_UPTREND_PERCENT`，非对称（下 20% / 上 80%）
@@ -204,10 +212,11 @@ V1.0 不重复造轮子，复用现有 `StrategyService`：
 - `AUTO_LP_REQUIRE_STABLE_SYMBOL`（保留字段：当前版本不用于筛选）
 - `AUTO_LP_WIDTH_SIDEWAYS_PERCENT` / `AUTO_LP_WIDTH_MILD_UPTREND_PERCENT` / `AUTO_LP_WIDTH_RAPID_PUMP_PERCENT`
 
-退出卫士：
+退出卫士（可配置）：
 
-- `AUTO_LP_AUTO_EXIT_VOLUME_THRESHOLD`：量价衰减阈值（默认 0.5）
-- `AUTO_LP_HEAT_DOWN_SCANS`：热度连续下降次数（默认 6 次扫描）
+- `AUTO_LP_GUARD_WINDOW_SECONDS`：窗口秒数（默认 120 秒）
+- `AUTO_LP_GUARD_VOLUME_DROP_PERCENT`：5m 成交量相对峰值回落比例（默认 0.30=30%）
+- `AUTO_LP_GUARD_PRICE_TX_DROP_PERCENT`：价格与交易笔数相对峰值回落比例（默认 0.10=10%）
 
 ClickHouse：
 

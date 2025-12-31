@@ -56,6 +56,18 @@ const ZapSimpleABI = `[
     "type": "event"
   },
   {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "internalType": "address", "name": "target", "type": "address" },
+      { "indexed": false, "internalType": "address", "name": "tokenIn", "type": "address" },
+      { "indexed": false, "internalType": "address", "name": "tokenOut", "type": "address" },
+      { "indexed": false, "internalType": "uint256", "name": "amountIn", "type": "uint256" },
+      { "indexed": false, "internalType": "uint256", "name": "amountOut", "type": "uint256" }
+    ],
+    "name": "SwapExecuted",
+    "type": "event"
+  },
+  {
     "inputs": [
       { "internalType": "address", "name": "pool", "type": "address" },
       { "internalType": "int24", "name": "tickLower", "type": "int24" },

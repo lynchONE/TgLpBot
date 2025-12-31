@@ -85,6 +85,12 @@ type StrategyTask struct {
 	ExitLastError     string     `gorm:"type:text" json:"exit_last_error"`
 	ExitGiveUpAt      *time.Time `json:"exit_give_up_at"`
 
+	// Rebalance re-entry retry state (after exit succeeds).
+	RebalancePending     bool       `gorm:"default:false" json:"rebalance_pending"`
+	RebalanceRetryCount  int        `gorm:"default:0" json:"rebalance_retry_count"`
+	RebalanceNextRetryAt *time.Time `json:"rebalance_next_retry_at"`
+	RebalanceLastError   string     `gorm:"type:text" json:"rebalance_last_error"`
+
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`

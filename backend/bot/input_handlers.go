@@ -8,6 +8,7 @@ import (
 	"TgLpBot/services"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"strconv"
 	"strings"
@@ -383,21 +384,40 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 		return
 	}
 
+	lowerPct, upperPct := tc.CalculatePercentagesFromTicks(currentTick, tickLower, tickUpper)
+	effectivePct := percentage
+	if lowerPct > 0 && upperPct > 0 {
+		effectivePct = (lowerPct + upperPct) / 2.0
+	}
+
 	// Store tick range and amount
 	database.SetUserSession(user.TelegramID, "tick_lower", strconv.Itoa(tickLower), 30*time.Minute)
 	database.SetUserSession(user.TelegramID, "tick_upper", strconv.Itoa(tickUpper), 30*time.Minute)
 	database.SetUserSession(user.TelegramID, "position_amount", fmt.Sprintf("%.8f", amount), 30*time.Minute)
-	database.SetUserSession(user.TelegramID, "tick_percentage", fmt.Sprintf("%.8f", percentage), 30*time.Minute)
+	database.SetUserSession(user.TelegramID, "tick_percentage", fmt.Sprintf("%.8f", effectivePct), 30*time.Minute)
+	if lowerPct > 0 && upperPct > 0 {
+		database.SetUserSession(user.TelegramID, "tick_lower_percentage", fmt.Sprintf("%.8f", lowerPct), 30*time.Minute)
+		database.SetUserSession(user.TelegramID, "tick_upper_percentage", fmt.Sprintf("%.8f", upperPct), 30*time.Minute)
+	}
 
 	// 直接创建任务，不需要确认
+	rangeLine := fmt.Sprintf("📈 百分比范围：±%.6f%%", percentage)
+	if lowerPct > 0 && upperPct > 0 {
+		if math.Abs(effectivePct-percentage) >= 0.0001 {
+			rangeLine = fmt.Sprintf("📈 百分比范围：输入 ±%.6f%%，实际 ±%.6f%% (受费率/格子影响)", percentage, effectivePct)
+		} else {
+			rangeLine = fmt.Sprintf("📈 百分比范围：±%.6f%%", effectivePct)
+		}
+	}
+
 	b.sendMessage(message.Chat.ID, fmt.Sprintf(`📊 *任务参数*
 
-📈 百分比范围：±%.6f%%
+%s
 🎯 当前 Tick：%d
 📊 Tick 范围：%d 到 %d
 💰 投入金额：%.2f USDT
 
-⏳ 正在创建任务并开仓...`, percentage, currentTick, tickLower, tickUpper, amount))
+⏳ 正在创建任务并开仓...`, rangeLine, currentTick, tickLower, tickUpper, amount))
 
 	// 调用创建任务逻辑
 	b.createPositionTask(message.Chat.ID, user)
@@ -414,6 +434,8 @@ func (b *Bot) createPositionTask(chatID int64, user *models.User) {
 	feeStr, _ := database.GetUserSession(user.TelegramID, "pool_fee")
 	tickSpacingStr, _ := database.GetUserSession(user.TelegramID, "pool_tick_spacing")
 	rangePctStr, _ := database.GetUserSession(user.TelegramID, "tick_percentage")
+	rangeLowerPctStr, _ := database.GetUserSession(user.TelegramID, "tick_lower_percentage")
+	rangeUpperPctStr, _ := database.GetUserSession(user.TelegramID, "tick_upper_percentage")
 	tickLowerStr, _ := database.GetUserSession(user.TelegramID, "tick_lower")
 	tickUpperStr, _ := database.GetUserSession(user.TelegramID, "tick_upper")
 	amountStr, _ := database.GetUserSession(user.TelegramID, "position_amount")
@@ -431,6 +453,12 @@ func (b *Bot) createPositionTask(chatID int64, user *models.User) {
 	fee, _ := strconv.Atoi(feeStr)
 	tickSpacing, _ := strconv.Atoi(tickSpacingStr)
 	rangePct, _ := strconv.ParseFloat(rangePctStr, 64)
+	rangeLowerPct, _ := strconv.ParseFloat(rangeLowerPctStr, 64)
+	rangeUpperPct, _ := strconv.ParseFloat(rangeUpperPctStr, 64)
+	if rangeLowerPct <= 0 || rangeUpperPct <= 0 {
+		rangeLowerPct = 0
+		rangeUpperPct = 0
+	}
 
 	cfg, cfgErr := b.configService.GetOrCreate(user.ID)
 	if cfgErr != nil {
@@ -454,6 +482,8 @@ func (b *Bot) createPositionTask(chatID int64, user *models.User) {
 		TickLower:            tickLower,
 		TickUpper:            tickUpper,
 		RangePercentage:      rangePct,
+		RangeLowerPercentage: rangeLowerPct,
+		RangeUpperPercentage: rangeUpperPct,
 		AmountUSDT:           amount,
 		CurrentLiquidity:     "0", // Will be updated after zap in
 		ReopenDelaySeconds:   cfg.RebalanceTimeout,

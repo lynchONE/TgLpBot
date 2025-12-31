@@ -20,43 +20,7 @@ func NewTickCalculator() *TickCalculator {
 // tickSpacing: 池子的 tick spacing
 // Returns: tickLower, tickUpper
 func (tc *TickCalculator) CalculateTickFromPercentage(currentTick int, percentage float64, tickSpacing int) (int, int) {
-	// 计算价格变化对应的 tick 变化
-	// price = 1.0001^tick
-	// 对于 x% 的价格变化，tick 偏移量 = log(1 + x/100) / log(1.0001)
-
-	// 使用对称算法：取上涨和下跌偏移量的平均值作为对称偏移
-	priceMultiplierUpper := 1.0 + (percentage / 100.0)
-	priceMultiplierLower := 1.0 - (percentage / 100.0)
-
-	tickOffsetUpper := math.Abs(math.Log(priceMultiplierUpper) / math.Log(1.0001))
-	tickOffsetLower := math.Abs(math.Log(priceMultiplierLower) / math.Log(1.0001))
-
-	// 取平均值作为对称偏移量
-	symmetricOffset := int((tickOffsetUpper + tickOffsetLower) / 2)
-
-	// 确保偏移量至少是一个 tickSpacing
-	if symmetricOffset < tickSpacing {
-		symmetricOffset = tickSpacing
-	}
-
-	// 计算对称的 tick 范围
-	tickUpper := currentTick + symmetricOffset
-	tickLower := currentTick - symmetricOffset
-
-	// 调整到 tick spacing 的倍数
-	// 为了保持对称，两边都使用四舍五入到最近的 tickSpacing 倍数
-	tickLower = tc.RoundToNearestTickSpacing(tickLower, tickSpacing)
-	tickUpper = tc.RoundToNearestTickSpacing(tickUpper, tickSpacing)
-
-	// 额外保护：确保 tickUpper > currentTick 且 tickLower < currentTick
-	if tickUpper <= currentTick {
-		tickUpper = tc.RoundUpToTickSpacing(currentTick+1, tickSpacing)
-	}
-	if tickLower >= currentTick {
-		tickLower = tc.RoundDownToTickSpacing(currentTick-1, tickSpacing)
-	}
-
-	return tickLower, tickUpper
+	return tc.CalculateTickFromPercentages(currentTick, percentage, percentage, tickSpacing)
 }
 
 // CalculateTickFromPercentages calculates an ASYMMETRIC tick range based on separate lower/upper percentages.
@@ -69,8 +33,8 @@ func (tc *TickCalculator) CalculateTickFromPercentages(currentTick int, lowerPct
 	tickOffsetUpper := math.Abs(math.Log(priceMultiplierUpper) / math.Log(1.0001))
 	tickOffsetLower := math.Abs(math.Log(priceMultiplierLower) / math.Log(1.0001))
 
-	upperOffset := int(tickOffsetUpper)
-	lowerOffset := int(tickOffsetLower)
+	upperOffset := int(math.Ceil(tickOffsetUpper))
+	lowerOffset := int(math.Ceil(tickOffsetLower))
 
 	if upperOffset < tickSpacing {
 		upperOffset = tickSpacing
@@ -90,6 +54,98 @@ func (tc *TickCalculator) CalculateTickFromPercentages(currentTick int, lowerPct
 	}
 
 	return tickLower, tickUpper
+}
+
+// CalculateTickFromPercentagesBestFit chooses the closest valid ticks to the target percentages.
+// This minimizes distortion when currentTick isn't aligned to tickSpacing (useful for AutoLP).
+func (tc *TickCalculator) CalculateTickFromPercentagesBestFit(currentTick int, lowerPct float64, upperPct float64, tickSpacing int) (int, int) {
+	if tickSpacing <= 0 || lowerPct <= 0 || upperPct <= 0 {
+		return tc.CalculateTickFromPercentages(currentTick, lowerPct, upperPct, tickSpacing)
+	}
+
+	priceMultiplierUpper := 1.0 + (upperPct / 100.0)
+	priceMultiplierLower := 1.0 - (lowerPct / 100.0)
+	if priceMultiplierUpper <= 0 || priceMultiplierLower <= 0 {
+		return tc.CalculateTickFromPercentages(currentTick, lowerPct, upperPct, tickSpacing)
+	}
+
+	tickOffsetUpper := math.Abs(math.Log(priceMultiplierUpper) / math.Log(1.0001))
+	tickOffsetLower := math.Abs(math.Log(priceMultiplierLower) / math.Log(1.0001))
+	if tickOffsetUpper < 1 {
+		tickOffsetUpper = 1
+	}
+	if tickOffsetLower < 1 {
+		tickOffsetLower = 1
+	}
+
+	targetLower := currentTick - int(math.Round(tickOffsetLower))
+	targetUpper := currentTick + int(math.Round(tickOffsetUpper))
+
+	lowerCandidates := []int{
+		tc.RoundDownToTickSpacing(targetLower, tickSpacing),
+		tc.RoundUpToTickSpacing(targetLower, tickSpacing),
+	}
+	upperCandidates := []int{
+		tc.RoundDownToTickSpacing(targetUpper, tickSpacing),
+		tc.RoundUpToTickSpacing(targetUpper, tickSpacing),
+	}
+
+	bestLower := lowerCandidates[0]
+	bestUpper := upperCandidates[0]
+	bestScore := math.Inf(1)
+
+	for _, l := range lowerCandidates {
+		for _, u := range upperCandidates {
+			if l >= u || l >= currentTick || u <= currentTick {
+				continue
+			}
+			effLower, effUpper := tc.CalculatePercentagesFromTicks(currentTick, l, u)
+			if effLower <= 0 || effUpper <= 0 {
+				continue
+			}
+			score := math.Abs(effLower-lowerPct) + math.Abs(effUpper-upperPct)
+			if lowerPct < upperPct && effLower > effUpper {
+				score += 1000
+			}
+			if lowerPct > upperPct && effLower < effUpper {
+				score += 1000
+			}
+			if score < bestScore {
+				bestScore = score
+				bestLower = l
+				bestUpper = u
+			}
+		}
+	}
+
+	if math.IsInf(bestScore, 1) {
+		return tc.CalculateTickFromPercentages(currentTick, lowerPct, upperPct, tickSpacing)
+	}
+	return bestLower, bestUpper
+}
+
+// CalculatePercentagesFromTicks estimates lower/upper percentage widths from a tick range.
+func (tc *TickCalculator) CalculatePercentagesFromTicks(currentTick, tickLower, tickUpper int) (float64, float64) {
+	price := tc.CalculatePriceFromTick(currentTick)
+	if price <= 0 {
+		return 0, 0
+	}
+
+	lowerPrice := tc.CalculatePriceFromTick(tickLower)
+	upperPrice := tc.CalculatePriceFromTick(tickUpper)
+	if lowerPrice <= 0 || upperPrice <= 0 {
+		return 0, 0
+	}
+
+	lowerPct := (1.0 - (lowerPrice / price)) * 100.0
+	upperPct := ((upperPrice / price) - 1.0) * 100.0
+	if lowerPct < 0 {
+		lowerPct = 0
+	}
+	if upperPct < 0 {
+		upperPct = 0
+	}
+	return lowerPct, upperPct
 }
 
 // RoundToNearestTickSpacing rounds a tick to the NEAREST valid tick spacing (四舍五入)

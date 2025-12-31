@@ -76,6 +76,7 @@ func (s *PnLService) GetTaskPnL(task *models.StrategyTask) (*PnLInfo, error) {
 	}
 
 	dustValueUSDT := 0.0
+	dustUSDTValue := 0.0
 	if sqrtPriceX96 != nil && (dust0.Sign() > 0 || dust1.Sign() > 0) {
 		dustValueUSDT, _, _ = s.calculateUSDTValue(
 			task,
@@ -86,9 +87,30 @@ func (s *PnLService) GetTaskPnL(task *models.StrategyTask) (*PnLInfo, error) {
 		)
 	}
 
-	netInvested := initialCost - dustValueUSDT
+	if dust0.Sign() > 0 && isUSDTToken(task.Token0Symbol, task.Token0Address) {
+		dustUSDTValue += weiToFloat(dust0, getTokenDecimals(task.Token0Address))
+	}
+	if dust1.Sign() > 0 && isUSDTToken(task.Token1Symbol, task.Token1Address) {
+		dustUSDTValue += weiToFloat(dust1, getTokenDecimals(task.Token1Address))
+	}
+
+	dustValueNonUSDT := dustValueUSDT - dustUSDTValue
+	if dustValueNonUSDT < 0 {
+		dustValueNonUSDT = 0
+	}
+
+	netInvested := initialCost - dustValueNonUSDT
 	if netInvested < 0 {
 		netInvested = 0
+	}
+
+	dec0 := defaultTokenDecimals
+	dec1 := defaultTokenDecimals
+	if dust0.Sign() > 0 {
+		dec0 = getTokenDecimals(task.Token0Address)
+	}
+	if dust1.Sign() > 0 {
+		dec1 = getTokenDecimals(task.Token1Address)
 	}
 
 	return &PnLInfo{
@@ -98,8 +120,8 @@ func (s *PnLService) GetTaskPnL(task *models.StrategyTask) (*PnLInfo, error) {
 		AbsolutePnLUSDT:   currentValue - netInvested,
 		UnclaimedFeesUSDT: unclaimedFees,
 		HoldingsUSDT:      holdingsValue,
-		DustToken0:        weiToFloat(dust0, 18),
-		DustToken1:        weiToFloat(dust1, 18),
+		DustToken0:        weiToFloat(dust0, dec0),
+		DustToken1:        weiToFloat(dust1, dec1),
 		DustValueUSDT:     dustValueUSDT,
 	}, nil
 }
@@ -119,6 +141,9 @@ func (s *PnLService) getInitialCost(task *models.StrategyTask) (float64, *models
 	amountWei, err := parseBigInt(rec.OpenUSDTSpent)
 	if err != nil {
 		return 0, nil, err
+	}
+	if amountWei == nil || amountWei.Sign() <= 0 {
+		return task.AmountUSDT, &rec, nil
 	}
 	return weiToFloat(amountWei, 18), &rec, nil
 }
@@ -432,4 +457,18 @@ func weiToFloat(wei *big.Int, decimals int) float64 {
 	f.Quo(f, div)
 	val, _ := f.Float64()
 	return val
+}
+
+func isUSDTToken(symbol, addr string) bool {
+	if strings.EqualFold(strings.TrimSpace(symbol), "USDT") {
+		return true
+	}
+	if config.AppConfig == nil {
+		return false
+	}
+	usdtAddr := strings.TrimSpace(config.AppConfig.USDTAddress)
+	if !common.IsHexAddress(usdtAddr) {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(addr), usdtAddr)
 }

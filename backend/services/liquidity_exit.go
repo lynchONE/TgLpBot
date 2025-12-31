@@ -7,6 +7,7 @@ import (
 	"TgLpBot/models"
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
@@ -21,6 +22,153 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 )
+
+// SwapToUSDTError marks an error that happened during the "swap back to USDT" phase,
+// after the position was already removed successfully. Callers may choose to recover
+// via an additional wallet sweep swap.
+type SwapToUSDTError struct {
+	Err error
+}
+
+func (e *SwapToUSDTError) Error() string {
+	if e == nil || e.Err == nil {
+		return "swap to USDT failed"
+	}
+	return e.Err.Error()
+}
+
+func (e *SwapToUSDTError) Unwrap() error { return e.Err }
+
+var (
+	erc20TransferEventID = crypto.Keccak256Hash([]byte("Transfer(address,address,uint256)"))
+	reTxHash             = regexp.MustCompile(`^0x[0-9a-fA-F]{64}$`)
+)
+
+func firstTxHash(txHashes []string) (common.Hash, bool) {
+	if len(txHashes) == 0 {
+		return common.Hash{}, false
+	}
+	txInfo := strings.TrimSpace(txHashes[0])
+	if txInfo == "" {
+		return common.Hash{}, false
+	}
+	parts := strings.Split(txInfo, "|")
+	if len(parts) >= 2 {
+		txInfo = strings.TrimSpace(parts[1])
+	}
+	if !reTxHash.MatchString(txInfo) {
+		return common.Hash{}, false
+	}
+	return common.HexToHash(txInfo), true
+}
+
+func receiptTokenTransferDelta(receipt *types.Receipt, token common.Address, wallet common.Address) *big.Int {
+	if receipt == nil || token == (common.Address{}) || wallet == (common.Address{}) {
+		return big.NewInt(0)
+	}
+	in := big.NewInt(0)
+	out := big.NewInt(0)
+	for _, lg := range receipt.Logs {
+		if lg == nil || lg.Address != token || len(lg.Topics) < 3 || lg.Topics[0] != erc20TransferEventID {
+			continue
+		}
+		from := common.BytesToAddress(lg.Topics[1].Bytes())
+		to := common.BytesToAddress(lg.Topics[2].Bytes())
+		if len(lg.Data) == 0 {
+			continue
+		}
+		val := new(big.Int).SetBytes(lg.Data)
+		if to == wallet {
+			in.Add(in, val)
+		}
+		if from == wallet {
+			out.Add(out, val)
+		}
+	}
+	delta := new(big.Int).Sub(in, out)
+	if delta.Sign() < 0 {
+		return big.NewInt(0)
+	}
+	return delta
+}
+
+func (s *LiquidityService) exitTokenSyncDurations() (time.Duration, time.Duration) {
+	timeout := 30 * time.Second
+	poll := 500 * time.Millisecond
+	if config.AppConfig != nil {
+		if config.AppConfig.ExitTokenSyncTimeoutSeconds > 0 {
+			timeout = time.Duration(config.AppConfig.ExitTokenSyncTimeoutSeconds) * time.Second
+		}
+		if config.AppConfig.ExitTokenSyncPollMillis > 0 {
+			poll = time.Duration(config.AppConfig.ExitTokenSyncPollMillis) * time.Millisecond
+		}
+	}
+	if poll < 100*time.Millisecond {
+		poll = 100 * time.Millisecond
+	}
+	if timeout < poll {
+		timeout = poll
+	}
+	return timeout, poll
+}
+
+func (s *LiquidityService) getReceiptWithRetry(txHash common.Hash) (*types.Receipt, error) {
+	if blockchain.Client == nil {
+		return nil, fmt.Errorf("blockchain client not initialized")
+	}
+	timeout, poll := s.exitTokenSyncDurations()
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		receipt, err := blockchain.Client.TransactionReceipt(ctx, txHash)
+		cancel()
+		if err == nil && receipt != nil {
+			return receipt, nil
+		}
+		lastErr = err
+		if time.Now().After(deadline) {
+			if lastErr != nil {
+				return nil, fmt.Errorf("fetch tx receipt timeout %s: %w", txHash.Hex(), lastErr)
+			}
+			return nil, fmt.Errorf("fetch tx receipt timeout %s", txHash.Hex())
+		}
+		time.Sleep(poll)
+	}
+}
+
+func (s *LiquidityService) waitTokenBalanceAtLeast(token common.Address, wallet common.Address, min *big.Int, label string) (*big.Int, error) {
+	bal, err := blockchain.GetTokenBalance(token, wallet)
+	if bal == nil {
+		bal = big.NewInt(0)
+	}
+	if err != nil {
+		return bal, err
+	}
+	if min == nil || min.Sign() <= 0 || bal.Cmp(min) >= 0 {
+		return bal, nil
+	}
+
+	timeout, poll := s.exitTokenSyncDurations()
+	deadline := time.Now().Add(timeout)
+	log.Printf("[Liquidity] 等待 RPC 同步 %s 余额 (%s): have=%s want>=%s timeout=%s poll=%s", label, token.Hex(), bal.String(), min.String(), timeout.String(), poll.String())
+
+	for time.Now().Before(deadline) {
+		time.Sleep(poll)
+		bal, err = blockchain.GetTokenBalance(token, wallet)
+		if bal == nil {
+			bal = big.NewInt(0)
+		}
+		if err == nil && bal.Cmp(min) >= 0 {
+			log.Printf("[Liquidity] RPC 同步完成 %s 余额 (%s): %s", label, token.Hex(), bal.String())
+			return bal, nil
+		}
+	}
+	if err != nil {
+		return bal, fmt.Errorf("等待 RPC 同步 %s 余额失败 (%s): %w", label, token.Hex(), err)
+	}
+	return bal, fmt.Errorf("等待 RPC 同步 %s 余额超时 (%s): have=%s want>=%s", label, token.Hex(), bal.String(), min.String())
+}
 
 func parseBigIntFlexible(s string) (*big.Int, error) {
 	s = strings.TrimSpace(s)
@@ -84,26 +232,118 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 		bnbBefore = big.NewInt(0)
 	}
 
-	var txHashes []string
-	swapDeltas := !sweepWallet
-	switch strings.ToLower(strings.TrimSpace(task.PoolVersion)) {
-	case "v4":
-		txHashes, err = s.exitV4ToUSDT(privateKey, walletAddr, usdtAddr, task, swapDeltas, opts)
-	default:
-		txHashes, err = s.exitV3ToUSDT(privateKey, walletAddr, usdtAddr, task, swapDeltas, opts)
-	}
-	if err != nil {
-		return nil, err
-	}
-
+	// SweepWallet mode needs to be resilient to public RPC lag/load-balancing:
+	// after liquidity removal is mined, balanceOf() may still return an old state for a short time.
+	// We capture pre-exit balances and later enforce "min expected" balances (pre + receipt delta)
+	// before swapping, so we don't miss tokens due to stale RPC reads.
+	var sweepToken0 common.Address
+	var sweepToken1 common.Address
+	var sweepPreBalances map[common.Address]*big.Int
 	if sweepWallet {
-		if sweepHashes, sweepErr := s.swapWalletTokensToUSDT(privateKey, walletAddr, usdtAddr, task); sweepErr != nil {
-			log.Printf("[Liquidity] Warning: sweep wallet tokens failed: %v", sweepErr)
-		} else if len(sweepHashes) > 0 {
-			txHashes = append(txHashes, sweepHashes...)
+		t0, t1, tokErr := s.resolveTaskTokenAddresses(task)
+		if tokErr != nil {
+			log.Printf("[Liquidity] Warning: resolveTaskTokenAddresses (pre-exit) failed, skip expected-balance check: %v", tokErr)
+		} else {
+			sweepToken0, sweepToken1 = t0, t1
+			sweepPreBalances = make(map[common.Address]*big.Int)
+			seen := make(map[common.Address]struct{})
+			for _, tok := range []common.Address{t0, t1} {
+				if tok == (common.Address{}) || tok == usdtAddr {
+					continue
+				}
+				if _, ok := seen[tok]; ok {
+					continue
+				}
+				seen[tok] = struct{}{}
+				bal, err := blockchain.GetTokenBalance(tok, walletAddr)
+				if err != nil {
+					log.Printf("[Liquidity] Warning: read pre-exit token balance failed (%s): %v", tok.Hex(), err)
+					bal = big.NewInt(0)
+				}
+				if bal == nil {
+					bal = big.NewInt(0)
+				}
+				sweepPreBalances[tok] = cloneBig(bal)
+			}
 		}
 	}
 
+	var txHashes []string
+	// When `sweepWallet` is enabled, we prefer sweeping the full wallet balance (清仓)
+	// for the pool tokens, instead of only swapping the LP exit deltas.
+	swapDeltas := !sweepWallet
+	var exitErr error
+	switch strings.ToLower(strings.TrimSpace(task.PoolVersion)) {
+	case "v4":
+		txHashes, exitErr = s.exitV4ToUSDT(privateKey, walletAddr, usdtAddr, task, swapDeltas, opts)
+	default:
+		txHashes, exitErr = s.exitV3ToUSDT(privateKey, walletAddr, usdtAddr, task, swapDeltas, opts)
+	}
+
+	var sweepErr error
+	if sweepWallet {
+		var expectedMinBalances map[common.Address]*big.Int
+		if exitErr == nil && len(sweepPreBalances) > 0 {
+			if exitHash, ok := firstTxHash(txHashes); ok {
+				receipt, rerr := s.getReceiptWithRetry(exitHash)
+				if rerr != nil {
+					log.Printf("[Liquidity] Warning: fetch exit receipt failed, skip expected-balance check: %v", rerr)
+				} else if receipt != nil {
+					expectedMinBalances = make(map[common.Address]*big.Int)
+					for tok, before := range sweepPreBalances {
+						delta := receiptTokenTransferDelta(receipt, tok, walletAddr)
+						if delta.Sign() <= 0 {
+							continue
+						}
+						want := new(big.Int).Add(cloneBig(before), delta)
+						if cur, ok := expectedMinBalances[tok]; !ok || want.Cmp(cur) > 0 {
+							expectedMinBalances[tok] = want
+						}
+					}
+
+					// V3 fallback: use ZapOutV3 event deltas when Transfer logs are not available.
+					if strings.ToLower(strings.TrimSpace(task.PoolVersion)) != "v4" {
+						if common.IsHexAddress(config.AppConfig.ZapV3Address) {
+							tokenId, _ := parseBigIntFlexible(task.V3TokenID)
+							if tokenId != nil && tokenId.Sign() > 0 {
+								zapAddr := common.HexToAddress(config.AppConfig.ZapV3Address)
+								if a0, a1, ok := parseZapOutV3Result(receipt, zapAddr, walletAddr, tokenId); ok {
+									if sweepToken0 != (common.Address{}) && sweepToken0 != usdtAddr {
+										if _, exists := expectedMinBalances[sweepToken0]; !exists && a0.Sign() > 0 {
+											before := sweepPreBalances[sweepToken0]
+											expectedMinBalances[sweepToken0] = new(big.Int).Add(cloneBig(before), cloneBig(a0))
+										}
+									}
+									if sweepToken1 != (common.Address{}) && sweepToken1 != usdtAddr {
+										if _, exists := expectedMinBalances[sweepToken1]; !exists && a1.Sign() > 0 {
+											before := sweepPreBalances[sweepToken1]
+											expectedMinBalances[sweepToken1] = new(big.Int).Add(cloneBig(before), cloneBig(a1))
+										}
+									}
+								}
+							}
+						}
+					}
+
+					if len(expectedMinBalances) == 0 {
+						expectedMinBalances = nil
+					}
+				}
+			}
+		}
+
+		sweepHashes, err := s.swapWalletTokensToUSDT(privateKey, walletAddr, usdtAddr, task, expectedMinBalances)
+		if len(sweepHashes) > 0 {
+			txHashes = append(txHashes, sweepHashes...)
+		}
+		sweepErr = err
+		if err != nil && exitErr == nil {
+			sweepErr = &SwapToUSDTError{Err: err}
+		}
+	}
+
+	// 无论是否有错误，都计算实际收到的 USDT 和消耗的 Gas
+	// 这样即使部分操作失败，也能正确记录已收到的金额
 	usdtAfter, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
 	if usdtAfter == nil {
 		usdtAfter = big.NewInt(0)
@@ -136,16 +376,104 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 
 	// 获取 BNB 价格用于计算 Gas 的 USDT 价值
 	bnbPriceUSDT := NewPnLService().GetBNBPriceUSDT()
-	_ = NewTradeRecordService().CloseLatestOpenRecord(task, mainHash, actualReceived, gasSpent, bnbPriceUSDT)
-	if mainHash != "" {
-		if err := database.DB.Model(&models.Transaction{}).Where("tx_hash = ? AND task_id = ?", mainHash, task.ID).Updates(map[string]interface{}{
-			"amount_out": actualReceived.String(),
-		}).Error; err != nil {
-			log.Printf("[Liquidity] Warning: update exit transaction amount_out failed: %v", err)
+
+	// 即使有错误，只要有实际收到的金额或有交易哈希，就更新交易记录
+	// 这样可以避免因部分失败导致撤出金额记录为 0 的问题
+	if actualReceived.Sign() > 0 || mainHash != "" {
+		_ = NewTradeRecordService().CloseLatestOpenRecord(task, mainHash, actualReceived, gasSpent, bnbPriceUSDT)
+
+		// 更新或创建 Transaction 记录
+		if mainHash != "" {
+			// 先尝试更新（swapDeltas=true 时 exitV3ToUSDT 已创建记录）
+			result := database.DB.Model(&models.Transaction{}).Where("tx_hash = ? AND task_id = ?", mainHash, task.ID).Updates(map[string]interface{}{
+				"amount_out": actualReceived.String(),
+			})
+			// 如果没有找到记录则创建新记录（sweepWallet 模式）
+			if result.RowsAffected == 0 {
+				usdtAddr := common.HexToAddress(config.AppConfig.USDTAddress)
+				txRecord := models.Transaction{
+					UserID:          task.UserID,
+					TaskID:          task.ID,
+					TxHash:          mainHash,
+					Type:            models.TxTypeRemoveLiquidity,
+					Status:          models.TxStatusConfirmed,
+					FromAddress:     walletAddr.Hex(),
+					TokenOutAddress: usdtAddr.Hex(),
+					AmountIn:        "0",
+					AmountOut:       actualReceived.String(),
+					CreatedAt:       time.Now(),
+				}
+				if err := database.DB.Create(&txRecord).Error; err != nil {
+					log.Printf("[Liquidity] Warning: create exit transaction record failed: %v", err)
+				}
+			} else if result.Error != nil {
+				log.Printf("[Liquidity] Warning: update exit transaction amount_out failed: %v", result.Error)
+			}
 		}
 	}
 
+	// 如果有错误，在更新记录后再返回错误
+	if exitErr != nil || sweepErr != nil {
+		var errs []error
+		if exitErr != nil {
+			errs = append(errs, exitErr)
+		}
+		if sweepErr != nil {
+			errs = append(errs, sweepErr)
+		}
+		return txHashes, errors.Join(errs...)
+	}
+
 	return txHashes, nil
+}
+
+func parseZapOutV3Result(receipt *types.Receipt, zapAddr common.Address, user common.Address, tokenId *big.Int) (*big.Int, *big.Int, bool) {
+	if receipt == nil {
+		return nil, nil, false
+	}
+	parsed, err := abi.JSON(strings.NewReader(blockchain.ZapSimpleABI))
+	if err != nil {
+		return nil, nil, false
+	}
+	ev, ok := parsed.Events["ZapOutV3"]
+	if !ok {
+		return nil, nil, false
+	}
+
+	for _, lg := range receipt.Logs {
+		if lg == nil || lg.Address != zapAddr || len(lg.Topics) == 0 || lg.Topics[0] != ev.ID {
+			continue
+		}
+		if len(lg.Topics) < 3 {
+			continue
+		}
+		if user != (common.Address{}) {
+			// topic[1] is indexed user (address) padded to 32 bytes.
+			if common.BytesToAddress(lg.Topics[1].Bytes()) != user {
+				continue
+			}
+		}
+		if tokenId != nil && tokenId.Sign() > 0 {
+			if new(big.Int).SetBytes(lg.Topics[2].Bytes()).Cmp(tokenId) != 0 {
+				continue
+			}
+		}
+		out, err := parsed.Unpack("ZapOutV3", lg.Data)
+		if err != nil || len(out) < 2 {
+			continue
+		}
+		amount0, _ := out[0].(*big.Int)
+		amount1, _ := out[1].(*big.Int)
+		if amount0 == nil {
+			amount0 = big.NewInt(0)
+		}
+		if amount1 == nil {
+			amount1 = big.NewInt(0)
+		}
+		return amount0, amount1, true
+	}
+
+	return nil, nil, false
 }
 
 func (s *LiquidityService) swapWalletTokensToUSDT(
@@ -153,28 +481,15 @@ func (s *LiquidityService) swapWalletTokensToUSDT(
 	walletAddr common.Address,
 	usdtAddr common.Address,
 	task *models.StrategyTask,
+	expectedMinBalances map[common.Address]*big.Int,
 ) ([]string, error) {
 	if task == nil {
 		return nil, fmt.Errorf("task is nil")
 	}
 
-	token0 := common.Address{}
-	token1 := common.Address{}
-	if common.IsHexAddress(task.Token0Address) {
-		token0 = common.HexToAddress(task.Token0Address)
-	}
-	if common.IsHexAddress(task.Token1Address) {
-		token1 = common.HexToAddress(task.Token1Address)
-	}
-	if (token0 == common.Address{} || token1 == common.Address{}) && common.IsHexAddress(task.PoolId) {
-		if c0, c1, err := blockchain.GetV3PoolTokens(common.HexToAddress(task.PoolId)); err == nil {
-			if token0 == (common.Address{}) {
-				token0 = c0
-			}
-			if token1 == (common.Address{}) {
-				token1 = c1
-			}
-		}
+	token0, token1, err := s.resolveTaskTokenAddresses(task)
+	if err != nil {
+		return nil, fmt.Errorf("解析退出代币地址失败: %w", err)
 	}
 
 	tokens := []struct {
@@ -185,8 +500,13 @@ func (s *LiquidityService) swapWalletTokensToUSDT(
 		{addr: token1, symbol: strings.TrimSpace(task.Token1Symbol)},
 	}
 
+	type sweepToken struct {
+		addr   common.Address
+		symbol string
+	}
+
 	seen := make(map[common.Address]struct{})
-	var txHashes []string
+	var targets []sweepToken
 	for _, tok := range tokens {
 		if tok.addr == (common.Address{}) || tok.addr == usdtAddr {
 			continue
@@ -195,30 +515,83 @@ func (s *LiquidityService) swapWalletTokensToUSDT(
 			continue
 		}
 		seen[tok.addr] = struct{}{}
+		targets = append(targets, sweepToken{addr: tok.addr, symbol: tok.symbol})
+	}
 
-		bal, err := blockchain.GetTokenBalance(tok.addr, walletAddr)
-		if err != nil {
-			log.Printf("[Liquidity] Warning: failed to get token balance for sweep: %v", err)
-			continue
+	var txHashes []string
+	var errs []error
+	for _, tok := range targets {
+		label := tok.symbol
+		if label == "" {
+			label = tok.addr.Hex()
 		}
+
+		minExpected := (*big.Int)(nil)
+		if expectedMinBalances != nil {
+			if v, ok := expectedMinBalances[tok.addr]; ok && v != nil && v.Sign() > 0 {
+				minExpected = v
+			}
+		}
+
+		var bal *big.Int
+		if minExpected != nil {
+			var werr error
+			bal, werr = s.waitTokenBalanceAtLeast(tok.addr, walletAddr, minExpected, label)
+			if werr != nil {
+				errs = append(errs, werr)
+				continue
+			}
+		} else {
+			var rerr error
+			bal, rerr = blockchain.GetTokenBalance(tok.addr, walletAddr)
+			if rerr != nil {
+				errs = append(errs, fmt.Errorf("读取 %s 余额失败 (%s): %w", label, tok.addr.Hex(), rerr))
+				continue
+			}
+		}
+
 		if bal == nil || bal.Sign() <= 0 {
 			continue
 		}
 
 		swapTxHash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, tok.addr, usdtAddr, bal, task.SlippageTolerance)
 		if err != nil {
-			log.Printf("[Liquidity] Warning: sweep swap failed for %s: %v", tok.addr.Hex(), err)
+			errs = append(errs, fmt.Errorf("清仓兑换 %s→USDT 失败 (%s) amount=%s: %w", label, tok.addr.Hex(), bal.String(), err))
 			continue
 		}
-		if swapTxHash != "" {
-			symbol := tok.symbol
-			if symbol == "" {
-				symbol = tok.addr.Hex()
-			}
-			txHashes = append(txHashes, fmt.Sprintf("清仓 %s→USDT|%s", symbol, swapTxHash))
+		if swapTxHash == "" {
+			errs = append(errs, fmt.Errorf("清仓兑换 %s→USDT 返回空交易哈希 (%s) amount=%s", label, tok.addr.Hex(), bal.String()))
+			continue
+		}
+
+		symbol := tok.symbol
+		if symbol == "" {
+			symbol = tok.addr.Hex()
+		}
+		txHashes = append(txHashes, fmt.Sprintf("清仓 %s→USDT|%s", symbol, swapTxHash))
+	}
+
+	// 校验：swap 后检查是否仍有余额（仅打印警告，不返回错误以避免重试导致重复兑换）
+	for _, tok := range targets {
+		bal, err := blockchain.GetTokenBalance(tok.addr, walletAddr)
+		label := tok.symbol
+		if label == "" {
+			label = tok.addr.Hex()
+		}
+		if err != nil {
+			log.Printf("[Liquidity] Warning: 校验清仓后 %s 余额失败 (%s): %v", label, tok.addr.Hex(), err)
+			continue
+		}
+		if bal != nil && bal.Sign() > 0 {
+			// 仅打印警告日志，不返回错误，避免触发重试机制导致同一代币被多次兑换
+			log.Printf("[Liquidity] Warning: 清仓兑换后仍有 %s 余额未兑换 (%s): %s（可能是 swap 滑点或小额残余）", label, tok.addr.Hex(), bal.String())
 		}
 	}
 
+	// 只返回实际的 swap 错误，不因校验残余而返回错误
+	if len(errs) > 0 {
+		return txHashes, errors.Join(errs...)
+	}
 	return txHashes, nil
 }
 
@@ -338,6 +711,7 @@ func unpackRevertReasonFromError(err error) string {
 
 func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr common.Address, usdtAddr common.Address, task *models.StrategyTask, swapDeltas bool, opts TxOptions) ([]string, error) {
 	var txHashes []string
+	var swapErr error
 
 	// Capture initial USDT balance for calculating output
 	usdtBefore, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
@@ -379,6 +753,23 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	}
 	token0 := posInfo.Token0
 	token1 := posInfo.Token1
+	liq := big.NewInt(0)
+	if posInfo.Liquidity != nil {
+		liq = posInfo.Liquidity
+	}
+	owed0 := big.NewInt(0)
+	owed1 := big.NewInt(0)
+	if posInfo.TokensOwed0 != nil {
+		owed0 = posInfo.TokensOwed0
+	}
+	if posInfo.TokensOwed1 != nil {
+		owed1 = posInfo.TokensOwed1
+	}
+	// Idempotency: if the position is already emptied (no liquidity + no fees owed), skip ZapOut.
+	if liq.Sign() <= 0 && owed0.Sign() <= 0 && owed1.Sign() <= 0 {
+		log.Printf("[Liquidity] V3 exit: position already empty, skipping ZapOutV3 tokenId=%s", tokenId.String())
+		return txHashes, nil
+	}
 
 	// Compute V3 exit min amounts using current pool price (slippage protection for DECREASE_LIQUIDITY).
 	poolAddrStr := strings.TrimSpace(task.PoolId)
@@ -467,41 +858,85 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	log.Printf("[Liquidity] V3 exit: tx sent %s", tx.Hash().Hex())
 	txHashes = append(txHashes, "撤出流动性|"+tx.Hash().Hex())
 
-	if _, err := s.waitMined(tx); err != nil {
+	receipt, err := s.waitMined(tx)
+	if err != nil {
 		return txHashes, fmt.Errorf("ZapOutV3 tx failed: %w", err)
 	}
 
 	// 5. 计算获得的代币并 Swap 回 USDT
-	b0After, _ := blockchain.GetTokenBalance(token0, walletAddr)
-	b1After, _ := blockchain.GetTokenBalance(token1, walletAddr)
-
-	d0 := new(big.Int).Sub(b0After, b0Before)
-	d1 := new(big.Int).Sub(b1After, b1Before)
+	// Prefer the ZapOutV3 event amounts (exact deltas), fall back to wallet balance deltas.
+	d0 := big.NewInt(0)
+	d1 := big.NewInt(0)
+	if a0, a1, ok := parseZapOutV3Result(receipt, zapAddr, walletAddr, tokenId); ok {
+		d0 = cloneBig(a0)
+		d1 = cloneBig(a1)
+	} else {
+		b0After, _ := blockchain.GetTokenBalance(token0, walletAddr)
+		b1After, _ := blockchain.GetTokenBalance(token1, walletAddr)
+		if b0After == nil {
+			b0After = big.NewInt(0)
+		}
+		if b1After == nil {
+			b1After = big.NewInt(0)
+		}
+		d0 = new(big.Int).Sub(b0After, b0Before)
+		d1 = new(big.Int).Sub(b1After, b1Before)
+	}
+	if d0.Sign() < 0 {
+		d0 = big.NewInt(0)
+	}
+	if d1.Sign() < 0 {
+		d1 = big.NewInt(0)
+	}
 
 	if swapDeltas {
-		if d0.Sign() > 0 {
+		var swapErrs []error
+		if d0.Sign() > 0 && token0 != usdtAddr {
 			log.Printf("[Liquidity] V3 exit: Got %s token0, swapping to USDT...", d0.String())
 			if swapTxHash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, token0, usdtAddr, d0, task.SlippageTolerance); err != nil {
-				log.Printf("[Liquidity] Warning: swap token0->USDT failed: %v", err)
+				symbol := "Token0"
+				if task.Token0Symbol != "" {
+					symbol = task.Token0Symbol
+				}
+				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT failed: %w", symbol, err))
 			} else if swapTxHash != "" {
 				symbol := "Token0"
 				if task.Token0Symbol != "" {
 					symbol = task.Token0Symbol
 				}
 				txHashes = append(txHashes, fmt.Sprintf("兑换 %s→USDT|%s", symbol, swapTxHash))
+			} else {
+				symbol := "Token0"
+				if task.Token0Symbol != "" {
+					symbol = task.Token0Symbol
+				}
+				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT returned empty tx hash", symbol))
 			}
 		}
-		if d1.Sign() > 0 {
+		if d1.Sign() > 0 && token1 != usdtAddr {
 			log.Printf("[Liquidity] V3 exit: Got %s token1, swapping to USDT...", d1.String())
 			if swapTxHash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, token1, usdtAddr, d1, task.SlippageTolerance); err != nil {
-				log.Printf("[Liquidity] Warning: swap token1->USDT failed: %v", err)
+				symbol := "Token1"
+				if task.Token1Symbol != "" {
+					symbol = task.Token1Symbol
+				}
+				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT failed: %w", symbol, err))
 			} else if swapTxHash != "" {
 				symbol := "Token1"
 				if task.Token1Symbol != "" {
 					symbol = task.Token1Symbol
 				}
 				txHashes = append(txHashes, fmt.Sprintf("兑换 %s→USDT|%s", symbol, swapTxHash))
+			} else {
+				symbol := "Token1"
+				if task.Token1Symbol != "" {
+					symbol = task.Token1Symbol
+				}
+				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT returned empty tx hash", symbol))
 			}
+		}
+		if len(swapErrs) > 0 {
+			swapErr = errors.Join(swapErrs...)
 		}
 	}
 
@@ -528,27 +963,32 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 		}
 	}
 
-	txRecord := models.Transaction{
-		UserID:          task.UserID,
-		TaskID:          task.ID,
-		TxHash:          mainHash, // Use ZapOut hash
-		Type:            models.TxTypeRemoveLiquidity,
-		Status:          models.TxStatusConfirmed,
-		FromAddress:     walletAddr.Hex(),
-		ToAddress:       zapAddr.Hex(),
-		TokenInAddress:  pmAddr.Hex(), // Representing the pool/position
-		TokenOutAddress: usdtAddr.Hex(),
-		AmountIn:        "0",
-		AmountOut:       totalUSDTReceived.String(),
-		CreatedAt:       time.Now(),
-	}
-	// Try creating. If hash conflict (unlikely if unique), log error
-	if mainHash != "" {
+	// 只有当 swapDeltas=true 时才在这里创建 Transaction 记录
+	// 当 swapDeltas=false (sweepWallet 模式) 时，由顶层 ExitTaskToUSDTWithOptions 统一创建
+	// 这样可以避免创建 AmountOut=0 的记录
+	if swapDeltas && mainHash != "" {
+		txRecord := models.Transaction{
+			UserID:          task.UserID,
+			TaskID:          task.ID,
+			TxHash:          mainHash, // Use ZapOut hash
+			Type:            models.TxTypeRemoveLiquidity,
+			Status:          models.TxStatusConfirmed,
+			FromAddress:     walletAddr.Hex(),
+			ToAddress:       zapAddr.Hex(),
+			TokenInAddress:  pmAddr.Hex(), // Representing the pool/position
+			TokenOutAddress: usdtAddr.Hex(),
+			AmountIn:        "0",
+			AmountOut:       totalUSDTReceived.String(),
+			CreatedAt:       time.Now(),
+		}
 		if err := database.DB.Create(&txRecord).Error; err != nil {
 			log.Printf("[Liquidity] Warning: failed to record exit transaction: %v", err)
 		}
 	}
 
+	if swapErr != nil {
+		return txHashes, &SwapToUSDTError{Err: swapErr}
+	}
 	return txHashes, nil
 }
 
@@ -600,6 +1040,7 @@ func (s *LiquidityService) approveNFT(privateKey *ecdsa.PrivateKey, walletAddr, 
 
 func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr common.Address, usdtAddr common.Address, task *models.StrategyTask, swapDeltas bool, opts TxOptions) ([]string, error) {
 	var txHashes []string
+	var swapErr error
 
 	if !common.IsHexAddress(config.AppConfig.UniswapV4PoolManagerAddress) {
 		return nil, fmt.Errorf("UNISWAP_V4_POOL_MANAGER_ADDRESS not set")
@@ -644,15 +1085,34 @@ func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 		return nil, fmt.Errorf("init v4 position manager failed: %w", err)
 	}
 
-	liq, err := parseBigIntFlexible(task.CurrentLiquidity)
-	if err != nil || liq == nil || liq.Sign() <= 0 {
-		if pos, pErr := v4pm.Positions(nil, tokenId); pErr == nil && pos != nil && pos.Liquidity != nil && pos.Liquidity.Sign() > 0 {
-			log.Printf("[Liquidity] V4 exit: using on-chain liquidity %s (task value invalid)", pos.Liquidity.String())
+	pos, posErr := v4pm.Positions(nil, tokenId)
+	liq := big.NewInt(0)
+	owed0 := big.NewInt(0)
+	owed1 := big.NewInt(0)
+	if posErr == nil && pos != nil {
+		if pos.Liquidity != nil {
 			liq = pos.Liquidity
 		}
+		if pos.TokensOwed0 != nil {
+			owed0 = pos.TokensOwed0
+		}
+		if pos.TokensOwed1 != nil {
+			owed1 = pos.TokensOwed1
+		}
 	}
-	if liq == nil || liq.Sign() <= 0 {
-		return nil, fmt.Errorf("missing/invalid current_liquidity for V4 remove (need >0)")
+
+	// If on-chain says the position is already empty, skip remove to make exit retry-safe.
+	if posErr == nil && liq.Sign() <= 0 && owed0.Sign() <= 0 && owed1.Sign() <= 0 {
+		log.Printf("[Liquidity] V4 exit: position already empty, skipping remove tokenId=%s", tokenId.String())
+		return txHashes, nil
+	}
+
+	// If we couldn't query on-chain position, fall back to task.current_liquidity.
+	if posErr != nil {
+		liq, err = parseBigIntFlexible(task.CurrentLiquidity)
+		if err != nil || liq == nil || liq.Sign() <= 0 {
+			return nil, fmt.Errorf("missing/invalid current_liquidity for V4 remove and failed to query on-chain position: %w", posErr)
+		}
 	}
 
 	// Build `unlockData` = abi.encode(actions, params) to call PositionManager.modifyLiquidities.
@@ -715,7 +1175,7 @@ func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	txHashes = append(txHashes, fmt.Sprintf("V4撤仓|%s", removeTxHash))
 
 	if _, err := s.waitMined(tx); err != nil {
-		return nil, fmt.Errorf("v4 remove tx failed: %w", err)
+		return txHashes, fmt.Errorf("v4 remove tx failed: %w", err)
 	}
 
 	b0After, _ := blockchain.GetTokenBalance(c0, walletAddr)
@@ -750,19 +1210,27 @@ func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	}
 
 	if swapDeltas {
-		if d0.Sign() > 0 {
+		var swapErrs []error
+		if d0.Sign() > 0 && c0 != usdtAddr {
 			if hash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, c0, usdtAddr, d0, task.SlippageTolerance); err != nil {
-				log.Printf("[Liquidity] Warning: swap currency0->USDT failed: %v", err)
+				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT failed: %w", sym0, err))
 			} else if hash != "" {
 				txHashes = append(txHashes, fmt.Sprintf("交换 %s→USDT|%s", sym0, hash))
+			} else {
+				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT returned empty tx hash", sym0))
 			}
 		}
-		if d1.Sign() > 0 {
+		if d1.Sign() > 0 && c1 != usdtAddr {
 			if hash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, c1, usdtAddr, d1, task.SlippageTolerance); err != nil {
-				log.Printf("[Liquidity] Warning: swap currency1->USDT failed: %v", err)
+				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT failed: %w", sym1, err))
 			} else if hash != "" {
 				txHashes = append(txHashes, fmt.Sprintf("交换 %s→USDT|%s", sym1, hash))
+			} else {
+				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT returned empty tx hash", sym1))
 			}
+		}
+		if len(swapErrs) > 0 {
+			swapErr = errors.Join(swapErrs...)
 		}
 	}
 
@@ -796,6 +1264,9 @@ func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 		log.Printf("[Liquidity] Warning: failed to record V4 exit transaction: %v", err)
 	}
 
+	if swapErr != nil {
+		return txHashes, &SwapToUSDTError{Err: swapErr}
+	}
 	return txHashes, nil
 }
 
@@ -824,11 +1295,21 @@ func (s *LiquidityService) swapDeltaToUSDT(
 	if err != nil {
 		log.Printf("[Liquidity] Warning: failed to get token balance: %v", err)
 	} else {
+		if actualBalance == nil {
+			actualBalance = big.NewInt(0)
+		}
 		log.Printf("[Liquidity] Token %s balance: %s, attempting to swap: %s", tokenIn.Hex(), actualBalance.String(), amountIn.String())
-		// 如果实际余额小于要 swap 的数量，使用实际余额
+		// 如果实际余额小于要 swap 的数量，先等待 RPC 同步再决定是否截断。
 		if actualBalance.Cmp(amountIn) < 0 {
-			log.Printf("[Liquidity] Warning: balance insufficient, using actual balance %s instead of %s", actualBalance.String(), amountIn.String())
-			amountIn = actualBalance
+			synced, werr := s.waitTokenBalanceAtLeast(tokenIn, walletAddr, amountIn, tokenIn.Hex())
+			if werr == nil && synced != nil && synced.Cmp(amountIn) >= 0 {
+				actualBalance = synced
+			} else if synced != nil && synced.Sign() > 0 && synced.Cmp(amountIn) < 0 {
+				log.Printf("[Liquidity] Warning: balance insufficient after sync wait, using synced balance %s instead of %s", synced.String(), amountIn.String())
+				amountIn = synced
+			} else if werr != nil {
+				log.Printf("[Liquidity] Warning: balance sync wait failed for %s: %v (proceeding with amount=%s)", tokenIn.Hex(), werr, amountIn.String())
+			}
 		}
 	}
 
@@ -857,11 +1338,21 @@ func (s *LiquidityService) swapDeltaToUSDTWithHash(
 	if err != nil {
 		log.Printf("[Liquidity] Warning: failed to get token balance: %v", err)
 	} else {
+		if actualBalance == nil {
+			actualBalance = big.NewInt(0)
+		}
 		log.Printf("[Liquidity] Token %s balance: %s, attempting to swap: %s", tokenIn.Hex(), actualBalance.String(), amountIn.String())
-		// 如果实际余额小于要 swap 的数量，使用实际余额
+		// 如果实际余额小于要 swap 的数量，先等待 RPC 同步再决定是否截断。
 		if actualBalance.Cmp(amountIn) < 0 {
-			log.Printf("[Liquidity] Warning: balance insufficient, using actual balance %s instead of %s", actualBalance.String(), amountIn.String())
-			amountIn = actualBalance
+			synced, werr := s.waitTokenBalanceAtLeast(tokenIn, walletAddr, amountIn, tokenIn.Hex())
+			if werr == nil && synced != nil && synced.Cmp(amountIn) >= 0 {
+				actualBalance = synced
+			} else if synced != nil && synced.Sign() > 0 && synced.Cmp(amountIn) < 0 {
+				log.Printf("[Liquidity] Warning: balance insufficient after sync wait, using synced balance %s instead of %s", synced.String(), amountIn.String())
+				amountIn = synced
+			} else if werr != nil {
+				log.Printf("[Liquidity] Warning: balance sync wait failed for %s: %v (proceeding with amount=%s)", tokenIn.Hex(), werr, amountIn.String())
+			}
 		}
 	}
 

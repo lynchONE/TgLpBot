@@ -41,6 +41,13 @@ func (s *TradeRecordService) CreateOpenRecord(
 
 	now := time.Now()
 
+	openSpent := openUSDTSpentWei
+	if (openSpent == nil || openSpent.Sign() <= 0) && task.AmountUSDT > 0 {
+		if fallback, err := floatUSDTToWei(task.AmountUSDT); err == nil && fallback.Sign() > 0 {
+			openSpent = fallback
+		}
+	}
+
 	// If there is any dangling open record for this task, mark it as orphaned.
 	_ = database.DB.Model(&models.TradeRecord{}).
 		Where("user_id = ? AND task_id = ? AND status = ?", task.UserID, task.ID, models.TradeStatusOpen).
@@ -59,7 +66,7 @@ func (s *TradeRecordService) CreateOpenRecord(
 		Token1Symbol:      strings.TrimSpace(task.Token1Symbol),
 		OpenedAt:          now,
 		OpenTxHash:        strings.TrimSpace(openTxHash),
-		OpenUSDTSpent:     safeBigIntString(openUSDTSpentWei),
+		OpenUSDTSpent:     safeBigIntString(openSpent),
 		OpenGasSpentWei:   safeBigIntString(openGasSpentWei),
 		OpenDust0:         safeBigIntString(dust0Wei),
 		OpenDust1:         safeBigIntString(dust1Wei),
@@ -89,14 +96,19 @@ func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, cl
 	// If no open record exists (e.g. legacy tasks created before this feature),
 	// create a closed record with unknown open fields to avoid losing the exit summary.
 	if err != nil {
-		openZero := big.NewInt(0)
+		openSpent := big.NewInt(0)
+		if task.AmountUSDT > 0 {
+			if fallback, ferr := floatUSDTToWei(task.AmountUSDT); ferr == nil && fallback.Sign() > 0 {
+				openSpent = fallback
+			}
+		}
 		// 计算 Gas 的 USDT 价值
 		totalGasWei := nonNilBigInt(closeGasSpentWei)
 		totalGasUSDT := calcGasUSDT(totalGasWei, bnbPriceUSDT)
 
-		profit := new(big.Int).Sub(nonNilBigInt(closeUSDTReceivedWei), openZero)
+		profit := new(big.Int).Sub(nonNilBigInt(closeUSDTReceivedWei), openSpent)
 		profit.Sub(profit, totalGasUSDT) // 扣除 Gas 费用
-		profitPct := calcProfitPct(profit, openZero)
+		profitPct := calcProfitPct(profit, openSpent)
 
 		closed := &models.TradeRecord{
 			UserID:            task.UserID,
@@ -108,7 +120,7 @@ func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, cl
 			Token1Symbol:      strings.TrimSpace(task.Token1Symbol),
 			OpenedAt:          now,
 			OpenTxHash:        "",
-			OpenUSDTSpent:     "0",
+			OpenUSDTSpent:     safeBigIntString(openSpent),
 			OpenGasSpentWei:   "0",
 			ClosedAt:          &now,
 			CloseTxHash:       strings.TrimSpace(closeTxHash),
@@ -123,7 +135,20 @@ func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, cl
 	}
 
 	openSpent, _ := parseBigInt(rec.OpenUSDTSpent)
+	if openSpent == nil {
+		openSpent = big.NewInt(0)
+	}
 	openGasWei, _ := parseBigInt(rec.OpenGasSpentWei)
+	if openGasWei == nil {
+		openGasWei = big.NewInt(0)
+	}
+	fallbackOpen := false
+	if openSpent.Sign() <= 0 && task.AmountUSDT > 0 {
+		if fallback, err := floatUSDTToWei(task.AmountUSDT); err == nil && fallback.Sign() > 0 {
+			openSpent = fallback
+			fallbackOpen = true
+		}
+	}
 
 	// 计算开仓+平仓 Gas 的 USDT 总价值
 	totalGasWei := new(big.Int).Add(openGasWei, nonNilBigInt(closeGasSpentWei))
@@ -143,6 +168,9 @@ func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, cl
 		"profit_usdt":         profit.String(),
 		"profit_pct":          profitPct,
 		"status":              models.TradeStatusClosed,
+	}
+	if fallbackOpen {
+		updates["open_usdt_spent"] = openSpent.String()
 	}
 
 	return database.DB.Model(&models.TradeRecord{}).Where("id = ?", rec.ID).Updates(updates).Error

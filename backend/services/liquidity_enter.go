@@ -31,6 +31,11 @@ type EnterResult struct {
 	V4TokenID string
 
 	CurrentLiquidity string
+
+	// Dust0/Dust1 are the leftover amounts returned to the wallet after minting (token0/token1 units).
+	// Best-effort: filled from Zap events when available.
+	Dust0 *big.Int
+	Dust1 *big.Int
 }
 
 type EntrySwapRequiredError struct {
@@ -355,6 +360,9 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 		return nil, err
 	}
 
+	// 等待 RPC 节点状态同步，避免读取到旧的余额值
+	time.Sleep(500 * time.Millisecond)
+
 	usdtAfter, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
 	if usdtAfter == nil {
 		usdtAfter = big.NewInt(0)
@@ -381,16 +389,16 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	if actualSpent.Sign() < 0 {
 		actualSpent = big.NewInt(0)
 	}
-	dust0 := big.NewInt(0)
-	dust1 := big.NewInt(0)
+	walletDust0 := big.NewInt(0)
+	walletDust1 := big.NewInt(0)
 	if token0Addr != (common.Address{}) {
 		if delta := new(big.Int).Sub(t0After, t0Before); delta.Sign() > 0 {
-			dust0 = delta
+			walletDust0 = delta
 		}
 	}
 	if token1Addr != (common.Address{}) {
 		if delta := new(big.Int).Sub(t1After, t1Before); delta.Sign() > 0 {
-			dust1 = delta
+			walletDust1 = delta
 		}
 	}
 	// 注意：不需要对 USDT 做特殊处理，因为上面的余额变化计算已经正确处理了所有 token 的 dust。
@@ -399,6 +407,18 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	gasSpent := new(big.Int).Sub(bnbBefore, bnbAfter)
 	if gasSpent.Sign() < 0 {
 		gasSpent = big.NewInt(0)
+	}
+	log.Printf("[Liquidity] Enter gas tracking: bnbBefore=%s bnbAfter=%s gasSpent=%s", bnbBefore.String(), bnbAfter.String(), gasSpent.String())
+
+	dust0 := walletDust0
+	dust1 := walletDust1
+	if res != nil {
+		if res.Dust0 != nil && res.Dust0.Cmp(dust0) > 0 {
+			dust0 = res.Dust0
+		}
+		if res.Dust1 != nil && res.Dust1.Cmp(dust1) > 0 {
+			dust1 = res.Dust1
+		}
 	}
 
 	_ = NewTradeRecordService().CreateOpenRecord(task, res.TxHash, actualSpent, gasSpent, dust0, dust1)
@@ -585,17 +605,27 @@ func (s *LiquidityService) enterV3FromToken(
 		if err := s.approveToken(privateKey, walletAddr, token0, zapAddr, amount0In, opts); err != nil {
 			return nil, fmt.Errorf("approve token0 failed: %w", err)
 		}
-		// Double check allowance
+		// Double check allowance (with retry for RPC node sync delay)
 		t0, err := blockchain.NewERC20(token0, blockchain.Client)
 		if err != nil {
-			return nil, fmt.Errorf("init eras20 token0 failed: %w", err)
+			return nil, fmt.Errorf("init erc20 token0 failed: %w", err)
 		}
 		allow, err := t0.Allowance(nil, walletAddr, zapAddr)
 		if err != nil {
 			return nil, fmt.Errorf("check allowance token0 failed: %w", err)
 		}
+		// 如果 allowance 不足，可能是 RPC 节点状态未及时同步，等待后重试
 		if allow.Cmp(amount0In) < 0 {
-			return nil, fmt.Errorf("allowance token0 insufficient: %s < %s", allow.String(), amount0In.String())
+			log.Printf("[Liquidity] V3 enter: allowance token0 insufficient on first check (%s < %s), waiting 2s and retrying...", allow.String(), amount0In.String())
+			time.Sleep(2 * time.Second)
+			allow, err = t0.Allowance(nil, walletAddr, zapAddr)
+			if err != nil {
+				return nil, fmt.Errorf("check allowance token0 (retry) failed: %w", err)
+			}
+			if allow.Cmp(amount0In) < 0 {
+				return nil, fmt.Errorf("allowance token0 insufficient: %s < %s", allow.String(), amount0In.String())
+			}
+			log.Printf("[Liquidity] V3 enter: allowance token0 OK after retry: %s", allow.String())
 		}
 		// Double check balance
 		bal0, err := blockchain.GetTokenBalance(token0, walletAddr)
@@ -611,7 +641,7 @@ func (s *LiquidityService) enterV3FromToken(
 		if err := s.approveToken(privateKey, walletAddr, token1, zapAddr, amount1In, opts); err != nil {
 			return nil, fmt.Errorf("approve token1 failed: %w", err)
 		}
-		// Double check allowance and balance
+		// Double check allowance and balance (with retry for RPC node sync delay)
 		t1, err := blockchain.NewERC20(token1, blockchain.Client)
 		if err != nil {
 			return nil, fmt.Errorf("init erc20 token1 failed: %w", err)
@@ -620,8 +650,18 @@ func (s *LiquidityService) enterV3FromToken(
 		if err != nil {
 			return nil, fmt.Errorf("check allowance token1 failed: %w", err)
 		}
+		// 如果 allowance 不足，可能是 RPC 节点状态未及时同步，等待后重试
 		if allow.Cmp(amount1In) < 0 {
-			return nil, fmt.Errorf("allowance token1 insufficient: %s < %s", allow.String(), amount1In.String())
+			log.Printf("[Liquidity] V3 enter: allowance token1 insufficient on first check (%s < %s), waiting 2s and retrying...", allow.String(), amount1In.String())
+			time.Sleep(2 * time.Second)
+			allow, err = t1.Allowance(nil, walletAddr, zapAddr)
+			if err != nil {
+				return nil, fmt.Errorf("check allowance token1 (retry) failed: %w", err)
+			}
+			if allow.Cmp(amount1In) < 0 {
+				return nil, fmt.Errorf("allowance token1 insufficient: %s < %s", allow.String(), amount1In.String())
+			}
+			log.Printf("[Liquidity] V3 enter: allowance token1 OK after retry: %s", allow.String())
 		}
 		bal1, err := blockchain.GetTokenBalance(token1, walletAddr)
 		if err != nil {
@@ -673,8 +713,9 @@ func (s *LiquidityService) enterV3FromToken(
 	}
 
 	// 从交易 receipt 中解析返回值
-	// 注意：zapInV3 函数返回 ZapResult struct，包含 tokenId 和 liquidity
-	tokenId, liq, err := parseZapInV3Result(receipt, zapAddr)
+	// 注意：zapInV3 函数返回 ZapResult struct，包含 tokenId/liquidity/amountUsed/dust，但 tx 回执里拿不到 return data；
+	// 我们用 ZapInV3 + SwapExecuted 事件计算实际使用量和 dust（剩余代币）。
+	tokenId, liq, used0, used1, err := parseZapInV3Result(receipt, zapAddr)
 	if err != nil {
 		return nil, fmt.Errorf("parse zap result failed: %w", err)
 	}
@@ -714,11 +755,51 @@ func (s *LiquidityService) enterV3FromToken(
 	// using the actual USDT spent (delta of wallet balance before/after).
 	// Do NOT create it here to avoid duplicates or incorrect amounts.
 
+	dust0 := big.NewInt(0)
+	dust1 := big.NewInt(0)
+	if used0 == nil {
+		used0 = big.NewInt(0)
+	}
+	if used1 == nil {
+		used1 = big.NewInt(0)
+	}
+
+	avail0 := new(big.Int).Set(amount0In)
+	avail1 := new(big.Int).Set(amount1In)
+	if tin, tout, ain, aout, ok := parseZapSwapExecutedEvent(receipt, zapAddr); ok && ain != nil && ain.Sign() > 0 && aout != nil {
+		switch {
+		case tin == token0 && tout == token1:
+			avail0.Sub(avail0, ain)
+			if avail0.Sign() < 0 {
+				avail0 = big.NewInt(0)
+			}
+			avail1.Add(avail1, aout)
+		case tin == token1 && tout == token0:
+			avail1.Sub(avail1, ain)
+			if avail1.Sign() < 0 {
+				avail1 = big.NewInt(0)
+			}
+			avail0.Add(avail0, aout)
+		default:
+			log.Printf("[Liquidity] Warning: SwapExecuted token mismatch: in=%s out=%s (pool token0=%s token1=%s)", tin.Hex(), tout.Hex(), token0.Hex(), token1.Hex())
+		}
+	}
+	dust0.Sub(avail0, used0)
+	if dust0.Sign() < 0 {
+		dust0 = big.NewInt(0)
+	}
+	dust1.Sub(avail1, used1)
+	if dust1.Sign() < 0 {
+		dust1 = big.NewInt(0)
+	}
+
 	return &EnterResult{
 		TxHash:                   tx.Hash().Hex(),
 		V3PositionManagerAddress: pmAddr.Hex(),
 		V3TokenID:                tokenId.String(),
 		CurrentLiquidity:         liq.String(),
+		Dust0:                    dust0,
+		Dust1:                    dust1,
 	}, nil
 }
 
@@ -769,65 +850,52 @@ func percentToBpsOrZero(percent float64) *big.Int {
 	return big.NewInt(10000) // 100% dust 容忍度
 }
 
-// parseZapInV3Result 从 PositionManager 的 IncreaseLiquidity 事件中解析 tokenId
-// 注意：ZapInV3 事件中的 tokenId 是 indexed uint256，会被存储为 hash，无法直接解析
-// 因此我们从 NonfungiblePositionManager 的 IncreaseLiquidity 事件中获取 tokenId
-func parseZapInV3Result(receipt *types.Receipt, zapAddr common.Address) (*big.Int, *big.Int, error) {
-	// IncreaseLiquidity 事件签名: IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)
-	// Event ID: keccak256("IncreaseLiquidity(uint256,uint128,uint256,uint256)")
-	increaseLiquidityEventID := common.HexToHash("0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f")
-
-	// 先从 ZapInV3 事件获取 liquidity
-	zapParsed, err := abi.JSON(strings.NewReader(blockchain.ZapSimpleABI))
+// parseZapInV3Result parses tokenId/liquidity/amount0Used/amount1Used from ZapSimple.ZapInV3 event.
+func parseZapInV3Result(receipt *types.Receipt, zapAddr common.Address) (*big.Int, *big.Int, *big.Int, *big.Int, error) {
+	parsed, err := abi.JSON(strings.NewReader(blockchain.ZapSimpleABI))
 	if err != nil {
-		return nil, nil, fmt.Errorf("parse ZapSimple ABI failed: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("parse ZapSimple ABI failed: %w", err)
 	}
-	zapEv, ok := zapParsed.Events["ZapInV3"]
+	ev, ok := parsed.Events["ZapInV3"]
 	if !ok {
-		return nil, nil, fmt.Errorf("ZapInV3 event not found in ABI")
+		return nil, nil, nil, nil, fmt.Errorf("ZapInV3 event not found in ABI")
 	}
 
-	var liquidity *big.Int
 	for _, lg := range receipt.Logs {
-		if lg == nil || lg.Address != zapAddr || len(lg.Topics) == 0 || lg.Topics[0] != zapEv.ID {
+		if lg == nil || lg.Address != zapAddr || len(lg.Topics) == 0 || lg.Topics[0] != ev.ID {
 			continue
 		}
-		out, err := zapParsed.Unpack("ZapInV3", lg.Data)
+		if len(lg.Topics) < 4 {
+			continue
+		}
+		tokenId := new(big.Int).SetBytes(lg.Topics[3].Bytes())
+		if tokenId.Sign() <= 0 {
+			continue
+		}
+
+		out, err := parsed.Unpack("ZapInV3", lg.Data)
 		if err != nil {
 			continue
 		}
-		if len(out) >= 3 {
-			if liq, ok := out[2].(*big.Int); ok {
-				liquidity = liq
-				break
-			}
-		}
-	}
-
-	if liquidity == nil {
-		return nil, nil, fmt.Errorf("liquidity not found in ZapInV3 event")
-	}
-
-	// 从 IncreaseLiquidity 事件获取 tokenId
-	for _, lg := range receipt.Logs {
-		if lg == nil || len(lg.Topics) == 0 || lg.Topics[0] != increaseLiquidityEventID {
+		if len(out) < 3 {
 			continue
 		}
-		if len(lg.Topics) < 2 {
-			continue
+		amount0, ok0 := out[0].(*big.Int)
+		amount1, ok1 := out[1].(*big.Int)
+		liq, okL := out[2].(*big.Int)
+		if !ok0 || amount0 == nil {
+			amount0 = big.NewInt(0)
 		}
-		// tokenId 是第一个 indexed 参数
-		tokenId := new(big.Int).SetBytes(lg.Topics[1].Bytes())
-
-		// 验证 tokenId 不为 0
-		if tokenId == nil || tokenId.Sign() == 0 {
-			continue
+		if !ok1 || amount1 == nil {
+			amount1 = big.NewInt(0)
 		}
-
-		return tokenId, liquidity, nil
+		if !okL || liq == nil {
+			liq = big.NewInt(0)
+		}
+		return tokenId, liq, amount0, amount1, nil
 	}
 
-	return nil, nil, fmt.Errorf("IncreaseLiquidity event not found in receipt logs")
+	return nil, nil, nil, nil, fmt.Errorf("ZapInV3 event not found in receipt logs")
 }
 
 // calculateOptimalSwapPure calculates optimal swap without blockchain calls
@@ -1117,16 +1185,23 @@ func (s *LiquidityService) enterV4FromToken(
 	tc := NewTickCalculator()
 	if terr := tc.ValidateTickRange(tickLower, tickUpper, tickSpacing); terr != nil {
 		// If the task was created with an incorrect tickSpacing, try to recompute from the stored percentage.
-		if task.RangePercentage > 0 {
-			newLower, newUpper := tc.CalculateTickFromPercentage(currentTick, task.RangePercentage, tickSpacing)
-			if terr2 := tc.ValidateTickRange(newLower, newUpper, tickSpacing); terr2 == nil {
-				log.Printf("[Liquidity] V4 tick range invalid for tickSpacing=%d (%v). Recomputed from RangePercentage=%.4f => [%d,%d]", tickSpacing, terr, task.RangePercentage, newLower, newUpper)
-				tickLower, tickUpper = newLower, newUpper
-			} else {
-				return nil, fmt.Errorf("invalid V4 tick range (original=%v, recompute=%v)", terr, terr2)
-			}
-		} else {
+		var newLower, newUpper int
+		var recomputeLabel string
+		switch {
+		case task.RangeLowerPercentage > 0 && task.RangeUpperPercentage > 0:
+			newLower, newUpper = tc.CalculateTickFromPercentages(currentTick, task.RangeLowerPercentage, task.RangeUpperPercentage, tickSpacing)
+			recomputeLabel = fmt.Sprintf("RangeLower=%.4f RangeUpper=%.4f", task.RangeLowerPercentage, task.RangeUpperPercentage)
+		case task.RangePercentage > 0:
+			newLower, newUpper = tc.CalculateTickFromPercentage(currentTick, task.RangePercentage, tickSpacing)
+			recomputeLabel = fmt.Sprintf("RangePercentage=%.4f", task.RangePercentage)
+		default:
 			return nil, fmt.Errorf("invalid V4 tick range: %w", terr)
+		}
+		if terr2 := tc.ValidateTickRange(newLower, newUpper, tickSpacing); terr2 == nil {
+			log.Printf("[Liquidity] V4 tick range invalid for tickSpacing=%d (%v). Recomputed from %s => [%d,%d]", tickSpacing, terr, recomputeLabel, newLower, newUpper)
+			tickLower, tickUpper = newLower, newUpper
+		} else {
+			return nil, fmt.Errorf("invalid V4 tick range (original=%v, recompute=%v)", terr, terr2)
 		}
 	}
 
@@ -1259,7 +1334,7 @@ func (s *LiquidityService) enterV4FromToken(
 	}
 
 	// 7. Parse Result (ZapInV4 Event)
-	tokenId, liq, err := parseZapInV4Event(receipt, zapAddr)
+	tokenId, liq, used0, used1, err := parseZapInV4Event(receipt, zapAddr)
 	if err != nil {
 		log.Printf("[Liquidity] Warning: parse ZapInV4 event failed: %v", err)
 		return nil, err
@@ -1288,20 +1363,60 @@ func (s *LiquidityService) enterV4FromToken(
 	// using the actual USDT spent (delta of wallet balance before/after).
 	// Do NOT create it here to avoid duplicates or incorrect amounts.
 
+	dust0 := big.NewInt(0)
+	dust1 := big.NewInt(0)
+	if used0 == nil {
+		used0 = big.NewInt(0)
+	}
+	if used1 == nil {
+		used1 = big.NewInt(0)
+	}
+
+	avail0 := new(big.Int).Set(amount0In)
+	avail1 := new(big.Int).Set(amount1In)
+	if tin, tout, ain, aout, ok := parseZapSwapExecutedEvent(receipt, zapAddr); ok && ain != nil && ain.Sign() > 0 && aout != nil {
+		switch {
+		case tin == c0 && tout == c1:
+			avail0.Sub(avail0, ain)
+			if avail0.Sign() < 0 {
+				avail0 = big.NewInt(0)
+			}
+			avail1.Add(avail1, aout)
+		case tin == c1 && tout == c0:
+			avail1.Sub(avail1, ain)
+			if avail1.Sign() < 0 {
+				avail1 = big.NewInt(0)
+			}
+			avail0.Add(avail0, aout)
+		default:
+			log.Printf("[Liquidity] Warning: SwapExecuted token mismatch (V4): in=%s out=%s (c0=%s c1=%s)", tin.Hex(), tout.Hex(), c0.Hex(), c1.Hex())
+		}
+	}
+	dust0.Sub(avail0, used0)
+	if dust0.Sign() < 0 {
+		dust0 = big.NewInt(0)
+	}
+	dust1.Sub(avail1, used1)
+	if dust1.Sign() < 0 {
+		dust1 = big.NewInt(0)
+	}
+
 	return &EnterResult{
 		TxHash:           tx.Hash().Hex(),
 		V4TokenID:        tokenId.String(),
 		CurrentLiquidity: liq.String(),
+		Dust0:            dust0,
+		Dust1:            dust1,
 	}, nil
 }
 
-// parseZapInV4Event parses tokenId and liquidity from logs
-func parseZapInV4Event(receipt *types.Receipt, zapAddr common.Address) (*big.Int, *big.Int, error) {
+// parseZapInV4Event parses tokenId/liquidity/amount0Used/amount1Used from logs.
+func parseZapInV4Event(receipt *types.Receipt, zapAddr common.Address) (*big.Int, *big.Int, *big.Int, *big.Int, error) {
 	// ZapInV4(address indexed user, bytes32 indexed poolId, uint256 indexed tokenId, uint256 amount0, uint256 amount1, uint128 liquidity)
 	query := blockchain.ZapSimpleABI
 	parsed, err := abi.JSON(strings.NewReader(query))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	eventID := parsed.Events["ZapInV4"].ID
 
@@ -1318,13 +1433,57 @@ func parseZapInV4Event(receipt *types.Receipt, zapAddr common.Address) (*big.Int
 				continue
 			}
 			if len(out) >= 3 {
-				if liq, ok := out[2].(*big.Int); ok {
-					return tokenId, liq, nil
+				a0, _ := out[0].(*big.Int)
+				a1, _ := out[1].(*big.Int)
+				liq, _ := out[2].(*big.Int)
+				if a0 == nil {
+					a0 = big.NewInt(0)
 				}
+				if a1 == nil {
+					a1 = big.NewInt(0)
+				}
+				if liq == nil {
+					liq = big.NewInt(0)
+				}
+				return tokenId, liq, a0, a1, nil
 			}
 		}
 	}
-	return nil, nil, fmt.Errorf("ZapInV4 event not found")
+	return nil, nil, nil, nil, fmt.Errorf("ZapInV4 event not found")
+}
+
+func parseZapSwapExecutedEvent(receipt *types.Receipt, zapAddr common.Address) (common.Address, common.Address, *big.Int, *big.Int, bool) {
+	parsed, err := abi.JSON(strings.NewReader(blockchain.ZapSimpleABI))
+	if err != nil {
+		return common.Address{}, common.Address{}, nil, nil, false
+	}
+	ev, ok := parsed.Events["SwapExecuted"]
+	if !ok {
+		return common.Address{}, common.Address{}, nil, nil, false
+	}
+
+	for _, lg := range receipt.Logs {
+		if lg == nil || lg.Address != zapAddr || len(lg.Topics) == 0 || lg.Topics[0] != ev.ID {
+			continue
+		}
+		out, err := parsed.Unpack("SwapExecuted", lg.Data)
+		if err != nil || len(out) < 4 {
+			continue
+		}
+		tokenIn, _ := out[0].(common.Address)
+		tokenOut, _ := out[1].(common.Address)
+		amountIn, _ := out[2].(*big.Int)
+		amountOut, _ := out[3].(*big.Int)
+		if amountIn == nil {
+			amountIn = big.NewInt(0)
+		}
+		if amountOut == nil {
+			amountOut = big.NewInt(0)
+		}
+		return tokenIn, tokenOut, amountIn, amountOut, true
+	}
+
+	return common.Address{}, common.Address{}, nil, nil, false
 }
 
 // percentageToBps converts float percent (e.g. 0.5) to bps (e.g. 50)

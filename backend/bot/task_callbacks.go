@@ -123,6 +123,24 @@ func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 
 	// If we are not currently in a running position (e.g. waiting), we allow a pure "stop" when there's no recorded liquidity.
 	if !canExit {
+		if task.RebalancePending && (currentLiq == "" || currentLiq == "0") {
+			if err := b.taskService.Update(user.ID, taskID, map[string]interface{}{
+				"status":                  models.StrategyStatusStopped,
+				"rebalance_pending":       false,
+				"rebalance_retry_count":   0,
+				"rebalance_next_retry_at": nil,
+				"rebalance_last_error":    "",
+				"error_message":           "",
+			}); err != nil {
+				b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("停止任务失败：%v", err))
+				return
+			}
+			b.sendMessage(query.Message.Chat.ID, "✅ 已停止：当前处于再平衡重试中且无可撤出的流动性仓位")
+			task, _ = b.taskService.GetByID(user.ID, taskID)
+			b.sendMessageWithKeyboard(query.Message.Chat.ID, b.formatTaskCard(task), b.taskKeyboard(task))
+			return
+		}
+
 		if task.Status != models.StrategyStatusRunning && (currentLiq == "" || currentLiq == "0") {
 			if err := b.taskService.Update(user.ID, taskID, map[string]interface{}{
 				"status":        models.StrategyStatusStopped,
@@ -176,6 +194,29 @@ func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 
 	txHashes, err := b.liquidityService.ExitTaskToUSDT(user.ID, task, true)
 	if err != nil {
+		var txLinksText string
+		if len(txHashes) > 0 {
+			txLinksText = "\n📝 *交易记录：*\n"
+			for i, txInfo := range txHashes {
+				parts := strings.Split(txInfo, "|")
+				if len(parts) == 2 {
+					desc := parts[0]
+					txHash := strings.TrimSpace(parts[1])
+					if txHash != "" {
+						txLinksText += fmt.Sprintf("%d. **%s**\n   [查看交易](https://bscscan.com/tx/%s)\n", i+1, desc, txHash)
+					} else {
+						txLinksText += fmt.Sprintf("%d. **%s**\n", i+1, desc)
+					}
+				} else {
+					txHash := strings.TrimSpace(txInfo)
+					if txHash != "" {
+						txLinksText += fmt.Sprintf("%d. [查看交易](https://bscscan.com/tx/%s)\n", i+1, txHash)
+					}
+				}
+			}
+			txLinksText += "\n"
+		}
+
 		nextAt := now.Add(10 * time.Second)
 		_ = b.taskService.Update(user.ID, taskID, map[string]interface{}{
 			"status":              models.StrategyStatusRunning,
@@ -187,7 +228,7 @@ func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 			"exit_give_up_at":     nil,
 			"error_message":       "",
 		})
-		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("❌ 撤出失败：%v\n系统将自动重试（1/3），任务保持运行中。", err))
+		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("❌ 撤出/兑换失败：%v\n系统将自动重试（1/3），任务保持运行中。%s", err, txLinksText))
 		task, _ = b.taskService.GetByID(user.ID, taskID)
 		b.sendMessageWithKeyboard(query.Message.Chat.ID, b.formatTaskCard(task), b.taskKeyboard(task))
 		return
@@ -198,6 +239,7 @@ func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 	var txLinksText string
 	if len(txHashes) > 0 {
 		txLinksText = "\n📝 *交易记录：*\n"
+		hasSwapTx := false
 		for i, txInfo := range txHashes {
 			// 格式：描述|哈希
 			parts := strings.Split(txInfo, "|")
@@ -206,13 +248,23 @@ func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 				txHash := parts[1]
 				log.Printf("[Bot] TX %d: %s - %s", i+1, desc, txHash)
 				txLinksText += fmt.Sprintf("%d. **%s**\n   [查看交易](https://bscscan.com/tx/%s)\n", i+1, desc, txHash)
+				if strings.Contains(desc, "→USDT") || strings.Contains(desc, "->USDT") {
+					hasSwapTx = true
+				}
 			} else {
 				// 兼容旧格式（只有哈希）
 				log.Printf("[Bot] TX %d: %s", i+1, txInfo)
 				txLinksText += fmt.Sprintf("%d. [查看交易](https://bscscan.com/tx/%s)\n", i+1, txInfo)
+				if strings.Contains(txInfo, "→USDT") || strings.Contains(txInfo, "->USDT") {
+					hasSwapTx = true
+				}
 			}
 		}
 		txLinksText += "\n"
+
+		if !hasSwapTx {
+			txLinksText += "ℹ️ 本次未产生兑换交易：钱包中该池子的非 USDT 代币余额为 0（无需兑换）。\n\n"
+		}
 	} else {
 		log.Printf("[Bot] No transaction hashes returned from ExitTaskToUSDT")
 	}

@@ -7,22 +7,10 @@ import (
 	"TgLpBot/models"
 	"fmt"
 	"log"
-	"math"
 	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-)
-
-type autoLPPriceSample struct {
-	at    time.Time
-	price float64
-}
-
-const (
-	autoLPCrashWindow     = 5 * time.Minute
-	autoLPCrashMinSamples = 24 // ~2 minutes at 5s tick interval
-	autoLPCrashZThreshold = -3.0
 )
 
 // StrategyService handles background monitoring and strategy execution
@@ -32,10 +20,6 @@ type StrategyService struct {
 	stopChan         chan struct{}
 	ticker           *time.Ticker
 	notifier         func(userID uint, message string) // Callback for notifications
-
-	// autoLPPrices keeps a short on-chain price history for AutoLP tasks so the crash guard
-	// does not depend on external APIs returning pool data.
-	autoLPPrices map[uint][]autoLPPriceSample
 }
 
 // NewStrategyService creates a new strategy service
@@ -45,7 +29,6 @@ func NewStrategyService() *StrategyService {
 		liquidityService: NewLiquidityService(),
 		stopChan:         make(chan struct{}),
 		ticker:           time.NewTicker(5 * time.Second), // Check every 5 seconds
-		autoLPPrices:     make(map[uint][]autoLPPriceSample),
 	}
 }
 
@@ -93,17 +76,6 @@ func (s *StrategyService) checkTasks() {
 		return
 	}
 
-	activeIDs := make(map[uint]struct{}, len(tasks))
-	for i := range tasks {
-		activeIDs[tasks[i].ID] = struct{}{}
-	}
-	for id := range s.autoLPPrices {
-		if _, ok := activeIDs[id]; ok {
-			continue
-		}
-		delete(s.autoLPPrices, id)
-	}
-
 	// Cache for current ticks to avoid duplicate RPC calls in the same cycle
 	tickCache := make(map[string]int)
 
@@ -119,6 +91,10 @@ func (s *StrategyService) processTask(task *models.StrategyTask, tickCache map[s
 
 	// If an exit is pending (e.g. previous exit failed), retry it first and skip other logic.
 	if s.processExitRetry(task) {
+		return
+	}
+	// If a rebalance re-entry is pending after a successful exit, retry it first.
+	if s.processRebalanceRetry(task) {
 		return
 	}
 
@@ -152,20 +128,6 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 	}
 
 	log.Printf("[Strategy] 任务 #%d 监控中: Tick %d (范围 %d - %d)", task.ID, currentTick, task.TickLower, task.TickUpper)
-
-	if task.IsAuto && hasTaskPositionForExit(task) {
-		if ok, z := s.checkAutoLPCrashGuard(task, now, currentTick); ok {
-			reason := fmt.Sprintf("CRASH: Z < -3 (onchain) Z=%.2f", z)
-			if config.AppConfig != nil && config.AppConfig.AutoLPEmergencyGasMultiplier > 1 {
-				gasMult := config.AppConfig.AutoLPEmergencyGasMultiplier
-				_ = database.DB.Model(task).Update("exit_gas_multiplier", gasMult).Error
-				task.ExitGasMultiplier = gasMult
-			}
-			_ = NewAutoLPEventService().Record(task, models.AutoLPEventGuardExit, reason)
-			s.executeStopLoss(task, now, reason)
-			return
-		}
-	}
 
 	inRange := currentTick >= task.TickLower && currentTick <= task.TickUpper
 	alertLines := formatRangeAlertLines(task, task.TickLower, task.TickUpper, currentTick)
@@ -299,59 +261,6 @@ func (s *StrategyService) notify(userID uint, message string) {
 	}
 }
 
-func (s *StrategyService) checkAutoLPCrashGuard(task *models.StrategyTask, now time.Time, currentTick int) (bool, float64) {
-	if s == nil || task == nil {
-		return false, 0
-	}
-	// Only guard stable-quote pools; avoid interpreting non-stable pairs incorrectly.
-	if stableSideFromTask(task) == stableUnknown {
-		return false, 0
-	}
-	price, _, _, ok := BuildPriceDisplay(task, currentTick)
-	if !ok || !isValidPrice(price) {
-		return false, 0
-	}
-
-	hist := s.autoLPPrices[task.ID]
-	hist = append(hist, autoLPPriceSample{at: now, price: price})
-
-	cutoff := now.Add(-autoLPCrashWindow)
-	drop := 0
-	for drop < len(hist) && hist[drop].at.Before(cutoff) {
-		drop++
-	}
-	if drop > 0 {
-		copy(hist, hist[drop:])
-		hist = hist[:len(hist)-drop]
-	}
-	s.autoLPPrices[task.ID] = hist
-
-	if len(hist) < autoLPCrashMinSamples {
-		return false, 0
-	}
-
-	sum := 0.0
-	for i := range hist {
-		sum += hist[i].price
-	}
-	ma := sum / float64(len(hist))
-
-	variance := 0.0
-	for i := range hist {
-		d := hist[i].price - ma
-		variance += d * d
-	}
-	sigma := math.Sqrt(variance / float64(len(hist)))
-	if sigma <= 0 || math.IsNaN(ma) || math.IsInf(ma, 0) || math.IsNaN(sigma) || math.IsInf(sigma, 0) {
-		return false, 0
-	}
-	z := (price - ma) / sigma
-	if math.IsNaN(z) || math.IsInf(z, 0) {
-		return false, 0
-	}
-	return z < autoLPCrashZThreshold, z
-}
-
 // handleWaitingTask checks if it's time to reopen (Keep for compatibility)
 func (s *StrategyService) handleWaitingTask(task *models.StrategyTask) {
 	if task.LastExitTime == nil {
@@ -472,14 +381,19 @@ func (s *StrategyService) calculateRangeFromPercentage(task *models.StrategyTask
 	}
 	tc := NewTickCalculator()
 
-	// Default: symmetric rangePercentage (manual tasks).
 	lowerPct := task.RangePercentage
 	upperPct := task.RangePercentage
 
-	// Auto tasks may use asymmetric lower/upper percentages.
 	if task.RangeLowerPercentage > 0 && task.RangeUpperPercentage > 0 {
 		lowerPct = task.RangeLowerPercentage
 		upperPct = task.RangeUpperPercentage
+	} else if task.TickLower != 0 && task.TickUpper != 0 {
+		centerTick := (task.TickLower + task.TickUpper) / 2
+		effLower, effUpper := tc.CalculatePercentagesFromTicks(centerTick, task.TickLower, task.TickUpper)
+		if effLower > 0 && effUpper > 0 {
+			lowerPct = effLower
+			upperPct = effUpper
+		}
 	}
 
 	if lowerPct <= 0 || upperPct <= 0 || lowerPct >= 100 || upperPct >= 100 {
@@ -487,10 +401,10 @@ func (s *StrategyService) calculateRangeFromPercentage(task *models.StrategyTask
 	}
 
 	var tickLower, tickUpper int
-	if task.RangeLowerPercentage > 0 && task.RangeUpperPercentage > 0 {
-		tickLower, tickUpper = tc.CalculateTickFromPercentages(currentTick, lowerPct, upperPct, task.TickSpacing)
+	if task.IsAuto {
+		tickLower, tickUpper = tc.CalculateTickFromPercentagesBestFit(currentTick, lowerPct, upperPct, task.TickSpacing)
 	} else {
-		tickLower, tickUpper = tc.CalculateTickFromPercentage(currentTick, task.RangePercentage, task.TickSpacing)
+		tickLower, tickUpper = tc.CalculateTickFromPercentages(currentTick, lowerPct, upperPct, task.TickSpacing)
 	}
 	if err := tc.ValidateTickRange(tickLower, tickUpper, task.TickSpacing); err != nil {
 		return 0, 0, err

@@ -215,7 +215,22 @@ func (b *Bot) autoStrategyKeyboard() any {
 }
 
 func (b *Bot) autoStrategyText() string {
-	return `📌 *当前策略（V1）*
+	windowSeconds := 120
+	volumeDropPct := 0.30
+	priceTxDropPct := 0.10
+	if config.AppConfig != nil {
+		if config.AppConfig.AutoLPGuardWindowSeconds > 0 {
+			windowSeconds = config.AppConfig.AutoLPGuardWindowSeconds
+		}
+		if config.AppConfig.AutoLPGuardVolumeDropPercent > 0 && config.AppConfig.AutoLPGuardVolumeDropPercent < 1 {
+			volumeDropPct = config.AppConfig.AutoLPGuardVolumeDropPercent
+		}
+		if config.AppConfig.AutoLPGuardPriceTxDropPercent > 0 && config.AppConfig.AutoLPGuardPriceTxDropPercent < 1 {
+			priceTxDropPct = config.AppConfig.AutoLPGuardPriceTxDropPercent
+		}
+	}
+
+	return fmt.Sprintf(`📌 *当前策略（V1）*
 
 *怎么选池子*
 • 从手续费榜单抓取 5/15/60/360 分钟数据
@@ -229,12 +244,16 @@ func (b *Bot) autoStrategyText() string {
 • Tick 计算会按池子的 tickSpacing 取整
 
 *何时撤仓（自动任务）*
-• 暴跌：Z5 < -3 触发撤仓（可提高 Gas 倍数）
-• 量价衰减：60m 成交量低于过去 24h 均值 × 阈值
-• 热度消失：5m 交易笔数连续下降 N 次
+• 触发 1：%d 秒窗口内，5m 成交量较峰值下跌 >=%.0f%% 即撤仓
+• 触发 2：%d 秒窗口内，价格与交易笔数较峰值下跌 >=%.0f%% 即撤仓
 • 另外仍复用原有任务监控逻辑：出区间后按配置执行再平衡/止损
 
-说明：上述阈值/宽度参数来自服务端配置；你在 /auto 里设置的“总投入/最大任务数/盈亏关闭”用于控制每个用户的自动开新仓，并在触发盈亏关闭时撤出当前自动仓位。`
+说明：上述阈值/宽度参数来自服务端配置；你在 /auto 里设置的“总投入/最大任务数/盈亏关闭”用于控制每个用户的自动开新仓，并在触发盈亏关闭时撤出当前自动仓位。`,
+		windowSeconds,
+		volumeDropPct*100,
+		windowSeconds,
+		priceTxDropPct*100,
+	)
 }
 
 func (b *Bot) autoStatsText(user *models.User, cfg *models.AutoLPUserConfig) string {

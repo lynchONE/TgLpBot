@@ -27,6 +27,8 @@ func (b *Bot) handleConfirmPosition(query *tgbotapi.CallbackQuery, user *models.
 	feeStr, _ := database.GetUserSession(user.TelegramID, "pool_fee")
 	tickSpacingStr, _ := database.GetUserSession(user.TelegramID, "pool_tick_spacing")
 	rangePctStr, _ := database.GetUserSession(user.TelegramID, "tick_percentage")
+	rangeLowerPctStr, _ := database.GetUserSession(user.TelegramID, "tick_lower_percentage")
+	rangeUpperPctStr, _ := database.GetUserSession(user.TelegramID, "tick_upper_percentage")
 	tickLowerStr, _ := database.GetUserSession(user.TelegramID, "tick_lower")
 	tickUpperStr, _ := database.GetUserSession(user.TelegramID, "tick_upper")
 	amountStr, _ := database.GetUserSession(user.TelegramID, "position_amount")
@@ -37,6 +39,12 @@ func (b *Bot) handleConfirmPosition(query *tgbotapi.CallbackQuery, user *models.
 	fee, _ := strconv.Atoi(feeStr)
 	tickSpacing, _ := strconv.Atoi(tickSpacingStr)
 	rangePct, _ := strconv.ParseFloat(rangePctStr, 64)
+	rangeLowerPct, _ := strconv.ParseFloat(rangeLowerPctStr, 64)
+	rangeUpperPct, _ := strconv.ParseFloat(rangeUpperPctStr, 64)
+	if rangeLowerPct <= 0 || rangeUpperPct <= 0 {
+		rangeLowerPct = 0
+		rangeUpperPct = 0
+	}
 
 	cfg, cfgErr := b.configService.GetOrCreate(user.ID)
 	if cfgErr != nil {
@@ -60,6 +68,8 @@ func (b *Bot) handleConfirmPosition(query *tgbotapi.CallbackQuery, user *models.
 		TickLower:            tickLower,
 		TickUpper:            tickUpper,
 		RangePercentage:      rangePct,
+		RangeLowerPercentage: rangeLowerPct,
+		RangeUpperPercentage: rangeUpperPct,
 		AmountUSDT:           amount,
 		CurrentLiquidity:     "0", // Will be updated after zap in
 		ReopenDelaySeconds:   cfg.RebalanceTimeout,

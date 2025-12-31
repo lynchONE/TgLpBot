@@ -78,6 +78,7 @@ func (b *Bot) handleHelp(message *tgbotapi.Message, user *models.User) {
 /profit - 余额走势
 /transactions - 查看交易历史
 /auto - AutoLP 自动开仓配置
+/smart_money - Smart Money 加LP榜
 /help - 显示此帮助信息
 
 *使用方法：*

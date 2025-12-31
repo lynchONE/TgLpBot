@@ -123,9 +123,12 @@ func (s *AutoLPService) runOnce() {
 		return
 	}
 
-	log.Printf("[AutoLP] 开始扫描：链=%s 协议=%s 扫描间隔=%ds 请求间隔=%dms 自动开仓=%v Top推送=%v 调试=%v；硬筛：TVL(current_pool_value,USD)>%.0f 费率(fee_percentage)>%.2f%% 5m费用率(total_fees/current_pool_value)>%.4f%% 5m手续费(total_fees)>%.2f 5m成交量(total_volume)>%.2f；开仓宽度(总宽度)：震荡=%.2f%% 温和上涨=%.2f%% 急涨=%.2f%%",
+	dexes := autoLPDexList(config.AppConfig.AutoLPProtocols)
+	dexParam := strings.Join(dexes, ",")
+
+	log.Printf("[AutoLP] 开始扫描：链=%s DEX=%s 扫描间隔=%ds 请求间隔=%dms 自动开仓=%v Top推送=%v 调试=%v；硬筛：TVL(current_pool_value,USD)>%.0f 费率(fee_percentage)>%.2f%% 5m费用率(total_fees/current_pool_value)>%.4f%% 5m手续费(total_fees)>%.2f 5m成交量(total_volume)>%.2f；开仓宽度(总宽度)：震荡=%.2f%% 温和上涨=%.2f%% 急涨=%.2f%%",
 		strings.ToLower(strings.TrimSpace(config.AppConfig.AutoLPChain)),
-		strings.TrimSpace(config.AppConfig.AutoLPProtocols),
+		dexParam,
 		config.AppConfig.AutoLPScanIntervalSeconds,
 		config.AppConfig.AutoLPFetchDelayMillis,
 		config.AppConfig.AutoLPExecuteEnabled,
@@ -242,7 +245,8 @@ func (s *AutoLPService) runOnce() {
 
 	if config.AppConfig != nil && config.AppConfig.SmartLPEnabled && config.AppConfig.SmartLPMinWallets > 0 {
 		for _, a := range analyses {
-			if a.SmartWalletCount < config.AppConfig.SmartLPMinWallets {
+			// 使用最近时间窗口内添加LP的钱包数进行判断
+			if a.RecentAddWalletCount < config.AppConfig.SmartLPMinWallets {
 				continue
 			}
 			if a.CandidateEligible {
@@ -255,7 +259,11 @@ func (s *AutoLPService) runOnce() {
 			} else if addr != "" {
 				pair = fmt.Sprintf("%s (%s)", pair, addr)
 			}
-			notifyTargets(fmt.Sprintf("⚠️ 监测到 %d 个钱包在池子 %s 加LP，但未满足 AutoLP 规则，未自动开仓。", a.SmartWalletCount, pair))
+			windowMinutes := config.AppConfig.SmartLPRecentWindowMinutes
+			if windowMinutes <= 0 {
+				windowMinutes = 10
+			}
+			notifyTargets(fmt.Sprintf("⚠️ 最近%d分钟内监测到 %d 个钱包在池子 %s 加LP，但未满足 AutoLP 规则，未自动开仓。", windowMinutes, a.RecentAddWalletCount, pair))
 		}
 	}
 
@@ -321,12 +329,19 @@ type poolMSnapshot struct {
 }
 
 type poolMRawRow struct {
-	ts              time.Time
-	chain           string
-	protocolVersion string
-	timeframe       int
-	p               PoolMFeePool
-	lastSwapAt      time.Time
+	ts                 time.Time
+	chain              string
+	requestedChain     string
+	protocolVersion    string
+	timeframe          int
+	timeframeLabel     string
+	requestedProtocols []string
+	requestedDexes     []string
+	totalPools         int
+	responseSuccess    bool
+	responseError      string
+	p                  PoolMFeePool
+	lastSwapAt         time.Time
 }
 
 func (s *AutoLPService) fetchPoolMSnapshot(ctx context.Context) (*poolMSnapshot, []poolMRawRow, error) {
@@ -334,10 +349,8 @@ func (s *AutoLPService) fetchPoolMSnapshot(ctx context.Context) (*poolMSnapshot,
 	if chain == "" {
 		chain = "bsc"
 	}
-	protos := splitCSVLower(config.AppConfig.AutoLPProtocols)
-	if len(protos) == 0 {
-		protos = []string{"v3", "v4"}
-	}
+	dexes := autoLPDexList(config.AppConfig.AutoLPProtocols)
+	dexParam := strings.Join(dexes, ",")
 	timeframes := []int{5, 15, 60, 360}
 
 	delay := time.Duration(config.AppConfig.AutoLPFetchDelayMillis) * time.Millisecond
@@ -345,7 +358,7 @@ func (s *AutoLPService) fetchPoolMSnapshot(ctx context.Context) (*poolMSnapshot,
 		delay = 0
 	}
 
-	log.Printf("[AutoLP] PoolM 拉取：链=%s 协议=%v 周期=%v 请求间隔=%s", chain, protos, timeframes, delay.String())
+	log.Printf("[AutoLP] PoolM 拉取：链=%s DEX=%v 周期=%v 请求间隔=%s", chain, dexes, timeframes, delay.String())
 
 	now := time.Now()
 	out := &poolMSnapshot{
@@ -355,53 +368,78 @@ func (s *AutoLPService) fetchPoolMSnapshot(ctx context.Context) (*poolMSnapshot,
 	}
 	var rows []poolMRawRow
 
-	for _, proto := range protos {
-		for _, tf := range timeframes {
-			resp, err := s.poolm.TopFees(ctx, tf, proto, chain)
-			if err != nil {
-				return nil, nil, err
+	for _, tf := range timeframes {
+		resp, err := s.poolm.TopFees(ctx, tf, chain, dexParam)
+		if err != nil {
+			return nil, nil, err
+		}
+		log.Printf("[AutoLP] PoolM 返回：DEX=%s 周期=%dmin 本次返回=%d Top总数=%d", dexParam, tf, len(resp.Data), resp.TotalPools)
+
+		requestedChain := strings.TrimSpace(resp.RequestedChain)
+		if requestedChain == "" {
+			requestedChain = chain
+		}
+		timeframeLabel := strings.TrimSpace(resp.Timeframe)
+		requestedProtocols := []string(resp.RequestedProtocol)
+		if requestedProtocols == nil {
+			requestedProtocols = []string{}
+		}
+		requestedDexes := []string(resp.RequestedDex)
+		if requestedDexes == nil {
+			requestedDexes = []string{}
+		}
+		totalPools := resp.TotalPools
+		responseSuccess := resp.Success
+		responseError := strings.TrimSpace(resp.Error)
+
+		for _, p := range resp.Data {
+			addr := strings.ToLower(strings.TrimSpace(p.PoolAddress))
+			if addr == "" {
+				continue
 			}
-			log.Printf("[AutoLP] PoolM 返回：协议=%s 周期=%dmin 本次返回=%d Top总数=%d", proto, tf, len(resp.Data), resp.TotalPools)
-
-			for _, p := range resp.Data {
-				key := poolKey{
-					proto: strings.ToLower(strings.TrimSpace(p.ProtocolVersion)),
-					addr:  strings.ToLower(strings.TrimSpace(p.PoolAddress)),
-				}
-				if key.proto == "" {
-					key.proto = strings.ToLower(strings.TrimSpace(proto))
-				}
-				if key.addr == "" {
-					continue
-				}
-
-				if _, ok := out.data[key]; !ok {
-					out.data[key] = make(map[int]PoolMFeePool)
-				}
-				out.data[key][tf] = p
-
-				lastSwap := time.Time{}
-				if strings.TrimSpace(p.LastSwapAt) != "" {
-					if t, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(p.LastSwapAt)); err == nil {
-						lastSwap = t
-					}
-				}
-				rows = append(rows, poolMRawRow{
-					ts:              now,
-					chain:           chain,
-					protocolVersion: key.proto,
-					timeframe:       tf,
-					p:               p,
-					lastSwapAt:      lastSwap,
-				})
+			proto := normalizePoolMProtocolVersion(p, addr)
+			if proto == "" {
+				continue
 			}
 
-			if delay > 0 {
-				select {
-				case <-ctx.Done():
-					return nil, nil, ctx.Err()
-				case <-time.After(delay):
+			key := poolKey{
+				proto: proto,
+				addr:  addr,
+			}
+
+			if _, ok := out.data[key]; !ok {
+				out.data[key] = make(map[int]PoolMFeePool)
+			}
+			out.data[key][tf] = p
+
+			lastSwap := time.Time{}
+			if strings.TrimSpace(p.LastSwapAt) != "" {
+				if t, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(p.LastSwapAt)); err == nil {
+					lastSwap = t
 				}
+			}
+			rows = append(rows, poolMRawRow{
+				ts:                 now,
+				chain:              chain,
+				requestedChain:     requestedChain,
+				protocolVersion:    key.proto,
+				timeframe:          tf,
+				timeframeLabel:     timeframeLabel,
+				requestedProtocols: requestedProtocols,
+				requestedDexes:     requestedDexes,
+				totalPools:         totalPools,
+				responseSuccess:    responseSuccess,
+				responseError:      responseError,
+				p:                  p,
+				lastSwapAt:         lastSwap,
+			})
+		}
+
+		if delay > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, nil, ctx.Err()
+			case <-time.After(delay):
 			}
 		}
 	}
@@ -418,9 +456,10 @@ func (s *AutoLPService) insertPoolMRaw(ctx context.Context, rows []poolMRawRow) 
 	}
 
 	batch, err := s.ch.Conn.PrepareBatch(ctx, `INSERT INTO poolm_top_fees_raw (
-		ts, chain, protocol_version, timeframe_minutes, pool_address,
-		factory_name, factory_address, trading_pair,
-		token0_symbol, token1_symbol, token0_address, token1_address,
+		ts, chain, requested_chain, protocol_version, dex, timeframe_minutes, timeframe_label,
+		requested_protocols, requested_dexes, total_pools, response_success, response_error,
+		pool_address, factory_name, factory_address, trading_pair,
+		token0_symbol, token1_symbol, token0_name, token1_name, token0_address, token1_address,
 		token0_decimals, token1_decimals, stable_coin_symbol,
 		fee_rate, fee_percentage, transaction_count,
 		total_fees, total_volume, current_pool_value,
@@ -433,17 +472,31 @@ func (s *AutoLPService) insertPoolMRaw(ctx context.Context, rows []poolMRawRow) 
 
 	for _, r := range rows {
 		p := r.p
+		responseSuccess := uint8(0)
+		if r.responseSuccess {
+			responseSuccess = 1
+		}
 		if err := batch.Append(
 			r.ts,
 			r.chain,
+			strings.TrimSpace(r.requestedChain),
 			r.protocolVersion,
+			strings.TrimSpace(p.Dex),
 			uint16(r.timeframe),
+			strings.TrimSpace(r.timeframeLabel),
+			r.requestedProtocols,
+			r.requestedDexes,
+			uint32(maxInt(r.totalPools, 0)),
+			responseSuccess,
+			strings.TrimSpace(r.responseError),
 			strings.ToLower(strings.TrimSpace(p.PoolAddress)),
 			strings.TrimSpace(p.FactoryName),
 			strings.ToLower(strings.TrimSpace(p.FactoryAddress)),
 			strings.TrimSpace(p.TradingPair),
 			strings.TrimSpace(p.Token0Symbol),
 			strings.TrimSpace(p.Token1Symbol),
+			strings.TrimSpace(p.Token0Name),
+			strings.TrimSpace(p.Token1Name),
 			strings.ToLower(strings.TrimSpace(p.Token0Address)),
 			strings.ToLower(strings.TrimSpace(p.Token1Address)),
 			uint8(maxInt(p.Token0Decimals, 0)),
@@ -494,7 +547,8 @@ type AutoLPAnalysis struct {
 	CandidateEligible bool
 	Score             float64
 
-	SmartWalletCount int
+	SmartWalletCount     int // 当前持有LP仓位的钱包数（用于评分加成）
+	RecentAddWalletCount int // 最近时间窗口内添加LP的钱包数（用于自动开单判断）
 }
 
 func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot) ([]AutoLPAnalysis, error) {
@@ -649,6 +703,7 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 			})
 		}
 
+		// 获取当前持仓钱包数（用于评分加成）
 		if counts, err := s.smartLP.GetActiveWalletCounts(ctx, pools); err != nil {
 			log.Printf("[AutoLP] smart LP counts failed: %v", err)
 		} else {
@@ -660,6 +715,23 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 					if bonus > 0 {
 						out[i].Score += float64(c) * bonus
 					}
+				}
+			}
+		}
+
+		// 获取最近时间窗口内添加LP的钱包数（用于自动开单判断）
+		windowMinutes := config.AppConfig.SmartLPRecentWindowMinutes
+		if windowMinutes <= 0 {
+			windowMinutes = 10 // 默认10分钟
+		}
+		lookback := time.Duration(windowMinutes) * time.Minute
+		if recentCounts, err := s.smartLP.GetRecentAddWalletCounts(ctx, pools, lookback); err != nil {
+			log.Printf("[AutoLP] smart LP recent add counts failed: %v", err)
+		} else {
+			for i := range out {
+				key := smartLPPoolKey(out[i].ProtocolVersion, out[i].PoolAddress)
+				if c, ok := recentCounts[key]; ok {
+					out[i].RecentAddWalletCount = c
 				}
 			}
 		}
@@ -973,6 +1045,67 @@ func splitCSVLower(s string) []string {
 	return out
 }
 
+func autoLPDexList(raw string) []string {
+	parts := splitCSVLower(raw)
+	if len(parts) == 0 {
+		return []string{"pcsv3", "univ3", "univ4"}
+	}
+
+	expanded := make([]string, 0, len(parts))
+	for _, part := range parts {
+		switch part {
+		case "v3":
+			expanded = append(expanded, "pcsv3", "univ3")
+		case "v4":
+			expanded = append(expanded, "univ4")
+		default:
+			expanded = append(expanded, part)
+		}
+	}
+
+	seen := make(map[string]struct{}, len(expanded))
+	out := make([]string, 0, len(expanded))
+	for _, dex := range expanded {
+		if dex == "" {
+			continue
+		}
+		if _, ok := seen[dex]; ok {
+			continue
+		}
+		seen[dex] = struct{}{}
+		out = append(out, dex)
+	}
+	if len(out) == 0 {
+		return []string{"pcsv3", "univ3", "univ4"}
+	}
+	return out
+}
+
+func normalizePoolMProtocolVersion(p PoolMFeePool, poolAddr string) string {
+	candidates := []string{p.ProtocolVersion, p.Dex, p.FactoryName}
+	for _, raw := range candidates {
+		v := strings.ToLower(strings.TrimSpace(raw))
+		if v == "" {
+			continue
+		}
+		if strings.Contains(v, "v4") {
+			return "v4"
+		}
+		if strings.Contains(v, "v3") {
+			return "v3"
+		}
+	}
+
+	addr := strings.ToLower(strings.TrimSpace(poolAddr))
+	if len(addr) == 66 {
+		return "v4"
+	}
+	if len(addr) == 42 {
+		return "v3"
+	}
+	return ""
+}
+
 func maxInt(a, b int) int {
 	if a > b {
 		return a
@@ -1009,7 +1142,8 @@ func (s *AutoLPService) applyUserStopConditions(ctx context.Context, cfg models.
 		return false, nil
 	}
 
-	profitWei, err := s.sumAutoRealizedProfitWei(ctx, userID)
+	// 只计算本轮 AutoLP 开启后的收益，避免历史亏损导致立即触发止损
+	profitWei, err := s.sumAutoRealizedProfitWei(ctx, userID, cfg.LastEnabledAt)
 	if err != nil {
 		return false, err
 	}
@@ -1123,7 +1257,7 @@ func hasTaskPositionForExit(task *models.StrategyTask) bool {
 	}
 }
 
-func (s *AutoLPService) sumAutoRealizedProfitWei(ctx context.Context, userID uint) (*big.Int, error) {
+func (s *AutoLPService) sumAutoRealizedProfitWei(ctx context.Context, userID uint, lastEnabledAt *time.Time) (*big.Int, error) {
 	if database.DB == nil {
 		return big.NewInt(0), nil
 	}
@@ -1133,13 +1267,28 @@ func (s *AutoLPService) sumAutoRealizedProfitWei(ctx context.Context, userID uin
 	}
 	out := row{}
 
-	q := `
-		SELECT COALESCE(SUM(CAST(tr.profit_usdt AS DECIMAL(65,0))), 0) AS profit
-		FROM trade_records tr
-		JOIN strategy_tasks st ON st.id = tr.task_id
-		WHERE tr.user_id = ? AND tr.status = ? AND st.is_auto = 1
-	`
-	if err := database.DB.Raw(q, userID, models.TradeStatusClosed).Scan(&out).Error; err != nil {
+	// 只计算 lastEnabledAt 之后关闭的交易记录的收益
+	// 这样每次重新开启 AutoLP 时，收益计算会从 0 开始
+	var q string
+	var err error
+	if lastEnabledAt != nil {
+		q = `
+			SELECT COALESCE(SUM(CAST(tr.profit_usdt AS DECIMAL(65,0))), 0) AS profit
+			FROM trade_records tr
+			JOIN strategy_tasks st ON st.id = tr.task_id
+			WHERE tr.user_id = ? AND tr.status = ? AND st.is_auto = 1 AND tr.closed_at >= ?
+		`
+		err = database.DB.Raw(q, userID, models.TradeStatusClosed, *lastEnabledAt).Scan(&out).Error
+	} else {
+		q = `
+			SELECT COALESCE(SUM(CAST(tr.profit_usdt AS DECIMAL(65,0))), 0) AS profit
+			FROM trade_records tr
+			JOIN strategy_tasks st ON st.id = tr.task_id
+			WHERE tr.user_id = ? AND tr.status = ? AND st.is_auto = 1
+		`
+		err = database.DB.Raw(q, userID, models.TradeStatusClosed).Scan(&out).Error
+	}
+	if err != nil {
 		return nil, err
 	}
 
@@ -1247,9 +1396,10 @@ func (s *AutoLPService) executeBestCandidateForUser(ctx context.Context, cfg mod
 		return nil
 	}
 
+	// 优先使用最近时间窗口内添加LP的钱包数进行自动开单判断
 	if config.AppConfig != nil && config.AppConfig.SmartLPMinWallets > 0 {
 		for _, a := range analyses {
-			if a.Action != "CANDIDATE" || a.SmartWalletCount < config.AppConfig.SmartLPMinWallets {
+			if a.Action != "CANDIDATE" || a.RecentAddWalletCount < config.AppConfig.SmartLPMinWallets {
 				continue
 			}
 			if opened, err := s.tryOpenCandidate(ctx, userID, a, amountPerTask); err != nil {
@@ -1305,9 +1455,10 @@ func (s *AutoLPService) executeBestCandidate(ctx context.Context, userID uint, s
 		return s.tryOpenCandidate(ctx, userID, a, amount)
 	}
 
+	// 优先使用最近时间窗口内添加LP的钱包数进行自动开单判断
 	if config.AppConfig != nil && config.AppConfig.SmartLPMinWallets > 0 {
 		for _, a := range analyses {
-			if a.Action != "CANDIDATE" || a.SmartWalletCount < config.AppConfig.SmartLPMinWallets {
+			if a.Action != "CANDIDATE" || a.RecentAddWalletCount < config.AppConfig.SmartLPMinWallets {
 				continue
 			}
 			if opened, err := openWithAmount(a); err != nil {
@@ -1387,9 +1538,15 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 	}
 
 	tc := NewTickCalculator()
-	tickLower, tickUpper := tc.CalculateTickFromPercentages(currentTick, a.LowerWidthPct, a.UpperWidthPct, info.TickSpacing)
+	tickLower, tickUpper := tc.CalculateTickFromPercentagesBestFit(currentTick, a.LowerWidthPct, a.UpperWidthPct, info.TickSpacing)
 	if err := tc.ValidateTickRange(tickLower, tickUpper, info.TickSpacing); err != nil {
 		return nil, 1, err
+	}
+
+	effLowerPct, effUpperPct := tc.CalculatePercentagesFromTicks(currentTick, tickLower, tickUpper)
+	if effLowerPct <= 0 || effUpperPct <= 0 {
+		effLowerPct = a.LowerWidthPct
+		effUpperPct = a.UpperWidthPct
 	}
 
 	cfg, err := s.configService.GetOrCreate(userID)
@@ -1424,8 +1581,8 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 		AmountUSDT: amountUSDT,
 
 		RangePercentage:      a.BaseWidthPct,
-		RangeLowerPercentage: a.LowerWidthPct,
-		RangeUpperPercentage: a.UpperWidthPct,
+		RangeLowerPercentage: effLowerPct,
+		RangeUpperPercentage: effUpperPct,
 
 		CurrentLiquidity:     "0",
 		ReopenDelaySeconds:   cfg.RebalanceTimeout,
@@ -1533,7 +1690,7 @@ func bytesCompare(a common.Address, b common.Address) int {
 }
 
 func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSnapshot, analyses []AutoLPAnalysis) {
-	if database.DB == nil {
+	if database.DB == nil || config.AppConfig == nil {
 		return
 	}
 
@@ -1549,6 +1706,27 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 		return
 	}
 
+	windowSeconds := config.AppConfig.AutoLPGuardWindowSeconds
+	if windowSeconds <= 0 {
+		windowSeconds = 120
+	}
+	window := time.Duration(windowSeconds) * time.Second
+
+	volumeDropPct := config.AppConfig.AutoLPGuardVolumeDropPercent
+	if volumeDropPct > 1 && volumeDropPct <= 100 {
+		volumeDropPct = volumeDropPct / 100
+	}
+	if volumeDropPct <= 0 || volumeDropPct >= 1 {
+		volumeDropPct = 0.30
+	}
+	priceTxDropPct := config.AppConfig.AutoLPGuardPriceTxDropPercent
+	if priceTxDropPct > 1 && priceTxDropPct <= 100 {
+		priceTxDropPct = priceTxDropPct / 100
+	}
+	if priceTxDropPct <= 0 || priceTxDropPct >= 1 {
+		priceTxDropPct = 0.10
+	}
+
 	for i := range tasks {
 		task := &tasks[i]
 		if task.ExitGiveUpAt != nil {
@@ -1559,79 +1737,22 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 			continue
 		}
 
-		// CRASH detection should apply to active tasks regardless of candidate hard-filters.
-		if ok, err := s.checkCrashZ5(ctx, snap, task); err == nil && ok {
-			reason := "CRASH: Z5 < -3"
-			if err := s.requestStopLossExit(task, reason, config.AppConfig.AutoLPEmergencyGasMultiplier); err == nil {
+		if ok, err := s.checkVolumeDropWithin(ctx, task, window, volumeDropPct); err == nil && ok {
+			reason := fmt.Sprintf("5m 成交量 %ds 内较峰值下跌 >=%.0f%%", windowSeconds, volumeDropPct*100)
+			if err := s.requestStopLossExit(task, reason, 1.0); err == nil {
 				_ = NewAutoLPEventService().Record(task, models.AutoLPEventGuardExit, reason)
 			}
 			continue
 		}
 
-		if config.AppConfig.AutoLPExitVolumeThreshold > 0 {
-			if ok, err := s.checkVolumeDecay(ctx, task, config.AppConfig.AutoLPExitVolumeThreshold); err == nil && ok {
-				reason := "量价衰减触发止损"
-				if err := s.requestStopLossExit(task, reason, 1.0); err == nil {
-					_ = NewAutoLPEventService().Record(task, models.AutoLPEventGuardExit, reason)
-				}
-				continue
+		if ok, err := s.checkPriceAndTxDropWithin(ctx, task, window, priceTxDropPct); err == nil && ok {
+			reason := fmt.Sprintf("价格与交易笔数 %ds 内较峰值下跌 >=%.0f%%", windowSeconds, priceTxDropPct*100)
+			if err := s.requestStopLossExit(task, reason, 1.0); err == nil {
+				_ = NewAutoLPEventService().Record(task, models.AutoLPEventGuardExit, reason)
 			}
-		}
-
-		if config.AppConfig.AutoLPHeatDownScans > 0 {
-			if ok, err := s.checkHeatDown(ctx, task, config.AppConfig.AutoLPHeatDownScans); err == nil && ok {
-				reason := "热度消失触发止损"
-				if err := s.requestStopLossExit(task, reason, 1.0); err == nil {
-					_ = NewAutoLPEventService().Record(task, models.AutoLPEventGuardExit, reason)
-				}
-				continue
-			}
+			continue
 		}
 	}
-}
-
-func (s *AutoLPService) checkCrashZ5(ctx context.Context, snap *poolMSnapshot, task *models.StrategyTask) (bool, error) {
-	if s == nil || s.ch == nil || s.ch.Conn == nil || task == nil || config.AppConfig == nil {
-		return false, nil
-	}
-
-	chain := strings.ToLower(strings.TrimSpace(config.AppConfig.AutoLPChain))
-	proto := strings.ToLower(strings.TrimSpace(task.PoolVersion))
-	pool := strings.ToLower(strings.TrimSpace(task.PoolId))
-	if chain == "" || proto == "" || pool == "" {
-		return false, nil
-	}
-
-	current := 0.0
-	if snap != nil {
-		key := poolKey{proto: proto, addr: pool}
-		if tfs, ok := snap.data[key]; ok {
-			if p5, ok := tfs[5]; ok {
-				current = p5.CurrentTokenPrice
-			}
-		}
-	}
-	if current <= 0 {
-		q := `
-			SELECT argMax(current_token_price, ts) AS price
-			FROM poolm_top_fees_raw
-			WHERE chain = ? AND protocol_version = ? AND timeframe_minutes = 5 AND pool_address = ?
-		`
-		_ = s.ch.Conn.QueryRow(ctx, q, chain, proto, pool).Scan(&current)
-	}
-	if current <= 0 {
-		return false, nil
-	}
-
-	ma5, sigma5, n5, err := s.priceStats(ctx, chain, proto, pool, 5, 5)
-	if err != nil {
-		return false, err
-	}
-	z5, okZ5 := zScore(current, ma5, sigma5, n5, 4)
-	if !okZ5 {
-		return false, nil
-	}
-	return z5 < -3, nil
 }
 
 func (s *AutoLPService) requestStopLossExit(task *models.StrategyTask, reason string, gasMultiplier float64) error {
@@ -1674,92 +1795,94 @@ func (s *AutoLPService) requestStopLossExit(task *models.StrategyTask, reason st
 	return nil
 }
 
-func (s *AutoLPService) checkVolumeDecay(ctx context.Context, task *models.StrategyTask, threshold float64) (bool, error) {
-	if s.ch == nil || s.ch.Conn == nil || task == nil {
+func (s *AutoLPService) checkVolumeDropWithin(ctx context.Context, task *models.StrategyTask, window time.Duration, dropPct float64) (bool, error) {
+	if s.ch == nil || s.ch.Conn == nil || task == nil || config.AppConfig == nil {
 		return false, nil
 	}
-	if threshold <= 0 {
-		return false, nil
-	}
-	chain := strings.ToLower(strings.TrimSpace(config.AppConfig.AutoLPChain))
-	proto := strings.ToLower(strings.TrimSpace(task.PoolVersion))
-	pool := strings.ToLower(strings.TrimSpace(task.PoolId))
-
-	qCurrent := `
-		SELECT argMax(total_volume, ts) AS vol
-		FROM poolm_top_fees_raw
-		WHERE chain = ? AND protocol_version = ? AND timeframe_minutes = 60 AND pool_address = ?
-	`
-	var currentVol float64
-	if err := s.ch.Conn.QueryRow(ctx, qCurrent, chain, proto, pool).Scan(&currentVol); err != nil {
-		return false, err
-	}
-	if currentVol <= 0 {
-		return false, nil
-	}
-
-	qAvg := `
-		SELECT avg(total_volume) AS avgVol, count() AS n
-		FROM poolm_top_fees_raw
-		WHERE chain = ? AND protocol_version = ? AND timeframe_minutes = 60 AND pool_address = ?
-		  AND ts >= now() - INTERVAL 24 HOUR
-	`
-	var avgVol float64
-	var n uint64
-	if err := s.ch.Conn.QueryRow(ctx, qAvg, chain, proto, pool).Scan(&avgVol, &n); err != nil {
-		return false, err
-	}
-	if n < 10 || avgVol <= 0 {
-		return false, nil
-	}
-
-	return currentVol < avgVol*threshold, nil
-}
-
-func (s *AutoLPService) checkHeatDown(ctx context.Context, task *models.StrategyTask, scans int) (bool, error) {
-	if s.ch == nil || s.ch.Conn == nil || task == nil {
-		return false, nil
-	}
-	if scans <= 1 {
+	if window <= 0 || dropPct <= 0 || dropPct >= 1 {
 		return false, nil
 	}
 
 	chain := strings.ToLower(strings.TrimSpace(config.AppConfig.AutoLPChain))
 	proto := strings.ToLower(strings.TrimSpace(task.PoolVersion))
 	pool := strings.ToLower(strings.TrimSpace(task.PoolId))
+	if chain == "" || proto == "" || pool == "" {
+		return false, nil
+	}
 
+	windowSeconds := int(window.Seconds())
+	if windowSeconds <= 0 {
+		return false, nil
+	}
 	q := fmt.Sprintf(`
-		SELECT transaction_count
+		SELECT
+			argMax(total_volume, ts) AS current_vol,
+			max(total_volume) AS max_vol,
+			count() AS n
 		FROM poolm_top_fees_raw
 		WHERE chain = ? AND protocol_version = ? AND timeframe_minutes = 5 AND pool_address = ?
-		ORDER BY ts DESC
-		LIMIT %d
-	`, scans)
+		  AND ts >= now() - INTERVAL %d SECOND
+	`, windowSeconds)
 
-	rows, err := s.ch.Conn.Query(ctx, q, chain, proto, pool)
-	if err != nil {
+	var currentVol float64
+	var maxVol float64
+	var n uint64
+	if err := s.ch.Conn.QueryRow(ctx, q, chain, proto, pool).Scan(&currentVol, &maxVol, &n); err != nil {
 		return false, err
 	}
-	defer rows.Close()
-
-	var vals []uint64
-	for rows.Next() {
-		var v uint64
-		if err := rows.Scan(&v); err != nil {
-			return false, err
-		}
-		vals = append(vals, v)
-	}
-	if len(vals) < scans {
+	if n < 2 || currentVol <= 0 || maxVol <= 0 {
 		return false, nil
 	}
 
-	for i := 0; i+1 < len(vals); i++ {
-		if vals[i] <= vals[i+1] {
-			return false, nil
-		}
+	return currentVol <= maxVol*(1.0-dropPct), nil
+}
+
+func (s *AutoLPService) checkPriceAndTxDropWithin(ctx context.Context, task *models.StrategyTask, window time.Duration, dropPct float64) (bool, error) {
+	if s.ch == nil || s.ch.Conn == nil || task == nil || config.AppConfig == nil {
+		return false, nil
 	}
-	return true, nil
+	if window <= 0 || dropPct <= 0 || dropPct >= 1 {
+		return false, nil
+	}
+
+	chain := strings.ToLower(strings.TrimSpace(config.AppConfig.AutoLPChain))
+	proto := strings.ToLower(strings.TrimSpace(task.PoolVersion))
+	pool := strings.ToLower(strings.TrimSpace(task.PoolId))
+	if chain == "" || proto == "" || pool == "" {
+		return false, nil
+	}
+
+	windowSeconds := int(window.Seconds())
+	if windowSeconds <= 0 {
+		return false, nil
+	}
+	q := fmt.Sprintf(`
+		SELECT
+			argMax(current_token_price, ts) AS current_price,
+			max(current_token_price) AS max_price,
+			argMax(transaction_count, ts) AS current_tx,
+			max(transaction_count) AS max_tx,
+			count() AS n
+		FROM poolm_top_fees_raw
+		WHERE chain = ? AND protocol_version = ? AND timeframe_minutes = 5 AND pool_address = ?
+		  AND ts >= now() - INTERVAL %d SECOND
+	`, windowSeconds)
+
+	var currentPrice float64
+	var maxPrice float64
+	var currentTx uint64
+	var maxTx uint64
+	var n uint64
+	if err := s.ch.Conn.QueryRow(ctx, q, chain, proto, pool).Scan(&currentPrice, &maxPrice, &currentTx, &maxTx, &n); err != nil {
+		return false, err
+	}
+	if n < 2 || currentPrice <= 0 || maxPrice <= 0 || currentTx == 0 || maxTx == 0 {
+		return false, nil
+	}
+
+	priceDrop := currentPrice <= maxPrice*(1.0-dropPct)
+	txDrop := float64(currentTx) <= float64(maxTx)*(1.0-dropPct)
+	return priceDrop && txDrop, nil
 }
 
 func autoLPStateZh(state string) string {

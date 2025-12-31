@@ -23,6 +23,7 @@ type Bot struct {
 	strategyService  *services.StrategyService
 	autoLPService    *services.AutoLPService
 	smartLPMonitor   *services.SmartLPMonitor
+	smartLPService   *services.SmartLPService
 	autoLPCfgService *services.AutoLPUserConfigService
 	configService    *services.GlobalConfigService
 	taskService      *services.StrategyTaskService
@@ -51,6 +52,7 @@ func NewBot(ch *services.ClickHouseService) (*Bot, error) {
 		strategyService:  services.NewStrategyService(),
 		autoLPService:    services.NewAutoLPService(ch),
 		smartLPMonitor:   services.NewSmartLPMonitor(ch),
+		smartLPService:   services.NewSmartLPService(ch),
 		autoLPCfgService: services.NewAutoLPUserConfigService(),
 		configService:    services.NewGlobalConfigService(),
 		taskService:      services.NewStrategyTaskService(),
@@ -125,6 +127,10 @@ func (b *Bot) setCommands() error {
 		{
 			Command:     "transactions",
 			Description: "查看交易历史",
+		},
+		{
+			Command:     "smart_money",
+			Description: "Smart Money 加LP榜",
 		},
 	}
 
@@ -273,6 +279,8 @@ func (b *Bot) handleCommand(message *tgbotapi.Message, user *models.User) {
 		b.handleCancel(message, user)
 	case "admin":
 		b.handleAdmin(message, user)
+	case "smart_money":
+		b.handleSmartMoney(message, user)
 	default:
 		b.sendMessage(message.Chat.ID, "未知命令。使用 /help 查看可用命令。")
 	}

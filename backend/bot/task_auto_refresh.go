@@ -18,12 +18,18 @@ type AutoRefreshSession struct {
 	UserID    uint
 	StopChan  chan struct{}
 	Active    bool
+	StartedAt time.Time
 }
 
 var (
 	// Map: chatID_messageID -> session
 	autoRefreshSessions = make(map[string]*AutoRefreshSession)
 	autoRefreshMutex    sync.RWMutex
+)
+
+const (
+	taskAutoRefreshInterval    = 30 * time.Second
+	taskAutoRefreshMaxDuration = 30 * time.Minute
 )
 
 // startTaskAutoRefresh starts auto-refreshing a task card
@@ -47,6 +53,7 @@ func (b *Bot) startTaskAutoRefresh(chatID int64, messageID int, taskID, userID u
 		UserID:    userID,
 		StopChan:  make(chan struct{}),
 		Active:    true,
+		StartedAt: time.Now(),
 	}
 	autoRefreshSessions[key] = session
 	autoRefreshMutex.Unlock()
@@ -72,18 +79,51 @@ func (b *Bot) stopTaskAutoRefresh(chatID int64, messageID int) {
 
 // autoRefreshLoop refreshes task card every 30 seconds
 func (b *Bot) autoRefreshLoop(session *AutoRefreshSession) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(taskAutoRefreshInterval)
 	defer ticker.Stop()
+
+	expireTimer := time.NewTimer(taskAutoRefreshMaxDuration)
+	defer expireTimer.Stop()
 
 	for {
 		select {
 		case <-session.StopChan:
 			log.Printf("[Bot] Auto-refresh loop stopped for task #%d", session.TaskID)
 			return
+		case <-expireTimer.C:
+			b.onAutoRefreshExpired(session)
+			return
 		case <-ticker.C:
 			b.refreshTaskCard(session)
 		}
 	}
+}
+
+func (b *Bot) onAutoRefreshExpired(session *AutoRefreshSession) {
+	if session == nil {
+		return
+	}
+
+	key := fmt.Sprintf("%d_%d", session.ChatID, session.MessageID)
+
+	autoRefreshMutex.RLock()
+	current := autoRefreshSessions[key]
+	isActive := current == session && session.Active
+	autoRefreshMutex.RUnlock()
+
+	// Session already stopped/replaced; don't spam user with stale timeout message.
+	if !isActive {
+		return
+	}
+
+	b.stopTaskAutoRefresh(session.ChatID, session.MessageID)
+
+	if task, err := b.taskService.GetByID(session.UserID, session.TaskID); err == nil && task != nil {
+		_ = b.editMessageText(session.ChatID, session.MessageID, b.formatTaskCardWithRefreshExpired(task))
+		_ = b.editMessageReplyMarkup(session.ChatID, session.MessageID, b.taskKeyboard(task))
+	}
+
+	b.sendMessage(session.ChatID, fmt.Sprintf("⏸️ 任务 #%d 卡片已自动刷新超过 30 分钟，已停止刷新。请重新查看仓位信息以重新开始自动刷新。", session.TaskID))
 }
 
 // refreshTaskCard updates the task card message
