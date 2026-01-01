@@ -216,6 +216,9 @@ V1.0 不重复造轮子，复用现有 `StrategyService`：
 
 - `AUTO_LP_GUARD_WINDOW_SECONDS`：窗口秒数（默认 120 秒）
 - `AUTO_LP_GUARD_VOLUME_DROP_PERCENT`：5m 成交量相对峰值回落比例（默认 0.30=30%）
+- `AUTO_LP_GUARD_NO_EXIT_MIN_FEE_RATE_5M`：若 5m 手续费/TVL（total_fees/current_pool_value，%）高于阈值，则不因“成交量回落”触发撤退（默认 0=关闭）
+- `AUTO_LP_GUARD_LOW_FEE_RATE_5M`：若 5m 手续费/TVL 低于阈值，则“成交量回落”改用低费率阈值（默认 0=关闭）
+- `AUTO_LP_GUARD_VOLUME_DROP_PERCENT_LOW_FEE`：低手续费率时的成交量峰值回落比例（默认 0=不启用）
 - `AUTO_LP_GUARD_PRICE_TX_DROP_PERCENT`：价格与交易笔数相对峰值回落比例（默认 0.10=10%）
 
 ClickHouse：

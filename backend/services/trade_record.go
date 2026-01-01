@@ -176,6 +176,130 @@ func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, cl
 	return database.DB.Model(&models.TradeRecord{}).Where("id = ?", rec.ID).Updates(updates).Error
 }
 
+// ApplyExitDelta accumulates exit-phase deltas (received USDT + gas spent) into the latest trade record.
+// It prefers the latest OPEN record; if none exists, it falls back to the latest record for this task
+// (so a previously-closed-too-early record can still be corrected across retries).
+//
+// When finalize=true, it will also mark the record as CLOSED and recompute Profit/TotalGasUSDT.
+func (s *TradeRecordService) ApplyExitDelta(
+	task *models.StrategyTask,
+	closeTxHash string,
+	closeUSDTReceivedDeltaWei *big.Int,
+	closeGasSpentDeltaWei *big.Int,
+	finalize bool,
+	bnbPriceUSDT float64,
+) (*models.TradeRecord, error) {
+	if task == nil {
+		return nil, fmt.Errorf("task is nil")
+	}
+
+	var rec models.TradeRecord
+	err := database.DB.
+		Where("user_id = ? AND task_id = ? AND status = ?", task.UserID, task.ID, models.TradeStatusOpen).
+		Order("opened_at DESC").
+		First(&rec).Error
+	if err != nil {
+		// Fallback for repairing already-closed records (e.g. swap failed then later retried).
+		err2 := database.DB.
+			Where("user_id = ? AND task_id = ?", task.UserID, task.ID).
+			Order("opened_at DESC").
+			First(&rec).Error
+		if err2 != nil {
+			return nil, err2
+		}
+	}
+
+	curReceived, _ := parseBigInt(rec.CloseUSDTReceived)
+	if curReceived == nil {
+		curReceived = big.NewInt(0)
+	}
+	curGas, _ := parseBigInt(rec.CloseGasSpentWei)
+	if curGas == nil {
+		curGas = big.NewInt(0)
+	}
+
+	deltaReceived := nonNilBigInt(closeUSDTReceivedDeltaWei)
+	if deltaReceived.Sign() < 0 {
+		deltaReceived = big.NewInt(0)
+	}
+	deltaGas := nonNilBigInt(closeGasSpentDeltaWei)
+	if deltaGas.Sign() < 0 {
+		deltaGas = big.NewInt(0)
+	}
+
+	newReceived := new(big.Int).Add(curReceived, deltaReceived)
+	if newReceived.Sign() < 0 {
+		newReceived = big.NewInt(0)
+	}
+	newGas := new(big.Int).Add(curGas, deltaGas)
+	if newGas.Sign() < 0 {
+		newGas = big.NewInt(0)
+	}
+
+	closeTxHash = strings.TrimSpace(closeTxHash)
+
+	updates := map[string]interface{}{
+		"close_usdt_received": newReceived.String(),
+		"close_gas_spent_wei": newGas.String(),
+	}
+	if strings.TrimSpace(rec.CloseTxHash) == "" && closeTxHash != "" {
+		updates["close_tx_hash"] = closeTxHash
+		rec.CloseTxHash = closeTxHash
+	}
+
+	openSpent, _ := parseBigInt(rec.OpenUSDTSpent)
+	if openSpent == nil {
+		openSpent = big.NewInt(0)
+	}
+	fallbackOpen := false
+	if openSpent.Sign() <= 0 && task.AmountUSDT > 0 {
+		if fallback, err := floatUSDTToWei(task.AmountUSDT); err == nil && fallback.Sign() > 0 {
+			openSpent = fallback
+			fallbackOpen = true
+		}
+	}
+	if fallbackOpen {
+		updates["open_usdt_spent"] = openSpent.String()
+		rec.OpenUSDTSpent = openSpent.String()
+	}
+
+	if finalize {
+		openGasWei, _ := parseBigInt(rec.OpenGasSpentWei)
+		if openGasWei == nil {
+			openGasWei = big.NewInt(0)
+		}
+
+		totalGasWei := new(big.Int).Add(openGasWei, newGas)
+		totalGasUSDT := calcGasUSDT(totalGasWei, bnbPriceUSDT)
+
+		profit := new(big.Int).Sub(newReceived, openSpent)
+		profit.Sub(profit, totalGasUSDT)
+		profitPct := calcProfitPct(profit, openSpent)
+
+		now := time.Now()
+		updates["closed_at"] = &now
+		updates["total_gas_usdt"] = safeBigIntString(totalGasUSDT)
+		updates["profit_usdt"] = profit.String()
+		updates["profit_pct"] = profitPct
+		updates["status"] = models.TradeStatusClosed
+
+		rec.ClosedAt = &now
+		rec.TotalGasUSDT = safeBigIntString(totalGasUSDT)
+		rec.ProfitUSDT = profit.String()
+		rec.ProfitPct = profitPct
+		rec.Status = models.TradeStatusClosed
+	}
+
+	if err := database.DB.Model(&models.TradeRecord{}).Where("id = ?", rec.ID).Updates(updates).Error; err != nil {
+		return nil, err
+	}
+
+	rec.CloseUSDTReceived = newReceived.String()
+	rec.CloseGasSpentWei = newGas.String()
+
+	return &rec, nil
+}
+
 // calcGasUSDT 将 BNB Gas (wei) 转换为 USDT (wei)
 func calcGasUSDT(gasWei *big.Int, bnbPriceUSDT float64) *big.Int {
 	if gasWei == nil || gasWei.Sign() <= 0 || bnbPriceUSDT <= 0 {

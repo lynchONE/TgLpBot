@@ -1719,6 +1719,24 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 	if volumeDropPct <= 0 || volumeDropPct >= 1 {
 		volumeDropPct = 0.30
 	}
+
+	volumeDropPctLow := config.AppConfig.AutoLPGuardVolumeDropPercentLow
+	if volumeDropPctLow > 1 && volumeDropPctLow <= 100 {
+		volumeDropPctLow = volumeDropPctLow / 100
+	}
+	if volumeDropPctLow <= 0 || volumeDropPctLow >= 1 {
+		volumeDropPctLow = 0
+	}
+
+	noExitMinFeeRate5m := config.AppConfig.AutoLPGuardNoExitMinFeeRate5m
+	if noExitMinFeeRate5m < 0 {
+		noExitMinFeeRate5m = 0
+	}
+	lowFeeRate5m := config.AppConfig.AutoLPGuardLowFeeRate5m
+	if lowFeeRate5m < 0 {
+		lowFeeRate5m = 0
+	}
+
 	priceTxDropPct := config.AppConfig.AutoLPGuardPriceTxDropPercent
 	if priceTxDropPct > 1 && priceTxDropPct <= 100 {
 		priceTxDropPct = priceTxDropPct / 100
@@ -1737,12 +1755,34 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 			continue
 		}
 
-		if ok, err := s.checkVolumeDropWithin(ctx, task, window, volumeDropPct); err == nil && ok {
-			reason := fmt.Sprintf("5m 成交量 %ds 内较峰值下跌 >=%.0f%%", windowSeconds, volumeDropPct*100)
-			if err := s.requestStopLossExit(task, reason, 1.0); err == nil {
-				_ = NewAutoLPEventService().Record(task, models.AutoLPEventGuardExit, reason)
+		effectiveVolDropPct := volumeDropPct
+		skipVolumeExit := false
+
+		if noExitMinFeeRate5m > 0 || lowFeeRate5m > 0 {
+			feeRatePct, okFee := poolM5mFeeRatePctFromSnapshot(snap, task)
+			if !okFee {
+				if feeRatePct, okFee, _ = s.latestFeeRatePctWithin(ctx, task, window); okFee {
+					// noop
+				}
 			}
-			continue
+
+			if okFee {
+				if noExitMinFeeRate5m > 0 && feeRatePct > noExitMinFeeRate5m {
+					skipVolumeExit = true
+				} else if lowFeeRate5m > 0 && feeRatePct < lowFeeRate5m && volumeDropPctLow > 0 {
+					effectiveVolDropPct = volumeDropPctLow
+				}
+			}
+		}
+
+		if !skipVolumeExit {
+			if ok, err := s.checkVolumeDropWithin(ctx, task, window, effectiveVolDropPct); err == nil && ok {
+				reason := fmt.Sprintf("5m 成交量 %ds 内较峰值下跌 >=%.0f%%", windowSeconds, effectiveVolDropPct*100)
+				if err := s.requestStopLossExit(task, reason, 1.0); err == nil {
+					_ = NewAutoLPEventService().Record(task, models.AutoLPEventGuardExit, reason)
+				}
+				continue
+			}
 		}
 
 		if ok, err := s.checkPriceAndTxDropWithin(ctx, task, window, priceTxDropPct); err == nil && ok {
@@ -1753,6 +1793,68 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 			continue
 		}
 	}
+}
+
+func poolM5mFeeRatePctFromSnapshot(snap *poolMSnapshot, task *models.StrategyTask) (float64, bool) {
+	if snap == nil || task == nil {
+		return 0, false
+	}
+	proto := strings.ToLower(strings.TrimSpace(task.PoolVersion))
+	pool := strings.ToLower(strings.TrimSpace(task.PoolId))
+	if proto == "" || pool == "" {
+		return 0, false
+	}
+	tfs, ok := snap.data[poolKey{proto: proto, addr: pool}]
+	if !ok {
+		return 0, false
+	}
+	p5, ok := tfs[5]
+	if !ok || p5.CurrentPoolValue <= 0 {
+		return 0, false
+	}
+	return (p5.TotalFees / p5.CurrentPoolValue) * 100, true
+}
+
+func (s *AutoLPService) latestFeeRatePctWithin(ctx context.Context, task *models.StrategyTask, window time.Duration) (float64, bool, error) {
+	if s.ch == nil || s.ch.Conn == nil || task == nil || config.AppConfig == nil {
+		return 0, false, nil
+	}
+	if window <= 0 {
+		return 0, false, nil
+	}
+
+	chain := strings.ToLower(strings.TrimSpace(config.AppConfig.AutoLPChain))
+	proto := strings.ToLower(strings.TrimSpace(task.PoolVersion))
+	pool := strings.ToLower(strings.TrimSpace(task.PoolId))
+	if chain == "" || proto == "" || pool == "" {
+		return 0, false, nil
+	}
+
+	windowSeconds := int(window.Seconds())
+	if windowSeconds <= 0 {
+		return 0, false, nil
+	}
+
+	q := fmt.Sprintf(`
+		SELECT
+			argMax(total_fees, ts) AS current_fees,
+			argMax(current_pool_value, ts) AS current_tvl,
+			count() AS n
+		FROM poolm_top_fees_raw
+		WHERE chain = ? AND protocol_version = ? AND timeframe_minutes = 5 AND pool_address = ?
+		  AND ts >= now() - INTERVAL %d SECOND
+	`, windowSeconds)
+
+	var currentFees float64
+	var currentTVL float64
+	var n uint64
+	if err := s.ch.Conn.QueryRow(ctx, q, chain, proto, pool).Scan(&currentFees, &currentTVL, &n); err != nil {
+		return 0, false, err
+	}
+	if n < 1 || currentTVL <= 0 {
+		return 0, false, nil
+	}
+	return (currentFees / currentTVL) * 100, true, nil
 }
 
 func (s *AutoLPService) requestStopLossExit(task *models.StrategyTask, reason string, gasMultiplier float64) error {

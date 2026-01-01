@@ -3,6 +3,7 @@ package services
 import (
 	"TgLpBot/blockchain"
 	"TgLpBot/config"
+	"TgLpBot/database"
 	"TgLpBot/models"
 	"fmt"
 	"math/big"
@@ -66,13 +67,69 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 
 	txHashes := make([]string, 0, 2)
 
+	openSpentWei, _ := parseBigInt(rec.OpenUSDTSpent)
+	if openSpentWei == nil {
+		openSpentWei = big.NewInt(0)
+	}
+	openGasWei, _ := parseBigInt(rec.OpenGasSpentWei)
+	if openGasWei == nil {
+		openGasWei = big.NewInt(0)
+	}
+
 	if dust0.Sign() > 0 {
 		if token0Addr != usdtAddr {
+			bnbBefore, _ := blockchain.GetBalance(walletAddr)
+			if bnbBefore == nil {
+				bnbBefore = big.NewInt(0)
+			}
+			usdtBefore, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
+			if usdtBefore == nil {
+				usdtBefore = big.NewInt(0)
+			}
 			txHash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, token0Addr, usdtAddr, dust0, task.SlippageTolerance)
 			if err != nil {
 				return txHashes, err
 			}
 			if txHash != "" {
+				bnbAfter, _ := blockchain.GetBalance(walletAddr)
+				if bnbAfter == nil {
+					bnbAfter = big.NewInt(0)
+				}
+				gasSpentWei := new(big.Int).Sub(bnbBefore, bnbAfter)
+				if gasSpentWei.Sign() < 0 {
+					gasSpentWei = big.NewInt(0)
+				}
+				if gasSpentWei.Sign() > 0 {
+					openGasWei.Add(openGasWei, gasSpentWei)
+				}
+
+				usdtAfter, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
+				if usdtAfter == nil {
+					usdtAfter = big.NewInt(0)
+				}
+				usdtDelta := new(big.Int).Sub(usdtAfter, usdtBefore)
+				if usdtDelta.Sign() < 0 {
+					usdtDelta = big.NewInt(0)
+				}
+				if receipt, rerr := s.getReceiptWithRetry(common.HexToHash(txHash)); rerr == nil && receipt != nil {
+					if d := receiptTokenTransferDelta(receipt, usdtAddr, walletAddr); d != nil && d.Sign() > 0 {
+						usdtDelta = d
+					}
+				}
+				if usdtDelta.Sign() > 0 && openSpentWei.Sign() > 0 {
+					openSpentWei.Sub(openSpentWei, usdtDelta)
+					if openSpentWei.Sign() < 0 {
+						openSpentWei = big.NewInt(0)
+					}
+				}
+				_ = database.DB.Model(&models.TradeRecord{}).Where("id = ?", rec.ID).Updates(map[string]interface{}{
+					"open_dust0":         "0",
+					"open_usdt_spent":    openSpentWei.String(),
+					"open_gas_spent_wei": openGasWei.String(),
+				}).Error
+				rec.OpenDust0 = "0"
+				rec.OpenUSDTSpent = openSpentWei.String()
+				rec.OpenGasSpentWei = openGasWei.String()
 				sym := strings.TrimSpace(task.Token0Symbol)
 				if sym == "" {
 					sym = token0Addr.Hex()
@@ -84,11 +141,58 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 
 	if dust1.Sign() > 0 {
 		if token1Addr != usdtAddr {
+			bnbBefore, _ := blockchain.GetBalance(walletAddr)
+			if bnbBefore == nil {
+				bnbBefore = big.NewInt(0)
+			}
+			usdtBefore, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
+			if usdtBefore == nil {
+				usdtBefore = big.NewInt(0)
+			}
 			txHash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, token1Addr, usdtAddr, dust1, task.SlippageTolerance)
 			if err != nil {
 				return txHashes, err
 			}
 			if txHash != "" {
+				bnbAfter, _ := blockchain.GetBalance(walletAddr)
+				if bnbAfter == nil {
+					bnbAfter = big.NewInt(0)
+				}
+				gasSpentWei := new(big.Int).Sub(bnbBefore, bnbAfter)
+				if gasSpentWei.Sign() < 0 {
+					gasSpentWei = big.NewInt(0)
+				}
+				if gasSpentWei.Sign() > 0 {
+					openGasWei.Add(openGasWei, gasSpentWei)
+				}
+
+				usdtAfter, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
+				if usdtAfter == nil {
+					usdtAfter = big.NewInt(0)
+				}
+				usdtDelta := new(big.Int).Sub(usdtAfter, usdtBefore)
+				if usdtDelta.Sign() < 0 {
+					usdtDelta = big.NewInt(0)
+				}
+				if receipt, rerr := s.getReceiptWithRetry(common.HexToHash(txHash)); rerr == nil && receipt != nil {
+					if d := receiptTokenTransferDelta(receipt, usdtAddr, walletAddr); d != nil && d.Sign() > 0 {
+						usdtDelta = d
+					}
+				}
+				if usdtDelta.Sign() > 0 && openSpentWei.Sign() > 0 {
+					openSpentWei.Sub(openSpentWei, usdtDelta)
+					if openSpentWei.Sign() < 0 {
+						openSpentWei = big.NewInt(0)
+					}
+				}
+				_ = database.DB.Model(&models.TradeRecord{}).Where("id = ?", rec.ID).Updates(map[string]interface{}{
+					"open_dust1":         "0",
+					"open_usdt_spent":    openSpentWei.String(),
+					"open_gas_spent_wei": openGasWei.String(),
+				}).Error
+				rec.OpenDust1 = "0"
+				rec.OpenUSDTSpent = openSpentWei.String()
+				rec.OpenGasSpentWei = openGasWei.String()
 				sym := strings.TrimSpace(task.Token1Symbol)
 				if sym == "" {
 					sym = token1Addr.Hex()

@@ -130,7 +130,10 @@ type Config struct {
 	AutoLPAllowEntrySwap            bool
 	AutoLPGuardWindowSeconds        int
 	AutoLPGuardVolumeDropPercent    float64
+	AutoLPGuardVolumeDropPercentLow float64
 	AutoLPGuardPriceTxDropPercent   float64
+	AutoLPGuardNoExitMinFeeRate5m   float64
+	AutoLPGuardLowFeeRate5m         float64
 	AutoLPEmergencyGasMultiplier    float64
 	AutoLPWidthSidewaysPercent      float64
 	AutoLPWidthMildUptrendPercent   float64
@@ -192,7 +195,10 @@ func LoadConfig() error {
 	autoLPMaxCandidates, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_MAX_CANDIDATES", "20")))
 	autoLPGuardWindowSeconds, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_GUARD_WINDOW_SECONDS", "120")))
 	autoLPGuardVolumeDropPct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_VOLUME_DROP_PERCENT", "0.30")), 64)
+	autoLPGuardVolumeDropPctLow, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_VOLUME_DROP_PERCENT_LOW_FEE", "0")), 64)
 	autoLPGuardPriceTxDropPct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_PRICE_TX_DROP_PERCENT", "0.10")), 64)
+	autoLPGuardNoExitMinFeeRate5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_NO_EXIT_MIN_FEE_RATE_5M", "0")), 64)
+	autoLPGuardLowFeeRate5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_LOW_FEE_RATE_5M", "0")), 64)
 	autoLPEmergencyGasMult, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_EMERGENCY_GAS_MULTIPLIER", "2.0")), 64)
 	autoLPDebug := getEnvBool("AUTO_LP_DEBUG", false)
 	autoLPWidthSideways, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_SIDEWAYS_PERCENT", "2.0")), 64)
@@ -327,7 +333,10 @@ func LoadConfig() error {
 		AutoLPAllowEntrySwap:            getEnvBool("AUTO_LP_ALLOW_ENTRY_SWAP", false),
 		AutoLPGuardWindowSeconds:        autoLPGuardWindowSeconds,
 		AutoLPGuardVolumeDropPercent:    autoLPGuardVolumeDropPct,
+		AutoLPGuardVolumeDropPercentLow: autoLPGuardVolumeDropPctLow,
 		AutoLPGuardPriceTxDropPercent:   autoLPGuardPriceTxDropPct,
+		AutoLPGuardNoExitMinFeeRate5m:   autoLPGuardNoExitMinFeeRate5m,
+		AutoLPGuardLowFeeRate5m:         autoLPGuardLowFeeRate5m,
 		AutoLPEmergencyGasMultiplier:    autoLPEmergencyGasMult,
 		AutoLPWidthSidewaysPercent:      autoLPWidthSideways,
 		AutoLPWidthMildUptrendPercent:   autoLPWidthMildUp,

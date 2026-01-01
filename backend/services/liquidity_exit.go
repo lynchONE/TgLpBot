@@ -332,7 +332,7 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 			}
 		}
 
-		sweepHashes, err := s.swapWalletTokensToUSDT(privateKey, walletAddr, usdtAddr, task, expectedMinBalances)
+		sweepHashes, err := s.swapWalletTokensToUSDT(privateKey, walletAddr, usdtAddr, task, expectedMinBalances, sweepPreBalances)
 		if len(sweepHashes) > 0 {
 			txHashes = append(txHashes, sweepHashes...)
 		}
@@ -374,40 +374,58 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 		}
 	}
 
-	// 获取 BNB 价格用于计算 Gas 的 USDT 价值
-	bnbPriceUSDT := NewPnLService().GetBNBPriceUSDT()
+	finalizeTradeRecord := exitErr == nil && sweepErr == nil
+	shouldUpdateRecords := finalizeTradeRecord || actualReceived.Sign() > 0 || gasSpent.Sign() > 0 || mainHash != ""
 
-	// 即使有错误，只要有实际收到的金额或有交易哈希，就更新交易记录
-	// 这样可以避免因部分失败导致撤出金额记录为 0 的问题
-	if actualReceived.Sign() > 0 || mainHash != "" {
-		_ = NewTradeRecordService().CloseLatestOpenRecord(task, mainHash, actualReceived, gasSpent, bnbPriceUSDT)
+	var tradeRec *models.TradeRecord
+	if shouldUpdateRecords {
+		trSvc := NewTradeRecordService()
+		bnbPriceUSDT := 0.0
+		if finalizeTradeRecord {
+			// Only needed when finalizing the record (Profit/TotalGasUSDT computation).
+			bnbPriceUSDT = NewPnLService().GetBNBPriceUSDT()
+		}
+		if rec, err := trSvc.ApplyExitDelta(task, mainHash, actualReceived, gasSpent, finalizeTradeRecord, bnbPriceUSDT); err == nil {
+			tradeRec = rec
+		} else if finalizeTradeRecord {
+			// Legacy fallback: create a closed record so we don't lose the exit summary.
+			_ = trSvc.CloseLatestOpenRecord(task, mainHash, actualReceived, gasSpent, bnbPriceUSDT)
+		}
+	}
 
-		// 更新或创建 Transaction 记录
-		if mainHash != "" {
-			// 先尝试更新（swapDeltas=true 时 exitV3ToUSDT 已创建记录）
-			result := database.DB.Model(&models.Transaction{}).Where("tx_hash = ? AND task_id = ?", mainHash, task.ID).Updates(map[string]interface{}{
-				"amount_out": actualReceived.String(),
-			})
-			// 如果没有找到记录则创建新记录（sweepWallet 模式）
-			if result.RowsAffected == 0 {
-				usdtAddr := common.HexToAddress(config.AppConfig.USDTAddress)
-				txRecord := models.Transaction{
-					UserID:          task.UserID,
-					TaskID:          task.ID,
-					TxHash:          mainHash,
-					Type:            models.TxTypeRemoveLiquidity,
-					Status:          models.TxStatusConfirmed,
-					FromAddress:     walletAddr.Hex(),
-					TokenOutAddress: usdtAddr.Hex(),
-					AmountIn:        "0",
-					AmountOut:       actualReceived.String(),
-					CreatedAt:       time.Now(),
-				}
-				if err := database.DB.Create(&txRecord).Error; err != nil {
-					log.Printf("[Liquidity] Warning: create exit transaction record failed: %v", err)
-				}
-			} else if result.Error != nil {
-				log.Printf("[Liquidity] Warning: update exit transaction amount_out failed: %v", result.Error)
+	// Update/Create Transaction record (best-effort). Use cumulative amount when available.
+	txHash := strings.TrimSpace(mainHash)
+	amountOut := actualReceived.String()
+	if tradeRec != nil {
+		if strings.TrimSpace(tradeRec.CloseTxHash) != "" {
+			txHash = strings.TrimSpace(tradeRec.CloseTxHash)
+		}
+		if strings.TrimSpace(tradeRec.CloseUSDTReceived) != "" {
+			amountOut = strings.TrimSpace(tradeRec.CloseUSDTReceived)
+		}
+	}
+	if txHash != "" && shouldUpdateRecords {
+		var existing models.Transaction
+		if err := database.DB.Where("tx_hash = ?", txHash).First(&existing).Error; err == nil {
+			if err := database.DB.Model(&existing).Updates(map[string]interface{}{"amount_out": amountOut}).Error; err != nil {
+				log.Printf("[Liquidity] Warning: update exit transaction amount_out failed: %v", err)
+			}
+		} else {
+			usdtAddr := common.HexToAddress(config.AppConfig.USDTAddress)
+			txRecord := models.Transaction{
+				UserID:          task.UserID,
+				TaskID:          task.ID,
+				TxHash:          txHash,
+				Type:            models.TxTypeRemoveLiquidity,
+				Status:          models.TxStatusConfirmed,
+				FromAddress:     walletAddr.Hex(),
+				TokenOutAddress: usdtAddr.Hex(),
+				AmountIn:        "0",
+				AmountOut:       amountOut,
+				CreatedAt:       time.Now(),
+			}
+			if err := database.DB.Create(&txRecord).Error; err != nil {
+				log.Printf("[Liquidity] Warning: create exit transaction record failed: %v", err)
 			}
 		}
 	}
@@ -476,12 +494,78 @@ func parseZapOutV3Result(receipt *types.Receipt, zapAddr common.Address, user co
 	return nil, nil, false
 }
 
+type otherTaskDustRow struct {
+	Token0Address string `gorm:"column:token0_address"`
+	Token1Address string `gorm:"column:token1_address"`
+	OpenDust0     string `gorm:"column:open_dust0"`
+	OpenDust1     string `gorm:"column:open_dust1"`
+}
+
+// reservedDustForOtherOpenTasks returns the sum of recorded dust amounts (OpenDust0/OpenDust1)
+// for other open tasks (same user, TradeStatusOpen) keyed by token address.
+// It is best-effort: query failures are returned to callers so they can decide whether to ignore.
+func (s *LiquidityService) reservedDustForOtherOpenTasks(userID uint, excludeTaskID uint, tokens []common.Address) (map[common.Address]*big.Int, error) {
+	reserved := make(map[common.Address]*big.Int)
+	if userID == 0 || len(tokens) == 0 {
+		return reserved, nil
+	}
+
+	tokenSet := make(map[common.Address]struct{}, len(tokens))
+	for _, t := range tokens {
+		if t == (common.Address{}) {
+			continue
+		}
+		tokenSet[t] = struct{}{}
+	}
+	if len(tokenSet) == 0 {
+		return reserved, nil
+	}
+
+	var rows []otherTaskDustRow
+	err := database.DB.
+		Table("trade_records tr").
+		Select("st.token0_address AS token0_address, st.token1_address AS token1_address, tr.open_dust0 AS open_dust0, tr.open_dust1 AS open_dust1").
+		Joins("JOIN strategy_tasks st ON st.id = tr.task_id").
+		Where("tr.user_id = ? AND tr.status = ? AND tr.task_id <> ?", userID, models.TradeStatusOpen, excludeTaskID).
+		Scan(&rows).Error
+	if err != nil {
+		return reserved, err
+	}
+
+	add := func(addrStr string, dustStr string) {
+		if !common.IsHexAddress(addrStr) {
+			return
+		}
+		addr := common.HexToAddress(strings.TrimSpace(addrStr))
+		if _, ok := tokenSet[addr]; !ok {
+			return
+		}
+		dust, perr := parseBigInt(dustStr)
+		if perr != nil || dust == nil || dust.Sign() <= 0 {
+			return
+		}
+		if cur := reserved[addr]; cur != nil {
+			cur.Add(cur, dust)
+			return
+		}
+		reserved[addr] = cloneBig(dust)
+	}
+
+	for _, r := range rows {
+		add(r.Token0Address, r.OpenDust0)
+		add(r.Token1Address, r.OpenDust1)
+	}
+
+	return reserved, nil
+}
+
 func (s *LiquidityService) swapWalletTokensToUSDT(
 	privateKey *ecdsa.PrivateKey,
 	walletAddr common.Address,
 	usdtAddr common.Address,
 	task *models.StrategyTask,
 	expectedMinBalances map[common.Address]*big.Int,
+	preBalances map[common.Address]*big.Int,
 ) ([]string, error) {
 	if task == nil {
 		return nil, fmt.Errorf("task is nil")
@@ -518,8 +602,19 @@ func (s *LiquidityService) swapWalletTokensToUSDT(
 		targets = append(targets, sweepToken{addr: tok.addr, symbol: tok.symbol})
 	}
 
+	targetAddrs := make([]common.Address, 0, len(targets))
+	for _, tok := range targets {
+		targetAddrs = append(targetAddrs, tok.addr)
+	}
+	reservedOtherDust, rerr := s.reservedDustForOtherOpenTasks(task.UserID, task.ID, targetAddrs)
+	if rerr != nil {
+		log.Printf("[Liquidity] Warning: 读取其他任务残余余额失败，可能导致收益归属不准确: %v", rerr)
+		reservedOtherDust = nil
+	}
+
 	var txHashes []string
 	var errs []error
+	expectedRemaining := make(map[common.Address]*big.Int)
 	for _, tok := range targets {
 		label := tok.symbol
 		if label == "" {
@@ -554,13 +649,34 @@ func (s *LiquidityService) swapWalletTokensToUSDT(
 			continue
 		}
 
-		swapTxHash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, tok.addr, usdtAddr, bal, task.SlippageTolerance)
+		// Keep other open tasks' recorded dust for this token in the wallet, so one task's sweep
+		// won't accidentally "consume" other tasks' residuals and mis-attribute the PnL.
+		keep := big.NewInt(0)
+		if reservedOtherDust != nil {
+			if v := reservedOtherDust[tok.addr]; v != nil && v.Sign() > 0 {
+				keep = cloneBig(v)
+			}
+		}
+		if preBalances != nil {
+			if pre := preBalances[tok.addr]; pre != nil && pre.Sign() > 0 && keep.Cmp(pre) > 0 {
+				// Only reserve what existed before this exit; exit deltas always belong to this task.
+				keep = cloneBig(pre)
+			}
+		}
+		expectedRemaining[tok.addr] = cloneBig(keep)
+
+		toSwap := new(big.Int).Sub(cloneBig(bal), keep)
+		if toSwap.Sign() <= 0 {
+			continue
+		}
+
+		swapTxHash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, tok.addr, usdtAddr, toSwap, task.SlippageTolerance)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("清仓兑换 %s→USDT 失败 (%s) amount=%s: %w", label, tok.addr.Hex(), bal.String(), err))
+			errs = append(errs, fmt.Errorf("清仓兑换 %s→USDT 失败 (%s) amount=%s: %w", label, tok.addr.Hex(), toSwap.String(), err))
 			continue
 		}
 		if swapTxHash == "" {
-			errs = append(errs, fmt.Errorf("清仓兑换 %s→USDT 返回空交易哈希 (%s) amount=%s", label, tok.addr.Hex(), bal.String()))
+			errs = append(errs, fmt.Errorf("清仓兑换 %s→USDT 返回空交易哈希 (%s) amount=%s", label, tok.addr.Hex(), toSwap.String()))
 			continue
 		}
 
@@ -582,9 +698,13 @@ func (s *LiquidityService) swapWalletTokensToUSDT(
 			log.Printf("[Liquidity] Warning: 校验清仓后 %s 余额失败 (%s): %v", label, tok.addr.Hex(), err)
 			continue
 		}
-		if bal != nil && bal.Sign() > 0 {
+		keep := expectedRemaining[tok.addr]
+		if keep == nil {
+			keep = big.NewInt(0)
+		}
+		if bal != nil && bal.Sign() > 0 && bal.Cmp(keep) > 0 {
 			// 仅打印警告日志，不返回错误，避免触发重试机制导致同一代币被多次兑换
-			log.Printf("[Liquidity] Warning: 清仓兑换后仍有 %s 余额未兑换 (%s): %s（可能是 swap 滑点或小额残余）", label, tok.addr.Hex(), bal.String())
+			log.Printf("[Liquidity] Warning: 清仓兑换后仍有 %s 余额未兑换 (%s): %s（预留 %s；可能是 swap 滑点或小额残余）", label, tok.addr.Hex(), bal.String(), keep.String())
 		}
 	}
 
