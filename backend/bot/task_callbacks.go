@@ -21,6 +21,16 @@ func parseTaskID(prefix, data string) (uint, error) {
 	return uint(id64), nil
 }
 
+func taskDeleteConfirmKeyboard(taskID uint) tgbotapi.InlineKeyboardMarkup {
+	idStr := fmt.Sprintf("%d", taskID)
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("⚠️ 确认删除", "task_confirm_delete_"+idStr),
+			tgbotapi.NewInlineKeyboardButtonData("取消", "task_cancel_delete_"+idStr),
+		),
+	)
+}
+
 func (b *Bot) handleTaskView(query *tgbotapi.CallbackQuery, user *models.User) {
 	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
 	taskID, err := parseTaskID("task_view_", query.Data)
@@ -40,6 +50,104 @@ func (b *Bot) handleTaskView(query *tgbotapi.CallbackQuery, user *models.User) {
 		// Start auto-refresh for this message
 		b.startTaskAutoRefresh(query.Message.Chat.ID, msg.MessageID, task.ID, user.ID)
 	}
+}
+
+func (b *Bot) handleTaskDelete(query *tgbotapi.CallbackQuery, user *models.User) {
+	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
+	chatID := user.TelegramID
+	messageID := 0
+	if query.Message != nil {
+		chatID = query.Message.Chat.ID
+		messageID = query.Message.MessageID
+		b.stopTaskAutoRefresh(query.Message.Chat.ID, query.Message.MessageID)
+	}
+
+	taskID, err := parseTaskID("task_delete_", query.Data)
+	if err != nil {
+		b.sendMessage(chatID, "无效的任务ID")
+		return
+	}
+	task, err := b.taskService.GetByID(user.ID, taskID)
+	if err != nil {
+		b.sendMessage(chatID, fmt.Sprintf("获取任务失败：%v", err))
+		return
+	}
+
+	text := fmt.Sprintf("⚠️ *确认删除任务 #%d？*\n\n删除后将从列表中移除（不可恢复）。\n\n注意：删除不会撤出链上流动性/兑换 USDT；如需撤仓请先点击“停止任务”，或自行在钱包里撤仓。", task.ID)
+	if task.IsAuto {
+		text += "\n\n🤖 该任务由 AutoLP 创建，删除不会关闭 AutoLP；如要停止自动开仓请在 /auto 中关闭。"
+	}
+
+	if messageID != 0 {
+		_ = b.editMessageText(chatID, messageID, text)
+		_ = b.editMessageReplyMarkup(chatID, messageID, taskDeleteConfirmKeyboard(task.ID))
+		return
+	}
+
+	b.sendMessageWithKeyboard(chatID, text, taskDeleteConfirmKeyboard(task.ID))
+}
+
+func (b *Bot) handleTaskCancelDelete(query *tgbotapi.CallbackQuery, user *models.User) {
+	b.api.Send(tgbotapi.NewCallback(query.ID, "已取消"))
+	chatID := user.TelegramID
+	messageID := 0
+	if query.Message != nil {
+		chatID = query.Message.Chat.ID
+		messageID = query.Message.MessageID
+	}
+	taskID, err := parseTaskID("task_cancel_delete_", query.Data)
+	if err != nil {
+		b.sendMessage(chatID, "无效的任务ID")
+		return
+	}
+	task, err := b.taskService.GetByID(user.ID, taskID)
+	if err != nil {
+		b.sendMessage(chatID, fmt.Sprintf("获取任务失败：%v", err))
+		return
+	}
+
+	if messageID != 0 {
+		if task.Status == models.StrategyStatusRunning || task.Status == models.StrategyStatusWaiting || task.Status == models.StrategyStatusStopping {
+			_ = b.editMessageText(chatID, messageID, b.formatTaskCardWithRefresh(task))
+			_ = b.editMessageReplyMarkup(chatID, messageID, b.taskKeyboardWithRefresh(task))
+			b.startTaskAutoRefresh(chatID, messageID, task.ID, user.ID)
+			return
+		}
+
+		_ = b.editMessageText(chatID, messageID, b.formatTaskCard(task))
+		_ = b.editMessageReplyMarkup(chatID, messageID, b.taskKeyboard(task))
+		return
+	}
+	b.sendMessageWithKeyboard(chatID, b.formatTaskCard(task), b.taskKeyboard(task))
+}
+
+func (b *Bot) handleTaskConfirmDelete(query *tgbotapi.CallbackQuery, user *models.User) {
+	b.api.Send(tgbotapi.NewCallback(query.ID, "已删除"))
+	chatID := user.TelegramID
+	messageID := 0
+	if query.Message != nil {
+		chatID = query.Message.Chat.ID
+		messageID = query.Message.MessageID
+		b.stopTaskAutoRefresh(query.Message.Chat.ID, query.Message.MessageID)
+	}
+
+	taskID, err := parseTaskID("task_confirm_delete_", query.Data)
+	if err != nil {
+		b.sendMessage(chatID, "无效的任务ID")
+		return
+	}
+
+	if err := b.taskService.Delete(user.ID, taskID); err != nil {
+		b.sendMessage(chatID, fmt.Sprintf("删除任务失败：%v", err))
+		return
+	}
+
+	if messageID != 0 {
+		_ = b.editMessageText(chatID, messageID, fmt.Sprintf("✅ 任务 #%d 已删除", taskID))
+		_ = b.editMessageReplyMarkup(chatID, messageID, tgbotapi.NewInlineKeyboardMarkup())
+		return
+	}
+	b.sendMessage(chatID, fmt.Sprintf("✅ 任务 #%d 已删除", taskID))
 }
 
 // handleTaskStopRefresh stops auto-refresh for a task card

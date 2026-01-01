@@ -51,3 +51,14 @@ func (s *StrategyTaskService) Update(userID uint, taskID uint, updates map[strin
 	}
 	return nil
 }
+
+func (s *StrategyTaskService) Delete(userID uint, taskID uint) error {
+	task, err := s.GetByID(userID, taskID)
+	if err != nil {
+		return err
+	}
+	if err := database.DB.Delete(task).Error; err != nil {
+		return fmt.Errorf("delete task failed: %w", err)
+	}
+	return nil
+}

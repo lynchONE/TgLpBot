@@ -277,6 +277,7 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 		_ = NewAutoLPEventService().Record(task, models.AutoLPEventRebalance, "")
 	}
 	s.notify(task.UserID, fmt.Sprintf("✅ 再平衡完成！\n新 Tick 范围: %d - %d\n交易哈希: `%s`", tickLower, tickUpper, enterRes.TxHash))
+	s.notifyTaskCard(task.UserID, task.ID)
 	return nil
 }
 

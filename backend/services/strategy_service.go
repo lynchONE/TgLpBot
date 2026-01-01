@@ -20,21 +20,29 @@ type StrategyService struct {
 	stopChan         chan struct{}
 	ticker           *time.Ticker
 	notifier         func(userID uint, message string) // Callback for notifications
+	taskCardNotifier func(userID uint, taskID uint)    // Callback for showing latest task card
+
+	lastLiquidityCheck map[uint]time.Time
 }
 
 // NewStrategyService creates a new strategy service
 func NewStrategyService() *StrategyService {
 	return &StrategyService{
-		poolService:      NewPoolService(),
-		liquidityService: NewLiquidityService(),
-		stopChan:         make(chan struct{}),
-		ticker:           time.NewTicker(5 * time.Second), // Check every 5 seconds
+		poolService:        NewPoolService(),
+		liquidityService:   NewLiquidityService(),
+		stopChan:           make(chan struct{}),
+		ticker:             time.NewTicker(5 * time.Second), // Check every 5 seconds
+		lastLiquidityCheck: make(map[uint]time.Time),
 	}
 }
 
 // SetNotifier sets the notification callback
 func (s *StrategyService) SetNotifier(fn func(userID uint, message string)) {
 	s.notifier = fn
+}
+
+func (s *StrategyService) SetTaskCardNotifier(fn func(userID uint, taskID uint)) {
+	s.taskCardNotifier = fn
 }
 
 // Start starts the strategy monitoring loop
@@ -95,6 +103,11 @@ func (s *StrategyService) processTask(task *models.StrategyTask, tickCache map[s
 	}
 	// If a rebalance re-entry is pending after a successful exit, retry it first.
 	if s.processRebalanceRetry(task) {
+		return
+	}
+
+	// If the on-chain position has no liquidity (e.g. user removed it manually), auto-stop to avoid "stuck running" tasks.
+	if s.processNoLiquidityTask(task) {
 		return
 	}
 
@@ -258,6 +271,12 @@ func formatDelayTime(seconds int) string {
 func (s *StrategyService) notify(userID uint, message string) {
 	if s.notifier != nil {
 		s.notifier(userID, message)
+	}
+}
+
+func (s *StrategyService) notifyTaskCard(userID uint, taskID uint) {
+	if s.taskCardNotifier != nil {
+		s.taskCardNotifier(userID, taskID)
 	}
 }
 

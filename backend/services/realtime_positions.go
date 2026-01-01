@@ -705,13 +705,41 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		return nil, fmt.Sprintf("V4 tokenId=%s 缺少 token0/token1 信息", tokenId)
 	}
 
-	liq, ok := new(big.Int).SetString(strings.TrimSpace(task.CurrentLiquidity), 10)
-	if !ok || liq == nil || liq.Sign() == 0 {
-		// Ignore empty positions (stale tasks / already exited).
+	var warn string
+	liq := big.NewInt(0)
+	if v, ok := new(big.Int).SetString(strings.TrimSpace(task.CurrentLiquidity), 10); ok && v != nil {
+		liq = v
+	}
+	tickLower := task.TickLower
+	tickUpper := task.TickUpper
+	var v4pos *blockchain.V4PositionInfo
+
+	if common.IsHexAddress(config.AppConfig.UniswapV4PositionManagerAddress) {
+		tokenID, parseErr := parseBigInt(tokenId)
+		if parseErr == nil && tokenID.Sign() > 0 {
+			v4pmAddr := common.HexToAddress(config.AppConfig.UniswapV4PositionManagerAddress)
+			pos, posErr := blockchain.GetV4PositionInfo(v4pmAddr, poolManager, task.PoolId, tokenID)
+			if posErr != nil {
+				log.Printf("[Realtime] V4 position info read failed: tokenId=%s err=%v", tokenId, posErr)
+			}
+			if pos != nil {
+				v4pos = pos
+				if pos.Liquidity != nil {
+					liq = pos.Liquidity
+				}
+				if (pos.TickLower != 0 || pos.TickUpper != 0) && pos.TickLower < pos.TickUpper {
+					tickLower = pos.TickLower
+					tickUpper = pos.TickUpper
+				}
+			}
+		}
+	}
+
+	// Ignore empty positions (NFT not burned but liquidity already removed).
+	if liq == nil || liq.Sign() == 0 {
 		return nil, ""
 	}
 
-	var warn string
 	sqrtP, currentTick, usedStale, age, err := s.getV4Slot0(stateView, poolManager, task.PoolId)
 	if err != nil && sqrtP == nil {
 		errMsg := strings.ToLower(err.Error())
@@ -726,32 +754,15 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 
 	owed0 := big.NewInt(0)
 	owed1 := big.NewInt(0)
-	if common.IsHexAddress(config.AppConfig.UniswapV4PositionManagerAddress) {
-		tokenID, parseErr := parseBigInt(tokenId)
-		if parseErr == nil && tokenID.Sign() > 0 {
-			v4pmAddr := common.HexToAddress(config.AppConfig.UniswapV4PositionManagerAddress)
-			pos, posErr := blockchain.GetV4PositionInfo(v4pmAddr, poolManager, task.PoolId, tokenID)
-			if posErr != nil {
-				log.Printf("[Realtime] V4 position info read failed: tokenId=%s err=%v", tokenId, posErr)
-			}
-			if pos != nil {
-				if pos.Liquidity != nil && pos.Liquidity.Sign() > 0 {
-					liq = pos.Liquidity
-				}
-				if pos.TickLower == 0 && pos.TickUpper == 0 {
-					pos.TickLower = task.TickLower
-					pos.TickUpper = task.TickUpper
-				}
-				if fee0, fee1, feeErr := calcV4UnclaimedFees(task.PoolId, currentTick, pos); feeErr == nil {
-					owed0 = fee0
-					owed1 = fee1
-				}
-			}
+	if v4pos != nil {
+		if fee0, fee1, feeErr := calcV4UnclaimedFees(task.PoolId, currentTick, v4pos); feeErr == nil {
+			owed0 = fee0
+			owed1 = fee1
 		}
 	}
 
-	sqrtA, _ := SqrtRatioAtTick(int32(task.TickLower))
-	sqrtB, _ := SqrtRatioAtTick(int32(task.TickUpper))
+	sqrtA, _ := SqrtRatioAtTick(int32(tickLower))
+	sqrtB, _ := SqrtRatioAtTick(int32(tickUpper))
 	amt0Raw, amt1Raw := AmountsForLiquidity(sqrtP, sqrtA, sqrtB, liq)
 
 	w0 := s.getWalletTokenBalance(c0, walletAddr)
@@ -774,12 +785,12 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 	}
 	totals.TotalUSD = totals.WalletUSD + totals.PositionUSD + totals.FeeUSD
 
-	inRange := currentTick >= task.TickLower && currentTick <= task.TickUpper
+	inRange := currentTick >= tickLower && currentTick <= tickUpper
 	rangePct := task.RangePercentage
 	if task.RangeLowerPercentage > 0 && task.RangeUpperPercentage > 0 {
 		rangePct = (task.RangeLowerPercentage + task.RangeUpperPercentage) / 2.0
 	} else if rangePct <= 0 {
-		rangePct = estimateRangePercent(currentTick, task.TickLower, task.TickUpper)
+		rangePct = estimateRangePercent(currentTick, tickLower, tickUpper)
 	}
 
 	exchange := strings.TrimSpace(task.Exchange)
@@ -795,13 +806,13 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		Title:        title,
 		PoolID:       strings.TrimSpace(task.PoolId),
 		PositionID:   tokenId,
-		StatusLabel:  "运行中",
+		StatusLabel:  statusLabelFromTask(task),
 		InRange:      inRange,
 		CurrentTick:  currentTick,
-		TickLower:    task.TickLower,
-		TickUpper:    task.TickUpper,
+		TickLower:    tickLower,
+		TickUpper:    tickUpper,
 		RangePercent: rangePct,
-		OutOfRange:   formatOutOfRange(task, task.TickLower, task.TickUpper, currentTick),
+		OutOfRange:   formatOutOfRange(task, tickLower, tickUpper, currentTick),
 		RunningSince: &task.CreatedAt,
 		HasLiquidity: hasLiquidity,
 		TokenRows:    []RealtimeTokenRow{row0, row1},

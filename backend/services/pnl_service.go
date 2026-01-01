@@ -87,6 +87,25 @@ func (s *PnLService) GetTaskPnL(task *models.StrategyTask) (*PnLInfo, error) {
 		)
 	}
 
+	openSpentWei := big.NewInt(0)
+	if rec != nil {
+		if v, perr := parseBigInt(rec.OpenUSDTSpent); perr == nil && v != nil && v.Sign() > 0 {
+			openSpentWei = v
+		}
+	}
+	expectedWei, _ := floatUSDTToWei(task.AmountUSDT)
+	if expectedWei == nil {
+		expectedWei = big.NewInt(0)
+	}
+
+	dustUSDTWei := big.NewInt(0)
+	if dust0.Sign() > 0 && isUSDTToken(task.Token0Symbol, task.Token0Address) {
+		dustUSDTWei.Add(dustUSDTWei, dust0)
+	}
+	if dust1.Sign() > 0 && isUSDTToken(task.Token1Symbol, task.Token1Address) {
+		dustUSDTWei.Add(dustUSDTWei, dust1)
+	}
+
 	if dust0.Sign() > 0 && isUSDTToken(task.Token0Symbol, task.Token0Address) {
 		dustUSDTValue += weiToFloat(dust0, getTokenDecimals(task.Token0Address))
 	}
@@ -94,12 +113,44 @@ func (s *PnLService) GetTaskPnL(task *models.StrategyTask) (*PnLInfo, error) {
 		dustUSDTValue += weiToFloat(dust1, getTokenDecimals(task.Token1Address))
 	}
 
-	dustValueNonUSDT := dustValueUSDT - dustUSDTValue
-	if dustValueNonUSDT < 0 {
-		dustValueNonUSDT = 0
+	// NetInvestedUSDT aims to reflect the USDT amount actually locked in the position.
+	// For non-USDT dust, it should always be excluded (since it was bought with USDT spent).
+	// For USDT dust, OpenUSDTSpent is usually derived from wallet USDT delta and already excludes refunded USDT dust.
+	// But if OpenUSDTSpent was recorded via fallback (e.g., due to RPC lag), we must subtract USDT dust too.
+	excludeUSDTReturnedDust := true
+	if dustUSDTWei.Sign() > 0 && openSpentWei.Sign() > 0 && expectedWei.Sign() > 0 {
+		// Tolerance: 0.001 USDT (1e15 wei) to cover DB rounding and float->wei conversions.
+		const tolWeiStr = "1000000000000000"
+		tolWei, _ := new(big.Int).SetString(tolWeiStr, 10)
+
+		sum := new(big.Int).Add(openSpentWei, dustUSDTWei)
+		sumDiff := new(big.Int).Sub(sum, expectedWei)
+		if sumDiff.Sign() < 0 {
+			sumDiff.Neg(sumDiff)
+		}
+		spentDiff := new(big.Int).Sub(openSpentWei, expectedWei)
+		if spentDiff.Sign() < 0 {
+			spentDiff.Neg(spentDiff)
+		}
+
+		// If openSpent + dustUSDT ~= expected: openSpent likely already excluded the refunded USDT dust.
+		if tolWei != nil && sumDiff.Cmp(tolWei) <= 0 {
+			excludeUSDTReturnedDust = true
+		} else if tolWei != nil && spentDiff.Cmp(tolWei) <= 0 {
+			// If openSpent ~= expected while dustUSDT > 0, OpenUSDTSpent likely includes the dust (fallback record).
+			excludeUSDTReturnedDust = false
+		}
 	}
 
-	netInvested := initialCost - dustValueNonUSDT
+	dustToSubtract := dustValueUSDT
+	if excludeUSDTReturnedDust {
+		dustToSubtract = dustValueUSDT - dustUSDTValue
+		if dustToSubtract < 0 {
+			dustToSubtract = 0
+		}
+	}
+
+	netInvested := initialCost - dustToSubtract
 	if netInvested < 0 {
 		netInvested = 0
 	}
@@ -245,7 +296,7 @@ func (s *PnLService) getV4CurrentValue(task *models.StrategyTask) (totalVal, fee
 				if pos.TokensOwed1 != nil {
 					fees1 = pos.TokensOwed1
 				}
-				if pos.Liquidity != nil && pos.Liquidity.Sign() > 0 {
+				if pos.Liquidity != nil {
 					liquidity = pos.Liquidity
 				}
 			}

@@ -421,6 +421,27 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 		}
 	}
 
+	// If RPC returns stale balances, actualSpent can be 0 (or otherwise invalid) even when the tx succeeded.
+	// We can recover a best-effort "actual spent" from the input amount and refunded USDT dust (when applicable).
+	if actualSpent.Sign() <= 0 || actualSpent.Cmp(usdtAmount) > 0 {
+		expectedSpent := new(big.Int).Set(usdtAmount)
+		if !plan.RequiresSwap {
+			usdtDust := big.NewInt(0)
+			if token0Addr == usdtAddr {
+				usdtDust = dust0
+			} else if token1Addr == usdtAddr {
+				usdtDust = dust1
+			}
+			if usdtDust.Sign() > 0 {
+				expectedSpent.Sub(expectedSpent, usdtDust)
+				if expectedSpent.Sign() < 0 {
+					expectedSpent = big.NewInt(0)
+				}
+			}
+		}
+		actualSpent = expectedSpent
+	}
+
 	_ = NewTradeRecordService().CreateOpenRecord(task, res.TxHash, actualSpent, gasSpent, dust0, dust1)
 
 	return res, nil

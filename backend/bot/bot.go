@@ -69,6 +69,23 @@ func NewBot(ch *services.ClickHouseService) (*Bot, error) {
 			log.Printf("Failed to notify user %d: %v", userID, err)
 		}
 	})
+	bot.strategyService.SetTaskCardNotifier(func(userID uint, taskID uint) {
+		user, err := bot.userService.GetUserByID(userID)
+		if err != nil {
+			log.Printf("Failed to notify task card user %d: %v", userID, err)
+			return
+		}
+		task, err := bot.taskService.GetByID(userID, taskID)
+		if err != nil {
+			log.Printf("Failed to notify task card user %d task #%d: %v", userID, taskID, err)
+			return
+		}
+
+		msg, err := bot.sendTaskCardMessage(user.TelegramID, bot.formatTaskCardWithRefresh(task), bot.taskKeyboardWithRefresh(task))
+		if err == nil && msg.MessageID != 0 {
+			bot.startTaskAutoRefresh(user.TelegramID, msg.MessageID, task.ID, userID)
+		}
+	})
 
 	// Set AutoLP Notifier (reuse the same user->telegram mapping)
 	if bot.autoLPService != nil {
@@ -483,6 +500,12 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleTaskStopRefresh(query, user)
 	case strings.HasPrefix(query.Data, "task_stop_"):
 		b.handleTaskStop(query, user)
+	case strings.HasPrefix(query.Data, "task_delete_"):
+		b.handleTaskDelete(query, user)
+	case strings.HasPrefix(query.Data, "task_confirm_delete_"):
+		b.handleTaskConfirmDelete(query, user)
+	case strings.HasPrefix(query.Data, "task_cancel_delete_"):
+		b.handleTaskCancelDelete(query, user)
 	case strings.HasPrefix(query.Data, "task_toggle_reinvest_"):
 		b.handleTaskToggleReinvest(query, user)
 	case strings.HasPrefix(query.Data, "task_toggle_stoploss_"):

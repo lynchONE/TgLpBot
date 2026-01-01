@@ -138,6 +138,8 @@ func (b *Bot) refreshTaskCard(session *AutoRefreshSession) {
 	if task.Status == models.StrategyStatusStopped || task.Status == models.StrategyStatusError {
 		log.Printf("[Bot] Task #%d is %s, stopping auto-refresh", session.TaskID, task.Status)
 		b.stopTaskAutoRefresh(session.ChatID, session.MessageID)
+		_ = b.editMessageText(session.ChatID, session.MessageID, b.formatTaskCard(task))
+		_ = b.editMessageReplyMarkup(session.ChatID, session.MessageID, b.taskKeyboard(task))
 		return
 	}
 
