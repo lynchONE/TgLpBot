@@ -265,8 +265,11 @@ export default function App() {
         if (!initData) return;
         let aborted = false;
         const controller = new AbortController();
+        let inFlight = false;
 
         const run = async () => {
+            if (inFlight) return;
+            inFlight = true;
             setLoading(true);
             setError('');
             try {
@@ -277,6 +280,7 @@ export default function App() {
                 if (aborted) return;
                 setError(String(e?.message || e));
             } finally {
+                inFlight = false;
                 if (!aborted) setLoading(false);
             }
         };
@@ -297,8 +301,11 @@ export default function App() {
         if (!initData || !showAdmin) return;
         let aborted = false;
         const controller = new AbortController();
+        let inFlight = false;
 
         const run = async () => {
+            if (inFlight) return;
+            inFlight = true;
             setAdminUsersLoading(true);
             setAdminUsersError('');
             try {
@@ -315,6 +322,7 @@ export default function App() {
                 if (aborted) return;
                 setAdminUsersError(String(e?.message || e));
             } finally {
+                inFlight = false;
                 if (!aborted) setAdminUsersLoading(false);
             }
         };
@@ -348,6 +356,7 @@ export default function App() {
         if (!initData || !showAdmin || !adminSelectedUserId) return;
         let aborted = false;
         const controller = new AbortController();
+        let inFlight = false;
 
         const selectedChanged = adminSelectedRef.current !== adminSelectedUserId;
         adminSelectedRef.current = adminSelectedUserId;
@@ -357,6 +366,8 @@ export default function App() {
         }
 
         const run = async () => {
+            if (inFlight) return;
+            inFlight = true;
             setAdminPositionsLoading(true);
             setAdminPositionsError('');
             try {
@@ -372,6 +383,7 @@ export default function App() {
                 if (aborted) return;
                 setAdminPositionsError(String(e?.message || e));
             } finally {
+                inFlight = false;
                 if (!aborted) setAdminPositionsLoading(false);
             }
         };
@@ -392,8 +404,11 @@ export default function App() {
         if (!isHotPools) return;
         let aborted = false;
         const controller = new AbortController();
+        let inFlight = false;
 
         const run = async () => {
+            if (inFlight) return;
+            inFlight = true;
             setHotPoolsLoading(true);
             setHotPoolsError('');
             try {
@@ -411,6 +426,7 @@ export default function App() {
                 if (aborted) return;
                 setHotPoolsError(String(e?.message || e));
             } finally {
+                inFlight = false;
                 if (!aborted) setHotPoolsLoading(false);
             }
         };
