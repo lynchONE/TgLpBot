@@ -3,7 +3,7 @@ import HotPoolCard from './components/HotPoolCard.jsx';
 import PositionCard from './components/PositionCard.jsx';
 import { fetchAdminRealtimePositions, fetchAdminRealtimeUsers, fetchHotPools, fetchRealtimePositions } from './lib/api';
 import { getTelegramWebApp } from './lib/telegram';
-import { formatRelativeTime } from './lib/time';
+import { formatRelativeTime, useTick } from './lib/time';
 
 function resolveApiBaseUrl() {
     const queryApiBase = new URLSearchParams(window.location.search).get('apiBaseUrl');
@@ -117,6 +117,7 @@ const icons = {
 
 export default function App() {
     const initData = useInitData();
+    const tick = useTick(); // 实时时钟，每秒更新一次
     const [data, setData] = useState(null);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
@@ -502,7 +503,7 @@ export default function App() {
                     ? `运行中用户：${adminUsers.length}`
                     : '暂无运行任务'
         : isHotPools
-            ? `5m · ${hotPoolsData?.updated_at ? `更新：${formatRelativeTime(hotPoolsData.updated_at)}` : hotPoolsLoading ? '加载中...' : '暂无数据'} · 自动刷新 ${hotPoolsPollIntervalSec}s`
+            ? `5m · ${hotPoolsData?.updated_at ? `更新：${formatRelativeTime(hotPoolsData.updated_at, tick)}` : hotPoolsLoading ? '加载中...' : '暂无数据'} · 自动刷新 ${hotPoolsPollIntervalSec}s`
             : walletAddress
                 ? `钱包：${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
                 : '加载钱包中...';
@@ -619,7 +620,7 @@ export default function App() {
                             <div>
                                 <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">费用排行</div>
                                 <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
-                                    {hotPoolsData?.updated_at ? `更新：${formatRelativeTime(hotPoolsData.updated_at)}` : hotPoolsLoading ? '加载中...' : '暂无数据'}
+                                    {hotPoolsData?.updated_at ? `更新：${formatRelativeTime(hotPoolsData.updated_at, tick)}` : hotPoolsLoading ? '加载中...' : '暂无数据'}
                                 </div>
                             </div>
                             <div className="flex rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5">
@@ -713,7 +714,7 @@ export default function App() {
                             {adminUsers.map((u) => {
                                 const selected = Number(u?.user_id) === Number(adminSelectedUserId);
                                 const label = formatUserLabel(u);
-                                const updatedText = formatRelativeTime(u?.updated_at) || '--';
+                                const updatedText = formatRelativeTime(u?.updated_at, tick) || '--';
                                 return (
                                     <button
                                         key={u.user_id}
@@ -852,7 +853,7 @@ export default function App() {
                                     当前：{settingsPollIntervalSec}s（{pollOverrideSec ? '自定义' : `默认 ${settingsServerPollIntervalSec}s`})
                                 </div>
                                 <div className="mt-3 flex flex-wrap gap-2">
-                                    {[1, 2, 3, 5, 10, 30].map((sec) => (
+                                    {[5, 10, 15, 30, 60].map((sec) => (
                                         <button
                                             key={sec}
                                             type="button"

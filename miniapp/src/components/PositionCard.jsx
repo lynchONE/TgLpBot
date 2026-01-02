@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { openLink } from '../lib/telegram';
-import { formatDurationFrom, formatRelativeTime } from '../lib/time';
+import { useDurationFrom, useRelativeTime } from '../lib/time';
 
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -81,6 +81,10 @@ const pillClassForStatus = (label) => {
 };
 
 export default function PositionCard({ position, walletAddress, bnbBalance, pollIntervalSec, updatedAt }) {
+    // 实时更新的时间显示
+    const runningDuration = useDurationFrom(position?.running_since);
+    const updateTimeText = useRelativeTime(updatedAt);
+
     const token0 = position?.token_rows?.[0];
     const token1 = position?.token_rows?.[1];
     const stableIndex = useMemo(() => {
@@ -286,8 +290,8 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
                                 <div className="absolute inset-0 bg-gradient-to-r from-rose-500/20 via-amber-400/15 to-emerald-500/20" />
                                 <div
                                     className={`absolute inset-y-0 left-0 rounded-full shadow-sm transition-[width] duration-500 ease-out ${position?.in_range
-                                            ? 'bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-600'
-                                            : 'bg-gradient-to-r from-rose-400 via-rose-500 to-rose-600'
+                                        ? 'bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-600'
+                                        : 'bg-gradient-to-r from-rose-400 via-rose-500 to-rose-600'
                                         }`}
                                     style={{ width: `${progressPercent}%` }}
                                 />
@@ -312,13 +316,13 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
                     <div>
                         <div className="text-zinc-500 dark:text-white/40">运行</div>
                         <div className="mt-0.5 font-semibold text-emerald-700 dark:text-emerald-300 tabular-nums">
-                            {formatDurationFrom(position?.running_since)}
+                            {runningDuration}
                         </div>
                     </div>
                     <div className="text-right">
                         <div className="text-zinc-500 dark:text-white/40">更新时间</div>
                         <div className="mt-0.5 font-semibold text-zinc-900 dark:text-white/80 tabular-nums">
-                            {formatRelativeTime(updatedAt)}
+                            {updateTimeText}
                         </div>
                     </div>
                 </div>
