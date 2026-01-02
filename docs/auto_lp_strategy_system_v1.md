@@ -4,7 +4,7 @@
 
 系统分为三层架构：
 
-1) **数据采集层（Scanner Thread）**：轮询 PoolM API，抓取 Top Fees 池子（`5/15/60/360` 分钟维度）。
+1) **数据采集层（Scanner Thread）**：轮询 PoolM API，抓取 Top Fees 池子（当前使用 `5/60` 分钟维度）。
 2) **策略计算层（Analyzer Thread）**：基于 ClickHouse 的价格历史计算 `Z5/Z60`，并按状态机 + 共振规则输出区间宽度与执行动作。
 3) **执行控制层（Executor & Guardian）**：复用现有 Zap 合约开仓；对 `is_auto=true` 的任务做退出卫士（5m 成交量回落 / 价格+交易笔数回落）。
 
@@ -24,12 +24,10 @@ API：
 
 `https://mapi.poolm.xyz/api/pools/top-fees/{timeframe}?chain=bsc&dex=pcsv3,univ3,univ4`
 
-V1.0 需要同时请求：
+V1.0 当前请求：
 
 - `timeframe=5`（高频）
-- `timeframe=15`（中频）
 - `timeframe=60`（趋势）
-- `timeframe=360`（中期）
 
 并将结果写入 ClickHouse 作为后续分析与回放数据源。
 

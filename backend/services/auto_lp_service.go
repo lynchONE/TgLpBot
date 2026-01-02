@@ -250,6 +250,10 @@ func (s *AutoLPService) runOnce() {
 		return
 	}
 
+	if err := s.replacePoolMRealtime(ctx, rawRows); err != nil {
+		log.Printf("[AutoLP] PoolM 实时表刷新失败: %v", err)
+	}
+
 	log.Printf("[AutoLP] PoolM 数据入库：原始记录=%d（协议×周期×池子）去重池子=%d（协议+池子地址）", len(rawRows), len(snap.data))
 
 	analyses, err := s.analyzeSnapshot(ctx, snap)
@@ -385,7 +389,7 @@ func (s *AutoLPService) fetchPoolMSnapshot(ctx context.Context) (*poolMSnapshot,
 	}
 	dexes := autoLPDexList(config.AppConfig.AutoLPProtocols)
 	dexParam := strings.Join(dexes, ",")
-	timeframes := []int{5, 15, 60, 360}
+	timeframes := []int{5, 60}
 
 	delay := time.Duration(config.AppConfig.AutoLPFetchDelayMillis) * time.Millisecond
 	if delay < 0 {
@@ -545,6 +549,49 @@ func (s *AutoLPService) insertPoolMRaw(ctx context.Context, rows []poolMRawRow) 
 			p.CurrentToken0Balance,
 			p.CurrentToken1Balance,
 			p.CurrentTokenPrice,
+			strings.TrimSpace(p.PriceDisplay),
+			r.lastSwapAt,
+		); err != nil {
+			return err
+		}
+	}
+	return batch.Send()
+}
+
+func (s *AutoLPService) replacePoolMRealtime(ctx context.Context, rows []poolMRawRow) error {
+	if s.ch == nil || s.ch.Conn == nil {
+		return fmt.Errorf("clickhouse not initialized")
+	}
+
+	if err := s.ch.Conn.Exec(ctx, `TRUNCATE TABLE poolm_top_fees_realtime`); err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	batch, err := s.ch.Conn.PrepareBatch(ctx, `INSERT INTO poolm_top_fees_realtime (
+		ts, chain, protocol_version, timeframe_minutes, dex, pool_address, trading_pair,
+		fee_percentage, total_fees, total_volume, current_pool_value, price_display, last_swap_at
+	)`)
+	if err != nil {
+		return err
+	}
+
+	for _, r := range rows {
+		p := r.p
+		if err := batch.Append(
+			r.ts,
+			r.chain,
+			r.protocolVersion,
+			uint16(r.timeframe),
+			strings.TrimSpace(p.Dex),
+			strings.ToLower(strings.TrimSpace(p.PoolAddress)),
+			strings.TrimSpace(p.TradingPair),
+			p.FeePercentage,
+			p.TotalFees,
+			p.TotalVolume,
+			p.CurrentPoolValue,
 			strings.TrimSpace(p.PriceDisplay),
 			r.lastSwapAt,
 		); err != nil {

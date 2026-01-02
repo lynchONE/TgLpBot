@@ -1,12 +1,40 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Button, ConfigProvider, InputNumber, Layout, theme as antdTheme } from 'antd';
-import PoolGrid from './components/PoolTable'; // Now Bento Grid
-import PositionCard from './components/PositionCard'; // Now 3D Widget
-import ThemeToggle from './components/ThemeToggle';
-import { useTheme } from './context/ThemeContext';
-import { ConnectButton } from '@rainbow-me/rainbowkit';
+import React, { useEffect, useMemo, useState, lazy, Suspense } from 'react';
+import { ConfigProvider, InputNumber, Layout, theme as antdTheme } from 'antd';
+import { ThemeProvider, useTheme } from './context/ThemeContext';
+import { ConnectButton, getDefaultConfig, RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
+import { WagmiProvider } from 'wagmi';
+import { bsc, mainnet, arbitrum } from 'wagmi/chains';
+import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
+import '@rainbow-me/rainbowkit/styles.css';
+
+// Lazy load heavy components
+const PoolGrid = lazy(() => import('./components/PoolTable'));
+const PositionCard = lazy(() => import('./components/PositionCard'));
+const ThemeToggle = lazy(() => import('./components/ThemeToggle'));
+
+// QueryClient - optimized but still real-time
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false, // Don't refetch on tab switch (saves requests)
+      retry: 1, // Only retry once on failure (faster error handling)
+    },
+  },
+});
+
+// Wagmi config - only include chains we actually use
+const wagmiConfig = getDefaultConfig({
+  appName: 'TgLpBot Dashboard',
+  projectId: 'YOUR_PROJECT_ID',
+  chains: [bsc, mainnet, arbitrum], // Reduced chain list
+});
 
 const { Content } = Layout;
+
+// Loading placeholder for lazy components
+const ComponentLoader = () => (
+  <div className="animate-pulse bg-white/5 rounded-2xl h-full min-h-[200px]"></div>
+);
 
 function App() {
   const { theme } = useTheme();
@@ -130,12 +158,12 @@ function App() {
               <>
                 {/* LEFT: Position Card Widget (Takes 1/4 on XL) */}
                 <div className="xl:col-span-1 h-[420px] xl:h-auto">
-                  <PositionCard refetchIntervalMs={refetchIntervalMs} />
+                  <Suspense fallback={<ComponentLoader />}><PositionCard refetchIntervalMs={refetchIntervalMs} /></Suspense>
                 </div>
 
                 {/* RIGHT: Market Grid (Takes 3/4 on XL) */}
                 <div className="xl:col-span-3 min-h-[500px]">
-                  <PoolGrid refetchIntervalMs={refetchIntervalMs} />
+                  <Suspense fallback={<ComponentLoader />}><PoolGrid refetchIntervalMs={refetchIntervalMs} /></Suspense>
                 </div>
               </>
             )}
@@ -231,4 +259,17 @@ function App() {
   );
 }
 
-export default App;
+// Wrap App with all providers for proper lazy loading
+const AppWithProviders = () => (
+  <WagmiProvider config={wagmiConfig}>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+        <RainbowKitProvider theme={darkTheme({ accentColor: '#06b6d4', borderRadius: 'medium' })}>
+          <App />
+        </RainbowKitProvider>
+      </ThemeProvider>
+    </QueryClientProvider>
+  </WagmiProvider>
+);
+
+export default AppWithProviders;

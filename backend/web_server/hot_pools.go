@@ -105,7 +105,6 @@ func (s *Server) handleHotPools(w http.ResponseWriter, r *http.Request) {
 	where := `
 		WHERE chain = ?
 		  AND timeframe_minutes = ?
-		  AND ts >= now() - INTERVAL 60 MINUTE
 	`
 	args := []any{chain, uint16(timeframeMinutes)}
 	if dex != "" {
@@ -125,25 +124,10 @@ func (s *Server) handleHotPools(w http.ResponseWriter, r *http.Request) {
 			current_pool_value,
 			if(current_pool_value > 0, total_fees / current_pool_value * 100, 0) AS fee_rate,
 			price_display,
-			updated_at,
+			ts AS updated_at,
 			last_swap_at
-		FROM (
-			SELECT
-				protocol_version,
-				pool_address,
-				argMax(dex, ts) AS dex,
-				argMax(trading_pair, ts) AS trading_pair,
-				argMax(fee_percentage, ts) AS fee_percentage,
-				argMax(total_fees, ts) AS total_fees,
-				argMax(total_volume, ts) AS total_volume,
-				argMax(current_pool_value, ts) AS current_pool_value,
-				argMax(price_display, ts) AS price_display,
-				argMax(last_swap_at, ts) AS last_swap_at,
-				max(ts) AS updated_at
-			FROM poolm_top_fees_raw
-			%s
-			GROUP BY protocol_version, pool_address
-		)
+		FROM poolm_top_fees_realtime
+		%s
 		ORDER BY %s DESC
 		LIMIT %d
 	`, where, orderBy, limit)
