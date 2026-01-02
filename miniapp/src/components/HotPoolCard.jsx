@@ -203,6 +203,14 @@ export default function HotPoolCard({ pool, metric, previousData }) {
                                 label="TVL变化"
                             />
                         </div>
+                        {pool?.transaction_count > 0 ? (
+                            <div className="text-zinc-500 dark:text-white/40 flex items-center">
+                                交易笔数:{' '}
+                                <span className="font-semibold text-orange-600 dark:text-orange-300 tabular-nums">
+                                    {pool.transaction_count.toLocaleString()}
+                                </span>
+                            </div>
+                        ) : null}
                     </div>
                 </div>
 
