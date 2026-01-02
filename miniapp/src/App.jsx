@@ -78,8 +78,6 @@ const storage = {
 
 const STORAGE_THEME = 'tglp_theme';
 const STORAGE_POLL_SEC = 'tglp_poll_interval_sec';
-const STORAGE_HOT_POOLS_WATCH = 'tglp_hot_pools_watch';
-const STORAGE_HOT_POOLS_HIDDEN = 'tglp_hot_pools_hidden';
 
 function formatUsd(v) {
     const n = Number(v || 0);
@@ -130,8 +128,6 @@ export default function App() {
     const [hotPoolsError, setHotPoolsError] = useState('');
     const [hotPoolsLoading, setHotPoolsLoading] = useState(false);
     const hotPoolsPollRef = useRef(null);
-    const [hotPoolsWatched, setHotPoolsWatched] = useState(() => new Set());
-    const [hotPoolsHidden, setHotPoolsHidden] = useState(() => new Set());
 
     const [adminUsers, setAdminUsers] = useState([]);
     const [adminUsersError, setAdminUsersError] = useState('');
@@ -219,13 +215,8 @@ export default function App() {
     }, [positions]);
 
     const hotPoolsRows = useMemo(() => {
-        const rows = Array.isArray(hotPoolsData?.data) ? hotPoolsData.data : [];
-        return rows.filter((row) => {
-            const addr = String(row?.pool_address || '').trim().toLowerCase();
-            if (!addr) return true;
-            return !hotPoolsHidden.has(addr);
-        });
-    }, [hotPoolsData, hotPoolsHidden]);
+        return Array.isArray(hotPoolsData?.data) ? hotPoolsData.data : [];
+    }, [hotPoolsData]);
 
     const apiBaseUrl = useMemo(() => resolveApiBaseUrl(), []);
 
@@ -249,25 +240,6 @@ export default function App() {
         if (Number.isFinite(savedPoll) && savedPoll >= 1) {
             setPollOverrideSec(Math.floor(savedPoll));
         }
-
-        const loadSet = (key) => {
-            try {
-                const raw = storage.get(key);
-                if (!raw) return new Set();
-                const parsed = JSON.parse(raw);
-                if (!Array.isArray(parsed)) return new Set();
-                const next = new Set();
-                for (const item of parsed) {
-                    const v = String(item || '').trim().toLowerCase();
-                    if (v) next.add(v);
-                }
-                return next;
-            } catch {
-                return new Set();
-            }
-        };
-        setHotPoolsWatched(loadSet(STORAGE_HOT_POOLS_WATCH));
-        setHotPoolsHidden(loadSet(STORAGE_HOT_POOLS_HIDDEN));
     }, []);
 
     useEffect(() => {
@@ -430,7 +402,7 @@ export default function App() {
                     sort: hotPoolsSort,
                     chain: 'bsc',
                     timeframeMinutes: 5,
-                    limit: 50,
+                    limit: 20,
                     signal: controller.signal,
                 });
                 if (aborted) return;
@@ -480,40 +452,6 @@ export default function App() {
         storage.set(STORAGE_POLL_SEC, String(v));
         setPollDraftSec(String(v));
         setSettingsOpen(false);
-    };
-
-    const persistSet = (key, set) => {
-        storage.set(key, JSON.stringify(Array.from(set)));
-    };
-
-    const toggleHotPoolWatch = (poolAddress) => {
-        const addr = String(poolAddress || '').trim().toLowerCase();
-        if (!addr) return;
-        setHotPoolsWatched((prev) => {
-            const next = new Set(prev);
-            if (next.has(addr)) next.delete(addr);
-            else next.add(addr);
-            persistSet(STORAGE_HOT_POOLS_WATCH, next);
-            return next;
-        });
-    };
-
-    const hideHotPool = (poolAddress) => {
-        const addr = String(poolAddress || '').trim().toLowerCase();
-        if (!addr) return;
-        setHotPoolsHidden((prev) => {
-            const next = new Set(prev);
-            next.add(addr);
-            persistSet(STORAGE_HOT_POOLS_HIDDEN, next);
-            return next;
-        });
-        setHotPoolsWatched((prev) => {
-            if (!prev.has(addr)) return prev;
-            const next = new Set(prev);
-            next.delete(addr);
-            persistSet(STORAGE_HOT_POOLS_WATCH, next);
-            return next;
-        });
     };
 
     const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
@@ -819,15 +757,11 @@ export default function App() {
             <div className="space-y-4">
                 {isHotPools
                     ? hotPoolsRows.map((row) => {
-                          const addr = String(row?.pool_address || '').trim().toLowerCase();
                           return (
                               <HotPoolCard
                                   key={`${row?.protocol_version || ''}:${row?.pool_address || ''}`}
                                   pool={row}
                                   metric={hotPoolsSort}
-                                  watched={addr ? hotPoolsWatched.has(addr) : false}
-                                  onToggleWatch={toggleHotPoolWatch}
-                                  onHide={hideHotPool}
                               />
                           );
                       })

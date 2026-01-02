@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { copyToClipboard, openLink } from '../lib/telegram';
+import { copyToClipboard } from '../lib/telegram';
 
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -9,10 +9,6 @@ const Icon = ({ path, className = '' }) => (
 
 const icons = {
     copy: 'M16 1H4a2 2 0 00-2 2v14h2V3h12V1zm3 4H8a2 2 0 00-2 2v14a2 2 0 002 2h11a2 2 0 002-2V7a2 2 0 00-2-2zm0 16H8V7h11v14z',
-    plus: 'M19 11H13V5h-2v6H5v2h6v6h2v-6h6v-2z',
-    check: 'M9 16.2l-3.5-3.5-1.4 1.4L9 19 20.3 7.7l-1.4-1.4z',
-    external: 'M14 3h7v7h-2V6.4l-9.3 9.3-1.4-1.4 9.3-9.3H14V3zM5 5h6v2H7v10h10v-4h2v6H5V5z',
-    close: 'M6.225 4.811a1 1 0 011.414 0L12 9.172l4.361-4.361a1 1 0 111.414 1.414L13.414 10.586l4.361 4.361a1 1 0 01-1.414 1.414L12 12l-4.361 4.361a1 1 0 01-1.414-1.414l4.361-4.361-4.361-4.361a1 1 0 010-1.414z',
 };
 
 const usdCompact = new Intl.NumberFormat('en-US', {
@@ -47,21 +43,39 @@ function formatRatePct(v) {
     return `${n.toFixed(3)}%`;
 }
 
-function dexLabel(dex) {
+function normalizeDexName(dex) {
     const v = String(dex || '').trim().toLowerCase();
-    if (!v) return 'DEX';
-    if (v.includes('pancake') || v === 'pcs') return 'PCS';
-    if (v.includes('uniswap')) return 'UNI';
-    return v.toUpperCase().slice(0, 6);
+    if (!v) return '';
+    if (v.includes('pancake') || v === 'pcs') return 'pancake';
+    if (v.includes('uniswap') || v === 'uni') return 'uniswap';
+    if (v.includes('sushi')) return 'sushi';
+    return v.replace(/[^a-z0-9]+/g, '');
 }
 
-function poolLink(poolAddress) {
-    const addr = String(poolAddress || '').trim();
-    if (/^0x[a-fA-F0-9]{40}$/.test(addr)) return `https://bscscan.com/address/${addr}`;
-    return 'https://poolm.xyz/';
+function normalizeProtocolVersion(protocolVersion, dex) {
+    const proto = String(protocolVersion || '').trim().toLowerCase();
+    const fromProto = proto.match(/v?\d+/)?.[0] ?? '';
+    if (fromProto) return fromProto.startsWith('v') ? fromProto : `v${fromProto}`;
+    const dx = String(dex || '').trim().toLowerCase();
+    const fromDex = dx.match(/v\d+/)?.[0] ?? '';
+    return fromDex;
 }
 
-export default function HotPoolCard({ pool, metric, watched, onToggleWatch, onHide }) {
+function dexLabel(dex, protocolVersion) {
+    const base = normalizeDexName(dex);
+    const version = normalizeProtocolVersion(protocolVersion, dex);
+    if (!base && !version) return 'DEX';
+    if (!base) return version.toUpperCase();
+    return `${base}${version || ''}`;
+}
+
+function formatPairLabel(tradingPair) {
+    const v = String(tradingPair || '').trim();
+    if (!v) return '--';
+    return v.replace(/\//g, '/\u200B');
+}
+
+export default function HotPoolCard({ pool, metric }) {
     const [copied, setCopied] = useState(false);
     const addr = String(pool?.pool_address || '').trim();
 
@@ -94,15 +108,13 @@ export default function HotPoolCard({ pool, metric, watched, onToggleWatch, onHi
         }
     };
 
-    const openPool = () => openLink(poolLink(addr));
-
     return (
         <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
             <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                        <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/90">
-                            {pool?.trading_pair || '--'}
+                        <div className="min-w-0 flex-1 text-xs font-semibold leading-4 text-zinc-900 dark:text-white/90 whitespace-normal break-words">
+                            {formatPairLabel(pool?.trading_pair)}
                         </div>
                         {pool?.fee_percentage ? (
                             <div className="rounded-lg bg-sky-500/10 px-2 py-0.5 text-[11px] font-semibold text-sky-700 ring-1 ring-sky-500/20 dark:bg-sky-500/15 dark:text-sky-200 dark:ring-sky-500/30">
@@ -155,43 +167,9 @@ export default function HotPoolCard({ pool, metric, watched, onToggleWatch, onHi
                 </div>
             </div>
 
-            <div className="mt-3 flex items-center justify-between">
+            <div className="mt-3 flex items-center">
                 <div className="inline-flex items-center rounded-lg bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-500/25 dark:bg-amber-500/15 dark:text-amber-200 dark:ring-amber-500/30">
-                    {dexLabel(pool?.dex)}
-                </div>
-
-                <div className="flex items-center gap-2">
-                    <button
-                        type="button"
-                        onClick={() => onHide?.(addr)}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-white/70 text-zinc-600 shadow-sm hover:bg-zinc-100 active:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15"
-                        aria-label="隐藏"
-                        disabled={!addr}
-                    >
-                        <Icon path={icons.close} className="h-5 w-5" />
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => onToggleWatch?.(addr)}
-                        className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border shadow-sm ${
-                            watched
-                                ? 'border-emerald-500/30 bg-emerald-500 text-white hover:bg-emerald-600 active:bg-emerald-700'
-                                : 'border-zinc-200 bg-white/70 text-zinc-700 hover:bg-zinc-100 active:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15'
-                        }`}
-                        aria-label={watched ? '取消监控' : '添加监控'}
-                        disabled={!addr}
-                    >
-                        <Icon path={watched ? icons.check : icons.plus} className="h-5 w-5" />
-                    </button>
-                    <button
-                        type="button"
-                        onClick={openPool}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-white/70 text-zinc-700 shadow-sm hover:bg-zinc-100 active:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15"
-                        aria-label="打开"
-                        disabled={!addr}
-                    >
-                        <Icon path={icons.external} className="h-5 w-5" />
-                    </button>
+                    {dexLabel(pool?.dex, pool?.protocol_version)}
                 </div>
             </div>
         </div>
