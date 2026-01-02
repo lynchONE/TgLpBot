@@ -289,12 +289,12 @@ func (b *Bot) autoStatsText(user *models.User, cfg *models.AutoLPUserConfig) str
 
 	bestLine := "无"
 	if strings.TrimSpace(stats.BestPair) != "" {
-		bestLine = fmt.Sprintf("%s（%s USDT）", escapeTelegramMarkdown(stats.BestPair), formatWei(stats.BestProfit))
+		bestLine = fmt.Sprintf("%s（%s USDT）", escapeTelegramMarkdown(stats.BestPair), formatWei(stats.BestProfitUSDTWei))
 	}
 
 	worstLine := "无"
 	if strings.TrimSpace(stats.WorstPair) != "" {
-		worstLine = fmt.Sprintf("%s（%s USDT）", escapeTelegramMarkdown(stats.WorstPair), formatWei(stats.WorstProfit))
+		worstLine = fmt.Sprintf("%s（%s USDT）", escapeTelegramMarkdown(stats.WorstPair), formatWei(stats.WorstProfitUSDTWei))
 	}
 
 	return fmt.Sprintf(`📊 *本次 Auto 任务执行*
@@ -310,8 +310,8 @@ func (b *Bot) autoStatsText(user *models.User, cfg *models.AutoLPUserConfig) str
 		stats.OpenCount,
 		stats.RebalanceCount,
 		stats.GuardCount,
-		formatWei(stats.GasUSDT),
-		formatWei(stats.ProfitUSDT),
+		formatWei(stats.GasUSDTWei),
+		formatWei(stats.ProfitUSDTWei),
 		bestLine,
 		worstLine,
 	)

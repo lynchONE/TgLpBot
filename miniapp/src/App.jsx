@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import HotPoolCard from './components/HotPoolCard.jsx';
 import PositionCard from './components/PositionCard.jsx';
-import { fetchAdminRealtimePositions, fetchAdminRealtimeUsers, fetchHotPools, fetchRealtimePositions } from './lib/api';
+import { disableAdminAutoLP, fetchAdminAutoLPStats, fetchAdminRealtimePositions, fetchAdminRealtimeUsers, fetchHotPools, fetchRealtimePositions } from './lib/api';
 import { getTelegramWebApp } from './lib/telegram';
 import { formatRelativeTime, useTick } from './lib/time';
 
@@ -139,8 +139,15 @@ export default function App() {
     const [adminPositions, setAdminPositions] = useState(null);
     const [adminPositionsError, setAdminPositionsError] = useState('');
     const [adminPositionsLoading, setAdminPositionsLoading] = useState(false);
+    const [adminAutoStats, setAdminAutoStats] = useState(null);
+    const [adminAutoStatsError, setAdminAutoStatsError] = useState('');
+    const [adminAutoStatsLoading, setAdminAutoStatsLoading] = useState(false);
+    const [adminDisableError, setAdminDisableError] = useState('');
+    const [adminDisableLoading, setAdminDisableLoading] = useState(false);
+    const [adminDisableResult, setAdminDisableResult] = useState(null);
     const adminUsersPollRef = useRef(null);
     const adminPositionsPollRef = useRef(null);
+    const adminAutoStatsPollRef = useRef(null);
     const adminSelectedRef = useRef(null);
 
     const [theme, setTheme] = useState('dark');
@@ -151,6 +158,7 @@ export default function App() {
     const serverPollIntervalSec = Math.max(1, Number(data?.poll_interval_sec || adminPositions?.poll_interval_sec || 1));
     const pollIntervalSec = Math.max(1, Number(pollOverrideSec || serverPollIntervalSec || 1));
     const adminListPollSec = Math.max(3, pollIntervalSec);
+    const adminStatsPollSec = Math.max(5, pollIntervalSec * 2);
     const isAdmin = Boolean(data?.is_admin || adminPositions?.is_admin);
     const showAdmin = isAdmin && viewMode === 'admin';
     const isHotPools = viewMode === 'hot_pools';
@@ -349,15 +357,13 @@ export default function App() {
 
     useEffect(() => {
         if (!showAdmin) return;
+        if (adminSelectedUserId) return;
         if (!adminUsers.length) {
-            setAdminSelectedUserId(null);
             setAdminPositions(null);
+            setAdminAutoStats(null);
             return;
         }
-        const exists = adminUsers.some((u) => Number(u?.user_id) === Number(adminSelectedUserId));
-        if (!exists) {
-            setAdminSelectedUserId(adminUsers[0].user_id);
-        }
+        setAdminSelectedUserId(adminUsers[0].user_id);
     }, [showAdmin, adminUsers, adminSelectedUserId]);
 
     useEffect(() => {
@@ -371,6 +377,10 @@ export default function App() {
         if (selectedChanged) {
             setAdminPositions(null);
             setAdminPositionsError('');
+            setAdminAutoStats(null);
+            setAdminAutoStatsError('');
+            setAdminDisableError('');
+            setAdminDisableResult(null);
         }
 
         const run = async () => {
@@ -407,6 +417,47 @@ export default function App() {
             if (adminPositionsPollRef.current) clearInterval(adminPositionsPollRef.current);
         };
     }, [apiBaseUrl, initData, showAdmin, adminSelectedUserId, pollIntervalSec]);
+
+    useEffect(() => {
+        if (!initData || !showAdmin || !adminSelectedUserId) return;
+        let aborted = false;
+        const controller = new AbortController();
+        let inFlight = false;
+
+        const run = async () => {
+            if (inFlight) return;
+            inFlight = true;
+            setAdminAutoStatsLoading(true);
+            setAdminAutoStatsError('');
+            try {
+                const resp = await fetchAdminAutoLPStats({
+                    apiBaseUrl,
+                    initData,
+                    userId: adminSelectedUserId,
+                    signal: controller.signal,
+                });
+                if (aborted) return;
+                setAdminAutoStats(resp);
+            } catch (e) {
+                if (aborted) return;
+                setAdminAutoStatsError(String(e?.message || e));
+            } finally {
+                inFlight = false;
+                if (!aborted) setAdminAutoStatsLoading(false);
+            }
+        };
+
+        run();
+
+        if (adminAutoStatsPollRef.current) clearInterval(adminAutoStatsPollRef.current);
+        adminAutoStatsPollRef.current = setInterval(run, adminStatsPollSec * 1000);
+
+        return () => {
+            aborted = true;
+            controller.abort();
+            if (adminAutoStatsPollRef.current) clearInterval(adminAutoStatsPollRef.current);
+        };
+    }, [apiBaseUrl, initData, showAdmin, adminSelectedUserId, adminStatsPollSec]);
 
     // 热门池子数据始终加载（预加载）
     useEffect(() => {
@@ -493,6 +544,36 @@ export default function App() {
     };
 
     const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
+
+    const handleAdminDisableAuto = async () => {
+        if (!initData || !showAdmin || !adminSelectedUserId || adminDisableLoading) return;
+
+        const label = adminSelectedUser
+            ? formatUserLabel(adminSelectedUser)
+            : `用户 ${String(adminSelectedUserId)}`;
+
+        const ok = window.confirm(`确认关闭 ${label} 的 Auto？\n将撤出自动仓位并兑换成稳定币。`);
+        if (!ok) return;
+
+        setAdminDisableLoading(true);
+        setAdminDisableError('');
+        setAdminDisableResult(null);
+
+        try {
+            const resp = await disableAdminAutoLP({
+                apiBaseUrl,
+                initData,
+                userId: adminSelectedUserId,
+                reason: '🛑 管理员已关闭 AutoLP',
+            });
+            setAdminDisableResult(resp);
+        } catch (e) {
+            setAdminDisableError(String(e?.message || e));
+        } finally {
+            setAdminDisableLoading(false);
+        }
+    };
+
     const headerTitle = showAdmin ? '管理面板' : isHotPools ? '热门池子' : '实时仓位';
     const headerSubtext = showAdmin
         ? adminSelectedUser
@@ -500,8 +581,8 @@ export default function App() {
             : adminUsersLoading && adminUsers.length === 0
                 ? '加载用户中...'
                 : adminUsers.length
-                    ? `运行中用户：${adminUsers.length}`
-                    : '暂无运行任务'
+                    ? `开启Auto用户：${adminUsers.length}`
+                    : '暂无开启Auto用户'
         : isHotPools
             ? `5m · ${hotPoolsData?.updated_at ? `更新：${formatRelativeTime(hotPoolsData.updated_at, tick)}` : hotPoolsLoading ? '加载中...' : '暂无数据'} · 自动刷新 ${hotPoolsPollIntervalSec}s`
             : walletAddress
@@ -687,7 +768,7 @@ export default function App() {
             {!isHotPools && showAdmin ? (
                 <div className="mb-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
                     <div className="flex items-center justify-between">
-                        <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">运行中用户</div>
+                        <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">开启Auto用户</div>
                         <div className="text-[11px] text-zinc-500 dark:text-white/40">{adminUsers.length} 人</div>
                     </div>
 
@@ -705,7 +786,7 @@ export default function App() {
 
                     {!adminUsersLoading && adminUsers.length === 0 ? (
                         <div className="mt-3 rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                            暂无运行任务用户
+                            暂无开启Auto用户
                         </div>
                     ) : null}
 
@@ -755,6 +836,116 @@ export default function App() {
                                     </button>
                                 );
                             })}
+                        </div>
+                    ) : null}
+                </div>
+            ) : null}
+
+            {!isHotPools && showAdmin && adminSelectedUserId ? (
+                <div className="mb-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">Auto 统计</div>
+                                <div
+                                    className={`rounded-lg px-2 py-0.5 text-[11px] font-semibold ring-1 ${adminAutoStats?.config?.enabled
+                                        ? 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/25 dark:text-emerald-300'
+                                        : 'bg-zinc-500/10 text-zinc-700 ring-zinc-500/20 dark:text-white/60'
+                                        }`}
+                                >
+                                    {adminAutoStats?.config?.enabled ? 'Auto 开启' : 'Auto 已关闭'}
+                                </div>
+                            </div>
+                            <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
+                                {adminSelectedUser ? `${formatUserLabel(adminSelectedUser)} · ID ${adminSelectedUserId}` : `用户 ID ${adminSelectedUserId}`}
+                            </div>
+                            {adminAutoStats?.stats?.window_label ? (
+                                <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
+                                    周期：{adminAutoStats.stats.window_label}
+                                </div>
+                            ) : null}
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={handleAdminDisableAuto}
+                            disabled={adminDisableLoading}
+                            className={`rounded-xl px-3 py-2 text-xs font-semibold ring-1 transition ${adminDisableLoading
+                                ? 'cursor-not-allowed bg-rose-500/10 text-rose-700/70 ring-rose-500/15 dark:text-rose-200/60'
+                                : 'bg-rose-500/15 text-rose-700 ring-rose-500/25 hover:bg-rose-500/20 dark:text-rose-200'
+                                }`}
+                        >
+                            {adminDisableLoading ? '关闭中...' : '关闭 Auto'}
+                        </button>
+                    </div>
+
+                    {adminDisableError ? (
+                        <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
+                            {adminDisableError}
+                        </div>
+                    ) : null}
+
+                    {adminDisableResult ? (
+                        <div className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-700 dark:text-emerald-200">
+                            已发起关闭：找到 {adminDisableResult.tasks_found} 个 Auto 任务，已请求撤出 {adminDisableResult.exit_requested} 个。
+                        </div>
+                    ) : null}
+
+                    {adminAutoStatsError ? (
+                        <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
+                            {adminAutoStatsError}
+                        </div>
+                    ) : null}
+
+                    {adminAutoStatsLoading && !adminAutoStats ? (
+                        <div className="mt-3 rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                            加载中...
+                        </div>
+                    ) : null}
+
+                    {adminAutoStats?.stats ? (
+                        <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="text-[11px] text-zinc-500 dark:text-white/40">累计收益</div>
+                                <div className="mt-0.5 text-sm font-extrabold tabular-nums text-emerald-700 dark:text-emerald-300">
+                                    {adminAutoStats?.formatted?.profit_usdt ?? '--'} USDT
+                                </div>
+                            </div>
+                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="text-[11px] text-zinc-500 dark:text-white/40">Gas 消耗</div>
+                                <div className="mt-0.5 text-sm font-extrabold tabular-nums text-zinc-900 dark:text-white/80">
+                                    {adminAutoStats?.formatted?.gas_usdt ?? '--'} USDT
+                                </div>
+                            </div>
+                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="text-[11px] text-zinc-500 dark:text-white/40">开仓 / 再平衡</div>
+                                <div className="mt-0.5 text-sm font-extrabold tabular-nums text-zinc-900 dark:text-white/80">
+                                    {adminAutoStats.stats.open_count} / {adminAutoStats.stats.rebalance_count}
+                                </div>
+                            </div>
+                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="text-[11px] text-zinc-500 dark:text-white/40">撤退卫士</div>
+                                <div className="mt-0.5 text-sm font-extrabold tabular-nums text-zinc-900 dark:text-white/80">
+                                    {adminAutoStats.stats.guard_count}
+                                </div>
+                            </div>
+
+                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116] col-span-2">
+                                <div className="flex flex-wrap gap-x-4 gap-y-2">
+                                    <div className="text-[11px] text-zinc-500 dark:text-white/40">
+                                        盈利交易对：
+                                        <span className="ml-1 font-semibold text-zinc-900 dark:text-white/80">
+                                            {adminAutoStats.stats.best_pair ? `${adminAutoStats.stats.best_pair}（${adminAutoStats?.formatted?.best_profit_usdt ?? '--'} USDT）` : '--'}
+                                        </span>
+                                    </div>
+                                    <div className="text-[11px] text-zinc-500 dark:text-white/40">
+                                        亏损交易对：
+                                        <span className="ml-1 font-semibold text-zinc-900 dark:text-white/80">
+                                            {adminAutoStats.stats.worst_pair ? `${adminAutoStats.stats.worst_pair}（${adminAutoStats?.formatted?.worst_profit_usdt ?? '--'} USDT）` : '--'}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     ) : null}
                 </div>

@@ -33,6 +33,8 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/realtime_positions", s.handleRealtimePositions)
 	mux.HandleFunc("/api/admin/realtime_users", s.handleAdminRealtimeUsers)
 	mux.HandleFunc("/api/admin/realtime_positions", s.handleAdminRealtimePositions)
+	mux.HandleFunc("/api/admin/autolp_stats", s.handleAdminAutoLPStats)
+	mux.HandleFunc("/api/admin/autolp_disable", s.handleAdminAutoLPDisable)
 
 	handler := corsMiddleware(mux)
 

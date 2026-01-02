@@ -11,21 +11,21 @@ import (
 )
 
 type AutoLPStats struct {
-	WindowLabel string
-	WindowStart *time.Time
-	WindowEnd   *time.Time
+	WindowLabel string     `json:"window_label"`
+	WindowStart *time.Time `json:"window_start,omitempty"`
+	WindowEnd   *time.Time `json:"window_end,omitempty"`
 
-	OpenCount      int64
-	RebalanceCount int64
-	GuardCount     int64
+	OpenCount      int64 `json:"open_count"`
+	RebalanceCount int64 `json:"rebalance_count"`
+	GuardCount     int64 `json:"guard_count"`
 
-	GasUSDT    string
-	ProfitUSDT string
+	GasUSDTWei    string `json:"gas_usdt_wei"`
+	ProfitUSDTWei string `json:"profit_usdt_wei"`
 
-	BestPair    string
-	BestProfit  string
-	WorstPair   string
-	WorstProfit string
+	BestPair           string `json:"best_pair"`
+	BestProfitUSDTWei  string `json:"best_profit_usdt_wei"`
+	WorstPair          string `json:"worst_pair"`
+	WorstProfitUSDTWei string `json:"worst_profit_usdt_wei"`
 }
 
 type AutoLPStatsService struct{}
@@ -41,11 +41,11 @@ func (s *AutoLPStatsService) GetUserStats(userID uint, cfg *models.AutoLPUserCon
 
 	start, end, label := resolveAutoLPStatsWindow(cfg)
 	stats := &AutoLPStats{
-		WindowLabel: label,
-		WindowStart: start,
-		WindowEnd:   end,
-		GasUSDT:     "0",
-		ProfitUSDT:  "0",
+		WindowLabel:   label,
+		WindowStart:   start,
+		WindowEnd:     end,
+		GasUSDTWei:    "0",
+		ProfitUSDTWei: "0",
 	}
 
 	openCount, err := s.countEvents(userID, models.AutoLPEventOpen, start, end)
@@ -69,8 +69,8 @@ func (s *AutoLPStatsService) GetUserStats(userID uint, cfg *models.AutoLPUserCon
 	if err != nil {
 		return nil, err
 	}
-	stats.ProfitUSDT = profit
-	stats.GasUSDT = gas
+	stats.ProfitUSDTWei = profit
+	stats.GasUSDTWei = gas
 
 	bestPair, bestProfit, err := s.pickExtremePair(userID, start, end, true)
 	if err != nil {
@@ -81,9 +81,9 @@ func (s *AutoLPStatsService) GetUserStats(userID uint, cfg *models.AutoLPUserCon
 		return nil, err
 	}
 	stats.BestPair = bestPair
-	stats.BestProfit = bestProfit
+	stats.BestProfitUSDTWei = bestProfit
 	stats.WorstPair = worstPair
-	stats.WorstProfit = worstProfit
+	stats.WorstProfitUSDTWei = worstProfit
 
 	return stats, nil
 }

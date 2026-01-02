@@ -572,7 +572,7 @@ func (s *AutoLPService) replacePoolMRealtime(ctx context.Context, rows []poolMRa
 
 	batch, err := s.ch.Conn.PrepareBatch(ctx, `INSERT INTO poolm_top_fees_realtime (
 		ts, chain, protocol_version, timeframe_minutes, dex, pool_address, factory_name, trading_pair,
-		fee_percentage, total_fees, total_volume, current_pool_value, price_display, last_swap_at
+		fee_percentage, transaction_count, total_fees, total_volume, current_pool_value, price_display, last_swap_at
 	)`)
 	if err != nil {
 		return err
@@ -590,6 +590,7 @@ func (s *AutoLPService) replacePoolMRealtime(ctx context.Context, rows []poolMRa
 			strings.TrimSpace(p.FactoryName),
 			strings.TrimSpace(p.TradingPair),
 			p.FeePercentage,
+			uint32(maxInt(p.TransactionCount, 0)),
 			p.TotalFees,
 			p.TotalVolume,
 			p.CurrentPoolValue,

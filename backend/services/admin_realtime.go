@@ -38,17 +38,18 @@ func (s *AdminRealtimeService) ListActiveTaskUsers(limit int) ([]AdminActiveUser
 	}
 
 	var rows []AdminActiveUser
-	err := database.DB.Table("strategy_tasks st").
-		Select(`st.user_id AS user_id,
-			COUNT(*) AS active_tasks,
-			MAX(st.updated_at) AS updated_at,
+	err := database.DB.Table("auto_lp_user_configs cfg").
+		Select(`cfg.user_id AS user_id,
+			COUNT(st.id) AS active_tasks,
+			COALESCE(cfg.last_enabled_at, cfg.updated_at) AS updated_at,
 			u.telegram_id AS telegram_id,
 			u.username AS username,
 			u.first_name AS first_name,
 			u.last_name AS last_name`).
-		Joins("LEFT JOIN users u ON u.id = st.user_id").
-		Where("st.status IN ? AND st.deleted_at IS NULL", statuses).
-		Group("st.user_id, u.telegram_id, u.username, u.first_name, u.last_name").
+		Joins("LEFT JOIN users u ON u.id = cfg.user_id").
+		Joins("LEFT JOIN strategy_tasks st ON st.user_id = cfg.user_id AND st.is_auto = 1 AND st.status IN ? AND st.deleted_at IS NULL", statuses).
+		Where("cfg.enabled = 1 AND cfg.deleted_at IS NULL").
+		Group("cfg.user_id, u.telegram_id, u.username, u.first_name, u.last_name, cfg.last_enabled_at, cfg.updated_at").
 		Order("updated_at DESC").
 		Limit(limit).
 		Scan(&rows).Error

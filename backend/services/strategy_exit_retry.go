@@ -120,7 +120,8 @@ func (s *StrategyService) processExitRetry(task *models.StrategyTask) bool {
 	}
 
 	attempt := task.ExitRetryCount + 1
-	reason := strings.TrimSpace(task.ExitPendingReason)
+	pendingReason := strings.TrimSpace(task.ExitPendingReason)
+	reason := pendingReason
 	if reason == "" {
 		reason = "撤出流动性"
 	}
@@ -154,7 +155,11 @@ func (s *StrategyService) processExitRetry(task *models.StrategyTask) bool {
 	case exitActionStopLoss:
 		s.finishStopAfterExit(task, now, reason, txHashes)
 	case exitActionManualStop:
-		s.finishStopAfterExit(task, now, "🛑 手动停止", txHashes)
+		title := "🛑 手动停止"
+		if pendingReason != "" {
+			title = pendingReason
+		}
+		s.finishStopAfterExit(task, now, title, txHashes)
 	default:
 		// Unknown action, keep task running.
 		log.Printf("[Strategy] 任务 #%d 撤出成功，但未知 exit_pending_action=%q，已清理重试状态", task.ID, action)
