@@ -77,6 +77,28 @@ func (b *Bot) handleConfigResidualTolerance(query *tgbotapi.CallbackQuery, user 
 	b.sendMessage(query.Message.Chat.ID, "🧾 请输入剩余资产容忍度（百分比），例如：`1` 表示最多允许 1% 的剩余资产未投入")
 }
 
+func (b *Bot) handleConfigExtraNotificationsToggle(query *tgbotapi.CallbackQuery, user *models.User) {
+	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
+	cfg, err := b.configService.GetOrCreate(user.ID)
+	if err != nil {
+		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("❌ 获取配置失败：%v", err))
+		return
+	}
+	newValue := !cfg.ExtraNotificationsEnabled
+	_, err = b.configService.Update(user.ID, map[string]interface{}{
+		"extra_notifications_enabled": newValue,
+	})
+	if err != nil {
+		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("❌ 更新配置失败：%v", err))
+		return
+	}
+	if newValue {
+		b.sendMessage(query.Message.Chat.ID, "✅ 已开启日志通知（涨破/跌破/AutoLP候选池）")
+	} else {
+		b.sendMessage(query.Message.Chat.ID, "✅ 已关闭日志通知（涨破/跌破/AutoLP候选池）")
+	}
+}
+
 func (b *Bot) handleViewConfig(query *tgbotapi.CallbackQuery, user *models.User) {
 	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
 	chatID := user.TelegramID

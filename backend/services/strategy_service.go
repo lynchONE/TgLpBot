@@ -17,6 +17,7 @@ import (
 type StrategyService struct {
 	poolService      *PoolService
 	liquidityService *LiquidityService
+	configService    *GlobalConfigService
 	stopChan         chan struct{}
 	ticker           *time.Ticker
 	notifier         func(userID uint, message string) // Callback for notifications
@@ -30,6 +31,7 @@ func NewStrategyService() *StrategyService {
 	return &StrategyService{
 		poolService:        NewPoolService(),
 		liquidityService:   NewLiquidityService(),
+		configService:      NewGlobalConfigService(),
 		stopChan:           make(chan struct{}),
 		ticker:             time.NewTicker(5 * time.Second), // Check every 5 seconds
 		lastLiquidityCheck: make(map[uint]time.Time),
@@ -194,11 +196,13 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 	if isUp {
 		// 首次检测到涨破，立即通知用户
 		if isFirstTimeOutOfRange {
-			s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 涨破区间上界\n"+
-				"%s\n"+
-				"%s\n"+
-				"如果 %s 内不回到区间，将自动执行再平衡",
-				task.ID, alertLines.current, alertLines.upper, formatDelayTime(task.ReopenDelaySeconds)))
+			if s.extraNotificationsEnabled(task.UserID) {
+				s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 涨破区间上界\n"+
+					"%s\n"+
+					"%s\n"+
+					"如果 %s 内不回到区间，将自动执行再平衡",
+					task.ID, alertLines.current, alertLines.upper, formatDelayTime(task.ReopenDelaySeconds)))
+			}
 			log.Printf("[Strategy] 任务 #%d 涨破区间，开始再平衡倒计时 %ds", task.ID, task.ReopenDelaySeconds)
 		}
 
@@ -217,18 +221,20 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 			// 首次检测到跌破，立即通知用户
 			if isFirstTimeOutOfRange {
 				stopLossSec := task.StopLossDelaySeconds
-				if stopLossSec == 0 {
-					s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 跌破区间下界\n"+
-						"%s\n"+
-						"%s\n"+
-						"将立即执行止损",
-						task.ID, alertLines.current, alertLines.lower))
-				} else {
-					s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 跌破区间下界\n"+
-						"%s\n"+
-						"%s\n"+
-						"如果 %s 内不回到区间，将自动执行止损",
-						task.ID, alertLines.current, alertLines.lower, formatDelayTime(stopLossSec)))
+				if s.extraNotificationsEnabled(task.UserID) {
+					if stopLossSec == 0 {
+						s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 跌破区间下界\n"+
+							"%s\n"+
+							"%s\n"+
+							"将立即执行止损",
+							task.ID, alertLines.current, alertLines.lower))
+					} else {
+						s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 跌破区间下界\n"+
+							"%s\n"+
+							"%s\n"+
+							"如果 %s 内不回到区间，将自动执行止损",
+							task.ID, alertLines.current, alertLines.lower, formatDelayTime(stopLossSec)))
+					}
 				}
 				log.Printf("[Strategy] 任务 #%d 跌破区间，开始止损倒计时 %ds", task.ID, task.StopLossDelaySeconds)
 			}
@@ -242,11 +248,13 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 			// Case B: StopLoss Disabled -> Treat as Rebalance
 			// 首次检测到跌破，立即通知用户
 			if isFirstTimeOutOfRange {
-				s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 跌破区间下界\n"+
-					"%s\n"+
-					"%s\n"+
-					"如果 %s 内不回到区间，将自动执行再平衡",
-					task.ID, alertLines.current, alertLines.lower, formatDelayTime(task.ReopenDelaySeconds)))
+				if s.extraNotificationsEnabled(task.UserID) {
+					s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 跌破区间下界\n"+
+						"%s\n"+
+						"%s\n"+
+						"如果 %s 内不回到区间，将自动执行再平衡",
+						task.ID, alertLines.current, alertLines.lower, formatDelayTime(task.ReopenDelaySeconds)))
+				}
 				log.Printf("[Strategy] 任务 #%d 跌破区间，开始再平衡倒计时 %ds", task.ID, task.ReopenDelaySeconds)
 			}
 
@@ -272,6 +280,18 @@ func (s *StrategyService) notify(userID uint, message string) {
 	if s.notifier != nil {
 		s.notifier(userID, message)
 	}
+}
+
+func (s *StrategyService) extraNotificationsEnabled(userID uint) bool {
+	if s.configService == nil {
+		return true
+	}
+	cfg, err := s.configService.GetOrCreate(userID)
+	if err != nil {
+		log.Printf("[Strategy] get global config failed: %v", err)
+		return true
+	}
+	return cfg.ExtraNotificationsEnabled
 }
 
 func (s *StrategyService) notifyTaskCard(userID uint, taskID uint) {
@@ -323,6 +343,7 @@ func (s *StrategyService) handleWaitingTask(task *models.StrategyTask) {
 		updates := map[string]interface{}{
 			"status":                      models.StrategyStatusRunning,
 			"current_liquidity":           enterRes.CurrentLiquidity,
+			"exit_liquidity_removed":      false,
 			"v3_position_manager_address": enterRes.V3PositionManagerAddress,
 			"v3_token_id":                 enterRes.V3TokenID,
 			"v4_token_id":                 enterRes.V4TokenID,
@@ -332,6 +353,7 @@ func (s *StrategyService) handleWaitingTask(task *models.StrategyTask) {
 			"error_message":               "",
 		}
 		database.DB.Model(task).Updates(updates)
+		task.ExitLiquidityRemoved = false
 
 		log.Printf("[Strategy] 任务 #%d 已重新开仓! 继续监控.", task.ID)
 	} else {

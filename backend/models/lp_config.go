@@ -28,6 +28,9 @@ type GlobalConfig struct {
 	// Residual tolerance when adding liquidity (percentage, e.g. 1.0 = 1%)
 	ResidualTolerance float64 `gorm:"type:decimal(5,2);default:1.0" json:"residual_tolerance"`
 
+	// Notifications
+	ExtraNotificationsEnabled bool `gorm:"not null;default:true" json:"extra_notifications_enabled"`
+
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`

@@ -235,7 +235,7 @@ sudo systemctl status tglpbot
 - `/balance` - Check wallet balances
 - `/newposition` - Create a new position
 - `/positions` - View and manage positions
-- `/config` - Global config
+- `/config` - Global config (slippage/stop-loss/rebalance/extra notifications)
 - `/transactions` - View transaction history
 
 ### Workflow
@@ -881,3 +881,15 @@ AutoLP 自动开仓的交易记录中，Gas 费显示为 `0.000000 BNB`。
 - ✅ **节省 Gas**：不会因 RPC 延迟导致分两次兑换同一代币
 - ✅ **日志可追溯**：如有残余会打印警告日志
 
+
+## Web Dashboard Update (2026-01-02)
+
+### 1. UI/UX 全面升级 (Glassmorphism)
+- **视觉风格**: 采用 "Glassmorphism" 毛玻璃风格，配合 Mesh Gradient 动态背景。
+- **字体优化**: 引入 `Outfit` (标题) 和 `Inter` (正文) 字体，提升阅读体验。
+- **深色模式**: 优化了 Dark Mode 的配色，从 slate 灰转向更深邃的 zinc 色系。
+
+### 2. 组件重构
+- **PositionCard**: 重新设计为全息卡片样式，增强了展示效果和交互动画。
+- **PoolTable**: 简化了表格边框，增加了悬停高亮和自定义 Badge 样式。
+- **布局**: 头部导航改为悬浮玻璃栏，优化了移动端适配。

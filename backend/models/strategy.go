@@ -84,6 +84,9 @@ type StrategyTask struct {
 	ExitNextRetryAt   *time.Time `json:"exit_next_retry_at"`
 	ExitLastError     string     `gorm:"type:text" json:"exit_last_error"`
 	ExitGiveUpAt      *time.Time `json:"exit_give_up_at"`
+	// ExitLiquidityRemoved marks that the liquidity removal tx already succeeded, and the remaining
+	// pending work (if any) should retry swap-to-USDT only.
+	ExitLiquidityRemoved bool `gorm:"default:false" json:"exit_liquidity_removed"`
 
 	// Rebalance re-entry retry state (after exit succeeds).
 	RebalancePending     bool       `gorm:"default:false" json:"rebalance_pending"`

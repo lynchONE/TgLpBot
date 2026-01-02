@@ -491,6 +491,8 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleConfigReinvestToggle(query, user)
 	case query.Data == "config_residual_tolerance":
 		b.handleConfigResidualTolerance(query, user)
+	case query.Data == "config_extra_notifications_toggle":
+		b.handleConfigExtraNotificationsToggle(query, user)
 	case query.Data == "view_config":
 		b.handleViewConfig(query, user)
 	// Task management callbacks

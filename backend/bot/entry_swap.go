@@ -16,9 +16,10 @@ func (b *Bot) applyEnterResult(task *models.StrategyTask, enterRes *services.Ent
 	}
 
 	updates := map[string]interface{}{
-		"current_liquidity": enterRes.CurrentLiquidity,
-		"error_message":     "",
-		"status":            models.StrategyStatusRunning,
+		"current_liquidity":      enterRes.CurrentLiquidity,
+		"exit_liquidity_removed": false,
+		"error_message":          "",
+		"status":                 models.StrategyStatusRunning,
 	}
 
 	v3TokenId := strings.TrimSpace(enterRes.V3TokenID)
@@ -37,6 +38,7 @@ func (b *Bot) applyEnterResult(task *models.StrategyTask, enterRes *services.Ent
 	}
 
 	task.CurrentLiquidity = enterRes.CurrentLiquidity
+	task.ExitLiquidityRemoved = false
 	task.Status = models.StrategyStatusRunning
 	task.ErrorMessage = ""
 

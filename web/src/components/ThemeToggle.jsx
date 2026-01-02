@@ -38,16 +38,16 @@ const ThemeToggle = () => {
             onClick={toggleTheme}
             aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
             title={isDark ? 'Light mode' : 'Dark mode'}
-            className="relative inline-flex h-9 w-16 items-center rounded-full border border-slate-200/70 bg-white/70 p-1 shadow-sm backdrop-blur transition-colors hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 dark:border-slate-800/70 dark:bg-[#151718]/60 dark:hover:bg-[#151718]/80 dark:focus-visible:ring-offset-[#0d0e10]"
+            className="relative inline-flex h-9 w-16 items-center rounded-full border border-border bg-secondary/50 p-1 shadow-sm backdrop-blur-sm transition-all hover:bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
-            <span className="pointer-events-none absolute left-2 text-slate-500 dark:text-slate-400">
+            <span className="pointer-events-none absolute left-2 text-muted-foreground">
                 <SunIcon className="h-4 w-4" />
             </span>
-            <span className="pointer-events-none absolute right-2 text-slate-500 dark:text-slate-400">
+            <span className="pointer-events-none absolute right-2 text-muted-foreground">
                 <MoonIcon className="h-4 w-4" />
             </span>
             <span
-                className={`grid h-7 w-7 transform place-items-center rounded-full bg-slate-900 text-white shadow transition-transform duration-200 dark:bg-white dark:text-slate-900 ${isDark ? 'translate-x-7' : 'translate-x-0'}`}
+                className={`grid h-7 w-7 transform place-items-center rounded-full bg-background text-foreground shadow-md ring-1 ring-black/5 transition-transform duration-300 ${isDark ? 'translate-x-7' : 'translate-x-0'}`}
             >
                 {isDark ? <MoonIcon className="h-4 w-4" /> : <SunIcon className="h-4 w-4" />}
             </span>

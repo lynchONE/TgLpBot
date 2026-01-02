@@ -13,9 +13,10 @@ func applyEnterResultToTask(task *models.StrategyTask, enterRes *EnterResult) er
 	}
 
 	updates := map[string]interface{}{
-		"current_liquidity": enterRes.CurrentLiquidity,
-		"error_message":     "",
-		"status":            models.StrategyStatusRunning,
+		"current_liquidity":      enterRes.CurrentLiquidity,
+		"exit_liquidity_removed": false,
+		"error_message":          "",
+		"status":                 models.StrategyStatusRunning,
 	}
 
 	if strings.TrimSpace(enterRes.V3TokenID) != "" && strings.TrimSpace(enterRes.V3TokenID) != "0" {
@@ -31,6 +32,7 @@ func applyEnterResultToTask(task *models.StrategyTask, enterRes *EnterResult) er
 	}
 
 	task.CurrentLiquidity = enterRes.CurrentLiquidity
+	task.ExitLiquidityRemoved = false
 	task.ErrorMessage = ""
 	task.Status = models.StrategyStatusRunning
 

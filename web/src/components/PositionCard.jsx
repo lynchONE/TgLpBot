@@ -76,12 +76,12 @@ const PositionCard = ({ refetchIntervalMs = 30000 }) => {
 
     if (!isConnected) {
         return (
-            <div className="flex min-h-[300px] flex-col items-center justify-center rounded-2xl border border-slate-200/70 bg-white/80 p-8 shadow-sm ring-1 ring-black/5 backdrop-blur dark:border-slate-800/70 dark:bg-[#151718]/70 dark:ring-white/10">
-                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 text-3xl dark:bg-white/5">
+            <div className="glass-card flex min-h-[300px] flex-col items-center justify-center rounded-3xl p-8">
+                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-secondary/50 text-3xl shadow-inner">
                     👛
                 </div>
-                <h3 className="mb-2 text-xl font-bold text-slate-900 dark:text-white">Wallet Disconnected</h3>
-                <p className="max-w-xs text-center text-slate-500 dark:text-slate-400">
+                <h3 className="mb-2 text-xl font-bold text-foreground">Wallet Disconnected</h3>
+                <p className="max-w-xs text-center text-muted-foreground">
                     Connect your wallet to view your active liquidity positions.
                 </p>
             </div>
@@ -90,22 +90,24 @@ const PositionCard = ({ refetchIntervalMs = 30000 }) => {
 
     if (!balance || balance === 0n) {
         return (
-            <div className="rounded-2xl border border-slate-200/70 bg-white/80 p-8 text-center shadow-sm ring-1 ring-black/5 backdrop-blur dark:border-slate-800/70 dark:bg-[#151718]/70 dark:ring-white/10">
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white">No Positions Found</h3>
-                <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                    You don&apos;t have any active V3 liquidity positions on this chain.
+            <div className="glass-card rounded-3xl p-8 text-center">
+                <h3 className="text-lg font-bold text-foreground">No Positions Found</h3>
+                <p className="mt-2 text-sm text-muted-foreground">
+                    You don't have any active V3 liquidity positions on this chain.
                 </p>
             </div>
         );
     }
 
     if (!position) {
-        return <div className="p-8 text-center text-gray-500">Loading position...</div>;
+        return (
+            <div className="glass-card rounded-3xl p-8 flex items-center justify-center">
+                <div className="animate-pulse text-muted-foreground">Loading position data...</div>
+            </div>
+        );
     }
 
-    // Unpack position data (Simplified for UI)
-    // In a real app, you'd fetch Token Symbols and Decimals here using another hook or multicall.
-    // For now we mock the symbols but use real raw numbers to prove data connection.
+    // Unpack position data
     const [, , token0, token1, fee, tickLower, tickUpper, liquidity, , , tokensOwed0, tokensOwed1] = position;
 
     // Calculate basic tick range prices (simplified math)
@@ -113,62 +115,73 @@ const PositionCard = ({ refetchIntervalMs = 30000 }) => {
     const priceUpper = Math.pow(1.0001, Number(tickUpper));
 
     return (
-        <div className="relative overflow-hidden rounded-2xl border border-slate-200/70 bg-white/80 p-6 shadow-sm ring-1 ring-black/5 backdrop-blur dark:border-slate-800/70 dark:bg-[#151718]/70 dark:ring-white/10 group">
-            <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                <svg width="120" height="120" viewBox="0 0 24 24" fill="currentColor" className="text-blue-500">
+        <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-[#1e293b] to-[#0f172a] p-6 text-white shadow-xl ring-1 ring-white/5 group hover:shadow-2xl hover:-translate-y-1 transition-all duration-300">
+            {/* Background Decor */}
+            <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity duration-500">
+                <svg width="180" height="180" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 2L2 7l10 5 10-5-10-5zm0 9l2.5-1.25L12 8.5l-2.5 1.25L12 11zm0 2.5l-5-2.5-5 2.5L12 22l10-8.5-5-2.5-5 2.5z" />
                 </svg>
             </div>
 
+            <div className="absolute top-0 right-0 w-full h-full bg-gradient-to-br from-blue-500/10 to-purple-500/10 rounded-3xl pointer-events-none"></div>
+
             <div className="relative z-10">
-                <div className="flex justify-between items-start mb-6">
+                <div className="flex justify-between items-start mb-8">
                     <div>
-                        <div className="flex items-center gap-2 mb-1">
-                            <span className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 text-xs px-2 py-1 rounded font-bold">
-                                V3 LP #{tokenId.toString()}
+                        <div className="flex items-center gap-2 mb-2">
+                            <span className="bg-white/10 border border-white/10 text-white/90 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold backdrop-blur-md">
+                                V3 Position
                             </span>
-                            <span className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 text-xs px-2 py-1 rounded font-bold">
-                                {fee / 10000}% Fee
+                            <span className="bg-green-500/20 text-green-300 border border-green-500/20 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold backdrop-blur-md">
+                                #{tokenId.toString()}
                             </span>
                         </div>
-                        <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
-                            Active Position
+                        <h3 className="font-display text-2xl font-bold text-white tracking-tight">
+                            Liquidity Pool
                         </h3>
-                        <div className="mt-1 font-mono text-xs text-slate-400">
+                        <div className="mt-1 font-mono text-xs text-slate-400 font-medium tracking-wide">
                             {token0.slice(0, 6)}... / {token1.slice(0, 6)}...
+                            <span className="mx-2 text-slate-600">|</span>
+                            {fee / 10000}% Fee
                         </div>
                     </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 mb-6">
-                    <div className="rounded-xl border border-slate-200/70 bg-slate-50/80 p-3 dark:border-slate-800/70 dark:bg-white/5">
-                        <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">Liquidity</div>
-                        <div className="truncate text-lg font-bold text-slate-900 dark:text-white">
+                    <div className="rounded-2xl bg-white/5 border border-white/5 p-4 backdrop-blur-sm hover:bg-white/10 transition-colors">
+                        <div className="mb-1 text-xs text-slate-400 uppercase tracking-wider font-semibold">Liquidity</div>
+                        <div className="truncate text-lg font-bold font-display text-white">
                             {liquidity.toString().slice(0, 8)}...
                         </div>
                     </div>
-                    <div className="rounded-xl border border-slate-200/70 bg-slate-50/80 p-3 dark:border-slate-800/70 dark:bg-white/5">
-                        <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">Unclaimed Fees</div>
-                        <div className="text-lg font-bold text-green-600 dark:text-green-400">
+                    <div className="rounded-2xl bg-white/5 border border-white/5 p-4 backdrop-blur-sm hover:bg-white/10 transition-colors">
+                        <div className="mb-1 text-xs text-slate-400 uppercase tracking-wider font-semibold">Unclaimed Fees</div>
+                        <div className="text-lg font-bold font-display text-emerald-400">
                             {formatUnits(tokensOwed0 + tokensOwed1, 18).slice(0, 6)}
                         </div>
                     </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-200/70 bg-slate-50/80 p-4 dark:border-slate-800/70 dark:bg-white/5">
+                <div className="rounded-2xl bg-black/20 border border-white/5 p-5 backdrop-blur-md">
                     <div className="flex justify-between items-center mb-4">
-                        <span className="text-sm font-medium text-slate-600 dark:text-slate-300">Price Range</span>
-                        <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Price Range</span>
+                        <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] text-green-400 font-bold uppercase">Active</span>
+                            <span className="relative flex h-2 w-2">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                            </span>
+                        </div>
                     </div>
 
-                    <div className="flex justify-between text-center divide-x divide-slate-200/70 dark:divide-slate-700/60">
+                    <div className="flex justify-between text-center divide-x divide-white/10">
                         <div className="flex-1 px-2">
-                            <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">Min Price</div>
-                            <div className="font-mono text-sm font-bold text-slate-900 dark:text-white">{priceLower.toPrecision(5)}</div>
+                            <div className="mb-1 text-[10px] text-slate-400">Min Price</div>
+                            <div className="font-mono text-sm font-bold text-white">{priceLower.toPrecision(5)}</div>
                         </div>
                         <div className="flex-1 px-2">
-                            <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">Max Price</div>
-                            <div className="font-mono text-sm font-bold text-slate-900 dark:text-white">{priceUpper.toPrecision(5)}</div>
+                            <div className="mb-1 text-[10px] text-slate-400">Max Price</div>
+                            <div className="font-mono text-sm font-bold text-white">{priceUpper.toPrecision(5)}</div>
                         </div>
                     </div>
                 </div>

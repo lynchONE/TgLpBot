@@ -22,6 +22,7 @@ func globalConfigKeyboard() tgbotapi.InlineKeyboardMarkup {
 			tgbotapi.NewInlineKeyboardButtonData("🧾 剩余资产容忍度", "config_residual_tolerance"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📝 日志通知", "config_extra_notifications_toggle"),
 			tgbotapi.NewInlineKeyboardButtonData("🔄 刷新", "view_config"),
 		),
 	)
@@ -41,6 +42,7 @@ func formatGlobalConfigMenuText(cfg *models.GlobalConfig) string {
 📊 滑点：%.2f%%
 🔁 复投：%s
 🧾 剩余资产容忍度：%.2f%%
+📝 日志通知：%s
 
 请选择要配置的选项：`,
 		cfg.RebalanceTimeout,
@@ -49,5 +51,6 @@ func formatGlobalConfigMenuText(cfg *models.GlobalConfig) string {
 		cfg.SlippageTolerance,
 		boolToOnOff(cfg.AutoReinvest),
 		cfg.ResidualTolerance,
+		boolToOnOff(cfg.ExtraNotificationsEnabled),
 	)
 }

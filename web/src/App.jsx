@@ -20,6 +20,15 @@ function App() {
   });
   const [showPools, setShowPools] = useState(true);
   const [showPosition, setShowPosition] = useState(true);
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setScrolled(window.scrollY > 20);
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -36,105 +45,130 @@ function App() {
       theme={{
         algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
         token: {
-          colorPrimary: '#2563eb',
-          borderRadiusLG: 16,
-          colorBgBase: isDark ? '#0d0e10' : '#f8fafc',
-          colorBgContainer: isDark ? '#151718' : '#ffffff',
-          colorBgElevated: isDark ? '#1f2123' : '#ffffff',
+          fontFamily: 'Inter, sans-serif',
+          colorPrimary: '#3b82f6', // blue-500
+          borderRadius: 12,
+          colorBgBase: 'transparent',
         },
+        components: {
+          Table: {
+            colorBgContainer: 'transparent',
+            headerBg: 'transparent',
+            rowHoverBg: 'transparent',
+          },
+          Button: {
+            controlHeightSM: 32,
+            borderRadiusSM: 8,
+            fontWeight: 500,
+          }
+        }
       }}
     >
-      <Layout className="min-h-screen bg-slate-50 text-slate-900 dark:bg-[#0d0e10] dark:text-slate-100">
-        <Header className="sticky top-0 z-50 flex h-16 items-center justify-between border-b border-slate-200/70 bg-white/70 px-4 backdrop-blur dark:border-slate-800/70 dark:bg-[#151718]/60 sm:px-6">
-          <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-blue-600 to-purple-600 font-extrabold text-white shadow-sm ring-1 ring-black/10 dark:ring-white/10">
-              TG
+      <Layout className="min-h-screen bg-transparent">
+        {/* Background Gradients */}
+        <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+          <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-purple-500/20 rounded-full blur-[120px] dark:bg-purple-900/20" />
+          <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-blue-500/20 rounded-full blur-[120px] dark:bg-blue-900/20" />
+        </div>
+
+        <Header
+          className={`sticky top-0 z-50 flex h-20 items-center justify-between px-4 sm:px-8 transition-all duration-300 ${scrolled ? 'glass border-b border-border shadow-sm' : 'bg-transparent border-transparent'
+            }`}
+          style={{ background: scrolled ? undefined : 'transparent' }}
+        >
+          <div className="flex items-center gap-4">
+            <div className="relative group">
+              <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl blur opacity-25 group-hover:opacity-75 transition duration-500"></div>
+              <div className="relative grid h-10 w-10 place-items-center rounded-xl bg-white dark:bg-black border border-slate-200 dark:border-white/10 shadow-sm">
+                <span className="text-xl font-bold bg-gradient-to-br from-blue-600 to-purple-600 bg-clip-text text-transparent">T</span>
+              </div>
             </div>
             <div className="leading-tight">
-              <div className="text-base font-semibold tracking-tight text-slate-900 dark:text-white">
-                LP Dashboard
-              </div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">
-                Pools & positions · Auto refresh {refreshSeconds}s
+              <div className="font-display text-xl font-bold tracking-tight text-foreground">
+                TgLpBot
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-secondary/50 border border-border">
+              <span className="text-xs font-medium text-muted-foreground">Refresh:</span>
+              <div className="flex items-center gap-1">
+                <InputNumber
+                  size="small"
+                  min={5}
+                  step={1}
+                  value={refreshSeconds}
+                  bordered={false}
+                  className="!w-12 !bg-transparent text-right font-medium"
+                  controls={false}
+                  onChange={(v) => {
+                    if (v == null) return;
+                    setRefreshSeconds(Math.max(5, Math.floor(Number(v) || 5)));
+                  }}
+                />
+                <span className="text-xs text-muted-foreground">s</span>
+              </div>
+            </div>
+            <div className="h-6 w-px bg-border mx-2 hidden sm:block"></div>
             <ThemeToggle />
-            <ConnectButton chainStatus="icon" showBalance={false} />
+            <ConnectButton chainStatus="icon" showBalance={false} accountStatus={{ smallScreen: 'avatar', largeScreen: 'full' }} />
           </div>
         </Header>
-        <Content className="px-4 py-6 sm:px-6">
-          <div className={`mx-auto mb-4 flex ${gridMaxWidthClass} flex-col gap-3 sm:flex-row sm:items-center sm:justify-between`}>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button size="small" type={showPools ? 'primary' : 'default'} onClick={() => setShowPools((v) => !v)}>
-                {showPools ? 'Hide Top Pools' : 'Show Top Pools'}
-              </Button>
-              <Button
-                size="small"
-                type={showPosition ? 'primary' : 'default'}
-                onClick={() => setShowPosition((v) => !v)}
-              >
-                {showPosition ? 'Hide My Position' : 'Show My Position'}
-              </Button>
+
+        <Content className="relative z-10 px-4 py-8 sm:px-8">
+          <div className={`mx-auto mb-8 flex ${gridMaxWidthClass} flex-col gap-4 sm:flex-row sm:items-center sm:justify-between animate-fade-in`}>
+            <div>
+              <h1 className="font-display text-3xl font-bold text-foreground mb-1">Dashboard</h1>
+              <p className="text-muted-foreground">Manage your liquidity positions and view market stats.</p>
             </div>
-            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-              <span>Refresh</span>
-              <InputNumber
-                size="small"
-                min={5}
-                step={1}
-                value={refreshSeconds}
-                onChange={(v) => {
-                  if (v == null) return;
-                  setRefreshSeconds(Math.max(5, Math.floor(Number(v) || 5)));
-                }}
-              />
-              <span>s (min 5s)</span>
+
+            <div className="flex items-center gap-2 bg-secondary/30 p-1 rounded-xl border border-border/50 backdrop-blur-sm">
+              <button
+                onClick={() => setShowPools(!showPools)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${showPools ? 'bg-card text-card-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                Top Pools
+              </button>
+              <button
+                onClick={() => setShowPosition(!showPosition)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${showPosition ? 'bg-card text-card-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                My Position
+              </button>
             </div>
           </div>
 
           {showEmpty ? (
-            <div className={`mx-auto ${gridMaxWidthClass} rounded-2xl border border-slate-200/70 bg-white/80 p-10 text-center shadow-sm ring-1 ring-black/5 dark:border-slate-800/70 dark:bg-[#151718]/70 dark:ring-white/10`}>
-              <div className="text-base font-semibold text-slate-900 dark:text-white">Nothing to show</div>
-              <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                Use the buttons above to show Top Pools or My Position.
+            <div className={`mx-auto ${gridMaxWidthClass} glass-card rounded-3xl p-16 text-center animate-slide-up`}>
+              <div className="inline-flex h-20 w-20 items-center justify-center rounded-full bg-secondary/50 mb-6">
+                <span className="text-4xl">👻</span>
               </div>
+              <h3 className="text-xl font-bold text-foreground mb-2">Nothing to see here</h3>
+              <p className="text-muted-foreground max-w-sm mx-auto">
+                You've hidden all the dashboard widgets. Use the toggles above to bring them back.
+              </p>
             </div>
           ) : (
-            <div className={`mx-auto grid ${gridMaxWidthClass} grid-cols-1 gap-6 ${gridColsClass}`}>
+            <div className={`mx-auto grid ${gridMaxWidthClass} grid-cols-1 gap-8 ${gridColsClass}`}>
               {showPools && (
-                <section
-                  className={`rounded-2xl border border-slate-200/70 bg-white/80 p-6 shadow-sm ring-1 ring-black/5 dark:border-slate-800/70 dark:bg-[#151718]/70 dark:ring-white/10 ${
-                    showPools && showPosition ? 'xl:col-span-2' : ''
-                  }`}
-                >
-                  <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <section className={`glass-card rounded-3xl p-6 md:p-8 animate-slide-up ${showPools && showPosition ? 'xl:col-span-2' : ''}`}>
+                  <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Top Pools</h2>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">
-                        Switch 5m/1h/6h/24h for volume, fees, APR, change
+                      <h2 className="font-display text-xl font-bold text-foreground flex items-center gap-2">
+                        <span className="flex h-2 w-2 rounded-full bg-green-500 animate-pulse"></span>
+                        Top Pools
+                      </h2>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Live market data from The Graph
                       </p>
                     </div>
-                    <Button size="small" onClick={() => setShowPools(false)}>
-                      Collapse
-                    </Button>
                   </div>
                   <PoolTable refetchIntervalMs={refetchIntervalMs} />
                 </section>
               )}
 
               {showPosition && (
-                <section className={`${showPools && showPosition ? 'xl:col-span-1' : ''} space-y-4`}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h2 className="text-lg font-semibold text-slate-900 dark:text-white">My Position</h2>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">Reads your first V3 LP position on-chain</p>
-                    </div>
-                    <Button size="small" onClick={() => setShowPosition(false)}>
-                      Collapse
-                    </Button>
-                  </div>
+                <section className={`space-y-6 animate-slide-up ${showPools && showPosition ? 'xl:col-span-1' : ''} transition-all duration-500`} style={{ animationDelay: '100ms' }}>
                   <PositionCard refetchIntervalMs={refetchIntervalMs} />
                 </section>
               )}

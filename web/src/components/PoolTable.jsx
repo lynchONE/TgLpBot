@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Segmented, Table, Tag, Typography } from 'antd';
+import { Segmented, Table, Tag, Typography, Tooltip } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 
 const fetchPools = async () => {
@@ -59,129 +59,141 @@ const PoolTable = ({ refetchIntervalMs = 30000 }) => {
 
             return [
                 {
-                    title: 'Pool',
+                    title: 'Pool Name',
                     dataIndex: 'name',
                     key: 'name',
                     width: 320,
                     render: (text, record) => (
-                        <div>
-                            <div className="flex items-center gap-2">
-                                <div className="font-semibold text-sm text-gray-900 dark:text-gray-100">{text}</div>
+                        <div className="group">
+                            <div className="flex items-center gap-2 mb-0.5">
+                                <span className="font-semibold text-sm text-foreground group-hover:text-primary transition-colors">{text}</span>
                                 {!!record?.dex_id && (
-                                    <Tag className="border-0 text-[11px] leading-[18px]">
+                                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wider">
                                         {formatDexLabel(record.dex_id)}
-                                    </Tag>
+                                    </span>
                                 )}
                                 {!!record?.pool_fee_percentage && (
-                                    <Tag className="border-0 text-[11px] leading-[18px]" color="blue">
+                                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500">
                                         {Number(record.pool_fee_percentage).toFixed(2)}%
-                                    </Tag>
+                                    </span>
                                 )}
                             </div>
-                            <Typography.Text
-                                className="text-[11px] text-gray-600 dark:text-gray-400 font-mono"
-                            copyable={{ text: record.address }}
-                            >
-                                {record.address?.slice(0, 6)}...{record.address?.slice(-4)}
-                            </Typography.Text>
+                            <div className="flex items-center gap-2">
+                                <Tooltip title={record.address}>
+                                    <Typography.Text className="text-[11px] text-muted-foreground font-mono cursor-pointer hover:text-foreground transition-colors" copyable={{ text: record.address }}>
+                                        {record.address?.slice(0, 6)}...{record.address?.slice(-4)}
+                                    </Typography.Text>
+                                </Tooltip>
+                            </div>
                         </div>
                     ),
                 },
-            {
-                title: 'Price',
-                dataIndex: 'price_usd',
-                key: 'price_usd',
-                align: 'right',
-                width: 120,
-                render: (val) => (
-                    <span className="text-gray-900 dark:text-gray-100 font-medium font-mono text-xs">
-                        ${val ? Number(val).toFixed(6) : '0.00'}
-                    </span>
-                ),
-            },
-            {
-                title: `${intervalLabel} Vol`,
-                key: keyFor('volume'),
-                align: 'right',
-                width: 130,
-                sorter: (a, b) => getNum(a, keyFor('volume')) - getNum(b, keyFor('volume')),
-                defaultSortOrder: interval === 'h24' ? 'descend' : undefined,
-                render: (_, record) => (
-                    <span className="text-gray-900 dark:text-gray-100 font-mono text-xs">
-                        {formatUsdCompact(getNum(record, keyFor('volume')))}
-                    </span>
-                ),
-            },
-            {
-                title: `${intervalLabel} Fees`,
-                key: keyFor('fee_usd'),
-                align: 'right',
-                width: 130,
-                sorter: (a, b) => getNum(a, keyFor('fee_usd')) - getNum(b, keyFor('fee_usd')),
-                render: (_, record) => (
-                    <span className="text-gray-900 dark:text-gray-100 font-mono text-xs">
-                        {formatUsdCompact(getNum(record, keyFor('fee_usd')))}
-                    </span>
-                ),
-            },
-            {
-                title: `${intervalLabel} APR`,
-                key: keyFor('fee_apr'),
-                align: 'right',
-                width: 120,
-                sorter: (a, b) => getNum(a, keyFor('fee_apr')) - getNum(b, keyFor('fee_apr')),
-                render: (_, record) => (
-                    <span className="text-gray-900 dark:text-gray-100 font-mono text-xs">
-                        {getNum(record, keyFor('fee_apr')).toFixed(2)}%
-                    </span>
-                ),
-            },
-            {
-                title: 'TVL',
-                dataIndex: 'reserve_usd',
-                key: 'reserve_usd',
-                align: 'right',
-                width: 130,
-                sorter: (a, b) => getNum(a, 'reserve_usd') - getNum(b, 'reserve_usd'),
-                render: (val) => (
-                    <span className="text-gray-900 dark:text-gray-100 font-mono text-xs">
-                        {formatUsdCompact(val)}
-                    </span>
-                ),
-            },
-            {
-                title: `${intervalLabel} Chg`,
-                key: keyFor('price_change'),
-                align: 'right',
-                width: 110,
-                sorter: (a, b) => getNum(a, keyFor('price_change')) - getNum(b, keyFor('price_change')),
-                render: (_, record) => {
-                    const val = getNum(record, keyFor('price_change'));
-                    return (
-                        <Tag
-                            color={val >= 0 ? 'green' : 'red'}
-                            className="text-[11px] font-bold border-0 px-2 py-0.5"
-                        >
-                            {val.toFixed(2)}%
-                        </Tag>
-                    );
+                {
+                    title: 'Price',
+                    dataIndex: 'price_usd',
+                    key: 'price_usd',
+                    align: 'right',
+                    width: 120,
+                    render: (val) => (
+                        <div className="flex flex-col items-end">
+                            <span className="text-foreground font-medium font-mono text-xs">
+                                ${val ? Number(val).toFixed(6) : '0.00'}
+                            </span>
+                        </div>
+                    ),
                 },
-            },
+                {
+                    title: `${intervalLabel} Vol`,
+                    key: keyFor('volume'),
+                    align: 'right',
+                    width: 130,
+                    sorter: (a, b) => getNum(a, keyFor('volume')) - getNum(b, keyFor('volume')),
+                    defaultSortOrder: interval === 'h24' ? 'descend' : undefined,
+                    render: (_, record) => (
+                        <span className="text-foreground font-mono text-xs">
+                            {formatUsdCompact(getNum(record, keyFor('volume')))}
+                        </span>
+                    ),
+                },
+                {
+                    title: `${intervalLabel} Fees`,
+                    key: keyFor('fee_usd'),
+                    align: 'right',
+                    width: 130,
+                    sorter: (a, b) => getNum(a, keyFor('fee_usd')) - getNum(b, keyFor('fee_usd')),
+                    render: (_, record) => (
+                        <span className="text-foreground font-mono text-xs">
+                            {formatUsdCompact(getNum(record, keyFor('fee_usd')))}
+                        </span>
+                    ),
+                },
+                {
+                    title: `${intervalLabel} APR`,
+                    key: keyFor('fee_apr'),
+                    align: 'right',
+                    width: 120,
+                    sorter: (a, b) => getNum(a, keyFor('fee_apr')) - getNum(b, keyFor('fee_apr')),
+                    render: (_, record) => {
+                        const val = getNum(record, keyFor('fee_apr'));
+                        return (
+                            <span className={`font-mono text-xs font-medium ${val > 50 ? 'text-green-500' : 'text-foreground'}`}>
+                                {val.toFixed(2)}%
+                            </span>
+                        );
+                    },
+                },
+                {
+                    title: 'TVL',
+                    dataIndex: 'reserve_usd',
+                    key: 'reserve_usd',
+                    align: 'right',
+                    width: 130,
+                    sorter: (a, b) => getNum(a, 'reserve_usd') - getNum(b, 'reserve_usd'),
+                    render: (val) => (
+                        <span className="text-muted-foreground font-mono text-xs">
+                            {formatUsdCompact(val)}
+                        </span>
+                    ),
+                },
+                {
+                    title: `${intervalLabel} Chg`,
+                    key: keyFor('price_change'),
+                    align: 'right',
+                    width: 110,
+                    sorter: (a, b) => getNum(a, keyFor('price_change')) - getNum(b, keyFor('price_change')),
+                    render: (_, record) => {
+                        const val = getNum(record, keyFor('price_change'));
+                        const isPos = val >= 0;
+                        return (
+                            <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${isPos ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
+                                {isPos ? '+' : ''}{val.toFixed(2)}%
+                            </span>
+                        );
+                    },
+                },
             ];
         },
         [interval, intervalLabel, usdCompactFormatter]
     );
 
-    if (error) return <div className="p-4 text-red-500 bg-red-50 dark:bg-red-900/10 rounded">Error loading pools: {error.message}</div>;
+    if (error) return (
+        <div className="p-6 rounded-2xl bg-destructive/10 border border-destructive/20 text-destructive text-center">
+            <p className="font-bold">Error loading pools</p>
+            <p className="text-xs mt-1 opacity-80">{error.message}</p>
+        </div>
+    );
 
     return (
         <div className="overflow-x-auto">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div className="text-xs text-gray-600 dark:text-gray-400">Interval: {intervalLabel}</div>
+            <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+                <div className="text-xs font-medium text-muted-foreground px-1">
+                    Performance Interval: <span className="text-foreground">{intervalLabel}</span>
+                </div>
                 <Segmented
                     size="small"
                     value={interval}
                     onChange={setInterval}
+                    className="bg-muted p-0.5"
                     options={[
                         { label: '5m', value: 'm5' },
                         { label: '1h', value: 'h1' },
@@ -195,13 +207,10 @@ const PoolTable = ({ refetchIntervalMs = 30000 }) => {
                 dataSource={pools}
                 rowKey="id"
                 loading={isLoading}
-                size="small"
-                className="text-xs"
+                size="middle"
+                className="custom-table"
                 scroll={{ x: true }}
-                pagination={{ pageSize: 10, position: ['bottomCenter'] }}
-                rowClassName={() =>
-                    'bg-transparent hover:bg-slate-50/80 dark:hover:bg-white/5 transition-colors'
-                }
+                pagination={{ pageSize: 10, position: ['bottomCenter'], className: "!mb-0" }}
             />
         </div>
     );

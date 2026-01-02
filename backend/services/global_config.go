@@ -26,14 +26,15 @@ func (s *GlobalConfigService) GetOrCreate(userID uint) (*models.GlobalConfig, er
 	}
 
 	cfg = models.GlobalConfig{
-		UserID:               userID,
-		RebalanceTimeout:     300,
-		StopLossThreshold:    10.0,
-		StopLossEnabled:      false,
-		StopLossDelaySeconds: 0,
-		SlippageTolerance:    0.5,
-		AutoReinvest:         false,
-		ResidualTolerance:    1.0,
+		UserID:                    userID,
+		RebalanceTimeout:          300,
+		StopLossThreshold:         10.0,
+		StopLossEnabled:           false,
+		StopLossDelaySeconds:      0,
+		SlippageTolerance:         0.5,
+		AutoReinvest:              false,
+		ResidualTolerance:         1.0,
+		ExtraNotificationsEnabled: true,
 	}
 	if err := database.DB.Create(&cfg).Error; err != nil {
 		return nil, fmt.Errorf("create global config failed: %w", err)

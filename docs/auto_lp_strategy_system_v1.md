@@ -152,7 +152,7 @@ V1.0 执行策略：
 
 - 每次扫描最多自动开 1 个新仓位（避免过度交易）
 - 自动执行需显式开启 `AUTO_LP_EXECUTE_ENABLED=1`
-- V1.0 不再按 `stable_coin_symbol` 做硬筛过滤；若池子不含 USDT 且 `AUTO_LP_ALLOW_ENTRY_SWAP=0`，则会因无法入场而跳过/失败（建议先不开执行观察）
+- V1.0 不再按 `stable_coin_symbol` 做硬筛过滤；若池子不含 USDT，会先将 USDT 兑换为入场代币（如 WBNB/USDC）再开仓（可用 `AUTO_LP_ALLOW_ENTRY_SWAP=0` 禁用）
 
 执行流程：
 

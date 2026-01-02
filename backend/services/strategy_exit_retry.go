@@ -126,9 +126,17 @@ func (s *StrategyService) processExitRetry(task *models.StrategyTask) bool {
 	}
 
 	if attempt == 1 {
-		s.notify(task.UserID, fmt.Sprintf("%s，正在撤出流动性并兑换成 USDT...", reason))
+		if task.ExitLiquidityRemoved {
+			s.notify(task.UserID, fmt.Sprintf("%s，正在兑换成 USDT...", reason))
+		} else {
+			s.notify(task.UserID, fmt.Sprintf("%s，正在撤出流动性并兑换成 USDT...", reason))
+		}
 	} else {
-		s.notify(task.UserID, fmt.Sprintf("🔄 %s失败，正在第 %d/%d 次重试撤出并兑换 USDT...", reason, attempt, exitMaxAttempts))
+		if task.ExitLiquidityRemoved {
+			s.notify(task.UserID, fmt.Sprintf("🔄 %s失败，正在第 %d/%d 次重试兑换 USDT...", reason, attempt, exitMaxAttempts))
+		} else {
+			s.notify(task.UserID, fmt.Sprintf("🔄 %s失败，正在第 %d/%d 次重试撤出并兑换 USDT...", reason, attempt, exitMaxAttempts))
+		}
 	}
 
 	txHashes, err := s.liquidityService.ExitTaskToUSDTWithOptions(task.UserID, task, true, TxOptions{GasMultiplier: task.ExitGasMultiplier})
@@ -245,6 +253,7 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 		"last_rebalance_at":           &now,
 		"last_exit_time":              &now,
 		"current_liquidity":           enterRes.CurrentLiquidity,
+		"exit_liquidity_removed":      false,
 		"v3_position_manager_address": enterRes.V3PositionManagerAddress,
 		"v3_token_id":                 enterRes.V3TokenID,
 		"v4_token_id":                 enterRes.V4TokenID,
@@ -263,6 +272,7 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 	task.LastRebalanceAt = &now
 	task.LastExitTime = &now
 	task.CurrentLiquidity = enterRes.CurrentLiquidity
+	task.ExitLiquidityRemoved = false
 	task.V3PositionManagerAddress = enterRes.V3PositionManagerAddress
 	task.V3TokenID = enterRes.V3TokenID
 	task.V4TokenID = enterRes.V4TokenID

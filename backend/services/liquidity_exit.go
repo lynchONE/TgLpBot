@@ -62,6 +62,34 @@ func firstTxHash(txHashes []string) (common.Hash, bool) {
 	return common.HexToHash(txInfo), true
 }
 
+func extractTxHashes(txHashes []string) []common.Hash {
+	if len(txHashes) == 0 {
+		return nil
+	}
+	seen := make(map[common.Hash]struct{}, len(txHashes))
+	out := make([]common.Hash, 0, len(txHashes))
+	for _, item := range txHashes {
+		s := strings.TrimSpace(item)
+		if s == "" {
+			continue
+		}
+		parts := strings.Split(s, "|")
+		if len(parts) >= 2 {
+			s = strings.TrimSpace(parts[len(parts)-1])
+		}
+		if !reTxHash.MatchString(s) {
+			continue
+		}
+		h := common.HexToHash(s)
+		if _, ok := seen[h]; ok {
+			continue
+		}
+		seen[h] = struct{}{}
+		out = append(out, h)
+	}
+	return out
+}
+
 func receiptTokenTransferDelta(receipt *types.Receipt, token common.Address, wallet common.Address) *big.Int {
 	if receipt == nil || token == (common.Address{}) || wallet == (common.Address{}) {
 		return big.NewInt(0)
@@ -90,6 +118,83 @@ func receiptTokenTransferDelta(receipt *types.Receipt, token common.Address, wal
 		return big.NewInt(0)
 	}
 	return delta
+}
+
+func receiptGasCostWei(receipt *types.Receipt) *big.Int {
+	if receipt == nil || receipt.GasUsed == 0 {
+		return big.NewInt(0)
+	}
+	if receipt.EffectiveGasPrice == nil || receipt.EffectiveGasPrice.Sign() <= 0 {
+		return big.NewInt(0)
+	}
+	return new(big.Int).Mul(receipt.EffectiveGasPrice, new(big.Int).SetUint64(receipt.GasUsed))
+}
+
+func (s *LiquidityService) gasCostWeiFromReceipt(txHash common.Hash, receipt *types.Receipt) *big.Int {
+	if receipt == nil {
+		return big.NewInt(0)
+	}
+	if cost := receiptGasCostWei(receipt); cost.Sign() > 0 {
+		return cost
+	}
+	// Fallback for nodes that don't provide EffectiveGasPrice in receipts.
+	if blockchain.Client == nil || receipt.GasUsed == 0 {
+		return big.NewInt(0)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	tx, _, err := blockchain.Client.TransactionByHash(ctx, txHash)
+	cancel()
+	if err != nil || tx == nil {
+		return big.NewInt(0)
+	}
+
+	// Legacy/AccessList transactions still have a fixed gasPrice.
+	if tx.Type() < types.DynamicFeeTxType {
+		gp := tx.GasPrice()
+		if gp == nil || gp.Sign() <= 0 {
+			return big.NewInt(0)
+		}
+		return new(big.Int).Mul(gp, new(big.Int).SetUint64(receipt.GasUsed))
+	}
+
+	// Dynamic fee: effectiveGasPrice = min(maxFeePerGas, baseFee + maxPriorityFeePerGas)
+	if receipt.BlockNumber == nil {
+		gp := tx.GasPrice()
+		if gp == nil || gp.Sign() <= 0 {
+			return big.NewInt(0)
+		}
+		return new(big.Int).Mul(gp, new(big.Int).SetUint64(receipt.GasUsed))
+	}
+
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
+	header, err := blockchain.Client.HeaderByNumber(ctx2, receipt.BlockNumber)
+	cancel2()
+	if err != nil || header == nil || header.BaseFee == nil {
+		gp := tx.GasPrice()
+		if gp == nil || gp.Sign() <= 0 {
+			return big.NewInt(0)
+		}
+		return new(big.Int).Mul(gp, new(big.Int).SetUint64(receipt.GasUsed))
+	}
+
+	tipCap := tx.GasTipCap()
+	if tipCap == nil {
+		tipCap = big.NewInt(0)
+	}
+	feeCap := tx.GasFeeCap()
+	if feeCap == nil || feeCap.Sign() <= 0 {
+		feeCap = tx.GasPrice()
+	}
+
+	price := new(big.Int).Add(header.BaseFee, tipCap)
+	if feeCap != nil && feeCap.Sign() > 0 && feeCap.Cmp(price) < 0 {
+		price = feeCap
+	}
+	if price == nil || price.Sign() <= 0 {
+		return big.NewInt(0)
+	}
+	return new(big.Int).Mul(price, new(big.Int).SetUint64(receipt.GasUsed))
 }
 
 func (s *LiquidityService) exitTokenSyncDurations() (time.Duration, time.Duration) {
@@ -273,17 +378,30 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 	// for the pool tokens, instead of only swapping the LP exit deltas.
 	swapDeltas := !sweepWallet
 	var exitErr error
-	switch strings.ToLower(strings.TrimSpace(task.PoolVersion)) {
-	case "v4":
-		txHashes, exitErr = s.exitV4ToUSDT(privateKey, walletAddr, usdtAddr, task, swapDeltas, opts)
-	default:
-		txHashes, exitErr = s.exitV3ToUSDT(privateKey, walletAddr, usdtAddr, task, swapDeltas, opts)
+	skipExit := sweepWallet && task.ExitLiquidityRemoved
+	if skipExit {
+		log.Printf("[Liquidity] Exit-to-USDT: liquidity already removed (task #%d), skipping exit and retrying swap only", task.ID)
+	} else {
+		switch strings.ToLower(strings.TrimSpace(task.PoolVersion)) {
+		case "v4":
+			txHashes, exitErr = s.exitV4ToUSDT(privateKey, walletAddr, usdtAddr, task, swapDeltas, opts)
+		default:
+			txHashes, exitErr = s.exitV3ToUSDT(privateKey, walletAddr, usdtAddr, task, swapDeltas, opts)
+		}
 	}
 
 	var sweepErr error
 	// Only swap/sweep after a confirmed successful liquidity exit.
 	// If liquidity removal failed, keep funds untouched and let the retry strategy continue exiting first.
 	if sweepWallet && exitErr == nil {
+		// Mark "liquidity removed" before swapping, so a swap failure won't retry removing liquidity again.
+		if !task.ExitLiquidityRemoved {
+			if database.DB != nil {
+				_ = database.DB.Model(task).Updates(map[string]interface{}{"exit_liquidity_removed": true}).Error
+			}
+			task.ExitLiquidityRemoved = true
+		}
+
 		var expectedMinBalances map[common.Address]*big.Int
 		if exitErr == nil && len(sweepPreBalances) > 0 {
 			if exitHash, ok := firstTxHash(txHashes); ok {
@@ -342,6 +460,13 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 		if err != nil && exitErr == nil {
 			sweepErr = &SwapToUSDTError{Err: err}
 		}
+		if sweepErr == nil && task.ExitLiquidityRemoved {
+			// Full exit (remove + swap) succeeded; clear the intermediate state.
+			if database.DB != nil {
+				_ = database.DB.Model(task).Updates(map[string]interface{}{"exit_liquidity_removed": false}).Error
+			}
+			task.ExitLiquidityRemoved = false
+		}
 	} else if sweepWallet && exitErr != nil {
 		log.Printf("[Liquidity] Exit failed, skip swap-to-USDT sweep: %v", exitErr)
 	}
@@ -366,6 +491,25 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 	gasSpent := new(big.Int).Sub(bnbBefore, bnbAfter)
 	if gasSpent.Sign() < 0 {
 		gasSpent = big.NewInt(0)
+	}
+
+	// Prefer receipt-derived deltas when available, to avoid public RPC "stale balanceOf()"
+	// causing under-counting (especially for the swap-to-USDT phase).
+	receiptUSDT := big.NewInt(0)
+	receiptGas := big.NewInt(0)
+	for _, h := range extractTxHashes(txHashes) {
+		receipt, rerr := s.getReceiptWithRetry(h)
+		if rerr != nil || receipt == nil {
+			continue
+		}
+		receiptUSDT.Add(receiptUSDT, receiptTokenTransferDelta(receipt, usdtAddr, walletAddr))
+		receiptGas.Add(receiptGas, s.gasCostWeiFromReceipt(h, receipt))
+	}
+	if receiptUSDT.Cmp(actualReceived) > 0 {
+		actualReceived = receiptUSDT
+	}
+	if receiptGas.Cmp(gasSpent) > 0 {
+		gasSpent = receiptGas
 	}
 
 	mainHash := ""

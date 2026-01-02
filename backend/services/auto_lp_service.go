@@ -192,7 +192,24 @@ func (s *AutoLPService) runOnce() {
 		}
 	}
 
-	notifyTargets := func(msg string) {
+	extraNotifyCache := make(map[uint]bool)
+	extraNotificationsEnabled := func(userID uint) bool {
+		if v, ok := extraNotifyCache[userID]; ok {
+			return v
+		}
+		enabled := true
+		if s.configService != nil {
+			if cfg, err := s.configService.GetOrCreate(userID); err == nil {
+				enabled = cfg.ExtraNotificationsEnabled
+			} else if config.AppConfig.AutoLPDebug {
+				log.Printf("[AutoLP] get global config failed: user_id=%d err=%v", userID, err)
+			}
+		}
+		extraNotifyCache[userID] = enabled
+		return enabled
+	}
+
+	notifyCore := func(msg string) {
 		if len(enabledCfgs) > 0 {
 			for i := range enabledCfgs {
 				s.notify(enabledCfgs[i].UserID, msg)
@@ -204,16 +221,32 @@ func (s *AutoLPService) runOnce() {
 		}
 	}
 
+	notifyExtra := func(msg string) {
+		if len(enabledCfgs) > 0 {
+			for i := range enabledCfgs {
+				userID := enabledCfgs[i].UserID
+				if !extraNotificationsEnabled(userID) {
+					continue
+				}
+				s.notify(userID, msg)
+			}
+			return
+		}
+		if legacyUserID > 0 && extraNotificationsEnabled(legacyUserID) {
+			s.notify(legacyUserID, msg)
+		}
+	}
+
 	snap, rawRows, err := s.fetchPoolMSnapshot(ctx)
 	if err != nil {
 		s.lastRunError = err.Error()
-		notifyTargets(fmt.Sprintf("❌ AutoLP 扫描失败：%v", err))
+		notifyCore(fmt.Sprintf("❌ AutoLP 扫描失败：%v", err))
 		return
 	}
 
 	if err := s.insertPoolMRaw(ctx, rawRows); err != nil {
 		s.lastRunError = err.Error()
-		notifyTargets(fmt.Sprintf("❌ AutoLP 写入 ClickHouse 失败：%v", err))
+		notifyCore(fmt.Sprintf("❌ AutoLP 写入 ClickHouse 失败：%v", err))
 		return
 	}
 
@@ -222,7 +255,7 @@ func (s *AutoLPService) runOnce() {
 	analyses, err := s.analyzeSnapshot(ctx, snap)
 	if err != nil {
 		s.lastRunError = err.Error()
-		notifyTargets(fmt.Sprintf("❌ AutoLP 分析失败：%v", err))
+		notifyCore(fmt.Sprintf("❌ AutoLP 分析失败：%v", err))
 		return
 	}
 
@@ -263,7 +296,7 @@ func (s *AutoLPService) runOnce() {
 			if windowMinutes <= 0 {
 				windowMinutes = 10
 			}
-			notifyTargets(fmt.Sprintf("⚠️ 最近%d分钟内监测到 %d 个钱包在池子 %s 加LP，但未满足 AutoLP 规则，未自动开仓。", windowMinutes, a.RecentAddWalletCount, pair))
+			notifyExtra(fmt.Sprintf("⚠️ 最近%d分钟内监测到 %d 个钱包在池子 %s 加LP，但未满足 AutoLP 规则，未自动开仓。", windowMinutes, a.RecentAddWalletCount, pair))
 		}
 	}
 
@@ -280,7 +313,7 @@ func (s *AutoLPService) runOnce() {
 			topCand.BaseWidthPct, topCand.LowerWidthPct, topCand.UpperWidthPct,
 			topCand.Score,
 		)
-		notifyTargets(msg)
+		notifyExtra(msg)
 	}
 
 	s.guardActiveAutoTasks(ctx, snap, analyses)

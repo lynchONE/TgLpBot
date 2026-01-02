@@ -332,8 +332,12 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 
 	entryToken := usdtAddr
 	entryAmount := usdtAmount
+	allowEntrySwap := task.AllowEntrySwap
+	if !allowEntrySwap && task.IsAuto && config.AppConfig != nil && config.AppConfig.AutoLPAllowEntrySwap {
+		allowEntrySwap = true
+	}
 	if plan.RequiresSwap {
-		if !task.AllowEntrySwap {
+		if !allowEntrySwap {
 			return nil, &EntrySwapRequiredError{TokenSymbol: plan.EntrySymbol}
 		}
 		log.Printf("[Liquidity] Entry swap: USDT -> %s amount=%s", plan.EntrySymbol, usdtAmount.String())
@@ -407,6 +411,18 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	gasSpent := new(big.Int).Sub(bnbBefore, bnbAfter)
 	if gasSpent.Sign() < 0 {
 		gasSpent = big.NewInt(0)
+	}
+	if res != nil {
+		txHash := strings.TrimSpace(res.TxHash)
+		if reTxHash.MatchString(txHash) {
+			if receipt, rerr := s.getReceiptWithRetry(common.HexToHash(txHash)); rerr == nil && receipt != nil {
+				if cost := s.gasCostWeiFromReceipt(common.HexToHash(txHash), receipt); cost.Sign() > 0 {
+					if cost.Cmp(gasSpent) > 0 {
+						gasSpent = cost
+					}
+				}
+			}
+		}
 	}
 	log.Printf("[Liquidity] Enter gas tracking: bnbBefore=%s bnbAfter=%s gasSpent=%s", bnbBefore.String(), bnbAfter.String(), gasSpent.String())
 

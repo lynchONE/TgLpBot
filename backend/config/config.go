@@ -330,7 +330,7 @@ func LoadConfig() error {
 		AutoLPResonanceMinFeeRate5m:     autoLPResMinFeeRate5m,
 		AutoLPResonanceMinTotalVolume5m: autoLPResMinTotalVolume5m,
 		AutoLPResonanceMinAbsZ60:        autoLPResMinAbsZ60,
-		AutoLPAllowEntrySwap:            getEnvBool("AUTO_LP_ALLOW_ENTRY_SWAP", false),
+		AutoLPAllowEntrySwap:            getEnvBool("AUTO_LP_ALLOW_ENTRY_SWAP", true),
 		AutoLPGuardWindowSeconds:        autoLPGuardWindowSeconds,
 		AutoLPGuardVolumeDropPercent:    autoLPGuardVolumeDropPct,
 		AutoLPGuardVolumeDropPercentLow: autoLPGuardVolumeDropPctLow,
