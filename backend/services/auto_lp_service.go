@@ -269,10 +269,11 @@ func (s *AutoLPService) runOnce() {
 
 	if config.AppConfig.AutoLPNotifyTopCandidate && foundTop {
 		msg := fmt.Sprintf(
-			"📡 AutoLP 候选池：%d\nTop1：%s %s\n地址：%s\nZ5=%.2f 状态=%s\nZ60=%.2f 趋势=%s\n共振=%s\n宽度：%.2f%%（下 %.2f%% / 上 %.2f%%）\n评分：%.2f",
+			"📡 AutoLP 候选池：%d\nTop1：%s %s\n地址：%s\n5m 手续费=%.2f | 手续费率=%.2f%% | 5m 成交量=%.2f | TVL=%.2f | 5m 费用率=%.4f%%\nZ5=%.2f 状态=%s\nZ60=%.2f 趋势=%s\n共振=%s\n宽度：%.2f%%（下 %.2f%% / 上 %.2f%%）\n评分：%.2f\nZ5/Z60：价格 Z-score，Z=(P-MA)/σ；MA/σ 分别统计最近 5/60 分钟 current_token_price（minN=4/12，60m 不足则用 5m 数据窗口 60 分钟回退）",
 			candidateCount,
 			strings.ToUpper(topCand.ProtocolVersion), topCand.TradingPair,
 			topCand.PoolAddress,
+			topCand.TotalFees5m, topCand.FeePercentage, topCand.TotalVolume5m, topCand.TVLUSD, topCand.FeeRate5mPct,
 			topCand.Z5, autoLPStateZh(topCand.State5),
 			topCand.Z60, autoLPTrendZh(topCand.Trend60),
 			autoLPResonanceZh(topCand.Resonance),
@@ -525,7 +526,15 @@ type AutoLPAnalysis struct {
 	ProtocolVersion string
 	PoolAddress     string
 	TradingPair     string
-	CurrentPrice    float64
+
+	// 5m pool metrics (from PoolM top-fees 5m snapshot)
+	FeePercentage float64
+	FeeRate5mPct  float64 // total_fees/current_pool_value * 100
+	TotalFees5m   float64
+	TotalVolume5m float64
+	TVLUSD        float64 // current_pool_value (USD)
+
+	CurrentPrice float64
 
 	MA5    float64
 	Sigma5 float64
@@ -675,6 +684,11 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 			ProtocolVersion:   key.proto,
 			PoolAddress:       key.addr,
 			TradingPair:       strings.TrimSpace(p5.TradingPair),
+			FeePercentage:     p5.FeePercentage,
+			FeeRate5mPct:      feeRatePct,
+			TotalFees5m:       p5.TotalFees,
+			TotalVolume5m:     p5.TotalVolume,
+			TVLUSD:            p5.CurrentPoolValue,
 			CurrentPrice:      current,
 			MA5:               ma5,
 			Sigma5:            sigma5,
@@ -1776,8 +1790,12 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 		}
 
 		if !skipVolumeExit {
-			if ok, err := s.checkVolumeDropWithin(ctx, task, window, effectiveVolDropPct); err == nil && ok {
-				reason := fmt.Sprintf("5m 成交量 %ds 内较峰值下跌 >=%.0f%%", windowSeconds, effectiveVolDropPct*100)
+			if ok, currentVol, maxVol, err := s.checkVolumeDropWithin(ctx, task, window, effectiveVolDropPct); err == nil && ok {
+				reason := fmt.Sprintf(
+					"5m 成交量 %ds 内较峰值下跌 >=%.0f%%（峰值=%.2f USDT 当前=%.2f USDT）",
+					windowSeconds, effectiveVolDropPct*100,
+					maxVol, currentVol,
+				)
 				if err := s.requestStopLossExit(task, reason, 1.0); err == nil {
 					_ = NewAutoLPEventService().Record(task, models.AutoLPEventGuardExit, reason)
 				}
@@ -1897,24 +1915,24 @@ func (s *AutoLPService) requestStopLossExit(task *models.StrategyTask, reason st
 	return nil
 }
 
-func (s *AutoLPService) checkVolumeDropWithin(ctx context.Context, task *models.StrategyTask, window time.Duration, dropPct float64) (bool, error) {
+func (s *AutoLPService) checkVolumeDropWithin(ctx context.Context, task *models.StrategyTask, window time.Duration, dropPct float64) (bool, float64, float64, error) {
 	if s.ch == nil || s.ch.Conn == nil || task == nil || config.AppConfig == nil {
-		return false, nil
+		return false, 0, 0, nil
 	}
 	if window <= 0 || dropPct <= 0 || dropPct >= 1 {
-		return false, nil
+		return false, 0, 0, nil
 	}
 
 	chain := strings.ToLower(strings.TrimSpace(config.AppConfig.AutoLPChain))
 	proto := strings.ToLower(strings.TrimSpace(task.PoolVersion))
 	pool := strings.ToLower(strings.TrimSpace(task.PoolId))
 	if chain == "" || proto == "" || pool == "" {
-		return false, nil
+		return false, 0, 0, nil
 	}
 
 	windowSeconds := int(window.Seconds())
 	if windowSeconds <= 0 {
-		return false, nil
+		return false, 0, 0, nil
 	}
 	q := fmt.Sprintf(`
 		SELECT
@@ -1930,13 +1948,13 @@ func (s *AutoLPService) checkVolumeDropWithin(ctx context.Context, task *models.
 	var maxVol float64
 	var n uint64
 	if err := s.ch.Conn.QueryRow(ctx, q, chain, proto, pool).Scan(&currentVol, &maxVol, &n); err != nil {
-		return false, err
+		return false, 0, 0, err
 	}
 	if n < 2 || currentVol <= 0 || maxVol <= 0 {
-		return false, nil
+		return false, currentVol, maxVol, nil
 	}
 
-	return currentVol <= maxVol*(1.0-dropPct), nil
+	return currentVol <= maxVol*(1.0-dropPct), currentVol, maxVol, nil
 }
 
 func (s *AutoLPService) checkPriceAndTxDropWithin(ctx context.Context, task *models.StrategyTask, window time.Duration, dropPct float64) (bool, error) {

@@ -123,7 +123,7 @@ func (b *Bot) setCommands() error {
 		},
 		{
 			Command:     "auto",
-			Description: "AutoLP 自动开仓配置",
+			Description: "全自动托管模式",
 		},
 		{
 			Command:     "positions",
@@ -147,7 +147,7 @@ func (b *Bot) setCommands() error {
 		},
 		{
 			Command:     "smart_money",
-			Description: "Smart Money 加LP榜",
+			Description: "聪明钱",
 		},
 	}
 

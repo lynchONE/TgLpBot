@@ -47,3 +47,23 @@ export async function fetchAdminRealtimePositions({ apiBaseUrl, initData, userId
     }
     return resp.json();
 }
+
+export async function fetchHotPools({ apiBaseUrl, sort, chain, timeframeMinutes, limit, dex, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const params = new URLSearchParams();
+    if (sort) params.set('sort', String(sort));
+    if (chain) params.set('chain', String(chain));
+    if (Number.isFinite(timeframeMinutes)) params.set('timeframe_minutes', String(timeframeMinutes));
+    if (Number.isFinite(limit)) params.set('limit', String(limit));
+    if (dex) params.set('dex', String(dex));
+
+    const qs = params.toString();
+    const url = `${base}/api/hot_pools${qs ? `?${qs}` : ''}`;
+
+    const resp = await fetch(url, { method: 'GET', signal });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}

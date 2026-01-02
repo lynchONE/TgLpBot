@@ -61,7 +61,7 @@ func (s *SmartLPService) GetTopAddedLiquidityPools(ctx context.Context, chain st
 			AND pool_version != '' AND pool_id != ''
 			%s
 		GROUP BY pool_version, pool_id
-		ORDER BY added_liquidity DESC
+		ORDER BY wallet_count DESC, added_liquidity DESC
 		LIMIT %d
 	`, seconds, chainFilter, limit)
 

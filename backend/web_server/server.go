@@ -28,6 +28,7 @@ func NewServer(ch *services.ClickHouseService) *Server {
 func (s *Server) Start(port string) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/pools", s.handleGetPools)
+	mux.HandleFunc("/api/hot_pools", s.handleHotPools)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/realtime_positions", s.handleRealtimePositions)
 	mux.HandleFunc("/api/admin/realtime_users", s.handleAdminRealtimeUsers)

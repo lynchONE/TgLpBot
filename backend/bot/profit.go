@@ -5,6 +5,7 @@ import (
 	"TgLpBot/models"
 	"bytes"
 	"fmt"
+	"math"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -110,11 +111,11 @@ func (b *Bot) sendProfitChart(chatID int64, user *models.User) {
 
 	now := time.Now()
 	days := make([]string, 0, 7)
-	labels := make([]string, 0, 7)
+	dates := make([]time.Time, 0, 7)
 	for i := 6; i >= 0; i-- {
 		t := now.AddDate(0, 0, -i)
 		days = append(days, t.Format("2006-01-02"))
-		labels = append(labels, t.Format("01-02"))
+		dates = append(dates, t)
 	}
 
 	var snaps []models.WalletBalanceSnapshot
@@ -131,31 +132,110 @@ func (b *Bot) sendProfitChart(chatID int64, user *models.User) {
 	}
 
 	values := make([]float64, 0, 7)
+	present := make([]bool, 0, 7)
 	missing := 0
 	for _, d := range days {
 		s, ok := byDay[d]
 		if !ok {
 			values = append(values, 0)
+			present = append(present, false)
 			missing++
 			continue
 		}
 		values = append(values, weiToFloat64(strings.TrimSpace(s.USDTBalanceWei)))
+		present = append(present, true)
 	}
 
-	bars := make([]chart.Value, 0, 7)
-	for i := range labels {
-		bars = append(bars, chart.Value{
-			Value: values[i],
-			Label: labels[i],
+	var (
+		minY       float64
+		maxY       float64
+		hasAnyData bool
+	)
+	for i := range values {
+		if !present[i] {
+			continue
+		}
+		v := values[i]
+		if !hasAnyData {
+			minY, maxY = v, v
+			hasAnyData = true
+			continue
+		}
+		minY = math.Min(minY, v)
+		maxY = math.Max(maxY, v)
+	}
+	if !hasAnyData {
+		b.sendMessage(chatID, "暂无余额走势数据（将从今天开始自动记录）。")
+		return
+	}
+
+	const (
+		strokeWidth = 3.0
+		dotWidth    = 4.0
+	)
+	seriesStyle := chart.Style{
+		StrokeColor: chart.ColorBlue,
+		StrokeWidth: strokeWidth,
+		DotColor:    chart.ColorBlue,
+		DotWidth:    dotWidth,
+		FillColor:   chart.ColorBlue.WithAlpha(48),
+	}
+
+	segments := make([]chart.Series, 0, 2)
+	segX := make([]time.Time, 0, 7)
+	segY := make([]float64, 0, 7)
+	flushSeg := func() {
+		if len(segX) == 0 {
+			return
+		}
+		segments = append(segments, chart.TimeSeries{
+			Style:   seriesStyle,
+			XValues: append([]time.Time(nil), segX...),
+			YValues: append([]float64(nil), segY...),
+		})
+		segX = segX[:0]
+		segY = segY[:0]
+	}
+	for i := range dates {
+		if !present[i] {
+			flushSeg()
+			continue
+		}
+		segX = append(segX, dates[i])
+		segY = append(segY, values[i])
+	}
+	flushSeg()
+
+	yPad := math.Max(1.0, maxY*0.01)
+	yMin := minY - yPad
+	if yMin < 0 {
+		yMin = 0
+	}
+	yMax := maxY + yPad
+	if yMax <= yMin {
+		yMax = yMin + 1
+	}
+
+	xTicks := make([]chart.Tick, 0, len(dates))
+	for i := range dates {
+		xTicks = append(xTicks, chart.Tick{
+			Value: chart.TimeToFloat64(dates[i]),
+			Label: dates[i].Format("01-02"),
 		})
 	}
 
-	graph := chart.BarChart{
-		Title:      "近7天余额走势",
-		TitleStyle: chart.Shown(),
-		Height:     420,
-		BarWidth:   48,
-		Bars:       bars,
+	graph := chart.Chart{
+		Height: 420,
+		YAxis: chart.YAxis{
+			Range: &chart.ContinuousRange{Min: yMin, Max: yMax},
+			ValueFormatter: func(v interface{}) string {
+				return chart.FloatValueFormatterWithFormat(v, "%.2f")
+			},
+		},
+		XAxis: chart.XAxis{
+			Ticks: xTicks,
+		},
+		Series: segments,
 	}
 	if f := getChartCJKFont(); f != nil {
 		graph.Font = f

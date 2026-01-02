@@ -44,7 +44,7 @@ func (b *Bot) handleSmartMoney(message *tgbotapi.Message, user *models.User) {
 		return
 	}
 
-	text := "🧠 *Smart Money*（最近 1 小时加 LP 排名）\n\n"
+	text := "🧠 *Smart Money*（最近 1 小时加 LP 排名，按参与钱包数量排序）\n\n"
 	for i, rank := range ranks {
 		poolID := strings.TrimSpace(rank.PoolID)
 		if poolID == "" {
@@ -69,7 +69,7 @@ func (b *Bot) handleSmartMoney(message *tgbotapi.Message, user *models.User) {
 			}
 		}
 
-		text += fmt.Sprintf("%d. 池子：`%s`\n", i+1, poolID)
+		text += fmt.Sprintf("%d. 池子地址：\n```\n%s\n```\n", i+1, poolID)
 		text += fmt.Sprintf("💱 交易对：%s\n", pair)
 		text += fmt.Sprintf("💵 费率：%s\n", feeText)
 		text += fmt.Sprintf("👛 参与钱包：%d\n\n", rank.WalletCount)

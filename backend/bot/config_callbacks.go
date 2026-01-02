@@ -79,31 +79,24 @@ func (b *Bot) handleConfigResidualTolerance(query *tgbotapi.CallbackQuery, user 
 
 func (b *Bot) handleViewConfig(query *tgbotapi.CallbackQuery, user *models.User) {
 	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
+	chatID := user.TelegramID
+	if query.Message != nil {
+		chatID = query.Message.Chat.ID
+	}
 	cfg, err := b.configService.GetOrCreate(user.ID)
 	if err != nil {
-		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("❌ 获取配置失败：%v", err))
+		b.sendMessage(chatID, fmt.Sprintf("❌ 获取配置失败：%v", err))
 		return
 	}
 
-	text := fmt.Sprintf(`⚙️ *当前全局配置*
-
-⏱️ 再平衡超时：%d 秒
-⚡ 秒止损：%v
-⏲️ 秒止损阈值：%d 秒
-📊 滑点：%.2f%%
-🔁 复投：%v
-🧾 剩余资产容忍度：%.2f%%
-
-使用 /config 修改。`,
-		cfg.RebalanceTimeout,
-		boolToOnOff(cfg.StopLossEnabled),
-		cfg.StopLossDelaySeconds,
-		cfg.SlippageTolerance,
-		boolToOnOff(cfg.AutoReinvest),
-		cfg.ResidualTolerance,
-	)
-
-	b.sendMessage(query.Message.Chat.ID, text)
+	text := formatGlobalConfigMenuText(cfg)
+	keyboard := globalConfigKeyboard()
+	if query.Message != nil {
+		_ = b.editMessageText(query.Message.Chat.ID, query.Message.MessageID, text)
+		_ = b.editMessageReplyMarkup(query.Message.Chat.ID, query.Message.MessageID, keyboard)
+		return
+	}
+	b.sendMessageWithKeyboard(chatID, text, keyboard)
 }
 
 func boolToOnOff(v bool) string {

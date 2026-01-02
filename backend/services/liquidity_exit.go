@@ -281,7 +281,9 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 	}
 
 	var sweepErr error
-	if sweepWallet {
+	// Only swap/sweep after a confirmed successful liquidity exit.
+	// If liquidity removal failed, keep funds untouched and let the retry strategy continue exiting first.
+	if sweepWallet && exitErr == nil {
 		var expectedMinBalances map[common.Address]*big.Int
 		if exitErr == nil && len(sweepPreBalances) > 0 {
 			if exitHash, ok := firstTxHash(txHashes); ok {
@@ -340,6 +342,8 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 		if err != nil && exitErr == nil {
 			sweepErr = &SwapToUSDTError{Err: err}
 		}
+	} else if sweepWallet && exitErr != nil {
+		log.Printf("[Liquidity] Exit failed, skip swap-to-USDT sweep: %v", exitErr)
 	}
 
 	// 无论是否有错误，都计算实际收到的 USDT 和消耗的 Gas

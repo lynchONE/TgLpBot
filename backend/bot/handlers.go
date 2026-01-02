@@ -119,7 +119,14 @@ func (b *Bot) handleWallet(message *tgbotapi.Message, user *models.User) {
 		),
 	)
 
-	text := "💼 *钱包管理*\n\n请选择一个选项："
+	text := "💼 *钱包管理*\n\n"
+	if wallet, err := b.walletService.GetDefaultWallet(user.ID); err == nil {
+		bnbBalance, usdtBalance := b.getWalletBalances(wallet.Address)
+		text += fmt.Sprintf("💰 *当前默认钱包：* *%s* ⭐\n`%s`\n💎 BNB: %s\n💵 USDT: %s\n\n", wallet.Name, wallet.Address, bnbBalance, usdtBalance)
+	} else {
+		text += "当前还没有导入钱包。\n\n"
+	}
+	text += "请选择一个选项："
 	b.sendMessageWithKeyboard(message.Chat.ID, text, keyboard)
 }
 
@@ -246,26 +253,12 @@ func (b *Bot) handlePositions(message *tgbotapi.Message, user *models.User) {
 
 // handleConfig handles the /config command
 func (b *Bot) handleConfig(message *tgbotapi.Message, user *models.User) {
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("⏱️ 再平衡超时", "config_rebalance_timeout"),
-			tgbotapi.NewInlineKeyboardButtonData("⚡ 秒止损开关", "config_stop_loss_toggle"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("⏲️ 秒止损阈值", "config_stop_loss_delay"),
-			tgbotapi.NewInlineKeyboardButtonData("📊 滑点配置", "config_slippage"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🔁 复投开关", "config_reinvest_toggle"),
-			tgbotapi.NewInlineKeyboardButtonData("🧾 剩余资产容忍度", "config_residual_tolerance"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("👀 查看当前配置", "view_config"),
-		),
-	)
-
-	text := "⚙️ *全局配置*\n\n请选择要配置的选项："
-	b.sendMessageWithKeyboard(message.Chat.ID, text, keyboard)
+	cfg, err := b.configService.GetOrCreate(user.ID)
+	if err != nil {
+		b.sendMessage(message.Chat.ID, fmt.Sprintf("❌ 获取配置失败：%v", err))
+		return
+	}
+	b.sendMessageWithKeyboard(message.Chat.ID, formatGlobalConfigMenuText(cfg), globalConfigKeyboard())
 }
 
 // handleTransactions handles the /transactions command

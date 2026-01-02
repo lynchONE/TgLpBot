@@ -176,6 +176,8 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
 *格式选项：*
 1️⃣ 使用百分比范围: '百分比 金额'
    例如: '5 100' (表示当前价格 ±5%%, 投入 100 USDT)
+2️⃣ 使用上下不对称百分比: '金额 下百分比 上百分比'
+   例如: '100 1 3' (表示当前价格下方 1%%、上方 3%%, 投入 100 USDT)
 
 💡 提示：百分比范围会自动换算成 tick 范围
 
@@ -217,6 +219,9 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
 	database.SetUserSession(user.TelegramID, "pool_exchange", poolInfo.Exchange, 30*time.Minute)
 	database.SetUserSession(user.TelegramID, "pool_token0", poolInfo.Token0Symbol, 30*time.Minute)
 	database.SetUserSession(user.TelegramID, "pool_token1", poolInfo.Token1Symbol, 30*time.Minute)
+	database.SetUserSession(user.TelegramID, "pool_token0_address", poolInfo.Token0, 30*time.Minute)
+	database.SetUserSession(user.TelegramID, "pool_token1_address", poolInfo.Token1, 30*time.Minute)
+	database.SetUserSession(user.TelegramID, "pool_hooks_address", "0x0000000000000000000000000000000000000000", 30*time.Minute)
 	database.SetUserSession(user.TelegramID, "pool_fee", fmt.Sprintf("%d", poolInfo.Fee), 30*time.Minute)
 	database.SetUserSession(user.TelegramID, "pool_tick_spacing", fmt.Sprintf("%d", poolInfo.TickSpacing), 30*time.Minute)
 	database.SetUserSession(user.TelegramID, "state", "awaiting_tick_range", 30*time.Minute)
@@ -252,6 +257,8 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
 *格式选项：*
 1️⃣ 使用百分比范围: '百分比 金额'
    例如: '5 100' (表示当前价格 ±5%%, 投入 100 USDT)
+2️⃣ 使用上下不对称百分比: '金额 下百分比 上百分比'
+   例如: '100 1 3' (表示当前价格下方 1%%、上方 3%%, 投入 100 USDT)
 
 💡 提示：百分比范围会自动换算成 tick 范围
 
@@ -270,23 +277,57 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
 func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 	input := strings.TrimSpace(message.Text)
 
-	// Expect: "percentage amount"
+	// Expect:
+	// - "percentage amount" (symmetric)
+	// - "amount lowerPct upperPct" (asymmetric)
 	fields := strings.Fields(input)
-	if len(fields) != 2 {
-		b.sendMessage(message.Chat.ID, "格式无效。请使用：`百分比 金额`\n\n例如：`5 100`（表示当前价格 ±5%，投入 100 USDT）")
-		return
-	}
 
-	percentStr := strings.TrimSuffix(fields[0], "%")
-	percentage, err := strconv.ParseFloat(percentStr, 64)
-	if err != nil || percentage <= 0 || percentage >= 100 {
-		b.sendMessage(message.Chat.ID, "百分比无效。请输入 0 到 100 之间的数字（不含 100）。\n\n例如：`5` 表示 ±5%。")
-		return
-	}
+	var amount float64
+	var stableLowerPctReq float64
+	var stableUpperPctReq float64
+	symmetric := false
 
-	amount, err := strconv.ParseFloat(fields[1], 64)
-	if err != nil || amount <= 0 {
-		b.sendMessage(message.Chat.ID, "金额无效。请输入正数。\n\n例如：`100`")
+	switch len(fields) {
+	case 2:
+		// "percentage amount"
+		percentStr := strings.TrimSuffix(fields[0], "%")
+		pct, err := strconv.ParseFloat(percentStr, 64)
+		if err != nil || pct <= 0 || pct >= 100 {
+			b.sendMessage(message.Chat.ID, "百分比无效。请输入 0 到 100 之间的数字（不含 100）。\n\n例如：`5 100` 表示当前价格 ±5%，投入 100 USDT。")
+			return
+		}
+
+		a, err := strconv.ParseFloat(fields[1], 64)
+		if err != nil || a <= 0 {
+			b.sendMessage(message.Chat.ID, "金额无效。请输入正数。\n\n例如：`5 100` 或 `100 1 3`")
+			return
+		}
+
+		amount = a
+		stableLowerPctReq = pct
+		stableUpperPctReq = pct
+		symmetric = true
+	case 3:
+		// "amount lowerPct upperPct"
+		a, err := strconv.ParseFloat(fields[0], 64)
+		if err != nil || a <= 0 {
+			b.sendMessage(message.Chat.ID, "金额无效。请输入正数。\n\n例如：`100 1 3`（投入 100 USDT，当前价格下方 1%、上方 3%）")
+			return
+		}
+		lowStr := strings.TrimSuffix(fields[1], "%")
+		upStr := strings.TrimSuffix(fields[2], "%")
+		lowPct, err1 := strconv.ParseFloat(lowStr, 64)
+		upPct, err2 := strconv.ParseFloat(upStr, 64)
+		if err1 != nil || err2 != nil || lowPct <= 0 || upPct <= 0 || lowPct >= 100 || upPct >= 100 {
+			b.sendMessage(message.Chat.ID, "百分比无效。请输入 0 到 100 之间的数字（不含 100）。\n\n例如：`100 1 3`（投入 100 USDT，当前价格下方 1%、上方 3%）")
+			return
+		}
+
+		amount = a
+		stableLowerPctReq = lowPct
+		stableUpperPctReq = upPct
+	default:
+		b.sendMessage(message.Chat.ID, "格式无效。请使用：\n1) `百分比 金额`（例如：`5 100` 表示当前价格 ±5%，投入 100 USDT）\n2) `金额 下百分比 上百分比`（例如：`100 1 3` 表示当前价格下方 1%、上方 3%，投入 100 USDT）")
 		return
 	}
 
@@ -334,12 +375,31 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 	}
 
 	poolVersion, _ := database.GetUserSession(user.TelegramID, "pool_version")
+	poolID, _ := database.GetUserSession(user.TelegramID, "pool_address")
+	token0Symbol, _ := database.GetUserSession(user.TelegramID, "pool_token0")
+	token1Symbol, _ := database.GetUserSession(user.TelegramID, "pool_token1")
+	token0Addr, _ := database.GetUserSession(user.TelegramID, "pool_token0_address")
+	token1Addr, _ := database.GetUserSession(user.TelegramID, "pool_token1_address")
+
+	// Prepare a minimal task context for stable-side detection and stable/tick percentage conversion.
+	tmpTask := &models.StrategyTask{
+		PoolId:        poolID,
+		PoolVersion:   poolVersion,
+		Token0Symbol:  token0Symbol,
+		Token1Symbol:  token1Symbol,
+		Token0Address: token0Addr,
+		Token1Address: token1Addr,
+	}
+	tickLowerPctReq, tickUpperPctReq := services.TickPercentagesFromStablePercentages(tmpTask, stableLowerPctReq, stableUpperPctReq)
+	if tickLowerPctReq <= 0 || tickUpperPctReq <= 0 {
+		b.sendMessage(message.Chat.ID, "百分比无效。请检查输入范围。\n\n例如：`5 100` 或 `100 1 3`")
+		return
+	}
 
 	// Fetch current tick from chain (V3 via pool.slot0; V4 via PoolManager.getSlot0/slot0)
 	var currentTick int
 	switch strings.ToLower(strings.TrimSpace(poolVersion)) {
 	case "v4":
-		poolID, _ := database.GetUserSession(user.TelegramID, "pool_address")
 		if config.AppConfig == nil || !common.IsHexAddress(config.AppConfig.UniswapV4PoolManagerAddress) {
 			b.sendMessage(message.Chat.ID, "未配置 Uniswap V4 PoolManager 地址，无法查询当前 tick 并按百分比换算。\n\n请在 `.env` 中设置 `UNISWAP_V4_POOL_MANAGER_ADDRESS` 后重试。")
 			return
@@ -378,35 +438,55 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 	}
 
 	tc := services.NewTickCalculator()
-	tickLower, tickUpper := tc.CalculateTickFromPercentage(currentTick, percentage, tickSpacing)
+	tickLower, tickUpper := tc.CalculateTickFromPercentages(currentTick, tickLowerPctReq, tickUpperPctReq, tickSpacing)
 	if err := tc.ValidateTickRange(tickLower, tickUpper, tickSpacing); err != nil {
 		b.sendMessage(message.Chat.ID, fmt.Sprintf("计算出的 tick 范围无效：%v\n\n请尝试更小的百分比。", err))
 		return
 	}
 
-	lowerPct, upperPct := tc.CalculatePercentagesFromTicks(currentTick, tickLower, tickUpper)
-	effectivePct := percentage
-	if lowerPct > 0 && upperPct > 0 {
-		effectivePct = (lowerPct + upperPct) / 2.0
-	}
+	tickLowerPctEff, tickUpperPctEff := tc.CalculatePercentagesFromTicks(currentTick, tickLower, tickUpper)
+	effectivePct := (tickLowerPctEff + tickUpperPctEff) / 2.0
+	stableLowerPctEff, stableUpperPctEff := services.StablePercentagesFromTickPercentages(tmpTask, tickLowerPctEff, tickUpperPctEff)
 
 	// Store tick range and amount
 	database.SetUserSession(user.TelegramID, "tick_lower", strconv.Itoa(tickLower), 30*time.Minute)
 	database.SetUserSession(user.TelegramID, "tick_upper", strconv.Itoa(tickUpper), 30*time.Minute)
 	database.SetUserSession(user.TelegramID, "position_amount", fmt.Sprintf("%.8f", amount), 30*time.Minute)
 	database.SetUserSession(user.TelegramID, "tick_percentage", fmt.Sprintf("%.8f", effectivePct), 30*time.Minute)
-	if lowerPct > 0 && upperPct > 0 {
-		database.SetUserSession(user.TelegramID, "tick_lower_percentage", fmt.Sprintf("%.8f", lowerPct), 30*time.Minute)
-		database.SetUserSession(user.TelegramID, "tick_upper_percentage", fmt.Sprintf("%.8f", upperPct), 30*time.Minute)
+	if tickLowerPctEff > 0 && tickUpperPctEff > 0 {
+		database.SetUserSession(user.TelegramID, "tick_lower_percentage", fmt.Sprintf("%.8f", tickLowerPctEff), 30*time.Minute)
+		database.SetUserSession(user.TelegramID, "tick_upper_percentage", fmt.Sprintf("%.8f", tickUpperPctEff), 30*time.Minute)
 	}
 
 	// 直接创建任务，不需要确认
-	rangeLine := fmt.Sprintf("📈 百分比范围：±%.6f%%", percentage)
-	if lowerPct > 0 && upperPct > 0 {
-		if math.Abs(effectivePct-percentage) >= 0.0001 {
-			rangeLine = fmt.Sprintf("📈 百分比范围：输入 ±%.6f%%，实际 ±%.6f%% (受费率/格子影响)", percentage, effectivePct)
-		} else {
-			rangeLine = fmt.Sprintf("📈 百分比范围：±%.6f%%", effectivePct)
+	var rangeLine string
+	switch {
+	case symmetric:
+		requested := stableLowerPctReq
+		avgEff := (stableLowerPctEff + stableUpperPctEff) / 2.0
+
+		rangeLine = fmt.Sprintf("📈 百分比范围：±%.6f%%", requested)
+		if stableLowerPctEff > 0 && stableUpperPctEff > 0 {
+			asymmetricEff := math.Abs(stableLowerPctEff-stableUpperPctEff) >= 0.0001
+			drift := math.Abs(avgEff-requested) >= 0.0001
+
+			if asymmetricEff {
+				rangeLine = fmt.Sprintf("📈 百分比范围：输入 ±%.6f%%，实际 下 %.6f%% / 上 %.6f%% (受费率/格子影响)", requested, stableLowerPctEff, stableUpperPctEff)
+			} else if drift {
+				rangeLine = fmt.Sprintf("📈 百分比范围：输入 ±%.6f%%，实际 ±%.6f%% (受费率/格子影响)", requested, avgEff)
+			} else {
+				rangeLine = fmt.Sprintf("📈 百分比范围：±%.6f%%", avgEff)
+			}
+		}
+	default:
+		rangeLine = fmt.Sprintf("📈 百分比范围：下 %.6f%% / 上 %.6f%%", stableLowerPctReq, stableUpperPctReq)
+		if stableLowerPctEff > 0 && stableUpperPctEff > 0 {
+			drift := math.Abs(stableLowerPctEff-stableLowerPctReq) >= 0.0001 || math.Abs(stableUpperPctEff-stableUpperPctReq) >= 0.0001
+			if drift {
+				rangeLine = fmt.Sprintf("📈 百分比范围：输入 下 %.6f%% / 上 %.6f%%，实际 下 %.6f%% / 上 %.6f%% (受费率/格子影响)", stableLowerPctReq, stableUpperPctReq, stableLowerPctEff, stableUpperPctEff)
+			} else {
+				rangeLine = fmt.Sprintf("📈 百分比范围：下 %.6f%% / 上 %.6f%%", stableLowerPctEff, stableUpperPctEff)
+			}
 		}
 	}
 

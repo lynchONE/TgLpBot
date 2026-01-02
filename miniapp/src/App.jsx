@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import HotPoolCard from './components/HotPoolCard.jsx';
 import PositionCard from './components/PositionCard.jsx';
-import { fetchAdminRealtimePositions, fetchAdminRealtimeUsers, fetchRealtimePositions } from './lib/api';
+import { fetchAdminRealtimePositions, fetchAdminRealtimeUsers, fetchHotPools, fetchRealtimePositions } from './lib/api';
 import { getTelegramWebApp } from './lib/telegram';
 import { formatRelativeTime } from './lib/time';
 
@@ -77,6 +78,8 @@ const storage = {
 
 const STORAGE_THEME = 'tglp_theme';
 const STORAGE_POLL_SEC = 'tglp_poll_interval_sec';
+const STORAGE_HOT_POOLS_WATCH = 'tglp_hot_pools_watch';
+const STORAGE_HOT_POOLS_HIDDEN = 'tglp_hot_pools_hidden';
 
 function formatUsd(v) {
     const n = Number(v || 0);
@@ -107,6 +110,7 @@ const Icon = ({ path, className = '' }) => (
 
 const icons = {
     bot: 'M12 2a2 2 0 012 2v1h1a3 3 0 013 3v7a7 7 0 11-14 0V8a3 3 0 013-3h1V4a2 2 0 012-2zm-4 7a1.25 1.25 0 100 2.5A1.25 1.25 0 008 9zm8 0a1.25 1.25 0 100 2.5A1.25 1.25 0 0016 9zm-7.5 6.5h7a3.5 3.5 0 01-7 0z',
+    chart: 'M4 19h16v2H2V3h2v16zm4-2H6v-6h2v6zm5 0h-2V7h2v10zm5 0h-2v-4h2v4z',
     gear: 'M12 8.25a3.75 3.75 0 100 7.5 3.75 3.75 0 000-7.5zm9 3.75l-1.9.95a7.9 7.9 0 01-.5 1.2l.7 2.03-2.12 2.12-2.03-.7c-.38.2-.79.37-1.2.5L12 21l-1.95-1.9c-.41-.13-.82-.3-1.2-.5l-2.03.7-2.12-2.12.7-2.03c-.2-.38-.37-.79-.5-1.2L3 12l1.9-1.95c.13-.41.3-.82.5-1.2l-.7-2.03 2.12-2.12 2.03.7c.38-.2.79-.37 1.2-.5L12 3l1.95 1.9c.41.13.82.3 1.2.5l2.03-.7 2.12 2.12-.7 2.03c.2.38.37.79.5 1.2L21 12z',
     moon: 'M21 14.5A7.5 7.5 0 019.5 3a6.5 6.5 0 1011.5 11.5z',
     sun: 'M12 18a6 6 0 100-12 6 6 0 000 12zm0-16h1v3h-2V2h1zm0 17h1v3h-2v-3h1zM2 11h3v2H2v-2zm17 0h3v2h-3v-2zM4.2 5.6l2.1 2.1-1.4 1.4-2.1-2.1 1.4-1.4zm13.1 13.1l2.1 2.1-1.4 1.4-2.1-2.1 1.4-1.4zM18.4 4.2l1.4 1.4-2.1 2.1-1.4-1.4 2.1-2.1zM5.6 18.4l1.4 1.4-2.1 2.1-1.4-1.4 2.1-2.1z',
@@ -120,6 +124,15 @@ export default function App() {
     const [loading, setLoading] = useState(false);
     const pollRef = useRef(null);
     const [viewMode, setViewMode] = useState('positions');
+
+    const [hotPoolsSort, setHotPoolsSort] = useState('fees');
+    const [hotPoolsData, setHotPoolsData] = useState(null);
+    const [hotPoolsError, setHotPoolsError] = useState('');
+    const [hotPoolsLoading, setHotPoolsLoading] = useState(false);
+    const hotPoolsPollRef = useRef(null);
+    const [hotPoolsWatched, setHotPoolsWatched] = useState(() => new Set());
+    const [hotPoolsHidden, setHotPoolsHidden] = useState(() => new Set());
+
     const [adminUsers, setAdminUsers] = useState([]);
     const [adminUsersError, setAdminUsersError] = useState('');
     const [adminUsersLoading, setAdminUsersLoading] = useState(false);
@@ -141,6 +154,11 @@ export default function App() {
     const adminListPollSec = Math.max(3, pollIntervalSec);
     const isAdmin = Boolean(data?.is_admin || adminPositions?.is_admin);
     const showAdmin = isAdmin && viewMode === 'admin';
+    const isHotPools = viewMode === 'hot_pools';
+    const hotPoolsDefaultPollSec = 5;
+    const hotPoolsPollIntervalSec = Math.max(1, Number(pollOverrideSec || hotPoolsDefaultPollSec));
+    const settingsPollIntervalSec = isHotPools ? hotPoolsPollIntervalSec : pollIntervalSec;
+    const settingsServerPollIntervalSec = isHotPools ? hotPoolsDefaultPollSec : serverPollIntervalSec;
 
     const adminSelectedUser = useMemo(() => {
         if (!adminSelectedUserId) return null;
@@ -200,6 +218,15 @@ export default function App() {
         return positions.filter((p) => p?.has_liquidity !== false);
     }, [positions]);
 
+    const hotPoolsRows = useMemo(() => {
+        const rows = Array.isArray(hotPoolsData?.data) ? hotPoolsData.data : [];
+        return rows.filter((row) => {
+            const addr = String(row?.pool_address || '').trim().toLowerCase();
+            if (!addr) return true;
+            return !hotPoolsHidden.has(addr);
+        });
+    }, [hotPoolsData, hotPoolsHidden]);
+
     const apiBaseUrl = useMemo(() => resolveApiBaseUrl(), []);
 
     useEffect(() => {
@@ -222,6 +249,25 @@ export default function App() {
         if (Number.isFinite(savedPoll) && savedPoll >= 1) {
             setPollOverrideSec(Math.floor(savedPoll));
         }
+
+        const loadSet = (key) => {
+            try {
+                const raw = storage.get(key);
+                if (!raw) return new Set();
+                const parsed = JSON.parse(raw);
+                if (!Array.isArray(parsed)) return new Set();
+                const next = new Set();
+                for (const item of parsed) {
+                    const v = String(item || '').trim().toLowerCase();
+                    if (v) next.add(v);
+                }
+                return next;
+            } catch {
+                return new Set();
+            }
+        };
+        setHotPoolsWatched(loadSet(STORAGE_HOT_POOLS_WATCH));
+        setHotPoolsHidden(loadSet(STORAGE_HOT_POOLS_HIDDEN));
     }, []);
 
     useEffect(() => {
@@ -370,6 +416,45 @@ export default function App() {
         };
     }, [apiBaseUrl, initData, showAdmin, adminSelectedUserId, pollIntervalSec]);
 
+    useEffect(() => {
+        if (!isHotPools) return;
+        let aborted = false;
+        const controller = new AbortController();
+
+        const run = async () => {
+            setHotPoolsLoading(true);
+            setHotPoolsError('');
+            try {
+                const resp = await fetchHotPools({
+                    apiBaseUrl,
+                    sort: hotPoolsSort,
+                    chain: 'bsc',
+                    timeframeMinutes: 5,
+                    limit: 50,
+                    signal: controller.signal,
+                });
+                if (aborted) return;
+                setHotPoolsData(resp);
+            } catch (e) {
+                if (aborted) return;
+                setHotPoolsError(String(e?.message || e));
+            } finally {
+                if (!aborted) setHotPoolsLoading(false);
+            }
+        };
+
+        run();
+
+        if (hotPoolsPollRef.current) clearInterval(hotPoolsPollRef.current);
+        hotPoolsPollRef.current = setInterval(run, hotPoolsPollIntervalSec * 1000);
+
+        return () => {
+            aborted = true;
+            controller.abort();
+            if (hotPoolsPollRef.current) clearInterval(hotPoolsPollRef.current);
+        };
+    }, [apiBaseUrl, isHotPools, hotPoolsSort, hotPoolsPollIntervalSec]);
+
     const applyPollDraft = () => {
         const raw = String(pollDraftSec || '').trim();
         const m = raw.match(/\d+/);
@@ -397,8 +482,42 @@ export default function App() {
         setSettingsOpen(false);
     };
 
+    const persistSet = (key, set) => {
+        storage.set(key, JSON.stringify(Array.from(set)));
+    };
+
+    const toggleHotPoolWatch = (poolAddress) => {
+        const addr = String(poolAddress || '').trim().toLowerCase();
+        if (!addr) return;
+        setHotPoolsWatched((prev) => {
+            const next = new Set(prev);
+            if (next.has(addr)) next.delete(addr);
+            else next.add(addr);
+            persistSet(STORAGE_HOT_POOLS_WATCH, next);
+            return next;
+        });
+    };
+
+    const hideHotPool = (poolAddress) => {
+        const addr = String(poolAddress || '').trim().toLowerCase();
+        if (!addr) return;
+        setHotPoolsHidden((prev) => {
+            const next = new Set(prev);
+            next.add(addr);
+            persistSet(STORAGE_HOT_POOLS_HIDDEN, next);
+            return next;
+        });
+        setHotPoolsWatched((prev) => {
+            if (!prev.has(addr)) return prev;
+            const next = new Set(prev);
+            next.delete(addr);
+            persistSet(STORAGE_HOT_POOLS_WATCH, next);
+            return next;
+        });
+    };
+
     const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
-    const headerTitle = showAdmin ? '管理面板' : '实时仓位';
+    const headerTitle = showAdmin ? '管理面板' : isHotPools ? '热门池子' : '实时仓位';
     const headerSubtext = showAdmin
         ? adminSelectedUser
             ? `用户：${formatUserLabel(adminSelectedUser)}`
@@ -407,16 +526,18 @@ export default function App() {
                 : adminUsers.length
                     ? `运行中用户：${adminUsers.length}`
                     : '暂无运行任务'
-        : walletAddress
-            ? `钱包：${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
-            : '加载钱包中...';
-    const showSummaryCard = !showAdmin || Boolean(adminPositions);
+        : isHotPools
+            ? `5m · ${hotPoolsData?.updated_at ? `更新：${formatRelativeTime(hotPoolsData.updated_at)}` : hotPoolsLoading ? '加载中...' : '暂无数据'} · 自动刷新 ${hotPoolsPollIntervalSec}s`
+            : walletAddress
+                ? `钱包：${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
+                : '加载钱包中...';
+    const hasAdminPositions = Boolean(adminPositions);
     const adminSummaryPlaceholder = adminSelectedUserId
         ? adminPositionsLoading
             ? '加载用户仓位中...'
             : '用户仓位暂不可用'
         : '请选择用户查看实时仓位';
-    const showEmptyPositions = Boolean(activeData) && visiblePositions.length === 0;
+    const showEmptyPositions = !isHotPools && Boolean(activeData) && visiblePositions.length === 0;
 
     return (
         <div className="min-h-screen max-w-[720px] px-4 py-4 pb-[calc(16px+env(safe-area-inset-bottom))] mx-auto">
@@ -424,7 +545,7 @@ export default function App() {
                 <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
                         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-700 ring-1 ring-emerald-500/20 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/25">
-                            <Icon path={icons.bot} className="h-5 w-5" />
+                            <Icon path={isHotPools ? icons.chart : icons.bot} className="h-5 w-5" />
                         </div>
                         <div>
                             <div className="text-lg font-extrabold tracking-tight">{headerTitle}</div>
@@ -452,20 +573,36 @@ export default function App() {
                     </div>
                 </div>
 
-                {isAdmin ? (
-                    <div className="mt-3 grid grid-cols-2 gap-1 rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5">
-                        <button
-                            type="button"
-                            onClick={() => setViewMode('positions')}
-                            aria-pressed={viewMode === 'positions'}
-                            className={`rounded-xl px-3 py-2 transition ${
-                                viewMode === 'positions'
-                                    ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
-                                    : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
-                            }`}
-                        >
-                            实时仓位
-                        </button>
+                <div
+                    className={`mt-3 grid ${
+                        isAdmin ? 'grid-cols-3' : 'grid-cols-2'
+                    } gap-1 rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5`}
+                >
+                    <button
+                        type="button"
+                        onClick={() => setViewMode('positions')}
+                        aria-pressed={viewMode === 'positions'}
+                        className={`rounded-xl px-3 py-2 transition ${
+                            viewMode === 'positions'
+                                ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
+                                : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
+                        }`}
+                    >
+                        实时仓位
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setViewMode('hot_pools')}
+                        aria-pressed={viewMode === 'hot_pools'}
+                        className={`rounded-xl px-3 py-2 transition ${
+                            viewMode === 'hot_pools'
+                                ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
+                                : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
+                        }`}
+                    >
+                        热门池子
+                    </button>
+                    {isAdmin ? (
                         <button
                             type="button"
                             onClick={() => setViewMode('admin')}
@@ -478,10 +615,66 @@ export default function App() {
                         >
                             管理
                         </button>
-                    </div>
-                ) : null}
+                    ) : null}
+                </div>
 
-                {showSummaryCard ? (
+                {showAdmin ? (
+                    hasAdminPositions ? (
+                        <div className="mt-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                            <div className="flex items-start justify-between gap-4">
+                                <div>
+                                    <div className="text-[11px] text-zinc-500 dark:text-white/40">总余额</div>
+                                    <div className="mt-0.5 text-2xl font-extrabold tabular-nums text-zinc-900 dark:text-emerald-300">
+                                        {formatUsd(totalUsd)}
+                                    </div>
+                                    <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40 tabular-nums">
+                                        {bnbBalance} BNB{typeof bnbUsd === 'number' ? ` ≈ ${formatUsd(bnbUsd)}` : ''}
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <div className="text-[11px] text-zinc-500 dark:text-white/40">自动刷新</div>
+                                    <div className="text-sm font-semibold tabular-nums">{pollIntervalSec}s</div>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="mt-3 rounded-2xl border border-zinc-200 bg-white/70 p-4 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                            {adminSummaryPlaceholder}
+                        </div>
+                    )
+                ) : isHotPools ? (
+                    <div className="mt-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">费用排行</div>
+                                <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
+                                    {hotPoolsData?.updated_at ? `更新：${formatRelativeTime(hotPoolsData.updated_at)}` : hotPoolsLoading ? '加载中...' : '暂无数据'}
+                                </div>
+                            </div>
+                            <div className="flex rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5">
+                                {[
+                                    { key: 'fees', label: '费用' },
+                                    { key: 'fee_rate', label: '费用率' },
+                                    { key: 'volume', label: '交易量' },
+                                ].map((tab) => (
+                                    <button
+                                        key={tab.key}
+                                        type="button"
+                                        onClick={() => setHotPoolsSort(tab.key)}
+                                        aria-pressed={hotPoolsSort === tab.key}
+                                        className={`rounded-xl px-3 py-2 transition ${
+                                            hotPoolsSort === tab.key
+                                                ? 'bg-emerald-500 text-white shadow-sm'
+                                                : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
+                                        }`}
+                                    >
+                                        {tab.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                ) : (
                     <div className="mt-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
                         <div className="flex items-start justify-between gap-4">
                             <div>
@@ -499,14 +692,28 @@ export default function App() {
                             </div>
                         </div>
                     </div>
-                ) : (
-                    <div className="mt-3 rounded-2xl border border-zinc-200 bg-white/70 p-4 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                        {adminSummaryPlaceholder}
-                    </div>
                 )}
             </header>
 
-            {showAdmin ? (
+            {isHotPools && hotPoolsError ? (
+                <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-200">
+                    {hotPoolsError}
+                </div>
+            ) : null}
+
+            {isHotPools && hotPoolsLoading && hotPoolsRows.length === 0 ? (
+                <div className="mb-4 rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                    加载中...
+                </div>
+            ) : null}
+
+            {isHotPools && !hotPoolsLoading && !hotPoolsError && hotPoolsData && hotPoolsRows.length === 0 ? (
+                <div className="mb-4 rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                    暂无热门池子数据。
+                </div>
+            ) : null}
+
+            {!isHotPools && showAdmin ? (
                 <div className="mb-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
                     <div className="flex items-center justify-between">
                         <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">运行中用户</div>
@@ -585,19 +792,19 @@ export default function App() {
                 </div>
             ) : null}
 
-            {activeError ? (
+            {!isHotPools && activeError ? (
                 <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-200">
                     {activeError}
                 </div>
             ) : null}
 
-            {showAdmin && !adminSelectedUserId ? (
+            {!isHotPools && showAdmin && !adminSelectedUserId ? (
                 <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
                     请选择用户查看实时仓位。
                 </div>
             ) : null}
 
-            {activeLoading && !activeData ? (
+            {!isHotPools && activeLoading && !activeData ? (
                 <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
                     加载中...
                 </div>
@@ -610,21 +817,35 @@ export default function App() {
             ) : null}
 
             <div className="space-y-4">
-                {activeData
-                    ? visiblePositions.map((p) => (
-                          <PositionCard
-                              key={`${p.version}:${p.position_id}`}
-                              position={p}
-                              walletAddress={walletAddress}
-                              bnbBalance={bnbBalance}
-                              pollIntervalSec={pollIntervalSec}
-                              updatedAt={updatedAt}
-                          />
-                      ))
-                    : null}
+                {isHotPools
+                    ? hotPoolsRows.map((row) => {
+                          const addr = String(row?.pool_address || '').trim().toLowerCase();
+                          return (
+                              <HotPoolCard
+                                  key={`${row?.protocol_version || ''}:${row?.pool_address || ''}`}
+                                  pool={row}
+                                  metric={hotPoolsSort}
+                                  watched={addr ? hotPoolsWatched.has(addr) : false}
+                                  onToggleWatch={toggleHotPoolWatch}
+                                  onHide={hideHotPool}
+                              />
+                          );
+                      })
+                    : activeData
+                        ? visiblePositions.map((p) => (
+                              <PositionCard
+                                  key={`${p.version}:${p.position_id}`}
+                                  position={p}
+                                  walletAddress={walletAddress}
+                                  bnbBalance={bnbBalance}
+                                  pollIntervalSec={pollIntervalSec}
+                                  updatedAt={updatedAt}
+                              />
+                          ))
+                        : null}
             </div>
 
-            {activeData?.warnings?.length ? (
+            {!isHotPools && activeData?.warnings?.length ? (
                 <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-700 dark:text-amber-200">
                     <div className="font-semibold">提示</div>
                     <ul className="mt-1 list-disc space-y-1 pl-4">
@@ -660,7 +881,7 @@ export default function App() {
                             <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                 <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">自动刷新</div>
                                 <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
-                                    当前：{pollIntervalSec}s（{pollOverrideSec ? '自定义' : `默认 ${serverPollIntervalSec}s`})
+                                    当前：{settingsPollIntervalSec}s（{pollOverrideSec ? '自定义' : `默认 ${settingsServerPollIntervalSec}s`})
                                 </div>
                                 <div className="mt-3 flex flex-wrap gap-2">
                                     {[1, 2, 3, 5, 10, 30].map((sec) => (

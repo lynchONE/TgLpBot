@@ -206,9 +206,15 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 
 	rangePctText := ""
 	if task.RangeLowerPercentage > 0 && task.RangeUpperPercentage > 0 {
-		avg := (task.RangeLowerPercentage + task.RangeUpperPercentage) / 2.0
-		if math.Abs(task.RangeLowerPercentage-task.RangeUpperPercentage) >= 0.01 {
-			rangePctText = fmt.Sprintf(" (L %.2f%% / U %.2f%%)", task.RangeLowerPercentage, task.RangeUpperPercentage)
+		stableLowerPct, stableUpperPct := services.StablePercentagesFromTickPercentages(task, task.RangeLowerPercentage, task.RangeUpperPercentage)
+		if stableLowerPct <= 0 || stableUpperPct <= 0 {
+			stableLowerPct = task.RangeLowerPercentage
+			stableUpperPct = task.RangeUpperPercentage
+		}
+
+		avg := (stableLowerPct + stableUpperPct) / 2.0
+		if math.Abs(stableLowerPct-stableUpperPct) >= 0.01 {
+			rangePctText = fmt.Sprintf(" (L %.2f%% / U %.2f%%)", stableLowerPct, stableUpperPct)
 		} else {
 			rangePctText = fmt.Sprintf(" (±%.2f%%)", avg)
 		}

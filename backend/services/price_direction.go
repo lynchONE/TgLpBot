@@ -23,6 +23,71 @@ var stableSymbols = map[string]struct{}{
 	"DAI":  {},
 }
 
+// StableSideFromTask returns which token is considered the stable quote.
+// -1: unknown, 0: token0, 1: token1.
+func StableSideFromTask(task *models.StrategyTask) int {
+	return stableSideFromTask(task)
+}
+
+// TickPercentagesFromStablePercentages converts stable-price range percentages into tick-price percentages.
+// stableLowerPct/stableUpperPct are in stable price terms: price down/up from current (e.g. 1 means -1%).
+// Returned tickLowerPct/tickUpperPct are in Uniswap tick price (token1/token0) terms.
+func TickPercentagesFromStablePercentages(task *models.StrategyTask, stableLowerPct, stableUpperPct float64) (tickLowerPct, tickUpperPct float64) {
+	if stableLowerPct <= 0 || stableUpperPct <= 0 {
+		return 0, 0
+	}
+	if stableLowerPct >= 100 || stableUpperPct >= 100 {
+		return 0, 0
+	}
+
+	side := stableSideFromTask(task)
+	if side != 0 {
+		// Stable is token1 (or unknown): stable price direction matches tick price direction.
+		return stableLowerPct, stableUpperPct
+	}
+
+	// Stable is token0: stable price = 1 / tickPrice.
+	// When stable price goes UP by U, tickPrice goes DOWN by U/(100+U).
+	// When stable price goes DOWN by L, tickPrice goes UP by L/(100-L).
+	tickLowerPct = (stableUpperPct / (100.0 + stableUpperPct)) * 100.0
+	tickUpperPct = (stableLowerPct / (100.0 - stableLowerPct)) * 100.0
+
+	if tickLowerPct <= 0 || tickUpperPct <= 0 {
+		return 0, 0
+	}
+	return tickLowerPct, tickUpperPct
+}
+
+// StablePercentagesFromTickPercentages converts tick-price range percentages into stable-price percentages.
+// tickLowerPct/tickUpperPct are in Uniswap tick price (token1/token0) terms: price down/up from current.
+// Returned stableLowerPct/stableUpperPct are in stable price terms when a stable side is known.
+func StablePercentagesFromTickPercentages(task *models.StrategyTask, tickLowerPct, tickUpperPct float64) (stableLowerPct, stableUpperPct float64) {
+	if tickLowerPct <= 0 || tickUpperPct <= 0 {
+		return 0, 0
+	}
+
+	side := stableSideFromTask(task)
+	if side != 0 {
+		// Stable is token1 (or unknown): stable price direction matches tick price direction.
+		return tickLowerPct, tickUpperPct
+	}
+
+	// Stable is token0: stable price = 1 / tickPrice.
+	// When tickPrice goes UP by u, stable price goes DOWN by u/(100+u).
+	// When tickPrice goes DOWN by d, stable price goes UP by d/(100-d).
+	stableLowerPct = (tickUpperPct / (100.0 + tickUpperPct)) * 100.0
+	if tickLowerPct >= 100 {
+		stableUpperPct = 0
+	} else {
+		stableUpperPct = (tickLowerPct / (100.0 - tickLowerPct)) * 100.0
+	}
+
+	if stableLowerPct <= 0 || stableUpperPct <= 0 {
+		return 0, 0
+	}
+	return stableLowerPct, stableUpperPct
+}
+
 func isStableSymbol(sym string) bool {
 	sym = strings.ToUpper(strings.TrimSpace(sym))
 	_, ok := stableSymbols[sym]
