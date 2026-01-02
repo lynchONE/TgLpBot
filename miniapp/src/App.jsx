@@ -220,7 +220,7 @@ export default function App() {
         return Array.isArray(hotPoolsData?.data) ? hotPoolsData.data : [];
     }, [hotPoolsData]);
 
-    // 构建热门池子的历史数据映射 (pool_address -> previous data)
+    // 构建热门池子的历史数据映射 (protocol_version:pool_address -> previous data)
     const previousHotPoolsMap = useMemo(() => {
         return previousHotPoolsDataRef.current;
     }, [hotPoolsRows]);
@@ -428,17 +428,21 @@ export default function App() {
                     signal: controller.signal,
                 });
                 if (aborted) return;
-                // 在更新数据之前，保存当前数据作为历史数据
-                if (hotPoolsData?.data) {
-                    const prevMap = {};
-                    for (const pool of hotPoolsData.data) {
-                        if (pool?.pool_address) {
-                            prevMap[pool.pool_address] = pool;
+                // 在更新数据之前，保存当前数据作为历史数据（使用 setState 回调避免闭包拿到旧数据）
+                setHotPoolsData((prev) => {
+                    if (prev?.data) {
+                        const prevMap = {};
+                        for (const pool of prev.data) {
+                            const addr = String(pool?.pool_address || '').trim().toLowerCase();
+                            if (!addr) continue;
+                            const proto = String(pool?.protocol_version || '').trim();
+                            const key = `${proto}:${addr}`;
+                            prevMap[key] = pool;
                         }
+                        previousHotPoolsDataRef.current = prevMap;
                     }
-                    previousHotPoolsDataRef.current = prevMap;
-                }
-                setHotPoolsData(resp);
+                    return resp;
+                });
             } catch (e) {
                 if (aborted) return;
                 setHotPoolsError(String(e?.message || e));
@@ -782,10 +786,13 @@ export default function App() {
             <div className="space-y-4">
                 {isHotPools
                     ? hotPoolsRows.map((row) => {
-                        const prevData = previousHotPoolsMap[row?.pool_address];
+                        const proto = String(row?.protocol_version || '').trim();
+                        const addr = String(row?.pool_address || '').trim().toLowerCase();
+                        const poolKey = `${proto}:${addr}`;
+                        const prevData = previousHotPoolsMap[poolKey];
                         return (
                             <HotPoolCard
-                                key={`${row?.protocol_version || ''}:${row?.pool_address || ''}`}
+                                key={`${proto}:${addr}`}
                                 pool={row}
                                 metric={hotPoolsSort}
                                 previousData={prevData}

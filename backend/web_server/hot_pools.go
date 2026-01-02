@@ -14,6 +14,7 @@ type HotPoolResponse struct {
 	ProtocolVersion  string    `json:"protocol_version" ch:"protocol_version"`
 	PoolAddress      string    `json:"pool_address" ch:"pool_address"`
 	Dex              string    `json:"dex" ch:"dex"`
+	FactoryName      string    `json:"factory_name" ch:"factory_name"`
 	TradingPair      string    `json:"trading_pair" ch:"trading_pair"`
 	FeePercentage    float64   `json:"fee_percentage" ch:"fee_percentage"`
 	TotalFees        float64   `json:"total_fees" ch:"total_fees"`
@@ -117,6 +118,7 @@ func (s *Server) handleHotPools(w http.ResponseWriter, r *http.Request) {
 			protocol_version,
 			pool_address,
 			dex,
+			factory_name,
 			trading_pair,
 			fee_percentage,
 			total_fees,
