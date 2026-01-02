@@ -1,16 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button, ConfigProvider, InputNumber, Layout, theme as antdTheme } from 'antd';
-import PoolTable from './components/PoolTable';
-import PositionCard from './components/PositionCard';
+import PoolGrid from './components/PoolTable'; // Now Bento Grid
+import PositionCard from './components/PositionCard'; // Now 3D Widget
 import ThemeToggle from './components/ThemeToggle';
 import { useTheme } from './context/ThemeContext';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 
-const { Header, Content } = Layout;
+const { Content } = Layout;
 
 function App() {
   const { theme } = useTheme();
-  const isDark = theme === 'dark';
+  // V2 is always "Dark Mode" aesthetically, light mode is just a semantic requirement 
+  // but for the "Command Center" vibe, we force dark algorithm unless explicitly light.
+  const isDark = true;
+
   const refreshStorageKey = 'lp_dashboard_refresh_seconds';
   const [refreshSeconds, setRefreshSeconds] = useState(() => {
     const savedRaw = typeof window !== 'undefined' ? window.localStorage.getItem(refreshStorageKey) : null;
@@ -18,17 +21,9 @@ function App() {
     if (Number.isFinite(saved) && saved > 0) return Math.max(5, Math.floor(saved));
     return 30;
   });
-  const [showPools, setShowPools] = useState(true);
-  const [showPosition, setShowPosition] = useState(true);
-  const [scrolled, setScrolled] = useState(false);
 
-  useEffect(() => {
-    const handleScroll = () => {
-      setScrolled(window.scrollY > 20);
-    };
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+  // V2 Navigation State
+  const [activeView, setActiveView] = useState('dashboard'); // 'dashboard', 'pools', 'settings'
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -36,145 +31,201 @@ function App() {
   }, [refreshSeconds]);
 
   const refetchIntervalMs = useMemo(() => Math.max(5000, refreshSeconds * 1000), [refreshSeconds]);
-  const showEmpty = !showPools && !showPosition;
-  const gridMaxWidthClass = showPools ? 'max-w-[1600px]' : 'max-w-[720px]';
-  const gridColsClass = showPools && showPosition ? 'xl:grid-cols-3' : 'xl:grid-cols-1';
 
   return (
     <ConfigProvider
       theme={{
-        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        algorithm: antdTheme.darkAlgorithm,
         token: {
           fontFamily: 'Inter, sans-serif',
-          colorPrimary: '#3b82f6', // blue-500
-          borderRadius: 12,
-          colorBgBase: 'transparent',
+          colorPrimary: '#06b6d4', // neon-cyan
+          borderRadius: 8,
+          colorBgBase: '#020617', // midnight-950
         },
-        components: {
-          Table: {
-            colorBgContainer: 'transparent',
-            headerBg: 'transparent',
-            rowHoverBg: 'transparent',
-          },
-          Button: {
-            controlHeightSM: 32,
-            borderRadiusSM: 8,
-            fontWeight: 500,
-          }
-        }
       }}
     >
-      <Layout className="min-h-screen bg-transparent">
-        {/* Background Gradients */}
-        <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
-          <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-purple-500/20 rounded-full blur-[120px] dark:bg-purple-900/20" />
-          <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-blue-500/20 rounded-full blur-[120px] dark:bg-blue-900/20" />
+      <Layout className="min-h-screen bg-transparent relative selection:bg-neon-cyan/30 selection:text-neon-cyan">
+
+        {/* Top Stats Bar */}
+        <div className="fixed top-0 inset-x-0 h-12 z-50 bg-midnight-950/80 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-4 sm:px-6">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-neon-green animate-pulse"></div>
+              <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">System Online</span>
+            </div>
+            <div className="h-4 w-px bg-white/10"></div>
+            <div className="flex items-center gap-1.5 opacity-60 hover:opacity-100 transition-opacity">
+              <span className="text-[10px] text-slate-500 uppercase font-bold">ETH</span>
+              <span className="text-xs font-mono text-neon-blue">$3,240.50</span>
+            </div>
+            <div className="flex items-center gap-1.5 opacity-60 hover:opacity-100 transition-opacity hidden sm:flex">
+              <span className="text-[10px] text-slate-500 uppercase font-bold">Gas</span>
+              <span className="text-xs font-mono text-neon-purple">15 Gwei</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <ConnectButton.Custom>
+              {({ account, chain, openAccountModal, openChainModal, openConnectModal, mounted }) => {
+                const ready = mounted;
+                const connected = ready && account && chain;
+                return (
+                  <div
+                    {...(!ready && { 'aria-hidden': true, 'style': { opacity: 0, pointerEvents: 'none', userSelect: 'none' } })}
+                  >
+                    {(() => {
+                      if (!connected) {
+                        return (
+                          <button onClick={openConnectModal} className="text-xs font-bold bg-neon-blue/10 text-neon-blue border border-neon-blue/20 px-3 py-1.5 rounded hover:bg-neon-blue/20 transition-all">
+                            CONNECT LINK
+                          </button>
+                        );
+                      }
+                      return (
+                        <div className="flex items-center gap-2">
+                          <button onClick={openChainModal} className="hidden sm:flex items-center gap-1 text-[10px] font-bold bg-white/5 border border-white/10 px-2 py-1 rounded text-slate-300 hover:text-white transition-colors">
+                            {chain.hasIcon && (
+                              <div style={{ background: chain.iconBackground, width: 12, height: 12, borderRadius: 999, overflow: 'hidden', marginRight: 4 }}>
+                                {chain.iconUrl && (
+                                  <img alt={chain.name ?? 'Chain icon'} src={chain.iconUrl} style={{ width: 12, height: 12 }} />
+                                )}
+                              </div>
+                            )}
+                            {chain.name}
+                          </button>
+                          <button onClick={openAccountModal} className="flex items-center gap-2 text-xs font-bold font-mono text-neon-cyan border border-neon-cyan/20 bg-neon-cyan/5 px-2 py-1 rounded hover:bg-neon-cyan/10 transition-colors shadow-[0_0_10px_rgba(6,182,212,0.1)]">
+                            {account.displayName}
+                            <span className="text-slate-500">
+                              {account.displayBalance ? ` (${account.displayBalance})` : ''}
+                            </span>
+                          </button>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                );
+              }}
+            </ConnectButton.Custom>
+          </div>
         </div>
 
-        <Header
-          className={`sticky top-0 z-50 flex h-20 items-center justify-between px-4 sm:px-8 transition-all duration-300 ${scrolled ? 'glass border-b border-border shadow-sm' : 'bg-transparent border-transparent'
-            }`}
-          style={{ background: scrolled ? undefined : 'transparent' }}
-        >
-          <div className="flex items-center gap-4">
-            <div className="relative group">
-              <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl blur opacity-25 group-hover:opacity-75 transition duration-500"></div>
-              <div className="relative grid h-10 w-10 place-items-center rounded-xl bg-white dark:bg-black border border-slate-200 dark:border-white/10 shadow-sm">
-                <span className="text-xl font-bold bg-gradient-to-br from-blue-600 to-purple-600 bg-clip-text text-transparent">T</span>
-              </div>
-            </div>
-            <div className="leading-tight">
-              <div className="font-display text-xl font-bold tracking-tight text-foreground">
-                TgLpBot
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-secondary/50 border border-border">
-              <span className="text-xs font-medium text-muted-foreground">Refresh:</span>
-              <div className="flex items-center gap-1">
-                <InputNumber
-                  size="small"
-                  min={5}
-                  step={1}
-                  value={refreshSeconds}
-                  bordered={false}
-                  className="!w-12 !bg-transparent text-right font-medium"
-                  controls={false}
-                  onChange={(v) => {
-                    if (v == null) return;
-                    setRefreshSeconds(Math.max(5, Math.floor(Number(v) || 5)));
-                  }}
-                />
-                <span className="text-xs text-muted-foreground">s</span>
-              </div>
-            </div>
-            <div className="h-6 w-px bg-border mx-2 hidden sm:block"></div>
-            <ThemeToggle />
-            <ConnectButton chainStatus="icon" showBalance={false} accountStatus={{ smallScreen: 'avatar', largeScreen: 'full' }} />
-          </div>
-        </Header>
+        {/* Main Content Area */}
+        <Content className="pt-20 pb-32 px-4 sm:px-6 max-w-[1800px] mx-auto w-full">
 
-        <Content className="relative z-10 px-4 py-8 sm:px-8">
-          <div className={`mx-auto mb-8 flex ${gridMaxWidthClass} flex-col gap-4 sm:flex-row sm:items-center sm:justify-between animate-fade-in`}>
-            <div>
-              <h1 className="font-display text-3xl font-bold text-foreground mb-1">Dashboard</h1>
-              <p className="text-muted-foreground">Manage your liquidity positions and view market stats.</p>
-            </div>
-
-            <div className="flex items-center gap-2 bg-secondary/30 p-1 rounded-xl border border-border/50 backdrop-blur-sm">
-              <button
-                onClick={() => setShowPools(!showPools)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${showPools ? 'bg-card text-card-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-              >
-                Top Pools
-              </button>
-              <button
-                onClick={() => setShowPosition(!showPosition)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${showPosition ? 'bg-card text-card-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-              >
-                My Position
-              </button>
-            </div>
+          {/* Header Greeting */}
+          <div className="mb-10 animate-fade-in">
+            <h1 className="font-display text-4xl sm:text-5xl font-bold text-white mb-2 tracking-tight">
+              Command Center
+            </h1>
+            <p className="text-slate-400 text-lg max-w-2xl font-light">
+              Real-time liquidity management and market intelligence.
+            </p>
           </div>
 
-          {showEmpty ? (
-            <div className={`mx-auto ${gridMaxWidthClass} glass-card rounded-3xl p-16 text-center animate-slide-up`}>
-              <div className="inline-flex h-20 w-20 items-center justify-center rounded-full bg-secondary/50 mb-6">
-                <span className="text-4xl">👻</span>
+          {/* BENTO GRID LAYOUT */}
+          <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 animate-slide-up">
+
+            {/* Active View Logic */}
+            {activeView === 'dashboard' && (
+              <>
+                {/* LEFT: Position Card Widget (Takes 1/4 on XL) */}
+                <div className="xl:col-span-1 h-[420px] xl:h-auto">
+                  <PositionCard refetchIntervalMs={refetchIntervalMs} />
+                </div>
+
+                {/* RIGHT: Market Grid (Takes 3/4 on XL) */}
+                <div className="xl:col-span-3 min-h-[500px]">
+                  <PoolGrid refetchIntervalMs={refetchIntervalMs} />
+                </div>
+              </>
+            )}
+
+            {activeView === 'pools' && (
+              <div className="col-span-1 xl:col-span-4 min-h-[80vh]">
+                <PoolGrid refetchIntervalMs={refetchIntervalMs} />
               </div>
-              <h3 className="text-xl font-bold text-foreground mb-2">Nothing to see here</h3>
-              <p className="text-muted-foreground max-w-sm mx-auto">
-                You've hidden all the dashboard widgets. Use the toggles above to bring them back.
-              </p>
-            </div>
-          ) : (
-            <div className={`mx-auto grid ${gridMaxWidthClass} grid-cols-1 gap-8 ${gridColsClass}`}>
-              {showPools && (
-                <section className={`glass-card rounded-3xl p-6 md:p-8 animate-slide-up ${showPools && showPosition ? 'xl:col-span-2' : ''}`}>
-                  <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            )}
+
+            {activeView === 'settings' && (
+              <div className="col-span-1 xl:col-span-4 min-h-[50vh] flex items-center justify-center">
+                <div className="glass-panel p-10 rounded-3xl max-w-md w-full">
+                  <h2 className="text-2xl font-display font-bold text-white mb-6">System Configuration</h2>
+
+                  <div className="space-y-6">
                     <div>
-                      <h2 className="font-display text-xl font-bold text-foreground flex items-center gap-2">
-                        <span className="flex h-2 w-2 rounded-full bg-green-500 animate-pulse"></span>
-                        Top Pools
-                      </h2>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Live market data from The Graph
-                      </p>
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-2">Auto-Refresh Rate</label>
+                      <div className="flex items-center gap-4">
+                        <InputNumber
+                          size="large"
+                          min={5}
+                          step={1}
+                          value={refreshSeconds}
+                          onChange={(v) => v && setRefreshSeconds(v)}
+                          className="w-full !bg-midnight-950 !border-white/10 !text-white"
+                        />
+                        <span className="text-slate-400 font-mono">SEC</span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-2">Lower values increase RPC usage.</p>
+                    </div>
+
+                    <div className="pt-6 border-t border-white/5">
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-slate-300">Theme Preference</span>
+                        <ThemeToggle />
+                      </div>
                     </div>
                   </div>
-                  <PoolTable refetchIntervalMs={refetchIntervalMs} />
-                </section>
-              )}
+                </div>
+              </div>
+            )}
 
-              {showPosition && (
-                <section className={`space-y-6 animate-slide-up ${showPools && showPosition ? 'xl:col-span-1' : ''} transition-all duration-500`} style={{ animationDelay: '100ms' }}>
-                  <PositionCard refetchIntervalMs={refetchIntervalMs} />
-                </section>
-              )}
-            </div>
-          )}
+          </div>
         </Content>
+
+        {/* Floating Dock Navigation */}
+        <div className="fixed bottom-8 inset-x-0 z-50 flex justify-center pointer-events-none">
+          <div className="glass-panel px-6 py-3 rounded-2xl flex items-center gap-6 pointer-events-auto transform hover:scale-105 transition-transform duration-300 shadow-[0_20px_40px_rgba(0,0,0,0.4)]">
+
+            <button
+              onClick={() => setActiveView('dashboard')}
+              className={`group relative p-2 rounded-xl transition-all ${activeView === 'dashboard' ? 'bg-white/10 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+            >
+              <div className="absolute -top-1 right-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-neon-cyan opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-neon-cyan"></span>
+                </span>
+              </div>
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+              </svg>
+              <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 text-[10px] font-bold uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-opacity bg-midnight-950 px-2 py-0.5 rounded border border-white/10 text-white">Dashboard</span>
+            </button>
+
+            <button
+              onClick={() => setActiveView('pools')}
+              className={`group relative p-2 rounded-xl transition-all ${activeView === 'pools' ? 'bg-white/10 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+            >
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+              </svg>
+              <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 text-[10px] font-bold uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-opacity bg-midnight-950 px-2 py-0.5 rounded border border-white/10 text-white">Market</span>
+            </button>
+
+            <div className="w-px h-8 bg-white/10"></div>
+
+            <button
+              onClick={() => setActiveView('settings')}
+              className={`group relative p-2 rounded-xl transition-all ${activeView === 'settings' ? 'bg-white/10 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+            >
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 text-[10px] font-bold uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-opacity bg-midnight-950 px-2 py-0.5 rounded border border-white/10 text-white">System</span>
+            </button>
+          </div>
+        </div>
       </Layout>
     </ConfigProvider>
   );
