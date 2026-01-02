@@ -122,7 +122,7 @@ export default function App() {
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const pollRef = useRef(null);
-    const [viewMode, setViewMode] = useState('positions');
+    const [viewMode, setViewMode] = useState('hot_pools');
 
     const [hotPoolsSort, setHotPoolsSort] = useState('fees');
     const [hotPoolsData, setHotPoolsData] = useState(null);
@@ -408,8 +408,8 @@ export default function App() {
         };
     }, [apiBaseUrl, initData, showAdmin, adminSelectedUserId, pollIntervalSec]);
 
+    // 热门池子数据始终加载（预加载）
     useEffect(() => {
-        if (!isHotPools) return;
         let aborted = false;
         const controller = new AbortController();
         let inFlight = false;
@@ -555,17 +555,6 @@ export default function App() {
                 >
                     <button
                         type="button"
-                        onClick={() => setViewMode('positions')}
-                        aria-pressed={viewMode === 'positions'}
-                        className={`rounded-xl px-3 py-2 transition ${viewMode === 'positions'
-                            ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
-                            : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
-                            }`}
-                    >
-                        实时仓位
-                    </button>
-                    <button
-                        type="button"
                         onClick={() => setViewMode('hot_pools')}
                         aria-pressed={viewMode === 'hot_pools'}
                         className={`rounded-xl px-3 py-2 transition ${viewMode === 'hot_pools'
@@ -574,6 +563,17 @@ export default function App() {
                             }`}
                     >
                         热门池子
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setViewMode('positions')}
+                        aria-pressed={viewMode === 'positions'}
+                        className={`rounded-xl px-3 py-2 transition ${viewMode === 'positions'
+                            ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
+                            : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
+                            }`}
+                    >
+                        实时仓位
                     </button>
                     {isAdmin ? (
                         <button
