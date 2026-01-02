@@ -153,9 +153,12 @@ export default function HotPoolCard({ pool, metric, previousData }) {
     return (
         <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
             <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                        <div className="min-w-0 flex-1 text-xs font-semibold leading-4 text-zinc-900 dark:text-white/90 whitespace-normal break-words">
+                        <div
+                            className="max-w-[90px] text-xs font-semibold leading-4 text-zinc-900 dark:text-white/90 truncate"
+                            title={pool?.trading_pair || ''}
+                        >
                             {formatPairLabel(pool?.trading_pair)}
                         </div>
                         {pool?.fee_percentage ? (
@@ -203,9 +206,9 @@ export default function HotPoolCard({ pool, metric, previousData }) {
                     </div>
                 </div>
 
-                <div className="text-right">
-                    <div className="flex items-baseline justify-end gap-2">
-                        <div className="text-lg font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums flex items-center">
+                <div className="text-right shrink-0 min-w-[110px]">
+                    <div className="flex items-baseline justify-end gap-1 flex-wrap">
+                        <div className="text-base font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums flex items-center">
                             {mainValue}
                             <ChangeIndicator
                                 currentValue={metric === 'volume' ? pool?.total_volume : pool?.total_fees}
@@ -213,11 +216,16 @@ export default function HotPoolCard({ pool, metric, previousData }) {
                                 label={metric === 'volume' ? '交易量变化' : '费用变化'}
                             />
                         </div>
-                        {priceDisplay ? (
-                            <div className={`text-xs font-semibold tabular-nums ${priceDisplayClass}`}>{priceDisplay}</div>
-                        ) : null}
                     </div>
-                    <div className="mt-0.5 text-[11px] font-semibold text-violet-600 dark:text-violet-300 tabular-nums">
+                    {priceDisplay ? (
+                        <div
+                            className={`mt-0.5 text-[10px] font-semibold tabular-nums truncate max-w-[110px] ${priceDisplayClass}`}
+                            title={priceDisplay}
+                        >
+                            {priceDisplay}
+                        </div>
+                    ) : null}
+                    <div className="mt-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-300 tabular-nums">
                         {metric === 'fee_rate' ? formatUsd(pool?.total_fees) : formatRatePct(pool?.fee_rate)}
                     </div>
                 </div>

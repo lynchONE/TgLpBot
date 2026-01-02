@@ -153,8 +153,8 @@ export default function App() {
     const isAdmin = Boolean(data?.is_admin || adminPositions?.is_admin);
     const showAdmin = isAdmin && viewMode === 'admin';
     const isHotPools = viewMode === 'hot_pools';
-    const hotPoolsDefaultPollSec = 5;
-    const hotPoolsPollIntervalSec = Math.max(1, Number(pollOverrideSec || hotPoolsDefaultPollSec));
+    const hotPoolsDefaultPollSec = 10;
+    const hotPoolsPollIntervalSec = Math.max(5, Number(pollOverrideSec || hotPoolsDefaultPollSec));
     const settingsPollIntervalSec = isHotPools ? hotPoolsPollIntervalSec : pollIntervalSec;
     const settingsServerPollIntervalSec = isHotPools ? hotPoolsDefaultPollSec : serverPollIntervalSec;
 
@@ -235,16 +235,16 @@ export default function App() {
 
     useEffect(() => {
         const tg = getTelegramWebApp();
-        const tgTheme = tg?.colorScheme === 'light' ? 'light' : 'dark';
         const savedTheme = storage.get(STORAGE_THEME);
         if (savedTheme === 'light' || savedTheme === 'dark') {
             setTheme(savedTheme);
         } else {
-            setTheme(tgTheme);
+            // 默认使用暗色主题
+            setTheme('dark');
         }
 
         const savedPoll = Number(storage.get(STORAGE_POLL_SEC));
-        if (Number.isFinite(savedPoll) && savedPoll >= 1) {
+        if (Number.isFinite(savedPoll) && savedPoll >= 5) {
             setPollOverrideSec(Math.floor(savedPoll));
         }
     }, []);
@@ -470,7 +470,7 @@ export default function App() {
         if (!m) return;
         const n = Number(m[0]);
         if (!Number.isFinite(n)) return;
-        const v = Math.max(1, Math.min(300, Math.floor(n)));
+        const v = Math.max(5, Math.min(300, Math.floor(n)));
         setPollOverrideSec(v);
         storage.set(STORAGE_POLL_SEC, String(v));
         setSettingsOpen(false);
@@ -484,7 +484,7 @@ export default function App() {
     };
 
     const setQuickPoll = (sec) => {
-        const v = Math.max(1, Math.min(300, Math.floor(Number(sec) || 1)));
+        const v = Math.max(5, Math.min(300, Math.floor(Number(sec) || 5)));
         setPollOverrideSec(v);
         storage.set(STORAGE_POLL_SEC, String(v));
         setPollDraftSec(String(v));
@@ -557,8 +557,8 @@ export default function App() {
                         onClick={() => setViewMode('positions')}
                         aria-pressed={viewMode === 'positions'}
                         className={`rounded-xl px-3 py-2 transition ${viewMode === 'positions'
-                                ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
-                                : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
+                            ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
+                            : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
                             }`}
                     >
                         实时仓位
@@ -568,8 +568,8 @@ export default function App() {
                         onClick={() => setViewMode('hot_pools')}
                         aria-pressed={viewMode === 'hot_pools'}
                         className={`rounded-xl px-3 py-2 transition ${viewMode === 'hot_pools'
-                                ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
-                                : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
+                            ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
+                            : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
                             }`}
                     >
                         热门池子
@@ -580,8 +580,8 @@ export default function App() {
                             onClick={() => setViewMode('admin')}
                             aria-pressed={viewMode === 'admin'}
                             className={`rounded-xl px-3 py-2 transition ${viewMode === 'admin'
-                                    ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
-                                    : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
+                                ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
+                                : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
                                 }`}
                         >
                             管理
@@ -634,8 +634,8 @@ export default function App() {
                                         onClick={() => setHotPoolsSort(tab.key)}
                                         aria-pressed={hotPoolsSort === tab.key}
                                         className={`rounded-xl px-3 py-2 transition ${hotPoolsSort === tab.key
-                                                ? 'bg-emerald-500 text-white shadow-sm'
-                                                : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
+                                            ? 'bg-emerald-500 text-white shadow-sm'
+                                            : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
                                             }`}
                                     >
                                         {tab.label}
@@ -725,8 +725,8 @@ export default function App() {
                                             setAdminPositionsError('');
                                         }}
                                         className={`w-full rounded-xl border p-3 text-left transition ${selected
-                                                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-900 dark:text-emerald-100'
-                                                : 'border-zinc-200 bg-white/70 text-zinc-900 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10'
+                                            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-900 dark:text-emerald-100'
+                                            : 'border-zinc-200 bg-white/70 text-zinc-900 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10'
                                             }`}
                                     >
                                         <div className="flex items-start justify-between gap-3">
@@ -858,8 +858,8 @@ export default function App() {
                                             type="button"
                                             onClick={() => setQuickPoll(sec)}
                                             className={`rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 ${pollOverrideSec === sec
-                                                    ? 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/25 dark:text-emerald-300'
-                                                    : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
+                                                ? 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/25 dark:text-emerald-300'
+                                                : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
                                                 }`}
                                         >
                                             {sec}s

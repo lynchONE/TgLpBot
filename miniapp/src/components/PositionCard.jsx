@@ -198,9 +198,9 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
 
                 {[token0, token1].filter(Boolean).map((row) => (
                     <div key={row.address} className="mt-3 grid grid-cols-4 gap-2 items-start">
-                        <div>
-                            <div className="text-sm font-bold text-zinc-900 dark:text-white/90">{row.symbol}</div>
-                            <div className="text-[11px] text-zinc-500 dark:text-white/40">{row.price_usd_text || `$${Number(row.price_usd || 0).toFixed(4)}`}</div>
+                        <div className="min-w-0">
+                            <div className="text-sm font-bold text-zinc-900 dark:text-white/90 truncate" title={row.symbol}>{row.symbol}</div>
+                            <div className="text-[11px] text-zinc-500 dark:text-white/40 truncate">{row.price_usd_text || `$${Number(row.price_usd || 0).toFixed(4)}`}</div>
                         </div>
                         <div className="text-right">
                             <div className="text-sm font-semibold text-zinc-900 dark:text-white/90 tabular-nums">{row.wallet_amount}</div>
@@ -242,14 +242,16 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
                 <button
                     onClick={() => openToken(token0?.address)}
                     disabled={!token0?.address}
-                    className="rounded-xl border border-zinc-200 bg-white/70 py-2 text-xs font-semibold text-zinc-700 hover:bg-white active:bg-white disabled:opacity-40 dark:border-white/10 dark:bg-[#0f1116] dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15"
+                    className="rounded-xl border border-zinc-200 bg-white/70 py-2 text-xs font-semibold text-zinc-700 hover:bg-white active:bg-white disabled:opacity-40 dark:border-white/10 dark:bg-[#0f1116] dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15 truncate px-1"
+                    title={token0?.symbol || 'Token0'}
                 >
                     {token0?.symbol || 'Token0'}
                 </button>
                 <button
                     onClick={() => openToken(token1?.address)}
                     disabled={!token1?.address}
-                    className="rounded-xl border border-zinc-200 bg-white/70 py-2 text-xs font-semibold text-zinc-700 hover:bg-white active:bg-white disabled:opacity-40 dark:border-white/10 dark:bg-[#0f1116] dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15"
+                    className="rounded-xl border border-zinc-200 bg-white/70 py-2 text-xs font-semibold text-zinc-700 hover:bg-white active:bg-white disabled:opacity-40 dark:border-white/10 dark:bg-[#0f1116] dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15 truncate px-1"
+                    title={token1?.symbol || 'Token1'}
                 >
                     {token1?.symbol || 'Token1'}
                 </button>
@@ -283,19 +285,17 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
                             <div className="absolute inset-0 overflow-hidden rounded-full bg-zinc-200/80 dark:bg-white/10">
                                 <div className="absolute inset-0 bg-gradient-to-r from-rose-500/20 via-amber-400/15 to-emerald-500/20" />
                                 <div
-                                    className={`absolute inset-y-0 left-0 rounded-full shadow-sm transition-[width] duration-500 ease-out ${
-                                        position?.in_range
+                                    className={`absolute inset-y-0 left-0 rounded-full shadow-sm transition-[width] duration-500 ease-out ${position?.in_range
                                             ? 'bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-600'
                                             : 'bg-gradient-to-r from-rose-400 via-rose-500 to-rose-600'
-                                    }`}
+                                        }`}
                                     style={{ width: `${progressPercent}%` }}
                                 />
                                 <div className="absolute inset-y-0 left-1/2 w-px bg-zinc-400/60 dark:bg-white/25" />
                             </div>
                             <div
-                                className={`pointer-events-none absolute top-1/2 z-10 flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white shadow-md ring-2 transition-[left] duration-500 ease-out ${
-                                    position?.in_range ? 'ring-emerald-500/70' : 'ring-rose-500/70'
-                                } dark:bg-[#0f1116]`}
+                                className={`pointer-events-none absolute top-1/2 z-10 flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white shadow-md ring-2 transition-[left] duration-500 ease-out ${position?.in_range ? 'ring-emerald-500/70' : 'ring-rose-500/70'
+                                    } dark:bg-[#0f1116]`}
                                 style={{ left: `${progressPercent}%` }}
                             >
                                 <div className={`h-1.5 w-1.5 rounded-full ${position?.in_range ? 'bg-emerald-500' : 'bg-rose-500'}`} />
