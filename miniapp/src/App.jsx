@@ -128,6 +128,8 @@ export default function App() {
     const [hotPoolsError, setHotPoolsError] = useState('');
     const [hotPoolsLoading, setHotPoolsLoading] = useState(false);
     const hotPoolsPollRef = useRef(null);
+    // 保存上一次热门池子数据，用于计算变化
+    const previousHotPoolsDataRef = useRef({});
 
     const [adminUsers, setAdminUsers] = useState([]);
     const [adminUsersError, setAdminUsersError] = useState('');
@@ -217,6 +219,11 @@ export default function App() {
     const hotPoolsRows = useMemo(() => {
         return Array.isArray(hotPoolsData?.data) ? hotPoolsData.data : [];
     }, [hotPoolsData]);
+
+    // 构建热门池子的历史数据映射 (pool_address -> previous data)
+    const previousHotPoolsMap = useMemo(() => {
+        return previousHotPoolsDataRef.current;
+    }, [hotPoolsRows]);
 
     const apiBaseUrl = useMemo(() => resolveApiBaseUrl(), []);
 
@@ -421,6 +428,16 @@ export default function App() {
                     signal: controller.signal,
                 });
                 if (aborted) return;
+                // 在更新数据之前，保存当前数据作为历史数据
+                if (hotPoolsData?.data) {
+                    const prevMap = {};
+                    for (const pool of hotPoolsData.data) {
+                        if (pool?.pool_address) {
+                            prevMap[pool.pool_address] = pool;
+                        }
+                    }
+                    previousHotPoolsDataRef.current = prevMap;
+                }
                 setHotPoolsData(resp);
             } catch (e) {
                 if (aborted) return;
@@ -528,19 +545,17 @@ export default function App() {
                 </div>
 
                 <div
-                    className={`mt-3 grid ${
-                        isAdmin ? 'grid-cols-3' : 'grid-cols-2'
-                    } gap-1 rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5`}
+                    className={`mt-3 grid ${isAdmin ? 'grid-cols-3' : 'grid-cols-2'
+                        } gap-1 rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5`}
                 >
                     <button
                         type="button"
                         onClick={() => setViewMode('positions')}
                         aria-pressed={viewMode === 'positions'}
-                        className={`rounded-xl px-3 py-2 transition ${
-                            viewMode === 'positions'
+                        className={`rounded-xl px-3 py-2 transition ${viewMode === 'positions'
                                 ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
                                 : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
-                        }`}
+                            }`}
                     >
                         实时仓位
                     </button>
@@ -548,11 +563,10 @@ export default function App() {
                         type="button"
                         onClick={() => setViewMode('hot_pools')}
                         aria-pressed={viewMode === 'hot_pools'}
-                        className={`rounded-xl px-3 py-2 transition ${
-                            viewMode === 'hot_pools'
+                        className={`rounded-xl px-3 py-2 transition ${viewMode === 'hot_pools'
                                 ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
                                 : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
-                        }`}
+                            }`}
                     >
                         热门池子
                     </button>
@@ -561,11 +575,10 @@ export default function App() {
                             type="button"
                             onClick={() => setViewMode('admin')}
                             aria-pressed={viewMode === 'admin'}
-                            className={`rounded-xl px-3 py-2 transition ${
-                                viewMode === 'admin'
+                            className={`rounded-xl px-3 py-2 transition ${viewMode === 'admin'
                                     ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
                                     : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
-                            }`}
+                                }`}
                         >
                             管理
                         </button>
@@ -616,11 +629,10 @@ export default function App() {
                                         type="button"
                                         onClick={() => setHotPoolsSort(tab.key)}
                                         aria-pressed={hotPoolsSort === tab.key}
-                                        className={`rounded-xl px-3 py-2 transition ${
-                                            hotPoolsSort === tab.key
+                                        className={`rounded-xl px-3 py-2 transition ${hotPoolsSort === tab.key
                                                 ? 'bg-emerald-500 text-white shadow-sm'
                                                 : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
-                                        }`}
+                                            }`}
                                     >
                                         {tab.label}
                                     </button>
@@ -708,19 +720,17 @@ export default function App() {
                                             setAdminPositions(null);
                                             setAdminPositionsError('');
                                         }}
-                                        className={`w-full rounded-xl border p-3 text-left transition ${
-                                            selected
+                                        className={`w-full rounded-xl border p-3 text-left transition ${selected
                                                 ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-900 dark:text-emerald-100'
                                                 : 'border-zinc-200 bg-white/70 text-zinc-900 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10'
-                                        }`}
+                                            }`}
                                     >
                                         <div className="flex items-start justify-between gap-3">
                                             <div>
                                                 <div className="text-sm font-semibold">{label}</div>
                                                 <div
-                                                    className={`mt-0.5 text-[11px] ${
-                                                        selected ? 'text-emerald-700/80 dark:text-emerald-200/80' : 'text-zinc-500 dark:text-white/40'
-                                                    }`}
+                                                    className={`mt-0.5 text-[11px] ${selected ? 'text-emerald-700/80 dark:text-emerald-200/80' : 'text-zinc-500 dark:text-white/40'
+                                                        }`}
                                                 >
                                                     {u.telegram_id ? `TG ${u.telegram_id}` : 'TG --'} · ID {u.user_id}
                                                 </div>
@@ -730,9 +740,8 @@ export default function App() {
                                                     {u.active_tasks} 个任务
                                                 </div>
                                                 <div
-                                                    className={`mt-0.5 text-[11px] ${
-                                                        selected ? 'text-emerald-700/70 dark:text-emerald-200/70' : 'text-zinc-500 dark:text-white/40'
-                                                    }`}
+                                                    className={`mt-0.5 text-[11px] ${selected ? 'text-emerald-700/70 dark:text-emerald-200/70' : 'text-zinc-500 dark:text-white/40'
+                                                        }`}
                                                 >
                                                     {updatedText}
                                                 </div>
@@ -773,25 +782,27 @@ export default function App() {
             <div className="space-y-4">
                 {isHotPools
                     ? hotPoolsRows.map((row) => {
-                          return (
-                              <HotPoolCard
-                                  key={`${row?.protocol_version || ''}:${row?.pool_address || ''}`}
-                                  pool={row}
-                                  metric={hotPoolsSort}
-                              />
-                          );
-                      })
+                        const prevData = previousHotPoolsMap[row?.pool_address];
+                        return (
+                            <HotPoolCard
+                                key={`${row?.protocol_version || ''}:${row?.pool_address || ''}`}
+                                pool={row}
+                                metric={hotPoolsSort}
+                                previousData={prevData}
+                            />
+                        );
+                    })
                     : activeData
                         ? visiblePositions.map((p) => (
-                              <PositionCard
-                                  key={`${p.version}:${p.position_id}`}
-                                  position={p}
-                                  walletAddress={walletAddress}
-                                  bnbBalance={bnbBalance}
-                                  pollIntervalSec={pollIntervalSec}
-                                  updatedAt={updatedAt}
-                              />
-                          ))
+                            <PositionCard
+                                key={`${p.version}:${p.position_id}`}
+                                position={p}
+                                walletAddress={walletAddress}
+                                bnbBalance={bnbBalance}
+                                pollIntervalSec={pollIntervalSec}
+                                updatedAt={updatedAt}
+                            />
+                        ))
                         : null}
             </div>
 
@@ -839,11 +850,10 @@ export default function App() {
                                             key={sec}
                                             type="button"
                                             onClick={() => setQuickPoll(sec)}
-                                            className={`rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 ${
-                                                pollOverrideSec === sec
+                                            className={`rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 ${pollOverrideSec === sec
                                                     ? 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/25 dark:text-emerald-300'
                                                     : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
-                                            }`}
+                                                }`}
                                         >
                                             {sec}s
                                         </button>

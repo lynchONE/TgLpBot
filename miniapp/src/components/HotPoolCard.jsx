@@ -9,6 +9,8 @@ const Icon = ({ path, className = '' }) => (
 
 const icons = {
     copy: 'M16 1H4a2 2 0 00-2 2v14h2V3h12V1zm3 4H8a2 2 0 00-2 2v14a2 2 0 002 2h11a2 2 0 002-2V7a2 2 0 00-2-2zm0 16H8V7h11v14z',
+    arrowUp: 'M5.293 9.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 7.414V15a1 1 0 11-2 0V7.414L6.707 9.707a1 1 0 01-1.414 0z',
+    arrowDown: 'M14.707 10.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 12.586V5a1 1 0 012 0v7.586l2.293-2.293a1 1 0 011.414 0z',
 };
 
 const usdCompact = new Intl.NumberFormat('en-US', {
@@ -61,9 +63,15 @@ function normalizeProtocolVersion(protocolVersion, dex) {
     return fromDex;
 }
 
-function dexLabel(dex, protocolVersion) {
-    const base = normalizeDexName(dex);
-    const version = normalizeProtocolVersion(protocolVersion, dex);
+function dexLabel(pool) {
+    // 优先使用 factory_name
+    const factoryName = String(pool?.factory_name || '').trim();
+    if (factoryName) {
+        return factoryName;
+    }
+    // 回退到原来的逻辑
+    const base = normalizeDexName(pool?.dex);
+    const version = normalizeProtocolVersion(pool?.protocol_version, pool?.dex);
     if (!base && !version) return 'DEX';
     if (!base) return version.toUpperCase();
     return `${base}${version || ''}`;
@@ -75,7 +83,41 @@ function formatPairLabel(tradingPair) {
     return v.replace(/\//g, '/\u200B');
 }
 
-export default function HotPoolCard({ pool, metric }) {
+// 通用变化指示器组件 - 用于显示数值变化（费用、交易量等）
+const ChangeIndicator = ({ currentValue, previousValue, label = '变化' }) => {
+    if (previousValue === undefined || previousValue === null) return null;
+
+    const current = Number(currentValue || 0);
+    const previous = Number(previousValue || 0);
+    const diff = current - previous;
+    if (diff === 0 || !Number.isFinite(diff)) return null;
+
+    const isIncrease = diff > 0;
+    const absValue = Math.abs(diff);
+
+    // 格式化数字显示
+    const formatValue = (val) => {
+        if (val >= 1000) {
+            return usdCompact.format(val).replace('$', '');
+        }
+        return val.toFixed(2);
+    };
+
+    return (
+        <span
+            className={`ml-1 inline-flex items-center text-[10px] font-bold ${isIncrease ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                }`}
+            title={`${label}: ${isIncrease ? '+' : '-'}$${absValue.toFixed(2)}`}
+        >
+            <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d={isIncrease ? icons.arrowUp : icons.arrowDown} clipRule="evenodd" />
+            </svg>
+            <span>{formatValue(absValue)}</span>
+        </span>
+    );
+};
+
+export default function HotPoolCard({ pool, metric, previousData }) {
     const [copied, setCopied] = useState(false);
     const addr = String(pool?.pool_address || '').trim();
 
@@ -124,11 +166,10 @@ export default function HotPoolCard({ pool, metric }) {
                         <button
                             type="button"
                             onClick={copyAddr}
-                            className={`inline-flex h-7 w-7 items-center justify-center rounded-xl border text-zinc-600 shadow-sm transition ${
-                                copied
-                                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200'
-                                    : 'border-zinc-200 bg-zinc-100 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15'
-                            }`}
+                            className={`inline-flex h-7 w-7 items-center justify-center rounded-xl border text-zinc-600 shadow-sm transition ${copied
+                                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200'
+                                : 'border-zinc-200 bg-zinc-100 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15'
+                                }`}
                             aria-label={copied ? '已复制' : '复制地址'}
                             disabled={!addr}
                         >
@@ -137,25 +178,40 @@ export default function HotPoolCard({ pool, metric }) {
                     </div>
 
                     <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-                        <div className="text-zinc-500 dark:text-white/40">
+                        <div className="text-zinc-500 dark:text-white/40 flex items-center">
                             交易量:{' '}
                             <span className="font-semibold text-sky-600 dark:text-sky-200 tabular-nums">
                                 {formatUsdCompact(pool?.total_volume)}
                             </span>
+                            <ChangeIndicator
+                                currentValue={pool?.total_volume}
+                                previousValue={previousData?.total_volume}
+                                label="交易量变化"
+                            />
                         </div>
-                        <div className="text-zinc-500 dark:text-white/40">
+                        <div className="text-zinc-500 dark:text-white/40 flex items-center">
                             TVL:{' '}
                             <span className="font-semibold text-zinc-900 dark:text-white/80 tabular-nums">
                                 {formatUsdCompact(pool?.current_pool_value)}
                             </span>
+                            <ChangeIndicator
+                                currentValue={pool?.current_pool_value}
+                                previousValue={previousData?.current_pool_value}
+                                label="TVL变化"
+                            />
                         </div>
                     </div>
                 </div>
 
                 <div className="text-right">
                     <div className="flex items-baseline justify-end gap-2">
-                        <div className="text-lg font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums">
+                        <div className="text-lg font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums flex items-center">
                             {mainValue}
+                            <ChangeIndicator
+                                currentValue={metric === 'volume' ? pool?.total_volume : pool?.total_fees}
+                                previousValue={metric === 'volume' ? previousData?.total_volume : previousData?.total_fees}
+                                label={metric === 'volume' ? '交易量变化' : '费用变化'}
+                            />
                         </div>
                         {priceDisplay ? (
                             <div className={`text-xs font-semibold tabular-nums ${priceDisplayClass}`}>{priceDisplay}</div>
@@ -169,7 +225,7 @@ export default function HotPoolCard({ pool, metric }) {
 
             <div className="mt-3 flex items-center">
                 <div className="inline-flex items-center rounded-lg bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-500/25 dark:bg-amber-500/15 dark:text-amber-200 dark:ring-amber-500/30">
-                    {dexLabel(pool?.dex, pool?.protocol_version)}
+                    {dexLabel(pool)}
                 </div>
             </div>
         </div>
