@@ -129,8 +129,8 @@ export default function PriceRangeVisualizer({
                 </div>
 
                 {/* Current Price */}
-                <div className={`text-[13px] font-bold tabular-nums ml-auto ${inRange ? 'text-emerald-500' : 'text-rose-500'}`}>
-                    {formatPrice(currentPrice)}
+                <div className={`text-[10px] font-bold tabular-nums ml-auto ${inRange ? 'text-emerald-500' : 'text-rose-500'}`}>
+                    当前价格 {formatPrice(currentPrice)}
                 </div>
             </div>
 
@@ -149,8 +149,8 @@ export default function PriceRangeVisualizer({
                 {/* Current Price Marker */}
                 <div
                     className={`absolute top-0 bottom-0 w-1.5 z-20 transition-all duration-500 rounded-full ${inRange
-                            ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]'
-                            : 'bg-rose-600 dark:bg-rose-500 shadow-[0_0_8px_rgba(225,29,72,0.6)]'
+                        ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]'
+                        : 'bg-rose-600 dark:bg-rose-500 shadow-[0_0_8px_rgba(225,29,72,0.6)]'
                         }`}
                     style={{
                         left: `${finalPercent}%`,
