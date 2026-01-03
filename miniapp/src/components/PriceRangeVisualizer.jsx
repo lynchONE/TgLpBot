@@ -110,34 +110,34 @@ export default function PriceRangeVisualizer({
     const midPrice = (minPrice + maxPrice) / 2;
 
     return (
-        <div className="w-full">
+        <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
             {/* Header */}
             <div className="flex justify-between items-center mb-2">
-                <div className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                <div className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
                     价格范围 {gridCount ? `(${gridCount}格)` : ''}:
                 </div>
-                <div className="bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-xs px-1.5 py-0.5 rounded">
+                <div className="bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[10px] px-1.5 py-0.5 rounded">
                     {deviation ? `${deviation.toFixed(2)}%` : '--'}
                 </div>
             </div>
 
+            <div className="flex justify-center mb-1">
+                <div className={`text-base font-bold tabular-nums ${inRange ? 'text-zinc-900 dark:text-white' : 'text-rose-600 dark:text-rose-500'}`}>
+                    {formatPrice(currentPrice)}
+                </div>
+            </div>
+
             {/* Labels Row (Top) */}
-            <div className="flex justify-between text-[10px] font-medium mb-1">
+            <div className="flex justify-between text-[10px] font-medium mb-1 opacity-80">
                 <span className="text-emerald-500">下限</span>
                 <span className="text-zinc-500">中心</span>
                 <span className="text-rose-500">上限</span>
             </div>
 
-            <div className="flex justify-center mb-2">
-                <div className={`text-lg font-bold tabular-nums ${inRange ? 'text-zinc-900 dark:text-white' : 'text-rose-600 dark:text-rose-500'}`}>
-                    {formatPrice(currentPrice)}
-                </div>
-            </div>
-
             {/* Visual Bar */}
-            <div className="relative h-8 w-full select-none mb-1">
+            <div className="relative h-6 w-full select-none mb-1">
                 {/* Track */}
-                <div className="absolute top-1/2 left-0 right-0 h-4 -mt-2 bg-zinc-200 dark:bg-zinc-700 rounded-full border border-zinc-300 dark:border-zinc-600 overflow-hidden">
+                <div className="absolute top-1/2 left-0 right-0 h-3 -mt-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-full border border-zinc-300 dark:border-zinc-600 overflow-hidden">
                     {/* Mid - 50% only */}
                     <div className="absolute top-0 bottom-0 w-0.5 bg-zinc-400 left-1/2 -ml-px"></div>
                 </div>
@@ -145,8 +145,8 @@ export default function PriceRangeVisualizer({
                 {/* Current Price Marker */}
                 <div
                     className={`absolute top-0 bottom-0 w-1.5 z-20 transition-all duration-500 rounded-full ${inRange
-                            ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]'
-                            : 'bg-rose-600 dark:bg-rose-500 shadow-[0_0_8px_rgba(225,29,72,0.6)]'
+                        ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]'
+                        : 'bg-rose-600 dark:bg-rose-500 shadow-[0_0_8px_rgba(225,29,72,0.6)]'
                         }`}
                     style={{
                         left: `${percent}%`,
@@ -157,7 +157,7 @@ export default function PriceRangeVisualizer({
             </div>
 
             {/* Price Values Row */}
-            <div className="flex justify-between text-[11px] font-bold tabular-nums">
+            <div className="flex justify-between text-[10px] font-bold tabular-nums">
                 <span className="text-emerald-500">{formatPrice(minPrice)}</span>
                 <span className="text-zinc-500">{formatPrice(midPrice)}</span>
                 <span className="text-rose-500">{formatPrice(maxPrice)}</span>
@@ -167,13 +167,13 @@ export default function PriceRangeVisualizer({
             {!inRange && (
                 <div className="mt-3 space-y-2">
                     {/* Range Info Box */}
-                    <div className="bg-zinc-100 dark:bg-zinc-800 rounded-lg py-1.5 px-3 flex items-center justify-center text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                    <div className="bg-zinc-100 dark:bg-zinc-800 rounded-lg py-1.5 px-3 flex items-center justify-center text-[10px] font-medium text-zinc-700 dark:text-zinc-300">
                         <span className="text-orange-600 dark:text-orange-400 mr-2 font-bold">超出范围</span>
                         <span className="tabular-nums opacity-80"> | {formatPrice(minPrice)} - {formatPrice(maxPrice)}</span>
                     </div>
 
                     {/* Alert Box */}
-                    <div className="bg-rose-50 dark:bg-rose-900/20 rounded-lg p-2 flex items-center justify-center text-xs text-rose-700 dark:text-rose-300">
+                    <div className="bg-rose-50 dark:bg-rose-900/20 rounded-lg p-2 flex items-center justify-center text-[10px] text-rose-700 dark:text-rose-300">
                         <span className="mr-1">{isBelow ? '⬇' : '⬆'}</span>
                         <span>价格 {formatPrice(currentPrice)} {isBelow ? '低于下限' : '高于上限'} </span>
                         <span className="font-bold ml-1">{outOfRangePercent?.toFixed(3)}%</span>
