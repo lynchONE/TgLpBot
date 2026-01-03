@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { copyToClipboard, openLink } from '../lib/telegram';
+import { copyToClipboard } from '../lib/telegram';
 
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -12,19 +12,6 @@ const icons = {
     chart: 'M5 3v18h18v-2H7V3H5zm5 14H8v-6h2v6zm4 0h-2V7h2v10zm2 0h2v-4h-2v4z',
     arrowUp: 'M5.293 9.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 7.414V15a1 1 0 11-2 0V7.414L6.707 9.707a1 1 0 01-1.414 0z',
     arrowDown: 'M14.707 10.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 12.586V5a1 1 0 012 0v7.586l2.293-2.293a1 1 0 011.414 0z',
-};
-
-const dextoolsChainSlug = (chain) => {
-    const v = String(chain || '').trim().toLowerCase();
-    if (!v) return 'bnb';
-    if (v === 'bsc' || v === 'bnb') return 'bnb';
-    if (v === 'eth' || v === 'ethereum') return 'ether';
-    if (v === 'arb' || v === 'arbitrum') return 'arbitrum';
-    if (v === 'op' || v === 'optimism') return 'optimism';
-    if (v === 'matic' || v === 'polygon') return 'polygon';
-    if (v === 'avax' || v === 'avalanche') return 'avalanche';
-    if (v === 'ftm' || v === 'fantom') return 'fantom';
-    return v;
 };
 
 const usdCompact = new Intl.NumberFormat('en-US', {
@@ -131,17 +118,10 @@ const ChangeIndicator = ({ currentValue, previousValue, label = '变化' }) => {
     );
 };
 
-export default function HotPoolCard({ pool, metric, previousData, chain }) {
+export default function HotPoolCard({ pool, metric, previousData, onOpenKline }) {
     const [copied, setCopied] = useState(false);
     const addr = String(pool?.pool_address || '').trim();
-
-    const chartLink = useMemo(() => {
-        if (!/^0x[a-fA-F0-9]{40}$/.test(addr)) return null;
-        const slug = dextoolsChainSlug(chain);
-        return slug ? `https://www.dextools.io/app/en/${slug}/pair-explorer/${addr}` : null;
-    }, [addr, chain]);
-
-    const openChart = () => chartLink && openLink(chartLink);
+    const canOpenKline = useMemo(() => /^0x[a-fA-F0-9]{40}$/.test(addr), [addr]);
 
     const mainValue = useMemo(() => {
         if (metric === 'volume') return formatUsdCompact(pool?.total_volume);
@@ -202,11 +182,11 @@ export default function HotPoolCard({ pool, metric, previousData, chain }) {
                         </button>
                         <button
                             type="button"
-                            onClick={openChart}
+                            onClick={() => onOpenKline?.(pool)}
                             className="inline-flex h-7 w-7 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-600 shadow-sm transition hover:bg-zinc-200 active:bg-zinc-200 disabled:opacity-40 dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15"
                             aria-label="K线图"
-                            title="打开 DEXTools K线图"
-                            disabled={!chartLink}
+                            title="查看K线图"
+                            disabled={!canOpenKline || typeof onOpenKline !== 'function'}
                         >
                             <Icon path={icons.chart} className="h-4 w-4" />
                         </button>

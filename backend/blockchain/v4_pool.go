@@ -572,6 +572,65 @@ func GetUniswapV4PoolCurrentTickViaStateView(stateView common.Address, poolManag
 	return int(tickBig.Int64()), nil
 }
 
+// GetUniswapV4PoolCurrentTickViaStateViewAtBlock reads the tick using a StateView helper contract at a given block number.
+func GetUniswapV4PoolCurrentTickViaStateViewAtBlock(stateView common.Address, poolManager common.Address, poolID string, blockNumber uint64) (int, error) {
+	if Client == nil {
+		return 0, fmt.Errorf("blockchain client not initialized")
+	}
+	if blockNumber == 0 {
+		return 0, fmt.Errorf("block number not set")
+	}
+	if (stateView == common.Address{}) {
+		return 0, fmt.Errorf("uniswap v4 state view address not configured")
+	}
+	if (poolManager == common.Address{}) {
+		return 0, fmt.Errorf("uniswap v4 pool manager address not configured")
+	}
+
+	id, err := normalizePoolID(poolID)
+	if err != nil {
+		return 0, err
+	}
+
+	parsedABI, err := abi.JSON(strings.NewReader(uniswapV4StateViewABISingleArg))
+	if err != nil {
+		return 0, fmt.Errorf("parse state view ABI failed: %w", err)
+	}
+
+	data, err := parsedABI.Pack("getSlot0", id)
+	if err != nil {
+		return 0, fmt.Errorf("pack state view getSlot0 failed: %w", err)
+	}
+
+	msg := ethereum.CallMsg{To: &stateView, Data: data}
+	block := new(big.Int).SetUint64(blockNumber)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	raw, err := callContractWithRetryAtBlock(ctx, msg, block)
+	if err != nil {
+		return 0, fmt.Errorf("call state view getSlot0 failed: %w", err)
+	}
+
+	out, err := parsedABI.Unpack("getSlot0", raw)
+	if err != nil {
+		return 0, fmt.Errorf("unpack state view getSlot0 failed: %w", err)
+	}
+	if len(out) < 2 {
+		return 0, fmt.Errorf("unexpected state view getSlot0 return length: %d", len(out))
+	}
+
+	sqrtPriceX96, ok0 := out[0].(*big.Int)
+	tickBig, ok := out[1].(*big.Int)
+	if !ok0 || sqrtPriceX96 == nil || !ok || tickBig == nil {
+		return 0, fmt.Errorf("unexpected state view slot0 return types: sqrt=%T tick=%T", out[0], out[1])
+	}
+	if sqrtPriceX96.Sign() == 0 {
+		return 0, fmt.Errorf("pool not initialized (sqrtPriceX96=0)")
+	}
+	return int(tickBig.Int64()), nil
+}
+
 // GetUniswapV4PoolSlot0ViaStateView reads slot0 using a StateView helper contract.
 func GetUniswapV4PoolSlot0ViaStateView(stateView common.Address, poolManager common.Address, poolID string) (*big.Int, int, error) {
 	if Client == nil {

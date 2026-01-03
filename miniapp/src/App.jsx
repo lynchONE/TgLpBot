@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import HotPoolCard from './components/HotPoolCard.jsx';
+import KlineModal from './components/KlineModal.jsx';
 import PositionCard from './components/PositionCard.jsx';
 import { disableAdminAutoLP, fetchAdminAutoLPStats, fetchAdminRealtimePositions, fetchAdminRealtimeUsers, fetchHotPools, fetchRealtimePositions } from './lib/api';
 import { getTelegramWebApp } from './lib/telegram';
@@ -131,6 +132,7 @@ export default function App() {
     const hotPoolsPollRef = useRef(null);
     // 保存上一次热门池子数据，用于计算变化
     const previousHotPoolsDataRef = useRef({});
+    const [klinePool, setKlinePool] = useState(null);
 
     const [adminUsers, setAdminUsers] = useState([]);
     const [adminUsersError, setAdminUsersError] = useState('');
@@ -596,6 +598,20 @@ export default function App() {
         : '请选择用户查看实时仓位';
     const showEmptyPositions = !isHotPools && Boolean(activeData) && visiblePositions.length === 0;
 
+    const initDataMissing = viewMode !== 'hot_pools' && !initData;
+
+    const activeErrorText = useMemo(() => {
+        const msg = String(activeError || '').trim();
+        if (!msg) return '';
+        if (msg.includes('missing initData')) {
+            return '未获取到 Telegram WebApp 的 initData：请从机器人里的“实时仓位”按钮打开。';
+        }
+        if (msg.includes('invalid initData')) {
+            return 'initData 校验失败：请检查后端 TELEGRAM_BOT_TOKEN 是否正确，或 initData 是否过期。';
+        }
+        return msg;
+    }, [activeError]);
+
     return (
         <div className="min-h-screen max-w-[720px] px-4 py-4 pb-[calc(16px+env(safe-area-inset-bottom))] mx-auto">
             <header className="mb-4">
@@ -951,9 +967,15 @@ export default function App() {
                 </div>
             ) : null}
 
-            {!isHotPools && activeError ? (
+            {!isHotPools && initDataMissing ? (
+                <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-200">
+                    请从 Telegram 机器人里的“实时仓位”按钮打开页面（否则无法读取你的仓位）。
+                </div>
+            ) : null}
+
+            {!isHotPools && activeErrorText ? (
                 <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-200">
-                    {activeError}
+                    {activeErrorText}
                 </div>
             ) : null}
 
@@ -988,7 +1010,7 @@ export default function App() {
                                 pool={row}
                                 metric={hotPoolsSort}
                                 previousData={prevData}
-                                chain={hotPoolsData?.chain || 'bsc'}
+                                onOpenKline={setKlinePool}
                             />
                         );
                     })
@@ -1094,6 +1116,15 @@ export default function App() {
                     </div>
                 </div>
             ) : null}
+
+            <KlineModal
+                open={Boolean(klinePool)}
+                onClose={() => setKlinePool(null)}
+                apiBaseUrl={apiBaseUrl}
+                theme={theme}
+                pool={klinePool}
+                chain={hotPoolsData?.chain || 'bsc'}
+            />
         </div>
     );
 }

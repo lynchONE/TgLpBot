@@ -3,6 +3,7 @@ package blockchain
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 
@@ -82,6 +83,39 @@ func callContractWithRetry(ctx context.Context, msg ethereum.CallMsg) ([]byte, e
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		raw, err := Client.CallContract(ctx, msg, nil)
+		if err == nil {
+			return raw, nil
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if attempt == maxAttempts || !isRetryableRPCCallError(err) {
+			break
+		}
+
+		wait := rpcRetryDelay(attempt, err)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(wait):
+		}
+	}
+	return nil, lastErr
+}
+
+func callContractWithRetryAtBlock(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
+	if Client == nil {
+		return nil, fmt.Errorf("blockchain client not initialized")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	const maxAttempts = 4
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		raw, err := Client.CallContract(ctx, msg, blockNumber)
 		if err == nil {
 			return raw, nil
 		}

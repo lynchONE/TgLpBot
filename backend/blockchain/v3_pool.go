@@ -162,6 +162,51 @@ func GetV3PoolCurrentTick(poolAddress common.Address) (int, error) {
 	return int(tickBig.Int64()), nil
 }
 
+// GetV3PoolCurrentTickAtBlock returns the tick from slot0() at a given block number.
+func GetV3PoolCurrentTickAtBlock(poolAddress common.Address, blockNumber uint64) (int, error) {
+	if Client == nil {
+		return 0, fmt.Errorf("blockchain client not initialized")
+	}
+	if blockNumber == 0 {
+		return 0, fmt.Errorf("block number not set")
+	}
+
+	parsedABI, err := abi.JSON(strings.NewReader(v3PoolSlot0MinABI))
+	if err != nil {
+		return 0, fmt.Errorf("parse pool ABI failed: %w", err)
+	}
+
+	data, err := parsedABI.Pack("slot0")
+	if err != nil {
+		return 0, fmt.Errorf("pack slot0 failed: %w", err)
+	}
+
+	msg := ethereum.CallMsg{To: &poolAddress, Data: data}
+	block := new(big.Int).SetUint64(blockNumber)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	raw, err := callContractWithRetryAtBlock(ctx, msg, block)
+	if err != nil {
+		return 0, fmt.Errorf("call slot0 failed: %w", err)
+	}
+
+	out, err := parsedABI.Unpack("slot0", raw)
+	if err != nil {
+		return 0, fmt.Errorf("unpack slot0 failed: %w", err)
+	}
+	if len(out) < 2 {
+		return 0, fmt.Errorf("unexpected slot0 return length: %d", len(out))
+	}
+
+	tickBig, ok := out[1].(*big.Int)
+	if !ok || tickBig == nil {
+		return 0, fmt.Errorf("unexpected tick type: %T", out[1])
+	}
+
+	return int(tickBig.Int64()), nil
+}
+
 // GetV3PoolSlot0 returns the sqrtPriceX96 and current tick from a V3 pool.
 func GetV3PoolSlot0(poolAddress common.Address) (*big.Int, int, error) {
 	if Client == nil {

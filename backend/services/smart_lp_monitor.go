@@ -33,6 +33,8 @@ type smartLPV3Pos struct {
 	token0 common.Address
 	token1 common.Address
 	fee    uint64
+	tickL  int
+	tickU  int
 	ok     bool
 }
 
@@ -75,6 +77,8 @@ type smartLPEvent struct {
 	amount0         string
 	amount1         string
 	liquidityDelta  string
+	tickLower       int
+	tickUpper       int
 	txHash          string
 	blockNumber     uint64
 	logIndex        uint32
@@ -643,7 +647,7 @@ func (s *SmartLPMonitor) insertEvents(ctx context.Context, events []smartLPEvent
 
 	batch, err := s.ch.PrepareBatch(ctx, `INSERT INTO smart_lp_events (
 		ts, event_seq, chain, pool_version, pool_id, wallet_address, action,
-		token_id, amount0, amount1, liquidity_delta, tx_hash, block_number, log_index,
+		token_id, amount0, amount1, liquidity_delta, tick_lower, tick_upper, tx_hash, block_number, log_index,
 		contract_address, source
 	)`)
 	if err != nil {
@@ -663,6 +667,8 @@ func (s *SmartLPMonitor) insertEvents(ctx context.Context, events []smartLPEvent
 			ev.amount0,
 			ev.amount1,
 			ev.liquidityDelta,
+			int32(ev.tickLower),
+			int32(ev.tickUpper),
 			ev.txHash,
 			ev.blockNumber,
 			ev.logIndex,
@@ -789,6 +795,8 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 		token0 common.Address
 		token1 common.Address
 		fee    uint64
+		tickL  int
+		tickU  int
 		ok     bool
 	}
 	v3PosCache := make(map[string]v3Pos)
@@ -976,7 +984,7 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 									}
 									v3PosCache[posKey] = v3Pos{ok: false}
 								} else {
-									v3PosCache[posKey] = v3Pos{token0: p.Token0, token1: p.Token1, fee: p.Fee, ok: true}
+									v3PosCache[posKey] = v3Pos{token0: p.Token0, token1: p.Token1, fee: p.Fee, tickL: p.TickLower, tickU: p.TickUpper, ok: true}
 								}
 							}
 							pos = v3PosCache[posKey]
@@ -1017,6 +1025,8 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 							amount0:         amount0.String(),
 							amount1:         amount1.String(),
 							liquidityDelta:  liq.String(),
+							tickLower:       pos.tickL,
+							tickUpper:       pos.tickU,
 							txHash:          strings.ToLower(tx.Hash.Hex()),
 							blockNumber:     bn,
 							logIndex:        uint32(lg.Index),
@@ -1039,9 +1049,19 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 						unpackErrs++
 						continue
 					}
+					tickLowerBI, _ := decoded[0].(*big.Int)
+					tickUpperBI, _ := decoded[1].(*big.Int)
 					liqDelta, _ := decoded[2].(*big.Int)
 					if liqDelta == nil || liqDelta.Sign() == 0 {
 						continue
+					}
+					tickLower := 0
+					tickUpper := 0
+					if tickLowerBI != nil {
+						tickLower = int(tickLowerBI.Int64())
+					}
+					if tickUpperBI != nil {
+						tickUpper = int(tickUpperBI.Int64())
 					}
 
 					action := "add"
@@ -1098,6 +1118,8 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 						amount0:         amount0,
 						amount1:         amount1,
 						liquidityDelta:  liqDelta.String(),
+						tickLower:       tickLower,
+						tickUpper:       tickUpper,
 						txHash:          strings.ToLower(tx.Hash.Hex()),
 						blockNumber:     bn,
 						logIndex:        uint32(lg.Index),
@@ -1256,7 +1278,7 @@ func (sc *smartLPReceiptScanner) scanReceipt(ctx context.Context, receipt *types
 							}
 							sc.v3PosCache[posKey] = smartLPV3Pos{ok: false}
 						} else {
-							sc.v3PosCache[posKey] = smartLPV3Pos{token0: p.Token0, token1: p.Token1, fee: p.Fee, ok: true}
+							sc.v3PosCache[posKey] = smartLPV3Pos{token0: p.Token0, token1: p.Token1, fee: p.Fee, tickL: p.TickLower, tickU: p.TickUpper, ok: true}
 						}
 					}
 					pos = sc.v3PosCache[posKey]
@@ -1297,6 +1319,8 @@ func (sc *smartLPReceiptScanner) scanReceipt(ctx context.Context, receipt *types
 					amount0:         amount0.String(),
 					amount1:         amount1.String(),
 					liquidityDelta:  liq.String(),
+					tickLower:       pos.tickL,
+					tickUpper:       pos.tickU,
 					txHash:          txHashStr,
 					blockNumber:     bn,
 					logIndex:        uint32(lg.Index),
@@ -1318,9 +1342,19 @@ func (sc *smartLPReceiptScanner) scanReceipt(ctx context.Context, receipt *types
 			if err != nil || len(decoded) < 4 {
 				continue
 			}
+			tickLowerBI, _ := decoded[0].(*big.Int)
+			tickUpperBI, _ := decoded[1].(*big.Int)
 			liqDelta, _ := decoded[2].(*big.Int)
 			if liqDelta == nil || liqDelta.Sign() == 0 {
 				continue
+			}
+			tickLower := 0
+			tickUpper := 0
+			if tickLowerBI != nil {
+				tickLower = int(tickLowerBI.Int64())
+			}
+			if tickUpperBI != nil {
+				tickUpper = int(tickUpperBI.Int64())
 			}
 
 			action := "add"
@@ -1378,6 +1412,8 @@ func (sc *smartLPReceiptScanner) scanReceipt(ctx context.Context, receipt *types
 				amount0:         amount0,
 				amount1:         amount1,
 				liquidityDelta:  liqDelta.String(),
+				tickLower:       tickLower,
+				tickUpper:       tickUpper,
 				txHash:          txHashStr,
 				blockNumber:     bn,
 				logIndex:        uint32(lg.Index),

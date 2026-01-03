@@ -103,3 +103,24 @@ export async function fetchHotPools({ apiBaseUrl, sort, chain, timeframeMinutes,
     }
     return resp.json();
 }
+
+export async function fetchPoolOHLCV({ apiBaseUrl, chain, poolAddress, timeframe, aggregate, limit, beforeTimestamp, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const params = new URLSearchParams();
+    if (chain) params.set('chain', String(chain));
+    if (poolAddress) params.set('pool_address', String(poolAddress));
+    if (timeframe) params.set('timeframe', String(timeframe));
+    if (Number.isFinite(aggregate)) params.set('aggregate', String(aggregate));
+    if (Number.isFinite(limit)) params.set('limit', String(limit));
+    if (Number.isFinite(beforeTimestamp)) params.set('before_timestamp', String(beforeTimestamp));
+
+    const qs = params.toString();
+    const url = `${base}/api/pool_ohlcv${qs ? `?${qs}` : ''}`;
+
+    const resp = await fetch(url, { method: 'GET', signal });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}

@@ -348,6 +348,28 @@ func (b *Bot) sendMessageWithKeyboard(chatID int64, text string, replyMarkup any
 	}
 }
 
+// sendMessageWithKeyboardRet sends a message with inline keyboard and returns the sent message.
+func (b *Bot) sendMessageWithKeyboardRet(chatID int64, text string, replyMarkup any) (tgbotapi.Message, error) {
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = replyMarkup
+	if sentMsg, err := b.api.Send(msg); err != nil {
+		if strings.Contains(err.Error(), "can't parse entities") {
+			msg.ParseMode = ""
+			if sentMsg2, err2 := b.api.Send(msg); err2 == nil {
+				return sentMsg2, nil
+			} else {
+				log.Printf("Error sending message (Markdown): %v; fallback plain text failed: %v", err, err2)
+				return tgbotapi.Message{}, err2
+			}
+		}
+		log.Printf("Error sending message: %v", err)
+		return tgbotapi.Message{}, err
+	} else {
+		return sentMsg, nil
+	}
+}
+
 func (b *Bot) editMessageText(chatID int64, messageID int, text string) error {
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	editMsg.ParseMode = "Markdown"
@@ -524,6 +546,8 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleTaskSetStopLossDelay(query, user)
 	case strings.HasPrefix(query.Data, "task_set_residual_"):
 		b.handleTaskSetResidualTolerance(query, user)
+	case strings.HasPrefix(query.Data, "smartmoney_"):
+		b.handleSmartMoneyCallback(query, user)
 	case query.Data == "view_profit":
 		b.handleViewProfit(query, user)
 	default:

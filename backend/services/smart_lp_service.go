@@ -27,6 +27,25 @@ func NewSmartLPService(ch *ClickHouseService) *SmartLPService {
 	return &SmartLPService{ch: ch}
 }
 
+type SmartLPEvent struct {
+	Ts             time.Time
+	EventSeq       uint64
+	Chain          string
+	PoolVersion    string
+	PoolID         string
+	WalletAddress  string
+	Action         string
+	TokenID        string
+	Amount0        string
+	Amount1        string
+	LiquidityDelta string
+	TickLower      int
+	TickUpper      int
+	TxHash         string
+	BlockNumber    uint64
+	LogIndex       uint32
+}
+
 func (s *SmartLPService) GetTopAddedLiquidityPools(ctx context.Context, chain string, lookback time.Duration, limit int) ([]SmartLPRank, error) {
 	out := make([]SmartLPRank, 0)
 	if s == nil || s.ch == nil || s.ch.Conn == nil {
@@ -85,6 +104,100 @@ func (s *SmartLPService) GetTopAddedLiquidityPools(ctx context.Context, chain st
 			AddedLiquidity: added,
 			WalletCount:    int(wallets),
 		})
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+
+	return out, nil
+}
+
+// GetPoolAddEvents returns recent SmartLP add-liquidity events for a pool.
+// Typical use is to render per-wallet participation details for the same lookback window as rankings.
+func (s *SmartLPService) GetPoolAddEvents(ctx context.Context, chain string, lookback time.Duration, poolVersion string, poolID string, limit int) ([]SmartLPEvent, error) {
+	out := make([]SmartLPEvent, 0)
+	if s == nil || s.ch == nil || s.ch.Conn == nil {
+		return out, fmt.Errorf("clickhouse not initialized")
+	}
+
+	poolVersion = strings.ToLower(strings.TrimSpace(poolVersion))
+	poolID = strings.ToLower(strings.TrimSpace(poolID))
+	if poolVersion == "" || poolID == "" {
+		return out, fmt.Errorf("pool not specified")
+	}
+
+	if lookback <= 0 {
+		lookback = time.Hour
+	}
+	seconds := int(lookback.Seconds())
+	if seconds <= 0 {
+		seconds = 3600
+	}
+
+	if limit <= 0 {
+		limit = 500
+	}
+	if limit > 5000 {
+		limit = 5000
+	}
+
+	chain = strings.ToLower(strings.TrimSpace(chain))
+	chainFilter := ""
+	args := make([]interface{}, 0, 4)
+	args = append(args, poolVersion, poolID)
+	if chain != "" {
+		chainFilter = "AND chain = ?"
+		args = append(args, chain)
+	}
+
+	q := fmt.Sprintf(`
+		SELECT
+			ts, event_seq, chain, pool_version, pool_id, wallet_address, action, token_id,
+			amount0, amount1, liquidity_delta, tick_lower, tick_upper,
+			tx_hash, block_number, log_index
+		FROM smart_lp_events
+		WHERE ts >= now() - INTERVAL %d SECOND
+			AND action = 'add'
+			AND pool_version = ? AND pool_id = ?
+			AND pool_version != '' AND pool_id != ''
+			%s
+		ORDER BY block_number DESC, log_index DESC
+		LIMIT %d
+	`, seconds, chainFilter, limit)
+
+	rows, err := s.ch.Conn.Query(ctx, q, args...)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var ev SmartLPEvent
+		var tickL int32
+		var tickU int32
+		if err := rows.Scan(
+			&ev.Ts,
+			&ev.EventSeq,
+			&ev.Chain,
+			&ev.PoolVersion,
+			&ev.PoolID,
+			&ev.WalletAddress,
+			&ev.Action,
+			&ev.TokenID,
+			&ev.Amount0,
+			&ev.Amount1,
+			&ev.LiquidityDelta,
+			&tickL,
+			&tickU,
+			&ev.TxHash,
+			&ev.BlockNumber,
+			&ev.LogIndex,
+		); err != nil {
+			return out, err
+		}
+		ev.TickLower = int(tickL)
+		ev.TickUpper = int(tickU)
+		out = append(out, ev)
 	}
 	if err := rows.Err(); err != nil {
 		return out, err
