@@ -128,53 +128,30 @@ export default function PriceRangeVisualizer({
                 <span className="text-rose-500">上限</span>
             </div>
 
+            <div className="flex justify-center mb-2">
+                <div className={`text-lg font-bold tabular-nums ${inRange ? 'text-zinc-900 dark:text-white' : 'text-rose-600 dark:text-rose-500'}`}>
+                    {formatPrice(currentPrice)}
+                </div>
+            </div>
+
             {/* Visual Bar */}
             <div className="relative h-8 w-full select-none mb-1">
                 {/* Track */}
-                <div className="absolute top-1/2 left-0 right-0 h-4 -mt-2 bg-zinc-200 dark:bg-zinc-700 rounded-full overflow-hidden">
-                    {/* Lower Marker Line */}
-                    <div className="absolute top-0 bottom-0 w-0.5 bg-emerald-500 z-10" style={{ left: '10%' }}></div>
-                    {/* Mid Marker Line */}
-                    <div className="absolute top-0 bottom-0 w-0.5 bg-zinc-400 z-10" style={{ left: '50%' }}></div>
-                    {/* Upper Marker Line */}
-                    <div className="absolute top-0 bottom-0 w-0.5 bg-rose-500 z-10" style={{ left: '90%' }}></div>
-
-                    {/* We map [Min, Max] to [10%, 90%] of the visual width to allow space for "Out of range" viz? 
-                        Actually, user image shows ticks inside the bar.
-                        Let's treat the *whole bar* as the range for simplicity first, 
-                        or add padding.
-                        If I use 0% and 100% as min/max, then checks differ.
-                        
-                        Refining based on image:
-                        The image shows a bar.
-                        Green line at some offset. Red line at some offset.
-                        Gray line in middle.
-                        Maybe the bar represents a wider scope?
-                        No, usually the bar is the range.
-                        Let's stick to Bar = Range (0% to 100%).
-                     */}
-                </div>
-
-                {/* Re-rendering Track Logic for Bar = Range */}
-                <div className="absolute top-1/2 left-0 right-0 h-4 -mt-2 bg-zinc-200 dark:bg-zinc-700 rounded-full border border-zinc-300 dark:border-zinc-600">
-                    {/* Ticks within the bar */}
-                    {/* Min - 0% */}
-                    <div className="absolute top-0 bottom-0 w-0.5 bg-emerald-500 left-0"></div>
-                    {/* Mid - 50% */}
+                <div className="absolute top-1/2 left-0 right-0 h-4 -mt-2 bg-zinc-200 dark:bg-zinc-700 rounded-full border border-zinc-300 dark:border-zinc-600 overflow-hidden">
+                    {/* Mid - 50% only */}
                     <div className="absolute top-0 bottom-0 w-0.5 bg-zinc-400 left-1/2 -ml-px"></div>
-                    {/* Max - 100% */}
-                    <div className="absolute right-0 top-0 bottom-0 w-0.5 bg-rose-500"></div>
                 </div>
 
                 {/* Current Price Marker */}
                 <div
-                    className={`absolute top-0 bottom-0 w-1 z-20 transition-all duration-500 ${inRange
-                            ? 'bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.5)]'
-                            : 'bg-rose-600 dark:bg-rose-500 shadow-[0_0_4px_rgba(225,29,72,0.5)]'
+                    className={`absolute top-0 bottom-0 w-1.5 z-20 transition-all duration-500 rounded-full ${inRange
+                            ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]'
+                            : 'bg-rose-600 dark:bg-rose-500 shadow-[0_0_8px_rgba(225,29,72,0.6)]'
                         }`}
                     style={{
                         left: `${percent}%`,
-                        opacity: 1
+                        opacity: 1,
+                        transform: 'translateX(-50%)' // Center the marker
                     }}
                 ></div>
             </div>
