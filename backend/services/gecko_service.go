@@ -194,7 +194,7 @@ func (s *GeckoService) resolvePoolFeePercentage(network string, p GeckoPoolData)
 
 func (s *GeckoService) BatchInsert(pools []GeckoPoolData) error {
 	ctx := context.Background()
-	batch, err := s.ClickHouse.Conn.PrepareBatch(ctx, `INSERT INTO pools (
+	batch, err := s.ClickHouse.PrepareBatch(ctx, `INSERT INTO pools (
 		id, type, address, name,
 		base_token_id, quote_token_id, dex_id,
 		base_token_price_usd, quote_token_price_usd,

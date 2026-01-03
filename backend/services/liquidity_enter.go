@@ -337,19 +337,76 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 		allowEntrySwap = true
 	}
 	if plan.RequiresSwap {
-		if !allowEntrySwap {
-			return nil, &EntrySwapRequiredError{TokenSymbol: plan.EntrySymbol}
+		// 如果用户账户里已经有足够的入场代币（典型场景：上次 swap 成功但 bot 误判返回 0），直接用余额开仓，避免重复提示/重复兑换。
+		// 目前仅对 USDC 做“USDT 金额≈USDC 数量”的安全处理；WBNB 等非稳定币不适用该等价关系。
+		if strings.EqualFold(plan.EntrySymbol, "USDC") && plan.EntryToken != (common.Address{}) {
+			usdcBal, _ := blockchain.GetTokenBalance(plan.EntryToken, walletAddr)
+			if usdcBal == nil {
+				usdcBal = big.NewInt(0)
+			}
+			slippagePct := task.SlippageTolerance
+			if slippagePct <= 0 {
+				slippagePct = 0.5
+			}
+			bps := int64(math.Round(slippagePct * 100))
+			if bps < 0 {
+				bps = 0
+			}
+			if bps > 10000 {
+				bps = 10000
+			}
+			minNeeded := new(big.Int).Set(usdtAmount)
+			if bps > 0 && bps < 10000 {
+				minNeeded = new(big.Int).Mul(usdtAmount, big.NewInt(10000-bps))
+				minNeeded.Div(minNeeded, big.NewInt(10000))
+			} else if bps >= 10000 {
+				minNeeded = big.NewInt(0)
+			}
+			if usdcBal.Sign() > 0 && usdcBal.Cmp(minNeeded) >= 0 {
+				use := new(big.Int).Set(usdtAmount)
+				if usdcBal.Cmp(use) < 0 {
+					use = new(big.Int).Set(usdcBal)
+				}
+				log.Printf("[Liquidity] Entry swap skipped: already have %s balance=%s use=%s (minNeeded=%s)",
+					plan.EntrySymbol, usdcBal.String(), use.String(), minNeeded.String())
+				entryToken = plan.EntryToken
+				entryAmount = use
+			}
 		}
-		log.Printf("[Liquidity] Entry swap: USDT -> %s amount=%s", plan.EntrySymbol, usdtAmount.String())
-		swapped, err := s.swapExactInViaOKX(privateKey, walletAddr, usdtAddr, plan.EntryToken, usdtAmount, task.SlippageTolerance)
-		if err != nil {
-			return nil, fmt.Errorf("swap USDT to %s failed: %w", plan.EntrySymbol, err)
+
+		// 仍然需要 swap 才能使用 USDT 入场
+		if entryToken == usdtAddr {
+			if !allowEntrySwap {
+				return nil, &EntrySwapRequiredError{TokenSymbol: plan.EntrySymbol}
+			}
+			log.Printf("[Liquidity] Entry swap: USDT -> %s amount=%s", plan.EntrySymbol, usdtAmount.String())
+			swapped, err := s.swapExactInViaOKX(privateKey, walletAddr, usdtAddr, plan.EntryToken, usdtAmount, task.SlippageTolerance)
+			if err != nil {
+				return nil, fmt.Errorf("swap USDT to %s failed: %w", plan.EntrySymbol, err)
+			}
+			if swapped == nil || swapped.Sign() <= 0 {
+				// Best-effort: 有些 RPC 会出现“交易已成功但余额暂时读不到”的情况，回退到读取钱包余额（仅限 USDC）。
+				if strings.EqualFold(plan.EntrySymbol, "USDC") {
+					if bal, _ := blockchain.GetTokenBalance(plan.EntryToken, walletAddr); bal != nil && bal.Sign() > 0 {
+						use := new(big.Int).Set(usdtAmount)
+						if bal.Cmp(use) < 0 {
+							use = new(big.Int).Set(bal)
+						}
+						log.Printf("[Liquidity] Entry swap returned 0, fallback to wallet %s balance=%s use=%s",
+							plan.EntrySymbol, bal.String(), use.String())
+						entryToken = plan.EntryToken
+						entryAmount = use
+					} else {
+						return nil, fmt.Errorf("swap USDT to %s returned 0", plan.EntrySymbol)
+					}
+				} else {
+					return nil, fmt.Errorf("swap USDT to %s returned 0", plan.EntrySymbol)
+				}
+			} else {
+				entryToken = plan.EntryToken
+				entryAmount = swapped
+			}
 		}
-		if swapped == nil || swapped.Sign() <= 0 {
-			return nil, fmt.Errorf("swap USDT to %s returned 0", plan.EntrySymbol)
-		}
-		entryToken = plan.EntryToken
-		entryAmount = swapped
 	}
 
 	version := strings.ToLower(strings.TrimSpace(task.PoolVersion))

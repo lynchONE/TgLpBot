@@ -66,6 +66,7 @@ func main() {
 		config.AppConfig.ClickHouseDB,
 		config.AppConfig.ClickHouseUser,
 		config.AppConfig.ClickHousePassword,
+		config.AppConfig.ClickHouseProtocol,
 		config.AppConfig.ClickHouseDebug,
 	)
 	if err != nil {

@@ -5,8 +5,12 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
@@ -16,7 +20,55 @@ type ClickHouseService struct {
 	Conn driver.Conn
 }
 
-func NewClickHouseService(addr, db, user, password string, debug bool) (*ClickHouseService, error) {
+func inferClickHouseProtocol(addr string) clickhouse.Protocol {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return clickhouse.HTTP
+	}
+
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return clickhouse.HTTP
+	}
+	p, err := strconv.Atoi(port)
+	if err != nil {
+		return clickhouse.HTTP
+	}
+
+	// Some deployments expose ClickHouse behind NodePort/NAT offsets (e.g. 19000->9000, 18123->8123).
+	switch p % 10000 {
+	case 9000, 9440:
+		return clickhouse.Native
+	case 8123, 8443:
+		return clickhouse.HTTP
+	default:
+		return clickhouse.HTTP
+	}
+}
+
+func NewClickHouseService(addr, db, user, password, protocol string, debug bool) (*ClickHouseService, error) {
+	chProtocol := clickhouse.HTTP
+	switch strings.ToLower(strings.TrimSpace(protocol)) {
+	case "":
+		chProtocol = inferClickHouseProtocol(addr)
+	case "native":
+		chProtocol = clickhouse.Native
+	case "http":
+		chProtocol = clickhouse.HTTP
+	default:
+		return nil, fmt.Errorf("unsupported CLICKHOUSE_PROTOCOL=%q (expected: native|http)", protocol)
+	}
+
+	var transportFunc func(*http.Transport) (http.RoundTripper, error)
+	if chProtocol == clickhouse.HTTP {
+		transportFunc = func(t *http.Transport) (http.RoundTripper, error) {
+			// Prevent stale keep-alive connections from causing intermittent `EOF` on POST
+			// (common when ClickHouse is behind a LB/proxy with a short idle timeout).
+			t.IdleConnTimeout = 25 * time.Second
+			return t, nil
+		}
+	}
+
 	conn, err := clickhouse.Open(&clickhouse.Options{
 		Addr: []string{addr},
 		Auth: clickhouse.Auth{
@@ -24,10 +76,11 @@ func NewClickHouseService(addr, db, user, password string, debug bool) (*ClickHo
 			Username: user,
 			Password: password,
 		},
-		Protocol:     clickhouse.HTTP,
-		Debug:        debug,
-		MaxOpenConns: 20,
-		MaxIdleConns: 5,
+		Protocol:      chProtocol,
+		TransportFunc: transportFunc,
+		Debug:         debug,
+		MaxOpenConns:  20,
+		MaxIdleConns:  5,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open clickhouse connection: %w", err)
@@ -44,6 +97,31 @@ func NewClickHouseService(addr, db, user, password string, debug bool) (*ClickHo
 	}
 
 	return service, nil
+}
+
+func (s *ClickHouseService) PrepareBatch(ctx context.Context, query string) (driver.Batch, error) {
+	if s == nil || s.Conn == nil {
+		return nil, fmt.Errorf("clickhouse not initialized")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	batch, err := s.Conn.PrepareBatch(ctx, query)
+	if err == nil {
+		return batch, nil
+	}
+	if !isRetryableClickHouseError(err) {
+		return nil, err
+	}
+
+	// Retry once on transient network errors (e.g. stale HTTP keep-alive causing EOF).
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(200 * time.Millisecond):
+	}
+	return s.Conn.PrepareBatch(ctx, query)
 }
 
 func (s *ClickHouseService) Migrate(ctx context.Context) error {

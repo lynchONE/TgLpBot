@@ -278,6 +278,8 @@ func (b *Bot) handleCommand(message *tgbotapi.Message, user *models.User) {
 		b.handleAuto(message, user)
 	case "help":
 		b.handleHelp(message, user)
+	case "clean":
+		b.handleClean(message, user)
 	case "wallet":
 		b.handleWallet(message, user)
 	case "newposition":

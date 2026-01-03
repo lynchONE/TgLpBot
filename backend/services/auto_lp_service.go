@@ -493,7 +493,7 @@ func (s *AutoLPService) insertPoolMRaw(ctx context.Context, rows []poolMRawRow) 
 		return nil
 	}
 
-	batch, err := s.ch.Conn.PrepareBatch(ctx, `INSERT INTO poolm_top_fees_raw (
+	batch, err := s.ch.PrepareBatch(ctx, `INSERT INTO poolm_top_fees_raw (
 		ts, chain, requested_chain, protocol_version, dex, timeframe_minutes, timeframe_label,
 		requested_protocols, requested_dexes, total_pools, response_success, response_error,
 		pool_address, factory_name, factory_address, trading_pair,
@@ -570,7 +570,7 @@ func (s *AutoLPService) replacePoolMRealtime(ctx context.Context, rows []poolMRa
 		return nil
 	}
 
-	batch, err := s.ch.Conn.PrepareBatch(ctx, `INSERT INTO poolm_top_fees_realtime (
+	batch, err := s.ch.PrepareBatch(ctx, `INSERT INTO poolm_top_fees_realtime (
 		ts, chain, protocol_version, timeframe_minutes, dex, pool_address, factory_name, trading_pair,
 		fee_percentage, transaction_count, total_fees, total_volume, current_pool_value, price_display, last_swap_at
 	)`)
@@ -900,7 +900,7 @@ func (s *AutoLPService) insertAnalysis(ctx context.Context, rows []AutoLPAnalysi
 	if len(rows) == 0 {
 		return nil
 	}
-	batch, err := s.ch.Conn.PrepareBatch(ctx, `INSERT INTO auto_lp_analysis (
+	batch, err := s.ch.PrepareBatch(ctx, `INSERT INTO auto_lp_analysis (
 		ts, chain, protocol_version, pool_address, trading_pair, current_price,
 		ma_5, sigma_5, z_5,
 		ma_60, sigma_60, z_60,

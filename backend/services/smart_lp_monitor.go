@@ -641,7 +641,7 @@ func (s *SmartLPMonitor) insertEvents(ctx context.Context, events []smartLPEvent
 		return nil
 	}
 
-	batch, err := s.ch.Conn.PrepareBatch(ctx, `INSERT INTO smart_lp_events (
+	batch, err := s.ch.PrepareBatch(ctx, `INSERT INTO smart_lp_events (
 		ts, event_seq, chain, pool_version, pool_id, wallet_address, action,
 		token_id, amount0, amount1, liquidity_delta, tx_hash, block_number, log_index,
 		contract_address, source

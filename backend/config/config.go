@@ -59,6 +59,7 @@ type Config struct {
 	ClickHouseDB       string
 	ClickHouseUser     string
 	ClickHousePassword string
+	ClickHouseProtocol string // native|http (optional; auto-detected when empty)
 	ClickHouseDebug    bool
 	ClickHouseResetAll bool
 
@@ -262,6 +263,7 @@ func LoadConfig() error {
 		ClickHouseDB:       getEnv("CLICKHOUSE_DB", "default"),
 		ClickHouseUser:     getEnv("CLICKHOUSE_USER", "default"),
 		ClickHousePassword: getEnv("CLICKHOUSE_PASSWORD", ""),
+		ClickHouseProtocol: strings.ToLower(strings.TrimSpace(getEnv("CLICKHOUSE_PROTOCOL", ""))),
 		ClickHouseDebug:    getEnvBool("CLICKHOUSE_DEBUG", false),
 		ClickHouseResetAll: getEnvBool("CLICKHOUSE_RESET_ALL", false),
 

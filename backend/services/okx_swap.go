@@ -129,8 +129,15 @@ func (s *LiquidityService) swapExactInViaOKX(
 	if _, err := blockchain.SendTransaction(signed); err != nil {
 		return nil, err
 	}
-	if _, err := s.waitMined(signed); err != nil {
+	txHash := signed.Hash().Hex()
+	receipt, err := s.waitMined(signed)
+	if err != nil {
 		return nil, err
+	}
+
+	// Prefer receipt logs over balance reads to avoid "RPC lag / load balancer" stale reads.
+	if d := receiptTokenTransferDelta(receipt, tokenOut, walletAddr); d != nil && d.Sign() > 0 {
+		return d, nil
 	}
 
 	outAfter, _ := blockchain.GetTokenBalance(tokenOut, walletAddr)
@@ -138,8 +145,23 @@ func (s *LiquidityService) swapExactInViaOKX(
 		outAfter = big.NewInt(0)
 	}
 	delta := new(big.Int).Sub(outAfter, outBefore)
+	if delta.Sign() <= 0 {
+		minWanted := new(big.Int).Add(outBefore, big.NewInt(1))
+		if synced, werr := s.waitTokenBalanceAtLeast(tokenOut, walletAddr, minWanted, "OKX swap out"); werr == nil && synced != nil {
+			outAfter = synced
+			delta = new(big.Int).Sub(outAfter, outBefore)
+		}
+	}
 	if delta.Sign() < 0 {
 		delta = big.NewInt(0)
+	}
+	if delta.Sign() == 0 {
+		expectedOut := strings.TrimSpace(swapResp.Data[0].RouterResult.ToTokenAmount)
+		if expectedOut == "" {
+			expectedOut = "unknown"
+		}
+		log.Printf("[Liquidity] Warning: OKX swap mined but tokenOut delta is 0 (tx=%s tokenOut=%s expected=%s outBefore=%s outAfter=%s)",
+			txHash, tokenOut.Hex(), expectedOut, outBefore.String(), outAfter.String())
 	}
 	return delta, nil
 }

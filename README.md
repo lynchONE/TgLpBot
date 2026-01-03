@@ -120,6 +120,7 @@ REDIS_PORT=6379
 
 # ClickHouse (optional; used by /api/pools etc.)
 CLICKHOUSE_ADDR=localhost:9000
+CLICKHOUSE_PROTOCOL=  # native|http (optional; empty = auto-detect by port)
 CLICKHOUSE_DB=default
 CLICKHOUSE_USER=default
 CLICKHOUSE_PASSWORD=
