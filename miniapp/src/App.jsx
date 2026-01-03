@@ -988,6 +988,7 @@ export default function App() {
                                 pool={row}
                                 metric={hotPoolsSort}
                                 previousData={prevData}
+                                chain={hotPoolsData?.chain || 'bsc'}
                             />
                         );
                     })

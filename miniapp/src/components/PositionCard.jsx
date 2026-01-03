@@ -100,7 +100,12 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
     const quoteSymbol = stableIndex === 0 ? token0?.symbol : token1?.symbol;
     const pairLabel = baseSymbol && quoteSymbol ? `${baseSymbol}/${quoteSymbol}` : baseSymbol || quoteSymbol || '';
 
-    const titleRight = useMemo(() => formatUsd(position?.totals?.total_usd), [position?.totals?.total_usd]);
+    const titleRight = useMemo(() => {
+        const positionUsd = Number(position?.totals?.position_usd || 0);
+        const feeUsd = Number(position?.totals?.fee_usd || 0);
+        const total = (Number.isFinite(positionUsd) ? positionUsd : 0) + (Number.isFinite(feeUsd) ? feeUsd : 0);
+        return formatUsd(total);
+    }, [position?.totals?.position_usd, position?.totals?.fee_usd]);
 
     const poolLink = useMemo(() => {
         const pool = position?.pool_id;
@@ -179,7 +184,7 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
                 </div>
                 <div className="flex items-center gap-2">
                     <div className="text-right">
-                        <div className="text-xs text-zinc-500 dark:text-white/50">总计</div>
+                        <div className="text-xs text-zinc-500 dark:text-white/50">总计（仓位+手续费）</div>
                         <div className="text-lg font-extrabold text-emerald-700 dark:text-emerald-300">{titleRight}</div>
                     </div>
                 </div>

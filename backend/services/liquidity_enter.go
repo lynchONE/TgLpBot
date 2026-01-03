@@ -1283,10 +1283,10 @@ func (s *LiquidityService) enterV4FromToken(
 		var recomputeLabel string
 		switch {
 		case task.RangeLowerPercentage > 0 && task.RangeUpperPercentage > 0:
-			newLower, newUpper = tc.CalculateTickFromPercentages(currentTick, task.RangeLowerPercentage, task.RangeUpperPercentage, tickSpacing)
+			newLower, newUpper = tc.CalculateTickFromPercentagesBestFit(currentTick, task.RangeLowerPercentage, task.RangeUpperPercentage, tickSpacing)
 			recomputeLabel = fmt.Sprintf("RangeLower=%.4f RangeUpper=%.4f", task.RangeLowerPercentage, task.RangeUpperPercentage)
 		case task.RangePercentage > 0:
-			newLower, newUpper = tc.CalculateTickFromPercentage(currentTick, task.RangePercentage, tickSpacing)
+			newLower, newUpper = tc.CalculateTickFromPercentagesBestFit(currentTick, task.RangePercentage, task.RangePercentage, tickSpacing)
 			recomputeLabel = fmt.Sprintf("RangePercentage=%.4f", task.RangePercentage)
 		default:
 			return nil, fmt.Errorf("invalid V4 tick range: %w", terr)

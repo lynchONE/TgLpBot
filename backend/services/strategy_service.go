@@ -441,12 +441,8 @@ func (s *StrategyService) calculateRangeFromPercentage(task *models.StrategyTask
 		return 0, 0, fmt.Errorf("range percentage not set")
 	}
 
-	var tickLower, tickUpper int
-	if task.IsAuto {
-		tickLower, tickUpper = tc.CalculateTickFromPercentagesBestFit(currentTick, lowerPct, upperPct, task.TickSpacing)
-	} else {
-		tickLower, tickUpper = tc.CalculateTickFromPercentages(currentTick, lowerPct, upperPct, task.TickSpacing)
-	}
+	// Use best-fit rounding to minimize distortion caused by tickSpacing quantization.
+	tickLower, tickUpper := tc.CalculateTickFromPercentagesBestFit(currentTick, lowerPct, upperPct, task.TickSpacing)
 	if err := tc.ValidateTickRange(tickLower, tickUpper, task.TickSpacing); err != nil {
 		return 0, 0, err
 	}

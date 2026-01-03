@@ -1634,15 +1634,32 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 	}
 
 	tc := NewTickCalculator()
-	tickLower, tickUpper := tc.CalculateTickFromPercentagesBestFit(currentTick, a.LowerWidthPct, a.UpperWidthPct, info.TickSpacing)
+	// AutoLP widths are decided in stable price terms (e.g., "USDT price down/up").
+	// Uniswap ticks are in token1/token0 terms, so when the stable coin is token0 we must convert.
+	tmpTask := &models.StrategyTask{
+		PoolId:        poolID,
+		PoolVersion:   version,
+		Token0Symbol:  info.Token0Symbol,
+		Token1Symbol:  info.Token1Symbol,
+		Token0Address: strings.TrimSpace(info.Token0),
+		Token1Address: strings.TrimSpace(info.Token1),
+	}
+	tickLowerPctReq, tickUpperPctReq := TickPercentagesFromStablePercentages(tmpTask, a.LowerWidthPct, a.UpperWidthPct)
+	if tickLowerPctReq <= 0 || tickUpperPctReq <= 0 {
+		// Fallback: treat inputs as tick-price percentages if we cannot detect stable side.
+		tickLowerPctReq = a.LowerWidthPct
+		tickUpperPctReq = a.UpperWidthPct
+	}
+
+	tickLower, tickUpper := tc.CalculateTickFromPercentagesBestFit(currentTick, tickLowerPctReq, tickUpperPctReq, info.TickSpacing)
 	if err := tc.ValidateTickRange(tickLower, tickUpper, info.TickSpacing); err != nil {
 		return nil, 1, err
 	}
 
 	effLowerPct, effUpperPct := tc.CalculatePercentagesFromTicks(currentTick, tickLower, tickUpper)
 	if effLowerPct <= 0 || effUpperPct <= 0 {
-		effLowerPct = a.LowerWidthPct
-		effUpperPct = a.UpperWidthPct
+		effLowerPct = tickLowerPctReq
+		effUpperPct = tickUpperPctReq
 	}
 
 	cfg, err := s.configService.GetOrCreate(userID)
