@@ -302,16 +302,45 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 	taskByV3Token := make(map[string]models.StrategyTask)
 	taskByV3TokenID := make(map[string]models.StrategyTask)
 	taskByV4Token := make(map[string]models.StrategyTask)
+	v3NPMSet := make(map[common.Address]struct{})
+
+	addV3NPM := func(addrStr string) {
+		addrStr = strings.TrimSpace(addrStr)
+		if !common.IsHexAddress(addrStr) {
+			return
+		}
+		addr := common.HexToAddress(addrStr)
+		if addr == (common.Address{}) {
+			return
+		}
+		v3NPMSet[addr] = struct{}{}
+	}
+
+	resolveTaskNPM := func(t models.StrategyTask) string {
+		if common.IsHexAddress(t.V3PositionManagerAddress) {
+			return strings.TrimSpace(t.V3PositionManagerAddress)
+		}
+		ex := strings.ToLower(strings.TrimSpace(t.Exchange))
+		if strings.Contains(ex, "pancake") && common.IsHexAddress(config.AppConfig.PancakeV3PositionManagerAddress) {
+			return strings.TrimSpace(config.AppConfig.PancakeV3PositionManagerAddress)
+		}
+		if strings.Contains(ex, "uniswap") && common.IsHexAddress(config.AppConfig.UniswapV3PositionManagerAddress) {
+			return strings.TrimSpace(config.AppConfig.UniswapV3PositionManagerAddress)
+		}
+		return ""
+	}
 
 	// Preload tasks for display enhancements (range %, out-of-range timer, etc.)
 	var tasks []models.StrategyTask
-	if err := database.DB.Where("user_id = ? AND v3_token_id <> ''", userID).Find(&tasks).Error; err == nil {
+	if err := database.DB.Where("user_id = ? AND (v3_token_id <> '' OR v3_position_manager_address <> '')", userID).Find(&tasks).Error; err == nil {
 		for _, t := range tasks {
+			addV3NPM(resolveTaskNPM(t))
+
 			tokenKey := strings.TrimSpace(t.V3TokenID)
 			if tokenKey == "" {
 				continue
 			}
-			key := tokenKey + "|" + strings.ToLower(strings.TrimSpace(t.V3PositionManagerAddress))
+			key := tokenKey + "|" + strings.ToLower(strings.TrimSpace(resolveTaskNPM(t)))
 			taskByV3Token[key] = t
 			if prev, ok := taskByV3TokenID[tokenKey]; !ok || t.UpdatedAt.After(prev.UpdatedAt) {
 				taskByV3TokenID[tokenKey] = t
@@ -333,15 +362,18 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 	seenV3 := make(map[string]struct{})
 
 	// 1) V3 positions via NPM balanceOf/tokenOfOwnerByIndex
-	npmAddrs := []string{
-		strings.TrimSpace(config.AppConfig.PancakeV3PositionManagerAddress),
-		strings.TrimSpace(config.AppConfig.UniswapV3PositionManagerAddress),
+	addV3NPM(config.AppConfig.PancakeV3PositionManagerAddress)
+	addV3NPM(config.AppConfig.UniswapV3PositionManagerAddress)
+
+	npmAddrs := make([]common.Address, 0, len(v3NPMSet))
+	for addr := range v3NPMSet {
+		npmAddrs = append(npmAddrs, addr)
 	}
-	for _, npmStr := range npmAddrs {
-		if !common.IsHexAddress(npmStr) {
-			continue
-		}
-		npmAddr := common.HexToAddress(npmStr)
+	sort.Slice(npmAddrs, func(i, j int) bool {
+		return strings.ToLower(npmAddrs[i].Hex()) < strings.ToLower(npmAddrs[j].Hex())
+	})
+
+	for _, npmAddr := range npmAddrs {
 		pm, err := blockchain.NewV3PositionManager(npmAddr, blockchain.Client)
 		if err != nil {
 			resp.Warnings = append(resp.Warnings, fmt.Sprintf("初始化 V3 PositionManager 失败: %s", npmAddr.Hex()))
@@ -383,90 +415,6 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 				p, warn := s.buildV3Position(pm, npmAddr, walletAddr, tid, taskByV3Token, taskByV3TokenID)
 				positionsMu.Lock()
 				defer positionsMu.Unlock()
-				if warn != "" {
-					resp.Warnings = append(resp.Warnings, warn)
-				}
-				if p != nil {
-					positions = append(positions, *p)
-				}
-				return nil
-			})
-		}
-		_ = g.Wait()
-	}
-
-	// 1b) V3 positions referenced by DB tasks (covers non-standard NPM addresses or missing config).
-	if len(taskByV3Token) > 0 {
-		pmCache := make(map[string]*blockchain.V3PositionManager)
-		var mu sync.Mutex
-
-		resolveTaskNPM := func(t models.StrategyTask) string {
-			if common.IsHexAddress(t.V3PositionManagerAddress) {
-				return strings.TrimSpace(t.V3PositionManagerAddress)
-			}
-			ex := strings.ToLower(strings.TrimSpace(t.Exchange))
-			if strings.Contains(ex, "pancake") && common.IsHexAddress(config.AppConfig.PancakeV3PositionManagerAddress) {
-				return strings.TrimSpace(config.AppConfig.PancakeV3PositionManagerAddress)
-			}
-			if strings.Contains(ex, "uniswap") && common.IsHexAddress(config.AppConfig.UniswapV3PositionManagerAddress) {
-				return strings.TrimSpace(config.AppConfig.UniswapV3PositionManagerAddress)
-			}
-			return ""
-		}
-
-		taskKeys := make([]string, 0, len(taskByV3Token))
-		for k := range taskByV3Token {
-			taskKeys = append(taskKeys, k)
-		}
-		sort.Strings(taskKeys)
-
-		g, _ := errgroup.WithContext(context.Background())
-		g.SetLimit(6)
-		for _, k := range taskKeys {
-			task := taskByV3Token[k]
-			tokenStr := strings.TrimSpace(task.V3TokenID)
-			npmStr := resolveTaskNPM(task)
-			if tokenStr == "" || tokenStr == "0" || !common.IsHexAddress(npmStr) {
-				continue
-			}
-			npmAddr := common.HexToAddress(npmStr)
-			seenKey := tokenStr + "|" + strings.ToLower(npmAddr.Hex())
-			if _, ok := seenV3[seenKey]; ok {
-				continue
-			}
-			seenV3[seenKey] = struct{}{}
-
-			tid, parseErr := parseBigInt(tokenStr)
-			if parseErr != nil || tid == nil || tid.Sign() == 0 {
-				continue
-			}
-			tid = new(big.Int).Set(tid)
-
-			g.Go(func() error {
-				key := strings.ToLower(npmAddr.Hex())
-
-				mu.Lock()
-				pm := pmCache[key]
-				mu.Unlock()
-
-				if pm == nil {
-					created, err := blockchain.NewV3PositionManager(npmAddr, blockchain.Client)
-					if err != nil {
-						mu.Lock()
-						resp.Warnings = append(resp.Warnings, fmt.Sprintf("初始化 V3 PositionManager 失败: %s", npmAddr.Hex()))
-						mu.Unlock()
-						return nil
-					}
-					mu.Lock()
-					pmCache[key] = created
-					pm = created
-					mu.Unlock()
-				}
-
-				p, warn := s.buildV3Position(pm, npmAddr, walletAddr, tid, taskByV3Token, taskByV3TokenID)
-
-				mu.Lock()
-				defer mu.Unlock()
 				if warn != "" {
 					resp.Warnings = append(resp.Warnings, warn)
 				}

@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { openLink } from '../lib/telegram';
 import { useDurationFrom, useRelativeTime } from '../lib/time';
+import PriceRangeVisualizer from './PriceRangeVisualizer';
 
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -266,69 +267,33 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
                 </button>
             </div>
 
-            <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-[11px] text-zinc-600 dark:border-white/10 dark:bg-[#0f1116] dark:text-white/60">
-                <div className="grid grid-cols-3 gap-2">
-                    <div>
-                        <div className="text-zinc-500 dark:text-white/40">现价</div>
-                        <div className="mt-0.5 font-semibold text-zinc-900 dark:text-white/80 tabular-nums">{currentPriceText}</div>
-                        <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
-                            {pairMetaText}±{Number(position?.range_percent || 0).toFixed(1)}%
-                        </div>
-                    </div>
-                    <div>
-                        <div className="text-zinc-500 dark:text-white/40">价格区间</div>
-                        <div className="mt-0.5 font-semibold text-zinc-900 dark:text-white/80 tabular-nums">{rangeText}</div>
-                        <div className={`mt-0.5 text-[11px] ${position?.in_range ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300'}`}>
-                            {position?.in_range ? '区间内' : '区间外'}
-                        </div>
-                    </div>
-                    <div className="text-right">
-                        <div className="text-zinc-500 dark:text-white/40"># NFT</div>
-                        <div className="mt-0.5 font-semibold text-zinc-900 dark:text-white/80 tabular-nums">{position?.position_id}</div>
+            <PriceRangeVisualizer
+                currentPrice={currentPrice}
+                minPrice={rangeMin}
+                maxPrice={rangeMax}
+                token0={token0}
+                token1={token1}
+                tickLower={position?.tick_lower}
+                tickUpper={position?.tick_upper}
+                tickSpacing={position?.pool?.tickSpacing || position?.tick_spacing}
+                inRange={position?.in_range}
+            />
+
+            <div className="mt-3 grid grid-cols-3 gap-2">
+                <div>
+                    <div className="text-zinc-500 dark:text-white/40">间隔</div>
+                    <div className="mt-0.5 font-semibold text-zinc-900 dark:text-white/80 tabular-nums">{pollIntervalSec}s</div>
+                </div>
+                <div>
+                    <div className="text-zinc-500 dark:text-white/40">运行</div>
+                    <div className="mt-0.5 font-semibold text-emerald-700 dark:text-emerald-300 tabular-nums">
+                        {runningDuration}
                     </div>
                 </div>
-
-                {progressPercent !== null ? (
-                    <div className="mt-3">
-                        <div className="relative h-3 w-full">
-                            <div className="absolute inset-0 overflow-hidden rounded-full bg-zinc-200/80 dark:bg-white/10">
-                                <div className="absolute inset-0 bg-gradient-to-r from-rose-500/20 via-amber-400/15 to-emerald-500/20" />
-                                <div
-                                    className={`absolute inset-y-0 left-0 rounded-full shadow-sm transition-[width] duration-500 ease-out ${position?.in_range
-                                        ? 'bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-600'
-                                        : 'bg-gradient-to-r from-rose-400 via-rose-500 to-rose-600'
-                                        }`}
-                                    style={{ width: `${progressPercent}%` }}
-                                />
-                                <div className="absolute inset-y-0 left-1/2 w-px bg-zinc-400/60 dark:bg-white/25" />
-                            </div>
-                            <div
-                                className={`pointer-events-none absolute top-1/2 z-10 flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white shadow-md ring-2 transition-[left] duration-500 ease-out ${position?.in_range ? 'ring-emerald-500/70' : 'ring-rose-500/70'
-                                    } dark:bg-[#0f1116]`}
-                                style={{ left: `${progressPercent}%` }}
-                            >
-                                <div className={`h-1.5 w-1.5 rounded-full ${position?.in_range ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                            </div>
-                        </div>
-                    </div>
-                ) : null}
-
-                <div className="mt-3 grid grid-cols-3 gap-2">
-                    <div>
-                        <div className="text-zinc-500 dark:text-white/40">间隔</div>
-                        <div className="mt-0.5 font-semibold text-zinc-900 dark:text-white/80 tabular-nums">{pollIntervalSec}s</div>
-                    </div>
-                    <div>
-                        <div className="text-zinc-500 dark:text-white/40">运行</div>
-                        <div className="mt-0.5 font-semibold text-emerald-700 dark:text-emerald-300 tabular-nums">
-                            {runningDuration}
-                        </div>
-                    </div>
-                    <div className="text-right">
-                        <div className="text-zinc-500 dark:text-white/40">更新时间</div>
-                        <div className="mt-0.5 font-semibold text-zinc-900 dark:text-white/80 tabular-nums">
-                            {updateTimeText}
-                        </div>
+                <div className="text-right">
+                    <div className="text-zinc-500 dark:text-white/40">更新时间</div>
+                    <div className="mt-0.5 font-semibold text-zinc-900 dark:text-white/80 tabular-nums">
+                        {updateTimeText}
                     </div>
                 </div>
             </div>
