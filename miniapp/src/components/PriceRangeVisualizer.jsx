@@ -112,65 +112,59 @@ export default function PriceRangeVisualizer({
     // Mid price
     const midPrice = (minPrice + maxPrice) / 2;
 
+    // Map range to [5%, 95%] to avoid edges
+    const mapPercent = (p) => 5 + (p * 0.9);
+    const finalPercent = mapPercent(percent);
+
     return (
         <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-            {/* Header */}
-            <div className="flex justify-between items-center mb-2">
+            {/* Header with Price integrated */}
+            <div className="flex items-center flex-wrap gap-2 mb-4">
                 <div className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
                     价格范围 {gridCount ? `(${gridCount}格)` : ''}:
                 </div>
-                <div className="bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[10px] px-1.5 py-0.5 rounded">
+                {/* Deviation Badge */}
+                <div className="bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[10px] px-1.5 py-0.5 rounded font-medium">
                     {deviation ? `${deviation.toFixed(2)}%` : '--'}
                 </div>
-            </div>
 
-
-
-            {/* Labels Row (Top) */}
-            <div className="flex justify-between text-[10px] font-medium mb-1 opacity-80">
-                <span className="text-emerald-500">下限</span>
-                <span className="text-zinc-500">中心</span>
-                <span className="text-rose-500">上限</span>
-            </div>
-
-            {/* Visual Bar Container - Relative for floating elements */}
-            <div className="relative h-6 w-full select-none mb-1">
-                {/* Floating Current Price Label */}
-                <div
-                    className="absolute -top-7 transform -translate-x-1/2 z-30 transition-all duration-500"
-                    style={{ left: `${percent}%` }}
-                >
-                    <div className={`text-sm font-bold tabular-nums whitespace-nowrap ${inRange ? 'text-zinc-900 dark:text-white' : 'text-rose-600 dark:text-rose-500'
-                        }`}>
-                        {formatPrice(currentPrice)}
-                    </div>
+                {/* Current Price */}
+                <div className={`text-[13px] font-bold tabular-nums ml-auto ${inRange ? 'text-emerald-500' : 'text-rose-500'}`}>
+                    {formatPrice(currentPrice)}
                 </div>
+            </div>
 
+            {/* Visual Bar */}
+            <div className="relative h-6 w-full select-none mb-1">
                 {/* Track */}
                 <div className="absolute top-1/2 left-0 right-0 h-3 -mt-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-full border border-zinc-300 dark:border-zinc-600 overflow-hidden">
-                    {/* Mid - 50% only */}
+                    {/* Lower Marker Line (Green) at 5% */}
+                    <div className="absolute top-0 bottom-0 w-0.5 bg-emerald-500" style={{ left: '5%' }}></div>
+                    {/* Mid Marker Line (Grey) at 50% */}
                     <div className="absolute top-0 bottom-0 w-0.5 bg-zinc-400 left-1/2 -ml-px"></div>
+                    {/* Upper Marker Line (Red) at 95% */}
+                    <div className="absolute top-0 bottom-0 w-0.5 bg-rose-500" style={{ left: '95%' }}></div>
                 </div>
 
                 {/* Current Price Marker */}
                 <div
                     className={`absolute top-0 bottom-0 w-1.5 z-20 transition-all duration-500 rounded-full ${inRange
-                        ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]'
-                        : 'bg-rose-600 dark:bg-rose-500 shadow-[0_0_8px_rgba(225,29,72,0.6)]'
+                            ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]'
+                            : 'bg-rose-600 dark:bg-rose-500 shadow-[0_0_8px_rgba(225,29,72,0.6)]'
                         }`}
                     style={{
-                        left: `${percent}%`,
+                        left: `${finalPercent}%`,
                         opacity: 1,
-                        transform: 'translateX(-50%)' // Center the marker
+                        transform: 'translateX(-50%)'
                     }}
                 ></div>
             </div>
 
-            {/* Price Values Row */}
-            <div className="flex justify-between text-[10px] font-bold tabular-nums">
-                <span className="text-emerald-500">{formatPrice(minPrice)}</span>
-                <span className="text-zinc-500">{formatPrice(midPrice)}</span>
-                <span className="text-rose-500">{formatPrice(maxPrice)}</span>
+            {/* Price Values Row (Only Numbers) */}
+            <div className="flex justify-between text-[10px] font-bold tabular-nums px-1">
+                <div className="text-emerald-500 transform -translate-x-1/4">{formatPrice(minPrice)}</div>
+                <div className="text-zinc-500">{formatPrice(midPrice)}</div>
+                <div className="text-rose-500 transform translate-x-1/4">{formatPrice(maxPrice)}</div>
             </div>
 
             {/* Out of Range Status */}

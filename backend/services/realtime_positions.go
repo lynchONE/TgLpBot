@@ -427,6 +427,76 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 		_ = g.Wait()
 	}
 
+	// 1b) V3 positions referenced by DB tasks (covers staked NFTs / non-enumerable NPMs).
+	if len(taskByV3Token) > 0 {
+		pmCache := make(map[string]*blockchain.V3PositionManager)
+		var mu sync.Mutex
+
+		taskKeys := make([]string, 0, len(taskByV3Token))
+		for k := range taskByV3Token {
+			taskKeys = append(taskKeys, k)
+		}
+		sort.Strings(taskKeys)
+
+		g, _ := errgroup.WithContext(context.Background())
+		g.SetLimit(6)
+		for _, k := range taskKeys {
+			task := taskByV3Token[k]
+			tokenStr := strings.TrimSpace(task.V3TokenID)
+			npmStr := resolveTaskNPM(task)
+			if tokenStr == "" || tokenStr == "0" || !common.IsHexAddress(npmStr) {
+				continue
+			}
+			npmAddr := common.HexToAddress(npmStr)
+			seenKey := tokenStr + "|" + strings.ToLower(npmAddr.Hex())
+			if _, ok := seenV3[seenKey]; ok {
+				continue
+			}
+			seenV3[seenKey] = struct{}{}
+
+			tid, parseErr := parseBigInt(tokenStr)
+			if parseErr != nil || tid == nil || tid.Sign() == 0 {
+				continue
+			}
+			tid = new(big.Int).Set(tid)
+
+			g.Go(func() error {
+				key := strings.ToLower(npmAddr.Hex())
+
+				mu.Lock()
+				pm := pmCache[key]
+				mu.Unlock()
+
+				if pm == nil {
+					created, err := blockchain.NewV3PositionManager(npmAddr, blockchain.Client)
+					if err != nil {
+						mu.Lock()
+						resp.Warnings = append(resp.Warnings, fmt.Sprintf("初始化 V3 PositionManager 失败: %s", npmAddr.Hex()))
+						mu.Unlock()
+						return nil
+					}
+					mu.Lock()
+					pmCache[key] = created
+					pm = created
+					mu.Unlock()
+				}
+
+				p, warn := s.buildV3Position(pm, npmAddr, walletAddr, tid, taskByV3Token, taskByV3TokenID)
+
+				mu.Lock()
+				defer mu.Unlock()
+				if warn != "" {
+					resp.Warnings = append(resp.Warnings, warn)
+				}
+				if p != nil {
+					positions = append(positions, *p)
+				}
+				return nil
+			})
+		}
+		_ = g.Wait()
+	}
+
 	// 2) V4 positions (best-effort): prefer DB tasks because on-chain tokenId->range mapping is not always enumerable.
 	ownedV4 := make(map[string]struct{})
 	if len(taskByV4Token) > 0 && config.AppConfig.V4NFTScanFromBlock > 0 && common.IsHexAddress(config.AppConfig.UniswapV4PositionManagerAddress) {
@@ -661,6 +731,12 @@ func (s *RealtimePositionsService) buildV3Position(
 
 	info, err := pm.Positions(nil, tokenId)
 	if err != nil || info == nil {
+		if err != nil {
+			msg := strings.ToLower(err.Error())
+			if strings.Contains(msg, "invalid token id") {
+				return nil, ""
+			}
+		}
 		return nil, fmt.Sprintf("读取 V3 positions() 失败: tokenId=%s err=%v", tokenId.String(), err)
 	}
 
