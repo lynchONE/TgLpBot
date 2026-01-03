@@ -32,7 +32,10 @@ export default function PriceRangeVisualizer({
     tickLower,
     tickUpper,
     tickSpacing,
-    inRange
+    inRange,
+    pollIntervalSec,
+    runningDuration,
+    updateTimeText
 }) {
     // 1. Calculate Grid Count (Tick Spacing Multiples)
     const gridCount = useMemo(() => {
@@ -121,11 +124,7 @@ export default function PriceRangeVisualizer({
                 </div>
             </div>
 
-            <div className="flex justify-center mb-1">
-                <div className={`text-base font-bold tabular-nums ${inRange ? 'text-zinc-900 dark:text-white' : 'text-rose-600 dark:text-rose-500'}`}>
-                    {formatPrice(currentPrice)}
-                </div>
-            </div>
+
 
             {/* Labels Row (Top) */}
             <div className="flex justify-between text-[10px] font-medium mb-1 opacity-80">
@@ -134,8 +133,19 @@ export default function PriceRangeVisualizer({
                 <span className="text-rose-500">上限</span>
             </div>
 
-            {/* Visual Bar */}
+            {/* Visual Bar Container - Relative for floating elements */}
             <div className="relative h-6 w-full select-none mb-1">
+                {/* Floating Current Price Label */}
+                <div
+                    className="absolute -top-7 transform -translate-x-1/2 z-30 transition-all duration-500"
+                    style={{ left: `${percent}%` }}
+                >
+                    <div className={`text-sm font-bold tabular-nums whitespace-nowrap ${inRange ? 'text-zinc-900 dark:text-white' : 'text-rose-600 dark:text-rose-500'
+                        }`}>
+                        {formatPrice(currentPrice)}
+                    </div>
+                </div>
+
                 {/* Track */}
                 <div className="absolute top-1/2 left-0 right-0 h-3 -mt-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-full border border-zinc-300 dark:border-zinc-600 overflow-hidden">
                     {/* Mid - 50% only */}
@@ -180,6 +190,26 @@ export default function PriceRangeVisualizer({
                     </div>
                 </div>
             )}
+
+            {/* Stats Row (Moved from PositionCard) */}
+            <div className="mt-3 border-t border-zinc-200 dark:border-white/10 pt-2 grid grid-cols-3 gap-2 text-[10px]">
+                <div>
+                    <div className="text-zinc-500 dark:text-white/40">间隔</div>
+                    <div className="mt-0.5 font-semibold text-zinc-900 dark:text-white/80 tabular-nums">{pollIntervalSec}s</div>
+                </div>
+                <div>
+                    <div className="text-zinc-500 dark:text-white/40">运行</div>
+                    <div className="mt-0.5 font-semibold text-emerald-700 dark:text-emerald-300 tabular-nums">
+                        {runningDuration}
+                    </div>
+                </div>
+                <div className="text-right">
+                    <div className="text-zinc-500 dark:text-white/40">更新时间</div>
+                    <div className="mt-0.5 font-semibold text-zinc-900 dark:text-white/80 tabular-nums">
+                        {updateTimeText}
+                    </div>
+                </div>
+            </div>
         </div>
     );
 }

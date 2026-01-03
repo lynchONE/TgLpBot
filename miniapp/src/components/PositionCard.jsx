@@ -277,26 +277,11 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
                 tickUpper={position?.tick_upper}
                 tickSpacing={position?.pool?.tickSpacing || position?.tick_spacing}
                 inRange={position?.in_range}
+                // Stats props
+                pollIntervalSec={pollIntervalSec}
+                runningDuration={runningDuration}
+                updateTimeText={updateTimeText}
             />
-
-            <div className="mt-3 grid grid-cols-3 gap-2">
-                <div>
-                    <div className="text-zinc-500 dark:text-white/40">间隔</div>
-                    <div className="mt-0.5 font-semibold text-zinc-900 dark:text-white/80 tabular-nums">{pollIntervalSec}s</div>
-                </div>
-                <div>
-                    <div className="text-zinc-500 dark:text-white/40">运行</div>
-                    <div className="mt-0.5 font-semibold text-emerald-700 dark:text-emerald-300 tabular-nums">
-                        {runningDuration}
-                    </div>
-                </div>
-                <div className="text-right">
-                    <div className="text-zinc-500 dark:text-white/40">更新时间</div>
-                    <div className="mt-0.5 font-semibold text-zinc-900 dark:text-white/80 tabular-nums">
-                        {updateTimeText}
-                    </div>
-                </div>
-            </div>
         </div>
     );
 }
