@@ -102,7 +102,7 @@ function formatUserLabel(user) {
 }
 
 const Icon = ({ path, className = '' }) => (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="0.5" className={className} aria-hidden="true">
         <path d={path} />
     </svg>
 );
