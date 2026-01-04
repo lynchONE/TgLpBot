@@ -30,10 +30,25 @@ export default function KlineModal({ open, onClose, theme, pool, chain }) {
 
     if (!open) return null;
 
-    // Construct DexScreener Embed URL
-    // Format: https://dexscreener.com/{chain}/{address}?embed=1&theme={theme}
-    // Note: DexScreener uses specific chain slugs (e.g. 'bsc', 'ethereum', 'solana', 'base')
-    const embedUrl = `https://dexscreener.com/${effectiveChain}/${poolAddress}?embed=1&theme=${theme === 'light' ? 'light' : 'dark'}&items=0&info=0`;
+    // Construct Embed URL
+    // Default: DexScreener for standard pools (address length 42 approx for 0x...20bytes)
+    // Fallback: GeckoTerminal for V4/Long IDs (length 66 approx for 0x...32bytes) or if DexScreener fails context
+
+    // Check if poolAddress is likely a pool ID (32 bytes / 64 hex chars + 0x = 66 chars)
+    // Standard address is 20 bytes / 40 hex chars + 0x = 42 chars
+    const isV4ID = poolAddress && poolAddress.length > 50;
+
+    let embedUrl;
+
+    if (isV4ID) {
+        // Use GeckoTerminal for V4 pools as it reliably supports Pool IDs
+        // URL Format: https://www.geckoterminal.com/{chain}/pools/{pool_address}?embed=1&info=0&swaps=0
+        embedUrl = `https://www.geckoterminal.com/${effectiveChain}/pools/${poolAddress}?embed=1&info=0&swaps=0`;
+    } else {
+        // Use DexScreener for standard V2/V3 pools
+        // URL Format: https://dexscreener.com/{chain}/{address}?embed=1&theme={theme}
+        embedUrl = `https://dexscreener.com/${effectiveChain}/${poolAddress}?embed=1&theme=${theme === 'light' ? 'light' : 'dark'}&items=0&info=0`;
+    }
 
     return (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4">

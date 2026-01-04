@@ -218,6 +218,8 @@ func (s *ClickHouseService) Migrate(ctx context.Context) error {
 		`ALTER TABLE poolm_top_fees_realtime MODIFY TTL ts + INTERVAL 2 HOUR`,
 		`ALTER TABLE poolm_top_fees_realtime ADD COLUMN IF NOT EXISTS factory_name LowCardinality(String)`,
 		`ALTER TABLE poolm_top_fees_realtime ADD COLUMN IF NOT EXISTS transaction_count UInt32`,
+		`ALTER TABLE poolm_top_fees_realtime ADD COLUMN IF NOT EXISTS token0_address String`,
+		`ALTER TABLE poolm_top_fees_realtime ADD COLUMN IF NOT EXISTS token1_address String`,
 		`
 		CREATE TABLE IF NOT EXISTS pools (
 			id String,

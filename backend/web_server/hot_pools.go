@@ -25,6 +25,8 @@ type HotPoolResponse struct {
 	PriceDisplay     string    `json:"price_display" ch:"price_display"`
 	UpdatedAt        time.Time `json:"updated_at" ch:"updated_at"`
 	LastSwapAt       time.Time `json:"last_swap_at" ch:"last_swap_at"`
+	Token0Address    string    `json:"token0_address" ch:"token0_address"`
+	Token1Address    string    `json:"token1_address" ch:"token1_address"`
 }
 
 type hotPoolsEnvelope struct {
@@ -129,7 +131,9 @@ func (s *Server) handleHotPools(w http.ResponseWriter, r *http.Request) {
 			if(current_pool_value > 0, total_fees / current_pool_value * 100, 0) AS fee_rate,
 			price_display,
 			ts AS updated_at,
-			last_swap_at
+			last_swap_at,
+			token0_address,
+			token1_address
 		FROM poolm_top_fees_realtime
 		%s
 		ORDER BY %s DESC
