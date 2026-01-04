@@ -671,7 +671,7 @@ export default function App() {
                             className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 shadow-sm hover:bg-zinc-200 active:bg-zinc-200 dark:border-yellow-500/30 dark:bg-yellow-500/15 dark:hover:bg-yellow-500/25 dark:active:bg-yellow-500/30"
                             aria-label="切换主题"
                         >
-                            <span className="text-lg">{theme === 'dark' ? '🌙' : '☀️'}</span>
+                            <span className={`text-lg ${theme === 'dark' ? 'text-white' : 'text-black'}`}>{theme === 'dark' ? '🌙' : '☀️'}</span>
                         </button>
                         <button
                             type="button"
