@@ -20,7 +20,13 @@ function normalizeHexPrefixed(v) {
 export default function KlineModal({ open, onClose, theme, pool, chain }) {
     const poolAddressRaw = useMemo(() => String(pool?.pool_address || pool?.pool_id || '').trim(), [pool?.pool_address, pool?.pool_id]);
     const poolAddress = useMemo(() => normalizeHexPrefixed(poolAddressRaw), [poolAddressRaw]);
-    const title = useMemo(() => String(pool?.trading_pair || '').trim() || 'K线图', [pool?.trading_pair]);
+    const title = useMemo(() => {
+        const pair = String(pool?.trading_pair || '').trim() || 'K线图';
+        if (pool?.fee_percentage !== undefined && pool?.fee_percentage !== null) {
+            return `${pair} (${Number(pool.fee_percentage).toFixed(2)}%)`;
+        }
+        return pair;
+    }, [pool?.trading_pair, pool?.fee_percentage]);
     const effectiveChain = useMemo(() => {
         const c = String(chain || 'bsc').toLowerCase();
         // DexScreener chain slugs mapping if needed, simplified for common ones
@@ -31,24 +37,80 @@ export default function KlineModal({ open, onClose, theme, pool, chain }) {
     if (!open) return null;
 
     // Construct Embed URL
-    // Default: DexScreener for standard pools (address length 42 approx for 0x...20bytes)
-    // Fallback: GeckoTerminal for V4/Long IDs (length 66 approx for 0x...32bytes) or if DexScreener fails context
+    // For V4 pools, the 'poolAddress' (PoolId) does NOT match DexScreener's 'pairAddress'.
+    // DexScreener generates a synthetic pair address for V4 pools.
+    // Solution: We query DexScreener API by Token Address to find the correct Pair Address.
+
+    const [resolvedAddress, setResolvedAddress] = useState(null);
+    const [resolving, setResolving] = useState(false);
 
     // Check if poolAddress is likely a pool ID (32 bytes / 64 hex chars + 0x = 66 chars)
-    // Standard address is 20 bytes / 40 hex chars + 0x = 42 chars
     const isV4ID = poolAddress && poolAddress.length > 50;
 
-    let embedUrl;
+    useEffect(() => {
+        if (!open) {
+            setResolvedAddress(null);
+            setResolving(false);
+            return;
+        }
 
-    if (isV4ID) {
-        // Use GeckoTerminal for V4 pools as it reliably supports Pool IDs
-        // URL Format: https://www.geckoterminal.com/{chain}/pools/{pool_address}?embed=1&info=0&swaps=0
-        embedUrl = `https://www.geckoterminal.com/${effectiveChain}/pools/${poolAddress}?embed=1&info=0&swaps=0`;
-    } else {
-        // Use DexScreener for standard V2/V3 pools
-        // URL Format: https://dexscreener.com/{chain}/{address}?embed=1&theme={theme}
-        embedUrl = `https://dexscreener.com/${effectiveChain}/${poolAddress}?embed=1&theme=${theme === 'light' ? 'light' : 'dark'}&items=0&info=0`;
-    }
+        // If it's a standard V2/V3 pool (short address), use it directly.
+        if (!isV4ID) {
+            setResolvedAddress(poolAddress);
+            return;
+        }
+
+        // If it's a V4 pool (Long ID), we must find the DexScreener Pair Address.
+        const token0 = pool?.token0_address;
+        const token1 = pool?.token1_address;
+
+        if (!token0) {
+            // Fallback: If no token info, try using the ID directly (unlikely to work but better than nothing)
+            setResolvedAddress(poolAddress);
+            return;
+        }
+
+        setResolving(true);
+        const fetchPair = async () => {
+            try {
+                // Fetch pairs for the first token
+                const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${token0}`);
+                const data = await res.json();
+
+                if (data?.pairs && Array.isArray(data.pairs)) {
+                    // Filter for:
+                    // 1. Same Chain (bsc)
+                    // 2. Contains the other token (token1)
+                    // 3. DEX is PancakeSwap (optional, but safe)
+                    const targetPair = data.pairs.find(p =>
+                        p.chainId === effectiveChain &&
+                        p.quoteToken?.address?.toLowerCase() === token1.toLowerCase()
+                    );
+
+                    if (targetPair?.pairAddress) {
+                        setResolvedAddress(targetPair.pairAddress);
+                    } else {
+                        // If exact match not found, fallback to poolAddress
+                        setResolvedAddress(poolAddress);
+                    }
+                } else {
+                    setResolvedAddress(poolAddress);
+                }
+            } catch (e) {
+                console.error("DexScreener API error:", e);
+                setResolvedAddress(poolAddress);
+            } finally {
+                setResolving(false);
+            }
+        };
+
+        fetchPair();
+
+    }, [open, isV4ID, poolAddress, pool?.token0_address, pool?.token1_address, effectiveChain]);
+
+    const embedUrl = resolvedAddress
+        ? `https://dexscreener.com/${effectiveChain}/${resolvedAddress}?embed=1&theme=${theme === 'light' ? 'light' : 'dark'}&items=0&info=0`
+        : '';
 
     return (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4">
@@ -84,7 +146,11 @@ export default function KlineModal({ open, onClose, theme, pool, chain }) {
 
                 {/* Iframe Container */}
                 <div className="flex-1 w-full bg-[#111318] relative">
-                    {poolAddress ? (
+                    {resolving ? (
+                        <div className="flex items-center justify-center h-full text-zinc-500 dark:text-white/40 text-sm animate-pulse">
+                            正在寻找 DexScreener 图表...
+                        </div>
+                    ) : resolvedAddress ? (
                         <iframe
                             src={embedUrl}
                             className="absolute inset-0 w-full h-full border-0"
