@@ -142,6 +142,11 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 	}
 	pair = escapeTelegramMarkdown(pair)
 
+	poolID := strings.TrimSpace(task.PoolId)
+	if poolID == "" {
+		poolID = "-"
+	}
+
 	// Display actual invested amount (USDT delta) if we have an open trade record.
 	// Calculate PnL
 	amountLine := fmt.Sprintf("初始投入：%.2f USDT", task.AmountUSDT)
@@ -251,7 +256,7 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 		statusText,
 		exchange,
 		pair,
-		shortenHex(task.PoolId),
+		poolID,
 		positionInfo,
 		currentPriceInfo,
 		priceRangeInfo,

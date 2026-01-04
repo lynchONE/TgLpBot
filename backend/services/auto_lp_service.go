@@ -597,6 +597,8 @@ func (s *AutoLPService) replacePoolMRealtime(ctx context.Context, rows []poolMRa
 			p.CurrentPoolValue,
 			strings.TrimSpace(p.PriceDisplay),
 			r.lastSwapAt,
+			strings.ToLower(strings.TrimSpace(p.Token0Address)),
+			strings.ToLower(strings.TrimSpace(p.Token1Address)),
 		); err != nil {
 			return err
 		}

@@ -346,7 +346,7 @@ func LoadConfig() error {
 
 		SmartLPEnabled:             getEnvBool("SMART_LP_ENABLED", false),
 		SmartLPDebug:               smartLPDebug,
-		SmartLPContractAddress:     strings.TrimSpace(getEnv("SMART_LP_CONTRACT_ADDRESS", "0x17ef7601103792929E01832c0DC3901a55Cf7922")),
+		SmartLPContractAddress:     strings.TrimSpace(getEnv("SMART_LP_CONTRACT_ADDRESS", "0x17ef7601103792929E01832c0DC3901a55Cf7922 0xd40318d99952680c2aBD7B634710bE8226EcABa4")),
 		SmartLPScorePerWallet:      smartLPScorePerWallet,
 		SmartLPMinWallets:          smartLPMinWallets,
 		SmartLPRecentWindowMinutes: smartLPRecentWindowMinutes,
