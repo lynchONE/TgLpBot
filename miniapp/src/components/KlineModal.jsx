@@ -75,7 +75,7 @@ export default function KlineModal({ open, onClose, theme, pool, chain }) {
             />
 
             {/* Modal Content */}
-            <div className="relative w-full max-w-lg overflow-hidden rounded-t-2xl sm:rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-white/10 dark:bg-[#111318] flex flex-col h-[85vh] sm:h-[600px]">
+            <div className="relative w-full max-w-lg overflow-hidden rounded-t-2xl sm:rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-white/10 dark:bg-[#111318] flex flex-col h-[92vh] sm:h-[700px]">
                 {/* Header */}
                 <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-zinc-100 dark:border-white/5 bg-white/50 dark:bg-white/5 shrink-0">
                     <div className="min-w-0">
