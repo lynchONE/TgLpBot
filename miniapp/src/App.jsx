@@ -668,10 +668,10 @@ export default function App() {
                         <button
                             type="button"
                             onClick={toggleTheme}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 shadow-sm hover:bg-zinc-200 active:bg-zinc-200 dark:border-yellow-500/30 dark:bg-yellow-500/15 dark:hover:bg-yellow-500/25 dark:active:bg-yellow-500/30"
+                            className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border shadow-sm ${theme === 'dark' ? 'border-white/20 bg-white/10 text-white hover:bg-white/20' : 'border-zinc-300 bg-zinc-100 text-zinc-900 hover:bg-zinc-200'}`}
                             aria-label="切换主题"
                         >
-                            <span className={`text-lg ${theme === 'dark' ? 'text-white' : 'text-black'}`}>{theme === 'dark' ? '🌙' : '☀️'}</span>
+                            <Icon path={theme === 'dark' ? icons.moon : icons.sun} className="h-5 w-5" />
                         </button>
                         <button
                             type="button"
