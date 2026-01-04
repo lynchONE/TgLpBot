@@ -34,6 +34,9 @@ export default function KlineModal({ open, onClose, theme, pool, chain }) {
         return c;
     }, [chain]);
 
+    const [resolvedAddress, setResolvedAddress] = useState(null);
+    const [resolving, setResolving] = useState(false);
+
     // Check if poolAddress is likely a pool ID (32 bytes / 64 hex chars + 0x = 66 chars)
     const isV4ID = poolAddress && poolAddress.length > 50;
 
