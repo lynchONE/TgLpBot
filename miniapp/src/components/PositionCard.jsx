@@ -17,9 +17,17 @@ const icons = {
     kebab: 'M12 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4z',
 };
 
+const USD_DISPLAY_LIMIT = 1e15;
+const usdFormatter = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+});
+
 const formatUsd = (v) => {
-    const n = Number(v || 0);
-    return `$${n.toFixed(2)}`;
+    const n = Number(v ?? 0);
+    if (!Number.isFinite(n) || Math.abs(n) > USD_DISPLAY_LIMIT) return '$--';
+    return usdFormatter.format(n);
 };
 
 const STABLE_SYMBOLS = new Set(['USDT', 'USDC', 'BUSD', 'DAI']);

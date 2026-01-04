@@ -20,13 +20,19 @@ const usdCompact = new Intl.NumberFormat('en-US', {
     notation: 'compact',
     maximumFractionDigits: 2,
 });
+const USD_DISPLAY_LIMIT = 1e15;
+const usdFormatter = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+});
 
 const isPoolAddressLike = (v) => /^(0x)?[a-fA-F0-9]{40}$/.test(String(v || '').trim()) || /^(0x)?[a-fA-F0-9]{64}$/.test(String(v || '').trim());
 
 function formatUsd(v) {
-    const n = Number(v || 0);
-    if (!Number.isFinite(n)) return '$0.00';
-    return `$${n.toFixed(2)}`;
+    const n = Number(v ?? 0);
+    if (!Number.isFinite(n) || Math.abs(n) > USD_DISPLAY_LIMIT) return '$--';
+    return usdFormatter.format(n);
 }
 
 function formatUsdCompact(v) {

@@ -1,12 +1,13 @@
 package main
 
 import (
-	"TgLpBot/blockchain"
-	"TgLpBot/bot"
-	"TgLpBot/config"
-	"TgLpBot/database"
-	"TgLpBot/services"
-	"TgLpBot/web_server"
+	"TgLpBot/base/blockchain"
+	"TgLpBot/base/clickhouse"
+	"TgLpBot/base/config"
+	"TgLpBot/base/database"
+	"TgLpBot/service/bot"
+	"TgLpBot/service/wallet"
+	"TgLpBot/service/web_server"
 	"fmt"
 	"log"
 	"os"
@@ -39,7 +40,7 @@ func main() {
 	defer database.CloseMySQL()
 
 	// Security: migrate any legacy plaintext wallet private keys to encrypted storage.
-	ws := services.NewWalletService()
+	ws := wallet.NewWalletService()
 	if migrated, err := ws.MigratePlaintextPrivateKeys(); err != nil {
 		log.Fatalf("❌ 私钥加密迁移失败: %v", err)
 	} else if migrated > 0 {
@@ -61,7 +62,7 @@ func main() {
 	log.Println("========================================")
 	log.Println("📊 初始化 ClickHouse...")
 	log.Println("========================================")
-	chService, err := services.NewClickHouseService(
+	chService, err := clickhouse.NewClickHouseService(
 		config.AppConfig.ClickHouseAddr,
 		config.AppConfig.ClickHouseDB,
 		config.AppConfig.ClickHouseUser,

@@ -80,10 +80,17 @@ const storage = {
 const STORAGE_THEME = 'tglp_theme';
 const STORAGE_POLL_SEC = 'tglp_poll_interval_sec';
 
+const USD_DISPLAY_LIMIT = 1e15;
+const usdFormatter = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+});
+
 function formatUsd(v) {
-    const n = Number(v || 0);
-    if (!Number.isFinite(n)) return '$0.00';
-    return `$${n.toFixed(2)}`;
+    const n = Number(v ?? 0);
+    if (!Number.isFinite(n) || Math.abs(n) > USD_DISPLAY_LIMIT) return '$--';
+    return usdFormatter.format(n);
 }
 
 function formatUserLabel(user) {
