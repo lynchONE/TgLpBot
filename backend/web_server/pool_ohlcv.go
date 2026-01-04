@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-var poolAddressRegex = regexp.MustCompile(`^0x[a-fA-F0-9]{40}$`)
+var poolAddressRegex = regexp.MustCompile(`^(0x)?[a-fA-F0-9]{40}$|^(0x)?[a-fA-F0-9]{64}$`)
 var chainSlugRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 type poolOHLCVCandle struct {
@@ -72,6 +72,9 @@ func (s *Server) handlePoolOHLCV(w http.ResponseWriter, r *http.Request) {
 	if !poolAddressRegex.MatchString(poolAddress) {
 		http.Error(w, "invalid pool_address", http.StatusBadRequest)
 		return
+	}
+	if !strings.HasPrefix(poolAddress, "0x") && !strings.HasPrefix(poolAddress, "0X") {
+		poolAddress = "0x" + poolAddress
 	}
 	poolAddress = strings.ToLower(poolAddress)
 

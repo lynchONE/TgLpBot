@@ -21,6 +21,15 @@ func parseTaskID(prefix, data string) (uint, error) {
 	return uint(id64), nil
 }
 
+func isTaskAutoRefreshActive(chatID int64, messageID int) bool {
+	key := fmt.Sprintf("%d_%d", chatID, messageID)
+	autoRefreshMutex.RLock()
+	session := autoRefreshSessions[key]
+	active := session != nil && session.Active
+	autoRefreshMutex.RUnlock()
+	return active
+}
+
 func taskDeleteConfirmKeyboard(taskID uint) tgbotapi.InlineKeyboardMarkup {
 	idStr := fmt.Sprintf("%d", taskID)
 	return tgbotapi.NewInlineKeyboardMarkup(
@@ -452,6 +461,82 @@ func (b *Bot) handleTaskToggleReinvest(query *tgbotapi.CallbackQuery, user *mode
 	b.api.Send(editMsg)
 
 	if err := b.editMessageReplyMarkup(query.Message.Chat.ID, query.Message.MessageID, b.taskKeyboard(task)); err != nil {
+		log.Printf("[Bot] Failed to update task keyboard: %v", err)
+	}
+}
+
+func (b *Bot) handleTaskTogglePause(query *tgbotapi.CallbackQuery, user *models.User) {
+	taskID, err := parseTaskID("task_toggle_pause_", query.Data)
+	if err != nil {
+		b.api.Send(tgbotapi.NewCallback(query.ID, "无效的任务ID"))
+		b.sendMessage(query.Message.Chat.ID, "无效的任务ID")
+		return
+	}
+	task, err := b.taskService.GetByID(user.ID, taskID)
+	if err != nil {
+		b.api.Send(tgbotapi.NewCallback(query.ID, "获取任务失败"))
+		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("获取任务失败：%v", err))
+		return
+	}
+
+	newValue := !task.Paused
+	now := time.Now()
+
+	updates := map[string]interface{}{
+		"paused":             newValue,
+		"out_of_range_since": nil,
+	}
+	if newValue {
+		updates["paused_at"] = &now
+	} else {
+		updates["paused_at"] = nil
+	}
+
+	if err := b.taskService.Update(user.ID, taskID, updates); err != nil {
+		b.api.Send(tgbotapi.NewCallback(query.ID, "更新失败"))
+		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("更新任务失败：%v", err))
+		return
+	}
+
+	task.Paused = newValue
+	if newValue {
+		task.PausedAt = &now
+	} else {
+		task.PausedAt = nil
+	}
+	task.OutOfRangeSince = nil
+
+	cbText := "✅ 已恢复"
+	if newValue {
+		cbText = "⏸️ 已暂停"
+	}
+	b.api.Send(tgbotapi.NewCallback(query.ID, cbText))
+
+	useRefresh := false
+	if query.Message != nil {
+		useRefresh = isTaskAutoRefreshActive(query.Message.Chat.ID, query.Message.MessageID)
+	}
+
+	var cardText string
+	var keyboard any
+	if useRefresh {
+		cardText = b.formatTaskCardWithRefresh(task)
+		keyboard = b.taskKeyboardWithRefresh(task)
+	} else {
+		cardText = b.formatTaskCard(task)
+		keyboard = b.taskKeyboard(task)
+	}
+
+	editMsg := tgbotapi.NewEditMessageText(
+		query.Message.Chat.ID,
+		query.Message.MessageID,
+		cardText,
+	)
+	editMsg.ParseMode = "Markdown"
+	editMsg.DisableWebPagePreview = true
+	b.api.Send(editMsg)
+
+	if err := b.editMessageReplyMarkup(query.Message.Chat.ID, query.Message.MessageID, keyboard); err != nil {
 		log.Printf("[Bot] Failed to update task keyboard: %v", err)
 	}
 }

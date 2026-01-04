@@ -21,6 +21,8 @@ const usdCompact = new Intl.NumberFormat('en-US', {
     maximumFractionDigits: 2,
 });
 
+const isPoolAddressLike = (v) => /^(0x)?[a-fA-F0-9]{40}$/.test(String(v || '').trim()) || /^(0x)?[a-fA-F0-9]{64}$/.test(String(v || '').trim());
+
 function formatUsd(v) {
     const n = Number(v || 0);
     if (!Number.isFinite(n)) return '$0.00';
@@ -121,7 +123,7 @@ const ChangeIndicator = ({ currentValue, previousValue, label = '变化' }) => {
 export default function HotPoolCard({ pool, metric, previousData, onOpenKline }) {
     const [copied, setCopied] = useState(false);
     const addr = String(pool?.pool_address || '').trim();
-    const canOpenKline = useMemo(() => /^0x[a-fA-F0-9]{40}$/.test(addr), [addr]);
+    const canOpenKline = useMemo(() => isPoolAddressLike(addr), [addr]);
 
     const mainValue = useMemo(() => {
         if (metric === 'volume') return formatUsdCompact(pool?.total_volume);

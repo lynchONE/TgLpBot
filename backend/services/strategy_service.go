@@ -81,7 +81,7 @@ func (s *StrategyService) runLoop() {
 func (s *StrategyService) checkTasks() {
 	var tasks []models.StrategyTask
 	// Find all running or waiting tasks
-	if err := database.DB.Where("status IN ?", []models.StrategyStatus{models.StrategyStatusRunning, models.StrategyStatusWaiting}).Find(&tasks).Error; err != nil {
+	if err := database.DB.Where("status IN ? AND paused = ?", []models.StrategyStatus{models.StrategyStatusRunning, models.StrategyStatusWaiting}, false).Find(&tasks).Error; err != nil {
 		log.Printf("[Strategy] 获取任务失败: %v", err)
 		return
 	}

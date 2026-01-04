@@ -123,6 +123,15 @@ func NewRealtimePositionsService() *RealtimePositionsService {
 	}
 }
 
+func (s *RealtimePositionsService) InvalidateUser(userID uint) {
+	if s == nil || userID == 0 {
+		return
+	}
+	s.cacheMu.Lock()
+	delete(s.cache, userID)
+	s.cacheMu.Unlock()
+}
+
 type RealtimePositionsResponse struct {
 	Wallet          RealtimeWallet     `json:"wallet"`
 	Summary         RealtimeSummary    `json:"summary"`
@@ -154,6 +163,8 @@ type RealtimePosition struct {
 	Title        string     `json:"title"`
 	PoolID       string     `json:"pool_id"`
 	PositionID   string     `json:"position_id"`
+	TaskID       uint       `json:"task_id,omitempty"`
+	TaskPaused   bool       `json:"task_paused"`
 	StatusLabel  string     `json:"status_label"`
 	InRange      bool       `json:"in_range"`
 	CurrentTick  int        `json:"current_tick"`
@@ -393,11 +404,28 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 			max = 50
 		}
 		tokenIDs := make([]*big.Int, 0, int(max))
+		var tokenIDsRawMu sync.Mutex
+		tokenIDsRaw := make([]*big.Int, 0, int(max))
+
+		// Parallelize tokenOfOwnerByIndex() calls to reduce cold-load latency.
+		idGroup, _ := errgroup.WithContext(context.Background())
+		idGroup.SetLimit(8)
 		for i := int64(0); i < max; i++ {
-			tokenId, err := pm.TokenOfOwnerByIndex(nil, walletAddr, big.NewInt(i))
-			if err != nil || tokenId == nil || tokenId.Sign() == 0 {
-				continue
-			}
+			idx := i
+			idGroup.Go(func() error {
+				tokenId, err := pm.TokenOfOwnerByIndex(nil, walletAddr, big.NewInt(idx))
+				if err != nil || tokenId == nil || tokenId.Sign() == 0 {
+					return nil
+				}
+				tokenIDsRawMu.Lock()
+				tokenIDsRaw = append(tokenIDsRaw, new(big.Int).Set(tokenId))
+				tokenIDsRawMu.Unlock()
+				return nil
+			})
+		}
+		_ = idGroup.Wait()
+
+		for _, tokenId := range tokenIDsRaw {
 			seenKey := strings.TrimSpace(tokenId.String()) + "|" + strings.ToLower(npmAddr.Hex())
 			if _, ok := seenV3[seenKey]; ok {
 				continue
@@ -892,12 +920,20 @@ func (s *RealtimePositionsService) buildV3Position(
 	}
 
 	hasLiquidity := liq != nil && liq.Sign() > 0
+	taskID := uint(0)
+	taskPaused := false
+	if task != nil {
+		taskID = task.ID
+		taskPaused = task.Paused
+	}
 	return &RealtimePosition{
 		Version:      "v3",
 		Exchange:     exchange,
 		Title:        title,
 		PoolID:       poolID,
 		PositionID:   tokenId.String(),
+		TaskID:       taskID,
+		TaskPaused:   taskPaused,
 		StatusLabel:  statusLabel,
 		InRange:      inRange,
 		CurrentTick:  currentTick,
@@ -1032,6 +1068,8 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		Title:        title,
 		PoolID:       strings.TrimSpace(task.PoolId),
 		PositionID:   tokenId,
+		TaskID:       task.ID,
+		TaskPaused:   task.Paused,
 		StatusLabel:  statusLabelFromTask(task),
 		InRange:      inRange,
 		CurrentTick:  currentTick,
@@ -1478,6 +1516,9 @@ func formatOutOfRange(task *models.StrategyTask, tickLower, tickUpper int, curre
 	if task == nil {
 		return "0/0"
 	}
+	if task.Paused && (task.Status == models.StrategyStatusRunning || task.Status == models.StrategyStatusWaiting) {
+		return "⏸"
+	}
 	threshold := task.ReopenDelaySeconds
 	if currentTick != 0 && task.StopLossEnabled && task.StopLossDelaySeconds > 0 {
 		_, _, _, priceDown := priceDirectionFromTicks(task, tickLower, tickUpper, currentTick)
@@ -1508,6 +1549,9 @@ func formatOutOfRange(task *models.StrategyTask, tickLower, tickUpper int, curre
 func statusLabelFromTask(task *models.StrategyTask) string {
 	if task == nil {
 		return "运行中"
+	}
+	if task.Paused && (task.Status == models.StrategyStatusRunning || task.Status == models.StrategyStatusWaiting) {
+		return "已暂停"
 	}
 	switch task.Status {
 	case models.StrategyStatusRunning:

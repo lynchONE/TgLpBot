@@ -534,6 +534,8 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleTaskCancelDelete(query, user)
 	case strings.HasPrefix(query.Data, "task_toggle_reinvest_"):
 		b.handleTaskToggleReinvest(query, user)
+	case strings.HasPrefix(query.Data, "task_toggle_pause_"):
+		b.handleTaskTogglePause(query, user)
 	case strings.HasPrefix(query.Data, "task_toggle_stoploss_"):
 		b.handleTaskToggleStopLoss(query, user)
 	case strings.HasPrefix(query.Data, "task_set_slippage_"):

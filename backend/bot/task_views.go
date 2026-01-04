@@ -74,7 +74,14 @@ func buildPriceDisplayLines(task *models.StrategyTask) (string, string) {
 	return currentLine, rangeLine
 }
 
-func formatTaskStatus(status models.StrategyStatus) (string, string) {
+func formatTaskStatus(task *models.StrategyTask) (string, string) {
+	if task != nil && task.Paused && (task.Status == models.StrategyStatusRunning || task.Status == models.StrategyStatusWaiting) {
+		return "⏸️", "已暂停"
+	}
+	status := models.StrategyStatusRunning
+	if task != nil {
+		status = task.Status
+	}
 	switch status {
 	case models.StrategyStatusRunning:
 		return "🟢", "运行中"
@@ -122,7 +129,7 @@ func formatDustAmount(amount float64) string {
 }
 
 func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
-	emoji, statusText := formatTaskStatus(task.Status)
+	emoji, statusText := formatTaskStatus(task)
 	exchange := strings.TrimSpace(task.Exchange)
 	if exchange == "" {
 		exchange = "-"
@@ -269,12 +276,21 @@ func (b *Bot) taskKeyboard(task *models.StrategyTask) any {
 		stopText = "⏳ 停止中"
 	}
 
+	row1 := []tgbotapi.InlineKeyboardButton{
+		tgbotapi.NewInlineKeyboardButtonData(stopText, "task_stop_"+idStr),
+	}
+	if task.Status == models.StrategyStatusRunning || task.Status == models.StrategyStatusWaiting {
+		pauseText := "⏸️ 暂停任务"
+		if task.Paused {
+			pauseText = "▶️ 恢复任务"
+		}
+		row1 = append(row1, tgbotapi.NewInlineKeyboardButtonData(pauseText, "task_toggle_pause_"+idStr))
+	}
+
 	stopLossText := fmt.Sprintf("⚡ 秒止损：%s", boolToOnOff(task.StopLossEnabled))
 	reinvestText := fmt.Sprintf("🔁 复投：%s", boolToOnOff(task.AutoReinvest))
 	base := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(stopText, "task_stop_"+idStr),
-		),
+		tgbotapi.NewInlineKeyboardRow(row1...),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(stopLossText, "task_toggle_stoploss_"+idStr),
 			tgbotapi.NewInlineKeyboardButtonData(reinvestText, "task_toggle_reinvest_"+idStr),

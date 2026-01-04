@@ -38,11 +38,22 @@ func (b *Bot) taskKeyboardWithRefresh(task *models.StrategyTask) any {
 		stopText = "⏳ 停止中"
 	}
 
+	row1 := []tgbotapi.InlineKeyboardButton{
+		tgbotapi.NewInlineKeyboardButtonData(stopText, "task_stop_"+idStr),
+	}
+	if task.Status == models.StrategyStatusRunning || task.Status == models.StrategyStatusWaiting {
+		pauseText := "⏸️ 暂停任务"
+		if task.Paused {
+			pauseText = "▶️ 恢复任务"
+		}
+		row1 = append(row1, tgbotapi.NewInlineKeyboardButtonData(pauseText, "task_toggle_pause_"+idStr))
+	}
+
 	stopLossText := fmt.Sprintf("⚡ 秒止损：%s", boolToOnOff(task.StopLossEnabled))
 	reinvestText := fmt.Sprintf("🔁 复投：%s", boolToOnOff(task.AutoReinvest))
 	base := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(row1...),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(stopText, "task_stop_"+idStr),
 			tgbotapi.NewInlineKeyboardButtonData("⏸️ 停止刷新", "task_stop_refresh_"+idStr),
 		),
 		tgbotapi.NewInlineKeyboardRow(

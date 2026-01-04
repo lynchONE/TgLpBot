@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { openLink } from '../lib/telegram';
 import { useDurationFrom, useRelativeTime } from '../lib/time';
 import PriceRangeVisualizer from './PriceRangeVisualizer';
@@ -14,6 +14,7 @@ const icons = {
     wallet: 'M4 7a3 3 0 013-3h13v4H7a1 1 0 000 2h14v7a3 3 0 01-3 3H7a3 3 0 01-3-3V7zm16 6h-5v4h5v-4z',
     refresh: 'M17.65 6.35A7.95 7.95 0 0012 4V1L7 6l5 5V7a5 5 0 11-5 5H5a7 7 0 107.65-5.65z',
     link: 'M3.9 12a5 5 0 015-5h3v2h-3a3 3 0 000 6h3v2h-3a5 5 0 01-5-5zm7-1h2v2h-2v-2zm4.1-4h3a5 5 0 010 10h-3v-2h3a3 3 0 000-6h-3V7z',
+    kebab: 'M12 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4z',
 };
 
 const formatUsd = (v) => {
@@ -74,6 +75,8 @@ const formatPrice = (value) => {
 const pillClassForStatus = (label) => {
     if (label?.includes('错误'))
         return 'bg-red-500/10 text-red-700 ring-red-500/20 dark:bg-red-500/15 dark:text-red-300 dark:ring-red-500/30';
+    if (label?.includes('暂停'))
+        return 'bg-amber-500/10 text-amber-800 ring-amber-500/20 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/30';
     if (label?.includes('停止'))
         return 'bg-amber-500/10 text-amber-800 ring-amber-500/20 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/30';
     if (label?.includes('等待'))
@@ -81,7 +84,14 @@ const pillClassForStatus = (label) => {
     return 'bg-emerald-500/10 text-emerald-800 ring-emerald-500/20 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/30';
 };
 
-export default function PositionCard({ position, walletAddress, bnbBalance, pollIntervalSec, updatedAt }) {
+const normalizeHexPrefixed = (v) => {
+    const raw = String(v || '').trim();
+    if (!raw) return '';
+    if (raw.startsWith('0x') || raw.startsWith('0X')) return `0x${raw.slice(2)}`;
+    return `0x${raw}`;
+};
+
+export default function PositionCard({ position, walletAddress, bnbBalance, pollIntervalSec, updatedAt, allowTaskActions = true, onSetTaskPaused }) {
     // 实时更新的时间显示
     const runningDuration = useDurationFrom(position?.running_since);
     const updateTimeText = useRelativeTime(updatedAt);
@@ -109,9 +119,10 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
     }, [position?.totals?.position_usd, position?.totals?.fee_usd]);
 
     const poolLink = useMemo(() => {
-        const pool = position?.pool_id;
+        const pool = normalizeHexPrefixed(position?.pool_id);
         if (!pool) return null;
         if (/^0x[a-fA-F0-9]{40}$/.test(pool)) return `https://bscscan.com/address/${pool}`;
+        if (/^0x[a-fA-F0-9]{64}$/.test(pool)) return `https://www.geckoterminal.com/bsc/pools/${pool.toLowerCase()}`;
         return null;
     }, [position?.pool_id]);
 
@@ -163,6 +174,45 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
         : '--';
     const pairMetaText = pairLabel ? `${pairLabel} · ` : '';
 
+    const taskId = useMemo(() => {
+        const raw = Number(position?.task_id);
+        return Number.isFinite(raw) && raw > 0 ? raw : 0;
+    }, [position?.task_id]);
+    const taskPaused = Boolean(position?.task_paused);
+    const canTaskAction = Boolean(allowTaskActions) && typeof onSetTaskPaused === 'function' && taskId > 0;
+
+    const [menuOpen, setMenuOpen] = useState(false);
+    const [pausePending, setPausePending] = useState(false);
+    const menuRef = useRef(null);
+
+    useEffect(() => {
+        if (!menuOpen) return;
+        const onPointerDown = (e) => {
+            if (!menuRef.current) return;
+            if (menuRef.current.contains(e.target)) return;
+            setMenuOpen(false);
+        };
+        document.addEventListener('mousedown', onPointerDown);
+        document.addEventListener('touchstart', onPointerDown);
+        return () => {
+            document.removeEventListener('mousedown', onPointerDown);
+            document.removeEventListener('touchstart', onPointerDown);
+        };
+    }, [menuOpen]);
+
+    const togglePause = async () => {
+        if (!canTaskAction || pausePending) return;
+        setPausePending(true);
+        try {
+            await onSetTaskPaused(taskId, !taskPaused);
+        } catch (e) {
+            window.alert(String(e?.message || e));
+        } finally {
+            setPausePending(false);
+            setMenuOpen(false);
+        }
+    };
+
     return (
         <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
             <div className="flex items-start justify-between gap-3">
@@ -184,6 +234,32 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
+                    {canTaskAction ? (
+                        <div className="relative" ref={menuRef}>
+                            <button
+                                type="button"
+                                onClick={() => setMenuOpen((v) => !v)}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-white/70 text-zinc-700 hover:bg-white active:bg-white dark:border-white/10 dark:bg-[#0f1116] dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15"
+                                aria-label="任务操作"
+                                aria-expanded={menuOpen}
+                                disabled={pausePending}
+                            >
+                                <Icon path={icons.kebab} className="h-5 w-5" />
+                            </button>
+                            {menuOpen ? (
+                                <div className="absolute right-0 top-full z-20 mt-2 w-32 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-white/10 dark:bg-[#111318]">
+                                    <button
+                                        type="button"
+                                        onClick={togglePause}
+                                        disabled={pausePending}
+                                        className="w-full px-3 py-2 text-left text-xs font-semibold text-zinc-800 hover:bg-zinc-100 active:bg-zinc-100 disabled:opacity-50 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/10"
+                                    >
+                                        {pausePending ? '处理中...' : taskPaused ? '恢复任务' : '暂停任务'}
+                                    </button>
+                                </div>
+                            ) : null}
+                        </div>
+                    ) : null}
                     <div className="text-right">
                         <div className="text-xs text-zinc-500 dark:text-white/50">总计（仓位+手续费）</div>
                         <div className="text-lg font-extrabold text-emerald-700 dark:text-emerald-300">{titleRight}</div>

@@ -20,7 +20,15 @@ const TIMEFRAMES = [
     { key: '4h', label: '4h', timeframe: 'hour', aggregate: 4 },
 ];
 
-const isHexAddress = (v) => /^0x[a-fA-F0-9]{40}$/.test(String(v || '').trim());
+const isPoolAddressLike = (v) =>
+    /^(0x)?[a-fA-F0-9]{40}$/.test(String(v || '').trim()) || /^(0x)?[a-fA-F0-9]{64}$/.test(String(v || '').trim());
+
+function normalizeHexPrefixed(v) {
+    const raw = String(v || '').trim();
+    if (!raw) return '';
+    if (raw.startsWith('0x') || raw.startsWith('0X')) return `0x${raw.slice(2)}`;
+    return `0x${raw}`;
+}
 
 export default function KlineModal({ open, onClose, apiBaseUrl, theme, pool, chain }) {
     const containerRef = useRef(null);
@@ -36,7 +44,8 @@ export default function KlineModal({ open, onClose, apiBaseUrl, theme, pool, cha
     const [candles, setCandles] = useState([]);
     const cacheRef = useRef(new Map());
 
-    const poolAddress = useMemo(() => String(pool?.pool_address || '').trim(), [pool?.pool_address]);
+    const poolAddressRaw = useMemo(() => String(pool?.pool_address || pool?.pool_id || '').trim(), [pool?.pool_address, pool?.pool_id]);
+    const poolAddress = useMemo(() => normalizeHexPrefixed(poolAddressRaw), [poolAddressRaw]);
     const title = useMemo(() => String(pool?.trading_pair || '').trim() || 'K线图', [pool?.trading_pair]);
     const effectiveChain = useMemo(() => String(chain || '').trim() || 'bsc', [chain]);
 
@@ -66,31 +75,50 @@ export default function KlineModal({ open, onClose, apiBaseUrl, theme, pool, cha
         if (!el) return;
         if (chartRef.current) return;
 
-        const chart = createChart(el, {
-            autoSize: true,
-            layout: {
-                background: { color: chartTheme.background },
-                textColor: chartTheme.text,
-                fontFamily:
-                    'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"',
-            },
-            grid: {
-                vertLines: { color: chartTheme.grid },
-                horzLines: { color: chartTheme.grid },
-            },
-            rightPriceScale: {
-                borderColor: chartTheme.border,
-            },
-            timeScale: {
-                borderColor: chartTheme.border,
-                timeVisible: true,
-                secondsVisible: false,
-            },
-            crosshair: {
-                vertLine: { color: chartTheme.border, labelBackgroundColor: chartTheme.background },
-                horzLine: { color: chartTheme.border, labelBackgroundColor: chartTheme.background },
-            },
-        });
+        const supportsResizeObserver = typeof window !== 'undefined' && typeof window.ResizeObserver !== 'undefined';
+        let cleanupResize = null;
+
+        let chart;
+        try {
+            const options = {
+                autoSize: supportsResizeObserver,
+                layout: {
+                    background: { color: chartTheme.background },
+                    textColor: chartTheme.text,
+                    fontFamily:
+                        'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"',
+                },
+                grid: {
+                    vertLines: { color: chartTheme.grid },
+                    horzLines: { color: chartTheme.grid },
+                },
+                rightPriceScale: {
+                    borderColor: chartTheme.border,
+                },
+                timeScale: {
+                    borderColor: chartTheme.border,
+                    timeVisible: true,
+                    secondsVisible: false,
+                },
+                crosshair: {
+                    vertLine: { color: chartTheme.border, labelBackgroundColor: chartTheme.background },
+                    horzLine: { color: chartTheme.border, labelBackgroundColor: chartTheme.background },
+                },
+            };
+
+            if (!supportsResizeObserver) {
+                const rect = el.getBoundingClientRect?.();
+                const measuredWidth = Math.floor(rect?.width || el.clientWidth || 0);
+                const measuredHeight = Math.floor(rect?.height || el.clientHeight || 0);
+                options.width = measuredWidth > 0 ? measuredWidth : 360;
+                options.height = measuredHeight > 0 ? measuredHeight : 380;
+            }
+
+            chart = createChart(el, options);
+        } catch (e) {
+            setError(String(e?.message || e || 'K线图渲染失败'));
+            return;
+        }
 
         const candleSeries = chart.addCandlestickSeries({
             upColor: chartTheme.up,
@@ -112,6 +140,28 @@ export default function KlineModal({ open, onClose, apiBaseUrl, theme, pool, cha
         candleSeriesRef.current = candleSeries;
         volumeSeriesRef.current = volumeSeries;
 
+        if (!supportsResizeObserver) {
+            const handleResize = () => {
+                try {
+                    const rect = el.getBoundingClientRect?.();
+                    const measuredWidth = Math.floor(rect?.width || el.clientWidth || 0);
+                    const measuredHeight = Math.floor(rect?.height || el.clientHeight || 0);
+                    const width = measuredWidth > 0 ? measuredWidth : 360;
+                    const height = measuredHeight > 0 ? measuredHeight : 380;
+                    if (typeof chart.resize === 'function') {
+                        chart.resize(width, height);
+                    } else {
+                        chart.applyOptions({ width, height });
+                    }
+                } catch {
+                    // ignore
+                }
+            };
+            handleResize();
+            window.addEventListener('resize', handleResize);
+            cleanupResize = () => window.removeEventListener('resize', handleResize);
+        }
+
         return () => {
             try {
                 requestControllerRef.current?.abort?.();
@@ -119,7 +169,17 @@ export default function KlineModal({ open, onClose, apiBaseUrl, theme, pool, cha
                 // ignore
             }
             requestControllerRef.current = null;
-            chart.remove();
+            try {
+                cleanupResize?.();
+            } catch {
+                // ignore
+            }
+            cleanupResize = null;
+            try {
+                chart.remove();
+            } catch {
+                // ignore
+            }
             chartRef.current = null;
             candleSeriesRef.current = null;
             volumeSeriesRef.current = null;
@@ -158,7 +218,7 @@ export default function KlineModal({ open, onClose, apiBaseUrl, theme, pool, cha
     const loadCandles = useCallback(
         async ({ force = false } = {}) => {
             if (!open) return;
-            if (!isHexAddress(poolAddress)) return;
+            if (!isPoolAddressLike(poolAddress)) return;
             const cacheKey = `${effectiveChain}:${poolAddress}:${selectedTimeframe.timeframe}:${selectedTimeframe.aggregate}`;
             if (!force && cacheRef.current.has(cacheKey)) {
                 setCandles(cacheRef.current.get(cacheKey));
@@ -209,41 +269,66 @@ export default function KlineModal({ open, onClose, apiBaseUrl, theme, pool, cha
         loadCandles({ force: false });
     }, [open, poolAddress, timeframeKey, loadCandles]);
 
-    const candleData = useMemo(() => {
-        return (Array.isArray(candles) ? candles : [])
-            .map((c) => ({
-                time: Number(c?.t || 0),
-                open: Number(c?.o || 0),
-                high: Number(c?.h || 0),
-                low: Number(c?.l || 0),
-                close: Number(c?.c || 0),
-            }))
-            .filter((c) => Number.isFinite(c.time) && c.time > 0);
-    }, [candles]);
-
-    const volumeData = useMemo(() => {
-        return (Array.isArray(candles) ? candles : [])
+    const normalizedCandles = useMemo(() => {
+        const rows = (Array.isArray(candles) ? candles : [])
             .map((c) => {
-                const time = Number(c?.t || 0);
+                const time = Math.floor(Number(c?.t || 0));
                 const open = Number(c?.o || 0);
+                const high = Number(c?.h || 0);
+                const low = Number(c?.l || 0);
                 const close = Number(c?.c || 0);
-                const value = Number(c?.v || 0);
-                if (!Number.isFinite(time) || time <= 0 || !Number.isFinite(value) || value < 0) return null;
-                const isUp = Number.isFinite(open) && Number.isFinite(close) ? close >= open : true;
-                return {
-                    time,
-                    value,
-                    color: isUp ? 'rgba(16,185,129,0.35)' : 'rgba(244,63,94,0.35)',
-                };
+                const volume = Number(c?.v || 0);
+                if (!Number.isFinite(time) || time <= 0) return null;
+                if (![open, high, low, close].every(Number.isFinite)) return null;
+                if (!Number.isFinite(volume) || volume < 0) return null;
+                return { time, open, high, low, close, volume };
             })
             .filter(Boolean);
+
+        rows.sort((a, b) => a.time - b.time);
+
+        const deduped = [];
+        for (const row of rows) {
+            const last = deduped[deduped.length - 1];
+            if (last && last.time === row.time) {
+                deduped[deduped.length - 1] = row;
+                continue;
+            }
+            deduped.push(row);
+        }
+        return deduped;
     }, [candles]);
+
+    const candleData = useMemo(() => {
+        return normalizedCandles.map((c) => ({
+            time: c.time,
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close,
+        }));
+    }, [normalizedCandles]);
+
+    const volumeData = useMemo(() => {
+        return normalizedCandles.map((c) => {
+            const isUp = c.close >= c.open;
+            return {
+                time: c.time,
+                value: c.volume,
+                color: isUp ? 'rgba(16,185,129,0.35)' : 'rgba(244,63,94,0.35)',
+            };
+        });
+    }, [normalizedCandles]);
 
     useEffect(() => {
         if (!open) return;
-        candleSeriesRef.current?.setData(candleData);
-        volumeSeriesRef.current?.setData(volumeData);
-        chartRef.current?.timeScale().fitContent();
+        try {
+            candleSeriesRef.current?.setData(candleData);
+            volumeSeriesRef.current?.setData(volumeData);
+            chartRef.current?.timeScale().fitContent();
+        } catch (e) {
+            setError(String(e?.message || e || 'K线图渲染失败'));
+        }
     }, [open, candleData, volumeData]);
 
     if (!open) return null;
@@ -268,7 +353,7 @@ export default function KlineModal({ open, onClose, apiBaseUrl, theme, pool, cha
                         <button
                             type="button"
                             onClick={() => loadCandles({ force: true })}
-                            disabled={loading || !isHexAddress(poolAddress)}
+                            disabled={loading || !isPoolAddressLike(poolAddress)}
                             className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 shadow-sm hover:bg-zinc-200 active:bg-zinc-200 disabled:opacity-40 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
                             aria-label="刷新K线"
                             title="刷新"

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import HotPoolCard from './components/HotPoolCard.jsx';
 import KlineModal from './components/KlineModal.jsx';
 import PositionCard from './components/PositionCard.jsx';
-import { disableAdminAutoLP, fetchAdminAutoLPStats, fetchAdminRealtimePositions, fetchAdminRealtimeUsers, fetchHotPools, fetchRealtimePositions } from './lib/api';
+import { disableAdminAutoLP, fetchAdminAutoLPStats, fetchAdminRealtimePositions, fetchAdminRealtimeUsers, fetchHotPools, fetchMe, fetchRealtimePositions, setTaskPaused } from './lib/api';
 import { getTelegramWebApp } from './lib/telegram';
 import { formatRelativeTime, useTick } from './lib/time';
 
@@ -119,6 +119,7 @@ const icons = {
 export default function App() {
     const initData = useInitData();
     const tick = useTick(); // 实时时钟，每秒更新一次
+    const [me, setMe] = useState(null);
     const [data, setData] = useState(null);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
@@ -161,7 +162,7 @@ export default function App() {
     const pollIntervalSec = Math.max(1, Number(pollOverrideSec || serverPollIntervalSec || 1));
     const adminListPollSec = Math.max(3, pollIntervalSec);
     const adminStatsPollSec = Math.max(5, pollIntervalSec * 2);
-    const isAdmin = Boolean(data?.is_admin || adminPositions?.is_admin);
+    const isAdmin = Boolean(me?.is_admin || data?.is_admin || adminPositions?.is_admin);
     const showAdmin = isAdmin && viewMode === 'admin';
     const isHotPools = viewMode === 'hot_pools';
     const hotPoolsDefaultPollSec = 10;
@@ -237,6 +238,29 @@ export default function App() {
     }, [hotPoolsRows]);
 
     const apiBaseUrl = useMemo(() => resolveApiBaseUrl(), []);
+
+    useEffect(() => {
+        if (!initData) return;
+        let aborted = false;
+        const controller = new AbortController();
+
+        const run = async () => {
+            try {
+                const resp = await fetchMe({ apiBaseUrl, initData, signal: controller.signal });
+                if (aborted) return;
+                setMe(resp);
+            } catch {
+                // ignore; fallback to `realtime_positions` response
+            }
+        };
+
+        run();
+
+        return () => {
+            aborted = true;
+            controller.abort();
+        };
+    }, [apiBaseUrl, initData]);
 
     useEffect(() => {
         if (!isAdmin && viewMode === 'admin') {
@@ -574,6 +598,20 @@ export default function App() {
         } finally {
             setAdminDisableLoading(false);
         }
+    };
+
+    const handleSetTaskPaused = async (taskId, paused) => {
+        if (!initData || showAdmin) return;
+        const id = Number(taskId);
+        if (!Number.isFinite(id) || id <= 0) return;
+
+        const wantPaused = Boolean(paused);
+        const ok = window.confirm(wantPaused
+            ? '确认暂停该任务？\n暂停后将不再自动执行再平衡/止损等操作。'
+            : '确认恢复该任务？\n恢复后将继续自动执行再平衡/止损等操作。');
+        if (!ok) return;
+
+        await setTaskPaused({ apiBaseUrl, initData, taskId: id, paused: wantPaused });
     };
 
     const headerTitle = showAdmin ? '管理面板' : isHotPools ? '热门池子' : '实时仓位';
@@ -1023,6 +1061,8 @@ export default function App() {
                                 bnbBalance={bnbBalance}
                                 pollIntervalSec={pollIntervalSec}
                                 updatedAt={updatedAt}
+                                allowTaskActions={!showAdmin && Boolean(initData)}
+                                onSetTaskPaused={handleSetTaskPaused}
                             />
                         ))
                         : null}

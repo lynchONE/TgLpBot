@@ -69,6 +69,8 @@ type StrategyTask struct {
 	StopLossDelaySeconds int     `gorm:"default:0" json:"stop_loss_delay_seconds"` // Out-of-range seconds before stop-loss triggers (0 = immediately)
 
 	// State
+	Paused          bool           `gorm:"default:false;index" json:"paused"`
+	PausedAt        *time.Time     `json:"paused_at"`
 	Status          StrategyStatus `gorm:"size:20;default:'running'" json:"status"`
 	LastExitTime    *time.Time     `json:"last_exit_time"` // When did we exit/remove liquidity?
 	LastRebalanceAt *time.Time     `json:"last_rebalance_at"`

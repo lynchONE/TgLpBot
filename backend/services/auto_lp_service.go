@@ -1306,7 +1306,7 @@ func (s *AutoLPService) requestExitForAutoTasks(userID uint, reason string, gasM
 	}
 
 	var tasks []models.StrategyTask
-	if err := database.DB.Where("user_id = ? AND is_auto = ? AND status IN ?", userID, true, []models.StrategyStatus{
+	if err := database.DB.Where("user_id = ? AND is_auto = ? AND paused = ? AND status IN ?", userID, true, false, []models.StrategyStatus{
 		models.StrategyStatusRunning,
 		models.StrategyStatusWaiting,
 	}).Find(&tasks).Error; err != nil {
@@ -1808,7 +1808,7 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 	}
 
 	var tasks []models.StrategyTask
-	if err := database.DB.Where("is_auto = ? AND status IN ?", true, []models.StrategyStatus{
+	if err := database.DB.Where("is_auto = ? AND paused = ? AND status IN ?", true, false, []models.StrategyStatus{
 		models.StrategyStatusRunning,
 		models.StrategyStatusWaiting,
 	}).Find(&tasks).Error; err != nil {
