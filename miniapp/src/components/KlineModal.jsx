@@ -34,16 +34,6 @@ export default function KlineModal({ open, onClose, theme, pool, chain }) {
         return c;
     }, [chain]);
 
-    if (!open) return null;
-
-    // Construct Embed URL
-    // For V4 pools, the 'poolAddress' (PoolId) does NOT match DexScreener's 'pairAddress'.
-    // DexScreener generates a synthetic pair address for V4 pools.
-    // Solution: We query DexScreener API by Token Address to find the correct Pair Address.
-
-    const [resolvedAddress, setResolvedAddress] = useState(null);
-    const [resolving, setResolving] = useState(false);
-
     // Check if poolAddress is likely a pool ID (32 bytes / 64 hex chars + 0x = 66 chars)
     const isV4ID = poolAddress && poolAddress.length > 50;
 
@@ -111,6 +101,8 @@ export default function KlineModal({ open, onClose, theme, pool, chain }) {
     const embedUrl = resolvedAddress
         ? `https://dexscreener.com/${effectiveChain}/${resolvedAddress}?embed=1&theme=${theme === 'light' ? 'light' : 'dark'}&items=0&info=0`
         : '';
+
+    if (!open) return null;
 
     return (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4">
