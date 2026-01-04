@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo } from 'react';
 
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -27,107 +27,40 @@ export default function KlineModal({ open, onClose, theme, pool, chain }) {
         }
         return pair;
     }, [pool?.trading_pair, pool?.fee_percentage]);
-    const effectiveChain = useMemo(() => {
+
+    // Chain slug for DexScreener (uses 'bsc')
+    const dexScreenerChain = useMemo(() => {
         const c = String(chain || 'bsc').toLowerCase();
-        // DexScreener chain slugs mapping if needed, simplified for common ones
         if (c === 'bnb') return 'bsc';
         return c;
     }, [chain]);
 
-    const [resolvedAddress, setResolvedAddress] = useState(null);
-    const [resolving, setResolving] = useState(false);
+    // Chain slug for DEXTools (uses 'bnb')
+    const dextoolsChain = useMemo(() => {
+        const c = String(chain || 'bsc').toLowerCase();
+        if (c === 'bsc') return 'bnb';
+        return c;
+    }, [chain]);
 
-    // Check if poolAddress is likely a pool ID (32 bytes / 64 hex chars + 0x = 66 chars)
+    // Check if poolAddress is likely a V4 pool ID (32 bytes / 64 hex chars + 0x = 66 chars)
     const isV4ID = poolAddress && poolAddress.length > 50;
 
-    useEffect(() => {
-        if (!open) {
-            setResolvedAddress(null);
-            setResolving(false);
-            return;
+    // Build embed URL based on pool type
+    // V4 pools: Use DEXTools (supports Pool ID directly)
+    // V2/V3 pools: Use DexScreener (supports pool address)
+    const embedUrl = useMemo(() => {
+        if (!poolAddress) return '';
+
+        if (isV4ID) {
+            // DEXTools widget URL format:
+            // https://www.dextools.io/widget-chart/en/{chain}/pe-light/{address}?theme={theme}&chartType=1&chartResolution=30&drawingToolbars=false
+            return `https://www.dextools.io/widget-chart/en/${dextoolsChain}/pe-light/${poolAddress}?theme=${theme === 'light' ? 'light' : 'dark'}&chartType=1&chartResolution=30&drawingToolbars=false`;
+        } else {
+            // DexScreener embed URL format:
+            // https://dexscreener.com/{chain}/{address}?embed=1&theme={theme}
+            return `https://dexscreener.com/${dexScreenerChain}/${poolAddress}?embed=1&theme=${theme === 'light' ? 'light' : 'dark'}&items=0&info=0`;
         }
-
-        // If it's a standard V2/V3 pool (short address), use it directly.
-        if (!isV4ID) {
-            setResolvedAddress(poolAddress);
-            return;
-        }
-
-        // If it's a V4 pool (Long ID), we must find the DexScreener Pair Address.
-        const token0 = pool?.token0_address;
-        const token1 = pool?.token1_address;
-
-        if (!token0) {
-            // Fallback: If no token info, try using the ID directly (unlikely to work but better than nothing)
-            setResolvedAddress(poolAddress);
-            return;
-        }
-
-        setResolving(true);
-        const fetchPair = async () => {
-            // Helper to search pairs by token address
-            const searchByToken = async (addr) => {
-                if (!addr) return [];
-                try {
-                    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${addr}`);
-                    const data = await res.json();
-                    if (data?.pairs && Array.isArray(data.pairs)) {
-                        // Filter for same chain
-                        return data.pairs.filter(p => p.chainId === effectiveChain);
-                    }
-                } catch (e) {
-                    console.error("DexScreener API error:", e);
-                }
-                return [];
-            };
-
-            setResolving(true);
-            try {
-                // Try token0 first
-                let pairs = await searchByToken(token0);
-
-                // If no pairs found for token0, try token1
-                if (pairs.length === 0 && token1) {
-                    pairs = await searchByToken(token1);
-                }
-
-                if (pairs.length > 0) {
-                    // Sort pairs by liquidity (USD) descending to find the "main" pair
-                    pairs.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
-
-                    // 1. Try to find exact match for the other token (if we successfully filtered by one token)
-                    // Note: This logic is tricky if we switched tokens, so let's simplify:
-                    // Just find the pair with the HIGHEST liquidity that involves one of our tokens.
-                    // This is usually what the user wants to see for price action.
-
-                    const bestPair = pairs[0];
-                    if (bestPair && bestPair.pairAddress) {
-                        setResolvedAddress(bestPair.pairAddress);
-                    } else {
-                        // Fallback to poolAddress (will likely fail for V4 ID, but it's the last resort)
-                        setResolvedAddress(poolAddress);
-                    }
-                } else {
-                    // No pairs found at all on DexScreener for these tokens on this chain
-                    // Do NOT set resolvedAddress to poolAddress (V4 ID), because we know it fails.
-                    // Leave it null to show "Not Found" message.
-                    setResolvedAddress(null);
-                }
-            } catch (e) {
-                console.error("Pair resolution failed:", e);
-                setResolvedAddress(null);
-            } finally {
-                setResolving(false);
-            }
-        };
-
-        fetchPair();
-
-    }, [open, isV4ID, poolAddress, pool?.token0_address, pool?.token1_address, effectiveChain]);
-
-    const embedUrl = resolvedAddress
-        ? `https://dexscreener.com/${effectiveChain}/${resolvedAddress}?embed=1&theme=${theme === 'light' ? 'light' : 'dark'}&items=0&info=0`
-        : '';
+    }, [poolAddress, isV4ID, dextoolsChain, dexScreenerChain, theme]);
 
     if (!open) return null;
 
@@ -147,8 +80,15 @@ export default function KlineModal({ open, onClose, theme, pool, chain }) {
                 <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-zinc-100 dark:border-white/5 bg-white/50 dark:bg-white/5 shrink-0">
                     <div className="min-w-0">
                         <div className="truncate text-sm font-bold text-zinc-900 dark:text-white/90">{title}</div>
-                        <div className="truncate text-[10px] font-medium text-zinc-500 dark:text-white/40 font-mono mt-0.5">
-                            {poolAddress ? `${poolAddress.slice(0, 10)}...${poolAddress.slice(-8)}` : ''}
+                        <div className="flex items-center gap-2 mt-0.5">
+                            <div className="truncate text-[10px] font-medium text-zinc-500 dark:text-white/40 font-mono">
+                                {poolAddress ? `${poolAddress.slice(0, 10)}...${poolAddress.slice(-8)}` : ''}
+                            </div>
+                            {isV4ID && (
+                                <span className="shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300">
+                                    V4 · DEXTools
+                                </span>
+                            )}
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -165,22 +105,16 @@ export default function KlineModal({ open, onClose, theme, pool, chain }) {
 
                 {/* Iframe Container */}
                 <div className="flex-1 w-full bg-[#111318] relative">
-                    {resolving ? (
-                        <div className="flex flex-col items-center justify-center h-full text-zinc-500 dark:text-white/40 text-sm animate-pulse gap-2">
-                            <span>正在寻找 DexScreener 图表...</span>
-                            <span className="text-xs opacity-60">搜索最佳流动性交易对</span>
-                        </div>
-                    ) : resolvedAddress ? (
+                    {poolAddress ? (
                         <iframe
                             src={embedUrl}
                             className="absolute inset-0 w-full h-full border-0"
-                            title="DexScreener Chart"
+                            title={isV4ID ? "DEXTools Chart" : "DexScreener Chart"}
                             allowFullScreen
                         />
                     ) : (
                         <div className="flex flex-col items-center justify-center h-full text-zinc-500 dark:text-white/40 text-sm gap-2">
-                            <span>无法找到该代币的 DexScreener 图表</span>
-                            {isV4ID && <span className="text-xs opacity-60 px-8 text-center">V4 池暂未被收录，且未找到关联 Token 的其他交易对</span>}
+                            <span>无效的合约地址</span>
                         </div>
                     )}
                 </div>
