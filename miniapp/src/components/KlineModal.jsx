@@ -65,33 +65,57 @@ export default function KlineModal({ open, onClose, theme, pool, chain }) {
 
         setResolving(true);
         const fetchPair = async () => {
+            // Helper to search pairs by token address
+            const searchByToken = async (addr) => {
+                if (!addr) return [];
+                try {
+                    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${addr}`);
+                    const data = await res.json();
+                    if (data?.pairs && Array.isArray(data.pairs)) {
+                        // Filter for same chain
+                        return data.pairs.filter(p => p.chainId === effectiveChain);
+                    }
+                } catch (e) {
+                    console.error("DexScreener API error:", e);
+                }
+                return [];
+            };
+
+            setResolving(true);
             try {
-                // Fetch pairs for the first token
-                const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${token0}`);
-                const data = await res.json();
+                // Try token0 first
+                let pairs = await searchByToken(token0);
 
-                if (data?.pairs && Array.isArray(data.pairs)) {
-                    // Filter for:
-                    // 1. Same Chain (bsc)
-                    // 2. Contains the other token (token1)
-                    // 3. DEX is PancakeSwap (optional, but safe)
-                    const targetPair = data.pairs.find(p =>
-                        p.chainId === effectiveChain &&
-                        p.quoteToken?.address?.toLowerCase() === token1.toLowerCase()
-                    );
+                // If no pairs found for token0, try token1
+                if (pairs.length === 0 && token1) {
+                    pairs = await searchByToken(token1);
+                }
 
-                    if (targetPair?.pairAddress) {
-                        setResolvedAddress(targetPair.pairAddress);
+                if (pairs.length > 0) {
+                    // Sort pairs by liquidity (USD) descending to find the "main" pair
+                    pairs.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
+
+                    // 1. Try to find exact match for the other token (if we successfully filtered by one token)
+                    // Note: This logic is tricky if we switched tokens, so let's simplify:
+                    // Just find the pair with the HIGHEST liquidity that involves one of our tokens.
+                    // This is usually what the user wants to see for price action.
+
+                    const bestPair = pairs[0];
+                    if (bestPair && bestPair.pairAddress) {
+                        setResolvedAddress(bestPair.pairAddress);
                     } else {
-                        // If exact match not found, fallback to poolAddress
+                        // Fallback to poolAddress (will likely fail for V4 ID, but it's the last resort)
                         setResolvedAddress(poolAddress);
                     }
                 } else {
-                    setResolvedAddress(poolAddress);
+                    // No pairs found at all on DexScreener for these tokens on this chain
+                    // Do NOT set resolvedAddress to poolAddress (V4 ID), because we know it fails.
+                    // Leave it null to show "Not Found" message.
+                    setResolvedAddress(null);
                 }
             } catch (e) {
-                console.error("DexScreener API error:", e);
-                setResolvedAddress(poolAddress);
+                console.error("Pair resolution failed:", e);
+                setResolvedAddress(null);
             } finally {
                 setResolving(false);
             }
@@ -131,7 +155,7 @@ export default function KlineModal({ open, onClose, theme, pool, chain }) {
                         <button
                             type="button"
                             onClick={onClose}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-100 text-zinc-600 transition hover:bg-zinc-200 active:bg-zinc-300 dark:bg-white/10 dark:text-white/70 dark:hover:bg-white/20 dark:active:bg-white/25"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-100 text-zinc-600 transition hover:bg-zinc-200 active:bg-zinc-300 dark:bg-zinc-800 dark:text-white dark:hover:bg-zinc-700 dark:active:bg-zinc-600"
                             aria-label="关闭"
                         >
                             <Icon path={icons.close} className="h-5 w-5" />
@@ -142,8 +166,9 @@ export default function KlineModal({ open, onClose, theme, pool, chain }) {
                 {/* Iframe Container */}
                 <div className="flex-1 w-full bg-[#111318] relative">
                     {resolving ? (
-                        <div className="flex items-center justify-center h-full text-zinc-500 dark:text-white/40 text-sm animate-pulse">
-                            正在寻找 DexScreener 图表...
+                        <div className="flex flex-col items-center justify-center h-full text-zinc-500 dark:text-white/40 text-sm animate-pulse gap-2">
+                            <span>正在寻找 DexScreener 图表...</span>
+                            <span className="text-xs opacity-60">搜索最佳流动性交易对</span>
                         </div>
                     ) : resolvedAddress ? (
                         <iframe
@@ -153,8 +178,9 @@ export default function KlineModal({ open, onClose, theme, pool, chain }) {
                             allowFullScreen
                         />
                     ) : (
-                        <div className="flex items-center justify-center h-full text-zinc-500 dark:text-white/40 text-sm">
-                            无效的合约地址
+                        <div className="flex flex-col items-center justify-center h-full text-zinc-500 dark:text-white/40 text-sm gap-2">
+                            <span>无法找到该代币的 DexScreener 图表</span>
+                            {isV4ID && <span className="text-xs opacity-60 px-8 text-center">V4 池暂未被收录，且未找到关联 Token 的其他交易对</span>}
                         </div>
                     )}
                 </div>
