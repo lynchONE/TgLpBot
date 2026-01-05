@@ -109,6 +109,17 @@ function parseNullableNumber(value) {
     return Math.max(0, n);
 }
 
+function parseMetricNumber(value) {
+    if (value === null || value === undefined || value === '') return NaN;
+    const raw = typeof value === 'string' ? value.replace(/,/g, '').trim() : value;
+    const direct = Number(raw);
+    if (Number.isFinite(direct)) return direct;
+    const match = String(value).match(/-?\d+(\.\d+)?/);
+    if (!match) return NaN;
+    const parsed = Number(match[0]);
+    return Number.isFinite(parsed) ? parsed : NaN;
+}
+
 function normalizeHotPoolsFilter(value) {
     const base = { ...defaultHotPoolsFilter };
     if (!value || typeof value !== 'object') return base;
@@ -168,7 +179,7 @@ const Icon = ({ path, className = '' }) => (
 const icons = {
     bot: 'M12 2a2 2 0 012 2v1h1a3 3 0 013 3v7a7 7 0 11-14 0V8a3 3 0 013-3h1V4a2 2 0 012-2zm-4 7a1.25 1.25 0 100 2.5A1.25 1.25 0 008 9zm8 0a1.25 1.25 0 100 2.5A1.25 1.25 0 0016 9zm-7.5 6.5h7a3.5 3.5 0 01-7 0z',
     chart: 'M4 19h16v2H2V3h2v16zm4-2H6v-6h2v6zm5 0h-2V7h2v10zm5 0h-2v-4h2v4z',
-    gear: 'M12 8.25a3.75 3.75 0 100 7.5 3.75 3.75 0 000-7.5zm9 3.75l-1.9.95a7.9 7.9 0 01-.5 1.2l.7 2.03-2.12 2.12-2.03-.7c-.38.2-.79.37-1.2.5L12 21l-1.95-1.9c-.41-.13-.82-.3-1.2-.5l-2.03.7-2.12-2.12.7-2.03c-.2-.38-.37-.79-.5-1.2L3 12l1.9-1.95c.13-.41.3-.82.5-1.2l-.7-2.03 2.12-2.12 2.03.7c.38-.2.79-.37 1.2-.5L12 3l1.95 1.9c.41.13.82.3 1.2.5l2.03-.7 2.12 2.12-.7 2.03c.2.38.37.79.5 1.2L21 12z',
+    filter: 'M4 5h16l-6.5 7.5v5l-3 1.5v-6.5L4 5z',
     moon: 'M12 3a9 9 0 109 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 01-4.4 2.26 5.403 5.403 0 01-3.14-9.8c-.44-.06-.9-.1-1.36-.1z',
     sun: 'M12 7a5 5 0 100 10 5 5 0 000-10zM2 13h2a1 1 0 100-2H2a1 1 0 100 2zm18 0h2a1 1 0 100-2h-2a1 1 0 100 2zM11 2v2a1 1 0 102 0V2a1 1 0 10-2 0zm0 18v2a1 1 0 102 0v-2a1 1 0 10-2 0zM5.99 4.58a1 1 0 10-1.41 1.41l1.06 1.06a1 1 0 001.41-1.41L5.99 4.58zm12.37 12.37a1 1 0 10-1.41 1.41l1.06 1.06a1 1 0 001.41-1.41l-1.06-1.06zm1.06-10.96a1 1 0 10-1.41-1.41l-1.06 1.06a1 1 0 001.41 1.41l1.06-1.06zM7.05 18.36a1 1 0 10-1.41-1.41l-1.06 1.06a1 1 0 001.41 1.41l1.06-1.06z',
     close: 'M6.225 4.811a1 1 0 011.414 0L12 9.172l4.361-4.361a1 1 0 111.414 1.414L13.414 10.586l4.361 4.361a1 1 0 01-1.414 1.414L12 12l-4.361 4.361a1 1 0 01-1.414-1.414l4.361-4.361-4.361-4.361a1 1 0 010-1.414z',
@@ -329,10 +340,10 @@ export default function App() {
         const minTvl = hotPoolsFilter.minTvl;
         const minVolume = hotPoolsFilter.minVolume;
         return hotPoolsRows.filter((row) => {
-            const fees = Number(row?.total_fees ?? 0);
-            const feeRate = Number(row?.fee_rate ?? 0);
-            const tvl = Number(row?.current_pool_value ?? 0);
-            const volume = Number(row?.total_volume ?? 0);
+            const fees = parseMetricNumber(row?.total_fees);
+            const feeRate = parseMetricNumber(row?.fee_rate);
+            const tvl = parseMetricNumber(row?.current_pool_value);
+            const volume = parseMetricNumber(row?.total_volume);
             if (Number.isFinite(minFees) && fees < minFees) return false;
             if (Number.isFinite(minFeeRate) && feeRate < minFeeRate) return false;
             if (Number.isFinite(minTvl) && tvl < minTvl) return false;
@@ -342,8 +353,8 @@ export default function App() {
     }, [hotPoolsFilter, hotPoolsFilterEnabled, hotPoolsRows]);
 
     const hotPoolsFilterLabel = useMemo(() => {
-        if (!hotPoolsFilterEnabled) return '';
-        return `${hotPoolsVisibleRows.length}/${hotPoolsRows.length}`;
+        if (!hotPoolsFilterEnabled) return '筛选关闭';
+        return `筛选 ${hotPoolsVisibleRows.length}/${hotPoolsRows.length}`;
     }, [hotPoolsFilterEnabled, hotPoolsRows.length, hotPoolsVisibleRows.length]);
 
     // 构建热门池子的历史数据映射 (protocol_version:pool_address -> previous data)
@@ -1025,7 +1036,7 @@ export default function App() {
                                     aria-label="Filter"
                                     title="Filter"
                                 >
-                                    <Icon path={icons.gear} className="h-4 w-4" />
+                                    <Icon path={icons.filter} className="h-4 w-4" />
                                     {hotPoolsFilterEnabled ? (
                                         <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-white dark:ring-[#111318]" />
                                     ) : null}
@@ -1074,7 +1085,7 @@ export default function App() {
 
             {isHotPools && !hotPoolsLoading && !hotPoolsError && hotPoolsData && hotPoolsRows.length > 0 && hotPoolsFilterEnabled && hotPoolsVisibleRows.length === 0 ? (
                 <div className="mb-4 rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                    No pools match the filter.
+                    筛选后暂无热门池子数据。
                 </div>
             ) : null}
 
@@ -1350,7 +1361,7 @@ export default function App() {
                     <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
                         <div className="flex items-center justify-between">
                             <div className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 p-2 text-zinc-700 dark:border-white/10 dark:bg-white/5 dark:text-white/80">
-                                <Icon path={icons.gear} className="h-4 w-4" />
+                                <Icon path={icons.filter} className="h-4 w-4" />
                             </div>
                             <button
                                 type="button"
@@ -1372,17 +1383,17 @@ export default function App() {
                                             ? 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/25 dark:text-emerald-200'
                                             : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
                                             }`}
-                                        aria-label="Toggle filter"
-                                        title="Toggle filter"
+                                        aria-label="切换筛选"
+                                        title="切换筛选"
                                     >
                                         <span className={`h-2 w-2 rounded-full ${hotPoolsFilterDraft.enabled ? 'bg-emerald-500' : 'bg-zinc-400'}`} />
-                                        <span className="text-[10px] tabular-nums">{hotPoolsFilterDraft.enabled ? 'ON' : 'OFF'}</span>
+                                        <span className="text-[10px] tabular-nums">{hotPoolsFilterDraft.enabled ? '开启' : '关闭'}</span>
                                     </button>
                                 </div>
 
                                 <div className="mt-3 grid grid-cols-2 gap-3">
                                     <div>
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">fees >= (USD)</div>
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">手续费 >= (USD)</div>
                                         <input
                                             value={hotPoolsFilterDraft.minFees}
                                             onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFees: e.target.value }))}
@@ -1392,7 +1403,7 @@ export default function App() {
                                         />
                                     </div>
                                     <div>
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">fee_rate >= (%)</div>
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">费用率 >= (%)</div>
                                         <input
                                             value={hotPoolsFilterDraft.minFeeRate}
                                             onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFeeRate: e.target.value }))}
@@ -1402,7 +1413,7 @@ export default function App() {
                                         />
                                     </div>
                                     <div>
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">tvl >= (USD)</div>
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">TVL >= (USD)</div>
                                         <input
                                             value={hotPoolsFilterDraft.minTvl}
                                             onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minTvl: e.target.value }))}
@@ -1412,7 +1423,7 @@ export default function App() {
                                         />
                                     </div>
                                     <div>
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">volume >= (USD)</div>
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">交易量 >= (USD)</div>
                                         <input
                                             value={hotPoolsFilterDraft.minVolume}
                                             onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minVolume: e.target.value }))}
@@ -1428,28 +1439,31 @@ export default function App() {
                                         type="button"
                                         onClick={applyHotPoolsFilter}
                                         className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-600 active:bg-emerald-700"
-                                        aria-label="Apply"
-                                        title="Apply"
+                                        aria-label="应用"
+                                        title="应用"
                                     >
                                         <Icon path={icons.check} className="h-4 w-4" />
+                                        应用
                                     </button>
                                     <button
                                         type="button"
                                         onClick={resetHotPoolsFilter}
                                         className="inline-flex items-center gap-2 rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
-                                        aria-label="Reset"
-                                        title="Reset"
+                                        aria-label="默认"
+                                        title="默认"
                                     >
                                         <Icon path={icons.reset} className="h-4 w-4" />
+                                        默认
                                     </button>
                                     <button
                                         type="button"
                                         onClick={disableHotPoolsFilter}
                                         className="inline-flex items-center gap-2 rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
-                                        aria-label="No filter"
-                                        title="No filter"
+                                        aria-label="不筛选"
+                                        title="不筛选"
                                     >
                                         <Icon path={icons.ban} className="h-4 w-4" />
+                                        不筛选
                                     </button>
                                 </div>
                             </div>
