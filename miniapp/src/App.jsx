@@ -185,7 +185,6 @@ const icons = {
     close: 'M6.225 4.811a1 1 0 011.414 0L12 9.172l4.361-4.361a1 1 0 111.414 1.414L13.414 10.586l4.361 4.361a1 1 0 01-1.414 1.414L12 12l-4.361 4.361a1 1 0 01-1.414-1.414l4.361-4.361-4.361-4.361a1 1 0 010-1.414z',
     check: 'M9 16.17L4.83 12 3.41 13.41 9 19l12-12-1.41-1.41L9 16.17z',
     reset: 'M12 5V2L7 7l5 5V9a5 5 0 11-5 5H5a7 7 0 107-7z',
-    ban: 'M12 2a10 10 0 100 20 10 10 0 000-20zm6 10a5.96 5.96 0 01-1.26 3.67L8.33 7.26A5.96 5.96 0 0112 6a6 6 0 016 6zm-12 0a5.96 5.96 0 011.26-3.67l8.41 8.41A5.96 5.96 0 0112 18a6 6 0 01-6-6z',
 };
 
 export default function App() {
@@ -225,7 +224,8 @@ export default function App() {
     const [klinePool, setKlinePool] = useState(null);
     const [openPositionPool, setOpenPositionPool] = useState(null);
     const [openPositionAmount, setOpenPositionAmount] = useState('');
-    const [openPositionRange, setOpenPositionRange] = useState('');
+    const [openPositionRangeLower, setOpenPositionRangeLower] = useState('');
+    const [openPositionRangeUpper, setOpenPositionRangeUpper] = useState('');
     const [openPositionAllowSwap, setOpenPositionAllowSwap] = useState(false);
     const [openPositionError, setOpenPositionError] = useState('');
     const [openPositionLoading, setOpenPositionLoading] = useState(false);
@@ -724,10 +724,16 @@ export default function App() {
         setHotPoolsFilterOpen(false);
     };
 
-    const disableHotPoolsFilter = () => {
-        const next = { ...hotPoolsFilter, enabled: false };
-        setHotPoolsFilter(next);
-        storage.set(STORAGE_HOT_POOLS_FILTER, JSON.stringify(next));
+    const clearHotPoolsFilter = () => {
+        const cleared = normalizeHotPoolsFilter({
+            enabled: false,
+            minFees: null,
+            minFeeRate: null,
+            minTvl: null,
+            minVolume: null,
+        });
+        setHotPoolsFilter(cleared);
+        storage.set(STORAGE_HOT_POOLS_FILTER, JSON.stringify(cleared));
         setHotPoolsFilterOpen(false);
     };
 
@@ -741,22 +747,17 @@ export default function App() {
         { label: '1% / 3%', value: '1 3' },
     ];
 
-    const parseRangeInput = (raw) => {
-        const text = String(raw || '').trim();
-        if (!text) return null;
-        const hasSym = /(\+\/?-|±|正负)/.test(text);
-        const matches = text.match(/-?\d+(?:\.\d+)?/g) || [];
-        const numbers = matches.map((v) => Math.abs(Number(v))).filter((v) => Number.isFinite(v));
-        if (!numbers.length) return null;
-        if (hasSym || numbers.length === 1) {
-            return { lower: numbers[0], upper: numbers[0] };
-        }
-        return { lower: numbers[0], upper: numbers[1] };
+    const parseRangeInput = (lowerRaw, upperRaw) => {
+        const lower = Number(String(lowerRaw || '').trim());
+        const upper = Number(String(upperRaw || '').trim());
+        if (!Number.isFinite(lower) || !Number.isFinite(upper)) return null;
+        return { lower: Math.abs(lower), upper: Math.abs(upper) };
     };
 
     const resetOpenPositionDraft = () => {
         setOpenPositionAmount('');
-        setOpenPositionRange('+-5');
+        setOpenPositionRangeLower('');
+        setOpenPositionRangeUpper('');
         setOpenPositionAllowSwap(false);
         setOpenPositionError('');
         setOpenPositionSuccess('');
@@ -783,7 +784,7 @@ export default function App() {
             setOpenPositionError('请输入有效的金额。');
             return;
         }
-        const range = parseRangeInput(openPositionRange);
+        const range = parseRangeInput(openPositionRangeLower, openPositionRangeUpper);
         if (!range || range.lower <= 0 || range.upper <= 0 || range.lower >= 100 || range.upper >= 100) {
             setOpenPositionError('区间无效，请输入 0-100 之间的百分比。');
             return;
@@ -1441,13 +1442,13 @@ export default function App() {
                                     </button>
                                     <button
                                         type="button"
-                                        onClick={disableHotPoolsFilter}
+                                        onClick={clearHotPoolsFilter}
                                         className="inline-flex items-center gap-2 rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
-                                        aria-label="不筛选"
-                                        title="不筛选"
+                                        aria-label="清空条件"
+                                        title="清空条件"
                                     >
-                                        <Icon path={icons.ban} className="h-4 w-4" />
-                                        不筛选
+                                        <Icon path={icons.close} className="h-4 w-4" />
+                                        清空条件
                                     </button>
                                 </div>
                             </div>
@@ -1578,22 +1579,43 @@ export default function App() {
                             <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                 <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">自定义区间 (%)</div>
                                 <input
-                                    value={openPositionRange}
-                                    onChange={(e) => {
-                                        setOpenPositionRange(e.target.value);
-                                        setOpenPositionError('');
-                                    }}
-                                    inputMode="text"
-                                    className="mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
-                                    placeholder="例如 ±5 / 1 3"
-                                />
+                                <div className="mt-2 grid grid-cols-2 gap-2">
+                                    <input
+                                        value={openPositionRangeLower}
+                                        onChange={(e) => {
+                                            setOpenPositionRangeLower(e.target.value);
+                                            setOpenPositionError('');
+                                        }}
+                                        inputMode="decimal"
+                                        className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                        placeholder="下限 %"
+                                    />
+                                    <input
+                                        value={openPositionRangeUpper}
+                                        onChange={(e) => {
+                                            setOpenPositionRangeUpper(e.target.value);
+                                            setOpenPositionError('');
+                                        }}
+                                        inputMode="decimal"
+                                        className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                        placeholder="上限 %"
+                                    />
+                                </div>
                                 <div className="mt-2 flex flex-wrap gap-2">
                                     {quickRangeOptions.map((option) => (
                                         <button
                                             key={option.value}
                                             type="button"
                                             onClick={() => {
-                                                setOpenPositionRange(option.value);
+                                                if (option.value.includes(' ')) {
+                                                    const parts = option.value.split(/\s+/);
+                                                    setOpenPositionRangeLower(parts[0] || '');
+                                                    setOpenPositionRangeUpper(parts[1] || '');
+                                                } else {
+                                                    const normalized = option.value.replace(/[^0-9.]/g, '');
+                                                    setOpenPositionRangeLower(normalized);
+                                                    setOpenPositionRangeUpper(normalized);
+                                                }
                                                 setOpenPositionError('');
                                             }}
                                             className="rounded-xl px-3 py-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-500/30 bg-gradient-to-r from-emerald-50 via-emerald-100/60 to-sky-100/60 hover:from-emerald-100 hover:via-emerald-200/70 hover:to-sky-200/70 dark:text-emerald-200 dark:ring-emerald-400/30 dark:from-emerald-500/10 dark:via-emerald-400/10 dark:to-sky-400/10"
@@ -1603,7 +1625,7 @@ export default function App() {
                                     ))}
                                 </div>
                                 <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                    支持对称输入（±5）或非对称输入（1 3 表示下 1% 上 3%）。
+                                    请输入下限与上限百分比（如 1 / 3 表示下 1% 上 3%）。
                                 </div>
                             </div>
 
