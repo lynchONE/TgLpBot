@@ -1,6 +1,5 @@
 package trade
 
-import 
 import (
 	"TgLpBot/base/convert"
 	"TgLpBot/base/database"

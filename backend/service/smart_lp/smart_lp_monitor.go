@@ -1,6 +1,5 @@
 package smart_lp
 
-import 
 import (
 	"TgLpBot/base/blockchain"
 	"TgLpBot/base/clickhouse"

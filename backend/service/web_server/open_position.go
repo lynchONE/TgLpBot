@@ -195,7 +195,12 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		poolInfo, err = poolService.GetPoolInfo(poolAddress)
 	}
 	if err != nil || poolInfo == nil {
-		http.Error(w, "failed to load pool info", http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(openPositionError{
+			Code:    "pool_info_error",
+			Message: strings.TrimSpace(err.Error()),
+		})
 		return
 	}
 	if poolInfo.TickSpacing <= 0 {

@@ -1,6 +1,5 @@
 package pool
 
-import 
 import (
 	"TgLpBot/base/blockchain"
 	"TgLpBot/base/config"

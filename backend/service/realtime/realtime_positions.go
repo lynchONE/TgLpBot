@@ -357,7 +357,7 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 
 	// Preload tasks for display enhancements (range %, out-of-range timer, etc.)
 	var tasks []models.StrategyTask
-	if err := database.DB.Where("user_id = ? AND (v3_token_id <> '' OR v3_position_manager_address <> '')", userID).Find(&tasks).Error; err == nil {
+	if err := database.DB.Where("user_id = ? AND (v3_token_id <> '' OR v3_position_manager_address <> '') AND status <> ?", userID, models.StrategyStatusStopped).Find(&tasks).Error; err == nil {
 		for _, t := range tasks {
 			addV3NPM(resolveTaskNPM(t))
 
@@ -386,87 +386,89 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 	positions := make([]RealtimePosition, 0, 8)
 	seenV3 := make(map[string]struct{})
 
-	// 1) V3 positions via NPM balanceOf/tokenOfOwnerByIndex
-	addV3NPM(config.AppConfig.PancakeV3PositionManagerAddress)
-	addV3NPM(config.AppConfig.UniswapV3PositionManagerAddress)
+	// 1) V3 positions via NPM balanceOf/tokenOfOwnerByIndex (optional; can be heavy).
+	if config.AppConfig.RealtimeV3NFTScan && config.AppConfig.RealtimeV3NFTScanMax > 0 {
+		addV3NPM(config.AppConfig.PancakeV3PositionManagerAddress)
+		addV3NPM(config.AppConfig.UniswapV3PositionManagerAddress)
 
-	npmAddrs := make([]common.Address, 0, len(v3NPMSet))
-	for addr := range v3NPMSet {
-		npmAddrs = append(npmAddrs, addr)
-	}
-	sort.Slice(npmAddrs, func(i, j int) bool {
-		return strings.ToLower(npmAddrs[i].Hex()) < strings.ToLower(npmAddrs[j].Hex())
-	})
+		npmAddrs := make([]common.Address, 0, len(v3NPMSet))
+		for addr := range v3NPMSet {
+			npmAddrs = append(npmAddrs, addr)
+		}
+		sort.Slice(npmAddrs, func(i, j int) bool {
+			return strings.ToLower(npmAddrs[i].Hex()) < strings.ToLower(npmAddrs[j].Hex())
+		})
 
-	for _, npmAddr := range npmAddrs {
-		pm, err := blockchain.NewV3PositionManager(npmAddr, blockchain.Client)
-		if err != nil {
-			resp.Warnings = append(resp.Warnings, fmt.Sprintf("初始化 V3 PositionManager 失败: %s", npmAddr.Hex()))
-			continue
-		}
-
-		bal, err := pm.BalanceOf(nil, walletAddr)
-		if err != nil {
-			resp.Warnings = append(resp.Warnings, fmt.Sprintf("读取 V3 仓位失败（%s）：%v", npmAddr.Hex(), err))
-			continue
-		}
-		if bal == nil || bal.Sign() == 0 {
-			continue
-		}
-		max := bal.Int64()
-		if max > 50 {
-			max = 50
-		}
-		tokenIDs := make([]*big.Int, 0, int(max))
-		var tokenIDsRawMu sync.Mutex
-		tokenIDsRaw := make([]*big.Int, 0, int(max))
-
-		// Parallelize tokenOfOwnerByIndex() calls to reduce cold-load latency.
-		idGroup, _ := errgroup.WithContext(context.Background())
-		idGroup.SetLimit(8)
-		for i := int64(0); i < max; i++ {
-			idx := i
-			idGroup.Go(func() error {
-				tokenId, err := pm.TokenOfOwnerByIndex(nil, walletAddr, big.NewInt(idx))
-				if err != nil || tokenId == nil || tokenId.Sign() == 0 {
-					return nil
-				}
-				tokenIDsRawMu.Lock()
-				tokenIDsRaw = append(tokenIDsRaw, new(big.Int).Set(tokenId))
-				tokenIDsRawMu.Unlock()
-				return nil
-			})
-		}
-		_ = idGroup.Wait()
-
-		for _, tokenId := range tokenIDsRaw {
-			seenKey := strings.TrimSpace(tokenId.String()) + "|" + strings.ToLower(npmAddr.Hex())
-			if _, ok := seenV3[seenKey]; ok {
+		for _, npmAddr := range npmAddrs {
+			pm, err := blockchain.NewV3PositionManager(npmAddr, blockchain.Client)
+			if err != nil {
+				resp.Warnings = append(resp.Warnings, fmt.Sprintf("初始化 V3 PositionManager 失败: %s", npmAddr.Hex()))
 				continue
 			}
-			seenV3[seenKey] = struct{}{}
-			tokenIDs = append(tokenIDs, tokenId)
-		}
 
-		var positionsMu sync.Mutex
-		g, _ := errgroup.WithContext(context.Background())
-		g.SetLimit(6)
-		for _, tokenId := range tokenIDs {
-			tid := new(big.Int).Set(tokenId)
-			g.Go(func() error {
-				p, warn := s.buildV3Position(pm, npmAddr, walletAddr, tid, taskByV3Token, taskByV3TokenID)
-				positionsMu.Lock()
-				defer positionsMu.Unlock()
-				if warn != "" {
-					resp.Warnings = append(resp.Warnings, warn)
+			bal, err := pm.BalanceOf(nil, walletAddr)
+			if err != nil {
+				resp.Warnings = append(resp.Warnings, fmt.Sprintf("读取 V3 仓位失败（%s）：%v", npmAddr.Hex(), err))
+				continue
+			}
+			if bal == nil || bal.Sign() == 0 {
+				continue
+			}
+			max := bal.Int64()
+			if max > int64(config.AppConfig.RealtimeV3NFTScanMax) {
+				max = int64(config.AppConfig.RealtimeV3NFTScanMax)
+			}
+			tokenIDs := make([]*big.Int, 0, int(max))
+			var tokenIDsRawMu sync.Mutex
+			tokenIDsRaw := make([]*big.Int, 0, int(max))
+
+			// Parallelize tokenOfOwnerByIndex() calls to reduce cold-load latency.
+			idGroup, _ := errgroup.WithContext(context.Background())
+			idGroup.SetLimit(8)
+			for i := int64(0); i < max; i++ {
+				idx := i
+				idGroup.Go(func() error {
+					tokenId, err := pm.TokenOfOwnerByIndex(nil, walletAddr, big.NewInt(idx))
+					if err != nil || tokenId == nil || tokenId.Sign() == 0 {
+						return nil
+					}
+					tokenIDsRawMu.Lock()
+					tokenIDsRaw = append(tokenIDsRaw, new(big.Int).Set(tokenId))
+					tokenIDsRawMu.Unlock()
+					return nil
+				})
+			}
+			_ = idGroup.Wait()
+
+			for _, tokenId := range tokenIDsRaw {
+				seenKey := strings.TrimSpace(tokenId.String()) + "|" + strings.ToLower(npmAddr.Hex())
+				if _, ok := seenV3[seenKey]; ok {
+					continue
 				}
-				if p != nil {
-					positions = append(positions, *p)
-				}
-				return nil
-			})
+				seenV3[seenKey] = struct{}{}
+				tokenIDs = append(tokenIDs, tokenId)
+			}
+
+			var positionsMu sync.Mutex
+			g, _ := errgroup.WithContext(context.Background())
+			g.SetLimit(6)
+			for _, tokenId := range tokenIDs {
+				tid := new(big.Int).Set(tokenId)
+				g.Go(func() error {
+					p, warn := s.buildV3Position(pm, npmAddr, walletAddr, tid, taskByV3Token, taskByV3TokenID)
+					positionsMu.Lock()
+					defer positionsMu.Unlock()
+					if warn != "" {
+						resp.Warnings = append(resp.Warnings, warn)
+					}
+					if p != nil {
+						positions = append(positions, *p)
+					}
+					return nil
+				})
+			}
+			_ = g.Wait()
 		}
-		_ = g.Wait()
 	}
 
 	// 1b) V3 positions referenced by DB tasks (covers staked NFTs / non-enumerable NPMs).

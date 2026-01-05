@@ -1,6 +1,5 @@
 package clickhouse
 
-import 
 import (
 	"TgLpBot/base/config"
 	"context"

@@ -1,6 +1,5 @@
 package user
 
-import 
 import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"

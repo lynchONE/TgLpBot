@@ -1,6 +1,5 @@
 package auto_lp
 
-import 
 import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"

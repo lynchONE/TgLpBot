@@ -1,6 +1,5 @@
 package wallet
 
-import 
 import (
 	"TgLpBot/base/blockchain"
 	"TgLpBot/base/config"

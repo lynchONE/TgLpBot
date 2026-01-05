@@ -95,7 +95,9 @@ type Config struct {
 	UniswapV3SwapRouter string
 
 	// Mini App / Realtime positions
-	V4NFTScanFromBlock uint64
+	V4NFTScanFromBlock   uint64
+	RealtimeV3NFTScan    bool
+	RealtimeV3NFTScanMax int
 
 	// Auto LP (PoolM scanner + optional executor)
 	AutoLPEnabled                   bool
@@ -172,6 +174,7 @@ func LoadConfig() error {
 	maxGasPrice, _ := strconv.ParseInt(getEnv("MAX_GAS_PRICE", "5000000000"), 10, 64)
 	gasLimit, _ := strconv.ParseUint(getEnv("GAS_LIMIT", "500000"), 10, 64)
 	v4NFTScanFromBlock, _ := strconv.ParseUint(strings.TrimSpace(getEnv("V4_NFT_SCAN_FROM_BLOCK", "0")), 10, 64)
+	realtimeV3NFTScanMax, _ := strconv.Atoi(strings.TrimSpace(getEnv("REALTIME_V3_NFT_SCAN_MAX", "20")))
 	autoLPShortTF, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_TIMEFRAME_SHORT_MINUTES", "5")))
 	autoLPLongTF, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_TIMEFRAME_LONG_MINUTES", "60")))
 	autoLPScanInterval, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_SCAN_INTERVAL_SECONDS", "60")))
@@ -299,7 +302,9 @@ func LoadConfig() error {
 		UniswapV3SwapRouter: getEnv("UNISWAP_V3_SWAP_ROUTER", "0xB971eF87ede563556b2ED4b1C0b0019111Dd85d2"),
 
 		// Mini App / Realtime positions
-		V4NFTScanFromBlock: v4NFTScanFromBlock,
+		V4NFTScanFromBlock:   v4NFTScanFromBlock,
+		RealtimeV3NFTScan:    getEnvBool("REALTIME_V3_NFT_SCAN", false),
+		RealtimeV3NFTScanMax: realtimeV3NFTScanMax,
 
 		// Auto LP (PoolM scanner + optional executor)
 		AutoLPEnabled:                   getEnvBool("AUTO_LP_ENABLED", false),
@@ -384,6 +389,8 @@ func LoadConfig() error {
 	log.Printf("   - MySQL: %s@%s:%s/%s", AppConfig.MySQLUser, AppConfig.MySQLHost, AppConfig.MySQLPort, AppConfig.MySQLDatabase)
 	log.Printf("   - Redis: %s:%s (DB: %d)", AppConfig.RedisHost, AppConfig.RedisPort, AppConfig.RedisDB)
 	log.Printf("   - V4 NFT Scan From Block: %d", AppConfig.V4NFTScanFromBlock)
+	log.Printf("   - Realtime V3 NFT Scan: %v", AppConfig.RealtimeV3NFTScan)
+	log.Printf("   - Realtime V3 NFT Scan Max: %d", AppConfig.RealtimeV3NFTScanMax)
 	log.Printf("   - AutoLP Enabled: %v", AppConfig.AutoLPEnabled)
 	log.Printf("   - AutoLP Execute Enabled: %v", AppConfig.AutoLPExecuteEnabled)
 	log.Printf("   - AutoLP Debug: %v", AppConfig.AutoLPDebug)
