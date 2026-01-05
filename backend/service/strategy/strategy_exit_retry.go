@@ -15,6 +15,7 @@ const (
 	ExitActionManualStop = "manual_stop"
 	ExitActionStopLoss   = "stoploss"
 	ExitActionRebalance  = "rebalance"
+	ExitActionCooldown   = "cooldown"
 
 	exitMaxAttempts = 3
 )
@@ -155,6 +156,8 @@ func (s *StrategyService) processExitRetry(task *models.StrategyTask) bool {
 		s.executeRebalanceAfterExit(task, now)
 	case ExitActionStopLoss:
 		s.finishStopAfterExit(task, now, reason, txHashes)
+	case ExitActionCooldown:
+		s.finishCooldownAfterExit(task, now, reason, txHashes)
 	case ExitActionManualStop:
 		title := "🛑 手动停止"
 		if pendingReason != "" {
@@ -232,7 +235,11 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 		return fmt.Errorf("rebalance tick query failed: %w", err)
 	}
 
-	tickLower, tickUpper, err := s.calculateRangeFromPercentage(task, currentTick)
+	mult := task.NextRangeMultiplier
+	if mult <= 0 {
+		mult = 1.0
+	}
+	tickLower, tickUpper, err := s.calculateRangeFromPercentageWithMultiplier(task, currentTick, mult)
 	if err != nil {
 		log.Printf("[Strategy] 任务 #%d 计算新 tick 范围失败: %v", task.ID, err)
 		return fmt.Errorf("rebalance range calc failed: %w", err)
@@ -260,6 +267,9 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 		"last_exit_time":              &now,
 		"current_liquidity":           enterRes.CurrentLiquidity,
 		"exit_liquidity_removed":      false,
+		"next_range_multiplier":       1.0,
+		"cooldown_until":              nil,
+		"cooldown_reason":             "",
 		"v3_position_manager_address": enterRes.V3PositionManagerAddress,
 		"v3_token_id":                 enterRes.V3TokenID,
 		"v4_token_id":                 enterRes.V4TokenID,
@@ -279,6 +289,9 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 	task.LastExitTime = &now
 	task.CurrentLiquidity = enterRes.CurrentLiquidity
 	task.ExitLiquidityRemoved = false
+	task.NextRangeMultiplier = 1.0
+	task.CooldownUntil = nil
+	task.CooldownReason = ""
 	task.V3PositionManagerAddress = enterRes.V3PositionManagerAddress
 	task.V3TokenID = enterRes.V3TokenID
 	task.V4TokenID = enterRes.V4TokenID
@@ -521,4 +534,86 @@ func (s *StrategyService) finishStopAfterExit(task *models.StrategyTask, now tim
 		}
 	}
 	s.notify(task.UserID, msg)
+}
+
+func (s *StrategyService) finishCooldownAfterExit(task *models.StrategyTask, now time.Time, title string, txHashes []string) {
+	if task == nil {
+		return
+	}
+
+	cooldownUntil := now.Add(autoModeCooldownDuration)
+	reason := strings.TrimSpace(title)
+	if reason == "" {
+		reason = "进入冷却"
+	}
+
+	updates := map[string]interface{}{
+		"status":                      models.StrategyStatusWaiting,
+		"last_exit_time":              &now,
+		"last_rebalance_at":           nil,
+		"current_liquidity":           "0",
+		"v3_position_manager_address": "",
+		"v3_token_id":                 "",
+		"v4_token_id":                 "",
+		"out_of_range_since":          nil,
+		"rebalance_pending":           false,
+		"rebalance_retry_count":       0,
+		"rebalance_next_retry_at":     nil,
+		"rebalance_last_error":        "",
+		"exit_liquidity_removed":      false,
+		"cooldown_until":              &cooldownUntil,
+		"cooldown_reason":             reason,
+		"range_break_up_streak":       0,
+		"range_break_down_streak":     0,
+		"next_range_multiplier":       1.0,
+		"error_message":               "",
+	}
+	_ = database.DB.Model(task).Updates(updates).Error
+
+	task.Status = models.StrategyStatusWaiting
+	task.LastExitTime = &now
+	task.LastRebalanceAt = nil
+	task.CurrentLiquidity = "0"
+	task.V3PositionManagerAddress = ""
+	task.V3TokenID = ""
+	task.V4TokenID = ""
+	task.OutOfRangeSince = nil
+	task.RebalancePending = false
+	task.RebalanceRetryCount = 0
+	task.RebalanceNextRetryAt = nil
+	task.RebalanceLastError = ""
+	task.ExitLiquidityRemoved = false
+	task.CooldownUntil = &cooldownUntil
+	task.CooldownReason = reason
+	task.RangeBreakUpStreak = 0
+	task.RangeBreakDownStreak = 0
+	task.NextRangeMultiplier = 1.0
+	task.ErrorMessage = ""
+
+	msg := fmt.Sprintf("⏸️ %s 完成，已撤出并兑换为 USDT。\n该池子进入冷却 1 小时（至 %s），期间不再开仓。", reason, cooldownUntil.Format("15:04:05"))
+	if len(txHashes) > 0 {
+		msg += "\n📝 *交易记录：*\n"
+		hasSwapTx := false
+		for i, txInfo := range txHashes {
+			parts := strings.Split(txInfo, "|")
+			if len(parts) == 2 {
+				desc := parts[0]
+				txHash := parts[1]
+				msg += fmt.Sprintf("%d. **%s**\n   [查看交易](https://bscscan.com/tx/%s)\n", i+1, desc, txHash)
+				if strings.Contains(desc, "→USDT") || strings.Contains(desc, "->USDT") {
+					hasSwapTx = true
+				}
+			} else {
+				msg += fmt.Sprintf("%d. [查看交易](https://bscscan.com/tx/%s)\n", i+1, txInfo)
+				if strings.Contains(txInfo, "→USDT") || strings.Contains(txInfo, "->USDT") {
+					hasSwapTx = true
+				}
+			}
+		}
+		if !hasSwapTx {
+			msg += "\nℹ️ 本次未产生兑换交易：钱包中该池子的非 USDT 代币余额为 0（无需兑换）。"
+		}
+	}
+	s.notify(task.UserID, msg)
+	s.notifyTaskCard(task.UserID, task.ID)
 }

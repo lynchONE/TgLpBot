@@ -78,8 +78,15 @@ type StrategyTask struct {
 	LastCheckTime   time.Time      `json:"last_check_time"`
 	ErrorMessage    string         `gorm:"type:text" json:"error_message"`
 
+	// Auto-mode guard state (persisted per task/pool)
+	RangeBreakUpStreak   int        `gorm:"default:0" json:"range_break_up_streak"`
+	RangeBreakDownStreak int        `gorm:"default:0" json:"range_break_down_streak"`
+	NextRangeMultiplier  float64    `gorm:"type:decimal(6,2);default:1.0" json:"next_range_multiplier"`
+	CooldownUntil        *time.Time `json:"cooldown_until"`
+	CooldownReason       string     `gorm:"type:text" json:"cooldown_reason"`
+
 	// Exit retry state (keep task Status as running when exit fails).
-	ExitPendingAction string     `gorm:"size:20;default:''" json:"exit_pending_action"` // manual_stop | stoploss | rebalance
+	ExitPendingAction string     `gorm:"size:20;default:''" json:"exit_pending_action"` // manual_stop | stoploss | rebalance | cooldown
 	ExitPendingReason string     `gorm:"type:text" json:"exit_pending_reason"`
 	ExitGasMultiplier float64    `gorm:"type:decimal(6,2);default:1.0" json:"exit_gas_multiplier"` // Gas multiplier for the next exit attempt (auto strategy may set to 2.0)
 	ExitRetryCount    int        `gorm:"default:0" json:"exit_retry_count"`                        // number of failed attempts
