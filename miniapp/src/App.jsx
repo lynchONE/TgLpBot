@@ -229,7 +229,6 @@ export default function App() {
     const [openPositionAllowSwap, setOpenPositionAllowSwap] = useState(false);
     const [openPositionError, setOpenPositionError] = useState('');
     const [openPositionLoading, setOpenPositionLoading] = useState(false);
-    const [openPositionSuccess, setOpenPositionSuccess] = useState('');
 
     const [adminUsers, setAdminUsers] = useState([]);
     const [adminUsersError, setAdminUsersError] = useState('');
@@ -351,11 +350,6 @@ export default function App() {
             return true;
         });
     }, [hotPoolsFilter, hotPoolsFilterEnabled, hotPoolsRows]);
-
-    const hotPoolsFilterLabel = useMemo(() => {
-        if (!hotPoolsFilterEnabled) return '筛选关闭';
-        return `筛选 ${hotPoolsVisibleRows.length}/${hotPoolsRows.length}`;
-    }, [hotPoolsFilterEnabled, hotPoolsRows.length, hotPoolsVisibleRows.length]);
 
     // 构建热门池子的历史数据映射 (protocol_version:pool_address -> previous data)
     const previousHotPoolsMap = useMemo(() => {
@@ -746,7 +740,6 @@ export default function App() {
         { label: '±10%', value: '±10' },
         { label: '1% / 3%', value: '1 3' },
     ];
-
     const parseRangeInput = (lowerRaw, upperRaw) => {
         const lower = Number(String(lowerRaw || '').trim());
         const upper = Number(String(upperRaw || '').trim());
@@ -760,7 +753,6 @@ export default function App() {
         setOpenPositionRangeUpper('');
         setOpenPositionAllowSwap(false);
         setOpenPositionError('');
-        setOpenPositionSuccess('');
     };
 
     const openPositionModal = (pool) => {
@@ -792,7 +784,6 @@ export default function App() {
 
         setOpenPositionLoading(true);
         setOpenPositionError('');
-        setOpenPositionSuccess('');
         try {
             const resp = await openPosition({
                 apiBaseUrl,
@@ -804,12 +795,12 @@ export default function App() {
                 rangeUpperPct: range.upper,
                 allowEntrySwap: openPositionAllowSwap,
             });
-            const hash = String(resp?.tx_hash || '').trim();
-            setOpenPositionSuccess(hash ? `开仓成功，交易哈希：${hash}` : '开仓成功，已提交链上交易。');
+            setOpenPositionPool(null);
+            resetOpenPositionDraft();
         } catch (e) {
             const msg = String(e?.message || e || '').trim();
-            if (msg.includes('entry swap required')) {
-                setOpenPositionError('该池子不含 USDT，需在机器人里确认兑换后才能开仓。');
+            if (msg.includes('entry swap required') || msg.includes('pool does not contain USDT')) {
+                setOpenPositionError('该池子不含 USDT，请开启“允许兑换”后重试。');
             } else {
                 setOpenPositionError(msg || '开仓失败，请稍后重试。');
             }
@@ -1001,10 +992,6 @@ export default function App() {
                         <div className="flex items-center justify-between gap-3">
                             <div>
                                 <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">费用排行</div>
-                                <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
-                                    {hotPoolsData?.updated_at ? `更新：${formatRelativeTime(hotPoolsData.updated_at, tick)}` : hotPoolsLoading ? '加载中...' : '暂无数据'}
-                                    {hotPoolsData && hotPoolsFilterLabel ? ` · ${hotPoolsFilterLabel}` : ''}
-                                </div>
                             </div>
                             <div className="flex items-center gap-2">
                                 <div className="flex shrink-0 rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5">
@@ -1657,12 +1644,6 @@ export default function App() {
                                     {openPositionError}
                                 </div>
                             ) : null}
-                            {openPositionSuccess ? (
-                                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-700 dark:text-emerald-200">
-                                    {openPositionSuccess}
-                                </div>
-                            ) : null}
-
                             <button
                                 type="button"
                                 onClick={handleOpenPosition}

@@ -222,7 +222,33 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
     };
 
     return (
-        <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+        <div className="relative rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+            {canTaskAction ? (
+                <div className="absolute right-4 top-4 z-20" ref={menuRef}>
+                    <button
+                        type="button"
+                        onClick={() => setMenuOpen((v) => !v)}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-white/70 text-zinc-700 hover:bg-white active:bg-white dark:border-white/10 dark:bg-[#0f1116] dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15"
+                        aria-label="任务操作"
+                        aria-expanded={menuOpen}
+                        disabled={pausePending}
+                    >
+                        <Icon path={icons.kebab} className="h-5 w-5" />
+                    </button>
+                    {menuOpen ? (
+                        <div className="absolute right-0 top-full z-20 mt-2 w-32 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-white/10 dark:bg-[#111318]">
+                            <button
+                                type="button"
+                                onClick={togglePause}
+                                disabled={pausePending}
+                                className="w-full px-3 py-2 text-left text-xs font-semibold text-zinc-800 hover:bg-zinc-100 active:bg-zinc-100 disabled:opacity-50 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/10"
+                            >
+                                {pausePending ? '处理中...' : taskPaused ? '恢复任务' : '暂停任务'}
+                            </button>
+                        </div>
+                    ) : null}
+                </div>
+            ) : null}
             <div className="flex items-start justify-between gap-3">
                 <div>
                     <div className="text-base font-semibold text-zinc-900 dark:text-white/90">{position?.title}</div>
@@ -241,38 +267,11 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
                         </span>
                     </div>
                 </div>
-                <div className="flex items-center gap-2">
-                    {canTaskAction ? (
-                        <div className="relative" ref={menuRef}>
-                            <button
-                                type="button"
-                                onClick={() => setMenuOpen((v) => !v)}
-                                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-white/70 text-zinc-700 hover:bg-white active:bg-white dark:border-white/10 dark:bg-[#0f1116] dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                aria-label="任务操作"
-                                aria-expanded={menuOpen}
-                                disabled={pausePending}
-                            >
-                                <Icon path={icons.kebab} className="h-5 w-5" />
-                            </button>
-                            {menuOpen ? (
-                                <div className="absolute right-0 top-full z-20 mt-2 w-32 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-white/10 dark:bg-[#111318]">
-                                    <button
-                                        type="button"
-                                        onClick={togglePause}
-                                        disabled={pausePending}
-                                        className="w-full px-3 py-2 text-left text-xs font-semibold text-zinc-800 hover:bg-zinc-100 active:bg-zinc-100 disabled:opacity-50 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/10"
-                                    >
-                                        {pausePending ? '处理中...' : taskPaused ? '恢复任务' : '暂停任务'}
-                                    </button>
-                                </div>
-                            ) : null}
-                        </div>
-                    ) : null}
-                    <div className="text-right">
-                        <div className="text-xs text-zinc-500 dark:text-white/50">总计（仓位+手续费）</div>
-                        <div className="text-lg font-extrabold text-emerald-700 dark:text-emerald-300">{titleRight}</div>
-                    </div>
+                <div className={`text-right ${canTaskAction ? 'pr-12' : ''}`}>
+                    <div className="text-xs text-zinc-500 dark:text-white/50">总计（仓位+手续费）</div>
+                    <div className="text-lg font-extrabold text-emerald-700 dark:text-emerald-300">{titleRight}</div>
                 </div>
+            </div>
             </div>
 
             <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">

@@ -11,6 +11,7 @@ import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	botSvc "TgLpBot/service/bot"
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/pool"
 	"TgLpBot/service/pricing"
@@ -197,15 +198,36 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 	if err != nil || poolInfo == nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Header().Set("Content-Type", "application/json")
+		message := "failed to load pool info"
+		if err != nil {
+			message = strings.TrimSpace(err.Error())
+		}
 		_ = json.NewEncoder(w).Encode(openPositionError{
 			Code:    "pool_info_error",
-			Message: strings.TrimSpace(err.Error()),
+			Message: message,
 		})
 		return
 	}
 	if poolInfo.TickSpacing <= 0 {
 		http.Error(w, "invalid tick spacing", http.StatusInternalServerError)
 		return
+	}
+	if !req.AllowEntrySwap {
+		usdtAddrStr := strings.TrimSpace(config.AppConfig.USDTAddress)
+		if common.IsHexAddress(usdtAddrStr) {
+			usdtAddr := strings.ToLower(usdtAddrStr)
+			token0 := strings.ToLower(strings.TrimSpace(poolInfo.Token0))
+			token1 := strings.ToLower(strings.TrimSpace(poolInfo.Token1))
+			if token0 != usdtAddr && token1 != usdtAddr {
+				w.WriteHeader(http.StatusConflict)
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(openPositionError{
+					Code:    "entry_swap_required",
+					Message: "pool does not contain USDT",
+				})
+				return
+			}
+		}
 	}
 
 	tmpTask := &models.StrategyTask{
@@ -334,6 +356,10 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to update task", http.StatusInternalServerError)
 		return
 	}
+
+	go func() {
+		_ = botSvc.SendTaskCardForUser(user.ID, task.ID)
+	}()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(openPositionResponse{
