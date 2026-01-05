@@ -1578,7 +1578,6 @@ export default function App() {
 
                             <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                 <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">自定义区间 (%)</div>
-                                <input
                                 <div className="mt-2 grid grid-cols-2 gap-2">
                                     <input
                                         value={openPositionRangeLower}
