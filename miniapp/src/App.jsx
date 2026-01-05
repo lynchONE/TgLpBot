@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import HotPoolCard from './components/HotPoolCard.jsx';
 import KlineModal from './components/KlineModal.jsx';
 import PositionCard from './components/PositionCard.jsx';
-import { disableAdminAutoLP, fetchAdminAutoLPStats, fetchAdminRealtimePositions, fetchAdminRealtimeUsers, fetchHotPools, fetchMe, fetchRealtimePositions, setTaskPaused } from './lib/api';
+import { disableAdminAutoLP, fetchAdminAutoLPStats, fetchAdminRealtimePositions, fetchAdminRealtimeUsers, fetchHotPools, fetchMe, fetchRealtimePositions, openPosition, setTaskPaused } from './lib/api';
 import { getTelegramWebApp } from './lib/telegram';
 import { formatRelativeTime, useTick } from './lib/time';
 
@@ -79,6 +79,7 @@ const storage = {
 
 const STORAGE_THEME = 'tglp_theme';
 const STORAGE_POLL_SEC = 'tglp_poll_interval_sec';
+const STORAGE_HOT_POOLS_FILTER = 'tglp_hot_pools_filter_v1';
 
 const USD_DISPLAY_LIMIT = 1e15;
 const usdFormatter = new Intl.NumberFormat('en-US', {
@@ -91,6 +92,56 @@ function formatUsd(v) {
     const n = Number(v ?? 0);
     if (!Number.isFinite(n) || Math.abs(n) > USD_DISPLAY_LIMIT) return '$--';
     return usdFormatter.format(n);
+}
+
+const defaultHotPoolsFilter = {
+    enabled: true,
+    minFees: 60,
+    minFeeRate: 0.3,
+    minTvl: 1000,
+    minVolume: 2000,
+};
+
+function parseNullableNumber(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(0, n);
+}
+
+function normalizeHotPoolsFilter(value) {
+    const base = { ...defaultHotPoolsFilter };
+    if (!value || typeof value !== 'object') return base;
+    if (Object.prototype.hasOwnProperty.call(value, 'enabled')) {
+        base.enabled = Boolean(value.enabled);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'minFees')) {
+        base.minFees = parseNullableNumber(value.minFees);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'minFeeRate')) {
+        base.minFeeRate = parseNullableNumber(value.minFeeRate);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'minTvl')) {
+        base.minTvl = parseNullableNumber(value.minTvl);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'minVolume')) {
+        base.minVolume = parseNullableNumber(value.minVolume);
+    }
+    return base;
+}
+
+function parseDraftNumber(raw) {
+    const text = String(raw || '').trim();
+    if (!text) return null;
+    const match = text.match(/-?\d+(\.\d+)?/);
+    if (!match) return null;
+    const n = Number(match[0]);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(0, n);
+}
+
+function formatDraftNumber(value) {
+    return Number.isFinite(value) ? String(value) : '';
 }
 
 function formatUserLabel(user) {
@@ -138,9 +189,33 @@ export default function App() {
     const [hotPoolsError, setHotPoolsError] = useState('');
     const [hotPoolsLoading, setHotPoolsLoading] = useState(false);
     const hotPoolsPollRef = useRef(null);
+    const [hotPoolsFilterOpen, setHotPoolsFilterOpen] = useState(false);
+    const [hotPoolsFilter, setHotPoolsFilter] = useState(() => {
+        const saved = storage.get(STORAGE_HOT_POOLS_FILTER);
+        if (!saved) return defaultHotPoolsFilter;
+        try {
+            return normalizeHotPoolsFilter(JSON.parse(saved));
+        } catch {
+            return defaultHotPoolsFilter;
+        }
+    });
+    const [hotPoolsFilterDraft, setHotPoolsFilterDraft] = useState(() => ({
+        enabled: defaultHotPoolsFilter.enabled,
+        minFees: String(defaultHotPoolsFilter.minFees),
+        minFeeRate: String(defaultHotPoolsFilter.minFeeRate),
+        minTvl: String(defaultHotPoolsFilter.minTvl),
+        minVolume: String(defaultHotPoolsFilter.minVolume),
+    }));
     // 保存上一次热门池子数据，用于计算变化
     const previousHotPoolsDataRef = useRef({});
     const [klinePool, setKlinePool] = useState(null);
+    const [openPositionPool, setOpenPositionPool] = useState(null);
+    const [openPositionAmount, setOpenPositionAmount] = useState('');
+    const [openPositionRange, setOpenPositionRange] = useState('');
+    const [openPositionAllowSwap, setOpenPositionAllowSwap] = useState(false);
+    const [openPositionError, setOpenPositionError] = useState('');
+    const [openPositionLoading, setOpenPositionLoading] = useState(false);
+    const [openPositionSuccess, setOpenPositionSuccess] = useState('');
 
     const [adminUsers, setAdminUsers] = useState([]);
     const [adminUsersError, setAdminUsersError] = useState('');
@@ -239,6 +314,35 @@ export default function App() {
         return Array.isArray(hotPoolsData?.data) ? hotPoolsData.data : [];
     }, [hotPoolsData]);
 
+    const hotPoolsFilterEnabled = useMemo(() => {
+        if (!hotPoolsFilter.enabled) return false;
+        return [hotPoolsFilter.minFees, hotPoolsFilter.minFeeRate, hotPoolsFilter.minTvl, hotPoolsFilter.minVolume].some((v) => Number.isFinite(v));
+    }, [hotPoolsFilter]);
+
+    const hotPoolsVisibleRows = useMemo(() => {
+        if (!hotPoolsFilterEnabled) return hotPoolsRows;
+        const minFees = hotPoolsFilter.minFees;
+        const minFeeRate = hotPoolsFilter.minFeeRate;
+        const minTvl = hotPoolsFilter.minTvl;
+        const minVolume = hotPoolsFilter.minVolume;
+        return hotPoolsRows.filter((row) => {
+            const fees = Number(row?.total_fees ?? 0);
+            const feeRate = Number(row?.fee_rate ?? 0);
+            const tvl = Number(row?.current_pool_value ?? 0);
+            const volume = Number(row?.total_volume ?? 0);
+            if (Number.isFinite(minFees) && fees < minFees) return false;
+            if (Number.isFinite(minFeeRate) && feeRate < minFeeRate) return false;
+            if (Number.isFinite(minTvl) && tvl < minTvl) return false;
+            if (Number.isFinite(minVolume) && volume < minVolume) return false;
+            return true;
+        });
+    }, [hotPoolsFilter, hotPoolsFilterEnabled, hotPoolsRows]);
+
+    const hotPoolsFilterLabel = useMemo(() => {
+        if (!hotPoolsFilterEnabled) return '不过滤';
+        return `筛选 ${hotPoolsVisibleRows.length}/${hotPoolsRows.length}`;
+    }, [hotPoolsFilterEnabled, hotPoolsRows.length, hotPoolsVisibleRows.length]);
+
     // 构建热门池子的历史数据映射 (protocol_version:pool_address -> previous data)
     const previousHotPoolsMap = useMemo(() => {
         return previousHotPoolsDataRef.current;
@@ -309,6 +413,17 @@ export default function App() {
         if (!settingsOpen) return;
         setPollDraftSec(pollOverrideSec ? String(pollOverrideSec) : '');
     }, [settingsOpen, pollOverrideSec]);
+
+    useEffect(() => {
+        if (!hotPoolsFilterOpen) return;
+        setHotPoolsFilterDraft({
+            enabled: hotPoolsFilter.enabled,
+            minFees: formatDraftNumber(hotPoolsFilter.minFees),
+            minFeeRate: formatDraftNumber(hotPoolsFilter.minFeeRate),
+            minTvl: formatDraftNumber(hotPoolsFilter.minTvl),
+            minVolume: formatDraftNumber(hotPoolsFilter.minVolume),
+        });
+    }, [hotPoolsFilterOpen, hotPoolsFilter]);
 
     useEffect(() => {
         if (!initData) return;
@@ -576,7 +691,111 @@ export default function App() {
         setSettingsOpen(false);
     };
 
+    const applyHotPoolsFilter = () => {
+        const next = normalizeHotPoolsFilter({
+            enabled: hotPoolsFilterDraft.enabled,
+            minFees: parseDraftNumber(hotPoolsFilterDraft.minFees),
+            minFeeRate: parseDraftNumber(hotPoolsFilterDraft.minFeeRate),
+            minTvl: parseDraftNumber(hotPoolsFilterDraft.minTvl),
+            minVolume: parseDraftNumber(hotPoolsFilterDraft.minVolume),
+        });
+        setHotPoolsFilter(next);
+        storage.set(STORAGE_HOT_POOLS_FILTER, JSON.stringify(next));
+        setHotPoolsFilterOpen(false);
+    };
+
+    const resetHotPoolsFilter = () => {
+        setHotPoolsFilter(defaultHotPoolsFilter);
+        storage.set(STORAGE_HOT_POOLS_FILTER, JSON.stringify(defaultHotPoolsFilter));
+        setHotPoolsFilterOpen(false);
+    };
+
+    const disableHotPoolsFilter = () => {
+        const next = { ...hotPoolsFilter, enabled: false };
+        setHotPoolsFilter(next);
+        storage.set(STORAGE_HOT_POOLS_FILTER, JSON.stringify(next));
+        setHotPoolsFilterOpen(false);
+    };
+
     const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
+
+    const quickRangeOptions = ['+-3', '+-5', '正负3', '正负5', '+-10'];
+
+    const parseRangeInput = (raw) => {
+        const text = String(raw || '').trim();
+        if (!text) return null;
+        const hasSym = /(\+\/?-|±|正负)/.test(text);
+        const matches = text.match(/-?\d+(?:\.\d+)?/g) || [];
+        const numbers = matches.map((v) => Math.abs(Number(v))).filter((v) => Number.isFinite(v));
+        if (!numbers.length) return null;
+        if (hasSym || numbers.length === 1) {
+            return { lower: numbers[0], upper: numbers[0] };
+        }
+        return { lower: numbers[0], upper: numbers[1] };
+    };
+
+    const resetOpenPositionDraft = () => {
+        setOpenPositionAmount('');
+        setOpenPositionRange('+-5');
+        setOpenPositionAllowSwap(false);
+        setOpenPositionError('');
+        setOpenPositionSuccess('');
+    };
+
+    const openPositionModal = (pool) => {
+        setOpenPositionPool(pool);
+        resetOpenPositionDraft();
+    };
+
+    const closeOpenPosition = () => {
+        if (openPositionLoading) return;
+        setOpenPositionPool(null);
+    };
+
+    const handleOpenPosition = async () => {
+        if (!openPositionPool) return;
+        if (!initData) {
+            setOpenPositionError('未获取到 Telegram initData，请从机器人入口打开页面。');
+            return;
+        }
+        const amount = Number(String(openPositionAmount || '').trim());
+        if (!Number.isFinite(amount) || amount <= 0) {
+            setOpenPositionError('请输入有效的金额。');
+            return;
+        }
+        const range = parseRangeInput(openPositionRange);
+        if (!range || range.lower <= 0 || range.upper <= 0 || range.lower >= 100 || range.upper >= 100) {
+            setOpenPositionError('区间无效，请输入 0-100 之间的百分比。');
+            return;
+        }
+
+        setOpenPositionLoading(true);
+        setOpenPositionError('');
+        setOpenPositionSuccess('');
+        try {
+            const resp = await openPosition({
+                apiBaseUrl,
+                initData,
+                poolAddress: openPositionPool?.pool_address,
+                poolVersion: openPositionPool?.protocol_version,
+                amount,
+                rangeLowerPct: range.lower,
+                rangeUpperPct: range.upper,
+                allowEntrySwap: openPositionAllowSwap,
+            });
+            const hash = String(resp?.tx_hash || '').trim();
+            setOpenPositionSuccess(hash ? `开仓成功，交易哈希：${hash}` : '开仓成功，已提交链上交易。');
+        } catch (e) {
+            const msg = String(e?.message || e || '').trim();
+            if (msg.includes('entry swap required')) {
+                setOpenPositionError('该池子不含 USDT，需在机器人里确认兑换后才能开仓。');
+            } else {
+                setOpenPositionError(msg || '开仓失败，请稍后重试。');
+            }
+        } finally {
+            setOpenPositionLoading(false);
+        }
+    };
 
     const handleAdminDisableAuto = async () => {
         if (!initData || !showAdmin || !adminSelectedUserId || adminDisableLoading) return;
@@ -763,27 +982,40 @@ export default function App() {
                                 <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">费用排行</div>
                                 <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
                                     {hotPoolsData?.updated_at ? `更新：${formatRelativeTime(hotPoolsData.updated_at, tick)}` : hotPoolsLoading ? '加载中...' : '暂无数据'}
+                                    {hotPoolsData ? ` · ${hotPoolsFilterLabel}` : ''}
                                 </div>
                             </div>
-                            <div className="flex rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5">
-                                {[
-                                    { key: 'fees', label: '费用' },
-                                    { key: 'fee_rate', label: '费用率' },
-                                    { key: 'volume', label: '交易量' },
-                                ].map((tab) => (
-                                    <button
-                                        key={tab.key}
-                                        type="button"
-                                        onClick={() => setHotPoolsSort(tab.key)}
-                                        aria-pressed={hotPoolsSort === tab.key}
-                                        className={`rounded-xl px-3 py-2 transition ${hotPoolsSort === tab.key
-                                            ? 'bg-emerald-500 text-white shadow-sm'
-                                            : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
-                                            }`}
-                                    >
-                                        {tab.label}
-                                    </button>
-                                ))}
+                            <div className="flex items-center gap-2">
+                                <div className="flex rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5">
+                                    {[
+                                        { key: 'fees', label: '费用' },
+                                        { key: 'fee_rate', label: '费用率' },
+                                        { key: 'volume', label: '交易量' },
+                                    ].map((tab) => (
+                                        <button
+                                            key={tab.key}
+                                            type="button"
+                                            onClick={() => setHotPoolsSort(tab.key)}
+                                            aria-pressed={hotPoolsSort === tab.key}
+                                            className={`rounded-xl px-3 py-2 transition ${hotPoolsSort === tab.key
+                                                ? 'bg-emerald-500 text-white shadow-sm'
+                                                : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
+                                                }`}
+                                        >
+                                            {tab.label}
+                                        </button>
+                                    ))}
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setHotPoolsFilterOpen(true)}
+                                    className={`rounded-xl px-3 py-2 text-xs font-semibold ring-1 transition ${hotPoolsFilterEnabled
+                                        ? 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/25 dark:text-emerald-200'
+                                        : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
+                                        }`}
+                                >
+                                    筛选
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -823,6 +1055,12 @@ export default function App() {
             {isHotPools && !hotPoolsLoading && !hotPoolsError && hotPoolsData && hotPoolsRows.length === 0 ? (
                 <div className="mb-4 rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
                     暂无热门池子数据。
+                </div>
+            ) : null}
+
+            {isHotPools && !hotPoolsLoading && !hotPoolsError && hotPoolsData && hotPoolsRows.length > 0 && hotPoolsFilterEnabled && hotPoolsVisibleRows.length === 0 ? (
+                <div className="mb-4 rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                    筛选后暂无热门池子数据。
                 </div>
             ) : null}
 
@@ -1044,7 +1282,7 @@ export default function App() {
 
             <div className="space-y-4">
                 {isHotPools
-                    ? hotPoolsRows.map((row) => {
+                    ? hotPoolsVisibleRows.map((row) => {
                         const proto = String(row?.protocol_version || '').trim();
                         const addr = String(row?.pool_address || '').trim().toLowerCase();
                         const poolKey = `${proto}:${addr}`;
@@ -1056,6 +1294,7 @@ export default function App() {
                                 metric={hotPoolsSort}
                                 previousData={prevData}
                                 onOpenKline={setKlinePool}
+                                onOpenPosition={openPositionModal}
                             />
                         );
                     })
@@ -1083,6 +1322,118 @@ export default function App() {
                             <li key={String(i)}>{w}</li>
                         ))}
                     </ul>
+                </div>
+            ) : null}
+
+            {hotPoolsFilterOpen ? (
+                <div className="fixed inset-0 z-50">
+                    <button
+                        type="button"
+                        className="absolute inset-0 cursor-default bg-black/40"
+                        onClick={() => setHotPoolsFilterOpen(false)}
+                        aria-label="关闭筛选"
+                    />
+                    <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                        <div className="flex items-center justify-between">
+                            <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">热门池子筛选</div>
+                            <button
+                                type="button"
+                                onClick={() => setHotPoolsFilterOpen(false)}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
+                                aria-label="关闭"
+                            >
+                                <Icon path={icons.close} className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <div className="mt-4 space-y-4">
+                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="flex items-center justify-between gap-2">
+                                    <div>
+                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">筛选条件</div>
+                                        <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">留空表示不限制</div>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setHotPoolsFilterDraft((prev) => ({ ...prev, enabled: !prev.enabled }))}
+                                        className={`rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 ${hotPoolsFilterDraft.enabled
+                                            ? 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/25 dark:text-emerald-200'
+                                            : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
+                                            }`}
+                                    >
+                                        {hotPoolsFilterDraft.enabled ? '已启用' : '已关闭'}
+                                    </button>
+                                </div>
+
+                                <div className="mt-3 grid grid-cols-2 gap-3">
+                                    <div>
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">手续费 >= (USD)</div>
+                                        <input
+                                            value={hotPoolsFilterDraft.minFees}
+                                            onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFees: e.target.value }))}
+                                            inputMode="decimal"
+                                            className="mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                            placeholder={String(defaultHotPoolsFilter.minFees)}
+                                        />
+                                    </div>
+                                    <div>
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">费用率 >= (%)</div>
+                                        <input
+                                            value={hotPoolsFilterDraft.minFeeRate}
+                                            onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFeeRate: e.target.value }))}
+                                            inputMode="decimal"
+                                            className="mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                            placeholder={String(defaultHotPoolsFilter.minFeeRate)}
+                                        />
+                                    </div>
+                                    <div>
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">TVL >= (USD)</div>
+                                        <input
+                                            value={hotPoolsFilterDraft.minTvl}
+                                            onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minTvl: e.target.value }))}
+                                            inputMode="decimal"
+                                            className="mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                            placeholder={String(defaultHotPoolsFilter.minTvl)}
+                                        />
+                                    </div>
+                                    <div>
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">交易量 >= (USD)</div>
+                                        <input
+                                            value={hotPoolsFilterDraft.minVolume}
+                                            onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minVolume: e.target.value }))}
+                                            inputMode="decimal"
+                                            className="mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                            placeholder={String(defaultHotPoolsFilter.minVolume)}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={applyHotPoolsFilter}
+                                        className="rounded-xl bg-emerald-500 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-600 active:bg-emerald-700"
+                                    >
+                                        应用
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={resetHotPoolsFilter}
+                                        className="rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
+                                    >
+                                        默认
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={disableHotPoolsFilter}
+                                        className="rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
+                                    >
+                                        不过滤
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             ) : null}
 
@@ -1159,6 +1510,130 @@ export default function App() {
                                     </button>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
+
+            {openPositionPool ? (
+                <div className="fixed inset-0 z-50">
+                    <button
+                        type="button"
+                        className="absolute inset-0 bg-black/40"
+                        onClick={closeOpenPosition}
+                        aria-label="关闭开仓"
+                    />
+                    <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                        <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">一键开仓</div>
+                                <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40 truncate">
+                                    {openPositionPool?.trading_pair || '--'}
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={closeOpenPosition}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
+                                aria-label="关闭"
+                            >
+                                <Icon path={icons.close} className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <div className="mt-4 space-y-4">
+                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">投入金额 (USDT)</div>
+                                <input
+                                    value={openPositionAmount}
+                                    onChange={(e) => {
+                                        setOpenPositionAmount(e.target.value);
+                                        setOpenPositionError('');
+                                    }}
+                                    inputMode="decimal"
+                                    className="mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                    placeholder="例如 100"
+                                />
+                            </div>
+
+                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">自定义区间 (%)</div>
+                                <input
+                                    value={openPositionRange}
+                                    onChange={(e) => {
+                                        setOpenPositionRange(e.target.value);
+                                        setOpenPositionError('');
+                                    }}
+                                    inputMode="text"
+                                    className="mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                    placeholder="例如 +-5 / 正负3 / 1 3"
+                                />
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                    {quickRangeOptions.map((value) => (
+                                        <button
+                                            key={value}
+                                            type="button"
+                                            onClick={() => {
+                                                setOpenPositionRange(value);
+                                                setOpenPositionError('');
+                                            }}
+                                            className="rounded-xl bg-white/70 px-3 py-1.5 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
+                                        >
+                                            {value}
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
+                                    支持对称输入（+-5 / 正负3）或非对称输入（1 3 表示下 1% 上 3%）。
+                                </div>
+                            </div>
+
+                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div>
+                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">允许兑换</div>
+                                        <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
+                                            池子不含 USDT 时，允许自动兑换入场代币。
+                                        </div>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setOpenPositionAllowSwap((v) => !v);
+                                            setOpenPositionError('');
+                                        }}
+                                        className={`inline-flex h-8 items-center rounded-full border px-3 text-xs font-semibold transition ${openPositionAllowSwap
+                                            ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-700 dark:text-emerald-200'
+                                            : 'border-zinc-200 bg-white/70 text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-white/60'
+                                            }`}
+                                    >
+                                        {openPositionAllowSwap ? '已开启' : '已关闭'}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {openPositionError ? (
+                                <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
+                                    {openPositionError}
+                                </div>
+                            ) : null}
+                            {openPositionSuccess ? (
+                                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-700 dark:text-emerald-200">
+                                    {openPositionSuccess}
+                                </div>
+                            ) : null}
+
+                            <button
+                                type="button"
+                                onClick={handleOpenPosition}
+                                disabled={openPositionLoading}
+                                className={`w-full rounded-xl px-3 py-2 text-sm font-semibold text-white shadow-sm transition ${openPositionLoading
+                                    ? 'cursor-not-allowed bg-emerald-500/60'
+                                    : 'bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700'
+                                    }`}
+                            >
+                                {openPositionLoading ? '开仓中...' : '确认开仓'}
+                            </button>
                         </div>
                     </div>
                 </div>

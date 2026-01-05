@@ -126,7 +126,7 @@ const ChangeIndicator = ({ currentValue, previousValue, label = '变化' }) => {
     );
 };
 
-export default function HotPoolCard({ pool, metric, previousData, onOpenKline }) {
+export default function HotPoolCard({ pool, metric, previousData, onOpenKline, onOpenPosition }) {
     const [copied, setCopied] = useState(false);
     const addr = String(pool?.pool_address || '').trim();
     const canOpenKline = useMemo(() => isPoolAddressLike(addr), [addr]);
@@ -259,10 +259,18 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline })
                 </div>
             </div>
 
-            <div className="mt-3 flex items-center">
+            <div className="mt-3 flex items-center justify-between gap-2">
                 <div className="inline-flex items-center rounded-lg bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-500/25 dark:bg-amber-500/15 dark:text-amber-200 dark:ring-amber-500/30">
                     {dexLabel(pool)}
                 </div>
+                <button
+                    type="button"
+                    onClick={() => onOpenPosition?.(pool)}
+                    disabled={typeof onOpenPosition !== 'function'}
+                    className="inline-flex items-center rounded-lg bg-emerald-500/15 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-500/25 transition hover:bg-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed dark:text-emerald-200"
+                >
+                    一键开仓
+                </button>
             </div>
         </div>
     );

@@ -156,3 +156,35 @@ export async function fetchPoolOHLCV({ apiBaseUrl, chain, poolAddress, timeframe
     }
     return resp.json();
 }
+
+export async function openPosition({ apiBaseUrl, initData, poolAddress, poolVersion, amount, rangeLowerPct, rangeUpperPct, allowEntrySwap, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/open_position`;
+    const payload = {
+        initData,
+        pool_address: poolAddress,
+        pool_version: poolVersion,
+        amount,
+        range_lower_pct: rangeLowerPct,
+        range_upper_pct: rangeUpperPct,
+        allow_entry_swap: Boolean(allowEntrySwap),
+    };
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        let detail = text;
+        try {
+            const parsed = text ? JSON.parse(text) : null;
+            if (parsed?.message) detail = parsed.message;
+        } catch {
+            // ignore JSON parse
+        }
+        throw new Error(detail || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}

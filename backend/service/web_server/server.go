@@ -35,6 +35,7 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/me", s.handleMe)
 	mux.HandleFunc("/api/realtime_positions", s.handleRealtimePositions)
 	mux.HandleFunc("/api/task_pause", s.handleTaskPause)
+	mux.HandleFunc("/api/open_position", s.handleOpenPosition)
 	mux.HandleFunc("/api/admin/realtime_users", s.handleAdminRealtimeUsers)
 	mux.HandleFunc("/api/admin/realtime_positions", s.handleAdminRealtimePositions)
 	mux.HandleFunc("/api/admin/autolp_stats", s.handleAdminAutoLPStats)
