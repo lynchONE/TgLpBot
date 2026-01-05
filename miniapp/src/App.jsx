@@ -179,7 +179,7 @@ const Icon = ({ path, className = '' }) => (
 const icons = {
     bot: 'M12 2a2 2 0 012 2v1h1a3 3 0 013 3v7a7 7 0 11-14 0V8a3 3 0 013-3h1V4a2 2 0 012-2zm-4 7a1.25 1.25 0 100 2.5A1.25 1.25 0 008 9zm8 0a1.25 1.25 0 100 2.5A1.25 1.25 0 0016 9zm-7.5 6.5h7a3.5 3.5 0 01-7 0z',
     chart: 'M4 19h16v2H2V3h2v16zm4-2H6v-6h2v6zm5 0h-2V7h2v10zm5 0h-2v-4h2v4z',
-    filter: 'M4 5h16l-6.5 7.5v5l-3 1.5v-6.5L4 5z',
+    filter: 'M3 5h18l-7 8v5.5l-4 2V13L3 5z',
     moon: 'M12 3a9 9 0 109 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 01-4.4 2.26 5.403 5.403 0 01-3.14-9.8c-.44-.06-.9-.1-1.36-.1z',
     sun: 'M12 7a5 5 0 100 10 5 5 0 000-10zM2 13h2a1 1 0 100-2H2a1 1 0 100 2zm18 0h2a1 1 0 100-2h-2a1 1 0 100 2zM11 2v2a1 1 0 102 0V2a1 1 0 10-2 0zm0 18v2a1 1 0 102 0v-2a1 1 0 10-2 0zM5.99 4.58a1 1 0 10-1.41 1.41l1.06 1.06a1 1 0 001.41-1.41L5.99 4.58zm12.37 12.37a1 1 0 10-1.41 1.41l1.06 1.06a1 1 0 001.41-1.41l-1.06-1.06zm1.06-10.96a1 1 0 10-1.41-1.41l-1.06 1.06a1 1 0 001.41 1.41l1.06-1.06zM7.05 18.36a1 1 0 10-1.41-1.41l-1.06 1.06a1 1 0 001.41 1.41l1.06-1.06z',
     close: 'M6.225 4.811a1 1 0 011.414 0L12 9.172l4.361-4.361a1 1 0 111.414 1.414L13.414 10.586l4.361 4.361a1 1 0 01-1.414 1.414L12 12l-4.361 4.361a1 1 0 01-1.414-1.414l4.361-4.361-4.361-4.361a1 1 0 010-1.414z',
@@ -707,7 +707,7 @@ export default function App() {
 
     const applyHotPoolsFilter = () => {
         const next = normalizeHotPoolsFilter({
-            enabled: hotPoolsFilterDraft.enabled,
+            enabled: true,
             minFees: parseDraftNumber(hotPoolsFilterDraft.minFees),
             minFeeRate: parseDraftNumber(hotPoolsFilterDraft.minFeeRate),
             minTvl: parseDraftNumber(hotPoolsFilterDraft.minTvl),
@@ -1006,7 +1006,7 @@ export default function App() {
                                 </div>
                             </div>
                             <div className="flex items-center gap-2">
-                                <div className="flex rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5">
+                                <div className="flex shrink-0 rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5">
                                     {[
                                         { key: 'fees', label: '费用' },
                                         { key: 'fee_rate', label: '费用率' },
@@ -1017,7 +1017,7 @@ export default function App() {
                                             type="button"
                                             onClick={() => setHotPoolsSort(tab.key)}
                                             aria-pressed={hotPoolsSort === tab.key}
-                                            className={`rounded-xl px-3 py-2 transition ${hotPoolsSort === tab.key
+                                            className={`rounded-xl px-3 py-2 whitespace-nowrap transition ${hotPoolsSort === tab.key
                                                 ? 'bg-emerald-500 text-white shadow-sm'
                                                 : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
                                                 }`}
@@ -1029,16 +1029,16 @@ export default function App() {
                                 <button
                                     type="button"
                                     onClick={() => setHotPoolsFilterOpen(true)}
-                                    className={`relative inline-flex h-9 w-9 items-center justify-center rounded-xl ring-1 transition ${hotPoolsFilterEnabled
+                                    className={`relative inline-flex h-9 w-9 items-center justify-center rounded-2xl ring-1 transition ${hotPoolsFilterEnabled
                                         ? 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/25 dark:text-emerald-200'
                                         : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
                                         }`}
                                     aria-label="Filter"
                                     title="Filter"
                                 >
-                                    <Icon path={icons.filter} className="h-4 w-4" />
+                                    <Icon path={icons.filter} className="h-3.5 w-3.5" />
                                     {hotPoolsFilterEnabled ? (
-                                        <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-white dark:ring-[#111318]" />
+                                        <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-emerald-400 ring-2 ring-white dark:ring-[#111318]" />
                                     ) : null}
                                 </button>
                             </div>
@@ -1375,22 +1375,6 @@ export default function App() {
 
                         <div className="mt-4 space-y-4">
                             <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="flex items-center justify-between gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => setHotPoolsFilterDraft((prev) => ({ ...prev, enabled: !prev.enabled }))}
-                                        className={`inline-flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 ${hotPoolsFilterDraft.enabled
-                                            ? 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/25 dark:text-emerald-200'
-                                            : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
-                                            }`}
-                                        aria-label="切换筛选"
-                                        title="切换筛选"
-                                    >
-                                        <span className={`h-2 w-2 rounded-full ${hotPoolsFilterDraft.enabled ? 'bg-emerald-500' : 'bg-zinc-400'}`} />
-                                        <span className="text-[10px] tabular-nums">{hotPoolsFilterDraft.enabled ? '开启' : '关闭'}</span>
-                                    </button>
-                                </div>
-
                                 <div className="mt-3 grid grid-cols-2 gap-3">
                                     <div>
                                         <div className="text-[11px] text-zinc-500 dark:text-white/40">手续费 >= (USD)</div>

@@ -357,7 +357,11 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 
 	// Preload tasks for display enhancements (range %, out-of-range timer, etc.)
 	var tasks []models.StrategyTask
-	if err := database.DB.Where("user_id = ? AND (v3_token_id <> '' OR v3_position_manager_address <> '') AND status <> ?", userID, models.StrategyStatusStopped).Find(&tasks).Error; err == nil {
+	if err := database.DB.Where(
+		"user_id = ? AND (v3_token_id <> '' OR v3_position_manager_address <> '') AND status = ?",
+		userID,
+		models.StrategyStatusRunning,
+	).Find(&tasks).Error; err == nil {
 		for _, t := range tasks {
 			addV3NPM(resolveTaskNPM(t))
 
@@ -376,7 +380,11 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 	}
 
 	var v4Tasks []models.StrategyTask
-	if err := database.DB.Where("user_id = ? AND v4_token_id <> ''", userID).Find(&v4Tasks).Error; err == nil {
+	if err := database.DB.Where(
+		"user_id = ? AND v4_token_id <> '' AND status = ?",
+		userID,
+		models.StrategyStatusRunning,
+	).Find(&v4Tasks).Error; err == nil {
 		for _, t := range v4Tasks {
 			key := strings.TrimSpace(t.V4TokenID)
 			taskByV4Token[key] = t
