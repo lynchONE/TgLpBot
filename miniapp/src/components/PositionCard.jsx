@@ -272,7 +272,6 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
                     <div className="text-lg font-extrabold text-emerald-700 dark:text-emerald-300">{titleRight}</div>
                 </div>
             </div>
-            </div>
 
             <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                 <div className="flex items-center justify-between">
