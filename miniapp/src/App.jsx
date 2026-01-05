@@ -2,7 +2,20 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import HotPoolCard from './components/HotPoolCard.jsx';
 import KlineModal from './components/KlineModal.jsx';
 import PositionCard from './components/PositionCard.jsx';
-import { disableAdminAutoLP, fetchAdminAutoLPStats, fetchAdminRealtimePositions, fetchAdminRealtimeUsers, fetchHotPools, fetchMe, fetchRealtimePositions, openPosition, setTaskPaused } from './lib/api';
+import {
+    deleteTask,
+    disableAdminAutoLP,
+    fetchAdminAutoLPStats,
+    fetchAdminRealtimePositions,
+    fetchAdminRealtimeUsers,
+    fetchGlobalConfig,
+    fetchHotPools,
+    fetchMe,
+    fetchRealtimePositions,
+    openPosition,
+    setTaskPaused,
+    stopTask,
+} from './lib/api';
 import { getTelegramWebApp } from './lib/telegram';
 import { formatRelativeTime, useTick } from './lib/time';
 
@@ -170,6 +183,10 @@ function formatUserLabel(user) {
     return '未知用户';
 }
 
+function formatOnOff(value) {
+    return value ? '开启' : '关闭';
+}
+
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="0.5" className={className} aria-hidden="true">
         <path d={path} />
@@ -248,11 +265,19 @@ export default function App() {
     const adminPositionsPollRef = useRef(null);
     const adminAutoStatsPollRef = useRef(null);
     const adminSelectedRef = useRef(null);
+    const confirmResolveRef = useRef(null);
+    const noticeTimerRef = useRef(null);
 
     const [theme, setTheme] = useState('dark');
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [pollOverrideSec, setPollOverrideSec] = useState(null);
     const [pollDraftSec, setPollDraftSec] = useState('');
+    const [confirmState, setConfirmState] = useState(null);
+    const [notice, setNotice] = useState(null);
+    const [globalConfigOpen, setGlobalConfigOpen] = useState(false);
+    const [globalConfig, setGlobalConfig] = useState(null);
+    const [globalConfigError, setGlobalConfigError] = useState('');
+    const [globalConfigLoading, setGlobalConfigLoading] = useState(false);
 
     const serverPollIntervalSec = Math.max(1, Number(data?.poll_interval_sec || adminPositions?.poll_interval_sec || 1));
     const pollIntervalSec = Math.max(1, Number(pollOverrideSec || serverPollIntervalSec || 1));
@@ -359,6 +384,32 @@ export default function App() {
 
     const apiBaseUrl = useMemo(() => resolveApiBaseUrl(), []);
 
+    const requestConfirm = (options) => new Promise((resolve) => {
+        confirmResolveRef.current = resolve;
+        setConfirmState({
+            title: options?.title || '确认操作',
+            message: options?.message || '',
+            confirmText: options?.confirmText || '确认',
+            cancelText: options?.cancelText || '取消',
+            tone: options?.tone || 'primary',
+        });
+    });
+
+    const closeConfirm = (result) => {
+        const resolve = confirmResolveRef.current;
+        confirmResolveRef.current = null;
+        setConfirmState(null);
+        if (typeof resolve === 'function') resolve(result);
+    };
+
+    const showNotice = (message, tone = 'info') => {
+        const text = String(message || '').trim();
+        if (!text) return;
+        setNotice({ message: text, tone });
+        if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+        noticeTimerRef.current = setTimeout(() => setNotice(null), 3200);
+    };
+
     useEffect(() => {
         if (!initData) return;
         let aborted = false;
@@ -417,6 +468,12 @@ export default function App() {
             // ignore
         }
     }, [theme]);
+
+    useEffect(() => {
+        return () => {
+            if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+        };
+    }, []);
 
     useEffect(() => {
         if (!settingsOpen) return;
@@ -810,6 +867,28 @@ export default function App() {
         }
     };
 
+    const loadGlobalConfig = async () => {
+        if (!initData) {
+            setGlobalConfigError('未获取到 Telegram initData，请从机器人入口打开页面。');
+            return;
+        }
+        setGlobalConfigLoading(true);
+        setGlobalConfigError('');
+        try {
+            const resp = await fetchGlobalConfig({ apiBaseUrl, initData });
+            setGlobalConfig(resp?.config || resp || null);
+        } catch (e) {
+            setGlobalConfigError(String(e?.message || e));
+        } finally {
+            setGlobalConfigLoading(false);
+        }
+    };
+
+    const openGlobalConfig = () => {
+        setGlobalConfigOpen(true);
+        loadGlobalConfig();
+    };
+
     const handleAdminDisableAuto = async () => {
         if (!initData || !showAdmin || !adminSelectedUserId || adminDisableLoading) return;
 
@@ -817,7 +896,12 @@ export default function App() {
             ? formatUserLabel(adminSelectedUser)
             : `用户 ${String(adminSelectedUserId)}`;
 
-        const ok = window.confirm(`确认关闭 ${label} 的 Auto？\n将撤出自动仓位并兑换成稳定币。`);
+        const ok = await requestConfirm({
+            title: '关闭 Auto',
+            message: `确认关闭 ${label} 的 Auto？\n将撤出自动仓位并兑换成稳定币。`,
+            confirmText: '确认关闭',
+            tone: 'danger',
+        });
         if (!ok) return;
 
         setAdminDisableLoading(true);
@@ -845,12 +929,63 @@ export default function App() {
         if (!Number.isFinite(id) || id <= 0) return;
 
         const wantPaused = Boolean(paused);
-        const ok = window.confirm(wantPaused
-            ? '确认暂停该任务？\n暂停后将不再自动执行再平衡/止损等操作。'
-            : '确认恢复该任务？\n恢复后将继续自动执行再平衡/止损等操作。');
+        const ok = await requestConfirm({
+            title: wantPaused ? '暂停任务' : '恢复任务',
+            message: wantPaused
+                ? '确认暂停该任务？\n暂停后将不再自动执行再平衡/止损等操作。'
+                : '确认恢复该任务？\n恢复后将继续自动执行再平衡/止损等操作。',
+            confirmText: wantPaused ? '确认暂停' : '确认恢复',
+        });
         if (!ok) return;
 
-        await setTaskPaused({ apiBaseUrl, initData, taskId: id, paused: wantPaused });
+        try {
+            await setTaskPaused({ apiBaseUrl, initData, taskId: id, paused: wantPaused });
+            showNotice(wantPaused ? '任务已暂停' : '任务已恢复', 'success');
+        } catch (e) {
+            showNotice(String(e?.message || e), 'error');
+        }
+    };
+
+    const handleStopTask = async (taskId) => {
+        if (!initData || showAdmin) return;
+        const id = Number(taskId);
+        if (!Number.isFinite(id) || id <= 0) return;
+
+        const ok = await requestConfirm({
+            title: '停止任务',
+            message: '确认停止该任务？\n停止后将撤出流动性并兑换成 USDT，可能需要几十秒。',
+            confirmText: '确认停止',
+            tone: 'danger',
+        });
+        if (!ok) return;
+
+        try {
+            const resp = await stopTask({ apiBaseUrl, initData, taskId: id });
+            showNotice(resp?.message || '已发起停止，正在撤出并兑换成 USDT', 'success');
+        } catch (e) {
+            showNotice(String(e?.message || e), 'error');
+        }
+    };
+
+    const handleDeleteTask = async (taskId) => {
+        if (!initData || showAdmin) return;
+        const id = Number(taskId);
+        if (!Number.isFinite(id) || id <= 0) return;
+
+        const ok = await requestConfirm({
+            title: '删除任务',
+            message: '确认删除该任务？\n删除只会从列表移除，不会撤出流动性/兑换 USDT。',
+            confirmText: '确认删除',
+            tone: 'danger',
+        });
+        if (!ok) return;
+
+        try {
+            const resp = await deleteTask({ apiBaseUrl, initData, taskId: id });
+            showNotice(resp?.message || '任务已删除', 'success');
+        } catch (e) {
+            showNotice(String(e?.message || e), 'error');
+        }
     };
 
     const headerTitle = showAdmin ? '管理面板' : isHotPools ? '热门池子' : '实时仓位';
@@ -876,6 +1011,27 @@ export default function App() {
     const showEmptyPositions = !isHotPools && Boolean(activeData) && visiblePositions.length === 0;
 
     const initDataMissing = viewMode !== 'hot_pools' && !initData;
+    const noticeClass = notice?.tone === 'error'
+        ? 'bg-red-600 text-white'
+        : notice?.tone === 'success'
+            ? 'bg-emerald-600 text-white'
+            : 'bg-zinc-900 text-white dark:bg-white/10 dark:text-white';
+    const globalCfg = globalConfig || {};
+    const rebalanceText = Number.isFinite(Number(globalCfg.rebalance_timeout))
+        ? `${Number(globalCfg.rebalance_timeout)} 秒`
+        : '--';
+    const stopLossDelayText = Number.isFinite(Number(globalCfg.stop_loss_delay_seconds))
+        ? `${Number(globalCfg.stop_loss_delay_seconds)} 秒`
+        : '--';
+    const slippageText = Number.isFinite(Number(globalCfg.slippage_tolerance))
+        ? `${Number(globalCfg.slippage_tolerance).toFixed(2)}%`
+        : '--';
+    const residualText = Number.isFinite(Number(globalCfg.residual_tolerance))
+        ? `${Number(globalCfg.residual_tolerance).toFixed(2)}%`
+        : '--';
+    const confirmButtonClass = confirmState?.tone === 'danger'
+        ? 'bg-red-500 text-white hover:bg-red-600 active:bg-red-700'
+        : 'bg-emerald-500 text-white hover:bg-emerald-600 active:bg-emerald-700';
 
     const activeErrorText = useMemo(() => {
         const msg = String(activeError || '').trim();
@@ -891,6 +1047,13 @@ export default function App() {
 
     return (
         <div className="min-h-screen max-w-[720px] px-4 py-4 pb-[calc(16px+env(safe-area-inset-bottom))] mx-auto">
+            {notice ? (
+                <div className="fixed left-1/2 top-4 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2">
+                    <div className={`rounded-xl px-3 py-2 text-sm font-semibold shadow-lg ${noticeClass}`}>
+                        {notice.message}
+                    </div>
+                </div>
+            ) : null}
             <header className="mb-4">
                 <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
@@ -1054,6 +1217,22 @@ export default function App() {
                         </div>
                     </div>
                 )}
+
+                {!showAdmin && !isHotPools ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                            type="button"
+                            onClick={openGlobalConfig}
+                            disabled={!initData}
+                            className={`rounded-xl px-3 py-2 text-xs font-semibold ring-1 ${initData
+                                ? 'bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50 dark:bg-white/5 dark:text-white/80 dark:ring-white/10 dark:hover:bg-white/10'
+                                : 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
+                                }`}
+                        >
+                            全局配置
+                        </button>
+                    </div>
+                ) : null}
             </header>
 
             {isHotPools && hotPoolsError ? (
@@ -1325,6 +1504,8 @@ export default function App() {
                                 updatedAt={updatedAt}
                                 allowTaskActions={!showAdmin && Boolean(initData)}
                                 onSetTaskPaused={handleSetTaskPaused}
+                                onStopTask={handleStopTask}
+                                onDeleteTask={handleDeleteTask}
                             />
                         ))
                         : null}
@@ -1442,6 +1623,91 @@ export default function App() {
                                     </button>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
+
+            {globalConfigOpen ? (
+                <div className="fixed inset-0 z-50">
+                    <button
+                        type="button"
+                        className="absolute inset-0 cursor-default bg-black/40"
+                        onClick={() => setGlobalConfigOpen(false)}
+                        aria-label="关闭全局配置"
+                    />
+                    <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                        <div className="flex items-center justify-between">
+                            <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">全局配置</div>
+                            <button
+                                type="button"
+                                onClick={() => setGlobalConfigOpen(false)}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
+                                aria-label="关闭"
+                            >
+                                <Icon path={icons.close} className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <div className="mt-4 space-y-3">
+                            {globalConfigError ? (
+                                <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
+                                    {globalConfigError}
+                                </div>
+                            ) : null}
+                            {globalConfigLoading && !globalConfig ? (
+                                <div className="rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                                    加载中...
+                                </div>
+                            ) : null}
+                            {globalConfig ? (
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                    <div className="grid grid-cols-2 gap-3 text-xs text-zinc-500 dark:text-white/50">
+                                        <div>
+                                            <div>再平衡超时</div>
+                                            <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{rebalanceText}</div>
+                                        </div>
+                                        <div>
+                                            <div>滑点</div>
+                                            <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{slippageText}</div>
+                                        </div>
+                                        <div>
+                                            <div>秒止损</div>
+                                            <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.stop_loss_enabled)}</div>
+                                        </div>
+                                        <div>
+                                            <div>秒止损阈值</div>
+                                            <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{stopLossDelayText}</div>
+                                        </div>
+                                        <div>
+                                            <div>复投</div>
+                                            <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.auto_reinvest)}</div>
+                                        </div>
+                                        <div>
+                                            <div>剩余资产容忍度</div>
+                                            <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{residualText}</div>
+                                        </div>
+                                        <div>
+                                            <div>日志通知</div>
+                                            <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.extra_notifications_enabled)}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : null}
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap gap-2">
+                            <button
+                                type="button"
+                                onClick={loadGlobalConfig}
+                                disabled={globalConfigLoading}
+                                className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold ring-1 ${globalConfigLoading
+                                    ? 'cursor-not-allowed bg-emerald-500/40 text-white ring-emerald-500/30'
+                                    : 'bg-emerald-500 text-white ring-emerald-500/30 hover:bg-emerald-600'
+                                    }`}
+                            >
+                                刷新
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -1657,6 +1923,51 @@ export default function App() {
                                     }`}
                             >
                                 {openPositionLoading ? '开仓中...' : '确认开仓'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
+
+            {confirmState ? (
+                <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4">
+                    <button
+                        type="button"
+                        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                        onClick={() => closeConfirm(false)}
+                        aria-label="取消"
+                    />
+                    <div className="relative w-full max-w-md overflow-hidden rounded-t-2xl sm:rounded-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318]">
+                        <div className="flex items-center justify-between gap-2">
+                            <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">{confirmState.title}</div>
+                            <button
+                                type="button"
+                                onClick={() => closeConfirm(false)}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
+                                aria-label="关闭"
+                            >
+                                <Icon path={icons.close} className="h-4 w-4" />
+                            </button>
+                        </div>
+                        {confirmState.message ? (
+                            <div className="mt-2 text-sm text-zinc-600 whitespace-pre-line dark:text-white/60">
+                                {confirmState.message}
+                            </div>
+                        ) : null}
+                        <div className="mt-4 flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => closeConfirm(false)}
+                                className="flex-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 active:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15"
+                            >
+                                {confirmState.cancelText || '取消'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => closeConfirm(true)}
+                                className={`flex-1 rounded-xl px-3 py-2 text-sm font-semibold ${confirmButtonClass}`}
+                            >
+                                {confirmState.confirmText || '确认'}
                             </button>
                         </div>
                     </div>

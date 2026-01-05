@@ -138,6 +138,10 @@ func (b *Bot) setCommands() error {
 			Description: "查看我的仓位",
 		},
 		{
+			Command:     "miniapp",
+			Description: "打开小程序",
+		},
+		{
 			Command:     "config",
 			Description: "全局配置",
 		},
@@ -294,6 +298,8 @@ func (b *Bot) handleCommand(message *tgbotapi.Message, user *models.User) {
 		b.handleNewPosition(message, user)
 	case "positions":
 		b.handlePositions(message, user)
+	case "miniapp":
+		b.handleMiniApp(message, user)
 	case "config":
 		b.handleConfig(message, user)
 	case "balance":

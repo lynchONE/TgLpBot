@@ -1617,6 +1617,18 @@ func statusLabelFromTask(task *models.StrategyTask) string {
 	if task == nil {
 		return "运行中"
 	}
+	if strings.TrimSpace(task.ExitPendingAction) != "" {
+		switch strings.TrimSpace(task.ExitPendingAction) {
+		case strategy.ExitActionManualStop:
+			return "停止中"
+		case strategy.ExitActionStopLoss:
+			return "止损中"
+		case strategy.ExitActionRebalance:
+			return "再平衡中"
+		default:
+			return "撤出中"
+		}
+	}
 	if task.Paused && (task.Status == models.StrategyStatusRunning || task.Status == models.StrategyStatusWaiting) {
 		return "已暂停"
 	}

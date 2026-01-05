@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -213,19 +212,9 @@ func (s *SmartLPMonitor) runWebsocket(wsURL string) {
 
 	scanner := newSmartLPReceiptScanner(chain, callTimeout, debug, v3Managers, v4PoolManager)
 
-	subscribeAddrs := make([]common.Address, 0, len(v3Managers)+1)
-	subscribeAddrs = append(subscribeAddrs, v3Managers...)
-	if hasV4 {
-		subscribeAddrs = append(subscribeAddrs, v4PoolManager)
-	}
-	if len(subscribeAddrs) == 0 {
-		log.Println("[SmartLP] websocket: no subscribe addresses (no V3/V4 managers)")
-		return
-	}
-
 	backoff := 1 * time.Second
 	for {
-		if err := s.runWebsocketSession(wsURL, subscribeAddrs, monitorAddrList, monitorAddrs, scanner); err != nil {
+		if err := s.runWebsocketSession(wsURL, monitorAddrList, monitorAddrs, scanner); err != nil {
 			select {
 			case <-s.stopChan:
 				log.Println("[SmartLP] websocket monitor stopped")
@@ -260,7 +249,7 @@ func (s *SmartLPMonitor) runWebsocket(wsURL string) {
 	}
 }
 
-func (s *SmartLPMonitor) runWebsocketSession(wsURL string, subscribeAddrList []common.Address, monitorAddrList []common.Address, monitorAddrs map[common.Address]struct{}, scanner *smartLPReceiptScanner) error {
+func (s *SmartLPMonitor) runWebsocketSession(wsURL string, monitorAddrList []common.Address, monitorAddrs map[common.Address]struct{}, scanner *smartLPReceiptScanner) error {
 	dialCtx, cancelDial := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancelDial()
 	go func() {
@@ -277,18 +266,7 @@ func (s *SmartLPMonitor) runWebsocketSession(wsURL string, subscribeAddrList []c
 	}
 	defer client.Close()
 
-	firstTopics := make([]common.Hash, 0, 3)
-	if scanner != nil && len(scanner.v3ManagersSet) > 0 {
-		firstTopics = append(firstTopics, scanner.increaseID, scanner.decreaseID)
-	}
-	if scanner != nil && scanner.hasV4 {
-		firstTopics = append(firstTopics, scanner.modifyID)
-	}
-	if len(firstTopics) == 0 {
-		return fmt.Errorf("no subscribe topics configured")
-	}
-
-	logCh := make(chan types.Log, 512)
+	headerCh := make(chan *types.Header, 256)
 	subCtx, cancelSub := context.WithCancel(context.Background())
 	defer cancelSub()
 	go func() {
@@ -299,86 +277,98 @@ func (s *SmartLPMonitor) runWebsocketSession(wsURL string, subscribeAddrList []c
 		}
 	}()
 
-	sub, err := client.SubscribeFilterLogs(subCtx, ethereum.FilterQuery{
-		Addresses: subscribeAddrList,
-		Topics:    [][]common.Hash{firstTopics},
-	}, logCh)
+	sub, err := client.SubscribeNewHead(subCtx, headerCh)
 	if err != nil {
 		return err
 	}
 	defer sub.Unsubscribe()
 
 	if scanner != nil && scanner.debug {
-		addrStrs := make([]string, 0, len(subscribeAddrList))
-		for _, a := range subscribeAddrList {
-			addrStrs = append(addrStrs, strings.ToLower(a.Hex()))
-		}
 		monStrs := make([]string, 0, len(monitorAddrList))
 		for _, a := range monitorAddrList {
 			monStrs = append(monStrs, strings.ToLower(a.Hex()))
 		}
-		log.Printf("[SmartLP] websocket subscribed addrs=%d topics=%d addr_list=%s monitor_contracts=%s", len(subscribeAddrList), len(firstTopics), strings.Join(addrStrs, ","), strings.Join(monStrs, ","))
+		log.Printf("[SmartLP] websocket subscribed new heads monitor_contracts=%s", strings.Join(monStrs, ","))
 	} else {
-		log.Printf("[SmartLP] websocket subscribed addrs=%d topics=%d monitor_contracts=%d", len(subscribeAddrList), len(firstTopics), len(monitorAddrList))
+		log.Printf("[SmartLP] websocket subscribed new heads monitor_contracts=%d", len(monitorAddrList))
 	}
 
-	txQueue := make(chan common.Hash, 2048)
+	blockQueue := make(chan uint64, 512)
 	workerDone := make(chan struct{})
 	go func() {
 		defer close(workerDone)
-		s.smartLPWebsocketWorker(txQueue, monitorAddrs, scanner)
+		s.smartLPWebsocketBlockWorker(blockQueue, monitorAddrs, scanner)
 	}()
 
-	seenTx := make(map[common.Hash]time.Time)
+	type seenBlock struct {
+		hash common.Hash
+		ts   time.Time
+	}
+	seenBlocks := make(map[uint64]seenBlock)
+	var lastQueued uint64
 	cleanupTicker := time.NewTicker(20 * time.Minute)
 	defer cleanupTicker.Stop()
 
 	for {
 		select {
 		case <-s.stopChan:
-			close(txQueue)
+			close(blockQueue)
 			<-workerDone
 			return nil
 		case err := <-sub.Err():
-			close(txQueue)
+			close(blockQueue)
 			<-workerDone
 			if err == nil {
 				return fmt.Errorf("websocket subscription ended")
 			}
 			return err
-		case lg := <-logCh:
-			if lg.Removed {
+		case head := <-headerCh:
+			if head == nil || head.Number == nil {
 				continue
 			}
-			if (lg.TxHash == common.Hash{}) {
+			bn := head.Number.Uint64()
+			if bn == 0 {
 				continue
 			}
-			txHash := lg.TxHash
-			if _, ok := seenTx[txHash]; ok {
+			hh := head.Hash()
+			if prev, ok := seenBlocks[bn]; ok && prev.hash == hh {
 				continue
 			}
-			seenTx[txHash] = time.Now()
+			seenBlocks[bn] = seenBlock{hash: hh, ts: time.Now()}
 
-			select {
-			case txQueue <- txHash:
-			default:
-				if scanner != nil && scanner.debug {
-					log.Printf("[SmartLP] websocket tx queue full; drop tx=%s", strings.ToLower(txHash.Hex()))
+			start := bn
+			if lastQueued > 0 && bn > lastQueued+1 {
+				start = lastQueued + 1
+			}
+			if bn <= lastQueued {
+				start = bn
+			}
+
+			for i := start; i <= bn; i++ {
+				select {
+				case blockQueue <- i:
+				default:
+					if scanner != nil && scanner.debug {
+						log.Printf("[SmartLP] websocket block queue full; drop block=%d", i)
+					}
+					delete(seenBlocks, i)
 				}
-				delete(seenTx, txHash)
+			}
+			if bn > lastQueued {
+				lastQueued = bn
 			}
 		case <-cleanupTicker.C:
 			cutoff := time.Now().Add(-2 * time.Hour)
-			for h, t := range seenTx {
-				if t.Before(cutoff) {
-					delete(seenTx, h)
+			for b, info := range seenBlocks {
+				if info.ts.Before(cutoff) {
+					delete(seenBlocks, b)
 				}
 			}
 		}
 	}
 }
 
-func (s *SmartLPMonitor) smartLPWebsocketWorker(txQueue <-chan common.Hash, monitorAddrs map[common.Address]struct{}, scanner *smartLPReceiptScanner) {
+func (s *SmartLPMonitor) smartLPWebsocketBlockWorker(blockQueue <-chan uint64, monitorAddrs map[common.Address]struct{}, scanner *smartLPReceiptScanner) {
 	if s == nil || s.ch == nil || s.ch.Conn == nil {
 		return
 	}
@@ -386,54 +376,19 @@ func (s *SmartLPMonitor) smartLPWebsocketWorker(txQueue <-chan common.Hash, moni
 		return
 	}
 
-	for txHash := range txQueue {
+	for bn := range blockQueue {
 		if blockchain.Client == nil || blockchain.ChainID == nil {
 			continue
 		}
 
-		txCtx, cancel := context.WithTimeout(context.Background(), scanner.callTimeout)
-		tx, _, err := blockchain.Client.TransactionByHash(txCtx, txHash)
-		cancel()
-		if err != nil || tx == nil {
-			if scanner.debug {
-				log.Printf("[SmartLP] websocket get tx failed tx=%s err=%v", strings.ToLower(txHash.Hex()), err)
-			}
-			continue
-		}
-
-		if tx.To() == nil {
-			continue
-		}
-		contractTo := *tx.To()
-		if monitorAddrs != nil {
-			if _, ok := monitorAddrs[contractTo]; !ok {
-				continue
-			}
-		}
-
-		fromAddr, err := types.Sender(types.LatestSignerForChainID(blockchain.ChainID), tx)
+		events, err := s.scanSmartLPBlockWithScanner(context.Background(), bn, monitorAddrs, scanner)
 		if err != nil {
-			if scanner.debug {
-				log.Printf("[SmartLP] websocket derive sender failed tx=%s err=%v", strings.ToLower(txHash.Hex()), err)
-			}
+			log.Printf("[SmartLP] websocket scan block failed block=%d err=%v", bn, err)
 			continue
 		}
-
-		receiptCtx, cancel := context.WithTimeout(context.Background(), scanner.callTimeout)
-		receipt, err := blockchain.Client.TransactionReceipt(receiptCtx, txHash)
-		cancel()
-		if err != nil || receipt == nil {
-			if scanner.debug {
-				log.Printf("[SmartLP] websocket receipt fetch failed tx=%s err=%v", strings.ToLower(txHash.Hex()), err)
-			}
-			continue
-		}
-
-		events := scanner.scanReceipt(context.Background(), receipt, fromAddr, contractTo, txHash)
 		if len(events) == 0 {
 			continue
 		}
-
 		insertCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		err = s.insertEvents(insertCtx, events)
 		cancel()
@@ -443,6 +398,108 @@ func (s *SmartLPMonitor) smartLPWebsocketWorker(txQueue <-chan common.Hash, moni
 		}
 		log.Printf("[SmartLP] inserted events: %d", len(events))
 	}
+}
+
+func (s *SmartLPMonitor) scanSmartLPBlockWithScanner(ctx context.Context, blockNumber uint64, monitorAddrs map[common.Address]struct{}, scanner *smartLPReceiptScanner) ([]smartLPEvent, error) {
+	if s == nil || scanner == nil {
+		return nil, nil
+	}
+	if blockchain.Client == nil {
+		return nil, fmt.Errorf("blockchain client not initialized")
+	}
+	if blockNumber == 0 {
+		return nil, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	callTimeout := scanner.callTimeout
+	if callTimeout <= 0 {
+		callTimeout = 30 * time.Second
+	}
+
+	type rpcTx struct {
+		Hash common.Hash     `json:"hash"`
+		From common.Address  `json:"from"`
+		To   *common.Address `json:"to"`
+	}
+	type rpcBlock struct {
+		Transactions []rpcTx `json:"transactions"`
+	}
+
+	var blk rpcBlock
+	var err error
+	for attempt := 1; attempt <= 3; attempt++ {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		blockCtx, cancel := context.WithTimeout(ctx, callTimeout)
+		err = blockchain.Client.Client().CallContext(blockCtx, &blk, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), true)
+		cancel()
+		if err == nil {
+			break
+		}
+		if attempt >= 3 || !isRetryableRPCError(err) {
+			break
+		}
+		if scanner.debug {
+			log.Printf("[SmartLP] websocket getBlock retrying block=%d attempt=%d err=%v", blockNumber, attempt, err)
+		}
+		delay := time.Duration(attempt) * 500 * time.Millisecond
+		t := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return nil, ctx.Err()
+		case <-t.C:
+		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("eth_getBlockByNumber failed block=%d: %w", blockNumber, err)
+	}
+
+	events := make([]smartLPEvent, 0)
+	receiptErrs := 0
+	candidateTxs := 0
+
+	for _, tx := range blk.Transactions {
+		if (tx.Hash == common.Hash{}) {
+			continue
+		}
+		if tx.To == nil || *tx.To == (common.Address{}) {
+			continue
+		}
+		contractTo := *tx.To
+		if monitorAddrs != nil {
+			if _, ok := monitorAddrs[contractTo]; !ok {
+				continue
+			}
+		}
+		candidateTxs++
+
+		receiptCtx, cancel := context.WithTimeout(ctx, callTimeout)
+		receipt, err := blockchain.Client.TransactionReceipt(receiptCtx, tx.Hash)
+		cancel()
+		if err != nil || receipt == nil {
+			receiptErrs++
+			if scanner.debug && receiptErrs <= 3 {
+				log.Printf("[SmartLP] websocket receipt fetch failed tx=%s err=%v", strings.ToLower(tx.Hash.Hex()), err)
+			}
+			continue
+		}
+
+		txEvents := scanner.scanReceipt(ctx, receipt, tx.From, contractTo, tx.Hash)
+		if len(txEvents) > 0 {
+			events = append(events, txEvents...)
+		}
+	}
+
+	if scanner.debug {
+		log.Printf("[SmartLP] websocket block=%d txs=%d candidates=%d events=%d", blockNumber, len(blk.Transactions), candidateTxs, len(events))
+	}
+
+	return events, nil
 }
 
 func (s *SmartLPMonitor) runOnce() {

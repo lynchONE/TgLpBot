@@ -99,7 +99,17 @@ const normalizeHexPrefixed = (v) => {
     return `0x${raw}`;
 };
 
-export default function PositionCard({ position, walletAddress, bnbBalance, pollIntervalSec, updatedAt, allowTaskActions = true, onSetTaskPaused }) {
+export default function PositionCard({
+    position,
+    walletAddress,
+    bnbBalance,
+    pollIntervalSec,
+    updatedAt,
+    allowTaskActions = true,
+    onSetTaskPaused,
+    onStopTask,
+    onDeleteTask,
+}) {
     // 实时更新的时间显示
     const runningDuration = useDurationFrom(position?.running_since);
     const updateTimeText = useRelativeTime(updatedAt);
@@ -187,10 +197,17 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
         return Number.isFinite(raw) && raw > 0 ? raw : 0;
     }, [position?.task_id]);
     const taskPaused = Boolean(position?.task_paused);
-    const canTaskAction = Boolean(allowTaskActions) && typeof onSetTaskPaused === 'function' && taskId > 0;
+    const statusLabel = String(position?.status_label || '');
+    const isStopped = statusLabel.includes('已停止');
+    const isStopping = statusLabel.includes('停止中') || statusLabel.includes('撤出中');
+    const hasActions = typeof onSetTaskPaused === 'function' || typeof onStopTask === 'function' || typeof onDeleteTask === 'function';
+    const canTaskAction = Boolean(allowTaskActions) && hasActions && taskId > 0;
+    const canPauseAction = canTaskAction && typeof onSetTaskPaused === 'function' && !isStopping;
+    const canStopAction = canTaskAction && typeof onStopTask === 'function' && !isStopped && !isStopping;
+    const canDeleteAction = canTaskAction && typeof onDeleteTask === 'function' && !isStopping;
 
     const [menuOpen, setMenuOpen] = useState(false);
-    const [pausePending, setPausePending] = useState(false);
+    const [actionPending, setActionPending] = useState('');
     const menuRef = useRef(null);
 
     useEffect(() => {
@@ -208,18 +225,20 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
         };
     }, [menuOpen]);
 
-    const togglePause = async () => {
-        if (!canTaskAction || pausePending) return;
-        setPausePending(true);
+    const runAction = async (action, handler) => {
+        if (!handler || actionPending) return;
+        setActionPending(action);
         try {
-            await onSetTaskPaused(taskId, !taskPaused);
-        } catch (e) {
-            window.alert(String(e?.message || e));
+            await handler();
         } finally {
-            setPausePending(false);
+            setActionPending('');
             setMenuOpen(false);
         }
     };
+
+    const togglePause = () => runAction('pause', () => onSetTaskPaused?.(taskId, !taskPaused));
+    const stopTask = () => runAction('stop', () => onStopTask?.(taskId));
+    const deleteTask = () => runAction('delete', () => onDeleteTask?.(taskId));
 
     return (
         <div className="relative rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
@@ -231,20 +250,42 @@ export default function PositionCard({ position, walletAddress, bnbBalance, poll
                         className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-white/70 text-zinc-700 hover:bg-white active:bg-white dark:border-white/10 dark:bg-[#0f1116] dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15"
                         aria-label="任务操作"
                         aria-expanded={menuOpen}
-                        disabled={pausePending}
+                        disabled={Boolean(actionPending)}
                     >
                         <Icon path={icons.kebab} className="h-5 w-5" />
                     </button>
                     {menuOpen ? (
-                        <div className="absolute right-0 top-full z-20 mt-2 w-32 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-white/10 dark:bg-[#111318]">
-                            <button
-                                type="button"
-                                onClick={togglePause}
-                                disabled={pausePending}
-                                className="w-full px-3 py-2 text-left text-xs font-semibold text-zinc-800 hover:bg-zinc-100 active:bg-zinc-100 disabled:opacity-50 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/10"
-                            >
-                                {pausePending ? '处理中...' : taskPaused ? '恢复任务' : '暂停任务'}
-                            </button>
+                        <div className="absolute right-0 top-full z-20 mt-2 w-36 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-white/10 dark:bg-[#111318]">
+                            {typeof onSetTaskPaused === 'function' ? (
+                                <button
+                                    type="button"
+                                    onClick={togglePause}
+                                    disabled={!canPauseAction || Boolean(actionPending)}
+                                    className="w-full px-3 py-2 text-left text-xs font-semibold text-zinc-800 hover:bg-zinc-100 active:bg-zinc-100 disabled:opacity-50 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/10"
+                                >
+                                    {actionPending === 'pause' ? '处理中...' : taskPaused ? '恢复任务' : '暂停任务'}
+                                </button>
+                            ) : null}
+                            {typeof onStopTask === 'function' ? (
+                                <button
+                                    type="button"
+                                    onClick={stopTask}
+                                    disabled={!canStopAction || Boolean(actionPending)}
+                                    className="w-full border-t border-zinc-100 px-3 py-2 text-left text-xs font-semibold text-amber-700 hover:bg-amber-50 active:bg-amber-50 disabled:opacity-50 dark:border-white/10 dark:text-amber-300 dark:hover:bg-white/10 dark:active:bg-white/10"
+                                >
+                                    {actionPending === 'stop' ? '处理中...' : isStopping ? '停止中...' : '停止任务'}
+                                </button>
+                            ) : null}
+                            {typeof onDeleteTask === 'function' ? (
+                                <button
+                                    type="button"
+                                    onClick={deleteTask}
+                                    disabled={!canDeleteAction || Boolean(actionPending)}
+                                    className="w-full border-t border-zinc-100 px-3 py-2 text-left text-xs font-semibold text-red-600 hover:bg-red-50 active:bg-red-50 disabled:opacity-50 dark:border-white/10 dark:text-red-300 dark:hover:bg-white/10 dark:active:bg-white/10"
+                                >
+                                    {actionPending === 'delete' ? '删除中...' : '删除任务'}
+                                </button>
+                            ) : null}
                         </div>
                     ) : null}
                 </div>

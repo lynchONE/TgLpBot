@@ -44,20 +44,6 @@ func (b *Bot) handleStart(message *tgbotapi.Message, user *models.User) {
 	// 添加授权状态
 	text += b.formatAccessStatus(user)
 
-	// If configured, show Mini App入口按钮
-	if config.AppConfig != nil {
-		url := strings.TrimSpace(config.AppConfig.TelegramWebAppURL)
-		if isValidWebAppURL(url) {
-			msg := tgbotapi.NewMessage(message.Chat.ID, text)
-			msg.ParseMode = "Markdown"
-			msg.ReplyMarkup = newWebAppInlineKeyboardMarkup("实时仓位", url)
-			if _, err := b.api.Send(msg); err != nil {
-				log.Printf("Error sending start message with webapp button: %v", err)
-			}
-			return
-		}
-	}
-
 	b.sendMessage(message.Chat.ID, text)
 }
 
@@ -79,6 +65,7 @@ func (b *Bot) handleHelp(message *tgbotapi.Message, user *models.User) {
 /transactions - 查看交易历史
 /auto - AutoLP 自动开仓配置
 /smart_money - Smart Money 加LP榜
+/miniapp - 打开小程序
 /help - 显示此帮助信息
 
 *使用方法：*
@@ -103,6 +90,27 @@ func (b *Bot) handleHelp(message *tgbotapi.Message, user *models.User) {
 	}
 
 	b.sendMessage(message.Chat.ID, text)
+}
+
+// handleMiniApp handles the /miniapp command
+func (b *Bot) handleMiniApp(message *tgbotapi.Message, user *models.User) {
+	if config.AppConfig == nil {
+		b.sendMessage(message.Chat.ID, "小程序入口未配置，请联系管理员。")
+		return
+	}
+
+	url := strings.TrimSpace(config.AppConfig.TelegramWebAppURL)
+	if !isValidWebAppURL(url) {
+		b.sendMessage(message.Chat.ID, "小程序入口链接无效，请联系管理员更新配置。")
+		return
+	}
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, "请点击下方按钮打开小程序。")
+	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = newWebAppInlineKeyboardMarkup("打开小程序", url)
+	if _, err := b.api.Send(msg); err != nil {
+		log.Printf("Error sending miniapp message with webapp button: %v", err)
+	}
 }
 
 // handleWallet handles the /wallet command
