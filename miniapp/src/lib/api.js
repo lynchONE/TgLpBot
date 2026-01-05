@@ -32,7 +32,7 @@ export async function fetchMe({ apiBaseUrl, initData, signal }) {
 
 export async function setTaskPaused({ apiBaseUrl, initData, taskId, paused, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/task_pause`;
+    const url = `${base}/api/task_action?action=pause`;
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -48,7 +48,7 @@ export async function setTaskPaused({ apiBaseUrl, initData, taskId, paused, sign
 
 export async function stopTask({ apiBaseUrl, initData, taskId, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/task_stop`;
+    const url = `${base}/api/task_action?action=stop`;
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -64,7 +64,7 @@ export async function stopTask({ apiBaseUrl, initData, taskId, signal }) {
 
 export async function deleteTask({ apiBaseUrl, initData, taskId, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/task_delete`;
+    const url = `${base}/api/task_action?action=delete`;
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -96,7 +96,7 @@ export async function fetchGlobalConfig({ apiBaseUrl, initData, signal }) {
 
 export async function fetchAdminRealtimeUsers({ apiBaseUrl, initData, limit, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/admin/realtime_users`;
+    const url = `${base}/api/admin?endpoint=realtime_users`;
     const payload = { initData };
     if (Number.isFinite(limit)) payload.limit = limit;
     const resp = await fetch(url, {
@@ -114,7 +114,7 @@ export async function fetchAdminRealtimeUsers({ apiBaseUrl, initData, limit, sig
 
 export async function fetchAdminRealtimePositions({ apiBaseUrl, initData, userId, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/admin/realtime_positions`;
+    const url = `${base}/api/admin?endpoint=realtime_positions`;
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -130,7 +130,7 @@ export async function fetchAdminRealtimePositions({ apiBaseUrl, initData, userId
 
 export async function fetchAdminAutoLPStats({ apiBaseUrl, initData, userId, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/admin/autolp_stats`;
+    const url = `${base}/api/admin?endpoint=autolp_stats`;
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -146,7 +146,7 @@ export async function fetchAdminAutoLPStats({ apiBaseUrl, initData, userId, sign
 
 export async function disableAdminAutoLP({ apiBaseUrl, initData, userId, reason, gasMultiplier, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/admin/autolp_disable`;
+    const url = `${base}/api/admin?endpoint=autolp_disable`;
     const payload = { initData, userId };
     if (reason) payload.reason = String(reason);
     if (Number.isFinite(gasMultiplier)) payload.gasMultiplier = gasMultiplier;
