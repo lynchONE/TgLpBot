@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import HotPoolCard from './components/HotPoolCard.jsx';
 import KlineModal from './components/KlineModal.jsx';
+import AutoMonitorCard from './components/AutoMonitorCard.jsx';
 import PositionCard from './components/PositionCard.jsx';
 import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
 import {
     deleteTask,
     disableAdminAutoLP,
+    fetchAutoMonitor,
     fetchAdminAutoLPStats,
     fetchAdminRealtimePositions,
     fetchAdminRealtimeUsers,
@@ -215,6 +217,10 @@ export default function App() {
     const [loading, setLoading] = useState(false);
     const pollRef = useRef(null);
     const [viewMode, setViewMode] = useState('hot_pools');
+    const [autoMonitor, setAutoMonitor] = useState(null);
+    const [autoMonitorError, setAutoMonitorError] = useState('');
+    const [autoMonitorLoading, setAutoMonitorLoading] = useState(false);
+    const autoMonitorPollRef = useRef(null);
 
     const [hotPoolsSort, setHotPoolsSort] = useState('fees');
     const [hotPoolsData, setHotPoolsData] = useState(null);
@@ -297,10 +303,13 @@ export default function App() {
     const isAdmin = Boolean(me?.is_admin || data?.is_admin || adminPositions?.is_admin);
     const showAdmin = isAdmin && viewMode === 'admin';
     const isHotPools = viewMode === 'hot_pools';
+    const isMonitor = viewMode === 'monitor';
+    const isPositions = viewMode === 'positions';
     const hotPoolsDefaultPollSec = 10;
     const hotPoolsPollIntervalSec = Math.max(5, Number(pollOverrideSec || hotPoolsDefaultPollSec));
     const settingsPollIntervalSec = isHotPools ? hotPoolsPollIntervalSec : pollIntervalSec;
     const settingsServerPollIntervalSec = isHotPools ? hotPoolsDefaultPollSec : serverPollIntervalSec;
+    const monitorPollSec = Math.max(3, pollIntervalSec);
 
     const adminSelectedUser = useMemo(() => {
         if (!adminSelectedUserId) return null;
@@ -574,6 +583,42 @@ export default function App() {
             if (pollRef.current) clearInterval(pollRef.current);
         };
     }, [apiBaseUrl, initData, pollIntervalSec]);
+
+    useEffect(() => {
+        if (!initData || showAdmin || !isMonitor) return;
+        let aborted = false;
+        const controller = new AbortController();
+        let inFlight = false;
+
+        const run = async () => {
+            if (inFlight) return;
+            inFlight = true;
+            setAutoMonitorLoading(true);
+            setAutoMonitorError('');
+            try {
+                const resp = await fetchAutoMonitor({ apiBaseUrl, initData, signal: controller.signal });
+                if (aborted) return;
+                setAutoMonitor(resp);
+            } catch (e) {
+                if (aborted) return;
+                setAutoMonitorError(String(e?.message || e));
+            } finally {
+                inFlight = false;
+                if (!aborted) setAutoMonitorLoading(false);
+            }
+        };
+
+        run();
+
+        if (autoMonitorPollRef.current) clearInterval(autoMonitorPollRef.current);
+        autoMonitorPollRef.current = setInterval(run, monitorPollSec * 1000);
+
+        return () => {
+            aborted = true;
+            controller.abort();
+            if (autoMonitorPollRef.current) clearInterval(autoMonitorPollRef.current);
+        };
+    }, [apiBaseUrl, initData, showAdmin, isMonitor, monitorPollSec]);
 
     useEffect(() => {
         if (!initData || !showAdmin) return;
@@ -1093,7 +1138,7 @@ export default function App() {
         return Math.max(0, Math.floor(elapsed / 1000));
     }, [tick]);
 
-    const headerTitle = showAdmin ? '管理面板' : isHotPools ? '热门池子' : '实时仓位';
+    const headerTitle = showAdmin ? '管理面板' : isHotPools ? '热门池子' : isMonitor ? '自动任务监控' : '实时仓位';
     const headerSubtext = showAdmin
         ? adminSelectedUser
             ? `用户：${formatUserLabel(adminSelectedUser)}`
@@ -1104,16 +1149,20 @@ export default function App() {
                     : '暂无开启Auto用户'
         : isHotPools
             ? `5m · ${hotPoolsData ? `更新：${localUpdateSecAgo}秒前` : hotPoolsLoading ? '加载中...' : '暂无数据'} · 自动刷新 ${hotPoolsPollIntervalSec}s`
-            : walletAddress
-                ? `钱包：${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
-                : '加载钱包中...';
+            : isMonitor
+                ? `Auto任务：${Array.isArray(autoMonitor?.tasks) ? autoMonitor.tasks.length : 0} · 更新：${formatRelativeTime(autoMonitor?.updated_at, tick) || '--'} · 自动刷新 ${monitorPollSec}s`
+                : walletAddress
+                    ? `钱包：${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
+                    : '加载钱包中...';
     const hasAdminPositions = Boolean(adminPositions);
     const adminSummaryPlaceholder = adminSelectedUserId
         ? adminPositionsLoading
             ? '加载用户仓位中...'
             : '用户仓位暂不可用'
         : '请选择用户查看实时仓位';
-    const showEmptyPositions = !isHotPools && Boolean(activeData) && visiblePositions.length === 0;
+    const showEmptyPositions = isPositions && Boolean(activeData) && visiblePositions.length === 0;
+    const monitorTasks = useMemo(() => (Array.isArray(autoMonitor?.tasks) ? autoMonitor.tasks : []), [autoMonitor]);
+    const showEmptyAutoTasks = isMonitor && Boolean(autoMonitor) && monitorTasks.length === 0 && !autoMonitorLoading && !autoMonitorError;
 
     const initDataMissing = viewMode !== 'hot_pools' && !initData;
     const noticeClass = notice?.tone === 'error'
@@ -1199,7 +1248,7 @@ export default function App() {
                 </div>
 
                 <div
-                    className={`mt-3 grid ${isAdmin ? 'grid-cols-3' : 'grid-cols-2'
+                    className={`mt-3 grid ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'
                         } gap-1 rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5`}
                 >
                     <button
@@ -1223,6 +1272,17 @@ export default function App() {
                             }`}
                     >
                         实时仓位
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setViewMode('monitor')}
+                        aria-pressed={viewMode === 'monitor'}
+                        className={`rounded-xl px-3 py-2 transition ${viewMode === 'monitor'
+                            ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
+                            : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
+                            }`}
+                    >
+                        监控
                     </button>
                     {isAdmin ? (
                         <button
@@ -1561,9 +1621,15 @@ export default function App() {
                 </div>
             ) : null}
 
-            {!isHotPools && activeErrorText ? (
+            {(isPositions || showAdmin) && activeErrorText ? (
                 <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-200">
                     {activeErrorText}
+                </div>
+            ) : null}
+
+            {isMonitor && autoMonitorError ? (
+                <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-200">
+                    {autoMonitorError}
                 </div>
             ) : null}
 
@@ -1573,12 +1639,16 @@ export default function App() {
                 </div>
             ) : null}
 
-            {!isHotPools && activeLoading && !activeData ? (
+            {(isPositions || showAdmin) && activeLoading && !activeData ? (
+                <SkeletonList count={2} Card={SkeletonPositionCard} />
+            ) : null}
+
+            {isMonitor && autoMonitorLoading && !autoMonitor ? (
                 <SkeletonList count={2} Card={SkeletonPositionCard} />
             ) : null}
 
             {/* 批量操作工具栏 */}
-            {!isHotPools && !showAdmin && visiblePositions.length > 1 && (
+            {isPositions && !showAdmin && visiblePositions.length > 1 && (
                 <div className="mb-4 flex items-center justify-between gap-2">
                     <button
                         type="button"
@@ -1634,6 +1704,12 @@ export default function App() {
                 </div>
             ) : null}
 
+            {showEmptyAutoTasks ? (
+                <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                    暂无自动任务。请先在机器人里开启 AutoLP 并开仓。
+                </div>
+            ) : null}
+
             <div className="space-y-4">
                 {isHotPools
                     ? hotPoolsVisibleRows.map((row, index) => {
@@ -1654,28 +1730,32 @@ export default function App() {
                             />
                         );
                     })
-                    : activeData
-                        ? visiblePositions.map((p) => (
-                            <PositionCard
-                                key={`${p.version}:${p.position_id}`}
-                                position={p}
-                                walletAddress={walletAddress}
-                                bnbBalance={bnbBalance}
-                                pollIntervalSec={pollIntervalSec}
-                                updatedAt={updatedAt}
-                                allowTaskActions={!showAdmin && Boolean(initData)}
-                                onSetTaskPaused={handleSetTaskPaused}
-                                onStopTask={handleStopTask}
-                                onDeleteTask={handleDeleteTask}
-                                batchMode={batchMode}
-                                isSelected={selectedTaskIds.has(p.task_id)}
-                                onToggleSelect={() => toggleTaskSelection(p.task_id)}
-                            />
+                    : isMonitor
+                        ? monitorTasks.map((t) => (
+                            <AutoMonitorCard key={String(t?.task_id)} task={t} tick={tick} />
                         ))
-                        : null}
+                        : activeData
+                            ? visiblePositions.map((p) => (
+                                <PositionCard
+                                    key={`${p.version}:${p.position_id}`}
+                                    position={p}
+                                    walletAddress={walletAddress}
+                                    bnbBalance={bnbBalance}
+                                    pollIntervalSec={pollIntervalSec}
+                                    updatedAt={updatedAt}
+                                    allowTaskActions={!showAdmin && Boolean(initData)}
+                                    onSetTaskPaused={handleSetTaskPaused}
+                                    onStopTask={handleStopTask}
+                                    onDeleteTask={handleDeleteTask}
+                                    batchMode={batchMode}
+                                    isSelected={selectedTaskIds.has(p.task_id)}
+                                    onToggleSelect={() => toggleTaskSelection(p.task_id)}
+                                />
+                            ))
+                            : null}
             </div>
 
-            {!isHotPools && activeData?.warnings?.length ? (
+            {(isPositions || showAdmin) && activeData?.warnings?.length ? (
                 <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-700 dark:text-amber-200">
                     <div className="font-semibold">提示</div>
                     <ul className="mt-1 list-disc space-y-1 pl-4">
@@ -1713,7 +1793,7 @@ export default function App() {
                             <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                 <div className="mt-3 grid grid-cols-2 gap-3">
                                     <div>
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">手续费 >= (USD)</div>
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">手续费 ≥ (USD)</div>
                                         <input
                                             value={hotPoolsFilterDraft.minFees}
                                             onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFees: e.target.value }))}
@@ -1723,7 +1803,7 @@ export default function App() {
                                         />
                                     </div>
                                     <div>
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">费用率 >= (%)</div>
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">费用率 ≥ (%)</div>
                                         <input
                                             value={hotPoolsFilterDraft.minFeeRate}
                                             onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFeeRate: e.target.value }))}
@@ -1733,7 +1813,7 @@ export default function App() {
                                         />
                                     </div>
                                     <div>
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">TVL >= (USD)</div>
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">TVL ≥ (USD)</div>
                                         <input
                                             value={hotPoolsFilterDraft.minTvl}
                                             onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minTvl: e.target.value }))}
@@ -1743,7 +1823,7 @@ export default function App() {
                                         />
                                     </div>
                                     <div>
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">交易量 >= (USD)</div>
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">交易量 ≥ (USD)</div>
                                         <input
                                             value={hotPoolsFilterDraft.minVolume}
                                             onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minVolume: e.target.value }))}

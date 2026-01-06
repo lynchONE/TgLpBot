@@ -14,6 +14,22 @@ export async function fetchRealtimePositions({ apiBaseUrl, initData, signal }) {
     return resp.json();
 }
 
+export async function fetchAutoMonitor({ apiBaseUrl, initData, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/auto_monitor`;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData }),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
 export async function fetchMe({ apiBaseUrl, initData, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/me`;

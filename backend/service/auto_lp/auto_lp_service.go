@@ -2045,6 +2045,8 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 		gasMult = config.AppConfig.AutoLPEmergencyGasMultiplier
 	}
 
+	now := time.Now()
+
 	task := &models.StrategyTask{
 		UserID: userID,
 		IsAuto: true,
@@ -2073,6 +2075,11 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 		GuardOpenVolume5m:           a.TotalVolume5m,
 		GuardOpenPrice:              a.CurrentPrice,
 		GuardOpenTxCount5m:          int64(maxInt(a.TxCount5m, 0)),
+		GuardOpenFeePercentage:      a.FeePercentage,
+		GuardOpenFeeRate5mPct:       a.FeeRate5mPct,
+		GuardOpenTotalFees5m:        a.TotalFees5m,
+		GuardOpenTVLUSD:             a.TVLUSD,
+		GuardOpenMetricsAt:          &now,
 		GuardVolumeDropArmed:        false,
 		GuardVolumeDropLastVolume5m: 0,
 		GuardPriceTxDropArmed:       false,
@@ -2087,7 +2094,7 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 		StopLossDelaySeconds: cfg.StopLossDelaySeconds,
 
 		Status:        models.StrategyStatusRunning,
-		LastCheckTime: time.Now(),
+		LastCheckTime: now,
 	}
 
 	if !common.IsHexAddress(task.HooksAddress) {
@@ -2265,12 +2272,23 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 
 		initUpdates := map[string]interface{}{}
 		if task.GuardOpenVolume5m <= 0 && m.TotalVolume > 0 {
+			metricsAt := time.Now()
 			initUpdates["guard_open_volume_5m"] = m.TotalVolume
 			initUpdates["guard_volume_drop_armed"] = false
 			initUpdates["guard_volume_drop_last_volume_5m"] = 0
+			initUpdates["guard_open_fee_percentage"] = m.FeePercentage
+			initUpdates["guard_open_fee_rate_5m_pct"] = feeRatePct
+			initUpdates["guard_open_total_fees_5m"] = m.TotalFees
+			initUpdates["guard_open_tvl_usd"] = m.CurrentPoolValue
+			initUpdates["guard_open_metrics_at"] = metricsAt
 			task.GuardOpenVolume5m = m.TotalVolume
 			task.GuardVolumeDropArmed = false
 			task.GuardVolumeDropLastVolume5m = 0
+			task.GuardOpenFeePercentage = m.FeePercentage
+			task.GuardOpenFeeRate5mPct = feeRatePct
+			task.GuardOpenTotalFees5m = m.TotalFees
+			task.GuardOpenTVLUSD = m.CurrentPoolValue
+			task.GuardOpenMetricsAt = &metricsAt
 		}
 		if task.GuardOpenPrice <= 0 && m.CurrentTokenPrice > 0 {
 			initUpdates["guard_open_price"] = m.CurrentTokenPrice
@@ -2372,6 +2390,7 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 }
 
 type poolM5mMetrics struct {
+	FeePercentage     float64
 	TotalFees         float64
 	TotalVolume       float64
 	CurrentPoolValue  float64
@@ -2397,6 +2416,7 @@ func poolM5mMetricsFromSnapshot(snap *poolMSnapshot, task *models.StrategyTask) 
 		return poolM5mMetrics{}, false
 	}
 	return poolM5mMetrics{
+		FeePercentage:     p5.FeePercentage,
 		TotalFees:         p5.TotalFees,
 		TotalVolume:       p5.TotalVolume,
 		CurrentPoolValue:  p5.CurrentPoolValue,
@@ -2419,6 +2439,7 @@ func (s *AutoLPService) latestPoolM5mMetrics(ctx context.Context, task *models.S
 
 	q := `
 		SELECT
+			argMax(fee_percentage, ts) AS current_fee_pct,
 			argMax(total_fees, ts) AS current_fees,
 			argMax(total_volume, ts) AS current_vol,
 			argMax(current_pool_value, ts) AS current_tvl,
@@ -2429,19 +2450,21 @@ func (s *AutoLPService) latestPoolM5mMetrics(ctx context.Context, task *models.S
 		WHERE chain = ? AND protocol_version = ? AND timeframe_minutes = 5 AND pool_address = ?
 	`
 
+	var feePct float64
 	var fees float64
 	var vol float64
 	var tvl float64
 	var price float64
 	var tx uint64
 	var n uint64
-	if err := s.ch.Conn.QueryRow(ctx, q, chain, proto, pool).Scan(&fees, &vol, &tvl, &price, &tx, &n); err != nil {
+	if err := s.ch.Conn.QueryRow(ctx, q, chain, proto, pool).Scan(&feePct, &fees, &vol, &tvl, &price, &tx, &n); err != nil {
 		return poolM5mMetrics{}, false, err
 	}
 	if n < 1 {
 		return poolM5mMetrics{}, false, nil
 	}
 	return poolM5mMetrics{
+		FeePercentage:     feePct,
 		TotalFees:         fees,
 		TotalVolume:       vol,
 		CurrentPoolValue:  tvl,

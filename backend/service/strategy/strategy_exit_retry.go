@@ -295,6 +295,11 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 		updates["guard_open_volume_5m"] = 0
 		updates["guard_open_price"] = 0
 		updates["guard_open_tx_count_5m"] = 0
+		updates["guard_open_fee_percentage"] = 0
+		updates["guard_open_fee_rate_5m_pct"] = 0
+		updates["guard_open_total_fees_5m"] = 0
+		updates["guard_open_tvl_usd"] = 0
+		updates["guard_open_metrics_at"] = nil
 		updates["guard_volume_drop_armed"] = false
 		updates["guard_volume_drop_last_volume_5m"] = 0
 		updates["guard_price_tx_drop_armed"] = false
@@ -324,6 +329,11 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 		task.GuardOpenVolume5m = 0
 		task.GuardOpenPrice = 0
 		task.GuardOpenTxCount5m = 0
+		task.GuardOpenFeePercentage = 0
+		task.GuardOpenFeeRate5mPct = 0
+		task.GuardOpenTotalFees5m = 0
+		task.GuardOpenTVLUSD = 0
+		task.GuardOpenMetricsAt = nil
 		task.GuardVolumeDropArmed = false
 		task.GuardVolumeDropLastVolume5m = 0
 		task.GuardPriceTxDropArmed = false
