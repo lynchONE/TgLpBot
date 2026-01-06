@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { copyToClipboard } from '../lib/telegram';
+import { copyToClipboard, hapticNotification, hapticImpact } from '../lib/telegram';
 
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -196,12 +196,14 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
 
     const copyAddr = async () => {
         if (!addr) return;
+        hapticImpact('light'); // 按钮点击反馈
         try {
             await copyToClipboard(addr);
             setCopied(true);
+            hapticNotification('success'); // 复制成功反馈
             setTimeout(() => setCopied(false), 1200);
         } catch {
-            // ignore
+            hapticNotification('error'); // 复制失败反馈
         }
     };
 

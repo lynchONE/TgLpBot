@@ -31,15 +31,20 @@
 - 增加了CSS变量和样式优化
 - 提升文字可读性
 
-## 待完成功能
+### 7. 加载进度指示 ✅ (新增)
+- 顶部固定的进度条显示轮询倒计时
+- 加载时显示动画效果
+- 进度条随时间增长，刷新后重置
 
-### 下拉刷新
-- CSS样式已添加
-- 需要后续添加触摸事件处理逻辑
+### 8. 触觉反馈 ✅ (新增)
+- 复制地址时触发震动反馈
+- 数据刷新成功时轻触反馈
+- 操作成功/失败有不同的震动类型
 
 ## 修改的文件
 - `miniapp/src/components/Skeleton.jsx` [新建]
 - `miniapp/src/index.css`
+- `miniapp/src/lib/telegram.js`
 - `miniapp/src/components/HotPoolCard.jsx`
 - `miniapp/src/components/PositionCard.jsx`
 - `miniapp/src/components/PriceRangeVisualizer.jsx`

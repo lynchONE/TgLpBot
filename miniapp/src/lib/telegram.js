@@ -58,3 +58,40 @@ export function copyToClipboard(text) {
     }
     return legacyCopy(value);
 }
+
+/**
+ * 触觉反馈类型
+ * - impact: 物理碰撞反馈 (light, medium, heavy, rigid, soft)
+ * - notification: 通知反馈 (success, warning, error)
+ * - selection: 选择变化反馈
+ */
+
+// 碰撞反馈 - 按钮点击
+export function hapticImpact(style = 'light') {
+    const tg = getTelegramWebApp();
+    try {
+        tg?.HapticFeedback?.impactOccurred?.(style);
+    } catch {
+        // ignore - 设备可能不支持
+    }
+}
+
+// 通知反馈 - 操作结果
+export function hapticNotification(type = 'success') {
+    const tg = getTelegramWebApp();
+    try {
+        tg?.HapticFeedback?.notificationOccurred?.(type);
+    } catch {
+        // ignore
+    }
+}
+
+// 选择反馈 - 轻触反馈
+export function hapticSelection() {
+    const tg = getTelegramWebApp();
+    try {
+        tg?.HapticFeedback?.selectionChanged?.();
+    } catch {
+        // ignore
+    }
+}

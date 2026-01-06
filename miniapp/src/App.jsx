@@ -17,7 +17,7 @@ import {
     setTaskPaused,
     stopTask,
 } from './lib/api';
-import { getTelegramWebApp } from './lib/telegram';
+import { getTelegramWebApp, hapticImpact, hapticNotification, hapticSelection } from './lib/telegram';
 import { formatRelativeTime, useTick } from './lib/time';
 
 function resolveApiBaseUrl() {
@@ -280,6 +280,11 @@ export default function App() {
     const [globalConfigError, setGlobalConfigError] = useState('');
     const [globalConfigLoading, setGlobalConfigLoading] = useState(false);
 
+    // 加载进度状态
+    const [pollProgress, setPollProgress] = useState(0);
+    const pollProgressRef = useRef(null);
+    const lastPollTimeRef = useRef(Date.now());
+
     const serverPollIntervalSec = Math.max(1, Number(data?.poll_interval_sec || adminPositions?.poll_interval_sec || 1));
     const pollIntervalSec = Math.max(1, Number(pollOverrideSec || serverPollIntervalSec || 1));
     const adminListPollSec = Math.max(3, pollIntervalSec);
@@ -475,6 +480,37 @@ export default function App() {
             if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
         };
     }, []);
+
+    // 进度条计时器 - 显示轮询倒计时
+    useEffect(() => {
+        const currentPollSec = isHotPools ? hotPoolsPollIntervalSec : pollIntervalSec;
+
+        const updateProgress = () => {
+            const elapsed = Date.now() - lastPollTimeRef.current;
+            const progress = Math.min(100, (elapsed / (currentPollSec * 1000)) * 100);
+            setPollProgress(progress);
+        };
+
+        // 立即更新一次
+        updateProgress();
+
+        // 每100ms更新进度
+        pollProgressRef.current = setInterval(updateProgress, 100);
+
+        return () => {
+            if (pollProgressRef.current) clearInterval(pollProgressRef.current);
+        };
+    }, [isHotPools, hotPoolsPollIntervalSec, pollIntervalSec]);
+
+    // 轮询完成时重置进度
+    useEffect(() => {
+        lastPollTimeRef.current = Date.now();
+        setPollProgress(0);
+        // 触觉反馈 - 数据刷新成功
+        if (data || hotPoolsData) {
+            hapticSelection();
+        }
+    }, [data, hotPoolsData]);
 
     useEffect(() => {
         if (!settingsOpen) return;
@@ -1055,6 +1091,13 @@ export default function App() {
                     </div>
                 </div>
             ) : null}
+            {/* 顶部加载进度条 */}
+            <div className="progress-bar-container">
+                <div
+                    className={`progress-bar ${loading || hotPoolsLoading ? 'loading' : ''}`}
+                    style={{ width: loading || hotPoolsLoading ? undefined : `${pollProgress}%` }}
+                />
+            </div>
             <header className="mb-4">
                 <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">

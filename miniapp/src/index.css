@@ -13,6 +13,7 @@ body {
 }
 
 @media (max-width: 640px) {
+
     input[inputmode='decimal'],
     input[inputmode='numeric'] {
         font-size: 16px;
@@ -46,14 +47,70 @@ body {
 }
 
 @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* 顶部加载进度条 */
+.progress-bar-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    z-index: 9999;
+    background: rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+}
+
+.dark .progress-bar-container {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #10b981, #34d399, #6ee7b7);
+    transition: width 0.3s linear;
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+}
+
+.progress-bar.loading {
+    animation: progress-indeterminate 1.5s ease-in-out infinite;
+}
+
+@keyframes progress-indeterminate {
+    0% {
+        width: 0%;
+        margin-left: 0%;
+    }
+
+    50% {
+        width: 30%;
+        margin-left: 35%;
+    }
+
+    100% {
+        width: 0%;
+        margin-left: 100%;
+    }
 }
 
 /* 骨架屏脉冲动画 */
 @keyframes skeleton-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.4;
+    }
 }
 
 .animate-skeleton {
@@ -62,9 +119,17 @@ body {
 
 /* 价格变化动画 */
 @keyframes price-pulse {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.05); }
-    100% { transform: scale(1); }
+    0% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.05);
+    }
+
+    100% {
+        transform: scale(1);
+    }
 }
 
 .price-pulse {
