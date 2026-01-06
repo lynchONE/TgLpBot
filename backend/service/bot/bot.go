@@ -154,6 +154,10 @@ func (b *Bot) setCommands() error {
 			Description: "管理钱包",
 		},
 		{
+			Command:     "swap_to_usdt",
+			Description: "兑换其它代币为USDT",
+		},
+		{
 			Command:     "transactions",
 			Description: "查看交易历史",
 		},
@@ -308,6 +312,8 @@ func (b *Bot) handleCommand(message *tgbotapi.Message, user *models.User) {
 		b.handleTransactions(message, user)
 	case "profit":
 		b.handleProfit(message, user)
+	case "swap_to_usdt":
+		b.handleSwapToUSDT(message, user)
 	case "cancel":
 		b.handleCancel(message, user)
 	case "admin":
@@ -486,6 +492,12 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleConfirmDeleteWallet(query, user)
 	case query.Data == "back_to_wallets":
 		b.handleViewWallets(query, user)
+	case query.Data == "wallet_swap_to_usdt":
+		b.handleWalletSwapToUSDTPrompt(query, user)
+	case query.Data == "wallet_swap_to_usdt_confirm":
+		b.handleWalletSwapToUSDTConfirm(query, user)
+	case query.Data == "wallet_swap_to_usdt_cancel":
+		b.handleWalletSwapToUSDTCancel(query, user)
 	// Position confirmation callbacks
 	case query.Data == "confirm_position":
 		b.handleConfirmPosition(query, user)

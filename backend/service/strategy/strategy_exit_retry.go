@@ -291,6 +291,14 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 		"rebalance_last_error":        "",
 		"error_message":               "",
 	}
+	if task.IsAuto {
+		updates["guard_open_volume_5m"] = 0
+		updates["guard_open_price"] = 0
+		updates["guard_open_tx_count_5m"] = 0
+		updates["guard_volume_drop_armed"] = false
+		updates["guard_volume_drop_last_volume_5m"] = 0
+		updates["guard_price_tx_drop_armed"] = false
+	}
 	_ = database.DB.Model(task).Updates(updates).Error
 
 	task.Status = models.StrategyStatusRunning
@@ -312,6 +320,14 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 	task.RebalanceNextRetryAt = nil
 	task.RebalanceLastError = ""
 	task.ErrorMessage = ""
+	if task.IsAuto {
+		task.GuardOpenVolume5m = 0
+		task.GuardOpenPrice = 0
+		task.GuardOpenTxCount5m = 0
+		task.GuardVolumeDropArmed = false
+		task.GuardVolumeDropLastVolume5m = 0
+		task.GuardPriceTxDropArmed = false
+	}
 
 	if task.IsAuto {
 		eventType := models.AutoLPEventRebalance

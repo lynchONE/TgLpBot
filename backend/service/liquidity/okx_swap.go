@@ -46,19 +46,42 @@ func (s *LiquidityService) swapExactInViaOKX(
 		outBefore = big.NewInt(0)
 	}
 
-	swapResp, err := s.okxService.GetSwapData(exchange.SwapRequest{
+	swapReq := exchange.SwapRequest{
 		ChainID:           fmt.Sprintf("%d", config.AppConfig.BSCChainID),
 		FromTokenAddress:  tokenIn.Hex(),
 		ToTokenAddress:    tokenOut.Hex(),
 		Amount:            amountIn.String(),
 		Slippage:          s.okxSlippageDecimal(slippagePercent),
 		UserWalletAddress: walletAddr.Hex(),
-	})
+	}
+
+	preview, err := s.okxService.GetQuoteThenSwap(swapReq)
 	if err != nil {
 		return nil, err
 	}
+	swapResp := preview.Swap
 	if len(swapResp.Data) == 0 {
 		return nil, fmt.Errorf("OKX swap response empty")
+	}
+
+	if preview.EstimatedGas != nil {
+		log.Printf("[Liquidity] OKX quote: %s -> %s amountIn=%s expectedOut=%s estGas=%s slippage=%.4f%%",
+			tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), preview.QuoteToTokenAmount.String(), preview.EstimatedGas.String(), slippagePercent)
+	} else {
+		log.Printf("[Liquidity] OKX quote: %s -> %s amountIn=%s expectedOut=%s slippage=%.4f%%",
+			tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), preview.QuoteToTokenAmount.String(), slippagePercent)
+	}
+
+	if preview.SwapToTokenAmount != nil && preview.SwapToTokenAmount.Cmp(preview.QuoteToTokenAmount) < 0 {
+		diff := new(big.Int).Sub(preview.QuoteToTokenAmount, preview.SwapToTokenAmount)
+		bps := new(big.Int).Mul(diff, big.NewInt(10_000))
+		bps.Div(bps, preview.QuoteToTokenAmount)
+		if bps.Cmp(big.NewInt(2_000)) > 0 { // 20% drop is suspicious given quote->swap is immediate
+			return nil, fmt.Errorf("OKX quote/swap mismatch too large: quoteOut=%s swapOut=%s (drop=%s bps)",
+				preview.QuoteToTokenAmount.String(), preview.SwapToTokenAmount.String(), bps.String())
+		}
+		log.Printf("[Liquidity] Warning: OKX quote/swap output mismatch: quoteOut=%s swapOut=%s (drop=%s bps)",
+			preview.QuoteToTokenAmount.String(), preview.SwapToTokenAmount.String(), bps.String())
 	}
 
 	txObj := swapResp.Data[0].Tx

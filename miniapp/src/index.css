@@ -12,3 +12,9 @@ body {
         Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji';
 }
 
+@media (max-width: 640px) {
+    input[inputmode='decimal'],
+    input[inputmode='numeric'] {
+        font-size: 16px;
+    }
+}

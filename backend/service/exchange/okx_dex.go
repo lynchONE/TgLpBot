@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -175,6 +176,165 @@ type SwapResponse struct {
 	} `json:"data"`
 }
 
+type OKXAPIError struct {
+	Endpoint string
+	Code     string
+	Msg      string
+}
+
+func (e *OKXAPIError) Error() string {
+	if e == nil {
+		return "OKX API error"
+	}
+	if strings.TrimSpace(e.Endpoint) == "" {
+		return fmt.Sprintf("OKX API error: %s (code=%s)", e.Msg, e.Code)
+	}
+	return fmt.Sprintf("OKX API error: %s (code=%s endpoint=%s)", e.Msg, e.Code, e.Endpoint)
+}
+
+type QuoteUnsupportedError struct {
+	ChainID          string
+	FromTokenAddress string
+	ToTokenAddress   string
+	Amount           string
+	Slippage         string
+	Reason           string
+}
+
+func (e *QuoteUnsupportedError) Error() string {
+	if e == nil {
+		return "OKX quote unsupported route"
+	}
+	reason := strings.TrimSpace(e.Reason)
+	if reason == "" {
+		reason = "no route"
+	}
+	return fmt.Sprintf("OKX quote 不支持该兑换路径: chain=%s from=%s to=%s amount=%s slippage=%s (%s)",
+		strings.TrimSpace(e.ChainID),
+		strings.TrimSpace(e.FromTokenAddress),
+		strings.TrimSpace(e.ToTokenAddress),
+		strings.TrimSpace(e.Amount),
+		strings.TrimSpace(e.Slippage),
+		reason,
+	)
+}
+
+type QuoteThenSwapResult struct {
+	Quote *QuoteResponse
+	Swap  *SwapResponse
+
+	QuoteToTokenAmount *big.Int
+	SwapToTokenAmount  *big.Int
+	EstimatedGas       *big.Int
+}
+
+func parseBigIntAnyBase(s string) (*big.Int, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, false
+	}
+	if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
+		return new(big.Int).SetString(strings.TrimPrefix(strings.TrimPrefix(s, "0x"), "0X"), 16)
+	}
+	return new(big.Int).SetString(s, 10)
+}
+
+// GetQuoteThenSwap fetches a /quote preview first, then fetches /swap transaction data.
+// Useful for previewing expected output/estimated gas and validating the swap response.
+func (s *OKXDexService) GetQuoteThenSwap(req SwapRequest) (*QuoteThenSwapResult, error) {
+	quoteResp, err := s.GetQuote(QuoteRequest{
+		ChainID:          req.ChainID,
+		FromTokenAddress: req.FromTokenAddress,
+		ToTokenAddress:   req.ToTokenAddress,
+		Amount:           req.Amount,
+		Slippage:         req.Slippage,
+	})
+	if err != nil {
+		var apiErr *OKXAPIError
+		if errors.As(err, &apiErr) {
+			reason := strings.TrimSpace(apiErr.Msg)
+			if apiErr.Code != "" {
+				reason = fmt.Sprintf("%s (code=%s)", reason, apiErr.Code)
+			}
+			return nil, &QuoteUnsupportedError{
+				ChainID:          req.ChainID,
+				FromTokenAddress: req.FromTokenAddress,
+				ToTokenAddress:   req.ToTokenAddress,
+				Amount:           req.Amount,
+				Slippage:         req.Slippage,
+				Reason:           reason,
+			}
+		}
+		return nil, fmt.Errorf("get OKX quote failed: %w", err)
+	}
+	if quoteResp == nil || len(quoteResp.Data) == 0 {
+		return nil, &QuoteUnsupportedError{
+			ChainID:          req.ChainID,
+			FromTokenAddress: req.FromTokenAddress,
+			ToTokenAddress:   req.ToTokenAddress,
+			Amount:           req.Amount,
+			Slippage:         req.Slippage,
+			Reason:           "empty quote response",
+		}
+	}
+
+	quoteOutStr := strings.TrimSpace(quoteResp.Data[0].RouterResult.ToTokenAmount)
+	quoteOut, ok := parseBigIntAnyBase(quoteOutStr)
+	if !ok {
+		return nil, &QuoteUnsupportedError{
+			ChainID:          req.ChainID,
+			FromTokenAddress: req.FromTokenAddress,
+			ToTokenAddress:   req.ToTokenAddress,
+			Amount:           req.Amount,
+			Slippage:         req.Slippage,
+			Reason:           fmt.Sprintf("invalid quote toTokenAmount: %q", quoteOutStr),
+		}
+	}
+	if quoteOut.Sign() <= 0 {
+		return nil, &QuoteUnsupportedError{
+			ChainID:          req.ChainID,
+			FromTokenAddress: req.FromTokenAddress,
+			ToTokenAddress:   req.ToTokenAddress,
+			Amount:           req.Amount,
+			Slippage:         req.Slippage,
+			Reason:           "quote toTokenAmount is zero",
+		}
+	}
+
+	// Optional fields
+	var estGas *big.Int
+	estGasStr := strings.TrimSpace(quoteResp.Data[0].RouterResult.EstimatedGas)
+	if estGasStr != "" {
+		if g, ok := parseBigIntAnyBase(estGasStr); ok && g.Sign() > 0 {
+			estGas = g
+		}
+	}
+
+	swapResp, err := s.GetSwapData(req)
+	if err != nil {
+		return nil, err
+	}
+	if swapResp == nil || len(swapResp.Data) == 0 {
+		return nil, fmt.Errorf("OKX swap response empty")
+	}
+
+	var swapOut *big.Int
+	swapOutStr := strings.TrimSpace(swapResp.Data[0].RouterResult.ToTokenAmount)
+	if swapOutStr != "" {
+		if v, ok := parseBigIntAnyBase(swapOutStr); ok && v.Sign() > 0 {
+			swapOut = v
+		}
+	}
+
+	return &QuoteThenSwapResult{
+		Quote:              quoteResp,
+		Swap:               swapResp,
+		QuoteToTokenAmount: quoteOut,
+		SwapToTokenAmount:  swapOut,
+		EstimatedGas:       estGas,
+	}, nil
+}
+
 // GetQuote gets a quote for token swap
 func (s *OKXDexService) GetQuote(req QuoteRequest) (*QuoteResponse, error) {
 	url := fmt.Sprintf("%s/quote?%s=%s&fromTokenAddress=%s&toTokenAddress=%s&amount=%s&%s=%s",
@@ -206,7 +366,7 @@ func (s *OKXDexService) GetQuote(req QuoteRequest) (*QuoteResponse, error) {
 	}
 
 	if quoteResp.Code != "0" {
-		return nil, fmt.Errorf("OKX API error: %s (code=%s)", quoteResp.Msg, quoteResp.Code)
+		return nil, &OKXAPIError{Endpoint: "quote", Code: quoteResp.Code, Msg: quoteResp.Msg}
 	}
 
 	return &quoteResp, nil
@@ -251,7 +411,7 @@ func (s *OKXDexService) GetSwapData(req SwapRequest) (*SwapResponse, error) {
 	}
 
 	if swapResp.Code != "0" {
-		return nil, fmt.Errorf("OKX API error: %s (code=%s)", swapResp.Msg, swapResp.Code)
+		return nil, &OKXAPIError{Endpoint: "swap", Code: swapResp.Code, Msg: swapResp.Msg}
 	}
 
 	// 打印详细响应信息
@@ -325,7 +485,7 @@ func (s *OKXDexService) GetApproveSpender(chainID string, tokenAddress string) (
 	}
 
 	if approveResp.Code != "0" {
-		return "", fmt.Errorf("OKX API error: %s (code=%s)", approveResp.Msg, approveResp.Code)
+		return "", &OKXAPIError{Endpoint: "approve-transaction", Code: approveResp.Code, Msg: approveResp.Msg}
 	}
 
 	if len(approveResp.Data) == 0 || approveResp.Data[0].DexContractAddress == "" {

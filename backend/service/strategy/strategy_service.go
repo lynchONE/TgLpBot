@@ -451,11 +451,27 @@ func (s *StrategyService) handleWaitingTask(task *models.StrategyTask) {
 			"next_range_multiplier":       1.0,
 			"error_message":               "",
 		}
+		if task.IsAuto {
+			updates["guard_open_volume_5m"] = 0
+			updates["guard_open_price"] = 0
+			updates["guard_open_tx_count_5m"] = 0
+			updates["guard_volume_drop_armed"] = false
+			updates["guard_volume_drop_last_volume_5m"] = 0
+			updates["guard_price_tx_drop_armed"] = false
+		}
 		database.DB.Model(task).Updates(updates)
 		task.ExitLiquidityRemoved = false
 		task.CooldownUntil = nil
 		task.CooldownReason = ""
 		task.NextRangeMultiplier = 1.0
+		if task.IsAuto {
+			task.GuardOpenVolume5m = 0
+			task.GuardOpenPrice = 0
+			task.GuardOpenTxCount5m = 0
+			task.GuardVolumeDropArmed = false
+			task.GuardVolumeDropLastVolume5m = 0
+			task.GuardPriceTxDropArmed = false
+		}
 
 		s.notify(task.UserID, fmt.Sprintf("✅ 冷却结束，已重新开仓（Tick %d）。\n新 Tick 范围: %d - %d\n交易哈希: `%s`", currentTick, tickLower, tickUpper, enterRes.TxHash))
 		s.notifyTaskCard(task.UserID, task.ID)
@@ -512,8 +528,24 @@ func (s *StrategyService) handleWaitingTask(task *models.StrategyTask) {
 			"out_of_range_since":          nil,
 			"error_message":               "",
 		}
+		if task.IsAuto {
+			updates["guard_open_volume_5m"] = 0
+			updates["guard_open_price"] = 0
+			updates["guard_open_tx_count_5m"] = 0
+			updates["guard_volume_drop_armed"] = false
+			updates["guard_volume_drop_last_volume_5m"] = 0
+			updates["guard_price_tx_drop_armed"] = false
+		}
 		database.DB.Model(task).Updates(updates)
 		task.ExitLiquidityRemoved = false
+		if task.IsAuto {
+			task.GuardOpenVolume5m = 0
+			task.GuardOpenPrice = 0
+			task.GuardOpenTxCount5m = 0
+			task.GuardVolumeDropArmed = false
+			task.GuardVolumeDropLastVolume5m = 0
+			task.GuardPriceTxDropArmed = false
+		}
 
 		log.Printf("[Strategy] 任务 #%d 已重新开仓! 继续监控.", task.ID)
 	} else {

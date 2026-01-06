@@ -79,11 +79,17 @@ type StrategyTask struct {
 	ErrorMessage    string         `gorm:"type:text" json:"error_message"`
 
 	// Auto-mode guard state (persisted per task/pool)
-	RangeBreakUpStreak   int        `gorm:"default:0" json:"range_break_up_streak"`
-	RangeBreakDownStreak int        `gorm:"default:0" json:"range_break_down_streak"`
-	NextRangeMultiplier  float64    `gorm:"type:decimal(6,2);default:1.0" json:"next_range_multiplier"`
-	CooldownUntil        *time.Time `json:"cooldown_until"`
-	CooldownReason       string     `gorm:"type:text" json:"cooldown_reason"`
+	GuardOpenVolume5m           float64    `gorm:"type:decimal(20,8);default:0" json:"guard_open_volume_5m"`
+	GuardOpenPrice              float64    `gorm:"type:decimal(30,12);default:0" json:"guard_open_price"`
+	GuardOpenTxCount5m          int64      `gorm:"default:0" json:"guard_open_tx_count_5m"`
+	GuardVolumeDropArmed        bool       `gorm:"default:false" json:"guard_volume_drop_armed"`
+	GuardVolumeDropLastVolume5m float64    `gorm:"type:decimal(20,8);default:0" json:"guard_volume_drop_last_volume_5m"`
+	GuardPriceTxDropArmed       bool       `gorm:"default:false" json:"guard_price_tx_drop_armed"`
+	RangeBreakUpStreak          int        `gorm:"default:0" json:"range_break_up_streak"`
+	RangeBreakDownStreak        int        `gorm:"default:0" json:"range_break_down_streak"`
+	NextRangeMultiplier         float64    `gorm:"type:decimal(6,2);default:1.0" json:"next_range_multiplier"`
+	CooldownUntil               *time.Time `json:"cooldown_until"`
+	CooldownReason              string     `gorm:"type:text" json:"cooldown_reason"`
 
 	// Exit retry state (keep task Status as running when exit fails).
 	ExitPendingAction string     `gorm:"size:20;default:''" json:"exit_pending_action"` // manual_stop | stoploss | rebalance | switch | cooldown

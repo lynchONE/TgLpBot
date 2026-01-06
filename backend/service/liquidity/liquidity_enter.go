@@ -627,67 +627,14 @@ func (s *LiquidityService) enterV3FromToken(
 		CallData:      []byte{},
 	}
 	if swapAmount != nil && swapAmount.Sign() > 0 {
-		okxData, err := s.okxService.GetSwapData(exchange.SwapRequest{
-			ChainID:           "56", // BSC
-			FromTokenAddress:  swapTokenIn.Hex(),
-			ToTokenAddress:    swapTokenOut.Hex(),
-			Amount:            swapAmount.String(),
-			Slippage:          s.okxSlippageDecimal(task.SlippageTolerance),
-			UserWalletAddress: zapAddr.Hex(), // Zap 合约地址作为执行者
-		})
+		p, err := s.prepareOKXSwapParams(zapAddr, swapTokenIn, swapTokenOut, swapAmount, task.SlippageTolerance)
 		if err != nil {
-			return nil, fmt.Errorf("get OKX swap data failed: %w", err)
+			return nil, err
 		}
-
-		// 验证 OKX 返回数据
-		if len(okxData.Data) == 0 {
-			return nil, fmt.Errorf("OKX returned empty data")
+		if p != nil {
+			swapParams = *p
+			log.Printf("[Liquidity] V3 enter: OKX swap target=%s minOut=%s", swapParams.Target.Hex(), swapParams.MinAmountOut.String())
 		}
-
-		// 解析 OKX 返回的数据
-		minOut := big.NewInt(0)
-		if okxData.Data[0].RouterResult.ToTokenAmount != "" {
-			minOut, _ = new(big.Int).SetString(okxData.Data[0].RouterResult.ToTokenAmount, 10)
-			// 减少 5% 作为最小输出保护
-			minOut = new(big.Int).Mul(minOut, big.NewInt(95))
-			minOut = new(big.Int).Div(minOut, big.NewInt(100))
-		}
-
-		callData, _ := hex.DecodeString(strings.TrimPrefix(okxData.Data[0].Tx.Data, "0x"))
-
-		// 确定 ApproveTarget: 优先使用配置的 OKX TokenApproveAddress
-		approveTarget := common.HexToAddress(okxData.Data[0].Tx.To)
-		if config.AppConfig.OKXTokenApproveAddress != "" {
-			approveTarget = common.HexToAddress(config.AppConfig.OKXTokenApproveAddress)
-		}
-
-		// 确定 Target: 优先使用配置的 OKX Swap Router（避免信任 API 返回的 to 地址）
-		apiTarget := common.HexToAddress(okxData.Data[0].Tx.To)
-		target := apiTarget
-
-		log.Printf("[Liquidity] DEBUG: OKX API returned router (tx.to): %s", apiTarget.Hex())
-		log.Printf("[Liquidity] DEBUG: AppConfig.OKXSwapRouter: %s", config.AppConfig.OKXSwapRouter)
-
-		if config.AppConfig.OKXSwapRouter != "" {
-			confTarget := common.HexToAddress(config.AppConfig.OKXSwapRouter)
-			if confTarget != apiTarget {
-				log.Printf("[Liquidity] ⚠️ WARNING: Configured OKX Router (%s) mismatch API returned (%s). Using Configured.", confTarget.Hex(), apiTarget.Hex())
-			}
-			target = confTarget
-		} else {
-			log.Printf("[Liquidity] ⚠️ WARNING: AppConfig.OKXSwapRouter is empty. Using API returned router.")
-		}
-
-		swapParams = blockchain.SwapParamsSimple{
-			Target:        target,
-			ApproveTarget: approveTarget,
-			TokenIn:       swapTokenIn,
-			TokenOut:      swapTokenOut,
-			AmountIn:      swapAmount,
-			MinAmountOut:  minOut,
-			CallData:      callData,
-		}
-		log.Printf("[Liquidity] V3 enter: OKX swap target=%s minOut=%s", swapParams.Target.Hex(), minOut.String())
 	}
 
 	// 3. Approve 代币给 Zap 合约
@@ -1085,29 +1032,53 @@ func (s *LiquidityService) prepareOKXSwapParams(
 		return nil, nil // No swap needed
 	}
 
-	okxData, err := s.okxService.GetSwapData(exchange.SwapRequest{
+	swapReq := exchange.SwapRequest{
 		ChainID:           "56", // BSC
 		FromTokenAddress:  tokenIn.Hex(),
 		ToTokenAddress:    tokenOut.Hex(),
 		Amount:            amountIn.String(),
 		Slippage:          s.okxSlippageDecimal(slippageTolerance),
 		UserWalletAddress: executorAddr.Hex(), // Zap contract as executor
-	})
-	if err != nil {
-		return nil, fmt.Errorf("get OKX swap data failed: %w", err)
 	}
 
+	preview, err := s.okxService.GetQuoteThenSwap(swapReq)
+	if err != nil {
+		return nil, fmt.Errorf("get OKX quote/swap data failed: %w", err)
+	}
+
+	okxData := preview.Swap
 	if len(okxData.Data) == 0 {
 		return nil, fmt.Errorf("OKX returned empty data")
 	}
 
-	minOut := big.NewInt(0)
-	if okxData.Data[0].RouterResult.ToTokenAmount != "" {
-		minOut, _ = new(big.Int).SetString(okxData.Data[0].RouterResult.ToTokenAmount, 10)
-		// 95% protection
-		minOut = new(big.Int).Mul(minOut, big.NewInt(95))
-		minOut = new(big.Int).Div(minOut, big.NewInt(100))
+	if preview.EstimatedGas != nil {
+		log.Printf("[Liquidity] OKX quote(zap): %s -> %s amountIn=%s executor=%s expectedOut=%s estGas=%s slippage=%.4f%%",
+			tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), executorAddr.Hex(), preview.QuoteToTokenAmount.String(), preview.EstimatedGas.String(), slippageTolerance)
+	} else {
+		log.Printf("[Liquidity] OKX quote(zap): %s -> %s amountIn=%s executor=%s expectedOut=%s slippage=%.4f%%",
+			tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), executorAddr.Hex(), preview.QuoteToTokenAmount.String(), slippageTolerance)
 	}
+
+	if preview.SwapToTokenAmount != nil && preview.SwapToTokenAmount.Cmp(preview.QuoteToTokenAmount) < 0 {
+		diff := new(big.Int).Sub(preview.QuoteToTokenAmount, preview.SwapToTokenAmount)
+		bps := new(big.Int).Mul(diff, big.NewInt(10_000))
+		bps.Div(bps, preview.QuoteToTokenAmount)
+		if bps.Cmp(big.NewInt(2_000)) > 0 {
+			return nil, fmt.Errorf("OKX quote/swap mismatch too large: quoteOut=%s swapOut=%s (drop=%s bps)",
+				preview.QuoteToTokenAmount.String(), preview.SwapToTokenAmount.String(), bps.String())
+		}
+		log.Printf("[Liquidity] Warning: OKX quote/swap output mismatch: quoteOut=%s swapOut=%s (drop=%s bps)",
+			preview.QuoteToTokenAmount.String(), preview.SwapToTokenAmount.String(), bps.String())
+	}
+
+	baseOut := new(big.Int).Set(preview.QuoteToTokenAmount)
+	if preview.SwapToTokenAmount != nil && preview.SwapToTokenAmount.Sign() > 0 && preview.SwapToTokenAmount.Cmp(baseOut) < 0 {
+		baseOut = preview.SwapToTokenAmount
+	}
+
+	// 95% protection (keep <= OKX calldata's internal minOut to avoid reverting after swap)
+	minOut := new(big.Int).Mul(baseOut, big.NewInt(95))
+	minOut = minOut.Div(minOut, big.NewInt(100))
 
 	callData := []byte{}
 	if okxData.Data[0].Tx.Data != "" {
@@ -1119,9 +1090,14 @@ func (s *LiquidityService) prepareOKXSwapParams(
 		approveTarget = common.HexToAddress(config.AppConfig.OKXTokenApproveAddress)
 	}
 
-	target := common.HexToAddress(okxData.Data[0].Tx.To)
+	apiTarget := common.HexToAddress(okxData.Data[0].Tx.To)
+	target := apiTarget
 	if config.AppConfig.OKXSwapRouter != "" {
-		target = common.HexToAddress(config.AppConfig.OKXSwapRouter)
+		confTarget := common.HexToAddress(config.AppConfig.OKXSwapRouter)
+		if confTarget != apiTarget {
+			log.Printf("[Liquidity] ⚠️ WARNING: Configured OKX Router (%s) mismatch API returned (%s). Using Configured.", confTarget.Hex(), apiTarget.Hex())
+		}
+		target = confTarget
 	}
 
 	return &blockchain.SwapParamsSimple{

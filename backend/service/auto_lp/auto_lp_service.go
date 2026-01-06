@@ -628,6 +628,7 @@ type AutoLPAnalysis struct {
 	FeeRate5mPct  float64 // total_fees/current_pool_value * 100
 	TotalFees5m   float64
 	TotalVolume5m float64
+	TxCount5m     int
 	TVLUSD        float64 // current_pool_value (USD)
 
 	CurrentPrice float64
@@ -786,6 +787,7 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 			FeeRate5mPct:      feeRatePct,
 			TotalFees5m:       p5.TotalFees,
 			TotalVolume5m:     p5.TotalVolume,
+			TxCount5m:         maxInt(p5.TransactionCount, 0),
 			TVLUSD:            p5.CurrentPoolValue,
 			CurrentPrice:      current,
 			MA5:               ma5,
@@ -1434,8 +1436,18 @@ func (s *AutoLPService) tryOpenCandidate(ctx context.Context, userID uint, a Aut
 		return false, fmt.Errorf("create task failed: %w", err)
 	}
 
-	s.notify(userID, fmt.Sprintf("🤖 AutoLP 开仓中...\n池子: %s (%s)\n投入: %.2f USDT\nWidth: L %.2f%% / U %.2f%%",
-		task.Token0Symbol+"/"+task.Token1Symbol, task.PoolId, amount, task.RangeLowerPercentage, task.RangeUpperPercentage))
+	displayLowerPct := task.RangeLowerPercentage
+	displayUpperPct := task.RangeUpperPercentage
+	if task.RangeLowerPercentage > 0 && task.RangeUpperPercentage > 0 {
+		stableLowerPct, stableUpperPct := pricing.StablePercentagesFromTickPercentages(task, task.RangeLowerPercentage, task.RangeUpperPercentage)
+		if stableLowerPct > 0 && stableUpperPct > 0 {
+			displayLowerPct = stableLowerPct
+			displayUpperPct = stableUpperPct
+		}
+	}
+
+	s.notify(userID, fmt.Sprintf("🤖 AutoLP 开仓中...\n池子: %s (%s)\n投入: %.2f USDT\n宽度：下 %.2f%% / 上 %.2f%%",
+		task.Token0Symbol+"/"+task.Token1Symbol, task.PoolId, amount, displayLowerPct, displayUpperPct))
 
 	enterRes, err := s.liquidity.EnterTaskFromUSDTWithOptions(userID, task, liquidity.TxOptions{GasMultiplier: gasMult})
 	if err != nil {
@@ -2058,6 +2070,13 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 		RangeLowerPercentage: effLowerPct,
 		RangeUpperPercentage: effUpperPct,
 
+		GuardOpenVolume5m:           a.TotalVolume5m,
+		GuardOpenPrice:              a.CurrentPrice,
+		GuardOpenTxCount5m:          int64(maxInt(a.TxCount5m, 0)),
+		GuardVolumeDropArmed:        false,
+		GuardVolumeDropLastVolume5m: 0,
+		GuardPriceTxDropArmed:       false,
+
 		CurrentLiquidity:     "0",
 		ReopenDelaySeconds:   cfg.RebalanceTimeout,
 		SlippageTolerance:    cfg.SlippageTolerance,
@@ -2180,12 +2199,6 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 		return
 	}
 
-	windowSeconds := config.AppConfig.AutoLPGuardWindowSeconds
-	if windowSeconds <= 0 {
-		windowSeconds = 120
-	}
-	window := time.Duration(windowSeconds) * time.Second
-
 	volumeDropPct := config.AppConfig.AutoLPGuardVolumeDropPercent
 	if volumeDropPct > 1 && volumeDropPct <= 100 {
 		volumeDropPct = volumeDropPct / 100
@@ -2229,32 +2242,125 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 			continue
 		}
 
+		m, okMetrics, err := s.currentPoolM5mMetrics(ctx, snap, task)
+		if err != nil || !okMetrics {
+			continue
+		}
+
+		feeRatePct := 0.0
+		if m.CurrentPoolValue > 0 {
+			feeRatePct = (m.TotalFees / m.CurrentPoolValue) * 100
+		}
+
 		effectiveVolDropPct := volumeDropPct
 		skipVolumeExit := false
 
 		if noExitMinFeeRate5m > 0 || lowFeeRate5m > 0 {
-			feeRatePct, okFee := poolM5mFeeRatePctFromSnapshot(snap, task)
-			if !okFee {
-				if feeRatePct, okFee, _ = s.latestFeeRatePctWithin(ctx, task, window); okFee {
-					// noop
-				}
+			if noExitMinFeeRate5m > 0 && feeRatePct > noExitMinFeeRate5m {
+				skipVolumeExit = true
+			} else if lowFeeRate5m > 0 && feeRatePct < lowFeeRate5m && volumeDropPctLow > 0 {
+				effectiveVolDropPct = volumeDropPctLow
 			}
+		}
 
-			if okFee {
-				if noExitMinFeeRate5m > 0 && feeRatePct > noExitMinFeeRate5m {
-					skipVolumeExit = true
-				} else if lowFeeRate5m > 0 && feeRatePct < lowFeeRate5m && volumeDropPctLow > 0 {
-					effectiveVolDropPct = volumeDropPctLow
+		initUpdates := map[string]interface{}{}
+		if task.GuardOpenVolume5m <= 0 && m.TotalVolume > 0 {
+			initUpdates["guard_open_volume_5m"] = m.TotalVolume
+			initUpdates["guard_volume_drop_armed"] = false
+			initUpdates["guard_volume_drop_last_volume_5m"] = 0
+			task.GuardOpenVolume5m = m.TotalVolume
+			task.GuardVolumeDropArmed = false
+			task.GuardVolumeDropLastVolume5m = 0
+		}
+		if task.GuardOpenPrice <= 0 && m.CurrentTokenPrice > 0 {
+			initUpdates["guard_open_price"] = m.CurrentTokenPrice
+			initUpdates["guard_price_tx_drop_armed"] = false
+			task.GuardOpenPrice = m.CurrentTokenPrice
+			task.GuardPriceTxDropArmed = false
+		}
+		if task.GuardOpenTxCount5m <= 0 && m.TransactionCount > 0 {
+			initUpdates["guard_open_tx_count_5m"] = int64(m.TransactionCount)
+			initUpdates["guard_price_tx_drop_armed"] = false
+			task.GuardOpenTxCount5m = int64(m.TransactionCount)
+			task.GuardPriceTxDropArmed = false
+		}
+		if len(initUpdates) > 0 {
+			_ = database.DB.Model(task).Updates(initUpdates).Error
+		}
+
+		if !skipVolumeExit &&
+			effectiveVolDropPct > 0 &&
+			task.GuardOpenVolume5m > 0 &&
+			m.TotalVolume > 0 {
+			threshold := task.GuardOpenVolume5m * (1.0 - effectiveVolDropPct)
+			hit := m.TotalVolume <= threshold
+
+			if !hit {
+				if task.GuardVolumeDropArmed {
+					_ = database.DB.Model(task).Updates(map[string]interface{}{
+						"guard_volume_drop_armed":          false,
+						"guard_volume_drop_last_volume_5m": 0,
+					}).Error
+					task.GuardVolumeDropArmed = false
+					task.GuardVolumeDropLastVolume5m = 0
+				}
+			} else {
+				if !task.GuardVolumeDropArmed {
+					_ = database.DB.Model(task).Updates(map[string]interface{}{
+						"guard_volume_drop_armed":          true,
+						"guard_volume_drop_last_volume_5m": m.TotalVolume,
+					}).Error
+					task.GuardVolumeDropArmed = true
+					task.GuardVolumeDropLastVolume5m = m.TotalVolume
+				} else if last := task.GuardVolumeDropLastVolume5m; last > 0 && m.TotalVolume < last {
+					reason := fmt.Sprintf(
+						"5m 成交量较开仓时下跌 >=%.0f%% 且继续下降（开仓=%.2f USDT 当前=%.2f USDT）",
+						effectiveVolDropPct*100,
+						task.GuardOpenVolume5m,
+						m.TotalVolume,
+					)
+					if err := s.requestStopLossExit(task, reason, 1.0); err == nil {
+						_ = strategy.NewAutoLPEventService().Record(task, models.AutoLPEventGuardExit, reason)
+					}
+					continue
+				} else {
+					_ = database.DB.Model(task).Updates(map[string]interface{}{
+						"guard_volume_drop_last_volume_5m": m.TotalVolume,
+					}).Error
+					task.GuardVolumeDropLastVolume5m = m.TotalVolume
 				}
 			}
 		}
 
-		if !skipVolumeExit {
-			if ok, currentVol, maxVol, err := s.checkVolumeDropWithin(ctx, task, window, effectiveVolDropPct); err == nil && ok {
+		if priceTxDropPct > 0 &&
+			task.GuardOpenPrice > 0 &&
+			task.GuardOpenTxCount5m > 0 &&
+			m.CurrentTokenPrice > 0 &&
+			m.TransactionCount > 0 {
+			priceHit := m.CurrentTokenPrice <= task.GuardOpenPrice*(1.0-priceTxDropPct)
+			txHit := float64(m.TransactionCount) <= float64(task.GuardOpenTxCount5m)*(1.0-priceTxDropPct)
+			hit := priceHit && txHit
+
+			if !hit {
+				if task.GuardPriceTxDropArmed {
+					_ = database.DB.Model(task).Updates(map[string]interface{}{
+						"guard_price_tx_drop_armed": false,
+					}).Error
+					task.GuardPriceTxDropArmed = false
+				}
+			} else if !task.GuardPriceTxDropArmed {
+				_ = database.DB.Model(task).Updates(map[string]interface{}{
+					"guard_price_tx_drop_armed": true,
+				}).Error
+				task.GuardPriceTxDropArmed = true
+			} else {
 				reason := fmt.Sprintf(
-					"5m 成交量 %ds 内较峰值下跌 >=%.0f%%（峰值=%.2f USDT 当前=%.2f USDT）",
-					windowSeconds, effectiveVolDropPct*100,
-					maxVol, currentVol,
+					"价格与交易笔数较开仓时下跌 >=%.0f%%（开仓价=%.6f 当前价=%.6f 开仓Tx=%d 当前Tx=%d）",
+					priceTxDropPct*100,
+					task.GuardOpenPrice,
+					m.CurrentTokenPrice,
+					task.GuardOpenTxCount5m,
+					m.TransactionCount,
 				)
 				if err := s.requestStopLossExit(task, reason, 1.0); err == nil {
 					_ = strategy.NewAutoLPEventService().Record(task, models.AutoLPEventGuardExit, reason)
@@ -2262,15 +2368,93 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 				continue
 			}
 		}
-
-		if ok, err := s.checkPriceAndTxDropWithin(ctx, task, window, priceTxDropPct); err == nil && ok {
-			reason := fmt.Sprintf("价格与交易笔数 %ds 内较峰值下跌 >=%.0f%%", windowSeconds, priceTxDropPct*100)
-			if err := s.requestStopLossExit(task, reason, 1.0); err == nil {
-				_ = strategy.NewAutoLPEventService().Record(task, models.AutoLPEventGuardExit, reason)
-			}
-			continue
-		}
 	}
+}
+
+type poolM5mMetrics struct {
+	TotalFees         float64
+	TotalVolume       float64
+	CurrentPoolValue  float64
+	CurrentTokenPrice float64
+	TransactionCount  uint64
+}
+
+func poolM5mMetricsFromSnapshot(snap *poolMSnapshot, task *models.StrategyTask) (poolM5mMetrics, bool) {
+	if snap == nil || task == nil {
+		return poolM5mMetrics{}, false
+	}
+	proto := strings.ToLower(strings.TrimSpace(task.PoolVersion))
+	pool := strings.ToLower(strings.TrimSpace(task.PoolId))
+	if proto == "" || pool == "" {
+		return poolM5mMetrics{}, false
+	}
+	tfs, ok := snap.data[poolKey{proto: proto, addr: pool}]
+	if !ok {
+		return poolM5mMetrics{}, false
+	}
+	p5, ok := tfs[5]
+	if !ok {
+		return poolM5mMetrics{}, false
+	}
+	return poolM5mMetrics{
+		TotalFees:         p5.TotalFees,
+		TotalVolume:       p5.TotalVolume,
+		CurrentPoolValue:  p5.CurrentPoolValue,
+		CurrentTokenPrice: p5.CurrentTokenPrice,
+		TransactionCount:  uint64(maxInt(p5.TransactionCount, 0)),
+	}, true
+}
+
+func (s *AutoLPService) latestPoolM5mMetrics(ctx context.Context, task *models.StrategyTask) (poolM5mMetrics, bool, error) {
+	if s == nil || s.ch == nil || s.ch.Conn == nil || task == nil || config.AppConfig == nil {
+		return poolM5mMetrics{}, false, nil
+	}
+
+	chain := strings.ToLower(strings.TrimSpace(config.AppConfig.AutoLPChain))
+	proto := strings.ToLower(strings.TrimSpace(task.PoolVersion))
+	pool := strings.ToLower(strings.TrimSpace(task.PoolId))
+	if chain == "" || proto == "" || pool == "" {
+		return poolM5mMetrics{}, false, nil
+	}
+
+	q := `
+		SELECT
+			argMax(total_fees, ts) AS current_fees,
+			argMax(total_volume, ts) AS current_vol,
+			argMax(current_pool_value, ts) AS current_tvl,
+			argMax(current_token_price, ts) AS current_price,
+			argMax(transaction_count, ts) AS current_tx,
+			count() AS n
+		FROM poolm_top_fees_raw
+		WHERE chain = ? AND protocol_version = ? AND timeframe_minutes = 5 AND pool_address = ?
+	`
+
+	var fees float64
+	var vol float64
+	var tvl float64
+	var price float64
+	var tx uint64
+	var n uint64
+	if err := s.ch.Conn.QueryRow(ctx, q, chain, proto, pool).Scan(&fees, &vol, &tvl, &price, &tx, &n); err != nil {
+		return poolM5mMetrics{}, false, err
+	}
+	if n < 1 {
+		return poolM5mMetrics{}, false, nil
+	}
+	return poolM5mMetrics{
+		TotalFees:         fees,
+		TotalVolume:       vol,
+		CurrentPoolValue:  tvl,
+		CurrentTokenPrice: price,
+		TransactionCount:  tx,
+	}, true, nil
+}
+
+func (s *AutoLPService) currentPoolM5mMetrics(ctx context.Context, snap *poolMSnapshot, task *models.StrategyTask) (poolM5mMetrics, bool, error) {
+	if m, ok := poolM5mMetricsFromSnapshot(snap, task); ok {
+		return m, true, nil
+	}
+	return s.latestPoolM5mMetrics(ctx, task)
 }
 
 func poolM5mFeeRatePctFromSnapshot(snap *poolMSnapshot, task *models.StrategyTask) (float64, bool) {
