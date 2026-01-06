@@ -1031,6 +1031,12 @@ export default function App() {
         }
     };
 
+    // 计算本地刷新后经过的秒数
+    const localUpdateSecAgo = useMemo(() => {
+        const elapsed = tick - lastPollTimeRef.current;
+        return Math.max(0, Math.floor(elapsed / 1000));
+    }, [tick]);
+
     const headerTitle = showAdmin ? '管理面板' : isHotPools ? '热门池子' : '实时仓位';
     const headerSubtext = showAdmin
         ? adminSelectedUser
@@ -1041,7 +1047,7 @@ export default function App() {
                     ? `开启Auto用户：${adminUsers.length}`
                     : '暂无开启Auto用户'
         : isHotPools
-            ? `5m · ${hotPoolsData?.updated_at ? `更新：${formatRelativeTime(hotPoolsData.updated_at, tick)}` : hotPoolsLoading ? '加载中...' : '暂无数据'} · 自动刷新 ${hotPoolsPollIntervalSec}s`
+            ? `5m · ${hotPoolsData ? `更新：${localUpdateSecAgo}秒前` : hotPoolsLoading ? '加载中...' : '暂无数据'} · 自动刷新 ${hotPoolsPollIntervalSec}s`
             : walletAddress
                 ? `钱包：${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
                 : '加载钱包中...';
