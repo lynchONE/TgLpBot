@@ -98,7 +98,7 @@ func (s *LiquidityService) swapExactInViaOKX(
 		return nil, fmt.Errorf("OKX swap requires native value; not supported")
 	}
 
-	gasLimit := config.AppConfig.GasLimit
+	var gasLimit uint64 = 0 // 默认让节点自动估算
 	if strings.TrimSpace(txObj.Gas) != "" {
 		if g, ok := new(big.Int).SetString(strings.TrimSpace(txObj.Gas), 10); ok && g.IsUint64() {
 			gasLimit = g.Uint64()

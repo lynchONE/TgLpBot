@@ -27,6 +27,10 @@ type HotPoolResponse struct {
 	LastSwapAt       time.Time `json:"last_swap_at" ch:"last_swap_at"`
 	Token0Address    string    `json:"token0_address" ch:"token0_address"`
 	Token1Address    string    `json:"token1_address" ch:"token1_address"`
+	// 24小时数据
+	TotalFees24h        float64 `json:"total_fees_24h,omitempty"`
+	TotalVolume24h      float64 `json:"total_volume_24h,omitempty"`
+	TransactionCount24h uint32  `json:"transaction_count_24h,omitempty"`
 }
 
 type hotPoolsEnvelope struct {
@@ -147,6 +151,53 @@ func (s *Server) handleHotPools(w http.ResponseWriter, r *http.Request) {
 	if err := s.ClickHouse.Conn.Select(ctx, &rows, q, args...); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// 获取24小时数据
+	if len(rows) > 0 {
+		poolAddresses := make([]string, len(rows))
+		for i, row := range rows {
+			poolAddresses[i] = row.PoolAddress
+		}
+
+		// 查询24小时聚合数据
+		q24h := `
+			SELECT
+				pool_address,
+				sum(total_fees) AS total_fees_24h,
+				sum(total_volume) AS total_volume_24h,
+				sum(transaction_count) AS transaction_count_24h
+			FROM poolm_top_fees_raw
+			WHERE chain = ?
+			  AND pool_address IN (?)
+			  AND ts >= now() - INTERVAL 24 HOUR
+			GROUP BY pool_address
+		`
+
+		type stats24h struct {
+			PoolAddress         string  `ch:"pool_address"`
+			TotalFees24h        float64 `ch:"total_fees_24h"`
+			TotalVolume24h      float64 `ch:"total_volume_24h"`
+			TransactionCount24h uint32  `ch:"transaction_count_24h"`
+		}
+
+		var stats24hRows []stats24h
+		if err := s.ClickHouse.Conn.Select(ctx, &stats24hRows, q24h, chain, poolAddresses); err == nil {
+			// 构建map用于快速查找
+			stats24hMap := make(map[string]stats24h)
+			for _, s := range stats24hRows {
+				stats24hMap[s.PoolAddress] = s
+			}
+
+			// 合并24小时数据到结果
+			for i := range rows {
+				if s, ok := stats24hMap[rows[i].PoolAddress]; ok {
+					rows[i].TotalFees24h = s.TotalFees24h
+					rows[i].TotalVolume24h = s.TotalVolume24h
+					rows[i].TransactionCount24h = s.TransactionCount24h
+				}
+			}
+		}
 	}
 
 	var newest *time.Time

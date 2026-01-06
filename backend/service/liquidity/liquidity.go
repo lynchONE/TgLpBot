@@ -2,7 +2,6 @@ package liquidity
 
 import (
 	"TgLpBot/base/blockchain"
-	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/service/exchange"
@@ -92,7 +91,7 @@ func (s *LiquidityService) approveToken(
 
 	auth.Nonce = big.NewInt(int64(nonce))
 	auth.Value = big.NewInt(0)
-	auth.GasLimit = config.AppConfig.GasLimit
+	auth.GasLimit = 0 // 让节点自动估算 gas
 	auth.GasPrice = gasPrice
 
 	tx, err := erc20.Approve(auth, spender, approveAmount)

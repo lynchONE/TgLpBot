@@ -734,7 +734,7 @@ func (s *LiquidityService) enterV3FromToken(
 	if err != nil {
 		return nil, err
 	}
-	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), config.AppConfig.GasLimit, opts)
+	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), opts)
 	if err != nil {
 		return nil, err
 	}
@@ -1367,7 +1367,7 @@ func (s *LiquidityService) enterV4FromToken(
 	if err != nil {
 		return nil, err
 	}
-	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), config.AppConfig.GasLimit, opts)
+	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), opts)
 	if err != nil {
 		return nil, err
 	}

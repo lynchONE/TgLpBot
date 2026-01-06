@@ -111,6 +111,9 @@ export default function PositionCard({
     onSetTaskPaused,
     onStopTask,
     onDeleteTask,
+    batchMode = false,
+    isSelected = false,
+    onToggleSelect,
 }) {
     // 展开/折叠状态
     const [expanded, setExpanded] = useState(false);
@@ -319,21 +322,40 @@ export default function PositionCard({
                 </div>
             ) : null}
             <div className="flex items-start justify-between gap-3">
-                <div>
-                    <div className="text-base font-semibold text-zinc-900 dark:text-white/90">{position?.title}</div>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <span
-                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${pillClassForStatus(
-                                position?.status_label
-                            )}`}
+                <div className="flex items-start gap-3">
+                    {/* 批量选择复选框 */}
+                    {batchMode && (
+                        <button
+                            type="button"
+                            onClick={onToggleSelect}
+                            className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition ${isSelected
+                                ? 'border-emerald-500 bg-emerald-500 text-white'
+                                : 'border-zinc-300 bg-white dark:border-zinc-600 dark:bg-zinc-800'
+                                }`}
                         >
-                            <span className="h-1.5 w-1.5 rounded-full bg-current opacity-90" />
-                            {position?.status_label || '运行中'}
-                        </span>
-                        <span className="inline-flex items-center gap-1 rounded-full bg-white/70 px-2 py-0.5 text-xs text-zinc-700 ring-1 ring-zinc-200 dark:bg-[#0f1116] dark:text-white/70 dark:ring-white/10">
-                            <Icon path={icons.trend} className="h-3.5 w-3.5 text-zinc-500 dark:text-white/60" />
-                            {bnbBalance} BNB
-                        </span>
+                            {isSelected && (
+                                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                            )}
+                        </button>
+                    )}
+                    <div>
+                        <div className="text-base font-semibold text-zinc-900 dark:text-white/90">{position?.title}</div>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <span
+                                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${pillClassForStatus(
+                                    position?.status_label
+                                )}`}
+                            >
+                                <span className="h-1.5 w-1.5 rounded-full bg-current opacity-90" />
+                                {position?.status_label || '运行中'}
+                            </span>
+                            <span className="inline-flex items-center gap-1 rounded-full bg-white/70 px-2 py-0.5 text-xs text-zinc-700 ring-1 ring-zinc-200 dark:bg-[#0f1116] dark:text-white/70 dark:ring-white/10">
+                                <Icon path={icons.trend} className="h-3.5 w-3.5 text-zinc-500 dark:text-white/60" />
+                                {bnbBalance} BNB
+                            </span>
+                        </div>
                     </div>
                 </div>
                 <div className={`text-right ${canTaskAction ? 'pr-12' : ''}`}>

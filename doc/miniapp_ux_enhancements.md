@@ -6,46 +6,48 @@
 ## 已完成功能
 
 ### 1. 骨架屏加载 ✅
-- 创建 `Skeleton.jsx` 组件，包含热门池子和仓位卡片的骨架样式
-- 用脉冲动画骨架屏替代"加载中..."文字
+- `Skeleton.jsx` 组件替代"加载中..."文字
 
 ### 2. 热门池子渐变高亮 ✅
 - 前3名池子显示金/银/铜渐变背景
-- 通过 `rank` 属性和 CSS 渐变类实现
 
 ### 3. 仓位盈亏(PnL)显示 ✅
-- 在仓位卡片右上角显示盈亏金额和百分比
-- 绿色表示盈利，红色表示亏损
-- 基于 `initial_cost_usd` 或 `net_invested_usd` 计算
+- 在仓位卡片显示盈亏金额和百分比
 
 ### 4. 可展开/折叠仓位卡片 ✅
 - 余额信息区域默认收起
-- 点击可展开查看详细的钱包/仓位/手续费信息
-- 带有平滑动画效果
 
 ### 5. 价格范围动画 ✅
-- 价格变化时价格标记有脉冲动画效果
-- 使用 `transition-all duration-500` 平滑过渡
+- 价格变化时有脉冲动画效果
 
 ### 6. 深色模式对比度优化 ✅
-- 增加了CSS变量和样式优化
-- 提升文字可读性
 
-### 7. 加载进度指示 ✅ (新增)
-- 顶部固定的进度条显示轮询倒计时
-- 加载时显示动画效果
-- 进度条随时间增长，刷新后重置
+### 7. 加载进度指示 ✅
+- 顶部进度条显示轮询倒计时
 
-### 8. 触觉反馈 ✅ (新增)
-- 复制地址时触发震动反馈
-- 数据刷新成功时轻触反馈
-- 操作成功/失败有不同的震动类型
+### 8. 触觉反馈 ✅
+- 复制/刷新时触发震动反馈
+
+### 9. 迷你图表 ✅ (新增)
+- 热门池子卡片显示24小时价格走势
+- 使用SVG绘制，调用 `pool_ohlcv` API
+
+### 10. 批量操作 ✅ (新增)
+- 仓位页面多选模式
+- 全选/取消全选
+- 批量暂停/恢复任务
+
+### 11. 24小时数据 ✅ (新增)
+- 后端添加24h聚合查询
+- 热门池子显示24h费用和交易量
 
 ## 修改的文件
 - `miniapp/src/components/Skeleton.jsx` [新建]
+- `miniapp/src/components/MiniChart.jsx` [新建]
 - `miniapp/src/index.css`
 - `miniapp/src/lib/telegram.js`
 - `miniapp/src/components/HotPoolCard.jsx`
 - `miniapp/src/components/PositionCard.jsx`
 - `miniapp/src/components/PriceRangeVisualizer.jsx`
 - `miniapp/src/App.jsx`
+- `backend/service/web_server/hot_pools.go`

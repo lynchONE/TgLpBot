@@ -849,7 +849,7 @@ func (s *LiquidityService) swapWalletTokensToUSDT(
 	return txHashes, nil
 }
 
-func (s *LiquidityService) buildAuth(privateKey *ecdsa.PrivateKey, nonce uint64, value *big.Int, gasLimit uint64, opts TxOptions) (*bind.TransactOpts, error) {
+func (s *LiquidityService) buildAuth(privateKey *ecdsa.PrivateKey, nonce uint64, value *big.Int, opts TxOptions) (*bind.TransactOpts, error) {
 	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, blockchain.ChainID)
 	if err != nil {
 		return nil, err
@@ -860,7 +860,7 @@ func (s *LiquidityService) buildAuth(privateKey *ecdsa.PrivateKey, nonce uint64,
 	}
 	auth.Nonce = big.NewInt(int64(nonce))
 	auth.Value = value
-	auth.GasLimit = gasLimit
+	auth.GasLimit = 0 // 让节点自动估算 gas
 	auth.GasPrice = gasPrice
 	return auth, nil
 }
@@ -1094,7 +1094,7 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	if err != nil {
 		return nil, err
 	}
-	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), config.AppConfig.GasLimit, opts)
+	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), opts)
 	if err != nil {
 		return nil, err
 	}
@@ -1278,7 +1278,7 @@ func (s *LiquidityService) approveNFT(privateKey *ecdsa.PrivateKey, walletAddr, 
 	if err != nil {
 		return err
 	}
-	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), config.AppConfig.GasLimit, opts)
+	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), opts)
 	if err != nil {
 		return err
 	}
@@ -1415,7 +1415,7 @@ func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	if err != nil {
 		return nil, err
 	}
-	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), config.AppConfig.GasLimit, opts)
+	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), opts)
 	if err != nil {
 		return nil, err
 	}
@@ -1692,7 +1692,7 @@ func (s *LiquidityService) swapExactInViaOKXWithHash(
 		return "", fmt.Errorf("OKX swap requires native value; not supported")
 	}
 
-	gasLimit := config.AppConfig.GasLimit
+	var gasLimit uint64 = 0 // 默认让节点自动估算
 	if strings.TrimSpace(txObj.Gas) != "" {
 		if g, ok := new(big.Int).SetString(strings.TrimSpace(txObj.Gas), 10); ok && g.IsUint64() {
 			gasLimit = g.Uint64()
@@ -1804,7 +1804,7 @@ func (s *LiquidityService) setNFTApprovalForAll(
 		return err
 	}
 
-	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), config.AppConfig.GasLimit, opts)
+	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), opts)
 	if err != nil {
 		return err
 	}

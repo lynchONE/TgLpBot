@@ -285,6 +285,11 @@ export default function App() {
     const pollProgressRef = useRef(null);
     const lastPollTimeRef = useRef(Date.now());
 
+    // 批量操作状态
+    const [batchMode, setBatchMode] = useState(false);
+    const [selectedTaskIds, setSelectedTaskIds] = useState(new Set());
+    const [batchLoading, setBatchLoading] = useState(false);
+
     const serverPollIntervalSec = Math.max(1, Number(data?.poll_interval_sec || adminPositions?.poll_interval_sec || 1));
     const pollIntervalSec = Math.max(1, Number(pollOverrideSec || serverPollIntervalSec || 1));
     const adminListPollSec = Math.max(3, pollIntervalSec);
@@ -1031,6 +1036,57 @@ export default function App() {
         }
     };
 
+    // 批量操作函数
+    const toggleTaskSelection = (taskId) => {
+        const newSet = new Set(selectedTaskIds);
+        if (newSet.has(taskId)) {
+            newSet.delete(taskId);
+        } else {
+            newSet.add(taskId);
+        }
+        setSelectedTaskIds(newSet);
+        hapticSelection();
+    };
+
+    const selectAllTasks = () => {
+        const allIds = new Set();
+        visiblePositions.forEach(p => {
+            if (p?.task_id) allIds.add(p.task_id);
+        });
+        setSelectedTaskIds(allIds);
+        hapticImpact('light');
+    };
+
+    const deselectAllTasks = () => {
+        setSelectedTaskIds(new Set());
+        hapticImpact('light');
+    };
+
+    const batchPauseTasks = async (paused) => {
+        if (selectedTaskIds.size === 0) return;
+        setBatchLoading(true);
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const taskId of selectedTaskIds) {
+            try {
+                await setTaskPaused({ apiBaseUrl, initData, taskId, paused });
+                successCount++;
+            } catch {
+                failCount++;
+            }
+        }
+
+        setBatchLoading(false);
+        setSelectedTaskIds(new Set());
+        setBatchMode(false);
+        hapticNotification(failCount === 0 ? 'success' : 'warning');
+        showNotice(
+            `批量${paused ? '暂停' : '恢复'}完成：成功 ${successCount}，失败 ${failCount}`,
+            failCount === 0 ? 'success' : 'warning'
+        );
+    };
+
     // 计算本地刷新后经过的秒数
     const localUpdateSecAgo = useMemo(() => {
         const elapsed = tick - lastPollTimeRef.current;
@@ -1521,6 +1577,57 @@ export default function App() {
                 <SkeletonList count={2} Card={SkeletonPositionCard} />
             ) : null}
 
+            {/* 批量操作工具栏 */}
+            {!isHotPools && !showAdmin && visiblePositions.length > 1 && (
+                <div className="mb-4 flex items-center justify-between gap-2">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setBatchMode(!batchMode);
+                            if (batchMode) setSelectedTaskIds(new Set());
+                            hapticImpact('light');
+                        }}
+                        className={`inline-flex items-center gap-1 rounded-xl px-3 py-1.5 text-xs font-semibold transition ${batchMode
+                            ? 'bg-sky-500/20 text-sky-700 ring-1 ring-sky-500/30 dark:text-sky-200'
+                            : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
+                            }`}
+                    >
+                        {batchMode ? '退出多选' : '批量操作'}
+                    </button>
+
+                    {batchMode && (
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={selectedTaskIds.size === visiblePositions.length ? deselectAllTasks : selectAllTasks}
+                                className="inline-flex items-center rounded-xl bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-600 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
+                            >
+                                {selectedTaskIds.size === visiblePositions.length ? '取消全选' : '全选'}
+                            </button>
+                            <span className="text-xs text-zinc-500 dark:text-white/50">
+                                已选 {selectedTaskIds.size}
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => batchPauseTasks(true)}
+                                disabled={selectedTaskIds.size === 0 || batchLoading}
+                                className="inline-flex items-center rounded-xl bg-amber-500/15 px-2 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-500/25 disabled:opacity-50 dark:text-amber-200"
+                            >
+                                {batchLoading ? '处理中...' : '批量暂停'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => batchPauseTasks(false)}
+                                disabled={selectedTaskIds.size === 0 || batchLoading}
+                                className="inline-flex items-center rounded-xl bg-emerald-500/15 px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-500/25 disabled:opacity-50 dark:text-emerald-200"
+                            >
+                                批量恢复
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
+
             {showEmptyPositions ? (
                 <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
                     暂无仓位。请先在机器人里导入钱包并开仓。
@@ -1543,6 +1650,7 @@ export default function App() {
                                 onOpenKline={setKlinePool}
                                 onOpenPosition={openPositionModal}
                                 rank={index + 1}
+                                apiBaseUrl={apiBaseUrl}
                             />
                         );
                     })
@@ -1559,6 +1667,9 @@ export default function App() {
                                 onSetTaskPaused={handleSetTaskPaused}
                                 onStopTask={handleStopTask}
                                 onDeleteTask={handleDeleteTask}
+                                batchMode={batchMode}
+                                isSelected={selectedTaskIds.has(p.task_id)}
+                                onToggleSelect={() => toggleTaskSelection(p.task_id)}
                             />
                         ))
                         : null}
