@@ -55,33 +55,25 @@ func (s *LiquidityService) swapExactInViaOKX(
 		UserWalletAddress: walletAddr.Hex(),
 	}
 
-	preview, err := s.okxService.GetQuoteThenSwap(swapReq)
+	swapResp, err := s.okxService.GetSwapData(swapReq)
 	if err != nil {
 		return nil, err
 	}
-	swapResp := preview.Swap
-	if len(swapResp.Data) == 0 {
+	if swapResp == nil || len(swapResp.Data) == 0 {
 		return nil, fmt.Errorf("OKX swap response empty")
 	}
 
-	if preview.EstimatedGas != nil {
-		log.Printf("[Liquidity] OKX quote: %s -> %s amountIn=%s expectedOut=%s estGas=%s slippage=%.4f%%",
-			tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), preview.QuoteToTokenAmount.String(), preview.EstimatedGas.String(), slippagePercent)
-	} else {
-		log.Printf("[Liquidity] OKX quote: %s -> %s amountIn=%s expectedOut=%s slippage=%.4f%%",
-			tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), preview.QuoteToTokenAmount.String(), slippagePercent)
+	expectedOut := strings.TrimSpace(swapResp.Data[0].RouterResult.ToTokenAmount)
+	if expectedOut == "" {
+		expectedOut = "unknown"
 	}
-
-	if preview.SwapToTokenAmount != nil && preview.SwapToTokenAmount.Cmp(preview.QuoteToTokenAmount) < 0 {
-		diff := new(big.Int).Sub(preview.QuoteToTokenAmount, preview.SwapToTokenAmount)
-		bps := new(big.Int).Mul(diff, big.NewInt(10_000))
-		bps.Div(bps, preview.QuoteToTokenAmount)
-		if bps.Cmp(big.NewInt(2_000)) > 0 { // 20% drop is suspicious given quote->swap is immediate
-			return nil, fmt.Errorf("OKX quote/swap mismatch too large: quoteOut=%s swapOut=%s (drop=%s bps)",
-				preview.QuoteToTokenAmount.String(), preview.SwapToTokenAmount.String(), bps.String())
-		}
-		log.Printf("[Liquidity] Warning: OKX quote/swap output mismatch: quoteOut=%s swapOut=%s (drop=%s bps)",
-			preview.QuoteToTokenAmount.String(), preview.SwapToTokenAmount.String(), bps.String())
+	estGas := strings.TrimSpace(swapResp.Data[0].Tx.Gas)
+	if estGas != "" {
+		log.Printf("[Liquidity] OKX swap preview: %s -> %s amountIn=%s expectedOut=%s txGas=%s slippage=%.4f%%",
+			tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), expectedOut, estGas, slippagePercent)
+	} else {
+		log.Printf("[Liquidity] OKX swap preview: %s -> %s amountIn=%s expectedOut=%s slippage=%.4f%%",
+			tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), expectedOut, slippagePercent)
 	}
 
 	txObj := swapResp.Data[0].Tx

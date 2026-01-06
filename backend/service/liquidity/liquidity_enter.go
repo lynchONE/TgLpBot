@@ -1041,44 +1041,47 @@ func (s *LiquidityService) prepareOKXSwapParams(
 		UserWalletAddress: executorAddr.Hex(), // Zap contract as executor
 	}
 
-	preview, err := s.okxService.GetQuoteThenSwap(swapReq)
+	okxData, err := s.okxService.GetSwapData(swapReq)
 	if err != nil {
-		return nil, fmt.Errorf("get OKX quote/swap data failed: %w", err)
+		return nil, fmt.Errorf("get OKX swap data failed: %w", err)
 	}
-
-	okxData := preview.Swap
-	if len(okxData.Data) == 0 {
+	if okxData == nil || len(okxData.Data) == 0 {
 		return nil, fmt.Errorf("OKX returned empty data")
 	}
 
-	if preview.EstimatedGas != nil {
-		log.Printf("[Liquidity] OKX quote(zap): %s -> %s amountIn=%s executor=%s expectedOut=%s estGas=%s slippage=%.4f%%",
-			tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), executorAddr.Hex(), preview.QuoteToTokenAmount.String(), preview.EstimatedGas.String(), slippageTolerance)
+	expectedOutText := strings.TrimSpace(okxData.Data[0].RouterResult.ToTokenAmount)
+	if expectedOutText == "" {
+		expectedOutText = "unknown"
+	}
+	estGasText := strings.TrimSpace(okxData.Data[0].Tx.Gas)
+	if estGasText != "" {
+		log.Printf("[Liquidity] OKX swap(zap): %s -> %s amountIn=%s executor=%s expectedOut=%s txGas=%s slippage=%.4f%%",
+			tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), executorAddr.Hex(), expectedOutText, estGasText, slippageTolerance)
 	} else {
-		log.Printf("[Liquidity] OKX quote(zap): %s -> %s amountIn=%s executor=%s expectedOut=%s slippage=%.4f%%",
-			tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), executorAddr.Hex(), preview.QuoteToTokenAmount.String(), slippageTolerance)
+		log.Printf("[Liquidity] OKX swap(zap): %s -> %s amountIn=%s executor=%s expectedOut=%s slippage=%.4f%%",
+			tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), executorAddr.Hex(), expectedOutText, slippageTolerance)
 	}
 
-	if preview.SwapToTokenAmount != nil && preview.SwapToTokenAmount.Cmp(preview.QuoteToTokenAmount) < 0 {
-		diff := new(big.Int).Sub(preview.QuoteToTokenAmount, preview.SwapToTokenAmount)
-		bps := new(big.Int).Mul(diff, big.NewInt(10_000))
-		bps.Div(bps, preview.QuoteToTokenAmount)
-		if bps.Cmp(big.NewInt(2_000)) > 0 {
-			return nil, fmt.Errorf("OKX quote/swap mismatch too large: quoteOut=%s swapOut=%s (drop=%s bps)",
-				preview.QuoteToTokenAmount.String(), preview.SwapToTokenAmount.String(), bps.String())
+	baseOut := big.NewInt(0)
+	outStr := strings.TrimSpace(okxData.Data[0].RouterResult.ToTokenAmount)
+	if outStr != "" {
+		var ok bool
+		if strings.HasPrefix(outStr, "0x") || strings.HasPrefix(outStr, "0X") {
+			baseOut, ok = new(big.Int).SetString(strings.TrimPrefix(strings.TrimPrefix(outStr, "0x"), "0X"), 16)
+		} else {
+			baseOut, ok = new(big.Int).SetString(outStr, 10)
 		}
-		log.Printf("[Liquidity] Warning: OKX quote/swap output mismatch: quoteOut=%s swapOut=%s (drop=%s bps)",
-			preview.QuoteToTokenAmount.String(), preview.SwapToTokenAmount.String(), bps.String())
-	}
-
-	baseOut := new(big.Int).Set(preview.QuoteToTokenAmount)
-	if preview.SwapToTokenAmount != nil && preview.SwapToTokenAmount.Sign() > 0 && preview.SwapToTokenAmount.Cmp(baseOut) < 0 {
-		baseOut = preview.SwapToTokenAmount
+		if !ok || baseOut == nil || baseOut.Sign() <= 0 {
+			baseOut = big.NewInt(0)
+		}
 	}
 
 	// 95% protection (keep <= OKX calldata's internal minOut to avoid reverting after swap)
-	minOut := new(big.Int).Mul(baseOut, big.NewInt(95))
-	minOut = minOut.Div(minOut, big.NewInt(100))
+	minOut := big.NewInt(0)
+	if baseOut.Sign() > 0 {
+		minOut = new(big.Int).Mul(baseOut, big.NewInt(95))
+		minOut = minOut.Div(minOut, big.NewInt(100))
+	}
 
 	callData := []byte{}
 	if okxData.Data[0].Tx.Data != "" {

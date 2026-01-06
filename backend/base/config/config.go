@@ -171,8 +171,8 @@ func LoadConfig() error {
 
 	chainID, _ := strconv.ParseInt(getEnv("BSC_CHAIN_ID", "56"), 10, 64)
 	redisDB, _ := strconv.Atoi(getEnv("REDIS_DB", "0"))
-	maxGasPrice, _ := strconv.ParseInt(getEnv("MAX_GAS_PRICE", "5000000000"), 10, 64)
-	gasLimit, _ := strconv.ParseUint(getEnv("GAS_LIMIT", "500000"), 10, 64)
+	maxGasPrice, _ := strconv.ParseInt(getEnv("MAX_GAS_PRICE", "10000000000"), 10, 64)
+	gasLimit, _ := strconv.ParseUint(getEnv("GAS_LIMIT", "5000000"), 10, 64)
 	v4NFTScanFromBlock, _ := strconv.ParseUint(strings.TrimSpace(getEnv("V4_NFT_SCAN_FROM_BLOCK", "0")), 10, 64)
 	realtimeV3NFTScanMax, _ := strconv.Atoi(strings.TrimSpace(getEnv("REALTIME_V3_NFT_SCAN_MAX", "20")))
 	autoLPShortTF, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_TIMEFRAME_SHORT_MINUTES", "5")))
