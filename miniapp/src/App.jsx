@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import HotPoolCard from './components/HotPoolCard.jsx';
 import KlineModal from './components/KlineModal.jsx';
 import PositionCard from './components/PositionCard.jsx';
+import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
 import {
     deleteTask,
     disableAdminAutoLP,
@@ -1242,9 +1243,7 @@ export default function App() {
             ) : null}
 
             {isHotPools && hotPoolsLoading && hotPoolsRows.length === 0 ? (
-                <div className="mb-4 rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                    加载中...
-                </div>
+                <SkeletonList count={5} Card={SkeletonHotPoolCard} />
             ) : null}
 
             {isHotPools && !hotPoolsLoading && !hotPoolsError && hotPoolsData && hotPoolsRows.length === 0 ? (
@@ -1464,9 +1463,7 @@ export default function App() {
             ) : null}
 
             {!isHotPools && activeLoading && !activeData ? (
-                <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                    加载中...
-                </div>
+                <SkeletonList count={2} Card={SkeletonPositionCard} />
             ) : null}
 
             {showEmptyPositions ? (
@@ -1477,7 +1474,7 @@ export default function App() {
 
             <div className="space-y-4">
                 {isHotPools
-                    ? hotPoolsVisibleRows.map((row) => {
+                    ? hotPoolsVisibleRows.map((row, index) => {
                         const proto = String(row?.protocol_version || '').trim();
                         const addr = String(row?.pool_address || '').trim().toLowerCase();
                         const poolKey = `${proto}:${addr}`;
@@ -1490,6 +1487,7 @@ export default function App() {
                                 previousData={prevData}
                                 onOpenKline={setKlinePool}
                                 onOpenPosition={openPositionModal}
+                                rank={index + 1}
                             />
                         );
                     })

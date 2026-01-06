@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useDurationFrom, useRelativeTime } from '../lib/time';
 
 const formatPrice = (value) => {
@@ -37,6 +37,19 @@ export default function PriceRangeVisualizer({
     runningDuration,
     updateTimeText
 }) {
+    // 价格变化动画状态
+    const [isPulse, setIsPulse] = useState(false);
+    const prevPriceRef = useRef(currentPrice);
+
+    // 价格变化时触发脉冲动画
+    useEffect(() => {
+        if (prevPriceRef.current !== currentPrice && Number.isFinite(currentPrice)) {
+            setIsPulse(true);
+            const timer = setTimeout(() => setIsPulse(false), 300);
+            prevPriceRef.current = currentPrice;
+            return () => clearTimeout(timer);
+        }
+    }, [currentPrice]);
     // 1. Calculate Grid Count (Tick Spacing Multiples)
     const gridCount = useMemo(() => {
         const lower = Number(tickLower);
@@ -151,7 +164,7 @@ export default function PriceRangeVisualizer({
                     className={`absolute top-0 bottom-0 w-1.5 z-20 transition-all duration-500 rounded-full ${inRange
                         ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]'
                         : 'bg-rose-600 dark:bg-rose-500 shadow-[0_0_8px_rgba(225,29,72,0.6)]'
-                        }`}
+                        } ${isPulse ? 'price-pulse' : ''}`}
                     style={{
                         left: `${finalPercent}%`,
                         opacity: 1,

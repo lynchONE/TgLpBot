@@ -15,6 +15,8 @@ const icons = {
     refresh: 'M17.65 6.35A7.95 7.95 0 0012 4V1L7 6l5 5V7a5 5 0 11-5 5H5a7 7 0 107.65-5.65z',
     link: 'M3.9 12a5 5 0 015-5h3v2h-3a3 3 0 000 6h3v2h-3a5 5 0 01-5-5zm7-1h2v2h-2v-2zm4.1-4h3a5 5 0 010 10h-3v-2h3a3 3 0 000-6h-3V7z',
     kebab: 'M12 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4z',
+    chevronDown: 'M6 9l6 6 6-6',
+    chevronUp: 'M18 15l-6-6-6 6',
 };
 
 const USD_DISPLAY_LIMIT = 1e15;
@@ -110,6 +112,9 @@ export default function PositionCard({
     onStopTask,
     onDeleteTask,
 }) {
+    // 展开/折叠状态
+    const [expanded, setExpanded] = useState(false);
+
     // 实时更新的时间显示
     const runningDuration = useDurationFrom(position?.running_since);
     const updateTimeText = useRelativeTime(updatedAt);
@@ -129,12 +134,35 @@ export default function PositionCard({
     const quoteSymbol = stableIndex === 0 ? token0?.symbol : token1?.symbol;
     const pairLabel = baseSymbol && quoteSymbol ? `${baseSymbol}/${quoteSymbol}` : baseSymbol || quoteSymbol || '';
 
-    const titleRight = useMemo(() => {
+    // 计算当前总价值和PnL
+    const { totalValue, pnlAbsolute, pnlPercent, hasPnL } = useMemo(() => {
         const positionUsd = Number(position?.totals?.position_usd || 0);
         const feeUsd = Number(position?.totals?.fee_usd || 0);
         const total = (Number.isFinite(positionUsd) ? positionUsd : 0) + (Number.isFinite(feeUsd) ? feeUsd : 0);
-        return formatUsd(total);
-    }, [position?.totals?.position_usd, position?.totals?.fee_usd]);
+
+        // 从position获取初始成本
+        const initialCost = Number(position?.initial_cost_usd || position?.net_invested_usd || 0);
+
+        if (Number.isFinite(initialCost) && initialCost > 0) {
+            const pnl = total - initialCost;
+            const pnlPct = (pnl / initialCost) * 100;
+            return {
+                totalValue: total,
+                pnlAbsolute: pnl,
+                pnlPercent: pnlPct,
+                hasPnL: true,
+            };
+        }
+
+        return {
+            totalValue: total,
+            pnlAbsolute: 0,
+            pnlPercent: 0,
+            hasPnL: false,
+        };
+    }, [position?.totals?.position_usd, position?.totals?.fee_usd, position?.initial_cost_usd, position?.net_invested_usd]);
+
+    const titleRight = formatUsd(totalValue);
 
     const poolLink = useMemo(() => {
         const pool = normalizeHexPrefixed(position?.pool_id);
@@ -311,50 +339,66 @@ export default function PositionCard({
                 <div className={`text-right ${canTaskAction ? 'pr-12' : ''}`}>
                     <div className="text-xs text-zinc-500 dark:text-white/50">总计（仓位+手续费）</div>
                     <div className="text-lg font-extrabold text-emerald-700 dark:text-emerald-300">{titleRight}</div>
+                    {hasPnL && (
+                        <div className={`text-sm font-bold tabular-nums ${pnlAbsolute >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
+                            {pnlAbsolute >= 0 ? '+' : ''}{formatUsd(pnlAbsolute)} ({pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%)
+                        </div>
+                    )}
                 </div>
             </div>
 
             <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                <div className="flex items-center justify-between">
-                    <div className="text-xs font-semibold text-zinc-700 dark:text-white/70">余额信息</div>
-                    <div className="text-[11px] text-zinc-500 dark:text-white/40">钱包 vs 仓位 vs 手续费</div>
-                </div>
-                <div className="mt-3 grid grid-cols-4 gap-2 text-[11px] text-zinc-500 dark:text-white/40">
-                    <div>Token</div>
-                    <div className="flex items-center gap-1 justify-end">
-                        <Icon path={icons.wallet} className="h-3.5 w-3.5" />
-                        钱包
+                <button
+                    type="button"
+                    onClick={() => setExpanded(!expanded)}
+                    className="w-full flex items-center justify-between"
+                >
+                    <div className="flex items-center gap-2">
+                        <div className="text-xs font-semibold text-zinc-700 dark:text-white/70">余额信息</div>
+                        <div className="text-[11px] text-zinc-500 dark:text-white/40">钱包 vs 仓位 vs 手续费</div>
                     </div>
-                    <div className="justify-end flex items-center gap-1"># 仓位</div>
-                    <div className="justify-end flex items-center gap-1 text-emerald-700/80 dark:text-emerald-300/80">手续费</div>
-                </div>
-
-                {[token0, token1].filter(Boolean).map((row) => (
-                    <div key={row.address} className="mt-3 grid grid-cols-4 gap-2 items-start">
-                        <div className="min-w-0">
-                            <div className="text-sm font-bold text-zinc-900 dark:text-white/90 truncate" title={row.symbol}>{row.symbol}</div>
-                            <div className="text-[11px] text-zinc-500 dark:text-white/40 truncate">{row.price_usd_text || `$${Number(row.price_usd || 0).toFixed(4)}`}</div>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`h-4 w-4 text-zinc-500 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}>
+                        <path d={icons.chevronDown} />
+                    </svg>
+                </button>
+                <div className={`collapsible-content ${expanded ? 'expanded' : 'collapsed'}`}>
+                    <div className="mt-3 grid grid-cols-4 gap-2 text-[11px] text-zinc-500 dark:text-white/40">
+                        <div>Token</div>
+                        <div className="flex items-center gap-1 justify-end">
+                            <Icon path={icons.wallet} className="h-3.5 w-3.5" />
+                            钱包
                         </div>
-                        <div className="text-right">
-                            <div className="text-sm font-semibold text-zinc-900 dark:text-white/90 tabular-nums">{row.wallet_amount}</div>
-                            <div className="text-[11px] text-zinc-500 dark:text-white/40 tabular-nums">{formatUsd(row.wallet_usd)}</div>
-                        </div>
-                        <div className="text-right">
-                            <div className="text-sm font-semibold text-zinc-900 dark:text-white/90 tabular-nums">{row.position_amount}</div>
-                            <div className="text-[11px] text-zinc-500 dark:text-white/40 tabular-nums">{formatUsd(row.position_usd)}</div>
-                        </div>
-                        <div className="text-right">
-                            <div className="text-sm font-semibold text-emerald-700 dark:text-emerald-300 tabular-nums">{row.fee_amount}</div>
-                            <div className="text-[11px] text-emerald-700/70 dark:text-emerald-300/70 tabular-nums">{formatUsd(row.fee_usd)}</div>
-                        </div>
+                        <div className="justify-end flex items-center gap-1"># 仓位</div>
+                        <div className="justify-end flex items-center gap-1 text-emerald-700/80 dark:text-emerald-300/80">手续费</div>
                     </div>
-                ))}
 
-                <div className="mt-3 border-t border-zinc-200 pt-3 grid grid-cols-4 gap-2 text-sm font-semibold tabular-nums dark:border-white/10">
-                    <div className="text-zinc-600 dark:text-white/60">小计</div>
-                    <div className="text-right text-zinc-900 dark:text-white/80">{formatUsd(position?.totals?.wallet_usd)}</div>
-                    <div className="text-right text-zinc-900 dark:text-white/80">{formatUsd(position?.totals?.position_usd)}</div>
-                    <div className="text-right text-emerald-700 dark:text-emerald-300">{formatUsd(position?.totals?.fee_usd)}</div>
+                    {[token0, token1].filter(Boolean).map((row) => (
+                        <div key={row.address} className="mt-3 grid grid-cols-4 gap-2 items-start">
+                            <div className="min-w-0">
+                                <div className="text-sm font-bold text-zinc-900 dark:text-white/90 truncate" title={row.symbol}>{row.symbol}</div>
+                                <div className="text-[11px] text-zinc-500 dark:text-white/40 truncate">{row.price_usd_text || `$${Number(row.price_usd || 0).toFixed(4)}`}</div>
+                            </div>
+                            <div className="text-right">
+                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90 tabular-nums">{row.wallet_amount}</div>
+                                <div className="text-[11px] text-zinc-500 dark:text-white/40 tabular-nums">{formatUsd(row.wallet_usd)}</div>
+                            </div>
+                            <div className="text-right">
+                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90 tabular-nums">{row.position_amount}</div>
+                                <div className="text-[11px] text-zinc-500 dark:text-white/40 tabular-nums">{formatUsd(row.position_usd)}</div>
+                            </div>
+                            <div className="text-right">
+                                <div className="text-sm font-semibold text-emerald-700 dark:text-emerald-300 tabular-nums">{row.fee_amount}</div>
+                                <div className="text-[11px] text-emerald-700/70 dark:text-emerald-300/70 tabular-nums">{formatUsd(row.fee_usd)}</div>
+                            </div>
+                        </div>
+                    ))}
+
+                    <div className="mt-3 border-t border-zinc-200 pt-3 grid grid-cols-4 gap-2 text-sm font-semibold tabular-nums dark:border-white/10">
+                        <div className="text-zinc-600 dark:text-white/60">小计</div>
+                        <div className="text-right text-zinc-900 dark:text-white/80">{formatUsd(position?.totals?.wallet_usd)}</div>
+                        <div className="text-right text-zinc-900 dark:text-white/80">{formatUsd(position?.totals?.position_usd)}</div>
+                        <div className="text-right text-emerald-700 dark:text-emerald-300">{formatUsd(position?.totals?.fee_usd)}</div>
+                    </div>
                 </div>
             </div>
 

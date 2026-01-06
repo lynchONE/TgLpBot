@@ -163,10 +163,18 @@ const CountChangeIndicator = ({ currentValue, previousValue, label = '变化' })
     );
 };
 
-export default function HotPoolCard({ pool, metric, previousData, onOpenKline, onOpenPosition }) {
+export default function HotPoolCard({ pool, metric, previousData, onOpenKline, onOpenPosition, rank }) {
     const [copied, setCopied] = useState(false);
     const addr = String(pool?.pool_address || '').trim();
     const canOpenKline = useMemo(() => isPoolAddressLike(addr), [addr]);
+
+    // 根据排名确定渐变背景类
+    const rankClass = useMemo(() => {
+        if (rank === 1) return 'rank-gold';
+        if (rank === 2) return 'rank-silver';
+        if (rank === 3) return 'rank-bronze';
+        return '';
+    }, [rank]);
 
     const mainValue = useMemo(() => {
         if (metric === 'volume') return formatUsdCompact(pool?.total_volume);
@@ -198,7 +206,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
     };
 
     return (
-        <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+        <div className={`rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none ${rankClass}`}>
             <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
