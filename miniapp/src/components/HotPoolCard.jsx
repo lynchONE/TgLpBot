@@ -126,6 +126,43 @@ const ChangeIndicator = ({ currentValue, previousValue, label = '变化' }) => {
     );
 };
 
+// 数量变化指示器组件 - 用于显示交易笔数等非美元数值的变化
+const CountChangeIndicator = ({ currentValue, previousValue, label = '变化' }) => {
+    if (previousValue === undefined || previousValue === null) return null;
+
+    const current = Number(currentValue || 0);
+    const previous = Number(previousValue || 0);
+    const diff = current - previous;
+    if (diff === 0 || !Number.isFinite(diff)) return null;
+
+    const isIncrease = diff > 0;
+    const absValue = Math.abs(diff);
+
+    // 格式化数量显示（无美元符号）
+    const formatCount = (val) => {
+        if (val >= 1000000) {
+            return (val / 1000000).toFixed(1) + 'M';
+        }
+        if (val >= 1000) {
+            return (val / 1000).toFixed(1) + 'K';
+        }
+        return Math.round(val).toString();
+    };
+
+    return (
+        <span
+            className={`ml-1 inline-flex items-center text-[10px] font-bold ${isIncrease ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                }`}
+            title={`${label}: ${isIncrease ? '+' : '-'}${absValue.toLocaleString()}`}
+        >
+            <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d={isIncrease ? icons.arrowUp : icons.arrowDown} clipRule="evenodd" />
+            </svg>
+            <span>{formatCount(absValue)}</span>
+        </span>
+    );
+};
+
 export default function HotPoolCard({ pool, metric, previousData, onOpenKline, onOpenPosition }) {
     const [copied, setCopied] = useState(false);
     const addr = String(pool?.pool_address || '').trim();
@@ -229,6 +266,11 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                                 <span className="font-semibold text-orange-600 dark:text-orange-300 tabular-nums">
                                     {pool.transaction_count.toLocaleString()}
                                 </span>
+                                <CountChangeIndicator
+                                    currentValue={pool?.transaction_count}
+                                    previousValue={previousData?.transaction_count}
+                                    label="交易笔数变化"
+                                />
                             </div>
                         ) : null}
                     </div>
