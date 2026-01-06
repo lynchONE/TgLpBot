@@ -116,7 +116,7 @@ export default function PositionCard({
     onToggleSelect,
 }) {
     // 展开/折叠状态
-    const [expanded, setExpanded] = useState(false);
+    const [expanded, setExpanded] = useState(true);
 
     // 实时更新的时间显示
     const runningDuration = useDurationFrom(position?.running_since);
@@ -377,7 +377,11 @@ export default function PositionCard({
                 >
                     <div className="flex items-center gap-2">
                         <div className="text-xs font-semibold text-zinc-700 dark:text-white/70">余额信息</div>
-                        <div className="text-[11px] text-zinc-500 dark:text-white/40">钱包 vs 仓位 vs 手续费</div>
+                        {!expanded && (
+                            <div className="text-[10px] text-zinc-500 dark:text-white/40 tabular-nums">
+                                钱包 {formatUsd(position?.totals?.wallet_usd)} · 仓位 {formatUsd(position?.totals?.position_usd)} · 费用 {formatUsd(position?.totals?.fee_usd)}
+                            </div>
+                        )}
                     </div>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`h-4 w-4 text-zinc-500 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}>
                         <path d={icons.chevronDown} />
