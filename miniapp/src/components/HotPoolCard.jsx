@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react';
 import { copyToClipboard, hapticNotification, hapticImpact } from '../lib/telegram';
-import { MiniChartWithData } from './MiniChart';
 
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -298,15 +297,6 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                             />
                         </div>
                     </div>
-                    {/* 迷你价格走势图 */}
-                    <div className="mt-1 flex justify-end">
-                        <MiniChartWithData
-                            poolAddress={addr}
-                            apiBaseUrl={apiBaseUrl}
-                            width={60}
-                            height={20}
-                        />
-                    </div>
                     {priceDisplay ? (
                         <div
                             className={`mt-0.5 text-[10px] font-semibold tabular-nums truncate max-w-[110px] ${priceDisplayClass}`}
@@ -318,15 +308,6 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                     <div className="mt-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-300 tabular-nums">
                         {metric === 'fee_rate' ? formatUsd(pool?.total_fees) : formatRatePct(pool?.fee_rate)}
                     </div>
-                    {/* 24小时数据 */}
-                    {pool?.total_fees_24h > 0 && (
-                        <div className="mt-1 text-[9px] text-zinc-500 dark:text-white/40">
-                            24h: <span className="font-semibold text-emerald-600 dark:text-emerald-300">{formatUsdCompact(pool.total_fees_24h)}</span>
-                            {pool?.total_volume_24h > 0 && (
-                                <span className="ml-1">/ {formatUsdCompact(pool.total_volume_24h)}</span>
-                            )}
-                        </div>
-                    )}
                 </div>
             </div>
 
