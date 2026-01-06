@@ -586,7 +586,30 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 	}
 
 	sort.Slice(positions, func(i, j int) bool {
-		return positions[i].Title < positions[j].Title
+		pi := positions[i]
+		pj := positions[j]
+
+		if pi.Title != pj.Title {
+			return pi.Title < pj.Title
+		}
+
+		// Keep UI order stable across refreshes: titles can be identical for multiple positions.
+		poolI := strings.ToLower(strings.TrimSpace(pi.PoolID))
+		poolJ := strings.ToLower(strings.TrimSpace(pj.PoolID))
+		if poolI != poolJ {
+			return poolI < poolJ
+		}
+
+		if c := compareDecimalStrings(pi.PositionID, pj.PositionID); c != 0 {
+			return c < 0
+		}
+		if pi.TaskID != pj.TaskID {
+			return pi.TaskID < pj.TaskID
+		}
+		if pi.Version != pj.Version {
+			return pi.Version < pj.Version
+		}
+		return strings.ToLower(strings.TrimSpace(pi.Exchange)) < strings.ToLower(strings.TrimSpace(pj.Exchange))
 	})
 	resp.Positions = positions
 
@@ -625,6 +648,44 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 		log.Printf("[Realtime] user=%d positions=%d took=%s warnings=%d", userID, len(resp.Positions), took.Truncate(10*time.Millisecond), len(resp.Warnings))
 	}
 	return resp, nil
+}
+
+func compareDecimalStrings(a, b string) int {
+	aRaw := strings.TrimSpace(a)
+	bRaw := strings.TrimSpace(b)
+	if aRaw == bRaw {
+		return 0
+	}
+
+	aNorm, okA := normalizeDecimalString(aRaw)
+	bNorm, okB := normalizeDecimalString(bRaw)
+	if !okA || !okB {
+		return strings.Compare(aRaw, bRaw)
+	}
+
+	if len(aNorm) != len(bNorm) {
+		if len(aNorm) < len(bNorm) {
+			return -1
+		}
+		return 1
+	}
+	return strings.Compare(aNorm, bNorm)
+}
+
+func normalizeDecimalString(s string) (string, bool) {
+	if s == "" {
+		return "0", true
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return "", false
+		}
+	}
+	s = strings.TrimLeft(s, "0")
+	if s == "" {
+		s = "0"
+	}
+	return s, true
 }
 
 func (s *RealtimePositionsService) getV4OwnedTokenIDsCached(wallet common.Address) ([]string, bool) {

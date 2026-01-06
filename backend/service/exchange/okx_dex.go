@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/big"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -31,6 +33,58 @@ func NewOKXDexService() *OKXDexService {
 		passphrase: config.AppConfig.OKXPassphrase,
 		client:     &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+func (s *OKXDexService) isV6() bool {
+	return strings.Contains(s.apiURL, "/api/v6/") || strings.Contains(s.apiURL, "/api/v6")
+}
+
+func (s *OKXDexService) chainQueryKey() string {
+	// OKX DEX aggregator uses "chainId" on v5 endpoints and "chainIndex" on v6.
+	// Detect by API base URL to keep backward compatibility.
+	if s.isV6() {
+		return "chainIndex"
+	}
+	return "chainId"
+}
+
+func (s *OKXDexService) slippageQueryKey() string {
+	// OKX DEX aggregator uses "slippage" on v5 endpoints and "slippagePercent" on v6.
+	if s.isV6() {
+		return "slippagePercent"
+	}
+	return "slippage"
+}
+
+func (s *OKXDexService) slippageQueryValue(slippage string) string {
+	slippage = strings.TrimSpace(slippage)
+	if slippage == "" {
+		return ""
+	}
+	if !s.isV6() {
+		return slippage
+	}
+
+	// Existing callers pass slippage as a decimal fraction (e.g. 0.005 for 0.5%).
+	// v6 expects percent value (e.g. 0.5).
+	rat, ok := new(big.Rat).SetString(slippage)
+	if !ok {
+		return slippage
+	}
+	rat.Mul(rat, big.NewRat(100, 1))
+	if rat.Cmp(big.NewRat(0, 1)) < 0 {
+		rat = big.NewRat(0, 1)
+	}
+	if rat.Cmp(big.NewRat(100, 1)) > 0 {
+		rat = big.NewRat(100, 1)
+	}
+	out := rat.FloatString(6)
+	out = strings.TrimRight(out, "0")
+	out = strings.TrimRight(out, ".")
+	if out == "" {
+		return "0"
+	}
+	return out
 }
 
 // QuoteRequest represents a quote request
@@ -123,8 +177,8 @@ type SwapResponse struct {
 
 // GetQuote gets a quote for token swap
 func (s *OKXDexService) GetQuote(req QuoteRequest) (*QuoteResponse, error) {
-	url := fmt.Sprintf("%s/quote?chainId=%s&fromTokenAddress=%s&toTokenAddress=%s&amount=%s&slippage=%s",
-		s.apiURL, req.ChainID, req.FromTokenAddress, req.ToTokenAddress, req.Amount, req.Slippage)
+	url := fmt.Sprintf("%s/quote?%s=%s&fromTokenAddress=%s&toTokenAddress=%s&amount=%s&%s=%s",
+		s.apiURL, s.chainQueryKey(), req.ChainID, req.FromTokenAddress, req.ToTokenAddress, req.Amount, s.slippageQueryKey(), s.slippageQueryValue(req.Slippage))
 
 	httpReq, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -152,7 +206,7 @@ func (s *OKXDexService) GetQuote(req QuoteRequest) (*QuoteResponse, error) {
 	}
 
 	if quoteResp.Code != "0" {
-		return nil, fmt.Errorf("OKX API error: %s", quoteResp.Msg)
+		return nil, fmt.Errorf("OKX API error: %s (code=%s)", quoteResp.Msg, quoteResp.Code)
 	}
 
 	return &quoteResp, nil
@@ -160,8 +214,8 @@ func (s *OKXDexService) GetQuote(req QuoteRequest) (*QuoteResponse, error) {
 
 // GetSwapData gets swap transaction data
 func (s *OKXDexService) GetSwapData(req SwapRequest) (*SwapResponse, error) {
-	url := fmt.Sprintf("%s/swap?chainId=%s&fromTokenAddress=%s&toTokenAddress=%s&amount=%s&slippage=%s&userWalletAddress=%s",
-		s.apiURL, req.ChainID, req.FromTokenAddress, req.ToTokenAddress, req.Amount, req.Slippage, req.UserWalletAddress)
+	url := fmt.Sprintf("%s/swap?%s=%s&fromTokenAddress=%s&toTokenAddress=%s&amount=%s&%s=%s&userWalletAddress=%s",
+		s.apiURL, s.chainQueryKey(), req.ChainID, req.FromTokenAddress, req.ToTokenAddress, req.Amount, s.slippageQueryKey(), s.slippageQueryValue(req.Slippage), req.UserWalletAddress)
 
 	if config.AppConfig != nil && config.AppConfig.OKXDebug {
 		log.Printf("[OKX API] 请求 URL: %s", url)
@@ -197,7 +251,7 @@ func (s *OKXDexService) GetSwapData(req SwapRequest) (*SwapResponse, error) {
 	}
 
 	if swapResp.Code != "0" {
-		return nil, fmt.Errorf("OKX API error: %s", swapResp.Msg)
+		return nil, fmt.Errorf("OKX API error: %s (code=%s)", swapResp.Msg, swapResp.Code)
 	}
 
 	// 打印详细响应信息
@@ -242,8 +296,8 @@ type ApproveTransactionResponse struct {
 // GetApproveSpender 获取 OKX DEX 的 approve 目标地址
 // 这个地址是需要 approve 代币的 spender，每个链可能不同，需要动态获取
 func (s *OKXDexService) GetApproveSpender(chainID string, tokenAddress string) (string, error) {
-	url := fmt.Sprintf("%s/approve-transaction?chainId=%s&tokenContractAddress=%s&approveAmount=1",
-		s.apiURL, chainID, tokenAddress)
+	url := fmt.Sprintf("%s/approve-transaction?%s=%s&tokenContractAddress=%s&approveAmount=1",
+		s.apiURL, s.chainQueryKey(), chainID, tokenAddress)
 
 	httpReq, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -271,7 +325,7 @@ func (s *OKXDexService) GetApproveSpender(chainID string, tokenAddress string) (
 	}
 
 	if approveResp.Code != "0" {
-		return "", fmt.Errorf("OKX API error: %s", approveResp.Msg)
+		return "", fmt.Errorf("OKX API error: %s (code=%s)", approveResp.Msg, approveResp.Code)
 	}
 
 	if len(approveResp.Data) == 0 || approveResp.Data[0].DexContractAddress == "" {

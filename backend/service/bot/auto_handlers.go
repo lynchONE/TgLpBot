@@ -83,6 +83,8 @@ func autoInputPrompt(state string) string {
 		return "⏳ 请输入盈利多少 USDT 关闭 AutoLP 并撤出自动仓位（0 表示不启用），例如：`100` 或 `0`"
 	case "awaiting_auto_stop_loss":
 		return "⏳ 请输入亏损多少 USDT 关闭 AutoLP 并撤出自动仓位（0 表示不启用），例如：`50` 或 `0`"
+	case "awaiting_auto_switch_threshold":
+		return "⏳ 请输入换池阈值（百分比，0 表示只要收益更高就换），例如：`20` 或 `0`"
 	default:
 		return ""
 	}
@@ -135,6 +137,10 @@ func (b *Bot) buildAutoMenu(user *models.User, notice string) (string, any, stri
 		if cfg.StopLossUSDT > 0 {
 			sl = fmt.Sprintf("%.2f USDT", cfg.StopLossUSDT)
 		}
+		switchPct := "0%"
+		if cfg.SwitchMinImprovementPct > 0 {
+			switchPct = fmt.Sprintf("+%.2f%%", cfg.SwitchMinImprovementPct)
+		}
 
 		noticeLine := ""
 		if strings.TrimSpace(notice) != "" {
@@ -154,17 +160,20 @@ func (b *Bot) buildAutoMenu(user *models.User, notice string) (string, any, stri
 *总投入*：%.2f USDT
 *最大任务数*：%d
 *单仓投入*：%.2f USDT（总投入/最大任务数）
+*换池阈值*：%s（目标池 5m 费用率需高于当前最低收益池）
 *盈利关闭*：%s
 *亏损关闭*：%s
 
 %s
-达到最大任务数后将不再开新仓，需等有仓位撤仓后才会继续开新仓。
+达到最大任务数后如出现更高收益池，会按「换池阈值」自动将最低收益自动仓位切换到更高收益池。
+手动仓位如有同交易对更高收益池，也会尝试自动切换到更高收益池。
 盈利/亏损触发后会关闭 AutoLP，并自动撤出当前自动仓位。%s`,
 			noticeLine,
 			boolToOnOff(cfg.Enabled),
 			cfg.TotalAmountUSDT,
 			cfg.MaxActiveTasks,
 			perTask,
+			switchPct,
 			tp,
 			sl,
 			statsBlock,
@@ -198,7 +207,10 @@ func (b *Bot) autoConfigKeyboard(enabled bool, inInput bool) any {
 		tgbotapi.NewInlineKeyboardButtonData("设置最大任务数", "auto_cfg_set_max_tasks"),
 	))
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("设置换池阈值", "auto_cfg_set_switch_threshold"),
 		tgbotapi.NewInlineKeyboardButtonData("设置盈利关闭", "auto_cfg_set_take_profit"),
+	))
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 		tgbotapi.NewInlineKeyboardButtonData("设置亏损关闭", "auto_cfg_set_stop_loss"),
 	))
 

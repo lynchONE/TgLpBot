@@ -8,6 +8,7 @@ type AutoLPEventType string
 const (
 	AutoLPEventOpen      AutoLPEventType = "open"
 	AutoLPEventRebalance AutoLPEventType = "rebalance"
+	AutoLPEventSwitch    AutoLPEventType = "switch"
 	AutoLPEventGuardExit AutoLPEventType = "guard_exit"
 )
 

@@ -44,8 +44,8 @@ func (b *Bot) handleGlobalStopLossDelayInput(messageChatID int64, user *models.U
 
 func (b *Bot) handleGlobalSlippageInput(messageChatID int64, user *models.User, text string) {
 	value, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(text, "%")), 64)
-	if err != nil || value <= 0 || value > 50 {
-		b.sendMessage(messageChatID, "数值无效。请输入 0-50 之间的滑点百分比，例如：`1` 表示 1%")
+	if err != nil || value < 0 || value > 100 {
+		b.sendMessage(messageChatID, "数值无效。请输入 0-100 之间的滑点百分比，例如：`0.5` 表示 0.5%")
 		return
 	}
 	_, err = b.configService.Update(user.ID, map[string]interface{}{

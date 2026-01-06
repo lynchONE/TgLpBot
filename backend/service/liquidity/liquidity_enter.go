@@ -336,7 +336,7 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 				usdcBal = big.NewInt(0)
 			}
 			slippagePct := task.SlippageTolerance
-			if slippagePct <= 0 {
+			if slippagePct < 0 {
 				slippagePct = 0.5
 			}
 			bps := int64(math.Round(slippagePct * 100))
@@ -512,10 +512,16 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 }
 
 func (s *LiquidityService) okxSlippageDecimal(slippagePercent float64) string {
-	sl := slippagePercent / 100.0
-	if sl <= 0 {
-		sl = 0.005
+	if math.IsNaN(slippagePercent) || math.IsInf(slippagePercent, 0) {
+		slippagePercent = 0.5
 	}
+	if slippagePercent < 0 {
+		slippagePercent = 0
+	}
+	if slippagePercent > 100 {
+		slippagePercent = 100
+	}
+	sl := slippagePercent / 100.0
 	return fmt.Sprintf("%.6f", sl)
 }
 

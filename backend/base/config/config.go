@@ -253,7 +253,7 @@ func LoadConfig() error {
 		RedisDB:       redisDB,
 
 		// OKX DEX API
-		OKXDexAPIURL:           getEnv("OKX_DEX_API_URL", "https://www.okx.com/api/v5/dex/aggregator"),
+		OKXDexAPIURL:           getEnv("OKX_DEX_API_URL", "https://www.okx.com/api/v6/dex/aggregator"),
 		OKXAPIKey:              getEnv("OKX_API_KEY", ""),
 		OKXSecretKey:           getEnv("OKX_SECRET_KEY", ""),
 		OKXPassphrase:          getEnv("OKX_PASSPHRASE", ""),

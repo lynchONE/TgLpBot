@@ -506,6 +506,8 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleAutoConfigSetTotal(query, user)
 	case query.Data == "auto_cfg_set_max_tasks":
 		b.handleAutoConfigSetMaxTasks(query, user)
+	case query.Data == "auto_cfg_set_switch_threshold":
+		b.handleAutoConfigSetSwitchThreshold(query, user)
 	case query.Data == "auto_cfg_set_take_profit":
 		b.handleAutoConfigSetTakeProfit(query, user)
 	case query.Data == "auto_cfg_set_stop_loss":

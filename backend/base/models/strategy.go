@@ -86,13 +86,19 @@ type StrategyTask struct {
 	CooldownReason       string     `gorm:"type:text" json:"cooldown_reason"`
 
 	// Exit retry state (keep task Status as running when exit fails).
-	ExitPendingAction string     `gorm:"size:20;default:''" json:"exit_pending_action"` // manual_stop | stoploss | rebalance | cooldown
+	ExitPendingAction string     `gorm:"size:20;default:''" json:"exit_pending_action"` // manual_stop | stoploss | rebalance | switch | cooldown
 	ExitPendingReason string     `gorm:"type:text" json:"exit_pending_reason"`
 	ExitGasMultiplier float64    `gorm:"type:decimal(6,2);default:1.0" json:"exit_gas_multiplier"` // Gas multiplier for the next exit attempt (auto strategy may set to 2.0)
 	ExitRetryCount    int        `gorm:"default:0" json:"exit_retry_count"`                        // number of failed attempts
 	ExitNextRetryAt   *time.Time `json:"exit_next_retry_at"`
 	ExitLastError     string     `gorm:"type:text" json:"exit_last_error"`
 	ExitGiveUpAt      *time.Time `json:"exit_give_up_at"`
+
+	// Switch target (pool migration) state.
+	SwitchTargetPoolVersion  string  `gorm:"size:10;default:''" json:"switch_target_pool_version"`
+	SwitchTargetPoolId       string  `gorm:"size:66;default:''" json:"switch_target_pool_id"`
+	SwitchTargetTickLowerPct float64 `gorm:"type:decimal(10,4);default:0" json:"switch_target_tick_lower_pct"`
+	SwitchTargetTickUpperPct float64 `gorm:"type:decimal(10,4);default:0" json:"switch_target_tick_upper_pct"`
 	// ExitLiquidityRemoved marks that the liquidity removal tx already succeeded, and the remaining
 	// pending work (if any) should retry swap-to-USDT only.
 	ExitLiquidityRemoved bool `gorm:"default:false" json:"exit_liquidity_removed"`

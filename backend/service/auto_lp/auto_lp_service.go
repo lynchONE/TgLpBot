@@ -620,6 +620,8 @@ type AutoLPAnalysis struct {
 	ProtocolVersion string
 	PoolAddress     string
 	TradingPair     string
+	Token0Address   string
+	Token1Address   string
 
 	// 5m pool metrics (from PoolM top-fees 5m snapshot)
 	FeePercentage float64
@@ -778,6 +780,8 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 			ProtocolVersion:   key.proto,
 			PoolAddress:       key.addr,
 			TradingPair:       strings.TrimSpace(p5.TradingPair),
+			Token0Address:     strings.ToLower(strings.TrimSpace(p5.Token0Address)),
+			Token1Address:     strings.ToLower(strings.TrimSpace(p5.Token1Address)),
 			FeePercentage:     p5.FeePercentage,
 			FeeRate5mPct:      feeRatePct,
 			TotalFees5m:       p5.TotalFees,
@@ -1451,6 +1455,322 @@ func (s *AutoLPService) tryOpenCandidate(ctx context.Context, userID uint, a Aut
 	return true, nil
 }
 
+func autoLPPoolKey(version string, poolID string) string {
+	v := strings.ToLower(strings.TrimSpace(version))
+	p := strings.ToLower(strings.TrimSpace(poolID))
+	if v == "" || p == "" {
+		return ""
+	}
+	return v + "|" + p
+}
+
+func autoLPPairKey(token0 string, token1 string) string {
+	t0 := strings.ToLower(strings.TrimSpace(token0))
+	t1 := strings.ToLower(strings.TrimSpace(token1))
+	if t0 == "" || t1 == "" {
+		return ""
+	}
+	if common.IsHexAddress(t0) && common.IsHexAddress(t1) {
+		a0 := common.HexToAddress(t0)
+		a1 := common.HexToAddress(t1)
+		if bytesCompare(a0, a1) > 0 {
+			a0, a1 = a1, a0
+		}
+		return strings.ToLower(a0.Hex()) + "|" + strings.ToLower(a1.Hex())
+	}
+	if t0 > t1 {
+		t0, t1 = t1, t0
+	}
+	return t0 + "|" + t1
+}
+
+func autoLPShouldSwitch(current float64, target float64, minImprovementPct float64) bool {
+	if target <= current {
+		return false
+	}
+	if minImprovementPct <= 0 || current <= 0 {
+		return true
+	}
+	return target >= current*(1.0+minImprovementPct/100.0)
+}
+
+func autoLPCandidateContainsUSDT(a AutoLPAnalysis) bool {
+	if config.AppConfig == nil || !common.IsHexAddress(config.AppConfig.USDTAddress) {
+		return true
+	}
+	usdt := strings.ToLower(strings.TrimSpace(config.AppConfig.USDTAddress))
+	t0 := strings.ToLower(strings.TrimSpace(a.Token0Address))
+	t1 := strings.ToLower(strings.TrimSpace(a.Token1Address))
+	if t0 == "" || t1 == "" {
+		return true
+	}
+	return t0 == usdt || t1 == usdt
+}
+
+func autoLPTaskRangePct(task *models.StrategyTask) (float64, float64) {
+	if task == nil {
+		return 0, 0
+	}
+	lower := task.RangeLowerPercentage
+	upper := task.RangeUpperPercentage
+	if lower > 0 && upper > 0 {
+		return lower, upper
+	}
+	if task.RangePercentage > 0 {
+		return task.RangePercentage, task.RangePercentage
+	}
+	return 0, 0
+}
+
+func (s *AutoLPService) requestSwitchExit(task *models.StrategyTask, target AutoLPAnalysis, targetLowerPct float64, targetUpperPct float64, reason string, gasMultiplier float64) (bool, error) {
+	if task == nil {
+		return false, nil
+	}
+	if task.ExitGiveUpAt != nil {
+		return false, nil
+	}
+	if strings.TrimSpace(task.ExitPendingAction) != "" {
+		return false, nil
+	}
+	if task.RebalancePending {
+		return false, nil
+	}
+
+	targetPoolVersion := strings.ToLower(strings.TrimSpace(target.ProtocolVersion))
+	targetPoolID := strings.TrimSpace(target.PoolAddress)
+	if targetPoolVersion == "" || targetPoolID == "" {
+		return false, nil
+	}
+
+	updates := map[string]interface{}{
+		"exit_pending_action":          strategy.ExitActionSwitch,
+		"exit_pending_reason":          strings.TrimSpace(reason),
+		"exit_gas_multiplier":          gasMultiplier,
+		"exit_retry_count":             0,
+		"exit_next_retry_at":           nil,
+		"exit_last_error":              "",
+		"exit_give_up_at":              nil,
+		"rebalance_pending":            false,
+		"rebalance_retry_count":        0,
+		"rebalance_next_retry_at":      nil,
+		"rebalance_last_error":         "",
+		"error_message":                "",
+		"switch_target_pool_version":   targetPoolVersion,
+		"switch_target_pool_id":        targetPoolID,
+		"switch_target_tick_lower_pct": targetLowerPct,
+		"switch_target_tick_upper_pct": targetUpperPct,
+	}
+	if err := database.DB.Model(task).Updates(updates).Error; err != nil {
+		return false, err
+	}
+
+	task.ExitPendingAction = strategy.ExitActionSwitch
+	task.ExitPendingReason = strings.TrimSpace(reason)
+	task.ExitGasMultiplier = gasMultiplier
+	task.ExitRetryCount = 0
+	task.ExitNextRetryAt = nil
+	task.ExitLastError = ""
+	task.ExitGiveUpAt = nil
+	task.RebalancePending = false
+	task.RebalanceRetryCount = 0
+	task.RebalanceNextRetryAt = nil
+	task.RebalanceLastError = ""
+	task.ErrorMessage = ""
+	task.SwitchTargetPoolVersion = targetPoolVersion
+	task.SwitchTargetPoolId = targetPoolID
+	task.SwitchTargetTickLowerPct = targetLowerPct
+	task.SwitchTargetTickUpperPct = targetUpperPct
+
+	return true, nil
+}
+
+func (s *AutoLPService) trySwitchWorstAutoTask(ctx context.Context, cfg models.AutoLPUserConfig, analyses []AutoLPAnalysis) (bool, error) {
+	userID := cfg.UserID
+	if userID == 0 || database.DB == nil {
+		return false, nil
+	}
+
+	analysisByPool := make(map[string]AutoLPAnalysis, len(analyses))
+	for _, a := range analyses {
+		if k := autoLPPoolKey(a.ProtocolVersion, a.PoolAddress); k != "" {
+			analysisByPool[k] = a
+		}
+	}
+
+	var tasks []models.StrategyTask
+	if err := database.DB.Where("user_id = ? AND is_auto = ? AND paused = ? AND status IN ?", userID, true, false, []models.StrategyStatus{
+		models.StrategyStatusRunning,
+		models.StrategyStatusWaiting,
+	}).Find(&tasks).Error; err != nil {
+		return false, err
+	}
+
+	var worst *models.StrategyTask
+	worstYield := math.MaxFloat64
+	for i := range tasks {
+		task := &tasks[i]
+		if strings.TrimSpace(task.ExitPendingAction) != "" || task.RebalancePending || !hasTaskPositionForExit(task) {
+			continue
+		}
+		y := 0.0
+		if a, ok := analysisByPool[autoLPPoolKey(task.PoolVersion, task.PoolId)]; ok {
+			y = a.FeeRate5mPct
+		}
+		if y < worstYield {
+			worstYield = y
+			worst = task
+		}
+	}
+	if worst == nil {
+		return false, nil
+	}
+
+	var bestCand AutoLPAnalysis
+	foundCand := false
+	bestYield := 0.0
+	for _, a := range analyses {
+		if a.Action != "CANDIDATE" || a.FeeRate5mPct <= 0 {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(a.ProtocolVersion), strings.TrimSpace(worst.PoolVersion)) &&
+			strings.EqualFold(strings.TrimSpace(a.PoolAddress), strings.TrimSpace(worst.PoolId)) {
+			continue
+		}
+		if ok, err := s.hasActiveTask(userID, a.ProtocolVersion, a.PoolAddress); err != nil {
+			return false, err
+		} else if ok {
+			continue
+		}
+		if !worst.AllowEntrySwap && !autoLPCandidateContainsUSDT(a) {
+			continue
+		}
+		if !autoLPShouldSwitch(worstYield, a.FeeRate5mPct, cfg.SwitchMinImprovementPct) {
+			continue
+		}
+		if a.FeeRate5mPct > bestYield {
+			bestYield = a.FeeRate5mPct
+			bestCand = a
+			foundCand = true
+		}
+	}
+	if !foundCand {
+		return false, nil
+	}
+
+	candTask, _, err := s.buildTaskForCandidate(ctx, userID, bestCand, worst.AmountUSDT)
+	if err != nil || candTask == nil {
+		return false, nil
+	}
+
+	reason := fmt.Sprintf("🔁 AutoLP 切换到更高收益池：%s (%.4f%%)", strings.TrimSpace(bestCand.TradingPair), bestYield)
+	detail := fmt.Sprintf("🔁 AutoLP 已满仓，触发换池：\n当前最低：%s/%s %.4f%%\n目标池：%s %.4f%%\n阈值：+%.2f%%",
+		strings.TrimSpace(worst.Token0Symbol),
+		strings.TrimSpace(worst.Token1Symbol),
+		worstYield,
+		strings.TrimSpace(bestCand.TradingPair),
+		bestYield,
+		cfg.SwitchMinImprovementPct,
+	)
+	if scheduled, err := s.requestSwitchExit(worst, bestCand, candTask.RangeLowerPercentage, candTask.RangeUpperPercentage, reason, 1.0); err != nil {
+		return false, err
+	} else if !scheduled {
+		return false, nil
+	}
+	s.notify(userID, detail)
+	return true, nil
+}
+
+func (s *AutoLPService) trySwitchManualTask(ctx context.Context, cfg models.AutoLPUserConfig, analyses []AutoLPAnalysis) (bool, error) {
+	userID := cfg.UserID
+	if userID == 0 || database.DB == nil {
+		return false, nil
+	}
+
+	analysisByPool := make(map[string]AutoLPAnalysis, len(analyses))
+	bestByPair := make(map[string]AutoLPAnalysis)
+	for _, a := range analyses {
+		if k := autoLPPoolKey(a.ProtocolVersion, a.PoolAddress); k != "" {
+			analysisByPool[k] = a
+		}
+		if a.Action != "CANDIDATE" || a.FeeRate5mPct <= 0 {
+			continue
+		}
+		pair := autoLPPairKey(a.Token0Address, a.Token1Address)
+		if pair == "" {
+			continue
+		}
+		if cur, ok := bestByPair[pair]; !ok || a.FeeRate5mPct > cur.FeeRate5mPct {
+			bestByPair[pair] = a
+		}
+	}
+
+	var tasks []models.StrategyTask
+	if err := database.DB.Where("user_id = ? AND is_auto = ? AND paused = ? AND status IN ?", userID, false, false, []models.StrategyStatus{
+		models.StrategyStatusRunning,
+	}).Find(&tasks).Error; err != nil {
+		return false, err
+	}
+
+	for i := range tasks {
+		task := &tasks[i]
+		if strings.TrimSpace(task.ExitPendingAction) != "" || task.RebalancePending || !hasTaskPositionForExit(task) {
+			continue
+		}
+		pair := autoLPPairKey(task.Token0Address, task.Token1Address)
+		if pair == "" {
+			continue
+		}
+		best, ok := bestByPair[pair]
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(best.ProtocolVersion), strings.TrimSpace(task.PoolVersion)) &&
+			strings.EqualFold(strings.TrimSpace(best.PoolAddress), strings.TrimSpace(task.PoolId)) {
+			continue
+		}
+		if ok, err := s.hasActiveTask(userID, best.ProtocolVersion, best.PoolAddress); err != nil {
+			return false, err
+		} else if ok {
+			continue
+		}
+
+		currentYield := 0.0
+		if a, ok := analysisByPool[autoLPPoolKey(task.PoolVersion, task.PoolId)]; ok {
+			currentYield = a.FeeRate5mPct
+		}
+		if !autoLPShouldSwitch(currentYield, best.FeeRate5mPct, cfg.SwitchMinImprovementPct) {
+			continue
+		}
+		if !task.AllowEntrySwap && !autoLPCandidateContainsUSDT(best) {
+			continue
+		}
+
+		lowerPct, upperPct := autoLPTaskRangePct(task)
+		if lowerPct <= 0 || upperPct <= 0 || lowerPct >= 100 || upperPct >= 100 {
+			continue
+		}
+
+		reason := fmt.Sprintf("🔁 手动仓位切换更高收益池：%s (%.4f%%)", strings.TrimSpace(best.TradingPair), best.FeeRate5mPct)
+		detail := fmt.Sprintf("🔁 手动仓位触发换池：\n当前池：%s/%s %.4f%%\n目标池：%s %.4f%%\n阈值：+%.2f%%",
+			strings.TrimSpace(task.Token0Symbol),
+			strings.TrimSpace(task.Token1Symbol),
+			currentYield,
+			strings.TrimSpace(best.TradingPair),
+			best.FeeRate5mPct,
+			cfg.SwitchMinImprovementPct,
+		)
+		if scheduled, err := s.requestSwitchExit(task, best, lowerPct, upperPct, reason, 1.0); err != nil {
+			return false, err
+		} else if !scheduled {
+			return false, nil
+		}
+		s.notify(userID, detail)
+		return true, nil
+	}
+
+	return false, nil
+}
+
 func (s *AutoLPService) executeBestCandidateForUser(ctx context.Context, cfg models.AutoLPUserConfig, snap *poolMSnapshot, analyses []AutoLPAnalysis) error {
 	userID := cfg.UserID
 	if userID == 0 {
@@ -1489,12 +1809,41 @@ func (s *AutoLPService) executeBestCandidateForUser(ctx context.Context, cfg mod
 	if !check.IsAdmin && check.Access != nil && check.Access.MaxActiveTasks > 0 {
 		totalActive, _ := s.accessService.CountUserActiveTasks(userID)
 		if totalActive >= int64(check.Access.MaxActiveTasks) {
+			// Still allow switching existing tasks (does not increase task count).
+			if activeCount, _ := s.countActiveAutoTasks(userID); activeCount >= int64(cfg.MaxActiveTasks) {
+				if switched, err := s.trySwitchWorstAutoTask(ctx, cfg, analyses); err != nil {
+					return err
+				} else if switched {
+					return nil
+				}
+			}
+			if switched, err := s.trySwitchManualTask(ctx, cfg, analyses); err != nil {
+				return err
+			} else if switched {
+				return nil
+			}
 			return nil
 		}
 	}
 
 	activeCount, _ := s.countActiveAutoTasks(userID)
 	if activeCount >= int64(cfg.MaxActiveTasks) {
+		if switched, err := s.trySwitchWorstAutoTask(ctx, cfg, analyses); err != nil {
+			return err
+		} else if switched {
+			return nil
+		}
+		if switched, err := s.trySwitchManualTask(ctx, cfg, analyses); err != nil {
+			return err
+		} else if switched {
+			return nil
+		}
+		return nil
+	}
+
+	if switched, err := s.trySwitchManualTask(ctx, cfg, analyses); err != nil {
+		return err
+	} else if switched {
 		return nil
 	}
 

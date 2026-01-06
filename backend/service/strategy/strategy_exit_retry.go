@@ -15,6 +15,7 @@ const (
 	ExitActionManualStop = "manual_stop"
 	ExitActionStopLoss   = "stoploss"
 	ExitActionRebalance  = "rebalance"
+	ExitActionSwitch     = "switch"
 	ExitActionCooldown   = "cooldown"
 
 	exitMaxAttempts = 3
@@ -156,6 +157,8 @@ func (s *StrategyService) processExitRetry(task *models.StrategyTask) bool {
 		s.executeRebalanceAfterExit(task, now)
 	case ExitActionStopLoss:
 		s.finishStopAfterExit(task, now, reason, txHashes)
+	case ExitActionSwitch:
+		s.executeSwitchAfterExit(task, now, reason)
 	case ExitActionCooldown:
 		s.finishCooldownAfterExit(task, now, reason, txHashes)
 	case ExitActionManualStop:
@@ -227,6 +230,14 @@ func (s *StrategyService) markRebalancePending(task *models.StrategyTask, now ti
 func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now time.Time) error {
 	if task == nil {
 		return fmt.Errorf("task is nil")
+	}
+
+	switching := strings.TrimSpace(task.SwitchTargetPoolId) != "" && strings.TrimSpace(task.SwitchTargetPoolVersion) != ""
+
+	if task.TickSpacing <= 0 || strings.TrimSpace(task.Token0Address) == "" || strings.TrimSpace(task.Token1Address) == "" {
+		if err := s.refreshTaskPoolMeta(task); err != nil {
+			return fmt.Errorf("load pool info failed: %w", err)
+		}
 	}
 
 	currentTick, err := s.getCurrentTick(task)
@@ -303,9 +314,31 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 	task.ErrorMessage = ""
 
 	if task.IsAuto {
-		_ = NewAutoLPEventService().Record(task, models.AutoLPEventRebalance, "")
+		eventType := models.AutoLPEventRebalance
+		if switching {
+			eventType = models.AutoLPEventSwitch
+		}
+		_ = NewAutoLPEventService().Record(task, eventType, "")
 	}
-	s.notify(task.UserID, fmt.Sprintf("✅ 再平衡完成！\n新 Tick 范围: %d - %d\n交易哈希: `%s`", tickLower, tickUpper, enterRes.TxHash))
+
+	if switching {
+		_ = database.DB.Model(task).Updates(map[string]interface{}{
+			"switch_target_pool_version":   "",
+			"switch_target_pool_id":        "",
+			"switch_target_tick_lower_pct": 0,
+			"switch_target_tick_upper_pct": 0,
+		}).Error
+		task.SwitchTargetPoolVersion = ""
+		task.SwitchTargetPoolId = ""
+		task.SwitchTargetTickLowerPct = 0
+		task.SwitchTargetTickUpperPct = 0
+	}
+
+	title := "✅ 再平衡完成！"
+	if switching {
+		title = "✅ 切换完成！"
+	}
+	s.notify(task.UserID, fmt.Sprintf("%s\n新 Tick 范围: %d - %d\n交易哈希: `%s`", title, tickLower, tickUpper, enterRes.TxHash))
 	s.notifyTaskCard(task.UserID, task.ID)
 	return nil
 }
@@ -313,6 +346,11 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 func (s *StrategyService) scheduleRebalanceRetry(task *models.StrategyTask, attempt int, err error) {
 	if task == nil {
 		return
+	}
+
+	actionName := "再平衡"
+	if strings.TrimSpace(task.SwitchTargetPoolId) != "" && strings.TrimSpace(task.SwitchTargetPoolVersion) != "" {
+		actionName = "切换开仓"
 	}
 
 	now := time.Now()
@@ -337,7 +375,7 @@ func (s *StrategyService) scheduleRebalanceRetry(task *models.StrategyTask, atte
 	task.RebalanceLastError = errText
 	task.ErrorMessage = ""
 
-	s.notify(task.UserID, fmt.Sprintf("❌ 再平衡失败（%d 次）：%v\n将在 %ds 后重试，任务保持运行中。", attempt, err, int(delay.Seconds())))
+	s.notify(task.UserID, fmt.Sprintf("❌ %s失败（%d 次）：%v\n将在 %ds 后重试，任务保持运行中。", actionName, attempt, err, int(delay.Seconds())))
 }
 
 func (s *StrategyService) onExitAttemptFailed(task *models.StrategyTask, attempt int, err error, txHashes []string) {
@@ -486,6 +524,121 @@ func (s *StrategyService) executeRebalanceAfterExit(task *models.StrategyTask, n
 
 	s.markRebalancePending(task, now)
 	s.notify(task.UserID, "🔄 再平衡撤出已完成，正在按新价格重新开仓...")
+	if err := s.attemptRebalanceEnter(task, now); err != nil {
+		s.scheduleRebalanceRetry(task, 1, err)
+	}
+}
+
+func (s *StrategyService) executeSwitchAfterExit(task *models.StrategyTask, now time.Time, reason string) {
+	if task == nil {
+		return
+	}
+
+	targetPoolVersion := strings.ToLower(strings.TrimSpace(task.SwitchTargetPoolVersion))
+	targetPoolID := strings.TrimSpace(task.SwitchTargetPoolId)
+	if targetPoolVersion == "" || targetPoolID == "" {
+		title := "🔁 切换失败：缺少目标池"
+		if strings.TrimSpace(reason) != "" {
+			title = strings.TrimSpace(reason)
+		}
+		s.finishStopAfterExit(task, now, title, nil)
+		return
+	}
+
+	lowerPct := task.SwitchTargetTickLowerPct
+	upperPct := task.SwitchTargetTickUpperPct
+	if lowerPct <= 0 || upperPct <= 0 || lowerPct >= 100 || upperPct >= 100 {
+		if task.RangeLowerPercentage > 0 && task.RangeUpperPercentage > 0 {
+			lowerPct = task.RangeLowerPercentage
+			upperPct = task.RangeUpperPercentage
+		} else if task.RangePercentage > 0 {
+			lowerPct = task.RangePercentage
+			upperPct = task.RangePercentage
+		}
+	}
+	const maxPct = 99.0
+	if lowerPct > maxPct {
+		lowerPct = maxPct
+	}
+	if upperPct > maxPct {
+		upperPct = maxPct
+	}
+	if lowerPct <= 0 || upperPct <= 0 || lowerPct >= 100 || upperPct >= 100 {
+		lowerPct = 1.0
+		upperPct = 1.0
+	}
+
+	task.PoolVersion = targetPoolVersion
+	task.PoolId = targetPoolID
+	task.Exchange = ""
+	task.Token0Symbol = ""
+	task.Token1Symbol = ""
+	task.Token0Address = ""
+	task.Token1Address = ""
+	task.HooksAddress = "0x0000000000000000000000000000000000000000"
+	task.Fee = 0
+	task.TickSpacing = 0
+	task.RangeLowerPercentage = lowerPct
+	task.RangeUpperPercentage = upperPct
+	task.RangePercentage = (lowerPct + upperPct) / 2.0
+
+	updates := map[string]interface{}{
+		"pool_version":                task.PoolVersion,
+		"pool_id":                     task.PoolId,
+		"exchange":                    task.Exchange,
+		"token0_symbol":               task.Token0Symbol,
+		"token1_symbol":               task.Token1Symbol,
+		"token0_address":              task.Token0Address,
+		"token1_address":              task.Token1Address,
+		"hooks_address":               task.HooksAddress,
+		"fee":                         task.Fee,
+		"tick_spacing":                task.TickSpacing,
+		"range_percentage":            task.RangePercentage,
+		"range_lower_percentage":      task.RangeLowerPercentage,
+		"range_upper_percentage":      task.RangeUpperPercentage,
+		"tick_lower":                  0,
+		"tick_upper":                  0,
+		"status":                      models.StrategyStatusRunning,
+		"last_exit_time":              &now,
+		"current_liquidity":           "0",
+		"exit_liquidity_removed":      false,
+		"v3_position_manager_address": "",
+		"v3_token_id":                 "",
+		"v4_token_id":                 "",
+		"out_of_range_since":          nil,
+		"rebalance_pending":           true,
+		"rebalance_retry_count":       0,
+		"rebalance_next_retry_at":     nil,
+		"rebalance_last_error":        "",
+		"next_range_multiplier":       1.0,
+		"cooldown_until":              nil,
+		"cooldown_reason":             "",
+		"error_message":               "",
+	}
+	_ = database.DB.Model(task).Updates(updates).Error
+
+	task.Status = models.StrategyStatusRunning
+	task.LastExitTime = &now
+	task.CurrentLiquidity = "0"
+	task.ExitLiquidityRemoved = false
+	task.V3PositionManagerAddress = ""
+	task.V3TokenID = ""
+	task.V4TokenID = ""
+	task.OutOfRangeSince = nil
+	task.RebalancePending = true
+	task.RebalanceRetryCount = 0
+	task.RebalanceNextRetryAt = nil
+	task.RebalanceLastError = ""
+	task.NextRangeMultiplier = 1.0
+	task.CooldownUntil = nil
+	task.CooldownReason = ""
+	task.ErrorMessage = ""
+
+	msg := "🔁 切换撤出已完成，正在按新池子重新开仓..."
+	if strings.TrimSpace(reason) != "" {
+		msg = fmt.Sprintf("%s，正在按新池子重新开仓...", strings.TrimSpace(reason))
+	}
+	s.notify(task.UserID, msg)
 	if err := s.attemptRebalanceEnter(task, now); err != nil {
 		s.scheduleRebalanceRetry(task, 1, err)
 	}

@@ -26,12 +26,13 @@ func (s *AutoLPUserConfigService) GetOrCreate(userID uint) (*models.AutoLPUserCo
 	}
 
 	cfg = models.AutoLPUserConfig{
-		UserID:          userID,
-		Enabled:         false,
-		TotalAmountUSDT: 0,
-		StopLossUSDT:    0,
-		TakeProfitUSDT:  0,
-		MaxActiveTasks:  1,
+		UserID:                  userID,
+		Enabled:                 false,
+		TotalAmountUSDT:         0,
+		StopLossUSDT:            0,
+		TakeProfitUSDT:          0,
+		MaxActiveTasks:          1,
+		SwitchMinImprovementPct: 0,
 	}
 	if err := database.DB.Create(&cfg).Error; err != nil {
 		return nil, fmt.Errorf("create autolp config failed: %w", err)

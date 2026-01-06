@@ -9,6 +9,7 @@ import (
 	"TgLpBot/service/pool"
 	"TgLpBot/service/pricing"
 	"TgLpBot/service/user"
+	"bytes"
 	"fmt"
 	"log"
 	"strings"
@@ -547,6 +548,77 @@ func (s *StrategyService) mockAdd(task *models.StrategyTask) error {
 	default:
 		return s.mockV3Add(task)
 	}
+}
+
+func (s *StrategyService) refreshTaskPoolMeta(task *models.StrategyTask) error {
+	if task == nil {
+		return fmt.Errorf("task is nil")
+	}
+	if s == nil || s.poolService == nil {
+		return fmt.Errorf("pool service not initialized")
+	}
+	poolID := strings.TrimSpace(task.PoolId)
+	if poolID == "" {
+		return fmt.Errorf("pool id is empty")
+	}
+
+	version := strings.ToLower(strings.TrimSpace(task.PoolVersion))
+	var info *pool.PoolInfo
+	var err error
+	switch version {
+	case "v4":
+		info, err = s.poolService.GetV4PoolInfo(poolID)
+	default:
+		info, err = s.poolService.GetPoolInfo(poolID)
+	}
+	if err != nil {
+		return err
+	}
+	if info == nil || info.TickSpacing <= 0 {
+		return fmt.Errorf("invalid pool info")
+	}
+
+	token0Addr := strings.TrimSpace(info.Token0)
+	token1Addr := strings.TrimSpace(info.Token1)
+	token0Symbol := strings.TrimSpace(info.Token0Symbol)
+	token1Symbol := strings.TrimSpace(info.Token1Symbol)
+	if version == "v4" && common.IsHexAddress(token0Addr) && common.IsHexAddress(token1Addr) {
+		a0 := common.HexToAddress(token0Addr)
+		a1 := common.HexToAddress(token1Addr)
+		if bytes.Compare(a0.Bytes(), a1.Bytes()) > 0 {
+			token0Addr, token1Addr = token1Addr, token0Addr
+			token0Symbol, token1Symbol = token1Symbol, token0Symbol
+		}
+	}
+
+	hooksAddr := strings.TrimSpace(info.HooksAddress)
+	if !common.IsHexAddress(hooksAddr) {
+		hooksAddr = "0x0000000000000000000000000000000000000000"
+	}
+
+	updates := map[string]interface{}{
+		"exchange":       strings.TrimSpace(info.Exchange),
+		"token0_symbol":  token0Symbol,
+		"token1_symbol":  token1Symbol,
+		"token0_address": token0Addr,
+		"token1_address": token1Addr,
+		"hooks_address":  hooksAddr,
+		"fee":            info.Fee,
+		"tick_spacing":   info.TickSpacing,
+	}
+	if err := database.DB.Model(task).Updates(updates).Error; err != nil {
+		return err
+	}
+
+	task.Exchange = strings.TrimSpace(info.Exchange)
+	task.Token0Symbol = token0Symbol
+	task.Token1Symbol = token1Symbol
+	task.Token0Address = token0Addr
+	task.Token1Address = token1Addr
+	task.HooksAddress = hooksAddr
+	task.Fee = info.Fee
+	task.TickSpacing = info.TickSpacing
+	return nil
 }
 
 func (s *StrategyService) getCurrentTick(task *models.StrategyTask) (int, error) {

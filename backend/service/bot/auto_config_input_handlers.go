@@ -97,3 +97,24 @@ func (b *Bot) handleAutoStopLossInput(chatID int64, user *models.User, text stri
 	_ = database.DeleteUserSession(user.TelegramID, "state")
 	b.refreshAutoMenuFromSession(chatID, user, "")
 }
+
+func (b *Bot) handleAutoSwitchThresholdInput(chatID int64, user *models.User, text string) {
+	if user == nil || b.autoLPCfgService == nil {
+		return
+	}
+
+	raw := strings.TrimSpace(strings.TrimSuffix(text, "%"))
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || v < 0 || v > 1000 {
+		b.refreshAutoMenuFromSession(chatID, user, "❌ 数值无效。请输入 0-1000 之间的百分比，例如：`20` 或 `0`")
+		return
+	}
+	if _, err := b.autoLPCfgService.Update(user.ID, map[string]interface{}{
+		"switch_min_improvement_pct": v,
+	}); err != nil {
+		b.refreshAutoMenuFromSession(chatID, user, fmt.Sprintf("❌ 更新换池阈值失败：%v", err))
+		return
+	}
+	_ = database.DeleteUserSession(user.TelegramID, "state")
+	b.refreshAutoMenuFromSession(chatID, user, "")
+}
