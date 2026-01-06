@@ -503,14 +503,20 @@ export default function App() {
     }, [isHotPools, hotPoolsPollIntervalSec, pollIntervalSec]);
 
     // 轮询完成时重置进度
+    const lastUpdatedAtRef = useRef(null);
     useEffect(() => {
-        lastPollTimeRef.current = Date.now();
-        setPollProgress(0);
-        // 触觉反馈 - 数据刷新成功
-        if (data || hotPoolsData) {
-            hapticSelection();
+        // 使用 updatedAt 来判断数据是否真正更新了
+        const currentUpdatedAt = data?.updated_at || hotPoolsData?.updated_at;
+        if (currentUpdatedAt && currentUpdatedAt !== lastUpdatedAtRef.current) {
+            lastPollTimeRef.current = Date.now();
+            setPollProgress(0);
+            // 只在真正有新数据时触发触觉反馈
+            if (lastUpdatedAtRef.current !== null) {
+                hapticSelection();
+            }
+            lastUpdatedAtRef.current = currentUpdatedAt;
         }
-    }, [data, hotPoolsData]);
+    }, [data?.updated_at, hotPoolsData?.updated_at]);
 
     useEffect(() => {
         if (!settingsOpen) return;
