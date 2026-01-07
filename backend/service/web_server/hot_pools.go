@@ -100,6 +100,18 @@ func (s *Server) handleHotPools(w http.ResponseWriter, r *http.Request) {
 
 	dex := strings.ToLower(strings.TrimSpace(query.Get("dex")))
 
+	// 解析 include_pools 参数（逗号分隔的池子地址列表）
+	var includePools []string
+	if v := strings.TrimSpace(query.Get("include_pools")); v != "" {
+		parts := strings.Split(v, ",")
+		for _, p := range parts {
+			addr := strings.TrimSpace(p)
+			if addr != "" {
+				includePools = append(includePools, strings.ToLower(addr))
+			}
+		}
+	}
+
 	orderBy := "total_fees"
 	switch sort {
 	case "fees":
@@ -195,6 +207,99 @@ func (s *Server) handleHotPools(w http.ResponseWriter, r *http.Request) {
 					rows[i].TotalFees24h = s.TotalFees24h
 					rows[i].TotalVolume24h = s.TotalVolume24h
 					rows[i].TransactionCount24h = s.TransactionCount24h
+				}
+			}
+		}
+	}
+
+	// 处理 include_pools：查询并合并不在热门列表中的指定池子
+	if len(includePools) > 0 {
+		// 构建已有池子地址的 set（小写）
+		existingPools := make(map[string]bool)
+		for _, row := range rows {
+			existingPools[strings.ToLower(row.PoolAddress)] = true
+		}
+
+		// 筛选出不在热门列表中的池子
+		var missingPools []string
+		for _, addr := range includePools {
+			if !existingPools[addr] {
+				missingPools = append(missingPools, addr)
+			}
+		}
+
+		// 查询这些池子的数据
+		if len(missingPools) > 0 {
+			qExtra := `
+				SELECT
+					protocol_version,
+					pool_address,
+					dex,
+					factory_name,
+					trading_pair,
+					fee_percentage,
+					transaction_count,
+					total_fees,
+					total_volume,
+					current_pool_value,
+					if(current_pool_value > 0, total_fees / current_pool_value * 100, 0) AS fee_rate,
+					price_display,
+					ts AS updated_at,
+					last_swap_at,
+					token0_address,
+					token1_address
+				FROM poolm_top_fees_realtime
+				WHERE chain = ?
+				  AND timeframe_minutes = ?
+				  AND lower(pool_address) IN (?)
+			`
+
+			var extraRows []HotPoolResponse
+			if err := s.ClickHouse.Conn.Select(ctx, &extraRows, qExtra, chain, uint16(timeframeMinutes), missingPools); err == nil {
+				// 获取这些额外池子的24小时数据
+				if len(extraRows) > 0 {
+					extraAddrs := make([]string, len(extraRows))
+					for i, row := range extraRows {
+						extraAddrs[i] = row.PoolAddress
+					}
+
+					type stats24h struct {
+						PoolAddress         string  `ch:"pool_address"`
+						TotalFees24h        float64 `ch:"total_fees_24h"`
+						TotalVolume24h      float64 `ch:"total_volume_24h"`
+						TransactionCount24h uint32  `ch:"transaction_count_24h"`
+					}
+
+					q24hExtra := `
+						SELECT
+							pool_address,
+							sum(total_fees) AS total_fees_24h,
+							sum(total_volume) AS total_volume_24h,
+							sum(transaction_count) AS transaction_count_24h
+						FROM poolm_top_fees_raw
+						WHERE chain = ?
+						  AND pool_address IN (?)
+						  AND ts >= now() - INTERVAL 24 HOUR
+						GROUP BY pool_address
+					`
+
+					var extraStats []stats24h
+					if err := s.ClickHouse.Conn.Select(ctx, &extraStats, q24hExtra, chain, extraAddrs); err == nil {
+						stats24hMap := make(map[string]stats24h)
+						for _, s := range extraStats {
+							stats24hMap[s.PoolAddress] = s
+						}
+						for i := range extraRows {
+							if s, ok := stats24hMap[extraRows[i].PoolAddress]; ok {
+								extraRows[i].TotalFees24h = s.TotalFees24h
+								extraRows[i].TotalVolume24h = s.TotalVolume24h
+								extraRows[i].TransactionCount24h = s.TransactionCount24h
+							}
+						}
+					}
+
+					// 将额外池子追加到结果
+					rows = append(rows, extraRows...)
 				}
 			}
 		}

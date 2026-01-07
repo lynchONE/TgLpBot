@@ -384,6 +384,24 @@ export default function App() {
         return positions.filter((p) => p?.has_liquidity !== false);
     }, [positions]);
 
+    // 从仓位构建 pool_address -> position_usd 映射（用于在热门池子上显示持仓标签）
+    const positionsPoolMap = useMemo(() => {
+        const map = new Map();
+        for (const p of positions) {
+            const poolId = String(p?.pool_id || '').toLowerCase();
+            if (!poolId) continue;
+            const positionUsd = Number(p?.totals?.position_usd || 0) + Number(p?.totals?.fee_usd || 0);
+            const existing = map.get(poolId) || 0;
+            map.set(poolId, existing + positionUsd);
+        }
+        return map;
+    }, [positions]);
+
+    // 获取用户仓位中的池子地址列表（用于传给 hot_pools API）
+    const positionsPoolAddresses = useMemo(() => {
+        return Array.from(positionsPoolMap.keys());
+    }, [positionsPoolMap]);
+
     const hotPoolsRows = useMemo(() => {
         return Array.isArray(hotPoolsData?.data) ? hotPoolsData.data : [];
     }, [hotPoolsData]);
@@ -394,23 +412,48 @@ export default function App() {
     }, [hotPoolsFilter]);
 
     const hotPoolsVisibleRows = useMemo(() => {
-        if (!hotPoolsFilterEnabled) return hotPoolsRows;
-        const minFees = hotPoolsFilter.minFees;
-        const minFeeRate = hotPoolsFilter.minFeeRate;
-        const minTvl = hotPoolsFilter.minTvl;
-        const minVolume = hotPoolsFilter.minVolume;
-        return hotPoolsRows.filter((row) => {
-            const fees = parseMetricNumber(row?.total_fees);
-            const feeRate = parseMetricNumber(row?.fee_rate);
-            const tvl = parseMetricNumber(row?.current_pool_value);
-            const volume = parseMetricNumber(row?.total_volume);
-            if (Number.isFinite(minFees) && fees < minFees) return false;
-            if (Number.isFinite(minFeeRate) && feeRate < minFeeRate) return false;
-            if (Number.isFinite(minTvl) && tvl < minTvl) return false;
-            if (Number.isFinite(minVolume) && volume < minVolume) return false;
-            return true;
+        // 1. 先进行现有筛选
+        let filtered = hotPoolsRows;
+        if (hotPoolsFilterEnabled) {
+            const minFees = hotPoolsFilter.minFees;
+            const minFeeRate = hotPoolsFilter.minFeeRate;
+            const minTvl = hotPoolsFilter.minTvl;
+            const minVolume = hotPoolsFilter.minVolume;
+            filtered = hotPoolsRows.filter((row) => {
+                const fees = parseMetricNumber(row?.total_fees);
+                const feeRate = parseMetricNumber(row?.fee_rate);
+                const tvl = parseMetricNumber(row?.current_pool_value);
+                const volume = parseMetricNumber(row?.total_volume);
+                // 如果用户有仓位在这个池子，跳过筛选（始终显示）
+                const poolAddr = String(row?.pool_address || '').toLowerCase();
+                if (positionsPoolMap.has(poolAddr)) return true;
+                if (Number.isFinite(minFees) && fees < minFees) return false;
+                if (Number.isFinite(minFeeRate) && feeRate < minFeeRate) return false;
+                if (Number.isFinite(minTvl) && tvl < minTvl) return false;
+                if (Number.isFinite(minVolume) && volume < minVolume) return false;
+                return true;
+            });
+        }
+
+        // 2. 为每个池子添加 userPositionUsd 字段
+        const enriched = filtered.map(pool => {
+            const addr = String(pool?.pool_address || '').toLowerCase();
+            return {
+                ...pool,
+                userPositionUsd: positionsPoolMap.get(addr) || 0
+            };
         });
-    }, [hotPoolsFilter, hotPoolsFilterEnabled, hotPoolsRows]);
+
+        // 3. 排序：有仓位的置顶，按仓位金额降序；其余保持原顺序
+        return enriched.sort((a, b) => {
+            if (a.userPositionUsd > 0 && b.userPositionUsd <= 0) return -1;
+            if (b.userPositionUsd > 0 && a.userPositionUsd <= 0) return 1;
+            if (a.userPositionUsd > 0 && b.userPositionUsd > 0) {
+                return b.userPositionUsd - a.userPositionUsd;
+            }
+            return 0; // 保持原顺序
+        });
+    }, [hotPoolsFilter, hotPoolsFilterEnabled, hotPoolsRows, positionsPoolMap]);
 
     // 构建热门池子的历史数据映射 (protocol_version:pool_address -> previous data)
     const previousHotPoolsMap = useMemo(() => {
@@ -801,6 +844,7 @@ export default function App() {
                     chain: 'bsc',
                     timeframeMinutes: 5,
                     limit: 20,
+                    includePools: positionsPoolAddresses,
                     signal: controller.signal,
                 });
                 if (aborted) return;
@@ -838,7 +882,7 @@ export default function App() {
             controller.abort();
             if (hotPoolsPollRef.current) clearInterval(hotPoolsPollRef.current);
         };
-    }, [apiBaseUrl, isHotPools, hotPoolsSort, hotPoolsPollIntervalSec]);
+    }, [apiBaseUrl, isHotPools, hotPoolsSort, hotPoolsPollIntervalSec, positionsPoolAddresses.join(',')]);
 
     const applyPollDraft = () => {
         const raw = String(pollDraftSec || '').trim();

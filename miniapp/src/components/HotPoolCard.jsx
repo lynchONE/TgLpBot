@@ -106,6 +106,18 @@ function formatUsdCompact(v) {
     return usdCompact.format(n);
 }
 
+// 持仓标签组件
+const PositionBadge = ({ pool }) => {
+    const usd = Number(pool?.userPositionUsd || 0);
+    if (usd <= 0) return null;
+
+    return (
+        <div className="inline-flex items-center gap-1 rounded-lg bg-purple-500/15 px-2 py-0.5 text-[11px] font-bold text-purple-700 ring-1 ring-purple-500/25 dark:bg-purple-500/20 dark:text-purple-200 dark:ring-purple-500/30">
+            <span>💰 持仓 {formatUsdCompact(usd)}</span>
+        </div>
+    );
+};
+
 function formatFeePercent(v) {
     const n = Number(v || 0);
     if (!Number.isFinite(n) || n <= 0) return '';
@@ -377,7 +389,10 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
             </div>
 
             <div className="mt-3 flex items-center justify-between gap-2">
-                <DexBadge pool={pool} />
+                <div className="flex items-center gap-2 flex-wrap">
+                    <DexBadge pool={pool} />
+                    <PositionBadge pool={pool} />
+                </div>
                 <button
                     type="button"
                     onClick={() => onOpenPosition?.(pool)}

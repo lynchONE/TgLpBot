@@ -180,7 +180,7 @@ export async function disableAdminAutoLP({ apiBaseUrl, initData, userId, reason,
     return resp.json();
 }
 
-export async function fetchHotPools({ apiBaseUrl, sort, chain, timeframeMinutes, limit, dex, signal }) {
+export async function fetchHotPools({ apiBaseUrl, sort, chain, timeframeMinutes, limit, dex, includePools, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const params = new URLSearchParams();
     if (sort) params.set('sort', String(sort));
@@ -188,6 +188,10 @@ export async function fetchHotPools({ apiBaseUrl, sort, chain, timeframeMinutes,
     if (Number.isFinite(timeframeMinutes)) params.set('timeframe_minutes', String(timeframeMinutes));
     if (Number.isFinite(limit)) params.set('limit', String(limit));
     if (dex) params.set('dex', String(dex));
+    // 添加 include_pools 参数（逗号分隔的池子地址列表）
+    if (Array.isArray(includePools) && includePools.length > 0) {
+        params.set('include_pools', includePools.join(','));
+    }
 
     const qs = params.toString();
     const url = `${base}/api/hot_pools${qs ? `?${qs}` : ''}`;
