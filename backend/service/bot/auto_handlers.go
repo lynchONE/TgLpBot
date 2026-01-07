@@ -83,6 +83,10 @@ func autoInputPrompt(state string) string {
 		return "⏳ 请输入盈利多少 USDT 关闭 AutoLP 并撤出自动仓位（0 表示不启用），例如：`100` 或 `0`"
 	case "awaiting_auto_stop_loss":
 		return "⏳ 请输入亏损多少 USDT 关闭 AutoLP 并撤出自动仓位（0 表示不启用），例如：`50` 或 `0`"
+	case "awaiting_auto_switch_min_improvement_pct":
+		return "⏳ 请输入换仓阈值（相对提升百分比，0 表示禁用），例如：`20` 或 `0`"
+	case "awaiting_auto_switch_cooldown_seconds":
+		return "⏳ 请输入换仓冷却时间（秒，默认 300），例如：`300`"
 	default:
 		return ""
 	}
@@ -135,6 +139,14 @@ func (b *Bot) buildAutoMenu(user *models.User, notice string) (string, any, stri
 		if cfg.StopLossUSDT > 0 {
 			sl = fmt.Sprintf("%.2f USDT", cfg.StopLossUSDT)
 		}
+		switchThreshold := "禁用"
+		if cfg.SwitchMinImprovementPct > 0 {
+			switchThreshold = fmt.Sprintf("+%.2f%%", cfg.SwitchMinImprovementPct)
+		}
+		switchCooldown := cfg.SwitchCooldownSeconds
+		if switchCooldown <= 0 {
+			switchCooldown = 300
+		}
 
 		noticeLine := ""
 		if strings.TrimSpace(notice) != "" {
@@ -156,6 +168,8 @@ func (b *Bot) buildAutoMenu(user *models.User, notice string) (string, any, stri
 *单仓投入*：%.2f USDT（总投入/最大任务数）
 *盈利关闭*：%s
 *亏损关闭*：%s
+*满仓换仓阈值*：%s（基于 Top1 的 5m 费用率）
+*换仓冷却*：%d 秒（以换仓完成为准）
 
 %s
 盈利/亏损触发后会关闭 AutoLP，并自动撤出当前自动仓位。%s`,
@@ -166,6 +180,8 @@ func (b *Bot) buildAutoMenu(user *models.User, notice string) (string, any, stri
 			perTask,
 			tp,
 			sl,
+			switchThreshold,
+			switchCooldown,
 			statsBlock,
 			promptLine,
 		)
@@ -199,6 +215,10 @@ func (b *Bot) autoConfigKeyboard(enabled bool, inInput bool) any {
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 		tgbotapi.NewInlineKeyboardButtonData("设置盈利关闭", "auto_cfg_set_take_profit"),
 		tgbotapi.NewInlineKeyboardButtonData("设置亏损关闭", "auto_cfg_set_stop_loss"),
+	))
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("设置换仓阈值", "auto_cfg_set_switch_min_improvement"),
+		tgbotapi.NewInlineKeyboardButtonData("设置换仓冷却", "auto_cfg_set_switch_cooldown"),
 	))
 
 	return tgbotapi.NewInlineKeyboardMarkup(rows...)

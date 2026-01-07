@@ -26,6 +26,10 @@ type AutoLPUserConfig struct {
 	// Example: 20 means "switch only if target feeRate5m is >= currentMin * (1+20%)".
 	SwitchMinImprovementPct float64 `gorm:"type:decimal(10,4);default:0" json:"switch_min_improvement_pct"`
 
+	// SwitchCooldownSeconds is the minimum time between completed switches (0 = use default).
+	// Default: 300 seconds.
+	SwitchCooldownSeconds int `gorm:"default:300" json:"switch_cooldown_seconds"`
+
 	// LastEnabledAt marks the start time of the current/last AutoLP run.
 	LastEnabledAt  *time.Time `json:"last_enabled_at"`
 	LastDisabledAt *time.Time `json:"last_disabled_at"`

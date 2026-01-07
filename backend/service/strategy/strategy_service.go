@@ -42,6 +42,11 @@ type StrategyService struct {
 	lastLiquidityMu    sync.Mutex
 
 	monitorLimiter *concurrency.KeyedLimiter
+
+	// inflightTasks 用于跟踪正在执行链上交易的任务ID，防止重复提交
+	// key: taskID, value: 提交时间
+	inflightTasks   map[uint]time.Time
+	inflightTasksMu sync.Mutex
 }
 
 // NewStrategyService creates a new strategy service
@@ -58,6 +63,7 @@ func NewStrategyService() *StrategyService {
 		ticker:             time.NewTicker(5 * time.Second), // Check every 5 seconds
 		lastLiquidityCheck: make(map[uint]time.Time),
 		monitorLimiter:     concurrency.NewKeyedLimiter(maxUsers),
+		inflightTasks:      make(map[uint]time.Time),
 	}
 }
 
@@ -555,19 +561,40 @@ func (s *StrategyService) runCooldownReopen(taskID uint, userID uint) {
 		"error_message":               "",
 	}
 	if task.IsAuto {
-		updates["guard_open_volume_5m"] = 0
-		updates["guard_open_price"] = 0
-		updates["guard_open_tx_count_5m"] = 0
-		updates["guard_open_fee_percentage"] = 0
-		updates["guard_open_fee_rate_5m_pct"] = 0
-		updates["guard_open_total_fees_5m"] = 0
-		updates["guard_open_tvl_usd"] = 0
-		updates["guard_open_metrics_at"] = nil
-		updates["guard_volume_drop_armed"] = false
-		updates["guard_volume_drop_last_volume_5m"] = 0
-		updates["guard_price_tx_drop_armed"] = false
+		updates["GuardOpenVolume5m"] = 0
+		updates["GuardOpenPrice"] = 0
+		updates["GuardOpenTxCount5m"] = 0
+		updates["GuardOpenFeePercentage"] = 0
+		updates["GuardOpenFeeRate5mPct"] = 0
+		updates["GuardOpenTotalFees5m"] = 0
+		updates["GuardOpenTVLUSD"] = 0
+		updates["GuardOpenMetricsAt"] = nil
+		updates["GuardVolumeDropArmed"] = false
+		updates["GuardVolumeDropLastVolume5m"] = 0
+		updates["GuardPriceTxDropArmed"] = false
 	}
-	_ = database.DB.Model(&task).Updates(updates).Error
+	if dbErr := database.DB.Model(&task).Updates(updates).Error; dbErr != nil {
+		log.Printf("[Strategy] ⚠️ 任务 #%d 保存开仓结果失败 (链上交易已成功): %v", task.ID, dbErr)
+		// 兜底：关键字段优先写入，避免任务被误判为未开仓而重复开仓。
+		criticalUpdates := map[string]interface{}{
+			"status":                      models.StrategyStatusRunning,
+			"current_liquidity":           enterRes.CurrentLiquidity,
+			"exit_liquidity_removed":      false,
+			"v3_position_manager_address": enterRes.V3PositionManagerAddress,
+			"v3_token_id":                 enterRes.V3TokenID,
+			"v4_token_id":                 enterRes.V4TokenID,
+			"tick_lower":                  task.TickLower,
+			"tick_upper":                  task.TickUpper,
+			"out_of_range_since":          nil,
+			"cooldown_until":              nil,
+			"cooldown_reason":             "",
+			"next_range_multiplier":       1.0,
+			"error_message":               "",
+		}
+		if cErr := database.DB.Model(&task).Updates(criticalUpdates).Error; cErr != nil {
+			log.Printf("[Strategy] ⚠️ 任务 #%d 兜底写入关键字段仍失败: %v", task.ID, cErr)
+		}
+	}
 
 	s.notify(task.UserID, fmt.Sprintf("✅ 冷却结束，已重新开仓（Tick %d）。\n新 Tick 范围: %d - %d\n交易哈希: `%s`", currentTick, tickLower, tickUpper, enterRes.TxHash))
 	s.notifyTaskCard(task.UserID, task.ID)
@@ -629,19 +656,37 @@ func (s *StrategyService) runWaitingReopen(taskID uint, userID uint) {
 		"error_message":               "",
 	}
 	if task.IsAuto {
-		updates["guard_open_volume_5m"] = 0
-		updates["guard_open_price"] = 0
-		updates["guard_open_tx_count_5m"] = 0
-		updates["guard_open_fee_percentage"] = 0
-		updates["guard_open_fee_rate_5m_pct"] = 0
-		updates["guard_open_total_fees_5m"] = 0
-		updates["guard_open_tvl_usd"] = 0
-		updates["guard_open_metrics_at"] = nil
-		updates["guard_volume_drop_armed"] = false
-		updates["guard_volume_drop_last_volume_5m"] = 0
-		updates["guard_price_tx_drop_armed"] = false
+		updates["GuardOpenVolume5m"] = 0
+		updates["GuardOpenPrice"] = 0
+		updates["GuardOpenTxCount5m"] = 0
+		updates["GuardOpenFeePercentage"] = 0
+		updates["GuardOpenFeeRate5mPct"] = 0
+		updates["GuardOpenTotalFees5m"] = 0
+		updates["GuardOpenTVLUSD"] = 0
+		updates["GuardOpenMetricsAt"] = nil
+		updates["GuardVolumeDropArmed"] = false
+		updates["GuardVolumeDropLastVolume5m"] = 0
+		updates["GuardPriceTxDropArmed"] = false
 	}
-	_ = database.DB.Model(&task).Updates(updates).Error
+	if dbErr := database.DB.Model(&task).Updates(updates).Error; dbErr != nil {
+		log.Printf("[Strategy] ⚠️ 任务 #%d 保存开仓结果失败 (链上交易已成功): %v", task.ID, dbErr)
+		criticalUpdates := map[string]interface{}{
+			"status":                      models.StrategyStatusRunning,
+			"current_liquidity":           enterRes.CurrentLiquidity,
+			"exit_liquidity_removed":      false,
+			"v3_position_manager_address": enterRes.V3PositionManagerAddress,
+			"v3_token_id":                 enterRes.V3TokenID,
+			"v4_token_id":                 enterRes.V4TokenID,
+			"tick_lower":                  task.TickLower,
+			"tick_upper":                  task.TickUpper,
+			"out_of_range_since":          nil,
+			"next_range_multiplier":       1.0,
+			"error_message":               "",
+		}
+		if cErr := database.DB.Model(&task).Updates(criticalUpdates).Error; cErr != nil {
+			log.Printf("[Strategy] ⚠️ 任务 #%d 兜底写入关键字段仍失败: %v", task.ID, cErr)
+		}
+	}
 
 	log.Printf("[Strategy] 任务 #%d 已重新开仓! 继续监控.", task.ID)
 }

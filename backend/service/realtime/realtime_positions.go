@@ -349,6 +349,8 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 	taskByV3Token := make(map[string]models.StrategyTask)
 	taskByV3TokenID := make(map[string]models.StrategyTask)
 	taskByV4Token := make(map[string]models.StrategyTask)
+	pendingV3Tasks := make([]models.StrategyTask, 0, 4)
+	pendingV4Tasks := make([]models.StrategyTask, 0, 2)
 	v3NPMSet := make(map[common.Address]struct{})
 
 	addV3NPM := func(addrStr string) {
@@ -380,15 +382,22 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 	// Preload tasks for display enhancements (range %, out-of-range timer, etc.)
 	var tasks []models.StrategyTask
 	if err := database.DB.Where(
-		"user_id = ? AND (v3_token_id <> '' OR v3_position_manager_address <> '') AND status = ?",
+		"user_id = ? AND status = ? AND ((v3_token_id <> '' OR v3_position_manager_address <> '') OR rebalance_pending = ? OR exit_pending_action <> '')",
 		userID,
 		models.StrategyStatusRunning,
+		true,
 	).Find(&tasks).Error; err == nil {
 		for _, t := range tasks {
+			if strings.EqualFold(strings.TrimSpace(t.PoolVersion), "v4") {
+				continue
+			}
 			addV3NPM(resolveTaskNPM(t))
 
 			tokenKey := strings.TrimSpace(t.V3TokenID)
 			if tokenKey == "" {
+				if t.RebalancePending || strings.TrimSpace(t.ExitPendingAction) != "" {
+					pendingV3Tasks = append(pendingV3Tasks, t)
+				}
 				continue
 			}
 			key := tokenKey + "|" + strings.ToLower(strings.TrimSpace(resolveTaskNPM(t)))
@@ -403,12 +412,22 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 
 	var v4Tasks []models.StrategyTask
 	if err := database.DB.Where(
-		"user_id = ? AND v4_token_id <> '' AND status = ?",
+		"user_id = ? AND status = ? AND (v4_token_id <> '' OR rebalance_pending = ? OR exit_pending_action <> '')",
 		userID,
 		models.StrategyStatusRunning,
+		true,
 	).Find(&v4Tasks).Error; err == nil {
 		for _, t := range v4Tasks {
+			if !strings.EqualFold(strings.TrimSpace(t.PoolVersion), "v4") {
+				continue
+			}
 			key := strings.TrimSpace(t.V4TokenID)
+			if key == "" {
+				if t.RebalancePending || strings.TrimSpace(t.ExitPendingAction) != "" {
+					pendingV4Tasks = append(pendingV4Tasks, t)
+				}
+				continue
+			}
 			taskByV4Token[key] = t
 		}
 	}
@@ -599,6 +618,28 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 			}
 		}
 		p, warn := s.buildV4Position(walletAddr, tokenId, &task)
+		if warn != "" {
+			resp.Warnings = append(resp.Warnings, warn)
+		}
+		if p != nil {
+			positions = append(positions, *p)
+		}
+	}
+
+	// 3) Pending tasks without tokenId (rebalance/exit in progress): show placeholder cards in miniapp.
+	for i := range pendingV3Tasks {
+		task := pendingV3Tasks[i]
+		p, warn := s.buildPendingTaskPosition(walletAddr, &task)
+		if warn != "" {
+			resp.Warnings = append(resp.Warnings, warn)
+		}
+		if p != nil {
+			positions = append(positions, *p)
+		}
+	}
+	for i := range pendingV4Tasks {
+		task := pendingV4Tasks[i]
+		p, warn := s.buildPendingTaskPosition(walletAddr, &task)
 		if warn != "" {
 			resp.Warnings = append(resp.Warnings, warn)
 		}
@@ -1214,6 +1255,185 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 	}, warn
 }
 
+func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Address, task *models.StrategyTask) (*RealtimePosition, string) {
+	if task == nil {
+		return nil, ""
+	}
+
+	version := strings.ToLower(strings.TrimSpace(task.PoolVersion))
+	if version == "" {
+		version = "v3"
+	}
+	if version != "v4" {
+		version = "v3"
+	}
+
+	// Only show placeholders for tasks that are in some pending state and have no tokenId.
+	if !task.RebalancePending && strings.TrimSpace(task.ExitPendingAction) == "" {
+		return nil, ""
+	}
+	if version == "v4" {
+		if tid := strings.TrimSpace(task.V4TokenID); tid != "" && tid != "0" {
+			return nil, ""
+		}
+	} else {
+		if tid := strings.TrimSpace(task.V3TokenID); tid != "" && tid != "0" {
+			return nil, ""
+		}
+	}
+
+	poolID := strings.TrimSpace(task.PoolId)
+	tickLower := task.TickLower
+	tickUpper := task.TickUpper
+
+	currentTick := 0
+	gotTick := false
+
+	switch version {
+	case "v4":
+		if config.AppConfig != nil &&
+			common.IsHexAddress(config.AppConfig.UniswapV4PoolManagerAddress) &&
+			common.IsHexAddress(config.AppConfig.UniswapV4StateViewAddress) &&
+			strings.TrimSpace(poolID) != "" {
+			stateView := common.HexToAddress(config.AppConfig.UniswapV4StateViewAddress)
+			poolManager := common.HexToAddress(config.AppConfig.UniswapV4PoolManagerAddress)
+			if t, err := blockchain.GetUniswapV4PoolCurrentTickViaStateView(stateView, poolManager, poolID); err == nil {
+				currentTick = t
+				gotTick = true
+			}
+		}
+	default:
+		if common.IsHexAddress(poolID) {
+			if t, err := blockchain.GetV3PoolCurrentTick(common.HexToAddress(poolID)); err == nil {
+				currentTick = t
+				gotTick = true
+			}
+		}
+	}
+
+	inRange := false
+	if gotTick && tickLower < tickUpper {
+		inRange = currentTick >= tickLower && currentTick <= tickUpper
+	}
+
+	rangePct := task.RangePercentage
+	if task.RangeLowerPercentage > 0 && task.RangeUpperPercentage > 0 {
+		rangePct = (task.RangeLowerPercentage + task.RangeUpperPercentage) / 2.0
+	} else if rangePct <= 0 && gotTick && tickLower < tickUpper {
+		rangePct = estimateRangePercent(currentTick, tickLower, tickUpper)
+	}
+
+	token0 := common.Address{}
+	token1 := common.Address{}
+
+	if common.IsHexAddress(task.Token0Address) {
+		token0 = common.HexToAddress(task.Token0Address)
+	}
+	if common.IsHexAddress(task.Token1Address) {
+		token1 = common.HexToAddress(task.Token1Address)
+	}
+
+	// Best-effort: for V3 tasks, derive token0/token1 from pool if missing.
+	if version == "v3" && token0 == (common.Address{}) && token1 == (common.Address{}) && common.IsHexAddress(poolID) {
+		if t0, t1, err := blockchain.GetV3PoolTokens(common.HexToAddress(poolID)); err == nil {
+			token0 = t0
+			token1 = t1
+		}
+	}
+
+	meta0 := cachedTokenMeta{symbol: strings.TrimSpace(task.Token0Symbol), decimals: pricing.DefaultTokenDecimals}
+	meta1 := cachedTokenMeta{symbol: strings.TrimSpace(task.Token1Symbol), decimals: pricing.DefaultTokenDecimals}
+	if token0 != (common.Address{}) {
+		meta0 = s.getTokenMeta(token0)
+	}
+	if token1 != (common.Address{}) {
+		meta1 = s.getTokenMeta(token1)
+	}
+	if strings.TrimSpace(meta0.symbol) == "" {
+		if token0 != (common.Address{}) {
+			meta0.symbol = token0.Hex()
+		} else {
+			meta0.symbol = "-"
+		}
+	}
+	if strings.TrimSpace(meta1.symbol) == "" {
+		if token1 != (common.Address{}) {
+			meta1.symbol = token1.Hex()
+		} else {
+			meta1.symbol = "-"
+		}
+	}
+
+	w0 := s.getWalletTokenBalance(token0, walletAddr)
+	w1 := s.getWalletTokenBalance(token1, walletAddr)
+
+	price0 := 0.0
+	price1 := 0.0
+	addrList := make([]string, 0, 2)
+	if token0 != (common.Address{}) {
+		addrList = append(addrList, token0.Hex())
+	}
+	if token1 != (common.Address{}) {
+		addrList = append(addrList, token1.Hex())
+	}
+	if len(addrList) > 0 {
+		prices, _ := s.priceService.GetUSDPrices("bsc", addrList)
+		if token0 != (common.Address{}) {
+			price0 = prices[strings.ToLower(token0.Hex())]
+		}
+		if token1 != (common.Address{}) {
+			price1 = prices[strings.ToLower(token1.Hex())]
+		}
+	}
+
+	row0 := buildTokenRow(token0, meta0, price0, w0, big.NewInt(0), big.NewInt(0))
+	row1 := buildTokenRow(token1, meta1, price1, w1, big.NewInt(0), big.NewInt(0))
+
+	totals := RealtimeTotals{
+		WalletUSD: row0.WalletUSD + row1.WalletUSD,
+	}
+	totals.TotalUSD = totals.WalletUSD
+
+	exchange := strings.TrimSpace(task.Exchange)
+	if exchange == "" {
+		if version == "v4" {
+			exchange = "Uniswap V4"
+		} else {
+			exchange = "V3"
+		}
+	}
+	feePct := 0.0
+	if task.Fee > 0 {
+		feePct = float64(task.Fee) / 10000.0
+	}
+	short := "UniV3"
+	if version == "v4" {
+		short = "UniV4"
+	}
+	title := fmt.Sprintf("%s-%s-%s-%.2f%%", exchangeShort(exchange, short), row0.Symbol, row1.Symbol, feePct)
+
+	return &RealtimePosition{
+		Version:      version,
+		Exchange:     exchange,
+		Title:        title,
+		PoolID:       poolID,
+		PositionID:   fmt.Sprintf("task-%d", task.ID),
+		TaskID:       task.ID,
+		TaskPaused:   task.Paused,
+		StatusLabel:  statusLabelFromTask(task),
+		InRange:      inRange,
+		CurrentTick:  currentTick,
+		TickLower:    tickLower,
+		TickUpper:    tickUpper,
+		RangePercent: rangePct,
+		OutOfRange:   formatOutOfRange(task, tickLower, tickUpper, currentTick),
+		RunningSince: &task.CreatedAt,
+		HasLiquidity: false,
+		TokenRows:    []RealtimeTokenRow{row0, row1},
+		Totals:       totals,
+	}, ""
+}
+
 func (s *RealtimePositionsService) getTokenMeta(addr common.Address) cachedTokenMeta {
 	key := strings.ToLower(addr.Hex())
 	now := time.Now()
@@ -1520,9 +1740,8 @@ func (s *RealtimePositionsService) calcV3UnclaimedFeesCached(poolAddr common.Add
 
 	inside0 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global0, lower0, upper0)
 	inside1 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global1, lower1, upper1)
-	if inside0.Cmp(global0) > 0 || inside1.Cmp(global1) > 0 {
-		return nil, nil, usedStale, age, fmt.Errorf("invalid feeGrowthInside (pool=%s)", poolAddr.Hex())
-	}
+	// 注意：由于 uint256 模运算特性和 RPC 调用时序差异，inside 可能暂时"看起来"大于 global。
+	// 这里不再报错退出，而是继续计算。delta 计算已有负值保护，不会产生负手续费。
 
 	last0 := cloneBig(pos.FeeGrowthInside0LastX128)
 	last1 := cloneBig(pos.FeeGrowthInside1LastX128)
@@ -1700,9 +1919,8 @@ func (s *RealtimePositionsService) calcV4UnclaimedFeesCached(stateView common.Ad
 
 	inside0 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global0, lower0, upper0)
 	inside1 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global1, lower1, upper1)
-	if inside0.Cmp(global0) > 0 || inside1.Cmp(global1) > 0 {
-		return nil, nil, usedStale, age, fmt.Errorf("invalid feeGrowthInside (pool_id=%s)", poolID)
-	}
+	// 注意：由于 uint256 模运算特性和 RPC 调用时序差异，inside 可能暂时"看起来"大于 global。
+	// 这里不再报错退出，而是继续计算。delta 计算已有负值保护，不会产生负手续费。
 
 	last0 := cloneBig(pos.FeeGrowthInside0LastX128)
 	last1 := cloneBig(pos.FeeGrowthInside1LastX128)
@@ -1910,6 +2128,9 @@ func statusLabelFromTask(task *models.StrategyTask) string {
 		default:
 			return "撤出中"
 		}
+	}
+	if task.RebalancePending {
+		return "再平衡中"
 	}
 	if task.Paused && (task.Status == models.StrategyStatusRunning || task.Status == models.StrategyStatusWaiting) {
 		return "已暂停"

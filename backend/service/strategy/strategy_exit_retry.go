@@ -123,16 +123,61 @@ func (s *StrategyService) processExitRetry(task *models.StrategyTask) bool {
 		return true
 	}
 
+	// 检查内存锁：如果任务已在执行中，跳过本次提交
+	s.inflightTasksMu.Lock()
+	if submitTime, exists := s.inflightTasks[task.ID]; exists {
+		// 如果任务已在执行中超过10分钟，认为是异常情况，清理锁
+		if now.Sub(submitTime) < 10*time.Minute {
+			s.inflightTasksMu.Unlock()
+			log.Printf("[Strategy] 任务 #%d 退出操作已在执行中，跳过重复提交", task.ID)
+			return true
+		}
+		log.Printf("[Strategy] 任务 #%d 执行中锁超时(>10分钟)，清理旧锁", task.ID)
+		delete(s.inflightTasks, task.ID)
+	}
+	s.inflightTasksMu.Unlock()
+
 	exec := txexec.Default()
 	if exec == nil {
 		return true
 	}
+
+	// 先更新DB状态，设置一个较长的 exit_next_retry_at 防止重复触发
+	// 如果DB更新失败，不提交任务
+	lockUntil := now.Add(5 * time.Minute)
+	if err := database.DB.Model(task).Update("exit_next_retry_at", &lockUntil).Error; err != nil {
+		log.Printf("[Strategy] 任务 #%d 更新DB锁失败，跳过本次提交: %v", task.ID, err)
+		return true
+	}
+	task.ExitNextRetryAt = &lockUntil
+
+	// 设置内存锁
+	s.inflightTasksMu.Lock()
+	s.inflightTasks[task.ID] = now
+	s.inflightTasksMu.Unlock()
+
 	if ok, err := exec.TryRunUser(task.UserID, func(_ string) {
+		defer func() {
+			// 交易完成后清理内存锁
+			s.inflightTasksMu.Lock()
+			delete(s.inflightTasks, task.ID)
+			s.inflightTasksMu.Unlock()
+		}()
 		s.runExitRetryAttempt(task.ID, task.UserID)
 	}); err != nil {
 		log.Printf("[Strategy] schedule exit retry failed: task_id=%d user_id=%d err=%v", task.ID, task.UserID, err)
+		// 提交失败，清理内存锁
+		s.inflightTasksMu.Lock()
+		delete(s.inflightTasks, task.ID)
+		s.inflightTasksMu.Unlock()
 	} else if !ok {
-		// Wallet is busy or global tx slots are full; try again next cycle.
+		// Wallet is busy or global tx slots are full; 清理内存锁，下次重试
+		s.inflightTasksMu.Lock()
+		delete(s.inflightTasks, task.ID)
+		s.inflightTasksMu.Unlock()
+		// 恢复 exit_next_retry_at 为 nil，允许下次尝试
+		database.DB.Model(task).Update("exit_next_retry_at", nil)
+		task.ExitNextRetryAt = nil
 	}
 
 	return true
@@ -160,9 +205,9 @@ func (s *StrategyService) runExitRetryAttempt(taskID uint, userID uint) {
 	}
 
 	now := time.Now()
-	if task.ExitNextRetryAt != nil && now.Before(*task.ExitNextRetryAt) {
-		return
-	}
+	// 注意：不再检查 ExitNextRetryAt，因为 processExitRetry 已经检查过了，
+	// 而且这里的任务是刚从DB加载的，ExitNextRetryAt 是我们刚设置的5分钟锁，
+	// 如果在这里检查会导致直接返回而不执行撤退操作。
 
 	if task.ExitRetryCount >= exitMaxAttempts {
 		s.giveUpExitRetry(&task, fmt.Errorf("max attempts reached"))
@@ -204,7 +249,8 @@ func (s *StrategyService) runExitRetryAttempt(taskID uint, userID uint) {
 		s.executeRebalanceAfterExit(&task, now)
 	case ExitActionStopLoss:
 		s.finishStopAfterExit(&task, now, reason, txHashes)
-	// ExitActionSwitch 已删除 - 换仓功能已禁用
+	case ExitActionSwitch:
+		s.executeSwitchAfterExit(&task, now, reason)
 	case ExitActionCooldown:
 		s.finishCooldownAfterExit(&task, now, reason, txHashes)
 	case ExitActionManualStop:
@@ -230,16 +276,61 @@ func (s *StrategyService) processRebalanceRetry(task *models.StrategyTask) bool 
 		return true
 	}
 
+	// 检查内存锁：如果任务已在执行中，跳过本次提交
+	s.inflightTasksMu.Lock()
+	if submitTime, exists := s.inflightTasks[task.ID]; exists {
+		// 如果任务已在执行中超过10分钟，认为是异常情况，清理锁
+		if now.Sub(submitTime) < 10*time.Minute {
+			s.inflightTasksMu.Unlock()
+			log.Printf("[Strategy] 任务 #%d 再平衡开仓操作已在执行中，跳过重复提交", task.ID)
+			return true
+		}
+		log.Printf("[Strategy] 任务 #%d 执行中锁超时(>10分钟)，清理旧锁", task.ID)
+		delete(s.inflightTasks, task.ID)
+	}
+	s.inflightTasksMu.Unlock()
+
 	exec := txexec.Default()
 	if exec == nil {
 		return true
 	}
+
+	// 先更新DB状态，设置一个较长的 rebalance_next_retry_at 防止重复触发
+	// 如果DB更新失败，不提交任务
+	lockUntil := now.Add(5 * time.Minute)
+	if err := database.DB.Model(task).Update("rebalance_next_retry_at", &lockUntil).Error; err != nil {
+		log.Printf("[Strategy] 任务 #%d 更新再平衡DB锁失败，跳过本次提交: %v", task.ID, err)
+		return true
+	}
+	task.RebalanceNextRetryAt = &lockUntil
+
+	// 设置内存锁
+	s.inflightTasksMu.Lock()
+	s.inflightTasks[task.ID] = now
+	s.inflightTasksMu.Unlock()
+
 	if ok, err := exec.TryRunUser(task.UserID, func(_ string) {
+		defer func() {
+			// 交易完成后清理内存锁
+			s.inflightTasksMu.Lock()
+			delete(s.inflightTasks, task.ID)
+			s.inflightTasksMu.Unlock()
+		}()
 		s.runRebalanceRetryAttempt(task.ID, task.UserID)
 	}); err != nil {
 		log.Printf("[Strategy] schedule rebalance retry failed: task_id=%d user_id=%d err=%v", task.ID, task.UserID, err)
+		// 提交失败，清理内存锁
+		s.inflightTasksMu.Lock()
+		delete(s.inflightTasks, task.ID)
+		s.inflightTasksMu.Unlock()
 	} else if !ok {
-		// Wallet is busy or global tx slots are full; try again next cycle.
+		// Wallet is busy or global tx slots are full; 清理内存锁，下次重试
+		s.inflightTasksMu.Lock()
+		delete(s.inflightTasks, task.ID)
+		s.inflightTasksMu.Unlock()
+		// 恢复 rebalance_next_retry_at 为 nil，允许下次尝试
+		database.DB.Model(task).Update("rebalance_next_retry_at", nil)
+		task.RebalanceNextRetryAt = nil
 	}
 	return true
 }
@@ -258,11 +349,10 @@ func (s *StrategyService) runRebalanceRetryAttempt(taskID uint, userID uint) {
 		return
 	}
 
-	now := time.Now()
-	if task.RebalanceNextRetryAt != nil && now.Before(*task.RebalanceNextRetryAt) {
-		return
-	}
+	// 注意：不再检查 RebalanceNextRetryAt，因为 processRebalanceRetry 已经检查过了，
+	// 而且这里的任务是刚从DB加载的，RebalanceNextRetryAt 是我们刚设置的5分钟锁。
 
+	now := time.Now()
 	attempt := task.RebalanceRetryCount + 1
 	if err := s.attemptRebalanceEnter(&task, now); err != nil {
 		s.scheduleRebalanceRetry(&task, attempt, err)
@@ -368,17 +458,17 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 		"error_message":               "",
 	}
 	if task.IsAuto {
-		updates["guard_open_volume_5m"] = 0
-		updates["guard_open_price"] = 0
-		updates["guard_open_tx_count_5m"] = 0
-		updates["guard_open_fee_percentage"] = 0
-		updates["guard_open_fee_rate_5m_pct"] = 0
-		updates["guard_open_total_fees_5m"] = 0
-		updates["guard_open_tvl_usd"] = 0
-		updates["guard_open_metrics_at"] = nil
-		updates["guard_volume_drop_armed"] = false
-		updates["guard_volume_drop_last_volume_5m"] = 0
-		updates["guard_price_tx_drop_armed"] = false
+		updates["GuardOpenVolume5m"] = 0
+		updates["GuardOpenPrice"] = 0
+		updates["GuardOpenTxCount5m"] = 0
+		updates["GuardOpenFeePercentage"] = 0
+		updates["GuardOpenFeeRate5mPct"] = 0
+		updates["GuardOpenTotalFees5m"] = 0
+		updates["GuardOpenTVLUSD"] = 0
+		updates["GuardOpenMetricsAt"] = nil
+		updates["GuardVolumeDropArmed"] = false
+		updates["GuardVolumeDropLastVolume5m"] = 0
+		updates["GuardPriceTxDropArmed"] = false
 	}
 
 	// 调试日志：记录即将保存的TokenID
@@ -388,6 +478,32 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 	if dbErr := database.DB.Model(task).Updates(updates).Error; dbErr != nil {
 		// 链上交易已成功，DB保存失败只记录警告，不触发重试
 		log.Printf("[Strategy] ⚠️ 任务 #%d 保存开仓结果失败 (链上交易已成功): %v", task.ID, dbErr)
+
+		// 兜底：至少把关键字段（TokenID/状态/重试标志）写入 DB，避免任务被误判为未开仓而重复开仓。
+		criticalUpdates := map[string]interface{}{
+			"status":                      models.StrategyStatusRunning,
+			"tick_lower":                  tickLower,
+			"tick_upper":                  tickUpper,
+			"last_rebalance_at":           &now,
+			"last_exit_time":              &now,
+			"current_liquidity":           enterRes.CurrentLiquidity,
+			"exit_liquidity_removed":      false,
+			"next_range_multiplier":       1.0,
+			"cooldown_until":              nil,
+			"cooldown_reason":             "",
+			"v3_position_manager_address": enterRes.V3PositionManagerAddress,
+			"v3_token_id":                 enterRes.V3TokenID,
+			"v4_token_id":                 enterRes.V4TokenID,
+			"out_of_range_since":          nil,
+			"rebalance_pending":           false,
+			"rebalance_retry_count":       0,
+			"rebalance_next_retry_at":     nil,
+			"rebalance_last_error":        "",
+			"error_message":               "",
+		}
+		if cErr := database.DB.Model(task).Updates(criticalUpdates).Error; cErr != nil {
+			log.Printf("[Strategy] ⚠️ 任务 #%d 兜底写入关键字段仍失败: %v", task.ID, cErr)
+		}
 	}
 
 	task.Status = models.StrategyStatusRunning

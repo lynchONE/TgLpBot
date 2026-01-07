@@ -451,6 +451,10 @@ func (b *Bot) handleText(message *tgbotapi.Message, user *models.User) {
 		b.handleAutoTakeProfitInput(message.Chat.ID, user, message.Text)
 	case "awaiting_auto_stop_loss":
 		b.handleAutoStopLossInput(message.Chat.ID, user, message.Text)
+	case "awaiting_auto_switch_min_improvement_pct":
+		b.handleAutoSwitchMinImprovementInput(message.Chat.ID, user, message.Text)
+	case "awaiting_auto_switch_cooldown_seconds":
+		b.handleAutoSwitchCooldownInput(message.Chat.ID, user, message.Text)
 	// Task config inputs
 	case "awaiting_task_slippage":
 		b.handleTaskSlippageInput(message.Chat.ID, user, message.Text)

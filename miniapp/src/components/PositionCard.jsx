@@ -87,6 +87,8 @@ const pillClassForStatus = (label) => {
         return 'bg-red-500/10 text-red-700 ring-red-500/20 dark:bg-red-500/15 dark:text-red-300 dark:ring-red-500/30';
     if (label?.includes('暂停'))
         return 'bg-amber-500/10 text-amber-800 ring-amber-500/20 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/30';
+    if (label?.includes('再平衡') || label?.includes('止损') || label?.includes('撤出'))
+        return 'bg-amber-500/10 text-amber-800 ring-amber-500/20 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/30';
     if (label?.includes('停止'))
         return 'bg-amber-500/10 text-amber-800 ring-amber-500/20 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/30';
     if (label?.includes('等待'))

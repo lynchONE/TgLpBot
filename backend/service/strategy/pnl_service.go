@@ -21,8 +21,8 @@ import (
 )
 
 var (
-	q96       = new(big.Int).Lsh(big.NewInt(1), 96)
-	q128      = new(big.Int).Lsh(big.NewInt(1), 128)
+	q96        = new(big.Int).Lsh(big.NewInt(1), 96)
+	q128       = new(big.Int).Lsh(big.NewInt(1), 128)
 	modUint256 = new(big.Int).Lsh(big.NewInt(1), 256)
 )
 
@@ -698,9 +698,8 @@ func (s *PnLService) calcV3UnclaimedFeesCached(poolAddr common.Address, currentT
 
 	inside0 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global0, lower0, upper0)
 	inside1 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global1, lower1, upper1)
-	if inside0.Cmp(global0) > 0 || inside1.Cmp(global1) > 0 {
-		return owed0, owed1, usedStale, age, fmt.Errorf("invalid feeGrowthInside (pool=%s)", poolAddr.Hex())
-	}
+	// 注意：由于 uint256 模运算特性和 RPC 调用时序差异，inside 可能暂时"看起来"大于 global。
+	// 这里不再报错退出，而是继续计算。delta 计算已有负值保护，不会产生负手续费。
 
 	last0 := cloneBig(pos.FeeGrowthInside0LastX128)
 	last1 := cloneBig(pos.FeeGrowthInside1LastX128)

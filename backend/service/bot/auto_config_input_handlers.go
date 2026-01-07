@@ -97,3 +97,49 @@ func (b *Bot) handleAutoStopLossInput(chatID int64, user *models.User, text stri
 	_ = database.DeleteUserSession(user.TelegramID, "state")
 	b.refreshAutoMenuFromSession(chatID, user, "")
 }
+
+func (b *Bot) handleAutoSwitchMinImprovementInput(chatID int64, user *models.User, text string) {
+	if user == nil || b.autoLPCfgService == nil {
+		return
+	}
+
+	raw := strings.TrimSpace(text)
+	raw = strings.TrimSuffix(raw, "%")
+	v, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil || v < 0 || v > 1000 {
+		b.refreshAutoMenuFromSession(chatID, user, "❌ 数值无效。请输入 0-1000 之间的百分比数值（0 表示禁用），例如：`20` 或 `0`")
+		return
+	}
+
+	if _, err := b.autoLPCfgService.Update(user.ID, map[string]interface{}{
+		"switch_min_improvement_pct": v,
+	}); err != nil {
+		b.refreshAutoMenuFromSession(chatID, user, fmt.Sprintf("❌ 更新换仓阈值失败：%v", err))
+		return
+	}
+
+	_ = database.DeleteUserSession(user.TelegramID, "state")
+	b.refreshAutoMenuFromSession(chatID, user, "")
+}
+
+func (b *Bot) handleAutoSwitchCooldownInput(chatID int64, user *models.User, text string) {
+	if user == nil || b.autoLPCfgService == nil {
+		return
+	}
+
+	n, err := strconv.Atoi(strings.TrimSpace(text))
+	if err != nil || n < 30 || n > 86400 {
+		b.refreshAutoMenuFromSession(chatID, user, "❌ 数值无效。请输入 30-86400 之间的秒数，例如：`300`")
+		return
+	}
+
+	if _, err := b.autoLPCfgService.Update(user.ID, map[string]interface{}{
+		"switch_cooldown_seconds": n,
+	}); err != nil {
+		b.refreshAutoMenuFromSession(chatID, user, fmt.Sprintf("❌ 更新换仓冷却失败：%v", err))
+		return
+	}
+
+	_ = database.DeleteUserSession(user.TelegramID, "state")
+	b.refreshAutoMenuFromSession(chatID, user, "")
+}

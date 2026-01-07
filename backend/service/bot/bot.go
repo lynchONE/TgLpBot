@@ -522,6 +522,10 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleAutoConfigSetTakeProfit(query, user)
 	case query.Data == "auto_cfg_set_stop_loss":
 		b.handleAutoConfigSetStopLoss(query, user)
+	case query.Data == "auto_cfg_set_switch_min_improvement":
+		b.handleAutoConfigSetSwitchMinImprovement(query, user)
+	case query.Data == "auto_cfg_set_switch_cooldown":
+		b.handleAutoConfigSetSwitchCooldown(query, user)
 	case query.Data == "auto_cfg_cancel_input":
 		b.handleAutoCancelInput(query, user)
 	case query.Data == "auto_view_strategy":

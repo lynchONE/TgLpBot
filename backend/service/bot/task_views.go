@@ -9,6 +9,7 @@ import (
 	"log"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -75,8 +76,25 @@ func buildPriceDisplayLines(task *models.StrategyTask) (string, string) {
 }
 
 func formatTaskStatus(task *models.StrategyTask) (string, string) {
-	if task != nil && task.Paused && (task.Status == models.StrategyStatusRunning || task.Status == models.StrategyStatusWaiting) {
-		return "⏸️", "已暂停"
+	if task != nil {
+		if strings.TrimSpace(task.ExitPendingAction) != "" {
+			switch strings.TrimSpace(task.ExitPendingAction) {
+			case "manual_stop":
+				return "🟠", "停止中"
+			case "stoploss":
+				return "🟠", "止损中"
+			case "rebalance":
+				return "🔄", "再平衡中"
+			default:
+				return "🟠", "撤出中"
+			}
+		}
+		if task.RebalancePending {
+			return "🔄", "再平衡中"
+		}
+		if task.Paused && (task.Status == models.StrategyStatusRunning || task.Status == models.StrategyStatusWaiting) {
+			return "⏸️", "已暂停"
+		}
 	}
 	status := models.StrategyStatusRunning
 	if task != nil {
@@ -106,6 +124,18 @@ func shortenHex(s string) string {
 		return s
 	}
 	return s[:10] + "..." + s[len(s)-8:]
+}
+
+func truncateText(s string, maxRunes int) string {
+	s = strings.TrimSpace(s)
+	if s == "" || maxRunes <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+	return string(r[:maxRunes-1]) + "…"
 }
 
 func formatDustAmount(amount float64) string {
@@ -153,60 +183,100 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 	// Calculate PnL
 	amountLine := fmt.Sprintf("初始投入：%.2f USDT", task.AmountUSDT)
 	if b.pnlService != nil {
-		pnl, err := b.pnlService.GetTaskPnL(task)
-		if err != nil {
-			log.Printf("[TaskView] Get PnL failed for task #%d: %v", task.ID, err)
-			// Fallback to simpler display
-			amountLine += "\n(获取实时收益失败)"
+		canPnL := true
+		if task.RebalancePending {
+			canPnL = false
+		}
+		if strings.TrimSpace(task.ExitPendingAction) != "" {
+			canPnL = false
+		}
+		version := strings.ToLower(strings.TrimSpace(task.PoolVersion))
+		if version == "v4" {
+			tid := strings.TrimSpace(task.V4TokenID)
+			if tid == "" || tid == "0" {
+				canPnL = false
+			}
 		} else {
-			// Format PnL
-			sign := "+"
-			if pnl.AbsolutePnLUSDT < 0 {
-				sign = ""
+			tid := strings.TrimSpace(task.V3TokenID)
+			if tid == "" || tid == "0" {
+				canPnL = false
 			}
-			emojiStr := "🟢"
-			if pnl.AbsolutePnLUSDT < 0 {
-				emojiStr = "🔴"
-			}
+		}
 
-			dustLine := ""
-			dustParts := make([]string, 0, 2)
-			if pnl.DustToken0 > 0 {
-				formatted := formatDustAmount(pnl.DustToken0)
-				if formatted != "0" {
-					dustParts = append(dustParts, fmt.Sprintf("%s %s", formatted, escapeTelegramMarkdown(task.Token0Symbol)))
+		if !canPnL {
+			switch {
+			case task.RebalancePending:
+				amountLine += "\n(再平衡中，暂无实时收益)"
+				if task.RebalanceRetryCount > 0 {
+					amountLine += fmt.Sprintf("\n(已重试 %d 次)", task.RebalanceRetryCount)
 				}
-			}
-			if pnl.DustToken1 > 0 {
-				formatted := formatDustAmount(pnl.DustToken1)
-				if formatted != "0" {
-					dustParts = append(dustParts, fmt.Sprintf("%s %s", formatted, escapeTelegramMarkdown(task.Token1Symbol)))
+				if task.RebalanceNextRetryAt != nil {
+					amountLine += fmt.Sprintf("\n(下次重试：%s)", task.RebalanceNextRetryAt.In(time.Local).Format("15:04:05"))
 				}
+				if errText := strings.TrimSpace(task.RebalanceLastError); errText != "" {
+					amountLine += fmt.Sprintf("\n⚠️ 最近错误：%s", escapeTelegramMarkdown(truncateText(errText, 80)))
+				}
+			case strings.TrimSpace(task.ExitPendingAction) != "":
+				amountLine += "\n(正在撤出/兑换中，暂无实时收益)"
+			default:
+				amountLine += "\n(缺少头寸 ID，无法获取实时收益)"
 			}
-			if len(dustParts) > 0 {
-				dustLine = fmt.Sprintf("\n🧹 开仓残余：%s (≈%.2f USDT)", strings.Join(dustParts, " + "), pnl.DustValueUSDT)
-			}
+		} else {
+			pnl, err := b.pnlService.GetTaskPnL(task)
+			if err != nil {
+				log.Printf("[TaskView] Get PnL failed for task #%d: %v", task.ID, err)
+				// Fallback to simpler display
+				amountLine += "\n(获取实时收益失败)"
+			} else {
+				// Format PnL
+				sign := "+"
+				if pnl.AbsolutePnLUSDT < 0 {
+					sign = ""
+				}
+				emojiStr := "🟢"
+				if pnl.AbsolutePnLUSDT < 0 {
+					emojiStr = "🔴"
+				}
 
-			// 使用 NetInvestedUSDT（净投入 = 实际支出 - 残余价值）更准确反映仓位内金额
-			actualInvested := pnl.NetInvestedUSDT
-			if actualInvested <= 0 {
-				actualInvested = task.AmountUSDT
-			}
+				dustLine := ""
+				dustParts := make([]string, 0, 2)
+				if pnl.DustToken0 > 0 {
+					formatted := formatDustAmount(pnl.DustToken0)
+					if formatted != "0" {
+						dustParts = append(dustParts, fmt.Sprintf("%s %s", formatted, escapeTelegramMarkdown(task.Token0Symbol)))
+					}
+				}
+				if pnl.DustToken1 > 0 {
+					formatted := formatDustAmount(pnl.DustToken1)
+					if formatted != "0" {
+						dustParts = append(dustParts, fmt.Sprintf("%s %s", formatted, escapeTelegramMarkdown(task.Token1Symbol)))
+					}
+				}
+				if len(dustParts) > 0 {
+					dustLine = fmt.Sprintf("\n🧹 开仓残余：%s (≈%.2f USDT)", strings.Join(dustParts, " + "), pnl.DustValueUSDT)
+				}
 
-			feesText := fmt.Sprintf("%.2f", pnl.UnclaimedFeesUSDT)
-			if abs := math.Abs(pnl.UnclaimedFeesUSDT); abs > 0 && abs < 0.01 {
-				feesText = fmt.Sprintf("%.4f", pnl.UnclaimedFeesUSDT)
-			}
+				// 使用 NetInvestedUSDT（净投入 = 实际支出 - 残余价值）更准确反映仓位内金额
+				actualInvested := pnl.NetInvestedUSDT
+				if actualInvested <= 0 {
+					actualInvested = task.AmountUSDT
+				}
 
-			amountLine = fmt.Sprintf(
-				"📊 资产状况：\n📈 绝对盈亏：%s%.2f USDT %s\n💵 当前价值：%.2f USDT\n🎁 未领手续费：%s USDT\n💰 实际投入：%.2f USDT (预期 %.2f USDT)%s",
-				sign, pnl.AbsolutePnLUSDT, emojiStr,
-				pnl.HoldingsUSDT,
-				feesText,
-				actualInvested,
-				task.AmountUSDT,
-				dustLine,
-			)
+				feesText := fmt.Sprintf("%.2f", pnl.UnclaimedFeesUSDT)
+				if abs := math.Abs(pnl.UnclaimedFeesUSDT); abs > 0 && abs < 0.01 {
+					feesText = fmt.Sprintf("%.4f", pnl.UnclaimedFeesUSDT)
+				}
+
+				amountLine = fmt.Sprintf(
+					"📊 资产状况：\n📈 绝对盈亏：%s%.2f USDT %s\n💵 当前价值：%.2f USDT\n🎁 未领手续费：%s USDT\n💰 实际投入：%.2f USDT (预期 %.2f USDT)%s",
+					sign, pnl.AbsolutePnLUSDT, emojiStr,
+					pnl.HoldingsUSDT,
+					feesText,
+					actualInvested,
+					task.AmountUSDT,
+					dustLine,
+				)
+			}
 		}
 	}
 
@@ -219,6 +289,10 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 		positionInfo = fmt.Sprintf("\n🎫 头寸 ID：`%s`", v3TokenId)
 	} else if v4TokenId != "" && v4TokenId != "0" {
 		positionInfo = fmt.Sprintf("\n🎫 头寸 ID：`%s`", v4TokenId)
+	} else if task.RebalancePending {
+		positionInfo = "\n🎫 头寸 ID：-- (再平衡中)"
+	} else if strings.TrimSpace(task.ExitPendingAction) != "" {
+		positionInfo = "\n🎫 头寸 ID：-- (撤出中)"
 	}
 
 	currentPriceInfo, priceRangeInfo := buildPriceDisplayLines(task)

@@ -381,7 +381,19 @@ export default function App() {
     }, [summary?.total_usd, walletUsdFromTokens, bnbUsd, totalsFromPositions.positionUsd, totalsFromPositions.feeUsd]);
 
     const visiblePositions = useMemo(() => {
-        return positions.filter((p) => p?.has_liquidity !== false);
+        return positions.filter((p) => {
+            if (p?.has_liquidity !== false) return true;
+            const taskId = Number(p?.task_id || 0);
+            if (!Number.isFinite(taskId) || taskId <= 0) return false;
+            const label = String(p?.status_label || '');
+            return (
+                label.includes('再平衡') ||
+                label.includes('撤出') ||
+                label.includes('停止中') ||
+                label.includes('止损') ||
+                label.includes('等待')
+            );
+        });
     }, [positions]);
 
     // 从仓位构建 pool_address -> position_usd 映射（用于在热门池子上显示持仓标签）

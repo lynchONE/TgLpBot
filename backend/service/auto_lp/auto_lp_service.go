@@ -793,7 +793,7 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 		}
 		lowPct, upPct := decideWidth(totalWidth, state5, res)
 
-		score := scoreCandidate(p5.TotalFees, p5.CurrentPoolValue, p5.FeePercentage, res, state5)
+		score := scoreCandidate(feeRatePct, p5.TotalFees, p5.CurrentPoolValue, res, state5)
 		eligible := state5 == "RAPID_PUMP" || state5 == "SIDEWAYS" || state5 == "MILD_UPTREND"
 		action := "SKIP"
 		// Only open in these regimes (V1 tuning): RAPID_PUMP / SIDEWAYS / MILD_UPTREND
@@ -1156,42 +1156,35 @@ func decideWidth(baseWidth float64, state5 string, resonance string) (lowerPct f
 	return lowerPct, upperPct
 }
 
-const autoLPFeeBpsScoreWeight = 1_000_000.0
-
-func feeBpsFromPercentage(feePercentage float64) int {
-	// feePercentage is in percent units (e.g., 0.3 means 0.3%).
-	if feePercentage <= 0 {
-		return 0
-	}
-	return int(math.Round(feePercentage * 100))
-}
-
+// autoLPAnalysisLess 按 FeeRate5mPct（5分钟费用率）降序排列，这是最能反映池子实际收益率的指标
 func autoLPAnalysisLess(a, b AutoLPAnalysis) bool {
-	fa := feeBpsFromPercentage(a.FeePercentage)
-	fb := feeBpsFromPercentage(b.FeePercentage)
-	if fa != fb {
-		return fa > fb
+	// 首先按 FeeRate5mPct 降序排列
+	if a.FeeRate5mPct != b.FeeRate5mPct {
+		return a.FeeRate5mPct > b.FeeRate5mPct
 	}
+	// 相同费用率时按评分排序
 	return a.Score > b.Score
 }
 
-func scoreCandidate(fees5m float64, tvl float64, feePercentage float64, resonance string, state5 string) float64 {
+// scoreCandidate 计算候选池评分，基于 FeeRate5mPct（5分钟费用率）
+func scoreCandidate(feeRate5mPct float64, fees5m float64, tvl float64, resonance string, state5 string) float64 {
 	if state5 == "CRASH" {
 		return -1
 	}
-	score := fees5m
+	// 基础分 = FeeRate5mPct × 10000（放大以便区分）
+	score := feeRate5mPct * 10000
+	// TVL 加成：偏好更高 TVL 的池子（风险更低）
 	if tvl > 0 {
 		score = score * math.Log1p(tvl/10000.0)
 	}
+	// 共振加成
 	if resonance == "STRONG" {
 		score = score * 1.5
 	}
 	if resonance == "DIVERGENCE" {
 		score = score * 0.7
 	}
-	// 强调手续费率（fee_percentage）的重要性：同一批通过硬筛的池子中，手续费率更高的优先级应更高。
-	feeBps := feeBpsFromPercentage(feePercentage)
-	return float64(feeBps)*autoLPFeeBpsScoreWeight + score
+	return score
 }
 
 func splitCSVLower(s string) []string {
@@ -1573,6 +1566,58 @@ func autoLPShouldSwitch(current float64, target float64, minImprovementPct float
 	return target >= current*(1.0+minImprovementPct/100.0)
 }
 
+func autoLPResolveSwitchCooldownSeconds(cfg models.AutoLPUserConfig) int {
+	if cfg.SwitchCooldownSeconds > 0 {
+		return cfg.SwitchCooldownSeconds
+	}
+	return 300
+}
+
+func autoLPWithinSwitchCooldown(now time.Time, lastCompletedAt *time.Time, cooldownSeconds int) bool {
+	if lastCompletedAt == nil {
+		return false
+	}
+	if cooldownSeconds <= 0 {
+		cooldownSeconds = 300
+	}
+	return now.Sub(*lastCompletedAt) < time.Duration(cooldownSeconds)*time.Second
+}
+
+func autoLPTopCandidate(analyses []AutoLPAnalysis) (AutoLPAnalysis, bool) {
+	for _, a := range analyses {
+		if a.Action == "CANDIDATE" {
+			return a, true
+		}
+	}
+	return AutoLPAnalysis{}, false
+}
+
+func autoLPSelectWorstTaskForSwitch(tasks []models.StrategyTask, analysisByPool map[string]AutoLPAnalysis) (*models.StrategyTask, float64) {
+	worstYield := math.MaxFloat64
+	var worst *models.StrategyTask
+
+	for i := range tasks {
+		task := &tasks[i]
+		if strings.TrimSpace(task.ExitPendingAction) != "" || task.RebalancePending || !hasTaskPositionForExit(task) {
+			continue
+		}
+
+		y := 0.0
+		if a, ok := analysisByPool[autoLPPoolKey(task.PoolVersion, task.PoolId)]; ok {
+			y = a.FeeRate5mPct
+		}
+		if y < worstYield {
+			worstYield = y
+			worst = task
+		}
+	}
+
+	if worst == nil {
+		return nil, 0
+	}
+	return worst, worstYield
+}
+
 func autoLPCandidateContainsUSDT(a AutoLPAnalysis) bool {
 	if config.AppConfig == nil || !common.IsHexAddress(config.AppConfig.USDTAddress) {
 		return true
@@ -1639,8 +1684,14 @@ func (s *AutoLPService) requestSwitchExit(task *models.StrategyTask, target Auto
 		"switch_target_tick_lower_pct": targetLowerPct,
 		"switch_target_tick_upper_pct": targetUpperPct,
 	}
-	if err := database.DB.Model(task).Updates(updates).Error; err != nil {
-		return false, err
+	res := database.DB.Model(&models.StrategyTask{}).
+		Where("id = ? AND user_id = ? AND exit_give_up_at IS NULL AND rebalance_pending = ? AND (exit_pending_action = '' OR exit_pending_action IS NULL)", task.ID, task.UserID, false).
+		Updates(updates)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return false, nil
 	}
 
 	task.ExitPendingAction = strategy.ExitActionSwitch
@@ -1664,12 +1715,39 @@ func (s *AutoLPService) requestSwitchExit(task *models.StrategyTask, target Auto
 }
 
 func (s *AutoLPService) trySwitchWorstAutoTask(ctx context.Context, cfg models.AutoLPUserConfig, analyses []AutoLPAnalysis) (bool, error) {
-	// ⬇️⬇️ 换仓功能已禁用（待修复）⬇️⬇️
-	return false, nil
-	// ⬆️⬆️ 换仓功能已禁用（待修复）⬆️⬆️
-
 	userID := cfg.UserID
 	if userID == 0 || database.DB == nil {
+		return false, nil
+	}
+	if cfg.SwitchMinImprovementPct <= 0 {
+		// 0 = 禁用换仓
+		return false, nil
+	}
+	if len(analyses) == 0 {
+		return false, nil
+	}
+
+	top, ok := autoLPTopCandidate(analyses)
+	if !ok || top.FeeRate5mPct <= 0 {
+		return false, nil
+	}
+	if ok, err := s.hasActiveTask(userID, top.ProtocolVersion, top.PoolAddress); err != nil {
+		return false, err
+	} else if ok {
+		// Top1 已有活跃任务（包含当前自动任务），不换仓
+		return false, nil
+	}
+	if pending, err := s.hasPendingSwitch(userID); err != nil {
+		return false, err
+	} else if pending {
+		return false, nil
+	}
+
+	cooldownSeconds := autoLPResolveSwitchCooldownSeconds(cfg)
+	now := time.Now()
+	if lastAt, err := s.lastSwitchCompletedAt(userID); err != nil {
+		return false, err
+	} else if autoLPWithinSwitchCooldown(now, lastAt, cooldownSeconds) {
 		return false, nil
 	}
 
@@ -1688,73 +1766,34 @@ func (s *AutoLPService) trySwitchWorstAutoTask(ctx context.Context, cfg models.A
 		return false, err
 	}
 
-	var worst *models.StrategyTask
-	worstYield := math.MaxFloat64
-	for i := range tasks {
-		task := &tasks[i]
-		if strings.TrimSpace(task.ExitPendingAction) != "" || task.RebalancePending || !hasTaskPositionForExit(task) {
-			continue
-		}
-		y := 0.0
-		if a, ok := analysisByPool[autoLPPoolKey(task.PoolVersion, task.PoolId)]; ok {
-			y = a.FeeRate5mPct
-		}
-		if y < worstYield {
-			worstYield = y
-			worst = task
-		}
-	}
+	worst, worstYield := autoLPSelectWorstTaskForSwitch(tasks, analysisByPool)
 	if worst == nil {
 		return false, nil
 	}
 
-	var bestCand AutoLPAnalysis
-	foundCand := false
-	bestYield := 0.0
-	for _, a := range analyses {
-		if a.Action != "CANDIDATE" || a.FeeRate5mPct <= 0 {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(a.ProtocolVersion), strings.TrimSpace(worst.PoolVersion)) &&
-			strings.EqualFold(strings.TrimSpace(a.PoolAddress), strings.TrimSpace(worst.PoolId)) {
-			continue
-		}
-		if ok, err := s.hasActiveTask(userID, a.ProtocolVersion, a.PoolAddress); err != nil {
-			return false, err
-		} else if ok {
-			continue
-		}
-		if !worst.AllowEntrySwap && !autoLPCandidateContainsUSDT(a) {
-			continue
-		}
-		if !autoLPShouldSwitch(worstYield, a.FeeRate5mPct, cfg.SwitchMinImprovementPct) {
-			continue
-		}
-		if a.FeeRate5mPct > bestYield {
-			bestYield = a.FeeRate5mPct
-			bestCand = a
-			foundCand = true
-		}
+	if !worst.AllowEntrySwap && !autoLPCandidateContainsUSDT(top) {
+		return false, nil
 	}
-	if !foundCand {
+	if !autoLPShouldSwitch(worstYield, top.FeeRate5mPct, cfg.SwitchMinImprovementPct) {
 		return false, nil
 	}
 
-	candTask, _, err := s.buildTaskForCandidate(ctx, userID, bestCand, worst.AmountUSDT)
+	candTask, _, err := s.buildTaskForCandidate(ctx, userID, top, worst.AmountUSDT)
 	if err != nil || candTask == nil {
 		return false, nil
 	}
 
-	reason := fmt.Sprintf("🔁 AutoLP 切换到更高收益池：%s (%.4f%%)", strings.TrimSpace(bestCand.TradingPair), bestYield)
-	detail := fmt.Sprintf("🔁 AutoLP 已满仓，触发换池：\n当前最低：%s/%s %.4f%%\n目标池：%s %.4f%%\n阈值：+%.2f%%",
+	reason := fmt.Sprintf("🔁 AutoLP 满仓换仓：%s (%.4f%%)", strings.TrimSpace(top.TradingPair), top.FeeRate5mPct)
+	detail := fmt.Sprintf("🔁 AutoLP 已满仓，触发换池：\n当前最低：%s/%s %.4f%%\n目标池：%s %.4f%%\n阈值：+%.2f%%｜冷却：%ds",
 		strings.TrimSpace(worst.Token0Symbol),
 		strings.TrimSpace(worst.Token1Symbol),
 		worstYield,
-		strings.TrimSpace(bestCand.TradingPair),
-		bestYield,
+		strings.TrimSpace(top.TradingPair),
+		top.FeeRate5mPct,
 		cfg.SwitchMinImprovementPct,
+		cooldownSeconds,
 	)
-	if scheduled, err := s.requestSwitchExit(worst, bestCand, candTask.RangeLowerPercentage, candTask.RangeUpperPercentage, reason, 1.0); err != nil {
+	if scheduled, err := s.requestSwitchExit(worst, top, candTask.RangeLowerPercentage, candTask.RangeUpperPercentage, reason, 1.0); err != nil {
 		return false, err
 	} else if !scheduled {
 		return false, nil
@@ -1899,7 +1938,12 @@ func (s *AutoLPService) executeBestCandidateForUser(ctx context.Context, cfg mod
 
 	activeCount, _ := s.countActiveAutoTasks(userID)
 	if activeCount >= int64(cfg.MaxActiveTasks) {
-		// 已达到AutoLP任务上限，直接返回
+		// 已满仓：尝试换仓（Top1 候选 vs 当前最低收益）
+		if switched, err := s.trySwitchWorstAutoTask(ctx, cfg, analyses); err != nil {
+			return err
+		} else if switched {
+			return nil
+		}
 		return nil
 	}
 
@@ -2177,6 +2221,40 @@ func (s *AutoLPService) hasActiveTask(userID uint, poolVersion string, poolID st
 	return count > 0, nil
 }
 
+func (s *AutoLPService) hasPendingSwitch(userID uint) (bool, error) {
+	if userID == 0 || database.DB == nil {
+		return false, nil
+	}
+	var count int64
+	if err := database.DB.Model(&models.StrategyTask{}).
+		Where("user_id = ? AND is_auto = ? AND exit_pending_action = ?", userID, true, strategy.ExitActionSwitch).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (s *AutoLPService) lastSwitchCompletedAt(userID uint) (*time.Time, error) {
+	if userID == 0 || database.DB == nil {
+		return nil, nil
+	}
+
+	var rec models.AutoLPEvent
+	res := database.DB.
+		Where("user_id = ? AND event_type = ?", userID, models.AutoLPEventSwitch).
+		Order("created_at DESC").
+		Limit(1).
+		Find(&rec)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return nil, nil
+	}
+	t := rec.CreatedAt
+	return &t, nil
+}
+
 func (s *AutoLPService) countActiveAutoTasks(userID uint) (int64, error) {
 	var count int64
 	if err := database.DB.Model(&models.StrategyTask{}).
@@ -2319,14 +2397,14 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 		initUpdates := map[string]interface{}{}
 		if task.GuardOpenVolume5m <= 0 && m.TotalVolume > 0 {
 			metricsAt := time.Now()
-			initUpdates["guard_open_volume_5m"] = m.TotalVolume
-			initUpdates["guard_volume_drop_armed"] = false
-			initUpdates["guard_volume_drop_last_volume_5m"] = 0
-			initUpdates["guard_open_fee_percentage"] = m.FeePercentage
-			initUpdates["guard_open_fee_rate_5m_pct"] = feeRatePct
-			initUpdates["guard_open_total_fees_5m"] = m.TotalFees
-			initUpdates["guard_open_tvl_usd"] = m.CurrentPoolValue
-			initUpdates["guard_open_metrics_at"] = metricsAt
+			initUpdates["GuardOpenVolume5m"] = m.TotalVolume
+			initUpdates["GuardVolumeDropArmed"] = false
+			initUpdates["GuardVolumeDropLastVolume5m"] = 0
+			initUpdates["GuardOpenFeePercentage"] = m.FeePercentage
+			initUpdates["GuardOpenFeeRate5mPct"] = feeRatePct
+			initUpdates["GuardOpenTotalFees5m"] = m.TotalFees
+			initUpdates["GuardOpenTVLUSD"] = m.CurrentPoolValue
+			initUpdates["GuardOpenMetricsAt"] = metricsAt
 			task.GuardOpenVolume5m = m.TotalVolume
 			task.GuardVolumeDropArmed = false
 			task.GuardVolumeDropLastVolume5m = 0
@@ -2337,14 +2415,14 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 			task.GuardOpenMetricsAt = &metricsAt
 		}
 		if task.GuardOpenPrice <= 0 && m.CurrentTokenPrice > 0 {
-			initUpdates["guard_open_price"] = m.CurrentTokenPrice
-			initUpdates["guard_price_tx_drop_armed"] = false
+			initUpdates["GuardOpenPrice"] = m.CurrentTokenPrice
+			initUpdates["GuardPriceTxDropArmed"] = false
 			task.GuardOpenPrice = m.CurrentTokenPrice
 			task.GuardPriceTxDropArmed = false
 		}
 		if task.GuardOpenTxCount5m <= 0 && m.TransactionCount > 0 {
-			initUpdates["guard_open_tx_count_5m"] = int64(m.TransactionCount)
-			initUpdates["guard_price_tx_drop_armed"] = false
+			initUpdates["GuardOpenTxCount5m"] = int64(m.TransactionCount)
+			initUpdates["GuardPriceTxDropArmed"] = false
 			task.GuardOpenTxCount5m = int64(m.TransactionCount)
 			task.GuardPriceTxDropArmed = false
 		}
@@ -2362,8 +2440,8 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 			if !hit {
 				if task.GuardVolumeDropArmed {
 					_ = database.DB.Model(task).Updates(map[string]interface{}{
-						"guard_volume_drop_armed":          false,
-						"guard_volume_drop_last_volume_5m": 0,
+						"GuardVolumeDropArmed":        false,
+						"GuardVolumeDropLastVolume5m": 0,
 					}).Error
 					task.GuardVolumeDropArmed = false
 					task.GuardVolumeDropLastVolume5m = 0
@@ -2371,8 +2449,8 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 			} else {
 				if !task.GuardVolumeDropArmed {
 					_ = database.DB.Model(task).Updates(map[string]interface{}{
-						"guard_volume_drop_armed":          true,
-						"guard_volume_drop_last_volume_5m": m.TotalVolume,
+						"GuardVolumeDropArmed":        true,
+						"GuardVolumeDropLastVolume5m": m.TotalVolume,
 					}).Error
 					task.GuardVolumeDropArmed = true
 					task.GuardVolumeDropLastVolume5m = m.TotalVolume
@@ -2389,7 +2467,7 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 					continue
 				} else {
 					_ = database.DB.Model(task).Updates(map[string]interface{}{
-						"guard_volume_drop_last_volume_5m": m.TotalVolume,
+						"GuardVolumeDropLastVolume5m": m.TotalVolume,
 					}).Error
 					task.GuardVolumeDropLastVolume5m = m.TotalVolume
 				}
@@ -2408,13 +2486,13 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 			if !hit {
 				if task.GuardPriceTxDropArmed {
 					_ = database.DB.Model(task).Updates(map[string]interface{}{
-						"guard_price_tx_drop_armed": false,
+						"GuardPriceTxDropArmed": false,
 					}).Error
 					task.GuardPriceTxDropArmed = false
 				}
 			} else if !task.GuardPriceTxDropArmed {
 				_ = database.DB.Model(task).Updates(map[string]interface{}{
-					"guard_price_tx_drop_armed": true,
+					"GuardPriceTxDropArmed": true,
 				}).Error
 				task.GuardPriceTxDropArmed = true
 			} else {
