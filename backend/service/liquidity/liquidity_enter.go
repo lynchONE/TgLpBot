@@ -767,6 +767,10 @@ func (s *LiquidityService) enterV3FromToken(
 		return nil, err
 	}
 
+	tuneZapTxGasLimit("V3 enter zapInV3", auth, func(o *bind.TransactOpts) (*types.Transaction, error) {
+		return zap.ZapInV3(o, params)
+	})
+
 	tx, err := zap.ZapInV3(auth, params)
 	if err != nil {
 		return nil, fmt.Errorf("zapInV3 failed: %w", err)
@@ -1421,6 +1425,10 @@ func (s *LiquidityService) enterV4FromToken(
 	if err != nil {
 		return nil, err
 	}
+
+	tuneZapTxGasLimit("V4 enter zapInV4", auth, func(o *bind.TransactOpts) (*types.Transaction, error) {
+		return zap.ZapInV4(o, zapParams)
+	})
 
 	// 详细日志：打印所有 ZapInV4 参数
 	log.Printf("[Liquidity] ========== ZapInV4 参数详情 ==========")

@@ -60,6 +60,11 @@ type Config struct {
 	OKXSwapGasLimitMin        uint64
 	OKXSwapGasLimitMax        uint64
 
+	// Zap (V3/V4): GasLimit safety buffer (avoid out of gas / reentrancy sentry)
+	ZapGasLimitMultiplier float64
+	ZapGasLimitMin        uint64
+	ZapGasLimitMax        uint64
+
 	// ClickHouse
 	ClickHouseAddr               string
 	ClickHouseDB                 string
@@ -214,6 +219,9 @@ func LoadConfig() error {
 	okxSwapGasLimitMult, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("OKX_SWAP_GAS_LIMIT_MULTIPLIER", "1.30")), 64)
 	okxSwapGasLimitMin, _ := strconv.ParseUint(strings.TrimSpace(getEnv("OKX_SWAP_GAS_LIMIT_MIN", "250000")), 10, 64)
 	okxSwapGasLimitMax, _ := strconv.ParseUint(strings.TrimSpace(getEnv("OKX_SWAP_GAS_LIMIT_MAX", "10000000")), 10, 64)
+	zapGasLimitMult, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("ZAP_GAS_LIMIT_MULTIPLIER", "1.30")), 64)
+	zapGasLimitMin, _ := strconv.ParseUint(strings.TrimSpace(getEnv("ZAP_GAS_LIMIT_MIN", "0")), 10, 64)
+	zapGasLimitMax, _ := strconv.ParseUint(strings.TrimSpace(getEnv("ZAP_GAS_LIMIT_MAX", "0")), 10, 64)
 	clickhouseDialTimeoutSeconds, _ := strconv.Atoi(strings.TrimSpace(getEnv("CLICKHOUSE_DIAL_TIMEOUT_SECONDS", "60")))
 	clickhouseMaxOpenConns, _ := strconv.Atoi(strings.TrimSpace(getEnv("CLICKHOUSE_MAX_OPEN_CONNS", "50")))
 	clickhouseMaxIdleConns, _ := strconv.Atoi(strings.TrimSpace(getEnv("CLICKHOUSE_MAX_IDLE_CONNS", "10")))
@@ -302,6 +310,11 @@ func LoadConfig() error {
 		OKXSwapGasLimitMultiplier: okxSwapGasLimitMult,
 		OKXSwapGasLimitMin:        okxSwapGasLimitMin,
 		OKXSwapGasLimitMax:        okxSwapGasLimitMax,
+
+		// Zap (V3/V4): GasLimit safety buffer
+		ZapGasLimitMultiplier: zapGasLimitMult,
+		ZapGasLimitMin:        zapGasLimitMin,
+		ZapGasLimitMax:        zapGasLimitMax,
 
 		// ClickHouse
 		ClickHouseAddr:               getEnv("CLICKHOUSE_ADDR", "localhost:9000"),
@@ -430,6 +443,8 @@ func LoadConfig() error {
 	log.Printf("   - OKX Debug: %v", AppConfig.OKXDebug)
 	log.Printf("   - OKX Swap GasLimit Multiplier: %.4f", AppConfig.OKXSwapGasLimitMultiplier)
 	log.Printf("   - OKX Swap GasLimit Min/Max: %d/%d", AppConfig.OKXSwapGasLimitMin, AppConfig.OKXSwapGasLimitMax)
+	log.Printf("   - Zap GasLimit Multiplier: %.4f", AppConfig.ZapGasLimitMultiplier)
+	log.Printf("   - Zap GasLimit Min/Max: %d/%d", AppConfig.ZapGasLimitMin, AppConfig.ZapGasLimitMax)
 	log.Printf("   - Pancake V3 NPM: %s", AppConfig.PancakeV3PositionManagerAddress)
 	log.Printf("   - Uniswap V3 NPM: %s", AppConfig.UniswapV3PositionManagerAddress)
 	log.Printf("   - BSC RPC URL: %s", AppConfig.BSCRpcURL)

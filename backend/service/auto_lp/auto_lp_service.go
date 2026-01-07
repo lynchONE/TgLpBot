@@ -793,7 +793,7 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 		}
 		lowPct, upPct := decideWidth(totalWidth, state5, res)
 
-		score := scoreCandidate(p5.TotalFees, p5.CurrentPoolValue, res, state5)
+		score := scoreCandidate(p5.TotalFees, p5.CurrentPoolValue, p5.FeePercentage, res, state5)
 		eligible := state5 == "RAPID_PUMP" || state5 == "SIDEWAYS" || state5 == "MILD_UPTREND"
 		action := "SKIP"
 		// Only open in these regimes (V1 tuning): RAPID_PUMP / SIDEWAYS / MILD_UPTREND
@@ -877,7 +877,7 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 	}
 
 	sort.Slice(out, func(i, j int) bool {
-		return out[i].Score > out[j].Score
+		return autoLPAnalysisLess(out[i], out[j])
 	})
 
 	if max := config.AppConfig.AutoLPMaxCandidates; max > 0 {
@@ -1156,7 +1156,26 @@ func decideWidth(baseWidth float64, state5 string, resonance string) (lowerPct f
 	return lowerPct, upperPct
 }
 
-func scoreCandidate(fees5m float64, tvl float64, resonance string, state5 string) float64 {
+const autoLPFeeBpsScoreWeight = 1_000_000.0
+
+func feeBpsFromPercentage(feePercentage float64) int {
+	// feePercentage is in percent units (e.g., 0.3 means 0.3%).
+	if feePercentage <= 0 {
+		return 0
+	}
+	return int(math.Round(feePercentage * 100))
+}
+
+func autoLPAnalysisLess(a, b AutoLPAnalysis) bool {
+	fa := feeBpsFromPercentage(a.FeePercentage)
+	fb := feeBpsFromPercentage(b.FeePercentage)
+	if fa != fb {
+		return fa > fb
+	}
+	return a.Score > b.Score
+}
+
+func scoreCandidate(fees5m float64, tvl float64, feePercentage float64, resonance string, state5 string) float64 {
 	if state5 == "CRASH" {
 		return -1
 	}
@@ -1170,7 +1189,9 @@ func scoreCandidate(fees5m float64, tvl float64, resonance string, state5 string
 	if resonance == "DIVERGENCE" {
 		score = score * 0.7
 	}
-	return score
+	// 强调手续费率（fee_percentage）的重要性：同一批通过硬筛的池子中，手续费率更高的优先级应更高。
+	feeBps := feeBpsFromPercentage(feePercentage)
+	return float64(feeBps)*autoLPFeeBpsScoreWeight + score
 }
 
 func splitCSVLower(s string) []string {

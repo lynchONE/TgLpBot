@@ -1104,6 +1104,10 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 		return nil, fmt.Errorf("init zap contract failed: %w", err)
 	}
 
+	tuneZapTxGasLimit("V3 exit zapOutV3", auth, func(o *bind.TransactOpts) (*types.Transaction, error) {
+		return zap.ZapOutV3(o, pmAddr, tokenId, walletAddr, amount0Min, amount1Min)
+	})
+
 	log.Printf("[Liquidity] V3 exit: Calling ZapOutV3 tokenId=%s amount0Min=%s amount1Min=%s", tokenId.String(), amount0Min.String(), amount1Min.String())
 	tx, err := zap.ZapOutV3(auth, pmAddr, tokenId, walletAddr, amount0Min, amount1Min)
 	if err != nil {
