@@ -3,6 +3,7 @@ package web_server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -129,10 +130,6 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if initData == "" {
-		http.Error(w, "missing initData", http.StatusBadRequest)
-		return
-	}
 	if config.AppConfig == nil {
 		http.Error(w, "config not loaded", http.StatusInternalServerError)
 		return
@@ -142,9 +139,13 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	parsed, err := VerifyTelegramWebAppInitData(initData, config.AppConfig.TelegramBotToken)
+	parsed, err := ParseTelegramWebAppInitData(initData, config.AppConfig.TelegramBotToken)
 	if err != nil {
-		http.Error(w, "invalid initData", http.StatusUnauthorized)
+		if errors.Is(err, ErrMissingInitData) {
+			http.Error(w, "missing initData", http.StatusBadRequest)
+		} else {
+			http.Error(w, "invalid initData", http.StatusUnauthorized)
+		}
 		return
 	}
 

@@ -5,12 +5,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"TgLpBot/base/config"
 )
 
 type TelegramWebAppUser struct {
@@ -25,6 +28,19 @@ type TelegramWebAppInitData struct {
 	QueryID  string             `json:"query_id"`
 	User     TelegramWebAppUser `json:"user"`
 	AuthDate int64              `json:"auth_date"`
+}
+
+var ErrMissingInitData = errors.New("missing initData")
+
+func ParseTelegramWebAppInitData(initData string, botToken string) (*TelegramWebAppInitData, error) {
+	initData = strings.TrimSpace(initData)
+	if initData == "" {
+		if config.AppConfig != nil && config.AppConfig.TelegramWebAppAllowEmptyInitData {
+			return debugTelegramWebAppInitData(), nil
+		}
+		return nil, ErrMissingInitData
+	}
+	return VerifyTelegramWebAppInitData(initData, botToken)
 }
 
 func VerifyTelegramWebAppInitData(initData string, botToken string) (*TelegramWebAppInitData, error) {
@@ -96,6 +112,32 @@ func VerifyTelegramWebAppInitData(initData string, botToken string) (*TelegramWe
 	}
 
 	return out, nil
+}
+
+func debugTelegramWebAppInitData() *TelegramWebAppInitData {
+	userID := int64(0)
+	username := ""
+	if config.AppConfig != nil {
+		userID = config.AppConfig.TelegramWebAppDebugUserID
+		username = strings.TrimSpace(config.AppConfig.TelegramWebAppDebugUsername)
+	}
+	if userID == 0 {
+		userID = 1000000000
+	}
+	if username == "" {
+		username = "local_debug"
+	}
+	return &TelegramWebAppInitData{
+		QueryID:  "local_debug",
+		AuthDate: time.Now().Unix(),
+		User: TelegramWebAppUser{
+			ID:           userID,
+			Username:     username,
+			FirstName:    "Local",
+			LastName:     "Debug",
+			LanguageCode: "en",
+		},
+	}
 }
 
 func hmacSHA256(key []byte, data []byte) []byte {

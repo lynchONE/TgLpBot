@@ -2,6 +2,7 @@ package web_server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -58,18 +59,18 @@ func (s *Server) handleAdminRealtimeUsers(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if initData == "" {
-		http.Error(w, "missing initData", http.StatusBadRequest)
-		return
-	}
 	if config.AppConfig == nil {
 		http.Error(w, "config not loaded", http.StatusInternalServerError)
 		return
 	}
 
-	parsed, err := VerifyTelegramWebAppInitData(initData, config.AppConfig.TelegramBotToken)
+	parsed, err := ParseTelegramWebAppInitData(initData, config.AppConfig.TelegramBotToken)
 	if err != nil {
-		http.Error(w, "invalid initData", http.StatusUnauthorized)
+		if errors.Is(err, ErrMissingInitData) {
+			http.Error(w, "missing initData", http.StatusBadRequest)
+		} else {
+			http.Error(w, "invalid initData", http.StatusUnauthorized)
+		}
 		return
 	}
 
@@ -143,10 +144,6 @@ func (s *Server) handleAdminRealtimePositions(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if initData == "" {
-		http.Error(w, "missing initData", http.StatusBadRequest)
-		return
-	}
 	if userID == 0 {
 		http.Error(w, "missing userId", http.StatusBadRequest)
 		return
@@ -156,9 +153,13 @@ func (s *Server) handleAdminRealtimePositions(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	parsed, err := VerifyTelegramWebAppInitData(initData, config.AppConfig.TelegramBotToken)
+	parsed, err := ParseTelegramWebAppInitData(initData, config.AppConfig.TelegramBotToken)
 	if err != nil {
-		http.Error(w, "invalid initData", http.StatusUnauthorized)
+		if errors.Is(err, ErrMissingInitData) {
+			http.Error(w, "missing initData", http.StatusBadRequest)
+		} else {
+			http.Error(w, "invalid initData", http.StatusUnauthorized)
+		}
 		return
 	}
 

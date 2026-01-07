@@ -49,6 +49,21 @@ function resolveApiBaseUrl() {
     return '';
 }
 
+function resolveAllowEmptyInitData() {
+    const queryAllow = new URLSearchParams(window.location.search).get('allowEmptyInitData');
+    if (queryAllow && ['1', 'true', 'yes', 'y', 'on'].includes(queryAllow.toLowerCase())) {
+        return true;
+    }
+
+    const envAllow = String(import.meta.env.VITE_ALLOW_EMPTY_INITDATA || '').trim().toLowerCase();
+    if (['1', 'true', 'yes', 'y', 'on'].includes(envAllow)) {
+        return true;
+    }
+
+    const host = window.location.hostname;
+    return host === 'localhost' || host === '127.0.0.1';
+}
+
 function useInitData() {
     const [initData, setInitData] = useState('');
     useEffect(() => {
@@ -403,6 +418,8 @@ export default function App() {
     }, [hotPoolsRows]);
 
     const apiBaseUrl = useMemo(() => resolveApiBaseUrl(), []);
+    const allowEmptyInitData = useMemo(() => resolveAllowEmptyInitData(), []);
+    const hasInitData = Boolean(initData) || allowEmptyInitData;
 
     const requestConfirm = (options) => new Promise((resolve) => {
         confirmResolveRef.current = resolve;
@@ -431,7 +448,7 @@ export default function App() {
     };
 
     useEffect(() => {
-        if (!initData) return;
+        if (!hasInitData) return;
         let aborted = false;
         const controller = new AbortController();
 
@@ -451,7 +468,7 @@ export default function App() {
             aborted = true;
             controller.abort();
         };
-    }, [apiBaseUrl, initData]);
+    }, [apiBaseUrl, initData, hasInitData]);
 
     useEffect(() => {
         if (!isAdmin && viewMode === 'admin') {
@@ -549,7 +566,7 @@ export default function App() {
     }, [hotPoolsFilterOpen, hotPoolsFilter]);
 
     useEffect(() => {
-        if (!initData) return;
+        if (!hasInitData) return;
         let aborted = false;
         const controller = new AbortController();
         let inFlight = false;
@@ -582,10 +599,10 @@ export default function App() {
             controller.abort();
             if (pollRef.current) clearInterval(pollRef.current);
         };
-    }, [apiBaseUrl, initData, pollIntervalSec]);
+    }, [apiBaseUrl, initData, hasInitData, pollIntervalSec]);
 
     useEffect(() => {
-        if (!initData || showAdmin || !isMonitor) return;
+        if (!hasInitData || showAdmin || !isMonitor) return;
         let aborted = false;
         const controller = new AbortController();
         let inFlight = false;
@@ -618,10 +635,10 @@ export default function App() {
             controller.abort();
             if (autoMonitorPollRef.current) clearInterval(autoMonitorPollRef.current);
         };
-    }, [apiBaseUrl, initData, showAdmin, isMonitor, monitorPollSec]);
+    }, [apiBaseUrl, initData, hasInitData, showAdmin, isMonitor, monitorPollSec]);
 
     useEffect(() => {
-        if (!initData || !showAdmin) return;
+        if (!hasInitData || !showAdmin) return;
         let aborted = false;
         const controller = new AbortController();
         let inFlight = false;
@@ -660,7 +677,7 @@ export default function App() {
             controller.abort();
             if (adminUsersPollRef.current) clearInterval(adminUsersPollRef.current);
         };
-    }, [apiBaseUrl, initData, showAdmin, adminListPollSec]);
+    }, [apiBaseUrl, initData, hasInitData, showAdmin, adminListPollSec]);
 
     useEffect(() => {
         if (!showAdmin) return;
@@ -674,7 +691,7 @@ export default function App() {
     }, [showAdmin, adminUsers, adminSelectedUserId]);
 
     useEffect(() => {
-        if (!initData || !showAdmin || !adminSelectedUserId) return;
+        if (!hasInitData || !showAdmin || !adminSelectedUserId) return;
         let aborted = false;
         const controller = new AbortController();
         let inFlight = false;
@@ -723,10 +740,10 @@ export default function App() {
             controller.abort();
             if (adminPositionsPollRef.current) clearInterval(adminPositionsPollRef.current);
         };
-    }, [apiBaseUrl, initData, showAdmin, adminSelectedUserId, pollIntervalSec]);
+    }, [apiBaseUrl, initData, hasInitData, showAdmin, adminSelectedUserId, pollIntervalSec]);
 
     useEffect(() => {
-        if (!initData || !showAdmin || !adminSelectedUserId) return;
+        if (!hasInitData || !showAdmin || !adminSelectedUserId) return;
         let aborted = false;
         const controller = new AbortController();
         let inFlight = false;
@@ -764,7 +781,7 @@ export default function App() {
             controller.abort();
             if (adminAutoStatsPollRef.current) clearInterval(adminAutoStatsPollRef.current);
         };
-    }, [apiBaseUrl, initData, showAdmin, adminSelectedUserId, adminStatsPollSec]);
+    }, [apiBaseUrl, initData, hasInitData, showAdmin, adminSelectedUserId, adminStatsPollSec]);
 
     // 热门池子数据始终加载（预加载）
     useEffect(() => {
@@ -918,7 +935,7 @@ export default function App() {
 
     const handleOpenPosition = async () => {
         if (!openPositionPool) return;
-        if (!initData) {
+        if (!hasInitData) {
             setOpenPositionError('未获取到 Telegram initData，请从机器人入口打开页面。');
             return;
         }
@@ -961,7 +978,7 @@ export default function App() {
     };
 
     const loadGlobalConfig = async () => {
-        if (!initData) {
+        if (!hasInitData) {
             setGlobalConfigError('未获取到 Telegram initData，请从机器人入口打开页面。');
             return;
         }
@@ -983,7 +1000,7 @@ export default function App() {
     };
 
     const handleAdminDisableAuto = async () => {
-        if (!initData || !showAdmin || !adminSelectedUserId || adminDisableLoading) return;
+        if (!hasInitData || !showAdmin || !adminSelectedUserId || adminDisableLoading) return;
 
         const label = adminSelectedUser
             ? formatUserLabel(adminSelectedUser)
@@ -1017,7 +1034,7 @@ export default function App() {
     };
 
     const handleSetTaskPaused = async (taskId, paused) => {
-        if (!initData || showAdmin) return;
+        if (!hasInitData || showAdmin) return;
         const id = Number(taskId);
         if (!Number.isFinite(id) || id <= 0) return;
 
@@ -1040,7 +1057,7 @@ export default function App() {
     };
 
     const handleStopTask = async (taskId) => {
-        if (!initData || showAdmin) return;
+        if (!hasInitData || showAdmin) return;
         const id = Number(taskId);
         if (!Number.isFinite(id) || id <= 0) return;
 
@@ -1061,7 +1078,7 @@ export default function App() {
     };
 
     const handleDeleteTask = async (taskId) => {
-        if (!initData || showAdmin) return;
+        if (!hasInitData || showAdmin) return;
         const id = Number(taskId);
         if (!Number.isFinite(id) || id <= 0) return;
 
@@ -1164,7 +1181,7 @@ export default function App() {
     const monitorTasks = useMemo(() => (Array.isArray(autoMonitor?.tasks) ? autoMonitor.tasks : []), [autoMonitor]);
     const showEmptyAutoTasks = isMonitor && Boolean(autoMonitor) && monitorTasks.length === 0 && !autoMonitorLoading && !autoMonitorError;
 
-    const initDataMissing = viewMode !== 'hot_pools' && !initData;
+    const initDataMissing = viewMode !== 'hot_pools' && !hasInitData;
     const noticeClass = notice?.tone === 'error'
         ? 'bg-red-600 text-white'
         : notice?.tone === 'success'
@@ -1395,8 +1412,8 @@ export default function App() {
                         <button
                             type="button"
                             onClick={openGlobalConfig}
-                            disabled={!initData}
-                            className={`rounded-xl px-3 py-2 text-xs font-semibold ring-1 ${initData
+                            disabled={!hasInitData}
+                            className={`rounded-xl px-3 py-2 text-xs font-semibold ring-1 ${hasInitData
                                 ? 'bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50 dark:bg-white/5 dark:text-white/80 dark:ring-white/10 dark:hover:bg-white/10'
                                 : 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
                                 }`}
@@ -1743,7 +1760,7 @@ export default function App() {
                                     bnbBalance={bnbBalance}
                                     pollIntervalSec={pollIntervalSec}
                                     updatedAt={updatedAt}
-                                    allowTaskActions={!showAdmin && Boolean(initData)}
+                                    allowTaskActions={!showAdmin && hasInitData}
                                     onSetTaskPaused={handleSetTaskPaused}
                                     onStopTask={handleStopTask}
                                     onDeleteTask={handleDeleteTask}

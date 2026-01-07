@@ -53,6 +53,34 @@ func (e *EntrySwapRequiredError) Error() string {
 	return fmt.Sprintf("entry swap required: pool does not contain USDT (need %s)", strings.TrimSpace(e.TokenSymbol))
 }
 
+func parseERC721MintedTokenIDFromReceipt(receipt *types.Receipt, nftAddr common.Address, to common.Address) (*big.Int, bool) {
+	if receipt == nil || nftAddr == (common.Address{}) || to == (common.Address{}) {
+		return nil, false
+	}
+	transferEventID := crypto.Keccak256Hash([]byte("Transfer(address,address,uint256)"))
+	var found *big.Int
+	for _, lg := range receipt.Logs {
+		if lg == nil || lg.Address != nftAddr || len(lg.Topics) < 4 || lg.Topics[0] != transferEventID {
+			continue
+		}
+		// ERC721 Transfer(address indexed from, address indexed to, uint256 indexed tokenId)
+		fromAddr := common.BytesToAddress(lg.Topics[1].Bytes()[12:])
+		toAddr := common.BytesToAddress(lg.Topics[2].Bytes()[12:])
+		if fromAddr != (common.Address{}) || toAddr != to {
+			continue
+		}
+		tokenID := new(big.Int).SetBytes(lg.Topics[3].Bytes())
+		if tokenID.Sign() <= 0 {
+			continue
+		}
+		found = tokenID
+	}
+	if found == nil {
+		return nil, false
+	}
+	return found, true
+}
+
 type entryTokenCandidate struct {
 	Symbol  string
 	Address common.Address
@@ -754,8 +782,24 @@ func (s *LiquidityService) enterV3FromToken(
 	// 注意：zapInV3 函数返回 ZapResult struct，包含 tokenId/liquidity/amountUsed/dust，但 tx 回执里拿不到 return data；
 	// 我们用 ZapInV3 + SwapExecuted 事件计算实际使用量和 dust（剩余代币）。
 	tokenId, liq, used0, used1, err := parseZapInV3Result(receipt, zapAddr)
+	parsedViaTransferFallback := false
 	if err != nil {
-		return nil, fmt.Errorf("parse zap result failed: %w", err)
+		log.Printf("[Liquidity] Warning: parse ZapInV3 event failed: %v", err)
+		if recovered, ok := parseERC721MintedTokenIDFromReceipt(receipt, pmAddr, walletAddr); ok && recovered != nil && recovered.Sign() > 0 {
+			tokenId = recovered
+			parsedViaTransferFallback = true
+			liq = big.NewInt(0)
+			if v3pm, perr := blockchain.NewV3PositionManager(pmAddr, blockchain.Client); perr == nil {
+				if pos, qerr := v3pm.Positions(nil, tokenId); qerr == nil && pos != nil && pos.Liquidity != nil {
+					liq = cloneBig(pos.Liquidity)
+				}
+			}
+			used0 = big.NewInt(0)
+			used1 = big.NewInt(0)
+			log.Printf("[Liquidity] Recovered V3 tokenId via ERC721 Transfer: %s (liq=%s)", tokenId.String(), liq.String())
+		} else {
+			return nil, fmt.Errorf("parse zap result failed: %w", err)
+		}
 	}
 
 	// 验证 tokenId 不为 0
@@ -829,6 +873,12 @@ func (s *LiquidityService) enterV3FromToken(
 	dust1.Sub(avail1, used1)
 	if dust1.Sign() < 0 {
 		dust1 = big.NewInt(0)
+	}
+
+	// When we couldn't parse ZapInV3, dust computed from "used" amounts is unreliable; prefer wallet-delta dust in EnterTaskFromUSDT.
+	if parsedViaTransferFallback {
+		dust0 = nil
+		dust1 = nil
 	}
 
 	return &EnterResult{
@@ -1405,9 +1455,24 @@ func (s *LiquidityService) enterV4FromToken(
 
 	// 7. Parse Result (ZapInV4 Event)
 	tokenId, liq, used0, used1, err := parseZapInV4Event(receipt, zapAddr)
+	parsedViaTransferFallback := false
 	if err != nil {
 		log.Printf("[Liquidity] Warning: parse ZapInV4 event failed: %v", err)
-		return nil, err
+		if recovered, ok := parseERC721MintedTokenIDFromReceipt(receipt, positionManager, walletAddr); ok && recovered != nil && recovered.Sign() > 0 {
+			tokenId = recovered
+			parsedViaTransferFallback = true
+			liq = big.NewInt(0)
+			if v4pm, perr := blockchain.NewV4PositionManager(positionManager, blockchain.Client); perr == nil {
+				if pos, qerr := v4pm.Positions(nil, tokenId); qerr == nil && pos != nil && pos.Liquidity != nil {
+					liq = cloneBig(pos.Liquidity)
+				}
+			}
+			used0 = big.NewInt(0)
+			used1 = big.NewInt(0)
+			log.Printf("[Liquidity] Recovered V4 tokenId via ERC721 Transfer: %s (liq=%s)", tokenId.String(), liq.String())
+		} else {
+			return nil, err
+		}
 	}
 
 	// 8. Record Transaction
@@ -1469,6 +1534,12 @@ func (s *LiquidityService) enterV4FromToken(
 	dust1.Sub(avail1, used1)
 	if dust1.Sign() < 0 {
 		dust1 = big.NewInt(0)
+	}
+
+	// When we couldn't parse ZapInV4, dust computed from "used" amounts is unreliable; prefer wallet-delta dust in EnterTaskFromUSDT.
+	if parsedViaTransferFallback {
+		dust0 = nil
+		dust1 = nil
 	}
 
 	return &EnterResult{

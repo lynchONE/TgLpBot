@@ -159,17 +159,6 @@ func (b *Bot) handleAutoConfigSetStopLoss(query *tgbotapi.CallbackQuery, user *m
 	_ = b.refreshAutoMenu(query.Message.Chat.ID, query.Message.MessageID, user, "")
 }
 
-func (b *Bot) handleAutoConfigSetSwitchThreshold(query *tgbotapi.CallbackQuery, user *models.User) {
-	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
-	if user == nil {
-		return
-	}
-	_ = database.SetUserSession(user.TelegramID, autoMenuMsgIDKey, fmt.Sprintf("%d", query.Message.MessageID), 24*time.Hour)
-	_ = database.SetUserSession(user.TelegramID, autoMenuViewKey, autoMenuViewCfg, 24*time.Hour)
-	_ = database.SetUserSession(user.TelegramID, "state", "awaiting_auto_switch_threshold", 30*time.Minute)
-	_ = b.refreshAutoMenu(query.Message.Chat.ID, query.Message.MessageID, user, "")
-}
-
 func (b *Bot) handleAutoViewStrategy(query *tgbotapi.CallbackQuery, user *models.User) {
 	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
 	if user == nil {

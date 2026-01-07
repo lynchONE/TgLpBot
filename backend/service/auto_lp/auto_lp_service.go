@@ -1597,6 +1597,10 @@ func (s *AutoLPService) requestSwitchExit(task *models.StrategyTask, target Auto
 }
 
 func (s *AutoLPService) trySwitchWorstAutoTask(ctx context.Context, cfg models.AutoLPUserConfig, analyses []AutoLPAnalysis) (bool, error) {
+	// ⬇️⬇️ 换仓功能已禁用（待修复）⬇️⬇️
+	return false, nil
+	// ⬆️⬆️ 换仓功能已禁用（待修复）⬆️⬆️
+
 	userID := cfg.UserID
 	if userID == 0 || database.DB == nil {
 		return false, nil
@@ -1821,41 +1825,14 @@ func (s *AutoLPService) executeBestCandidateForUser(ctx context.Context, cfg mod
 	if !check.IsAdmin && check.Access != nil && check.Access.MaxActiveTasks > 0 {
 		totalActive, _ := s.accessService.CountUserActiveTasks(userID)
 		if totalActive >= int64(check.Access.MaxActiveTasks) {
-			// Still allow switching existing tasks (does not increase task count).
-			if activeCount, _ := s.countActiveAutoTasks(userID); activeCount >= int64(cfg.MaxActiveTasks) {
-				if switched, err := s.trySwitchWorstAutoTask(ctx, cfg, analyses); err != nil {
-					return err
-				} else if switched {
-					return nil
-				}
-			}
-			if switched, err := s.trySwitchManualTask(ctx, cfg, analyses); err != nil {
-				return err
-			} else if switched {
-				return nil
-			}
+			// 已达到任务配额上限，直接返回
 			return nil
 		}
 	}
 
 	activeCount, _ := s.countActiveAutoTasks(userID)
 	if activeCount >= int64(cfg.MaxActiveTasks) {
-		if switched, err := s.trySwitchWorstAutoTask(ctx, cfg, analyses); err != nil {
-			return err
-		} else if switched {
-			return nil
-		}
-		if switched, err := s.trySwitchManualTask(ctx, cfg, analyses); err != nil {
-			return err
-		} else if switched {
-			return nil
-		}
-		return nil
-	}
-
-	if switched, err := s.trySwitchManualTask(ctx, cfg, analyses); err != nil {
-		return err
-	} else if switched {
+		// 已达到AutoLP任务上限，直接返回
 		return nil
 	}
 
@@ -2116,13 +2093,13 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 
 func (s *AutoLPService) hasActiveTask(userID uint, poolVersion string, poolID string) (bool, error) {
 	poolVersion = strings.ToLower(strings.TrimSpace(poolVersion))
-	poolID = strings.TrimSpace(poolID)
+	poolID = strings.ToLower(strings.TrimSpace(poolID))
 	if poolVersion == "" || poolID == "" {
 		return false, nil
 	}
 	var count int64
 	if err := database.DB.Model(&models.StrategyTask{}).
-		Where("user_id = ? AND pool_version = ? AND pool_id = ? AND status IN ?", userID, poolVersion, poolID, []models.StrategyStatus{
+		Where("user_id = ? AND LOWER(pool_version) = ? AND LOWER(pool_id) = ? AND status IN ?", userID, poolVersion, poolID, []models.StrategyStatus{
 			models.StrategyStatusRunning,
 			models.StrategyStatusWaiting,
 			models.StrategyStatusStopping,

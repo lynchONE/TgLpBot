@@ -2,6 +2,7 @@ package web_server
 
 import (
 	"encoding/json"
+	"errors"
 	"math/big"
 	"net/http"
 	"strconv"
@@ -88,10 +89,6 @@ func (s *Server) handleAdminAutoLPStats(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if initData == "" {
-		http.Error(w, "missing initData", http.StatusBadRequest)
-		return
-	}
 	if userID == 0 {
 		http.Error(w, "missing userId", http.StatusBadRequest)
 		return
@@ -101,9 +98,13 @@ func (s *Server) handleAdminAutoLPStats(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	parsed, err := VerifyTelegramWebAppInitData(initData, config.AppConfig.TelegramBotToken)
+	parsed, err := ParseTelegramWebAppInitData(initData, config.AppConfig.TelegramBotToken)
 	if err != nil {
-		http.Error(w, "invalid initData", http.StatusUnauthorized)
+		if errors.Is(err, ErrMissingInitData) {
+			http.Error(w, "missing initData", http.StatusBadRequest)
+		} else {
+			http.Error(w, "invalid initData", http.StatusUnauthorized)
+		}
 		return
 	}
 
@@ -198,10 +199,6 @@ func (s *Server) handleAdminAutoLPDisable(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if initData == "" {
-		http.Error(w, "missing initData", http.StatusBadRequest)
-		return
-	}
 	if userID == 0 {
 		http.Error(w, "missing userId", http.StatusBadRequest)
 		return
@@ -211,9 +208,13 @@ func (s *Server) handleAdminAutoLPDisable(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	parsed, err := VerifyTelegramWebAppInitData(initData, config.AppConfig.TelegramBotToken)
+	parsed, err := ParseTelegramWebAppInitData(initData, config.AppConfig.TelegramBotToken)
 	if err != nil {
-		http.Error(w, "invalid initData", http.StatusUnauthorized)
+		if errors.Is(err, ErrMissingInitData) {
+			http.Error(w, "missing initData", http.StatusBadRequest)
+		} else {
+			http.Error(w, "invalid initData", http.StatusUnauthorized)
+		}
 		return
 	}
 

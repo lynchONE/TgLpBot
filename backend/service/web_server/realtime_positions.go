@@ -2,6 +2,7 @@ package web_server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -36,18 +37,18 @@ func (s *Server) handleRealtimePositions(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if initData == "" {
-		http.Error(w, "missing initData", http.StatusBadRequest)
-		return
-	}
 	if config.AppConfig == nil {
 		http.Error(w, "config not loaded", http.StatusInternalServerError)
 		return
 	}
 
-	parsed, err := VerifyTelegramWebAppInitData(initData, config.AppConfig.TelegramBotToken)
+	parsed, err := ParseTelegramWebAppInitData(initData, config.AppConfig.TelegramBotToken)
 	if err != nil {
-		http.Error(w, "invalid initData", http.StatusUnauthorized)
+		if errors.Is(err, ErrMissingInitData) {
+			http.Error(w, "missing initData", http.StatusBadRequest)
+		} else {
+			http.Error(w, "invalid initData", http.StatusUnauthorized)
+		}
 		return
 	}
 

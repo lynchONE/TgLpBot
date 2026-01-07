@@ -131,10 +131,6 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 	req.PoolAddress = strings.TrimSpace(req.PoolAddress)
 	req.PoolVersion = strings.ToLower(strings.TrimSpace(req.PoolVersion))
 
-	if req.InitData == "" {
-		http.Error(w, "missing initData", http.StatusBadRequest)
-		return
-	}
 	if req.PoolAddress == "" {
 		http.Error(w, "missing pool_address", http.StatusBadRequest)
 		return
@@ -152,9 +148,13 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	parsed, err := VerifyTelegramWebAppInitData(req.InitData, config.AppConfig.TelegramBotToken)
+	parsed, err := ParseTelegramWebAppInitData(req.InitData, config.AppConfig.TelegramBotToken)
 	if err != nil {
-		http.Error(w, "invalid initData", http.StatusUnauthorized)
+		if errors.Is(err, ErrMissingInitData) {
+			http.Error(w, "missing initData", http.StatusBadRequest)
+		} else {
+			http.Error(w, "invalid initData", http.StatusUnauthorized)
+		}
 		return
 	}
 

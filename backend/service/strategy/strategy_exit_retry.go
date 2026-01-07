@@ -157,8 +157,7 @@ func (s *StrategyService) processExitRetry(task *models.StrategyTask) bool {
 		s.executeRebalanceAfterExit(task, now)
 	case ExitActionStopLoss:
 		s.finishStopAfterExit(task, now, reason, txHashes)
-	case ExitActionSwitch:
-		s.executeSwitchAfterExit(task, now, reason)
+	// ExitActionSwitch 已删除 - 换仓功能已禁用
 	case ExitActionCooldown:
 		s.finishCooldownAfterExit(task, now, reason, txHashes)
 	case ExitActionManualStop:
@@ -208,7 +207,7 @@ func (s *StrategyService) markRebalancePending(task *models.StrategyTask, now ti
 		"out_of_range_since":      nil,
 		"rebalance_pending":       true,
 		"rebalance_retry_count":   0,
-		"rebalance_next_retry_at": nil,
+		"rebalance_next_retry_at": func() *time.Time { t := now.Add(5 * time.Minute); return &t }(), // 防止竞态条件导致重复触发
 		"rebalance_last_error":    "",
 		"error_message":           "",
 	}
@@ -222,7 +221,8 @@ func (s *StrategyService) markRebalancePending(task *models.StrategyTask, now ti
 	task.OutOfRangeSince = nil
 	task.RebalancePending = true
 	task.RebalanceRetryCount = 0
-	task.RebalanceNextRetryAt = nil
+	nextRetryAt := now.Add(5 * time.Minute)
+	task.RebalanceNextRetryAt = &nextRetryAt
 	task.RebalanceLastError = ""
 	task.ErrorMessage = ""
 }
@@ -304,7 +304,15 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 		updates["guard_volume_drop_last_volume_5m"] = 0
 		updates["guard_price_tx_drop_armed"] = false
 	}
-	_ = database.DB.Model(task).Updates(updates).Error
+
+	// 调试日志：记录即将保存的TokenID
+	log.Printf("[Strategy] 任务 #%d 开仓成功，准备保存: V3TokenID=%s, V4TokenID=%s, V3PM=%s",
+		task.ID, enterRes.V3TokenID, enterRes.V4TokenID, enterRes.V3PositionManagerAddress)
+
+	if dbErr := database.DB.Model(task).Updates(updates).Error; dbErr != nil {
+		// 链上交易已成功，DB保存失败只记录警告，不触发重试
+		log.Printf("[Strategy] ⚠️ 任务 #%d 保存开仓结果失败 (链上交易已成功): %v", task.ID, dbErr)
+	}
 
 	task.Status = models.StrategyStatusRunning
 	task.TickLower = tickLower
@@ -634,7 +642,7 @@ func (s *StrategyService) executeSwitchAfterExit(task *models.StrategyTask, now 
 		"out_of_range_since":          nil,
 		"rebalance_pending":           true,
 		"rebalance_retry_count":       0,
-		"rebalance_next_retry_at":     nil,
+		"rebalance_next_retry_at":     func() *time.Time { t := now.Add(5 * time.Minute); return &t }(), // 防止竞态条件导致重复触发
 		"rebalance_last_error":        "",
 		"next_range_multiplier":       1.0,
 		"cooldown_until":              nil,
@@ -653,7 +661,8 @@ func (s *StrategyService) executeSwitchAfterExit(task *models.StrategyTask, now 
 	task.OutOfRangeSince = nil
 	task.RebalancePending = true
 	task.RebalanceRetryCount = 0
-	task.RebalanceNextRetryAt = nil
+	switchNextRetryAt := now.Add(5 * time.Minute)
+	task.RebalanceNextRetryAt = &switchNextRetryAt
 	task.RebalanceLastError = ""
 	task.NextRangeMultiplier = 1.0
 	task.CooldownUntil = nil

@@ -17,6 +17,9 @@ type Config struct {
 	TelegramBotToken       string
 	TelegramWebAppURL      string
 	TelegramMenuButtonMode string // commands|default|web_app
+	TelegramWebAppAllowEmptyInitData bool
+	TelegramWebAppDebugUserID        int64
+	TelegramWebAppDebugUsername      string
 
 	// Access Control
 	AdminWalletAddress string
@@ -212,12 +215,17 @@ func LoadConfig() error {
 	smartLPScanTimeoutSeconds, _ := strconv.Atoi(strings.TrimSpace(getEnv("SMART_LP_SCAN_TIMEOUT_SECONDS", "600")))
 	exitTokenSyncTimeoutSeconds, _ := strconv.Atoi(strings.TrimSpace(getEnv("EXIT_TOKEN_SYNC_TIMEOUT_SECONDS", "30")))
 	exitTokenSyncPollMillis, _ := strconv.Atoi(strings.TrimSpace(getEnv("EXIT_TOKEN_SYNC_POLL_MILLIS", "500")))
+	webAppDebugUserID, _ := strconv.ParseInt(strings.TrimSpace(getEnv("TELEGRAM_WEBAPP_DEBUG_USER_ID", "0")), 10, 64)
+	webAppDebugUsername := strings.TrimSpace(getEnv("TELEGRAM_WEBAPP_DEBUG_USERNAME", "local_debug"))
 
 	AppConfig = &Config{
 		// Telegram
 		TelegramBotToken:       getEnv("TELEGRAM_BOT_TOKEN", ""),
 		TelegramWebAppURL:      normalizeTelegramWebAppURL(getEnv("TELEGRAM_WEBAPP_URL", "")),
 		TelegramMenuButtonMode: normalizeTelegramMenuButtonMode(getEnv("TELEGRAM_MENU_BUTTON_MODE", "commands")),
+		TelegramWebAppAllowEmptyInitData: getEnvBool("TELEGRAM_WEBAPP_ALLOW_EMPTY_INITDATA", false),
+		TelegramWebAppDebugUserID:        webAppDebugUserID,
+		TelegramWebAppDebugUsername:      webAppDebugUsername,
 
 		// Access Control
 		AdminWalletAddress: strings.TrimSpace(getEnv("ADMIN_WALLET_ADDRESS", "")),
@@ -361,6 +369,9 @@ func LoadConfig() error {
 	log.Printf("   - Telegram Bot Token: %s", maskString(AppConfig.TelegramBotToken))
 	log.Printf("   - Telegram WebApp URL: %s", AppConfig.TelegramWebAppURL)
 	log.Printf("   - Telegram Menu Button Mode: %s", AppConfig.TelegramMenuButtonMode)
+	log.Printf("   - Telegram WebApp Allow Empty InitData: %v", AppConfig.TelegramWebAppAllowEmptyInitData)
+	log.Printf("   - Telegram WebApp Debug User ID: %d", AppConfig.TelegramWebAppDebugUserID)
+	log.Printf("   - Telegram WebApp Debug Username: %s", AppConfig.TelegramWebAppDebugUsername)
 	log.Printf("   - Admin Wallet Address: %s", AppConfig.AdminWalletAddress)
 	log.Printf("   - Uniswap V4 PoolManager: %s", AppConfig.UniswapV4PoolManagerAddress)
 	log.Printf("   - Uniswap V4 StateView: %s", AppConfig.UniswapV4StateViewAddress)
