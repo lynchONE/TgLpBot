@@ -10,6 +10,7 @@ import (
 type StrategyStatus string
 
 const (
+	StrategyStatusOpening  StrategyStatus = "opening"
 	StrategyStatusRunning  StrategyStatus = "running"
 	StrategyStatusWaiting  StrategyStatus = "waiting" // Waiting to reopen
 	StrategyStatusStopping StrategyStatus = "stopping"

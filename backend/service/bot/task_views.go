@@ -83,6 +83,8 @@ func formatTaskStatus(task *models.StrategyTask) (string, string) {
 		status = task.Status
 	}
 	switch status {
+	case models.StrategyStatusOpening:
+		return "🟣", "开仓中"
 	case models.StrategyStatusRunning:
 		return "🟢", "运行中"
 	case models.StrategyStatusWaiting:
@@ -191,11 +193,16 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 				actualInvested = task.AmountUSDT
 			}
 
+			feesText := fmt.Sprintf("%.2f", pnl.UnclaimedFeesUSDT)
+			if abs := math.Abs(pnl.UnclaimedFeesUSDT); abs > 0 && abs < 0.01 {
+				feesText = fmt.Sprintf("%.4f", pnl.UnclaimedFeesUSDT)
+			}
+
 			amountLine = fmt.Sprintf(
-				"📊 资产状况：\n📈 绝对盈亏：%s%.2f USDT %s\n💵 当前价值：%.2f USDT\n🎁 未领手续费：%.2f USDT\n💰 实际投入：%.2f USDT (预期 %.2f USDT)%s",
+				"📊 资产状况：\n📈 绝对盈亏：%s%.2f USDT %s\n💵 当前价值：%.2f USDT\n🎁 未领手续费：%s USDT\n💰 实际投入：%.2f USDT (预期 %.2f USDT)%s",
 				sign, pnl.AbsolutePnLUSDT, emojiStr,
 				pnl.HoldingsUSDT,
-				pnl.UnclaimedFeesUSDT,
+				feesText,
 				actualInvested,
 				task.AmountUSDT,
 				dustLine,

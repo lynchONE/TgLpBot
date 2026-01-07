@@ -14,9 +14,9 @@ import (
 
 type Config struct {
 	// Telegram
-	TelegramBotToken       string
-	TelegramWebAppURL      string
-	TelegramMenuButtonMode string // commands|default|web_app
+	TelegramBotToken                 string
+	TelegramWebAppURL                string
+	TelegramMenuButtonMode           string // commands|default|web_app
 	TelegramWebAppAllowEmptyInitData bool
 	TelegramWebAppDebugUserID        int64
 	TelegramWebAppDebugUsername      string
@@ -49,22 +49,28 @@ type Config struct {
 	RedisDB       int
 
 	// OKX DEX API
-	OKXDexAPIURL           string
-	OKXAPIKey              string
-	OKXSecretKey           string
-	OKXPassphrase          string
-	OKXSwapRouter          string
-	OKXTokenApproveAddress string // OKX DEX 的 TokenApprove 合约地址
-	OKXDebug               bool
+	OKXDexAPIURL              string
+	OKXAPIKey                 string
+	OKXSecretKey              string
+	OKXPassphrase             string
+	OKXSwapRouter             string
+	OKXTokenApproveAddress    string // OKX DEX 的 TokenApprove 合约地址
+	OKXDebug                  bool
+	OKXSwapGasLimitMultiplier float64
+	OKXSwapGasLimitMin        uint64
+	OKXSwapGasLimitMax        uint64
 
 	// ClickHouse
-	ClickHouseAddr     string
-	ClickHouseDB       string
-	ClickHouseUser     string
-	ClickHousePassword string
-	ClickHouseProtocol string // native|http (optional; auto-detected when empty)
-	ClickHouseDebug    bool
-	ClickHouseResetAll bool
+	ClickHouseAddr               string
+	ClickHouseDB                 string
+	ClickHouseUser               string
+	ClickHousePassword           string
+	ClickHouseProtocol           string // native|http (optional; auto-detected when empty)
+	ClickHouseDebug              bool
+	ClickHouseResetAll           bool
+	ClickHouseDialTimeoutSeconds int
+	ClickHouseMaxOpenConns       int
+	ClickHouseMaxIdleConns       int
 
 	// Contracts
 	ZapV3Address string
@@ -80,6 +86,10 @@ type Config struct {
 	// Liquidity exit balance sync (RPC lag handling)
 	ExitTokenSyncTimeoutSeconds int
 	ExitTokenSyncPollMillis     int
+
+	// Workers / Concurrency
+	WorkerMaxParallelUsers int // max concurrent per-user jobs (strategy monitor, AutoLP user eval)
+	WalletTxMaxParallel    int // max concurrent wallets doing on-chain tx (per-wallet is still serialized)
 
 	// Token Addresses
 	USDTAddress      string
@@ -201,6 +211,12 @@ func LoadConfig() error {
 	autoLPGuardNoExitMinFeeRate5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_NO_EXIT_MIN_FEE_RATE_5M", "0")), 64)
 	autoLPGuardLowFeeRate5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_LOW_FEE_RATE_5M", "0")), 64)
 	autoLPEmergencyGasMult, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_EMERGENCY_GAS_MULTIPLIER", "2.0")), 64)
+	okxSwapGasLimitMult, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("OKX_SWAP_GAS_LIMIT_MULTIPLIER", "1.30")), 64)
+	okxSwapGasLimitMin, _ := strconv.ParseUint(strings.TrimSpace(getEnv("OKX_SWAP_GAS_LIMIT_MIN", "250000")), 10, 64)
+	okxSwapGasLimitMax, _ := strconv.ParseUint(strings.TrimSpace(getEnv("OKX_SWAP_GAS_LIMIT_MAX", "10000000")), 10, 64)
+	clickhouseDialTimeoutSeconds, _ := strconv.Atoi(strings.TrimSpace(getEnv("CLICKHOUSE_DIAL_TIMEOUT_SECONDS", "60")))
+	clickhouseMaxOpenConns, _ := strconv.Atoi(strings.TrimSpace(getEnv("CLICKHOUSE_MAX_OPEN_CONNS", "50")))
+	clickhouseMaxIdleConns, _ := strconv.Atoi(strings.TrimSpace(getEnv("CLICKHOUSE_MAX_IDLE_CONNS", "10")))
 	autoLPDebug := getEnvBool("AUTO_LP_DEBUG", false)
 	autoLPWidthSideways, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_SIDEWAYS_PERCENT", "2.0")), 64)
 	autoLPWidthMildUp, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_MILD_UPTREND_PERCENT", "5.0")), 64)
@@ -215,14 +231,35 @@ func LoadConfig() error {
 	smartLPScanTimeoutSeconds, _ := strconv.Atoi(strings.TrimSpace(getEnv("SMART_LP_SCAN_TIMEOUT_SECONDS", "600")))
 	exitTokenSyncTimeoutSeconds, _ := strconv.Atoi(strings.TrimSpace(getEnv("EXIT_TOKEN_SYNC_TIMEOUT_SECONDS", "30")))
 	exitTokenSyncPollMillis, _ := strconv.Atoi(strings.TrimSpace(getEnv("EXIT_TOKEN_SYNC_POLL_MILLIS", "500")))
+	workerMaxParallelUsers, _ := strconv.Atoi(strings.TrimSpace(getEnv("WORKER_MAX_PARALLEL_USERS", "16")))
+	walletTxMaxParallel, _ := strconv.Atoi(strings.TrimSpace(getEnv("WALLET_TX_MAX_PARALLEL", "8")))
 	webAppDebugUserID, _ := strconv.ParseInt(strings.TrimSpace(getEnv("TELEGRAM_WEBAPP_DEBUG_USER_ID", "0")), 10, 64)
 	webAppDebugUsername := strings.TrimSpace(getEnv("TELEGRAM_WEBAPP_DEBUG_USERNAME", "local_debug"))
 
+	if workerMaxParallelUsers <= 0 {
+		workerMaxParallelUsers = 1
+	}
+	if walletTxMaxParallel <= 0 {
+		walletTxMaxParallel = 1
+	}
+	if clickhouseDialTimeoutSeconds <= 0 {
+		clickhouseDialTimeoutSeconds = 60
+	}
+	if clickhouseMaxIdleConns <= 0 {
+		clickhouseMaxIdleConns = 10
+	}
+	if clickhouseMaxOpenConns <= 0 {
+		clickhouseMaxOpenConns = clickhouseMaxIdleConns + 10
+	}
+	if clickhouseMaxOpenConns < clickhouseMaxIdleConns {
+		clickhouseMaxOpenConns = clickhouseMaxIdleConns
+	}
+
 	AppConfig = &Config{
 		// Telegram
-		TelegramBotToken:       getEnv("TELEGRAM_BOT_TOKEN", ""),
-		TelegramWebAppURL:      normalizeTelegramWebAppURL(getEnv("TELEGRAM_WEBAPP_URL", "")),
-		TelegramMenuButtonMode: normalizeTelegramMenuButtonMode(getEnv("TELEGRAM_MENU_BUTTON_MODE", "commands")),
+		TelegramBotToken:                 getEnv("TELEGRAM_BOT_TOKEN", ""),
+		TelegramWebAppURL:                normalizeTelegramWebAppURL(getEnv("TELEGRAM_WEBAPP_URL", "")),
+		TelegramMenuButtonMode:           normalizeTelegramMenuButtonMode(getEnv("TELEGRAM_MENU_BUTTON_MODE", "commands")),
 		TelegramWebAppAllowEmptyInitData: getEnvBool("TELEGRAM_WEBAPP_ALLOW_EMPTY_INITDATA", false),
 		TelegramWebAppDebugUserID:        webAppDebugUserID,
 		TelegramWebAppDebugUsername:      webAppDebugUsername,
@@ -255,22 +292,28 @@ func LoadConfig() error {
 		RedisDB:       redisDB,
 
 		// OKX DEX API
-		OKXDexAPIURL:           getEnv("OKX_DEX_API_URL", "https://www.okx.com/api/v6/dex/aggregator"),
-		OKXAPIKey:              getEnv("OKX_API_KEY", ""),
-		OKXSecretKey:           getEnv("OKX_SECRET_KEY", ""),
-		OKXPassphrase:          getEnv("OKX_PASSPHRASE", ""),
-		OKXSwapRouter:          getEnv("OKX_SWAP_ROUTER", ""),
-		OKXTokenApproveAddress: getEnv("OKX_TOKEN_APPROVE_ADDRESS", ""),
-		OKXDebug:               getEnvBool("OKX_DEBUG", false),
+		OKXDexAPIURL:              getEnv("OKX_DEX_API_URL", "https://www.okx.com/api/v6/dex/aggregator"),
+		OKXAPIKey:                 getEnv("OKX_API_KEY", ""),
+		OKXSecretKey:              getEnv("OKX_SECRET_KEY", ""),
+		OKXPassphrase:             getEnv("OKX_PASSPHRASE", ""),
+		OKXSwapRouter:             getEnv("OKX_SWAP_ROUTER", ""),
+		OKXTokenApproveAddress:    getEnv("OKX_TOKEN_APPROVE_ADDRESS", ""),
+		OKXDebug:                  getEnvBool("OKX_DEBUG", false),
+		OKXSwapGasLimitMultiplier: okxSwapGasLimitMult,
+		OKXSwapGasLimitMin:        okxSwapGasLimitMin,
+		OKXSwapGasLimitMax:        okxSwapGasLimitMax,
 
 		// ClickHouse
-		ClickHouseAddr:     getEnv("CLICKHOUSE_ADDR", "localhost:9000"),
-		ClickHouseDB:       getEnv("CLICKHOUSE_DB", "default"),
-		ClickHouseUser:     getEnv("CLICKHOUSE_USER", "default"),
-		ClickHousePassword: getEnv("CLICKHOUSE_PASSWORD", ""),
-		ClickHouseProtocol: strings.ToLower(strings.TrimSpace(getEnv("CLICKHOUSE_PROTOCOL", ""))),
-		ClickHouseDebug:    getEnvBool("CLICKHOUSE_DEBUG", false),
-		ClickHouseResetAll: getEnvBool("CLICKHOUSE_RESET_ALL", false),
+		ClickHouseAddr:               getEnv("CLICKHOUSE_ADDR", "localhost:9000"),
+		ClickHouseDB:                 getEnv("CLICKHOUSE_DB", "default"),
+		ClickHouseUser:               getEnv("CLICKHOUSE_USER", "default"),
+		ClickHousePassword:           getEnv("CLICKHOUSE_PASSWORD", ""),
+		ClickHouseProtocol:           strings.ToLower(strings.TrimSpace(getEnv("CLICKHOUSE_PROTOCOL", ""))),
+		ClickHouseDebug:              getEnvBool("CLICKHOUSE_DEBUG", false),
+		ClickHouseResetAll:           getEnvBool("CLICKHOUSE_RESET_ALL", false),
+		ClickHouseDialTimeoutSeconds: clickhouseDialTimeoutSeconds,
+		ClickHouseMaxOpenConns:       clickhouseMaxOpenConns,
+		ClickHouseMaxIdleConns:       clickhouseMaxIdleConns,
 
 		// Contracts
 		ZapV3Address: getEnv("ZAP_V3_ADDRESS", ""),
@@ -285,6 +328,9 @@ func LoadConfig() error {
 
 		ExitTokenSyncTimeoutSeconds: exitTokenSyncTimeoutSeconds,
 		ExitTokenSyncPollMillis:     exitTokenSyncPollMillis,
+
+		WorkerMaxParallelUsers: workerMaxParallelUsers,
+		WalletTxMaxParallel:    walletTxMaxParallel,
 
 		// Token Addresses
 		USDTAddress:      getEnv("USDT_ADDRESS", "0x55d398326f99059fF775485246999027B3197955"),
@@ -382,6 +428,8 @@ func LoadConfig() error {
 	log.Printf("   - OKX Swap Router: %s", AppConfig.OKXSwapRouter)
 	log.Printf("   - OKX TokenApprove: %s", AppConfig.OKXTokenApproveAddress)
 	log.Printf("   - OKX Debug: %v", AppConfig.OKXDebug)
+	log.Printf("   - OKX Swap GasLimit Multiplier: %.4f", AppConfig.OKXSwapGasLimitMultiplier)
+	log.Printf("   - OKX Swap GasLimit Min/Max: %d/%d", AppConfig.OKXSwapGasLimitMin, AppConfig.OKXSwapGasLimitMax)
 	log.Printf("   - Pancake V3 NPM: %s", AppConfig.PancakeV3PositionManagerAddress)
 	log.Printf("   - Uniswap V3 NPM: %s", AppConfig.UniswapV3PositionManagerAddress)
 	log.Printf("   - BSC RPC URL: %s", AppConfig.BSCRpcURL)
@@ -389,6 +437,8 @@ func LoadConfig() error {
 	log.Printf("   - BSC Chain ID: %d", AppConfig.BSCChainID)
 	log.Printf("   - MySQL: %s@%s:%s/%s", AppConfig.MySQLUser, AppConfig.MySQLHost, AppConfig.MySQLPort, AppConfig.MySQLDatabase)
 	log.Printf("   - Redis: %s:%s (DB: %d)", AppConfig.RedisHost, AppConfig.RedisPort, AppConfig.RedisDB)
+	log.Printf("   - ClickHouse: %s db=%s proto=%s debug=%v", AppConfig.ClickHouseAddr, AppConfig.ClickHouseDB, AppConfig.ClickHouseProtocol, AppConfig.ClickHouseDebug)
+	log.Printf("   - ClickHouse Pool: maxOpen=%d maxIdle=%d dialTimeout=%ds", AppConfig.ClickHouseMaxOpenConns, AppConfig.ClickHouseMaxIdleConns, AppConfig.ClickHouseDialTimeoutSeconds)
 	log.Printf("   - V4 NFT Scan From Block: %d", AppConfig.V4NFTScanFromBlock)
 	log.Printf("   - Realtime V3 NFT Scan: %v", AppConfig.RealtimeV3NFTScan)
 	log.Printf("   - Realtime V3 NFT Scan Max: %d", AppConfig.RealtimeV3NFTScanMax)

@@ -37,10 +37,14 @@ func (s *StrategyService) processNoLiquidityTask(task *models.StrategyTask) bool
 	}
 
 	now := time.Now()
-	if last, ok := s.lastLiquidityCheck[task.ID]; ok && now.Sub(last) < strategyLiquidityCheckInterval {
+	s.lastLiquidityMu.Lock()
+	last, ok := s.lastLiquidityCheck[task.ID]
+	if ok && now.Sub(last) < strategyLiquidityCheckInterval {
+		s.lastLiquidityMu.Unlock()
 		return false
 	}
 	s.lastLiquidityCheck[task.ID] = now
+	s.lastLiquidityMu.Unlock()
 
 	version := strings.ToLower(strings.TrimSpace(task.PoolVersion))
 	tokenID := ""

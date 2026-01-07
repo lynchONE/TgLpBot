@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { copyToClipboard, hapticNotification, hapticImpact } from '../lib/telegram';
+import uniswapIcon from '../image/uniswap.svg';
+import pancakeIcon from '../image/pancake.svg';
 
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -12,6 +14,69 @@ const icons = {
     chart: 'M5 3v18h18v-2H7V3H5zm5 14H8v-6h2v6zm4 0h-2V7h2v10zm2 0h2v-4h-2v4z',
     arrowUp: 'M5.293 9.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 7.414V15a1 1 0 11-2 0V7.414L6.707 9.707a1 1 0 01-1.414 0z',
     arrowDown: 'M14.707 10.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 12.586V5a1 1 0 012 0v7.586l2.293-2.293a1 1 0 011.414 0z',
+};
+
+// Uniswap 图标组件 - 使用官方图标
+const UniswapIcon = ({ className = '' }) => (
+    <img src={uniswapIcon} alt="Uniswap" className={className} />
+);
+
+// PancakeSwap 图标组件 - 使用官方图标
+const PancakeIcon = ({ className = '' }) => (
+    <img src={pancakeIcon} alt="PancakeSwap" className={className} />
+);
+
+// 获取交易所图标和样式配置
+function getDexIconConfig(factoryName) {
+    const name = String(factoryName || '').toLowerCase();
+
+    if (name.includes('uniswap')) {
+        // 提取版本号
+        const versionMatch = name.match(/v(\d+)/i);
+        const version = versionMatch ? `V${versionMatch[1]}` : '';
+        return {
+            icon: UniswapIcon,
+            label: version,
+            bgClass: 'bg-pink-500/15',
+            textClass: 'text-pink-600 dark:text-pink-300',
+            ringClass: 'ring-pink-500/25 dark:ring-pink-500/30',
+        };
+    }
+
+    if (name.includes('pancake') || name.includes('pcs')) {
+        const versionMatch = name.match(/v(\d+)/i);
+        const version = versionMatch ? `V${versionMatch[1]}` : '';
+        return {
+            icon: PancakeIcon,
+            label: version,
+            bgClass: 'bg-amber-500/15',
+            textClass: 'text-amber-700 dark:text-amber-300',
+            ringClass: 'ring-amber-500/25 dark:ring-amber-500/30',
+        };
+    }
+
+    // 默认样式（其他交易所）
+    return {
+        icon: null,
+        label: factoryName || 'DEX',
+        bgClass: 'bg-violet-500/15',
+        textClass: 'text-violet-700 dark:text-violet-300',
+        ringClass: 'ring-violet-500/25 dark:ring-violet-500/30',
+    };
+}
+
+// 交易所标签组件
+const DexBadge = ({ pool }) => {
+    const factoryName = String(pool?.factory_name || '').trim();
+    const config = getDexIconConfig(factoryName || dexLabel(pool));
+    const IconComponent = config.icon;
+
+    return (
+        <div className={`inline-flex items-center gap-1 rounded-lg ${config.bgClass} px-2 py-0.5 text-[11px] font-semibold ${config.textClass} ring-1 ${config.ringClass}`}>
+            {IconComponent && <IconComponent className="w-4 h-4" />}
+            <span>{config.label || dexLabel(pool)}</span>
+        </div>
+    );
 };
 
 const usdCompact = new Intl.NumberFormat('en-US', {
@@ -312,9 +377,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
             </div>
 
             <div className="mt-3 flex items-center justify-between gap-2">
-                <div className="inline-flex items-center rounded-lg bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-500/25 dark:bg-amber-500/15 dark:text-amber-200 dark:ring-amber-500/30">
-                    {dexLabel(pool)}
-                </div>
+                <DexBadge pool={pool} />
                 <button
                     type="button"
                     onClick={() => onOpenPosition?.(pool)}

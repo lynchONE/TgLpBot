@@ -711,6 +711,7 @@ func (s *SmartLPMonitor) insertEvents(ctx context.Context, events []smartLPEvent
 	if err != nil {
 		return err
 	}
+	defer func() { _ = batch.Abort() }()
 
 	for _, ev := range events {
 		if err := batch.Append(
@@ -746,6 +747,8 @@ func isRetryableClickHouseError(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	switch {
+	case strings.Contains(msg, "acquire conn timeout"):
+		return true
 	case strings.Contains(msg, "eof"):
 		return true
 	case strings.Contains(msg, "connection reset"):

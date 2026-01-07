@@ -4,6 +4,7 @@ import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/service/liquidity"
+	"TgLpBot/service/txexec"
 	"errors"
 	"fmt"
 	"log"
@@ -122,6 +123,52 @@ func (s *StrategyService) processExitRetry(task *models.StrategyTask) bool {
 		return true
 	}
 
+	exec := txexec.Default()
+	if exec == nil {
+		return true
+	}
+	if ok, err := exec.TryRunUser(task.UserID, func(_ string) {
+		s.runExitRetryAttempt(task.ID, task.UserID)
+	}); err != nil {
+		log.Printf("[Strategy] schedule exit retry failed: task_id=%d user_id=%d err=%v", task.ID, task.UserID, err)
+	} else if !ok {
+		// Wallet is busy or global tx slots are full; try again next cycle.
+	}
+
+	return true
+}
+
+func (s *StrategyService) runExitRetryAttempt(taskID uint, userID uint) {
+	if taskID == 0 || userID == 0 {
+		return
+	}
+
+	var task models.StrategyTask
+	if err := database.DB.Where("id = ? AND user_id = ?", taskID, userID).First(&task).Error; err != nil {
+		log.Printf("[Strategy] load task for exit retry failed: task_id=%d user_id=%d err=%v", taskID, userID, err)
+		return
+	}
+
+	action := strings.TrimSpace(task.ExitPendingAction)
+	if action == "" {
+		return
+	}
+
+	// After we give up, only a manual stop can reset and retry again.
+	if task.ExitGiveUpAt != nil && action != ExitActionManualStop {
+		return
+	}
+
+	now := time.Now()
+	if task.ExitNextRetryAt != nil && now.Before(*task.ExitNextRetryAt) {
+		return
+	}
+
+	if task.ExitRetryCount >= exitMaxAttempts {
+		s.giveUpExitRetry(&task, fmt.Errorf("max attempts reached"))
+		return
+	}
+
 	attempt := task.ExitRetryCount + 1
 	pendingReason := strings.TrimSpace(task.ExitPendingReason)
 	reason := pendingReason
@@ -143,35 +190,32 @@ func (s *StrategyService) processExitRetry(task *models.StrategyTask) bool {
 		}
 	}
 
-	txHashes, err := s.liquidityService.ExitTaskToUSDTWithOptions(task.UserID, task, true, liquidity.TxOptions{GasMultiplier: task.ExitGasMultiplier})
+	txHashes, err := s.liquidityService.ExitTaskToUSDTWithOptions(task.UserID, &task, true, liquidity.TxOptions{GasMultiplier: task.ExitGasMultiplier})
 	if err != nil {
-		s.onExitAttemptFailed(task, attempt, err, txHashes)
-		return true
+		s.onExitAttemptFailed(&task, attempt, err, txHashes)
+		return
 	}
 
 	// Success: clear retry state and continue with post-exit action.
-	s.clearExitRetryState(task)
+	s.clearExitRetryState(&task)
 
 	switch action {
 	case ExitActionRebalance:
-		s.executeRebalanceAfterExit(task, now)
+		s.executeRebalanceAfterExit(&task, now)
 	case ExitActionStopLoss:
-		s.finishStopAfterExit(task, now, reason, txHashes)
+		s.finishStopAfterExit(&task, now, reason, txHashes)
 	// ExitActionSwitch 已删除 - 换仓功能已禁用
 	case ExitActionCooldown:
-		s.finishCooldownAfterExit(task, now, reason, txHashes)
+		s.finishCooldownAfterExit(&task, now, reason, txHashes)
 	case ExitActionManualStop:
 		title := "🛑 手动停止"
 		if pendingReason != "" {
 			title = pendingReason
 		}
-		s.finishStopAfterExit(task, now, title, txHashes)
+		s.finishStopAfterExit(&task, now, title, txHashes)
 	default:
-		// Unknown action, keep task running.
 		log.Printf("[Strategy] 任务 #%d 撤出成功，但未知 exit_pending_action=%q，已清理重试状态", task.ID, action)
 	}
-
-	return true
 }
 
 // processRebalanceRetry handles re-entry retries after a successful exit.
@@ -186,11 +230,43 @@ func (s *StrategyService) processRebalanceRetry(task *models.StrategyTask) bool 
 		return true
 	}
 
-	attempt := task.RebalanceRetryCount + 1
-	if err := s.attemptRebalanceEnter(task, now); err != nil {
-		s.scheduleRebalanceRetry(task, attempt, err)
+	exec := txexec.Default()
+	if exec == nil {
+		return true
+	}
+	if ok, err := exec.TryRunUser(task.UserID, func(_ string) {
+		s.runRebalanceRetryAttempt(task.ID, task.UserID)
+	}); err != nil {
+		log.Printf("[Strategy] schedule rebalance retry failed: task_id=%d user_id=%d err=%v", task.ID, task.UserID, err)
+	} else if !ok {
+		// Wallet is busy or global tx slots are full; try again next cycle.
 	}
 	return true
+}
+
+func (s *StrategyService) runRebalanceRetryAttempt(taskID uint, userID uint) {
+	if taskID == 0 || userID == 0 {
+		return
+	}
+
+	var task models.StrategyTask
+	if err := database.DB.Where("id = ? AND user_id = ?", taskID, userID).First(&task).Error; err != nil {
+		log.Printf("[Strategy] load task for rebalance retry failed: task_id=%d user_id=%d err=%v", taskID, userID, err)
+		return
+	}
+	if !task.RebalancePending {
+		return
+	}
+
+	now := time.Now()
+	if task.RebalanceNextRetryAt != nil && now.Before(*task.RebalanceNextRetryAt) {
+		return
+	}
+
+	attempt := task.RebalanceRetryCount + 1
+	if err := s.attemptRebalanceEnter(&task, now); err != nil {
+		s.scheduleRebalanceRetry(&task, attempt, err)
+	}
 }
 
 func (s *StrategyService) markRebalancePending(task *models.StrategyTask, now time.Time) {

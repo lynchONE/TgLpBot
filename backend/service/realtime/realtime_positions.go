@@ -57,6 +57,12 @@ type RealtimePositionsService struct {
 	v4ScanMu    sync.RWMutex
 	v4ScanCache map[string]cachedV4TokenIDs
 
+	v4FeeMu    sync.RWMutex
+	v4FeeCache map[string]cachedV4FeeGrowthGlobals
+
+	v4TickFeeMu    sync.RWMutex
+	v4TickFeeCache map[string]cachedV4TickFeeGrowthOutside
+
 	v3FeeMu    sync.RWMutex
 	v3FeeCache map[string]cachedV3FeeGrowthGlobals
 
@@ -120,6 +126,20 @@ type cachedV3TickFeeGrowthOutside struct {
 	expires     time.Time
 }
 
+type cachedV4FeeGrowthGlobals struct {
+	global0   *big.Int
+	global1   *big.Int
+	updatedAt time.Time
+	expires   time.Time
+}
+
+type cachedV4TickFeeGrowthOutside struct {
+	fee0      *big.Int
+	fee1      *big.Int
+	updatedAt time.Time
+	expires   time.Time
+}
+
 func NewRealtimePositionsService() *RealtimePositionsService {
 	return &RealtimePositionsService{
 		walletService:  wallet.NewWalletService(),
@@ -132,6 +152,8 @@ func NewRealtimePositionsService() *RealtimePositionsService {
 		v3Pool:         make(map[string]cachedV3PoolAddress),
 		v4Slot0:        make(map[string]cachedV4Slot0),
 		v4ScanCache:    make(map[string]cachedV4TokenIDs),
+		v4FeeCache:     make(map[string]cachedV4FeeGrowthGlobals),
+		v4TickFeeCache: make(map[string]cachedV4TickFeeGrowthOutside),
 		v3FeeCache:     make(map[string]cachedV3FeeGrowthGlobals),
 		v3TickFeeCache: make(map[string]cachedV3TickFeeGrowthOutside),
 	}
@@ -1101,9 +1123,33 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 	if v4pos != nil {
 		owed0 = cloneBig(v4pos.TokensOwed0)
 		owed1 = cloneBig(v4pos.TokensOwed1)
-		if fee0, fee1, feeErr := pool.CalcV4UnclaimedFees(task.PoolId, currentTick, v4pos); feeErr == nil && fee0 != nil && fee1 != nil {
+		if fee0, fee1, usedStaleFees, feeAge, feeErr := s.calcV4UnclaimedFeesCached(stateView, poolManager, task.PoolId, currentTick, v4pos); fee0 != nil && fee1 != nil {
 			owed0 = fee0
 			owed1 = fee1
+			if feeErr != nil {
+				if usedStaleFees {
+					msg := fmt.Sprintf("V4 手续费 RPC 限流/失败，已使用缓存（%ds 前）。建议调大自动刷新或更换 BSC RPC：tokenId=%s", int(feeAge.Seconds()), tokenId)
+					if warn == "" {
+						warn = msg
+					} else {
+						warn = warn + "; " + msg
+					}
+				} else {
+					msg := fmt.Sprintf("V4 手续费计算失败（显示为 TokensOwed，可能为 0）：tokenId=%s", tokenId)
+					if warn == "" {
+						warn = msg
+					} else {
+						warn = warn + "; " + msg
+					}
+				}
+			}
+		} else if feeErr != nil {
+			msg := fmt.Sprintf("V4 手续费计算失败（显示为 TokensOwed，可能为 0）：tokenId=%s", tokenId)
+			if warn == "" {
+				warn = msg
+			} else {
+				warn = warn + "; " + msg
+			}
 		}
 	}
 
@@ -1510,12 +1556,187 @@ func (s *RealtimePositionsService) calcV3UnclaimedFeesCached(poolAddr common.Add
 	return owed0, owed1, usedStale, age, err
 }
 
-func (s *RealtimePositionsService) getV4Slot0(stateView common.Address, poolManager common.Address, poolID string) (*big.Int, int, bool, time.Duration, error) {
-	now := time.Now()
+func normalizeV4PoolIDKey(poolID string) string {
 	poolIDKey := strings.ToLower(strings.TrimSpace(poolID))
 	if poolIDKey != "" && !strings.HasPrefix(poolIDKey, "0x") {
 		poolIDKey = "0x" + poolIDKey
 	}
+	return poolIDKey
+}
+
+func (s *RealtimePositionsService) getV4FeeGrowthGlobals(stateView common.Address, poolManager common.Address, poolID string) (*big.Int, *big.Int, bool, time.Duration, error) {
+	if (stateView == common.Address{}) || (poolManager == common.Address{}) {
+		return nil, nil, false, 0, fmt.Errorf("V4 stateView/poolManager missing")
+	}
+
+	now := time.Now()
+	poolIDKey := normalizeV4PoolIDKey(poolID)
+	key := strings.ToLower(stateView.Hex()) + "|" + strings.ToLower(poolManager.Hex()) + "|" + poolIDKey
+
+	s.v4FeeMu.RLock()
+	if c, ok := s.v4FeeCache[key]; ok && c.global0 != nil && c.global1 != nil && c.expires.After(now) {
+		g0 := new(big.Int).Set(c.global0)
+		g1 := new(big.Int).Set(c.global1)
+		s.v4FeeMu.RUnlock()
+		return g0, g1, false, 0, nil
+	}
+
+	var stale0 *big.Int
+	var stale1 *big.Int
+	var staleAt time.Time
+	if c, ok := s.v4FeeCache[key]; ok && c.global0 != nil && c.global1 != nil {
+		stale0 = new(big.Int).Set(c.global0)
+		stale1 = new(big.Int).Set(c.global1)
+		staleAt = c.updatedAt
+	}
+	s.v4FeeMu.RUnlock()
+
+	g0, g1, err := blockchain.GetV4PoolFeeGrowthGlobals(stateView, poolManager, poolID)
+	if err == nil && g0 != nil && g1 != nil {
+		s.v4FeeMu.Lock()
+		s.v4FeeCache[key] = cachedV4FeeGrowthGlobals{
+			global0:   new(big.Int).Set(g0),
+			global1:   new(big.Int).Set(g1),
+			updatedAt: now,
+			expires:   now.Add(2 * time.Second),
+		}
+		s.v4FeeMu.Unlock()
+		return g0, g1, false, 0, nil
+	}
+
+	// Best-effort fallback (keeps UI usable when RPC is rate-limited).
+	if stale0 != nil && stale1 != nil && !staleAt.IsZero() && now.Sub(staleAt) <= 30*time.Second {
+		return stale0, stale1, true, now.Sub(staleAt), err
+	}
+	return nil, nil, false, 0, err
+}
+
+func (s *RealtimePositionsService) getV4TickFeeGrowthOutside(stateView common.Address, poolManager common.Address, poolID string, tick int) (*big.Int, *big.Int, bool, time.Duration, error) {
+	if (stateView == common.Address{}) || (poolManager == common.Address{}) {
+		return nil, nil, false, 0, fmt.Errorf("V4 stateView/poolManager missing")
+	}
+
+	now := time.Now()
+	poolIDKey := normalizeV4PoolIDKey(poolID)
+	key := strings.ToLower(stateView.Hex()) + "|" + strings.ToLower(poolManager.Hex()) + "|" + poolIDKey + "|" + strconv.Itoa(tick)
+
+	s.v4TickFeeMu.RLock()
+	if c, ok := s.v4TickFeeCache[key]; ok && c.fee0 != nil && c.fee1 != nil && c.expires.After(now) {
+		f0 := new(big.Int).Set(c.fee0)
+		f1 := new(big.Int).Set(c.fee1)
+		s.v4TickFeeMu.RUnlock()
+		return f0, f1, false, 0, nil
+	}
+
+	var stale0 *big.Int
+	var stale1 *big.Int
+	var staleAt time.Time
+	if c, ok := s.v4TickFeeCache[key]; ok && c.fee0 != nil && c.fee1 != nil {
+		stale0 = new(big.Int).Set(c.fee0)
+		stale1 = new(big.Int).Set(c.fee1)
+		staleAt = c.updatedAt
+	}
+	s.v4TickFeeMu.RUnlock()
+
+	f0, f1, err := blockchain.GetV4TickFeeGrowthOutside(stateView, poolManager, poolID, tick)
+	if err == nil && f0 != nil && f1 != nil {
+		s.v4TickFeeMu.Lock()
+		s.v4TickFeeCache[key] = cachedV4TickFeeGrowthOutside{
+			fee0:      new(big.Int).Set(f0),
+			fee1:      new(big.Int).Set(f1),
+			updatedAt: now,
+			expires:   now.Add(20 * time.Second),
+		}
+		s.v4TickFeeMu.Unlock()
+		return f0, f1, false, 0, nil
+	}
+
+	// Best-effort fallback (keeps UI usable when RPC is rate-limited).
+	if stale0 != nil && stale1 != nil && !staleAt.IsZero() && now.Sub(staleAt) <= 2*time.Minute {
+		return stale0, stale1, true, now.Sub(staleAt), err
+	}
+	return nil, nil, false, 0, err
+}
+
+func (s *RealtimePositionsService) calcV4UnclaimedFeesCached(stateView common.Address, poolManager common.Address, poolID string, currentTick int, pos *blockchain.V4PositionInfo) (*big.Int, *big.Int, bool, time.Duration, error) {
+	if pos == nil {
+		return nil, nil, false, 0, fmt.Errorf("position info missing")
+	}
+
+	owed0 := cloneBig(pos.TokensOwed0)
+	owed1 := cloneBig(pos.TokensOwed1)
+
+	if pos.Liquidity == nil || pos.Liquidity.Sign() == 0 {
+		return owed0, owed1, false, 0, nil
+	}
+	if pos.FeeGrowthInside0LastX128 == nil || pos.FeeGrowthInside1LastX128 == nil {
+		return owed0, owed1, false, 0, fmt.Errorf("position feeGrowthInside last missing")
+	}
+
+	global0, global1, staleG, ageG, errG := s.getV4FeeGrowthGlobals(stateView, poolManager, poolID)
+	if errG != nil && (global0 == nil || global1 == nil) {
+		return nil, nil, false, 0, fmt.Errorf("read V4 feeGrowthGlobal failed: %w", errG)
+	}
+	lower0, lower1, staleL, ageL, errL := s.getV4TickFeeGrowthOutside(stateView, poolManager, poolID, pos.TickLower)
+	if errL != nil && (lower0 == nil || lower1 == nil) {
+		return nil, nil, false, 0, fmt.Errorf("read V4 tickLower feeGrowthOutside failed: %w", errL)
+	}
+	upper0, upper1, staleU, ageU, errU := s.getV4TickFeeGrowthOutside(stateView, poolManager, poolID, pos.TickUpper)
+	if errU != nil && (upper0 == nil || upper1 == nil) {
+		return nil, nil, false, 0, fmt.Errorf("read V4 tickUpper feeGrowthOutside failed: %w", errU)
+	}
+
+	usedStale := staleG || staleL || staleU
+	age := time.Duration(0)
+	if staleG && ageG > age {
+		age = ageG
+	}
+	if staleL && ageL > age {
+		age = ageL
+	}
+	if staleU && ageU > age {
+		age = ageU
+	}
+
+	inside0 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global0, lower0, upper0)
+	inside1 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global1, lower1, upper1)
+	if inside0.Cmp(global0) > 0 || inside1.Cmp(global1) > 0 {
+		return nil, nil, usedStale, age, fmt.Errorf("invalid feeGrowthInside (pool_id=%s)", poolID)
+	}
+
+	last0 := cloneBig(pos.FeeGrowthInside0LastX128)
+	last1 := cloneBig(pos.FeeGrowthInside1LastX128)
+
+	delta0 := new(big.Int).Sub(inside0, last0)
+	if delta0.Sign() < 0 {
+		delta0 = big.NewInt(0)
+	}
+	delta1 := new(big.Int).Sub(inside1, last1)
+	if delta1.Sign() < 0 {
+		delta1 = big.NewInt(0)
+	}
+
+	extra0 := mulDivFloor(delta0, pos.Liquidity, q128)
+	extra1 := mulDivFloor(delta1, pos.Liquidity, q128)
+	owed0.Add(owed0, extra0)
+	owed1.Add(owed1, extra1)
+
+	var err error
+	if usedStale {
+		if errG != nil {
+			err = errG
+		} else if errL != nil {
+			err = errL
+		} else if errU != nil {
+			err = errU
+		}
+	}
+	return owed0, owed1, usedStale, age, err
+}
+
+func (s *RealtimePositionsService) getV4Slot0(stateView common.Address, poolManager common.Address, poolID string) (*big.Int, int, bool, time.Duration, error) {
+	now := time.Now()
+	poolIDKey := normalizeV4PoolIDKey(poolID)
 	key := strings.ToLower(stateView.Hex()) + "|" + strings.ToLower(poolManager.Hex()) + "|" + poolIDKey
 
 	s.v4Slot0Mu.RLock()

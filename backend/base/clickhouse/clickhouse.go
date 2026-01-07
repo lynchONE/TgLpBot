@@ -69,6 +69,33 @@ func NewClickHouseService(addr, db, user, password, protocol string, debug bool)
 		}
 	}
 
+	maxOpenConns := 50
+	maxIdleConns := 10
+	dialTimeout := 60 * time.Second
+	if config.AppConfig != nil {
+		if config.AppConfig.ClickHouseMaxOpenConns > 0 {
+			maxOpenConns = config.AppConfig.ClickHouseMaxOpenConns
+		}
+		if config.AppConfig.ClickHouseMaxIdleConns > 0 {
+			maxIdleConns = config.AppConfig.ClickHouseMaxIdleConns
+		}
+		if config.AppConfig.ClickHouseDialTimeoutSeconds > 0 {
+			dialTimeout = time.Duration(config.AppConfig.ClickHouseDialTimeoutSeconds) * time.Second
+		}
+	}
+	if maxIdleConns < 0 {
+		maxIdleConns = 0
+	}
+	if maxOpenConns <= 0 {
+		maxOpenConns = maxIdleConns + 10
+	}
+	if maxOpenConns < maxIdleConns {
+		maxOpenConns = maxIdleConns
+	}
+	if dialTimeout <= 0 {
+		dialTimeout = 60 * time.Second
+	}
+
 	conn, err := clickhouse.Open(&clickhouse.Options{
 		Addr: []string{addr},
 		Auth: clickhouse.Auth{
@@ -79,8 +106,9 @@ func NewClickHouseService(addr, db, user, password, protocol string, debug bool)
 		Protocol:      chProtocol,
 		TransportFunc: transportFunc,
 		Debug:         debug,
-		MaxOpenConns:  20,
-		MaxIdleConns:  5,
+		DialTimeout:   dialTimeout,
+		MaxOpenConns:  maxOpenConns,
+		MaxIdleConns:  maxIdleConns,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open clickhouse connection: %w", err)

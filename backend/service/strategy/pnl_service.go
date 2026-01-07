@@ -12,18 +12,68 @@ import (
 	"log"
 	"math"
 	"math/big"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 )
 
-var q96 = new(big.Int).Lsh(big.NewInt(1), 96)
+var (
+	q96       = new(big.Int).Lsh(big.NewInt(1), 96)
+	q128      = new(big.Int).Lsh(big.NewInt(1), 128)
+	modUint256 = new(big.Int).Lsh(big.NewInt(1), 256)
+)
 
-type PnLService struct{}
+type cachedV3FeeGrowthGlobals struct {
+	global0   *big.Int
+	global1   *big.Int
+	updatedAt time.Time
+	expires   time.Time
+}
+
+type cachedV3TickFeeGrowthOutside struct {
+	fee0        *big.Int
+	fee1        *big.Int
+	initialized bool
+	updatedAt   time.Time
+	expires     time.Time
+}
+
+type cachedV4FeeGrowthGlobals struct {
+	global0   *big.Int
+	global1   *big.Int
+	updatedAt time.Time
+	expires   time.Time
+}
+
+type cachedV4TickFeeGrowthOutside struct {
+	fee0      *big.Int
+	fee1      *big.Int
+	updatedAt time.Time
+	expires   time.Time
+}
+
+type PnLService struct {
+	v3FeeMu        sync.RWMutex
+	v3FeeCache     map[string]cachedV3FeeGrowthGlobals
+	v3TickFeeMu    sync.RWMutex
+	v3TickFeeCache map[string]cachedV3TickFeeGrowthOutside
+
+	v4FeeMu        sync.RWMutex
+	v4FeeCache     map[string]cachedV4FeeGrowthGlobals
+	v4TickFeeMu    sync.RWMutex
+	v4TickFeeCache map[string]cachedV4TickFeeGrowthOutside
+}
 
 func NewPnLService() *PnLService {
-	return &PnLService{}
+	return &PnLService{
+		v3FeeCache:     make(map[string]cachedV3FeeGrowthGlobals),
+		v3TickFeeCache: make(map[string]cachedV3TickFeeGrowthOutside),
+		v4FeeCache:     make(map[string]cachedV4FeeGrowthGlobals),
+		v4TickFeeCache: make(map[string]cachedV4TickFeeGrowthOutside),
+	}
 }
 
 type PnLInfo struct {
@@ -254,10 +304,17 @@ func (s *PnLService) getV3CurrentValue(task *models.StrategyTask) (totalVal, fee
 
 	fees0 := cloneBig(pos.TokensOwed0)
 	fees1 := cloneBig(pos.TokensOwed1)
-	if fee0, fee1, feeErr := pool.CalcV3UnclaimedFees(poolAddr, currentTick, pos); feeErr == nil {
+	if fee0, fee1, usedStale, age, feeErr := s.calcV3UnclaimedFeesCached(poolAddr, currentTick, pos); fee0 != nil && fee1 != nil {
 		fees0 = fee0
 		fees1 = fee1
-	} else {
+		if feeErr != nil {
+			if usedStale {
+				log.Printf("[PnL] V3 手续费 RPC 限流/失败，已使用缓存（%ds 前）。tokenId=%s err=%v", int(age.Seconds()), task.V3TokenID, feeErr)
+			} else {
+				log.Printf("[PnL] V3 手续费计算失败(已回退 owed): tokenId=%s err=%v", task.V3TokenID, feeErr)
+			}
+		}
+	} else if feeErr != nil {
 		log.Printf("[PnL] V3 手续费计算失败: tokenId=%s err=%v", task.V3TokenID, feeErr)
 	}
 
@@ -337,11 +394,17 @@ func (s *PnLService) getV4CurrentValue(task *models.StrategyTask) (totalVal, fee
 
 	// 尝试计算实时手续费（如果有仓位信息）
 	if v4pos != nil && v4pos.Liquidity != nil && v4pos.Liquidity.Sign() > 0 {
-		if realFees0, realFees1, feeErr := pool.CalcV4UnclaimedFees(task.PoolId, currentTick, v4pos); feeErr == nil {
+		if realFees0, realFees1, usedStale, age, feeErr := s.calcV4UnclaimedFeesCached(stateView, poolManager, task.PoolId, currentTick, v4pos); realFees0 != nil && realFees1 != nil {
 			fees0 = realFees0
 			fees1 = realFees1
-			log.Printf("[PnL] V4 实时手续费: tokenId=%s fees0=%s fees1=%s", task.V4TokenID, fees0.String(), fees1.String())
-		} else {
+			if feeErr == nil {
+				log.Printf("[PnL] V4 实时手续费: tokenId=%s fees0=%s fees1=%s", task.V4TokenID, fees0.String(), fees1.String())
+			} else if usedStale {
+				log.Printf("[PnL] V4 手续费 RPC 限流/失败，已使用缓存（%ds 前）。tokenId=%s err=%v", int(age.Seconds()), task.V4TokenID, feeErr)
+			} else {
+				log.Printf("[PnL] V4 手续费计算失败(已回退 owed): tokenId=%s err=%v", task.V4TokenID, feeErr)
+			}
+		} else if feeErr != nil {
 			log.Printf("[PnL] V4 手续费计算失败: %v，使用 TokensOwed", feeErr)
 		}
 	}
@@ -375,25 +438,36 @@ func (s *PnLService) calculateUSDTValue(
 	isStable0 := pricing.IsStableSymbol(token0Symbol) || pricing.IsStableAddress(task.Token0Address)
 	isStable1 := pricing.IsStableSymbol(token1Symbol) || pricing.IsStableAddress(task.Token1Address)
 
-	// Determine price relation
-	// sqrtPriceX96 = sqrt(token1/token0) * 2^96
-	// price1to0 = (sqrtPriceX96 / 2^96)^2  (1 token0 = X token1) -> WRONG.
-	// Uniswap: price = token1/token0. So 1 token0 = price token1.
+	dec0 := pricing.GetTokenDecimals(task.Token0Address)
+	dec1 := pricing.GetTokenDecimals(task.Token1Address)
+	if dec0 <= 0 {
+		dec0 = pricing.DefaultTokenDecimals
+	}
+	if dec1 <= 0 {
+		dec1 = pricing.DefaultTokenDecimals
+	}
 
-	p := new(big.Float).SetInt(sqrtPriceX96)
-	q := new(big.Float).SetInt(q96)
-	p.Quo(p, q)
-	p.Mul(p, p) // price = (sqrtX96/Q96)^2. Represents amount of Token1 per 1 Token0.
+	// Determine price relation (human units).
+	// Uniswap: sqrtPriceX96 = sqrt(token1/token0) * 2^96, where token amounts are in raw units.
+	// So: priceRaw = token1_units per 1 token0_unit = (sqrtX96 / 2^96)^2.
+	// Convert to human units: priceHuman = priceRaw * 10^(dec0-dec1).
+	priceToken1PerToken0 := 0.0
+	if sqrtPriceX96 != nil && sqrtPriceX96.Sign() > 0 {
+		p := new(big.Float).SetInt(sqrtPriceX96)
+		q := new(big.Float).SetInt(q96)
+		p.Quo(p, q)
+		p.Mul(p, p) // priceRaw = token1_units per 1 token0_unit
+		priceRaw, _ := p.Float64()
+		priceToken1PerToken0 = priceRaw * math.Pow(10, float64(dec0-dec1))
+	}
 
-	priceToken1PerToken0, _ := p.Float64()
-
-	// Convert wei to float
-	t0 := weiToFloat(total0, 18) // Assume 18 decimals for now (should fetch from token metadata ideally)
-	t1 := weiToFloat(total1, 18)
-	f0 := weiToFloat(fees0, 18)
-	f1 := weiToFloat(fees1, 18)
-	h0 := weiToFloat(hold0, 18)
-	h1 := weiToFloat(hold1, 18)
+	// Convert raw units to human amounts
+	t0 := weiToFloat(total0, dec0)
+	t1 := weiToFloat(total1, dec1)
+	f0 := weiToFloat(fees0, dec0)
+	f1 := weiToFloat(fees1, dec1)
+	h0 := weiToFloat(hold0, dec0)
+	h1 := weiToFloat(hold1, dec1)
 
 	if isStable0 && !isStable1 {
 		// Token0 is stable. Value = T0 + T1 * (Price of T1 in stable)
@@ -486,4 +560,388 @@ func isUSDTToken(symbol, addr string) bool {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(addr), usdtAddr)
+}
+
+func (s *PnLService) getV3FeeGrowthGlobalsCached(poolAddress common.Address) (*big.Int, *big.Int, bool, time.Duration, error) {
+	if (poolAddress == common.Address{}) {
+		return nil, nil, false, 0, fmt.Errorf("empty pool address")
+	}
+
+	now := time.Now()
+	key := strings.ToLower(poolAddress.Hex())
+
+	s.v3FeeMu.RLock()
+	if c, ok := s.v3FeeCache[key]; ok && c.global0 != nil && c.global1 != nil && c.expires.After(now) {
+		g0 := new(big.Int).Set(c.global0)
+		g1 := new(big.Int).Set(c.global1)
+		s.v3FeeMu.RUnlock()
+		return g0, g1, false, 0, nil
+	}
+
+	var stale0 *big.Int
+	var stale1 *big.Int
+	var staleAt time.Time
+	if c, ok := s.v3FeeCache[key]; ok && c.global0 != nil && c.global1 != nil {
+		stale0 = new(big.Int).Set(c.global0)
+		stale1 = new(big.Int).Set(c.global1)
+		staleAt = c.updatedAt
+	}
+	s.v3FeeMu.RUnlock()
+
+	g0, g1, err := blockchain.GetV3PoolFeeGrowthGlobals(poolAddress)
+	if err == nil && g0 != nil && g1 != nil {
+		s.v3FeeMu.Lock()
+		s.v3FeeCache[key] = cachedV3FeeGrowthGlobals{
+			global0:   new(big.Int).Set(g0),
+			global1:   new(big.Int).Set(g1),
+			updatedAt: now,
+			expires:   now.Add(2 * time.Second),
+		}
+		s.v3FeeMu.Unlock()
+		return g0, g1, false, 0, nil
+	}
+
+	if stale0 != nil && stale1 != nil && !staleAt.IsZero() && now.Sub(staleAt) <= 30*time.Second {
+		return stale0, stale1, true, now.Sub(staleAt), err
+	}
+	return nil, nil, false, 0, err
+}
+
+func (s *PnLService) getV3TickFeeGrowthOutsideCached(poolAddress common.Address, tick int) (*big.Int, *big.Int, bool, bool, time.Duration, error) {
+	if (poolAddress == common.Address{}) {
+		return nil, nil, false, false, 0, fmt.Errorf("empty pool address")
+	}
+
+	now := time.Now()
+	key := strings.ToLower(poolAddress.Hex()) + "|" + strconv.Itoa(tick)
+
+	s.v3TickFeeMu.RLock()
+	if c, ok := s.v3TickFeeCache[key]; ok && c.fee0 != nil && c.fee1 != nil && c.expires.After(now) {
+		f0 := new(big.Int).Set(c.fee0)
+		f1 := new(big.Int).Set(c.fee1)
+		initialized := c.initialized
+		s.v3TickFeeMu.RUnlock()
+		return f0, f1, initialized, false, 0, nil
+	}
+
+	var stale0 *big.Int
+	var stale1 *big.Int
+	var staleInit bool
+	var staleAt time.Time
+	if c, ok := s.v3TickFeeCache[key]; ok && c.fee0 != nil && c.fee1 != nil {
+		stale0 = new(big.Int).Set(c.fee0)
+		stale1 = new(big.Int).Set(c.fee1)
+		staleInit = c.initialized
+		staleAt = c.updatedAt
+	}
+	s.v3TickFeeMu.RUnlock()
+
+	f0, f1, initialized, err := blockchain.GetV3PoolTickFeeGrowthOutside(poolAddress, tick)
+	if err == nil && f0 != nil && f1 != nil {
+		s.v3TickFeeMu.Lock()
+		s.v3TickFeeCache[key] = cachedV3TickFeeGrowthOutside{
+			fee0:        new(big.Int).Set(f0),
+			fee1:        new(big.Int).Set(f1),
+			initialized: initialized,
+			updatedAt:   now,
+			expires:     now.Add(20 * time.Second),
+		}
+		s.v3TickFeeMu.Unlock()
+		return f0, f1, initialized, false, 0, nil
+	}
+
+	if stale0 != nil && stale1 != nil && !staleAt.IsZero() && now.Sub(staleAt) <= 2*time.Minute {
+		return stale0, stale1, staleInit, true, now.Sub(staleAt), err
+	}
+	return nil, nil, false, false, 0, err
+}
+
+func (s *PnLService) calcV3UnclaimedFeesCached(poolAddr common.Address, currentTick int, pos *blockchain.V3PositionInfo) (*big.Int, *big.Int, bool, time.Duration, error) {
+	if pos == nil {
+		return nil, nil, false, 0, fmt.Errorf("position info missing")
+	}
+
+	owed0 := cloneBig(pos.TokensOwed0)
+	owed1 := cloneBig(pos.TokensOwed1)
+
+	if pos.Liquidity == nil || pos.Liquidity.Sign() == 0 {
+		return owed0, owed1, false, 0, nil
+	}
+	if poolAddr == (common.Address{}) {
+		return owed0, owed1, false, 0, fmt.Errorf("pool address missing")
+	}
+
+	global0, global1, staleG, ageG, errG := s.getV3FeeGrowthGlobalsCached(poolAddr)
+	if errG != nil && (global0 == nil || global1 == nil) {
+		return owed0, owed1, false, 0, fmt.Errorf("read feeGrowthGlobal failed: %w", errG)
+	}
+	lower0, lower1, _, staleL, ageL, errL := s.getV3TickFeeGrowthOutsideCached(poolAddr, pos.TickLower)
+	if errL != nil && (lower0 == nil || lower1 == nil) {
+		return owed0, owed1, false, 0, fmt.Errorf("read tickLower feeGrowthOutside failed: %w", errL)
+	}
+	upper0, upper1, _, staleU, ageU, errU := s.getV3TickFeeGrowthOutsideCached(poolAddr, pos.TickUpper)
+	if errU != nil && (upper0 == nil || upper1 == nil) {
+		return owed0, owed1, false, 0, fmt.Errorf("read tickUpper feeGrowthOutside failed: %w", errU)
+	}
+
+	usedStale := staleG || staleL || staleU
+	age := time.Duration(0)
+	if staleG && ageG > age {
+		age = ageG
+	}
+	if staleL && ageL > age {
+		age = ageL
+	}
+	if staleU && ageU > age {
+		age = ageU
+	}
+
+	inside0 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global0, lower0, upper0)
+	inside1 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global1, lower1, upper1)
+	if inside0.Cmp(global0) > 0 || inside1.Cmp(global1) > 0 {
+		return owed0, owed1, usedStale, age, fmt.Errorf("invalid feeGrowthInside (pool=%s)", poolAddr.Hex())
+	}
+
+	last0 := cloneBig(pos.FeeGrowthInside0LastX128)
+	last1 := cloneBig(pos.FeeGrowthInside1LastX128)
+
+	delta0 := new(big.Int).Sub(inside0, last0)
+	if delta0.Sign() < 0 {
+		delta0 = big.NewInt(0)
+	}
+	delta1 := new(big.Int).Sub(inside1, last1)
+	if delta1.Sign() < 0 {
+		delta1 = big.NewInt(0)
+	}
+
+	extra0 := mulDivFloor(delta0, pos.Liquidity, q128)
+	extra1 := mulDivFloor(delta1, pos.Liquidity, q128)
+	owed0.Add(owed0, extra0)
+	owed1.Add(owed1, extra1)
+
+	var err error
+	if usedStale {
+		if errG != nil {
+			err = errG
+		} else if errL != nil {
+			err = errL
+		} else if errU != nil {
+			err = errU
+		}
+	}
+	return owed0, owed1, usedStale, age, err
+}
+
+func normalizePoolIDKey(poolID string) string {
+	poolIDKey := strings.ToLower(strings.TrimSpace(poolID))
+	if poolIDKey != "" && !strings.HasPrefix(poolIDKey, "0x") {
+		poolIDKey = "0x" + poolIDKey
+	}
+	return poolIDKey
+}
+
+func (s *PnLService) getV4FeeGrowthGlobalsCached(stateView, poolManager common.Address, poolID string) (*big.Int, *big.Int, bool, time.Duration, error) {
+	if (stateView == common.Address{}) || (poolManager == common.Address{}) {
+		return nil, nil, false, 0, fmt.Errorf("V4 stateView/poolManager missing")
+	}
+
+	now := time.Now()
+	key := strings.ToLower(stateView.Hex()) + "|" + strings.ToLower(poolManager.Hex()) + "|" + normalizePoolIDKey(poolID)
+
+	s.v4FeeMu.RLock()
+	if c, ok := s.v4FeeCache[key]; ok && c.global0 != nil && c.global1 != nil && c.expires.After(now) {
+		g0 := new(big.Int).Set(c.global0)
+		g1 := new(big.Int).Set(c.global1)
+		s.v4FeeMu.RUnlock()
+		return g0, g1, false, 0, nil
+	}
+
+	var stale0 *big.Int
+	var stale1 *big.Int
+	var staleAt time.Time
+	if c, ok := s.v4FeeCache[key]; ok && c.global0 != nil && c.global1 != nil {
+		stale0 = new(big.Int).Set(c.global0)
+		stale1 = new(big.Int).Set(c.global1)
+		staleAt = c.updatedAt
+	}
+	s.v4FeeMu.RUnlock()
+
+	g0, g1, err := blockchain.GetV4PoolFeeGrowthGlobals(stateView, poolManager, poolID)
+	if err == nil && g0 != nil && g1 != nil {
+		s.v4FeeMu.Lock()
+		s.v4FeeCache[key] = cachedV4FeeGrowthGlobals{
+			global0:   new(big.Int).Set(g0),
+			global1:   new(big.Int).Set(g1),
+			updatedAt: now,
+			expires:   now.Add(2 * time.Second),
+		}
+		s.v4FeeMu.Unlock()
+		return g0, g1, false, 0, nil
+	}
+
+	if stale0 != nil && stale1 != nil && !staleAt.IsZero() && now.Sub(staleAt) <= 30*time.Second {
+		return stale0, stale1, true, now.Sub(staleAt), err
+	}
+	return nil, nil, false, 0, err
+}
+
+func (s *PnLService) getV4TickFeeGrowthOutsideCached(stateView, poolManager common.Address, poolID string, tick int) (*big.Int, *big.Int, bool, time.Duration, error) {
+	if (stateView == common.Address{}) || (poolManager == common.Address{}) {
+		return nil, nil, false, 0, fmt.Errorf("V4 stateView/poolManager missing")
+	}
+
+	now := time.Now()
+	key := strings.ToLower(stateView.Hex()) + "|" + strings.ToLower(poolManager.Hex()) + "|" + normalizePoolIDKey(poolID) + "|" + strconv.Itoa(tick)
+
+	s.v4TickFeeMu.RLock()
+	if c, ok := s.v4TickFeeCache[key]; ok && c.fee0 != nil && c.fee1 != nil && c.expires.After(now) {
+		f0 := new(big.Int).Set(c.fee0)
+		f1 := new(big.Int).Set(c.fee1)
+		s.v4TickFeeMu.RUnlock()
+		return f0, f1, false, 0, nil
+	}
+
+	var stale0 *big.Int
+	var stale1 *big.Int
+	var staleAt time.Time
+	if c, ok := s.v4TickFeeCache[key]; ok && c.fee0 != nil && c.fee1 != nil {
+		stale0 = new(big.Int).Set(c.fee0)
+		stale1 = new(big.Int).Set(c.fee1)
+		staleAt = c.updatedAt
+	}
+	s.v4TickFeeMu.RUnlock()
+
+	f0, f1, err := blockchain.GetV4TickFeeGrowthOutside(stateView, poolManager, poolID, tick)
+	if err == nil && f0 != nil && f1 != nil {
+		s.v4TickFeeMu.Lock()
+		s.v4TickFeeCache[key] = cachedV4TickFeeGrowthOutside{
+			fee0:      new(big.Int).Set(f0),
+			fee1:      new(big.Int).Set(f1),
+			updatedAt: now,
+			expires:   now.Add(20 * time.Second),
+		}
+		s.v4TickFeeMu.Unlock()
+		return f0, f1, false, 0, nil
+	}
+
+	if stale0 != nil && stale1 != nil && !staleAt.IsZero() && now.Sub(staleAt) <= 2*time.Minute {
+		return stale0, stale1, true, now.Sub(staleAt), err
+	}
+	return nil, nil, false, 0, err
+}
+
+func (s *PnLService) calcV4UnclaimedFeesCached(stateView, poolManager common.Address, poolID string, currentTick int, pos *blockchain.V4PositionInfo) (*big.Int, *big.Int, bool, time.Duration, error) {
+	if pos == nil {
+		return nil, nil, false, 0, fmt.Errorf("position info missing")
+	}
+
+	owed0 := cloneBig(pos.TokensOwed0)
+	owed1 := cloneBig(pos.TokensOwed1)
+
+	if pos.Liquidity == nil || pos.Liquidity.Sign() == 0 {
+		return owed0, owed1, false, 0, nil
+	}
+	if pos.FeeGrowthInside0LastX128 == nil || pos.FeeGrowthInside1LastX128 == nil {
+		return owed0, owed1, false, 0, fmt.Errorf("position feeGrowthInside last missing")
+	}
+
+	global0, global1, staleG, ageG, errG := s.getV4FeeGrowthGlobalsCached(stateView, poolManager, poolID)
+	if errG != nil && (global0 == nil || global1 == nil) {
+		return owed0, owed1, false, 0, fmt.Errorf("read V4 feeGrowthGlobal failed: %w", errG)
+	}
+	lower0, lower1, staleL, ageL, errL := s.getV4TickFeeGrowthOutsideCached(stateView, poolManager, poolID, pos.TickLower)
+	if errL != nil && (lower0 == nil || lower1 == nil) {
+		return owed0, owed1, false, 0, fmt.Errorf("read V4 tickLower feeGrowthOutside failed: %w", errL)
+	}
+	upper0, upper1, staleU, ageU, errU := s.getV4TickFeeGrowthOutsideCached(stateView, poolManager, poolID, pos.TickUpper)
+	if errU != nil && (upper0 == nil || upper1 == nil) {
+		return owed0, owed1, false, 0, fmt.Errorf("read V4 tickUpper feeGrowthOutside failed: %w", errU)
+	}
+
+	usedStale := staleG || staleL || staleU
+	age := time.Duration(0)
+	if staleG && ageG > age {
+		age = ageG
+	}
+	if staleL && ageL > age {
+		age = ageL
+	}
+	if staleU && ageU > age {
+		age = ageU
+	}
+
+	inside0 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global0, lower0, upper0)
+	inside1 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global1, lower1, upper1)
+	if inside0.Cmp(global0) > 0 || inside1.Cmp(global1) > 0 {
+		return owed0, owed1, usedStale, age, fmt.Errorf("invalid feeGrowthInside (pool_id=%s)", poolID)
+	}
+
+	last0 := cloneBig(pos.FeeGrowthInside0LastX128)
+	last1 := cloneBig(pos.FeeGrowthInside1LastX128)
+
+	delta0 := new(big.Int).Sub(inside0, last0)
+	if delta0.Sign() < 0 {
+		delta0 = big.NewInt(0)
+	}
+	delta1 := new(big.Int).Sub(inside1, last1)
+	if delta1.Sign() < 0 {
+		delta1 = big.NewInt(0)
+	}
+
+	extra0 := mulDivFloor(delta0, pos.Liquidity, q128)
+	extra1 := mulDivFloor(delta1, pos.Liquidity, q128)
+	owed0.Add(owed0, extra0)
+	owed1.Add(owed1, extra1)
+
+	var err error
+	if usedStale {
+		if errG != nil {
+			err = errG
+		} else if errL != nil {
+			err = errL
+		} else if errU != nil {
+			err = errU
+		}
+	}
+	return owed0, owed1, usedStale, age, err
+}
+
+func mulDivFloor(a, b, denom *big.Int) *big.Int {
+	if denom == nil || denom.Sign() == 0 {
+		return big.NewInt(0)
+	}
+	return new(big.Int).Div(new(big.Int).Mul(a, b), denom)
+}
+
+func feeGrowthInside(currentTick, tickLower, tickUpper int, global, outsideLower, outsideUpper *big.Int) *big.Int {
+	feeGlobal := cloneBig(global)
+	lower := cloneBig(outsideLower)
+	upper := cloneBig(outsideUpper)
+
+	var below *big.Int
+	if currentTick >= tickLower {
+		below = lower
+	} else {
+		below = subMod256(feeGlobal, lower)
+	}
+
+	var above *big.Int
+	if currentTick < tickUpper {
+		above = upper
+	} else {
+		above = subMod256(feeGlobal, upper)
+	}
+
+	sum := addMod256(below, above)
+	return subMod256(feeGlobal, sum)
+}
+
+func addMod256(a, b *big.Int) *big.Int {
+	sum := new(big.Int).Add(cloneBig(a), cloneBig(b))
+	return sum.Mod(sum, modUint256)
+}
+
+func subMod256(a, b *big.Int) *big.Int {
+	diff := new(big.Int).Sub(cloneBig(a), cloneBig(b))
+	return diff.Mod(diff, modUint256)
 }

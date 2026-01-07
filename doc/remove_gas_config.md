@@ -20,15 +20,16 @@
 - **liquidity_exit.go**: 
   - 修改 `buildAuth()` 函数，移除 `gasLimit` 参数，内部固定设置 `GasLimit = 0`
   - 更新所有调用 `buildAuth()` 的代码
-  - `swapDeltaToUSDTWithHash` 函数改为默认 `gasLimit = 0`，仅当 OKX API 返回 gas 值时使用
+  - OKX swap（`swapDeltaToUSDTWithHash` / `swapExactInViaOKXWithHash`）：改为使用节点 `EstimateGas` 估算 gasLimit，并对 OKX 返回值取 max 后乘以安全系数（避免 out of gas；可用 `OKX_SWAP_GAS_LIMIT_*` 调整）
 - **liquidity_enter.go**: 更新所有调用 `buildAuth()` 的代码
-- **okx_swap.go**: 改为默认 `gasLimit = 0`，仅当 OKX API 返回 gas 值时使用
+- **okx_swap.go**: OKX swap 改为使用节点 `EstimateGas` + 安全系数设置 gasLimit（raw tx 必须显式给 gasLimit）
 
 ## 改动效果
 
 1. **自动 Gas 估算**: 所有交易的 gas limit 现在由节点自动估算，无需手动配置
 2. **无 Gas 价格上限**: 移除了 `MAX_GAS_PRICE` 限制，系统会使用链上实际建议的 gas 价格
 3. **简化配置**: 减少了两个环境变量配置项
+4. **OKX swap 防 out-of-gas**: raw tx 采用 `EstimateGas` 并增加安全缓冲（可配置）
 
 ## 编译验证
 ✅ `go build ./...` 编译成功

@@ -317,6 +317,7 @@ func (s *AccessService) CountUserActiveTasks(userID uint) (int64, error) {
 	var count int64
 	if err := database.DB.Model(&models.StrategyTask{}).
 		Where("user_id = ? AND status IN ?", userID, []models.StrategyStatus{
+			models.StrategyStatusOpening,
 			models.StrategyStatusRunning,
 			models.StrategyStatusWaiting,
 			models.StrategyStatusStopping,

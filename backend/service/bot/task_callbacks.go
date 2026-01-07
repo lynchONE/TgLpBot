@@ -221,8 +221,6 @@ func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 		return
 	}
 
-	now := time.Now()
-
 	currentLiq := strings.TrimSpace(task.CurrentLiquidity)
 	poolVersion := strings.ToLower(strings.TrimSpace(task.PoolVersion))
 
@@ -277,156 +275,38 @@ func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 		return
 	}
 
-	loadingMsg, _ := b.sendMessage(query.Message.Chat.ID, "⏳ 正在撤出流动性并兑换成 USDT，请稍候...")
-	defer func() {
-		if loadingMsg.MessageID != 0 {
-			b.api.Send(tgbotapi.NewDeleteMessage(loadingMsg.Chat.ID, loadingMsg.MessageID))
-		}
-	}()
-
-	// Reset any previous give-up state when user manually stops again.
-	if task.ExitGiveUpAt != nil || task.ExitRetryCount > 0 || strings.TrimSpace(task.ExitLastError) != "" || task.ExitNextRetryAt != nil {
-		_ = b.taskService.Update(user.ID, taskID, map[string]interface{}{
-			"exit_pending_action": "",
-			"exit_pending_reason": "",
-			"exit_retry_count":    0,
-			"exit_next_retry_at":  nil,
-			"exit_last_error":     "",
-			"exit_give_up_at":     nil,
-			"error_message":       "",
-		})
-		// Update in-memory task snapshot for this handler.
-		task.ExitPendingAction = ""
-		task.ExitPendingReason = ""
-		task.ExitRetryCount = 0
-		task.ExitNextRetryAt = nil
-		task.ExitLastError = ""
-		task.ExitGiveUpAt = nil
-	}
-
-	_ = b.taskService.Update(user.ID, taskID, map[string]interface{}{
-		"status":        models.StrategyStatusStopping,
-		"error_message": "",
-	})
-
-	txHashes, err := b.liquidityService.ExitTaskToUSDT(user.ID, task, true)
-	if err != nil {
-		var txLinksText string
-		if len(txHashes) > 0 {
-			txLinksText = "\n📝 *交易记录：*\n"
-			for i, txInfo := range txHashes {
-				parts := strings.Split(txInfo, "|")
-				if len(parts) == 2 {
-					desc := parts[0]
-					txHash := strings.TrimSpace(parts[1])
-					if txHash != "" {
-						txLinksText += fmt.Sprintf("%d. **%s**\n   [查看交易](https://bscscan.com/tx/%s)\n", i+1, desc, txHash)
-					} else {
-						txLinksText += fmt.Sprintf("%d. **%s**\n", i+1, desc)
-					}
-				} else {
-					txHash := strings.TrimSpace(txInfo)
-					if txHash != "" {
-						txLinksText += fmt.Sprintf("%d. [查看交易](https://bscscan.com/tx/%s)\n", i+1, txHash)
-					}
-				}
-			}
-			txLinksText += "\n"
-		}
-
-		nextAt := now.Add(10 * time.Second)
-		_ = b.taskService.Update(user.ID, taskID, map[string]interface{}{
-			"status":              models.StrategyStatusRunning,
-			"exit_pending_action": "manual_stop",
-			"exit_pending_reason": "🛑 手动停止",
-			"exit_retry_count":    1,
-			"exit_next_retry_at":  &nextAt,
-			"exit_last_error":     fmt.Sprintf("%v", err),
-			"exit_give_up_at":     nil,
-			"error_message":       "",
-		})
-		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("❌ 撤出/兑换失败：%v\n系统将自动重试（1/3），任务保持运行中。%s", err, txLinksText))
-		task, _ = b.taskService.GetByID(user.ID, taskID)
-		b.sendMessageWithKeyboard(query.Message.Chat.ID, b.formatTaskCard(task), b.taskKeyboard(task))
-		return
-	}
-
-	// 准备交易链接文本（不直接发送）
-	log.Printf("[Bot] Task #%d stopped, got %d transaction hashes", taskID, len(txHashes))
-	var txLinksText string
-	if len(txHashes) > 0 {
-		txLinksText = "\n📝 *交易记录：*\n"
-		hasSwapTx := false
-		for i, txInfo := range txHashes {
-			// 格式：描述|哈希
-			parts := strings.Split(txInfo, "|")
-			if len(parts) == 2 {
-				desc := parts[0]
-				txHash := parts[1]
-				log.Printf("[Bot] TX %d: %s - %s", i+1, desc, txHash)
-				txLinksText += fmt.Sprintf("%d. **%s**\n   [查看交易](https://bscscan.com/tx/%s)\n", i+1, desc, txHash)
-				if strings.Contains(desc, "→USDT") || strings.Contains(desc, "->USDT") {
-					hasSwapTx = true
-				}
-			} else {
-				// 兼容旧格式（只有哈希）
-				log.Printf("[Bot] TX %d: %s", i+1, txInfo)
-				txLinksText += fmt.Sprintf("%d. [查看交易](https://bscscan.com/tx/%s)\n", i+1, txInfo)
-				if strings.Contains(txInfo, "→USDT") || strings.Contains(txInfo, "->USDT") {
-					hasSwapTx = true
-				}
-			}
-		}
-		txLinksText += "\n"
-
-		if !hasSwapTx {
-			txLinksText += "ℹ️ 本次未产生兑换交易：钱包中该池子的非 USDT 代币余额为 0（无需兑换）。\n\n"
-		}
-	} else {
-		log.Printf("[Bot] No transaction hashes returned from ExitTaskToUSDT")
-	}
-
+	// Reset any previous give-up state when user manually stops again, then rely on the strategy loop to exit in background.
 	updates := map[string]interface{}{
-		"status":              models.StrategyStatusStopped,
-		"current_liquidity":   "0",
-		"out_of_range_since":  nil,
-		"error_message":       "",
-		"last_exit_time":      &now,
-		"exit_pending_action": "",
-		"exit_pending_reason": "",
-		"exit_retry_count":    0,
-		"exit_next_retry_at":  nil,
-		"exit_last_error":     "",
-		"exit_give_up_at":     nil,
+		"status":                     models.StrategyStatusStopping,
+		"out_of_range_since":         nil,
+		"error_message":              "",
+		"exit_pending_action":        "manual_stop",
+		"exit_pending_reason":        "🛑 手动停止",
+		"exit_retry_count":           0,
+		"exit_next_retry_at":         nil, // retry ASAP in strategy loop
+		"exit_last_error":            "",
+		"exit_give_up_at":            nil,
+		"rebalance_pending":          false,
+		"rebalance_retry_count":      0,
+		"rebalance_next_retry_at":    nil,
+		"rebalance_last_error":       "",
+		"switch_target_pool_id":      "",
+		"switch_target_pool_version": "",
 	}
 	if err := b.taskService.Update(user.ID, taskID, updates); err != nil {
 		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("停止任务失败：%v", err))
 		return
 	}
 
-	// 编辑当前消息
+	b.sendMessage(query.Message.Chat.ID, "🛑 已提交手动停止：后台将撤出流动性并兑换成 USDT（最多重试 3 次）。")
+
 	task, _ = b.taskService.GetByID(user.ID, taskID)
-	finalText := "✅ *任务已停止* (流动性已撤出)\n" + txLinksText + b.formatTaskCard(task)
-
-	log.Printf("[Bot] Final message for task #%d (txLinksText len=%d): %s", taskID, len(txLinksText), txLinksText)
-
-	editMsg := tgbotapi.NewEditMessageText(
-		query.Message.Chat.ID,
-		query.Message.MessageID,
-		finalText,
-	)
+	finalText := "🛑 *已提交停止请求* (后台处理中)\n\n" + b.formatTaskCard(task)
+	editMsg := tgbotapi.NewEditMessageText(query.Message.Chat.ID, query.Message.MessageID, finalText)
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
-	if resp, err := b.api.Send(editMsg); err != nil {
-		log.Printf("[Bot] Failed to edit message for task #%d: %v", taskID, err)
-	} else {
-		log.Printf("[Bot] Message edited successfully for task #%d, msgID=%d", taskID, resp.MessageID)
-	}
-
-	// 更新按钮
-	if err := b.editMessageReplyMarkup(query.Message.Chat.ID, query.Message.MessageID, b.taskKeyboard(task)); err != nil {
-		log.Printf("[Bot] Failed to update task keyboard: %v", err)
-	}
+	_, _ = b.api.Send(editMsg)
+	_ = b.editMessageReplyMarkup(query.Message.Chat.ID, query.Message.MessageID, b.taskKeyboard(task))
 }
 
 func (b *Bot) handleTaskToggleReinvest(query *tgbotapi.CallbackQuery, user *models.User) {

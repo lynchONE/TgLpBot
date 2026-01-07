@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -81,11 +82,13 @@ func GetV4PoolFeeGrowthGlobals(stateView, poolManager common.Address, poolID str
 	}
 
 	msg := ethereum.CallMsg{To: &stateView, Data: data}
-	raw, err := Client.CallContract(context.Background(), msg, nil)
+	callCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	raw, err := callContractWithRetry(callCtx, msg)
 	if err != nil {
-		// 某些 StateView 实现可能不支持这个方法
-		v4Debugf("getFeeGrowthGlobals failed: %v, returning zeros", err)
-		return big.NewInt(0), big.NewInt(0), nil
+		// We need feeGrowthGlobal to compute fees; bubble up the error so callers can fallback/cached-read.
+		v4Debugf("getFeeGrowthGlobals failed: %v", err)
+		return nil, nil, fmt.Errorf("call getFeeGrowthGlobals failed: %w", err)
 	}
 
 	out, err := parsedABI.Unpack("getFeeGrowthGlobals", raw)
@@ -131,7 +134,9 @@ func GetV4TickFeeGrowthOutside(stateView, poolManager common.Address, poolID str
 	data, err := parsedABI.Pack("getTickFeeGrowthOutside", id, big.NewInt(int64(tick)))
 	if err == nil {
 		msg := ethereum.CallMsg{To: &stateView, Data: data}
-		raw, callErr := Client.CallContract(context.Background(), msg, nil)
+		callCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		raw, callErr := callContractWithRetry(callCtx, msg)
+		cancel()
 		if callErr == nil {
 			out, unpackErr := parsedABI.Unpack("getTickFeeGrowthOutside", raw)
 			if unpackErr == nil && len(out) >= 2 {
@@ -155,11 +160,19 @@ func GetV4TickFeeGrowthOutside(stateView, poolManager common.Address, poolID str
 	}
 
 	msg := ethereum.CallMsg{To: &stateView, Data: data}
-	raw, err := Client.CallContract(context.Background(), msg, nil)
+	callCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	raw, err := callContractWithRetry(callCtx, msg)
 	if err != nil {
-		// tick 未初始化时返回 0
-		v4Debugf("getTickInfo failed for tick %d: %v, returning zeros", tick, err)
-		return big.NewInt(0), big.NewInt(0), nil
+		// Some implementations revert for uninitialized ticks; treat that as 0.
+		// For other errors (e.g., RPC rate limit), bubble up the error so callers can fallback/cached-read.
+		errMsg := strings.ToLower(err.Error())
+		if strings.Contains(errMsg, "revert") {
+			v4Debugf("getTickInfo reverted for tick %d: %v, returning zeros", tick, err)
+			return big.NewInt(0), big.NewInt(0), nil
+		}
+		v4Debugf("getTickInfo failed for tick %d: %v", tick, err)
+		return nil, nil, fmt.Errorf("call getTickInfo failed for tick %d: %w", tick, err)
 	}
 
 	out, err := parsedABI.Unpack("getTickInfo", raw)

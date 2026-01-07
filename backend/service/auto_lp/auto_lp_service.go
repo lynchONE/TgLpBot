@@ -3,6 +3,7 @@ package auto_lp
 import (
 	"TgLpBot/base/blockchain"
 	"TgLpBot/base/clickhouse"
+	"TgLpBot/base/concurrency"
 	"TgLpBot/base/config"
 	"TgLpBot/base/convert"
 	"TgLpBot/base/database"
@@ -12,6 +13,7 @@ import (
 	"TgLpBot/service/pricing"
 	"TgLpBot/service/smart_lp"
 	"TgLpBot/service/strategy"
+	"TgLpBot/service/txexec"
 	"TgLpBot/service/user"
 	"TgLpBot/service/wallet"
 	"context"
@@ -42,6 +44,8 @@ type AutoLPService struct {
 
 	lastRunAt    time.Time
 	lastRunError string
+
+	userLimiter *concurrency.KeyedLimiter
 }
 
 func NewAutoLPService(ch *clickhouse.ClickHouseService) *AutoLPService {
@@ -65,6 +69,12 @@ func NewAutoLPService(ch *clickhouse.ClickHouseService) *AutoLPService {
 		smartLP:       smart_lp.NewSmartLPService(ch),
 		stopChan:      make(chan struct{}),
 		ticker:        time.NewTicker(interval),
+		userLimiter: concurrency.NewKeyedLimiter(func() int {
+			if config.AppConfig != nil && config.AppConfig.WorkerMaxParallelUsers > 0 {
+				return config.AppConfig.WorkerMaxParallelUsers
+			}
+			return 16
+		}()),
 	}
 }
 
@@ -338,12 +348,25 @@ func (s *AutoLPService) runOnce() {
 	if len(enabledCfgs) > 0 {
 		for i := range enabledCfgs {
 			cfg := enabledCfgs[i]
-			if ok, _ := s.applyUserStopConditions(ctx, cfg); ok {
+			userKey := fmt.Sprintf("%d", cfg.UserID)
+			if s.userLimiter == nil {
+				if ok, _ := s.applyUserStopConditions(context.Background(), cfg); ok {
+					continue
+				}
+				if err := s.executeBestCandidateForUser(context.Background(), cfg, snap, analyses); err != nil {
+					s.notify(cfg.UserID, fmt.Sprintf("❌ AutoLP 自动开仓失败：%v", err))
+				}
 				continue
 			}
-			if err := s.executeBestCandidateForUser(ctx, cfg, snap, analyses); err != nil {
-				s.notify(cfg.UserID, fmt.Sprintf("❌ AutoLP 自动开仓失败：%v", err))
-			}
+
+			_ = s.userLimiter.TryRun(userKey, func() {
+				if ok, _ := s.applyUserStopConditions(context.Background(), cfg); ok {
+					return
+				}
+				if err := s.executeBestCandidateForUser(context.Background(), cfg, snap, analyses); err != nil {
+					s.notify(cfg.UserID, fmt.Sprintf("❌ AutoLP 自动开仓失败：%v", err))
+				}
+			})
 		}
 		return
 	}
@@ -516,6 +539,7 @@ func (s *AutoLPService) insertPoolMRaw(ctx context.Context, rows []poolMRawRow) 
 	if err != nil {
 		return err
 	}
+	defer func() { _ = batch.Abort() }()
 
 	for _, r := range rows {
 		p := r.p
@@ -587,6 +611,7 @@ func (s *AutoLPService) replacePoolMRealtime(ctx context.Context, rows []poolMRa
 	if err != nil {
 		return err
 	}
+	defer func() { _ = batch.Abort() }()
 
 	for _, r := range rows {
 		p := r.p
@@ -929,6 +954,7 @@ func (s *AutoLPService) insertAnalysis(ctx context.Context, rows []AutoLPAnalysi
 	if err != nil {
 		return err
 	}
+	defer func() { _ = batch.Abort() }()
 
 	now := time.Now()
 	for _, r := range rows {
@@ -1325,6 +1351,7 @@ func (s *AutoLPService) requestExitForAutoTasks(userID uint, reason string, gasM
 
 	var tasks []models.StrategyTask
 	if err := database.DB.Where("user_id = ? AND is_auto = ? AND paused = ? AND status IN ?", userID, true, false, []models.StrategyStatus{
+		models.StrategyStatusOpening,
 		models.StrategyStatusRunning,
 		models.StrategyStatusWaiting,
 	}).Find(&tasks).Error; err != nil {
@@ -1432,38 +1459,57 @@ func (s *AutoLPService) tryOpenCandidate(ctx context.Context, userID uint, a Aut
 		return false, nil
 	}
 
-	if err := database.DB.Create(task).Error; err != nil {
-		return false, fmt.Errorf("create task failed: %w", err)
+	exec := txexec.Default()
+	if exec == nil {
+		return false, nil
 	}
-
-	displayLowerPct := task.RangeLowerPercentage
-	displayUpperPct := task.RangeUpperPercentage
-	if task.RangeLowerPercentage > 0 && task.RangeUpperPercentage > 0 {
-		stableLowerPct, stableUpperPct := pricing.StablePercentagesFromTickPercentages(task, task.RangeLowerPercentage, task.RangeUpperPercentage)
-		if stableLowerPct > 0 && stableUpperPct > 0 {
-			displayLowerPct = stableLowerPct
-			displayUpperPct = stableUpperPct
+	ok, err := exec.TryRunUser(userID, func(_ string) {
+		if err := database.DB.Create(task).Error; err != nil {
+			s.notify(userID, fmt.Sprintf("❌ AutoLP 创建任务失败：%v", err))
+			return
 		}
-	}
 
-	s.notify(userID, fmt.Sprintf("🤖 AutoLP 开仓中...\n池子: %s (%s)\n投入: %.2f USDT\n宽度：下 %.2f%% / 上 %.2f%%",
-		task.Token0Symbol+"/"+task.Token1Symbol, task.PoolId, amount, displayLowerPct, displayUpperPct))
+		displayLowerPct := task.RangeLowerPercentage
+		displayUpperPct := task.RangeUpperPercentage
+		if task.RangeLowerPercentage > 0 && task.RangeUpperPercentage > 0 {
+			stableLowerPct, stableUpperPct := pricing.StablePercentagesFromTickPercentages(task, task.RangeLowerPercentage, task.RangeUpperPercentage)
+			if stableLowerPct > 0 && stableUpperPct > 0 {
+				displayLowerPct = stableLowerPct
+				displayUpperPct = stableUpperPct
+			}
+		}
 
-	enterRes, err := s.liquidity.EnterTaskFromUSDTWithOptions(userID, task, liquidity.TxOptions{GasMultiplier: gasMult})
+		s.notify(userID, fmt.Sprintf("🤖 AutoLP 开仓中...\n任务ID: %d\n池子: %s (%s)\n投入: %.2f USDT\n宽度：下 %.2f%% / 上 %.2f%%",
+			task.ID, task.Token0Symbol+"/"+task.Token1Symbol, task.PoolId, amount, displayLowerPct, displayUpperPct))
+
+		enterRes, err := s.liquidity.EnterTaskFromUSDTWithOptions(userID, task, liquidity.TxOptions{GasMultiplier: gasMult})
+		if err != nil {
+			_ = database.DB.Model(task).Updates(map[string]interface{}{
+				"status":        models.StrategyStatusError,
+				"error_message": fmt.Sprintf("enter failed: %v", err),
+			}).Error
+			s.notify(userID, fmt.Sprintf("❌ AutoLP 开仓失败：%v", err))
+			return
+		}
+
+		if err := applyEnterResultToTask(task, enterRes); err != nil {
+			_ = database.DB.Model(task).Updates(map[string]interface{}{
+				"status":        models.StrategyStatusError,
+				"error_message": fmt.Sprintf("update task after enter failed: %v", err),
+			}).Error
+			s.notify(userID, fmt.Sprintf("❌ AutoLP 开仓失败：%v", err))
+			return
+		}
+
+		s.notify(userID, fmt.Sprintf("✅ AutoLP 开仓成功！\n任务ID: %d\n交易哈希: `%s`", task.ID, enterRes.TxHash))
+		_ = strategy.NewAutoLPEventService().Record(task, models.AutoLPEventOpen, "")
+	})
 	if err != nil {
-		_ = database.DB.Model(task).Updates(map[string]interface{}{
-			"status":        models.StrategyStatusError,
-			"error_message": fmt.Sprintf("enter failed: %v", err),
-		}).Error
 		return false, err
 	}
-
-	if err := applyEnterResultToTask(task, enterRes); err != nil {
-		return false, fmt.Errorf("update task after enter failed: %w", err)
+	if !ok {
+		return false, nil
 	}
-
-	s.notify(userID, fmt.Sprintf("✅ AutoLP 开仓成功！\n任务ID: %d\n交易哈希: `%s`", task.ID, enterRes.TxHash))
-	_ = strategy.NewAutoLPEventService().Record(task, models.AutoLPEventOpen, "")
 	return true, nil
 }
 
@@ -2070,7 +2116,7 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 		StopLossEnabled:      cfg.StopLossEnabled,
 		StopLossDelaySeconds: cfg.StopLossDelaySeconds,
 
-		Status:        models.StrategyStatusRunning,
+		Status:        models.StrategyStatusOpening,
 		LastCheckTime: now,
 	}
 
@@ -2100,6 +2146,7 @@ func (s *AutoLPService) hasActiveTask(userID uint, poolVersion string, poolID st
 	var count int64
 	if err := database.DB.Model(&models.StrategyTask{}).
 		Where("user_id = ? AND LOWER(pool_version) = ? AND LOWER(pool_id) = ? AND status IN ?", userID, poolVersion, poolID, []models.StrategyStatus{
+			models.StrategyStatusOpening,
 			models.StrategyStatusRunning,
 			models.StrategyStatusWaiting,
 			models.StrategyStatusStopping,
@@ -2113,6 +2160,7 @@ func (s *AutoLPService) countActiveAutoTasks(userID uint) (int64, error) {
 	var count int64
 	if err := database.DB.Model(&models.StrategyTask{}).
 		Where("user_id = ? AND is_auto = ? AND status IN ?", userID, true, []models.StrategyStatus{
+			models.StrategyStatusOpening,
 			models.StrategyStatusRunning,
 			models.StrategyStatusWaiting,
 			models.StrategyStatusStopping,

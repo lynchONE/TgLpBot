@@ -32,7 +32,10 @@ func (s *StrategyTaskService) ListActive(userID uint, limit int) ([]models.Strat
 	}
 	var tasks []models.StrategyTask
 	if err := database.DB.Where("user_id = ? AND status IN ?", userID, []models.StrategyStatus{
+		models.StrategyStatusOpening,
 		models.StrategyStatusRunning,
+		models.StrategyStatusWaiting,
+		models.StrategyStatusStopping,
 	}).Order("updated_at DESC").Limit(limit).Find(&tasks).Error; err != nil {
 		return nil, fmt.Errorf("list tasks failed: %w", err)
 	}

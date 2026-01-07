@@ -4,15 +4,87 @@ import (
 	"TgLpBot/base/blockchain"
 	"TgLpBot/base/config"
 	"TgLpBot/service/exchange"
+	"context"
 	"crypto/ecdsa"
 	"fmt"
 	"log"
 	"math/big"
 	"strings"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
+
+func normalizeOkxSwapGasMultiplier(v float64) float64 {
+	if v <= 0 {
+		return 1
+	}
+	if v > 10 {
+		return 10
+	}
+	return v
+}
+
+// okxSwapGasLimit picks a safe gasLimit for OKX swap tx:
+// - use node EstimateGas when possible
+// - take max(estimate, okxSuggested)
+// - apply a safety multiplier (default 1.30) and min/max bounds if configured
+func okxSwapGasLimit(from common.Address, to common.Address, value *big.Int, data []byte, okxSuggested uint64) (uint64, error) {
+	if blockchain.Client == nil {
+		return 0, fmt.Errorf("blockchain client not initialized")
+	}
+	if value == nil {
+		value = big.NewInt(0)
+	}
+
+	msg := ethereum.CallMsg{
+		From:  from,
+		To:    &to,
+		Value: value,
+		Data:  data,
+	}
+
+	estimated, err := blockchain.Client.EstimateGas(context.Background(), msg)
+	if err != nil {
+		if okxSuggested == 0 {
+			return 0, fmt.Errorf("estimate gas failed: %w", err)
+		}
+		log.Printf("[Liquidity] Warning: OKX swap EstimateGas failed, fallback to OKX gas=%d: %v", okxSuggested, err)
+		estimated = okxSuggested
+	}
+
+	base := estimated
+	if okxSuggested > base {
+		base = okxSuggested
+	}
+
+	mult := 1.30
+	minLimit := uint64(0)
+	maxLimit := uint64(0)
+	if config.AppConfig != nil {
+		if config.AppConfig.OKXSwapGasLimitMultiplier > 0 {
+			mult = config.AppConfig.OKXSwapGasLimitMultiplier
+		}
+		minLimit = config.AppConfig.OKXSwapGasLimitMin
+		maxLimit = config.AppConfig.OKXSwapGasLimitMax
+	}
+	mult = normalizeOkxSwapGasMultiplier(mult)
+
+	// gas values are small (< block limit), float64 is safe here.
+	withMult := uint64(float64(base) * mult)
+	gasLimit := withMult
+	if gasLimit < base {
+		gasLimit = base
+	}
+	if minLimit > 0 && gasLimit < minLimit {
+		gasLimit = minLimit
+	}
+	if maxLimit > 0 && gasLimit > maxLimit {
+		gasLimit = maxLimit
+	}
+	return gasLimit, nil
+}
 
 // swapExactInViaOKX executes a swap transaction returned by OKX DEX /swap API from the user's wallet.
 // It returns the balance delta of tokenOut observed on the wallet.
@@ -98,10 +170,10 @@ func (s *LiquidityService) swapExactInViaOKX(
 		return nil, fmt.Errorf("OKX swap requires native value; not supported")
 	}
 
-	var gasLimit uint64 = 0 // 默认让节点自动估算
+	var okxGasLimit uint64
 	if strings.TrimSpace(txObj.Gas) != "" {
 		if g, ok := new(big.Int).SetString(strings.TrimSpace(txObj.Gas), 10); ok && g.IsUint64() {
-			gasLimit = g.Uint64()
+			okxGasLimit = g.Uint64()
 		}
 	}
 
@@ -136,6 +208,12 @@ func (s *LiquidityService) swapExactInViaOKX(
 	if err != nil {
 		return nil, err
 	}
+
+	gasLimit, err := okxSwapGasLimit(walletAddr, to, value, data, okxGasLimit)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("[Liquidity] OKX swap gasLimit: okx=%d final=%d", okxGasLimit, gasLimit)
 
 	rawTx := types.NewTransaction(nonce, to, value, gasLimit, gasPrice, data)
 	signed, err := types.SignTx(rawTx, types.NewEIP155Signer(blockchain.ChainID), privateKey)

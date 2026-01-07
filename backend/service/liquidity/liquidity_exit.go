@@ -1692,10 +1692,10 @@ func (s *LiquidityService) swapExactInViaOKXWithHash(
 		return "", fmt.Errorf("OKX swap requires native value; not supported")
 	}
 
-	var gasLimit uint64 = 0 // 默认让节点自动估算
+	var okxGasLimit uint64
 	if strings.TrimSpace(txObj.Gas) != "" {
 		if g, ok := new(big.Int).SetString(strings.TrimSpace(txObj.Gas), 10); ok && g.IsUint64() {
-			gasLimit = g.Uint64()
+			okxGasLimit = g.Uint64()
 		}
 	}
 
@@ -1730,6 +1730,12 @@ func (s *LiquidityService) swapExactInViaOKXWithHash(
 	if err != nil {
 		return "", err
 	}
+
+	gasLimit, err := okxSwapGasLimit(walletAddr, to, value, data, okxGasLimit)
+	if err != nil {
+		return "", err
+	}
+	log.Printf("[Liquidity] OKX swap gasLimit: okx=%d final=%d", okxGasLimit, gasLimit)
 
 	rawTx := types.NewTransaction(nonce, to, value, gasLimit, gasPrice, data)
 	signed, err := types.SignTx(rawTx, types.NewEIP155Signer(blockchain.ChainID), privateKey)

@@ -214,6 +214,7 @@ func (s *GeckoService) BatchInsert(pools []GeckoPoolData) error {
 	if err != nil {
 		return err
 	}
+	defer func() { _ = batch.Abort() }()
 
 	for _, p := range pools {
 		attr := p.Attributes

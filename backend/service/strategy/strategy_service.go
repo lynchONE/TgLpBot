@@ -2,17 +2,20 @@ package strategy
 
 import (
 	"TgLpBot/base/blockchain"
+	"TgLpBot/base/concurrency"
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/pool"
 	"TgLpBot/service/pricing"
+	"TgLpBot/service/txexec"
 	"TgLpBot/service/user"
 	"bytes"
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -36,10 +39,17 @@ type StrategyService struct {
 	taskCardNotifier func(userID uint, taskID uint)    // Callback for showing latest task card
 
 	lastLiquidityCheck map[uint]time.Time
+	lastLiquidityMu    sync.Mutex
+
+	monitorLimiter *concurrency.KeyedLimiter
 }
 
 // NewStrategyService creates a new strategy service
 func NewStrategyService() *StrategyService {
+	maxUsers := 16
+	if config.AppConfig != nil && config.AppConfig.WorkerMaxParallelUsers > 0 {
+		maxUsers = config.AppConfig.WorkerMaxParallelUsers
+	}
 	return &StrategyService{
 		poolService:        pool.NewPoolService(),
 		liquidityService:   liquidity.NewLiquidityService(),
@@ -47,6 +57,7 @@ func NewStrategyService() *StrategyService {
 		stopChan:           make(chan struct{}),
 		ticker:             time.NewTicker(5 * time.Second), // Check every 5 seconds
 		lastLiquidityCheck: make(map[uint]time.Time),
+		monitorLimiter:     concurrency.NewKeyedLimiter(maxUsers),
 	}
 }
 
@@ -93,16 +104,45 @@ func (s *StrategyService) runLoop() {
 func (s *StrategyService) checkTasks() {
 	var tasks []models.StrategyTask
 	// Find all running or waiting tasks
-	if err := database.DB.Where("status IN ? AND paused = ?", []models.StrategyStatus{models.StrategyStatusRunning, models.StrategyStatusWaiting}, false).Find(&tasks).Error; err != nil {
+	if err := database.DB.Where("status IN ? AND paused = ?", []models.StrategyStatus{
+		models.StrategyStatusRunning,
+		models.StrategyStatusWaiting,
+		models.StrategyStatusStopping,
+	}, false).Find(&tasks).Error; err != nil {
 		log.Printf("[Strategy] 获取任务失败: %v", err)
 		return
 	}
 
-	// Cache for current ticks to avoid duplicate RPC calls in the same cycle
-	tickCache := make(map[string]int)
-
+	// Group tasks by user for isolation: one slow user should not block others.
+	byUser := make(map[uint][]*models.StrategyTask)
 	for i := range tasks {
-		s.processTask(&tasks[i], tickCache)
+		if tasks[i].UserID == 0 {
+			continue
+		}
+		uid := tasks[i].UserID
+		byUser[uid] = append(byUser[uid], &tasks[i])
+	}
+
+	for uid, userTasks := range byUser {
+		userKey := fmt.Sprintf("%d", uid)
+		userTasks := userTasks
+
+		if s.monitorLimiter == nil {
+			// Fallback: process inline (legacy behavior)
+			tickCache := make(map[string]int)
+			for i := range userTasks {
+				s.processTask(userTasks[i], tickCache)
+			}
+			continue
+		}
+
+		_ = s.monitorLimiter.TryRun(userKey, func() {
+			// Cache for current ticks to avoid duplicate RPC calls in the same cycle (per user).
+			tickCache := make(map[string]int)
+			for i := range userTasks {
+				s.processTask(userTasks[i], tickCache)
+			}
+		})
 	}
 }
 
@@ -404,87 +444,17 @@ func (s *StrategyService) handleWaitingTask(task *models.StrategyTask) {
 		}
 
 		log.Printf("[Strategy] 任务 #%d 冷却结束，准备重新开仓...", task.ID)
-
-		currentTick, err := s.getCurrentTick(task)
-		if err != nil {
-			log.Printf("[Strategy] 任务 #%d 冷却结束后获取当前 tick 失败: %v", task.ID, err)
+		exec := txexec.Default()
+		if exec == nil {
 			return
 		}
-
-		tickLower, tickUpper, rErr := s.calculateRangeFromPercentage(task, currentTick)
-		if rErr != nil {
-			log.Printf("[Strategy] 任务 #%d 冷却结束后计算新 tick 范围失败: %v", task.ID, rErr)
-			return
+		if ok, err := exec.TryRunUser(task.UserID, func(_ string) {
+			s.runCooldownReopen(task.ID, task.UserID)
+		}); err != nil {
+			log.Printf("[Strategy] schedule cooldown reopen failed: task_id=%d user_id=%d err=%v", task.ID, task.UserID, err)
+		} else if !ok {
+			// Wallet is busy; retry next cycle.
 		}
-
-		task.TickLower = tickLower
-		task.TickUpper = tickUpper
-		_ = database.DB.Model(task).Updates(map[string]interface{}{
-			"tick_lower": tickLower,
-			"tick_upper": tickUpper,
-		}).Error
-
-		enterRes, err := s.liquidityService.EnterTaskFromUSDT(task.UserID, task)
-		if err != nil {
-			log.Printf("[Strategy] 任务 #%d 冷却结束后开仓失败: %v", task.ID, err)
-			database.DB.Model(task).Updates(map[string]interface{}{
-				"status":          models.StrategyStatusError,
-				"error_message":   fmt.Sprintf("enter failed after cooldown: %v", err),
-				"cooldown_until":  nil,
-				"cooldown_reason": "",
-			})
-			return
-		}
-
-		updates := map[string]interface{}{
-			"status":                      models.StrategyStatusRunning,
-			"current_liquidity":           enterRes.CurrentLiquidity,
-			"exit_liquidity_removed":      false,
-			"v3_position_manager_address": enterRes.V3PositionManagerAddress,
-			"v3_token_id":                 enterRes.V3TokenID,
-			"v4_token_id":                 enterRes.V4TokenID,
-			"tick_lower":                  task.TickLower,
-			"tick_upper":                  task.TickUpper,
-			"out_of_range_since":          nil,
-			"cooldown_until":              nil,
-			"cooldown_reason":             "",
-			"next_range_multiplier":       1.0,
-			"error_message":               "",
-		}
-		if task.IsAuto {
-			updates["guard_open_volume_5m"] = 0
-			updates["guard_open_price"] = 0
-			updates["guard_open_tx_count_5m"] = 0
-			updates["guard_open_fee_percentage"] = 0
-			updates["guard_open_fee_rate_5m_pct"] = 0
-			updates["guard_open_total_fees_5m"] = 0
-			updates["guard_open_tvl_usd"] = 0
-			updates["guard_open_metrics_at"] = nil
-			updates["guard_volume_drop_armed"] = false
-			updates["guard_volume_drop_last_volume_5m"] = 0
-			updates["guard_price_tx_drop_armed"] = false
-		}
-		database.DB.Model(task).Updates(updates)
-		task.ExitLiquidityRemoved = false
-		task.CooldownUntil = nil
-		task.CooldownReason = ""
-		task.NextRangeMultiplier = 1.0
-		if task.IsAuto {
-			task.GuardOpenVolume5m = 0
-			task.GuardOpenPrice = 0
-			task.GuardOpenTxCount5m = 0
-			task.GuardOpenFeePercentage = 0
-			task.GuardOpenFeeRate5mPct = 0
-			task.GuardOpenTotalFees5m = 0
-			task.GuardOpenTVLUSD = 0
-			task.GuardOpenMetricsAt = nil
-			task.GuardVolumeDropArmed = false
-			task.GuardVolumeDropLastVolume5m = 0
-			task.GuardPriceTxDropArmed = false
-		}
-
-		s.notify(task.UserID, fmt.Sprintf("✅ 冷却结束，已重新开仓（Tick %d）。\n新 Tick 范围: %d - %d\n交易哈希: `%s`", currentTick, tickLower, tickUpper, enterRes.TxHash))
-		s.notifyTaskCard(task.UserID, task.ID)
 		return
 	}
 
@@ -502,76 +472,178 @@ func (s *StrategyService) handleWaitingTask(task *models.StrategyTask) {
 
 	if remaining <= 0 {
 		log.Printf("[Strategy] 任务 #%d 等待时间结束，准备重新开仓...", task.ID)
-
-		currentTick, err := s.getCurrentTick(task)
-		if err != nil {
-			log.Printf("[Strategy] 任务 #%d 获取当前 tick 失败: %v", task.ID, err)
+		exec := txexec.Default()
+		if exec == nil {
 			return
 		}
-		// Update range around current tick (best-effort)
-		tickLower, tickUpper, rErr := s.calculateRangeFromPercentage(task, currentTick)
-		if rErr == nil {
-			task.TickLower = tickLower
-			task.TickUpper = tickUpper
+		if ok, err := exec.TryRunUser(task.UserID, func(_ string) {
+			s.runWaitingReopen(task.ID, task.UserID)
+		}); err != nil {
+			log.Printf("[Strategy] schedule waiting reopen failed: task_id=%d user_id=%d err=%v", task.ID, task.UserID, err)
+		} else if !ok {
+			// Wallet is busy; retry next cycle.
 		}
-
-		enterRes, err := s.liquidityService.EnterTaskFromUSDT(task.UserID, task)
-		if err != nil {
-			log.Printf("[Strategy] 任务 #%d 开仓失败: %v", task.ID, err)
-			database.DB.Model(task).Updates(map[string]interface{}{
-				"status":        models.StrategyStatusError,
-				"error_message": fmt.Sprintf("enter failed: %v", err),
-			})
-			return
-		}
-
-		// Update task state
-		updates := map[string]interface{}{
-			"status":                      models.StrategyStatusRunning,
-			"current_liquidity":           enterRes.CurrentLiquidity,
-			"exit_liquidity_removed":      false,
-			"v3_position_manager_address": enterRes.V3PositionManagerAddress,
-			"v3_token_id":                 enterRes.V3TokenID,
-			"v4_token_id":                 enterRes.V4TokenID,
-			"tick_lower":                  task.TickLower,
-			"tick_upper":                  task.TickUpper,
-			"out_of_range_since":          nil,
-			"error_message":               "",
-		}
-		if task.IsAuto {
-			updates["guard_open_volume_5m"] = 0
-			updates["guard_open_price"] = 0
-			updates["guard_open_tx_count_5m"] = 0
-			updates["guard_open_fee_percentage"] = 0
-			updates["guard_open_fee_rate_5m_pct"] = 0
-			updates["guard_open_total_fees_5m"] = 0
-			updates["guard_open_tvl_usd"] = 0
-			updates["guard_open_metrics_at"] = nil
-			updates["guard_volume_drop_armed"] = false
-			updates["guard_volume_drop_last_volume_5m"] = 0
-			updates["guard_price_tx_drop_armed"] = false
-		}
-		database.DB.Model(task).Updates(updates)
-		task.ExitLiquidityRemoved = false
-		if task.IsAuto {
-			task.GuardOpenVolume5m = 0
-			task.GuardOpenPrice = 0
-			task.GuardOpenTxCount5m = 0
-			task.GuardOpenFeePercentage = 0
-			task.GuardOpenFeeRate5mPct = 0
-			task.GuardOpenTotalFees5m = 0
-			task.GuardOpenTVLUSD = 0
-			task.GuardOpenMetricsAt = nil
-			task.GuardVolumeDropArmed = false
-			task.GuardVolumeDropLastVolume5m = 0
-			task.GuardPriceTxDropArmed = false
-		}
-
-		log.Printf("[Strategy] 任务 #%d 已重新开仓! 继续监控.", task.ID)
 	} else {
 		// Log occasionally or just debug
 		// fmt.Printf("[Strategy] Task #%d waiting... %v remaining\n", task.ID, remaining)
 	}
+}
+
+func (s *StrategyService) runCooldownReopen(taskID uint, userID uint) {
+	if taskID == 0 || userID == 0 {
+		return
+	}
+
+	var task models.StrategyTask
+	if err := database.DB.Where("id = ? AND user_id = ?", taskID, userID).First(&task).Error; err != nil {
+		log.Printf("[Strategy] load task for cooldown reopen failed: task_id=%d user_id=%d err=%v", taskID, userID, err)
+		return
+	}
+	if task.Status != models.StrategyStatusWaiting || task.CooldownUntil == nil {
+		return
+	}
+
+	now := time.Now()
+	if now.Before(*task.CooldownUntil) {
+		return
+	}
+
+	currentTick, err := s.getCurrentTick(&task)
+	if err != nil {
+		log.Printf("[Strategy] 任务 #%d 冷却结束后获取当前 tick 失败: %v", task.ID, err)
+		return
+	}
+
+	tickLower, tickUpper, rErr := s.calculateRangeFromPercentage(&task, currentTick)
+	if rErr != nil {
+		log.Printf("[Strategy] 任务 #%d 冷却结束后计算新 tick 范围失败: %v", task.ID, rErr)
+		return
+	}
+
+	task.TickLower = tickLower
+	task.TickUpper = tickUpper
+	_ = database.DB.Model(&task).Updates(map[string]interface{}{
+		"tick_lower": tickLower,
+		"tick_upper": tickUpper,
+	}).Error
+
+	enterRes, err := s.liquidityService.EnterTaskFromUSDT(task.UserID, &task)
+	if err != nil {
+		log.Printf("[Strategy] 任务 #%d 冷却结束后开仓失败: %v", task.ID, err)
+		_ = database.DB.Model(&task).Updates(map[string]interface{}{
+			"status":          models.StrategyStatusError,
+			"error_message":   fmt.Sprintf("enter failed after cooldown: %v", err),
+			"cooldown_until":  nil,
+			"cooldown_reason": "",
+		}).Error
+		return
+	}
+
+	updates := map[string]interface{}{
+		"status":                      models.StrategyStatusRunning,
+		"current_liquidity":           enterRes.CurrentLiquidity,
+		"exit_liquidity_removed":      false,
+		"v3_position_manager_address": enterRes.V3PositionManagerAddress,
+		"v3_token_id":                 enterRes.V3TokenID,
+		"v4_token_id":                 enterRes.V4TokenID,
+		"tick_lower":                  task.TickLower,
+		"tick_upper":                  task.TickUpper,
+		"out_of_range_since":          nil,
+		"cooldown_until":              nil,
+		"cooldown_reason":             "",
+		"next_range_multiplier":       1.0,
+		"error_message":               "",
+	}
+	if task.IsAuto {
+		updates["guard_open_volume_5m"] = 0
+		updates["guard_open_price"] = 0
+		updates["guard_open_tx_count_5m"] = 0
+		updates["guard_open_fee_percentage"] = 0
+		updates["guard_open_fee_rate_5m_pct"] = 0
+		updates["guard_open_total_fees_5m"] = 0
+		updates["guard_open_tvl_usd"] = 0
+		updates["guard_open_metrics_at"] = nil
+		updates["guard_volume_drop_armed"] = false
+		updates["guard_volume_drop_last_volume_5m"] = 0
+		updates["guard_price_tx_drop_armed"] = false
+	}
+	_ = database.DB.Model(&task).Updates(updates).Error
+
+	s.notify(task.UserID, fmt.Sprintf("✅ 冷却结束，已重新开仓（Tick %d）。\n新 Tick 范围: %d - %d\n交易哈希: `%s`", currentTick, tickLower, tickUpper, enterRes.TxHash))
+	s.notifyTaskCard(task.UserID, task.ID)
+}
+
+func (s *StrategyService) runWaitingReopen(taskID uint, userID uint) {
+	if taskID == 0 || userID == 0 {
+		return
+	}
+
+	var task models.StrategyTask
+	if err := database.DB.Where("id = ? AND user_id = ?", taskID, userID).First(&task).Error; err != nil {
+		log.Printf("[Strategy] load task for waiting reopen failed: task_id=%d user_id=%d err=%v", taskID, userID, err)
+		return
+	}
+	if task.Status != models.StrategyStatusWaiting || !task.AutoReinvest || task.LastExitTime == nil {
+		return
+	}
+
+	now := time.Now()
+	elapsed := now.Sub(*task.LastExitTime)
+	remaining := time.Duration(task.ReopenDelaySeconds)*time.Second - elapsed
+	if remaining > 0 {
+		return
+	}
+
+	currentTick, err := s.getCurrentTick(&task)
+	if err != nil {
+		log.Printf("[Strategy] 任务 #%d 获取当前 tick 失败: %v", task.ID, err)
+		return
+	}
+	// Update range around current tick (best-effort)
+	tickLower, tickUpper, rErr := s.calculateRangeFromPercentage(&task, currentTick)
+	if rErr == nil {
+		task.TickLower = tickLower
+		task.TickUpper = tickUpper
+	}
+
+	enterRes, err := s.liquidityService.EnterTaskFromUSDT(task.UserID, &task)
+	if err != nil {
+		log.Printf("[Strategy] 任务 #%d 开仓失败: %v", task.ID, err)
+		_ = database.DB.Model(&task).Updates(map[string]interface{}{
+			"status":        models.StrategyStatusError,
+			"error_message": fmt.Sprintf("enter failed: %v", err),
+		}).Error
+		return
+	}
+
+	updates := map[string]interface{}{
+		"status":                      models.StrategyStatusRunning,
+		"current_liquidity":           enterRes.CurrentLiquidity,
+		"exit_liquidity_removed":      false,
+		"v3_position_manager_address": enterRes.V3PositionManagerAddress,
+		"v3_token_id":                 enterRes.V3TokenID,
+		"v4_token_id":                 enterRes.V4TokenID,
+		"tick_lower":                  task.TickLower,
+		"tick_upper":                  task.TickUpper,
+		"out_of_range_since":          nil,
+		"error_message":               "",
+	}
+	if task.IsAuto {
+		updates["guard_open_volume_5m"] = 0
+		updates["guard_open_price"] = 0
+		updates["guard_open_tx_count_5m"] = 0
+		updates["guard_open_fee_percentage"] = 0
+		updates["guard_open_fee_rate_5m_pct"] = 0
+		updates["guard_open_total_fees_5m"] = 0
+		updates["guard_open_tvl_usd"] = 0
+		updates["guard_open_metrics_at"] = nil
+		updates["guard_volume_drop_armed"] = false
+		updates["guard_volume_drop_last_volume_5m"] = 0
+		updates["guard_price_tx_drop_armed"] = false
+	}
+	_ = database.DB.Model(&task).Updates(updates).Error
+
+	log.Printf("[Strategy] 任务 #%d 已重新开仓! 继续监控.", task.ID)
 }
 
 // Mock functions for V4 until V4 contract is ready
