@@ -90,12 +90,13 @@ func (s *AccessService) CheckUserAccess(userID uint, now time.Time) (AccessCheck
 }
 
 type CreateAuthCodeInput struct {
-	ActiveFrom     *time.Time
-	ActiveTo       *time.Time
-	MaxWallets     int
-	MaxActiveTasks int
-	MaxRedemptions int
-	Note           string
+	ActiveFrom      *time.Time
+	ActiveTo        *time.Time
+	MaxWallets      int
+	MaxActiveTasks  int
+	MaxRedemptions  int
+	AutoModeEnabled bool
+	Note            string
 }
 
 func generateAuthCode() (string, error) {
@@ -140,6 +141,7 @@ func (s *AccessService) CreateAuthCode(createdByUserID uint, in CreateAuthCodeIn
 			MaxRedemptions:  in.MaxRedemptions,
 			MaxWallets:      in.MaxWallets,
 			MaxActiveTasks:  in.MaxActiveTasks,
+			AutoModeEnabled: in.AutoModeEnabled,
 		}
 		if err := database.DB.Create(ac).Error; err != nil {
 			lastErr = err
@@ -167,11 +169,12 @@ func (s *AccessService) GetAuthCode(codeID uint) (*models.AuthCode, error) {
 
 // UpdateAuthCodeInput 更新授权码的输入参数
 type UpdateAuthCodeInput struct {
-	ActiveTo       *time.Time
-	MaxWallets     *int
-	MaxActiveTasks *int
-	MaxRedemptions *int
-	Note           *string
+	ActiveTo        *time.Time
+	MaxWallets      *int
+	MaxActiveTasks  *int
+	MaxRedemptions  *int
+	AutoModeEnabled *bool
+	Note            *string
 }
 
 // UpdateAuthCode 更新授权码
@@ -192,6 +195,9 @@ func (s *AccessService) UpdateAuthCode(codeID uint, in UpdateAuthCodeInput) (*mo
 	}
 	if in.MaxRedemptions != nil {
 		updates["max_redemptions"] = *in.MaxRedemptions
+	}
+	if in.AutoModeEnabled != nil {
+		updates["auto_mode_enabled"] = *in.AutoModeEnabled
 	}
 	if in.Note != nil {
 		updates["note"] = strings.TrimSpace(*in.Note)
@@ -274,6 +280,7 @@ func (s *AccessService) RedeemAuthCode(userID uint, rawCode string) (*models.Use
 			"active_to":          auth.ActiveTo,
 			"max_wallets":        auth.MaxWallets,
 			"max_active_tasks":   auth.MaxActiveTasks,
+			"auto_mode_enabled":  auth.AutoModeEnabled,
 			"revoked_at":         nil,
 			"revoked_by_user_id": nil,
 			"note":               strings.TrimSpace(auth.Note),
@@ -451,11 +458,12 @@ func (s *AccessService) GetUserAccessWithUser(userID uint) (*models.UserAccess, 
 }
 
 type UpdateUserAccessInput struct {
-	ActiveFrom     *time.Time
-	ActiveTo       *time.Time
-	MaxWallets     *int
-	MaxActiveTasks *int
-	Note           *string
+	ActiveFrom      *time.Time
+	ActiveTo        *time.Time
+	MaxWallets      *int
+	MaxActiveTasks  *int
+	AutoModeEnabled *bool
+	Note            *string
 }
 
 func (s *AccessService) UpdateUserAccess(adminUserID uint, userID uint, in UpdateUserAccessInput) (*models.UserAccess, error) {
@@ -480,6 +488,9 @@ func (s *AccessService) UpdateUserAccess(adminUserID uint, userID uint, in Updat
 	}
 	if in.MaxActiveTasks != nil {
 		updates["max_active_tasks"] = *in.MaxActiveTasks
+	}
+	if in.AutoModeEnabled != nil {
+		updates["auto_mode_enabled"] = *in.AutoModeEnabled
 	}
 	if in.Note != nil {
 		updates["note"] = strings.TrimSpace(*in.Note)
@@ -515,4 +526,33 @@ func (s *AccessService) RestoreUserAccess(adminUserID uint, userID uint) error {
 			"revoked_by_user_id": nil,
 			"granted_by_user_id": adminUserID,
 		}).Error
+}
+
+// CheckAutoModeAccess 检查用户是否有 Auto 模式权限
+// 返回: (hasAccess, reason)
+func (s *AccessService) CheckAutoModeAccess(userID uint) (bool, string) {
+	// 管理员始终有权限
+	if s.IsAdminUser(userID) {
+		return true, ""
+	}
+
+	access, err := s.GetUserAccess(userID)
+	if err != nil {
+		return false, "未授权"
+	}
+
+	if access.RevokedAt != nil {
+		return false, "账户已停用"
+	}
+
+	now := time.Now()
+	if access.ActiveTo != nil && now.After(*access.ActiveTo) {
+		return false, "授权已过期"
+	}
+
+	if !access.AutoModeEnabled {
+		return false, "未开通 Auto 模式权限"
+	}
+
+	return true, ""
 }

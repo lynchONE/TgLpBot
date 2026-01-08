@@ -123,12 +123,16 @@ func (b *Bot) handleAdminCreateCode(query *tgbotapi.CallbackQuery, user *models.
 	// 快速创建按钮
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📅 7天/1人", "admin_quick_code_7_1"),
-			tgbotapi.NewInlineKeyboardButtonData("📅 30天/1人", "admin_quick_code_30_1"),
+			tgbotapi.NewInlineKeyboardButtonData("📅 30天/无Auto", "admin_quick_code_30_1_0"),
+			tgbotapi.NewInlineKeyboardButtonData("📅 30天/有Auto", "admin_quick_code_30_1_1"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📅 90天/3人", "admin_quick_code_90_3"),
-			tgbotapi.NewInlineKeyboardButtonData("📅 永久/5人", "admin_quick_code_0_5"),
+			tgbotapi.NewInlineKeyboardButtonData("📅 90天/无Auto", "admin_quick_code_90_1_0"),
+			tgbotapi.NewInlineKeyboardButtonData("📅 90天/有Auto", "admin_quick_code_90_1_1"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📅 永久/无Auto", "admin_quick_code_0_1_0"),
+			tgbotapi.NewInlineKeyboardButtonData("📅 永久/有Auto", "admin_quick_code_0_1_1"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("✏️ 自定义", "admin_custom_code"),
@@ -143,12 +147,11 @@ func (b *Bot) handleAdminCreateCode(query *tgbotapi.CallbackQuery, user *models.
 选择预设方案或自定义参数：
 
 *预设方案说明:*
-• 7天/1人 - 有效期7天，限1人使用
-• 30天/1人 - 有效期30天，限1人使用
-• 90天/3人 - 有效期90天，限3人使用
-• 永久/5人 - 永久有效，限5人使用
+• 无Auto - 仅手动开仓，无自动托管
+• 有Auto - 可使用自动托管(Auto模式)
+• 默认额度：3钱包/3任务
 
-默认额度：3个钱包，3个活跃任务`
+💡 自定义可设置更多参数`
 
 	b.sendMessageWithKeyboard(query.Message.Chat.ID, text, keyboard)
 }
@@ -163,15 +166,16 @@ func (b *Bot) handleAdminQuickCode(query *tgbotapi.CallbackQuery, user *models.U
 		return
 	}
 
-	// 解析参数: admin_quick_code_{days}_{maxRedemptions}
+	// 解析参数: admin_quick_code_{days}_{maxRedemptions}_{autoEnabled}
 	parts := strings.Split(query.Data, "_")
-	if len(parts) < 5 {
+	if len(parts) < 6 {
 		b.sendMessage(query.Message.Chat.ID, "❌ 参数错误")
 		return
 	}
 
 	days, _ := strconv.Atoi(parts[3])
 	maxRedemptions, _ := strconv.Atoi(parts[4])
+	autoEnabled := parts[5] == "1"
 
 	var activeTo *time.Time
 	if days > 0 {
@@ -180,12 +184,13 @@ func (b *Bot) handleAdminQuickCode(query *tgbotapi.CallbackQuery, user *models.U
 	}
 
 	input := userSvc.CreateAuthCodeInput{
-		ActiveFrom:     nil,
-		ActiveTo:       activeTo,
-		MaxWallets:     3,
-		MaxActiveTasks: 3,
-		MaxRedemptions: maxRedemptions,
-		Note:           fmt.Sprintf("快速生成 %d天/%d人", days, maxRedemptions),
+		ActiveFrom:      nil,
+		ActiveTo:        activeTo,
+		MaxWallets:      3,
+		MaxActiveTasks:  3,
+		MaxRedemptions:  maxRedemptions,
+		AutoModeEnabled: autoEnabled,
+		Note:            fmt.Sprintf("快速生成 %d天/Auto=%v", days, autoEnabled),
 	}
 
 	code, err := b.accessService.CreateAuthCode(user.ID, input)
@@ -199,6 +204,11 @@ func (b *Bot) handleAdminQuickCode(query *tgbotapi.CallbackQuery, user *models.U
 		validityText = fmt.Sprintf("%d 天", days)
 	}
 
+	autoText := "❌ 无"
+	if autoEnabled {
+		autoText = "✅ 有"
+	}
+
 	text := fmt.Sprintf(`✅ *授权码已生成*
 
 🔑 授权码: `+"`%s`"+`
@@ -208,8 +218,9 @@ func (b *Bot) handleAdminQuickCode(query *tgbotapi.CallbackQuery, user *models.U
 • 可使用人数: %d
 • 钱包上限: %d
 • 任务上限: %d
+• Auto模式: %s
 
-复制授权码发送给用户即可。`, code.Code, validityText, maxRedemptions, code.MaxWallets, code.MaxActiveTasks)
+复制授权码发送给用户即可。`, code.Code, validityText, maxRedemptions, code.MaxWallets, code.MaxActiveTasks, autoText)
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
@@ -236,11 +247,14 @@ func (b *Bot) handleAdminCustomCode(query *tgbotapi.CallbackQuery, user *models.
 	text := `✏️ *自定义授权码参数*
 
 请按以下格式输入参数（用空格分隔）:
-` + "`有效天数 使用人数 钱包上限 任务上限`" + `
+` + "`有效天数 使用人数 钱包上限 任务上限 [auto]`" + `
 
 示例:
-• ` + "`30 1 3 3`" + ` - 30天/1人/3钱包/3任务
-• ` + "`0 5 5 5`" + ` - 永久/5人/5钱包/5任务
+• ` + "`30 1 3 3`" + ` - 30天/1人/3钱包/3任务/无Auto
+• ` + "`90 1 5 5 auto`" + ` - 90天/1人/5钱包/5任务/有Auto
+• ` + "`0 1 3 3 auto`" + ` - 永久/1人/3钱包/3任务/有Auto
+
+💡 最后加 auto 表示开通Auto模式权限
 
 输入 /cancel 取消。`
 
@@ -257,7 +271,7 @@ func (b *Bot) handleAuthCodeParamsInput(message *tgbotapi.Message, user *models.
 
 	parts := strings.Fields(message.Text)
 	if len(parts) < 4 {
-		b.sendMessage(message.Chat.ID, "❌ 参数格式错误，请输入: `有效天数 使用人数 钱包上限 任务上限`")
+		b.sendMessage(message.Chat.ID, "❌ 参数格式错误，请输入: `有效天数 使用人数 钱包上限 任务上限 [auto]`")
 		return
 	}
 
@@ -285,6 +299,12 @@ func (b *Bot) handleAuthCodeParamsInput(message *tgbotapi.Message, user *models.
 		return
 	}
 
+	// 检查是否有 auto 参数
+	autoEnabled := false
+	if len(parts) >= 5 && strings.ToLower(parts[4]) == "auto" {
+		autoEnabled = true
+	}
+
 	database.ClearUserSession(user.TelegramID)
 
 	var activeTo *time.Time
@@ -294,11 +314,12 @@ func (b *Bot) handleAuthCodeParamsInput(message *tgbotapi.Message, user *models.
 	}
 
 	input := userSvc.CreateAuthCodeInput{
-		ActiveTo:       activeTo,
-		MaxWallets:     maxWallets,
-		MaxActiveTasks: maxTasks,
-		MaxRedemptions: maxRedemptions,
-		Note:           fmt.Sprintf("自定义 %d天/%d人/%d钱包/%d任务", days, maxRedemptions, maxWallets, maxTasks),
+		ActiveTo:        activeTo,
+		MaxWallets:      maxWallets,
+		MaxActiveTasks:  maxTasks,
+		MaxRedemptions:  maxRedemptions,
+		AutoModeEnabled: autoEnabled,
+		Note:            fmt.Sprintf("自定义 %d天/%d人/Auto=%v", days, maxRedemptions, autoEnabled),
 	}
 
 	code, err := b.accessService.CreateAuthCode(user.ID, input)
@@ -312,6 +333,11 @@ func (b *Bot) handleAuthCodeParamsInput(message *tgbotapi.Message, user *models.
 		validityText = fmt.Sprintf("%d 天", days)
 	}
 
+	autoText := "❌ 无"
+	if autoEnabled {
+		autoText = "✅ 有"
+	}
+
 	text := fmt.Sprintf(`✅ *授权码已生成*
 
 🔑 授权码: `+"`%s`"+`
@@ -320,7 +346,8 @@ func (b *Bot) handleAuthCodeParamsInput(message *tgbotapi.Message, user *models.
 • 有效期: %s
 • 可使用人数: %d
 • 钱包上限: %d
-• 任务上限: %d`, code.Code, validityText, maxRedemptions, maxWallets, maxTasks)
+• 任务上限: %d
+• Auto模式: %s`, code.Code, validityText, maxRedemptions, maxWallets, maxTasks, autoText)
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
@@ -570,6 +597,11 @@ func (b *Bot) handleAdminUserDetail(query *tgbotapi.CallbackQuery, user *models.
 		activeToText = access.ActiveTo.Format("2006-01-02")
 	}
 
+	autoModeText := "❌ 无"
+	if access.AutoModeEnabled {
+		autoModeText = "✅ 有"
+	}
+
 	walletCount, _ := b.accessService.CountUserWallets(uint(targetUserID))
 	taskCount, _ := b.accessService.CountUserActiveTasks(uint(targetUserID))
 
@@ -582,11 +614,13 @@ func (b *Bot) handleAdminUserDetail(query *tgbotapi.CallbackQuery, user *models.
 📅 授权到期: %s
 💼 钱包: %d / %d
 📋 活跃任务: %d / %d
+🤖 Auto模式: %s
 
 备注: %s`,
 		username, access.User.TelegramID, status,
 		activeToText, walletCount, access.MaxWallets,
 		taskCount, access.MaxActiveTasks,
+		autoModeText,
 		access.Note)
 
 	var actionBtn tgbotapi.InlineKeyboardButton
@@ -598,7 +632,7 @@ func (b *Bot) handleAdminUserDetail(query *tgbotapi.CallbackQuery, user *models.
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("✏️ 编辑额度", fmt.Sprintf("admin_user_edit_%d", targetUserID)),
+			tgbotapi.NewInlineKeyboardButtonData("✏️ 编辑权限", fmt.Sprintf("admin_user_edit_%d", targetUserID)),
 			actionBtn,
 		),
 		tgbotapi.NewInlineKeyboardRow(
@@ -638,6 +672,16 @@ func (b *Bot) handleAdminUserEdit(query *tgbotapi.CallbackQuery, user *models.Us
 		username = "@" + access.User.Username
 	}
 
+	currentExpiry := "永久"
+	if access.ActiveTo != nil {
+		currentExpiry = access.ActiveTo.Format("2006-01-02")
+	}
+
+	currentAuto := "无"
+	if access.AutoModeEnabled {
+		currentAuto = "有"
+	}
+
 	// 保存编辑的用户ID到session
 	database.SetUserSession(user.TelegramID, "edit_user_id", fmt.Sprintf("%d", targetUserID), 10*time.Minute)
 	database.SetUserSession(user.TelegramID, "state", "awaiting_user_edit_params", 10*time.Minute)
@@ -645,14 +689,21 @@ func (b *Bot) handleAdminUserEdit(query *tgbotapi.CallbackQuery, user *models.Us
 	text := fmt.Sprintf(`✏️ *编辑用户权限*
 
 👤 用户: %s
-当前额度: 钱包=%d, 任务=%d
+当前配置: 钱包=%d, 任务=%d, 到期=%s, Auto=%s
 
-请输入新的额度参数（用空格分隔）:
-`+"`钱包上限 任务上限`"+`
+请输入新的配置参数（用空格分隔）:
+`+"`钱包 任务 [到期天数] [auto]`"+`
 
-示例: `+"`5 5`"+` - 5个钱包、5个任务
+示例:
+• `+"`5 5`"+` - 仅修改额度
+• `+"`5 5 90`"+` - 额度+90天到期
+• `+"`5 5 90 auto`"+` - 额度+90天+开通Auto
+• `+"`5 5 0 auto`"+` - 额度+永久+开通Auto
 
-输入 /cancel 取消。`, username, access.MaxWallets, access.MaxActiveTasks)
+💡 到期天数: 0=永久, 正数=从今天起N天
+💡 最后加 auto 表示开通Auto模式
+
+输入 /cancel 取消。`, username, access.MaxWallets, access.MaxActiveTasks, currentExpiry, currentAuto)
 
 	b.sendMessage(query.Message.Chat.ID, text)
 }
@@ -677,7 +728,7 @@ func (b *Bot) handleUserEditInput(message *tgbotapi.Message, user *models.User) 
 
 	parts := strings.Fields(message.Text)
 	if len(parts) < 2 {
-		b.sendMessage(message.Chat.ID, "❌ 参数格式错误，请输入: `钱包上限 任务上限`")
+		b.sendMessage(message.Chat.ID, "❌ 参数格式错误，请输入: `钱包 任务 [到期天数] [auto]`")
 		return
 	}
 
@@ -698,6 +749,29 @@ func (b *Bot) handleUserEditInput(message *tgbotapi.Message, user *models.User) 
 		MaxActiveTasks: &maxTasks,
 	}
 
+	// 解析可选的到期天数
+	if len(parts) >= 3 {
+		days, err := strconv.Atoi(parts[2])
+		if err == nil && days >= 0 {
+			if days == 0 {
+				// 永久授权
+				input.ActiveTo = nil
+			} else {
+				t := time.Now().AddDate(0, 0, days)
+				input.ActiveTo = &t
+			}
+		}
+	}
+
+	// 解析可选的 auto 参数
+	for i := 2; i < len(parts); i++ {
+		if strings.ToLower(parts[i]) == "auto" {
+			autoEnabled := true
+			input.AutoModeEnabled = &autoEnabled
+			break
+		}
+	}
+
 	access, err := b.accessService.UpdateUserAccess(user.ID, uint(targetUserID), input)
 	if err != nil {
 		b.sendMessage(message.Chat.ID, fmt.Sprintf("❌ 更新失败: %v", err))
@@ -709,13 +783,25 @@ func (b *Bot) handleUserEditInput(message *tgbotapi.Message, user *models.User) 
 		username = "@" + access.User.Username
 	}
 
+	activeToText := "永久"
+	if access.ActiveTo != nil {
+		activeToText = access.ActiveTo.Format("2006-01-02")
+	}
+
+	autoText := "❌ 无"
+	if access.AutoModeEnabled {
+		autoText = "✅ 有"
+	}
+
 	text := fmt.Sprintf(`✅ *用户权限已更新*
 
 👤 用户: %s
 
-📋 *新额度:*
+📋 *新配置:*
 • 钱包上限: %d
-• 任务上限: %d`, username, access.MaxWallets, access.MaxActiveTasks)
+• 任务上限: %d
+• 授权到期: %s
+• Auto模式: %s`, username, access.MaxWallets, access.MaxActiveTasks, activeToText, autoText)
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(

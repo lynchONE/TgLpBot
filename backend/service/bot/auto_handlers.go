@@ -26,6 +26,14 @@ func (b *Bot) handleAuto(message *tgbotapi.Message, user *models.User) {
 	if user == nil {
 		return
 	}
+
+	// 检查 Auto 模式权限
+	hasAccess, reason := b.accessService.CheckAutoModeAccess(user.ID)
+	if !hasAccess {
+		b.sendMessage(message.Chat.ID, fmt.Sprintf("❌ 您没有 Auto 模式权限\n\n原因：%s\n\n请联系管理员开通。", reason))
+		return
+	}
+
 	_ = database.SetUserSession(user.TelegramID, autoMenuViewKey, autoMenuViewCfg, 24*time.Hour)
 	b.openAutoMenu(message.Chat.ID, user, "")
 }

@@ -67,6 +67,13 @@ func (b *Bot) handleAutoConfigToggle(query *tgbotapi.CallbackQuery, user *models
 		return
 	}
 
+	// 检查 Auto 模式权限
+	hasAccess, reason := b.accessService.CheckAutoModeAccess(user.ID)
+	if !hasAccess {
+		_ = b.refreshAutoMenu(query.Message.Chat.ID, query.Message.MessageID, user, fmt.Sprintf("❌ 您没有 Auto 模式权限：%s", reason))
+		return
+	}
+
 	// Require a wallet.
 	wallets, err := b.walletService.GetUserWallets(user.ID)
 	if err != nil || len(wallets) == 0 {

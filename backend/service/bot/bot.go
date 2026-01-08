@@ -312,7 +312,7 @@ func (b *Bot) handleCommand(message *tgbotapi.Message, user *models.User) {
 		b.handleTransactions(message, user)
 	case "profit":
 		b.handleProfit(message, user)
-	case "swap_to_usdt":
+	case "swap":
 		b.handleSwapToUSDT(message, user)
 	case "cancel":
 		b.handleCancel(message, user)
