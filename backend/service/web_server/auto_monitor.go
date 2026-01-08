@@ -95,6 +95,11 @@ type autoMonitorTask struct {
 	ExitLastError     string     `json:"exit_last_error,omitempty"`
 	ExitGiveUpAt      *time.Time `json:"exit_give_up_at,omitempty"`
 
+	// 连续跌破/涨破计数
+	RangeBreakUpStreak   int     `json:"range_break_up_streak"`
+	RangeBreakDownStreak int     `json:"range_break_down_streak"`
+	NextRangeMultiplier  float64 `json:"next_range_multiplier"`
+
 	Open    autoMonitorMetrics `json:"open"`
 	Current autoMonitorMetrics `json:"current"`
 
@@ -447,6 +452,10 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 			ExitNextRetryAt:   task.ExitNextRetryAt,
 			ExitLastError:     strings.TrimSpace(task.ExitLastError),
 			ExitGiveUpAt:      task.ExitGiveUpAt,
+
+			RangeBreakUpStreak:   task.RangeBreakUpStreak,
+			RangeBreakDownStreak: task.RangeBreakDownStreak,
+			NextRangeMultiplier:  task.NextRangeMultiplier,
 
 			Open:         open,
 			Current:      current,

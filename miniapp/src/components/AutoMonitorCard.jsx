@@ -169,6 +169,28 @@ export default function AutoMonitorCard({ task, tick }) {
                     </div>
                 </div>
 
+                {/* 连续跌破/涨破计数 */}
+                <div className="mt-2 flex items-center gap-3 text-[11px]">
+                    <div className="flex items-center gap-1">
+                        <span className="text-zinc-500 dark:text-white/40">连续跌破:</span>
+                        <span className={`font-semibold ${task?.range_break_down_streak >= 2 ? 'text-red-500' : task?.range_break_down_streak >= 1 ? 'text-amber-500' : ''}`}>
+                            {task?.range_break_down_streak || 0}/2
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                        <span className="text-zinc-500 dark:text-white/40">连续涨破:</span>
+                        <span className={`font-semibold ${task?.range_break_up_streak >= 3 ? 'text-amber-500' : ''}`}>
+                            {task?.range_break_up_streak || 0}/3
+                        </span>
+                    </div>
+                    {task?.next_range_multiplier > 1 ? (
+                        <div className="flex items-center gap-1">
+                            <span className="text-zinc-500 dark:text-white/40">下次扩大:</span>
+                            <span className="font-semibold text-amber-500">{task.next_range_multiplier}x</span>
+                        </div>
+                    ) : null}
+                </div>
+
                 <div className="mt-2 grid grid-cols-2 gap-3 text-[11px]">
                     <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
                         <div className="font-semibold text-zinc-900 dark:text-white/80">交易量撤退</div>
@@ -198,13 +220,15 @@ export default function AutoMonitorCard({ task, tick }) {
                     <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
                         <div className="font-semibold text-zinc-900 dark:text-white/80">价格 + Tx 撤退</div>
                         <div className="mt-1 grid grid-cols-2 gap-x-2 gap-y-1">
-                            <div className="text-zinc-500 dark:text-white/40">阈值跌幅</div>
-                            <div className="text-right font-semibold tabular-nums">{formatPct(Number(gp?.drop_pct || 0) * 100, 0)}</div>
+                            <div className="text-zinc-500 dark:text-white/40">价格阈值</div>
+                            <div className="text-right font-semibold tabular-nums">{formatPct(Number(gp?.price_drop_pct || gp?.drop_pct || 0) * 100, 0)}</div>
+                            <div className="text-zinc-500 dark:text-white/40">Tx阈值</div>
+                            <div className="text-right font-semibold tabular-nums">{formatPct(Number(gp?.tx_drop_pct || gp?.drop_pct || 0) * 100, 0)}</div>
                             <div className="text-zinc-500 dark:text-white/40">价格命中</div>
                             <div className="text-right font-semibold">{gp?.price_hit ? '是' : '否'}</div>
                             <div className="text-zinc-500 dark:text-white/40">Tx 命中</div>
                             <div className="text-right font-semibold">{gp?.tx_hit ? '是' : '否'}</div>
-                            <div className="text-zinc-500 dark:text-white/40">命中阈值</div>
+                            <div className="text-zinc-500 dark:text-white/40">同时命中</div>
                             <div className="text-right font-semibold">{gp?.hit ? '是' : '否'}</div>
                             <div className="text-zinc-500 dark:text-white/40">首次标记</div>
                             <div className="text-right font-semibold">{gp?.first_mark ? '是' : '否'}</div>
