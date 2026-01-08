@@ -17,6 +17,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/golang/freetype/truetype"
 	chart "github.com/wcharczuk/go-chart/v2"
+	"github.com/wcharczuk/go-chart/v2/drawing"
 )
 
 var (
@@ -169,16 +170,25 @@ func (b *Bot) sendProfitChart(chatID int64, user *models.User) {
 		return
 	}
 
+	// 定义现代化配色方案 - 深色主题
+	darkBg := drawing.Color{R: 26, G: 31, B: 46, A: 255}            // 深蓝灰背景 #1a1f2e
+	accentGreen := drawing.Color{R: 0, G: 212, B: 170, A: 255}      // 主色：青绿色 #00d4aa
+	accentGreenLight := drawing.Color{R: 0, G: 255, B: 204, A: 255} // 亮青绿色 #00ffcc
+	gridColor := drawing.Color{R: 42, G: 49, B: 66, A: 255}         // 网格线颜色 #2a3142
+	textColor := drawing.Color{R: 160, G: 174, B: 192, A: 255}      // 文字颜色 #a0aec0
+
 	const (
-		strokeWidth = 3.0
-		dotWidth    = 4.0
+		strokeWidth = 3.5
+		dotWidth    = 6.0
 	)
+
+	// 主数据线样式 - 青绿色渐变
 	seriesStyle := chart.Style{
-		StrokeColor: chart.ColorBlue,
+		StrokeColor: accentGreen,
 		StrokeWidth: strokeWidth,
-		DotColor:    chart.ColorBlue,
+		DotColor:    accentGreenLight,
 		DotWidth:    dotWidth,
-		FillColor:   chart.ColorBlue.WithAlpha(48),
+		FillColor:   accentGreen.WithAlpha(40), // 半透明填充
 	}
 
 	segments := make([]chart.Series, 0, 2)
@@ -206,7 +216,7 @@ func (b *Bot) sendProfitChart(chatID int64, user *models.User) {
 	}
 	flushSeg()
 
-	yPad := math.Max(1.0, maxY*0.01)
+	yPad := math.Max(1.0, maxY*0.05) // 增加Y轴边距
 	yMin := minY - yPad
 	if yMin < 0 {
 		yMin = 0
@@ -224,21 +234,105 @@ func (b *Bot) sendProfitChart(chatID int64, user *models.User) {
 		})
 	}
 
+	// 获取最后一个有效值用于标注
+	var lastValue float64
+	var lastDate time.Time
+	for i := len(values) - 1; i >= 0; i-- {
+		if present[i] {
+			lastValue = values[i]
+			lastDate = dates[i]
+			break
+		}
+	}
+
+	// 计算7日变动
+	var firstValue float64
+	hasFirst := false
+	for i := 0; i < len(values); i++ {
+		if present[i] {
+			firstValue = values[i]
+			hasFirst = true
+			break
+		}
+	}
+	changePercent := 0.0
+	if hasFirst && firstValue > 0 {
+		changePercent = ((lastValue - firstValue) / firstValue) * 100
+	}
+
+	// 创建当前余额标注
+	annotations := []chart.Value2{
+		{
+			XValue: chart.TimeToFloat64(lastDate),
+			YValue: lastValue,
+			Label:  fmt.Sprintf("$%.2f", lastValue),
+		},
+	}
+
+	// 添加最新值标注系列
+	annotationSeries := chart.AnnotationSeries{
+		Name:        "余额标注",
+		Annotations: annotations,
+		Style: chart.Style{
+			FontSize:    12,
+			FontColor:   accentGreenLight,
+			StrokeColor: accentGreen,
+			FillColor:   darkBg,
+			Padding:     chart.Box{Top: 5, Left: 5, Right: 5, Bottom: 5},
+		},
+	}
+
+	// 合并所有系列
+	allSeries := append(segments, annotationSeries)
+
 	graph := chart.Chart{
-		Height: 420,
+		Width:  800,
+		Height: 450,
+		Background: chart.Style{
+			FillColor: darkBg,
+		},
+		Canvas: chart.Style{
+			FillColor: darkBg,
+		},
 		YAxis: chart.YAxis{
 			Range: &chart.ContinuousRange{Min: yMin, Max: yMax},
 			ValueFormatter: func(v interface{}) string {
-				return chart.FloatValueFormatterWithFormat(v, "%.2f")
+				return chart.FloatValueFormatterWithFormat(v, "$%.2f")
+			},
+			Style: chart.Style{
+				FontColor:   textColor,
+				StrokeColor: gridColor,
+			},
+			GridMajorStyle: chart.Style{
+				StrokeColor: gridColor,
+				StrokeWidth: 1,
 			},
 		},
 		XAxis: chart.XAxis{
 			Ticks: xTicks,
+			Style: chart.Style{
+				FontColor:   textColor,
+				StrokeColor: gridColor,
+			},
+			GridMajorStyle: chart.Style{
+				StrokeColor: gridColor,
+				StrokeWidth: 1,
+			},
 		},
-		Series: segments,
+		Series: allSeries,
 	}
 	if f := getChartCJKFont(); f != nil {
 		graph.Font = f
+	}
+
+	// 生成变动提示
+	changeNote := ""
+	if hasFirst && firstValue > 0 {
+		if changePercent >= 0 {
+			changeNote = fmt.Sprintf("\n📊 7日变动: +%.2f%%", changePercent)
+		} else {
+			changeNote = fmt.Sprintf("\n📊 7日变动: %.2f%%", changePercent)
+		}
 	}
 
 	buf := bytes.NewBuffer(nil)
@@ -247,16 +341,16 @@ func (b *Bot) sendProfitChart(chatID int64, user *models.User) {
 		return
 	}
 
-	note := ""
+	missingNote := ""
 	if missing > 0 {
-		note = fmt.Sprintf("\n⚠️ 缺少 %d 天数据（将从今天开始自动记录）", missing)
+		missingNote = fmt.Sprintf("\n⚠️ 缺少 %d 天数据", missing)
 	}
 
 	photo := tgbotapi.NewPhoto(chatID, tgbotapi.FileBytes{
 		Name:  "profit.png",
 		Bytes: buf.Bytes(),
 	})
-	photo.Caption = fmt.Sprintf("📈 *余额走势*\n钱包：`%s`%s", shortenHex(wallet.Address), note)
+	photo.Caption = fmt.Sprintf("📈 *余额走势*\n钱包：`%s`%s%s", shortenHex(wallet.Address), changeNote, missingNote)
 	photo.ParseMode = "Markdown"
 	photo.DisableNotification = true
 	b.api.Send(photo)

@@ -154,8 +154,8 @@ func (b *Bot) setCommands() error {
 			Description: "管理钱包",
 		},
 		{
-			Command:     "swap_to_usdt",
-			Description: "兑换其它代币为USDT",
+			Command:     "swap",
+			Description: "零钱兑换",
 		},
 		{
 			Command:     "transactions",
