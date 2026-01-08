@@ -1,6 +1,7 @@
 package strategy
 
 import (
+	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/service/liquidity"
@@ -921,7 +922,14 @@ func (s *StrategyService) finishCooldownAfterExit(task *models.StrategyTask, now
 		return
 	}
 
-	cooldownUntil := now.Add(autoModeCooldownDuration)
+	// 从配置读取冷却时间，默认30分钟
+	cooldownDuration := autoModeCooldownDurationDefault
+	if config.AppConfig != nil && config.AppConfig.AutoLPGuardCooldownSeconds > 0 {
+		cooldownDuration = time.Duration(config.AppConfig.AutoLPGuardCooldownSeconds) * time.Second
+	}
+	cooldownUntil := now.Add(cooldownDuration)
+	cooldownMinutes := int(cooldownDuration.Minutes())
+
 	reason := strings.TrimSpace(title)
 	if reason == "" {
 		reason = "进入冷却"
@@ -970,7 +978,7 @@ func (s *StrategyService) finishCooldownAfterExit(task *models.StrategyTask, now
 	task.NextRangeMultiplier = 1.0
 	task.ErrorMessage = ""
 
-	msg := fmt.Sprintf("⏸️ %s 完成，已撤出并兑换为 USDT。\n该池子进入冷却 1 小时（至 %s），期间不再开仓。", reason, cooldownUntil.Format("15:04:05"))
+	msg := fmt.Sprintf("⏸️ %s 完成，已撤出并兑换为 USDT。\n该池子进入冷却 %d 分钟（至 %s），期间不再开仓。", reason, cooldownMinutes, cooldownUntil.Format("15:04:05"))
 	if len(txHashes) > 0 {
 		msg += "\n📝 *交易记录：*\n"
 		hasSwapTx := false

@@ -2363,6 +2363,23 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 		priceTxDropPct = 0.10
 	}
 
+	// 独立的价格和tx跌幅阈值
+	priceDropPct := config.AppConfig.AutoLPGuardPriceDropPercent
+	if priceDropPct > 1 && priceDropPct <= 100 {
+		priceDropPct = priceDropPct / 100
+	}
+	if priceDropPct <= 0 || priceDropPct >= 1 {
+		priceDropPct = 0.05 // 默认5%
+	}
+
+	txDropPct := config.AppConfig.AutoLPGuardTxDropPercent
+	if txDropPct > 1 && txDropPct <= 100 {
+		txDropPct = txDropPct / 100
+	}
+	if txDropPct <= 0 || txDropPct >= 1 {
+		txDropPct = 0.40 // 默认40%
+	}
+
 	for i := range tasks {
 		task := &tasks[i]
 		if task.ExitGiveUpAt != nil {
@@ -2474,13 +2491,13 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 			}
 		}
 
-		if priceTxDropPct > 0 &&
+		if priceDropPct > 0 && txDropPct > 0 &&
 			task.GuardOpenPrice > 0 &&
 			task.GuardOpenTxCount5m > 0 &&
 			m.CurrentTokenPrice > 0 &&
 			m.TransactionCount > 0 {
-			priceHit := m.CurrentTokenPrice <= task.GuardOpenPrice*(1.0-priceTxDropPct)
-			txHit := float64(m.TransactionCount) <= float64(task.GuardOpenTxCount5m)*(1.0-priceTxDropPct)
+			priceHit := m.CurrentTokenPrice <= task.GuardOpenPrice*(1.0-priceDropPct)
+			txHit := float64(m.TransactionCount) <= float64(task.GuardOpenTxCount5m)*(1.0-txDropPct)
 			hit := priceHit && txHit
 
 			if !hit {
@@ -2497,8 +2514,9 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 				task.GuardPriceTxDropArmed = true
 			} else {
 				reason := fmt.Sprintf(
-					"价格与交易笔数较开仓时下跌 >=%.0f%%（开仓价=%.6f 当前价=%.6f 开仓Tx=%d 当前Tx=%d）",
-					priceTxDropPct*100,
+					"价格跌>=%.0f%% 且 交易笔数跌>=%.0f%%（开仓价=%.6f 当前价=%.6f 开仓Tx=%d 当前Tx=%d）",
+					priceDropPct*100,
+					txDropPct*100,
 					task.GuardOpenPrice,
 					m.CurrentTokenPrice,
 					task.GuardOpenTxCount5m,

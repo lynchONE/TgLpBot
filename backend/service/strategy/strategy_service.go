@@ -25,7 +25,7 @@ const (
 	autoModeConsecutiveDownBreakCooldownThreshold = 2
 	autoModeConsecutiveUpBreakExpandThreshold     = 3
 	autoModeExpandRangeMultiplier                 = 2.0
-	autoModeCooldownDuration                      = 1 * time.Hour
+	autoModeCooldownDurationDefault               = 30 * time.Minute // 默认30分钟，可通过配置覆盖
 )
 
 // StrategyService handles background monitoring and strategy execution
@@ -401,8 +401,12 @@ func (s *StrategyService) handleAutoModeRangeBreakExit(task *models.StrategyTask
 		upStreak = 0
 		downStreak++
 		if downStreak >= autoModeConsecutiveDownBreakCooldownThreshold {
-			// 2 consecutive "down" breaks -> exit to USDT and ignore this pool for 1 hour.
-			cooldownReason := fmt.Sprintf("📉 连续 %d 次跌破区间，撤出并冷却 1 小时", autoModeConsecutiveDownBreakCooldownThreshold)
+			// 2 consecutive "down" breaks -> exit to USDT and cooldown this trading pair
+			cooldownMinutes := 30
+			if config.AppConfig != nil && config.AppConfig.AutoLPGuardCooldownSeconds > 0 {
+				cooldownMinutes = config.AppConfig.AutoLPGuardCooldownSeconds / 60
+			}
+			cooldownReason := fmt.Sprintf("📉 连续 %d 次跌破区间，撤出并冷却 %d 分钟", autoModeConsecutiveDownBreakCooldownThreshold, cooldownMinutes)
 			updates := map[string]interface{}{
 				"range_break_up_streak":   0,
 				"range_break_down_streak": 0,
@@ -414,6 +418,10 @@ func (s *StrategyService) handleAutoModeRangeBreakExit(task *models.StrategyTask
 			task.NextRangeMultiplier = 1.0
 
 			log.Printf("[Strategy] 任务 #%d 连续跌破 %d 次，触发冷却退出", task.ID, autoModeConsecutiveDownBreakCooldownThreshold)
+
+			// 同交易对冷却：暂停该用户同交易对的其他任务
+			s.cooldownSameTradingPairTasks(task, cooldownMinutes, cooldownReason)
+
 			s.requestExitToUSDT(task, ExitActionCooldown, cooldownReason)
 			return true
 		}
@@ -886,4 +894,80 @@ func (s *StrategyService) executeRebalance(task *models.StrategyTask, currentTic
 
 	log.Printf("[Strategy] 任务 #%d %s，执行再平衡", task.ID, reason)
 	s.requestExitToUSDT(task, ExitActionRebalance, reason)
+}
+
+// cooldownSameTradingPairTasks 将同交易对的其他活跃任务也设置为冷却状态
+// 交易对匹配逻辑：Token0Symbol和Token1Symbol相同（忽略顺序）
+func (s *StrategyService) cooldownSameTradingPairTasks(task *models.StrategyTask, cooldownMinutes int, reason string) {
+	if task == nil || task.UserID == 0 {
+		return
+	}
+
+	// 获取交易对符号
+	sym0 := strings.ToUpper(strings.TrimSpace(task.Token0Symbol))
+	sym1 := strings.ToUpper(strings.TrimSpace(task.Token1Symbol))
+	if sym0 == "" || sym1 == "" {
+		return
+	}
+
+	// 计算冷却结束时间
+	cooldownDuration := time.Duration(cooldownMinutes) * time.Minute
+	cooldownUntil := time.Now().Add(cooldownDuration)
+
+	// 查找该用户同交易对的其他活跃任务
+	var otherTasks []models.StrategyTask
+	if err := database.DB.Where(
+		"user_id = ? AND id != ? AND is_auto = ? AND status IN ?",
+		task.UserID, task.ID, true, []models.StrategyStatus{
+			models.StrategyStatusRunning,
+			models.StrategyStatusWaiting,
+		},
+	).Find(&otherTasks).Error; err != nil {
+		log.Printf("[Strategy] 查询同交易对任务失败: %v", err)
+		return
+	}
+
+	cooldownCount := 0
+	for _, otherTask := range otherTasks {
+		otherSym0 := strings.ToUpper(strings.TrimSpace(otherTask.Token0Symbol))
+		otherSym1 := strings.ToUpper(strings.TrimSpace(otherTask.Token1Symbol))
+
+		// 检查是否同交易对（忽略顺序）
+		sameSymbols := (sym0 == otherSym0 && sym1 == otherSym1) || (sym0 == otherSym1 && sym1 == otherSym0)
+		if !sameSymbols {
+			continue
+		}
+
+		// 设置冷却
+		updates := map[string]interface{}{
+			"status":                  models.StrategyStatusWaiting,
+			"cooldown_until":          &cooldownUntil,
+			"cooldown_reason":         fmt.Sprintf("📉 同交易对 %s/%s 触发冷却", sym0, sym1),
+			"range_break_up_streak":   0,
+			"range_break_down_streak": 0,
+			"next_range_multiplier":   1.0,
+			"out_of_range_since":      nil,
+			"rebalance_pending":       false,
+			"rebalance_retry_count":   0,
+			"rebalance_next_retry_at": nil,
+			"rebalance_last_error":    "",
+			"exit_pending_action":     "",
+			"exit_pending_reason":     "",
+			"exit_retry_count":        0,
+			"exit_next_retry_at":      nil,
+			"exit_last_error":         "",
+			"exit_give_up_at":         nil,
+		}
+		if err := database.DB.Model(&otherTask).Updates(updates).Error; err != nil {
+			log.Printf("[Strategy] 设置任务 #%d 冷却失败: %v", otherTask.ID, err)
+			continue
+		}
+
+		cooldownCount++
+		log.Printf("[Strategy] 任务 #%d 同交易对 %s/%s 触发冷却 %d 分钟", otherTask.ID, sym0, sym1, cooldownMinutes)
+	}
+
+	if cooldownCount > 0 {
+		s.notify(task.UserID, fmt.Sprintf("⚠️ 交易对 %s/%s 连续跌破，同交易对共 %d 个任务进入冷却 %d 分钟", sym0, sym1, cooldownCount+1, cooldownMinutes))
+	}
 }

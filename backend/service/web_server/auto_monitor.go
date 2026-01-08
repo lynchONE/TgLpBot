@@ -65,6 +65,8 @@ type autoMonitorGuardPriceTx struct {
 	Blocked       bool    `json:"blocked"`
 	BlockedReason string  `json:"blocked_reason,omitempty"`
 	DropPct       float64 `json:"drop_pct"`
+	PriceDropPct  float64 `json:"price_drop_pct"`
+	TxDropPct     float64 `json:"tx_drop_pct"`
 	PriceHit      bool    `json:"price_hit"`
 	TxHit         bool    `json:"tx_hit"`
 	Hit           bool    `json:"hit"`
@@ -198,6 +200,23 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 	}
 	if priceTxDropPct <= 0 || priceTxDropPct >= 1 {
 		priceTxDropPct = 0.10
+	}
+
+	// 独立的价格和tx跌幅阈值
+	priceDropPct := config.AppConfig.AutoLPGuardPriceDropPercent
+	if priceDropPct > 1 && priceDropPct <= 100 {
+		priceDropPct = priceDropPct / 100
+	}
+	if priceDropPct <= 0 || priceDropPct >= 1 {
+		priceDropPct = 0.05 // 默认5%
+	}
+
+	txDropPct := config.AppConfig.AutoLPGuardTxDropPercent
+	if txDropPct > 1 && txDropPct <= 100 {
+		txDropPct = txDropPct / 100
+	}
+	if txDropPct <= 0 || txDropPct >= 1 {
+		txDropPct = 0.40 // 默认40%
 	}
 
 	var tasks []models.StrategyTask
@@ -397,15 +416,17 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 			Blocked:       guardBlocked,
 			BlockedReason: guardBlockedReason,
 			DropPct:       priceTxDropPct,
+			PriceDropPct:  priceDropPct,
+			TxDropPct:     txDropPct,
 			OpenPrice:     open.Price,
 			CurrentPrice:  current.Price,
 			OpenTx5m:      openTx,
 			CurrentTx5m:   current.Tx5m,
 			Armed:         task.GuardPriceTxDropArmed,
 		}
-		if priceTx.Enabled && !priceTx.Blocked && priceTxDropPct > 0 && priceTxDropPct < 1 {
-			priceTx.PriceHit = current.Price <= open.Price*(1.0-priceTxDropPct)
-			priceTx.TxHit = float64(current.Tx5m) <= float64(openTx)*(1.0-priceTxDropPct)
+		if priceTx.Enabled && !priceTx.Blocked && priceDropPct > 0 && txDropPct > 0 {
+			priceTx.PriceHit = current.Price <= open.Price*(1.0-priceDropPct)
+			priceTx.TxHit = float64(current.Tx5m) <= float64(openTx)*(1.0-txDropPct)
 			priceTx.Hit = priceTx.PriceHit && priceTx.TxHit
 			priceTx.FirstMark = priceTx.Hit && !task.GuardPriceTxDropArmed
 			priceTx.ShouldExitNow = priceTx.Hit && task.GuardPriceTxDropArmed

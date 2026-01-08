@@ -149,8 +149,11 @@ type Config struct {
 	AutoLPGuardVolumeDropPercent    float64
 	AutoLPGuardVolumeDropPercentLow float64
 	AutoLPGuardPriceTxDropPercent   float64
+	AutoLPGuardPriceDropPercent     float64 // 价格单独跌幅阈值，默认5%
+	AutoLPGuardTxDropPercent        float64 // tx单独跌幅阈值，默认40%
 	AutoLPGuardNoExitMinFeeRate5m   float64
 	AutoLPGuardLowFeeRate5m         float64
+	AutoLPGuardCooldownSeconds      int // 连续跌破冷却时间（秒），默认1800（30分钟）
 	AutoLPEmergencyGasMultiplier    float64
 	AutoLPWidthSidewaysPercent      float64
 	AutoLPWidthMildUptrendPercent   float64
@@ -213,8 +216,11 @@ func LoadConfig() error {
 	autoLPGuardVolumeDropPct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_VOLUME_DROP_PERCENT", "0.30")), 64)
 	autoLPGuardVolumeDropPctLow, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_VOLUME_DROP_PERCENT_LOW_FEE", "0")), 64)
 	autoLPGuardPriceTxDropPct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_PRICE_TX_DROP_PERCENT", "0.10")), 64)
+	autoLPGuardPriceDropPct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_PRICE_DROP_PERCENT", "0.05")), 64)
+	autoLPGuardTxDropPct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_TX_DROP_PERCENT", "0.40")), 64)
 	autoLPGuardNoExitMinFeeRate5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_NO_EXIT_MIN_FEE_RATE_5M", "0")), 64)
 	autoLPGuardLowFeeRate5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_LOW_FEE_RATE_5M", "0")), 64)
+	autoLPGuardCooldownSeconds, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_GUARD_COOLDOWN_SECONDS", "1800")))
 	autoLPEmergencyGasMult, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_EMERGENCY_GAS_MULTIPLIER", "2.0")), 64)
 	okxSwapGasLimitMult, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("OKX_SWAP_GAS_LIMIT_MULTIPLIER", "1.30")), 64)
 	okxSwapGasLimitMin, _ := strconv.ParseUint(strings.TrimSpace(getEnv("OKX_SWAP_GAS_LIMIT_MIN", "250000")), 10, 64)
@@ -399,8 +405,11 @@ func LoadConfig() error {
 		AutoLPGuardVolumeDropPercent:    autoLPGuardVolumeDropPct,
 		AutoLPGuardVolumeDropPercentLow: autoLPGuardVolumeDropPctLow,
 		AutoLPGuardPriceTxDropPercent:   autoLPGuardPriceTxDropPct,
+		AutoLPGuardPriceDropPercent:     autoLPGuardPriceDropPct,
+		AutoLPGuardTxDropPercent:        autoLPGuardTxDropPct,
 		AutoLPGuardNoExitMinFeeRate5m:   autoLPGuardNoExitMinFeeRate5m,
 		AutoLPGuardLowFeeRate5m:         autoLPGuardLowFeeRate5m,
+		AutoLPGuardCooldownSeconds:      autoLPGuardCooldownSeconds,
 		AutoLPEmergencyGasMultiplier:    autoLPEmergencyGasMult,
 		AutoLPWidthSidewaysPercent:      autoLPWidthSideways,
 		AutoLPWidthMildUptrendPercent:   autoLPWidthMildUp,
