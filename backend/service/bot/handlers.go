@@ -54,7 +54,7 @@ func (b *Bot) handleHelp(message *tgbotapi.Message, user *models.User) {
 *钱包管理：*
 /wallet - 管理您的钱包
 /balance - 查看钱包余额
-/swap_to_usdt - 兑换其它代币为 USDT
+/swap - 零钱兑换
 
 *仓位管理：*
 /newposition - 创建新仓位
@@ -124,7 +124,7 @@ func (b *Bot) handleWallet(message *tgbotapi.Message, user *models.User) {
 			tgbotapi.NewInlineKeyboardButtonData("👀 查看钱包", "view_wallets"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🔄 其它代币换USDT", "wallet_swap_to_usdt"),
+			tgbotapi.NewInlineKeyboardButtonData("🪙 零钱兑换", "wallet_swap_to_usdt"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("📈 余额走势", "view_profit"),

@@ -43,21 +43,45 @@ func (b *Bot) promptWalletSwapToUSDT(chatID int64, user *models.User) {
 		}
 	}
 
-	text := fmt.Sprintf(`🔄 *一键兑换为 USDT*
+	// 发送加载消息
+	loadingMsg, _ := b.sendMessage(chatID, "⏳ 正在扫描钱包零钱代币...")
 
-将使用默认钱包：
-`+"`%s`"+`
+	// 扫描钱包中价值大于 0.1 USDT 的代币
+	minValueUSDT := 0.1
+	tokens, err := b.liquidityService.ScanWalletTokensForSwap(user.ID, minValueUSDT)
 
-把钱包里识别到的「非 BNB/WBNB、非稳定币」代币尽可能兑换成 USDT。
+	// 删除加载消息
+	if loadingMsg.MessageID != 0 {
+		_, _ = b.api.Send(tgbotapi.NewDeleteMessage(chatID, loadingMsg.MessageID))
+	}
 
-- 稳定币：USDT/USDC/BUSD
-- 不会动用 BNB/WBNB（Gas 资产）
-- 识别范围：历史仓位涉及的代币（token0/token1）
-- 会产生链上 Gas 费
+	if err != nil {
+		b.sendMessage(chatID, fmt.Sprintf("❌ 扫描钱包失败：%v", err))
+		return
+	}
 
-当前滑点：%.2f%%
+	if len(tokens) == 0 {
+		b.sendMessage(chatID, "✅ 钱包里没有发现需要兑换的零钱代币。\n\n（只显示价值大于 0.1 USDT 的非 BNB/稳定币代币）")
+		return
+	}
 
-是否继续？`, wallet.Address, slippage)
+	// 构建代币列表展示
+	var sb strings.Builder
+	sb.WriteString("🪙 *零钱兑换*\n\n")
+	sb.WriteString(fmt.Sprintf("钱包：`%s`\n\n", shortenHex(wallet.Address)))
+	sb.WriteString("发现以下代币可兑换为 USDT：\n\n")
+
+	totalValue := 0.0
+	for i, token := range tokens {
+		sb.WriteString(fmt.Sprintf("*%d. %s*\n", i+1, token.Symbol))
+		sb.WriteString(fmt.Sprintf("   数量：%s\n", token.Balance))
+		sb.WriteString(fmt.Sprintf("   价值：≈ %.2f USDT\n\n", token.ValueUSDT))
+		totalValue += token.ValueUSDT
+	}
+
+	sb.WriteString(fmt.Sprintf("💰 *总价值：≈ %.2f USDT*\n\n", totalValue))
+	sb.WriteString(fmt.Sprintf("当前滑点：%.2f%%\n\n", slippage))
+	sb.WriteString("是否确认兑换？")
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
@@ -65,7 +89,7 @@ func (b *Bot) promptWalletSwapToUSDT(chatID int64, user *models.User) {
 			tgbotapi.NewInlineKeyboardButtonData("❌ 取消", "wallet_swap_to_usdt_cancel"),
 		),
 	)
-	b.sendMessageWithKeyboard(chatID, text, keyboard)
+	b.sendMessageWithKeyboard(chatID, sb.String(), keyboard)
 }
 
 func (b *Bot) handleWalletSwapToUSDTConfirm(query *tgbotapi.CallbackQuery, user *models.User) {
