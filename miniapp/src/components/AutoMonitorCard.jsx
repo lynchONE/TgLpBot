@@ -172,12 +172,7 @@ export default function AutoMonitorCard({ task, tick }) {
 
                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                     <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">当前池子</div>
-                            <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-medium bg-zinc-100 text-zinc-500 dark:bg-white/5 dark:text-white/40">
-                                对比: {baselineLabel}
-                            </span>
-                        </div>
+                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">当前池子</div>
                         <div className="text-[11px] text-zinc-500 dark:text-white/40">{currentAtText}</div>
                     </div>
                     <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">

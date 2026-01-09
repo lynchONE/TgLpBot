@@ -1769,18 +1769,20 @@ export default function App() {
                             onClick={toggleAutoGuardBaseline}
                             disabled={!hasInitData || autoGuardBaselineUpdating}
                             className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all ${!hasInitData || autoGuardBaselineUpdating
-                                ? 'cursor-not-allowed bg-white text-zinc-400 dark:bg-[#0b0f14] dark:text-white/25'
-                                : 'bg-white text-zinc-700 ring-1 ring-zinc-200 hover:ring-zinc-300 dark:bg-[#0b0f14] dark:text-white/80 dark:ring-white/15 dark:hover:ring-white/25'
+                                ? 'cursor-not-allowed bg-zinc-100 text-zinc-400 dark:bg-white/5 dark:text-white/25'
+                                : guardCompareToPeak
+                                    ? 'bg-amber-500/10 text-amber-600 ring-1 ring-amber-500/20 hover:bg-amber-500/15 hover:ring-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-amber-500/20 dark:hover:bg-amber-500/15'
+                                    : 'bg-sky-500/10 text-sky-600 ring-1 ring-sky-500/20 hover:bg-sky-500/15 hover:ring-sky-500/30 dark:bg-sky-500/10 dark:text-sky-400 dark:ring-sky-500/20 dark:hover:bg-sky-500/15'
                                 }`}
                         >
                             {guardCompareToPeak ? (
                                 <>
-                                    <svg className="h-3 w-3 opacity-60" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2l2 4h4l-3.5 3 1.5 5L8 11l-4 3 1.5-5L2 6h4l2-4z" /></svg>
+                                    <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2l2 4h4l-3.5 3 1.5 5L8 11l-4 3 1.5-5L2 6h4l2-4z" /></svg>
                                     最高点
                                 </>
                             ) : (
                                 <>
-                                    <svg className="h-3 w-3 opacity-60" viewBox="0 0 16 16" fill="currentColor"><path d="M8 14A6 6 0 108 2a6 6 0 000 12zm0-2a4 4 0 110-8 4 4 0 010 8zm0-3a1 1 0 100-2 1 1 0 000 2z" /></svg>
+                                    <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor"><path d="M8 14A6 6 0 108 2a6 6 0 000 12zm0-2a4 4 0 110-8 4 4 0 010 8zm0-3a1 1 0 100-2 1 1 0 000 2z" /></svg>
                                     开仓时
                                 </>
                             )}
