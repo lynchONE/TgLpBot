@@ -1761,35 +1761,33 @@ export default function App() {
             ) : null}
 
             {isMonitor && !showAdmin ? (
-                <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-zinc-200/60 bg-white/50 px-3 py-2 dark:border-white/8 dark:bg-white/3">
+                <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-zinc-200/50 bg-zinc-50 px-3 py-2 dark:border-white/6 dark:bg-[#0b0f14]">
                     <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold text-zinc-600 dark:text-white/60">对比基准</span>
+                        <span className="text-xs font-medium text-zinc-500 dark:text-white/50">对比基准</span>
                         <button
                             type="button"
                             onClick={toggleAutoGuardBaseline}
                             disabled={!hasInitData || autoGuardBaselineUpdating}
-                            className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-bold transition ${!hasInitData || autoGuardBaselineUpdating
-                                ? 'cursor-not-allowed bg-zinc-100 text-zinc-400 dark:bg-white/5 dark:text-white/30'
-                                : guardCompareToPeak
-                                    ? 'bg-gradient-to-r from-emerald-500/20 to-teal-500/15 text-emerald-600 ring-1 ring-emerald-400/30 hover:from-emerald-500/30 hover:to-teal-500/25 dark:text-emerald-300'
-                                    : 'bg-gradient-to-r from-sky-500/20 to-blue-500/15 text-sky-600 ring-1 ring-sky-400/30 hover:from-sky-500/30 hover:to-blue-500/25 dark:text-sky-300'
+                            className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all ${!hasInitData || autoGuardBaselineUpdating
+                                ? 'cursor-not-allowed bg-white text-zinc-400 dark:bg-[#0b0f14] dark:text-white/25'
+                                : 'bg-white text-zinc-700 ring-1 ring-zinc-200 hover:ring-zinc-300 dark:bg-[#0b0f14] dark:text-white/80 dark:ring-white/15 dark:hover:ring-white/25'
                                 }`}
                         >
                             {guardCompareToPeak ? (
                                 <>
-                                    <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2l2 4h4l-3.5 3 1.5 5L8 11l-4 3 1.5-5L2 6h4l2-4z" /></svg>
+                                    <svg className="h-3 w-3 opacity-60" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2l2 4h4l-3.5 3 1.5 5L8 11l-4 3 1.5-5L2 6h4l2-4z" /></svg>
                                     最高点
                                 </>
                             ) : (
                                 <>
-                                    <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor"><path d="M8 14A6 6 0 108 2a6 6 0 000 12zm0-2a4 4 0 110-8 4 4 0 010 8zm0-3a1 1 0 100-2 1 1 0 000 2z" /></svg>
+                                    <svg className="h-3 w-3 opacity-60" viewBox="0 0 16 16" fill="currentColor"><path d="M8 14A6 6 0 108 2a6 6 0 000 12zm0-2a4 4 0 110-8 4 4 0 010 8zm0-3a1 1 0 100-2 1 1 0 000 2z" /></svg>
                                     开仓时
                                 </>
                             )}
                             {autoGuardBaselineUpdating && <span className="ml-0.5 animate-pulse">…</span>}
                         </button>
                     </div>
-                    <span className="text-[10px] text-zinc-400 dark:text-white/35">点击切换</span>
+                    <span className="text-[10px] text-zinc-400 dark:text-white/30">点击切换</span>
                 </div>
             ) : null}
 
