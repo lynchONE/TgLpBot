@@ -88,6 +88,13 @@ type StrategyTask struct {
 	GuardOpenTotalFees5m        float64    `gorm:"type:decimal(20,8);default:0" json:"guard_open_total_fees_5m"`
 	GuardOpenTVLUSD             float64    `gorm:"type:decimal(20,8);default:0" json:"guard_open_tvl_usd"`
 	GuardOpenMetricsAt          *time.Time `json:"guard_open_metrics_at"`
+	GuardPeakFeePercentage      float64    `gorm:"type:decimal(10,4);default:0" json:"guard_peak_fee_percentage"`
+	GuardPeakFeeRate5mPct       float64    `gorm:"type:decimal(10,6);default:0" json:"guard_peak_fee_rate_5m_pct"`
+	GuardPeakTotalFees5m        float64    `gorm:"type:decimal(20,8);default:0" json:"guard_peak_total_fees_5m"`
+	GuardPeakVolume5m           float64    `gorm:"type:decimal(20,8);default:0" json:"guard_peak_volume_5m"`
+	GuardPeakTVLUSD             float64    `gorm:"type:decimal(20,8);default:0" json:"guard_peak_tvl_usd"`
+	GuardPeakPrice              float64    `gorm:"type:decimal(30,12);default:0" json:"guard_peak_price"`
+	GuardPeakTxCount5m          int64      `gorm:"default:0" json:"guard_peak_tx_count_5m"`
 	GuardVolumeDropArmed        bool       `gorm:"default:false" json:"guard_volume_drop_armed"`
 	GuardVolumeDropLastVolume5m float64    `gorm:"type:decimal(20,8);default:0" json:"guard_volume_drop_last_volume_5m"`
 	GuardPriceTxDropArmed       bool       `gorm:"default:false" json:"guard_price_tx_drop_armed"`

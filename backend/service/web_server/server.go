@@ -33,6 +33,7 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/pool_ohlcv", s.handlePoolOHLCV)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/global_config", s.handleGlobalConfig)
+	mux.HandleFunc("/api/autolp_config", s.handleAutoLPConfig)
 	mux.HandleFunc("/api/me", s.handleMe)
 	mux.HandleFunc("/api/realtime_positions", s.handleRealtimePositions)
 	mux.HandleFunc("/api/auto_monitor", s.handleAutoMonitor)

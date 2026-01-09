@@ -30,6 +30,11 @@ type AutoLPUserConfig struct {
 	// Default: 300 seconds.
 	SwitchCooldownSeconds int `gorm:"default:300" json:"switch_cooldown_seconds"`
 
+	// GuardCompareToPeak controls the AutoLP guard baseline:
+	// - false: compare against open-time metrics
+	// - true: compare against peak metrics since open
+	GuardCompareToPeak bool `gorm:"default:true" json:"guard_compare_to_peak"`
+
 	// LastEnabledAt marks the start time of the current/last AutoLP run.
 	LastEnabledAt  *time.Time `json:"last_enabled_at"`
 	LastDisabledAt *time.Time `json:"last_disabled_at"`

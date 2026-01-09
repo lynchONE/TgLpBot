@@ -11,6 +11,7 @@ import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	autoLP "TgLpBot/service/auto_lp"
 	"TgLpBot/service/strategy"
 	userSvc "TgLpBot/service/user"
 )
@@ -26,6 +27,7 @@ type autoMonitorConfig struct {
 	NoExitMinFeeRate5m  float64 `json:"no_exit_min_fee_rate_5m"`
 	LowFeeRate5m        float64 `json:"low_fee_rate_5m"`
 	EffectiveDefaultVol float64 `json:"effective_default_vol_drop_pct"`
+	GuardCompareToPeak  bool    `json:"guard_compare_to_peak"`
 }
 
 type autoMonitorMetrics struct {
@@ -48,6 +50,8 @@ type autoMonitorGuardVolume struct {
 	BlockedReason    string  `json:"blocked_reason,omitempty"`
 	Skip             bool    `json:"skip"`
 	SkipReason       string  `json:"skip_reason,omitempty"`
+	Baseline         string  `json:"baseline"`
+	BaselineVolume5m float64 `json:"baseline_volume_5m"`
 	DropPct          float64 `json:"drop_pct"`
 	Threshold        float64 `json:"threshold"`
 	Hit              bool    `json:"hit"`
@@ -67,6 +71,9 @@ type autoMonitorGuardPriceTx struct {
 	DropPct       float64 `json:"drop_pct"`
 	PriceDropPct  float64 `json:"price_drop_pct"`
 	TxDropPct     float64 `json:"tx_drop_pct"`
+	Baseline      string  `json:"baseline"`
+	BaselinePrice float64 `json:"baseline_price"`
+	BaselineTx5m  uint64  `json:"baseline_tx_5m"`
 	PriceHit      bool    `json:"price_hit"`
 	TxHit         bool    `json:"tx_hit"`
 	Hit           bool    `json:"hit"`
@@ -101,6 +108,7 @@ type autoMonitorTask struct {
 	NextRangeMultiplier  float64 `json:"next_range_multiplier"`
 
 	Open    autoMonitorMetrics `json:"open"`
+	Peak    autoMonitorMetrics `json:"peak"`
 	Current autoMonitorMetrics `json:"current"`
 
 	GuardVolume  autoMonitorGuardVolume  `json:"guard_volume"`
@@ -172,6 +180,11 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 	chain := strings.ToLower(strings.TrimSpace(config.AppConfig.AutoLPChain))
 	if chain == "" {
 		chain = "bsc"
+	}
+
+	guardCompareToPeak := true
+	if cfg, err := autoLP.NewAutoLPUserConfigService().GetOrCreate(user.ID); err == nil && cfg != nil {
+		guardCompareToPeak = cfg.GuardCompareToPeak
 	}
 
 	volumeDropPct := config.AppConfig.AutoLPGuardVolumeDropPercent
@@ -328,6 +341,10 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 		if task.GuardOpenTxCount5m > 0 {
 			openTx = uint64(task.GuardOpenTxCount5m)
 		}
+		peakTx := uint64(0)
+		if task.GuardPeakTxCount5m > 0 {
+			peakTx = uint64(task.GuardPeakTxCount5m)
+		}
 
 		open := autoMonitorMetrics{
 			At:           task.GuardOpenMetricsAt,
@@ -339,6 +356,17 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 			Price:        task.GuardOpenPrice,
 			Tx5m:         openTx,
 			Ok:           task.GuardOpenVolume5m > 0,
+		}
+
+		peak := autoMonitorMetrics{
+			FeePct:       task.GuardPeakFeePercentage,
+			FeeRate5mPct: task.GuardPeakFeeRate5mPct,
+			Fees5m:       task.GuardPeakTotalFees5m,
+			Volume5m:     task.GuardPeakVolume5m,
+			TVL:          task.GuardPeakTVLUSD,
+			Price:        task.GuardPeakPrice,
+			Tx5m:         peakTx,
+			Ok:           task.GuardPeakVolume5m > 0,
 		}
 
 		current := autoMonitorMetrics{Ok: false}
@@ -364,6 +392,23 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		baseline := "open"
+		baselineVolume := open.Volume5m
+		baselinePrice := open.Price
+		baselineTx := openTx
+		if guardCompareToPeak {
+			baseline = "peak"
+			if peak.Volume5m > 0 {
+				baselineVolume = peak.Volume5m
+			}
+			if peak.Price > 0 {
+				baselinePrice = peak.Price
+			}
+			if peakTx > 0 {
+				baselineTx = peakTx
+			}
+		}
+
 		guardBlocked := false
 		guardBlockedReason := ""
 		if task.Paused {
@@ -379,14 +424,16 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 
 		// Volume guard status.
 		volGuard := autoMonitorGuardVolume{
-			Enabled:         current.Ok && open.Volume5m > 0 && current.Volume5m > 0,
-			Blocked:         guardBlocked,
-			BlockedReason:   guardBlockedReason,
-			DropPct:         volumeDropPct,
-			OpenVolume5m:    open.Volume5m,
-			CurrentVolume5m: current.Volume5m,
-			Armed:           task.GuardVolumeDropArmed,
-			LastVolume5m:    task.GuardVolumeDropLastVolume5m,
+			Enabled:          current.Ok && baselineVolume > 0 && current.Volume5m > 0,
+			Blocked:          guardBlocked,
+			BlockedReason:    guardBlockedReason,
+			Baseline:         baseline,
+			BaselineVolume5m: baselineVolume,
+			DropPct:          volumeDropPct,
+			OpenVolume5m:     open.Volume5m,
+			CurrentVolume5m:  current.Volume5m,
+			Armed:            task.GuardVolumeDropArmed,
+			LastVolume5m:     task.GuardVolumeDropLastVolume5m,
 		}
 
 		currentFeeRate := current.FeeRate5mPct
@@ -407,7 +454,7 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if volGuard.Enabled && !volGuard.Blocked && !volGuard.Skip && effectiveDropPct > 0 && effectiveDropPct < 1 {
-			volGuard.Threshold = open.Volume5m * (1.0 - effectiveDropPct)
+			volGuard.Threshold = baselineVolume * (1.0 - effectiveDropPct)
 			volGuard.Hit = current.Volume5m <= volGuard.Threshold
 			volGuard.FirstMark = volGuard.Hit && !task.GuardVolumeDropArmed
 			if volGuard.Hit && task.GuardVolumeDropArmed && task.GuardVolumeDropLastVolume5m > 0 && current.Volume5m < task.GuardVolumeDropLastVolume5m {
@@ -417,12 +464,15 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 
 		// Price+Tx guard status.
 		priceTx := autoMonitorGuardPriceTx{
-			Enabled:       current.Ok && open.Price > 0 && openTx > 0 && current.Price > 0 && current.Tx5m > 0,
+			Enabled:       current.Ok && baselinePrice > 0 && baselineTx > 0 && current.Price > 0 && current.Tx5m > 0,
 			Blocked:       guardBlocked,
 			BlockedReason: guardBlockedReason,
 			DropPct:       priceTxDropPct,
 			PriceDropPct:  priceDropPct,
 			TxDropPct:     txDropPct,
+			Baseline:      baseline,
+			BaselinePrice: baselinePrice,
+			BaselineTx5m:  baselineTx,
 			OpenPrice:     open.Price,
 			CurrentPrice:  current.Price,
 			OpenTx5m:      openTx,
@@ -430,8 +480,8 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 			Armed:         task.GuardPriceTxDropArmed,
 		}
 		if priceTx.Enabled && !priceTx.Blocked && priceDropPct > 0 && txDropPct > 0 {
-			priceTx.PriceHit = current.Price <= open.Price*(1.0-priceDropPct)
-			priceTx.TxHit = float64(current.Tx5m) <= float64(openTx)*(1.0-txDropPct)
+			priceTx.PriceHit = current.Price <= baselinePrice*(1.0-priceDropPct)
+			priceTx.TxHit = float64(current.Tx5m) <= float64(baselineTx)*(1.0-txDropPct)
 			priceTx.Hit = priceTx.PriceHit && priceTx.TxHit
 			priceTx.FirstMark = priceTx.Hit && !task.GuardPriceTxDropArmed
 			priceTx.ShouldExitNow = priceTx.Hit && task.GuardPriceTxDropArmed
@@ -458,6 +508,7 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 			NextRangeMultiplier:  task.NextRangeMultiplier,
 
 			Open:         open,
+			Peak:         peak,
 			Current:      current,
 			GuardVolume:  volGuard,
 			GuardPriceTx: priceTx,
@@ -474,6 +525,7 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 			NoExitMinFeeRate5m:  noExitMinFeeRate5m,
 			LowFeeRate5m:        lowFeeRate5m,
 			EffectiveDefaultVol: volumeDropPct,
+			GuardCompareToPeak:  guardCompareToPeak,
 		},
 		Tasks: out,
 	}

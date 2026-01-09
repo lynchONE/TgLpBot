@@ -34,6 +34,7 @@ func (s *AutoLPUserConfigService) GetOrCreate(userID uint) (*models.AutoLPUserCo
 		MaxActiveTasks:          1,
 		SwitchMinImprovementPct: 0,
 		SwitchCooldownSeconds:   300,
+		GuardCompareToPeak:      true,
 	}
 	if err := database.DB.Create(&cfg).Error; err != nil {
 		return nil, fmt.Errorf("create autolp config failed: %w", err)

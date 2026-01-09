@@ -2168,6 +2168,13 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 		GuardOpenTotalFees5m:        a.TotalFees5m,
 		GuardOpenTVLUSD:             a.TVLUSD,
 		GuardOpenMetricsAt:          &now,
+		GuardPeakFeePercentage:      a.FeePercentage,
+		GuardPeakFeeRate5mPct:       a.FeeRate5mPct,
+		GuardPeakTotalFees5m:        a.TotalFees5m,
+		GuardPeakVolume5m:           a.TotalVolume5m,
+		GuardPeakTVLUSD:             a.TVLUSD,
+		GuardPeakPrice:              a.CurrentPrice,
+		GuardPeakTxCount5m:          int64(maxInt(a.TxCount5m, 0)),
 		GuardVolumeDropArmed:        false,
 		GuardVolumeDropLastVolume5m: 0,
 		GuardPriceTxDropArmed:       false,
@@ -2330,6 +2337,31 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 		return
 	}
 
+	compareToPeakByUser := map[uint]bool{}
+	{
+		seenUsers := make(map[uint]struct{}, len(tasks))
+		userIDs := make([]uint, 0, 8)
+		for i := range tasks {
+			uid := tasks[i].UserID
+			if uid == 0 {
+				continue
+			}
+			if _, ok := seenUsers[uid]; ok {
+				continue
+			}
+			seenUsers[uid] = struct{}{}
+			userIDs = append(userIDs, uid)
+		}
+		if len(userIDs) > 0 {
+			var cfgs []models.AutoLPUserConfig
+			if err := database.DB.Select("user_id", "guard_compare_to_peak").Where("user_id IN ?", userIDs).Find(&cfgs).Error; err == nil {
+				for i := range cfgs {
+					compareToPeakByUser[cfgs[i].UserID] = cfgs[i].GuardCompareToPeak
+				}
+			}
+		}
+	}
+
 	volumeDropPct := config.AppConfig.AutoLPGuardVolumeDropPercent
 	if volumeDropPct > 1 && volumeDropPct <= 100 {
 		volumeDropPct = volumeDropPct / 100
@@ -2411,17 +2443,24 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 			}
 		}
 
-		initUpdates := map[string]interface{}{}
+		updates := map[string]interface{}{}
 		if task.GuardOpenVolume5m <= 0 && m.TotalVolume > 0 {
 			metricsAt := time.Now()
-			initUpdates["GuardOpenVolume5m"] = m.TotalVolume
-			initUpdates["GuardVolumeDropArmed"] = false
-			initUpdates["GuardVolumeDropLastVolume5m"] = 0
-			initUpdates["GuardOpenFeePercentage"] = m.FeePercentage
-			initUpdates["GuardOpenFeeRate5mPct"] = feeRatePct
-			initUpdates["GuardOpenTotalFees5m"] = m.TotalFees
-			initUpdates["GuardOpenTVLUSD"] = m.CurrentPoolValue
-			initUpdates["GuardOpenMetricsAt"] = metricsAt
+			updates["GuardOpenVolume5m"] = m.TotalVolume
+			updates["GuardVolumeDropArmed"] = false
+			updates["GuardVolumeDropLastVolume5m"] = 0
+			updates["GuardOpenFeePercentage"] = m.FeePercentage
+			updates["GuardOpenFeeRate5mPct"] = feeRatePct
+			updates["GuardOpenTotalFees5m"] = m.TotalFees
+			updates["GuardOpenTVLUSD"] = m.CurrentPoolValue
+			updates["GuardOpenMetricsAt"] = metricsAt
+
+			updates["GuardPeakFeePercentage"] = m.FeePercentage
+			updates["GuardPeakFeeRate5mPct"] = feeRatePct
+			updates["GuardPeakTotalFees5m"] = m.TotalFees
+			updates["GuardPeakVolume5m"] = m.TotalVolume
+			updates["GuardPeakTVLUSD"] = m.CurrentPoolValue
+
 			task.GuardOpenVolume5m = m.TotalVolume
 			task.GuardVolumeDropArmed = false
 			task.GuardVolumeDropLastVolume5m = 0
@@ -2430,28 +2469,120 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 			task.GuardOpenTotalFees5m = m.TotalFees
 			task.GuardOpenTVLUSD = m.CurrentPoolValue
 			task.GuardOpenMetricsAt = &metricsAt
+
+			task.GuardPeakFeePercentage = m.FeePercentage
+			task.GuardPeakFeeRate5mPct = feeRatePct
+			task.GuardPeakTotalFees5m = m.TotalFees
+			task.GuardPeakVolume5m = m.TotalVolume
+			task.GuardPeakTVLUSD = m.CurrentPoolValue
 		}
 		if task.GuardOpenPrice <= 0 && m.CurrentTokenPrice > 0 {
-			initUpdates["GuardOpenPrice"] = m.CurrentTokenPrice
-			initUpdates["GuardPriceTxDropArmed"] = false
+			updates["GuardOpenPrice"] = m.CurrentTokenPrice
+			updates["GuardPriceTxDropArmed"] = false
+			updates["GuardPeakPrice"] = m.CurrentTokenPrice
 			task.GuardOpenPrice = m.CurrentTokenPrice
 			task.GuardPriceTxDropArmed = false
+			task.GuardPeakPrice = m.CurrentTokenPrice
 		}
 		if task.GuardOpenTxCount5m <= 0 && m.TransactionCount > 0 {
-			initUpdates["GuardOpenTxCount5m"] = int64(m.TransactionCount)
-			initUpdates["GuardPriceTxDropArmed"] = false
+			updates["GuardOpenTxCount5m"] = int64(m.TransactionCount)
+			updates["GuardPriceTxDropArmed"] = false
+			updates["GuardPeakTxCount5m"] = int64(m.TransactionCount)
 			task.GuardOpenTxCount5m = int64(m.TransactionCount)
 			task.GuardPriceTxDropArmed = false
+			task.GuardPeakTxCount5m = int64(m.TransactionCount)
 		}
-		if len(initUpdates) > 0 {
-			_ = database.DB.Model(task).Updates(initUpdates).Error
+
+		// Bootstrap peak metrics for existing tasks (open metrics existed before peak fields were introduced).
+		if task.GuardOpenFeePercentage > 0 && task.GuardPeakFeePercentage <= 0 {
+			updates["GuardPeakFeePercentage"] = task.GuardOpenFeePercentage
+			task.GuardPeakFeePercentage = task.GuardOpenFeePercentage
+		}
+		if task.GuardOpenFeeRate5mPct > 0 && task.GuardPeakFeeRate5mPct <= 0 {
+			updates["GuardPeakFeeRate5mPct"] = task.GuardOpenFeeRate5mPct
+			task.GuardPeakFeeRate5mPct = task.GuardOpenFeeRate5mPct
+		}
+		if task.GuardOpenTotalFees5m > 0 && task.GuardPeakTotalFees5m <= 0 {
+			updates["GuardPeakTotalFees5m"] = task.GuardOpenTotalFees5m
+			task.GuardPeakTotalFees5m = task.GuardOpenTotalFees5m
+		}
+		if task.GuardOpenVolume5m > 0 && task.GuardPeakVolume5m <= 0 {
+			updates["GuardPeakVolume5m"] = task.GuardOpenVolume5m
+			task.GuardPeakVolume5m = task.GuardOpenVolume5m
+		}
+		if task.GuardOpenTVLUSD > 0 && task.GuardPeakTVLUSD <= 0 {
+			updates["GuardPeakTVLUSD"] = task.GuardOpenTVLUSD
+			task.GuardPeakTVLUSD = task.GuardOpenTVLUSD
+		}
+		if task.GuardOpenPrice > 0 && task.GuardPeakPrice <= 0 {
+			updates["GuardPeakPrice"] = task.GuardOpenPrice
+			task.GuardPeakPrice = task.GuardOpenPrice
+		}
+		if task.GuardOpenTxCount5m > 0 && task.GuardPeakTxCount5m <= 0 {
+			updates["GuardPeakTxCount5m"] = task.GuardOpenTxCount5m
+			task.GuardPeakTxCount5m = task.GuardOpenTxCount5m
+		}
+
+		// Track peak metrics since open.
+		if m.FeePercentage > 0 && m.FeePercentage > task.GuardPeakFeePercentage {
+			updates["GuardPeakFeePercentage"] = m.FeePercentage
+			task.GuardPeakFeePercentage = m.FeePercentage
+		}
+		if feeRatePct > 0 && feeRatePct > task.GuardPeakFeeRate5mPct {
+			updates["GuardPeakFeeRate5mPct"] = feeRatePct
+			task.GuardPeakFeeRate5mPct = feeRatePct
+		}
+		if m.TotalFees > 0 && m.TotalFees > task.GuardPeakTotalFees5m {
+			updates["GuardPeakTotalFees5m"] = m.TotalFees
+			task.GuardPeakTotalFees5m = m.TotalFees
+		}
+		if m.TotalVolume > 0 && m.TotalVolume > task.GuardPeakVolume5m {
+			updates["GuardPeakVolume5m"] = m.TotalVolume
+			task.GuardPeakVolume5m = m.TotalVolume
+		}
+		if m.CurrentPoolValue > 0 && m.CurrentPoolValue > task.GuardPeakTVLUSD {
+			updates["GuardPeakTVLUSD"] = m.CurrentPoolValue
+			task.GuardPeakTVLUSD = m.CurrentPoolValue
+		}
+		if m.CurrentTokenPrice > 0 && m.CurrentTokenPrice > task.GuardPeakPrice {
+			updates["GuardPeakPrice"] = m.CurrentTokenPrice
+			task.GuardPeakPrice = m.CurrentTokenPrice
+		}
+		if m.TransactionCount > 0 && int64(m.TransactionCount) > task.GuardPeakTxCount5m {
+			updates["GuardPeakTxCount5m"] = int64(m.TransactionCount)
+			task.GuardPeakTxCount5m = int64(m.TransactionCount)
+		}
+
+		if len(updates) > 0 {
+			_ = database.DB.Model(task).Updates(updates).Error
+		}
+
+		compareToPeak := true
+		if v, ok := compareToPeakByUser[task.UserID]; ok {
+			compareToPeak = v
+		}
+		baselineLabel := "开仓"
+		baselineVolume := task.GuardOpenVolume5m
+		baselinePrice := task.GuardOpenPrice
+		baselineTxCount5m := task.GuardOpenTxCount5m
+		if compareToPeak {
+			baselineLabel = "最高点"
+			if task.GuardPeakVolume5m > 0 {
+				baselineVolume = task.GuardPeakVolume5m
+			}
+			if task.GuardPeakPrice > 0 {
+				baselinePrice = task.GuardPeakPrice
+			}
+			if task.GuardPeakTxCount5m > 0 {
+				baselineTxCount5m = task.GuardPeakTxCount5m
+			}
 		}
 
 		if !skipVolumeExit &&
 			effectiveVolDropPct > 0 &&
-			task.GuardOpenVolume5m > 0 &&
+			baselineVolume > 0 &&
 			m.TotalVolume > 0 {
-			threshold := task.GuardOpenVolume5m * (1.0 - effectiveVolDropPct)
+			threshold := baselineVolume * (1.0 - effectiveVolDropPct)
 			hit := m.TotalVolume <= threshold
 
 			if !hit {
@@ -2473,9 +2604,11 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 					task.GuardVolumeDropLastVolume5m = m.TotalVolume
 				} else if last := task.GuardVolumeDropLastVolume5m; last > 0 && m.TotalVolume < last {
 					reason := fmt.Sprintf(
-						"5m 成交量较开仓时下跌 >=%.0f%% 且继续下降（开仓=%.2f USDT 当前=%.2f USDT）",
+						"5m 成交量较%s下跌 >=%.0f%% 且继续下降（%s=%.2f USDT 当前=%.2f USDT）",
+						baselineLabel,
 						effectiveVolDropPct*100,
-						task.GuardOpenVolume5m,
+						baselineLabel,
+						baselineVolume,
 						m.TotalVolume,
 					)
 					if err := s.requestStopLossExit(task, reason, 1.0); err == nil {
@@ -2492,12 +2625,12 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 		}
 
 		if priceDropPct > 0 && txDropPct > 0 &&
-			task.GuardOpenPrice > 0 &&
-			task.GuardOpenTxCount5m > 0 &&
+			baselinePrice > 0 &&
+			baselineTxCount5m > 0 &&
 			m.CurrentTokenPrice > 0 &&
 			m.TransactionCount > 0 {
-			priceHit := m.CurrentTokenPrice <= task.GuardOpenPrice*(1.0-priceDropPct)
-			txHit := float64(m.TransactionCount) <= float64(task.GuardOpenTxCount5m)*(1.0-txDropPct)
+			priceHit := m.CurrentTokenPrice <= baselinePrice*(1.0-priceDropPct)
+			txHit := float64(m.TransactionCount) <= float64(baselineTxCount5m)*(1.0-txDropPct)
 			hit := priceHit && txHit
 
 			if !hit {
@@ -2514,12 +2647,14 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 				task.GuardPriceTxDropArmed = true
 			} else {
 				reason := fmt.Sprintf(
-					"价格跌>=%.0f%% 且 交易笔数跌>=%.0f%%（开仓价=%.6f 当前价=%.6f 开仓Tx=%d 当前Tx=%d）",
+					"价格跌>=%.0f%% 且 交易笔数跌>=%.0f%%（%s价=%.6f 当前价=%.6f %sTx=%d 当前Tx=%d）",
 					priceDropPct*100,
 					txDropPct*100,
-					task.GuardOpenPrice,
+					baselineLabel,
+					baselinePrice,
 					m.CurrentTokenPrice,
-					task.GuardOpenTxCount5m,
+					baselineLabel,
+					baselineTxCount5m,
 					m.TransactionCount,
 				)
 				if err := s.requestStopLossExit(task, reason, 1.0); err == nil {

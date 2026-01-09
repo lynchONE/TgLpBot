@@ -16,6 +16,7 @@ import {
     fetchMe,
     fetchRealtimePositions,
     openPosition,
+    setAutoLPGuardCompareToPeak,
     setTaskPaused,
     stopTask,
 } from './lib/api';
@@ -236,6 +237,7 @@ export default function App() {
     const [autoMonitorError, setAutoMonitorError] = useState('');
     const [autoMonitorLoading, setAutoMonitorLoading] = useState(false);
     const autoMonitorPollRef = useRef(null);
+    const [autoGuardBaselineUpdating, setAutoGuardBaselineUpdating] = useState(false);
 
     const [hotPoolsSort, setHotPoolsSort] = useState('fees');
     const [hotPoolsData, setHotPoolsData] = useState(null);
@@ -500,6 +502,44 @@ export default function App() {
         setNotice({ message: text, tone });
         if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
         noticeTimerRef.current = setTimeout(() => setNotice(null), 3200);
+    };
+
+    const guardCompareToPeak = autoMonitor?.config?.guard_compare_to_peak !== false;
+    const toggleAutoGuardBaseline = async () => {
+        if (!hasInitData) {
+            showNotice('未获取到 initData，无法修改对比基准。', 'error');
+            return;
+        }
+        if (autoGuardBaselineUpdating) return;
+        const next = !guardCompareToPeak;
+        setAutoGuardBaselineUpdating(true);
+        try {
+            await setAutoLPGuardCompareToPeak({ apiBaseUrl, initData, guardCompareToPeak: next });
+            hapticSelection();
+            showNotice(`撤退对比基准已切换：${next ? '最高点' : '开仓时'}`, 'success');
+            try {
+                const resp = await fetchAutoMonitor({ apiBaseUrl, initData });
+                setAutoMonitor(resp);
+            } catch {
+                // ignore; polling will update soon
+                setAutoMonitor((prev) =>
+                    prev
+                        ? {
+                            ...prev,
+                            config: {
+                                ...(prev?.config || {}),
+                                guard_compare_to_peak: next,
+                            },
+                        }
+                        : prev,
+                );
+            }
+        } catch (e) {
+            hapticNotification('error');
+            showNotice(`切换失败：${String(e?.message || e)}`, 'error');
+        } finally {
+            setAutoGuardBaselineUpdating(false);
+        }
     };
 
     useEffect(() => {
@@ -1718,6 +1758,32 @@ export default function App() {
 
             {isMonitor && autoMonitorLoading && !autoMonitor ? (
                 <SkeletonList count={2} Card={SkeletonPositionCard} />
+            ) : null}
+
+            {isMonitor && !showAdmin ? (
+                <div className="mb-4 rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none">
+                    <div className="flex items-center justify-between gap-3">
+                        <div>
+                            <div className="text-sm font-extrabold text-zinc-900 dark:text-white/90">撤退对比基准</div>
+                            <div className="mt-0.5 text-xs text-zinc-500 dark:text-white/50">
+                                交易量撤退、价格+Tx 撤退将按此基准计算阈值
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={toggleAutoGuardBaseline}
+                            disabled={!hasInitData || autoGuardBaselineUpdating}
+                            className={`inline-flex items-center justify-center rounded-xl px-3 py-2 text-sm font-semibold transition ${!hasInitData || autoGuardBaselineUpdating
+                                ? 'cursor-not-allowed bg-zinc-200 text-zinc-500 dark:bg-white/5 dark:text-white/40'
+                                : guardCompareToPeak
+                                    ? 'bg-emerald-500/15 text-emerald-700 ring-1 ring-emerald-500/25 hover:bg-emerald-500/25 dark:text-emerald-200'
+                                    : 'bg-sky-500/15 text-sky-700 ring-1 ring-sky-500/25 hover:bg-sky-500/25 dark:text-sky-200'
+                                }`}
+                        >
+                            {autoGuardBaselineUpdating ? '切换中…' : guardCompareToPeak ? '最高点' : '开仓时'}
+                        </button>
+                    </div>
+                </div>
             ) : null}
 
             {/* 批量操作工具栏 */}

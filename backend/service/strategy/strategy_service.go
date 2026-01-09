@@ -23,7 +23,7 @@ import (
 
 const (
 	autoModeConsecutiveDownBreakCooldownThreshold = 2
-	autoModeConsecutiveUpBreakExpandThreshold     = 3
+	autoModeConsecutiveUpBreakExpandThreshold     = 2
 	autoModeExpandRangeMultiplier                 = 2.0
 	autoModeCooldownDurationDefault               = 30 * time.Minute // 默认30分钟，可通过配置覆盖
 )
@@ -390,12 +390,11 @@ func (s *StrategyService) handleAutoModeRangeBreakExit(task *models.StrategyTask
 	switch strings.ToLower(strings.TrimSpace(direction)) {
 	case "up":
 		downStreak = 0
+		upStreak++
 		if upStreak >= autoModeConsecutiveUpBreakExpandThreshold {
-			// 3 consecutive "up" breaks -> next (4th) open widens the computed range.
+			// 2 consecutive "up" breaks -> widen the next computed range.
 			nextMult = autoModeExpandRangeMultiplier
 			upStreak = 0
-		} else {
-			upStreak++
 		}
 	case "down":
 		upStreak = 0
@@ -577,6 +576,13 @@ func (s *StrategyService) runCooldownReopen(taskID uint, userID uint) {
 		updates["GuardOpenTotalFees5m"] = 0
 		updates["GuardOpenTVLUSD"] = 0
 		updates["GuardOpenMetricsAt"] = nil
+		updates["GuardPeakFeePercentage"] = 0
+		updates["GuardPeakFeeRate5mPct"] = 0
+		updates["GuardPeakTotalFees5m"] = 0
+		updates["GuardPeakVolume5m"] = 0
+		updates["GuardPeakTVLUSD"] = 0
+		updates["GuardPeakPrice"] = 0
+		updates["GuardPeakTxCount5m"] = 0
 		updates["GuardVolumeDropArmed"] = false
 		updates["GuardVolumeDropLastVolume5m"] = 0
 		updates["GuardPriceTxDropArmed"] = false
@@ -672,6 +678,13 @@ func (s *StrategyService) runWaitingReopen(taskID uint, userID uint) {
 		updates["GuardOpenTotalFees5m"] = 0
 		updates["GuardOpenTVLUSD"] = 0
 		updates["GuardOpenMetricsAt"] = nil
+		updates["GuardPeakFeePercentage"] = 0
+		updates["GuardPeakFeeRate5mPct"] = 0
+		updates["GuardPeakTotalFees5m"] = 0
+		updates["GuardPeakVolume5m"] = 0
+		updates["GuardPeakTVLUSD"] = 0
+		updates["GuardPeakPrice"] = 0
+		updates["GuardPeakTxCount5m"] = 0
 		updates["GuardVolumeDropArmed"] = false
 		updates["GuardVolumeDropLastVolume5m"] = 0
 		updates["GuardPriceTxDropArmed"] = false

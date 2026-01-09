@@ -57,11 +57,13 @@ export default function AutoMonitorCard({ task, tick }) {
     const paused = Boolean(task?.paused);
 
     const open = task?.open || {};
+    const peak = task?.peak || {};
     const current = task?.current || {};
     const gv = task?.guard_volume || {};
     const gp = task?.guard_price_tx || {};
 
     const hasOpenSnapshot = Boolean(open?.at);
+    const hasPeakSnapshot = Boolean(peak?.ok);
     const hasCurrentSnapshot = Boolean(current?.ok);
 
     const openAtText = useMemo(() => formatRelativeTime(open?.at, tick) || '--', [open?.at, tick]);
@@ -69,6 +71,12 @@ export default function AutoMonitorCard({ task, tick }) {
 
     const exitPending = String(task?.exit_pending_action || '').trim();
     const exitReason = String(task?.exit_pending_reason || '').trim();
+    const baselineText = useMemo(() => {
+        const baseline = String(gv?.baseline || gp?.baseline || '').trim().toLowerCase();
+        if (baseline === 'peak') return '最高点';
+        if (baseline === 'open') return '开仓时';
+        return '--';
+    }, [gv?.baseline, gp?.baseline]);
 
     const volBadge = useMemo(() => {
         if (!gv?.enabled) return { tone: 'muted', text: '不可用' };
@@ -160,10 +168,34 @@ export default function AutoMonitorCard({ task, tick }) {
                 </div>
             </div>
 
+            <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                <div className="flex items-center justify-between">
+                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">开仓后最高</div>
+                    <div className="text-[11px] text-zinc-500 dark:text-white/40">{hasPeakSnapshot ? '已记录' : '--'}</div>
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
+                    <div className="text-zinc-500 dark:text-white/40">手续费率</div>
+                    <div className="text-right font-semibold tabular-nums">{hasPeakSnapshot ? formatPct(peak?.fee_pct) : '--'}</div>
+                    <div className="text-zinc-500 dark:text-white/40">5m 费用率</div>
+                    <div className="text-right font-semibold tabular-nums">{hasPeakSnapshot ? formatPct(peak?.fee_rate_5m_pct, 4) : '--'}</div>
+                    <div className="text-zinc-500 dark:text-white/40">5m 费用</div>
+                    <div className="text-right font-semibold tabular-nums">{hasPeakSnapshot ? formatUsd(peak?.fees_5m) : '--'}</div>
+                    <div className="text-zinc-500 dark:text-white/40">5m 交易量</div>
+                    <div className="text-right font-semibold tabular-nums">{hasPeakSnapshot ? formatUsd(peak?.volume_5m) : '--'}</div>
+                    <div className="text-zinc-500 dark:text-white/40">TVL</div>
+                    <div className="text-right font-semibold tabular-nums">{hasPeakSnapshot ? formatUsd(peak?.tvl) : '--'}</div>
+                    <div className="text-zinc-500 dark:text-white/40">5m Tx</div>
+                    <div className="text-right font-semibold tabular-nums">{hasPeakSnapshot && Number.isFinite(Number(peak?.tx_5m)) ? peak.tx_5m : '--'}</div>
+                    <div className="text-zinc-500 dark:text-white/40">价格</div>
+                    <div className="text-right font-semibold tabular-nums">{hasPeakSnapshot ? formatNum(peak?.price, 8) : '--'}</div>
+                </div>
+            </div>
+
             <div className="mt-3 rounded-xl border border-zinc-200 bg-white p-3 dark:border-white/10 dark:bg-white/5">
                 <div className="flex items-center justify-between gap-2">
                     <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">撤退卫士</div>
                     <div className="flex items-center gap-2">
+                        <GuardBadge tone="muted">{`基准：${baselineText}`}</GuardBadge>
                         <GuardBadge tone={volBadge.tone}>{`交易量：${volBadge.text}`}</GuardBadge>
                         <GuardBadge tone={ptBadge.tone}>{`价+Tx：${ptBadge.text}`}</GuardBadge>
                     </div>
@@ -179,8 +211,8 @@ export default function AutoMonitorCard({ task, tick }) {
                     </div>
                     <div className="flex items-center gap-1">
                         <span className="text-zinc-500 dark:text-white/40">连续涨破:</span>
-                        <span className={`font-semibold ${task?.range_break_up_streak >= 3 ? 'text-amber-500' : ''}`}>
-                            {task?.range_break_up_streak || 0}/3
+                        <span className={`font-semibold ${task?.range_break_up_streak >= 2 ? 'text-amber-500' : ''}`}>
+                            {task?.range_break_up_streak || 0}/2
                         </span>
                     </div>
                     {task?.next_range_multiplier > 1 ? (
