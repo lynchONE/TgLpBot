@@ -50,6 +50,26 @@ function GuardBadge({ tone, children }) {
     );
 }
 
+function CompareIndicator({ current, baseline, reverse = false, suffix = '' }) {
+    const c = Number(current);
+    const b = Number(baseline);
+    if (!Number.isFinite(c) || !Number.isFinite(b) || b === 0) return null;
+    const pct = ((c - b) / Math.abs(b)) * 100;
+    const isUp = pct > 0;
+    const isSignificant = Math.abs(pct) >= 1;
+    if (!isSignificant) return null;
+    // reverse为true时，下跌显示为红色（如交易量下跌是危险的）
+    const colorClass = reverse
+        ? (isUp ? 'text-emerald-500' : 'text-red-500')
+        : (isUp ? 'text-emerald-500' : 'text-red-500');
+    const arrow = isUp ? '↑' : '↓';
+    return (
+        <span className={`ml-1 text-[10px] font-bold ${colorClass}`}>
+            {arrow}{Math.abs(pct).toFixed(0)}%{suffix}
+        </span>
+    );
+}
+
 export default function AutoMonitorCard({ task, tick }) {
     const title = String(task?.title || '').trim() || 'Auto 任务';
     const poolVersion = String(task?.pool_version || '').trim();
@@ -71,6 +91,12 @@ export default function AutoMonitorCard({ task, tick }) {
 
     const exitPending = String(task?.exit_pending_action || '').trim();
     const exitReason = String(task?.exit_pending_reason || '').trim();
+
+    // 计算基准数据 (根据配置使用peak或open)
+    const baselineType = String(gv?.baseline || gp?.baseline || '').trim().toLowerCase();
+    const baselineData = baselineType === 'peak' && hasPeakSnapshot ? peak : open;
+    const baselineLabel = baselineType === 'peak' ? '最高点' : '开仓时';
+
     const baselineText = useMemo(() => {
         const baseline = String(gv?.baseline || gp?.baseline || '').trim().toLowerCase();
         if (baseline === 'peak') return '最高点';
@@ -146,24 +172,49 @@ export default function AutoMonitorCard({ task, tick }) {
 
                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                     <div className="flex items-center justify-between">
-                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">当前池子</div>
+                        <div className="flex items-center gap-2">
+                            <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">当前池子</div>
+                            <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-medium bg-zinc-100 text-zinc-500 dark:bg-white/5 dark:text-white/40">
+                                对比: {baselineLabel}
+                            </span>
+                        </div>
                         <div className="text-[11px] text-zinc-500 dark:text-white/40">{currentAtText}</div>
                     </div>
                     <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
                         <div className="text-zinc-500 dark:text-white/40">手续费率</div>
-                        <div className="text-right font-semibold tabular-nums">{hasCurrentSnapshot ? formatPct(current?.fee_pct) : '--'}</div>
+                        <div className="text-right font-semibold tabular-nums flex items-center justify-end">
+                            {hasCurrentSnapshot ? formatPct(current?.fee_pct) : '--'}
+                        </div>
                         <div className="text-zinc-500 dark:text-white/40">5m 费用率</div>
-                        <div className="text-right font-semibold tabular-nums">{hasCurrentSnapshot ? formatPct(current?.fee_rate_5m_pct, 4) : '--'}</div>
+                        <div className="text-right font-semibold tabular-nums flex items-center justify-end">
+                            {hasCurrentSnapshot ? formatPct(current?.fee_rate_5m_pct, 4) : '--'}
+                            <CompareIndicator current={current?.fee_rate_5m_pct} baseline={baselineData?.fee_rate_5m_pct} />
+                        </div>
                         <div className="text-zinc-500 dark:text-white/40">5m 费用</div>
-                        <div className="text-right font-semibold tabular-nums">{hasCurrentSnapshot ? formatUsd(current?.fees_5m) : '--'}</div>
+                        <div className="text-right font-semibold tabular-nums flex items-center justify-end">
+                            {hasCurrentSnapshot ? formatUsd(current?.fees_5m) : '--'}
+                            <CompareIndicator current={current?.fees_5m} baseline={baselineData?.fees_5m} />
+                        </div>
                         <div className="text-zinc-500 dark:text-white/40">5m 交易量</div>
-                        <div className="text-right font-semibold tabular-nums">{hasCurrentSnapshot ? formatUsd(current?.volume_5m) : '--'}</div>
+                        <div className="text-right font-semibold tabular-nums flex items-center justify-end">
+                            {hasCurrentSnapshot ? formatUsd(current?.volume_5m) : '--'}
+                            <CompareIndicator current={current?.volume_5m} baseline={baselineData?.volume_5m} />
+                        </div>
                         <div className="text-zinc-500 dark:text-white/40">TVL</div>
-                        <div className="text-right font-semibold tabular-nums">{hasCurrentSnapshot ? formatUsd(current?.tvl) : '--'}</div>
+                        <div className="text-right font-semibold tabular-nums flex items-center justify-end">
+                            {hasCurrentSnapshot ? formatUsd(current?.tvl) : '--'}
+                            <CompareIndicator current={current?.tvl} baseline={baselineData?.tvl} />
+                        </div>
                         <div className="text-zinc-500 dark:text-white/40">5m Tx</div>
-                        <div className="text-right font-semibold tabular-nums">{hasCurrentSnapshot && Number.isFinite(Number(current?.tx_5m)) ? current.tx_5m : '--'}</div>
+                        <div className="text-right font-semibold tabular-nums flex items-center justify-end">
+                            {hasCurrentSnapshot && Number.isFinite(Number(current?.tx_5m)) ? current.tx_5m : '--'}
+                            <CompareIndicator current={current?.tx_5m} baseline={baselineData?.tx_5m} />
+                        </div>
                         <div className="text-zinc-500 dark:text-white/40">价格</div>
-                        <div className="text-right font-semibold tabular-nums">{hasCurrentSnapshot ? formatNum(current?.price, 8) : '--'}</div>
+                        <div className="text-right font-semibold tabular-nums flex items-center justify-end">
+                            {hasCurrentSnapshot ? formatNum(current?.price, 8) : '--'}
+                            <CompareIndicator current={current?.price} baseline={baselineData?.price} />
+                        </div>
                     </div>
                 </div>
             </div>
@@ -192,13 +243,10 @@ export default function AutoMonitorCard({ task, tick }) {
             </div>
 
             <div className="mt-3 rounded-xl border border-zinc-200 bg-white p-3 dark:border-white/10 dark:bg-white/5">
-                <div className="flex items-center justify-between gap-2">
-                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">撤退卫士</div>
-                    <div className="flex items-center gap-2">
-                        <GuardBadge tone="muted">{`基准：${baselineText}`}</GuardBadge>
-                        <GuardBadge tone={volBadge.tone}>{`交易量：${volBadge.text}`}</GuardBadge>
-                        <GuardBadge tone={ptBadge.tone}>{`价+Tx：${ptBadge.text}`}</GuardBadge>
-                    </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80 mr-1">撤退卫士</div>
+                    <GuardBadge tone={volBadge.tone}>{`交易量:${volBadge.text}`}</GuardBadge>
+                    <GuardBadge tone={ptBadge.tone}>{`价+Tx:${ptBadge.text}`}</GuardBadge>
                 </div>
 
                 {/* 连续跌破/涨破计数 */}

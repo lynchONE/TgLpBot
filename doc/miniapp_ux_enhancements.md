@@ -51,3 +51,13 @@
 - `miniapp/src/components/PriceRangeVisualizer.jsx`
 - `miniapp/src/App.jsx`
 - `backend/service/web_server/hot_pools.go`
+
+### 12. 撤退对比基准UI优化 ✅ (2026-01-10)
+- 对比基准切换器改为紧凑单行设计，添加图标和渐变样式
+- 当前池子数据旁添加涨跌指示器 (↑/↓百分比)
+- 显示当前数据相比基准(开仓/最高点)的变化趋势
+- 撤退卫士区域徽章精简化
+
+#### 修改文件:
+- `miniapp/src/App.jsx` - 对比基准切换按钮
+- `miniapp/src/components/AutoMonitorCard.jsx` - 涨跌指示器
