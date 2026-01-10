@@ -1130,12 +1130,12 @@ func decideWidth(baseWidth float64, state5 string, resonance string) (lowerPct f
 	case "RAPID_PUMP":
 		// Use a wider total width (configured via AUTO_LP_WIDTH_RAPID_PUMP_PERCENT).
 		total = baseWidth
-		lShare = 0.4
-		uShare = 0.6
-	case "MILD_UPTREND":
-		total = baseWidth
 		lShare = 0.3
 		uShare = 0.7
+	case "MILD_UPTREND":
+		total = baseWidth
+		lShare = 0.4
+		uShare = 0.6
 	case "MILD_DOWNTREND":
 		total = baseWidth
 		lShare = 0.8

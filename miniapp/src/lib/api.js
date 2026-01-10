@@ -314,7 +314,14 @@ export async function fetchBlacklist({ apiBaseUrl, initData, signal }) {
     const resp = await fetch(url, { method: 'GET', signal });
     if (!resp.ok) {
         const text = await resp.text().catch(() => '');
-        throw new Error(text || `HTTP ${resp.status}`);
+        let detail = text;
+        try {
+            const parsed = text ? JSON.parse(text) : null;
+            if (parsed?.message) detail = parsed.message;
+        } catch {
+            // ignore JSON parse
+        }
+        throw new Error(detail || `HTTP ${resp.status}`);
     }
     return resp.json();
 }
@@ -330,7 +337,14 @@ export async function addToBlacklist({ apiBaseUrl, initData, poolAddress, signal
     });
     if (!resp.ok) {
         const text = await resp.text().catch(() => '');
-        throw new Error(text || `HTTP ${resp.status}`);
+        let detail = text;
+        try {
+            const parsed = text ? JSON.parse(text) : null;
+            if (parsed?.message) detail = parsed.message;
+        } catch {
+            // ignore JSON parse
+        }
+        throw new Error(detail || `HTTP ${resp.status}`);
     }
     return resp.json();
 }
@@ -346,7 +360,14 @@ export async function removeFromBlacklist({ apiBaseUrl, initData, poolAddress, s
     });
     if (!resp.ok) {
         const text = await resp.text().catch(() => '');
-        throw new Error(text || `HTTP ${resp.status}`);
+        let detail = text;
+        try {
+            const parsed = text ? JSON.parse(text) : null;
+            if (parsed?.message) detail = parsed.message;
+        } catch {
+            // ignore JSON parse
+        }
+        throw new Error(detail || `HTTP ${resp.status}`);
     }
     return resp.json();
 }
@@ -359,7 +380,14 @@ export async function fetchCooldowns({ apiBaseUrl, initData, signal }) {
     const resp = await fetch(url, { method: 'GET', signal });
     if (!resp.ok) {
         const text = await resp.text().catch(() => '');
-        throw new Error(text || `HTTP ${resp.status}`);
+        let detail = text;
+        try {
+            const parsed = text ? JSON.parse(text) : null;
+            if (parsed?.message) detail = parsed.message;
+        } catch {
+            // ignore JSON parse
+        }
+        throw new Error(detail || `HTTP ${resp.status}`);
     }
     return resp.json();
 }

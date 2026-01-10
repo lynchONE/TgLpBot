@@ -436,10 +436,10 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                 <button
                     type="button"
                     onClick={() => onOpenPosition?.(pool)}
-                    disabled={typeof onOpenPosition !== 'function'}
+                    disabled={typeof onOpenPosition !== 'function' || isBlacklisted}
                     className="inline-flex items-center rounded-lg bg-emerald-500/15 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-500/25 transition hover:bg-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed dark:text-emerald-200"
                 >
-                    一键开仓
+                    {isBlacklisted ? '黑名单' : '一键开仓'}
                 </button>
             </div>
         </div>

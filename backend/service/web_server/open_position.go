@@ -11,6 +11,7 @@ import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	"TgLpBot/service/blacklist"
 	botSvc "TgLpBot/service/bot"
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/pool"
@@ -174,6 +175,17 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 	walletService := wallet.NewWalletService()
 	if _, err := walletService.GetDefaultWallet(user.ID); err != nil {
 		http.Error(w, "no wallet found", http.StatusBadRequest)
+		return
+	}
+
+	blacklistSvc := blacklist.NewBlacklistService()
+	if blacklistSvc.IsBlacklisted(user.ID, req.PoolAddress) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(openPositionError{
+			Code:    "blacklisted",
+			Message: "该池子已加入黑名单，禁止开仓",
+		})
 		return
 	}
 

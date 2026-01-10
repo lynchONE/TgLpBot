@@ -1030,6 +1030,12 @@ export default function App() {
     };
 
     const openPositionModal = (pool) => {
+        const addr = String(pool?.pool_address || '').trim().toLowerCase();
+        if (addr && blacklist.has(addr)) {
+            hapticNotification('error');
+            showNotice('该池子已加入黑名单，不能开仓。', 'error');
+            return;
+        }
         setOpenPositionPool(pool);
         resetOpenPositionDraft();
     };
@@ -1043,6 +1049,11 @@ export default function App() {
         if (!openPositionPool) return;
         if (!hasInitData) {
             setOpenPositionError('未获取到 Telegram initData，请从机器人入口打开页面。');
+            return;
+        }
+        const poolAddr = String(openPositionPool?.pool_address || '').trim().toLowerCase();
+        if (poolAddr && blacklist.has(poolAddr)) {
+            setOpenPositionError('该池子已加入黑名单，不能开仓。');
             return;
         }
         const amount = Number(String(openPositionAmount || '').trim());
@@ -1345,6 +1356,25 @@ export default function App() {
         : '请选择用户查看实时仓位';
     const showEmptyPositions = isPositions && Boolean(activeData) && visiblePositions.length === 0;
     const monitorTasks = useMemo(() => (Array.isArray(autoMonitor?.tasks) ? autoMonitor.tasks : []), [autoMonitor]);
+    const blacklistList = useMemo(() => Array.from(blacklist).sort(), [blacklist]);
+    const hotPoolsPairMap = useMemo(() => {
+        const m = new Map();
+        for (const row of hotPoolsRows) {
+            const addr = String(row?.pool_address || '').trim().toLowerCase();
+            const pair = String(row?.trading_pair || '').trim();
+            if (addr && pair && !m.has(addr)) m.set(addr, pair);
+        }
+        return m;
+    }, [hotPoolsRows]);
+    const monitorPoolTitleMap = useMemo(() => {
+        const m = new Map();
+        for (const t of monitorTasks) {
+            const addr = String(t?.pool_id || '').trim().toLowerCase();
+            const title = String(t?.title || '').trim();
+            if (addr && title && !m.has(addr)) m.set(addr, title);
+        }
+        return m;
+    }, [monitorTasks]);
     const showEmptyAutoTasks = isMonitor && Boolean(autoMonitor) && monitorTasks.length === 0 && !autoMonitorLoading && !autoMonitorError;
 
     const initDataMissing = viewMode !== 'hot_pools' && !hasInitData;
@@ -1978,8 +2008,53 @@ export default function App() {
                         ? (
                             <>
                                 {monitorTasks.map((t) => (
-                                    <AutoMonitorCard key={String(t?.task_id)} task={t} tick={tick} />
+                                    <AutoMonitorCard
+                                        key={String(t?.task_id)}
+                                        task={t}
+                                        tick={tick}
+                                        isBlacklisted={blacklist.has(String(t?.pool_id || '').trim().toLowerCase())}
+                                    />
                                 ))}
+                                {/* 黑名单池子展示 */}
+                                {!showAdmin && blacklistList.length > 0 ? (
+                                    <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 dark:border-red-500/20 dark:bg-red-500/5">
+                                        <div className="flex items-center gap-2 text-sm font-semibold text-red-700 dark:text-red-300">
+                                            <span>🚫</span>
+                                            <span>黑名单池子</span>
+                                            <span className="ml-auto text-[11px] font-normal text-red-600 dark:text-red-400">
+                                                这些池子禁止开仓
+                                            </span>
+                                        </div>
+                                        <div className="mt-2 space-y-2">
+                                            {blacklistList.map((addr) => {
+                                                const label = hotPoolsPairMap.get(addr) || monitorPoolTitleMap.get(addr) || '';
+                                                const shortAddr = addr.length > 12 ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : addr;
+                                                return (
+                                                    <div key={addr} className="flex items-center justify-between gap-3 rounded-xl bg-red-500/10 px-3 py-2 text-[11px] dark:bg-red-500/10">
+                                                        <div className="min-w-0">
+                                                            <div className="font-semibold text-red-800 dark:text-red-200 truncate">
+                                                                {label || shortAddr}
+                                                            </div>
+                                                            {label ? (
+                                                                <div className="mt-0.5 text-[10px] text-red-700/70 dark:text-red-200/60 truncate">
+                                                                    {shortAddr}
+                                                                </div>
+                                                            ) : null}
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            disabled={!hasInitData}
+                                                            onClick={() => handleBlacklist({ pool_address: addr, trading_pair: label || addr }, false)}
+                                                            className="shrink-0 inline-flex items-center rounded-lg bg-white/60 px-2 py-1 text-[11px] font-semibold text-red-700 ring-1 ring-red-500/20 hover:bg-white/80 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-white/10 dark:text-red-200 dark:ring-red-500/25 dark:hover:bg-white/15"
+                                                        >
+                                                            移除
+                                                        </button>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                ) : null}
                                 {/* 冷却中的交易对展示（移到底部） */}
                                 {cooldowns.length > 0 ? (
                                     <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 dark:border-amber-500/20 dark:bg-amber-500/5">

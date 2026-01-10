@@ -91,7 +91,7 @@ function ConditionStatus({ hit }) {
     return <span className="text-zinc-400 dark:text-white/30">否</span>;
 }
 
-export default function AutoMonitorCard({ task, tick }) {
+export default function AutoMonitorCard({ task, tick, isBlacklisted = false }) {
     const title = String(task?.title || '').trim() || 'Auto 任务';
     const poolVersion = String(task?.pool_version || '').trim();
     const status = String(task?.status || '').trim();
@@ -158,6 +158,7 @@ export default function AutoMonitorCard({ task, tick }) {
                     </div>
                 </div>
                 <div className="flex flex-col items-end gap-1">
+                    {isBlacklisted ? <GuardBadge tone="danger">黑名单</GuardBadge> : null}
                     {paused ? <GuardBadge tone="warn">已暂停</GuardBadge> : null}
                     {exitPending ? <GuardBadge tone="warn">撤退中：{exitPending}</GuardBadge> : null}
                 </div>
