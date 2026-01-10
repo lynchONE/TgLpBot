@@ -60,6 +60,7 @@ func autoMigrate() error {
 		&models.Wallet{},
 		&models.LPConfig{},
 		&models.GlobalConfig{},
+		&models.SystemConfig{},
 		&models.AutoLPUserConfig{},
 		&models.AutoLPEvent{},
 		&models.Position{},

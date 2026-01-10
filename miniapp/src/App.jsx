@@ -3,6 +3,7 @@ import HotPoolCard from './components/HotPoolCard.jsx';
 import KlineModal from './components/KlineModal.jsx';
 import AutoMonitorCard from './components/AutoMonitorCard.jsx';
 import PositionCard from './components/PositionCard.jsx';
+import SystemConfigCard from './components/SystemConfigCard.jsx';
 import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
 import {
     deleteTask,
@@ -19,6 +20,10 @@ import {
     setAutoLPGuardCompareToPeak,
     setTaskPaused,
     stopTask,
+    addToBlacklist,
+    removeFromBlacklist,
+    fetchBlacklist,
+    fetchCooldowns,
 } from './lib/api';
 import { getTelegramWebApp, hapticImpact, hapticNotification, hapticSelection } from './lib/telegram';
 import { formatRelativeTime, useTick } from './lib/time';
@@ -271,6 +276,11 @@ export default function App() {
     const [openPositionAllowSwap, setOpenPositionAllowSwap] = useState(false);
     const [openPositionError, setOpenPositionError] = useState('');
     const [openPositionLoading, setOpenPositionLoading] = useState(false);
+
+    // 黑名单状态
+    const [blacklist, setBlacklist] = useState(new Set());
+    // 冷却列表状态
+    const [cooldowns, setCooldowns] = useState([]);
 
     const [adminUsers, setAdminUsers] = useState([]);
     const [adminUsersError, setAdminUsersError] = useState('');
@@ -1073,6 +1083,66 @@ export default function App() {
         }
     };
 
+    // 黑名单操作处理
+    const handleBlacklist = useCallback(async (pool, add) => {
+        if (!hasInitData || !pool?.pool_address) return;
+        const addr = String(pool.pool_address).trim().toLowerCase();
+        try {
+            if (add) {
+                await addToBlacklist({ apiBaseUrl, initData, poolAddress: addr });
+                setBlacklist(prev => new Set(prev).add(addr));
+                hapticNotification('success');
+                showNotice(`已将 ${pool?.trading_pair || addr} 加入黑名单`, 'warning');
+            } else {
+                await removeFromBlacklist({ apiBaseUrl, initData, poolAddress: addr });
+                setBlacklist(prev => {
+                    const next = new Set(prev);
+                    next.delete(addr);
+                    return next;
+                });
+                hapticNotification('success');
+                showNotice(`已将 ${pool?.trading_pair || addr} 移出黑名单`, 'info');
+            }
+        } catch (e) {
+            hapticNotification('error');
+            showNotice(`黑名单操作失败: ${e?.message || e}`, 'error');
+        }
+    }, [apiBaseUrl, initData, hasInitData]);
+
+    // 加载黑名单列表
+    const loadBlacklist = useCallback(async () => {
+        if (!hasInitData) return;
+        try {
+            const resp = await fetchBlacklist({ apiBaseUrl, initData });
+            if (resp?.blacklist) {
+                setBlacklist(new Set(resp.blacklist.map(a => String(a).toLowerCase())));
+            }
+        } catch (e) {
+            console.error('[Blacklist] Load failed:', e);
+        }
+    }, [apiBaseUrl, initData, hasInitData]);
+
+    // 加载冷却列表
+    const loadCooldowns = useCallback(async () => {
+        if (!hasInitData) return;
+        try {
+            const resp = await fetchCooldowns({ apiBaseUrl, initData });
+            if (resp?.cooldowns) {
+                setCooldowns(resp.cooldowns);
+            }
+        } catch (e) {
+            console.error('[Cooldowns] Load failed:', e);
+        }
+    }, [apiBaseUrl, initData, hasInitData]);
+
+    // 初始化时加载黑名单和冷却列表
+    useEffect(() => {
+        if (hasInitData) {
+            loadBlacklist();
+            loadCooldowns();
+        }
+    }, [hasInitData, loadBlacklist, loadCooldowns]);
+
     const loadGlobalConfig = async () => {
         if (!hasInitData) {
             setGlobalConfigError('未获取到 Telegram initData，请从机器人入口打开页面。');
@@ -1543,79 +1613,84 @@ export default function App() {
             ) : null}
 
             {!isHotPools && showAdmin ? (
-                <div className="mb-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
-                    <div className="flex items-center justify-between">
-                        <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">开启Auto用户</div>
-                        <div className="text-[11px] text-zinc-500 dark:text-white/40">{adminUsers.length} 人</div>
+                <>
+                    <div className="mb-4">
+                        <SystemConfigCard apiBaseUrl={apiBaseUrl} initData={initData} onNotice={showNotice} />
                     </div>
-
-                    {adminUsersError ? (
-                        <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
-                            {adminUsersError}
+                    <div className="mb-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                        <div className="flex items-center justify-between">
+                            <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">开启Auto用户</div>
+                            <div className="text-[11px] text-zinc-500 dark:text-white/40">{adminUsers.length} 人</div>
                         </div>
-                    ) : null}
 
-                    {adminUsersLoading && adminUsers.length === 0 ? (
-                        <div className="mt-3 rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                            加载中...
-                        </div>
-                    ) : null}
+                        {adminUsersError ? (
+                            <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
+                                {adminUsersError}
+                            </div>
+                        ) : null}
 
-                    {!adminUsersLoading && adminUsers.length === 0 ? (
-                        <div className="mt-3 rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                            暂无开启Auto用户
-                        </div>
-                    ) : null}
+                        {adminUsersLoading && adminUsers.length === 0 ? (
+                            <div className="mt-3 rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                                加载中...
+                            </div>
+                        ) : null}
 
-                    {adminUsers.length ? (
-                        <div className="mt-3 space-y-2">
-                            {adminUsers.map((u) => {
-                                const selected = Number(u?.user_id) === Number(adminSelectedUserId);
-                                const label = formatUserLabel(u);
-                                const updatedText = formatRelativeTime(u?.updated_at, tick) || '--';
-                                return (
-                                    <button
-                                        key={u.user_id}
-                                        type="button"
-                                        onClick={() => {
-                                            if (Number(u?.user_id) === Number(adminSelectedUserId)) return;
-                                            setAdminSelectedUserId(u.user_id);
-                                            setAdminPositions(null);
-                                            setAdminPositionsError('');
-                                        }}
-                                        className={`w-full rounded-xl border p-3 text-left transition ${selected
-                                            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-900 dark:text-emerald-100'
-                                            : 'border-zinc-200 bg-white/70 text-zinc-900 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10'
-                                            }`}
-                                    >
-                                        <div className="flex items-start justify-between gap-3">
-                                            <div>
-                                                <div className="text-sm font-semibold">{label}</div>
-                                                <div
-                                                    className={`mt-0.5 text-[11px] ${selected ? 'text-emerald-700/80 dark:text-emerald-200/80' : 'text-zinc-500 dark:text-white/40'
-                                                        }`}
-                                                >
-                                                    {u.telegram_id ? `TG ${u.telegram_id}` : 'TG --'} · ID {u.user_id}
+                        {!adminUsersLoading && adminUsers.length === 0 ? (
+                            <div className="mt-3 rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                                暂无开启Auto用户
+                            </div>
+                        ) : null}
+
+                        {adminUsers.length ? (
+                            <div className="mt-3 space-y-2">
+                                {adminUsers.map((u) => {
+                                    const selected = Number(u?.user_id) === Number(adminSelectedUserId);
+                                    const label = formatUserLabel(u);
+                                    const updatedText = formatRelativeTime(u?.updated_at, tick) || '--';
+                                    return (
+                                        <button
+                                            key={u.user_id}
+                                            type="button"
+                                            onClick={() => {
+                                                if (Number(u?.user_id) === Number(adminSelectedUserId)) return;
+                                                setAdminSelectedUserId(u.user_id);
+                                                setAdminPositions(null);
+                                                setAdminPositionsError('');
+                                            }}
+                                            className={`w-full rounded-xl border p-3 text-left transition ${selected
+                                                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-900 dark:text-emerald-100'
+                                                : 'border-zinc-200 bg-white/70 text-zinc-900 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10'
+                                                }`}
+                                        >
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div>
+                                                    <div className="text-sm font-semibold">{label}</div>
+                                                    <div
+                                                        className={`mt-0.5 text-[11px] ${selected ? 'text-emerald-700/80 dark:text-emerald-200/80' : 'text-zinc-500 dark:text-white/40'
+                                                            }`}
+                                                    >
+                                                        {u.telegram_id ? `TG ${u.telegram_id}` : 'TG --'} · ID {u.user_id}
+                                                    </div>
+                                                </div>
+                                                <div className="text-right">
+                                                    <div className={`text-xs font-semibold ${selected ? 'text-emerald-700 dark:text-emerald-200' : 'text-zinc-700 dark:text-white/70'}`}>
+                                                        {u.active_tasks} 个任务
+                                                    </div>
+                                                    <div
+                                                        className={`mt-0.5 text-[11px] ${selected ? 'text-emerald-700/70 dark:text-emerald-200/70' : 'text-zinc-500 dark:text-white/40'
+                                                            }`}
+                                                    >
+                                                        {updatedText}
+                                                    </div>
                                                 </div>
                                             </div>
-                                            <div className="text-right">
-                                                <div className={`text-xs font-semibold ${selected ? 'text-emerald-700 dark:text-emerald-200' : 'text-zinc-700 dark:text-white/70'}`}>
-                                                    {u.active_tasks} 个任务
-                                                </div>
-                                                <div
-                                                    className={`mt-0.5 text-[11px] ${selected ? 'text-emerald-700/70 dark:text-emerald-200/70' : 'text-zinc-500 dark:text-white/40'
-                                                        }`}
-                                                >
-                                                    {updatedText}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    ) : null}
-                </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        ) : null}
+                    </div>
+                </>
             ) : null}
 
             {!isHotPools && showAdmin && adminSelectedUserId ? (
@@ -1726,135 +1801,156 @@ export default function App() {
                         </div>
                     ) : null}
                 </div>
-            ) : null}
+            ) : null
+            }
 
-            {!isHotPools && initDataMissing ? (
-                <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-200">
-                    请从 Telegram 机器人里的“实时仓位”按钮打开页面（否则无法读取你的仓位）。
-                </div>
-            ) : null}
-
-            {(isPositions || showAdmin) && activeErrorText ? (
-                <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-200">
-                    {activeErrorText}
-                </div>
-            ) : null}
-
-            {isMonitor && autoMonitorError ? (
-                <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-200">
-                    {autoMonitorError}
-                </div>
-            ) : null}
-
-            {!isHotPools && showAdmin && !adminSelectedUserId ? (
-                <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                    请选择用户查看实时仓位。
-                </div>
-            ) : null}
-
-            {(isPositions || showAdmin) && activeLoading && !activeData ? (
-                <SkeletonList count={2} Card={SkeletonPositionCard} />
-            ) : null}
-
-            {isMonitor && autoMonitorLoading && !autoMonitor ? (
-                <SkeletonList count={2} Card={SkeletonPositionCard} />
-            ) : null}
-
-            {isMonitor && !showAdmin ? (
-                <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-zinc-200/50 bg-zinc-50 px-3 py-2 dark:border-white/6 dark:bg-[#0b0f14]">
-                    <div className="flex items-center gap-2">
-                        <span className="text-xs font-medium text-zinc-500 dark:text-white/50">对比基准</span>
-                        <button
-                            type="button"
-                            onClick={toggleAutoGuardBaseline}
-                            disabled={!hasInitData || autoGuardBaselineUpdating}
-                            className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all ${!hasInitData || autoGuardBaselineUpdating
-                                ? 'cursor-not-allowed bg-zinc-100 text-zinc-400 dark:bg-white/5 dark:text-white/25'
-                                : guardCompareToPeak
-                                    ? 'bg-amber-500/10 text-amber-600 ring-1 ring-amber-500/20 hover:bg-amber-500/15 hover:ring-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-amber-500/20 dark:hover:bg-amber-500/15'
-                                    : 'bg-sky-500/10 text-sky-600 ring-1 ring-sky-500/20 hover:bg-sky-500/15 hover:ring-sky-500/30 dark:bg-sky-500/10 dark:text-sky-400 dark:ring-sky-500/20 dark:hover:bg-sky-500/15'
-                                }`}
-                        >
-                            {guardCompareToPeak ? (
-                                <>
-                                    <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2l2 4h4l-3.5 3 1.5 5L8 11l-4 3 1.5-5L2 6h4l2-4z" /></svg>
-                                    最高点
-                                </>
-                            ) : (
-                                <>
-                                    <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor"><path d="M8 14A6 6 0 108 2a6 6 0 000 12zm0-2a4 4 0 110-8 4 4 0 010 8zm0-3a1 1 0 100-2 1 1 0 000 2z" /></svg>
-                                    开仓时
-                                </>
-                            )}
-                            {autoGuardBaselineUpdating && <span className="ml-0.5 animate-pulse">…</span>}
-                        </button>
+            {
+                !isHotPools && initDataMissing ? (
+                    <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-200">
+                        请从 Telegram 机器人里的“实时仓位”按钮打开页面（否则无法读取你的仓位）。
                     </div>
-                    <span className="text-[10px] text-zinc-400 dark:text-white/30">点击切换</span>
-                </div>
-            ) : null}
+                ) : null
+            }
 
-            {/* 批量操作工具栏 */}
-            {isPositions && !showAdmin && visiblePositions.length > 1 && (
-                <div className="mb-4 flex items-center justify-between gap-2">
-                    <button
-                        type="button"
-                        onClick={() => {
-                            setBatchMode(!batchMode);
-                            if (batchMode) setSelectedTaskIds(new Set());
-                            hapticImpact('light');
-                        }}
-                        className={`inline-flex items-center gap-1 rounded-xl px-3 py-1.5 text-xs font-semibold transition ${batchMode
-                            ? 'bg-sky-500/20 text-sky-700 ring-1 ring-sky-500/30 dark:text-sky-200'
-                            : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
-                            }`}
-                    >
-                        {batchMode ? '退出多选' : '批量操作'}
-                    </button>
+            {
+                (isPositions || showAdmin) && activeErrorText ? (
+                    <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-200">
+                        {activeErrorText}
+                    </div>
+                ) : null
+            }
 
-                    {batchMode && (
+            {
+                isMonitor && autoMonitorError ? (
+                    <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-200">
+                        {autoMonitorError}
+                    </div>
+                ) : null
+            }
+
+            {
+                !isHotPools && showAdmin && !adminSelectedUserId ? (
+                    <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                        请选择用户查看实时仓位。
+                    </div>
+                ) : null
+            }
+
+            {
+                (isPositions || showAdmin) && activeLoading && !activeData ? (
+                    <SkeletonList count={2} Card={SkeletonPositionCard} />
+                ) : null
+            }
+
+            {
+                isMonitor && autoMonitorLoading && !autoMonitor ? (
+                    <SkeletonList count={2} Card={SkeletonPositionCard} />
+                ) : null
+            }
+
+            {
+                isMonitor && !showAdmin ? (
+                    <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-zinc-200/50 bg-zinc-50 px-3 py-2 dark:border-white/6 dark:bg-[#0b0f14]">
                         <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium text-zinc-500 dark:text-white/50">对比基准</span>
                             <button
                                 type="button"
-                                onClick={selectedTaskIds.size === visiblePositions.length ? deselectAllTasks : selectAllTasks}
-                                className="inline-flex items-center rounded-xl bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-600 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
+                                onClick={toggleAutoGuardBaseline}
+                                disabled={!hasInitData || autoGuardBaselineUpdating}
+                                className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all ${!hasInitData || autoGuardBaselineUpdating
+                                    ? 'cursor-not-allowed bg-zinc-100 text-zinc-400 dark:bg-white/5 dark:text-white/25'
+                                    : guardCompareToPeak
+                                        ? 'bg-amber-500/10 text-amber-600 ring-1 ring-amber-500/20 hover:bg-amber-500/15 hover:ring-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-amber-500/20 dark:hover:bg-amber-500/15'
+                                        : 'bg-sky-500/10 text-sky-600 ring-1 ring-sky-500/20 hover:bg-sky-500/15 hover:ring-sky-500/30 dark:bg-sky-500/10 dark:text-sky-400 dark:ring-sky-500/20 dark:hover:bg-sky-500/15'
+                                    }`}
                             >
-                                {selectedTaskIds.size === visiblePositions.length ? '取消全选' : '全选'}
-                            </button>
-                            <span className="text-xs text-zinc-500 dark:text-white/50">
-                                已选 {selectedTaskIds.size}
-                            </span>
-                            <button
-                                type="button"
-                                onClick={() => batchPauseTasks(true)}
-                                disabled={selectedTaskIds.size === 0 || batchLoading}
-                                className="inline-flex items-center rounded-xl bg-amber-500/15 px-2 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-500/25 disabled:opacity-50 dark:text-amber-200"
-                            >
-                                {batchLoading ? '处理中...' : '批量暂停'}
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => batchPauseTasks(false)}
-                                disabled={selectedTaskIds.size === 0 || batchLoading}
-                                className="inline-flex items-center rounded-xl bg-emerald-500/15 px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-500/25 disabled:opacity-50 dark:text-emerald-200"
-                            >
-                                批量恢复
+                                {guardCompareToPeak ? (
+                                    <>
+                                        <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2l2 4h4l-3.5 3 1.5 5L8 11l-4 3 1.5-5L2 6h4l2-4z" /></svg>
+                                        最高点
+                                    </>
+                                ) : (
+                                    <>
+                                        <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor"><path d="M8 14A6 6 0 108 2a6 6 0 000 12zm0-2a4 4 0 110-8 4 4 0 010 8zm0-3a1 1 0 100-2 1 1 0 000 2z" /></svg>
+                                        开仓时
+                                    </>
+                                )}
+                                {autoGuardBaselineUpdating && <span className="ml-0.5 animate-pulse">…</span>}
                             </button>
                         </div>
-                    )}
-                </div>
-            )}
+                        <span className="text-[10px] text-zinc-400 dark:text-white/30">点击切换</span>
+                    </div>
+                ) : null
+            }
 
-            {showEmptyPositions ? (
-                <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                    暂无仓位。请先在机器人里导入钱包并开仓。
-                </div>
-            ) : null}
+            {/* 批量操作工具栏 */}
+            {
+                isPositions && !showAdmin && visiblePositions.length > 1 && (
+                    <div className="mb-4 flex items-center justify-between gap-2">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setBatchMode(!batchMode);
+                                if (batchMode) setSelectedTaskIds(new Set());
+                                hapticImpact('light');
+                            }}
+                            className={`inline-flex items-center gap-1 rounded-xl px-3 py-1.5 text-xs font-semibold transition ${batchMode
+                                ? 'bg-sky-500/20 text-sky-700 ring-1 ring-sky-500/30 dark:text-sky-200'
+                                : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
+                                }`}
+                        >
+                            {batchMode ? '退出多选' : '批量操作'}
+                        </button>
 
-            {showEmptyAutoTasks ? (
-                <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                    暂无自动任务。请先在机器人里开启 AutoLP 并开仓。
-                </div>
-            ) : null}
+                        {batchMode && (
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={selectedTaskIds.size === visiblePositions.length ? deselectAllTasks : selectAllTasks}
+                                    className="inline-flex items-center rounded-xl bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-600 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
+                                >
+                                    {selectedTaskIds.size === visiblePositions.length ? '取消全选' : '全选'}
+                                </button>
+                                <span className="text-xs text-zinc-500 dark:text-white/50">
+                                    已选 {selectedTaskIds.size}
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => batchPauseTasks(true)}
+                                    disabled={selectedTaskIds.size === 0 || batchLoading}
+                                    className="inline-flex items-center rounded-xl bg-amber-500/15 px-2 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-500/25 disabled:opacity-50 dark:text-amber-200"
+                                >
+                                    {batchLoading ? '处理中...' : '批量暂停'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => batchPauseTasks(false)}
+                                    disabled={selectedTaskIds.size === 0 || batchLoading}
+                                    className="inline-flex items-center rounded-xl bg-emerald-500/15 px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-500/25 disabled:opacity-50 dark:text-emerald-200"
+                                >
+                                    批量恢复
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                )
+            }
+
+            {
+                showEmptyPositions ? (
+                    <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                        暂无仓位。请先在机器人里导入钱包并开仓。
+                    </div>
+                ) : null
+            }
+
+            {
+                showEmptyAutoTasks ? (
+                    <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                        暂无自动任务。请先在机器人里开启 AutoLP 并开仓。
+                    </div>
+                ) : null
+            }
 
             <div className="space-y-4">
                 {isHotPools
@@ -1871,15 +1967,44 @@ export default function App() {
                                 previousData={prevData}
                                 onOpenKline={setKlinePool}
                                 onOpenPosition={openPositionModal}
+                                onBlacklist={handleBlacklist}
                                 rank={index + 1}
                                 apiBaseUrl={apiBaseUrl}
+                                isBlacklisted={blacklist.has(addr)}
                             />
                         );
                     })
                     : isMonitor
-                        ? monitorTasks.map((t) => (
-                            <AutoMonitorCard key={String(t?.task_id)} task={t} tick={tick} />
-                        ))
+                        ? (
+                            <>
+                                {monitorTasks.map((t) => (
+                                    <AutoMonitorCard key={String(t?.task_id)} task={t} tick={tick} />
+                                ))}
+                                {/* 冷却中的交易对展示（移到底部） */}
+                                {cooldowns.length > 0 ? (
+                                    <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 dark:border-amber-500/20 dark:bg-amber-500/5">
+                                        <div className="flex items-center gap-2 text-sm font-semibold text-amber-700 dark:text-amber-300">
+                                            <span>⏸️</span>
+                                            <span>冷却中的代币</span>
+                                            <span className="ml-auto text-[11px] font-normal text-amber-600 dark:text-amber-400">
+                                                该代币相关池子禁止开仓
+                                            </span>
+                                        </div>
+                                        <div className="mt-2 space-y-2">
+                                            {cooldowns.map((cd, idx) => (
+                                                <div key={cd.trading_pair + idx} className="flex items-center justify-between rounded-xl bg-amber-500/10 px-3 py-2 text-[11px] dark:bg-amber-500/10">
+                                                    <div className="font-semibold text-amber-800 dark:text-amber-200">{cd.trading_pair}</div>
+                                                    <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                                                        <span>{cd.remaining_minutes}分钟后解除</span>
+                                                        <span className="text-[10px]">({cd.expires_at})</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : null}
+                            </>
+                        )
                         : activeData
                             ? visiblePositions.map((p) => (
                                 <PositionCard
@@ -1901,468 +2026,480 @@ export default function App() {
                             : null}
             </div>
 
-            {(isPositions || showAdmin) && activeData?.warnings?.length ? (
-                <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-700 dark:text-amber-200">
-                    <div className="font-semibold">提示</div>
-                    <ul className="mt-1 list-disc space-y-1 pl-4">
-                        {activeData.warnings.map((w, i) => (
-                            <li key={String(i)}>{w}</li>
-                        ))}
-                    </ul>
-                </div>
-            ) : null}
-
-            {hotPoolsFilterOpen ? (
-                <div className="fixed inset-0 z-50">
-                    <button
-                        type="button"
-                        className="absolute inset-0 cursor-default bg-black/40"
-                        onClick={() => setHotPoolsFilterOpen(false)}
-                        aria-label="Close filter"
-                    />
-                    <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
-                        <div className="flex items-center justify-between">
-                            <div className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 p-2 text-zinc-700 dark:border-white/10 dark:bg-white/5 dark:text-white/80">
-                                <Icon path={icons.filter} className="h-4 w-4" />
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => setHotPoolsFilterOpen(false)}
-                                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                aria-label="Close"
-                            >
-                                <Icon path={icons.close} className="h-5 w-5" />
-                            </button>
-                        </div>
-
-                        <div className="mt-4 space-y-4">
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="mt-3 grid grid-cols-2 gap-3">
-                                    <div>
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">手续费 ≥ (USD)</div>
-                                        <input
-                                            value={hotPoolsFilterDraft.minFees}
-                                            onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFees: e.target.value }))}
-                                            inputMode="decimal"
-                                            className="mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
-                                            placeholder={String(defaultHotPoolsFilter.minFees)}
-                                        />
-                                    </div>
-                                    <div>
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">费用率 ≥ (%)</div>
-                                        <input
-                                            value={hotPoolsFilterDraft.minFeeRate}
-                                            onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFeeRate: e.target.value }))}
-                                            inputMode="decimal"
-                                            className="mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
-                                            placeholder={String(defaultHotPoolsFilter.minFeeRate)}
-                                        />
-                                    </div>
-                                    <div>
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">TVL ≥ (USD)</div>
-                                        <input
-                                            value={hotPoolsFilterDraft.minTvl}
-                                            onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minTvl: e.target.value }))}
-                                            inputMode="decimal"
-                                            className="mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
-                                            placeholder={String(defaultHotPoolsFilter.minTvl)}
-                                        />
-                                    </div>
-                                    <div>
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">交易量 ≥ (USD)</div>
-                                        <input
-                                            value={hotPoolsFilterDraft.minVolume}
-                                            onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minVolume: e.target.value }))}
-                                            inputMode="decimal"
-                                            className="mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
-                                            placeholder={String(defaultHotPoolsFilter.minVolume)}
-                                        />
-                                    </div>
-                                </div>
-
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={applyHotPoolsFilter}
-                                        className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-600 active:bg-emerald-700"
-                                        aria-label="应用"
-                                        title="应用"
-                                    >
-                                        <Icon path={icons.check} className="h-4 w-4" />
-                                        应用
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={resetHotPoolsFilter}
-                                        className="inline-flex items-center gap-2 rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
-                                        aria-label="默认"
-                                        title="默认"
-                                    >
-                                        <Icon path={icons.reset} className="h-4 w-4" />
-                                        默认
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={clearHotPoolsFilter}
-                                        className="inline-flex items-center gap-2 rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
-                                        aria-label="清空条件"
-                                        title="清空条件"
-                                    >
-                                        <Icon path={icons.close} className="h-4 w-4" />
-                                        清空条件
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
+            {
+                (isPositions || showAdmin) && activeData?.warnings?.length ? (
+                    <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-700 dark:text-amber-200">
+                        <div className="font-semibold">提示</div>
+                        <ul className="mt-1 list-disc space-y-1 pl-4">
+                            {activeData.warnings.map((w, i) => (
+                                <li key={String(i)}>{w}</li>
+                            ))}
+                        </ul>
                     </div>
-                </div>
-            ) : null}
+                ) : null
+            }
 
-            {globalConfigOpen ? (
-                <div className="fixed inset-0 z-50">
-                    <button
-                        type="button"
-                        className="absolute inset-0 cursor-default bg-black/40"
-                        onClick={() => setGlobalConfigOpen(false)}
-                        aria-label="关闭全局配置"
-                    />
-                    <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
-                        <div className="flex items-center justify-between">
-                            <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">全局配置</div>
-                            <button
-                                type="button"
-                                onClick={() => setGlobalConfigOpen(false)}
-                                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                aria-label="关闭"
-                            >
-                                <Icon path={icons.close} className="h-5 w-5" />
-                            </button>
-                        </div>
+            {
+                hotPoolsFilterOpen ? (
+                    <div className="fixed inset-0 z-50">
+                        <button
+                            type="button"
+                            className="absolute inset-0 cursor-default bg-black/40"
+                            onClick={() => setHotPoolsFilterOpen(false)}
+                            aria-label="Close filter"
+                        />
+                        <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                            <div className="flex items-center justify-between">
+                                <div className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 p-2 text-zinc-700 dark:border-white/10 dark:bg-white/5 dark:text-white/80">
+                                    <Icon path={icons.filter} className="h-4 w-4" />
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setHotPoolsFilterOpen(false)}
+                                    className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
+                                    aria-label="Close"
+                                >
+                                    <Icon path={icons.close} className="h-5 w-5" />
+                                </button>
+                            </div>
 
-                        <div className="mt-4 space-y-3">
-                            {globalConfigError ? (
-                                <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
-                                    {globalConfigError}
-                                </div>
-                            ) : null}
-                            {globalConfigLoading && !globalConfig ? (
-                                <div className="rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                                    加载中...
-                                </div>
-                            ) : null}
-                            {globalConfig ? (
+                            <div className="mt-4 space-y-4">
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="grid grid-cols-2 gap-3 text-xs text-zinc-500 dark:text-white/50">
+                                    <div className="mt-3 grid grid-cols-2 gap-3">
                                         <div>
-                                            <div>再平衡超时</div>
-                                            <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{rebalanceText}</div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">手续费 ≥ (USD)</div>
+                                            <input
+                                                value={hotPoolsFilterDraft.minFees}
+                                                onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFees: e.target.value }))}
+                                                inputMode="decimal"
+                                                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                                placeholder={String(defaultHotPoolsFilter.minFees)}
+                                            />
                                         </div>
                                         <div>
-                                            <div>滑点</div>
-                                            <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{slippageText}</div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">费用率 ≥ (%)</div>
+                                            <input
+                                                value={hotPoolsFilterDraft.minFeeRate}
+                                                onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFeeRate: e.target.value }))}
+                                                inputMode="decimal"
+                                                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                                placeholder={String(defaultHotPoolsFilter.minFeeRate)}
+                                            />
                                         </div>
                                         <div>
-                                            <div>秒止损</div>
-                                            <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.stop_loss_enabled)}</div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">TVL ≥ (USD)</div>
+                                            <input
+                                                value={hotPoolsFilterDraft.minTvl}
+                                                onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minTvl: e.target.value }))}
+                                                inputMode="decimal"
+                                                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                                placeholder={String(defaultHotPoolsFilter.minTvl)}
+                                            />
                                         </div>
                                         <div>
-                                            <div>秒止损阈值</div>
-                                            <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{stopLossDelayText}</div>
-                                        </div>
-                                        <div>
-                                            <div>复投</div>
-                                            <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.auto_reinvest)}</div>
-                                        </div>
-                                        <div>
-                                            <div>剩余资产容忍度</div>
-                                            <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{residualText}</div>
-                                        </div>
-                                        <div>
-                                            <div>日志通知</div>
-                                            <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.extra_notifications_enabled)}</div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">交易量 ≥ (USD)</div>
+                                            <input
+                                                value={hotPoolsFilterDraft.minVolume}
+                                                onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minVolume: e.target.value }))}
+                                                inputMode="decimal"
+                                                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                                placeholder={String(defaultHotPoolsFilter.minVolume)}
+                                            />
                                         </div>
                                     </div>
-                                </div>
-                            ) : null}
-                        </div>
 
-                        <div className="mt-4 flex flex-wrap gap-2">
-                            <button
-                                type="button"
-                                onClick={loadGlobalConfig}
-                                disabled={globalConfigLoading}
-                                className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold ring-1 ${globalConfigLoading
-                                    ? 'cursor-not-allowed bg-emerald-500/40 text-white ring-emerald-500/30'
-                                    : 'bg-emerald-500 text-white ring-emerald-500/30 hover:bg-emerald-600'
-                                    }`}
-                            >
-                                刷新
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            ) : null}
-
-            {settingsOpen ? (
-                <div className="fixed inset-0 z-50">
-                    <button
-                        type="button"
-                        className="absolute inset-0 cursor-default bg-black/40"
-                        onClick={() => setSettingsOpen(false)}
-                        aria-label="关闭设置"
-                    />
-                    <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
-                        <div className="flex items-center justify-between">
-                            <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">设置</div>
-                            <button
-                                type="button"
-                                onClick={() => setSettingsOpen(false)}
-                                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                aria-label="关闭"
-                            >
-                                <Icon path={icons.close} className="h-5 w-5" />
-                            </button>
-                        </div>
-
-                        <div className="mt-4 space-y-4">
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">自动刷新</div>
-                                <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
-                                    当前：{settingsPollIntervalSec}s（{pollOverrideSec ? '自定义' : `默认 ${settingsServerPollIntervalSec}s`})
-                                </div>
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                    {[5, 10, 15, 30, 60].map((sec) => (
+                                    <div className="mt-3 flex flex-wrap gap-2">
                                         <button
-                                            key={sec}
                                             type="button"
-                                            onClick={() => setQuickPoll(sec)}
-                                            className={`rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 ${pollOverrideSec === sec
-                                                ? 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/25 dark:text-emerald-300'
-                                                : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
-                                                }`}
+                                            onClick={applyHotPoolsFilter}
+                                            className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-600 active:bg-emerald-700"
+                                            aria-label="应用"
+                                            title="应用"
                                         >
-                                            {sec}s
+                                            <Icon path={icons.check} className="h-4 w-4" />
+                                            应用
                                         </button>
-                                    ))}
-                                    <button
-                                        type="button"
-                                        onClick={clearPollOverride}
-                                        className="rounded-xl bg-white/70 px-3 py-1.5 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
-                                    >
-                                        跟随默认
-                                    </button>
-                                </div>
-
-                                <div className="mt-3 flex items-center gap-2">
-                                    <input
-                                        value={pollDraftSec}
-                                        onChange={(e) => setPollDraftSec(e.target.value)}
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter') {
-                                                e.preventDefault();
-                                                applyPollDraft();
-                                            }
-                                        }}
-                                        inputMode="numeric"
-                                        className="w-28 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
-                                        placeholder="1-300"
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={applyPollDraft}
-                                        className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-600 active:bg-emerald-700"
-                                    >
-                                        确定
-                                    </button>
+                                        <button
+                                            type="button"
+                                            onClick={resetHotPoolsFilter}
+                                            className="inline-flex items-center gap-2 rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
+                                            aria-label="默认"
+                                            title="默认"
+                                        >
+                                            <Icon path={icons.reset} className="h-4 w-4" />
+                                            默认
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={clearHotPoolsFilter}
+                                            className="inline-flex items-center gap-2 rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
+                                            aria-label="清空条件"
+                                            title="清空条件"
+                                        >
+                                            <Icon path={icons.close} className="h-4 w-4" />
+                                            清空条件
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            ) : null}
+                ) : null
+            }
 
-            {openPositionPool ? (
-                <div className="fixed inset-0 z-50">
-                    <button
-                        type="button"
-                        className="absolute inset-0 bg-black/40"
-                        onClick={closeOpenPosition}
-                        aria-label="关闭开仓"
-                    />
-                    <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
-                        <div className="flex items-center justify-between gap-2">
-                            <div className="min-w-0">
-                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">一键开仓</div>
-                                <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40 truncate">
-                                    {openPositionPool?.trading_pair || '--'}
-                                </div>
+            {
+                globalConfigOpen ? (
+                    <div className="fixed inset-0 z-50">
+                        <button
+                            type="button"
+                            className="absolute inset-0 cursor-default bg-black/40"
+                            onClick={() => setGlobalConfigOpen(false)}
+                            aria-label="关闭全局配置"
+                        />
+                        <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                            <div className="flex items-center justify-between">
+                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">全局配置</div>
+                                <button
+                                    type="button"
+                                    onClick={() => setGlobalConfigOpen(false)}
+                                    className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
+                                    aria-label="关闭"
+                                >
+                                    <Icon path={icons.close} className="h-5 w-5" />
+                                </button>
                             </div>
-                            <button
-                                type="button"
-                                onClick={closeOpenPosition}
-                                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                aria-label="关闭"
-                            >
-                                <Icon path={icons.close} className="h-5 w-5" />
-                            </button>
+
+                            <div className="mt-4 space-y-3">
+                                {globalConfigError ? (
+                                    <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
+                                        {globalConfigError}
+                                    </div>
+                                ) : null}
+                                {globalConfigLoading && !globalConfig ? (
+                                    <div className="rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                                        加载中...
+                                    </div>
+                                ) : null}
+                                {globalConfig ? (
+                                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                        <div className="grid grid-cols-2 gap-3 text-xs text-zinc-500 dark:text-white/50">
+                                            <div>
+                                                <div>再平衡超时</div>
+                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{rebalanceText}</div>
+                                            </div>
+                                            <div>
+                                                <div>滑点</div>
+                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{slippageText}</div>
+                                            </div>
+                                            <div>
+                                                <div>秒止损</div>
+                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.stop_loss_enabled)}</div>
+                                            </div>
+                                            <div>
+                                                <div>秒止损阈值</div>
+                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{stopLossDelayText}</div>
+                                            </div>
+                                            <div>
+                                                <div>复投</div>
+                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.auto_reinvest)}</div>
+                                            </div>
+                                            <div>
+                                                <div>剩余资产容忍度</div>
+                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{residualText}</div>
+                                            </div>
+                                            <div>
+                                                <div>日志通知</div>
+                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.extra_notifications_enabled)}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : null}
+                            </div>
+
+                            <div className="mt-4 flex flex-wrap gap-2">
+                                <button
+                                    type="button"
+                                    onClick={loadGlobalConfig}
+                                    disabled={globalConfigLoading}
+                                    className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold ring-1 ${globalConfigLoading
+                                        ? 'cursor-not-allowed bg-emerald-500/40 text-white ring-emerald-500/30'
+                                        : 'bg-emerald-500 text-white ring-emerald-500/30 hover:bg-emerald-600'
+                                        }`}
+                                >
+                                    刷新
+                                </button>
+                            </div>
                         </div>
+                    </div>
+                ) : null
+            }
 
-                        <div className="mt-4 space-y-4">
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">投入金额 (USDT)</div>
-                                <input
-                                    value={openPositionAmount}
-                                    onChange={(e) => {
-                                        setOpenPositionAmount(e.target.value);
-                                        setOpenPositionError('');
-                                    }}
-                                    inputMode="decimal"
-                                    className="mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
-                                    placeholder="例如 100"
-                                />
+            {
+                settingsOpen ? (
+                    <div className="fixed inset-0 z-50">
+                        <button
+                            type="button"
+                            className="absolute inset-0 cursor-default bg-black/40"
+                            onClick={() => setSettingsOpen(false)}
+                            aria-label="关闭设置"
+                        />
+                        <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                            <div className="flex items-center justify-between">
+                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">设置</div>
+                                <button
+                                    type="button"
+                                    onClick={() => setSettingsOpen(false)}
+                                    className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
+                                    aria-label="关闭"
+                                >
+                                    <Icon path={icons.close} className="h-5 w-5" />
+                                </button>
                             </div>
 
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">自定义区间 (%)</div>
-                                <div className="mt-2 grid grid-cols-2 gap-2">
+                            <div className="mt-4 space-y-4">
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">自动刷新</div>
+                                    <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
+                                        当前：{settingsPollIntervalSec}s（{pollOverrideSec ? '自定义' : `默认 ${settingsServerPollIntervalSec}s`})
+                                    </div>
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                        {[5, 10, 15, 30, 60].map((sec) => (
+                                            <button
+                                                key={sec}
+                                                type="button"
+                                                onClick={() => setQuickPoll(sec)}
+                                                className={`rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 ${pollOverrideSec === sec
+                                                    ? 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/25 dark:text-emerald-300'
+                                                    : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
+                                                    }`}
+                                            >
+                                                {sec}s
+                                            </button>
+                                        ))}
+                                        <button
+                                            type="button"
+                                            onClick={clearPollOverride}
+                                            className="rounded-xl bg-white/70 px-3 py-1.5 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
+                                        >
+                                            跟随默认
+                                        </button>
+                                    </div>
+
+                                    <div className="mt-3 flex items-center gap-2">
+                                        <input
+                                            value={pollDraftSec}
+                                            onChange={(e) => setPollDraftSec(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    applyPollDraft();
+                                                }
+                                            }}
+                                            inputMode="numeric"
+                                            className="w-28 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                            placeholder="1-300"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={applyPollDraft}
+                                            className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-600 active:bg-emerald-700"
+                                        >
+                                            确定
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                ) : null
+            }
+
+            {
+                openPositionPool ? (
+                    <div className="fixed inset-0 z-50">
+                        <button
+                            type="button"
+                            className="absolute inset-0 bg-black/40"
+                            onClick={closeOpenPosition}
+                            aria-label="关闭开仓"
+                        />
+                        <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                            <div className="flex items-center justify-between gap-2">
+                                <div className="min-w-0">
+                                    <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">一键开仓</div>
+                                    <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40 truncate">
+                                        {openPositionPool?.trading_pair || '--'}
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={closeOpenPosition}
+                                    className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
+                                    aria-label="关闭"
+                                >
+                                    <Icon path={icons.close} className="h-5 w-5" />
+                                </button>
+                            </div>
+
+                            <div className="mt-4 space-y-4">
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">投入金额 (USDT)</div>
                                     <input
-                                        value={openPositionRangeLower}
+                                        value={openPositionAmount}
                                         onChange={(e) => {
-                                            setOpenPositionRangeLower(e.target.value);
+                                            setOpenPositionAmount(e.target.value);
                                             setOpenPositionError('');
                                         }}
                                         inputMode="decimal"
-                                        className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
-                                        placeholder="下限 %"
-                                    />
-                                    <input
-                                        value={openPositionRangeUpper}
-                                        onChange={(e) => {
-                                            setOpenPositionRangeUpper(e.target.value);
-                                            setOpenPositionError('');
-                                        }}
-                                        inputMode="decimal"
-                                        className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
-                                        placeholder="上限 %"
+                                        className="mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                        placeholder="例如 100"
                                     />
                                 </div>
-                                <div className="mt-2 flex flex-wrap gap-2">
-                                    {quickRangeOptions.map((option) => (
-                                        <button
-                                            key={option.value}
-                                            type="button"
-                                            onClick={() => {
-                                                if (option.value.includes(' ')) {
-                                                    const parts = option.value.split(/\s+/);
-                                                    setOpenPositionRangeLower(parts[0] || '');
-                                                    setOpenPositionRangeUpper(parts[1] || '');
-                                                } else {
-                                                    const normalized = option.value.replace(/[^0-9.]/g, '');
-                                                    setOpenPositionRangeLower(normalized);
-                                                    setOpenPositionRangeUpper(normalized);
-                                                }
+
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">自定义区间 (%)</div>
+                                    <div className="mt-2 grid grid-cols-2 gap-2">
+                                        <input
+                                            value={openPositionRangeLower}
+                                            onChange={(e) => {
+                                                setOpenPositionRangeLower(e.target.value);
                                                 setOpenPositionError('');
                                             }}
-                                            className="rounded-xl px-3 py-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-500/30 bg-gradient-to-r from-emerald-50 via-emerald-100/60 to-sky-100/60 hover:from-emerald-100 hover:via-emerald-200/70 hover:to-sky-200/70 dark:text-emerald-200 dark:ring-emerald-400/30 dark:from-emerald-500/10 dark:via-emerald-400/10 dark:to-sky-400/10"
-                                        >
-                                            {option.label}
-                                        </button>
-                                    ))}
-                                </div>
-                                <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                    请输入下限与上限百分比（如 1 / 3 表示下 1% 上 3%）。
-                                </div>
-                            </div>
-
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="flex items-center justify-between gap-3">
-                                    <div>
-                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">允许兑换</div>
-                                        <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
-                                            池子不含 USDT 时，允许自动兑换入场代币。
-                                        </div>
+                                            inputMode="decimal"
+                                            className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                            placeholder="下限 %"
+                                        />
+                                        <input
+                                            value={openPositionRangeUpper}
+                                            onChange={(e) => {
+                                                setOpenPositionRangeUpper(e.target.value);
+                                                setOpenPositionError('');
+                                            }}
+                                            inputMode="decimal"
+                                            className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                            placeholder="上限 %"
+                                        />
                                     </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setOpenPositionAllowSwap((v) => !v);
-                                            setOpenPositionError('');
-                                        }}
-                                        className={`inline-flex h-8 items-center rounded-full border px-3 text-xs font-semibold transition ${openPositionAllowSwap
-                                            ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-700 dark:text-emerald-200'
-                                            : 'border-zinc-200 bg-white/70 text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-white/60'
-                                            }`}
-                                    >
-                                        {openPositionAllowSwap ? '已开启' : '已关闭'}
-                                    </button>
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                        {quickRangeOptions.map((option) => (
+                                            <button
+                                                key={option.value}
+                                                type="button"
+                                                onClick={() => {
+                                                    if (option.value.includes(' ')) {
+                                                        const parts = option.value.split(/\s+/);
+                                                        setOpenPositionRangeLower(parts[0] || '');
+                                                        setOpenPositionRangeUpper(parts[1] || '');
+                                                    } else {
+                                                        const normalized = option.value.replace(/[^0-9.]/g, '');
+                                                        setOpenPositionRangeLower(normalized);
+                                                        setOpenPositionRangeUpper(normalized);
+                                                    }
+                                                    setOpenPositionError('');
+                                                }}
+                                                className="rounded-xl px-3 py-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-500/30 bg-gradient-to-r from-emerald-50 via-emerald-100/60 to-sky-100/60 hover:from-emerald-100 hover:via-emerald-200/70 hover:to-sky-200/70 dark:text-emerald-200 dark:ring-emerald-400/30 dark:from-emerald-500/10 dark:via-emerald-400/10 dark:to-sky-400/10"
+                                            >
+                                                {option.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
+                                        请输入下限与上限百分比（如 1 / 3 表示下 1% 上 3%）。
+                                    </div>
                                 </div>
-                            </div>
 
-                            {openPositionError ? (
-                                <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
-                                    {openPositionError}
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div>
+                                            <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">允许兑换</div>
+                                            <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
+                                                池子不含 USDT 时，允许自动兑换入场代币。
+                                            </div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setOpenPositionAllowSwap((v) => !v);
+                                                setOpenPositionError('');
+                                            }}
+                                            className={`inline-flex h-8 items-center rounded-full border px-3 text-xs font-semibold transition ${openPositionAllowSwap
+                                                ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-700 dark:text-emerald-200'
+                                                : 'border-zinc-200 bg-white/70 text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-white/60'
+                                                }`}
+                                        >
+                                            {openPositionAllowSwap ? '已开启' : '已关闭'}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {openPositionError ? (
+                                    <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
+                                        {openPositionError}
+                                    </div>
+                                ) : null}
+                                <button
+                                    type="button"
+                                    onClick={handleOpenPosition}
+                                    disabled={openPositionLoading}
+                                    className={`w-full rounded-xl px-3 py-2 text-sm font-semibold text-white shadow-sm transition ${openPositionLoading
+                                        ? 'cursor-not-allowed bg-emerald-500/60'
+                                        : 'bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700'
+                                        }`}
+                                >
+                                    {openPositionLoading ? '开仓中...' : '确认开仓'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                ) : null
+            }
+
+            {
+                confirmState ? (
+                    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4">
+                        <button
+                            type="button"
+                            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                            onClick={() => closeConfirm(false)}
+                            aria-label="取消"
+                        />
+                        <div className="relative w-full max-w-md overflow-hidden rounded-t-2xl sm:rounded-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318]">
+                            <div className="flex items-center justify-between gap-2">
+                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">{confirmState.title}</div>
+                                <button
+                                    type="button"
+                                    onClick={() => closeConfirm(false)}
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
+                                    aria-label="关闭"
+                                >
+                                    <Icon path={icons.close} className="h-4 w-4" />
+                                </button>
+                            </div>
+                            {confirmState.message ? (
+                                <div className="mt-2 text-sm text-zinc-600 whitespace-pre-line dark:text-white/60">
+                                    {confirmState.message}
                                 </div>
                             ) : null}
-                            <button
-                                type="button"
-                                onClick={handleOpenPosition}
-                                disabled={openPositionLoading}
-                                className={`w-full rounded-xl px-3 py-2 text-sm font-semibold text-white shadow-sm transition ${openPositionLoading
-                                    ? 'cursor-not-allowed bg-emerald-500/60'
-                                    : 'bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700'
-                                    }`}
-                            >
-                                {openPositionLoading ? '开仓中...' : '确认开仓'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            ) : null}
-
-            {confirmState ? (
-                <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4">
-                    <button
-                        type="button"
-                        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                        onClick={() => closeConfirm(false)}
-                        aria-label="取消"
-                    />
-                    <div className="relative w-full max-w-md overflow-hidden rounded-t-2xl sm:rounded-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318]">
-                        <div className="flex items-center justify-between gap-2">
-                            <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">{confirmState.title}</div>
-                            <button
-                                type="button"
-                                onClick={() => closeConfirm(false)}
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                aria-label="关闭"
-                            >
-                                <Icon path={icons.close} className="h-4 w-4" />
-                            </button>
-                        </div>
-                        {confirmState.message ? (
-                            <div className="mt-2 text-sm text-zinc-600 whitespace-pre-line dark:text-white/60">
-                                {confirmState.message}
+                            <div className="mt-4 flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => closeConfirm(false)}
+                                    className="flex-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 active:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15"
+                                >
+                                    {confirmState.cancelText || '取消'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => closeConfirm(true)}
+                                    className={`flex-1 rounded-xl px-3 py-2 text-sm font-semibold ${confirmButtonClass}`}
+                                >
+                                    {confirmState.confirmText || '确认'}
+                                </button>
                             </div>
-                        ) : null}
-                        <div className="mt-4 flex items-center gap-2">
-                            <button
-                                type="button"
-                                onClick={() => closeConfirm(false)}
-                                className="flex-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 active:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15"
-                            >
-                                {confirmState.cancelText || '取消'}
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => closeConfirm(true)}
-                                className={`flex-1 rounded-xl px-3 py-2 text-sm font-semibold ${confirmButtonClass}`}
-                            >
-                                {confirmState.confirmText || '确认'}
-                            </button>
                         </div>
                     </div>
-                </div>
-            ) : null}
+                ) : null
+            }
 
             <KlineModal
                 open={Boolean(klinePool)}
@@ -2372,6 +2509,6 @@ export default function App() {
                 pool={klinePool}
                 chain={hotPoolsData?.chain || 'bsc'}
             />
-        </div>
+        </div >
     );
 }

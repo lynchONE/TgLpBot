@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef, useCallback } from 'react';
 import { copyToClipboard, hapticNotification, hapticImpact } from '../lib/telegram';
 import uniswapIcon from '../image/uniswap.svg';
 import pancakeIcon from '../image/pancake.svg';
@@ -240,10 +240,37 @@ const CountChangeIndicator = ({ currentValue, previousValue, label = '变化' })
     );
 };
 
-export default function HotPoolCard({ pool, metric, previousData, onOpenKline, onOpenPosition, rank, apiBaseUrl }) {
+export default function HotPoolCard({ pool, metric, previousData, onOpenKline, onOpenPosition, onBlacklist, rank, apiBaseUrl, isBlacklisted = false }) {
     const [copied, setCopied] = useState(false);
     const addr = String(pool?.pool_address || '').trim();
     const canOpenKline = useMemo(() => isPoolAddressLike(addr), [addr]);
+
+    // 长按黑名单功能
+    const longPressTimer = useRef(null);
+    const longPressThreshold = 500; // 500ms 触发长按
+
+    const handleTouchStart = useCallback((e) => {
+        longPressTimer.current = setTimeout(() => {
+            hapticImpact('heavy');
+            if (onBlacklist && typeof onBlacklist === 'function') {
+                onBlacklist(pool, !isBlacklisted);
+            }
+        }, longPressThreshold);
+    }, [pool, onBlacklist, isBlacklisted]);
+
+    const handleTouchEnd = useCallback(() => {
+        if (longPressTimer.current) {
+            clearTimeout(longPressTimer.current);
+            longPressTimer.current = null;
+        }
+    }, []);
+
+    const handleTouchMove = useCallback(() => {
+        if (longPressTimer.current) {
+            clearTimeout(longPressTimer.current);
+            longPressTimer.current = null;
+        }
+    }, []);
 
     // 根据排名确定渐变背景类
     const rankClass = useMemo(() => {
@@ -285,7 +312,15 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
     };
 
     return (
-        <div className={`rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none ${rankClass}`}>
+        <div
+            className={`rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none ${rankClass} ${isBlacklisted ? 'opacity-50 ring-2 ring-red-500/30' : ''}`}
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+            onTouchMove={handleTouchMove}
+            onMouseDown={handleTouchStart}
+            onMouseUp={handleTouchEnd}
+            onMouseLeave={handleTouchEnd}
+        >
             <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
@@ -392,6 +427,11 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                 <div className="flex items-center gap-2 flex-wrap">
                     <DexBadge pool={pool} />
                     <PositionBadge pool={pool} />
+                    {isBlacklisted ? (
+                        <div className="inline-flex items-center gap-1 rounded-lg bg-red-500/15 px-2 py-0.5 text-[11px] font-bold text-red-700 ring-1 ring-red-500/25 dark:bg-red-500/20 dark:text-red-200 dark:ring-red-500/30">
+                            <span>🚫 黑名单</span>
+                        </div>
+                    ) : null}
                 </div>
                 <button
                     type="button"

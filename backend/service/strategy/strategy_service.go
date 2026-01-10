@@ -6,6 +6,7 @@ import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	"TgLpBot/service/blacklist"
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/pool"
 	"TgLpBot/service/pricing"
@@ -909,6 +910,14 @@ func (s *StrategyService) executeRebalance(task *models.StrategyTask, currentTic
 	s.requestExitToUSDT(task, ExitActionRebalance, reason)
 }
 
+func isStableCoin(s string) bool {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case "USDT", "USDC", "DAI", "FDUSD", "TUSD", "BUSD":
+		return true
+	}
+	return false
+}
+
 // cooldownSameTradingPairTasks 将同交易对的其他活跃任务也设置为冷却状态
 // 交易对匹配逻辑：Token0Symbol和Token1Symbol相同（忽略顺序）
 func (s *StrategyService) cooldownSameTradingPairTasks(task *models.StrategyTask, cooldownMinutes int, reason string) {
@@ -926,6 +935,24 @@ func (s *StrategyService) cooldownSameTradingPairTasks(task *models.StrategyTask
 	// 计算冷却结束时间
 	cooldownDuration := time.Duration(cooldownMinutes) * time.Minute
 	cooldownUntil := time.Now().Add(cooldownDuration)
+
+	// 识别冷却目标（非稳定币代币 或 交易对）
+	// 用户要求：包含稳定币以外的那个代币的池子都要被禁止开仓
+	// 因此，我们尝试提取非稳定币作为冷却 Key
+	cooldownKey := fmt.Sprintf("%s/%s", sym0, sym1)
+	if isStableCoin(sym0) && !isStableCoin(sym1) {
+		cooldownKey = sym1
+	} else if !isStableCoin(sym0) && isStableCoin(sym1) {
+		cooldownKey = sym0
+	}
+
+	// 写入 Redis 冷却
+	cooldownSvc := blacklist.NewCooldownService()
+	if err := cooldownSvc.Add(task.UserID, cooldownKey, reason, cooldownDuration); err != nil {
+		log.Printf("[Strategy] 写入 Redis 冷却失败: user_id=%d key=%s err=%v", task.UserID, cooldownKey, err)
+	} else {
+		log.Printf("[Strategy] 目标 %s 已写入 Redis 冷却 %d 分钟", cooldownKey, cooldownMinutes)
+	}
 
 	// 查找该用户同交易对的其他活跃任务
 	var otherTasks []models.StrategyTask

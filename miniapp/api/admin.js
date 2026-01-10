@@ -26,7 +26,7 @@ export default async function handler(req, res) {
 
     // 从 query 参数获取 endpoint
     const endpoint = String(req.query?.endpoint || '').trim();
-    const validEndpoints = ['autolp_disable', 'autolp_stats', 'realtime_positions', 'realtime_users'];
+    const validEndpoints = ['autolp_disable', 'autolp_stats', 'realtime_positions', 'realtime_users', 'system_config'];
 
     if (!validEndpoints.includes(endpoint)) {
         res.statusCode = 400;

@@ -8,6 +8,7 @@ import (
 	"TgLpBot/base/convert"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	"TgLpBot/service/blacklist"
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/pool"
 	"TgLpBot/service/pricing"
@@ -690,11 +691,27 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 	debug := config.AppConfig != nil && config.AppConfig.AutoLPDebug
 	totalPools := len(snap.data)
 
-	minTVL := config.AppConfig.AutoLPMinPoolValueUSD
-	minFeePct := config.AppConfig.AutoLPMinFeePercentage
-	minFeeRatePct := config.AppConfig.AutoLPMinFeeRate5m
-	minFees := config.AppConfig.AutoLPMinTotalFees5m
-	minVol := config.AppConfig.AutoLPMinTotalVolume5m
+	// 获取动态硬筛配置（优先数据库配置，回退到环境变量）
+	sysConfigService := user.NewSystemConfigService()
+	hardFilter, err := sysConfigService.GetHardFilterConfig()
+	if err != nil {
+		log.Printf("[AutoLP] 获取硬筛配置失败，使用环境变量: %v", err)
+		hardFilter = &models.HardFilterConfig{
+			MinPoolValueUSD:  config.AppConfig.AutoLPMinPoolValueUSD,
+			MinFeePercentage: config.AppConfig.AutoLPMinFeePercentage,
+			MinFeeRate5m:     config.AppConfig.AutoLPMinFeeRate5m,
+			MinTotalFees5m:   config.AppConfig.AutoLPMinTotalFees5m,
+			MinTotalVolume5m: config.AppConfig.AutoLPMinTotalVolume5m,
+			MinTx5m:          config.AppConfig.AutoLPMinTx5m,
+		}
+	}
+
+	minTVL := hardFilter.MinPoolValueUSD
+	minFeePct := hardFilter.MinFeePercentage
+	minFeeRatePct := hardFilter.MinFeeRate5m
+	minFees := hardFilter.MinTotalFees5m
+	minVol := hardFilter.MinTotalVolume5m
+	minTx := hardFilter.MinTx5m
 	resMinFeeRate := config.AppConfig.AutoLPResonanceMinFeeRate5m
 	resMinVol := config.AppConfig.AutoLPResonanceMinTotalVolume5m
 	resMinAbsZ60 := config.AppConfig.AutoLPResonanceMinAbsZ60
@@ -705,6 +722,7 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 	filteredFeeRate := 0
 	filteredFees := 0
 	filteredVol := 0
+	filteredTx := 0
 	passedHard := 0
 
 	var out []AutoLPAnalysis
@@ -737,6 +755,10 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 		}
 		if minVol > 0 && p5.TotalVolume <= minVol {
 			filteredVol++
+			continue
+		}
+		if minTx > 0 && p5.TransactionCount <= minTx {
+			filteredTx++
 			continue
 		}
 
@@ -901,8 +923,8 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 		candidates = append(candidates, a)
 	}
 	candidateCount := len(candidates)
-	log.Printf("[AutoLP] 筛选结果：总池=%d 通过硬筛=%d 进入分析=%d 候选=%d；过滤：缺少5m(没进5m榜单)=%d TVL不达标(current_pool_value)=%d 费率不达标(fee_percentage)=%d 费用率不达标(fee_rate_5m)=%d 5m手续费不达标(total_fees)=%d 5m成交量不达标(total_volume)=%d",
-		totalPools, passedHard, len(out), candidateCount, filteredNo5, filteredTVL, filteredFeePct, filteredFeeRate, filteredFees, filteredVol,
+	log.Printf("[AutoLP] 筛选结果：总池=%d 通过硬筛=%d 进入分析=%d 候选=%d；过滤：缺少5m(没进5m榜单)=%d TVL不达标(current_pool_value)=%d 费率不达标(fee_percentage)=%d 费用率不达标(fee_rate_5m)=%d 5m手续费不达标(total_fees)=%d 5m成交量不达标(total_volume)=%d 5m交易笔数不达标(tx_count)=%d",
+		totalPools, passedHard, len(out), candidateCount, filteredNo5, filteredTVL, filteredFeePct, filteredFeeRate, filteredFees, filteredVol, filteredTx,
 	)
 	if len(candidates) > 0 {
 		top := candidates[0]
@@ -1458,10 +1480,64 @@ func (s *AutoLPService) sumAutoRealizedProfitWei(ctx context.Context, userID uin
 	return v, nil
 }
 
+func isStableCoin(s string) bool {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case "USDT", "USDC", "DAI", "FDUSD", "TUSD", "BUSD":
+		return true
+	}
+	return false
+}
+
 func (s *AutoLPService) tryOpenCandidate(ctx context.Context, userID uint, a AutoLPAnalysis, amount float64) (bool, error) {
 	if a.Action != "CANDIDATE" {
 		return false, nil
 	}
+
+	// 黑名单检查：跳过用户黑名单中的池子
+	blacklistSvc := blacklist.NewBlacklistService()
+	if blacklistSvc.IsBlacklisted(userID, a.PoolAddress) {
+		if config.AppConfig != nil && config.AppConfig.AutoLPDebug {
+			log.Printf("[AutoLP] 跳过黑名单池子: user_id=%d pool=%s", userID, a.PoolAddress)
+		}
+		return false, nil
+	}
+
+	// 冷却检查：检查非稳定币代币是否在冷却中
+	cooldownSvc := blacklist.NewCooldownService()
+	// 分解交易对获取 Token Symbol (从 TradingPair 字符串 "ETH/USDT" 或 Analysis 内容)
+	// AutoLPAnalysis 结构体没有单独的 Symbol 字段，只有 Token0Address/Token1Address 和 TradingPair
+	// 但通常 TradingPair 是 "TOKEN0/TOKEN1" 格式
+	// 我们可以尝试解析 TradingPair，或者如果未来有 Symbol 字段更好。
+	// 这里暂且解析 TradingPair 字符串。
+	parts := strings.Split(a.TradingPair, "/")
+	if len(parts) == 2 {
+		sym0 := strings.TrimSpace(parts[0])
+		sym1 := strings.TrimSpace(parts[1])
+
+		// 检查 Sym0
+		if !isStableCoin(sym0) && cooldownSvc.IsCoolingDown(userID, sym0) {
+			if config.AppConfig != nil && config.AppConfig.AutoLPDebug {
+				log.Printf("[AutoLP] 跳过冷却代币: user_id=%d token=%s", userID, sym0)
+			}
+			return false, nil
+		}
+		// 检查 Sym1
+		if !isStableCoin(sym1) && cooldownSvc.IsCoolingDown(userID, sym1) {
+			if config.AppConfig != nil && config.AppConfig.AutoLPDebug {
+				log.Printf("[AutoLP] 跳过冷却代币: user_id=%d token=%s", userID, sym1)
+			}
+			return false, nil
+		}
+	}
+
+	// Fallback/Legacy Check: 仍然检查整个 TradingPair，以防万一旧数据或特殊 Pair
+	if cooldownSvc.IsCoolingDown(userID, a.TradingPair) {
+		if config.AppConfig != nil && config.AppConfig.AutoLPDebug {
+			log.Printf("[AutoLP] 跳过冷却交易对: user_id=%d pair=%s", userID, a.TradingPair)
+		}
+		return false, nil
+	}
+
 	if ok, err := s.hasActiveTask(userID, a.ProtocolVersion, a.PoolAddress); err != nil {
 		return false, err
 	} else if ok {

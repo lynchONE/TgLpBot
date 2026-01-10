@@ -936,6 +936,17 @@ func (s *StrategyService) finishCooldownAfterExit(task *models.StrategyTask, now
 		return
 	}
 
+	// 对于 auto 模式任务，连续跌破后直接结束任务，不进入冷却等待重新开仓
+	// 因为 auto 模式下池子连续跌破表示该池子不再适合开仓
+	if task.IsAuto {
+		reason := strings.TrimSpace(title)
+		if reason == "" {
+			reason = "连续跌破区间，已撤出"
+		}
+		s.finishStopAfterExit(task, now, reason, txHashes)
+		return
+	}
+
 	// 从配置读取冷却时间，默认30分钟
 	cooldownDuration := autoModeCooldownDurationDefault
 	if config.AppConfig != nil && config.AppConfig.AutoLPGuardCooldownSeconds > 0 {
