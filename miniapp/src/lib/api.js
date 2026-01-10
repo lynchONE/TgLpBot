@@ -1,6 +1,6 @@
 export async function fetchRealtimePositions({ apiBaseUrl, initData, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/realtime_positions`;
+    const url = `${base}/api/positions?endpoint=realtime_positions`;
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -16,7 +16,7 @@ export async function fetchRealtimePositions({ apiBaseUrl, initData, signal }) {
 
 export async function fetchAutoMonitor({ apiBaseUrl, initData, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/auto_monitor`;
+    const url = `${base}/api/positions?endpoint=auto_monitor`;
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -32,7 +32,7 @@ export async function fetchAutoMonitor({ apiBaseUrl, initData, signal }) {
 
 export async function setAutoLPGuardCompareToPeak({ apiBaseUrl, initData, guardCompareToPeak, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/autolp_config`;
+    const url = `${base}/api/settings?endpoint=autolp_config`;
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -48,7 +48,7 @@ export async function setAutoLPGuardCompareToPeak({ apiBaseUrl, initData, guardC
 
 export async function fetchMe({ apiBaseUrl, initData, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/me`;
+    const url = `${base}/api/positions?endpoint=me`;
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -112,7 +112,7 @@ export async function deleteTask({ apiBaseUrl, initData, taskId, signal }) {
 
 export async function fetchGlobalConfig({ apiBaseUrl, initData, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/global_config`;
+    const url = `${base}/api/settings?endpoint=global_config`;
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -210,7 +210,7 @@ export async function fetchHotPools({ apiBaseUrl, sort, chain, timeframeMinutes,
     }
 
     const qs = params.toString();
-    const url = `${base}/api/hot_pools${qs ? `?${qs}` : ''}`;
+    const url = `${base}/api/pools?endpoint=hot_pools${qs ? `&${qs}` : ''}`;
 
     const resp = await fetch(url, { method: 'GET', signal });
     if (!resp.ok) {
@@ -231,7 +231,7 @@ export async function fetchPoolOHLCV({ apiBaseUrl, chain, poolAddress, timeframe
     if (Number.isFinite(beforeTimestamp)) params.set('before_timestamp', String(beforeTimestamp));
 
     const qs = params.toString();
-    const url = `${base}/api/pool_ohlcv${qs ? `?${qs}` : ''}`;
+    const url = `${base}/api/pools?endpoint=pool_ohlcv${qs ? `&${qs}` : ''}`;
 
     const resp = await fetch(url, { method: 'GET', signal });
     if (!resp.ok) {
@@ -243,7 +243,7 @@ export async function fetchPoolOHLCV({ apiBaseUrl, chain, poolAddress, timeframe
 
 export async function openPosition({ apiBaseUrl, initData, poolAddress, poolVersion, amount, rangeLowerPct, rangeUpperPct, allowEntrySwap, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/open_position`;
+    const url = `${base}/api/trading?endpoint=open_position`;
     const payload = {
         initData,
         pool_address: poolAddress,
@@ -310,7 +310,7 @@ export async function updateSystemConfig({ apiBaseUrl, initData, config, signal 
 
 export async function fetchBlacklist({ apiBaseUrl, initData, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/blacklist?initData=${encodeURIComponent(initData)}`;
+    const url = `${base}/api/trading?endpoint=blacklist&initData=${encodeURIComponent(initData)}`;
     const resp = await fetch(url, { method: 'GET', signal });
     if (!resp.ok) {
         const text = await resp.text().catch(() => '');
@@ -328,7 +328,7 @@ export async function fetchBlacklist({ apiBaseUrl, initData, signal }) {
 
 export async function addToBlacklist({ apiBaseUrl, initData, poolAddress, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/blacklist`;
+    const url = `${base}/api/trading?endpoint=blacklist`;
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -351,7 +351,7 @@ export async function addToBlacklist({ apiBaseUrl, initData, poolAddress, signal
 
 export async function removeFromBlacklist({ apiBaseUrl, initData, poolAddress, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/blacklist`;
+    const url = `${base}/api/trading?endpoint=blacklist`;
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -376,7 +376,7 @@ export async function removeFromBlacklist({ apiBaseUrl, initData, poolAddress, s
 
 export async function fetchCooldowns({ apiBaseUrl, initData, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/cooldowns?initData=${encodeURIComponent(initData)}`;
+    const url = `${base}/api/trading?endpoint=cooldowns&initData=${encodeURIComponent(initData)}`;
     const resp = await fetch(url, { method: 'GET', signal });
     if (!resp.ok) {
         const text = await resp.text().catch(() => '');
