@@ -245,12 +245,25 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
     const addr = String(pool?.pool_address || '').trim();
     const canOpenKline = useMemo(() => isPoolAddressLike(addr), [addr]);
 
-    // 长按黑名单功能
-    const longPressTimer = useRef(null);
-    const longPressThreshold = 500; // 500ms 触发长按
+    // 左滑触发黑名单
+    const swipeRef = useRef({ x: 0, y: 0, triggered: false });
+    const swipeThreshold = 60;
+    const swipeSlack = 12;
 
     const handleTouchStart = useCallback((e) => {
-        longPressTimer.current = setTimeout(() => {
+        const touch = e.touches?.[0];
+        if (!touch) return;
+        swipeRef.current = { x: touch.clientX, y: touch.clientY, triggered: false };
+    }, []);
+
+    const handleTouchMove = useCallback((e) => {
+        const touch = e.touches?.[0];
+        if (!touch) return;
+        const dx = touch.clientX - swipeRef.current.x;
+        const dy = touch.clientY - swipeRef.current.y;
+        if (swipeRef.current.triggered) return;
+        if (dx < -swipeThreshold && Math.abs(dx) > Math.abs(dy) + swipeSlack) {
+            swipeRef.current.triggered = true;
             hapticImpact('heavy');
             if (onBlacklistRequest && typeof onBlacklistRequest === 'function') {
                 onBlacklistRequest(pool);
@@ -263,21 +276,11 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
             if (onBlacklist && typeof onBlacklist === 'function') {
                 onBlacklist(pool, true);
             }
-        }, longPressThreshold);
+        }
     }, [pool, onBlacklist, onBlacklistRequest, isBlacklisted]);
 
     const handleTouchEnd = useCallback(() => {
-        if (longPressTimer.current) {
-            clearTimeout(longPressTimer.current);
-            longPressTimer.current = null;
-        }
-    }, []);
-
-    const handleTouchMove = useCallback(() => {
-        if (longPressTimer.current) {
-            clearTimeout(longPressTimer.current);
-            longPressTimer.current = null;
-        }
+        swipeRef.current = { x: 0, y: 0, triggered: false };
     }, []);
 
     // 根据排名确定渐变背景类
@@ -325,9 +328,6 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
             onTouchMove={handleTouchMove}
-            onMouseDown={handleTouchStart}
-            onMouseUp={handleTouchEnd}
-            onMouseLeave={handleTouchEnd}
         >
             <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
