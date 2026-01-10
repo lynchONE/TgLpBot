@@ -240,7 +240,7 @@ const CountChangeIndicator = ({ currentValue, previousValue, label = '变化' })
     );
 };
 
-export default function HotPoolCard({ pool, metric, previousData, onOpenKline, onOpenPosition, onBlacklist, rank, apiBaseUrl, isBlacklisted = false }) {
+export default function HotPoolCard({ pool, metric, previousData, onOpenKline, onOpenPosition, onBlacklist, onBlacklistRequest, rank, apiBaseUrl, isBlacklisted = false }) {
     const [copied, setCopied] = useState(false);
     const addr = String(pool?.pool_address || '').trim();
     const canOpenKline = useMemo(() => isPoolAddressLike(addr), [addr]);
@@ -252,19 +252,19 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
     const handleTouchStart = useCallback((e) => {
         longPressTimer.current = setTimeout(() => {
             hapticImpact('heavy');
+            if (onBlacklistRequest && typeof onBlacklistRequest === 'function') {
+                onBlacklistRequest(pool);
+                return;
+            }
+            if (isBlacklisted) {
+                hapticNotification('warning');
+                return;
+            }
             if (onBlacklist && typeof onBlacklist === 'function') {
-                if (!isBlacklisted) {
-                    const pair = String(pool?.trading_pair || '').trim();
-                    const label = pair ? `“${pair}”` : '该池子';
-                    const ok = window.confirm(
-                        `确定将${label}加入黑名单？\n黑名单会阻止包含当前代币的所有池子开仓。\n解除请去“监控”页面。`,
-                    );
-                    if (!ok) return;
-                }
-                onBlacklist(pool, !isBlacklisted);
+                onBlacklist(pool, true);
             }
         }, longPressThreshold);
-    }, [pool, onBlacklist, isBlacklisted]);
+    }, [pool, onBlacklist, onBlacklistRequest, isBlacklisted]);
 
     const handleTouchEnd = useCallback(() => {
         if (longPressTimer.current) {

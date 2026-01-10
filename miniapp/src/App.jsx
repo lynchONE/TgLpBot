@@ -227,6 +227,7 @@ const icons = {
     close: 'M6.225 4.811a1 1 0 011.414 0L12 9.172l4.361-4.361a1 1 0 111.414 1.414L13.414 10.586l4.361 4.361a1 1 0 01-1.414 1.414L12 12l-4.361 4.361a1 1 0 01-1.414-1.414l4.361-4.361-4.361-4.361a1 1 0 010-1.414z',
     check: 'M9 16.17L4.83 12 3.41 13.41 9 19l12-12-1.41-1.41L9 16.17z',
     reset: 'M12 5V2L7 7l5 5V9a5 5 0 11-5 5H5a7 7 0 107-7z',
+    alert: 'M12 2L1 21h22L12 2zm0 6a1 1 0 011 1v5a1 1 0 11-2 0V9a1 1 0 011-1zm0 10a1.25 1.25 0 110-2.5A1.25 1.25 0 0112 18z',
 };
 
 export default function App() {
@@ -308,6 +309,8 @@ export default function App() {
     const [pollDraftSec, setPollDraftSec] = useState('');
     const [confirmState, setConfirmState] = useState(null);
     const [notice, setNotice] = useState(null);
+    const [blacklistPrompt, setBlacklistPrompt] = useState(null);
+    const [blacklistPromptLoading, setBlacklistPromptLoading] = useState(false);
     const [globalConfigOpen, setGlobalConfigOpen] = useState(false);
     const [globalConfig, setGlobalConfig] = useState(null);
     const [globalConfigError, setGlobalConfigError] = useState('');
@@ -1120,6 +1123,36 @@ export default function App() {
         }
     }, [apiBaseUrl, initData, hasInitData]);
 
+    const openBlacklistPrompt = useCallback((pool) => {
+        const addr = String(pool?.pool_address || '').trim().toLowerCase();
+        if (!addr) return;
+        if (!hasInitData) {
+            showNotice('未获取到 Telegram initData，请从机器人入口打开页面。', 'error');
+            return;
+        }
+        if (blacklist.has(addr)) {
+            showNotice('该池子已在黑名单中。', 'info');
+            return;
+        }
+        setBlacklistPrompt({ pool, addr });
+    }, [blacklist, hasInitData, showNotice]);
+
+    const closeBlacklistPrompt = useCallback(() => {
+        if (blacklistPromptLoading) return;
+        setBlacklistPrompt(null);
+    }, [blacklistPromptLoading]);
+
+    const confirmBlacklistPrompt = useCallback(async () => {
+        if (!blacklistPrompt?.pool) return;
+        setBlacklistPromptLoading(true);
+        try {
+            await handleBlacklist(blacklistPrompt.pool, true);
+            setBlacklistPrompt(null);
+        } finally {
+            setBlacklistPromptLoading(false);
+        }
+    }, [blacklistPrompt, handleBlacklist]);
+
     // 加载黑名单列表
     const loadBlacklist = useCallback(async () => {
         if (!hasInitData) return;
@@ -1375,6 +1408,12 @@ export default function App() {
         }
         return m;
     }, [monitorTasks]);
+    const blacklistPromptPool = blacklistPrompt?.pool || null;
+    const blacklistPromptPair = String(blacklistPromptPool?.trading_pair || '').trim();
+    const blacklistPromptAddr = String(blacklistPromptPool?.pool_address || '').trim().toLowerCase();
+    const blacklistPromptAddrShort = blacklistPromptAddr.length > 12
+        ? `${blacklistPromptAddr.slice(0, 6)}...${blacklistPromptAddr.slice(-4)}`
+        : blacklistPromptAddr;
     const showEmptyAutoTasks = isMonitor && Boolean(autoMonitor) && monitorTasks.length === 0 && !autoMonitorLoading && !autoMonitorError;
 
     const initDataMissing = viewMode !== 'hot_pools' && !hasInitData;
@@ -1415,7 +1454,7 @@ export default function App() {
     return (
         <div className="min-h-screen max-w-[720px] px-4 py-4 pb-[calc(16px+env(safe-area-inset-bottom))] mx-auto">
             {notice ? (
-                <div className="fixed left-1/2 top-4 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2">
+                <div className="fixed left-1/2 top-[calc(env(safe-area-inset-top)+64px)] z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2">
                     <div className={`rounded-xl px-3 py-2 text-sm font-semibold shadow-lg ${noticeClass}`}>
                         {notice.message}
                     </div>
@@ -1990,18 +2029,18 @@ export default function App() {
                         const poolKey = `${proto}:${addr}`;
                         const prevData = previousHotPoolsMap[poolKey];
                         return (
-                            <HotPoolCard
-                                key={`${proto}:${addr}`}
-                                pool={row}
-                                metric={hotPoolsSort}
-                                previousData={prevData}
-                                onOpenKline={setKlinePool}
-                                onOpenPosition={openPositionModal}
-                                onBlacklist={handleBlacklist}
-                                rank={index + 1}
-                                apiBaseUrl={apiBaseUrl}
-                                isBlacklisted={blacklist.has(addr)}
-                            />
+                                <HotPoolCard
+                                    key={`${proto}:${addr}`}
+                                    pool={row}
+                                    metric={hotPoolsSort}
+                                    previousData={prevData}
+                                    onOpenKline={setKlinePool}
+                                    onOpenPosition={openPositionModal}
+                                    onBlacklistRequest={openBlacklistPrompt}
+                                    rank={index + 1}
+                                    apiBaseUrl={apiBaseUrl}
+                                    isBlacklisted={blacklist.has(addr)}
+                                />
                         );
                     })
                     : isMonitor
@@ -2522,6 +2561,89 @@ export default function App() {
                                         }`}
                                 >
                                     {openPositionLoading ? '开仓中...' : '确认开仓'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                ) : null
+            }
+
+            {
+                blacklistPrompt ? (
+                    <div className="fixed inset-0 z-[65] flex items-end justify-center sm:items-center sm:p-4">
+                        <button
+                            type="button"
+                            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                            onClick={closeBlacklistPrompt}
+                            aria-label="取消"
+                        />
+                        <div className="relative w-full max-w-md overflow-hidden rounded-t-2xl sm:rounded-2xl border border-red-500/20 bg-white p-4 shadow-2xl dark:border-red-500/20 dark:bg-[#111318]">
+                            <div className="flex items-start gap-3">
+                                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-500/15 text-red-600 ring-1 ring-red-500/30 dark:text-red-200">
+                                    <Icon path={icons.alert} className="h-6 w-6" />
+                                </div>
+                                <div className="min-w-0">
+                                    <div className="text-base font-extrabold text-zinc-900 dark:text-white/90">加入黑名单</div>
+                                    <div className="mt-1 text-xs text-zinc-500 dark:text-white/50">
+                                        将池子加入黑名单后会阻止相关池子开仓
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={closeBlacklistPrompt}
+                                    className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
+                                    aria-label="关闭"
+                                >
+                                    <Icon path={icons.close} className="h-4 w-4" />
+                                </button>
+                            </div>
+
+                            <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 p-3">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <div className="text-sm font-semibold text-red-800 dark:text-red-200 truncate">
+                                            {blacklistPromptPair || '未知池子'}
+                                        </div>
+                                        <div className="mt-0.5 text-[11px] text-red-700/70 dark:text-red-200/70">
+                                            {blacklistPromptAddrShort || '--'}
+                                        </div>
+                                    </div>
+                                    <div className="shrink-0 rounded-lg bg-red-500/15 px-2 py-1 text-[10px] font-semibold text-red-700 dark:text-red-200">
+                                        长按触发
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="mt-3 space-y-2 text-xs text-zinc-600 dark:text-white/60">
+                                <div className="flex items-start gap-2">
+                                    <span className="mt-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-red-500/15 text-red-600 dark:text-red-200">1</span>
+                                    <span>包含当前代币的所有池子将被禁止开仓。</span>
+                                </div>
+                                <div className="flex items-start gap-2">
+                                    <span className="mt-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-zinc-500/15 text-zinc-600 dark:text-white/60">2</span>
+                                    <span>解除黑名单请前往「监控」页面。</span>
+                                </div>
+                            </div>
+
+                            <div className="mt-4 flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={closeBlacklistPrompt}
+                                    disabled={blacklistPromptLoading}
+                                    className="flex-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 active:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15"
+                                >
+                                    取消
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={confirmBlacklistPrompt}
+                                    disabled={blacklistPromptLoading}
+                                    className={`flex-1 rounded-xl px-3 py-2 text-sm font-semibold text-white shadow-sm transition ${blacklistPromptLoading
+                                        ? 'cursor-not-allowed bg-red-500/60'
+                                        : 'bg-red-500 hover:bg-red-600 active:bg-red-700'
+                                        }`}
+                                >
+                                    {blacklistPromptLoading ? '处理中...' : '确认加入'}
                                 </button>
                             </div>
                         </div>
