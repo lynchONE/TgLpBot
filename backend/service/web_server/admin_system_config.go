@@ -15,20 +15,33 @@ import (
 type adminSystemConfigRequest struct {
 	InitData string `json:"initData"`
 
-	// 可选更新字段
+	// 可选更新字段 - 硬筛阈值
 	AutoLPMinPoolValueUSD  *float64 `json:"autolp_min_pool_value_usd,omitempty"`
 	AutoLPMinFeePercentage *float64 `json:"autolp_min_fee_percentage,omitempty"`
 	AutoLPMinFeeRate5m     *float64 `json:"autolp_min_fee_rate_5m,omitempty"`
 	AutoLPMinTotalFees5m   *float64 `json:"autolp_min_total_fees_5m,omitempty"`
 	AutoLPMinTotalVolume5m *float64 `json:"autolp_min_total_volume_5m,omitempty"`
 	AutoLPMinTx5m          *int     `json:"autolp_min_tx_5m,omitempty"`
+
+	// 可选更新字段 - 宽度策略
+	AutoLPWidthSidewaysPercent    *float64 `json:"autolp_width_sideways_percent,omitempty"`
+	AutoLPWidthMildUptrendPercent *float64 `json:"autolp_width_mild_uptrend_percent,omitempty"`
+	AutoLPWidthRapidPumpPercent   *float64 `json:"autolp_width_rapid_pump_percent,omitempty"`
+
+	// 可选更新字段 - 退出卫士
+	AutoLPGuardVolumeDropPercent    *float64 `json:"autolp_guard_volume_drop_percent,omitempty"`
+	AutoLPGuardPriceTxDropPercent   *float64 `json:"autolp_guard_price_tx_drop_percent,omitempty"`
+	AutoLPGuardNoExitMinFeeRate5m   *float64 `json:"autolp_guard_no_exit_min_fee_rate_5m,omitempty"`
+	AutoLPGuardLowFeeRate5m         *float64 `json:"autolp_guard_low_fee_rate_5m,omitempty"`
+	AutoLPGuardVolumeDropPercentLow *float64 `json:"autolp_guard_volume_drop_percent_low,omitempty"`
 }
 
 type adminSystemConfigResponse struct {
 	OK     bool                 `json:"ok"`
 	Config *models.SystemConfig `json:"config,omitempty"`
 	// 环境变量默认值（供前端显示参考）
-	Defaults *models.HardFilterConfig `json:"defaults,omitempty"`
+	Defaults           *models.HardFilterConfig `json:"defaults,omitempty"`
+	WidthGuardDefaults *models.WidthGuardConfig `json:"width_guard_defaults,omitempty"`
 }
 
 func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request) {
@@ -110,6 +123,32 @@ func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request)
 		if req.AutoLPMinTx5m != nil {
 			updates["AutoLPMinTx5m"] = *req.AutoLPMinTx5m
 		}
+		// 宽度策略
+		if req.AutoLPWidthSidewaysPercent != nil {
+			updates["AutoLPWidthSidewaysPercent"] = *req.AutoLPWidthSidewaysPercent
+		}
+		if req.AutoLPWidthMildUptrendPercent != nil {
+			updates["AutoLPWidthMildUptrendPercent"] = *req.AutoLPWidthMildUptrendPercent
+		}
+		if req.AutoLPWidthRapidPumpPercent != nil {
+			updates["AutoLPWidthRapidPumpPercent"] = *req.AutoLPWidthRapidPumpPercent
+		}
+		// 退出卫士
+		if req.AutoLPGuardVolumeDropPercent != nil {
+			updates["AutoLPGuardVolumeDropPercent"] = *req.AutoLPGuardVolumeDropPercent
+		}
+		if req.AutoLPGuardPriceTxDropPercent != nil {
+			updates["AutoLPGuardPriceTxDropPercent"] = *req.AutoLPGuardPriceTxDropPercent
+		}
+		if req.AutoLPGuardNoExitMinFeeRate5m != nil {
+			updates["AutoLPGuardNoExitMinFeeRate5m"] = *req.AutoLPGuardNoExitMinFeeRate5m
+		}
+		if req.AutoLPGuardLowFeeRate5m != nil {
+			updates["AutoLPGuardLowFeeRate5m"] = *req.AutoLPGuardLowFeeRate5m
+		}
+		if req.AutoLPGuardVolumeDropPercentLow != nil {
+			updates["AutoLPGuardVolumeDropPercentLow"] = *req.AutoLPGuardVolumeDropPercentLow
+		}
 
 		if len(updates) > 0 {
 			sysConfigService := userSvc.NewSystemConfigService()
@@ -120,11 +159,13 @@ func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request)
 			}
 
 			defaults := getEnvDefaults()
+			widthGuardDefaults := getWidthGuardDefaults()
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(adminSystemConfigResponse{
-				OK:       true,
-				Config:   cfg,
-				Defaults: defaults,
+				OK:                 true,
+				Config:             cfg,
+				Defaults:           defaults,
+				WidthGuardDefaults: widthGuardDefaults,
 			})
 			return
 		}
@@ -182,12 +223,14 @@ func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request)
 	}
 
 	defaults := getEnvDefaults()
+	widthGuardDefaults := getWidthGuardDefaults()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(adminSystemConfigResponse{
-		OK:       true,
-		Config:   cfg,
-		Defaults: defaults,
+		OK:                 true,
+		Config:             cfg,
+		Defaults:           defaults,
+		WidthGuardDefaults: widthGuardDefaults,
 	})
 }
 
@@ -203,5 +246,22 @@ func getEnvDefaults() *models.HardFilterConfig {
 		MinTotalFees5m:   config.AppConfig.AutoLPMinTotalFees5m,
 		MinTotalVolume5m: config.AppConfig.AutoLPMinTotalVolume5m,
 		MinTx5m:          config.AppConfig.AutoLPMinTx5m,
+	}
+}
+
+// getWidthGuardDefaults 获取宽度和退出卫士环境变量默认值
+func getWidthGuardDefaults() *models.WidthGuardConfig {
+	if config.AppConfig == nil {
+		return nil
+	}
+	return &models.WidthGuardConfig{
+		WidthSidewaysPercent:      config.AppConfig.AutoLPWidthSidewaysPercent,
+		WidthMildUptrendPercent:   config.AppConfig.AutoLPWidthMildUptrendPercent,
+		WidthRapidPumpPercent:     config.AppConfig.AutoLPWidthRapidPumpPercent,
+		GuardVolumeDropPercent:    config.AppConfig.AutoLPGuardVolumeDropPercent,
+		GuardPriceTxDropPercent:   config.AppConfig.AutoLPGuardPriceTxDropPercent,
+		GuardNoExitMinFeeRate5m:   config.AppConfig.AutoLPGuardNoExitMinFeeRate5m,
+		GuardLowFeeRate5m:         config.AppConfig.AutoLPGuardLowFeeRate5m,
+		GuardVolumeDropPercentLow: config.AppConfig.AutoLPGuardVolumeDropPercentLow,
 	}
 }

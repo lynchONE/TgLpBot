@@ -88,7 +88,7 @@ func (s *AutoLPService) Start() {
 		log.Println("[AutoLP] disabled (AUTO_LP_ENABLED=0)")
 		return
 	}
-	go s.runLoop()
+	go s.runLoopWithWarmStart()
 }
 
 func (s *AutoLPService) Stop() {
@@ -116,6 +116,42 @@ func (s *AutoLPService) runLoop() {
 			return
 		}
 	}
+}
+
+func (s *AutoLPService) runLoopWithWarmStart() {
+	s.warmStartEnabledUsers()
+	s.runLoop()
+}
+
+func (s *AutoLPService) warmStartEnabledUsers() {
+	if database.DB == nil {
+		log.Println("[AutoLP] warm start skipped: database not initialized")
+		return
+	}
+
+	cfgService := NewAutoLPUserConfigService()
+	cfgs, err := cfgService.ListEnabled()
+	if err != nil {
+		log.Printf("[AutoLP] warm start failed: list enabled configs: %v", err)
+		return
+	}
+	if len(cfgs) == 0 {
+		log.Println("[AutoLP] warm start: no enabled configs")
+		return
+	}
+
+	now := time.Now()
+	for i := range cfgs {
+		if cfgs[i].LastEnabledAt != nil {
+			continue
+		}
+		_, _ = cfgService.Update(cfgs[i].UserID, map[string]interface{}{
+			"last_enabled_at": now,
+		})
+	}
+
+	log.Printf("[AutoLP] warm start: found %d enabled configs, triggering initial scan", len(cfgs))
+	s.runOnce()
 }
 
 func (s *AutoLPService) runOnce() {
