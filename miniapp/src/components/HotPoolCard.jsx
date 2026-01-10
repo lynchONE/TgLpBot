@@ -253,6 +253,14 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
         longPressTimer.current = setTimeout(() => {
             hapticImpact('heavy');
             if (onBlacklist && typeof onBlacklist === 'function') {
+                if (!isBlacklisted) {
+                    const pair = String(pool?.trading_pair || '').trim();
+                    const label = pair ? `“${pair}”` : '该池子';
+                    const ok = window.confirm(
+                        `确定将${label}加入黑名单？\n黑名单会阻止包含当前代币的所有池子开仓。\n解除请去“监控”页面。`,
+                    );
+                    if (!ok) return;
+                }
                 onBlacklist(pool, !isBlacklisted);
             }
         }, longPressThreshold);
