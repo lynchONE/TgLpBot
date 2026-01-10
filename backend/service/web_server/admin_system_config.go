@@ -30,8 +30,8 @@ type adminSystemConfigRequest struct {
 
 	// 可选更新字段 - 退出卫士
 	AutoLPGuardVolumeDropPercent    *float64 `json:"autolp_guard_volume_drop_percent,omitempty"`
-	AutoLPGuardPriceTxDropPercent   *float64 `json:"autolp_guard_price_tx_drop_percent,omitempty"`
-	AutoLPGuardNoExitMinFeeRate5m   *float64 `json:"autolp_guard_no_exit_min_fee_rate_5m,omitempty"`
+	AutoLPGuardPriceDropPercent     *float64 `json:"autolp_guard_price_drop_percent,omitempty"`
+	AutoLPGuardTxDropPercent        *float64 `json:"autolp_guard_tx_drop_percent,omitempty"`
 	AutoLPGuardLowFeeRate5m         *float64 `json:"autolp_guard_low_fee_rate_5m,omitempty"`
 	AutoLPGuardVolumeDropPercentLow *float64 `json:"autolp_guard_volume_drop_percent_low,omitempty"`
 }
@@ -137,11 +137,11 @@ func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request)
 		if req.AutoLPGuardVolumeDropPercent != nil {
 			updates["AutoLPGuardVolumeDropPercent"] = *req.AutoLPGuardVolumeDropPercent
 		}
-		if req.AutoLPGuardPriceTxDropPercent != nil {
-			updates["AutoLPGuardPriceTxDropPercent"] = *req.AutoLPGuardPriceTxDropPercent
+		if req.AutoLPGuardPriceDropPercent != nil {
+			updates["AutoLPGuardPriceDropPercent"] = *req.AutoLPGuardPriceDropPercent
 		}
-		if req.AutoLPGuardNoExitMinFeeRate5m != nil {
-			updates["AutoLPGuardNoExitMinFeeRate5m"] = *req.AutoLPGuardNoExitMinFeeRate5m
+		if req.AutoLPGuardTxDropPercent != nil {
+			updates["AutoLPGuardTxDropPercent"] = *req.AutoLPGuardTxDropPercent
 		}
 		if req.AutoLPGuardLowFeeRate5m != nil {
 			updates["AutoLPGuardLowFeeRate5m"] = *req.AutoLPGuardLowFeeRate5m
@@ -259,8 +259,8 @@ func getWidthGuardDefaults() *models.WidthGuardConfig {
 		WidthMildUptrendPercent:   config.AppConfig.AutoLPWidthMildUptrendPercent,
 		WidthRapidPumpPercent:     config.AppConfig.AutoLPWidthRapidPumpPercent,
 		GuardVolumeDropPercent:    config.AppConfig.AutoLPGuardVolumeDropPercent,
-		GuardPriceTxDropPercent:   config.AppConfig.AutoLPGuardPriceTxDropPercent,
-		GuardNoExitMinFeeRate5m:   config.AppConfig.AutoLPGuardNoExitMinFeeRate5m,
+		GuardPriceDropPercent:     config.AppConfig.AutoLPGuardPriceDropPercent,
+		GuardTxDropPercent:        config.AppConfig.AutoLPGuardTxDropPercent,
 		GuardLowFeeRate5m:         config.AppConfig.AutoLPGuardLowFeeRate5m,
 		GuardVolumeDropPercentLow: config.AppConfig.AutoLPGuardVolumeDropPercentLow,
 	}

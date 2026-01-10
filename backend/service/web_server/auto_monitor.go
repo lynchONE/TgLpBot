@@ -23,8 +23,8 @@ type autoMonitorRequest struct {
 type autoMonitorConfig struct {
 	VolumeDropPct       float64 `json:"volume_drop_pct"`
 	VolumeDropPctLow    float64 `json:"volume_drop_pct_low"`
-	PriceTxDropPct      float64 `json:"price_tx_drop_pct"`
-	NoExitMinFeeRate5m  float64 `json:"no_exit_min_fee_rate_5m"`
+	PriceDropPct        float64 `json:"price_drop_pct"`
+	TxDropPct           float64 `json:"tx_drop_pct"`
 	LowFeeRate5m        float64 `json:"low_fee_rate_5m"`
 	EffectiveDefaultVol float64 `json:"effective_default_vol_drop_pct"`
 	GuardCompareToPeak  bool    `json:"guard_compare_to_peak"`
@@ -68,7 +68,6 @@ type autoMonitorGuardPriceTx struct {
 	Enabled       bool    `json:"enabled"`
 	Blocked       bool    `json:"blocked"`
 	BlockedReason string  `json:"blocked_reason,omitempty"`
-	DropPct       float64 `json:"drop_pct"`
 	PriceDropPct  float64 `json:"price_drop_pct"`
 	TxDropPct     float64 `json:"tx_drop_pct"`
 	Baseline      string  `json:"baseline"`
@@ -187,7 +186,20 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 		guardCompareToPeak = cfg.GuardCompareToPeak
 	}
 
-	volumeDropPct := config.AppConfig.AutoLPGuardVolumeDropPercent
+	// 获取动态退出卫士配置（优先数据库配置，回退到环境变量）
+	sysConfigSvc := userSvc.NewSystemConfigService()
+	widthGuardCfg, err := sysConfigSvc.GetWidthGuardConfig()
+	if err != nil {
+		widthGuardCfg = &models.WidthGuardConfig{
+			GuardVolumeDropPercent:    config.AppConfig.AutoLPGuardVolumeDropPercent,
+			GuardPriceDropPercent:     config.AppConfig.AutoLPGuardPriceDropPercent,
+			GuardTxDropPercent:        config.AppConfig.AutoLPGuardTxDropPercent,
+			GuardLowFeeRate5m:         config.AppConfig.AutoLPGuardLowFeeRate5m,
+			GuardVolumeDropPercentLow: config.AppConfig.AutoLPGuardVolumeDropPercentLow,
+		}
+	}
+
+	volumeDropPct := widthGuardCfg.GuardVolumeDropPercent
 	if volumeDropPct > 1 && volumeDropPct <= 100 {
 		volumeDropPct = volumeDropPct / 100
 	}
@@ -195,7 +207,7 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 		volumeDropPct = 0.30
 	}
 
-	volumeDropPctLow := config.AppConfig.AutoLPGuardVolumeDropPercentLow
+	volumeDropPctLow := widthGuardCfg.GuardVolumeDropPercentLow
 	if volumeDropPctLow > 1 && volumeDropPctLow <= 100 {
 		volumeDropPctLow = volumeDropPctLow / 100
 	}
@@ -203,25 +215,13 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 		volumeDropPctLow = 0
 	}
 
-	noExitMinFeeRate5m := config.AppConfig.AutoLPGuardNoExitMinFeeRate5m
-	if noExitMinFeeRate5m < 0 {
-		noExitMinFeeRate5m = 0
-	}
-	lowFeeRate5m := config.AppConfig.AutoLPGuardLowFeeRate5m
+	lowFeeRate5m := widthGuardCfg.GuardLowFeeRate5m
 	if lowFeeRate5m < 0 {
 		lowFeeRate5m = 0
 	}
 
-	priceTxDropPct := config.AppConfig.AutoLPGuardPriceTxDropPercent
-	if priceTxDropPct > 1 && priceTxDropPct <= 100 {
-		priceTxDropPct = priceTxDropPct / 100
-	}
-	if priceTxDropPct <= 0 || priceTxDropPct >= 1 {
-		priceTxDropPct = 0.10
-	}
-
 	// 独立的价格和tx跌幅阈值
-	priceDropPct := config.AppConfig.AutoLPGuardPriceDropPercent
+	priceDropPct := widthGuardCfg.GuardPriceDropPercent
 	if priceDropPct > 1 && priceDropPct <= 100 {
 		priceDropPct = priceDropPct / 100
 	}
@@ -229,7 +229,7 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 		priceDropPct = 0.05 // 默认5%
 	}
 
-	txDropPct := config.AppConfig.AutoLPGuardTxDropPercent
+	txDropPct := widthGuardCfg.GuardTxDropPercent
 	if txDropPct > 1 && txDropPct <= 100 {
 		txDropPct = txDropPct / 100
 	}
@@ -439,19 +439,10 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 		currentFeeRate := current.FeeRate5mPct
 		volGuard.CurrentFeeRate5m = currentFeeRate
 		effectiveDropPct := volumeDropPct
-		skipVolumeExit := false
-		if noExitMinFeeRate5m > 0 || lowFeeRate5m > 0 {
-			if noExitMinFeeRate5m > 0 && currentFeeRate > noExitMinFeeRate5m {
-				skipVolumeExit = true
-			} else if lowFeeRate5m > 0 && currentFeeRate < lowFeeRate5m && volumeDropPctLow > 0 {
-				effectiveDropPct = volumeDropPctLow
-			}
+		if lowFeeRate5m > 0 && currentFeeRate < lowFeeRate5m && volumeDropPctLow > 0 {
+			effectiveDropPct = volumeDropPctLow
 		}
 		volGuard.DropPct = effectiveDropPct
-		volGuard.Skip = skipVolumeExit
-		if skipVolumeExit {
-			volGuard.SkipReason = "fee rate too high"
-		}
 
 		if volGuard.Enabled && !volGuard.Blocked && !volGuard.Skip && effectiveDropPct > 0 && effectiveDropPct < 1 {
 			volGuard.Threshold = baselineVolume * (1.0 - effectiveDropPct)
@@ -467,7 +458,6 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 			Enabled:       current.Ok && baselinePrice > 0 && baselineTx > 0 && current.Price > 0 && current.Tx5m > 0,
 			Blocked:       guardBlocked,
 			BlockedReason: guardBlockedReason,
-			DropPct:       priceTxDropPct,
 			PriceDropPct:  priceDropPct,
 			TxDropPct:     txDropPct,
 			Baseline:      baseline,
@@ -521,8 +511,8 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 		Config: autoMonitorConfig{
 			VolumeDropPct:       volumeDropPct,
 			VolumeDropPctLow:    volumeDropPctLow,
-			PriceTxDropPct:      priceTxDropPct,
-			NoExitMinFeeRate5m:  noExitMinFeeRate5m,
+			PriceDropPct:        priceDropPct,
+			TxDropPct:           txDropPct,
 			LowFeeRate5m:        lowFeeRate5m,
 			EffectiveDefaultVol: volumeDropPct,
 			GuardCompareToPeak:  guardCompareToPeak,

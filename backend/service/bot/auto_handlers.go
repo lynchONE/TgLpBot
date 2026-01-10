@@ -5,6 +5,7 @@ import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/service/auto_lp"
+	userSvc "TgLpBot/service/user"
 	"fmt"
 	"log"
 	"strconv"
@@ -243,15 +244,35 @@ func (b *Bot) autoStrategyKeyboard() any {
 
 func (b *Bot) autoStrategyText() string {
 	volumeDropPct := 0.30
-	priceTxDropPct := 0.10
-	if config.AppConfig != nil {
-		if config.AppConfig.AutoLPGuardVolumeDropPercent > 0 && config.AppConfig.AutoLPGuardVolumeDropPercent < 1 {
+	priceDropPct := 0.05
+	txDropPct := 0.40
+	if database.DB != nil {
+		if cfg, err := userSvc.NewSystemConfigService().GetWidthGuardConfig(); err == nil && cfg != nil {
+			volumeDropPct = cfg.GuardVolumeDropPercent
+			priceDropPct = cfg.GuardPriceDropPercent
+			txDropPct = cfg.GuardTxDropPercent
+		} else if config.AppConfig != nil {
 			volumeDropPct = config.AppConfig.AutoLPGuardVolumeDropPercent
+			priceDropPct = config.AppConfig.AutoLPGuardPriceDropPercent
+			txDropPct = config.AppConfig.AutoLPGuardTxDropPercent
 		}
-		if config.AppConfig.AutoLPGuardPriceTxDropPercent > 0 && config.AppConfig.AutoLPGuardPriceTxDropPercent < 1 {
-			priceTxDropPct = config.AppConfig.AutoLPGuardPriceTxDropPercent
-		}
+	} else if config.AppConfig != nil {
+		volumeDropPct = config.AppConfig.AutoLPGuardVolumeDropPercent
+		priceDropPct = config.AppConfig.AutoLPGuardPriceDropPercent
+		txDropPct = config.AppConfig.AutoLPGuardTxDropPercent
 	}
+	normalizePct := func(value, fallback float64) float64 {
+		if value > 1 && value <= 100 {
+			value = value / 100
+		}
+		if value <= 0 || value >= 1 {
+			value = fallback
+		}
+		return value
+	}
+	volumeDropPct = normalizePct(volumeDropPct, 0.30)
+	priceDropPct = normalizePct(priceDropPct, 0.05)
+	txDropPct = normalizePct(txDropPct, 0.40)
 
 	return fmt.Sprintf(`📌 *当前策略（V1）*
 
@@ -268,14 +289,15 @@ func (b *Bot) autoStrategyText() string {
 
 *何时撤仓（自动任务）*
 • 触发 1：5m 成交量较“对比基准”下跌 >=%.0f%%（无时间窗口限制）；首次触发不撤，下一次监测若继续下降才撤
-• 触发 2：价格与交易笔数较“对比基准”下跌 >=%.0f%%（无时间窗口限制）；首次触发不撤，下一次监测仍满足阈值才撤
+• 触发 2：价格较“对比基准”下跌 >=%.0f%% 且交易笔数下跌 >=%.0f%%（无时间窗口限制）；首次触发不撤，下一次监测仍满足阈值才撤
 • 另外仍复用原有任务监控逻辑：出区间后按配置执行再平衡/止损
 
 对比基准：可在 Mini App 里切换使用“开仓时数据”或“开仓后最高点数据”（默认最高点）。
 
 说明：上述阈值/宽度参数来自服务端配置；你在 /auto 里设置的“总投入/最大任务数/盈亏关闭”用于控制每个用户的自动开新仓，并在触发盈亏关闭时撤出当前自动仓位。`,
 		volumeDropPct*100,
-		priceTxDropPct*100,
+		priceDropPct*100,
+		txDropPct*100,
 	)
 }
 

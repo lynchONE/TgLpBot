@@ -26,8 +26,8 @@ type SystemConfig struct {
 
 	// AutoLP 退出卫士参数（0 表示使用环境变量默认值）
 	AutoLPGuardVolumeDropPercent    float64 `gorm:"type:decimal(10,4);default:0" json:"autolp_guard_volume_drop_percent"`     // 成交量下降阈值
-	AutoLPGuardPriceTxDropPercent   float64 `gorm:"type:decimal(10,4);default:0" json:"autolp_guard_price_tx_drop_percent"`   // 价格+交易笔数下降阈值
-	AutoLPGuardNoExitMinFeeRate5m   float64 `gorm:"type:decimal(10,4);default:0" json:"autolp_guard_no_exit_min_fee_rate_5m"` // 手续费率保护阈值
+	AutoLPGuardPriceDropPercent     float64 `gorm:"type:decimal(10,4);default:0" json:"autolp_guard_price_drop_percent"`      // 价格跌幅阈值
+	AutoLPGuardTxDropPercent        float64 `gorm:"type:decimal(10,4);default:0" json:"autolp_guard_tx_drop_percent"`         // 交易笔数跌幅阈值
 	AutoLPGuardLowFeeRate5m         float64 `gorm:"type:decimal(10,4);default:0" json:"autolp_guard_low_fee_rate_5m"`         // 低手续费率阈值
 	AutoLPGuardVolumeDropPercentLow float64 `gorm:"type:decimal(10,4);default:0" json:"autolp_guard_volume_drop_percent_low"` // 低费率时成交量下降阈值
 
@@ -57,8 +57,8 @@ type WidthGuardConfig struct {
 	WidthMildUptrendPercent   float64 `json:"width_mild_uptrend_percent"`
 	WidthRapidPumpPercent     float64 `json:"width_rapid_pump_percent"`
 	GuardVolumeDropPercent    float64 `json:"guard_volume_drop_percent"`
-	GuardPriceTxDropPercent   float64 `json:"guard_price_tx_drop_percent"`
-	GuardNoExitMinFeeRate5m   float64 `json:"guard_no_exit_min_fee_rate_5m"`
+	GuardPriceDropPercent     float64 `json:"guard_price_drop_percent"`
+	GuardTxDropPercent        float64 `json:"guard_tx_drop_percent"`
 	GuardLowFeeRate5m         float64 `json:"guard_low_fee_rate_5m"`
 	GuardVolumeDropPercentLow float64 `json:"guard_volume_drop_percent_low"`
 }

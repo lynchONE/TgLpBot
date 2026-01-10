@@ -29,8 +29,8 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
         autolp_width_rapid_pump_percent: '',
         // 退出卫士
         autolp_guard_volume_drop_percent: '',
-        autolp_guard_price_tx_drop_percent: '',
-        autolp_guard_no_exit_min_fee_rate_5m: '',
+        autolp_guard_price_drop_percent: '',
+        autolp_guard_tx_drop_percent: '',
         autolp_guard_low_fee_rate_5m: '',
         autolp_guard_volume_drop_percent_low: '',
     });
@@ -58,8 +58,8 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
                     autolp_width_rapid_pump_percent: String(resp.config.autolp_width_rapid_pump_percent || ''),
                     // 退出卫士
                     autolp_guard_volume_drop_percent: String(resp.config.autolp_guard_volume_drop_percent || ''),
-                    autolp_guard_price_tx_drop_percent: String(resp.config.autolp_guard_price_tx_drop_percent || ''),
-                    autolp_guard_no_exit_min_fee_rate_5m: String(resp.config.autolp_guard_no_exit_min_fee_rate_5m || ''),
+                    autolp_guard_price_drop_percent: String(resp.config.autolp_guard_price_drop_percent || ''),
+                    autolp_guard_tx_drop_percent: String(resp.config.autolp_guard_tx_drop_percent || ''),
                     autolp_guard_low_fee_rate_5m: String(resp.config.autolp_guard_low_fee_rate_5m || ''),
                     autolp_guard_volume_drop_percent_low: String(resp.config.autolp_guard_volume_drop_percent_low || ''),
                 });
@@ -112,8 +112,8 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
             updates.autolp_width_rapid_pump_percent = parseFloat(draft.autolp_width_rapid_pump_percent);
             // 退出卫士
             updates.autolp_guard_volume_drop_percent = parseFloat(draft.autolp_guard_volume_drop_percent);
-            updates.autolp_guard_price_tx_drop_percent = parseFloat(draft.autolp_guard_price_tx_drop_percent);
-            updates.autolp_guard_no_exit_min_fee_rate_5m = parseFloat(draft.autolp_guard_no_exit_min_fee_rate_5m);
+            updates.autolp_guard_price_drop_percent = parseFloat(draft.autolp_guard_price_drop_percent);
+            updates.autolp_guard_tx_drop_percent = parseFloat(draft.autolp_guard_tx_drop_percent);
             updates.autolp_guard_low_fee_rate_5m = parseFloat(draft.autolp_guard_low_fee_rate_5m);
             updates.autolp_guard_volume_drop_percent_low = parseFloat(draft.autolp_guard_volume_drop_percent_low);
 
@@ -131,8 +131,8 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
                     autolp_width_mild_uptrend_percent: String(resp.config.autolp_width_mild_uptrend_percent || ''),
                     autolp_width_rapid_pump_percent: String(resp.config.autolp_width_rapid_pump_percent || ''),
                     autolp_guard_volume_drop_percent: String(resp.config.autolp_guard_volume_drop_percent || ''),
-                    autolp_guard_price_tx_drop_percent: String(resp.config.autolp_guard_price_tx_drop_percent || ''),
-                    autolp_guard_no_exit_min_fee_rate_5m: String(resp.config.autolp_guard_no_exit_min_fee_rate_5m || ''),
+                    autolp_guard_price_drop_percent: String(resp.config.autolp_guard_price_drop_percent || ''),
+                    autolp_guard_tx_drop_percent: String(resp.config.autolp_guard_tx_drop_percent || ''),
                     autolp_guard_low_fee_rate_5m: String(resp.config.autolp_guard_low_fee_rate_5m || ''),
                     autolp_guard_volume_drop_percent_low: String(resp.config.autolp_guard_volume_drop_percent_low || ''),
                 });
@@ -252,8 +252,8 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
                         <div className="text-xs text-zinc-500 dark:text-white/50 mb-2">退出条件阈值（小数表示百分比，如 0.5 = 50%），值为 0 时使用环境变量默认值</div>
                         <div className="grid grid-cols-1 gap-3">
                             {renderInput('autolp_guard_volume_drop_percent', '成交量下降阈值', widthGuardDefaults?.guard_volume_drop_percent, '0.01')}
-                            {renderInput('autolp_guard_price_tx_drop_percent', '价格+交易笔数下降阈值', widthGuardDefaults?.guard_price_tx_drop_percent, '0.01')}
-                            {renderInput('autolp_guard_no_exit_min_fee_rate_5m', '手续费率保护阈值 (%)', widthGuardDefaults?.guard_no_exit_min_fee_rate_5m, '0.1')}
+                            {renderInput('autolp_guard_price_drop_percent', '价格跌幅阈值', widthGuardDefaults?.guard_price_drop_percent, '0.01')}
+                            {renderInput('autolp_guard_tx_drop_percent', '交易笔数跌幅阈值', widthGuardDefaults?.guard_tx_drop_percent, '0.01')}
                             {renderInput('autolp_guard_low_fee_rate_5m', '低手续费率阈值 (%)', widthGuardDefaults?.guard_low_fee_rate_5m, '0.01')}
                             {renderInput('autolp_guard_volume_drop_percent_low', '低费率时成交量下降阈值', widthGuardDefaults?.guard_volume_drop_percent_low, '0.01')}
                         </div>

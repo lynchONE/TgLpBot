@@ -104,3 +104,65 @@ func (s *SystemConfigService) GetHardFilterConfig() (*models.HardFilterConfig, e
 
 	return hf, nil
 }
+
+// GetWidthGuardConfig 获取宽度和退出卫士配置，优先使用数据库配置，回退到环境变量
+func (s *SystemConfigService) GetWidthGuardConfig() (*models.WidthGuardConfig, error) {
+	cfg, err := s.GetOrCreate()
+	if err != nil {
+		return nil, err
+	}
+
+	wg := &models.WidthGuardConfig{}
+
+	// 宽度策略
+	if cfg.AutoLPWidthSidewaysPercent > 0 {
+		wg.WidthSidewaysPercent = cfg.AutoLPWidthSidewaysPercent
+	} else if config.AppConfig != nil {
+		wg.WidthSidewaysPercent = config.AppConfig.AutoLPWidthSidewaysPercent
+	}
+
+	if cfg.AutoLPWidthMildUptrendPercent > 0 {
+		wg.WidthMildUptrendPercent = cfg.AutoLPWidthMildUptrendPercent
+	} else if config.AppConfig != nil {
+		wg.WidthMildUptrendPercent = config.AppConfig.AutoLPWidthMildUptrendPercent
+	}
+
+	if cfg.AutoLPWidthRapidPumpPercent > 0 {
+		wg.WidthRapidPumpPercent = cfg.AutoLPWidthRapidPumpPercent
+	} else if config.AppConfig != nil {
+		wg.WidthRapidPumpPercent = config.AppConfig.AutoLPWidthRapidPumpPercent
+	}
+
+	// 退出卫士
+	if cfg.AutoLPGuardVolumeDropPercent > 0 {
+		wg.GuardVolumeDropPercent = cfg.AutoLPGuardVolumeDropPercent
+	} else if config.AppConfig != nil {
+		wg.GuardVolumeDropPercent = config.AppConfig.AutoLPGuardVolumeDropPercent
+	}
+
+	if cfg.AutoLPGuardPriceDropPercent > 0 {
+		wg.GuardPriceDropPercent = cfg.AutoLPGuardPriceDropPercent
+	} else if config.AppConfig != nil {
+		wg.GuardPriceDropPercent = config.AppConfig.AutoLPGuardPriceDropPercent
+	}
+
+	if cfg.AutoLPGuardTxDropPercent > 0 {
+		wg.GuardTxDropPercent = cfg.AutoLPGuardTxDropPercent
+	} else if config.AppConfig != nil {
+		wg.GuardTxDropPercent = config.AppConfig.AutoLPGuardTxDropPercent
+	}
+
+	if cfg.AutoLPGuardLowFeeRate5m > 0 {
+		wg.GuardLowFeeRate5m = cfg.AutoLPGuardLowFeeRate5m
+	} else if config.AppConfig != nil {
+		wg.GuardLowFeeRate5m = config.AppConfig.AutoLPGuardLowFeeRate5m
+	}
+
+	if cfg.AutoLPGuardVolumeDropPercentLow > 0 {
+		wg.GuardVolumeDropPercentLow = cfg.AutoLPGuardVolumeDropPercentLow
+	} else if config.AppConfig != nil {
+		wg.GuardVolumeDropPercentLow = config.AppConfig.AutoLPGuardVolumeDropPercentLow
+	}
+
+	return wg, nil
+}

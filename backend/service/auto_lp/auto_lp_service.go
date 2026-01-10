@@ -182,6 +182,33 @@ func (s *AutoLPService) runOnce() {
 	dexes := autoLPDexList(config.AppConfig.AutoLPProtocols)
 	dexParam := strings.Join(dexes, ",")
 
+	sysConfigService := user.NewSystemConfigService()
+	hardFilter := &models.HardFilterConfig{
+		MinPoolValueUSD:  config.AppConfig.AutoLPMinPoolValueUSD,
+		MinFeePercentage: config.AppConfig.AutoLPMinFeePercentage,
+		MinFeeRate5m:     config.AppConfig.AutoLPMinFeeRate5m,
+		MinTotalFees5m:   config.AppConfig.AutoLPMinTotalFees5m,
+		MinTotalVolume5m: config.AppConfig.AutoLPMinTotalVolume5m,
+		MinTx5m:          config.AppConfig.AutoLPMinTx5m,
+	}
+	if cfg, err := sysConfigService.GetHardFilterConfig(); err == nil && cfg != nil {
+		hardFilter = cfg
+	}
+
+	widthGuardCfg := &models.WidthGuardConfig{
+		WidthSidewaysPercent:      config.AppConfig.AutoLPWidthSidewaysPercent,
+		WidthMildUptrendPercent:   config.AppConfig.AutoLPWidthMildUptrendPercent,
+		WidthRapidPumpPercent:     config.AppConfig.AutoLPWidthRapidPumpPercent,
+		GuardVolumeDropPercent:    config.AppConfig.AutoLPGuardVolumeDropPercent,
+		GuardPriceDropPercent:     config.AppConfig.AutoLPGuardPriceDropPercent,
+		GuardTxDropPercent:        config.AppConfig.AutoLPGuardTxDropPercent,
+		GuardLowFeeRate5m:         config.AppConfig.AutoLPGuardLowFeeRate5m,
+		GuardVolumeDropPercentLow: config.AppConfig.AutoLPGuardVolumeDropPercentLow,
+	}
+	if cfg, err := sysConfigService.GetWidthGuardConfig(); err == nil && cfg != nil {
+		widthGuardCfg = cfg
+	}
+
 	log.Printf("[AutoLP] 开始扫描：链=%s DEX=%s 扫描间隔=%ds 请求间隔=%dms 自动开仓=%v Top推送=%v 调试=%v；硬筛：TVL(current_pool_value,USD)>%.0f 费率(fee_percentage)>%.2f%% 5m费用率(total_fees/current_pool_value)>%.4f%% 5m手续费(total_fees)>%.2f 5m成交量(total_volume)>%.2f；开仓宽度(总宽度)：震荡=%.2f%% 温和上涨=%.2f%% 急涨=%.2f%%",
 		strings.ToLower(strings.TrimSpace(config.AppConfig.AutoLPChain)),
 		dexParam,
@@ -190,14 +217,14 @@ func (s *AutoLPService) runOnce() {
 		config.AppConfig.AutoLPExecuteEnabled,
 		config.AppConfig.AutoLPNotifyTopCandidate,
 		config.AppConfig.AutoLPDebug,
-		config.AppConfig.AutoLPMinPoolValueUSD,
-		config.AppConfig.AutoLPMinFeePercentage,
-		config.AppConfig.AutoLPMinFeeRate5m,
-		config.AppConfig.AutoLPMinTotalFees5m,
-		config.AppConfig.AutoLPMinTotalVolume5m,
-		config.AppConfig.AutoLPWidthSidewaysPercent,
-		config.AppConfig.AutoLPWidthMildUptrendPercent,
-		config.AppConfig.AutoLPWidthRapidPumpPercent,
+		hardFilter.MinPoolValueUSD,
+		hardFilter.MinFeePercentage,
+		hardFilter.MinFeeRate5m,
+		hardFilter.MinTotalFees5m,
+		hardFilter.MinTotalVolume5m,
+		widthGuardCfg.WidthSidewaysPercent,
+		widthGuardCfg.WidthMildUptrendPercent,
+		widthGuardCfg.WidthRapidPumpPercent,
 	)
 	log.Printf("[AutoLP] 共振门槛：5m费用率>=%.4f%% 5m成交量>=%.2f |Z60|>=%.2f",
 		config.AppConfig.AutoLPResonanceMinFeeRate5m,
@@ -752,6 +779,20 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 	resMinVol := config.AppConfig.AutoLPResonanceMinTotalVolume5m
 	resMinAbsZ60 := config.AppConfig.AutoLPResonanceMinAbsZ60
 
+	// 获取动态宽度配置（优先数据库配置，回退到环境变量）
+	widthGuardCfg, err := sysConfigService.GetWidthGuardConfig()
+	if err != nil {
+		log.Printf("[AutoLP] 获取宽度配置失败，使用环境变量: %v", err)
+		widthGuardCfg = &models.WidthGuardConfig{
+			WidthSidewaysPercent:    config.AppConfig.AutoLPWidthSidewaysPercent,
+			WidthMildUptrendPercent: config.AppConfig.AutoLPWidthMildUptrendPercent,
+			WidthRapidPumpPercent:   config.AppConfig.AutoLPWidthRapidPumpPercent,
+		}
+	}
+	widthSideways := widthGuardCfg.WidthSidewaysPercent
+	widthMildUptrend := widthGuardCfg.WidthMildUptrendPercent
+	widthRapidPump := widthGuardCfg.WidthRapidPumpPercent
+
 	filteredNo5 := 0
 	filteredTVL := 0
 	filteredFeePct := 0
@@ -832,21 +873,21 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 		totalWidth := config.AppConfig.AutoLPBaseWidthPercentage
 		switch state5 {
 		case "SIDEWAYS":
-			if config.AppConfig.AutoLPWidthSidewaysPercent > 0 {
-				totalWidth = config.AppConfig.AutoLPWidthSidewaysPercent
+			if widthSideways > 0 {
+				totalWidth = widthSideways
 			}
 		case "MILD_UPTREND":
-			if config.AppConfig.AutoLPWidthMildUptrendPercent > 0 {
-				totalWidth = config.AppConfig.AutoLPWidthMildUptrendPercent
+			if widthMildUptrend > 0 {
+				totalWidth = widthMildUptrend
 			}
 		case "RAPID_PUMP":
-			if config.AppConfig.AutoLPWidthRapidPumpPercent > 0 {
-				totalWidth = config.AppConfig.AutoLPWidthRapidPumpPercent
+			if widthRapidPump > 0 {
+				totalWidth = widthRapidPump
 			}
 		case "CONSOLIDATION":
 			// Treat consolidation as a "sideways-like" regime.
-			if config.AppConfig.AutoLPWidthSidewaysPercent > 0 {
-				totalWidth = config.AppConfig.AutoLPWidthSidewaysPercent
+			if widthSideways > 0 {
+				totalWidth = widthSideways
 			}
 		}
 		lowPct, upPct := decideWidth(totalWidth, state5, res)
@@ -2474,7 +2515,21 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 		}
 	}
 
-	volumeDropPct := config.AppConfig.AutoLPGuardVolumeDropPercent
+	// 获取动态退出卫士配置（优先数据库配置，回退到环境变量）
+	sysConfigService := user.NewSystemConfigService()
+	widthGuardCfg, err := sysConfigService.GetWidthGuardConfig()
+	if err != nil {
+		log.Printf("[AutoLP Guard] 获取退出卫士配置失败，使用环境变量: %v", err)
+		widthGuardCfg = &models.WidthGuardConfig{
+			GuardVolumeDropPercent:    config.AppConfig.AutoLPGuardVolumeDropPercent,
+			GuardPriceDropPercent:     config.AppConfig.AutoLPGuardPriceDropPercent,
+			GuardTxDropPercent:        config.AppConfig.AutoLPGuardTxDropPercent,
+			GuardLowFeeRate5m:         config.AppConfig.AutoLPGuardLowFeeRate5m,
+			GuardVolumeDropPercentLow: config.AppConfig.AutoLPGuardVolumeDropPercentLow,
+		}
+	}
+
+	volumeDropPct := widthGuardCfg.GuardVolumeDropPercent
 	if volumeDropPct > 1 && volumeDropPct <= 100 {
 		volumeDropPct = volumeDropPct / 100
 	}
@@ -2482,7 +2537,7 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 		volumeDropPct = 0.30
 	}
 
-	volumeDropPctLow := config.AppConfig.AutoLPGuardVolumeDropPercentLow
+	volumeDropPctLow := widthGuardCfg.GuardVolumeDropPercentLow
 	if volumeDropPctLow > 1 && volumeDropPctLow <= 100 {
 		volumeDropPctLow = volumeDropPctLow / 100
 	}
@@ -2490,25 +2545,13 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 		volumeDropPctLow = 0
 	}
 
-	noExitMinFeeRate5m := config.AppConfig.AutoLPGuardNoExitMinFeeRate5m
-	if noExitMinFeeRate5m < 0 {
-		noExitMinFeeRate5m = 0
-	}
-	lowFeeRate5m := config.AppConfig.AutoLPGuardLowFeeRate5m
+	lowFeeRate5m := widthGuardCfg.GuardLowFeeRate5m
 	if lowFeeRate5m < 0 {
 		lowFeeRate5m = 0
 	}
 
-	priceTxDropPct := config.AppConfig.AutoLPGuardPriceTxDropPercent
-	if priceTxDropPct > 1 && priceTxDropPct <= 100 {
-		priceTxDropPct = priceTxDropPct / 100
-	}
-	if priceTxDropPct <= 0 || priceTxDropPct >= 1 {
-		priceTxDropPct = 0.10
-	}
-
 	// 独立的价格和tx跌幅阈值
-	priceDropPct := config.AppConfig.AutoLPGuardPriceDropPercent
+	priceDropPct := widthGuardCfg.GuardPriceDropPercent
 	if priceDropPct > 1 && priceDropPct <= 100 {
 		priceDropPct = priceDropPct / 100
 	}
@@ -2516,7 +2559,7 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 		priceDropPct = 0.05 // 默认5%
 	}
 
-	txDropPct := config.AppConfig.AutoLPGuardTxDropPercent
+	txDropPct := widthGuardCfg.GuardTxDropPercent
 	if txDropPct > 1 && txDropPct <= 100 {
 		txDropPct = txDropPct / 100
 	}
@@ -2547,12 +2590,8 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 		effectiveVolDropPct := volumeDropPct
 		skipVolumeExit := false
 
-		if noExitMinFeeRate5m > 0 || lowFeeRate5m > 0 {
-			if noExitMinFeeRate5m > 0 && feeRatePct > noExitMinFeeRate5m {
-				skipVolumeExit = true
-			} else if lowFeeRate5m > 0 && feeRatePct < lowFeeRate5m && volumeDropPctLow > 0 {
-				effectiveVolDropPct = volumeDropPctLow
-			}
+		if lowFeeRate5m > 0 && feeRatePct < lowFeeRate5m && volumeDropPctLow > 0 {
+			effectiveVolDropPct = volumeDropPctLow
 		}
 
 		updates := map[string]interface{}{}
