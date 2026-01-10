@@ -70,6 +70,27 @@ function CompareIndicator({ current, baseline, reverse = false, suffix = '' }) {
     );
 }
 
+// 绿色小勾图标组件
+function CheckIcon() {
+    return (
+        <svg className="h-3.5 w-3.5 text-emerald-500" viewBox="0 0 16 16" fill="currentColor">
+            <path fillRule="evenodd" d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" clipRule="evenodd" />
+        </svg>
+    );
+}
+
+// 条件状态显示组件
+function ConditionStatus({ hit }) {
+    if (hit) {
+        return (
+            <span className="inline-flex items-center justify-end gap-0.5">
+                <CheckIcon />
+            </span>
+        );
+    }
+    return <span className="text-zinc-400 dark:text-white/30">否</span>;
+}
+
 export default function AutoMonitorCard({ task, tick }) {
     const title = String(task?.title || '').trim() || 'Auto 任务';
     const poolVersion = String(task?.pool_version || '').trim();
@@ -86,7 +107,6 @@ export default function AutoMonitorCard({ task, tick }) {
     const hasPeakSnapshot = Boolean(peak?.ok);
     const hasCurrentSnapshot = Boolean(current?.ok);
 
-    const openAtText = useMemo(() => formatRelativeTime(open?.at, tick) || '--', [open?.at, tick]);
     const currentAtText = useMemo(() => formatRelativeTime(current?.updated_at, tick) || '--', [current?.updated_at, tick]);
 
     const exitPending = String(task?.exit_pending_action || '').trim();
@@ -94,15 +114,18 @@ export default function AutoMonitorCard({ task, tick }) {
 
     // 计算基准数据 (根据配置使用peak或open)
     const baselineType = String(gv?.baseline || gp?.baseline || '').trim().toLowerCase();
-    const baselineData = baselineType === 'peak' && hasPeakSnapshot ? peak : open;
-    const baselineLabel = baselineType === 'peak' ? '最高点' : '开仓时';
+    const isPeakBaseline = baselineType === 'peak';
+    const baselineData = isPeakBaseline && hasPeakSnapshot ? peak : open;
+    const hasBaselineSnapshot = isPeakBaseline ? hasPeakSnapshot : hasOpenSnapshot;
+    const baselineLabel = isPeakBaseline ? '最高点' : '开仓时';
 
-    const baselineText = useMemo(() => {
-        const baseline = String(gv?.baseline || gp?.baseline || '').trim().toLowerCase();
-        if (baseline === 'peak') return '最高点';
-        if (baseline === 'open') return '开仓时';
-        return '--';
-    }, [gv?.baseline, gp?.baseline]);
+    // 基准时间文本
+    const baselineAtText = useMemo(() => {
+        if (isPeakBaseline) {
+            return hasPeakSnapshot ? '已记录' : '--';
+        }
+        return formatRelativeTime(open?.at, tick) || '--';
+    }, [isPeakBaseline, hasPeakSnapshot, open?.at, tick]);
 
     const volBadge = useMemo(() => {
         if (!gv?.enabled) return { tone: 'muted', text: '不可用' };
@@ -146,30 +169,35 @@ export default function AutoMonitorCard({ task, tick }) {
                 </div>
             ) : null}
 
+            {/* 左边基准数据，右边实时数据 */}
             <div className="mt-3 grid grid-cols-2 gap-3">
-                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                {/* 左边：基准数据（根据选择显示开仓时或最高点） */}
+                <div className={`rounded-xl border p-3 ${isPeakBaseline ? 'border-amber-500/30 bg-amber-500/5 dark:border-amber-500/20 dark:bg-amber-500/5' : 'border-sky-500/30 bg-sky-500/5 dark:border-sky-500/20 dark:bg-sky-500/5'}`}>
                     <div className="flex items-center justify-between">
-                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">开仓参考</div>
-                        <div className="text-[11px] text-zinc-500 dark:text-white/40">{openAtText}</div>
+                        <div className={`text-xs font-semibold ${isPeakBaseline ? 'text-amber-700 dark:text-amber-300' : 'text-sky-700 dark:text-sky-300'}`}>
+                            基准：{baselineLabel}
+                        </div>
+                        <div className="text-[11px] text-zinc-500 dark:text-white/40">{baselineAtText}</div>
                     </div>
                     <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
                         <div className="text-zinc-500 dark:text-white/40">手续费率</div>
-                        <div className="text-right font-semibold tabular-nums">{hasOpenSnapshot ? formatPct(open?.fee_pct) : '--'}</div>
+                        <div className="text-right font-semibold tabular-nums">{hasBaselineSnapshot ? formatPct(baselineData?.fee_pct) : '--'}</div>
                         <div className="text-zinc-500 dark:text-white/40">5m 费用率</div>
-                        <div className="text-right font-semibold tabular-nums">{hasOpenSnapshot ? formatPct(open?.fee_rate_5m_pct, 4) : '--'}</div>
+                        <div className="text-right font-semibold tabular-nums">{hasBaselineSnapshot ? formatPct(baselineData?.fee_rate_5m_pct, 4) : '--'}</div>
                         <div className="text-zinc-500 dark:text-white/40">5m 费用</div>
-                        <div className="text-right font-semibold tabular-nums">{hasOpenSnapshot ? formatUsd(open?.fees_5m) : '--'}</div>
+                        <div className="text-right font-semibold tabular-nums">{hasBaselineSnapshot ? formatUsd(baselineData?.fees_5m) : '--'}</div>
                         <div className="text-zinc-500 dark:text-white/40">5m 交易量</div>
-                        <div className="text-right font-semibold tabular-nums">{formatUsd(open?.volume_5m)}</div>
+                        <div className="text-right font-semibold tabular-nums">{hasBaselineSnapshot ? formatUsd(baselineData?.volume_5m) : '--'}</div>
                         <div className="text-zinc-500 dark:text-white/40">TVL</div>
-                        <div className="text-right font-semibold tabular-nums">{hasOpenSnapshot ? formatUsd(open?.tvl) : '--'}</div>
+                        <div className="text-right font-semibold tabular-nums">{hasBaselineSnapshot ? formatUsd(baselineData?.tvl) : '--'}</div>
                         <div className="text-zinc-500 dark:text-white/40">5m Tx</div>
-                        <div className="text-right font-semibold tabular-nums">{Number.isFinite(Number(open?.tx_5m)) ? open.tx_5m : '--'}</div>
+                        <div className="text-right font-semibold tabular-nums">{hasBaselineSnapshot && Number.isFinite(Number(baselineData?.tx_5m)) ? baselineData.tx_5m : '--'}</div>
                         <div className="text-zinc-500 dark:text-white/40">价格</div>
-                        <div className="text-right font-semibold tabular-nums">{formatNum(open?.price, 8)}</div>
+                        <div className="text-right font-semibold tabular-nums">{hasBaselineSnapshot ? formatNum(baselineData?.price, 8) : '--'}</div>
                     </div>
                 </div>
 
+                {/* 右边：实时数据 */}
                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                     <div className="flex items-center justify-between">
                         <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">当前池子</div>
@@ -214,29 +242,7 @@ export default function AutoMonitorCard({ task, tick }) {
                 </div>
             </div>
 
-            <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                <div className="flex items-center justify-between">
-                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">开仓后最高</div>
-                    <div className="text-[11px] text-zinc-500 dark:text-white/40">{hasPeakSnapshot ? '已记录' : '--'}</div>
-                </div>
-                <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
-                    <div className="text-zinc-500 dark:text-white/40">手续费率</div>
-                    <div className="text-right font-semibold tabular-nums">{hasPeakSnapshot ? formatPct(peak?.fee_pct) : '--'}</div>
-                    <div className="text-zinc-500 dark:text-white/40">5m 费用率</div>
-                    <div className="text-right font-semibold tabular-nums">{hasPeakSnapshot ? formatPct(peak?.fee_rate_5m_pct, 4) : '--'}</div>
-                    <div className="text-zinc-500 dark:text-white/40">5m 费用</div>
-                    <div className="text-right font-semibold tabular-nums">{hasPeakSnapshot ? formatUsd(peak?.fees_5m) : '--'}</div>
-                    <div className="text-zinc-500 dark:text-white/40">5m 交易量</div>
-                    <div className="text-right font-semibold tabular-nums">{hasPeakSnapshot ? formatUsd(peak?.volume_5m) : '--'}</div>
-                    <div className="text-zinc-500 dark:text-white/40">TVL</div>
-                    <div className="text-right font-semibold tabular-nums">{hasPeakSnapshot ? formatUsd(peak?.tvl) : '--'}</div>
-                    <div className="text-zinc-500 dark:text-white/40">5m Tx</div>
-                    <div className="text-right font-semibold tabular-nums">{hasPeakSnapshot && Number.isFinite(Number(peak?.tx_5m)) ? peak.tx_5m : '--'}</div>
-                    <div className="text-zinc-500 dark:text-white/40">价格</div>
-                    <div className="text-right font-semibold tabular-nums">{hasPeakSnapshot ? formatNum(peak?.price, 8) : '--'}</div>
-                </div>
-            </div>
-
+            {/* 撤退卫士区域 */}
             <div className="mt-3 rounded-xl border border-zinc-200 bg-white p-3 dark:border-white/10 dark:bg-white/5">
                 <div className="flex flex-wrap items-center gap-1.5">
                     <div className="text-xs font-semibold text-zinc-900 dark:text-white/80 mr-1">撤退卫士</div>
@@ -277,13 +283,13 @@ export default function AutoMonitorCard({ task, tick }) {
                                 {formatUsd(gv?.current_volume_5m)} / {formatUsd(gv?.threshold)}
                             </div>
                             <div className="text-zinc-500 dark:text-white/40">命中阈值</div>
-                            <div className="text-right font-semibold">{gv?.hit ? '是' : '否'}</div>
+                            <div className="text-right font-semibold"><ConditionStatus hit={gv?.hit} /></div>
                             <div className="text-zinc-500 dark:text-white/40">首次标记</div>
-                            <div className="text-right font-semibold">{gv?.first_mark ? '是' : '否'}</div>
+                            <div className="text-right font-semibold"><ConditionStatus hit={gv?.first_mark} /></div>
                             <div className="text-zinc-500 dark:text-white/40">已上膛</div>
-                            <div className="text-right font-semibold">{gv?.armed ? '是' : '否'}</div>
+                            <div className="text-right font-semibold"><ConditionStatus hit={gv?.armed} /></div>
                             <div className="text-zinc-500 dark:text-white/40">连续下降</div>
-                            <div className="text-right font-semibold">{gv?.should_exit_now ? '是' : '否'}</div>
+                            <div className="text-right font-semibold"><ConditionStatus hit={gv?.should_exit_now} /></div>
                         </div>
                         {gv?.blocked_reason || gv?.skip_reason ? (
                             <div className="mt-2 text-zinc-500 dark:text-white/50">
@@ -300,17 +306,17 @@ export default function AutoMonitorCard({ task, tick }) {
                             <div className="text-zinc-500 dark:text-white/40">Tx阈值</div>
                             <div className="text-right font-semibold tabular-nums">{formatPct(Number(gp?.tx_drop_pct || gp?.drop_pct || 0) * 100, 0)}</div>
                             <div className="text-zinc-500 dark:text-white/40">价格命中</div>
-                            <div className="text-right font-semibold">{gp?.price_hit ? '是' : '否'}</div>
+                            <div className="text-right font-semibold"><ConditionStatus hit={gp?.price_hit} /></div>
                             <div className="text-zinc-500 dark:text-white/40">Tx 命中</div>
-                            <div className="text-right font-semibold">{gp?.tx_hit ? '是' : '否'}</div>
+                            <div className="text-right font-semibold"><ConditionStatus hit={gp?.tx_hit} /></div>
                             <div className="text-zinc-500 dark:text-white/40">同时命中</div>
-                            <div className="text-right font-semibold">{gp?.hit ? '是' : '否'}</div>
+                            <div className="text-right font-semibold"><ConditionStatus hit={gp?.hit} /></div>
                             <div className="text-zinc-500 dark:text-white/40">首次标记</div>
-                            <div className="text-right font-semibold">{gp?.first_mark ? '是' : '否'}</div>
+                            <div className="text-right font-semibold"><ConditionStatus hit={gp?.first_mark} /></div>
                             <div className="text-zinc-500 dark:text-white/40">已上膛</div>
-                            <div className="text-right font-semibold">{gp?.armed ? '是' : '否'}</div>
+                            <div className="text-right font-semibold"><ConditionStatus hit={gp?.armed} /></div>
                             <div className="text-zinc-500 dark:text-white/40">满足撤退</div>
-                            <div className="text-right font-semibold">{gp?.should_exit_now ? '是' : '否'}</div>
+                            <div className="text-right font-semibold"><ConditionStatus hit={gp?.should_exit_now} /></div>
                         </div>
                         {gp?.blocked_reason ? (
                             <div className="mt-2 text-zinc-500 dark:text-white/50">{zhReason(gp?.blocked_reason)}</div>
