@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { createChart } from 'lightweight-charts';
+import { createChart, createSeriesMarkers, LineSeries, LineStyle } from 'lightweight-charts';
 
 const USD_DISPLAY_LIMIT = 1e15;
 const usdFormatter = new Intl.NumberFormat('en-US', {
@@ -40,6 +40,7 @@ export default function AutoPnLCurveCard({ data, loading, error, theme = 'dark' 
     const chartRef = useRef(null);
     const realizedSeriesRef = useRef(null);
     const totalSeriesRef = useRef(null);
+    const markersRef = useRef(null);
     const resizeRef = useRef(null);
 
     const [showAllEvents, setShowAllEvents] = useState(false);
@@ -130,6 +131,14 @@ export default function AutoPnLCurveCard({ data, loading, error, theme = 'dark' 
             realizedSeriesRef.current = null;
             totalSeriesRef.current = null;
         }
+        if (markersRef.current) {
+            try {
+                markersRef.current.detach();
+            } catch {
+                // ignore
+            }
+            markersRef.current = null;
+        }
         if (resizeRef.current) {
             try {
                 resizeRef.current.disconnect();
@@ -160,21 +169,22 @@ export default function AutoPnLCurveCard({ data, loading, error, theme = 'dark' 
                 crosshair: { mode: 0 },
             });
 
-            const realized = chart.addLineSeries({
+            const realized = chart.addSeries(LineSeries, {
                 color: isDark ? '#60a5fa' : '#2563eb',
                 lineWidth: 2,
                 priceLineVisible: false,
             });
-            const total = chart.addLineSeries({
+            const total = chart.addSeries(LineSeries, {
                 color: isDark ? '#34d399' : '#10b981',
                 lineWidth: 2,
-                lineStyle: 2,
+                lineStyle: LineStyle.Dashed,
                 priceLineVisible: false,
             });
 
             chartRef.current = chart;
             realizedSeriesRef.current = realized;
             totalSeriesRef.current = total;
+            markersRef.current = createSeriesMarkers(total, []);
 
             if (typeof ResizeObserver !== 'undefined') {
                 const ro = new ResizeObserver(() => {
@@ -197,6 +207,14 @@ export default function AutoPnLCurveCard({ data, loading, error, theme = 'dark' 
                 }
                 resizeRef.current = null;
             }
+            if (markersRef.current) {
+                try {
+                    markersRef.current.detach();
+                } catch {
+                    // ignore
+                }
+                markersRef.current = null;
+            }
             if (chartRef.current) {
                 try {
                     chartRef.current.remove();
@@ -215,12 +233,13 @@ export default function AutoPnLCurveCard({ data, loading, error, theme = 'dark' 
         const chart = chartRef.current;
         const realized = realizedSeriesRef.current;
         const total = totalSeriesRef.current;
+        const markersApi = markersRef.current;
         if (!chart || !realized || !total) return;
 
         try {
             realized.setData(realizedSeries);
             total.setData(totalSeries.length ? totalSeries : realizedSeries);
-            total.setMarkers(markers);
+            markersApi?.setMarkers?.(markers);
             chart.timeScale().fitContent();
         } catch (err) {
             setChartError(`图表渲染失败：${String(err?.message || err)}`);
