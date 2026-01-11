@@ -93,9 +93,11 @@ export default function AutoPnLCurveCard({ data, loading, error, theme = 'dark' 
         return out;
     }, [data?.events]);
 
-    const eventsForList = useMemo(() => {
+    const collapseLimit = 20;
+
+    const allEvents = useMemo(() => {
         const events = Array.isArray(data?.events) ? data.events : [];
-        const list = events
+        return events
             .map((e) => ({
                 type: String(e?.type || '').trim(),
                 t: Number(e?.t || 0),
@@ -105,10 +107,15 @@ export default function AutoPnLCurveCard({ data, loading, error, theme = 'dark' 
             }))
             .filter((e) => (e.type === 'open' || e.type === 'close') && Number.isFinite(e.t) && e.t > 0)
             .sort((a, b) => b.t - a.t);
+    }, [data?.events]);
 
-        if (showAllEvents) return list;
-        return list.slice(0, 30);
-    }, [data?.events, showAllEvents]);
+    const eventsForList = useMemo(() => {
+        if (!showAllEvents) return [];
+        return allEvents.slice(0, collapseLimit);
+    }, [allEvents, showAllEvents]);
+
+    const hasEvents = allEvents.length > 0;
+    const hasMoreEvents = allEvents.length > collapseLimit;
 
     useEffect(() => {
         const el = containerRef.current;
@@ -321,38 +328,44 @@ export default function AutoPnLCurveCard({ data, loading, error, theme = 'dark' 
                 ) : null}
             </div>
 
-            {eventsForList.length ? (
+            {hasEvents ? (
                 <div className="mt-4">
                     <div className="flex items-center justify-between">
                         <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">开/平仓记录</div>
-                        <button
-                            type="button"
-                            onClick={() => setShowAllEvents((v) => !v)}
-                            className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 dark:text-emerald-300 dark:hover:text-emerald-200"
+                        {hasMoreEvents ? (
+                            <button
+                                type="button"
+                                onClick={() => setShowAllEvents((v) => !v)}
+                                className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 dark:text-emerald-300 dark:hover:text-emerald-200"
+                            >
+                                {showAllEvents ? '收起' : '展开'}
+                            </button>
+                        ) : null}
+                    </div>
+                    {eventsForList.length ? (
+                        <div
+                            className="mt-2 max-h-64 overflow-auto rounded-xl border border-zinc-200 bg-zinc-50 p-2 text-[11px] dark:border-white/10 dark:bg-[#0f1116]"
                         >
-                            {showAllEvents ? '收起' : '展开'}
-                        </button>
-                    </div>
-                    <div className="mt-2 max-h-64 overflow-auto rounded-xl border border-zinc-200 bg-zinc-50 p-2 text-[11px] dark:border-white/10 dark:bg-[#0f1116]">
-                        <div className="space-y-1">
-                            {eventsForList.map((e, idx) => {
-                                const isOpen = e.type === 'open';
-                                const label = isOpen ? '开仓' : '平仓';
-                                const tone = isOpen ? 'text-sky-700 dark:text-sky-300' : (e.profitUSDT >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300');
-                                const valueText = isOpen ? formatUsd(e.openUSDT) : `${e.profitUSDT >= 0 ? '+' : '-'}${formatUsd(Math.abs(e.profitUSDT))}`;
-                                return (
-                                    <div key={`${e.type}:${e.t}:${idx}`} className="flex items-center justify-between gap-2 rounded-lg bg-white/60 px-2 py-1 dark:bg-white/5">
-                                        <div className="min-w-0">
-                                            <div className={`font-semibold ${tone}`}>
-                                                {label} {e.pair || '--'} <span className="ml-2 text-zinc-500 dark:text-white/40">{formatEventTime(e.t)}</span>
+                            <div className="space-y-1">
+                                {eventsForList.map((e, idx) => {
+                                    const isOpen = e.type === 'open';
+                                    const label = isOpen ? '开仓' : '平仓';
+                                    const tone = isOpen ? 'text-sky-700 dark:text-sky-300' : (e.profitUSDT >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300');
+                                    const valueText = isOpen ? formatUsd(e.openUSDT) : `${e.profitUSDT >= 0 ? '+' : '-'}${formatUsd(Math.abs(e.profitUSDT))}`;
+                                    return (
+                                        <div key={`${e.type}:${e.t}:${idx}`} className="flex items-center justify-between gap-2 rounded-lg bg-white/60 px-2 py-1 dark:bg-white/5">
+                                            <div className="min-w-0">
+                                                <div className={`font-semibold ${tone}`}>
+                                                    {label} {e.pair || '--'} <span className="ml-2 text-zinc-500 dark:text-white/40">{formatEventTime(e.t)}</span>
+                                                </div>
                                             </div>
+                                            <div className={`shrink-0 font-semibold tabular-nums ${tone}`}>{valueText}</div>
                                         </div>
-                                        <div className={`shrink-0 font-semibold tabular-nums ${tone}`}>{valueText}</div>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                })}
+                            </div>
                         </div>
-                    </div>
+                    ) : null}
                 </div>
             ) : null}
         </div>
