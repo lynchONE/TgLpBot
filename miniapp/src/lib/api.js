@@ -196,6 +196,42 @@ export async function disableAdminAutoLP({ apiBaseUrl, initData, userId, reason,
     return resp.json();
 }
 
+export async function fetchAdminOnlineUsers({ apiBaseUrl, initData, limit, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/admin?endpoint=online_users`;
+    const payload = { initData };
+    if (Number.isFinite(limit)) payload.limit = limit;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
+export async function fetchAdminActiveTasks({ apiBaseUrl, initData, limit, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/admin?endpoint=active_tasks`;
+    const payload = { initData };
+    if (Number.isFinite(limit)) payload.limit = limit;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
 export async function fetchHotPools({ apiBaseUrl, sort, chain, timeframeMinutes, limit, dex, includePools, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const params = new URLSearchParams();

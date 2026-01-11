@@ -26,12 +26,12 @@ export default async function handler(req, res) {
 
     // 从 query 参数获取 endpoint
     const endpoint = String(req.query?.endpoint || '').trim();
-    const validEndpoints = ['autolp_disable', 'autolp_stats', 'realtime_positions', 'realtime_users', 'system_config'];
+    const validEndpoints = ['autolp_disable', 'autolp_stats', 'realtime_positions', 'realtime_users', 'system_config', 'online_users', 'active_tasks'];
 
     if (!validEndpoints.includes(endpoint)) {
         res.statusCode = 400;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.end(JSON.stringify({ error: '无效的端点，有效值: autolp_disable, autolp_stats, realtime_positions, realtime_users' }));
+        res.end(JSON.stringify({ error: '无效的端点，有效值: autolp_disable, autolp_stats, realtime_positions, realtime_users, system_config, online_users, active_tasks' }));
         return;
     }
 

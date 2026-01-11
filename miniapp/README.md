@@ -49,6 +49,18 @@ BACKEND_API_BASE_URL=http://<你的服务器IP>:8080
 | 合并后的端点 | 原端点 | 使用方式 |
 |------------|--------|---------|
 | `/api/task_action?action=xxx` | `/api/task_delete`, `/api/task_pause`, `/api/task_stop` | action 可选值: `delete`, `pause`, `stop` |
-| `/api/admin?endpoint=xxx` | `/api/admin/autolp_disable`, `/api/admin/autolp_stats`, `/api/admin/realtime_positions`, `/api/admin/realtime_users` | endpoint 可选值: `autolp_disable`, `autolp_stats`, `realtime_positions`, `realtime_users` |
+| `/api/admin?endpoint=xxx` | `/api/admin/autolp_disable`, `/api/admin/autolp_stats`, `/api/admin/realtime_positions`, `/api/admin/realtime_users`, `/api/admin/system_config`, `/api/admin/online_users`, `/api/admin/active_tasks` | endpoint 可选值: `autolp_disable`, `autolp_stats`, `realtime_positions`, `realtime_users`, `system_config`, `online_users`, `active_tasks` |
 
 **当前 API 文件数量**: 9 个（在 12 个限制内）
+
+## 管理员页面功能
+
+管理员页面分为 4 个子页面：
+
+| 子页面 | 功能说明 |
+|--------|----------|
+| **在线用户** | 显示所有有活跃任务的用户（包括 Auto 和手动） |
+| **活跃任务** | 显示所有正在运行的任务列表（包括 Auto 和手动） |
+| **系统配置** | AutoLP 硬筛阈值、宽度策略和退出卫士参数配置 |
+| **用户详情** | 查看选定用户的仓位和 Auto 统计信息 |
+

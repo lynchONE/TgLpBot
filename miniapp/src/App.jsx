@@ -5,6 +5,7 @@ import AutoMonitorCard from './components/AutoMonitorCard.jsx';
 import PositionCard from './components/PositionCard.jsx';
 import SystemConfigCard from './components/SystemConfigCard.jsx';
 import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
+import AdminPage from './components/AdminPage.jsx';
 import {
     deleteTask,
     disableAdminAutoLP,
@@ -1682,201 +1683,20 @@ export default function App() {
             ) : null}
 
             {!isHotPools && showAdmin ? (
-                <>
-                    <div className="mb-4">
-                        <SystemConfigCard apiBaseUrl={apiBaseUrl} initData={initData} onNotice={showNotice} />
-                    </div>
-                    <div className="mb-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
-                        <div className="flex items-center justify-between">
-                            <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">开启Auto用户</div>
-                            <div className="text-[11px] text-zinc-500 dark:text-white/40">{adminUsers.length} 人</div>
-                        </div>
-
-                        {adminUsersError ? (
-                            <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
-                                {adminUsersError}
-                            </div>
-                        ) : null}
-
-                        {adminUsersLoading && adminUsers.length === 0 ? (
-                            <div className="mt-3 rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                                加载中...
-                            </div>
-                        ) : null}
-
-                        {!adminUsersLoading && adminUsers.length === 0 ? (
-                            <div className="mt-3 rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                                暂无开启Auto用户
-                            </div>
-                        ) : null}
-
-                        {adminUsers.length ? (
-                            <div className="mt-3 space-y-2">
-                                {adminUsers.map((u) => {
-                                    const selected = Number(u?.user_id) === Number(adminSelectedUserId);
-                                    const label = formatUserLabel(u);
-                                    const updatedText = formatRelativeTime(u?.updated_at, tick) || '--';
-                                    return (
-                                        <button
-                                            key={u.user_id}
-                                            type="button"
-                                            onClick={() => {
-                                                if (Number(u?.user_id) === Number(adminSelectedUserId)) return;
-                                                setAdminSelectedUserId(u.user_id);
-                                                setAdminPositions(null);
-                                                setAdminPositionsError('');
-                                            }}
-                                            className={`w-full rounded-xl border p-3 text-left transition ${selected
-                                                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-900 dark:text-emerald-100'
-                                                : 'border-zinc-200 bg-white/70 text-zinc-900 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10'
-                                                }`}
-                                        >
-                                            <div className="flex items-start justify-between gap-3">
-                                                <div>
-                                                    <div className="text-sm font-semibold">{label}</div>
-                                                    <div
-                                                        className={`mt-0.5 text-[11px] ${selected ? 'text-emerald-700/80 dark:text-emerald-200/80' : 'text-zinc-500 dark:text-white/40'
-                                                            }`}
-                                                    >
-                                                        {u.telegram_id ? `TG ${u.telegram_id}` : 'TG --'} · ID {u.user_id}
-                                                    </div>
-                                                </div>
-                                                <div className="text-right">
-                                                    <div className={`text-xs font-semibold ${selected ? 'text-emerald-700 dark:text-emerald-200' : 'text-zinc-700 dark:text-white/70'}`}>
-                                                        {u.active_tasks} 个任务
-                                                    </div>
-                                                    <div
-                                                        className={`mt-0.5 text-[11px] ${selected ? 'text-emerald-700/70 dark:text-emerald-200/70' : 'text-zinc-500 dark:text-white/40'
-                                                            }`}
-                                                    >
-                                                        {updatedText}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        ) : null}
-                    </div>
-                </>
+                <AdminPage
+                    apiBaseUrl={apiBaseUrl}
+                    initData={initData}
+                    hasInitData={hasInitData}
+                    tick={tick}
+                    pollIntervalSec={pollIntervalSec}
+                    onNotice={showNotice}
+                />
             ) : null}
-
-            {!isHotPools && showAdmin && adminSelectedUserId ? (
-                <div className="mb-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
-                    <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">Auto 统计</div>
-                                <div
-                                    className={`rounded-lg px-2 py-0.5 text-[11px] font-semibold ring-1 ${adminAutoStats?.config?.enabled
-                                        ? 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/25 dark:text-emerald-300'
-                                        : 'bg-zinc-500/10 text-zinc-700 ring-zinc-500/20 dark:text-white/60'
-                                        }`}
-                                >
-                                    {adminAutoStats?.config?.enabled ? 'Auto 开启' : 'Auto 已关闭'}
-                                </div>
-                            </div>
-                            <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
-                                {adminSelectedUser ? `${formatUserLabel(adminSelectedUser)} · ID ${adminSelectedUserId}` : `用户 ID ${adminSelectedUserId}`}
-                            </div>
-                            {adminAutoStats?.stats?.window_label ? (
-                                <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
-                                    周期：{adminAutoStats.stats.window_label}
-                                </div>
-                            ) : null}
-                        </div>
-
-                        <button
-                            type="button"
-                            onClick={handleAdminDisableAuto}
-                            disabled={adminDisableLoading}
-                            className={`rounded-xl px-3 py-2 text-xs font-semibold ring-1 transition ${adminDisableLoading
-                                ? 'cursor-not-allowed bg-rose-500/10 text-rose-700/70 ring-rose-500/15 dark:text-rose-200/60'
-                                : 'bg-rose-500/15 text-rose-700 ring-rose-500/25 hover:bg-rose-500/20 dark:text-rose-200'
-                                }`}
-                        >
-                            {adminDisableLoading ? '关闭中...' : '关闭 Auto'}
-                        </button>
-                    </div>
-
-                    {adminDisableError ? (
-                        <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
-                            {adminDisableError}
-                        </div>
-                    ) : null}
-
-                    {adminDisableResult ? (
-                        <div className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-700 dark:text-emerald-200">
-                            已发起关闭：找到 {adminDisableResult.tasks_found} 个 Auto 任务，已请求撤出 {adminDisableResult.exit_requested} 个。
-                        </div>
-                    ) : null}
-
-                    {adminAutoStatsError ? (
-                        <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
-                            {adminAutoStatsError}
-                        </div>
-                    ) : null}
-
-                    {adminAutoStatsLoading && !adminAutoStats ? (
-                        <div className="mt-3 rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                            加载中...
-                        </div>
-                    ) : null}
-
-                    {adminAutoStats?.stats ? (
-                        <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-[11px] text-zinc-500 dark:text-white/40">累计收益</div>
-                                <div className="mt-0.5 text-sm font-extrabold tabular-nums text-emerald-700 dark:text-emerald-300">
-                                    {adminAutoStats?.formatted?.profit_usdt ?? '--'} USDT
-                                </div>
-                            </div>
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-[11px] text-zinc-500 dark:text-white/40">Gas 消耗</div>
-                                <div className="mt-0.5 text-sm font-extrabold tabular-nums text-zinc-900 dark:text-white/80">
-                                    {adminAutoStats?.formatted?.gas_usdt ?? '--'} USDT
-                                </div>
-                            </div>
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-[11px] text-zinc-500 dark:text-white/40">开仓 / 再平衡</div>
-                                <div className="mt-0.5 text-sm font-extrabold tabular-nums text-zinc-900 dark:text-white/80">
-                                    {adminAutoStats.stats.open_count} / {adminAutoStats.stats.rebalance_count}
-                                </div>
-                            </div>
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-[11px] text-zinc-500 dark:text-white/40">撤退卫士</div>
-                                <div className="mt-0.5 text-sm font-extrabold tabular-nums text-zinc-900 dark:text-white/80">
-                                    {adminAutoStats.stats.guard_count}
-                                </div>
-                            </div>
-
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116] col-span-2">
-                                <div className="flex flex-wrap gap-x-4 gap-y-2">
-                                    <div className="text-[11px] text-zinc-500 dark:text-white/40">
-                                        盈利交易对：
-                                        <span className="ml-1 font-semibold text-zinc-900 dark:text-white/80">
-                                            {adminAutoStats.stats.best_pair ? `${adminAutoStats.stats.best_pair}（${adminAutoStats?.formatted?.best_profit_usdt ?? '--'} USDT）` : '--'}
-                                        </span>
-                                    </div>
-                                    <div className="text-[11px] text-zinc-500 dark:text-white/40">
-                                        亏损交易对：
-                                        <span className="ml-1 font-semibold text-zinc-900 dark:text-white/80">
-                                            {adminAutoStats.stats.worst_pair ? `${adminAutoStats.stats.worst_pair}（${adminAutoStats?.formatted?.worst_profit_usdt ?? '--'} USDT）` : '--'}
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    ) : null}
-                </div>
-            ) : null
-            }
 
             {
                 !isHotPools && initDataMissing ? (
                     <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-200">
-                        请从 Telegram 机器人里的“实时仓位”按钮打开页面（否则无法读取你的仓位）。
+                        请从 Telegram 机器人里的"实时仓位"按钮打开页面（否则无法读取你的仓位）。
                     </div>
                 ) : null
             }
@@ -1893,14 +1713,6 @@ export default function App() {
                 isMonitor && autoMonitorError ? (
                     <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-200">
                         {autoMonitorError}
-                    </div>
-                ) : null
-            }
-
-            {
-                !isHotPools && showAdmin && !adminSelectedUserId ? (
-                    <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                        请选择用户查看实时仓位。
                     </div>
                 ) : null
             }
@@ -2029,18 +1841,18 @@ export default function App() {
                         const poolKey = `${proto}:${addr}`;
                         const prevData = previousHotPoolsMap[poolKey];
                         return (
-                                <HotPoolCard
-                                    key={`${proto}:${addr}`}
-                                    pool={row}
-                                    metric={hotPoolsSort}
-                                    previousData={prevData}
-                                    onOpenKline={setKlinePool}
-                                    onOpenPosition={openPositionModal}
-                                    onBlacklistRequest={openBlacklistPrompt}
-                                    rank={index + 1}
-                                    apiBaseUrl={apiBaseUrl}
-                                    isBlacklisted={blacklist.has(addr)}
-                                />
+                            <HotPoolCard
+                                key={`${proto}:${addr}`}
+                                pool={row}
+                                metric={hotPoolsSort}
+                                previousData={prevData}
+                                onOpenKline={setKlinePool}
+                                onOpenPosition={openPositionModal}
+                                onBlacklistRequest={openBlacklistPrompt}
+                                rank={index + 1}
+                                apiBaseUrl={apiBaseUrl}
+                                isBlacklisted={blacklist.has(addr)}
+                            />
                         );
                     })
                     : isMonitor
