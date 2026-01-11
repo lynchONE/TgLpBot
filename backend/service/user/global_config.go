@@ -35,6 +35,7 @@ func (s *GlobalConfigService) GetOrCreate(userID uint) (*models.GlobalConfig, er
 		AutoReinvest:              false,
 		ResidualTolerance:         1.0,
 		ExtraNotificationsEnabled: true,
+		FilterChineseTokens:       false,
 		BarkEnabled:               false,
 		BarkKeyEncrypted:          "",
 		BarkServer:                "",

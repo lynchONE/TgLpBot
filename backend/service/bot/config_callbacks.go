@@ -100,6 +100,28 @@ func (b *Bot) handleConfigExtraNotificationsToggle(query *tgbotapi.CallbackQuery
 	}
 }
 
+func (b *Bot) handleConfigFilterChineseToggle(query *tgbotapi.CallbackQuery, user *models.User) {
+	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
+	cfg, err := b.configService.GetOrCreate(user.ID)
+	if err != nil {
+		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("❌ 获取配置失败：%v", err))
+		return
+	}
+	newValue := !cfg.FilterChineseTokens
+	_, err = b.configService.Update(user.ID, map[string]interface{}{
+		"filter_chinese_tokens": newValue,
+	})
+	if err != nil {
+		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("❌ 更新配置失败：%v", err))
+		return
+	}
+	if newValue {
+		b.sendMessage(query.Message.Chat.ID, "✅ 已开启过滤中文代币（交易对含中文将不自动开仓）")
+	} else {
+		b.sendMessage(query.Message.Chat.ID, "✅ 已关闭过滤中文代币")
+	}
+}
+
 func (b *Bot) handleConfigBarkToggle(query *tgbotapi.CallbackQuery, user *models.User) {
 	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
 	cfg, err := b.configService.GetOrCreate(user.ID)

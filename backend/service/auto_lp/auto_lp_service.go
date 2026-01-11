@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -184,12 +185,14 @@ func (s *AutoLPService) runOnce() {
 
 	sysConfigService := user.NewSystemConfigService()
 	hardFilter := &models.HardFilterConfig{
-		MinPoolValueUSD:  config.AppConfig.AutoLPMinPoolValueUSD,
-		MinFeePercentage: config.AppConfig.AutoLPMinFeePercentage,
-		MinFeeRate5m:     config.AppConfig.AutoLPMinFeeRate5m,
-		MinTotalFees5m:   config.AppConfig.AutoLPMinTotalFees5m,
-		MinTotalVolume5m: config.AppConfig.AutoLPMinTotalVolume5m,
-		MinTx5m:          config.AppConfig.AutoLPMinTx5m,
+		MinPoolValueUSD:     config.AppConfig.AutoLPMinPoolValueUSD,
+		MinFeePercentage:    config.AppConfig.AutoLPMinFeePercentage,
+		MaxFeePercentage:    config.AppConfig.AutoLPMaxFeePercentage,
+		MinFeeRate5m:        config.AppConfig.AutoLPMinFeeRate5m,
+		MinTotalFees5m:      config.AppConfig.AutoLPMinTotalFees5m,
+		MinTotalVolume5m:    config.AppConfig.AutoLPMinTotalVolume5m,
+		MinTx5m:             config.AppConfig.AutoLPMinTx5m,
+		FilterChineseTokens: config.AppConfig.AutoLPFilterChineseTokens,
 	}
 	if cfg, err := sysConfigService.GetHardFilterConfig(); err == nil && cfg != nil {
 		hardFilter = cfg
@@ -209,7 +212,7 @@ func (s *AutoLPService) runOnce() {
 		widthGuardCfg = cfg
 	}
 
-	log.Printf("[AutoLP] 开始扫描：链=%s DEX=%s 扫描间隔=%ds 请求间隔=%dms 自动开仓=%v Top推送=%v 调试=%v；硬筛：TVL(current_pool_value,USD)>%.0f 费率(fee_percentage)>%.2f%% 5m费用率(total_fees/current_pool_value)>%.4f%% 5m手续费(total_fees)>%.2f 5m成交量(total_volume)>%.2f；开仓宽度(总宽度)：震荡=%.2f%% 温和上涨=%.2f%% 急涨=%.2f%%",
+	log.Printf("[AutoLP] 开始扫描：链=%s DEX=%s 扫描间隔=%ds 请求间隔=%dms 自动开仓=%v Top推送=%v 调试=%v；硬筛：中文=%v TVL(current_pool_value,USD)>%.0f 费率下限(fee_percentage)>%.2f%% 费率上限(fee_percentage)<=%.2f%% 5m费用率(total_fees/current_pool_value)>%.4f%% 5m手续费(total_fees)>%.2f 5m成交量(total_volume)>%.2f；开仓宽度(总宽度)：震荡=%.2f%% 温和上涨=%.2f%% 急涨=%.2f%%",
 		strings.ToLower(strings.TrimSpace(config.AppConfig.AutoLPChain)),
 		dexParam,
 		config.AppConfig.AutoLPScanIntervalSeconds,
@@ -217,8 +220,10 @@ func (s *AutoLPService) runOnce() {
 		config.AppConfig.AutoLPExecuteEnabled,
 		config.AppConfig.AutoLPNotifyTopCandidate,
 		config.AppConfig.AutoLPDebug,
+		hardFilter.FilterChineseTokens,
 		hardFilter.MinPoolValueUSD,
 		hardFilter.MinFeePercentage,
+		hardFilter.MaxFeePercentage,
 		hardFilter.MinFeeRate5m,
 		hardFilter.MinTotalFees5m,
 		hardFilter.MinTotalVolume5m,
@@ -760,21 +765,25 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 	if err != nil {
 		log.Printf("[AutoLP] 获取硬筛配置失败，使用环境变量: %v", err)
 		hardFilter = &models.HardFilterConfig{
-			MinPoolValueUSD:  config.AppConfig.AutoLPMinPoolValueUSD,
-			MinFeePercentage: config.AppConfig.AutoLPMinFeePercentage,
-			MinFeeRate5m:     config.AppConfig.AutoLPMinFeeRate5m,
-			MinTotalFees5m:   config.AppConfig.AutoLPMinTotalFees5m,
-			MinTotalVolume5m: config.AppConfig.AutoLPMinTotalVolume5m,
-			MinTx5m:          config.AppConfig.AutoLPMinTx5m,
+			MinPoolValueUSD:     config.AppConfig.AutoLPMinPoolValueUSD,
+			MinFeePercentage:    config.AppConfig.AutoLPMinFeePercentage,
+			MaxFeePercentage:    config.AppConfig.AutoLPMaxFeePercentage,
+			MinFeeRate5m:        config.AppConfig.AutoLPMinFeeRate5m,
+			MinTotalFees5m:      config.AppConfig.AutoLPMinTotalFees5m,
+			MinTotalVolume5m:    config.AppConfig.AutoLPMinTotalVolume5m,
+			MinTx5m:             config.AppConfig.AutoLPMinTx5m,
+			FilterChineseTokens: config.AppConfig.AutoLPFilterChineseTokens,
 		}
 	}
 
 	minTVL := hardFilter.MinPoolValueUSD
 	minFeePct := hardFilter.MinFeePercentage
+	maxFeePct := hardFilter.MaxFeePercentage
 	minFeeRatePct := hardFilter.MinFeeRate5m
 	minFees := hardFilter.MinTotalFees5m
 	minVol := hardFilter.MinTotalVolume5m
 	minTx := hardFilter.MinTx5m
+	filterChineseTokens := hardFilter.FilterChineseTokens
 	resMinFeeRate := config.AppConfig.AutoLPResonanceMinFeeRate5m
 	resMinVol := config.AppConfig.AutoLPResonanceMinTotalVolume5m
 	resMinAbsZ60 := config.AppConfig.AutoLPResonanceMinAbsZ60
@@ -794,8 +803,10 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 	widthRapidPump := widthGuardCfg.WidthRapidPumpPercent
 
 	filteredNo5 := 0
+	filteredChinese := 0
 	filteredTVL := 0
 	filteredFeePct := 0
+	filteredMaxFeePct := 0
 	filteredFeeRate := 0
 	filteredFees := 0
 	filteredVol := 0
@@ -810,12 +821,20 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 			filteredNo5++
 			continue
 		}
+		if filterChineseTokens && (containsChinese(strings.TrimSpace(p5.TradingPair)) || containsChinese(strings.TrimSpace(p5.Token0Symbol)) || containsChinese(strings.TrimSpace(p5.Token1Symbol))) {
+			filteredChinese++
+			continue
+		}
 		if minTVL > 0 && p5.CurrentPoolValue <= minTVL {
 			filteredTVL++
 			continue
 		}
 		if minFeePct > 0 && p5.FeePercentage <= minFeePct {
 			filteredFeePct++
+			continue
+		}
+		if maxFeePct > 0 && p5.FeePercentage > maxFeePct {
+			filteredMaxFeePct++
 			continue
 		}
 		feeRatePct := 0.0
@@ -1000,8 +1019,8 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 		candidates = append(candidates, a)
 	}
 	candidateCount := len(candidates)
-	log.Printf("[AutoLP] 筛选结果：总池=%d 通过硬筛=%d 进入分析=%d 候选=%d；过滤：缺少5m(没进5m榜单)=%d TVL不达标(current_pool_value)=%d 费率不达标(fee_percentage)=%d 费用率不达标(fee_rate_5m)=%d 5m手续费不达标(total_fees)=%d 5m成交量不达标(total_volume)=%d 5m交易笔数不达标(tx_count)=%d",
-		totalPools, passedHard, len(out), candidateCount, filteredNo5, filteredTVL, filteredFeePct, filteredFeeRate, filteredFees, filteredVol, filteredTx,
+	log.Printf("[AutoLP] 筛选结果：总池=%d 通过硬筛=%d 进入分析=%d 候选=%d；过滤：缺少5m(没进5m榜单)=%d 中文=%d TVL不达标(current_pool_value)=%d 费率不达标(fee_percentage)=%d 费率过高(fee_percentage)=%d 费用率不达标(fee_rate_5m)=%d 5m手续费不达标(total_fees)=%d 5m成交量不达标(total_volume)=%d 5m交易笔数不达标(tx_count)=%d",
+		totalPools, passedHard, len(out), candidateCount, filteredNo5, filteredChinese, filteredTVL, filteredFeePct, filteredMaxFeePct, filteredFeeRate, filteredFees, filteredVol, filteredTx,
 	)
 	if len(candidates) > 0 {
 		top := candidates[0]
@@ -1565,6 +1584,15 @@ func isStableCoin(s string) bool {
 	return false
 }
 
+func containsChinese(s string) bool {
+	for _, r := range s {
+		if unicode.Is(unicode.Han, r) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *AutoLPService) tryOpenCandidate(ctx context.Context, userID uint, a AutoLPAnalysis, amount float64) (bool, error) {
 	if a.Action != "CANDIDATE" {
 		return false, nil
@@ -1880,8 +1908,40 @@ func (s *AutoLPService) trySwitchWorstAutoTask(ctx context.Context, cfg models.A
 		return false, nil
 	}
 
-	top, ok := autoLPTopCandidate(analyses)
-	if !ok || top.FeeRate5mPct <= 0 {
+	globalCfg, err := s.configService.GetOrCreate(userID)
+	if err != nil {
+		return false, err
+	}
+
+	sysConfigService := user.NewSystemConfigService()
+	hardFilter, err := sysConfigService.GetHardFilterConfig()
+	if err != nil || hardFilter == nil {
+		hardFilter = &models.HardFilterConfig{}
+		if config.AppConfig != nil {
+			hardFilter.MaxFeePercentage = config.AppConfig.AutoLPMaxFeePercentage
+			hardFilter.FilterChineseTokens = config.AppConfig.AutoLPFilterChineseTokens
+		}
+	}
+	filterChineseTokens := globalCfg.FilterChineseTokens || hardFilter.FilterChineseTokens
+	maxFeePct := hardFilter.MaxFeePercentage
+
+	top := AutoLPAnalysis{}
+	ok := false
+	for _, a := range analyses {
+		if a.Action != "CANDIDATE" || a.FeeRate5mPct <= 0 {
+			continue
+		}
+		if maxFeePct > 0 && a.FeePercentage > maxFeePct {
+			continue
+		}
+		if filterChineseTokens && containsChinese(strings.TrimSpace(a.TradingPair)) {
+			continue
+		}
+		top = a
+		ok = true
+		break
+	}
+	if !ok {
 		return false, nil
 	}
 	if ok, err := s.hasActiveTask(userID, top.ProtocolVersion, top.PoolAddress); err != nil {
@@ -1961,6 +2021,18 @@ func (s *AutoLPService) trySwitchManualTask(ctx context.Context, cfg models.Auto
 		return false, nil
 	}
 
+	sysConfigService := user.NewSystemConfigService()
+	hardFilter, err := sysConfigService.GetHardFilterConfig()
+	if err != nil || hardFilter == nil {
+		hardFilter = &models.HardFilterConfig{}
+		if config.AppConfig != nil {
+			hardFilter.MaxFeePercentage = config.AppConfig.AutoLPMaxFeePercentage
+			hardFilter.FilterChineseTokens = config.AppConfig.AutoLPFilterChineseTokens
+		}
+	}
+	maxFeePct := hardFilter.MaxFeePercentage
+	filterChineseTokens := hardFilter.FilterChineseTokens
+
 	analysisByPool := make(map[string]AutoLPAnalysis, len(analyses))
 	bestByPair := make(map[string]AutoLPAnalysis)
 	for _, a := range analyses {
@@ -1968,6 +2040,12 @@ func (s *AutoLPService) trySwitchManualTask(ctx context.Context, cfg models.Auto
 			analysisByPool[k] = a
 		}
 		if a.Action != "CANDIDATE" || a.FeeRate5mPct <= 0 {
+			continue
+		}
+		if maxFeePct > 0 && a.FeePercentage > maxFeePct {
+			continue
+		}
+		if filterChineseTokens && containsChinese(strings.TrimSpace(a.TradingPair)) {
 			continue
 		}
 		pair := autoLPPairKey(a.Token0Address, a.Token1Address)
@@ -2227,8 +2305,38 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 		return nil, 1, fmt.Errorf("unsupported protocol_version=%q", a.ProtocolVersion)
 	}
 
+	globalCfg, err := s.configService.GetOrCreate(userID)
+	if err != nil {
+		return nil, 1, err
+	}
+
+	sysConfigService := user.NewSystemConfigService()
+	hardFilter, err := sysConfigService.GetHardFilterConfig()
+	if err != nil || hardFilter == nil {
+		hardFilter = &models.HardFilterConfig{}
+		if config.AppConfig != nil {
+			hardFilter.MaxFeePercentage = config.AppConfig.AutoLPMaxFeePercentage
+			hardFilter.FilterChineseTokens = config.AppConfig.AutoLPFilterChineseTokens
+		}
+	}
+	filterChineseTokens := globalCfg.FilterChineseTokens || hardFilter.FilterChineseTokens
+	maxFeePct := hardFilter.MaxFeePercentage
+
+	if maxFeePct > 0 && a.FeePercentage > maxFeePct {
+		if config.AppConfig != nil && config.AppConfig.AutoLPDebug {
+			log.Printf("[AutoLP] 跳过费率过高: user_id=%d pair=%s fee=%.4f max=%.4f pool=%s", userID, strings.TrimSpace(a.TradingPair), a.FeePercentage, maxFeePct, poolID)
+		}
+		return nil, 1, fmt.Errorf("filtered max fee percentage")
+	}
+
+	if filterChineseTokens && containsChinese(strings.TrimSpace(a.TradingPair)) {
+		if config.AppConfig != nil && config.AppConfig.AutoLPDebug {
+			log.Printf("[AutoLP] 跳过中文交易对: user_id=%d pair=%s pool=%s", userID, strings.TrimSpace(a.TradingPair), poolID)
+		}
+		return nil, 1, fmt.Errorf("filtered chinese trading pair")
+	}
+
 	var info *pool.PoolInfo
-	var err error
 	switch version {
 	case "v4":
 		info, err = s.poolService.GetV4PoolInfo(poolID)
@@ -2240,6 +2348,12 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 	}
 	if info == nil || info.TickSpacing <= 0 {
 		return nil, 1, fmt.Errorf("pool info invalid")
+	}
+	if filterChineseTokens && (containsChinese(info.Token0Symbol) || containsChinese(info.Token1Symbol)) {
+		if config.AppConfig != nil && config.AppConfig.AutoLPDebug {
+			log.Printf("[AutoLP] 跳过中文代币: user_id=%d pair=%s symbols=%s/%s pool=%s", userID, strings.TrimSpace(a.TradingPair), strings.TrimSpace(info.Token0Symbol), strings.TrimSpace(info.Token1Symbol), poolID)
+		}
+		return nil, 1, fmt.Errorf("filtered chinese token symbol")
 	}
 
 	currentTick, err := getCurrentTickByVersion(version, poolID)
@@ -2274,11 +2388,6 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 	if effLowerPct <= 0 || effUpperPct <= 0 {
 		effLowerPct = tickLowerPctReq
 		effUpperPct = tickUpperPctReq
-	}
-
-	cfg, err := s.configService.GetOrCreate(userID)
-	if err != nil {
-		return nil, 1, err
 	}
 
 	gasMult := 1.0
@@ -2333,13 +2442,13 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 		GuardPriceTxDropArmed:       false,
 
 		CurrentLiquidity:     "0",
-		ReopenDelaySeconds:   cfg.RebalanceTimeout,
-		SlippageTolerance:    cfg.SlippageTolerance,
-		AutoReinvest:         cfg.AutoReinvest,
-		ResidualTolerance:    cfg.ResidualTolerance,
+		ReopenDelaySeconds:   globalCfg.RebalanceTimeout,
+		SlippageTolerance:    globalCfg.SlippageTolerance,
+		AutoReinvest:         globalCfg.AutoReinvest,
+		ResidualTolerance:    globalCfg.ResidualTolerance,
 		AllowEntrySwap:       config.AppConfig.AutoLPAllowEntrySwap,
-		StopLossEnabled:      cfg.StopLossEnabled,
-		StopLossDelaySeconds: cfg.StopLossDelaySeconds,
+		StopLossEnabled:      globalCfg.StopLossEnabled,
+		StopLossDelaySeconds: globalCfg.StopLossDelaySeconds,
 
 		Status:        models.StrategyStatusOpening,
 		LastCheckTime: now,

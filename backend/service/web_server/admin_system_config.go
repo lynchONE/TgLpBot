@@ -16,12 +16,14 @@ type adminSystemConfigRequest struct {
 	InitData string `json:"initData"`
 
 	// 可选更新字段 - 硬筛阈值
-	AutoLPMinPoolValueUSD  *float64 `json:"autolp_min_pool_value_usd,omitempty"`
-	AutoLPMinFeePercentage *float64 `json:"autolp_min_fee_percentage,omitempty"`
-	AutoLPMinFeeRate5m     *float64 `json:"autolp_min_fee_rate_5m,omitempty"`
-	AutoLPMinTotalFees5m   *float64 `json:"autolp_min_total_fees_5m,omitempty"`
-	AutoLPMinTotalVolume5m *float64 `json:"autolp_min_total_volume_5m,omitempty"`
-	AutoLPMinTx5m          *int     `json:"autolp_min_tx_5m,omitempty"`
+	AutoLPMinPoolValueUSD     *float64 `json:"autolp_min_pool_value_usd,omitempty"`
+	AutoLPMinFeePercentage    *float64 `json:"autolp_min_fee_percentage,omitempty"`
+	AutoLPMaxFeePercentage    *float64 `json:"autolp_max_fee_percentage,omitempty"`
+	AutoLPMinFeeRate5m        *float64 `json:"autolp_min_fee_rate_5m,omitempty"`
+	AutoLPMinTotalFees5m      *float64 `json:"autolp_min_total_fees_5m,omitempty"`
+	AutoLPMinTotalVolume5m    *float64 `json:"autolp_min_total_volume_5m,omitempty"`
+	AutoLPMinTx5m             *int     `json:"autolp_min_tx_5m,omitempty"`
+	AutoLPFilterChineseTokens *bool    `json:"autolp_filter_chinese_tokens,omitempty"`
 
 	// 可选更新字段 - 宽度策略
 	AutoLPWidthSidewaysPercent    *float64 `json:"autolp_width_sideways_percent,omitempty"`
@@ -111,6 +113,9 @@ func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request)
 		if req.AutoLPMinFeePercentage != nil {
 			updates["AutoLPMinFeePercentage"] = *req.AutoLPMinFeePercentage
 		}
+		if req.AutoLPMaxFeePercentage != nil {
+			updates["AutoLPMaxFeePercentage"] = *req.AutoLPMaxFeePercentage
+		}
 		if req.AutoLPMinFeeRate5m != nil {
 			updates["AutoLPMinFeeRate5m"] = *req.AutoLPMinFeeRate5m
 		}
@@ -122,6 +127,9 @@ func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request)
 		}
 		if req.AutoLPMinTx5m != nil {
 			updates["AutoLPMinTx5m"] = *req.AutoLPMinTx5m
+		}
+		if req.AutoLPFilterChineseTokens != nil {
+			updates["AutoLPFilterChineseTokens"] = *req.AutoLPFilterChineseTokens
 		}
 		// 宽度策略
 		if req.AutoLPWidthSidewaysPercent != nil {
@@ -240,12 +248,14 @@ func getEnvDefaults() *models.HardFilterConfig {
 		return nil
 	}
 	return &models.HardFilterConfig{
-		MinPoolValueUSD:  config.AppConfig.AutoLPMinPoolValueUSD,
-		MinFeePercentage: config.AppConfig.AutoLPMinFeePercentage,
-		MinFeeRate5m:     config.AppConfig.AutoLPMinFeeRate5m,
-		MinTotalFees5m:   config.AppConfig.AutoLPMinTotalFees5m,
-		MinTotalVolume5m: config.AppConfig.AutoLPMinTotalVolume5m,
-		MinTx5m:          config.AppConfig.AutoLPMinTx5m,
+		MinPoolValueUSD:     config.AppConfig.AutoLPMinPoolValueUSD,
+		MinFeePercentage:    config.AppConfig.AutoLPMinFeePercentage,
+		MaxFeePercentage:    config.AppConfig.AutoLPMaxFeePercentage,
+		MinFeeRate5m:        config.AppConfig.AutoLPMinFeeRate5m,
+		MinTotalFees5m:      config.AppConfig.AutoLPMinTotalFees5m,
+		MinTotalVolume5m:    config.AppConfig.AutoLPMinTotalVolume5m,
+		MinTx5m:             config.AppConfig.AutoLPMinTx5m,
+		FilterChineseTokens: config.AppConfig.AutoLPFilterChineseTokens,
 	}
 }
 

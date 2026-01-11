@@ -37,6 +37,9 @@ type GlobalConfig struct {
 	// Notifications
 	ExtraNotificationsEnabled bool `gorm:"not null;default:true" json:"extra_notifications_enabled"`
 
+	// Token filters
+	FilterChineseTokens bool `gorm:"not null;default:false" json:"filter_chinese_tokens"`
+
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`

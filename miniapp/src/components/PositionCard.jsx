@@ -179,7 +179,7 @@ export default function PositionCard({
 
     const openWallet = () => openLink(`https://bscscan.com/address/${walletAddress}`);
     const openPool = () => poolLink && openLink(poolLink);
-    const openToken = (addr) => addr && openLink(`https://bscscan.com/token/${addr}`);
+    const openToken = (addr) => addr && openLink(`https://gmgn.ai/bsc/token/${addr}`);
 
     const decimals0 = useMemo(() => Number(token0?.decimals ?? 18), [token0?.decimals]);
     const decimals1 = useMemo(() => Number(token1?.decimals ?? 18), [token1?.decimals]);

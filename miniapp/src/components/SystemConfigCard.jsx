@@ -17,8 +17,10 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
     // 编辑状态
     const [draft, setDraft] = useState({
         // 硬筛阈值
+        autolp_filter_chinese_tokens: false,
         autolp_min_pool_value_usd: '',
         autolp_min_fee_percentage: '',
+        autolp_max_fee_percentage: '',
         autolp_min_fee_rate_5m: '',
         autolp_min_total_fees_5m: '',
         autolp_min_total_volume_5m: '',
@@ -46,8 +48,10 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
                 setConfig(resp.config);
                 setDraft({
                     // 硬筛阈值
+                    autolp_filter_chinese_tokens: Boolean(resp.config.autolp_filter_chinese_tokens),
                     autolp_min_pool_value_usd: String(resp.config.autolp_min_pool_value_usd || ''),
                     autolp_min_fee_percentage: String(resp.config.autolp_min_fee_percentage || ''),
+                    autolp_max_fee_percentage: String(resp.config.autolp_max_fee_percentage || ''),
                     autolp_min_fee_rate_5m: String(resp.config.autolp_min_fee_rate_5m || ''),
                     autolp_min_total_fees_5m: String(resp.config.autolp_min_total_fees_5m || ''),
                     autolp_min_total_volume_5m: String(resp.config.autolp_min_total_volume_5m || ''),
@@ -100,8 +104,10 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
             };
 
             // 硬筛阈值
+            updates.autolp_filter_chinese_tokens = Boolean(draft.autolp_filter_chinese_tokens);
             updates.autolp_min_pool_value_usd = parseFloat(draft.autolp_min_pool_value_usd);
             updates.autolp_min_fee_percentage = parseFloat(draft.autolp_min_fee_percentage);
+            updates.autolp_max_fee_percentage = parseFloat(draft.autolp_max_fee_percentage);
             updates.autolp_min_fee_rate_5m = parseFloat(draft.autolp_min_fee_rate_5m);
             updates.autolp_min_total_fees_5m = parseFloat(draft.autolp_min_total_fees_5m);
             updates.autolp_min_total_volume_5m = parseFloat(draft.autolp_min_total_volume_5m);
@@ -121,8 +127,10 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
             if (resp?.config) {
                 setConfig(resp.config);
                 setDraft({
+                    autolp_filter_chinese_tokens: Boolean(resp.config.autolp_filter_chinese_tokens),
                     autolp_min_pool_value_usd: String(resp.config.autolp_min_pool_value_usd || ''),
                     autolp_min_fee_percentage: String(resp.config.autolp_min_fee_percentage || ''),
+                    autolp_max_fee_percentage: String(resp.config.autolp_max_fee_percentage || ''),
                     autolp_min_fee_rate_5m: String(resp.config.autolp_min_fee_rate_5m || ''),
                     autolp_min_total_fees_5m: String(resp.config.autolp_min_total_fees_5m || ''),
                     autolp_min_total_volume_5m: String(resp.config.autolp_min_total_volume_5m || ''),
@@ -168,6 +176,8 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
 
     const sectionButtonClass = (section) => `flex w-full items-center justify-between py-2 ${expandedSection === section ? 'border-b border-zinc-200 dark:border-white/10' : ''}`;
 
+    const formatDefaultOnOff = (value) => (value ? '开' : '关');
+
     // 渲染输入字段
     const renderInput = (key, label, defaultValue, step = '0.01', isInt = false) => (
         <div>
@@ -185,6 +195,30 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
             />
         </div>
     );
+
+    const renderToggle = (key, label, defaultValue) => {
+        const on = Boolean(draft[key]);
+        const fallback = defaultValue !== undefined ? formatDefaultOnOff(Boolean(defaultValue)) : null;
+        return (
+            <div className="flex items-center justify-between rounded-lg border border-zinc-200 bg-white px-3 py-2 dark:border-white/10 dark:bg-white/5">
+                <div className={labelClass}>
+                    {label}
+                    {fallback !== null && <span className="ml-1 text-zinc-400">默认: {fallback}</span>}
+                </div>
+                <button
+                    type="button"
+                    onClick={() => handleInputChange(key, !on)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${on ? 'bg-emerald-600 dark:bg-emerald-500' : 'bg-zinc-300 dark:bg-white/10'}`}
+                    aria-pressed={on}
+                    aria-label={label}
+                >
+                    <span
+                        className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${on ? 'translate-x-5' : 'translate-x-1'}`}
+                    />
+                </button>
+            </div>
+        );
+    };
 
     return (
         <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
@@ -210,10 +244,14 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
                 </button>
                 {expandedSection === 'filter' && config && (
                     <div className="py-3 space-y-3">
-                        <div className="text-xs text-zinc-500 dark:text-white/50 mb-2">值为 0 时使用环境变量默认值</div>
+                        <div className="text-xs text-zinc-500 dark:text-white/50 mb-2">数值为 0 时使用环境变量默认值（费率上限为 0 表示不启用）</div>
                         <div className="grid grid-cols-2 gap-3">
+                            <div className="col-span-2">
+                                {renderToggle('autolp_filter_chinese_tokens', '过滤中文交易对/代币符号', defaults?.filter_chinese_tokens)}
+                            </div>
                             {renderInput('autolp_min_pool_value_usd', 'TVL 阈值 (USD)', defaults?.min_pool_value_usd)}
                             {renderInput('autolp_min_fee_percentage', '费率阈值 (%)', defaults?.min_fee_percentage)}
+                            {renderInput('autolp_max_fee_percentage', '费率上限 (%)', defaults?.max_fee_percentage)}
                             {renderInput('autolp_min_fee_rate_5m', '5m 费用率 (%)', defaults?.min_fee_rate_5m, '0.0001')}
                             {renderInput('autolp_min_total_fees_5m', '5m 手续费 (USD)', defaults?.min_total_fees_5m)}
                             {renderInput('autolp_min_total_volume_5m', '5m 成交量 (USD)', defaults?.min_total_volume_5m)}

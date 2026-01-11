@@ -12,12 +12,14 @@ type SystemConfig struct {
 	ID uint `gorm:"primaryKey" json:"id"`
 
 	// AutoLP 硬筛阈值（0 表示使用环境变量默认值）
-	AutoLPMinPoolValueUSD  float64 `gorm:"type:decimal(20,4);default:0" json:"autolp_min_pool_value_usd"`  // TVL 阈值 (USD)
-	AutoLPMinFeePercentage float64 `gorm:"type:decimal(10,4);default:0" json:"autolp_min_fee_percentage"`  // 费率阈值 (%)
-	AutoLPMinFeeRate5m     float64 `gorm:"type:decimal(10,6);default:0" json:"autolp_min_fee_rate_5m"`     // 5分钟费用率阈值 (%)
-	AutoLPMinTotalFees5m   float64 `gorm:"type:decimal(20,4);default:0" json:"autolp_min_total_fees_5m"`   // 5分钟手续费阈值 (USD)
-	AutoLPMinTotalVolume5m float64 `gorm:"type:decimal(20,4);default:0" json:"autolp_min_total_volume_5m"` // 5分钟成交量阈值 (USD)
-	AutoLPMinTx5m          int     `gorm:"default:0" json:"autolp_min_tx_5m"`                              // 5分钟交易笔数阈值
+	AutoLPMinPoolValueUSD     float64 `gorm:"type:decimal(20,4);default:0" json:"autolp_min_pool_value_usd"`  // TVL 阈值 (USD)
+	AutoLPMinFeePercentage    float64 `gorm:"type:decimal(10,4);default:0" json:"autolp_min_fee_percentage"`  // 费率阈值 (%)
+	AutoLPMaxFeePercentage    float64 `gorm:"type:decimal(10,4);default:0" json:"autolp_max_fee_percentage"`  // 费率上限 (%)
+	AutoLPMinFeeRate5m        float64 `gorm:"type:decimal(10,6);default:0" json:"autolp_min_fee_rate_5m"`     // 5分钟费用率阈值 (%)
+	AutoLPMinTotalFees5m      float64 `gorm:"type:decimal(20,4);default:0" json:"autolp_min_total_fees_5m"`   // 5分钟手续费阈值 (USD)
+	AutoLPMinTotalVolume5m    float64 `gorm:"type:decimal(20,4);default:0" json:"autolp_min_total_volume_5m"` // 5分钟成交量阈值 (USD)
+	AutoLPMinTx5m             int     `gorm:"default:0" json:"autolp_min_tx_5m"`                              // 5分钟交易笔数阈值
+	AutoLPFilterChineseTokens bool    `gorm:"not null;default:false" json:"autolp_filter_chinese_tokens"`     // 过滤中文交易对/代币符号
 
 	// AutoLP 宽度策略参数（0 表示使用环境变量默认值）
 	AutoLPWidthSidewaysPercent    float64 `gorm:"type:decimal(10,4);default:0" json:"autolp_width_sideways_percent"`     // 横盘宽度 (%)
@@ -43,12 +45,14 @@ func (SystemConfig) TableName() string {
 
 // HardFilterConfig 硬筛配置结构，用于传递给 AutoLP 服务
 type HardFilterConfig struct {
-	MinPoolValueUSD  float64 `json:"min_pool_value_usd"`
-	MinFeePercentage float64 `json:"min_fee_percentage"`
-	MinFeeRate5m     float64 `json:"min_fee_rate_5m"`
-	MinTotalFees5m   float64 `json:"min_total_fees_5m"`
-	MinTotalVolume5m float64 `json:"min_total_volume_5m"`
-	MinTx5m          int     `json:"min_tx_5m"`
+	MinPoolValueUSD     float64 `json:"min_pool_value_usd"`
+	MinFeePercentage    float64 `json:"min_fee_percentage"`
+	MaxFeePercentage    float64 `json:"max_fee_percentage"`
+	MinFeeRate5m        float64 `json:"min_fee_rate_5m"`
+	MinTotalFees5m      float64 `json:"min_total_fees_5m"`
+	MinTotalVolume5m    float64 `json:"min_total_volume_5m"`
+	MinTx5m             int     `json:"min_tx_5m"`
+	FilterChineseTokens bool    `json:"filter_chinese_tokens"`
 }
 
 // WidthGuardConfig 宽度和退出卫士配置结构，用于传递默认值

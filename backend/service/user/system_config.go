@@ -60,6 +60,9 @@ func (s *SystemConfigService) GetHardFilterConfig() (*models.HardFilterConfig, e
 
 	hf := &models.HardFilterConfig{}
 
+	// 中文交易对/代币过滤：使用数据库配置（默认关闭）
+	hf.FilterChineseTokens = cfg.AutoLPFilterChineseTokens
+
 	// TVL阈值：数据库值 > 0 则使用，否则使用环境变量
 	if cfg.AutoLPMinPoolValueUSD > 0 {
 		hf.MinPoolValueUSD = cfg.AutoLPMinPoolValueUSD
@@ -72,6 +75,13 @@ func (s *SystemConfigService) GetHardFilterConfig() (*models.HardFilterConfig, e
 		hf.MinFeePercentage = cfg.AutoLPMinFeePercentage
 	} else if config.AppConfig != nil {
 		hf.MinFeePercentage = config.AppConfig.AutoLPMinFeePercentage
+	}
+
+	// 费率上限（0 表示不启用；数据库值 > 0 优先）
+	if cfg.AutoLPMaxFeePercentage > 0 {
+		hf.MaxFeePercentage = cfg.AutoLPMaxFeePercentage
+	} else if config.AppConfig != nil {
+		hf.MaxFeePercentage = config.AppConfig.AutoLPMaxFeePercentage
 	}
 
 	// 5分钟费用率阈值

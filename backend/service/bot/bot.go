@@ -555,6 +555,8 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleConfigBarkGroup(query, user)
 	case query.Data == "config_extra_notifications_toggle":
 		b.handleConfigExtraNotificationsToggle(query, user)
+	case query.Data == "config_filter_chinese_toggle":
+		b.handleConfigFilterChineseToggle(query, user)
 	case query.Data == "view_config":
 		b.handleViewConfig(query, user)
 	// Task management callbacks

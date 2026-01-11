@@ -2325,6 +2325,10 @@ export default function App() {
                                                 <div>日志通知</div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.extra_notifications_enabled)}</div>
                                             </div>
+                                            <div>
+                                                <div>过滤中文代币</div>
+                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.filter_chinese_tokens)}</div>
+                                            </div>
                                         </div>
                                     </div>
                                 ) : null}

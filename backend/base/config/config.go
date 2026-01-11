@@ -131,6 +131,7 @@ type Config struct {
 	AutoLPMaxActiveTasks            int
 	AutoLPMinPoolValueUSD           float64
 	AutoLPMinFeePercentage          float64
+	AutoLPMaxFeePercentage          float64
 	AutoLPMinFeeRate5m              float64
 	AutoLPMinTotalFees5m            float64
 	AutoLPMinTotalVolume5m          float64
@@ -158,6 +159,7 @@ type Config struct {
 	AutoLPWidthSidewaysPercent      float64
 	AutoLPWidthMildUptrendPercent   float64
 	AutoLPWidthRapidPumpPercent     float64
+	AutoLPFilterChineseTokens       bool
 
 	// Smart LP (monitor external contract -> NPM events)
 	SmartLPEnabled             bool
@@ -200,6 +202,7 @@ func LoadConfig() error {
 	autoLPMaxActiveTasks, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_MAX_ACTIVE_TASKS", "1")))
 	autoLPMinPoolValueUSD, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_POOL_VALUE_USD", "50000")), 64)
 	autoLPMinFeePct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_FEE_PERCENTAGE", "0.2")), 64)
+	autoLPMaxFeePct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MAX_FEE_PERCENTAGE", "0")), 64)
 	autoLPMinFeeRate5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_FEE_RATE_5M", "0")), 64)
 	autoLPMinTotalFees5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_TOTAL_FEES_5M", "100")), 64)
 	autoLPMinTotalVolume5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_TOTAL_VOLUME_5M", "5000")), 64)
@@ -232,6 +235,7 @@ func LoadConfig() error {
 	clickhouseMaxOpenConns, _ := strconv.Atoi(strings.TrimSpace(getEnv("CLICKHOUSE_MAX_OPEN_CONNS", "50")))
 	clickhouseMaxIdleConns, _ := strconv.Atoi(strings.TrimSpace(getEnv("CLICKHOUSE_MAX_IDLE_CONNS", "10")))
 	autoLPDebug := getEnvBool("AUTO_LP_DEBUG", false)
+	autoLPFilterChineseTokens := getEnvBool("AUTO_LP_FILTER_CHINESE_TOKENS", false)
 	autoLPWidthSideways, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_SIDEWAYS_PERCENT", "2.0")), 64)
 	autoLPWidthMildUp, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_MILD_UPTREND_PERCENT", "5.0")), 64)
 	autoLPWidthRapidPump, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_RAPID_PUMP_PERCENT", "15.0")), 64)
@@ -387,6 +391,7 @@ func LoadConfig() error {
 		AutoLPMaxActiveTasks:            autoLPMaxActiveTasks,
 		AutoLPMinPoolValueUSD:           autoLPMinPoolValueUSD,
 		AutoLPMinFeePercentage:          autoLPMinFeePct,
+		AutoLPMaxFeePercentage:          autoLPMaxFeePct,
 		AutoLPMinFeeRate5m:              autoLPMinFeeRate5m,
 		AutoLPMinTotalFees5m:            autoLPMinTotalFees5m,
 		AutoLPMinTotalVolume5m:          autoLPMinTotalVolume5m,
@@ -414,6 +419,7 @@ func LoadConfig() error {
 		AutoLPWidthSidewaysPercent:      autoLPWidthSideways,
 		AutoLPWidthMildUptrendPercent:   autoLPWidthMildUp,
 		AutoLPWidthRapidPumpPercent:     autoLPWidthRapidPump,
+		AutoLPFilterChineseTokens:       autoLPFilterChineseTokens,
 
 		SmartLPEnabled:             getEnvBool("SMART_LP_ENABLED", false),
 		SmartLPDebug:               smartLPDebug,

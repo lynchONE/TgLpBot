@@ -32,6 +32,9 @@ func globalConfigKeyboard() tgbotapi.InlineKeyboardMarkup {
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("📝 日志通知", "config_extra_notifications_toggle"),
+			tgbotapi.NewInlineKeyboardButtonData("🈲 过滤中文代币", "config_filter_chinese_toggle"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("🔄 刷新", "view_config"),
 		),
 	)
@@ -71,6 +74,7 @@ func formatGlobalConfigMenuText(cfg *models.GlobalConfig) string {
 🌐 Bark Server：%s
 👥 Bark Group：%s
 📝 日志通知：%s
+🈲 过滤中文代币：%s
 
 请选择要配置的选项：`,
 		cfg.RebalanceTimeout,
@@ -84,5 +88,6 @@ func formatGlobalConfigMenuText(cfg *models.GlobalConfig) string {
 		barkServer,
 		barkGroup,
 		boolToOnOff(cfg.ExtraNotificationsEnabled),
+		boolToOnOff(cfg.FilterChineseTokens),
 	)
 }
