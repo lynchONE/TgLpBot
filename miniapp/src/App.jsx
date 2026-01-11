@@ -2039,15 +2039,6 @@ export default function App() {
                                         </div>
                                     ) : null}
 
-                                    {isPositions && positionsTaskTab === 'auto' ? (
-                                        <AutoPnLCurveCard
-                                            data={autoPnLCurve}
-                                            loading={autoPnLCurveLoading}
-                                            error={autoPnLCurveError}
-                                            theme={theme}
-                                        />
-                                    ) : null}
-
                                     {visibleTaskPositions.map((p) => (
                                         <PositionCard
                                             key={`${p.version}:${p.position_id}`}
@@ -2065,6 +2056,15 @@ export default function App() {
                                             onToggleSelect={() => toggleTaskSelection(p.task_id)}
                                         />
                                     ))}
+
+                                    {isPositions && positionsTaskTab === 'auto' ? (
+                                        <AutoPnLCurveCard
+                                            data={autoPnLCurve}
+                                            loading={autoPnLCurveLoading}
+                                            error={autoPnLCurveError}
+                                            theme={theme}
+                                        />
+                                    ) : null}
                                 </>
                             )
                             : null}
