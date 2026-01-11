@@ -43,6 +43,8 @@ export default function AutoPnLCurveCard({ data, loading, error, theme = 'dark' 
     const resizeRef = useRef(null);
 
     const [showAllEvents, setShowAllEvents] = useState(false);
+    const [chartError, setChartError] = useState('');
+    const [chartNonce, setChartNonce] = useState(0);
 
     const windowLabel = String(data?.window_label || '').trim();
     const realizedProfit = Number(data?.realized_profit_usdt ?? 0);
@@ -116,6 +118,8 @@ export default function AutoPnLCurveCard({ data, loading, error, theme = 'dark' 
         const borderColor = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)';
         const textColor = isDark ? 'rgba(255,255,255,0.82)' : '#27272a';
 
+        setChartError('');
+
         if (chartRef.current) {
             try {
                 chartRef.current.remove();
@@ -135,49 +139,53 @@ export default function AutoPnLCurveCard({ data, loading, error, theme = 'dark' 
             resizeRef.current = null;
         }
 
-        const chart = createChart(el, {
-            width: el.clientWidth || 320,
-            height: 240,
-            layout: { background: { type: 'solid', color: 'transparent' }, textColor },
-            grid: {
-                vertLines: { color: gridColor },
-                horzLines: { color: gridColor },
-            },
-            rightPriceScale: {
-                borderColor,
-                scaleMargins: { top: 0.15, bottom: 0.15 },
-            },
-            timeScale: {
-                borderColor,
-                timeVisible: true,
-                secondsVisible: false,
-            },
-            crosshair: { mode: 0 },
-        });
-
-        const realized = chart.addLineSeries({
-            color: isDark ? '#60a5fa' : '#2563eb',
-            lineWidth: 2,
-            priceLineVisible: false,
-        });
-        const total = chart.addLineSeries({
-            color: isDark ? '#34d399' : '#10b981',
-            lineWidth: 2,
-            lineStyle: 2,
-            priceLineVisible: false,
-        });
-
-        chartRef.current = chart;
-        realizedSeriesRef.current = realized;
-        totalSeriesRef.current = total;
-
-        if (typeof ResizeObserver !== 'undefined') {
-            const ro = new ResizeObserver(() => {
-                const w = el.clientWidth || 320;
-                chart.applyOptions({ width: w });
+        try {
+            const chart = createChart(el, {
+                width: el.clientWidth || 320,
+                height: 240,
+                layout: { background: { type: 'solid', color: 'transparent' }, textColor },
+                grid: {
+                    vertLines: { color: gridColor },
+                    horzLines: { color: gridColor },
+                },
+                rightPriceScale: {
+                    borderColor,
+                    scaleMargins: { top: 0.15, bottom: 0.15 },
+                },
+                timeScale: {
+                    borderColor,
+                    timeVisible: true,
+                    secondsVisible: false,
+                },
+                crosshair: { mode: 0 },
             });
-            ro.observe(el);
-            resizeRef.current = ro;
+
+            const realized = chart.addLineSeries({
+                color: isDark ? '#60a5fa' : '#2563eb',
+                lineWidth: 2,
+                priceLineVisible: false,
+            });
+            const total = chart.addLineSeries({
+                color: isDark ? '#34d399' : '#10b981',
+                lineWidth: 2,
+                lineStyle: 2,
+                priceLineVisible: false,
+            });
+
+            chartRef.current = chart;
+            realizedSeriesRef.current = realized;
+            totalSeriesRef.current = total;
+
+            if (typeof ResizeObserver !== 'undefined') {
+                const ro = new ResizeObserver(() => {
+                    const w = el.clientWidth || 320;
+                    chart.applyOptions({ width: w });
+                });
+                ro.observe(el);
+                resizeRef.current = ro;
+            }
+        } catch (err) {
+            setChartError(`图表初始化失败：${String(err?.message || err)}`);
         }
 
         return () => {
@@ -200,20 +208,24 @@ export default function AutoPnLCurveCard({ data, loading, error, theme = 'dark' 
                 totalSeriesRef.current = null;
             }
         };
-    }, [theme]);
+    }, [theme, chartNonce]);
 
     useEffect(() => {
+        if (chartError) return;
         const chart = chartRef.current;
         const realized = realizedSeriesRef.current;
         const total = totalSeriesRef.current;
         if (!chart || !realized || !total) return;
 
-        realized.setData(realizedSeries);
-        total.setData(totalSeries.length ? totalSeries : realizedSeries);
-        total.setMarkers(markers);
-
-        chart.timeScale().fitContent();
-    }, [realizedSeries, totalSeries, markers]);
+        try {
+            realized.setData(realizedSeries);
+            total.setData(totalSeries.length ? totalSeries : realizedSeries);
+            total.setMarkers(markers);
+            chart.timeScale().fitContent();
+        } catch (err) {
+            setChartError(`图表渲染失败：${String(err?.message || err)}`);
+        }
+    }, [realizedSeries, totalSeries, markers, theme, chartNonce, chartError]);
 
     const hasData = Boolean(data && (realizedSeries.length > 0 || totalSeries.length > 0));
     const warnings = Array.isArray(data?.warnings) ? data.warnings : [];
@@ -254,6 +266,21 @@ export default function AutoPnLCurveCard({ data, loading, error, theme = 'dark' 
 
             <div className="mt-3">
                 <div ref={containerRef} className="h-[240px] w-full" />
+                {chartError ? (
+                    <div className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
+                        <div className="min-w-0 break-words">{chartError}</div>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setChartError('');
+                                setChartNonce((v) => v + 1);
+                            }}
+                            className="shrink-0 rounded-lg bg-red-500/15 px-2.5 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-500/20 dark:text-red-200"
+                        >
+                            重试
+                        </button>
+                    </div>
+                ) : null}
                 {!hasData && loading ? (
                     <div className="mt-3 text-xs text-zinc-500 dark:text-white/50">加载中...</div>
                 ) : null}
@@ -312,4 +339,3 @@ export default function AutoPnLCurveCard({ data, loading, error, theme = 'dark' 
         </div>
     );
 }
-
