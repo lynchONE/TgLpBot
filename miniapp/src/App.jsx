@@ -1701,26 +1701,24 @@ export default function App() {
                             <div className="text-right">
                                 <div className="text-[11px] text-zinc-500 dark:text-white/40">自动刷新</div>
                                 <div className="text-sm font-semibold tabular-nums">{pollIntervalSec}s</div>
+                                {!showAdmin && !isHotPools ? (
+                                    <button
+                                        type="button"
+                                        onClick={openGlobalConfig}
+                                        disabled={!hasInitData}
+                                        className={`mt-2 inline-flex rounded-xl px-3 py-2 text-xs font-semibold ring-1 ${hasInitData
+                                            ? 'bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50 dark:bg-white/5 dark:text-white/80 dark:ring-white/10 dark:hover:bg-white/10'
+                                            : 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
+                                            }`}
+                                    >
+                                        全局配置
+                                    </button>
+                                ) : null}
                             </div>
                         </div>
                     </div>
                 )}
 
-                {!showAdmin && !isHotPools ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                        <button
-                            type="button"
-                            onClick={openGlobalConfig}
-                            disabled={!hasInitData}
-                            className={`rounded-xl px-3 py-2 text-xs font-semibold ring-1 ${hasInitData
-                                ? 'bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50 dark:bg-white/5 dark:text-white/80 dark:ring-white/10 dark:hover:bg-white/10'
-                                : 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
-                                }`}
-                        >
-                            全局配置
-                        </button>
-                    </div>
-                ) : null}
             </header>
 
             {isHotPools && hotPoolsError ? (
@@ -1878,22 +1876,6 @@ export default function App() {
                         )}
                     </div>
                 )
-            }
-
-            {
-                showEmptyPositions ? (
-                    <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                        暂无仓位。请先在机器人里导入钱包并开仓。
-                    </div>
-                ) : null
-            }
-
-            {
-                showEmptyTaskTab ? (
-                    <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                        {positionsTaskTab === 'auto' ? '暂无 Auto 任务。请先在机器人里开启 AutoLP 并开仓。' : '暂无手动任务。'}
-                    </div>
-                ) : null
             }
 
             {
