@@ -332,15 +332,16 @@ export default function AutoPnLCurveCard({ data, loading, error, theme = 'dark' 
                 <div className="mt-4">
                     <div className="flex items-center justify-between">
                         <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">开/平仓记录</div>
-                        {hasMoreEvents ? (
-                            <button
-                                type="button"
-                                onClick={() => setShowAllEvents((v) => !v)}
-                                className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 dark:text-emerald-300 dark:hover:text-emerald-200"
-                            >
-                                {showAllEvents ? '收起' : '展开'}
-                            </button>
-                        ) : null}
+                        <button
+                            type="button"
+                            onClick={() => setShowAllEvents((v) => !v)}
+                            className={`text-[11px] font-semibold ${hasEvents
+                                ? 'text-emerald-600 hover:text-emerald-700 dark:text-emerald-300 dark:hover:text-emerald-200'
+                                : 'text-zinc-400 dark:text-white/30'
+                                }`}
+                        >
+                            {showAllEvents ? '收起' : '展开'}
+                        </button>
                     </div>
                     {eventsForList.length ? (
                         <div
