@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"math/big"
 	"regexp"
 	"strings"
@@ -48,6 +49,100 @@ var (
 	erc20TransferEventID = crypto.Keccak256Hash([]byte("Transfer(address,address,uint256)"))
 	reTxHash             = regexp.MustCompile(`^0x[0-9a-fA-F]{64}$`)
 )
+
+const (
+	exitSlippageRetryMultiplier = 2.0
+	exitSlippageMaxPercent      = 10.0
+	exitSwapMinValueUSDT        = 1.0
+)
+
+func effectiveExitSlippagePercent(task *models.StrategyTask) float64 {
+	base := 0.5
+	retryCount := 0
+	if task != nil {
+		if task.SlippageTolerance > 0 {
+			base = task.SlippageTolerance
+		}
+		if task.ExitRetryCount > 0 {
+			retryCount = task.ExitRetryCount
+		}
+	}
+	if retryCount <= 0 {
+		return base
+	}
+
+	expanded := base * math.Pow(exitSlippageRetryMultiplier, float64(retryCount))
+
+	maxPct := exitSlippageMaxPercent
+	if base > maxPct {
+		maxPct = base
+	}
+	if expanded > maxPct {
+		expanded = maxPct
+	}
+	if expanded < base {
+		expanded = base
+	}
+	return expanded
+}
+
+func (s *LiquidityService) quoteTokenValueInUSDT(tokenAddr common.Address, amount *big.Int, walletAddr common.Address) (float64, bool) {
+	if amount == nil || amount.Sign() <= 0 {
+		return 0, true
+	}
+	if config.AppConfig == nil {
+		return 0, false
+	}
+	if !common.IsHexAddress(config.AppConfig.USDTAddress) {
+		return 0, false
+	}
+	if s.okxService == nil {
+		s.okxService = exchange.NewOKXDexService()
+	}
+
+	usdtAddr := common.HexToAddress(config.AppConfig.USDTAddress)
+	chainID := fmt.Sprintf("%d", config.AppConfig.BSCChainID)
+
+	resp, err := s.okxService.GetSwapData(exchange.SwapRequest{
+		ChainID:           chainID,
+		FromTokenAddress:  tokenAddr.Hex(),
+		ToTokenAddress:    usdtAddr.Hex(),
+		Amount:            amount.String(),
+		Slippage:          s.okxSlippageDecimal(1.0), // 1% slippage for quote
+		UserWalletAddress: walletAddr.Hex(),
+	})
+	if err != nil || resp == nil || len(resp.Data) == 0 {
+		return 0, false
+	}
+
+	toAmountStr := strings.TrimSpace(resp.Data[0].RouterResult.ToTokenAmount)
+	if toAmountStr == "" {
+		return 0, false
+	}
+	toAmount, ok := new(big.Int).SetString(toAmountStr, 10)
+	if !ok {
+		return 0, false
+	}
+
+	// USDT on BSC uses 18 decimals.
+	return toFloat64(toAmount, 18), true
+}
+
+func (s *LiquidityService) shouldSkipExitSwapToUSDT(tokenAddr common.Address, amountIn *big.Int, walletAddr common.Address, label string) (bool, float64) {
+	v, ok := s.quoteTokenValueInUSDT(tokenAddr, amountIn, walletAddr)
+	if !ok {
+		return false, 0
+	}
+	if v < exitSwapMinValueUSDT {
+		if strings.TrimSpace(label) == "" {
+			label = tokenAddr.Hex()
+		}
+		log.Printf("[Liquidity] Exit swap skipped (<%.2f USDT): %s amount=%s estValue=%.6f",
+			exitSwapMinValueUSDT, label, amountIn.String(), v)
+		return true, v
+	}
+	return false, v
+}
 
 func firstTxHash(txHashes []string) (common.Hash, bool) {
 	if len(txHashes) == 0 {
@@ -804,7 +899,13 @@ func (s *LiquidityService) swapWalletTokensToUSDT(
 			continue
 		}
 
-		swapTxHash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, tok.addr, usdtAddr, toSwap, task.SlippageTolerance)
+		if skip, _ := s.shouldSkipExitSwapToUSDT(tok.addr, toSwap, walletAddr, label); skip {
+			// Skip tiny swaps to avoid spending gas on < 1 USDT outputs.
+			expectedRemaining[tok.addr] = cloneBig(bal)
+			continue
+		}
+
+		swapTxHash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, tok.addr, usdtAddr, toSwap, effectiveExitSlippagePercent(task))
 		if err != nil {
 			errs = append(errs, fmt.Errorf("清仓兑换 %s→USDT 失败 (%s) amount=%s: %w", label, tok.addr.Hex(), toSwap.String(), err))
 			continue
@@ -1046,7 +1147,7 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	}
 	expected0, expected1 := pool.AmountsForLiquidity(sqrtPriceX96, sqrtA, sqrtB, posInfo.Liquidity)
 
-	slippageBps := int64(task.SlippageTolerance * 100)
+	slippageBps := int64(effectiveExitSlippagePercent(task) * 100)
 	if slippageBps < 0 {
 		slippageBps = 0
 	}
@@ -1151,46 +1252,34 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 		var swapErrs []error
 		if d0.Sign() > 0 && token0 != usdtAddr {
 			log.Printf("[Liquidity] V3 exit: Got %s token0, swapping to USDT...", d0.String())
-			if swapTxHash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, token0, usdtAddr, d0, task.SlippageTolerance); err != nil {
-				symbol := "Token0"
-				if task.Token0Symbol != "" {
-					symbol = task.Token0Symbol
+			symbol := "Token0"
+			if task.Token0Symbol != "" {
+				symbol = task.Token0Symbol
+			}
+			if skip, _ := s.shouldSkipExitSwapToUSDT(token0, d0, walletAddr, symbol); !skip {
+				if swapTxHash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, token0, usdtAddr, d0, effectiveExitSlippagePercent(task)); err != nil {
+					swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT failed: %w", symbol, err))
+				} else if swapTxHash != "" {
+					txHashes = append(txHashes, fmt.Sprintf("兑换 %s→USDT|%s", symbol, swapTxHash))
+				} else {
+					swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT returned empty tx hash", symbol))
 				}
-				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT failed: %w", symbol, err))
-			} else if swapTxHash != "" {
-				symbol := "Token0"
-				if task.Token0Symbol != "" {
-					symbol = task.Token0Symbol
-				}
-				txHashes = append(txHashes, fmt.Sprintf("兑换 %s→USDT|%s", symbol, swapTxHash))
-			} else {
-				symbol := "Token0"
-				if task.Token0Symbol != "" {
-					symbol = task.Token0Symbol
-				}
-				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT returned empty tx hash", symbol))
 			}
 		}
 		if d1.Sign() > 0 && token1 != usdtAddr {
 			log.Printf("[Liquidity] V3 exit: Got %s token1, swapping to USDT...", d1.String())
-			if swapTxHash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, token1, usdtAddr, d1, task.SlippageTolerance); err != nil {
-				symbol := "Token1"
-				if task.Token1Symbol != "" {
-					symbol = task.Token1Symbol
+			symbol := "Token1"
+			if task.Token1Symbol != "" {
+				symbol = task.Token1Symbol
+			}
+			if skip, _ := s.shouldSkipExitSwapToUSDT(token1, d1, walletAddr, symbol); !skip {
+				if swapTxHash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, token1, usdtAddr, d1, effectiveExitSlippagePercent(task)); err != nil {
+					swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT failed: %w", symbol, err))
+				} else if swapTxHash != "" {
+					txHashes = append(txHashes, fmt.Sprintf("兑换 %s→USDT|%s", symbol, swapTxHash))
+				} else {
+					swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT returned empty tx hash", symbol))
 				}
-				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT failed: %w", symbol, err))
-			} else if swapTxHash != "" {
-				symbol := "Token1"
-				if task.Token1Symbol != "" {
-					symbol = task.Token1Symbol
-				}
-				txHashes = append(txHashes, fmt.Sprintf("兑换 %s→USDT|%s", symbol, swapTxHash))
-			} else {
-				symbol := "Token1"
-				if task.Token1Symbol != "" {
-					symbol = task.Token1Symbol
-				}
-				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT returned empty tx hash", symbol))
 			}
 		}
 		if len(swapErrs) > 0 {
@@ -1470,7 +1559,10 @@ func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	if swapDeltas {
 		var swapErrs []error
 		if d0.Sign() > 0 && c0 != usdtAddr {
-			if hash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, c0, usdtAddr, d0, task.SlippageTolerance); err != nil {
+			if skip, _ := s.shouldSkipExitSwapToUSDT(c0, d0, walletAddr, sym0); skip {
+				goto swap1
+			}
+			if hash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, c0, usdtAddr, d0, effectiveExitSlippagePercent(task)); err != nil {
 				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT failed: %w", sym0, err))
 			} else if hash != "" {
 				txHashes = append(txHashes, fmt.Sprintf("交换 %s→USDT|%s", sym0, hash))
@@ -1478,8 +1570,12 @@ func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT returned empty tx hash", sym0))
 			}
 		}
+	swap1:
 		if d1.Sign() > 0 && c1 != usdtAddr {
-			if hash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, c1, usdtAddr, d1, task.SlippageTolerance); err != nil {
+			if skip, _ := s.shouldSkipExitSwapToUSDT(c1, d1, walletAddr, sym1); skip {
+				goto afterSwap
+			}
+			if hash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, c1, usdtAddr, d1, effectiveExitSlippagePercent(task)); err != nil {
 				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT failed: %w", sym1, err))
 			} else if hash != "" {
 				txHashes = append(txHashes, fmt.Sprintf("交换 %s→USDT|%s", sym1, hash))
@@ -1487,6 +1583,7 @@ func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT returned empty tx hash", sym1))
 			}
 		}
+	afterSwap:
 		if len(swapErrs) > 0 {
 			swapErr = errors.Join(swapErrs...)
 		}

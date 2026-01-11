@@ -35,6 +35,10 @@ func (s *GlobalConfigService) GetOrCreate(userID uint) (*models.GlobalConfig, er
 		AutoReinvest:              false,
 		ResidualTolerance:         1.0,
 		ExtraNotificationsEnabled: true,
+		BarkEnabled:               false,
+		BarkKeyEncrypted:          "",
+		BarkServer:                "",
+		BarkGroup:                 "",
 	}
 	if err := database.DB.Create(&cfg).Error; err != nil {
 		return nil, fmt.Errorf("create global config failed: %w", err)

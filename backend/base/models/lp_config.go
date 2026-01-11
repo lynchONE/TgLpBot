@@ -11,6 +11,12 @@ type GlobalConfig struct {
 	ID     uint `gorm:"primaryKey" json:"id"`
 	UserID uint `gorm:"not null;uniqueIndex" json:"user_id"` // One config per user
 
+	// Bark notifications (optional; per-user)
+	BarkEnabled      bool   `gorm:"not null;default:false" json:"bark_enabled"`
+	BarkKeyEncrypted string `gorm:"type:text" json:"-"`
+	BarkServer       string `gorm:"size:255;default:''" json:"bark_server"`
+	BarkGroup        string `gorm:"size:100;default:''" json:"bark_group"`
+
 	// Rebalance settings
 	RebalanceTimeout int `gorm:"default:300" json:"rebalance_timeout"` // Rebalance timeout in seconds
 

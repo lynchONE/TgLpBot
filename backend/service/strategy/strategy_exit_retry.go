@@ -4,6 +4,8 @@ import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	"TgLpBot/base/notify"
+	"TgLpBot/base/security"
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/txexec"
 	"errors"
@@ -678,6 +680,51 @@ func (s *StrategyService) onExitAttemptFailed(task *models.StrategyTask, attempt
 
 		if swapFailed {
 			s.notify(task.UserID, fmt.Sprintf("❌ 已撤出流动性，但兑换 USDT 连续失败 %d 次，已停止自动重试。\n任务保持运行中，可稍后手动停止再试。\n请到钱包手动把剩余 token 兑换成 USDT。\n最后错误：%v%s", attempt, err, txText))
+			go func(taskID uint, uid uint, errText string) {
+				if taskID == 0 || uid == 0 {
+					return
+				}
+				if config.AppConfig == nil || s.configService == nil {
+					return
+				}
+
+				userCfg, cfgErr := s.configService.GetOrCreate(uid)
+				if cfgErr != nil || userCfg == nil || !userCfg.BarkEnabled || strings.TrimSpace(userCfg.BarkKeyEncrypted) == "" {
+					return
+				}
+
+				keyBytes, kerr := security.DecodeHexKey32(config.AppConfig.EncryptionKey)
+				if kerr != nil {
+					return
+				}
+				plain, derr := security.DecryptAESGCMHex(keyBytes, userCfg.BarkKeyEncrypted)
+				if derr != nil {
+					return
+				}
+				barkKey := strings.TrimSpace(string(plain))
+				if barkKey == "" {
+					return
+				}
+
+				errText = strings.TrimSpace(errText)
+				if errText == "" {
+					errText = "unknown error"
+				}
+				// Bark content should be short and readable on mobile.
+				r := []rune(errText)
+				if len(r) > 300 {
+					errText = string(r[:300]) + "…"
+				}
+
+				_ = notify.SendBarkWithConfig("兑换 USDT 连续失败",
+					fmt.Sprintf("任务 #%d 兑换 USDT 连续失败 %d 次，已停止自动重试。\n最后错误：%s", taskID, exitMaxAttempts, errText),
+					notify.BarkConfig{
+						Server: userCfg.BarkServer,
+						Key:    barkKey,
+						Group:  userCfg.BarkGroup,
+					},
+				)
+			}(task.ID, task.UserID, errText)
 		} else {
 			s.notify(task.UserID, fmt.Sprintf("❌ 撤出/兑换连续失败 %d 次，已停止自动重试。\n任务保持运行中，可稍后手动停止再试。\n如果已撤出流动性但兑换失败，请到钱包手动把剩余 token 兑换成 USDT。\n最后错误：%v%s", attempt, err, txText))
 		}
@@ -925,7 +972,7 @@ func (s *StrategyService) finishStopAfterExit(task *models.StrategyTask, now tim
 			}
 		}
 		if !hasSwapTx {
-			msg += "\nℹ️ 本次未产生兑换交易：钱包中该池子的非 USDT 代币余额为 0（无需兑换）。"
+			msg += "\nℹ️ 本次未产生兑换交易：钱包中该池子的非 USDT 代币余额为 0，或均为小额（<1 USDT）已跳过兑换。"
 		}
 	}
 	s.notify(task.UserID, msg)
@@ -1024,7 +1071,7 @@ func (s *StrategyService) finishCooldownAfterExit(task *models.StrategyTask, now
 			}
 		}
 		if !hasSwapTx {
-			msg += "\nℹ️ 本次未产生兑换交易：钱包中该池子的非 USDT 代币余额为 0（无需兑换）。"
+			msg += "\nℹ️ 本次未产生兑换交易：钱包中该池子的非 USDT 代币余额为 0，或均为小额（<1 USDT）已跳过兑换。"
 		}
 	}
 	s.notify(task.UserID, msg)

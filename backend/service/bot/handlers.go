@@ -442,6 +442,12 @@ func (b *Bot) handleText(message *tgbotapi.Message, user *models.User) {
 		b.handleGlobalSlippageInput(message.Chat.ID, user, message.Text)
 	case "awaiting_global_residual_tolerance":
 		b.handleGlobalResidualToleranceInput(message.Chat.ID, user, message.Text)
+	case "awaiting_global_bark_key":
+		b.handleGlobalBarkKeyInput(message.Chat.ID, user, message.Text)
+	case "awaiting_global_bark_server":
+		b.handleGlobalBarkServerInput(message.Chat.ID, user, message.Text)
+	case "awaiting_global_bark_group":
+		b.handleGlobalBarkGroupInput(message.Chat.ID, user, message.Text)
 	// AutoLP config inputs
 	case "awaiting_auto_total_amount":
 		b.handleAutoTotalAmountInput(message.Chat.ID, user, message.Text)

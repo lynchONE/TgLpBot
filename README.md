@@ -107,6 +107,9 @@ Edit `.env` with your configuration:
 # Telegram Bot Token
 TELEGRAM_BOT_TOKEN=your_bot_token_here
 
+# Bark (optional; iOS push notifications)
+# Configure in Bot -> 全局配置 (per user). No .env variables required.
+
 # Database
 MYSQL_HOST=localhost
 MYSQL_PORT=3306
