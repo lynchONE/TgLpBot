@@ -3,6 +3,7 @@ import HotPoolCard from './components/HotPoolCard.jsx';
 import KlineModal from './components/KlineModal.jsx';
 import AutoMonitorCard from './components/AutoMonitorCard.jsx';
 import PositionCard from './components/PositionCard.jsx';
+import AutoPnLCurveCard from './components/AutoPnLCurveCard.jsx';
 import SystemConfigCard from './components/SystemConfigCard.jsx';
 import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
 import AdminPage from './components/AdminPage.jsx';
@@ -10,6 +11,7 @@ import {
     deleteTask,
     disableAdminAutoLP,
     fetchAutoMonitor,
+    fetchAutoLPPnLCurve,
     fetchAdminAutoLPStats,
     fetchAdminRealtimePositions,
     fetchAdminRealtimeUsers,
@@ -240,11 +242,17 @@ export default function App() {
     const [loading, setLoading] = useState(false);
     const pollRef = useRef(null);
     const [viewMode, setViewMode] = useState('hot_pools');
+    const [positionsTaskTab, setPositionsTaskTab] = useState('all'); // all | manual | auto
     const [autoMonitor, setAutoMonitor] = useState(null);
     const [autoMonitorError, setAutoMonitorError] = useState('');
     const [autoMonitorLoading, setAutoMonitorLoading] = useState(false);
     const autoMonitorPollRef = useRef(null);
     const [autoGuardBaselineUpdating, setAutoGuardBaselineUpdating] = useState(false);
+
+    const [autoPnLCurve, setAutoPnLCurve] = useState(null);
+    const [autoPnLCurveError, setAutoPnLCurveError] = useState('');
+    const [autoPnLCurveLoading, setAutoPnLCurveLoading] = useState(false);
+    const autoPnLCurvePollRef = useRef(null);
 
     const [hotPoolsSort, setHotPoolsSort] = useState('fees');
     const [hotPoolsData, setHotPoolsData] = useState(null);
@@ -341,6 +349,7 @@ export default function App() {
     const settingsPollIntervalSec = isHotPools ? hotPoolsPollIntervalSec : pollIntervalSec;
     const settingsServerPollIntervalSec = isHotPools ? hotPoolsDefaultPollSec : serverPollIntervalSec;
     const monitorPollSec = Math.max(3, pollIntervalSec);
+    const autoPnLCurvePollSec = 15;
 
     const adminSelectedUser = useMemo(() => {
         if (!adminSelectedUserId) return null;
@@ -411,6 +420,17 @@ export default function App() {
             );
         });
     }, [positions]);
+
+    const visibleTaskPositions = useMemo(() => {
+        if (positionsTaskTab === 'all') return visiblePositions;
+        const wantAuto = positionsTaskTab === 'auto';
+        return visiblePositions.filter((p) => {
+            const taskId = Number(p?.task_id || 0);
+            if (!Number.isFinite(taskId) || taskId <= 0) return false;
+            const isAuto = Boolean(p?.task_is_auto);
+            return wantAuto ? isAuto : !isAuto;
+        });
+    }, [positionsTaskTab, visiblePositions]);
 
     // 从仓位构建 pool_address -> position_usd 映射（用于在热门池子上显示持仓标签）
     const positionsPoolMap = useMemo(() => {
@@ -745,6 +765,42 @@ export default function App() {
             if (autoMonitorPollRef.current) clearInterval(autoMonitorPollRef.current);
         };
     }, [apiBaseUrl, initData, hasInitData, showAdmin, isMonitor, monitorPollSec]);
+
+    useEffect(() => {
+        if (!hasInitData || showAdmin || !isPositions || positionsTaskTab !== 'auto') return;
+        let aborted = false;
+        const controller = new AbortController();
+        let inFlight = false;
+
+        const run = async () => {
+            if (inFlight) return;
+            inFlight = true;
+            setAutoPnLCurveLoading(true);
+            setAutoPnLCurveError('');
+            try {
+                const resp = await fetchAutoLPPnLCurve({ apiBaseUrl, initData, signal: controller.signal });
+                if (aborted) return;
+                setAutoPnLCurve(resp);
+            } catch (e) {
+                if (aborted) return;
+                setAutoPnLCurveError(String(e?.message || e));
+            } finally {
+                inFlight = false;
+                if (!aborted) setAutoPnLCurveLoading(false);
+            }
+        };
+
+        run();
+
+        if (autoPnLCurvePollRef.current) clearInterval(autoPnLCurvePollRef.current);
+        autoPnLCurvePollRef.current = setInterval(run, autoPnLCurvePollSec * 1000);
+
+        return () => {
+            aborted = true;
+            controller.abort();
+            if (autoPnLCurvePollRef.current) clearInterval(autoPnLCurvePollRef.current);
+        };
+    }, [apiBaseUrl, initData, hasInitData, showAdmin, isPositions, positionsTaskTab, autoPnLCurvePollSec]);
 
     useEffect(() => {
         if (!hasInitData || !showAdmin) return;
@@ -1329,7 +1385,7 @@ export default function App() {
 
     const selectAllTasks = () => {
         const allIds = new Set();
-        visiblePositions.forEach(p => {
+        visibleTaskPositions.forEach(p => {
             if (p?.task_id) allIds.add(p.task_id);
         });
         setSelectedTaskIds(allIds);
@@ -1395,6 +1451,7 @@ export default function App() {
             : '用户仓位暂不可用'
         : '请选择用户查看实时仓位';
     const showEmptyPositions = isPositions && Boolean(activeData) && visiblePositions.length === 0;
+    const showEmptyTaskTab = isPositions && Boolean(activeData) && !showEmptyPositions && positionsTaskTab !== 'all' && visibleTaskPositions.length === 0;
     const monitorTasks = useMemo(() => (Array.isArray(autoMonitor?.tasks) ? autoMonitor.tasks : []), [autoMonitor]);
     const blacklistList = useMemo(() => Array.from(blacklist).sort(), [blacklist]);
     const hotPoolsPairMap = useMemo(() => {
@@ -1832,6 +1889,14 @@ export default function App() {
             }
 
             {
+                showEmptyTaskTab ? (
+                    <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                        {positionsTaskTab === 'auto' ? '暂无 Auto 任务。请先在机器人里开启 AutoLP 并开仓。' : '暂无手动任务。'}
+                    </div>
+                ) : null
+            }
+
+            {
                 showEmptyAutoTasks ? (
                     <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
                         暂无自动任务。请先在机器人里开启 AutoLP 并开仓。
@@ -1938,23 +2003,88 @@ export default function App() {
                             </>
                         )
                         : activeData
-                            ? visiblePositions.map((p) => (
-                                <PositionCard
-                                    key={`${p.version}:${p.position_id}`}
-                                    position={p}
-                                    walletAddress={walletAddress}
-                                    bnbBalance={bnbBalance}
-                                    pollIntervalSec={pollIntervalSec}
-                                    updatedAt={updatedAt}
-                                    allowTaskActions={!showAdmin && hasInitData}
-                                    onSetTaskPaused={handleSetTaskPaused}
-                                    onStopTask={handleStopTask}
-                                    onDeleteTask={handleDeleteTask}
-                                    batchMode={batchMode}
-                                    isSelected={selectedTaskIds.has(p.task_id)}
-                                    onToggleSelect={() => toggleTaskSelection(p.task_id)}
-                                />
-                            ))
+                            ? (
+                                <>
+                                    {isPositions ? (
+                                        <div
+                                            className="grid grid-cols-3 gap-1 rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5"
+                                        >
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setPositionsTaskTab('all');
+                                                    setSelectedTaskIds(new Set());
+                                                    setBatchMode(false);
+                                                }}
+                                                aria-pressed={positionsTaskTab === 'all'}
+                                                className={`rounded-xl px-3 py-2 transition ${positionsTaskTab === 'all'
+                                                    ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
+                                                    : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
+                                                    }`}
+                                            >
+                                                全部
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setPositionsTaskTab('manual');
+                                                    setSelectedTaskIds(new Set());
+                                                    setBatchMode(false);
+                                                }}
+                                                aria-pressed={positionsTaskTab === 'manual'}
+                                                className={`rounded-xl px-3 py-2 transition ${positionsTaskTab === 'manual'
+                                                    ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
+                                                    : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
+                                                    }`}
+                                            >
+                                                手动任务
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setPositionsTaskTab('auto');
+                                                    setSelectedTaskIds(new Set());
+                                                    setBatchMode(false);
+                                                }}
+                                                aria-pressed={positionsTaskTab === 'auto'}
+                                                className={`rounded-xl px-3 py-2 transition ${positionsTaskTab === 'auto'
+                                                    ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
+                                                    : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
+                                                    }`}
+                                            >
+                                                Auto任务
+                                            </button>
+                                        </div>
+                                    ) : null}
+
+                                    {isPositions && positionsTaskTab === 'auto' ? (
+                                        <AutoPnLCurveCard
+                                            data={autoPnLCurve}
+                                            loading={autoPnLCurveLoading}
+                                            error={autoPnLCurveError}
+                                            theme={theme}
+                                        />
+                                    ) : null}
+
+                                    {visibleTaskPositions.map((p) => (
+                                        <PositionCard
+                                            key={`${p.version}:${p.position_id}`}
+                                            position={p}
+                                            walletAddress={walletAddress}
+                                            bnbBalance={bnbBalance}
+                                            pollIntervalSec={pollIntervalSec}
+                                            updatedAt={updatedAt}
+                                            allowTaskActions={!showAdmin && hasInitData}
+                                            onSetTaskPaused={handleSetTaskPaused}
+                                            onStopTask={handleStopTask}
+                                            onDeleteTask={handleDeleteTask}
+                                            batchMode={batchMode}
+                                            isSelected={selectedTaskIds.has(p.task_id)}
+                                            onToggleSelect={() => toggleTaskSelection(p.task_id)}
+                                        />
+                                    ))}
+                                </>
+                            )
                             : null}
             </div>
 

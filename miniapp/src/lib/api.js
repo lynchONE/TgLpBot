@@ -30,6 +30,22 @@ export async function fetchAutoMonitor({ apiBaseUrl, initData, signal }) {
     return resp.json();
 }
 
+export async function fetchAutoLPPnLCurve({ apiBaseUrl, initData, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/positions?endpoint=autolp_pnl_curve`;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData }),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
 export async function setAutoLPGuardCompareToPeak({ apiBaseUrl, initData, guardCompareToPeak, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/settings?endpoint=autolp_config`;
