@@ -232,9 +232,10 @@ export async function fetchAdminActiveTasks({ apiBaseUrl, initData, limit, signa
     return resp.json();
 }
 
-export async function fetchHotPools({ apiBaseUrl, sort, chain, timeframeMinutes, limit, dex, includePools, signal }) {
+export async function fetchHotPools({ apiBaseUrl, initData, sort, chain, timeframeMinutes, limit, dex, includePools, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const params = new URLSearchParams();
+    if (initData) params.set('initData', String(initData));
     if (sort) params.set('sort', String(sort));
     if (chain) params.set('chain', String(chain));
     if (Number.isFinite(timeframeMinutes)) params.set('timeframe_minutes', String(timeframeMinutes));
@@ -256,9 +257,10 @@ export async function fetchHotPools({ apiBaseUrl, sort, chain, timeframeMinutes,
     return resp.json();
 }
 
-export async function fetchPoolOHLCV({ apiBaseUrl, chain, poolAddress, timeframe, aggregate, limit, beforeTimestamp, signal }) {
+export async function fetchPoolOHLCV({ apiBaseUrl, initData, chain, poolAddress, timeframe, aggregate, limit, beforeTimestamp, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const params = new URLSearchParams();
+    if (initData) params.set('initData', String(initData));
     if (chain) params.set('chain', String(chain));
     if (poolAddress) params.set('pool_address', String(poolAddress));
     if (timeframe) params.set('timeframe', String(timeframe));

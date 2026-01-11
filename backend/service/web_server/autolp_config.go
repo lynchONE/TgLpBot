@@ -2,15 +2,12 @@ package web_server
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 
-	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	autoLP "TgLpBot/service/auto_lp"
-	userSvc "TgLpBot/service/user"
 )
 
 type autoLPConfigRequest struct {
@@ -39,35 +36,32 @@ func (s *Server) handleAutoLPConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	initData := strings.TrimSpace(req.InitData)
-	if config.AppConfig == nil {
-		http.Error(w, "config not loaded", http.StatusInternalServerError)
-		return
-	}
 	if database.DB == nil {
 		http.Error(w, "database not initialized", http.StatusInternalServerError)
 		return
 	}
 
-	parsed, err := ParseTelegramWebAppInitData(initData, config.AppConfig.TelegramBotToken)
-	if err != nil {
-		if errors.Is(err, ErrMissingInitData) {
-			http.Error(w, "missing initData", http.StatusBadRequest)
-		} else {
-			http.Error(w, "invalid initData", http.StatusUnauthorized)
-		}
+	user, status, msg := authenticateTelegramWebAppUser(initData)
+	if status != 0 {
+		http.Error(w, msg, status)
 		return
 	}
 
-	userService := userSvc.NewUserService()
-	user, err := userService.GetOrCreateUser(
-		parsed.User.ID,
-		parsed.User.Username,
-		parsed.User.FirstName,
-		parsed.User.LastName,
-		parsed.User.LanguageCode,
-	)
+	check, status, msg, err := requireUserAccess(user.ID)
 	if err != nil {
-		http.Error(w, "failed to load user", http.StatusInternalServerError)
+		http.Error(w, msg, status)
+		return
+	}
+	if status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+	if status, msg := requireMiniAppPermission(check); status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+	if status, msg := requireAutoModePermission(check); status != 0 {
+		http.Error(w, msg, status)
 		return
 	}
 

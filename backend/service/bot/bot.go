@@ -287,7 +287,14 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 
 // handleCommand handles bot commands
 func (b *Bot) handleCommand(message *tgbotapi.Message, user *models.User) {
-	switch message.Command() {
+	cmd := message.Command()
+	if cmd != "start" && cmd != "help" && cmd != "cancel" {
+		if !b.checkUserAuthorized(message.Chat.ID, user) {
+			return
+		}
+	}
+
+	switch cmd {
 	case "start":
 		b.handleStart(message, user)
 	case "auto":
@@ -432,6 +439,17 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 	user, err := b.userService.GetUserByTelegramID(query.From.ID)
 	if err != nil {
 		log.Printf("Error getting user: %v", err)
+		return
+	}
+
+	chatID := int64(query.From.ID)
+	if query.Message != nil && query.Message.Chat != nil && query.Message.Chat.ID != 0 {
+		chatID = query.Message.Chat.ID
+	}
+	if !b.checkUserAuthorized(chatID, user) {
+		// Answer callback to remove loading state
+		callback := tgbotapi.NewCallback(query.ID, "")
+		_, _ = b.api.Request(callback)
 		return
 	}
 

@@ -123,6 +123,27 @@ func (s *Server) handleGetPools(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ClickHouse not configured", http.StatusServiceUnavailable)
 		return
 	}
+
+	initData := initDataFromQuery(r)
+	user, status, msg := authenticateTelegramWebAppUser(initData)
+	if status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+	check, status, msg, err := requireUserAccess(user.ID)
+	if err != nil {
+		http.Error(w, msg, status)
+		return
+	}
+	if status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+	if status, msg := requireMiniAppPermission(check); status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	var pools []PoolResponse
@@ -167,6 +188,27 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	initData := initDataFromQuery(r)
+	user, status, msg := authenticateTelegramWebAppUser(initData)
+	if status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+	check, status, msg, err := requireUserAccess(user.ID)
+	if err != nil {
+		http.Error(w, msg, status)
+		return
+	}
+	if status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+	if status, msg := requireMiniAppPermission(check); status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+
 	cfg := map[string]string{
 		"zap_v3": config.AppConfig.ZapV3Address,
 		"zap_v4": config.AppConfig.ZapV4Address,

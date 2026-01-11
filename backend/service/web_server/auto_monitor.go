@@ -3,7 +3,6 @@ package web_server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -144,35 +143,32 @@ func (s *Server) handleAutoMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if config.AppConfig == nil {
-		http.Error(w, "config not loaded", http.StatusInternalServerError)
-		return
-	}
 	if database.DB == nil {
 		http.Error(w, "database not initialized", http.StatusInternalServerError)
 		return
 	}
 
-	parsed, err := ParseTelegramWebAppInitData(initData, config.AppConfig.TelegramBotToken)
-	if err != nil {
-		if errors.Is(err, ErrMissingInitData) {
-			http.Error(w, "missing initData", http.StatusBadRequest)
-		} else {
-			http.Error(w, "invalid initData", http.StatusUnauthorized)
-		}
+	user, status, msg := authenticateTelegramWebAppUser(initData)
+	if status != 0 {
+		http.Error(w, msg, status)
 		return
 	}
 
-	userService := userSvc.NewUserService()
-	user, err := userService.GetOrCreateUser(
-		parsed.User.ID,
-		parsed.User.Username,
-		parsed.User.FirstName,
-		parsed.User.LastName,
-		parsed.User.LanguageCode,
-	)
+	check, status, msg, err := requireUserAccess(user.ID)
 	if err != nil {
-		http.Error(w, "failed to load user", http.StatusInternalServerError)
+		http.Error(w, msg, status)
+		return
+	}
+	if status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+	if status, msg := requireMiniAppPermission(check); status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+	if status, msg := requireAutoModePermission(check); status != 0 {
+		http.Error(w, msg, status)
 		return
 	}
 

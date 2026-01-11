@@ -34,6 +34,7 @@ type StrategyService struct {
 	poolService      *pool.PoolService
 	liquidityService *liquidity.LiquidityService
 	configService    *user.GlobalConfigService
+	accessService    *user.AccessService
 	stopChan         chan struct{}
 	ticker           *time.Ticker
 	notifier         func(userID uint, message string) // Callback for notifications
@@ -60,6 +61,7 @@ func NewStrategyService() *StrategyService {
 		poolService:        pool.NewPoolService(),
 		liquidityService:   liquidity.NewLiquidityService(),
 		configService:      user.NewGlobalConfigService(),
+		accessService:      user.NewAccessService(),
 		stopChan:           make(chan struct{}),
 		ticker:             time.NewTicker(5 * time.Second), // Check every 5 seconds
 		lastLiquidityCheck: make(map[uint]time.Time),
@@ -134,6 +136,18 @@ func (s *StrategyService) checkTasks() {
 		userKey := fmt.Sprintf("%d", uid)
 		userTasks := userTasks
 
+		if s.accessService != nil {
+			check, err := s.accessService.CheckUserAccess(uid, time.Now())
+			if err != nil {
+				log.Printf("[Strategy] 检查用户授权失败: user_id=%d err=%v", uid, err)
+				continue
+			}
+			if !check.Allowed {
+				s.pauseUserTasks(uid, check.Reason)
+				continue
+			}
+		}
+
 		if s.monitorLimiter == nil {
 			// Fallback: process inline (legacy behavior)
 			tickCache := make(map[string]int)
@@ -151,6 +165,36 @@ func (s *StrategyService) checkTasks() {
 			}
 		})
 	}
+}
+
+func (s *StrategyService) pauseUserTasks(userID uint, reason string) {
+	if database.DB == nil {
+		return
+	}
+
+	now := time.Now()
+	updates := map[string]interface{}{
+		"paused":             true,
+		"paused_at":          &now,
+		"out_of_range_since": nil,
+	}
+
+	res := database.DB.Model(&models.StrategyTask{}).
+		Where("user_id = ? AND paused = ?", userID, false).
+		Updates(updates)
+	if res.Error != nil {
+		log.Printf("[Strategy] 暂停用户任务失败: user_id=%d err=%v", userID, res.Error)
+		return
+	}
+	if res.RowsAffected <= 0 {
+		return
+	}
+
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "未授权"
+	}
+	s.notify(userID, fmt.Sprintf("⚠️ 授权状态变更：%s\n\n已自动暂停所有任务。", reason))
 }
 
 // processTask handles the logic for a single task

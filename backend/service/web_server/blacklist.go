@@ -2,14 +2,11 @@ package web_server
 
 import (
 	"encoding/json"
-	"errors"
 	"log"
 	"net/http"
 	"strings"
 
-	"TgLpBot/base/config"
 	"TgLpBot/service/blacklist"
-	userSvc "TgLpBot/service/user"
 )
 
 // BlacklistRequest 黑名单操作请求
@@ -45,32 +42,6 @@ func handleBlacklist(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// parseAndValidateUser 解析 initData 并获取用户
-func parseAndValidateUser(initData string) (uint, error) {
-	if config.AppConfig == nil {
-		return 0, errors.New("配置未加载")
-	}
-
-	parsed, err := ParseTelegramWebAppInitData(initData, config.AppConfig.TelegramBotToken)
-	if err != nil {
-		return 0, err
-	}
-
-	userService := userSvc.NewUserService()
-	user, err := userService.GetOrCreateUser(
-		parsed.User.ID,
-		parsed.User.Username,
-		parsed.User.FirstName,
-		parsed.User.LastName,
-		parsed.User.LanguageCode,
-	)
-	if err != nil {
-		return 0, err
-	}
-
-	return user.ID, nil
-}
-
 // handleGetBlacklist 获取黑名单列表
 func handleGetBlacklist(w http.ResponseWriter, r *http.Request) {
 	initData := r.URL.Query().Get("initData")
@@ -83,30 +54,39 @@ func handleGetBlacklist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 验证用户
-	userID, err := parseAndValidateUser(initData)
+	user, status, msg := authenticateTelegramWebAppUser(initData)
+	if status != 0 {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(BlacklistResponse{Success: false, Message: msg})
+		return
+	}
+	check, status, msg, err := requireUserAccess(user.ID)
 	if err != nil {
-		if errors.Is(err, ErrMissingInitData) {
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(BlacklistResponse{
-				Success: false,
-				Message: "缺少 initData",
-			})
-		} else {
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(BlacklistResponse{
-				Success: false,
-				Message: "验证失败: " + err.Error(),
-			})
-		}
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(BlacklistResponse{Success: false, Message: msg})
+		return
+	}
+	if status != 0 {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(BlacklistResponse{Success: false, Message: msg})
+		return
+	}
+	if status, msg := requireMiniAppPermission(check); status != 0 {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(BlacklistResponse{Success: false, Message: msg})
+		return
+	}
+	if status, msg := requireAutoModePermission(check); status != 0 {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(BlacklistResponse{Success: false, Message: msg})
 		return
 	}
 
 	// 获取黑名单
 	svc := blacklist.NewBlacklistService()
-	list, err := svc.GetAll(userID)
+	list, err := svc.GetAll(user.ID)
 	if err != nil {
-		log.Printf("[Blacklist API] 获取黑名单失败: user_id=%d err=%v", userID, err)
+		log.Printf("[Blacklist API] 获取黑名单失败: user_id=%d err=%v", user.ID, err)
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(BlacklistResponse{
 			Success: false,
@@ -153,14 +133,31 @@ func handleModifyBlacklist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 验证用户
-	userID, err := parseAndValidateUser(req.InitData)
+	user, status, msg := authenticateTelegramWebAppUser(req.InitData)
+	if status != 0 {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(BlacklistResponse{Success: false, Message: msg})
+		return
+	}
+	check, status, msg, err := requireUserAccess(user.ID)
 	if err != nil {
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(BlacklistResponse{
-			Success: false,
-			Message: "验证失败: " + err.Error(),
-		})
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(BlacklistResponse{Success: false, Message: msg})
+		return
+	}
+	if status != 0 {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(BlacklistResponse{Success: false, Message: msg})
+		return
+	}
+	if status, msg := requireMiniAppPermission(check); status != 0 {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(BlacklistResponse{Success: false, Message: msg})
+		return
+	}
+	if status, msg := requireAutoModePermission(check); status != 0 {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(BlacklistResponse{Success: false, Message: msg})
 		return
 	}
 
@@ -169,8 +166,8 @@ func handleModifyBlacklist(w http.ResponseWriter, r *http.Request) {
 
 	switch action {
 	case "add":
-		if err := svc.Add(userID, req.PoolAddress); err != nil {
-			log.Printf("[Blacklist API] 添加黑名单失败: user_id=%d pool=%s err=%v", userID, req.PoolAddress, err)
+		if err := svc.Add(user.ID, req.PoolAddress); err != nil {
+			log.Printf("[Blacklist API] 添加黑名单失败: user_id=%d pool=%s err=%v", user.ID, req.PoolAddress, err)
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(BlacklistResponse{
 				Success: false,
@@ -181,12 +178,12 @@ func handleModifyBlacklist(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(BlacklistResponse{
 			Success: true,
 			Message: "已添加到黑名单",
-			Count:   svc.Count(userID),
+			Count:   svc.Count(user.ID),
 		})
 
 	case "remove":
-		if err := svc.Remove(userID, req.PoolAddress); err != nil {
-			log.Printf("[Blacklist API] 移除黑名单失败: user_id=%d pool=%s err=%v", userID, req.PoolAddress, err)
+		if err := svc.Remove(user.ID, req.PoolAddress); err != nil {
+			log.Printf("[Blacklist API] 移除黑名单失败: user_id=%d pool=%s err=%v", user.ID, req.PoolAddress, err)
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(BlacklistResponse{
 				Success: false,
@@ -197,7 +194,7 @@ func handleModifyBlacklist(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(BlacklistResponse{
 			Success: true,
 			Message: "已从黑名单移除",
-			Count:   svc.Count(userID),
+			Count:   svc.Count(user.ID),
 		})
 
 	default:

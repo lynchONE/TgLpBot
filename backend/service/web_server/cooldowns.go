@@ -2,14 +2,11 @@ package web_server
 
 import (
 	"encoding/json"
-	"errors"
 	"log"
 	"net/http"
 	"strings"
 
-	"TgLpBot/base/config"
 	"TgLpBot/service/blacklist"
-	userSvc "TgLpBot/service/user"
 )
 
 // CooldownItem 冷却项
@@ -52,48 +49,31 @@ func handleCooldowns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 验证用户
-	if config.AppConfig == nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(CooldownsResponse{
-			Success: false,
-			Message: "配置未加载",
-		})
+	user, status, msg := authenticateTelegramWebAppUser(initData)
+	if status != 0 {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(CooldownsResponse{Success: false, Message: msg})
 		return
 	}
-
-	parsed, err := ParseTelegramWebAppInitData(initData, config.AppConfig.TelegramBotToken)
+	check, status, msg, err := requireUserAccess(user.ID)
 	if err != nil {
-		if errors.Is(err, ErrMissingInitData) {
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(CooldownsResponse{
-				Success: false,
-				Message: "缺少 initData",
-			})
-		} else {
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(CooldownsResponse{
-				Success: false,
-				Message: "验证失败: " + err.Error(),
-			})
-		}
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(CooldownsResponse{Success: false, Message: msg})
 		return
 	}
-
-	userService := userSvc.NewUserService()
-	user, err := userService.GetOrCreateUser(
-		parsed.User.ID,
-		parsed.User.Username,
-		parsed.User.FirstName,
-		parsed.User.LastName,
-		parsed.User.LanguageCode,
-	)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(CooldownsResponse{
-			Success: false,
-			Message: "加载用户失败",
-		})
+	if status != 0 {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(CooldownsResponse{Success: false, Message: msg})
+		return
+	}
+	if status, msg := requireMiniAppPermission(check); status != 0 {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(CooldownsResponse{Success: false, Message: msg})
+		return
+	}
+	if status, msg := requireAutoModePermission(check); status != 0 {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(CooldownsResponse{Success: false, Message: msg})
 		return
 	}
 

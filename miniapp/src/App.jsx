@@ -899,6 +899,11 @@ export default function App() {
         let inFlight = false;
 
         const run = async () => {
+            if (!hasInitData) {
+                setHotPoolsLoading(false);
+                setHotPoolsError('');
+                return;
+            }
             if (inFlight) return;
             inFlight = true;
             setHotPoolsLoading(true);
@@ -906,6 +911,7 @@ export default function App() {
             try {
                 const resp = await fetchHotPools({
                     apiBaseUrl,
+                    initData,
                     sort: hotPoolsSort,
                     chain: 'bsc',
                     timeframeMinutes: 5,
@@ -948,7 +954,7 @@ export default function App() {
             controller.abort();
             if (hotPoolsPollRef.current) clearInterval(hotPoolsPollRef.current);
         };
-    }, [apiBaseUrl, isHotPools, hotPoolsSort, hotPoolsPollIntervalSec, positionsPoolAddresses.join(',')]);
+    }, [apiBaseUrl, initData, hasInitData, isHotPools, hotPoolsSort, hotPoolsPollIntervalSec, positionsPoolAddresses.join(',')]);
 
     const applyPollDraft = () => {
         const raw = String(pollDraftSec || '').trim();

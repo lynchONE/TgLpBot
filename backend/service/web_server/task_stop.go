@@ -2,14 +2,11 @@ package web_server
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 
-	"TgLpBot/base/config"
 	"TgLpBot/base/models"
 	"TgLpBot/service/strategy"
-	userSvc "TgLpBot/service/user"
 )
 
 type taskStopRequest struct {
@@ -45,31 +42,24 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing taskId", http.StatusBadRequest)
 		return
 	}
-	if config.AppConfig == nil {
-		http.Error(w, "config not loaded", http.StatusInternalServerError)
+
+	user, status, msg := authenticateTelegramWebAppUser(initData)
+	if status != 0 {
+		http.Error(w, msg, status)
 		return
 	}
 
-	parsed, err := ParseTelegramWebAppInitData(initData, config.AppConfig.TelegramBotToken)
+	check, status, msg, err := requireUserAccess(user.ID)
 	if err != nil {
-		if errors.Is(err, ErrMissingInitData) {
-			http.Error(w, "missing initData", http.StatusBadRequest)
-		} else {
-			http.Error(w, "invalid initData", http.StatusUnauthorized)
-		}
+		http.Error(w, msg, status)
 		return
 	}
-
-	userService := userSvc.NewUserService()
-	user, err := userService.GetOrCreateUser(
-		parsed.User.ID,
-		parsed.User.Username,
-		parsed.User.FirstName,
-		parsed.User.LastName,
-		parsed.User.LanguageCode,
-	)
-	if err != nil {
-		http.Error(w, "failed to load user", http.StatusInternalServerError)
+	if status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+	if status, msg := requireMiniAppPermission(check); status != 0 {
+		http.Error(w, msg, status)
 		return
 	}
 

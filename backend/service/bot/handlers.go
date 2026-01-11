@@ -75,11 +75,18 @@ func (b *Bot) handleHelp(message *tgbotapi.Message, user *models.User) {
 3. 使用 /newposition 创建新仓位（输入池子地址、tick范围、投入金额）
 4. 使用 /positions 查看和管理您的仓位
 
-如需支持，请联系 @yoursupport`
+	如需支持，请联系 @yoursupport`
 
 	if config.AppConfig != nil {
 		url := strings.TrimSpace(config.AppConfig.TelegramWebAppURL)
 		if isValidWebAppURL(url) {
+			// 仅对有 MiniApp 权限的用户展示 WebApp 按钮
+			hasMiniApp, _ := b.accessService.CheckMiniAppAccess(user.ID)
+			if !hasMiniApp {
+				b.sendMessage(message.Chat.ID, text)
+				return
+			}
+
 			msg := tgbotapi.NewMessage(message.Chat.ID, text)
 			msg.ParseMode = "Markdown"
 			msg.ReplyMarkup = newWebAppInlineKeyboardMarkup("实时仓位", url)
@@ -95,6 +102,13 @@ func (b *Bot) handleHelp(message *tgbotapi.Message, user *models.User) {
 
 // handleMiniApp handles the /miniapp command
 func (b *Bot) handleMiniApp(message *tgbotapi.Message, user *models.User) {
+	// 检查 MiniApp 权限（基础授权已在 command 入口统一检查）
+	hasAccess, reason := b.accessService.CheckMiniAppAccess(user.ID)
+	if !hasAccess {
+		b.sendMessage(message.Chat.ID, fmt.Sprintf("❌ 您没有 MiniApp 权限\n\n原因：%s\n\n请联系管理员开通。", reason))
+		return
+	}
+
 	if config.AppConfig == nil {
 		b.sendMessage(message.Chat.ID, "小程序入口未配置，请联系管理员。")
 		return
@@ -412,6 +426,9 @@ func (b *Bot) handleText(message *tgbotapi.Message, user *models.User) {
 		text := strings.TrimSpace(message.Text)
 		// Check if it's a valid pool identifier (V3 address or V4 PoolId)
 		if isPoolIdentifier(text) {
+			if !b.checkUserAuthorized(message.Chat.ID, user) {
+				return
+			}
 			// Auto-detect pool input, treat as new position
 			database.SetUserSession(user.TelegramID, "state", "awaiting_pool_address", 30*time.Minute)
 			b.handlePoolAddress(message, user)
@@ -420,6 +437,12 @@ func (b *Bot) handleText(message *tgbotapi.Message, user *models.User) {
 		// Not a pool identifier and no state
 		b.sendMessage(message.Chat.ID, "💡 *提示：*\n\n直接发送池子地址或 PoolId 即可开始创建仓位。\n\n支持：\n• V3 池子地址（如 0x...，40位）\n• V4 PoolId（如 0x...，64位）\n\n或使用 /help 查看可用命令。")
 		return
+	}
+
+	if state != "awaiting_auth_code" {
+		if !b.checkUserAuthorized(message.Chat.ID, user) {
+			return
+		}
 	}
 
 	switch state {

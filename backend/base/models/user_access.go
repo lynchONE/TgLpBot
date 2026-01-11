@@ -23,6 +23,7 @@ type UserAccess struct {
 	MaxActiveTasks int `gorm:"default:1" json:"max_active_tasks"`
 
 	AutoModeEnabled bool `gorm:"default:false" json:"auto_mode_enabled"` // 是否有 Auto 模式权限
+	MiniAppEnabled  bool `gorm:"default:false" json:"mini_app_enabled"`  // 是否有 Mini App 权限
 
 	RevokedAt       *time.Time `gorm:"index" json:"revoked_at"`
 	RevokedByUserID *uint      `gorm:"index" json:"revoked_by_user_id"`

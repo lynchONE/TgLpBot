@@ -52,6 +52,26 @@ func (s *Server) handleHotPools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	initData := initDataFromQuery(r)
+	user, status, msg := authenticateTelegramWebAppUser(initData)
+	if status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+	check, status, msg, err := requireUserAccess(user.ID)
+	if err != nil {
+		http.Error(w, msg, status)
+		return
+	}
+	if status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+	if status, msg := requireMiniAppPermission(check); status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+
 	query := r.URL.Query()
 
 	sort := strings.ToLower(strings.TrimSpace(query.Get("sort")))

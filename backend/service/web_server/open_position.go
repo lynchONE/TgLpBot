@@ -149,27 +149,52 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	parsed, err := ParseTelegramWebAppInitData(req.InitData, config.AppConfig.TelegramBotToken)
-	if err != nil {
-		if errors.Is(err, ErrMissingInitData) {
-			http.Error(w, "missing initData", http.StatusBadRequest)
-		} else {
-			http.Error(w, "invalid initData", http.StatusUnauthorized)
-		}
+	user, status, msg := authenticateTelegramWebAppUser(req.InitData)
+	if status != 0 {
+		http.Error(w, msg, status)
 		return
 	}
 
-	userService := userSvc.NewUserService()
-	user, err := userService.GetOrCreateUser(
-		parsed.User.ID,
-		parsed.User.Username,
-		parsed.User.FirstName,
-		parsed.User.LastName,
-		parsed.User.LanguageCode,
-	)
+	check, status, msg, err := requireUserAccess(user.ID)
 	if err != nil {
-		http.Error(w, "failed to load user", http.StatusInternalServerError)
+		http.Error(w, msg, status)
 		return
+	}
+	if status != 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(openPositionError{
+			Code:    "forbidden",
+			Message: msg,
+		})
+		return
+	}
+	if status, msg := requireMiniAppPermission(check); status != 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(openPositionError{
+			Code:    "miniapp_forbidden",
+			Message: msg,
+		})
+		return
+	}
+
+	// 检查任务额度
+	if !check.IsAdmin && check.Access != nil {
+		taskCount, countErr := userSvc.NewAccessService().CountUserActiveTasks(user.ID)
+		if countErr != nil {
+			http.Error(w, "failed to check task quota", http.StatusInternalServerError)
+			return
+		}
+		if taskCount >= int64(check.Access.MaxActiveTasks) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(openPositionError{
+				Code:    "task_quota_exceeded",
+				Message: "已达到活跃任务数量上限，请先停止其他任务或联系管理员提升额度",
+			})
+			return
+		}
 	}
 
 	walletService := wallet.NewWalletService()

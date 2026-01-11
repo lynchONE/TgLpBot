@@ -96,6 +96,7 @@ type CreateAuthCodeInput struct {
 	MaxActiveTasks  int
 	MaxRedemptions  int
 	AutoModeEnabled bool
+	MiniAppEnabled  bool
 	Note            string
 }
 
@@ -142,6 +143,7 @@ func (s *AccessService) CreateAuthCode(createdByUserID uint, in CreateAuthCodeIn
 			MaxWallets:      in.MaxWallets,
 			MaxActiveTasks:  in.MaxActiveTasks,
 			AutoModeEnabled: in.AutoModeEnabled,
+			MiniAppEnabled:  in.MiniAppEnabled,
 		}
 		if err := database.DB.Create(ac).Error; err != nil {
 			lastErr = err
@@ -174,6 +176,7 @@ type UpdateAuthCodeInput struct {
 	MaxActiveTasks  *int
 	MaxRedemptions  *int
 	AutoModeEnabled *bool
+	MiniAppEnabled  *bool
 	Note            *string
 }
 
@@ -198,6 +201,9 @@ func (s *AccessService) UpdateAuthCode(codeID uint, in UpdateAuthCodeInput) (*mo
 	}
 	if in.AutoModeEnabled != nil {
 		updates["auto_mode_enabled"] = *in.AutoModeEnabled
+	}
+	if in.MiniAppEnabled != nil {
+		updates["mini_app_enabled"] = *in.MiniAppEnabled
 	}
 	if in.Note != nil {
 		updates["note"] = strings.TrimSpace(*in.Note)
@@ -281,6 +287,7 @@ func (s *AccessService) RedeemAuthCode(userID uint, rawCode string) (*models.Use
 			"max_wallets":        auth.MaxWallets,
 			"max_active_tasks":   auth.MaxActiveTasks,
 			"auto_mode_enabled":  auth.AutoModeEnabled,
+			"mini_app_enabled":   auth.MiniAppEnabled,
 			"revoked_at":         nil,
 			"revoked_by_user_id": nil,
 			"note":               strings.TrimSpace(auth.Note),
@@ -463,6 +470,7 @@ type UpdateUserAccessInput struct {
 	MaxWallets      *int
 	MaxActiveTasks  *int
 	AutoModeEnabled *bool
+	MiniAppEnabled  *bool
 	Note            *string
 }
 
@@ -491,6 +499,9 @@ func (s *AccessService) UpdateUserAccess(adminUserID uint, userID uint, in Updat
 	}
 	if in.AutoModeEnabled != nil {
 		updates["auto_mode_enabled"] = *in.AutoModeEnabled
+	}
+	if in.MiniAppEnabled != nil {
+		updates["mini_app_enabled"] = *in.MiniAppEnabled
 	}
 	if in.Note != nil {
 		updates["note"] = strings.TrimSpace(*in.Note)
@@ -546,12 +557,47 @@ func (s *AccessService) CheckAutoModeAccess(userID uint) (bool, string) {
 	}
 
 	now := time.Now()
+	if access.ActiveFrom != nil && now.Before(*access.ActiveFrom) {
+		return false, "未到生效时间"
+	}
 	if access.ActiveTo != nil && now.After(*access.ActiveTo) {
 		return false, "授权已过期"
 	}
 
 	if !access.AutoModeEnabled {
 		return false, "未开通 Auto 模式权限"
+	}
+
+	return true, ""
+}
+
+// CheckMiniAppAccess 检查用户是否有 MiniApp 权限
+// 返回: (hasAccess, reason)
+func (s *AccessService) CheckMiniAppAccess(userID uint) (bool, string) {
+	// 管理员始终有权限
+	if s.IsAdminUser(userID) {
+		return true, ""
+	}
+
+	access, err := s.GetUserAccess(userID)
+	if err != nil {
+		return false, "未授权"
+	}
+
+	if access.RevokedAt != nil {
+		return false, "账户已停用"
+	}
+
+	now := time.Now()
+	if access.ActiveFrom != nil && now.Before(*access.ActiveFrom) {
+		return false, "未到生效时间"
+	}
+	if access.ActiveTo != nil && now.After(*access.ActiveTo) {
+		return false, "授权已过期"
+	}
+
+	if !access.MiniAppEnabled {
+		return false, "未开通 MiniApp 权限"
 	}
 
 	return true, ""
