@@ -63,30 +63,27 @@ export default function AutoPnLCurveCard({ data, loading, error, theme = 'dark' 
             const t = Number(e?.t || 0);
             if (!Number.isFinite(t) || t <= 0) continue;
 
-            const pair = String(e?.pair || '').trim();
             if (type === 'open') {
-                const openUSDT = Number(e?.open_usdt ?? 0);
-                const text = pair ? `${pair} · 开仓 ${formatUsd(openUSDT)}` : `开仓 ${formatUsd(openUSDT)}`;
+                // 开仓：蓝色向上箭头，不显示文字避免重叠
                 out.push({
                     time: t,
                     position: 'belowBar',
                     color: '#60a5fa',
                     shape: 'arrowUp',
-                    text,
+                    text: '',
                 });
                 continue;
             }
             if (type === 'close') {
                 const profit = Number(e?.profit_usdt ?? 0);
                 const isProfit = Number.isFinite(profit) && profit >= 0;
-                const textProfit = Number.isFinite(profit) ? `${isProfit ? '+' : '-'}${formatUsd(Math.abs(profit))}` : '--';
-                const text = pair ? `${pair} · 平仓 ${textProfit}` : `平仓 ${textProfit}`;
+                // 平仓：盈利绿色、亏损红色向下箭头，不显示文字避免重叠
                 out.push({
                     time: t,
                     position: 'aboveBar',
                     color: isProfit ? '#10b981' : '#ef4444',
                     shape: 'arrowDown',
-                    text,
+                    text: '',
                 });
             }
         }

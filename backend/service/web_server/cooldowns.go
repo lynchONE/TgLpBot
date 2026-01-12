@@ -26,19 +26,31 @@ type CooldownsResponse struct {
 	Count     int            `json:"count,omitempty"`
 }
 
-// handleCooldowns 处理冷却列表 API
+// RemoveCooldownRequest 移除冷却请求
+type RemoveCooldownRequest struct {
+	TradingPair string `json:"trading_pair"`
+}
+
+// handleCooldowns 处理冷却列表 API (GET 获取列表, DELETE 移除冷却)
 func handleCooldowns(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	if r.Method != http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
+		handleCooldownsGet(w, r)
+	case http.MethodDelete:
+		handleCooldownsDelete(w, r)
+	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		json.NewEncoder(w).Encode(CooldownsResponse{
 			Success: false,
 			Message: "不支持的请求方法",
 		})
-		return
 	}
+}
 
+// handleCooldownsGet 获取冷却列表
+func handleCooldownsGet(w http.ResponseWriter, r *http.Request) {
 	initData := r.URL.Query().Get("initData")
 	if strings.TrimSpace(initData) == "" {
 		w.WriteHeader(http.StatusBadRequest)
@@ -77,7 +89,6 @@ func handleCooldowns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 获取冷却列表
 	svc := blacklist.NewCooldownService()
 	cooldowns, err := svc.GetAll(user.ID)
 	if err != nil {
@@ -90,7 +101,6 @@ func handleCooldowns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 转换为响应格式
 	items := make([]CooldownItem, 0, len(cooldowns))
 	for _, c := range cooldowns {
 		remainingSec := int64(c.RemainingTime.Seconds())
@@ -98,7 +108,6 @@ func handleCooldowns(w http.ResponseWriter, r *http.Request) {
 		if remainingMin < 1 && remainingSec > 0 {
 			remainingMin = 1
 		}
-
 		items = append(items, CooldownItem{
 			TradingPair:      c.TradingPair,
 			Reason:           c.Reason,
@@ -112,5 +121,83 @@ func handleCooldowns(w http.ResponseWriter, r *http.Request) {
 		Success:   true,
 		Cooldowns: items,
 		Count:     len(items),
+	})
+}
+
+// handleCooldownsDelete 移除冷却
+func handleCooldownsDelete(w http.ResponseWriter, r *http.Request) {
+	initData := r.URL.Query().Get("initData")
+	if strings.TrimSpace(initData) == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(CooldownsResponse{
+			Success: false,
+			Message: "缺少 initData",
+		})
+		return
+	}
+
+	user, status, msg := authenticateTelegramWebAppUser(initData)
+	if status != 0 {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(CooldownsResponse{Success: false, Message: msg})
+		return
+	}
+	check, status, msg, err := requireUserAccess(user.ID)
+	if err != nil {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(CooldownsResponse{Success: false, Message: msg})
+		return
+	}
+	if status != 0 {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(CooldownsResponse{Success: false, Message: msg})
+		return
+	}
+	if status, msg := requireMiniAppPermission(check); status != 0 {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(CooldownsResponse{Success: false, Message: msg})
+		return
+	}
+	if status, msg := requireAutoModePermission(check); status != 0 {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(CooldownsResponse{Success: false, Message: msg})
+		return
+	}
+
+	var req RemoveCooldownRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(CooldownsResponse{
+			Success: false,
+			Message: "请求格式错误: " + err.Error(),
+		})
+		return
+	}
+
+	tradingPair := strings.TrimSpace(req.TradingPair)
+	if tradingPair == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(CooldownsResponse{
+			Success: false,
+			Message: "缺少 trading_pair 参数",
+		})
+		return
+	}
+
+	svc := blacklist.NewCooldownService()
+	if err := svc.Remove(user.ID, tradingPair); err != nil {
+		log.Printf("[Cooldowns API] 移除冷却失败: user_id=%d trading_pair=%s err=%v", user.ID, tradingPair, err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(CooldownsResponse{
+			Success: false,
+			Message: "移除冷却失败: " + err.Error(),
+		})
+		return
+	}
+
+	log.Printf("[Cooldowns API] 移除冷却成功: user_id=%d trading_pair=%s", user.ID, tradingPair)
+	json.NewEncoder(w).Encode(CooldownsResponse{
+		Success: true,
+		Message: "已移除冷却: " + tradingPair,
 	})
 }

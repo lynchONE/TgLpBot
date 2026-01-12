@@ -3268,3 +3268,160 @@ func autoLPActionZh(action string) string {
 		return "未知"
 	}
 }
+
+// CheckPoolHardFilterResult 硬筛检查结果
+type CheckPoolHardFilterResult struct {
+	Passed     bool
+	FailReason string
+	Metrics    PoolHardFilterMetrics
+}
+
+// PoolHardFilterMetrics 池子硬筛指标
+type PoolHardFilterMetrics struct {
+	TVLUSD        float64
+	FeePercentage float64
+	FeeRate5mPct  float64
+	TotalFees5m   float64
+	TotalVolume5m float64
+	TxCount5m     int
+	TradingPair   string
+}
+
+// CheckPoolHardFilter 检查池子是否符合硬筛条件
+// 用于再平衡时判断是否应该重新开仓
+func (s *AutoLPService) CheckPoolHardFilter(ctx context.Context, poolAddress string, protocolVersion string) (*CheckPoolHardFilterResult, error) {
+	if s.poolm == nil {
+		return nil, fmt.Errorf("poolm client not initialized")
+	}
+
+	poolAddress = strings.ToLower(strings.TrimSpace(poolAddress))
+	protocolVersion = strings.ToLower(strings.TrimSpace(protocolVersion))
+	if poolAddress == "" {
+		return nil, fmt.Errorf("pool address is empty")
+	}
+
+	// 获取硬筛配置
+	sysConfigService := user.NewSystemConfigService()
+	hardFilter, err := sysConfigService.GetHardFilterConfig()
+	if err != nil {
+		log.Printf("[AutoLP] CheckPoolHardFilter 获取硬筛配置失败，使用环境变量: %v", err)
+		hardFilter = &models.HardFilterConfig{
+			MinPoolValueUSD:     config.AppConfig.AutoLPMinPoolValueUSD,
+			MinFeePercentage:    config.AppConfig.AutoLPMinFeePercentage,
+			MaxFeePercentage:    config.AppConfig.AutoLPMaxFeePercentage,
+			MinFeeRate5m:        config.AppConfig.AutoLPMinFeeRate5m,
+			MinTotalFees5m:      config.AppConfig.AutoLPMinTotalFees5m,
+			MinTotalVolume5m:    config.AppConfig.AutoLPMinTotalVolume5m,
+			MinTx5m:             config.AppConfig.AutoLPMinTx5m,
+			FilterChineseTokens: config.AppConfig.AutoLPFilterChineseTokens,
+		}
+	}
+
+	// 获取5分钟池子数据
+	chain := strings.ToLower(strings.TrimSpace(config.AppConfig.AutoLPChain))
+	if chain == "" {
+		chain = "bsc"
+	}
+	dexes := autoLPDexList(config.AppConfig.AutoLPProtocols)
+	dexParam := strings.Join(dexes, ",")
+
+	resp, err := s.poolm.TopFees(ctx, 5, chain, dexParam)
+	if err != nil {
+		return nil, fmt.Errorf("fetch top fees failed: %w", err)
+	}
+
+	// 在返回数据中查找目标池子
+	var found *PoolMFeePool
+	for _, p := range resp.Data {
+		addr := strings.ToLower(strings.TrimSpace(p.PoolAddress))
+		if addr == poolAddress {
+			found = &p
+			break
+		}
+	}
+
+	if found == nil {
+		// 池子不在5分钟Top列表中，视为不符合条件
+		return &CheckPoolHardFilterResult{
+			Passed:     false,
+			FailReason: "池子不在5分钟Top列表中（活跃度不足）",
+		}, nil
+	}
+
+	metrics := PoolHardFilterMetrics{
+		TVLUSD:        found.CurrentPoolValue,
+		FeePercentage: found.FeePercentage,
+		TotalFees5m:   found.TotalFees,
+		TotalVolume5m: found.TotalVolume,
+		TxCount5m:     found.TransactionCount,
+		TradingPair:   strings.TrimSpace(found.TradingPair),
+	}
+	if found.CurrentPoolValue > 0 {
+		metrics.FeeRate5mPct = (found.TotalFees / found.CurrentPoolValue) * 100
+	}
+
+	// 检查各项硬筛条件
+	if hardFilter.FilterChineseTokens && (containsChinese(found.TradingPair) || containsChinese(found.Token0Symbol) || containsChinese(found.Token1Symbol)) {
+		return &CheckPoolHardFilterResult{Passed: false, FailReason: "交易对名称包含中文", Metrics: metrics}, nil
+	}
+	if hardFilter.MinPoolValueUSD > 0 && found.CurrentPoolValue <= hardFilter.MinPoolValueUSD {
+		return &CheckPoolHardFilterResult{Passed: false, FailReason: fmt.Sprintf("TVL不达标（%.2f <= %.2f）", found.CurrentPoolValue, hardFilter.MinPoolValueUSD), Metrics: metrics}, nil
+	}
+	if hardFilter.MinFeePercentage > 0 && found.FeePercentage <= hardFilter.MinFeePercentage {
+		return &CheckPoolHardFilterResult{Passed: false, FailReason: fmt.Sprintf("费率不达标（%.4f%% <= %.4f%%）", found.FeePercentage, hardFilter.MinFeePercentage), Metrics: metrics}, nil
+	}
+	if hardFilter.MaxFeePercentage > 0 && found.FeePercentage > hardFilter.MaxFeePercentage {
+		return &CheckPoolHardFilterResult{Passed: false, FailReason: fmt.Sprintf("费率过高（%.4f%% > %.4f%%）", found.FeePercentage, hardFilter.MaxFeePercentage), Metrics: metrics}, nil
+	}
+	if hardFilter.MinFeeRate5m > 0 && metrics.FeeRate5mPct <= hardFilter.MinFeeRate5m {
+		return &CheckPoolHardFilterResult{Passed: false, FailReason: fmt.Sprintf("5分钟费用率不达标（%.4f%% <= %.4f%%）", metrics.FeeRate5mPct, hardFilter.MinFeeRate5m), Metrics: metrics}, nil
+	}
+	if hardFilter.MinTotalFees5m > 0 && found.TotalFees <= hardFilter.MinTotalFees5m {
+		return &CheckPoolHardFilterResult{Passed: false, FailReason: fmt.Sprintf("5分钟手续费不达标（%.2f <= %.2f）", found.TotalFees, hardFilter.MinTotalFees5m), Metrics: metrics}, nil
+	}
+	if hardFilter.MinTotalVolume5m > 0 && found.TotalVolume <= hardFilter.MinTotalVolume5m {
+		return &CheckPoolHardFilterResult{Passed: false, FailReason: fmt.Sprintf("5分钟成交量不达标（%.2f <= %.2f）", found.TotalVolume, hardFilter.MinTotalVolume5m), Metrics: metrics}, nil
+	}
+	if hardFilter.MinTx5m > 0 && found.TransactionCount <= hardFilter.MinTx5m {
+		return &CheckPoolHardFilterResult{Passed: false, FailReason: fmt.Sprintf("5分钟交易笔数不达标（%d <= %d）", found.TransactionCount, hardFilter.MinTx5m), Metrics: metrics}, nil
+	}
+
+	return &CheckPoolHardFilterResult{Passed: true, Metrics: metrics}, nil
+}
+
+// GetAutoLPService 获取全局 AutoLP 服务实例（用于其他服务调用）
+var globalAutoLPService *AutoLPService
+
+func SetGlobalAutoLPService(s *AutoLPService) {
+	globalAutoLPService = s
+
+	// 同时注册硬筛检查函数到 strategy 包，避免循环导入
+	if s != nil {
+		strategy.SetHardFilterChecker(func(ctx context.Context, poolAddress string, protocolVersion string) (*strategy.HardFilterResult, error) {
+			result, err := s.CheckPoolHardFilter(ctx, poolAddress, protocolVersion)
+			if err != nil {
+				return nil, err
+			}
+			if result == nil {
+				return nil, nil
+			}
+			return &strategy.HardFilterResult{
+				Passed:     result.Passed,
+				FailReason: result.FailReason,
+				Metrics: strategy.HardFilterMetrics{
+					TVLUSD:        result.Metrics.TVLUSD,
+					FeePercentage: result.Metrics.FeePercentage,
+					FeeRate5mPct:  result.Metrics.FeeRate5mPct,
+					TotalFees5m:   result.Metrics.TotalFees5m,
+					TotalVolume5m: result.Metrics.TotalVolume5m,
+					TxCount5m:     result.Metrics.TxCount5m,
+					TradingPair:   result.Metrics.TradingPair,
+				},
+			}, nil
+		})
+	}
+}
+
+func GetGlobalAutoLPService() *AutoLPService {
+	return globalAutoLPService
+}
