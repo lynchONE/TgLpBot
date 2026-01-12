@@ -126,6 +126,28 @@ export async function deleteTask({ apiBaseUrl, initData, taskId, signal }) {
     return resp.json();
 }
 
+export async function updateTaskRange({ apiBaseUrl, initData, taskId, rangeLowerPct, rangeUpperPct, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/task_action?action=update_range`;
+    const payload = {
+        initData,
+        taskId,
+        range_lower_pct: rangeLowerPct,
+        range_upper_pct: rangeUpperPct,
+    };
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
 export async function fetchGlobalConfig({ apiBaseUrl, initData, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/settings?endpoint=global_config`;
@@ -295,7 +317,7 @@ export async function fetchPoolOHLCV({ apiBaseUrl, initData, chain, poolAddress,
     return resp.json();
 }
 
-export async function openPosition({ apiBaseUrl, initData, poolAddress, poolVersion, amount, rangeLowerPct, rangeUpperPct, allowEntrySwap, signal }) {
+export async function openPosition({ apiBaseUrl, initData, poolAddress, poolVersion, amount, rangeLowerPct, rangeUpperPct, slippageTolerance, allowEntrySwap, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/trading?endpoint=open_position`;
     const payload = {
@@ -307,6 +329,9 @@ export async function openPosition({ apiBaseUrl, initData, poolAddress, poolVers
         range_upper_pct: rangeUpperPct,
         allow_entry_swap: Boolean(allowEntrySwap),
     };
+    if (Number.isFinite(slippageTolerance)) {
+        payload.slippage_tolerance = slippageTolerance;
+    }
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -432,6 +457,29 @@ export async function fetchCooldowns({ apiBaseUrl, initData, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/trading?endpoint=cooldowns&initData=${encodeURIComponent(initData)}`;
     const resp = await fetch(url, { method: 'GET', signal });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        let detail = text;
+        try {
+            const parsed = text ? JSON.parse(text) : null;
+            if (parsed?.message) detail = parsed.message;
+        } catch {
+            // ignore JSON parse
+        }
+        throw new Error(detail || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
+export async function removeCooldown({ apiBaseUrl, initData, tradingPair, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/trading?endpoint=cooldowns&initData=${encodeURIComponent(initData)}`;
+    const resp = await fetch(url, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trading_pair: tradingPair }),
+        signal,
+    });
     if (!resp.ok) {
         const text = await resp.text().catch(() => '');
         let detail = text;

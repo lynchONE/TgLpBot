@@ -23,13 +23,14 @@ import (
 )
 
 type openPositionRequest struct {
-	InitData       string  `json:"initData"`
-	PoolAddress    string  `json:"pool_address"`
-	PoolVersion    string  `json:"pool_version"`
-	Amount         float64 `json:"amount"`
-	RangeLowerPct  float64 `json:"range_lower_pct"`
-	RangeUpperPct  float64 `json:"range_upper_pct"`
-	AllowEntrySwap bool    `json:"allow_entry_swap"`
+	InitData       string   `json:"initData"`
+	PoolAddress    string   `json:"pool_address"`
+	PoolVersion    string   `json:"pool_version"`
+	Amount         float64  `json:"amount"`
+	RangeLowerPct  float64  `json:"range_lower_pct"`
+	RangeUpperPct  float64  `json:"range_upper_pct"`
+	Slippage       *float64 `json:"slippage_tolerance,omitempty"`
+	AllowEntrySwap bool     `json:"allow_entry_swap"`
 }
 
 type openPositionResponse struct {
@@ -143,6 +144,12 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 	if req.RangeLowerPct <= 0 || req.RangeUpperPct <= 0 || req.RangeLowerPct >= 100 || req.RangeUpperPct >= 100 {
 		http.Error(w, "invalid range", http.StatusBadRequest)
 		return
+	}
+	if req.Slippage != nil {
+		if *req.Slippage < 0 || *req.Slippage > 100 {
+			http.Error(w, "invalid slippage_tolerance", http.StatusBadRequest)
+			return
+		}
 	}
 	if config.AppConfig == nil {
 		http.Error(w, "config not loaded", http.StatusInternalServerError)
@@ -324,6 +331,11 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slippage := cfg.SlippageTolerance
+	if req.Slippage != nil {
+		slippage = *req.Slippage
+	}
+
 	hooksAddr := normalizeHexPrefixed(poolInfo.HooksAddress)
 	if !common.IsHexAddress(hooksAddr) {
 		hooksAddr = "0x0000000000000000000000000000000000000000"
@@ -349,7 +361,7 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		AmountUSDT:           req.Amount,
 		CurrentLiquidity:     "0",
 		ReopenDelaySeconds:   cfg.RebalanceTimeout,
-		SlippageTolerance:    cfg.SlippageTolerance,
+		SlippageTolerance:    slippage,
 		AutoReinvest:         cfg.AutoReinvest,
 		ResidualTolerance:    cfg.ResidualTolerance,
 		AllowEntrySwap:       req.AllowEntrySwap,

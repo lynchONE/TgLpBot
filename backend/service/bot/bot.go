@@ -598,6 +598,8 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleTaskToggleStopLoss(query, user)
 	case strings.HasPrefix(query.Data, "task_set_slippage_"):
 		b.handleTaskSetSlippage(query, user)
+	case strings.HasPrefix(query.Data, "task_set_range_"):
+		b.handleTaskSetRange(query, user)
 	case strings.HasPrefix(query.Data, "task_set_rebalance_"):
 		b.handleTaskSetRebalanceTimeout(query, user)
 	case strings.HasPrefix(query.Data, "task_swap_dust_"):

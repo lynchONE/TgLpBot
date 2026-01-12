@@ -113,6 +113,7 @@ export default function PositionCard({
     onSetTaskPaused,
     onStopTask,
     onDeleteTask,
+    onUpdateTaskRange,
     batchMode = false,
     isSelected = false,
     onToggleSelect,
@@ -204,6 +205,18 @@ export default function PositionCard({
     const rangeMin = rangeReady ? Math.min(rangeLower, rangeUpper) : null;
     const rangeMax = rangeReady ? Math.max(rangeLower, rangeUpper) : null;
 
+    const taskRange = useMemo(() => {
+        const low = Number(position?.task_range_lower_pct);
+        const up = Number(position?.task_range_upper_pct);
+        if (!Number.isFinite(low) || !Number.isFinite(up) || low <= 0 || up <= 0) return null;
+        const asymmetric = Math.abs(low - up) >= 0.01;
+        const avg = (low + up) / 2;
+        if (!asymmetric) {
+            return { low, up, text: `±${avg.toFixed(2)}%` };
+        }
+        return { low, up, text: `下 ${low.toFixed(2)}% / 上 ${up.toFixed(2)}%` };
+    }, [position?.task_range_lower_pct, position?.task_range_upper_pct]);
+
     const priceProgress = useMemo(() => {
         if (!Number.isFinite(currentPrice) || !Number.isFinite(rangeMin) || !Number.isFinite(rangeMax)) return null;
         const den = rangeMax - rangeMin;
@@ -233,9 +246,10 @@ export default function PositionCard({
     const statusLabel = String(position?.status_label || '');
     const isStopped = statusLabel.includes('已停止');
     const isStopping = statusLabel.includes('停止中') || statusLabel.includes('撤出中');
-    const hasActions = typeof onSetTaskPaused === 'function' || typeof onStopTask === 'function' || typeof onDeleteTask === 'function';
+    const hasActions = typeof onSetTaskPaused === 'function' || typeof onStopTask === 'function' || typeof onDeleteTask === 'function' || typeof onUpdateTaskRange === 'function';
     const canTaskAction = Boolean(allowTaskActions) && hasActions && taskId > 0;
     const canPauseAction = canTaskAction && typeof onSetTaskPaused === 'function' && !isStopping;
+    const canUpdateRangeAction = canTaskAction && typeof onUpdateTaskRange === 'function' && !isStopping;
     const canStopAction = canTaskAction && typeof onStopTask === 'function' && !isStopped && !isStopping;
     const canDeleteAction = canTaskAction && typeof onDeleteTask === 'function' && !isStopping;
 
@@ -270,6 +284,7 @@ export default function PositionCard({
     };
 
     const togglePause = () => runAction('pause', () => onSetTaskPaused?.(taskId, !taskPaused));
+    const editRange = () => runAction('range', () => onUpdateTaskRange?.(taskId, position));
     const stopTask = () => runAction('stop', () => onStopTask?.(taskId));
     const deleteTask = () => runAction('delete', () => onDeleteTask?.(taskId));
 
@@ -297,6 +312,16 @@ export default function PositionCard({
                                     className="w-full px-3 py-2 text-left text-xs font-semibold text-zinc-800 hover:bg-zinc-100 active:bg-zinc-100 disabled:opacity-50 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/10"
                                 >
                                     {actionPending === 'pause' ? '处理中...' : taskPaused ? '恢复任务' : '暂停任务'}
+                                </button>
+                            ) : null}
+                            {typeof onUpdateTaskRange === 'function' ? (
+                                <button
+                                    type="button"
+                                    onClick={editRange}
+                                    disabled={!canUpdateRangeAction || Boolean(actionPending)}
+                                    className="w-full border-t border-zinc-100 px-3 py-2 text-left text-xs font-semibold text-zinc-800 hover:bg-zinc-100 active:bg-zinc-100 disabled:opacity-50 dark:border-white/10 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/10"
+                                >
+                                    {actionPending === 'range' ? '处理中...' : '修改区间'}
                                 </button>
                             ) : null}
                             {typeof onStopTask === 'function' ? (
@@ -477,6 +502,15 @@ export default function PositionCard({
                 runningDuration={runningDuration}
                 updateTimeText={updateTimeText}
             />
+
+            {taskRange ? (
+                <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700 dark:border-white/10 dark:bg-[#0f1116] dark:text-white/70">
+                    <div className="flex items-center justify-between gap-2">
+                        <div className="font-semibold">策略区间（下次再平衡）</div>
+                        <div className="font-semibold tabular-nums">{taskRange.text}</div>
+                    </div>
+                </div>
+            ) : null}
         </div>
     );
 }

@@ -34,12 +34,12 @@ export default async function handler(req, res) {
 
     // 从 query 参数或 body 中获取 action
     const action = String(req.query?.action || '').trim();
-    const validActions = ['delete', 'pause', 'stop'];
+    const validActions = ['delete', 'pause', 'stop', 'update_range'];
 
     if (!validActions.includes(action)) {
         res.statusCode = 400;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.end(JSON.stringify({ error: '无效的操作类型，有效值: delete, pause, stop' }));
+        res.end(JSON.stringify({ error: '无效的操作类型，有效值: delete, pause, stop, update_range' }));
         return;
     }
 

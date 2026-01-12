@@ -20,6 +20,7 @@ import {
     fetchMe,
     fetchRealtimePositions,
     openPosition,
+    updateTaskRange,
     setAutoLPGuardCompareToPeak,
     setTaskPaused,
     stopTask,
@@ -27,6 +28,7 @@ import {
     removeFromBlacklist,
     fetchBlacklist,
     fetchCooldowns,
+    removeCooldown,
 } from './lib/api';
 import { getTelegramWebApp, hapticImpact, hapticNotification, hapticSelection } from './lib/telegram';
 import { formatRelativeTime, useTick } from './lib/time';
@@ -283,9 +285,16 @@ export default function App() {
     const [openPositionAmount, setOpenPositionAmount] = useState('');
     const [openPositionRangeLower, setOpenPositionRangeLower] = useState('');
     const [openPositionRangeUpper, setOpenPositionRangeUpper] = useState('');
+    const [openPositionSlippage, setOpenPositionSlippage] = useState('');
     const [openPositionAllowSwap, setOpenPositionAllowSwap] = useState(false);
     const [openPositionError, setOpenPositionError] = useState('');
     const [openPositionLoading, setOpenPositionLoading] = useState(false);
+
+    const [taskRangeEdit, setTaskRangeEdit] = useState(null);
+    const [taskRangeLower, setTaskRangeLower] = useState('');
+    const [taskRangeUpper, setTaskRangeUpper] = useState('');
+    const [taskRangeError, setTaskRangeError] = useState('');
+    const [taskRangeLoading, setTaskRangeLoading] = useState(false);
 
     // 黑名单状态
     const [blacklist, setBlacklist] = useState(new Set());
@@ -431,6 +440,37 @@ export default function App() {
             return wantAuto ? isAuto : !isAuto;
         });
     }, [positionsTaskTab, visiblePositions]);
+
+    // 智能切换实时仓位Tab：根据当前任务类型自动选择
+    const hasAutoTasks = useMemo(() => {
+        return visiblePositions.some((p) => {
+            const taskId = Number(p?.task_id || 0);
+            return Number.isFinite(taskId) && taskId > 0 && Boolean(p?.task_is_auto);
+        });
+    }, [visiblePositions]);
+
+    const hasManualTasks = useMemo(() => {
+        return visiblePositions.some((p) => {
+            const taskId = Number(p?.task_id || 0);
+            return Number.isFinite(taskId) && taskId > 0 && !Boolean(p?.task_is_auto);
+        });
+    }, [visiblePositions]);
+
+    // 首次加载或仓位变化时，智能设置Tab
+    const positionsInitializedRef = useRef(false);
+    useEffect(() => {
+        if (visiblePositions.length === 0) return;
+        if (positionsInitializedRef.current) return;
+        positionsInitializedRef.current = true;
+        
+        if (hasAutoTasks && hasManualTasks) {
+            setPositionsTaskTab('all');
+        } else if (hasAutoTasks && !hasManualTasks) {
+            setPositionsTaskTab('auto');
+        } else if (!hasAutoTasks && hasManualTasks) {
+            setPositionsTaskTab('manual');
+        }
+    }, [visiblePositions, hasAutoTasks, hasManualTasks]);
 
     // 从仓位构建 pool_address -> position_usd 映射（用于在热门池子上显示持仓标签）
     const positionsPoolMap = useMemo(() => {
@@ -1091,6 +1131,7 @@ export default function App() {
         setOpenPositionAmount('');
         setOpenPositionRangeLower('');
         setOpenPositionRangeUpper('');
+        setOpenPositionSlippage('');
         setOpenPositionAllowSwap(false);
         setOpenPositionError('');
     };
@@ -1133,6 +1174,17 @@ export default function App() {
             return;
         }
 
+        const slippageRaw = String(openPositionSlippage || '').trim();
+        let slippage = undefined;
+        if (slippageRaw) {
+            const v = Number(slippageRaw);
+            if (!Number.isFinite(v) || v < 0 || v > 100) {
+                setOpenPositionError('滑点无效，请输入 0-100 之间的百分比（不填则使用全局滑点）。');
+                return;
+            }
+            slippage = v;
+        }
+
         setOpenPositionLoading(true);
         setOpenPositionError('');
         try {
@@ -1144,6 +1196,7 @@ export default function App() {
                 amount,
                 rangeLowerPct: range.lower,
                 rangeUpperPct: range.upper,
+                slippageTolerance: slippage,
                 allowEntrySwap: openPositionAllowSwap,
             });
             setOpenPositionPool(null);
@@ -1368,6 +1421,64 @@ export default function App() {
             showNotice(resp?.message || '任务已删除', 'success');
         } catch (e) {
             showNotice(String(e?.message || e), 'error');
+        }
+    };
+
+    const openTaskRangeModal = useCallback((taskId, position) => {
+        if (!hasInitData || showAdmin) return;
+        const id = Number(taskId);
+        if (!Number.isFinite(id) || id <= 0) return;
+        const low = Number(position?.task_range_lower_pct);
+        const up = Number(position?.task_range_upper_pct);
+        setTaskRangeEdit({
+            taskId: id,
+            title: String(position?.title || '').trim() || `任务 #${id}`,
+        });
+        setTaskRangeLower(Number.isFinite(low) && low > 0 ? String(low) : '');
+        setTaskRangeUpper(Number.isFinite(up) && up > 0 ? String(up) : '');
+        setTaskRangeError('');
+    }, [hasInitData, showAdmin]);
+
+    const closeTaskRangeModal = () => {
+        if (taskRangeLoading) return;
+        setTaskRangeEdit(null);
+    };
+
+    const submitTaskRange = async () => {
+        if (!taskRangeEdit) return;
+        if (!hasInitData || showAdmin) return;
+
+        const range = parseRangeInput(taskRangeLower, taskRangeUpper);
+        if (!range || range.lower <= 0 || range.upper <= 0 || range.lower >= 100 || range.upper >= 100) {
+            setTaskRangeError('区间无效，请输入 0-100 之间的百分比。');
+            return;
+        }
+
+        const ok = await requestConfirm({
+            title: '修改区间',
+            message: '确认修改该任务区间？\n修改后的区间将对下次再平衡生效。',
+            confirmText: '确认修改',
+        });
+        if (!ok) return;
+
+        setTaskRangeLoading(true);
+        setTaskRangeError('');
+        try {
+            await updateTaskRange({
+                apiBaseUrl,
+                initData,
+                taskId: taskRangeEdit.taskId,
+                rangeLowerPct: range.lower,
+                rangeUpperPct: range.upper,
+            });
+            showNotice('区间已更新（下次再平衡生效）', 'success');
+            setTaskRangeEdit(null);
+            setTaskRangeLower('');
+            setTaskRangeUpper('');
+        } catch (e) {
+            setTaskRangeError(String(e?.message || e || '修改失败'));
+        } finally {
+            setTaskRangeLoading(false);
         }
     };
 
@@ -1878,13 +1989,7 @@ export default function App() {
                 )
             }
 
-            {
-                showEmptyAutoTasks ? (
-                    <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                        暂无自动任务。请先在机器人里开启 AutoLP 并开仓。
-                    </div>
-                ) : null
-            }
+            {/* 移除了"暂无自动任务"提示 */}
 
             <div className="space-y-4">
                 {isHotPools
@@ -2051,6 +2156,7 @@ export default function App() {
                                             onSetTaskPaused={handleSetTaskPaused}
                                             onStopTask={handleStopTask}
                                             onDeleteTask={handleDeleteTask}
+                                            onUpdateTaskRange={openTaskRangeModal}
                                             batchMode={batchMode}
                                             isSelected={selectedTaskIds.has(p.task_id)}
                                             onToggleSelect={() => toggleTaskSelection(p.task_id)}
@@ -2457,6 +2563,21 @@ export default function App() {
                                 </div>
 
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">滑点 (%)</div>
+                                    <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">不填则使用全局滑点，仅对本次开仓与后续再平衡生效。</div>
+                                    <input
+                                        value={openPositionSlippage}
+                                        onChange={(e) => {
+                                            setOpenPositionSlippage(e.target.value);
+                                            setOpenPositionError('');
+                                        }}
+                                        inputMode="decimal"
+                                        className="mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                        placeholder="例如 0.5（可选）"
+                                    />
+                                </div>
+
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="flex items-center justify-between gap-3">
                                         <div>
                                             <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">允许兑换</div>
@@ -2495,6 +2616,86 @@ export default function App() {
                                         }`}
                                 >
                                     {openPositionLoading ? '开仓中...' : '确认开仓'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                ) : null
+            }
+
+            {
+                taskRangeEdit ? (
+                    <div className="fixed inset-0 z-[55]">
+                        <button
+                            type="button"
+                            className="absolute inset-0 bg-black/40"
+                            onClick={closeTaskRangeModal}
+                            aria-label="关闭修改区间"
+                        />
+                        <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                            <div className="flex items-center justify-between gap-2">
+                                <div className="min-w-0">
+                                    <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">修改区间</div>
+                                    <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40 truncate">
+                                        {taskRangeEdit?.title || '--'}
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={closeTaskRangeModal}
+                                    className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
+                                    aria-label="关闭"
+                                    disabled={taskRangeLoading}
+                                >
+                                    <Icon path={icons.close} className="h-5 w-5" />
+                                </button>
+                            </div>
+
+                            <div className="mt-4 space-y-4">
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">新区间 (%)</div>
+                                    <div className="mt-2 grid grid-cols-2 gap-2">
+                                        <input
+                                            value={taskRangeLower}
+                                            onChange={(e) => {
+                                                setTaskRangeLower(e.target.value);
+                                                setTaskRangeError('');
+                                            }}
+                                            inputMode="decimal"
+                                            className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                            placeholder="下限 %"
+                                        />
+                                        <input
+                                            value={taskRangeUpper}
+                                            onChange={(e) => {
+                                                setTaskRangeUpper(e.target.value);
+                                                setTaskRangeError('');
+                                            }}
+                                            inputMode="decimal"
+                                            className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                            placeholder="上限 %"
+                                        />
+                                    </div>
+                                    <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
+                                        修改后的区间将对下次再平衡生效。
+                                    </div>
+                                </div>
+
+                                {taskRangeError ? (
+                                    <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
+                                        {taskRangeError}
+                                    </div>
+                                ) : null}
+                                <button
+                                    type="button"
+                                    onClick={submitTaskRange}
+                                    disabled={taskRangeLoading}
+                                    className={`w-full rounded-xl px-3 py-2 text-sm font-semibold text-white shadow-sm transition ${taskRangeLoading
+                                        ? 'cursor-not-allowed bg-emerald-500/60'
+                                        : 'bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700'
+                                        }`}
+                                >
+                                    {taskRangeLoading ? '保存中...' : '确认修改'}
                                 </button>
                             </div>
                         </div>

@@ -8,6 +8,7 @@ import (
 	"TgLpBot/base/security"
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/txexec"
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -401,7 +402,56 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 		return fmt.Errorf("task is nil")
 	}
 
+	// Reload editable config fields so user updates can affect the next (in-flight) rebalance.
+	var freshCfg models.StrategyTask
+	if err := database.DB.
+		Select("range_percentage", "range_lower_percentage", "range_upper_percentage", "slippage_tolerance").
+		Where("id = ? AND user_id = ?", task.ID, task.UserID).
+		First(&freshCfg).Error; err == nil {
+		task.RangePercentage = freshCfg.RangePercentage
+		task.RangeLowerPercentage = freshCfg.RangeLowerPercentage
+		task.RangeUpperPercentage = freshCfg.RangeUpperPercentage
+		task.SlippageTolerance = freshCfg.SlippageTolerance
+	}
+
 	switching := strings.TrimSpace(task.SwitchTargetPoolId) != "" && strings.TrimSpace(task.SwitchTargetPoolVersion) != ""
+
+	// Auto任务再平衡前检查硬筛条件（需求6：如果不符合硬筛条件就不开仓）
+	if task.IsAuto && !switching {
+		hardFilterChecker := GetHardFilterChecker()
+		if hardFilterChecker != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			checkResult, checkErr := hardFilterChecker(ctx, task.PoolId, task.PoolVersion)
+			cancel()
+
+			if checkErr != nil {
+				log.Printf("[Strategy] 任务 #%d 再平衡硬筛检查失败: %v", task.ID, checkErr)
+				// 检查失败时继续执行，不阻止开仓
+			} else if checkResult != nil && !checkResult.Passed {
+				log.Printf("[Strategy] 任务 #%d 再平衡时池子不符合硬筛条件，不开仓: %s", task.ID, checkResult.FailReason)
+
+				// 标记任务为已完成/停止状态
+				updates := map[string]interface{}{
+					"status":                  models.StrategyStatusStopping,
+					"rebalance_pending":       false,
+					"rebalance_retry_count":   0,
+					"rebalance_next_retry_at": nil,
+					"rebalance_last_error":    "硬筛条件不满足: " + checkResult.FailReason,
+					"error_message":           "",
+				}
+				_ = database.DB.Model(task).Updates(updates).Error
+
+				task.Status = models.StrategyStatusStopping
+				task.RebalancePending = false
+				task.RebalanceRetryCount = 0
+				task.RebalanceNextRetryAt = nil
+				task.RebalanceLastError = "硬筛条件不满足: " + checkResult.FailReason
+
+				s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 再平衡时池子不符合硬筛条件，已停止任务\n原因: %s\n交易对: %s", task.ID, checkResult.FailReason, checkResult.Metrics.TradingPair))
+				return fmt.Errorf("hard filter failed: %s", checkResult.FailReason)
+			}
+		}
+	}
 
 	if task.TickSpacing <= 0 || strings.TrimSpace(task.Token0Address) == "" || strings.TrimSpace(task.Token1Address) == "" {
 		if err := s.refreshTaskPoolMeta(task); err != nil {

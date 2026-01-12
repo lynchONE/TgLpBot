@@ -469,6 +469,34 @@ func (b *Bot) handleTaskSetSlippage(query *tgbotapi.CallbackQuery, user *models.
 	b.sendMessage(query.Message.Chat.ID, "📊 请输入该任务的滑点（百分比），例如：`1` 表示 1%")
 }
 
+func (b *Bot) handleTaskSetRange(query *tgbotapi.CallbackQuery, user *models.User) {
+	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
+	taskID, err := parseTaskID("task_set_range_", query.Data)
+	if err != nil {
+		b.sendMessage(query.Message.Chat.ID, "无效的任务ID")
+		return
+	}
+
+	task, err := b.taskService.GetByID(user.ID, taskID)
+	if err != nil || task == nil {
+		b.sendMessage(query.Message.Chat.ID, "任务不存在或已删除。")
+		return
+	}
+	if task.Status == models.StrategyStatusStopped {
+		b.sendMessage(query.Message.Chat.ID, "该任务已停止，无法修改区间。")
+		return
+	}
+
+	database.SetUserSession(user.TelegramID, "task_edit_id", fmt.Sprintf("%d", taskID), 30*time.Minute)
+	database.SetUserSession(user.TelegramID, "task_card_msg_id", fmt.Sprintf("%d", query.Message.MessageID), 30*time.Minute)
+	database.SetUserSession(user.TelegramID, "state", "awaiting_task_range", 30*time.Minute)
+
+	promptMsg, _ := b.sendMessage(query.Message.Chat.ID, "🎯 请输入新的区间（百分比），例如：`5` 表示 ±5%，或 `1 3` 表示下 1% 上 3%（修改后下次再平衡生效）")
+	if promptMsg.MessageID != 0 {
+		database.SetUserSession(user.TelegramID, "prompt_msg_id", fmt.Sprintf("%d", promptMsg.MessageID), 30*time.Minute)
+	}
+}
+
 func (b *Bot) handleTaskSetRebalanceTimeout(query *tgbotapi.CallbackQuery, user *models.User) {
 	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
 	taskID, err := parseTaskID("task_set_rebalance_", query.Data)

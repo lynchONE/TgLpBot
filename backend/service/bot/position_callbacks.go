@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -52,6 +53,13 @@ func (b *Bot) handleConfirmPosition(query *tgbotapi.CallbackQuery, user *models.
 		return
 	}
 
+	slippage := cfg.SlippageTolerance
+	if slippageStr, err := database.GetUserSession(user.TelegramID, "position_slippage"); err == nil {
+		if v, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(slippageStr, "%")), 64); err == nil && v >= 0 && v <= 100 {
+			slippage = v
+		}
+	}
+
 	// Clear session
 	database.ClearUserSession(user.TelegramID)
 
@@ -73,7 +81,7 @@ func (b *Bot) handleConfirmPosition(query *tgbotapi.CallbackQuery, user *models.
 		AmountUSDT:           amount,
 		CurrentLiquidity:     "0", // Will be updated after zap in
 		ReopenDelaySeconds:   cfg.RebalanceTimeout,
-		SlippageTolerance:    cfg.SlippageTolerance,
+		SlippageTolerance:    slippage,
 		AutoReinvest:         cfg.AutoReinvest,
 		ResidualTolerance:    cfg.ResidualTolerance,
 		StopLossEnabled:      cfg.StopLossEnabled,
@@ -144,6 +152,8 @@ func (b *Bot) handleBackToInput(query *tgbotapi.CallbackQuery, user *models.User
 
 *格式选项：*
 1️⃣ 使用百分比范围: '5 100' (表示当前价格 ±5%, 投入 100 USDT)
+
+可选滑点：末尾追加 ` + "`s=0.5`" + `（不填则使用全局滑点）
 
 发送 /cancel 取消此操作。`
 

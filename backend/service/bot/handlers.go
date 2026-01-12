@@ -487,6 +487,8 @@ func (b *Bot) handleText(message *tgbotapi.Message, user *models.User) {
 	// Task config inputs
 	case "awaiting_task_slippage":
 		b.handleTaskSlippageInput(message.Chat.ID, user, message.Text)
+	case "awaiting_task_range":
+		b.handleTaskRangeInput(message, user)
 	case "awaiting_task_rebalance_timeout":
 		b.handleTaskRebalanceTimeoutInput(message, user)
 	case "awaiting_task_stop_loss_delay":

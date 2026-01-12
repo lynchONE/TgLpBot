@@ -194,23 +194,25 @@ type RealtimeSummary struct {
 }
 
 type RealtimePosition struct {
-	Version      string     `json:"version"`
-	Exchange     string     `json:"exchange"`
-	Title        string     `json:"title"`
-	PoolID       string     `json:"pool_id"`
-	PositionID   string     `json:"position_id"`
-	TaskID       uint       `json:"task_id,omitempty"`
-	TaskPaused   bool       `json:"task_paused"`
-	TaskIsAuto   bool       `json:"task_is_auto"`
-	StatusLabel  string     `json:"status_label"`
-	InRange      bool       `json:"in_range"`
-	CurrentTick  int        `json:"current_tick"`
-	TickLower    int        `json:"tick_lower"`
-	TickUpper    int        `json:"tick_upper"`
-	RangePercent float64    `json:"range_percent"`
-	OutOfRange   string     `json:"out_of_range"`
-	RunningSince *time.Time `json:"running_since,omitempty"`
-	HasLiquidity bool       `json:"has_liquidity"`
+	Version           string     `json:"version"`
+	Exchange          string     `json:"exchange"`
+	Title             string     `json:"title"`
+	PoolID            string     `json:"pool_id"`
+	PositionID        string     `json:"position_id"`
+	TaskID            uint       `json:"task_id,omitempty"`
+	TaskPaused        bool       `json:"task_paused"`
+	TaskIsAuto        bool       `json:"task_is_auto"`
+	StatusLabel       string     `json:"status_label"`
+	InRange           bool       `json:"in_range"`
+	CurrentTick       int        `json:"current_tick"`
+	TickLower         int        `json:"tick_lower"`
+	TickUpper         int        `json:"tick_upper"`
+	RangePercent      float64    `json:"range_percent"`
+	TaskRangeLowerPct float64    `json:"task_range_lower_pct,omitempty"`
+	TaskRangeUpperPct float64    `json:"task_range_upper_pct,omitempty"`
+	OutOfRange        string     `json:"out_of_range"`
+	RunningSince      *time.Time `json:"running_since,omitempty"`
+	HasLiquidity      bool       `json:"has_liquidity"`
 
 	TokenRows []RealtimeTokenRow `json:"token_rows"`
 	Totals    RealtimeTotals     `json:"totals"`
@@ -1069,31 +1071,54 @@ func (s *RealtimePositionsService) buildV3Position(
 	taskID := uint(0)
 	taskPaused := false
 	taskIsAuto := false
+	taskRangeLowerPct := 0.0
+	taskRangeUpperPct := 0.0
 	if task != nil {
 		taskID = task.ID
 		taskPaused = task.Paused
 		taskIsAuto = task.IsAuto
+
+		lowerPct := task.RangeLowerPercentage
+		upperPct := task.RangeUpperPercentage
+		if lowerPct <= 0 || upperPct <= 0 {
+			if task.RangePercentage > 0 {
+				lowerPct = task.RangePercentage
+				upperPct = task.RangePercentage
+			}
+		}
+		if lowerPct > 0 && upperPct > 0 {
+			stableLower, stableUpper := pricing.StablePercentagesFromTickPercentages(task, lowerPct, upperPct)
+			if stableLower > 0 && stableUpper > 0 {
+				taskRangeLowerPct = stableLower
+				taskRangeUpperPct = stableUpper
+			} else {
+				taskRangeLowerPct = lowerPct
+				taskRangeUpperPct = upperPct
+			}
+		}
 	}
 	return &RealtimePosition{
-		Version:      "v3",
-		Exchange:     exchange,
-		Title:        title,
-		PoolID:       poolID,
-		PositionID:   tokenId.String(),
-		TaskID:       taskID,
-		TaskPaused:   taskPaused,
-		TaskIsAuto:   taskIsAuto,
-		StatusLabel:  statusLabel,
-		InRange:      inRange,
-		CurrentTick:  currentTick,
-		TickLower:    tickLower,
-		TickUpper:    tickUpper,
-		RangePercent: rangePct,
-		OutOfRange:   outOfRangeText,
-		RunningSince: runningSince,
-		HasLiquidity: hasLiquidity,
-		TokenRows:    []RealtimeTokenRow{row0, row1},
-		Totals:       totals,
+		Version:           "v3",
+		Exchange:          exchange,
+		Title:             title,
+		PoolID:            poolID,
+		PositionID:        tokenId.String(),
+		TaskID:            taskID,
+		TaskPaused:        taskPaused,
+		TaskIsAuto:        taskIsAuto,
+		StatusLabel:       statusLabel,
+		InRange:           inRange,
+		CurrentTick:       currentTick,
+		TickLower:         tickLower,
+		TickUpper:         tickUpper,
+		RangePercent:      rangePct,
+		TaskRangeLowerPct: taskRangeLowerPct,
+		TaskRangeUpperPct: taskRangeUpperPct,
+		OutOfRange:        outOfRangeText,
+		RunningSince:      runningSince,
+		HasLiquidity:      hasLiquidity,
+		TokenRows:         []RealtimeTokenRow{row0, row1},
+		Totals:            totals,
 	}, warn
 }
 
@@ -1237,26 +1262,49 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 	title := fmt.Sprintf("%s-%s-%s-%.2f%%", exchangeShort(exchange, "UniV4"), row0.Symbol, row1.Symbol, float64(task.Fee)/10000.0)
 
 	hasLiquidity := liq != nil && liq.Sign() > 0
+	taskRangeLowerPct := 0.0
+	taskRangeUpperPct := 0.0
+
+	lowerPct := task.RangeLowerPercentage
+	upperPct := task.RangeUpperPercentage
+	if lowerPct <= 0 || upperPct <= 0 {
+		if task.RangePercentage > 0 {
+			lowerPct = task.RangePercentage
+			upperPct = task.RangePercentage
+		}
+	}
+	if lowerPct > 0 && upperPct > 0 {
+		stableLower, stableUpper := pricing.StablePercentagesFromTickPercentages(task, lowerPct, upperPct)
+		if stableLower > 0 && stableUpper > 0 {
+			taskRangeLowerPct = stableLower
+			taskRangeUpperPct = stableUpper
+		} else {
+			taskRangeLowerPct = lowerPct
+			taskRangeUpperPct = upperPct
+		}
+	}
 	return &RealtimePosition{
-		Version:      "v4",
-		Exchange:     exchange,
-		Title:        title,
-		PoolID:       strings.TrimSpace(task.PoolId),
-		PositionID:   tokenId,
-		TaskID:       task.ID,
-		TaskPaused:   task.Paused,
-		TaskIsAuto:   task.IsAuto,
-		StatusLabel:  statusLabelFromTask(task),
-		InRange:      inRange,
-		CurrentTick:  currentTick,
-		TickLower:    tickLower,
-		TickUpper:    tickUpper,
-		RangePercent: rangePct,
-		OutOfRange:   formatOutOfRange(task, tickLower, tickUpper, currentTick),
-		RunningSince: &task.CreatedAt,
-		HasLiquidity: hasLiquidity,
-		TokenRows:    []RealtimeTokenRow{row0, row1},
-		Totals:       totals,
+		Version:           "v4",
+		Exchange:          exchange,
+		Title:             title,
+		PoolID:            strings.TrimSpace(task.PoolId),
+		PositionID:        tokenId,
+		TaskID:            task.ID,
+		TaskPaused:        task.Paused,
+		TaskIsAuto:        task.IsAuto,
+		StatusLabel:       statusLabelFromTask(task),
+		InRange:           inRange,
+		CurrentTick:       currentTick,
+		TickLower:         tickLower,
+		TickUpper:         tickUpper,
+		RangePercent:      rangePct,
+		TaskRangeLowerPct: taskRangeLowerPct,
+		TaskRangeUpperPct: taskRangeUpperPct,
+		OutOfRange:        formatOutOfRange(task, tickLower, tickUpper, currentTick),
+		RunningSince:      &task.CreatedAt,
+		HasLiquidity:      hasLiquidity,
+		TokenRows:         []RealtimeTokenRow{row0, row1},
+		Totals:            totals,
 	}, warn
 }
 
@@ -1417,26 +1465,49 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 	}
 	title := fmt.Sprintf("%s-%s-%s-%.2f%%", exchangeShort(exchange, short), row0.Symbol, row1.Symbol, feePct)
 
+	taskRangeLowerPct := 0.0
+	taskRangeUpperPct := 0.0
+	lowerPct := task.RangeLowerPercentage
+	upperPct := task.RangeUpperPercentage
+	if lowerPct <= 0 || upperPct <= 0 {
+		if task.RangePercentage > 0 {
+			lowerPct = task.RangePercentage
+			upperPct = task.RangePercentage
+		}
+	}
+	if lowerPct > 0 && upperPct > 0 {
+		stableLower, stableUpper := pricing.StablePercentagesFromTickPercentages(task, lowerPct, upperPct)
+		if stableLower > 0 && stableUpper > 0 {
+			taskRangeLowerPct = stableLower
+			taskRangeUpperPct = stableUpper
+		} else {
+			taskRangeLowerPct = lowerPct
+			taskRangeUpperPct = upperPct
+		}
+	}
+
 	return &RealtimePosition{
-		Version:      version,
-		Exchange:     exchange,
-		Title:        title,
-		PoolID:       poolID,
-		PositionID:   fmt.Sprintf("task-%d", task.ID),
-		TaskID:       task.ID,
-		TaskPaused:   task.Paused,
-		TaskIsAuto:   task.IsAuto,
-		StatusLabel:  statusLabelFromTask(task),
-		InRange:      inRange,
-		CurrentTick:  currentTick,
-		TickLower:    tickLower,
-		TickUpper:    tickUpper,
-		RangePercent: rangePct,
-		OutOfRange:   formatOutOfRange(task, tickLower, tickUpper, currentTick),
-		RunningSince: &task.CreatedAt,
-		HasLiquidity: false,
-		TokenRows:    []RealtimeTokenRow{row0, row1},
-		Totals:       totals,
+		Version:           version,
+		Exchange:          exchange,
+		Title:             title,
+		PoolID:            poolID,
+		PositionID:        fmt.Sprintf("task-%d", task.ID),
+		TaskID:            task.ID,
+		TaskPaused:        task.Paused,
+		TaskIsAuto:        task.IsAuto,
+		StatusLabel:       statusLabelFromTask(task),
+		InRange:           inRange,
+		CurrentTick:       currentTick,
+		TickLower:         tickLower,
+		TickUpper:         tickUpper,
+		RangePercent:      rangePct,
+		TaskRangeLowerPct: taskRangeLowerPct,
+		TaskRangeUpperPct: taskRangeUpperPct,
+		OutOfRange:        formatOutOfRange(task, tickLower, tickUpper, currentTick),
+		RunningSince:      &task.CreatedAt,
+		HasLiquidity:      false,
+		TokenRows:         []RealtimeTokenRow{row0, row1},
+		Totals:            totals,
 	}, ""
 }
 

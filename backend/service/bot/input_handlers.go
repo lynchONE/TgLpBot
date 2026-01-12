@@ -180,6 +180,8 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
    例如: '5 100' (表示当前价格 ±5%%, 投入 100 USDT)
 2️⃣ 使用上下不对称百分比: '金额 下百分比 上百分比'
    例如: '100 1 3' (表示当前价格下方 1%%、上方 3%%, 投入 100 USDT)
+3️⃣ 可选滑点: 末尾追加 's=滑点'
+   例如: '5 100 s=0.5' 或 '100 1 3 s=0.5' (不填则使用全局滑点)
 
 💡 提示：百分比范围会自动换算成 tick 范围
 
@@ -261,6 +263,8 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
    例如: '5 100' (表示当前价格 ±5%%, 投入 100 USDT)
 2️⃣ 使用上下不对称百分比: '金额 下百分比 上百分比'
    例如: '100 1 3' (表示当前价格下方 1%%、上方 3%%, 投入 100 USDT)
+3️⃣ 可选滑点: 末尾追加 's=滑点'
+   例如: '5 100 s=0.5' 或 '100 1 3 s=0.5' (不填则使用全局滑点)
 
 💡 提示：百分比范围会自动换算成 tick 范围
 
@@ -282,7 +286,55 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 	// Expect:
 	// - "percentage amount" (symmetric)
 	// - "amount lowerPct upperPct" (asymmetric)
+	// Optional: append slippage override, e.g. "5 100 s=0.5" or "100 1 3 s=0.5"
 	fields := strings.Fields(input)
+
+	parseSlippageToken := func(token string) (float64, bool, error) {
+		raw := strings.TrimSpace(token)
+		if raw == "" {
+			return 0, false, nil
+		}
+
+		lower := strings.ToLower(raw)
+		valueStr := ""
+		switch {
+		case strings.HasPrefix(lower, "s=") || strings.HasPrefix(lower, "s:"):
+			valueStr = raw[2:]
+		case strings.HasPrefix(lower, "slip="):
+			valueStr = raw[5:]
+		case strings.HasPrefix(lower, "slippage="):
+			valueStr = raw[len("slippage="):]
+		case strings.HasPrefix(lower, "滑点="):
+			valueStr = raw[len("滑点="):]
+		case strings.HasPrefix(lower, "s") && len(raw) > 1:
+			// s0.5
+			valueStr = raw[1:]
+		default:
+			return 0, false, nil
+		}
+
+		valueStr = strings.TrimSpace(strings.TrimSuffix(valueStr, "%"))
+		v, err := strconv.ParseFloat(valueStr, 64)
+		if err != nil || v < 0 || v > 100 {
+			return 0, true, fmt.Errorf("invalid slippage")
+		}
+		return v, true, nil
+	}
+
+	var slippageOverride *float64
+	filtered := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if v, ok, err := parseSlippageToken(f); ok {
+			if err != nil {
+				b.sendMessage(message.Chat.ID, "滑点无效。请输入 0-100 之间的滑点百分比，例如：`s=0.5` 表示 0.5%（不填则使用全局滑点）。")
+				return
+			}
+			slippageOverride = &v
+			continue
+		}
+		filtered = append(filtered, f)
+	}
+	fields = filtered
 
 	var amount float64
 	var stableLowerPctReq float64
@@ -329,7 +381,7 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 		stableLowerPctReq = lowPct
 		stableUpperPctReq = upPct
 	default:
-		b.sendMessage(message.Chat.ID, "格式无效。请使用：\n1) `百分比 金额`（例如：`5 100` 表示当前价格 ±5%，投入 100 USDT）\n2) `金额 下百分比 上百分比`（例如：`100 1 3` 表示当前价格下方 1%、上方 3%，投入 100 USDT）")
+		b.sendMessage(message.Chat.ID, "格式无效。请使用：\n1) `百分比 金额`（例如：`5 100` 表示当前价格 ±5%，投入 100 USDT）\n2) `金额 下百分比 上百分比`（例如：`100 1 3` 表示当前价格下方 1%、上方 3%，投入 100 USDT）\n可选滑点：末尾追加 `s=0.5`")
 		return
 	}
 
@@ -461,6 +513,11 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 		database.SetUserSession(user.TelegramID, "tick_lower_percentage", fmt.Sprintf("%.8f", tickLowerPctEff), 30*time.Minute)
 		database.SetUserSession(user.TelegramID, "tick_upper_percentage", fmt.Sprintf("%.8f", tickUpperPctEff), 30*time.Minute)
 	}
+	if slippageOverride != nil {
+		database.SetUserSession(user.TelegramID, "position_slippage", fmt.Sprintf("%.8f", *slippageOverride), 30*time.Minute)
+	} else {
+		_ = database.DeleteUserSession(user.TelegramID, "position_slippage")
+	}
 
 	// 直接创建任务，不需要确认
 	var rangeLine string
@@ -550,6 +607,13 @@ func (b *Bot) createPositionTask(chatID int64, user *models.User) {
 		return
 	}
 
+	slippage := cfg.SlippageTolerance
+	if slippageStr, err := database.GetUserSession(user.TelegramID, "position_slippage"); err == nil {
+		if v, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(slippageStr, "%")), 64); err == nil && v >= 0 && v <= 100 {
+			slippage = v
+		}
+	}
+
 	// Create Strategy Task
 	task := &models.StrategyTask{
 		UserID:               user.ID,
@@ -571,7 +635,7 @@ func (b *Bot) createPositionTask(chatID int64, user *models.User) {
 		AmountUSDT:           amount,
 		CurrentLiquidity:     "0", // Will be updated after zap in
 		ReopenDelaySeconds:   cfg.RebalanceTimeout,
-		SlippageTolerance:    cfg.SlippageTolerance,
+		SlippageTolerance:    slippage,
 		AutoReinvest:         cfg.AutoReinvest,
 		ResidualTolerance:    cfg.ResidualTolerance,
 		StopLossEnabled:      cfg.StopLossEnabled,
