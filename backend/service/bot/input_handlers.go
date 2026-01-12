@@ -176,12 +176,12 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
 📝 *下一步：* 请输入百分比范围和投入金额
 
 *格式选项：*
-1️⃣ 使用百分比范围: '百分比 金额'
-   例如: '5 100' (表示当前价格 ±5%%, 投入 100 USDT)
+1️⃣ 使用百分比范围: '金额 百分比'
+   例如: '100 5' (表示投入 100 USDT，当前价格 ±5%%)
 2️⃣ 使用上下不对称百分比: '金额 下百分比 上百分比'
-   例如: '100 1 3' (表示当前价格下方 1%%、上方 3%%, 投入 100 USDT)
+   例如: '100 1 3' (表示投入 100 USDT，当前价格下方 1%%、上方 3%%)
 3️⃣ 可选滑点: 末尾追加 's=滑点'
-   例如: '5 100 s=0.5' 或 '100 1 3 s=0.5' (不填则使用全局滑点)
+   例如: '100 5 s=0.5' 或 '100 1 3 s=0.5' (不填则使用全局滑点)
 
 💡 提示：百分比范围会自动换算成 tick 范围
 
@@ -259,12 +259,12 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
 📝 *下一步：* 请输入百分比范围和投入金额
 
 *格式选项：*
-1️⃣ 使用百分比范围: '百分比 金额'
-   例如: '5 100' (表示当前价格 ±5%%, 投入 100 USDT)
+1️⃣ 使用百分比范围: '金额 百分比'
+   例如: '100 5' (表示投入 100 USDT，当前价格 ±5%%)
 2️⃣ 使用上下不对称百分比: '金额 下百分比 上百分比'
-   例如: '100 1 3' (表示当前价格下方 1%%、上方 3%%, 投入 100 USDT)
+   例如: '100 1 3' (表示投入 100 USDT，当前价格下方 1%%、上方 3%%)
 3️⃣ 可选滑点: 末尾追加 's=滑点'
-   例如: '5 100 s=0.5' 或 '100 1 3 s=0.5' (不填则使用全局滑点)
+   例如: '100 5 s=0.5' 或 '100 1 3 s=0.5' (不填则使用全局滑点)
 
 💡 提示：百分比范围会自动换算成 tick 范围
 
@@ -284,9 +284,9 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 	input := strings.TrimSpace(message.Text)
 
 	// Expect:
-	// - "percentage amount" (symmetric)
+	// - "amount percentage" (symmetric)
 	// - "amount lowerPct upperPct" (asymmetric)
-	// Optional: append slippage override, e.g. "5 100 s=0.5" or "100 1 3 s=0.5"
+	// Optional: append slippage override, e.g. "100 5 s=0.5" or "100 1 3 s=0.5"
 	fields := strings.Fields(input)
 
 	parseSlippageToken := func(token string) (float64, bool, error) {
@@ -343,17 +343,17 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 
 	switch len(fields) {
 	case 2:
-		// "percentage amount"
-		percentStr := strings.TrimSuffix(fields[0], "%")
-		pct, err := strconv.ParseFloat(percentStr, 64)
-		if err != nil || pct <= 0 || pct >= 100 {
-			b.sendMessage(message.Chat.ID, "百分比无效。请输入 0 到 100 之间的数字（不含 100）。\n\n例如：`5 100` 表示当前价格 ±5%，投入 100 USDT。")
+		// "amount percentage"
+		a, err := strconv.ParseFloat(fields[0], 64)
+		if err != nil || a <= 0 {
+			b.sendMessage(message.Chat.ID, "金额无效。请输入正数。\n\n例如：`100 5` 表示投入 100 USDT，当前价格 ±5%。")
 			return
 		}
 
-		a, err := strconv.ParseFloat(fields[1], 64)
-		if err != nil || a <= 0 {
-			b.sendMessage(message.Chat.ID, "金额无效。请输入正数。\n\n例如：`5 100` 或 `100 1 3`")
+		percentStr := strings.TrimSuffix(fields[1], "%")
+		pct, err := strconv.ParseFloat(percentStr, 64)
+		if err != nil || pct <= 0 || pct >= 100 {
+			b.sendMessage(message.Chat.ID, "百分比无效。请输入 0 到 100 之间的数字（不含 100）。\n\n例如：`100 5` 表示投入 100 USDT，当前价格 ±5%。")
 			return
 		}
 
@@ -381,7 +381,7 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 		stableLowerPctReq = lowPct
 		stableUpperPctReq = upPct
 	default:
-		b.sendMessage(message.Chat.ID, "格式无效。请使用：\n1) `百分比 金额`（例如：`5 100` 表示当前价格 ±5%，投入 100 USDT）\n2) `金额 下百分比 上百分比`（例如：`100 1 3` 表示当前价格下方 1%、上方 3%，投入 100 USDT）\n可选滑点：末尾追加 `s=0.5`")
+		b.sendMessage(message.Chat.ID, "格式无效。请使用：\n1) `金额 百分比`（例如：`100 5` 表示投入 100 USDT，当前价格 ±5%）\n2) `金额 下百分比 上百分比`（例如：`100 1 3` 表示投入 100 USDT，当前价格下方 1%、上方 3%）\n可选滑点：末尾追加 `s=0.5`")
 		return
 	}
 
