@@ -300,6 +300,7 @@ export default function App() {
     const [blacklist, setBlacklist] = useState(new Set());
     // 冷却列表状态
     const [cooldowns, setCooldowns] = useState([]);
+    const [cooldownRemovingPair, setCooldownRemovingPair] = useState('');
 
     const [adminUsers, setAdminUsers] = useState([]);
     const [adminUsersError, setAdminUsersError] = useState('');
@@ -456,21 +457,45 @@ export default function App() {
         });
     }, [visiblePositions]);
 
-    // 首次加载或仓位变化时，智能设置Tab
-    const positionsInitializedRef = useRef(false);
+    const positionsTabTouchedRef = useRef(false);
     useEffect(() => {
+        if (!isPositions || showAdmin) return;
+        positionsTabTouchedRef.current = false;
+    }, [isPositions, showAdmin]);
+
+    // 智能设置实时仓位 Tab：默认按任务类型自动选择（用户手动切换后不强制覆盖）
+    useEffect(() => {
+        if (!isPositions || showAdmin) return;
         if (visiblePositions.length === 0) return;
-        if (positionsInitializedRef.current) return;
-        positionsInitializedRef.current = true;
-        
-        if (hasAutoTasks && hasManualTasks) {
-            setPositionsTaskTab('all');
-        } else if (hasAutoTasks && !hasManualTasks) {
-            setPositionsTaskTab('auto');
-        } else if (!hasAutoTasks && hasManualTasks) {
-            setPositionsTaskTab('manual');
+
+        const desiredTab = hasAutoTasks && hasManualTasks
+            ? 'all'
+            : hasAutoTasks
+                ? 'auto'
+                : hasManualTasks
+                    ? 'manual'
+                    : 'all';
+
+        if (!positionsTabTouchedRef.current) {
+            if (positionsTaskTab !== desiredTab) {
+                setPositionsTaskTab(desiredTab);
+                setSelectedTaskIds(new Set());
+                setBatchMode(false);
+            }
+            return;
         }
-    }, [visiblePositions, hasAutoTasks, hasManualTasks]);
+
+        // 用户已手动选择 Tab：仅在当前 Tab 已无任务时自动兜底跳转，避免空页面。
+        if (positionsTaskTab === 'auto' && !hasAutoTasks && hasManualTasks) {
+            setPositionsTaskTab('manual');
+            setSelectedTaskIds(new Set());
+            setBatchMode(false);
+        } else if (positionsTaskTab === 'manual' && !hasManualTasks && hasAutoTasks) {
+            setPositionsTaskTab('auto');
+            setSelectedTaskIds(new Set());
+            setBatchMode(false);
+        }
+    }, [isPositions, showAdmin, visiblePositions.length, hasAutoTasks, hasManualTasks, positionsTaskTab]);
 
     // 从仓位构建 pool_address -> position_usd 映射（用于在热门池子上显示持仓标签）
     const positionsPoolMap = useMemo(() => {
@@ -1295,6 +1320,30 @@ export default function App() {
         }
     }, [apiBaseUrl, initData, hasInitData]);
 
+    const handleRemoveCooldown = useCallback(async (tradingPair) => {
+        const pair = String(tradingPair || '').trim();
+        if (!hasInitData || !pair || cooldownRemovingPair) return;
+
+        const ok = await requestConfirm({
+            title: '解除冷却',
+            message: `确认解除 ${pair} 的冷却？\n解除后该代币相关池子可再次开仓。`,
+            confirmText: '确认解除',
+            tone: 'danger',
+        });
+        if (!ok) return;
+
+        setCooldownRemovingPair(pair);
+        try {
+            const resp = await removeCooldown({ apiBaseUrl, initData, tradingPair: pair });
+            showNotice(resp?.message || `已解除冷却: ${pair}`, 'success');
+            loadCooldowns();
+        } catch (e) {
+            showNotice(`解除冷却失败: ${String(e?.message || e)}`, 'error');
+        } finally {
+            setCooldownRemovingPair('');
+        }
+    }, [apiBaseUrl, initData, hasInitData, cooldownRemovingPair, loadCooldowns, requestConfirm]);
+
     // 初始化时加载黑名单和冷却列表
     useEffect(() => {
         if (hasInitData) {
@@ -1874,7 +1923,7 @@ export default function App() {
             }
 
             {
-                (isPositions || showAdmin) && activeErrorText ? (
+                isPositions && activeErrorText ? (
                     <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-200">
                         {activeErrorText}
                     </div>
@@ -1890,7 +1939,7 @@ export default function App() {
             }
 
             {
-                (isPositions || showAdmin) && activeLoading && !activeData ? (
+                isPositions && activeLoading && !activeData ? (
                     <SkeletonList count={2} Card={SkeletonPositionCard} />
                 ) : null
             }
@@ -2078,9 +2127,19 @@ export default function App() {
                                             {cooldowns.map((cd, idx) => (
                                                 <div key={cd.trading_pair + idx} className="flex items-center justify-between rounded-xl bg-amber-500/10 px-3 py-2 text-[11px] dark:bg-amber-500/10">
                                                     <div className="font-semibold text-amber-800 dark:text-amber-200">{cd.trading_pair}</div>
-                                                    <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
-                                                        <span>{cd.remaining_minutes}分钟后解除</span>
-                                                        <span className="text-[10px]">({cd.expires_at})</span>
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                                                            <span>{cd.remaining_minutes}分钟后解除</span>
+                                                            <span className="text-[10px]">({cd.expires_at})</span>
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            disabled={!hasInitData || Boolean(cooldownRemovingPair)}
+                                                            onClick={() => handleRemoveCooldown(cd.trading_pair)}
+                                                            className="shrink-0 inline-flex items-center rounded-lg bg-white/60 px-2 py-1 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-500/20 hover:bg-white/80 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-white/10 dark:text-amber-200 dark:ring-amber-500/25 dark:hover:bg-white/15"
+                                                        >
+                                                            {cooldownRemovingPair === String(cd.trading_pair || '').trim() ? '解除中...' : '解除'}
+                                                        </button>
                                                     </div>
                                                 </div>
                                             ))}
@@ -2089,7 +2148,7 @@ export default function App() {
                                 ) : null}
                             </>
                         )
-                        : activeData
+                        : !showAdmin && activeData
                             ? (
                                 <>
                                     {isPositions ? (
@@ -2099,6 +2158,7 @@ export default function App() {
                                             <button
                                                 type="button"
                                                 onClick={() => {
+                                                    positionsTabTouchedRef.current = true;
                                                     setPositionsTaskTab('all');
                                                     setSelectedTaskIds(new Set());
                                                     setBatchMode(false);
@@ -2114,6 +2174,7 @@ export default function App() {
                                             <button
                                                 type="button"
                                                 onClick={() => {
+                                                    positionsTabTouchedRef.current = true;
                                                     setPositionsTaskTab('manual');
                                                     setSelectedTaskIds(new Set());
                                                     setBatchMode(false);
@@ -2129,6 +2190,7 @@ export default function App() {
                                             <button
                                                 type="button"
                                                 onClick={() => {
+                                                    positionsTabTouchedRef.current = true;
                                                     setPositionsTaskTab('auto');
                                                     setSelectedTaskIds(new Set());
                                                     setBatchMode(false);
@@ -2177,7 +2239,7 @@ export default function App() {
             </div>
 
             {
-                (isPositions || showAdmin) && activeData?.warnings?.length ? (
+                isPositions && activeData?.warnings?.length ? (
                     <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-700 dark:text-amber-200">
                         <div className="font-semibold">提示</div>
                         <ul className="mt-1 list-disc space-y-1 pl-4">

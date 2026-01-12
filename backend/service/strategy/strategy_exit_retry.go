@@ -430,25 +430,36 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 			} else if checkResult != nil && !checkResult.Passed {
 				log.Printf("[Strategy] 任务 #%d 再平衡时池子不符合硬筛条件，不开仓: %s", task.ID, checkResult.FailReason)
 
-				// 标记任务为已完成/停止状态
+				failReason := strings.TrimSpace(checkResult.FailReason)
+				if failReason == "" {
+					failReason = "硬筛条件不满足"
+				}
+
+				// 不满足硬筛：不再开仓，直接停止任务（避免进入重试流程）
 				updates := map[string]interface{}{
-					"status":                  models.StrategyStatusStopping,
+					"status":                  models.StrategyStatusStopped,
+					"last_exit_time":          &now,
 					"rebalance_pending":       false,
 					"rebalance_retry_count":   0,
 					"rebalance_next_retry_at": nil,
-					"rebalance_last_error":    "硬筛条件不满足: " + checkResult.FailReason,
+					"rebalance_last_error":    "硬筛条件不满足: " + failReason,
 					"error_message":           "",
 				}
 				_ = database.DB.Model(task).Updates(updates).Error
 
-				task.Status = models.StrategyStatusStopping
+				task.Status = models.StrategyStatusStopped
+				task.LastExitTime = &now
 				task.RebalancePending = false
 				task.RebalanceRetryCount = 0
 				task.RebalanceNextRetryAt = nil
-				task.RebalanceLastError = "硬筛条件不满足: " + checkResult.FailReason
+				task.RebalanceLastError = "硬筛条件不满足: " + failReason
 
-				s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 再平衡时池子不符合硬筛条件，已停止任务\n原因: %s\n交易对: %s", task.ID, checkResult.FailReason, checkResult.Metrics.TradingPair))
-				return fmt.Errorf("hard filter failed: %s", checkResult.FailReason)
+				tradingPair := strings.TrimSpace(checkResult.Metrics.TradingPair)
+				if tradingPair == "" {
+					tradingPair = fmt.Sprintf("%s/%s", strings.TrimSpace(task.Token0Symbol), strings.TrimSpace(task.Token1Symbol))
+				}
+				s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 再平衡时池子不符合硬筛条件，已停止任务\n原因: %s\n交易对: %s", task.ID, failReason, tradingPair))
+				return nil
 			}
 		}
 	}

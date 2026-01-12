@@ -96,7 +96,9 @@ func (s *AdminRealtimeService) ListActiveTaskUsers(limit int) ([]AdminActiveUser
 	return rows, nil
 }
 
-// ListAllOnlineUsers 列出所有有活跃任务的用户（包括 Auto 和手动）
+// ListAllOnlineUsers 列出所有在线用户：
+// - 有活跃任务的用户（包括 Auto 和手动）
+// - 或开启了 Auto 的用户（即使当前暂无活跃任务）
 func (s *AdminRealtimeService) ListAllOnlineUsers(limit int) ([]AdminOnlineUser, error) {
 	if database.DB == nil {
 		return nil, errors.New("数据库未初始化")
@@ -113,8 +115,8 @@ func (s *AdminRealtimeService) ListAllOnlineUsers(limit int) ([]AdminOnlineUser,
 	}
 
 	var rows []AdminOnlineUser
-	err := database.DB.Table("strategy_tasks st").
-		Select(`st.user_id AS user_id,
+	err := database.DB.Table("users u").
+		Select(`u.id AS user_id,
 			u.telegram_id AS telegram_id,
 			u.username AS username,
 			u.first_name AS first_name,
@@ -123,11 +125,11 @@ func (s *AdminRealtimeService) ListAllOnlineUsers(limit int) ([]AdminOnlineUser,
 			SUM(CASE WHEN st.is_auto = 0 THEN 1 ELSE 0 END) AS manual_tasks,
 			COUNT(st.id) AS total_tasks,
 			COALESCE(cfg.enabled, 0) AS is_auto_enabled,
-			MAX(st.updated_at) AS updated_at`).
-		Joins("LEFT JOIN users u ON u.id = st.user_id").
-		Joins("LEFT JOIN auto_lp_user_configs cfg ON cfg.user_id = st.user_id AND cfg.deleted_at IS NULL").
-		Where("st.status IN ? AND st.deleted_at IS NULL", statuses).
-		Group("st.user_id, u.telegram_id, u.username, u.first_name, u.last_name, cfg.enabled").
+			COALESCE(MAX(st.updated_at), COALESCE(cfg.last_enabled_at, cfg.updated_at)) AS updated_at`).
+		Joins("LEFT JOIN auto_lp_user_configs cfg ON cfg.user_id = u.id AND cfg.deleted_at IS NULL").
+		Joins("LEFT JOIN strategy_tasks st ON st.user_id = u.id AND st.status IN ? AND st.deleted_at IS NULL", statuses).
+		Where("(st.id IS NOT NULL OR COALESCE(cfg.enabled, 0) = 1)").
+		Group("u.id, u.telegram_id, u.username, u.first_name, u.last_name, cfg.enabled, cfg.last_enabled_at, cfg.updated_at").
 		Order("updated_at DESC").
 		Limit(limit).
 		Scan(&rows).Error

@@ -55,9 +55,9 @@ export default async function handler(req, res) {
 
     const method = String(req.method || 'GET').toUpperCase();
 
-    // cooldowns 只支持 GET
+    // cooldowns 支持 GET / DELETE
     if (endpoint === 'cooldowns') {
-        if (method !== 'GET') {
+        if (method !== 'GET' && method !== 'DELETE') {
             res.statusCode = 405;
             res.setHeader('Content-Type', 'text/plain; charset=utf-8');
             res.end('method not allowed');
@@ -65,7 +65,14 @@ export default async function handler(req, res) {
         }
         const url = `${backendBaseUrl}/api/cooldowns${buildQueryString(req.query)}`;
         try {
-            const upstream = await fetch(url);
+            const headers = {};
+            let body = undefined;
+            if (method === 'DELETE') {
+                headers['content-type'] = 'application/json';
+                body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body || {});
+            }
+
+            const upstream = await fetch(url, { method, headers, body });
             const text = await upstream.text();
             res.statusCode = upstream.status;
             const contentType = upstream.headers.get('content-type');

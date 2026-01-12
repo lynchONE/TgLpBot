@@ -2872,6 +2872,7 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 						m.TotalVolume,
 					)
 					if err := s.requestStopLossExit(task, reason, 1.0); err == nil {
+						s.addGuardCooldown(task, reason)
 						_ = strategy.NewAutoLPEventService().Record(task, models.AutoLPEventGuardExit, reason)
 					}
 					continue
@@ -2918,6 +2919,7 @@ func (s *AutoLPService) guardActiveAutoTasks(ctx context.Context, snap *poolMSna
 					m.TransactionCount,
 				)
 				if err := s.requestStopLossExit(task, reason, 1.0); err == nil {
+					s.addGuardCooldown(task, reason)
 					_ = strategy.NewAutoLPEventService().Record(task, models.AutoLPEventGuardExit, reason)
 				}
 				continue
@@ -3117,6 +3119,46 @@ func (s *AutoLPService) requestStopLossExit(task *models.StrategyTask, reason st
 	task.ExitGiveUpAt = nil
 
 	return nil
+}
+
+func (s *AutoLPService) addGuardCooldown(task *models.StrategyTask, reason string) {
+	if task == nil || task.UserID == 0 {
+		return
+	}
+
+	cooldownDuration := blacklist.DefaultCooldownDuration
+	if config.AppConfig != nil && config.AppConfig.AutoLPGuardCooldownSeconds > 0 {
+		cooldownDuration = time.Duration(config.AppConfig.AutoLPGuardCooldownSeconds) * time.Second
+	}
+
+	sym0 := strings.ToUpper(strings.TrimSpace(task.Token0Symbol))
+	sym1 := strings.ToUpper(strings.TrimSpace(task.Token1Symbol))
+	key := ""
+	if sym0 != "" && sym1 != "" {
+		key = fmt.Sprintf("%s/%s", sym0, sym1)
+		if isStableCoin(sym0) && !isStableCoin(sym1) {
+			key = sym1
+		} else if !isStableCoin(sym0) && isStableCoin(sym1) {
+			key = sym0
+		}
+	}
+	if strings.TrimSpace(key) == "" {
+		return
+	}
+
+	value := strings.TrimSpace(reason)
+	if value == "" {
+		value = "撤退卫士触发撤出"
+	} else {
+		value = "撤退卫士：" + value
+	}
+
+	cooldownSvc := blacklist.NewCooldownService()
+	if err := cooldownSvc.Add(task.UserID, key, value, cooldownDuration); err != nil {
+		log.Printf("[AutoLP Guard] 添加冷却失败: user_id=%d key=%s err=%v", task.UserID, key, err)
+		return
+	}
+	log.Printf("[AutoLP Guard] 已添加冷却: user_id=%d key=%s duration=%v", task.UserID, key, cooldownDuration)
 }
 
 func (s *AutoLPService) checkVolumeDropWithin(ctx context.Context, task *models.StrategyTask, window time.Duration, dropPct float64) (bool, float64, float64, error) {

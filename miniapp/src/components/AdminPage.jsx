@@ -34,8 +34,8 @@ function formatUserLabel(user) {
 const ADMIN_TABS = [
     { key: 'online_users', label: '在线用户' },
     { key: 'active_tasks', label: '活跃任务' },
-    { key: 'system_config', label: '系统配置' },
     { key: 'user_detail', label: '用户详情' },
+    { key: 'system_config', label: '系统配置' },
 ];
 
 /**
