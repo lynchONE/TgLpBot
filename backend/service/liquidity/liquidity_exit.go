@@ -7,7 +7,6 @@ import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/service/exchange"
-	"TgLpBot/service/pool"
 	"TgLpBot/service/pricing"
 	"TgLpBot/service/trade"
 	"context"
@@ -1126,38 +1125,9 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 		return txHashes, nil
 	}
 
-	// Compute V3 exit min amounts using current pool price (slippage protection for DECREASE_LIQUIDITY).
-	poolAddrStr := strings.TrimSpace(task.PoolId)
-	if !common.IsHexAddress(poolAddrStr) {
-		return nil, fmt.Errorf("V3 pool address invalid: %s", poolAddrStr)
-	}
-	poolAddr := common.HexToAddress(poolAddrStr)
-
-	sqrtPriceX96, _, err := blockchain.GetV3PoolSlot0(poolAddr)
-	if err != nil {
-		return nil, fmt.Errorf("read V3 pool slot0 failed: %w", err)
-	}
-	sqrtA, err := pool.SqrtRatioAtTick(int32(posInfo.TickLower))
-	if err != nil {
-		return nil, fmt.Errorf("compute sqrtA failed: %w", err)
-	}
-	sqrtB, err := pool.SqrtRatioAtTick(int32(posInfo.TickUpper))
-	if err != nil {
-		return nil, fmt.Errorf("compute sqrtB failed: %w", err)
-	}
-	expected0, expected1 := pool.AmountsForLiquidity(sqrtPriceX96, sqrtA, sqrtB, posInfo.Liquidity)
-
-	slippageBps := int64(effectiveExitSlippagePercent(task) * 100)
-	if slippageBps < 0 {
-		slippageBps = 0
-	}
-	if slippageBps > 10000 {
-		slippageBps = 10000
-	}
-	factor := big.NewInt(10000 - slippageBps)
-	denom := big.NewInt(10000)
-	amount0Min := new(big.Int).Div(new(big.Int).Mul(expected0, factor), denom)
-	amount1Min := new(big.Int).Div(new(big.Int).Mul(expected1, factor), denom)
+	// V3 撤仓不做滑点校验：amount0Min/amount1Min 置 0，避免因价格波动导致撤仓交易 revert。
+	amount0Min := big.NewInt(0)
+	amount1Min := big.NewInt(0)
 
 	// 4. Approve NFT 给 Zap 合约（优化：使用 setApprovalForAll）
 	// 检查是否已经 setApprovalForAll
