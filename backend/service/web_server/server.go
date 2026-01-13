@@ -30,6 +30,7 @@ func (s *Server) Start(port string) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/pools", s.handleGetPools)
 	mux.HandleFunc("/api/hot_pools", s.handleHotPools)
+	mux.HandleFunc("/api/search_pools", s.handleSearchPools)
 	mux.HandleFunc("/api/pool_ohlcv", s.handlePoolOHLCV)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/global_config", s.handleGlobalConfig)

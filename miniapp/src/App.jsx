@@ -17,6 +17,7 @@ import {
     fetchAdminRealtimeUsers,
     fetchGlobalConfig,
     fetchHotPools,
+    fetchSearchPools,
     fetchMe,
     fetchRealtimePositions,
     openPosition,
@@ -231,6 +232,7 @@ const icons = {
     bot: 'M12 2a2 2 0 012 2v1h1a3 3 0 013 3v7a7 7 0 11-14 0V8a3 3 0 013-3h1V4a2 2 0 012-2zm-4 7a1.25 1.25 0 100 2.5A1.25 1.25 0 008 9zm8 0a1.25 1.25 0 100 2.5A1.25 1.25 0 0016 9zm-7.5 6.5h7a3.5 3.5 0 01-7 0z',
     chart: 'M4 19h16v2H2V3h2v16zm4-2H6v-6h2v6zm5 0h-2V7h2v10zm5 0h-2v-4h2v4z',
     filter: 'M3 5h18l-7 8v5.5l-4 2V13L3 5z',
+    search: 'M10 2a8 8 0 105.293 14.293l4.707 4.707a1 1 0 001.414-1.414l-4.707-4.707A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z',
     moon: 'M12 3a9 9 0 109 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 01-4.4 2.26 5.403 5.403 0 01-3.14-9.8c-.44-.06-.9-.1-1.36-.1z',
     sun: 'M12 7a5 5 0 100 10 5 5 0 000-10zM2 13h2a1 1 0 100-2H2a1 1 0 100 2zm18 0h2a1 1 0 100-2h-2a1 1 0 100 2zM11 2v2a1 1 0 102 0V2a1 1 0 10-2 0zm0 18v2a1 1 0 102 0v-2a1 1 0 10-2 0zM5.99 4.58a1 1 0 10-1.41 1.41l1.06 1.06a1 1 0 001.41-1.41L5.99 4.58zm12.37 12.37a1 1 0 10-1.41 1.41l1.06 1.06a1 1 0 001.41-1.41l-1.06-1.06zm1.06-10.96a1 1 0 10-1.41-1.41l-1.06 1.06a1 1 0 001.41 1.41l1.06-1.06zM7.05 18.36a1 1 0 10-1.41-1.41l-1.06 1.06a1 1 0 001.41 1.41l1.06-1.06z',
     gear: 'M19.14 12.94a7.43 7.43 0 00.05-.94 7.43 7.43 0 00-.05-.94l2.11-1.65a.5.5 0 00.12-.63l-2-3.46a.5.5 0 00-.6-.22l-2.49 1a7.18 7.18 0 00-1.63-.94l-.38-2.65A.5.5 0 0013.79 2h-3.6a.5.5 0 00-.49.41l-.38 2.65a7.18 7.18 0 00-1.63.94l-2.49-1a.5.5 0 00-.6.22l-2 3.46a.5.5 0 00.12.63l2.11 1.65a7.43 7.43 0 000 1.88l-2.11 1.65a.5.5 0 00-.12.63l2 3.46a.5.5 0 00.6.22l2.49-1c.5.39 1.05.72 1.63.94l.38 2.65a.5.5 0 00.49.41h3.6a.5.5 0 00.49-.41l.38-2.65a7.18 7.18 0 001.63-.94l2.49 1a.5.5 0 00.6-.22l2-3.46a.5.5 0 00-.12-.63l-2.11-1.65zM12 15.5A3.5 3.5 0 1112 8a3.5 3.5 0 010 7.5z',
@@ -284,6 +286,15 @@ export default function App() {
         minTvl: String(defaultHotPoolsFilter.minTvl),
         minVolume: String(defaultHotPoolsFilter.minVolume),
     }));
+
+    const [poolSearchOpen, setPoolSearchOpen] = useState(false);
+    const [poolSearchQuery, setPoolSearchQuery] = useState('');
+    const [poolSearchResults, setPoolSearchResults] = useState([]);
+    const [poolSearchPerformed, setPoolSearchPerformed] = useState(false);
+    const [poolSearchError, setPoolSearchError] = useState('');
+    const [poolSearchLoading, setPoolSearchLoading] = useState(false);
+    const poolSearchInputRef = useRef(null);
+    const poolSearchControllerRef = useRef(null);
     // 保存上一次热门池子数据，用于计算变化
     const previousHotPoolsDataRef = useRef({});
     const [klinePool, setKlinePool] = useState(null);
@@ -1157,6 +1168,85 @@ export default function App() {
         setHotPoolsFilterOpen(false);
     };
 
+    const openPoolSearch = () => {
+        setHotPoolsFilterOpen(false);
+        setPoolSearchOpen(true);
+        setPoolSearchQuery('');
+        setPoolSearchResults([]);
+        setPoolSearchError('');
+        setPoolSearchPerformed(false);
+        hapticImpact('light');
+        setTimeout(() => poolSearchInputRef.current?.focus?.(), 50);
+    };
+
+    const closePoolSearch = () => {
+        if (poolSearchControllerRef.current) {
+            try {
+                poolSearchControllerRef.current.abort();
+            } catch {
+                // ignore
+            }
+            poolSearchControllerRef.current = null;
+        }
+        setPoolSearchOpen(false);
+    };
+
+    const runPoolSearch = async () => {
+        if (poolSearchLoading) return;
+        const keyword = String(poolSearchQuery || '').trim();
+        if (!keyword) {
+            setPoolSearchError('请输入池子ID或代币名称。');
+            setPoolSearchResults([]);
+            setPoolSearchPerformed(false);
+            return;
+        }
+        if (!hasInitData) {
+            setPoolSearchError('未获取到 Telegram initData，请从机器人入口打开页面。');
+            return;
+        }
+
+        const controller = new AbortController();
+        if (poolSearchControllerRef.current) {
+            try {
+                poolSearchControllerRef.current.abort();
+            } catch {
+                // ignore
+            }
+        }
+        poolSearchControllerRef.current = controller;
+
+        setPoolSearchLoading(true);
+        setPoolSearchError('');
+        setPoolSearchPerformed(true);
+        try {
+            const resp = await fetchSearchPools({
+                apiBaseUrl,
+                initData,
+                q: keyword,
+                chain: 'bsc',
+                limit: 10,
+                signal: controller.signal,
+            });
+            if (controller.signal.aborted) return;
+            const rows = Array.isArray(resp?.data) ? resp.data : [];
+            setPoolSearchResults(rows.slice(0, 10));
+        } catch (e) {
+            if (controller.signal.aborted) return;
+            setPoolSearchResults([]);
+            setPoolSearchError(String(e?.message || e));
+        } finally {
+            if (poolSearchControllerRef.current === controller) {
+                poolSearchControllerRef.current = null;
+            }
+            setPoolSearchLoading(false);
+        }
+    };
+
+    const selectPoolFromSearch = (pool) => {
+        closePoolSearch();
+        setTimeout(() => openPositionModal(pool), 0);
+    };
+
     const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
 
     const quickRangeOptions = [
@@ -1851,7 +1941,19 @@ export default function App() {
                                 </div>
                                 <button
                                     type="button"
-                                    onClick={() => setHotPoolsFilterOpen(true)}
+                                    onClick={openPoolSearch}
+                                    className="inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-white/70 text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
+                                    aria-label="Search"
+                                    title="搜索池子"
+                                >
+                                    <Icon path={icons.search} className="h-4 w-4" />
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        closePoolSearch();
+                                        setHotPoolsFilterOpen(true);
+                                    }}
                                     className={`relative inline-flex h-9 w-9 items-center justify-center rounded-2xl ring-1 transition ${hotPoolsFilterEnabled
                                         ? 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/25 dark:text-emerald-200'
                                         : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
@@ -2268,6 +2370,116 @@ export default function App() {
                                 <li key={String(i)}>{w}</li>
                             ))}
                         </ul>
+                    </div>
+                ) : null
+            }
+
+            {
+                poolSearchOpen ? (
+                    <div className="fixed inset-0 z-50">
+                        <button
+                            type="button"
+                            className="absolute inset-0 cursor-default bg-black/40"
+                            onClick={closePoolSearch}
+                            aria-label="Close search"
+                        />
+                        <div className="absolute inset-x-0 bottom-0 max-h-[85vh] overflow-y-auto rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                            <div className="flex items-center justify-between">
+                                <div className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 p-2 text-zinc-700 dark:border-white/10 dark:bg-white/5 dark:text-white/80">
+                                    <Icon path={icons.search} className="h-4 w-4" />
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={closePoolSearch}
+                                    className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
+                                    aria-label="Close"
+                                >
+                                    <Icon path={icons.close} className="h-5 w-5" />
+                                </button>
+                            </div>
+
+                            <div className="mt-4 space-y-3">
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                    <div className="text-[11px] text-zinc-500 dark:text-white/40">搜索池子 (池子ID/代币名称)</div>
+                                    <div className="mt-1 flex gap-2">
+                                        <input
+                                            ref={poolSearchInputRef}
+                                            value={poolSearchQuery}
+                                            onChange={(e) => {
+                                                setPoolSearchQuery(e.target.value);
+                                                setPoolSearchResults([]);
+                                                setPoolSearchError('');
+                                                setPoolSearchPerformed(false);
+                                            }}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    runPoolSearch();
+                                                }
+                                            }}
+                                            className="flex-1 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                            placeholder="例如 USDT / WBNB / 0x..."
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={runPoolSearch}
+                                            disabled={!hasInitData || poolSearchLoading}
+                                            className={`shrink-0 rounded-xl px-3 py-2 text-sm font-semibold ring-1 transition ${!hasInitData || poolSearchLoading
+                                                ? 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
+                                                : 'bg-emerald-500 text-white ring-emerald-500/30 hover:bg-emerald-600'
+                                                }`}
+                                        >
+                                            {poolSearchLoading ? '搜索中...' : '搜索'}
+                                        </button>
+                                    </div>
+                                    <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
+                                        支持按池子ID和代币名称搜索，结果按 TVL 倒序，最多 10 条
+                                    </div>
+                                </div>
+
+                                {!hasInitData ? (
+                                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-200">
+                                        未获取到 Telegram initData，请从机器人入口打开页面。
+                                    </div>
+                                ) : null}
+
+                                {poolSearchError ? (
+                                    <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
+                                        {poolSearchError}
+                                    </div>
+                                ) : null}
+
+                                {poolSearchPerformed && !poolSearchLoading && !poolSearchError && poolSearchResults.length === 0 ? (
+                                    <div className="rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                                        未找到相关池子。
+                                    </div>
+                                ) : null}
+
+                                {poolSearchResults.length > 0 ? (
+                                    <div className="space-y-3">
+                                        {poolSearchResults.map((pool, idx) => {
+                                            const addr = String(pool?.pool_address || '').trim().toLowerCase();
+                                            const key = `${String(pool?.protocol_version || '').trim()}:${addr || String(idx)}`;
+                                            const isBlacklisted = addr ? blacklist.has(addr) : false;
+                                            return (
+                                                <HotPoolCard
+                                                    key={key}
+                                                    pool={pool}
+                                                    metric={hotPoolsSort}
+                                                    previousData={null}
+                                                    rank={idx + 1}
+                                                    apiBaseUrl={apiBaseUrl}
+                                                    isBlacklisted={isBlacklisted}
+                                                    onOpenKline={setKlinePool}
+                                                    onOpenPosition={selectPoolFromSearch}
+                                                    onBlacklistRequest={openBlacklistPrompt}
+                                                />
+                                            );
+                                        })}
+                                    </div>
+                                ) : null}
+                            </div>
+                        </div>
                     </div>
                 ) : null
             }

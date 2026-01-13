@@ -295,6 +295,25 @@ export async function fetchHotPools({ apiBaseUrl, initData, sort, chain, timefra
     return resp.json();
 }
 
+export async function fetchSearchPools({ apiBaseUrl, initData, q, chain, limit, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const params = new URLSearchParams();
+    if (initData) params.set('initData', String(initData));
+    if (q) params.set('q', String(q));
+    if (chain) params.set('chain', String(chain));
+    if (Number.isFinite(limit)) params.set('limit', String(limit));
+
+    const qs = params.toString();
+    const url = `${base}/api/pools?endpoint=search_pools${qs ? `&${qs}` : ''}`;
+
+    const resp = await fetch(url, { method: 'GET', signal });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
 export async function fetchPoolOHLCV({ apiBaseUrl, initData, chain, poolAddress, timeframe, aggregate, limit, beforeTimestamp, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const params = new URLSearchParams();

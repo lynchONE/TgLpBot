@@ -44,12 +44,12 @@ export default async function handler(req, res) {
 
     // 从 query 参数获取 endpoint
     const endpoint = String(req.query?.endpoint || '').trim();
-    const validEndpoints = ['hot_pools', 'pool_ohlcv'];
+    const validEndpoints = ['hot_pools', 'pool_ohlcv', 'search_pools'];
 
     if (!validEndpoints.includes(endpoint)) {
         res.statusCode = 400;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.end(JSON.stringify({ error: '无效的端点，有效值: hot_pools, pool_ohlcv' }));
+        res.end(JSON.stringify({ error: '无效的端点，有效值: hot_pools, pool_ohlcv, search_pools' }));
         return;
     }
 
