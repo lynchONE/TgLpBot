@@ -53,12 +53,14 @@ export default function KlineModal({ open, onClose, theme, pool, chain }) {
 
         if (isV4ID) {
             // DEXTools widget URL format:
-            // https://www.dextools.io/widget-chart/en/{chain}/pe-light/{address}?theme={theme}&chartType=1&chartResolution=30&drawingToolbars=false
-            return `https://www.dextools.io/widget-chart/en/${dextoolsChain}/pe-light/${poolAddress}?theme=${theme === 'light' ? 'light' : 'dark'}&chartType=1&chartResolution=30&drawingToolbars=false`;
+            // https://www.dextools.io/widget-chart/en/{chain}/pe-light/{address}?theme={theme}&chartType=1&chartResolution=1&drawingToolbars=false
+            // chartResolution=1 表示 1 分钟 K 线
+            return `https://www.dextools.io/widget-chart/en/${dextoolsChain}/pe-light/${poolAddress}?theme=${theme === 'light' ? 'light' : 'dark'}&chartType=1&chartResolution=1&drawingToolbars=false`;
         } else {
             // DexScreener embed URL format:
-            // https://dexscreener.com/{chain}/{address}?embed=1&theme={theme}
-            return `https://dexscreener.com/${dexScreenerChain}/${poolAddress}?embed=1&theme=${theme === 'light' ? 'light' : 'dark'}&items=0&info=0`;
+            // https://dexscreener.com/{chain}/{address}?embed=1&theme={theme}&interval=1
+            // interval=1 表示 1 分钟 K 线
+            return `https://dexscreener.com/${dexScreenerChain}/${poolAddress}?embed=1&theme=${theme === 'light' ? 'light' : 'dark'}&items=0&info=0&interval=1`;
         }
     }, [poolAddress, isV4ID, dextoolsChain, dexScreenerChain, theme]);
 
