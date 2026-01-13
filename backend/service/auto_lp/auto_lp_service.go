@@ -2350,6 +2350,19 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 	if info == nil || info.TickSpacing <= 0 {
 		return nil, 1, fmt.Errorf("pool info invalid")
 	}
+	if version == "v4" {
+		isZero := func(addr string) bool {
+			addr = strings.TrimSpace(addr)
+			return common.IsHexAddress(addr) && common.HexToAddress(addr) == (common.Address{})
+		}
+		if isZero(info.Token0) || isZero(info.Token1) {
+			if config.AppConfig != nil && config.AppConfig.AutoLPDebug {
+				log.Printf("[AutoLP] 跳过含原生币的 V4 池子 (native not supported): user_id=%d pair=%s tokens=%s/%s pool=%s",
+					userID, strings.TrimSpace(a.TradingPair), strings.TrimSpace(info.Token0), strings.TrimSpace(info.Token1), poolID)
+			}
+			return nil, 1, fmt.Errorf("filtered native currency v4 pool")
+		}
+	}
 	if filterChineseTokens && (containsChinese(info.Token0Symbol) || containsChinese(info.Token1Symbol)) {
 		if config.AppConfig != nil && config.AppConfig.AutoLPDebug {
 			log.Printf("[AutoLP] 跳过中文代币: user_id=%d pair=%s symbols=%s/%s pool=%s", userID, strings.TrimSpace(a.TradingPair), strings.TrimSpace(info.Token0Symbol), strings.TrimSpace(info.Token1Symbol), poolID)

@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +23,210 @@ type searchPoolsEnvelope struct {
 	Chain            string            `json:"chain"`
 	TimeframeMinutes int               `json:"timeframe_minutes"`
 	Limit            int               `json:"limit"`
+	Source           string            `json:"source"`
+}
+
+type dexScreenerToken struct {
+	Address string `json:"address"`
+	Name    string `json:"name"`
+	Symbol  string `json:"symbol"`
+}
+
+type dexScreenerTxnsBucket struct {
+	Buys  int `json:"buys"`
+	Sells int `json:"sells"`
+}
+
+type dexScreenerTxns struct {
+	H24 dexScreenerTxnsBucket `json:"h24"`
+}
+
+type dexScreenerVolume struct {
+	H24 float64 `json:"h24"`
+}
+
+type dexScreenerLiquidity struct {
+	USD float64 `json:"usd"`
+}
+
+type dexScreenerPair struct {
+	ChainID     string               `json:"chainId"`
+	DexID       string               `json:"dexId"`
+	PairAddress string               `json:"pairAddress"`
+	Labels      []string             `json:"labels"`
+	BaseToken   dexScreenerToken     `json:"baseToken"`
+	QuoteToken  dexScreenerToken     `json:"quoteToken"`
+	PriceUSD    string               `json:"priceUsd"`
+	Txns        dexScreenerTxns      `json:"txns"`
+	Volume      dexScreenerVolume    `json:"volume"`
+	Liquidity   dexScreenerLiquidity `json:"liquidity"`
+}
+
+type dexScreenerSearchResponse struct {
+	Pairs []dexScreenerPair `json:"pairs"`
+}
+
+func normalizeDexScreenerChain(chain string) string {
+	v := strings.ToLower(strings.TrimSpace(chain))
+	switch v {
+	case "", "bsc", "bnb":
+		return "bsc"
+	case "eth", "ethereum":
+		return "ethereum"
+	}
+	return v
+}
+
+func dexScreenerPairAddress(raw string) string {
+	addr := strings.TrimSpace(raw)
+	if addr == "" {
+		return ""
+	}
+	if strings.HasPrefix(addr, "0x") || strings.HasPrefix(addr, "0X") {
+		addr = addr[2:]
+	}
+	addr = strings.TrimSpace(addr)
+	addr = strings.ToLower(addr)
+	if addr == "" {
+		return ""
+	}
+	return "0x" + addr
+}
+
+func dexScreenerLooksLikePoolAddress(raw string) bool {
+	v := strings.TrimSpace(raw)
+	if v == "" {
+		return false
+	}
+	if strings.Contains(v, ":") {
+		return false
+	}
+	if strings.HasPrefix(v, "0x") || strings.HasPrefix(v, "0X") {
+		v = v[2:]
+	}
+	if len(v) != 40 && len(v) != 64 {
+		return false
+	}
+	for _, c := range v {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+func dexScreenerProtocolVersion(pair dexScreenerPair) string {
+	for _, l := range pair.Labels {
+		switch strings.ToLower(strings.TrimSpace(l)) {
+		case "v4":
+			return "v4"
+		case "v3":
+			return "v3"
+		case "v2":
+			return "v2"
+		}
+	}
+
+	addr := dexScreenerPairAddress(pair.PairAddress)
+	if isV4PoolId(addr) {
+		return "v4"
+	}
+	if common.IsHexAddress(addr) {
+		return "v3"
+	}
+	return ""
+}
+
+func fetchDexScreenerPairs(ctx context.Context, endpoint string) ([]dexScreenerPair, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("dexscreener http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var parsed dexScreenerSearchResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, err
+	}
+	return parsed.Pairs, nil
+}
+
+func buildSearchPoolResponse(pair dexScreenerPair, poolInfo *pool.PoolInfo, poolVersion string) HotPoolResponse {
+	poolAddress := dexScreenerPairAddress(pair.PairAddress)
+	tradingPair := strings.TrimSpace(pair.BaseToken.Symbol) + "/" + strings.TrimSpace(pair.QuoteToken.Symbol)
+	token0Addr := strings.TrimSpace(pair.BaseToken.Address)
+	token1Addr := strings.TrimSpace(pair.QuoteToken.Address)
+
+	factoryName := strings.TrimSpace(pair.DexID)
+	feePct := 0.0
+	if poolInfo != nil {
+		tradingPair = strings.TrimSpace(poolInfo.Token0Symbol) + "/" + strings.TrimSpace(poolInfo.Token1Symbol)
+		token0Addr = strings.TrimSpace(poolInfo.Token0)
+		token1Addr = strings.TrimSpace(poolInfo.Token1)
+		if strings.TrimSpace(poolInfo.Exchange) != "" {
+			factoryName = strings.TrimSpace(poolInfo.Exchange)
+		}
+		if poolInfo.Fee > 0 {
+			feePct = float64(poolInfo.Fee) / 10000.0
+		}
+	}
+
+	volume24h := pair.Volume.H24
+	tvl := pair.Liquidity.USD
+
+	totalFees := 0.0
+	if volume24h > 0 && feePct > 0 {
+		totalFees = volume24h * (feePct / 100.0)
+	}
+
+	feeRate := 0.0
+	if tvl > 0 && totalFees > 0 {
+		feeRate = totalFees / tvl * 100.0
+	}
+
+	txCount := pair.Txns.H24.Buys + pair.Txns.H24.Sells
+	if txCount < 0 {
+		txCount = 0
+	}
+
+	priceDisplay := strings.TrimSpace(pair.PriceUSD)
+	if priceDisplay != "" && !strings.HasPrefix(priceDisplay, "$") {
+		priceDisplay = "$" + priceDisplay
+	}
+
+	return HotPoolResponse{
+		ProtocolVersion:  poolVersion,
+		PoolAddress:      poolAddress,
+		Dex:              strings.TrimSpace(pair.DexID),
+		FactoryName:      factoryName,
+		TradingPair:      tradingPair,
+		FeePercentage:    feePct,
+		TransactionCount: uint32(txCount),
+		TotalFees:        totalFees,
+		TotalVolume:      volume24h,
+		CurrentPoolValue: tvl,
+		FeeRate:          feeRate,
+		PriceDisplay:     priceDisplay,
+		UpdatedAt:        time.Now(),
+		LastSwapAt:       time.Time{},
+		Token0Address:    token0Addr,
+		Token1Address:    token1Addr,
+	}
 }
 
 func (s *Server) handleSearchPools(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +268,7 @@ func (s *Server) handleSearchPools(w http.ResponseWriter, r *http.Request) {
 		q = q[:96]
 	}
 
-	chain := strings.ToLower(strings.TrimSpace(query.Get("chain")))
+	chain := normalizeDexScreenerChain(query.Get("chain"))
 	if chain == "" {
 		chain = "bsc"
 	}
@@ -79,164 +286,135 @@ func (s *Server) handleSearchPools(w http.ResponseWriter, r *http.Request) {
 		limit = 10
 	}
 
-	timeframeMinutes := 5
-
-	normalizedPool := strings.ToLower(strings.TrimSpace(q))
-	if normalizedPool != "" && (strings.HasPrefix(normalizedPool, "0x") || strings.HasPrefix(normalizedPool, "0X")) {
-		normalizedPool = normalizedPool[2:]
-	}
-	poolIdOrAddress := isV4PoolId(q) || common.IsHexAddress(normalizeHexPrefixed(q))
-
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
 
-	// 1) 优先从 ClickHouse 的快照表查询（用于代币搜索与已收录的池子ID搜索）
-	if s.ClickHouse != nil && s.ClickHouse.Conn != nil {
-		var rows []HotPoolResponse
+	poolService := pool.NewPoolService()
+	isPoolIdOrAddress := dexScreenerLooksLikePoolAddress(q)
 
-		selectCols := `
-			protocol_version,
-			pool_address,
-			dex,
-			factory_name,
-			trading_pair,
-			fee_percentage,
-			transaction_count,
-			total_fees,
-			total_volume,
-			current_pool_value,
-			if(current_pool_value > 0, total_fees / current_pool_value * 100, 0) AS fee_rate,
-			price_display,
-			ts AS updated_at,
-			last_swap_at,
-			token0_address,
-			token1_address
-		`
+	var (
+		pairs  []dexScreenerPair
+		source = "dexscreener"
+	)
+	if isPoolIdOrAddress {
+		addr := dexScreenerPairAddress(q)
+		endpoint := fmt.Sprintf("https://api.dexscreener.com/latest/dex/pairs/%s/%s", url.PathEscape(chain), url.PathEscape(addr))
+		found, err := fetchDexScreenerPairs(ctx, endpoint)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		pairs = found
+	} else {
+		if len([]rune(q)) < 2 {
+			http.Error(w, "q too short", http.StatusBadRequest)
+			return
+		}
+		endpoint := fmt.Sprintf("https://api.dexscreener.com/latest/dex/search?q=%s", url.QueryEscape(q))
+		found, err := fetchDexScreenerPairs(ctx, endpoint)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		out := make([]dexScreenerPair, 0, len(found))
+		for _, p := range found {
+			if strings.EqualFold(strings.TrimSpace(p.ChainID), chain) {
+				out = append(out, p)
+			}
+		}
+		pairs = out
+	}
 
-		var qSql string
-		var args []any
-		if poolIdOrAddress && normalizedPool != "" {
-			qSql = fmt.Sprintf(`
-				SELECT %s
-				FROM poolm_top_fees_realtime
-				WHERE chain = ?
-				  AND timeframe_minutes = ?
-				  AND lower(pool_address) = ?
-				ORDER BY current_pool_value DESC
-				LIMIT 1
-			`, selectCols)
-			args = []any{chain, uint16(timeframeMinutes), "0x" + normalizedPool}
+	if !isPoolIdOrAddress && len(pairs) > 1 {
+		sort.SliceStable(pairs, func(i, j int) bool {
+			return pairs[i].Liquidity.USD > pairs[j].Liquidity.USD
+		})
+	}
+
+	rows := make([]HotPoolResponse, 0, limit)
+	for _, p := range pairs {
+		if len(rows) >= limit {
+			break
+		}
+		if strings.TrimSpace(p.ChainID) != "" && !strings.EqualFold(strings.TrimSpace(p.ChainID), chain) {
+			continue
+		}
+		if !dexScreenerLooksLikePoolAddress(p.PairAddress) {
+			continue
+		}
+
+		poolAddr := dexScreenerPairAddress(p.PairAddress)
+		pv := dexScreenerProtocolVersion(p)
+		if pv == "v2" || pv == "" {
+			continue
+		}
+
+		var (
+			poolInfo *pool.PoolInfo
+			infoErr  error
+		)
+		switch pv {
+		case "v4":
+			poolInfo, infoErr = poolService.GetV4PoolInfo(poolAddr)
+		default:
+			if !common.IsHexAddress(poolAddr) {
+				continue
+			}
+			poolInfo, infoErr = poolService.GetPoolInfo(poolAddr)
+		}
+		if infoErr != nil || poolInfo == nil {
+			continue
+		}
+
+		rows = append(rows, buildSearchPoolResponse(p, poolInfo, pv))
+	}
+
+	// DexScreener 未返回该池子时（例如新池子），按池子ID搜索可回退到链上读取基础信息
+	if len(rows) == 0 && isPoolIdOrAddress {
+		poolAddr := normalizeHexPrefixed(q)
+		var (
+			poolInfo *pool.PoolInfo
+			infoErr  error
+			version  string
+		)
+		if isV4PoolId(poolAddr) {
+			version = "v4"
+			poolInfo, infoErr = poolService.GetV4PoolInfo(poolAddr)
 		} else {
-			needle := strings.ToLower(strings.TrimSpace(q))
-			if len(needle) < 2 {
-				http.Error(w, "q too short", http.StatusBadRequest)
+			version = "v3"
+			if !common.IsHexAddress(poolAddr) {
+				http.Error(w, "invalid pool address", http.StatusBadRequest)
 				return
 			}
-
-			qSql = fmt.Sprintf(`
-				SELECT %s
-				FROM poolm_top_fees_realtime
-				WHERE chain = ?
-				  AND timeframe_minutes = ?
-				  AND (
-					position(lower(trading_pair), ?) > 0
-					OR position(lower(pool_address), ?) > 0
-					OR position(lower(token0_address), ?) > 0
-					OR position(lower(token1_address), ?) > 0
-				  )
-				ORDER BY current_pool_value DESC
-				LIMIT %d
-			`, selectCols, limit)
-			args = []any{chain, uint16(timeframeMinutes), needle, needle, needle, needle}
+			poolInfo, infoErr = poolService.GetPoolInfo(poolAddr)
 		}
-
-		if err := s.ClickHouse.Conn.Select(ctx, &rows, qSql, args...); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+		if infoErr == nil && poolInfo != nil {
+			minimal := dexScreenerPair{
+				ChainID:     chain,
+				PairAddress: poolAddr,
+				BaseToken: dexScreenerToken{
+					Address: poolInfo.Token0,
+					Symbol:  poolInfo.Token0Symbol,
+					Name:    poolInfo.Token0Symbol,
+				},
+				QuoteToken: dexScreenerToken{
+					Address: poolInfo.Token1,
+					Symbol:  poolInfo.Token1Symbol,
+					Name:    poolInfo.Token1Symbol,
+				},
+			}
+			rows = append(rows, buildSearchPoolResponse(minimal, poolInfo, version))
+			source = "chain"
 		}
-
-		// ClickHouse 命中则直接返回
-		if len(rows) > 0 {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(searchPoolsEnvelope{
-				Data:             rows,
-				Query:            q,
-				Chain:            chain,
-				TimeframeMinutes: timeframeMinutes,
-				Limit:            limit,
-			})
-			return
-		}
-	}
-
-	// 2) ClickHouse 未命中：仅当是池子ID搜索时尝试链上回退
-	if !poolIdOrAddress {
-		if s.ClickHouse == nil || s.ClickHouse.Conn == nil {
-			http.Error(w, "ClickHouse not configured", http.StatusServiceUnavailable)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(searchPoolsEnvelope{
-			Data:             []HotPoolResponse{},
-			Query:            q,
-			Chain:            chain,
-			TimeframeMinutes: timeframeMinutes,
-			Limit:            limit,
-		})
-		return
-	}
-
-	// pool id / address 走链上读取（用于未被快照收录的池子）
-	poolService := pool.NewPoolService()
-	poolAddress := normalizeHexPrefixed(q)
-	var (
-		poolInfo *pool.PoolInfo
-		infoErr  error
-		version  string
-	)
-	if isV4PoolId(poolAddress) {
-		version = "v4"
-		poolInfo, infoErr = poolService.GetV4PoolInfo(poolAddress)
-	} else {
-		version = "v3"
-		if !common.IsHexAddress(poolAddress) {
-			http.Error(w, "invalid pool address", http.StatusBadRequest)
-			return
-		}
-		poolInfo, infoErr = poolService.GetPoolInfo(poolAddress)
-	}
-	if infoErr != nil || poolInfo == nil {
-		http.Error(w, "pool not found", http.StatusNotFound)
-		return
-	}
-
-	feePct := float64(poolInfo.Fee) / 10000.0
-	tradingPair := strings.TrimSpace(poolInfo.Token0Symbol) + "/" + strings.TrimSpace(poolInfo.Token1Symbol)
-	fallback := HotPoolResponse{
-		ProtocolVersion:  version,
-		PoolAddress:      poolAddress,
-		Dex:              "",
-		FactoryName:      poolInfo.Exchange,
-		TradingPair:      tradingPair,
-		FeePercentage:    feePct,
-		TransactionCount: 0,
-		TotalFees:        0,
-		TotalVolume:      0,
-		CurrentPoolValue: 0,
-		FeeRate:          0,
-		PriceDisplay:     "",
-		UpdatedAt:        time.Now(),
-		LastSwapAt:       time.Time{},
-		Token0Address:    poolInfo.Token0,
-		Token1Address:    poolInfo.Token1,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(searchPoolsEnvelope{
-		Data:             []HotPoolResponse{fallback},
+		Data:             rows,
 		Query:            q,
 		Chain:            chain,
-		TimeframeMinutes: timeframeMinutes,
+		TimeframeMinutes: 1440,
 		Limit:            limit,
+		Source:           source,
 	})
 }

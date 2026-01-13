@@ -209,6 +209,7 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 func (s *LiquidityService) resolveTaskTokenAddresses(task *models.StrategyTask) (common.Address, common.Address, error) {
 	token0Addr := common.Address{}
 	token1Addr := common.Address{}
+	resolvedFromChain := false
 	if common.IsHexAddress(task.Token0Address) {
 		token0Addr = common.HexToAddress(task.Token0Address)
 	}
@@ -229,6 +230,7 @@ func (s *LiquidityService) resolveTaskTokenAddresses(task *models.StrategyTask) 
 				v4pmAddr := common.HexToAddress(config.AppConfig.UniswapV4PositionManagerAddress)
 				if v4pm, err := blockchain.NewV4PositionManager(v4pmAddr, blockchain.Client); err == nil {
 					if pos, err := v4pm.Positions(nil, tokenId); err == nil && pos != nil {
+						resolvedFromChain = true
 						if token0Addr == (common.Address{}) {
 							token0Addr = pos.Token0
 						}
@@ -245,6 +247,7 @@ func (s *LiquidityService) resolveTaskTokenAddresses(task *models.StrategyTask) 
 			if common.IsHexAddress(config.AppConfig.UniswapV4PositionManagerAddress) {
 				pmAddr := common.HexToAddress(config.AppConfig.UniswapV4PositionManagerAddress)
 				if c0, c1, _, _, _, err := blockchain.GetUniswapV4PoolKeyFromPositionManager(pmAddr, task.PoolId); err == nil {
+					resolvedFromChain = true
 					if token0Addr == (common.Address{}) {
 						token0Addr = c0
 					}
@@ -254,6 +257,7 @@ func (s *LiquidityService) resolveTaskTokenAddresses(task *models.StrategyTask) 
 				} else if common.IsHexAddress(config.AppConfig.UniswapV4PoolManagerAddress) {
 					poolMgr := common.HexToAddress(config.AppConfig.UniswapV4PoolManagerAddress)
 					if c0, c1, _, _, _, err := blockchain.GetUniswapV4PoolKeyFromInitializeEvent(poolMgr, task.PoolId); err == nil {
+						resolvedFromChain = true
 						if token0Addr == (common.Address{}) {
 							token0Addr = c0
 						}
@@ -268,6 +272,7 @@ func (s *LiquidityService) resolveTaskTokenAddresses(task *models.StrategyTask) 
 		if common.IsHexAddress(task.PoolId) {
 			poolAddr := common.HexToAddress(task.PoolId)
 			if c0, c1, err := blockchain.GetV3PoolTokens(poolAddr); err == nil {
+				resolvedFromChain = true
 				if token0Addr == (common.Address{}) {
 					token0Addr = c0
 				}
@@ -293,6 +298,7 @@ func (s *LiquidityService) resolveTaskTokenAddresses(task *models.StrategyTask) 
 					pmAddr := common.HexToAddress(pmAddrStr)
 					if v3pm, err := blockchain.NewV3PositionManager(pmAddr, blockchain.Client); err == nil {
 						if pos, err := v3pm.Positions(nil, tokenId); err == nil && pos != nil {
+							resolvedFromChain = true
 							if token0Addr == (common.Address{}) {
 								token0Addr = pos.Token0
 							}
@@ -307,7 +313,14 @@ func (s *LiquidityService) resolveTaskTokenAddresses(task *models.StrategyTask) 
 	}
 
 	if token0Addr == (common.Address{}) || token1Addr == (common.Address{}) {
-		return common.Address{}, common.Address{}, fmt.Errorf("token address missing for dust swap")
+		isExplicitZero := func(addr string) bool {
+			addr = strings.TrimSpace(addr)
+			return common.IsHexAddress(addr) && common.HexToAddress(addr) == (common.Address{})
+		}
+		if version == "v4" && (resolvedFromChain || isExplicitZero(task.Token0Address) || isExplicitZero(task.Token1Address)) {
+			return common.Address{}, common.Address{}, fmt.Errorf("native currency not supported (use WBNB)")
+		}
+		return common.Address{}, common.Address{}, fmt.Errorf("token address missing (pool_version=%s pool_id=%s)", version, strings.TrimSpace(task.PoolId))
 	}
 	return token0Addr, token1Addr, nil
 }

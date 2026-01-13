@@ -6,7 +6,7 @@
 ## What Changes
 - MiniApp「热门池子」页新增“搜索池子”入口（弹窗/抽屉）：
   - 支持按 **池子ID**（V3 pool address 或 V4 poolId）搜索
-  - 支持按 **代币名称/符号** 搜索（匹配交易对字符串）
+  - 支持按 **代币名称/符号** 搜索（第三方数据源）
   - 搜索结果按 **TVL（current_pool_value）倒序** 排序
   - 最多展示 **10 条** 结果
 - 后端新增 API：`GET /api/search_pools`（需 Telegram WebApp `initData` 认证）：
@@ -24,6 +24,5 @@
 - Backwards compatibility: 仅新增 API 与前端功能，不影响旧客户端。
 
 ## Open Questions (need your confirmation)
-1. ✅ 代币名称匹配口径：本次先按 `trading_pair`（例如 `WBNB/USDT`）做不区分大小写的子串匹配。
-2. ✅ 数据源口径：按 `poolm_top_fees_realtime` 的 `timeframe_minutes=5` 快照进行搜索与排序（TVL）。
-
+1. ✅ 数据源口径：使用 DexScreener API 进行池子/代币搜索，并用其返回的 `liquidity.usd` 作为 TVL。
+2. ✅ 手续费口径：手续费金额（`total_fees`）为 best-effort（用 `volume.h24 * feeTier` 估算）；若无法解析则返回 0 且前端不展示。

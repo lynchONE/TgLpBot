@@ -292,9 +292,16 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
     }, [rank]);
 
     const mainValue = useMemo(() => {
-        if (metric === 'volume') return formatUsdCompact(pool?.total_volume);
-        if (metric === 'fee_rate') return formatRatePct(pool?.fee_rate);
-        return formatUsd(pool?.total_fees);
+        if (metric === 'volume') {
+            const v = Number(pool?.total_volume ?? 0);
+            return Number.isFinite(v) && v > 0 ? formatUsdCompact(v) : '--';
+        }
+        if (metric === 'fee_rate') {
+            const v = Number(pool?.fee_rate ?? 0);
+            return Number.isFinite(v) && v > 0 ? formatRatePct(v) : '--';
+        }
+        const v = Number(pool?.total_fees ?? 0);
+        return Number.isFinite(v) && v > 0 ? formatUsd(v) : '--';
     }, [metric, pool?.fee_rate, pool?.total_fees, pool?.total_volume]);
 
     const priceDisplay = useMemo(() => {
@@ -308,6 +315,21 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
         if (priceDisplay.includes('↑') || priceDisplay.includes('+')) return 'text-emerald-700 dark:text-emerald-300';
         return 'text-zinc-600 dark:text-white/60';
     }, [priceDisplay]);
+
+    const volumeValue = useMemo(() => Number(pool?.total_volume ?? 0), [pool?.total_volume]);
+    const tvlValue = useMemo(() => Number(pool?.current_pool_value ?? 0), [pool?.current_pool_value]);
+    const feeRateValue = useMemo(() => Number(pool?.fee_rate ?? 0), [pool?.fee_rate]);
+    const totalFeesValue = useMemo(() => Number(pool?.total_fees ?? 0), [pool?.total_fees]);
+    const showVolume = useMemo(() => Number.isFinite(volumeValue) && volumeValue > 0, [volumeValue]);
+    const showTVL = useMemo(() => Number.isFinite(tvlValue) && tvlValue > 0, [tvlValue]);
+    const showFeeRate = useMemo(() => Number.isFinite(feeRateValue) && feeRateValue > 0, [feeRateValue]);
+    const showTotalFees = useMemo(() => Number.isFinite(totalFeesValue) && totalFeesValue > 0, [totalFeesValue]);
+    const secondaryMetricText = useMemo(() => {
+        if (metric === 'fee_rate') {
+            return showTotalFees ? formatUsd(totalFeesValue) : '';
+        }
+        return showFeeRate ? formatRatePct(feeRateValue) : '';
+    }, [metric, showFeeRate, showTotalFees, feeRateValue, totalFeesValue]);
 
     const copyAddr = async () => {
         if (!addr) return;
@@ -368,28 +390,32 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                     </div>
 
                     <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-                        <div className="text-zinc-500 dark:text-white/40 flex items-center">
-                            交易量:{' '}
-                            <span className="font-semibold text-sky-600 dark:text-sky-200 tabular-nums">
-                                {formatUsdCompact(pool?.total_volume)}
-                            </span>
-                            <ChangeIndicator
-                                currentValue={pool?.total_volume}
-                                previousValue={previousData?.total_volume}
-                                label="交易量变化"
-                            />
-                        </div>
-                        <div className="text-zinc-500 dark:text-white/40 flex items-center">
-                            TVL:{' '}
-                            <span className="font-semibold text-zinc-900 dark:text-white/80 tabular-nums">
-                                {formatUsdCompact(pool?.current_pool_value)}
-                            </span>
-                            <ChangeIndicator
-                                currentValue={pool?.current_pool_value}
-                                previousValue={previousData?.current_pool_value}
-                                label="TVL变化"
-                            />
-                        </div>
+                        {showVolume ? (
+                            <div className="text-zinc-500 dark:text-white/40 flex items-center">
+                                交易量:{' '}
+                                <span className="font-semibold text-sky-600 dark:text-sky-200 tabular-nums">
+                                    {formatUsdCompact(volumeValue)}
+                                </span>
+                                <ChangeIndicator
+                                    currentValue={pool?.total_volume}
+                                    previousValue={previousData?.total_volume}
+                                    label="交易量变化"
+                                />
+                            </div>
+                        ) : null}
+                        {showTVL ? (
+                            <div className="text-zinc-500 dark:text-white/40 flex items-center">
+                                TVL:{' '}
+                                <span className="font-semibold text-zinc-900 dark:text-white/80 tabular-nums">
+                                    {formatUsdCompact(tvlValue)}
+                                </span>
+                                <ChangeIndicator
+                                    currentValue={pool?.current_pool_value}
+                                    previousValue={previousData?.current_pool_value}
+                                    label="TVL变化"
+                                />
+                            </div>
+                        ) : null}
                         {pool?.transaction_count > 0 ? (
                             <div className="text-zinc-500 dark:text-white/40 flex items-center">
                                 交易笔数:{' '}
@@ -425,9 +451,11 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                             {priceDisplay}
                         </div>
                     ) : null}
-                    <div className="mt-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-300 tabular-nums">
-                        {metric === 'fee_rate' ? formatUsd(pool?.total_fees) : formatRatePct(pool?.fee_rate)}
-                    </div>
+                    {secondaryMetricText ? (
+                        <div className="mt-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-300 tabular-nums">
+                            {secondaryMetricText}
+                        </div>
+                    ) : null}
                 </div>
             </div>
 
