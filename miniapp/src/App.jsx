@@ -138,6 +138,7 @@ function formatUsd(v) {
 
 const defaultHotPoolsFilter = {
     enabled: true,
+    keyword: '',
     minFees: 60,
     minFeeRate: 0.3,
     minTvl: 1000,
@@ -167,6 +168,10 @@ function normalizeHotPoolsFilter(value) {
     if (!value || typeof value !== 'object') return base;
     if (Object.prototype.hasOwnProperty.call(value, 'enabled')) {
         base.enabled = Boolean(value.enabled);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'keyword')) {
+        const raw = String(value.keyword ?? '').trim();
+        base.keyword = raw.length > 64 ? raw.slice(0, 64) : raw;
     }
     if (Object.prototype.hasOwnProperty.call(value, 'minFees')) {
         base.minFees = parseNullableNumber(value.minFees);
@@ -273,6 +278,7 @@ export default function App() {
     });
     const [hotPoolsFilterDraft, setHotPoolsFilterDraft] = useState(() => ({
         enabled: defaultHotPoolsFilter.enabled,
+        keyword: String(defaultHotPoolsFilter.keyword || ''),
         minFees: String(defaultHotPoolsFilter.minFees),
         minFeeRate: String(defaultHotPoolsFilter.minFeeRate),
         minTvl: String(defaultHotPoolsFilter.minTvl),
@@ -521,7 +527,9 @@ export default function App() {
 
     const hotPoolsFilterEnabled = useMemo(() => {
         if (!hotPoolsFilter.enabled) return false;
-        return [hotPoolsFilter.minFees, hotPoolsFilter.minFeeRate, hotPoolsFilter.minTvl, hotPoolsFilter.minVolume].some((v) => Number.isFinite(v));
+        const hasKeyword = String(hotPoolsFilter.keyword || '').trim().length > 0;
+        const hasNumbers = [hotPoolsFilter.minFees, hotPoolsFilter.minFeeRate, hotPoolsFilter.minTvl, hotPoolsFilter.minVolume].some((v) => Number.isFinite(v));
+        return hasKeyword || hasNumbers;
     }, [hotPoolsFilter]);
 
     const hotPoolsVisibleRows = useMemo(() => {
@@ -532,6 +540,7 @@ export default function App() {
             const minFeeRate = hotPoolsFilter.minFeeRate;
             const minTvl = hotPoolsFilter.minTvl;
             const minVolume = hotPoolsFilter.minVolume;
+            const keyword = String(hotPoolsFilter.keyword || '').trim().toLowerCase();
             filtered = hotPoolsRows.filter((row) => {
                 const fees = parseMetricNumber(row?.total_fees);
                 const feeRate = parseMetricNumber(row?.fee_rate);
@@ -540,6 +549,14 @@ export default function App() {
                 // 如果用户有仓位在这个池子，跳过筛选（始终显示）
                 const poolAddr = String(row?.pool_address || '').toLowerCase();
                 if (positionsPoolMap.has(poolAddr)) return true;
+                if (keyword) {
+                    const pair = String(row?.trading_pair || '').toLowerCase();
+                    const addr = String(row?.pool_address || '').toLowerCase();
+                    const t0 = String(row?.token0_address || '').toLowerCase();
+                    const t1 = String(row?.token1_address || '').toLowerCase();
+                    const hit = pair.includes(keyword) || addr.includes(keyword) || t0.includes(keyword) || t1.includes(keyword);
+                    if (!hit) return false;
+                }
                 if (Number.isFinite(minFees) && fees < minFees) return false;
                 if (Number.isFinite(minFeeRate) && feeRate < minFeeRate) return false;
                 if (Number.isFinite(minTvl) && tvl < minTvl) return false;
@@ -752,6 +769,7 @@ export default function App() {
         if (!hotPoolsFilterOpen) return;
         setHotPoolsFilterDraft({
             enabled: hotPoolsFilter.enabled,
+            keyword: String(hotPoolsFilter.keyword || ''),
             minFees: formatDraftNumber(hotPoolsFilter.minFees),
             minFeeRate: formatDraftNumber(hotPoolsFilter.minFeeRate),
             minTvl: formatDraftNumber(hotPoolsFilter.minTvl),
@@ -1105,8 +1123,10 @@ export default function App() {
     };
 
     const applyHotPoolsFilter = () => {
+        const keyword = String(hotPoolsFilterDraft.keyword || '').trim();
         const next = normalizeHotPoolsFilter({
             enabled: true,
+            keyword,
             minFees: parseDraftNumber(hotPoolsFilterDraft.minFees),
             minFeeRate: parseDraftNumber(hotPoolsFilterDraft.minFeeRate),
             minTvl: parseDraftNumber(hotPoolsFilterDraft.minTvl),
@@ -1126,6 +1146,7 @@ export default function App() {
     const clearHotPoolsFilter = () => {
         const cleared = normalizeHotPoolsFilter({
             enabled: false,
+            keyword: '',
             minFees: null,
             minFeeRate: null,
             minTvl: null,
@@ -2277,6 +2298,15 @@ export default function App() {
 
                             <div className="mt-4 space-y-4">
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                    <div className="mt-1">
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">搜索 (交易对/地址)</div>
+                                        <input
+                                            value={hotPoolsFilterDraft.keyword}
+                                            onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, keyword: e.target.value }))}
+                                            className="mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                            placeholder="例如 USDT"
+                                        />
+                                    </div>
                                     <div className="mt-3 grid grid-cols-2 gap-3">
                                         <div>
                                             <div className="text-[11px] text-zinc-500 dark:text-white/40">手续费 ≥ (USD)</div>
