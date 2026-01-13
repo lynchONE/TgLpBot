@@ -26,9 +26,11 @@ type adminSystemConfigRequest struct {
 	AutoLPFilterChineseTokens *bool    `json:"autolp_filter_chinese_tokens,omitempty"`
 
 	// 可选更新字段 - 宽度策略
-	AutoLPWidthSidewaysPercent    *float64 `json:"autolp_width_sideways_percent,omitempty"`
-	AutoLPWidthMildUptrendPercent *float64 `json:"autolp_width_mild_uptrend_percent,omitempty"`
-	AutoLPWidthRapidPumpPercent   *float64 `json:"autolp_width_rapid_pump_percent,omitempty"`
+	AutoLPWidthSidewaysPercent       *float64 `json:"autolp_width_sideways_percent,omitempty"`
+	AutoLPWidthMildUptrendPercent    *float64 `json:"autolp_width_mild_uptrend_percent,omitempty"`
+	AutoLPWidthRapidPumpPercent      *float64 `json:"autolp_width_rapid_pump_percent,omitempty"`
+	AutoLPFirstOpenFixedWidthEnabled *bool    `json:"autolp_first_open_fixed_width_enabled,omitempty"`
+	AutoLPFirstOpenFixedWidthPercent *float64 `json:"autolp_first_open_fixed_width_percent,omitempty"`
 
 	// 可选更新字段 - 退出卫士
 	AutoLPGuardVolumeDropPercent    *float64 `json:"autolp_guard_volume_drop_percent,omitempty"`
@@ -140,6 +142,12 @@ func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request)
 		}
 		if req.AutoLPWidthRapidPumpPercent != nil {
 			updates["AutoLPWidthRapidPumpPercent"] = *req.AutoLPWidthRapidPumpPercent
+		}
+		if req.AutoLPFirstOpenFixedWidthEnabled != nil {
+			updates["AutoLPFirstOpenFixedWidthEnabled"] = *req.AutoLPFirstOpenFixedWidthEnabled
+		}
+		if req.AutoLPFirstOpenFixedWidthPercent != nil {
+			updates["AutoLPFirstOpenFixedWidthPercent"] = *req.AutoLPFirstOpenFixedWidthPercent
 		}
 		// 退出卫士
 		if req.AutoLPGuardVolumeDropPercent != nil {
@@ -265,13 +273,15 @@ func getWidthGuardDefaults() *models.WidthGuardConfig {
 		return nil
 	}
 	return &models.WidthGuardConfig{
-		WidthSidewaysPercent:      config.AppConfig.AutoLPWidthSidewaysPercent,
-		WidthMildUptrendPercent:   config.AppConfig.AutoLPWidthMildUptrendPercent,
-		WidthRapidPumpPercent:     config.AppConfig.AutoLPWidthRapidPumpPercent,
-		GuardVolumeDropPercent:    config.AppConfig.AutoLPGuardVolumeDropPercent,
-		GuardPriceDropPercent:     config.AppConfig.AutoLPGuardPriceDropPercent,
-		GuardTxDropPercent:        config.AppConfig.AutoLPGuardTxDropPercent,
-		GuardLowFeeRate5m:         config.AppConfig.AutoLPGuardLowFeeRate5m,
-		GuardVolumeDropPercentLow: config.AppConfig.AutoLPGuardVolumeDropPercentLow,
+		WidthSidewaysPercent:       config.AppConfig.AutoLPWidthSidewaysPercent,
+		WidthMildUptrendPercent:    config.AppConfig.AutoLPWidthMildUptrendPercent,
+		WidthRapidPumpPercent:      config.AppConfig.AutoLPWidthRapidPumpPercent,
+		FirstOpenFixedWidthEnabled: false,
+		FirstOpenFixedWidthPercent: config.AppConfig.AutoLPBaseWidthPercentage,
+		GuardVolumeDropPercent:     config.AppConfig.AutoLPGuardVolumeDropPercent,
+		GuardPriceDropPercent:      config.AppConfig.AutoLPGuardPriceDropPercent,
+		GuardTxDropPercent:         config.AppConfig.AutoLPGuardTxDropPercent,
+		GuardLowFeeRate5m:          config.AppConfig.AutoLPGuardLowFeeRate5m,
+		GuardVolumeDropPercentLow:  config.AppConfig.AutoLPGuardVolumeDropPercentLow,
 	}
 }

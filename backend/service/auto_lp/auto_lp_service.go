@@ -2379,15 +2379,54 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 		tickUpperPctReq = a.UpperWidthPct
 	}
 
-	tickLower, tickUpper := tc.CalculateTickFromPercentagesBestFit(currentTick, tickLowerPctReq, tickUpperPctReq, info.TickSpacing)
-	if err := tc.ValidateTickRange(tickLower, tickUpper, info.TickSpacing); err != nil {
+	strategyTickLower, strategyTickUpper := tc.CalculateTickFromPercentagesBestFit(currentTick, tickLowerPctReq, tickUpperPctReq, info.TickSpacing)
+	if err := tc.ValidateTickRange(strategyTickLower, strategyTickUpper, info.TickSpacing); err != nil {
 		return nil, 1, err
 	}
 
-	effLowerPct, effUpperPct := tc.CalculatePercentagesFromTicks(currentTick, tickLower, tickUpper)
+	effLowerPct, effUpperPct := tc.CalculatePercentagesFromTicks(currentTick, strategyTickLower, strategyTickUpper)
 	if effLowerPct <= 0 || effUpperPct <= 0 {
 		effLowerPct = tickLowerPctReq
 		effUpperPct = tickUpperPctReq
+	}
+
+	openTickLower := strategyTickLower
+	openTickUpper := strategyTickUpper
+
+	// Optional: Use a fixed total width for the very first open (entry) only.
+	if database.DB != nil {
+		if wgCfg, err := sysConfigService.GetWidthGuardConfig(); err == nil && wgCfg != nil && wgCfg.FirstOpenFixedWidthEnabled {
+			totalWidth := wgCfg.FirstOpenFixedWidthPercent
+			if totalWidth <= 0 && config.AppConfig != nil {
+				totalWidth = config.AppConfig.AutoLPBaseWidthPercentage
+			}
+			if totalWidth > 0 && totalWidth < 100 {
+				if totalWidth < 0.5 {
+					totalWidth = 0.5
+				}
+				if totalWidth > 50 {
+					totalWidth = 50
+				}
+
+				stableLowerFixed := totalWidth / 2.0
+				stableUpperFixed := totalWidth / 2.0
+				tickLowerPctFixed, tickUpperPctFixed := pricing.TickPercentagesFromStablePercentages(tmpTask, stableLowerFixed, stableUpperFixed)
+				if tickLowerPctFixed <= 0 || tickUpperPctFixed <= 0 {
+					tickLowerPctFixed = stableLowerFixed
+					tickUpperPctFixed = stableUpperFixed
+				}
+
+				fixedTickLower, fixedTickUpper := tc.CalculateTickFromPercentagesBestFit(currentTick, tickLowerPctFixed, tickUpperPctFixed, info.TickSpacing)
+				if err := tc.ValidateTickRange(fixedTickLower, fixedTickUpper, info.TickSpacing); err == nil {
+					openTickLower = fixedTickLower
+					openTickUpper = fixedTickUpper
+				} else if config.AppConfig != nil && config.AppConfig.AutoLPDebug {
+					log.Printf("[AutoLP] ignore invalid first-open fixed range: user_id=%d pool=%s total=%.4f err=%v", userID, poolID, totalWidth, err)
+				}
+			} else if config.AppConfig != nil && config.AppConfig.AutoLPDebug {
+				log.Printf("[AutoLP] ignore invalid first-open fixed width percent: user_id=%d pool=%s value=%.4f", userID, poolID, totalWidth)
+			}
+		}
 	}
 
 	gasMult := 1.0
@@ -2414,8 +2453,8 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 		Fee:         info.Fee,
 		TickSpacing: info.TickSpacing,
 
-		TickLower:  tickLower,
-		TickUpper:  tickUpper,
+		TickLower:  openTickLower,
+		TickUpper:  openTickUpper,
 		AmountUSDT: amountUSDT,
 
 		RangePercentage:      a.BaseWidthPct,

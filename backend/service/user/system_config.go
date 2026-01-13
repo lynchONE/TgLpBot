@@ -143,6 +143,12 @@ func (s *SystemConfigService) GetWidthGuardConfig() (*models.WidthGuardConfig, e
 		wg.WidthRapidPumpPercent = config.AppConfig.AutoLPWidthRapidPumpPercent
 	}
 
+	// 首次开仓固定区间（bool 由数据库控制；percent 为 0 时表示未配置）
+	wg.FirstOpenFixedWidthEnabled = cfg.AutoLPFirstOpenFixedWidthEnabled
+	if cfg.AutoLPFirstOpenFixedWidthPercent > 0 {
+		wg.FirstOpenFixedWidthPercent = cfg.AutoLPFirstOpenFixedWidthPercent
+	}
+
 	// 退出卫士
 	if cfg.AutoLPGuardVolumeDropPercent > 0 {
 		wg.GuardVolumeDropPercent = cfg.AutoLPGuardVolumeDropPercent

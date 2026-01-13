@@ -29,6 +29,8 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
         autolp_width_sideways_percent: '',
         autolp_width_mild_uptrend_percent: '',
         autolp_width_rapid_pump_percent: '',
+        autolp_first_open_fixed_width_enabled: false,
+        autolp_first_open_fixed_width_percent: '',
         // 退出卫士
         autolp_guard_volume_drop_percent: '',
         autolp_guard_price_drop_percent: '',
@@ -60,6 +62,8 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
                     autolp_width_sideways_percent: String(resp.config.autolp_width_sideways_percent || ''),
                     autolp_width_mild_uptrend_percent: String(resp.config.autolp_width_mild_uptrend_percent || ''),
                     autolp_width_rapid_pump_percent: String(resp.config.autolp_width_rapid_pump_percent || ''),
+                    autolp_first_open_fixed_width_enabled: Boolean(resp.config.autolp_first_open_fixed_width_enabled),
+                    autolp_first_open_fixed_width_percent: String(resp.config.autolp_first_open_fixed_width_percent || ''),
                     // 退出卫士
                     autolp_guard_volume_drop_percent: String(resp.config.autolp_guard_volume_drop_percent || ''),
                     autolp_guard_price_drop_percent: String(resp.config.autolp_guard_price_drop_percent || ''),
@@ -116,6 +120,8 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
             updates.autolp_width_sideways_percent = parseFloat(draft.autolp_width_sideways_percent);
             updates.autolp_width_mild_uptrend_percent = parseFloat(draft.autolp_width_mild_uptrend_percent);
             updates.autolp_width_rapid_pump_percent = parseFloat(draft.autolp_width_rapid_pump_percent);
+            updates.autolp_first_open_fixed_width_enabled = Boolean(draft.autolp_first_open_fixed_width_enabled);
+            updates.autolp_first_open_fixed_width_percent = parseFloat(draft.autolp_first_open_fixed_width_percent);
             // 退出卫士
             updates.autolp_guard_volume_drop_percent = parseFloat(draft.autolp_guard_volume_drop_percent);
             updates.autolp_guard_price_drop_percent = parseFloat(draft.autolp_guard_price_drop_percent);
@@ -138,6 +144,8 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
                     autolp_width_sideways_percent: String(resp.config.autolp_width_sideways_percent || ''),
                     autolp_width_mild_uptrend_percent: String(resp.config.autolp_width_mild_uptrend_percent || ''),
                     autolp_width_rapid_pump_percent: String(resp.config.autolp_width_rapid_pump_percent || ''),
+                    autolp_first_open_fixed_width_enabled: Boolean(resp.config.autolp_first_open_fixed_width_enabled),
+                    autolp_first_open_fixed_width_percent: String(resp.config.autolp_first_open_fixed_width_percent || ''),
                     autolp_guard_volume_drop_percent: String(resp.config.autolp_guard_volume_drop_percent || ''),
                     autolp_guard_price_drop_percent: String(resp.config.autolp_guard_price_drop_percent || ''),
                     autolp_guard_tx_drop_percent: String(resp.config.autolp_guard_tx_drop_percent || ''),
@@ -274,6 +282,13 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
                             {renderInput('autolp_width_sideways_percent', '横盘宽度 (%)', widthGuardDefaults?.width_sideways_percent)}
                             {renderInput('autolp_width_mild_uptrend_percent', '温和上涨宽度 (%)', widthGuardDefaults?.width_mild_uptrend_percent)}
                             {renderInput('autolp_width_rapid_pump_percent', '急涨宽度 (%)', widthGuardDefaults?.width_rapid_pump_percent)}
+                        </div>
+                        <div className="pt-2 border-t border-zinc-200/60 dark:border-white/10">
+                            <div className="text-xs text-zinc-500 dark:text-white/50 mb-2">首次开仓固定区间（仅影响 Auto 任务首次开仓；后续再平衡按原逻辑计算）</div>
+                            <div className="grid grid-cols-1 gap-3">
+                                {renderToggle('autolp_first_open_fixed_width_enabled', '启用首次开仓固定区间', widthGuardDefaults?.first_open_fixed_width_enabled)}
+                                {renderInput('autolp_first_open_fixed_width_percent', '首次开仓固定总宽度 (%)', widthGuardDefaults?.first_open_fixed_width_percent)}
+                            </div>
                         </div>
                     </div>
                 )}
