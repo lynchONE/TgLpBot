@@ -180,5 +180,11 @@ func (s *SystemConfigService) GetWidthGuardConfig() (*models.WidthGuardConfig, e
 		wg.GuardVolumeDropPercentLow = config.AppConfig.AutoLPGuardVolumeDropPercentLow
 	}
 
+	if cfg.AutoLPGuardCooldownSeconds > 0 {
+		wg.GuardCooldownSeconds = cfg.AutoLPGuardCooldownSeconds
+	} else if config.AppConfig != nil {
+		wg.GuardCooldownSeconds = config.AppConfig.AutoLPGuardCooldownSeconds
+	}
+
 	return wg, nil
 }

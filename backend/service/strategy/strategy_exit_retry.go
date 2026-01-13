@@ -8,6 +8,7 @@ import (
 	"TgLpBot/base/security"
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/txexec"
+	userSvc "TgLpBot/service/user"
 	"context"
 	"errors"
 	"fmt"
@@ -1057,8 +1058,17 @@ func (s *StrategyService) finishCooldownAfterExit(task *models.StrategyTask, now
 
 	// 从配置读取冷却时间，默认30分钟
 	cooldownDuration := autoModeCooldownDurationDefault
-	if config.AppConfig != nil && config.AppConfig.AutoLPGuardCooldownSeconds > 0 {
-		cooldownDuration = time.Duration(config.AppConfig.AutoLPGuardCooldownSeconds) * time.Second
+	cooldownSeconds := 0
+	if database.DB != nil {
+		if cfg, err := userSvc.NewSystemConfigService().GetOrCreate(); err == nil && cfg != nil && cfg.AutoLPGuardCooldownSeconds > 0 {
+			cooldownSeconds = cfg.AutoLPGuardCooldownSeconds
+		}
+	}
+	if cooldownSeconds <= 0 && config.AppConfig != nil && config.AppConfig.AutoLPGuardCooldownSeconds > 0 {
+		cooldownSeconds = config.AppConfig.AutoLPGuardCooldownSeconds
+	}
+	if cooldownSeconds > 0 {
+		cooldownDuration = time.Duration(cooldownSeconds) * time.Second
 	}
 	cooldownUntil := now.Add(cooldownDuration)
 	cooldownMinutes := int(cooldownDuration.Minutes())

@@ -37,6 +37,7 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
         autolp_guard_tx_drop_percent: '',
         autolp_guard_low_fee_rate_5m: '',
         autolp_guard_volume_drop_percent_low: '',
+        autolp_guard_cooldown_seconds: '',
     });
 
     // 加载配置
@@ -70,6 +71,7 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
                     autolp_guard_tx_drop_percent: String(resp.config.autolp_guard_tx_drop_percent || ''),
                     autolp_guard_low_fee_rate_5m: String(resp.config.autolp_guard_low_fee_rate_5m || ''),
                     autolp_guard_volume_drop_percent_low: String(resp.config.autolp_guard_volume_drop_percent_low || ''),
+                    autolp_guard_cooldown_seconds: String(resp.config.autolp_guard_cooldown_seconds || ''),
                 });
             }
             if (resp?.defaults) {
@@ -128,6 +130,7 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
             updates.autolp_guard_tx_drop_percent = parseFloat(draft.autolp_guard_tx_drop_percent);
             updates.autolp_guard_low_fee_rate_5m = parseFloat(draft.autolp_guard_low_fee_rate_5m);
             updates.autolp_guard_volume_drop_percent_low = parseFloat(draft.autolp_guard_volume_drop_percent_low);
+            updates.autolp_guard_cooldown_seconds = parseInt(draft.autolp_guard_cooldown_seconds);
 
             const resp = await updateSystemConfig({ apiBaseUrl, initData, config: updates });
             if (resp?.config) {
@@ -151,6 +154,7 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
                     autolp_guard_tx_drop_percent: String(resp.config.autolp_guard_tx_drop_percent || ''),
                     autolp_guard_low_fee_rate_5m: String(resp.config.autolp_guard_low_fee_rate_5m || ''),
                     autolp_guard_volume_drop_percent_low: String(resp.config.autolp_guard_volume_drop_percent_low || ''),
+                    autolp_guard_cooldown_seconds: String(resp.config.autolp_guard_cooldown_seconds || ''),
                 });
             }
             if (onNotice) onNotice('配置已保存', 'success');
@@ -302,13 +306,14 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
                 </button>
                 {expandedSection === 'guard' && config && (
                     <div className="py-3 space-y-3">
-                        <div className="text-xs text-zinc-500 dark:text-white/50 mb-2">退出条件阈值（小数表示百分比，如 0.5 = 50%），值为 0 时使用环境变量默认值</div>
+                        <div className="text-xs text-zinc-500 dark:text-white/50 mb-2">退出条件阈值（小数表示百分比，如 0.5 = 50%），冷却时间单位为秒；值为 0 时使用环境变量默认值</div>
                         <div className="grid grid-cols-1 gap-3">
                             {renderInput('autolp_guard_volume_drop_percent', '成交量下降阈值', widthGuardDefaults?.guard_volume_drop_percent, '0.01')}
                             {renderInput('autolp_guard_price_drop_percent', '价格跌幅阈值', widthGuardDefaults?.guard_price_drop_percent, '0.01')}
                             {renderInput('autolp_guard_tx_drop_percent', '交易笔数跌幅阈值', widthGuardDefaults?.guard_tx_drop_percent, '0.01')}
                             {renderInput('autolp_guard_low_fee_rate_5m', '低手续费率阈值 (%)', widthGuardDefaults?.guard_low_fee_rate_5m, '0.01')}
                             {renderInput('autolp_guard_volume_drop_percent_low', '低费率时成交量下降阈值', widthGuardDefaults?.guard_volume_drop_percent_low, '0.01')}
+                            {renderInput('autolp_guard_cooldown_seconds', '冷却时间 (秒)', widthGuardDefaults?.guard_cooldown_seconds, '1', true)}
                         </div>
                     </div>
                 )}

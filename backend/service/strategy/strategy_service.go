@@ -446,11 +446,24 @@ func (s *StrategyService) handleAutoModeRangeBreakExit(task *models.StrategyTask
 		downStreak++
 		if downStreak >= autoModeConsecutiveDownBreakCooldownThreshold {
 			// 2 consecutive "down" breaks -> exit to USDT and cooldown this trading pair
-			cooldownMinutes := 30
-			if config.AppConfig != nil && config.AppConfig.AutoLPGuardCooldownSeconds > 0 {
-				cooldownMinutes = config.AppConfig.AutoLPGuardCooldownSeconds / 60
+			cooldownDuration := autoModeCooldownDurationDefault
+			cooldownSeconds := 0
+			if database.DB != nil {
+				if cfg, err := user.NewSystemConfigService().GetOrCreate(); err == nil && cfg != nil && cfg.AutoLPGuardCooldownSeconds > 0 {
+					cooldownSeconds = cfg.AutoLPGuardCooldownSeconds
+				}
 			}
-			cooldownReason := fmt.Sprintf("📉 连续 %d 次跌破区间，撤出并冷却 %d 分钟", autoModeConsecutiveDownBreakCooldownThreshold, cooldownMinutes)
+			if cooldownSeconds <= 0 && config.AppConfig != nil && config.AppConfig.AutoLPGuardCooldownSeconds > 0 {
+				cooldownSeconds = config.AppConfig.AutoLPGuardCooldownSeconds
+			}
+			if cooldownSeconds > 0 {
+				cooldownDuration = time.Duration(cooldownSeconds) * time.Second
+			}
+			cooldownLabel := fmt.Sprintf("%d 分钟", int(cooldownDuration.Minutes()))
+			if cooldownDuration < time.Minute {
+				cooldownLabel = fmt.Sprintf("%d 秒", int(cooldownDuration.Seconds()))
+			}
+			cooldownReason := fmt.Sprintf("📉 连续 %d 次跌破区间，撤出并冷却 %s", autoModeConsecutiveDownBreakCooldownThreshold, cooldownLabel)
 			updates := map[string]interface{}{
 				"range_break_up_streak":   0,
 				"range_break_down_streak": 0,
@@ -464,7 +477,7 @@ func (s *StrategyService) handleAutoModeRangeBreakExit(task *models.StrategyTask
 			log.Printf("[Strategy] 任务 #%d 连续跌破 %d 次，触发冷却退出", task.ID, autoModeConsecutiveDownBreakCooldownThreshold)
 
 			// 同交易对冷却：暂停该用户同交易对的其他任务
-			s.cooldownSameTradingPairTasks(task, cooldownMinutes, cooldownReason)
+			s.cooldownSameTradingPairTasks(task, cooldownDuration, cooldownReason)
 
 			s.requestExitToUSDT(task, ExitActionCooldown, cooldownReason)
 			return true
@@ -964,9 +977,13 @@ func isStableCoin(s string) bool {
 
 // cooldownSameTradingPairTasks 将同交易对的其他活跃任务也设置为冷却状态
 // 交易对匹配逻辑：Token0Symbol和Token1Symbol相同（忽略顺序）
-func (s *StrategyService) cooldownSameTradingPairTasks(task *models.StrategyTask, cooldownMinutes int, reason string) {
+func (s *StrategyService) cooldownSameTradingPairTasks(task *models.StrategyTask, cooldownDuration time.Duration, reason string) {
 	if task == nil || task.UserID == 0 {
 		return
+	}
+
+	if cooldownDuration <= 0 {
+		cooldownDuration = autoModeCooldownDurationDefault
 	}
 
 	// 获取交易对符号
@@ -977,8 +994,11 @@ func (s *StrategyService) cooldownSameTradingPairTasks(task *models.StrategyTask
 	}
 
 	// 计算冷却结束时间
-	cooldownDuration := time.Duration(cooldownMinutes) * time.Minute
 	cooldownUntil := time.Now().Add(cooldownDuration)
+	cooldownLabel := fmt.Sprintf("%d 分钟", int(cooldownDuration.Minutes()))
+	if cooldownDuration < time.Minute {
+		cooldownLabel = fmt.Sprintf("%d 秒", int(cooldownDuration.Seconds()))
+	}
 
 	// 识别冷却目标（非稳定币代币 或 交易对）
 	// 用户要求：包含稳定币以外的那个代币的池子都要被禁止开仓
@@ -995,7 +1015,7 @@ func (s *StrategyService) cooldownSameTradingPairTasks(task *models.StrategyTask
 	if err := cooldownSvc.Add(task.UserID, cooldownKey, reason, cooldownDuration); err != nil {
 		log.Printf("[Strategy] 写入 Redis 冷却失败: user_id=%d key=%s err=%v", task.UserID, cooldownKey, err)
 	} else {
-		log.Printf("[Strategy] 目标 %s 已写入 Redis 冷却 %d 分钟", cooldownKey, cooldownMinutes)
+		log.Printf("[Strategy] 目标 %s 已写入 Redis 冷却 %s", cooldownKey, cooldownLabel)
 	}
 
 	// 查找该用户同交易对的其他活跃任务
@@ -1048,10 +1068,10 @@ func (s *StrategyService) cooldownSameTradingPairTasks(task *models.StrategyTask
 		}
 
 		cooldownCount++
-		log.Printf("[Strategy] 任务 #%d 同交易对 %s/%s 触发冷却 %d 分钟", otherTask.ID, sym0, sym1, cooldownMinutes)
+		log.Printf("[Strategy] 任务 #%d 同交易对 %s/%s 触发冷却 %s", otherTask.ID, sym0, sym1, cooldownLabel)
 	}
 
 	if cooldownCount > 0 {
-		s.notify(task.UserID, fmt.Sprintf("⚠️ 交易对 %s/%s 连续跌破，同交易对共 %d 个任务进入冷却 %d 分钟", sym0, sym1, cooldownCount+1, cooldownMinutes))
+		s.notify(task.UserID, fmt.Sprintf("⚠️ 交易对 %s/%s 连续跌破，同交易对共 %d 个任务进入冷却 %s", sym0, sym1, cooldownCount+1, cooldownLabel))
 	}
 }

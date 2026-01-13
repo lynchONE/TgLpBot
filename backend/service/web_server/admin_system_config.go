@@ -38,6 +38,7 @@ type adminSystemConfigRequest struct {
 	AutoLPGuardTxDropPercent        *float64 `json:"autolp_guard_tx_drop_percent,omitempty"`
 	AutoLPGuardLowFeeRate5m         *float64 `json:"autolp_guard_low_fee_rate_5m,omitempty"`
 	AutoLPGuardVolumeDropPercentLow *float64 `json:"autolp_guard_volume_drop_percent_low,omitempty"`
+	AutoLPGuardCooldownSeconds      *int     `json:"autolp_guard_cooldown_seconds,omitempty"`
 }
 
 type adminSystemConfigResponse struct {
@@ -165,6 +166,9 @@ func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request)
 		if req.AutoLPGuardVolumeDropPercentLow != nil {
 			updates["AutoLPGuardVolumeDropPercentLow"] = *req.AutoLPGuardVolumeDropPercentLow
 		}
+		if req.AutoLPGuardCooldownSeconds != nil {
+			updates["AutoLPGuardCooldownSeconds"] = *req.AutoLPGuardCooldownSeconds
+		}
 
 		if len(updates) > 0 {
 			sysConfigService := userSvc.NewSystemConfigService()
@@ -283,5 +287,6 @@ func getWidthGuardDefaults() *models.WidthGuardConfig {
 		GuardTxDropPercent:         config.AppConfig.AutoLPGuardTxDropPercent,
 		GuardLowFeeRate5m:          config.AppConfig.AutoLPGuardLowFeeRate5m,
 		GuardVolumeDropPercentLow:  config.AppConfig.AutoLPGuardVolumeDropPercentLow,
+		GuardCooldownSeconds:       config.AppConfig.AutoLPGuardCooldownSeconds,
 	}
 }

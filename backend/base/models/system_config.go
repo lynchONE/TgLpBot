@@ -36,6 +36,7 @@ type SystemConfig struct {
 	AutoLPGuardTxDropPercent        float64 `gorm:"type:decimal(10,4);default:0" json:"autolp_guard_tx_drop_percent"`         // 交易笔数跌幅阈值
 	AutoLPGuardLowFeeRate5m         float64 `gorm:"type:decimal(10,4);default:0" json:"autolp_guard_low_fee_rate_5m"`         // 低手续费率阈值
 	AutoLPGuardVolumeDropPercentLow float64 `gorm:"type:decimal(10,4);default:0" json:"autolp_guard_volume_drop_percent_low"` // 低费率时成交量下降阈值
+	AutoLPGuardCooldownSeconds      int     `gorm:"default:0" json:"autolp_guard_cooldown_seconds"`                           // 冷却时间（秒；0 表示使用环境变量默认值）
 
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
@@ -71,4 +72,5 @@ type WidthGuardConfig struct {
 	GuardTxDropPercent         float64 `json:"guard_tx_drop_percent"`
 	GuardLowFeeRate5m          float64 `json:"guard_low_fee_rate_5m"`
 	GuardVolumeDropPercentLow  float64 `json:"guard_volume_drop_percent_low"`
+	GuardCooldownSeconds       int     `json:"guard_cooldown_seconds"`
 }

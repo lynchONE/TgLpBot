@@ -207,6 +207,7 @@ func (s *AutoLPService) runOnce() {
 		GuardTxDropPercent:        config.AppConfig.AutoLPGuardTxDropPercent,
 		GuardLowFeeRate5m:         config.AppConfig.AutoLPGuardLowFeeRate5m,
 		GuardVolumeDropPercentLow: config.AppConfig.AutoLPGuardVolumeDropPercentLow,
+		GuardCooldownSeconds:      config.AppConfig.AutoLPGuardCooldownSeconds,
 	}
 	if cfg, err := sysConfigService.GetWidthGuardConfig(); err == nil && cfg != nil {
 		widthGuardCfg = cfg
@@ -3166,8 +3167,17 @@ func (s *AutoLPService) addGuardCooldown(task *models.StrategyTask, reason strin
 	}
 
 	cooldownDuration := blacklist.DefaultCooldownDuration
-	if config.AppConfig != nil && config.AppConfig.AutoLPGuardCooldownSeconds > 0 {
-		cooldownDuration = time.Duration(config.AppConfig.AutoLPGuardCooldownSeconds) * time.Second
+	cooldownSeconds := 0
+	if database.DB != nil {
+		if cfg, err := user.NewSystemConfigService().GetWidthGuardConfig(); err == nil && cfg != nil {
+			cooldownSeconds = cfg.GuardCooldownSeconds
+		}
+	}
+	if cooldownSeconds <= 0 && config.AppConfig != nil {
+		cooldownSeconds = config.AppConfig.AutoLPGuardCooldownSeconds
+	}
+	if cooldownSeconds > 0 {
+		cooldownDuration = time.Duration(cooldownSeconds) * time.Second
 	}
 
 	sym0 := strings.ToUpper(strings.TrimSpace(task.Token0Symbol))
