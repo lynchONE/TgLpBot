@@ -145,6 +145,9 @@ type Config struct {
 	AutoLPResonanceMinFeeRate5m     float64
 	AutoLPResonanceMinTotalVolume5m float64
 	AutoLPResonanceMinAbsZ60        float64
+	AutoLPTrendFilterEnabled        bool
+	AutoLPEntryTrendCrossPercent    float64
+	AutoLPEntryBlockDev5Percent     float64
 	AutoLPAllowEntrySwap            bool
 	AutoLPGuardWindowSeconds        int
 	AutoLPGuardVolumeDropPercent    float64
@@ -209,6 +212,9 @@ func LoadConfig() error {
 	autoLPResMinFeeRate5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_RESONANCE_MIN_FEE_RATE_5M", "0")), 64)
 	autoLPResMinTotalVolume5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_RESONANCE_MIN_TOTAL_VOLUME_5M", "0")), 64)
 	autoLPResMinAbsZ60, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_RESONANCE_MIN_ABS_Z60", "0")), 64)
+	autoLPTrendFilterEnabled := getEnvBool("AUTO_LP_TREND_FILTER_ENABLED", true)
+	autoLPEntryTrendCrossPct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_ENTRY_TREND_CROSS_PCT", "0.3")), 64)
+	autoLPEntryBlockDev5Pct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_ENTRY_BLOCK_DEV5_PCT", "0.5")), 64)
 	autoLPMinTx5m, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_MIN_TX_5M", "0")))
 	autoLPMinTx60m, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_MIN_TX_60M", "0")))
 	autoLPMinFeeApr5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_FEE_APR_5M", "0")), 64)
@@ -239,6 +245,14 @@ func LoadConfig() error {
 	autoLPWidthSideways, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_SIDEWAYS_PERCENT", "2.0")), 64)
 	autoLPWidthMildUp, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_MILD_UPTREND_PERCENT", "5.0")), 64)
 	autoLPWidthRapidPump, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_RAPID_PUMP_PERCENT", "15.0")), 64)
+
+	if autoLPEntryTrendCrossPct <= 0 || autoLPEntryTrendCrossPct >= 100 {
+		autoLPEntryTrendCrossPct = 0.3
+	}
+	if autoLPEntryBlockDev5Pct <= 0 || autoLPEntryBlockDev5Pct >= 100 {
+		autoLPEntryBlockDev5Pct = 0.5
+	}
+
 	smartLPDebug := getEnvBool("SMART_LP_DEBUG", false)
 	smartLPScorePerWallet, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("SMART_LP_SCORE_PER_WALLET", "100")), 64)
 	smartLPMinWallets, _ := strconv.Atoi(strings.TrimSpace(getEnv("SMART_LP_MIN_WALLETS", "3")))
@@ -405,6 +419,9 @@ func LoadConfig() error {
 		AutoLPResonanceMinFeeRate5m:     autoLPResMinFeeRate5m,
 		AutoLPResonanceMinTotalVolume5m: autoLPResMinTotalVolume5m,
 		AutoLPResonanceMinAbsZ60:        autoLPResMinAbsZ60,
+		AutoLPTrendFilterEnabled:        autoLPTrendFilterEnabled,
+		AutoLPEntryTrendCrossPercent:    autoLPEntryTrendCrossPct,
+		AutoLPEntryBlockDev5Percent:     autoLPEntryBlockDev5Pct,
 		AutoLPAllowEntrySwap:            getEnvBool("AUTO_LP_ALLOW_ENTRY_SWAP", true),
 		AutoLPGuardWindowSeconds:        autoLPGuardWindowSeconds,
 		AutoLPGuardVolumeDropPercent:    autoLPGuardVolumeDropPct,

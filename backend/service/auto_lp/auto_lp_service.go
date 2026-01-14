@@ -237,6 +237,11 @@ func (s *AutoLPService) runOnce() {
 		config.AppConfig.AutoLPResonanceMinTotalVolume5m,
 		config.AppConfig.AutoLPResonanceMinAbsZ60,
 	)
+	log.Printf("[AutoLP] 进场门禁：启用=%v 趋势阈值(MA5-MA60)/MA60=±%.3f%% 回落阈值(P-MA5)/MA5<=-%.3f%%",
+		config.AppConfig.AutoLPTrendFilterEnabled,
+		config.AppConfig.AutoLPEntryTrendCrossPercent,
+		config.AppConfig.AutoLPEntryBlockDev5Percent,
+	)
 
 	timeout := 55 * time.Second
 	if config.AppConfig.AutoLPScanIntervalSeconds > 0 {
@@ -394,17 +399,23 @@ func (s *AutoLPService) runOnce() {
 	}
 
 	if config.AppConfig.AutoLPNotifyTopCandidate && foundTop {
+		trendExplain := "说明：趋势使用 MA5/MA60 均线差（MAΔ=(MA5-MA60)/MA60*100）；Dev5=(P-MA5)/MA5*100（回落门禁）；Z5/Z60 为价格相对均值的 Z-score（位置指标）"
+		if config.AppConfig != nil && !config.AppConfig.AutoLPTrendFilterEnabled {
+			trendExplain = "说明：趋势当前沿用旧逻辑（基于 Z60）；MAΔ/Dev5 仅供参考；开启 AUTO_LP_TREND_FILTER_ENABLED 可启用趋势/回落门禁"
+		}
 		msg := fmt.Sprintf(
-			"📡 AutoLP 候选池：%d\nTop1：%s %s\n地址：%s\n5m 手续费=%.2f | 手续费率=%.2f%% | 5m 成交量=%.2f | TVL=%.2f | 5m 费用率=%.4f%%\nZ5=%.2f 状态=%s\nZ60=%.2f 趋势=%s\n共振=%s\n宽度：%.2f%%（下 %.2f%% / 上 %.2f%%）\n评分：%.2f\nZ5/Z60：价格 Z-score，Z=(P-MA)/σ；MA/σ 分别统计最近 5/60 分钟 current_token_price（minN=4/12，60m 不足则用 5m 数据窗口 60 分钟回退）",
+			"📡 AutoLP 候选池：%d\nTop1：%s %s\n地址：%s\n5m 手续费=%.2f | 手续费率=%.2f%% | 5m 成交量=%.2f | TVL=%.2f | 5m 费用率=%.4f%%\nZ5=%.2f 状态=%s\nZ60=%.2f 趋势=%s\nMAΔ=%.3f%% Dev5=%.3f%%\n共振=%s\n宽度：%.2f%%（下 %.2f%% / 上 %.2f%%）\n评分：%.2f\n%s",
 			candidateCount,
 			strings.ToUpper(topCand.ProtocolVersion), topCand.TradingPair,
 			topCand.PoolAddress,
 			topCand.TotalFees5m, topCand.FeePercentage, topCand.TotalVolume5m, topCand.TVLUSD, topCand.FeeRate5mPct,
 			topCand.Z5, autoLPStateZh(topCand.State5),
 			topCand.Z60, autoLPTrendZh(topCand.Trend60),
+			topCand.MACrossPct, topCand.Dev5Pct,
 			autoLPResonanceZh(topCand.Resonance),
 			topCand.BaseWidthPct, topCand.LowerWidthPct, topCand.UpperWidthPct,
 			topCand.Score,
+			trendExplain,
 		)
 		notifyExtra(msg)
 	}
@@ -732,9 +743,11 @@ type AutoLPAnalysis struct {
 	Sigma5 float64
 	Z5     float64
 
-	MA60    float64
-	Sigma60 float64
-	Z60     float64
+	MA60       float64
+	Sigma60    float64
+	Z60        float64
+	MACrossPct float64 // (MA5 - MA60) / MA60 * 100
+	Dev5Pct    float64 // (P - MA5) / MA5 * 100
 
 	State5    string
 	Trend60   string
@@ -746,6 +759,8 @@ type AutoLPAnalysis struct {
 
 	Action            string
 	CandidateEligible bool
+	EntryBlocked      bool
+	EntryBlockReason  string
 	Score             float64
 
 	SmartWalletCount     int // 当前持有LP仓位的钱包数（用于评分加成）
@@ -788,6 +803,13 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 	resMinFeeRate := config.AppConfig.AutoLPResonanceMinFeeRate5m
 	resMinVol := config.AppConfig.AutoLPResonanceMinTotalVolume5m
 	resMinAbsZ60 := config.AppConfig.AutoLPResonanceMinAbsZ60
+	trendFilterEnabled := config.AppConfig != nil && config.AppConfig.AutoLPTrendFilterEnabled
+	entryTrendCrossPct := 0.0
+	entryBlockDev5Pct := 0.0
+	if config.AppConfig != nil {
+		entryTrendCrossPct = config.AppConfig.AutoLPEntryTrendCrossPercent
+		entryBlockDev5Pct = config.AppConfig.AutoLPEntryBlockDev5Percent
+	}
 
 	// 获取动态宽度配置（优先数据库配置，回退到环境变量）
 	widthGuardCfg, err := sysConfigService.GetWidthGuardConfig()
@@ -813,6 +835,10 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 	filteredVol := 0
 	filteredTx := 0
 	passedHard := 0
+	blockedTrendUnknown := 0
+	blockedTrendDown := 0
+	blockedDev5Unknown := 0
+	blockedDev5Drop := 0
 
 	var out []AutoLPAnalysis
 
@@ -874,7 +900,21 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 		}
 
 		state5 := classifyState(z5, okZ5, sigma5, sigma60)
+		maCrossPct, _ := pctDelta(ma5, ma60)
 		trend60 := classifyTrend(z60, okZ60)
+		okTrend := okZ60
+		if trendFilterEnabled {
+			t, crossPct, ok := classifyTrendMACross(ma5, ma60, n5, n60, entryTrendCrossPct)
+			trend60 = t
+			if ok {
+				maCrossPct = crossPct
+			}
+			okTrend = ok
+		}
+
+		dev5Pct, okDev5 := autoLPDev5Pct(current, ma5, n5)
+		entryBlocked, entryBlockReason := autoLPEntryGate(trendFilterEnabled, trend60, okTrend, dev5Pct, okDev5, entryBlockDev5Pct)
+
 		res := classifyResonance(state5, trend60)
 		resEligible := true
 		if resMinFeeRate > 0 && feeRatePct <= resMinFeeRate {
@@ -913,7 +953,22 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 		lowPct, upPct := decideWidth(totalWidth, state5, res)
 
 		score := scoreCandidate(feeRatePct, p5.TotalFees, p5.CurrentPoolValue, res, state5)
-		eligible := state5 == "RAPID_PUMP" || state5 == "SIDEWAYS" || state5 == "MILD_UPTREND"
+		baseEligible := state5 == "RAPID_PUMP" || state5 == "SIDEWAYS" || state5 == "MILD_UPTREND"
+		eligible := baseEligible && !entryBlocked
+		if trendFilterEnabled && baseEligible && entryBlocked {
+			switch entryBlockReason {
+			case "TREND_UNKNOWN":
+				blockedTrendUnknown++
+			case "TREND_DOWN":
+				blockedTrendDown++
+			case "DEV5_UNKNOWN":
+				blockedDev5Unknown++
+			case "DEV5_DROP":
+				blockedDev5Drop++
+			default:
+				blockedTrendUnknown++
+			}
+		}
 		action := "SKIP"
 		// Only open in these regimes (V1 tuning): RAPID_PUMP / SIDEWAYS / MILD_UPTREND
 		if eligible {
@@ -940,6 +995,8 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 			MA60:              ma60,
 			Sigma60:           sigma60,
 			Z60:               z60,
+			MACrossPct:        maCrossPct,
+			Dev5Pct:           dev5Pct,
 			State5:            state5,
 			Trend60:           trend60,
 			Resonance:         res,
@@ -948,6 +1005,8 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 			UpperWidthPct:     upPct,
 			Action:            action,
 			CandidateEligible: eligible,
+			EntryBlocked:      entryBlocked,
+			EntryBlockReason:  entryBlockReason,
 			Score:             score,
 		})
 	}
@@ -1020,16 +1079,18 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 		candidates = append(candidates, a)
 	}
 	candidateCount := len(candidates)
-	log.Printf("[AutoLP] 筛选结果：总池=%d 通过硬筛=%d 进入分析=%d 候选=%d；过滤：缺少5m(没进5m榜单)=%d 中文=%d TVL不达标(current_pool_value)=%d 费率不达标(fee_percentage)=%d 费率过高(fee_percentage)=%d 费用率不达标(fee_rate_5m)=%d 5m手续费不达标(total_fees)=%d 5m成交量不达标(total_volume)=%d 5m交易笔数不达标(tx_count)=%d",
+	log.Printf("[AutoLP] 筛选结果：总池=%d 通过硬筛=%d 进入分析=%d 候选=%d；过滤：缺少5m(没进5m榜单)=%d 中文=%d TVL不达标(current_pool_value)=%d 费率不达标(fee_percentage)=%d 费率过高(fee_percentage)=%d 费用率不达标(fee_rate_5m)=%d 5m手续费不达标(total_fees)=%d 5m成交量不达标(total_volume)=%d 5m交易笔数不达标(tx_count)=%d；门禁：TREND_UNKNOWN=%d TREND_DOWN=%d DEV5_UNKNOWN=%d DEV5_DROP=%d",
 		totalPools, passedHard, len(out), candidateCount, filteredNo5, filteredChinese, filteredTVL, filteredFeePct, filteredMaxFeePct, filteredFeeRate, filteredFees, filteredVol, filteredTx,
+		blockedTrendUnknown, blockedTrendDown, blockedDev5Unknown, blockedDev5Drop,
 	)
 	if len(candidates) > 0 {
 		top := candidates[0]
-		log.Printf("[AutoLP] Top1：评分=%.2f 协议=%s 交易对=%s 地址=%s｜Z5=%.2f 状态=%s(%s)｜Z60=%.2f 趋势=%s(%s)｜共振=%s(%s)｜宽度=%.2f%%（下 %.2f%% / 上 %.2f%%）｜动作=%s(%s)",
+		log.Printf("[AutoLP] Top1：评分=%.2f 协议=%s 交易对=%s 地址=%s｜Z5=%.2f 状态=%s(%s)｜Z60=%.2f 趋势=%s(%s)｜MAΔ=%.3f%% Dev5=%.3f%%｜共振=%s(%s)｜宽度=%.2f%%（下 %.2f%% / 上 %.2f%%）｜动作=%s(%s)",
 			top.Score,
 			strings.ToUpper(top.ProtocolVersion), top.TradingPair, top.PoolAddress,
 			top.Z5, top.State5, autoLPStateZh(top.State5),
 			top.Z60, top.Trend60, autoLPTrendZh(top.Trend60),
+			top.MACrossPct, top.Dev5Pct,
 			top.Resonance, autoLPResonanceZh(top.Resonance),
 			top.BaseWidthPct, top.LowerWidthPct, top.UpperWidthPct,
 			top.Action, autoLPActionZh(top.Action),
@@ -1040,12 +1101,13 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 		printed := 0
 		for i := 0; i < len(candidates) && printed < limit; i++ {
 			a := candidates[i]
-			log.Printf("[AutoLP] 候选#%d：评分=%.2f 协议=%s 交易对=%s 地址=%s｜Z5=%.2f 状态=%s(%s)｜Z60=%.2f 趋势=%s(%s)｜共振=%s(%s)｜宽度=%.2f%%（下 %.2f%% / 上 %.2f%%）",
+			log.Printf("[AutoLP] 候选#%d：评分=%.2f 协议=%s 交易对=%s 地址=%s｜Z5=%.2f 状态=%s(%s)｜Z60=%.2f 趋势=%s(%s)｜MAΔ=%.3f%% Dev5=%.3f%%｜共振=%s(%s)｜宽度=%.2f%%（下 %.2f%% / 上 %.2f%%）",
 				printed+1,
 				a.Score,
 				strings.ToUpper(a.ProtocolVersion), a.TradingPair, a.PoolAddress,
 				a.Z5, a.State5, autoLPStateZh(a.State5),
 				a.Z60, a.Trend60, autoLPTrendZh(a.Trend60),
+				a.MACrossPct, a.Dev5Pct,
 				a.Resonance, autoLPResonanceZh(a.Resonance),
 				a.BaseWidthPct, a.LowerWidthPct, a.UpperWidthPct,
 			)
@@ -1151,6 +1213,65 @@ func zScore(current float64, ma float64, sigma float64, n uint64, minPoints uint
 		return 0, false
 	}
 	return z, true
+}
+
+func pctDelta(value float64, base float64) (float64, bool) {
+	if base <= 0 {
+		return 0, false
+	}
+	pct := (value - base) / base * 100
+	if math.IsNaN(pct) || math.IsInf(pct, 0) {
+		return 0, false
+	}
+	return pct, true
+}
+
+func autoLPDev5Pct(current float64, ma5 float64, n5 uint64) (float64, bool) {
+	if n5 < 4 {
+		return 0, false
+	}
+	return pctDelta(current, ma5)
+}
+
+func classifyTrendMACross(ma5 float64, ma60 float64, n5 uint64, n60 uint64, crossThresholdPct float64) (trend string, maCrossPct float64, ok bool) {
+	if n5 < 4 || n60 < 12 {
+		return "UNKNOWN", 0, false
+	}
+	if crossThresholdPct <= 0 || crossThresholdPct >= 100 {
+		return "UNKNOWN", 0, false
+	}
+	maCrossPct, ok = pctDelta(ma5, ma60)
+	if !ok {
+		return "UNKNOWN", 0, false
+	}
+	if maCrossPct >= crossThresholdPct {
+		return "UPTREND", maCrossPct, true
+	}
+	if maCrossPct <= -crossThresholdPct {
+		return "DOWNTREND", maCrossPct, true
+	}
+	return "SIDEWAYS", maCrossPct, true
+}
+
+func autoLPEntryGate(trendFilterEnabled bool, trend60 string, okTrend bool, dev5Pct float64, okDev5 bool, blockDev5Pct float64) (blocked bool, reason string) {
+	if !trendFilterEnabled {
+		return false, ""
+	}
+	if !okTrend {
+		return true, "TREND_UNKNOWN"
+	}
+	if trend60 == "DOWNTREND" {
+		return true, "TREND_DOWN"
+	}
+	if blockDev5Pct > 0 {
+		if !okDev5 {
+			return true, "DEV5_UNKNOWN"
+		}
+		if dev5Pct <= -blockDev5Pct {
+			return true, "DEV5_DROP"
+		}
+	}
+	return false, ""
 }
 
 func classifyState(z float64, okZ bool, sigma5 float64, sigma60 float64) string {

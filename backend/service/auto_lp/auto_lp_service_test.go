@@ -8,6 +8,107 @@ import (
 	"TgLpBot/base/models"
 )
 
+func TestClassifyTrendMACross(t *testing.T) {
+	t.Run("insufficient_points", func(t *testing.T) {
+		trend, _, ok := classifyTrendMACross(100, 100, 3, 12, 0.3)
+		if ok || trend != "UNKNOWN" {
+			t.Fatalf("expected UNKNOWN/ok=false; got trend=%s ok=%v", trend, ok)
+		}
+	})
+
+	t.Run("invalid_threshold", func(t *testing.T) {
+		trend, _, ok := classifyTrendMACross(100, 100, 4, 12, 0)
+		if ok || trend != "UNKNOWN" {
+			t.Fatalf("expected UNKNOWN/ok=false; got trend=%s ok=%v", trend, ok)
+		}
+	})
+
+	t.Run("uptrend", func(t *testing.T) {
+		trend, crossPct, ok := classifyTrendMACross(101, 100, 4, 12, 0.3)
+		if !ok || trend != "UPTREND" {
+			t.Fatalf("expected UPTREND/ok=true; got trend=%s ok=%v cross=%.4f", trend, ok, crossPct)
+		}
+	})
+
+	t.Run("downtrend", func(t *testing.T) {
+		trend, crossPct, ok := classifyTrendMACross(99, 100, 4, 12, 0.3)
+		if !ok || trend != "DOWNTREND" {
+			t.Fatalf("expected DOWNTREND/ok=true; got trend=%s ok=%v cross=%.4f", trend, ok, crossPct)
+		}
+	})
+
+	t.Run("sideways", func(t *testing.T) {
+		trend, crossPct, ok := classifyTrendMACross(100.1, 100, 4, 12, 0.3)
+		if !ok || trend != "SIDEWAYS" {
+			t.Fatalf("expected SIDEWAYS/ok=true; got trend=%s ok=%v cross=%.4f", trend, ok, crossPct)
+		}
+	})
+}
+
+func TestAutoLPDev5Pct(t *testing.T) {
+	if _, ok := autoLPDev5Pct(100, 100, 3); ok {
+		t.Fatalf("expected ok=false for insufficient points")
+	}
+	got, ok := autoLPDev5Pct(99, 100, 4)
+	if !ok {
+		t.Fatalf("expected ok=true")
+	}
+	if got != -1 {
+		t.Fatalf("expected -1; got %v", got)
+	}
+}
+
+func TestAutoLPEntryGate(t *testing.T) {
+	t.Run("disabled", func(t *testing.T) {
+		blocked, reason := autoLPEntryGate(false, "DOWNTREND", true, -10, true, 0.5)
+		if blocked || reason != "" {
+			t.Fatalf("expected not blocked; got blocked=%v reason=%q", blocked, reason)
+		}
+	})
+
+	t.Run("trend_unknown", func(t *testing.T) {
+		blocked, reason := autoLPEntryGate(true, "UNKNOWN", false, 0, true, 0.5)
+		if !blocked || reason != "TREND_UNKNOWN" {
+			t.Fatalf("expected TREND_UNKNOWN; got blocked=%v reason=%q", blocked, reason)
+		}
+	})
+
+	t.Run("trend_down", func(t *testing.T) {
+		blocked, reason := autoLPEntryGate(true, "DOWNTREND", true, 0, true, 0.5)
+		if !blocked || reason != "TREND_DOWN" {
+			t.Fatalf("expected TREND_DOWN; got blocked=%v reason=%q", blocked, reason)
+		}
+	})
+
+	t.Run("dev5_unknown", func(t *testing.T) {
+		blocked, reason := autoLPEntryGate(true, "SIDEWAYS", true, 0, false, 0.5)
+		if !blocked || reason != "DEV5_UNKNOWN" {
+			t.Fatalf("expected DEV5_UNKNOWN; got blocked=%v reason=%q", blocked, reason)
+		}
+	})
+
+	t.Run("dev5_drop", func(t *testing.T) {
+		blocked, reason := autoLPEntryGate(true, "SIDEWAYS", true, -0.6, true, 0.5)
+		if !blocked || reason != "DEV5_DROP" {
+			t.Fatalf("expected DEV5_DROP; got blocked=%v reason=%q", blocked, reason)
+		}
+	})
+
+	t.Run("dev5_gate_disabled", func(t *testing.T) {
+		blocked, reason := autoLPEntryGate(true, "SIDEWAYS", true, -99, true, 0)
+		if blocked || reason != "" {
+			t.Fatalf("expected not blocked when dev5 gate disabled; got blocked=%v reason=%q", blocked, reason)
+		}
+	})
+
+	t.Run("allowed", func(t *testing.T) {
+		blocked, reason := autoLPEntryGate(true, "SIDEWAYS", true, -0.4, true, 0.5)
+		if blocked || reason != "" {
+			t.Fatalf("expected not blocked; got blocked=%v reason=%q", blocked, reason)
+		}
+	})
+}
+
 func TestAutoLPAnalysisLess_FeeRate5mPctFirst(t *testing.T) {
 	// FeeRate5mPct 高的应该排在前面
 	highFeeRate := AutoLPAnalysis{FeeRate5mPct: 0.15, Score: 1}
