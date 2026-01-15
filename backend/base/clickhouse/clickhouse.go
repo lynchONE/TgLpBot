@@ -106,9 +106,6 @@ func NewClickHouseService(addr, db, user, password, protocol string, debug bool)
 			Username: user,
 			Password: password,
 		},
-		Settings: clickhouse.Settings{
-			"time_zone": timeutil.LocationName(),
-		},
 		Protocol:      chProtocol,
 		TransportFunc: transportFunc,
 		Debug:         debug,
