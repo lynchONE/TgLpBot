@@ -5,6 +5,7 @@ import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	"TgLpBot/base/timeutil"
 	"fmt"
 	"log"
 	"math/big"
@@ -339,9 +340,8 @@ func (b *Bot) handleTransactions(message *tgbotapi.Message, user *models.User) {
 			exchange = "-"
 		}
 
-		// 使用中国时间 UTC+8
-		cst := time.FixedZone("CST", 8*60*60)
-		openTime := rec.OpenedAt.In(cst).Format("01-02 15:04")
+		loc := timeutil.Location()
+		openTime := rec.OpenedAt.In(loc).Format("01-02 15:04")
 		text += fmt.Sprintf("%d. %s *%s* (%s)\n", i+1, statusEmoji, exchange, statusText)
 		text += fmt.Sprintf("🕒 开仓：%s\n", openTime)
 		text += fmt.Sprintf("🏊 %s | 池子合约：`%s`\n", pair, poolId)

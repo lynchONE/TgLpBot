@@ -3,6 +3,7 @@ package database
 import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/models"
+	"TgLpBot/base/timeutil"
 	"fmt"
 	"log"
 
@@ -19,6 +20,8 @@ func InitMySQL() error {
 	log.Println("🗄️  开始初始化 MySQL 数据库...")
 	log.Println("========================================")
 
+	timeutil.Init()
+
 	dsn := config.AppConfig.GetMySQLDSN()
 	log.Printf("📡 连接信息: %s@tcp(%s:%s)/%s",
 		config.AppConfig.MySQLUser,
@@ -31,6 +34,7 @@ func InitMySQL() error {
 	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
 		Logger:                                   logger.Default.LogMode(logger.Silent),
 		DisableForeignKeyConstraintWhenMigrating: true,
+		NowFunc:                                  timeutil.Now,
 	})
 
 	if err != nil {

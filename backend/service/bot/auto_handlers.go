@@ -4,6 +4,7 @@ import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	"TgLpBot/base/timeutil"
 	"TgLpBot/service/auto_lp"
 	userSvc "TgLpBot/service/user"
 	"fmt"
@@ -317,11 +318,11 @@ func (b *Bot) autoStatsText(user *models.User, cfg *models.AutoLPUserConfig) str
 
 	windowLine := "全部历史"
 	if stats.WindowStart != nil {
-		cst := time.FixedZone("CST", 8*60*60)
-		startStr := stats.WindowStart.In(cst).Format("01-02 15:04")
+		loc := timeutil.Location()
+		startStr := stats.WindowStart.In(loc).Format("01-02 15:04")
 		endStr := "至今"
 		if stats.WindowEnd != nil {
-			endStr = stats.WindowEnd.In(cst).Format("01-02 15:04")
+			endStr = stats.WindowEnd.In(loc).Format("01-02 15:04")
 		}
 		label := strings.TrimSpace(stats.WindowLabel)
 		if label != "" && label != "全部历史" {

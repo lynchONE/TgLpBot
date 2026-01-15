@@ -5,6 +5,7 @@ import (
 	"TgLpBot/base/clickhouse"
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
+	"TgLpBot/base/timeutil"
 	"TgLpBot/service/bot"
 	"TgLpBot/service/wallet"
 	"TgLpBot/service/web_server"
@@ -19,6 +20,8 @@ func main() {
 	// 设置日志输出到标准输出，不使用缓冲
 	log.SetOutput(os.Stdout)
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+
+	timeutil.Init()
 
 	// 立即输出第一条日志
 	fmt.Println("========================================")

@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"TgLpBot/base/timeutil"
 )
 
 var poolAddressRegex = regexp.MustCompile(`^(0x)?[a-fA-F0-9]{40}$|^(0x)?[a-fA-F0-9]{64}$`)
@@ -246,6 +248,6 @@ func (s *Server) handlePoolOHLCV(w http.ResponseWriter, r *http.Request) {
 		Quote:       parsed.Meta.Quote,
 		Candles:     candles,
 		Source:      "geckoterminal",
-		UpdatedAt:   time.Now().UTC(),
+		UpdatedAt:   timeutil.Now(),
 	})
 }

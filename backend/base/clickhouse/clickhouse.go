@@ -2,6 +2,7 @@ package clickhouse
 
 import (
 	"TgLpBot/base/config"
+	"TgLpBot/base/timeutil"
 	"context"
 	"fmt"
 	"log"
@@ -47,6 +48,8 @@ func inferClickHouseProtocol(addr string) clickhouse.Protocol {
 }
 
 func NewClickHouseService(addr, db, user, password, protocol string, debug bool) (*ClickHouseService, error) {
+	timeutil.Init()
+
 	chProtocol := clickhouse.HTTP
 	switch strings.ToLower(strings.TrimSpace(protocol)) {
 	case "":
@@ -102,6 +105,9 @@ func NewClickHouseService(addr, db, user, password, protocol string, debug bool)
 			Database: db,
 			Username: user,
 			Password: password,
+		},
+		Settings: clickhouse.Settings{
+			"time_zone": timeutil.LocationName(),
 		},
 		Protocol:      chProtocol,
 		TransportFunc: transportFunc,

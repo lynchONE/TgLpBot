@@ -3,9 +3,9 @@ package bot
 import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/models"
+	"TgLpBot/base/timeutil"
 	"fmt"
 	"strings"
-	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -13,17 +13,13 @@ import (
 // formatTaskCardWithRefresh formats task card with refresh timestamp
 func (b *Bot) formatTaskCardWithRefresh(task *models.StrategyTask) string {
 	baseCard := b.formatTaskCard(task)
-	// 使用中国时间 UTC+8
-	cst := time.FixedZone("CST", 8*60*60)
-	now := time.Now().In(cst).Format("15:04:05")
+	now := timeutil.Now().Format("15:04:05")
 	return baseCard + fmt.Sprintf("\n\n🔄 最后更新：%s (自动刷新中)", now)
 }
 
 func (b *Bot) formatTaskCardWithRefreshExpired(task *models.StrategyTask) string {
 	baseCard := b.formatTaskCard(task)
-	// 使用中国时间 UTC+8
-	cst := time.FixedZone("CST", 8*60*60)
-	now := time.Now().In(cst).Format("15:04:05")
+	now := timeutil.Now().Format("15:04:05")
 	return baseCard + fmt.Sprintf("\n\n⏸️ 自动刷新已停止（超过 30 分钟）\n🔄 最后更新：%s\n请重新查看仓位信息以重新开始自动刷新。", now)
 }
 

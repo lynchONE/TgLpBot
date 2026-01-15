@@ -4,12 +4,12 @@ import (
 	"TgLpBot/base/blockchain"
 	"TgLpBot/base/config"
 	"TgLpBot/base/models"
+	"TgLpBot/base/timeutil"
 	"TgLpBot/service/pricing"
 	"fmt"
 	"log"
 	"math"
 	"strings"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -211,7 +211,7 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 					amountLine += fmt.Sprintf("\n(已重试 %d 次)", task.RebalanceRetryCount)
 				}
 				if task.RebalanceNextRetryAt != nil {
-					amountLine += fmt.Sprintf("\n(下次重试：%s)", task.RebalanceNextRetryAt.In(time.Local).Format("15:04:05"))
+					amountLine += fmt.Sprintf("\n(下次重试：%s)", task.RebalanceNextRetryAt.In(timeutil.Location()).Format("15:04:05"))
 				}
 				if errText := strings.TrimSpace(task.RebalanceLastError); errText != "" {
 					amountLine += fmt.Sprintf("\n⚠️ 最近错误：%s", escapeTelegramMarkdown(truncateText(errText, 80)))
