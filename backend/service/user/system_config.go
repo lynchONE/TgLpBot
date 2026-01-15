@@ -188,3 +188,42 @@ func (s *SystemConfigService) GetWidthGuardConfig() (*models.WidthGuardConfig, e
 
 	return wg, nil
 }
+
+// GetEntrySignalConfig 获取进场门禁配置，优先使用数据库配置，回退到环境变量
+func (s *SystemConfigService) GetEntrySignalConfig() (*models.EntrySignalConfig, error) {
+	cfg, err := s.GetOrCreate()
+	if err != nil {
+		return nil, err
+	}
+
+	out := &models.EntrySignalConfig{}
+
+	// 开关：默认启用；以数据库为准
+	out.TrendFilterEnabled = cfg.AutoLPTrendFilterEnabled
+
+	// 趋势阈值：数据库值 > 0 则使用，否则使用环境变量
+	if cfg.AutoLPEntryTrendCrossPercent > 0 {
+		out.EntryTrendCrossPercent = cfg.AutoLPEntryTrendCrossPercent
+	} else if config.AppConfig != nil {
+		out.EntryTrendCrossPercent = config.AppConfig.AutoLPEntryTrendCrossPercent
+	}
+	if out.EntryTrendCrossPercent <= 0 || out.EntryTrendCrossPercent >= 100 {
+		if config.AppConfig != nil {
+			out.EntryTrendCrossPercent = config.AppConfig.AutoLPEntryTrendCrossPercent
+		}
+	}
+
+	// 回落阈值：数据库值 > 0 则使用，否则使用环境变量
+	if cfg.AutoLPEntryBlockDev5Percent > 0 {
+		out.EntryBlockDev5Percent = cfg.AutoLPEntryBlockDev5Percent
+	} else if config.AppConfig != nil {
+		out.EntryBlockDev5Percent = config.AppConfig.AutoLPEntryBlockDev5Percent
+	}
+	if out.EntryBlockDev5Percent <= 0 || out.EntryBlockDev5Percent >= 100 {
+		if config.AppConfig != nil {
+			out.EntryBlockDev5Percent = config.AppConfig.AutoLPEntryBlockDev5Percent
+		}
+	}
+
+	return out, nil
+}

@@ -213,6 +213,15 @@ func (s *AutoLPService) runOnce() {
 		widthGuardCfg = cfg
 	}
 
+	entrySignalCfg := &models.EntrySignalConfig{
+		TrendFilterEnabled:     config.AppConfig.AutoLPTrendFilterEnabled,
+		EntryTrendCrossPercent: config.AppConfig.AutoLPEntryTrendCrossPercent,
+		EntryBlockDev5Percent:  config.AppConfig.AutoLPEntryBlockDev5Percent,
+	}
+	if cfg, err := sysConfigService.GetEntrySignalConfig(); err == nil && cfg != nil {
+		entrySignalCfg = cfg
+	}
+
 	log.Printf("[AutoLP] 开始扫描：链=%s DEX=%s 扫描间隔=%ds 请求间隔=%dms 自动开仓=%v Top推送=%v 调试=%v；硬筛：中文=%v TVL(current_pool_value,USD)>%.0f 费率下限(fee_percentage)>%.2f%% 费率上限(fee_percentage)<=%.2f%% 5m费用率(total_fees/current_pool_value)>%.4f%% 5m手续费(total_fees)>%.2f 5m成交量(total_volume)>%.2f；开仓宽度(总宽度)：震荡=%.2f%% 温和上涨=%.2f%% 急涨=%.2f%%",
 		strings.ToLower(strings.TrimSpace(config.AppConfig.AutoLPChain)),
 		dexParam,
@@ -238,9 +247,9 @@ func (s *AutoLPService) runOnce() {
 		config.AppConfig.AutoLPResonanceMinAbsZ60,
 	)
 	log.Printf("[AutoLP] 进场门禁：启用=%v 趋势阈值(MA5-MA60)/MA60=±%.3f%% 回落阈值(P-MA5)/MA5<=-%.3f%%",
-		config.AppConfig.AutoLPTrendFilterEnabled,
-		config.AppConfig.AutoLPEntryTrendCrossPercent,
-		config.AppConfig.AutoLPEntryBlockDev5Percent,
+		entrySignalCfg.TrendFilterEnabled,
+		entrySignalCfg.EntryTrendCrossPercent,
+		entrySignalCfg.EntryBlockDev5Percent,
 	)
 
 	timeout := 55 * time.Second
@@ -400,8 +409,8 @@ func (s *AutoLPService) runOnce() {
 
 	if config.AppConfig.AutoLPNotifyTopCandidate && foundTop {
 		trendExplain := "说明：趋势使用 MA5/MA60 均线差（MAΔ=(MA5-MA60)/MA60*100）；Dev5=(P-MA5)/MA5*100（回落门禁）；Z5/Z60 为价格相对均值的 Z-score（位置指标）"
-		if config.AppConfig != nil && !config.AppConfig.AutoLPTrendFilterEnabled {
-			trendExplain = "说明：趋势当前沿用旧逻辑（基于 Z60）；MAΔ/Dev5 仅供参考；开启 AUTO_LP_TREND_FILTER_ENABLED 可启用趋势/回落门禁"
+		if entrySignalCfg != nil && !entrySignalCfg.TrendFilterEnabled {
+			trendExplain = "说明：进场门禁当前已关闭，趋势沿用旧逻辑（基于 Z60）；MAΔ/Dev5 仅供参考；可在管理员系统配置开启"
 		}
 		msg := fmt.Sprintf(
 			"📡 AutoLP 候选池：%d\nTop1：%s %s\n地址：%s\n5m 手续费=%.2f | 手续费率=%.2f%% | 5m 成交量=%.2f | TVL=%.2f | 5m 费用率=%.4f%%\nZ5=%.2f 状态=%s\nZ60=%.2f 趋势=%s\nMAΔ=%.3f%% Dev5=%.3f%%\n共振=%s\n宽度：%.2f%%（下 %.2f%% / 上 %.2f%%）\n评分：%.2f\n%s",
@@ -803,12 +812,21 @@ func (s *AutoLPService) analyzeSnapshot(ctx context.Context, snap *poolMSnapshot
 	resMinFeeRate := config.AppConfig.AutoLPResonanceMinFeeRate5m
 	resMinVol := config.AppConfig.AutoLPResonanceMinTotalVolume5m
 	resMinAbsZ60 := config.AppConfig.AutoLPResonanceMinAbsZ60
-	trendFilterEnabled := config.AppConfig != nil && config.AppConfig.AutoLPTrendFilterEnabled
+	entrySignalCfg, err := sysConfigService.GetEntrySignalConfig()
+	if err != nil {
+		log.Printf("[AutoLP] 获取进场门禁配置失败，使用环境变量: %v", err)
+		entrySignalCfg = &models.EntrySignalConfig{
+			TrendFilterEnabled:     config.AppConfig.AutoLPTrendFilterEnabled,
+			EntryTrendCrossPercent: config.AppConfig.AutoLPEntryTrendCrossPercent,
+			EntryBlockDev5Percent:  config.AppConfig.AutoLPEntryBlockDev5Percent,
+		}
+	}
+	trendFilterEnabled := entrySignalCfg != nil && entrySignalCfg.TrendFilterEnabled
 	entryTrendCrossPct := 0.0
 	entryBlockDev5Pct := 0.0
-	if config.AppConfig != nil {
-		entryTrendCrossPct = config.AppConfig.AutoLPEntryTrendCrossPercent
-		entryBlockDev5Pct = config.AppConfig.AutoLPEntryBlockDev5Percent
+	if entrySignalCfg != nil {
+		entryTrendCrossPct = entrySignalCfg.EntryTrendCrossPercent
+		entryBlockDev5Pct = entrySignalCfg.EntryBlockDev5Percent
 	}
 
 	// 获取动态宽度配置（优先数据库配置，回退到环境变量）

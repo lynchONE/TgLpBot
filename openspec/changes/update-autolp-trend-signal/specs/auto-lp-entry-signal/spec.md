@@ -50,3 +50,13 @@
 #### Scenario: 关闭趋势过滤后沿用旧逻辑
 - **WHEN** `trend_filter_enabled=false`
 - **THEN** AutoLP 候选开仓的判定不应因本提案新增的趋势/动量门禁而被阻止
+
+### Requirement: MiniApp 可配置 AutoLP 进场门禁
+管理员 MUST 能通过 MiniApp 管理员面板读取与更新 AutoLP 进场门禁配置项：
+- `autolp_trend_filter_enabled`
+- `autolp_entry_trend_cross_pct`
+- `autolp_entry_block_dev5_pct`
+
+#### Scenario: 管理员更新后立即生效
+- **WHEN** 管理员在 MiniApp 更新 `autolp_trend_filter_enabled` / `autolp_entry_trend_cross_pct` / `autolp_entry_block_dev5_pct`
+- **THEN** 后续 AutoLP 扫描/候选评估按最新配置执行

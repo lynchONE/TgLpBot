@@ -21,6 +21,11 @@ type SystemConfig struct {
 	AutoLPMinTx5m             int     `gorm:"default:0" json:"autolp_min_tx_5m"`                              // 5分钟交易笔数阈值
 	AutoLPFilterChineseTokens bool    `gorm:"not null;default:false" json:"autolp_filter_chinese_tokens"`     // 过滤中文交易对/代币符号
 
+	// AutoLP 进场趋势/回落门禁（阈值为 0 表示使用环境变量默认值）
+	AutoLPTrendFilterEnabled     bool    `gorm:"not null;default:true" json:"autolp_trend_filter_enabled"`         // 是否启用进场门禁
+	AutoLPEntryTrendCrossPercent float64 `gorm:"type:decimal(10,4);default:0" json:"autolp_entry_trend_cross_pct"` // 趋势阈值：MAΔ=(MA5-MA60)/MA60*100（百分比点）
+	AutoLPEntryBlockDev5Percent  float64 `gorm:"type:decimal(10,4);default:0" json:"autolp_entry_block_dev5_pct"`  // 回落阈值：Dev5=(P-MA5)/MA5*100（百分比点）
+
 	// AutoLP 宽度策略参数（0 表示使用环境变量默认值）
 	AutoLPWidthSidewaysPercent    float64 `gorm:"type:decimal(10,4);default:0" json:"autolp_width_sideways_percent"`     // 横盘宽度 (%)
 	AutoLPWidthMildUptrendPercent float64 `gorm:"type:decimal(10,4);default:0" json:"autolp_width_mild_uptrend_percent"` // 温和上涨宽度 (%)
@@ -73,4 +78,11 @@ type WidthGuardConfig struct {
 	GuardLowFeeRate5m          float64 `json:"guard_low_fee_rate_5m"`
 	GuardVolumeDropPercentLow  float64 `json:"guard_volume_drop_percent_low"`
 	GuardCooldownSeconds       int     `json:"guard_cooldown_seconds"`
+}
+
+// EntrySignalConfig 进场门禁配置结构，用于传递默认值
+type EntrySignalConfig struct {
+	TrendFilterEnabled     bool    `json:"trend_filter_enabled"`
+	EntryTrendCrossPercent float64 `json:"entry_trend_cross_pct"`
+	EntryBlockDev5Percent  float64 `json:"entry_block_dev5_pct"`
 }

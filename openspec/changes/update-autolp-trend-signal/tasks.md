@@ -5,3 +5,5 @@
 - [x] 1.4 文案/可观测性：Top 推送与日志补充展示新信号与阻止原因；同步 `/auto` 策略说明（如需要）
 - [x] 1.5 单测：覆盖趋势判定与门禁（UP/DOWN/SIDEWAYS/UNKNOWN）边界样本
 - [x] 1.6 验证：`cd backend; go test ./...` + `openspec validate update-autolp-trend-signal --strict`
+- [x] 1.7 管理员动态配置：MiniApp 系统配置支持进场门禁 3 项参数的读取/更新，并在 AutoLP 扫描中生效
+- [x] 1.8 验证：`cd miniapp; npm run build`

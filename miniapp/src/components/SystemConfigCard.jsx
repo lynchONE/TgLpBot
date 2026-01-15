@@ -3,16 +3,17 @@ import { fetchSystemConfig, updateSystemConfig } from '../lib/api';
 
 /**
  * SystemConfigCard - 管理员系统配置卡片
- * 用于动态配置 AutoLP 硬筛阈值、宽度策略和退出卫士参数
+ * 用于动态配置 AutoLP 硬筛阈值、进场门禁、宽度策略和退出卫士参数
  */
 export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
     const [config, setConfig] = useState(null);
     const [defaults, setDefaults] = useState(null);
     const [widthGuardDefaults, setWidthGuardDefaults] = useState(null);
+    const [entrySignalDefaults, setEntrySignalDefaults] = useState(null);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
-    const [expandedSection, setExpandedSection] = useState(null); // 'filter' | 'width' | 'guard' | null
+    const [expandedSection, setExpandedSection] = useState(null); // 'filter' | 'entry' | 'width' | 'guard' | null
 
     // 编辑状态
     const [draft, setDraft] = useState({
@@ -25,6 +26,10 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
         autolp_min_total_fees_5m: '',
         autolp_min_total_volume_5m: '',
         autolp_min_tx_5m: '',
+        // 进场门禁
+        autolp_trend_filter_enabled: true,
+        autolp_entry_trend_cross_pct: '',
+        autolp_entry_block_dev5_pct: '',
         // 宽度策略
         autolp_width_sideways_percent: '',
         autolp_width_mild_uptrend_percent: '',
@@ -59,6 +64,10 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
                     autolp_min_total_fees_5m: String(resp.config.autolp_min_total_fees_5m || ''),
                     autolp_min_total_volume_5m: String(resp.config.autolp_min_total_volume_5m || ''),
                     autolp_min_tx_5m: String(resp.config.autolp_min_tx_5m || ''),
+                    // 进场门禁
+                    autolp_trend_filter_enabled: Boolean(resp.config.autolp_trend_filter_enabled),
+                    autolp_entry_trend_cross_pct: String(resp.config.autolp_entry_trend_cross_pct || ''),
+                    autolp_entry_block_dev5_pct: String(resp.config.autolp_entry_block_dev5_pct || ''),
                     // 宽度策略
                     autolp_width_sideways_percent: String(resp.config.autolp_width_sideways_percent || ''),
                     autolp_width_mild_uptrend_percent: String(resp.config.autolp_width_mild_uptrend_percent || ''),
@@ -79,6 +88,9 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
             }
             if (resp?.width_guard_defaults) {
                 setWidthGuardDefaults(resp.width_guard_defaults);
+            }
+            if (resp?.entry_signal_defaults) {
+                setEntrySignalDefaults(resp.entry_signal_defaults);
             }
         } catch (e) {
             setError(String(e?.message || e));
@@ -118,6 +130,10 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
             updates.autolp_min_total_fees_5m = parseFloat(draft.autolp_min_total_fees_5m);
             updates.autolp_min_total_volume_5m = parseFloat(draft.autolp_min_total_volume_5m);
             updates.autolp_min_tx_5m = parseInt(draft.autolp_min_tx_5m);
+            // 进场门禁
+            updates.autolp_trend_filter_enabled = Boolean(draft.autolp_trend_filter_enabled);
+            updates.autolp_entry_trend_cross_pct = parseFloat(draft.autolp_entry_trend_cross_pct);
+            updates.autolp_entry_block_dev5_pct = parseFloat(draft.autolp_entry_block_dev5_pct);
             // 宽度策略
             updates.autolp_width_sideways_percent = parseFloat(draft.autolp_width_sideways_percent);
             updates.autolp_width_mild_uptrend_percent = parseFloat(draft.autolp_width_mild_uptrend_percent);
@@ -144,6 +160,9 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
                     autolp_min_total_fees_5m: String(resp.config.autolp_min_total_fees_5m || ''),
                     autolp_min_total_volume_5m: String(resp.config.autolp_min_total_volume_5m || ''),
                     autolp_min_tx_5m: String(resp.config.autolp_min_tx_5m || ''),
+                    autolp_trend_filter_enabled: Boolean(resp.config.autolp_trend_filter_enabled),
+                    autolp_entry_trend_cross_pct: String(resp.config.autolp_entry_trend_cross_pct || ''),
+                    autolp_entry_block_dev5_pct: String(resp.config.autolp_entry_block_dev5_pct || ''),
                     autolp_width_sideways_percent: String(resp.config.autolp_width_sideways_percent || ''),
                     autolp_width_mild_uptrend_percent: String(resp.config.autolp_width_mild_uptrend_percent || ''),
                     autolp_width_rapid_pump_percent: String(resp.config.autolp_width_rapid_pump_percent || ''),
@@ -268,6 +287,24 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
                             {renderInput('autolp_min_total_fees_5m', '5m 手续费 (USD)', defaults?.min_total_fees_5m)}
                             {renderInput('autolp_min_total_volume_5m', '5m 成交量 (USD)', defaults?.min_total_volume_5m)}
                             {renderInput('autolp_min_tx_5m', '5m 交易笔数', defaults?.min_tx_5m, '1', true)}
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* 进场门禁配置 */}
+            <div className="border-t border-zinc-100 dark:border-white/5">
+                <button type="button" onClick={() => toggleSection('entry')} className={sectionButtonClass('entry')}>
+                    <span className="text-xs font-medium text-zinc-700 dark:text-white/80">进场门禁</span>
+                    <span className="text-xs text-zinc-400">{expandedSection === 'entry' ? '收起' : '展开'}</span>
+                </button>
+                {expandedSection === 'entry' && config && (
+                    <div className="py-3 space-y-3">
+                        <div className="text-xs text-zinc-500 dark:text-white/50 mb-2">阈值单位为百分比点：0.3 = 0.3%；数值为 0 时使用环境变量默认值</div>
+                        <div className="grid grid-cols-1 gap-3">
+                            {renderToggle('autolp_trend_filter_enabled', '启用进场门禁', entrySignalDefaults?.trend_filter_enabled)}
+                            {renderInput('autolp_entry_trend_cross_pct', '趋势阈值 MAΔ (%)', entrySignalDefaults?.entry_trend_cross_pct, '0.01')}
+                            {renderInput('autolp_entry_block_dev5_pct', '回落阈值 Dev5 (%)', entrySignalDefaults?.entry_block_dev5_pct, '0.01')}
                         </div>
                     </div>
                 )}

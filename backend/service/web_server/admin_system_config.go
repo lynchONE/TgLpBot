@@ -25,6 +25,11 @@ type adminSystemConfigRequest struct {
 	AutoLPMinTx5m             *int     `json:"autolp_min_tx_5m,omitempty"`
 	AutoLPFilterChineseTokens *bool    `json:"autolp_filter_chinese_tokens,omitempty"`
 
+	// 可选更新字段 - 进场门禁
+	AutoLPTrendFilterEnabled     *bool    `json:"autolp_trend_filter_enabled,omitempty"`
+	AutoLPEntryTrendCrossPercent *float64 `json:"autolp_entry_trend_cross_pct,omitempty"`
+	AutoLPEntryBlockDev5Percent  *float64 `json:"autolp_entry_block_dev5_pct,omitempty"`
+
 	// 可选更新字段 - 宽度策略
 	AutoLPWidthSidewaysPercent       *float64 `json:"autolp_width_sideways_percent,omitempty"`
 	AutoLPWidthMildUptrendPercent    *float64 `json:"autolp_width_mild_uptrend_percent,omitempty"`
@@ -45,8 +50,9 @@ type adminSystemConfigResponse struct {
 	OK     bool                 `json:"ok"`
 	Config *models.SystemConfig `json:"config,omitempty"`
 	// 环境变量默认值（供前端显示参考）
-	Defaults           *models.HardFilterConfig `json:"defaults,omitempty"`
-	WidthGuardDefaults *models.WidthGuardConfig `json:"width_guard_defaults,omitempty"`
+	Defaults            *models.HardFilterConfig  `json:"defaults,omitempty"`
+	WidthGuardDefaults  *models.WidthGuardConfig  `json:"width_guard_defaults,omitempty"`
+	EntrySignalDefaults *models.EntrySignalConfig `json:"entry_signal_defaults,omitempty"`
 }
 
 func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request) {
@@ -134,6 +140,16 @@ func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request)
 		if req.AutoLPFilterChineseTokens != nil {
 			updates["AutoLPFilterChineseTokens"] = *req.AutoLPFilterChineseTokens
 		}
+		// 进场门禁
+		if req.AutoLPTrendFilterEnabled != nil {
+			updates["AutoLPTrendFilterEnabled"] = *req.AutoLPTrendFilterEnabled
+		}
+		if req.AutoLPEntryTrendCrossPercent != nil {
+			updates["AutoLPEntryTrendCrossPercent"] = *req.AutoLPEntryTrendCrossPercent
+		}
+		if req.AutoLPEntryBlockDev5Percent != nil {
+			updates["AutoLPEntryBlockDev5Percent"] = *req.AutoLPEntryBlockDev5Percent
+		}
 		// 宽度策略
 		if req.AutoLPWidthSidewaysPercent != nil {
 			updates["AutoLPWidthSidewaysPercent"] = *req.AutoLPWidthSidewaysPercent
@@ -180,12 +196,14 @@ func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request)
 
 			defaults := getEnvDefaults()
 			widthGuardDefaults := getWidthGuardDefaults()
+			entrySignalDefaults := getEntrySignalDefaults()
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(adminSystemConfigResponse{
-				OK:                 true,
-				Config:             cfg,
-				Defaults:           defaults,
-				WidthGuardDefaults: widthGuardDefaults,
+				OK:                  true,
+				Config:              cfg,
+				Defaults:            defaults,
+				WidthGuardDefaults:  widthGuardDefaults,
+				EntrySignalDefaults: entrySignalDefaults,
 			})
 			return
 		}
@@ -244,13 +262,15 @@ func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request)
 
 	defaults := getEnvDefaults()
 	widthGuardDefaults := getWidthGuardDefaults()
+	entrySignalDefaults := getEntrySignalDefaults()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(adminSystemConfigResponse{
-		OK:                 true,
-		Config:             cfg,
-		Defaults:           defaults,
-		WidthGuardDefaults: widthGuardDefaults,
+		OK:                  true,
+		Config:              cfg,
+		Defaults:            defaults,
+		WidthGuardDefaults:  widthGuardDefaults,
+		EntrySignalDefaults: entrySignalDefaults,
 	})
 }
 
@@ -288,5 +308,16 @@ func getWidthGuardDefaults() *models.WidthGuardConfig {
 		GuardLowFeeRate5m:          config.AppConfig.AutoLPGuardLowFeeRate5m,
 		GuardVolumeDropPercentLow:  config.AppConfig.AutoLPGuardVolumeDropPercentLow,
 		GuardCooldownSeconds:       config.AppConfig.AutoLPGuardCooldownSeconds,
+	}
+}
+
+func getEntrySignalDefaults() *models.EntrySignalConfig {
+	if config.AppConfig == nil {
+		return nil
+	}
+	return &models.EntrySignalConfig{
+		TrendFilterEnabled:     config.AppConfig.AutoLPTrendFilterEnabled,
+		EntryTrendCrossPercent: config.AppConfig.AutoLPEntryTrendCrossPercent,
+		EntryBlockDev5Percent:  config.AppConfig.AutoLPEntryBlockDev5Percent,
 	}
 }
