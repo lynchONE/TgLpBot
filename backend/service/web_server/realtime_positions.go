@@ -62,6 +62,7 @@ func (s *Server) handleRealtimePositions(w http.ResponseWriter, r *http.Request)
 	}
 	accessService := userSvc.NewAccessService()
 	resp.IsAdmin = accessService.IsAdminUser(user.ID)
+	resp.SmartMoneyEnabled = resp.IsAdmin || (check.Access != nil && check.Access.SmartMoneyEnabled)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)

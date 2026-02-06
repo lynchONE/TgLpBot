@@ -90,14 +90,15 @@ func (s *AccessService) CheckUserAccess(userID uint, now time.Time) (AccessCheck
 }
 
 type CreateAuthCodeInput struct {
-	ActiveFrom      *time.Time
-	ActiveTo        *time.Time
-	MaxWallets      int
-	MaxActiveTasks  int
-	MaxRedemptions  int
-	AutoModeEnabled bool
-	MiniAppEnabled  bool
-	Note            string
+	ActiveFrom        *time.Time
+	ActiveTo          *time.Time
+	MaxWallets        int
+	MaxActiveTasks    int
+	MaxRedemptions    int
+	AutoModeEnabled   bool
+	MiniAppEnabled    bool
+	SmartMoneyEnabled bool
+	Note              string
 }
 
 func generateAuthCode() (string, error) {
@@ -134,16 +135,17 @@ func (s *AccessService) CreateAuthCode(createdByUserID uint, in CreateAuthCodeIn
 			return nil, fmt.Errorf("generate code failed: %w", err)
 		}
 		ac := &models.AuthCode{
-			Code:            code,
-			CreatedByUserID: createdByUserID,
-			Note:            strings.TrimSpace(in.Note),
-			ActiveFrom:      in.ActiveFrom,
-			ActiveTo:        in.ActiveTo,
-			MaxRedemptions:  in.MaxRedemptions,
-			MaxWallets:      in.MaxWallets,
-			MaxActiveTasks:  in.MaxActiveTasks,
-			AutoModeEnabled: in.AutoModeEnabled,
-			MiniAppEnabled:  in.MiniAppEnabled,
+			Code:              code,
+			CreatedByUserID:   createdByUserID,
+			Note:              strings.TrimSpace(in.Note),
+			ActiveFrom:        in.ActiveFrom,
+			ActiveTo:          in.ActiveTo,
+			MaxRedemptions:    in.MaxRedemptions,
+			MaxWallets:        in.MaxWallets,
+			MaxActiveTasks:    in.MaxActiveTasks,
+			AutoModeEnabled:   in.AutoModeEnabled,
+			MiniAppEnabled:    in.MiniAppEnabled,
+			SmartMoneyEnabled: in.SmartMoneyEnabled,
 		}
 		if err := database.DB.Create(ac).Error; err != nil {
 			lastErr = err
@@ -171,13 +173,14 @@ func (s *AccessService) GetAuthCode(codeID uint) (*models.AuthCode, error) {
 
 // UpdateAuthCodeInput 更新授权码的输入参数
 type UpdateAuthCodeInput struct {
-	ActiveTo        *time.Time
-	MaxWallets      *int
-	MaxActiveTasks  *int
-	MaxRedemptions  *int
-	AutoModeEnabled *bool
-	MiniAppEnabled  *bool
-	Note            *string
+	ActiveTo          *time.Time
+	MaxWallets        *int
+	MaxActiveTasks    *int
+	MaxRedemptions    *int
+	AutoModeEnabled   *bool
+	MiniAppEnabled    *bool
+	SmartMoneyEnabled *bool
+	Note              *string
 }
 
 // UpdateAuthCode 更新授权码
@@ -204,6 +207,9 @@ func (s *AccessService) UpdateAuthCode(codeID uint, in UpdateAuthCodeInput) (*mo
 	}
 	if in.MiniAppEnabled != nil {
 		updates["mini_app_enabled"] = *in.MiniAppEnabled
+	}
+	if in.SmartMoneyEnabled != nil {
+		updates["smart_money_enabled"] = *in.SmartMoneyEnabled
 	}
 	if in.Note != nil {
 		updates["note"] = strings.TrimSpace(*in.Note)
@@ -280,17 +286,18 @@ func (s *AccessService) RedeemAuthCode(userID uint, rawCode string) (*models.Use
 		}
 
 		updates := map[string]interface{}{
-			"granted_by_user_id": auth.CreatedByUserID,
-			"granted_by_code_id": auth.ID,
-			"active_from":        auth.ActiveFrom,
-			"active_to":          auth.ActiveTo,
-			"max_wallets":        auth.MaxWallets,
-			"max_active_tasks":   auth.MaxActiveTasks,
-			"auto_mode_enabled":  auth.AutoModeEnabled,
-			"mini_app_enabled":   auth.MiniAppEnabled,
-			"revoked_at":         nil,
-			"revoked_by_user_id": nil,
-			"note":               strings.TrimSpace(auth.Note),
+			"granted_by_user_id":  auth.CreatedByUserID,
+			"granted_by_code_id":  auth.ID,
+			"active_from":         auth.ActiveFrom,
+			"active_to":           auth.ActiveTo,
+			"max_wallets":         auth.MaxWallets,
+			"max_active_tasks":    auth.MaxActiveTasks,
+			"auto_mode_enabled":   auth.AutoModeEnabled,
+			"mini_app_enabled":    auth.MiniAppEnabled,
+			"smart_money_enabled": auth.SmartMoneyEnabled,
+			"revoked_at":          nil,
+			"revoked_by_user_id":  nil,
+			"note":                strings.TrimSpace(auth.Note),
 		}
 
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -465,13 +472,14 @@ func (s *AccessService) GetUserAccessWithUser(userID uint) (*models.UserAccess, 
 }
 
 type UpdateUserAccessInput struct {
-	ActiveFrom      *time.Time
-	ActiveTo        *time.Time
-	MaxWallets      *int
-	MaxActiveTasks  *int
-	AutoModeEnabled *bool
-	MiniAppEnabled  *bool
-	Note            *string
+	ActiveFrom        *time.Time
+	ActiveTo          *time.Time
+	MaxWallets        *int
+	MaxActiveTasks    *int
+	AutoModeEnabled   *bool
+	MiniAppEnabled    *bool
+	SmartMoneyEnabled *bool
+	Note              *string
 }
 
 func (s *AccessService) UpdateUserAccess(adminUserID uint, userID uint, in UpdateUserAccessInput) (*models.UserAccess, error) {
@@ -502,6 +510,9 @@ func (s *AccessService) UpdateUserAccess(adminUserID uint, userID uint, in Updat
 	}
 	if in.MiniAppEnabled != nil {
 		updates["mini_app_enabled"] = *in.MiniAppEnabled
+	}
+	if in.SmartMoneyEnabled != nil {
+		updates["smart_money_enabled"] = *in.SmartMoneyEnabled
 	}
 	if in.Note != nil {
 		updates["note"] = strings.TrimSpace(*in.Note)

@@ -338,6 +338,8 @@ func (s *ClickHouseService) Migrate(ctx context.Context) error {
 			token_id String,
 			amount0 String,
 			amount1 String,
+			net_amount0 String,
+			net_amount1 String,
 			liquidity_delta String,
 			tick_lower Int32,
 			tick_upper Int32,
@@ -352,6 +354,8 @@ func (s *ClickHouseService) Migrate(ctx context.Context) error {
 		ORDER BY (tx_hash, log_index)
 		TTL ts + INTERVAL 15 DAY
 		`,
+		`ALTER TABLE smart_lp_events ADD COLUMN IF NOT EXISTS net_amount0 String DEFAULT '0'`,
+		`ALTER TABLE smart_lp_events ADD COLUMN IF NOT EXISTS net_amount1 String DEFAULT '0'`,
 		`ALTER TABLE smart_lp_events ADD COLUMN IF NOT EXISTS tick_lower Int32 DEFAULT 0`,
 		`ALTER TABLE smart_lp_events ADD COLUMN IF NOT EXISTS tick_upper Int32 DEFAULT 0`,
 		`ALTER TABLE smart_lp_events MODIFY TTL ts + INTERVAL 15 DAY`,

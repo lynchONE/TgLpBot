@@ -24,8 +24,9 @@ type AuthCode struct {
 	MaxWallets     int `gorm:"default:1" json:"max_wallets"`
 	MaxActiveTasks int `gorm:"default:1" json:"max_active_tasks"`
 
-	AutoModeEnabled bool `gorm:"default:false" json:"auto_mode_enabled"` // 是否赋予 Auto 模式权限
-	MiniAppEnabled  bool `gorm:"default:false" json:"mini_app_enabled"`  // 是否赋予 Mini App 权限
+	AutoModeEnabled   bool `gorm:"default:false" json:"auto_mode_enabled"`   // 是否赋予 Auto 模式权限
+	MiniAppEnabled    bool `gorm:"default:false" json:"mini_app_enabled"`    // 是否赋予 Mini App 权限
+	SmartMoneyEnabled bool `gorm:"default:false" json:"smart_money_enabled"` // 是否赋予 Smart Money(聪明钱) 权限
 
 	DisabledAt *time.Time     `gorm:"index" json:"disabled_at"`
 	CreatedAt  time.Time      `json:"created_at"`

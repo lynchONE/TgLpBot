@@ -169,13 +169,14 @@ func (s *RealtimePositionsService) InvalidateUser(userID uint) {
 }
 
 type RealtimePositionsResponse struct {
-	Wallet          RealtimeWallet     `json:"wallet"`
-	Summary         RealtimeSummary    `json:"summary"`
-	Positions       []RealtimePosition `json:"positions"`
-	PollIntervalSec int                `json:"poll_interval_sec"`
-	IsAdmin         bool               `json:"is_admin"`
-	UpdatedAt       time.Time          `json:"updated_at"`
-	Warnings        []string           `json:"warnings,omitempty"`
+	Wallet            RealtimeWallet     `json:"wallet"`
+	Summary           RealtimeSummary    `json:"summary"`
+	Positions         []RealtimePosition `json:"positions"`
+	PollIntervalSec   int                `json:"poll_interval_sec"`
+	IsAdmin           bool               `json:"is_admin"`
+	SmartMoneyEnabled bool               `json:"smart_money_enabled"`
+	UpdatedAt         time.Time          `json:"updated_at"`
+	Warnings          []string           `json:"warnings,omitempty"`
 }
 
 type RealtimeWallet struct {

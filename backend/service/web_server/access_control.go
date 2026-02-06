@@ -91,3 +91,16 @@ func requireAutoModePermission(check userSvc.AccessCheck) (int, string) {
 	}
 	return 0, ""
 }
+
+func requireSmartMoneyPermission(check userSvc.AccessCheck) (int, string) {
+	if check.IsAdmin {
+		return 0, ""
+	}
+	if check.Access == nil {
+		return http.StatusForbidden, "未授权"
+	}
+	if !check.Access.SmartMoneyEnabled {
+		return http.StatusForbidden, "未开通 Smart Money 权限"
+	}
+	return 0, ""
+}

@@ -4,6 +4,7 @@ import KlineModal from './components/KlineModal.jsx';
 import AutoMonitorCard from './components/AutoMonitorCard.jsx';
 import PositionCard from './components/PositionCard.jsx';
 import AutoPnLCurveCard from './components/AutoPnLCurveCard.jsx';
+import SmartMoneyCard from './components/SmartMoneyCard.jsx';
 import SystemConfigCard from './components/SystemConfigCard.jsx';
 import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
 import AdminPage from './components/AdminPage.jsx';
@@ -19,6 +20,7 @@ import {
     fetchHotPools,
     fetchSearchPools,
     fetchMe,
+    fetchSmartMoneyOverview,
     fetchRealtimePositions,
     openPosition,
     updateTaskRange,
@@ -256,6 +258,10 @@ export default function App() {
     const [autoMonitorError, setAutoMonitorError] = useState('');
     const [autoMonitorLoading, setAutoMonitorLoading] = useState(false);
     const autoMonitorPollRef = useRef(null);
+    const [smartMoney, setSmartMoney] = useState(null);
+    const [smartMoneyError, setSmartMoneyError] = useState('');
+    const [smartMoneyLoading, setSmartMoneyLoading] = useState(false);
+    const smartMoneyPollRef = useRef(null);
     const [autoGuardBaselineUpdating, setAutoGuardBaselineUpdating] = useState(false);
 
     const [autoPnLCurve, setAutoPnLCurve] = useState(null);
@@ -367,16 +373,19 @@ export default function App() {
     const adminListPollSec = Math.max(3, pollIntervalSec);
     const adminStatsPollSec = Math.max(5, pollIntervalSec * 2);
     const isAdmin = Boolean(me?.is_admin || data?.is_admin || adminPositions?.is_admin);
+    const smartMoneyEnabled = Boolean(me?.smart_money_enabled || data?.smart_money_enabled || isAdmin);
     const showAdmin = isAdmin && viewMode === 'admin';
     const isHotPools = viewMode === 'hot_pools';
     const isMonitor = viewMode === 'monitor';
     const isPositions = viewMode === 'positions';
+    const isSmartMoney = viewMode === 'smart_money';
     const hotPoolsDefaultPollSec = 10;
     const hotPoolsPollIntervalSec = Math.max(5, Number(pollOverrideSec || hotPoolsDefaultPollSec));
     const settingsPollIntervalSec = isHotPools ? hotPoolsPollIntervalSec : pollIntervalSec;
     const settingsServerPollIntervalSec = isHotPools ? hotPoolsDefaultPollSec : serverPollIntervalSec;
     const monitorPollSec = Math.max(3, pollIntervalSec);
     const autoPnLCurvePollSec = 15;
+    const smartMoneyPollSec = 60;
 
     const adminSelectedUser = useMemo(() => {
         if (!adminSelectedUserId) return null;
@@ -693,10 +702,9 @@ export default function App() {
     }, [apiBaseUrl, initData, hasInitData]);
 
     useEffect(() => {
-        if (!isAdmin && viewMode === 'admin') {
-            setViewMode('positions');
-        }
-    }, [isAdmin, viewMode]);
+        if (!isAdmin && viewMode === 'admin') setViewMode('positions');
+        if (!smartMoneyEnabled && viewMode === 'smart_money') setViewMode('hot_pools');
+    }, [isAdmin, smartMoneyEnabled, viewMode]);
 
     useEffect(() => {
         const tg = getTelegramWebApp();
@@ -1105,6 +1113,52 @@ export default function App() {
             if (hotPoolsPollRef.current) clearInterval(hotPoolsPollRef.current);
         };
     }, [apiBaseUrl, initData, hasInitData, isHotPools, hotPoolsSort, hotPoolsPollIntervalSec, positionsPoolAddresses.join(',')]);
+
+    useEffect(() => {
+        if (!hasInitData || !isSmartMoney || !smartMoneyEnabled) {
+            if (smartMoneyPollRef.current) clearInterval(smartMoneyPollRef.current);
+            return;
+        }
+        let aborted = false;
+        const controller = new AbortController();
+        let inFlight = false;
+
+        const run = async () => {
+            if (inFlight) return;
+            inFlight = true;
+            setSmartMoneyLoading(true);
+            setSmartMoneyError('');
+            try {
+                const resp = await fetchSmartMoneyOverview({
+                    apiBaseUrl,
+                    initData,
+                    chain: 'bsc',
+                    poolLimit: 10,
+                    walletLimit: 50,
+                    signal: controller.signal,
+                });
+                if (aborted) return;
+                setSmartMoney(resp);
+            } catch (e) {
+                if (aborted) return;
+                setSmartMoneyError(String(e?.message || e));
+            } finally {
+                inFlight = false;
+                if (!aborted) setSmartMoneyLoading(false);
+            }
+        };
+
+        run();
+
+        if (smartMoneyPollRef.current) clearInterval(smartMoneyPollRef.current);
+        smartMoneyPollRef.current = setInterval(run, smartMoneyPollSec * 1000);
+
+        return () => {
+            aborted = true;
+            controller.abort();
+            if (smartMoneyPollRef.current) clearInterval(smartMoneyPollRef.current);
+        };
+    }, [apiBaseUrl, initData, hasInitData, isSmartMoney, smartMoneyEnabled, smartMoneyPollSec]);
 
     const applyPollDraft = () => {
         const raw = String(pollDraftSec || '').trim();
@@ -1699,7 +1753,7 @@ export default function App() {
         return Math.max(0, Math.floor(elapsed / 1000));
     }, [tick]);
 
-    const headerTitle = showAdmin ? '管理面板' : isHotPools ? '热门池子' : isMonitor ? '自动任务监控' : '实时仓位';
+    const headerTitle = showAdmin ? '管理面板' : isHotPools ? '热门池子' : isSmartMoney ? '聪明钱' : isMonitor ? '自动任务监控' : '实时仓位';
     const headerSubtext = showAdmin
         ? adminSelectedUser
             ? `用户：${formatUserLabel(adminSelectedUser)}`
@@ -1710,11 +1764,13 @@ export default function App() {
                     : '暂无开启Auto用户'
         : isHotPools
             ? `5m · ${hotPoolsData ? `更新：${localUpdateSecAgo}秒前` : hotPoolsLoading ? '加载中...' : '暂无数据'} · 自动刷新 ${hotPoolsPollIntervalSec}s`
-            : isMonitor
-                ? `Auto任务：${Array.isArray(autoMonitor?.tasks) ? autoMonitor.tasks.length : 0} · 更新：${formatRelativeTime(autoMonitor?.updated_at, tick) || '--'} · 自动刷新 ${monitorPollSec}s`
-                : walletAddress
-                    ? `钱包：${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
-                    : '加载钱包中...';
+            : isSmartMoney
+                ? `1h池子：${Array.isArray(smartMoney?.pools) ? smartMoney.pools.length : 0} · 24h钱包：${Array.isArray(smartMoney?.wallets_24h) ? smartMoney.wallets_24h.length : 0} · 更新：${formatRelativeTime(smartMoney?.updated_at, tick) || '--'} · 自动刷新 ${smartMoneyPollSec}s`
+                : isMonitor
+                    ? `Auto任务：${Array.isArray(autoMonitor?.tasks) ? autoMonitor.tasks.length : 0} · 更新：${formatRelativeTime(autoMonitor?.updated_at, tick) || '--'} · 自动刷新 ${monitorPollSec}s`
+                    : walletAddress
+                        ? `钱包：${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
+                        : '加载钱包中...';
     const hasAdminPositions = Boolean(adminPositions);
     const adminSummaryPlaceholder = adminSelectedUserId
         ? adminPositionsLoading
@@ -1806,7 +1862,7 @@ export default function App() {
                 <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
                         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-700 ring-1 ring-emerald-500/20 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/25">
-                            <Icon path={isHotPools ? icons.chart : icons.bot} className="h-5 w-5" />
+                            <Icon path={isHotPools ? icons.chart : isSmartMoney ? icons.search : icons.bot} className="h-5 w-5" />
                         </div>
                         <div>
                             <div className="text-lg font-extrabold tracking-tight">{headerTitle}</div>
@@ -1835,7 +1891,7 @@ export default function App() {
                 </div>
 
                 <div
-                    className={`mt-3 grid ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'
+                    className={`mt-3 grid ${isAdmin ? 'grid-cols-5' : smartMoneyEnabled ? 'grid-cols-4' : 'grid-cols-3'
                         } gap-1 rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5`}
                 >
                     <button
@@ -1871,6 +1927,19 @@ export default function App() {
                     >
                         监控
                     </button>
+                    {smartMoneyEnabled ? (
+                        <button
+                            type="button"
+                            onClick={() => setViewMode('smart_money')}
+                            aria-pressed={viewMode === 'smart_money'}
+                            className={`rounded-xl px-3 py-2 transition ${viewMode === 'smart_money'
+                                ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
+                                : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
+                                }`}
+                        >
+                            聪明钱
+                        </button>
+                    ) : null}
                     {isAdmin ? (
                         <button
                             type="button"
@@ -2062,6 +2131,14 @@ export default function App() {
             }
 
             {
+                isSmartMoney && smartMoneyError ? (
+                    <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-200">
+                        {smartMoneyError}
+                    </div>
+                ) : null
+            }
+
+            {
                 isPositions && activeLoading && !activeData ? (
                     <SkeletonList count={2} Card={SkeletonPositionCard} />
                 ) : null
@@ -2069,6 +2146,12 @@ export default function App() {
 
             {
                 isMonitor && autoMonitorLoading && !autoMonitor ? (
+                    <SkeletonList count={2} Card={SkeletonPositionCard} />
+                ) : null
+            }
+
+            {
+                isSmartMoney && smartMoneyLoading && !smartMoney ? (
                     <SkeletonList count={2} Card={SkeletonPositionCard} />
                 ) : null
             }
@@ -2271,6 +2354,15 @@ export default function App() {
                                 ) : null}
                             </>
                         )
+                        : isSmartMoney
+                            ? (
+                                <SmartMoneyCard
+                                    overview={smartMoney}
+                                    loading={smartMoneyLoading}
+                                    tick={tick}
+                                    onNotice={showNotice}
+                                />
+                            )
                         : !showAdmin && activeData
                             ? (
                                 <>

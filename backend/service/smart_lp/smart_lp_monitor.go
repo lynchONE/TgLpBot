@@ -76,6 +76,8 @@ type smartLPEvent struct {
 	tokenID         string
 	amount0         string
 	amount1         string
+	netAmount0      string
+	netAmount1      string
 	liquidityDelta  string
 	tickLower       int
 	tickUpper       int
@@ -705,7 +707,7 @@ func (s *SmartLPMonitor) insertEvents(ctx context.Context, events []smartLPEvent
 
 	batch, err := s.ch.PrepareBatch(ctx, `INSERT INTO smart_lp_events (
 		ts, event_seq, chain, pool_version, pool_id, wallet_address, action,
-		token_id, amount0, amount1, liquidity_delta, tick_lower, tick_upper, tx_hash, block_number, log_index,
+		token_id, amount0, amount1, net_amount0, net_amount1, liquidity_delta, tick_lower, tick_upper, tx_hash, block_number, log_index,
 		contract_address, source
 	)`)
 	if err != nil {
@@ -725,6 +727,8 @@ func (s *SmartLPMonitor) insertEvents(ctx context.Context, events []smartLPEvent
 			ev.tokenID,
 			ev.amount0,
 			ev.amount1,
+			ev.netAmount0,
+			ev.netAmount1,
 			ev.liquidityDelta,
 			int32(ev.tickLower),
 			int32(ev.tickUpper),
@@ -1073,6 +1077,9 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 							continue
 						}
 
+						net0 := netErc20TransferMagnitude(receipt, pos.token0, fromAddr, action)
+						net1 := netErc20TransferMagnitude(receipt, pos.token1, fromAddr, action)
+
 						eventSeq := bn*1_000_000 + uint64(lg.Index)
 						events = append(events, smartLPEvent{
 							ts:              time.Now(),
@@ -1085,6 +1092,8 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 							tokenID:         tokenID.String(),
 							amount0:         amount0.String(),
 							amount1:         amount1.String(),
+							netAmount0:      net0,
+							netAmount1:      net1,
 							liquidityDelta:  liq.String(),
 							tickLower:       pos.tickL,
 							tickUpper:       pos.tickU,
@@ -1178,6 +1187,8 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 						tokenID:         "",
 						amount0:         amount0,
 						amount1:         amount1,
+						netAmount0:      amount0,
+						netAmount1:      amount1,
 						liquidityDelta:  liqDelta.String(),
 						tickLower:       tickLower,
 						tickUpper:       tickUpper,
@@ -1366,6 +1377,9 @@ func (sc *smartLPReceiptScanner) scanReceipt(ctx context.Context, receipt *types
 					goto v4
 				}
 
+				net0 := netErc20TransferMagnitude(receipt, pos.token0, fromAddr, action)
+				net1 := netErc20TransferMagnitude(receipt, pos.token1, fromAddr, action)
+
 				bn := lg.BlockNumber
 				eventSeq := bn*1_000_000 + uint64(lg.Index)
 				events = append(events, smartLPEvent{
@@ -1379,6 +1393,8 @@ func (sc *smartLPReceiptScanner) scanReceipt(ctx context.Context, receipt *types
 					tokenID:         tokenID.String(),
 					amount0:         amount0.String(),
 					amount1:         amount1.String(),
+					netAmount0:      net0,
+					netAmount1:      net1,
 					liquidityDelta:  liq.String(),
 					tickLower:       pos.tickL,
 					tickUpper:       pos.tickU,
@@ -1472,6 +1488,8 @@ func (sc *smartLPReceiptScanner) scanReceipt(ctx context.Context, receipt *types
 				tokenID:         "",
 				amount0:         amount0,
 				amount1:         amount1,
+				netAmount0:      amount0,
+				netAmount1:      amount1,
 				liquidityDelta:  liqDelta.String(),
 				tickLower:       tickLower,
 				tickUpper:       tickUpper,

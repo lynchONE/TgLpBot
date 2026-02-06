@@ -441,8 +441,19 @@ func smartMoneyEstimateStableValue(task *models.StrategyTask, ev *smart_lp.Smart
 
 	dec0 := smartMoneyGetDecimals(task.Token0Address, decimalsCache)
 	dec1 := smartMoneyGetDecimals(task.Token1Address, decimalsCache)
-	amt0 := smartMoneyAmountToFloat(ev.Amount0, dec0)
-	amt1 := smartMoneyAmountToFloat(ev.Amount1, dec1)
+	amount0 := strings.TrimSpace(ev.Amount0)
+	amount1 := strings.TrimSpace(ev.Amount1)
+	net0 := strings.TrimSpace(ev.NetAmount0)
+	net1 := strings.TrimSpace(ev.NetAmount1)
+	if net0 != "" && net0 != "0" {
+		amount0 = net0
+	}
+	if net1 != "" && net1 != "0" {
+		amount1 = net1
+	}
+
+	amt0 := smartMoneyAmountToFloat(amount0, dec0)
+	amt1 := smartMoneyAmountToFloat(amount1, dec1)
 
 	price, _, quoteSym, okPrice := pricing.BuildPriceDisplay(task, currentTick)
 	if !okPrice || price <= 0 {

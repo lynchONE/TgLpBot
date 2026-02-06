@@ -78,6 +78,25 @@ export async function fetchMe({ apiBaseUrl, initData, signal }) {
     return resp.json();
 }
 
+export async function fetchSmartMoneyOverview({ apiBaseUrl, initData, chain, poolLimit, walletLimit, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const params = new URLSearchParams();
+    if (initData) params.set('initData', String(initData));
+    if (chain) params.set('chain', String(chain));
+    if (Number.isFinite(poolLimit)) params.set('pool_limit', String(poolLimit));
+    if (Number.isFinite(walletLimit)) params.set('wallet_limit', String(walletLimit));
+
+    const qs = params.toString();
+    const url = `${base}/api/smart_money${qs ? `?${qs}` : ''}`;
+
+    const resp = await fetch(url, { method: 'GET', signal });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
 export async function setTaskPaused({ apiBaseUrl, initData, taskId, paused, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/task_action?action=pause`;
