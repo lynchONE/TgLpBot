@@ -217,9 +217,9 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 	}
 	poolLimit := parseIntQuery(query, "pool_limit", 10, 1, 50)
 	walletLimit := parseIntQuery(query, "wallet_limit", 50, 1, 200)
-	// Keep legacy defaults (1h pools + 24h pnl), while allowing clients to
+	// Defaults: 2h pools + 24h pnl, while allowing clients to
 	// align windows explicitly via query params.
-	poolsWindowHours := parseIntQuery(query, "pools_window_hours", 1, 1, 168)
+	poolsWindowHours := parseIntQuery(query, "pools_window_hours", 2, 1, 168)
 	pnlWindowHours := parseIntQuery(query, "pnl_window_hours", 24, 1, 168)
 
 	poolsWindow := time.Duration(poolsWindowHours) * time.Hour
@@ -299,7 +299,9 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 		outPools = append(outPools, p)
 	}
 
-	walletRanks, werr := smSvc.GetTopAddWalletsInPools(ctx, chain, poolsWindow, pools, walletLimit)
+	// Wallet participation and PnL are computed over pnlWindow (default 24h),
+	// while pool ranking is computed over poolsWindow (default 2h).
+	walletRanks, werr := smSvc.GetTopAddWalletsInPools(ctx, chain, pnlWindow, pools, walletLimit)
 	if werr != nil {
 		warnings = append(warnings, fmt.Sprintf("wallet rank query failed: %v", werr))
 		walletRanks = nil

@@ -1,7 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { formatRelativeTime } from '../lib/time';
 import { copyToClipboard, hapticNotification, hapticImpact } from '../lib/telegram';
 import ModuleHeader from './ModuleHeader.jsx';
+import SmartMoneyEventTrendChart from './SmartMoneyEventTrendChart.jsx';
+import SmartMoneyWalletPositionsModal from './SmartMoneyWalletPositionsModal.jsx';
+import SmartMoneyWalletPnLChart from './SmartMoneyWalletPnLChart.jsx';
 
 const USD_DISPLAY_LIMIT = 1e15;
 const usdFormatter = new Intl.NumberFormat('en-US', {
@@ -39,21 +42,23 @@ function formatShare(v) {
     return `${(n * 100).toFixed(1)}%`;
 }
 
+function formatWindowLabel(windowSec) {
+    const sec = Number(windowSec ?? 0);
+    if (!Number.isFinite(sec) || sec <= 0) return '';
+    const hours = sec / 3600;
+    if (hours >= 1 && Math.abs(hours - Math.round(hours)) < 1e-9) return `${Math.round(hours)}h`;
+    if (hours >= 1) return `${hours.toFixed(1)}h`;
+    const minutes = sec / 60;
+    if (minutes >= 1 && Math.abs(minutes - Math.round(minutes)) < 1e-9) return `${Math.round(minutes)}m`;
+    if (minutes >= 1) return `${minutes.toFixed(0)}m`;
+    return `${Math.round(sec)}s`;
+}
+
 function shortHex(value, head = 6, tail = 4) {
     const s = String(value || '').trim();
     if (!s) return '';
     if (s.length <= head + tail + 2) return s;
     return `${s.slice(0, head)}...${s.slice(-tail)}`;
-}
-
-function trendBarScale(trend) {
-    if (!Array.isArray(trend) || !trend.length) return 1;
-    let max = 0;
-    for (const point of trend) {
-        const total = Number(point?.total_events ?? 0);
-        if (Number.isFinite(total) && total > max) max = total;
-    }
-    return max > 0 ? max : 1;
 }
 
 async function safeCopy(value, onNotice) {
@@ -77,13 +82,26 @@ function kpiTone(value) {
     return 'text-zinc-700 dark:text-white/80';
 }
 
-export default function SmartMoneyCard({ overview, loading = false, tick, onNotice }) {
+export default function SmartMoneyCard({ overview, loading = false, tick, onNotice, apiBaseUrl, initData, theme = 'dark' }) {
     const pools = Array.isArray(overview?.pools) ? overview.pools : [];
     const wallets = Array.isArray(overview?.wallets_24h) ? overview.wallets_24h : [];
     const warnings = Array.isArray(overview?.warnings) ? overview.warnings : [];
     const summary = overview?.summary || {};
     const histogram = Array.isArray(overview?.pnl_histogram_24h) ? overview.pnl_histogram_24h : [];
     const trend = Array.isArray(overview?.event_trend_24h) ? overview.event_trend_24h : [];
+    const poolsWindowLabel = formatWindowLabel(overview?.pools_window_sec) || '2h';
+    const pnlWindowLabel = formatWindowLabel(overview?.pnl_window_sec) || '24h';
+    const chain = String(overview?.chain || 'bsc').trim() || 'bsc';
+    const pnlWindowHours = useMemo(() => {
+        const sec = Number(overview?.pnl_window_sec ?? 0);
+        if (!Number.isFinite(sec) || sec <= 0) return 24;
+        const h = sec / 3600;
+        if (h <= 0) return 24;
+        return Math.max(1, Math.min(168, Math.round(h)));
+    }, [overview?.pnl_window_sec]);
+
+    const [walletModalOpen, setWalletModalOpen] = useState(false);
+    const [walletModalAddr, setWalletModalAddr] = useState('');
 
     const updatedAtText = useMemo(
         () => formatRelativeTime(overview?.updated_at, tick) || '--',
@@ -92,8 +110,11 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
 
     const topWallets = useMemo(() => wallets.slice(0, 20), [wallets]);
     const topPools = useMemo(() => pools.slice(0, 12), [pools]);
-    const barMax = useMemo(() => trendBarScale(trend), [trend]);
-    const subtitle = `最近24h池子 ${pools.length} 个 · 最近24h钱包 ${wallets.length} 个 · 更新 ${updatedAtText}`;
+    const hasTrend = useMemo(
+        () => trend.some((p) => Number(p?.total_events ?? 0) > 0),
+        [trend],
+    );
+    const subtitle = `最近${poolsWindowLabel}池子 ${pools.length} 个 · 最近${pnlWindowLabel}钱包 ${wallets.length} 个 · 更新 ${updatedAtText}`;
 
     return (
         <ModuleHeader
@@ -124,13 +145,13 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
 
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-white/10 dark:bg-[#0f1116]">
-                    <div className="text-[10px] text-zinc-500 dark:text-white/40">24h总PnL</div>
+                    <div className="text-[10px] text-zinc-500 dark:text-white/40">{pnlWindowLabel}总PnL</div>
                     <div className={`mt-1 text-sm font-extrabold tabular-nums ${kpiTone(summary?.total_pnl_usdt_24h)}`}>
                         {formatUsd(summary?.total_pnl_usdt_24h)}
                     </div>
                 </div>
                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-white/10 dark:bg-[#0f1116]">
-                    <div className="text-[10px] text-zinc-500 dark:text-white/40">24h In / Out</div>
+                    <div className="text-[10px] text-zinc-500 dark:text-white/40">{pnlWindowLabel} In / Out</div>
                     <div className="mt-1 text-sm font-extrabold tabular-nums text-zinc-900 dark:text-white/90">
                         {formatCompact(summary?.total_in_usdt_24h)} / {formatCompact(summary?.total_out_usdt_24h)}
                     </div>
@@ -147,7 +168,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-white/10 dark:bg-[#0f1116]">
                     <div className="text-[10px] text-zinc-500 dark:text-white/40">事件活跃度</div>
                     <div className="mt-1 text-sm font-extrabold tabular-nums text-zinc-900 dark:text-white/90">
-                        1h {Number(summary?.total_events_1h ?? 0)} · 24h {Number(summary?.total_events_24h ?? 0)}
+                        1h {Number(summary?.total_events_1h ?? 0)} · {pnlWindowLabel} {Number(summary?.total_events_24h ?? 0)}
                     </div>
                     <div className="text-[10px] text-zinc-500 dark:text-white/40">
                         缺价Token {Number(summary?.missing_price_token_count ?? 0)}
@@ -158,54 +179,12 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
             <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                     <div className="flex items-center justify-between">
-                        <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">24h事件趋势</div>
-                        <div className="text-[11px] text-zinc-500 dark:text-white/40">最近24小时</div>
+                        <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">{pnlWindowLabel}事件趋势</div>
+                        <div className="text-[11px] text-zinc-500 dark:text-white/40">最近{pnlWindowLabel}</div>
                     </div>
-                    {trend.length ? (
-                        <div className="mt-2 grid grid-cols-[repeat(24,minmax(0,1fr))] items-end gap-1">
-                            {trend.map((point, idx) => {
-                                const total = Number(point?.total_events ?? 0);
-                                const add = Number(point?.add_events ?? 0);
-                                const remove = Number(point?.remove_events ?? 0);
-                                const minSegment = 0.06;
-                                const totalPct = Math.max(0.04, Math.min(1, total / barMax));
-                                let addPct = total > 0 ? add / total : 0;
-                                let removePct = total > 0 ? remove / total : 0;
-                                if (add > 0) addPct = Math.max(minSegment, addPct);
-                                if (remove > 0) removePct = Math.max(minSegment, removePct);
-                                const pctSum = addPct + removePct;
-                                if (pctSum > 1) {
-                                    addPct /= pctSum;
-                                    removePct /= pctSum;
-                                }
-                                const addHeight = Math.round(addPct * 100);
-                                const removeHeight = Math.round(removePct * 100);
-                                return (
-                                    <div key={String(idx)} className="group flex h-24 items-end">
-                                        <div
-                                            className="relative w-full overflow-hidden rounded-t bg-zinc-300/70 dark:bg-white/20"
-                                            style={{ height: `${Math.round(totalPct * 100)}%` }}
-                                            title={`${point?.hours_ago}h ago · add ${add} / remove ${remove} / total ${total}`}
-                                        >
-                                            {total > 0 ? (
-                                                <>
-                                                    <div
-                                                        className="absolute bottom-0 left-0 right-0 rounded-t bg-emerald-500/80"
-                                                        style={{ height: `${addHeight}%` }}
-                                                    />
-                                                    <div
-                                                        className="absolute left-0 right-0 rounded-t bg-red-500/70"
-                                                        style={{
-                                                            bottom: `${addHeight}%`,
-                                                            height: `${removeHeight}%`,
-                                                        }}
-                                                    />
-                                                </>
-                                            ) : null}
-                                        </div>
-                                    </div>
-                                );
-                            })}
+                    {hasTrend ? (
+                        <div className="mt-2">
+                            <SmartMoneyEventTrendChart trend={trend} theme={theme} />
                         </div>
                     ) : (
                         <div className="mt-2 rounded-xl border border-zinc-200 bg-white/70 p-3 text-[11px] text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
@@ -220,7 +199,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
 
                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                     <div className="flex items-center justify-between">
-                        <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">24h PnL分布</div>
+                        <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">{pnlWindowLabel} PnL分布</div>
                         <div className="text-[11px] text-zinc-500 dark:text-white/40">按钱包聚合</div>
                     </div>
                     {histogram.length ? (
@@ -258,7 +237,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
             <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                     <div className="mb-2 flex items-center justify-between">
-                        <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">最近24h参与池子</div>
+                        <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">最近{poolsWindowLabel}参与池子</div>
                         <div className="text-[11px] text-zinc-500 dark:text-white/40">Top {topPools.length}</div>
                     </div>
                     {topPools.length ? (
@@ -314,9 +293,14 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
 
                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                     <div className="mb-2 flex items-center justify-between">
-                        <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">最近24h钱包盈亏</div>
+                        <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">最近{pnlWindowLabel}钱包盈亏</div>
                         <div className="text-[11px] text-zinc-500 dark:text-white/40">Top {topWallets.length}</div>
                     </div>
+                    {wallets.length ? (
+                        <div className="mt-2">
+                            <SmartMoneyWalletPnLChart wallets={wallets} theme={theme} windowLabel={pnlWindowLabel} />
+                        </div>
+                    ) : null}
                     {topWallets.length ? (
                         <div className="overflow-x-auto">
                             <table className="min-w-full text-left text-[11px]">
@@ -326,7 +310,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                         <th className="pb-1 pr-3 text-right font-medium">In</th>
                                         <th className="pb-1 pr-3 text-right font-medium">Out</th>
                                         <th className="pb-1 pr-3 text-right font-medium">PnL</th>
-                                        <th className="pb-1 pr-3 text-right font-medium">1h/24h</th>
+                                        <th className="pb-1 pr-3 text-right font-medium">1h/{pnlWindowLabel}</th>
                                         <th className="pb-1 pr-0 text-right font-medium">操作</th>
                                     </tr>
                                 </thead>
@@ -353,16 +337,29 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                                     {Number.isFinite(cnt1h) ? cnt1h : '--'} / {Number.isFinite(cnt24h) ? cnt24h : '--'}
                                                 </td>
                                                 <td className="py-1.5 pr-0 text-right">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            hapticImpact('light');
-                                                            safeCopy(addr, onNotice);
-                                                        }}
-                                                        className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
-                                                    >
-                                                        复制
-                                                    </button>
+                                                    <div className="inline-flex items-center gap-1.5">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                hapticImpact('light');
+                                                                safeCopy(addr, onNotice);
+                                                            }}
+                                                            className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
+                                                        >
+                                                            复制
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                hapticImpact('light');
+                                                                setWalletModalAddr(addr);
+                                                                setWalletModalOpen(true);
+                                                            }}
+                                                            className="inline-flex items-center rounded-lg bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
+                                                        >
+                                                            仓位
+                                                        </button>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         );
@@ -377,6 +374,20 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                     )}
                 </div>
             </div>
+
+            <SmartMoneyWalletPositionsModal
+                open={walletModalOpen}
+                onClose={() => {
+                    setWalletModalOpen(false);
+                    setWalletModalAddr('');
+                }}
+                apiBaseUrl={apiBaseUrl}
+                initData={initData}
+                chain={chain}
+                walletAddress={walletModalAddr}
+                windowHours={pnlWindowHours}
+                onNotice={onNotice}
+            />
         </ModuleHeader>
     );
 }

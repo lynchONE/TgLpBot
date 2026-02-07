@@ -42,6 +42,7 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/me", s.handleMe)
 	mux.HandleFunc("/api/realtime_positions", s.handleRealtimePositions)
 	mux.HandleFunc("/api/smart_money_overview", s.handleSmartMoneyOverview)
+	mux.HandleFunc("/api/smart_money_wallet_positions", s.handleSmartMoneyWalletPositions)
 	mux.HandleFunc("/api/auto_monitor", s.handleAutoMonitor)
 	mux.HandleFunc("/api/task_pause", s.handleTaskPause)
 	mux.HandleFunc("/api/task_stop", s.handleTaskStop)

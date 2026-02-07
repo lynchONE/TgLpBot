@@ -1,5 +1,5 @@
-// Smart Money overview API proxy
-// Forwards requests to backend: GET /api/smart_money_overview
+// Smart Money wallet positions API proxy
+// Forwards requests to backend: GET /api/smart_money_wallet_positions
 
 function normalizeBaseUrl(value) {
     const trimmed = String(value || '').trim();
@@ -49,7 +49,7 @@ export default async function handler(req, res) {
         return;
     }
 
-    const url = `${backendBaseUrl}/api/smart_money_overview${buildQueryString(req.query)}`;
+    const url = `${backendBaseUrl}/api/smart_money_wallet_positions${buildQueryString(req.query)}`;
 
     try {
         const upstream = await fetch(url);
@@ -61,16 +61,13 @@ export default async function handler(req, res) {
         res.setHeader('Cache-Control', 'no-store');
 
         if (upstream.ok && !body) {
-            // Never forward a 204 with a response body (clients may drop it).
-            // Return a JSON fallback with HTTP 200 so the UI can render warnings.
             res.statusCode = 200;
             res.setHeader('Content-Type', 'application/json; charset=utf-8');
             res.end(JSON.stringify({
                 chain: String(req.query?.chain || 'bsc'),
-                pools: [],
-                wallets_24h: [],
-                summary: {},
-                warnings: [`smart_money upstream returned empty body (HTTP ${upstream.status})`],
+                wallet_address: String(req.query?.wallet_address || ''),
+                positions: [],
+                warnings: [`smart_money_wallet_positions upstream returned empty body (HTTP ${upstream.status})`],
             }));
             return;
         }
@@ -80,19 +77,17 @@ export default async function handler(req, res) {
             if (!body) {
                 res.end(JSON.stringify({
                     chain: String(req.query?.chain || 'bsc'),
-                    pools: [],
-                    wallets_24h: [],
-                    summary: {},
-                    warnings: ['smart_money upstream non-json empty body'],
+                    wallet_address: String(req.query?.wallet_address || ''),
+                    positions: [],
+                    warnings: [`smart_money_wallet_positions upstream non-json empty body (HTTP ${upstream.status})`],
                 }));
                 return;
             }
             res.end(JSON.stringify({
                 chain: String(req.query?.chain || 'bsc'),
-                pools: [],
-                wallets_24h: [],
-                summary: {},
-                warnings: [`smart_money upstream non-json body: ${body.slice(0, 200)}`],
+                wallet_address: String(req.query?.wallet_address || ''),
+                positions: [],
+                warnings: [`smart_money_wallet_positions upstream non-json body: ${body.slice(0, 200)}`],
             }));
             return;
         }
@@ -105,3 +100,4 @@ export default async function handler(req, res) {
         res.end(String(err?.message || err || 'upstream fetch failed'));
     }
 }
+

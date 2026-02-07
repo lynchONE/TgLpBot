@@ -121,6 +121,47 @@ export async function fetchSmartMoneyOverview({
     }
 }
 
+export async function fetchSmartMoneyWalletPositions({
+    apiBaseUrl,
+    initData,
+    chain,
+    walletAddress,
+    windowHours,
+    limit,
+    signal,
+}) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const params = new URLSearchParams();
+    if (initData) params.set('initData', String(initData));
+    if (chain) params.set('chain', String(chain));
+    if (walletAddress) params.set('wallet_address', String(walletAddress));
+    if (Number.isFinite(windowHours)) params.set('window_hours', String(windowHours));
+    if (Number.isFinite(limit)) params.set('limit', String(limit));
+
+    const qs = params.toString();
+    const url = `${base}/api/smart_money_wallet_positions${qs ? `?${qs}` : ''}`;
+
+    const resp = await fetch(url, { method: 'GET', signal });
+    const text = await resp.text().catch(() => '');
+    if (!resp.ok) {
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    const body = String(text || '').trim();
+    if (!body) {
+        return {
+            chain: String(chain || 'bsc'),
+            wallet_address: String(walletAddress || ''),
+            positions: [],
+            warnings: [`smart_money_wallet_positions 接口返回空响应体 (HTTP ${resp.status})`],
+        };
+    }
+    try {
+        return JSON.parse(body);
+    } catch {
+        throw new Error(`smart_money_wallet_positions invalid JSON: ${body.slice(0, 120)}`);
+    }
+}
+
 export async function setTaskPaused({ apiBaseUrl, initData, taskId, paused, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/task_action?action=pause`;

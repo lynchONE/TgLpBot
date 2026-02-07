@@ -415,7 +415,7 @@ export default function App() {
     const monitorPollSec = Math.max(3, pollIntervalSec);
     const autoPnLCurvePollSec = 15;
     const smartMoneyPollSec = 60;
-    const smartMoneyPoolsWindowHours = 24;
+    const smartMoneyPoolsWindowHours = 2;
     const smartMoneyPnLWindowHours = 24;
 
     const adminSelectedUser = useMemo(() => {
@@ -2381,6 +2381,9 @@ export default function App() {
                                     loading={smartMoneyLoading}
                                     tick={tick}
                                     onNotice={showNotice}
+                                    apiBaseUrl={apiBaseUrl}
+                                    initData={initData}
+                                    theme={theme}
                                 />
                             )
                         : !showAdmin && activeData
