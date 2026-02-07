@@ -2,6 +2,8 @@ package web_server
 
 import (
 	"context"
+	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -205,6 +207,46 @@ func TestBuildSmartMoneySummary_AggregatesMetrics(t *testing.T) {
 	}
 	if summary.CoverageRatio24h <= 0.66 || summary.CoverageRatio24h > 0.67 {
 		t.Fatalf("unexpected coverage ratio: %+v", summary)
+	}
+}
+
+func TestBuildSmartMoneyHistogram_ProducesJSONSafeRanges(t *testing.T) {
+	wallets := []smartMoneyOverviewWallet{
+		{WalletAddress: "0x1", PnLUSDT24h: 123},
+	}
+
+	hist := buildSmartMoneyHistogram(wallets)
+	if len(hist) == 0 {
+		t.Fatalf("expected histogram buckets")
+	}
+	for _, b := range hist {
+		if math.IsNaN(b.RangeMin) || math.IsInf(b.RangeMin, 0) {
+			t.Fatalf("unexpected RangeMin: %+v", b)
+		}
+		if math.IsNaN(b.RangeMax) || math.IsInf(b.RangeMax, 0) {
+			t.Fatalf("unexpected RangeMax: %+v", b)
+		}
+		if math.IsNaN(b.Share) || math.IsInf(b.Share, 0) {
+			t.Fatalf("unexpected Share: %+v", b)
+		}
+		if math.IsNaN(b.TotalPnL24) || math.IsInf(b.TotalPnL24, 0) {
+			t.Fatalf("unexpected TotalPnL24: %+v", b)
+		}
+	}
+
+	resp := smartMoneyOverviewResponse{
+		Chain:          "bsc",
+		PoolsWindowSec: 3600,
+		PnLWindowSec:   86400,
+		UpdatedAt:      time.Now(),
+		Summary:        smartMoneyOverviewSummary{},
+		Pools:          []smartMoneyOverviewPool{},
+		Wallets24h:     wallets,
+		PnLHistogram24: hist,
+		EventTrend24h:  []smartMoneyOverviewEventTrendPoint{},
+	}
+	if _, err := json.Marshal(resp); err != nil {
+		t.Fatalf("expected response to marshal, got %v", err)
 	}
 }
 

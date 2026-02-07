@@ -162,18 +162,28 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                         <div className="text-[11px] text-zinc-500 dark:text-white/40">最近24小时</div>
                     </div>
                     {trend.length ? (
-                        <div className="mt-2 grid grid-cols-24 items-end gap-1">
+                        <div className="mt-2 grid grid-cols-[repeat(24,minmax(0,1fr))] items-end gap-1">
                             {trend.map((point, idx) => {
                                 const total = Number(point?.total_events ?? 0);
                                 const add = Number(point?.add_events ?? 0);
                                 const remove = Number(point?.remove_events ?? 0);
+                                const minSegment = 0.06;
                                 const totalPct = Math.max(0.04, Math.min(1, total / barMax));
-                                const addPct = total > 0 ? Math.max(0.05, add / total) : 0;
-                                const removePct = total > 0 ? Math.max(0.05, remove / total) : 0;
+                                let addPct = total > 0 ? add / total : 0;
+                                let removePct = total > 0 ? remove / total : 0;
+                                if (add > 0) addPct = Math.max(minSegment, addPct);
+                                if (remove > 0) removePct = Math.max(minSegment, removePct);
+                                const pctSum = addPct + removePct;
+                                if (pctSum > 1) {
+                                    addPct /= pctSum;
+                                    removePct /= pctSum;
+                                }
+                                const addHeight = Math.round(addPct * 100);
+                                const removeHeight = Math.round(removePct * 100);
                                 return (
                                     <div key={String(idx)} className="group flex h-24 items-end">
                                         <div
-                                            className="relative w-full rounded-t bg-zinc-300/70 dark:bg-white/20"
+                                            className="relative w-full overflow-hidden rounded-t bg-zinc-300/70 dark:bg-white/20"
                                             style={{ height: `${Math.round(totalPct * 100)}%` }}
                                             title={`${point?.hours_ago}h ago · add ${add} / remove ${remove} / total ${total}`}
                                         >
@@ -181,13 +191,13 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                                 <>
                                                     <div
                                                         className="absolute bottom-0 left-0 right-0 rounded-t bg-emerald-500/80"
-                                                        style={{ height: `${Math.round(addPct * 100)}%` }}
+                                                        style={{ height: `${addHeight}%` }}
                                                     />
                                                     <div
                                                         className="absolute left-0 right-0 rounded-t bg-red-500/70"
                                                         style={{
-                                                            bottom: `${Math.round(addPct * 100)}%`,
-                                                            height: `${Math.round(removePct * 100)}%`,
+                                                            bottom: `${addHeight}%`,
+                                                            height: `${removeHeight}%`,
                                                         }}
                                                     />
                                                 </>

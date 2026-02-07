@@ -536,13 +536,15 @@ func buildSmartMoneyHistogram(wallets []smartMoneyOverviewWallet) []smartMoneyOv
 	if len(wallets) == 0 {
 		return []smartMoneyOverviewHistogramBucket{}
 	}
+
+	const unboundedRange = 1e18
 	type bucketDef struct {
 		label string
 		min   float64
 		max   float64
 	}
 	buckets := []bucketDef{
-		{label: "<= -1000", min: math.Inf(-1), max: -1000},
+		{label: "<= -1000", min: -unboundedRange, max: -1000},
 		{label: "-1000 ~ -300", min: -1000, max: -300},
 		{label: "-300 ~ -100", min: -300, max: -100},
 		{label: "-100 ~ -10", min: -100, max: -10},
@@ -550,7 +552,7 @@ func buildSmartMoneyHistogram(wallets []smartMoneyOverviewWallet) []smartMoneyOv
 		{label: "10 ~ 100", min: 10, max: 100},
 		{label: "100 ~ 300", min: 100, max: 300},
 		{label: "300 ~ 1000", min: 300, max: 1000},
-		{label: ">= 1000", min: 1000, max: math.Inf(1)},
+		{label: ">= 1000", min: 1000, max: unboundedRange},
 	}
 	out := make([]smartMoneyOverviewHistogramBucket, len(buckets))
 	total := len(wallets)
