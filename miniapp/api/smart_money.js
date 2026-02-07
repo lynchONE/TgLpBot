@@ -54,11 +54,47 @@ export default async function handler(req, res) {
     try {
         const upstream = await fetch(url);
         const text = await upstream.text();
+        const body = String(text || '').trim();
 
         res.statusCode = upstream.status;
-        const contentType = upstream.headers.get('content-type');
-        if (contentType) res.setHeader('Content-Type', contentType);
+        const contentType = String(upstream.headers.get('content-type') || '');
         res.setHeader('Cache-Control', 'no-store');
+
+        if (upstream.ok && !body) {
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+            res.end(JSON.stringify({
+                chain: String(req.query?.chain || 'bsc'),
+                pools: [],
+                wallets_24h: [],
+                summary: {},
+                warnings: ['smart_money upstream returned empty body'],
+            }));
+            return;
+        }
+
+        if (!contentType.toLowerCase().includes('application/json')) {
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+            if (!body) {
+                res.end(JSON.stringify({
+                    chain: String(req.query?.chain || 'bsc'),
+                    pools: [],
+                    wallets_24h: [],
+                    summary: {},
+                    warnings: ['smart_money upstream non-json empty body'],
+                }));
+                return;
+            }
+            res.end(JSON.stringify({
+                chain: String(req.query?.chain || 'bsc'),
+                pools: [],
+                wallets_24h: [],
+                summary: {},
+                warnings: [`smart_money upstream non-json body: ${body.slice(0, 200)}`],
+            }));
+            return;
+        }
+
+        res.setHeader('Content-Type', contentType || 'application/json; charset=utf-8');
         res.end(text);
     } catch (err) {
         res.statusCode = 502;
@@ -66,4 +102,3 @@ export default async function handler(req, res) {
         res.end(String(err?.message || err || 'upstream fetch failed'));
     }
 }
-

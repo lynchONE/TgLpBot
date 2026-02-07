@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -27,6 +29,9 @@ type SmartLPMonitor struct {
 	stopChan chan struct{}
 	ticker   *time.Ticker
 	interval time.Duration
+
+	removeTicker   *time.Ticker
+	removeInterval time.Duration
 }
 
 type smartLPV3Pos struct {
@@ -93,11 +98,14 @@ func NewSmartLPMonitor(ch *clickhouse.ClickHouseService) *SmartLPMonitor {
 	if config.AppConfig != nil && config.AppConfig.SmartLPScanIntervalSeconds > 0 {
 		interval = time.Duration(config.AppConfig.SmartLPScanIntervalSeconds) * time.Second
 	}
+	removeInterval := interval
 	return &SmartLPMonitor{
-		ch:       ch,
-		stopChan: make(chan struct{}),
-		ticker:   time.NewTicker(interval),
-		interval: interval,
+		ch:             ch,
+		stopChan:       make(chan struct{}),
+		ticker:         time.NewTicker(interval),
+		interval:       interval,
+		removeTicker:   time.NewTicker(removeInterval),
+		removeInterval: removeInterval,
 	}
 }
 
@@ -117,6 +125,7 @@ func (s *SmartLPMonitor) Start() {
 		}
 		log.Printf("[SmartLP] websocket enabled url=%s", wsURL)
 		go s.runWebsocket(wsURL)
+		go s.runRemoveWatcherLoop()
 		return
 	}
 
@@ -128,6 +137,7 @@ func (s *SmartLPMonitor) Start() {
 		}
 	}
 	go s.runLoop()
+	go s.runRemoveWatcherLoop()
 }
 
 func (s *SmartLPMonitor) Stop() {
@@ -141,6 +151,9 @@ func (s *SmartLPMonitor) Stop() {
 	}
 	if s.ticker != nil {
 		s.ticker.Stop()
+	}
+	if s.removeTicker != nil {
+		s.removeTicker.Stop()
 	}
 }
 
@@ -398,6 +411,9 @@ func (s *SmartLPMonitor) smartLPWebsocketBlockWorker(blockQueue <-chan uint64, m
 			log.Printf("[SmartLP] insert events failed: %v", err)
 			continue
 		}
+		if err := s.upsertWatchedWallets(context.Background(), events, "scan_add"); err != nil {
+			log.Printf("[SmartLP] upsert watched wallets failed: %v", err)
+		}
 		log.Printf("[SmartLP] inserted events: %d", len(events))
 	}
 }
@@ -599,6 +615,9 @@ func (s *SmartLPMonitor) runOnce() {
 				log.Printf("[SmartLP] insert events failed: %v", err)
 				return
 			}
+			if err := s.upsertWatchedWallets(ctx, events, "scan_add"); err != nil {
+				log.Printf("[SmartLP] upsert watched wallets failed: %v", err)
+			}
 			log.Printf("[SmartLP] inserted events: %d", len(events))
 		}
 		if lastScanned >= from {
@@ -615,6 +634,9 @@ func (s *SmartLPMonitor) runOnce() {
 		if err := s.insertEvents(ctx, events); err != nil {
 			log.Printf("[SmartLP] insert events failed: %v", err)
 			return
+		}
+		if err := s.upsertWatchedWallets(ctx, events, "scan_add"); err != nil {
+			log.Printf("[SmartLP] upsert watched wallets failed: %v", err)
 		}
 		log.Printf("[SmartLP] inserted events: %d", len(events))
 	} else {
@@ -1624,6 +1646,447 @@ func parseHexAddressList(raw string) []common.Address {
 		addrs = append(addrs, addr)
 	}
 	return addrs
+}
+
+func (s *SmartLPMonitor) upsertWatchedWallets(ctx context.Context, events []smartLPEvent, source string) error {
+	if s == nil || s.ch == nil || s.ch.Conn == nil || len(events) == 0 {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	type pair struct {
+		chain  string
+		wallet string
+	}
+	uniq := make(map[pair]time.Time)
+	for _, ev := range events {
+		if strings.ToLower(strings.TrimSpace(ev.action)) != "add" {
+			continue
+		}
+		chain := strings.ToLower(strings.TrimSpace(ev.chain))
+		wallet := strings.ToLower(strings.TrimSpace(ev.walletAddress))
+		if chain == "" || !common.IsHexAddress(wallet) {
+			continue
+		}
+		key := pair{chain: chain, wallet: wallet}
+		last := ev.ts
+		if last.IsZero() {
+			last = time.Now()
+		}
+		if prev, ok := uniq[key]; !ok || last.After(prev) {
+			uniq[key] = last
+		}
+	}
+	if len(uniq) == 0 {
+		return nil
+	}
+
+	batch, err := s.ch.PrepareBatch(ctx, `INSERT INTO smart_lp_watched_wallets (
+		chain, wallet_address, last_add_at, source, updated_at
+	)`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = batch.Abort() }()
+
+	now := time.Now()
+	src := strings.TrimSpace(source)
+	if src == "" {
+		src = "smart_lp"
+	}
+	for key, lastAddAt := range uniq {
+		if err := batch.Append(
+			key.chain,
+			key.wallet,
+			lastAddAt,
+			src,
+			now,
+		); err != nil {
+			return err
+		}
+	}
+	return batch.Send()
+}
+
+func (s *SmartLPMonitor) loadWatchedWallets(ctx context.Context, chain string) (map[string]struct{}, error) {
+	out := make(map[string]struct{})
+	if s == nil || s.ch == nil || s.ch.Conn == nil {
+		return out, fmt.Errorf("clickhouse not initialized")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	chain = strings.ToLower(strings.TrimSpace(chain))
+	if chain == "" {
+		return out, nil
+	}
+
+	rows, err := s.ch.Conn.Query(ctx, `
+		SELECT wallet_address
+		FROM smart_lp_watched_wallets
+		WHERE lowerUTF8(chain) = ?
+		GROUP BY wallet_address
+	`, chain)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var wallet string
+		if err := rows.Scan(&wallet); err != nil {
+			return out, err
+		}
+		wallet = strings.ToLower(strings.TrimSpace(wallet))
+		if common.IsHexAddress(wallet) {
+			out[wallet] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+func (s *SmartLPMonitor) loadRemoveLastScannedBlock(ctx context.Context) (uint64, bool, error) {
+	var last uint64
+	var cnt uint64
+	q := "SELECT argMax(last_block, updated_at) AS last_block, count() AS cnt FROM smart_lp_remove_scan_state WHERE id = 1"
+	if err := s.ch.Conn.QueryRow(ctx, q).Scan(&last, &cnt); err != nil {
+		return 0, false, err
+	}
+	if cnt == 0 {
+		return 0, false, nil
+	}
+	return last, true, nil
+}
+
+func (s *SmartLPMonitor) saveRemoveLastScannedBlock(ctx context.Context, block uint64) error {
+	q := "INSERT INTO smart_lp_remove_scan_state (id, last_block, updated_at) VALUES (1, ?, ?)"
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		if attempt > 1 {
+			delay := time.Duration(attempt-1) * 500 * time.Millisecond
+			t := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				return ctx.Err()
+			case <-t.C:
+			}
+		}
+		if err := s.ch.Conn.Exec(ctx, q, block, time.Now()); err != nil {
+			lastErr = err
+			if !isRetryableClickHouseError(err) {
+				return err
+			}
+			continue
+		}
+		return nil
+	}
+	return lastErr
+}
+
+func (s *SmartLPMonitor) runRemoveWatcherLoop() {
+	if s == nil || s.removeTicker == nil {
+		return
+	}
+	if config.AppConfig != nil && config.AppConfig.SmartLPDebug {
+		log.Printf("[SmartLP] remove watcher started interval=%s", s.removeInterval)
+	}
+	s.runRemoveWatcherOnce()
+	for {
+		select {
+		case <-s.removeTicker.C:
+			s.runRemoveWatcherOnce()
+		case <-s.stopChan:
+			if config.AppConfig != nil && config.AppConfig.SmartLPDebug {
+				log.Printf("[SmartLP] remove watcher stopped")
+			}
+			return
+		}
+	}
+}
+
+func (s *SmartLPMonitor) runRemoveWatcherOnce() {
+	if config.AppConfig == nil || !config.AppConfig.SmartLPEnabled {
+		return
+	}
+	if s == nil || s.ch == nil || s.ch.Conn == nil {
+		return
+	}
+	if blockchain.Client == nil || blockchain.ChainID == nil {
+		return
+	}
+
+	chain := strings.ToLower(strings.TrimSpace(config.AppConfig.AutoLPChain))
+	if chain == "" {
+		chain = "bsc"
+	}
+
+	v3Managers := make([]common.Address, 0, 2)
+	if common.IsHexAddress(config.AppConfig.PancakeV3PositionManagerAddress) {
+		v3Managers = append(v3Managers, common.HexToAddress(config.AppConfig.PancakeV3PositionManagerAddress))
+	}
+	if common.IsHexAddress(config.AppConfig.UniswapV3PositionManagerAddress) {
+		v3Managers = append(v3Managers, common.HexToAddress(config.AppConfig.UniswapV3PositionManagerAddress))
+	}
+	hasV4 := common.IsHexAddress(config.AppConfig.UniswapV4PoolManagerAddress)
+	var v4PoolManager common.Address
+	if hasV4 {
+		v4PoolManager = common.HexToAddress(config.AppConfig.UniswapV4PoolManagerAddress)
+	}
+	if len(v3Managers) == 0 && !hasV4 {
+		return
+	}
+
+	scanTimeout := 10 * time.Minute
+	if config.AppConfig.SmartLPScanTimeoutSeconds > 0 {
+		scanTimeout = time.Duration(config.AppConfig.SmartLPScanTimeoutSeconds) * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), scanTimeout)
+	defer cancel()
+
+	watch, err := s.loadWatchedWallets(ctx, chain)
+	if err != nil {
+		log.Printf("[SmartLP] remove watcher load watchlist failed: %v", err)
+		return
+	}
+	if len(watch) == 0 {
+		if config.AppConfig.SmartLPDebug {
+			log.Printf("[SmartLP] remove watcher skip: empty watchlist")
+		}
+		return
+	}
+
+	head, err := blockchain.Client.BlockNumber(ctx)
+	if err != nil {
+		log.Printf("[SmartLP] remove watcher get head block failed: %v", err)
+		return
+	}
+
+	last, ok, err := s.loadRemoveLastScannedBlock(ctx)
+	if err != nil {
+		log.Printf("[SmartLP] remove watcher load state failed: %v", err)
+		return
+	}
+	if !ok {
+		if err := s.saveRemoveLastScannedBlock(ctx, head); err != nil {
+			log.Printf("[SmartLP] remove watcher init state failed: %v", err)
+		}
+		return
+	}
+	if last >= head {
+		return
+	}
+
+	from := last + 1
+	to := head
+	maxBlocks := 200
+	if config.AppConfig.SmartLPMaxBlocksPerScan > 0 {
+		maxBlocks = config.AppConfig.SmartLPMaxBlocksPerScan
+	}
+	if maxBlocks > 0 {
+		maxU := uint64(maxBlocks)
+		if maxU > 0 && from+maxU-1 < to {
+			to = from + maxU - 1
+		}
+	}
+
+	debug := config.AppConfig != nil && config.AppConfig.SmartLPDebug
+	scanner := newSmartLPReceiptScanner(chain, 30*time.Second, debug, v3Managers, v4PoolManager)
+	if config.AppConfig != nil && config.AppConfig.SmartLPRPCTimeoutSeconds > 0 {
+		scanner.callTimeout = time.Duration(config.AppConfig.SmartLPRPCTimeoutSeconds) * time.Second
+	}
+	callTimeout := scanner.callTimeout
+	if callTimeout <= 0 {
+		callTimeout = 30 * time.Second
+	}
+
+	fromBI := new(big.Int).SetUint64(from)
+	toBI := new(big.Int).SetUint64(to)
+	candidateTxBlocks := make(map[common.Hash]uint64)
+
+	collectCandidateLogs := func(q ethereum.FilterQuery, label string) error {
+		logs, err := blockchain.Client.FilterLogs(ctx, q)
+		if err != nil {
+			return err
+		}
+		for _, lg := range logs {
+			if lg.TxHash == (common.Hash{}) {
+				continue
+			}
+			bn := lg.BlockNumber
+			if bn == 0 {
+				bn = from
+			}
+			if prev, ok := candidateTxBlocks[lg.TxHash]; !ok || bn < prev {
+				candidateTxBlocks[lg.TxHash] = bn
+			}
+		}
+		if debug {
+			log.Printf("[SmartLP] remove watcher candidate logs source=%s range=%d-%d logs=%d txs=%d", label, from, to, len(logs), len(candidateTxBlocks))
+		}
+		return nil
+	}
+
+	if len(v3Managers) > 0 {
+		q := ethereum.FilterQuery{
+			FromBlock: fromBI,
+			ToBlock:   toBI,
+			Addresses: v3Managers,
+			Topics:    [][]common.Hash{{scanner.decreaseID}},
+		}
+		if err := collectCandidateLogs(q, "v3_decrease"); err != nil {
+			log.Printf("[SmartLP] remove watcher filter v3 logs failed: %v", err)
+			return
+		}
+	}
+
+	if hasV4 {
+		q := ethereum.FilterQuery{
+			FromBlock: fromBI,
+			ToBlock:   toBI,
+			Addresses: []common.Address{v4PoolManager},
+			Topics:    [][]common.Hash{{scanner.modifyID}},
+		}
+		if err := collectCandidateLogs(q, "v4_modify"); err != nil {
+			log.Printf("[SmartLP] remove watcher filter v4 logs failed: %v", err)
+			return
+		}
+	}
+
+	if len(candidateTxBlocks) == 0 {
+		if err := s.saveRemoveLastScannedBlock(ctx, to); err != nil {
+			log.Printf("[SmartLP] remove watcher save state failed: %v", err)
+		}
+		return
+	}
+
+	type candidateTx struct {
+		hash  common.Hash
+		block uint64
+	}
+	candidates := make([]candidateTx, 0, len(candidateTxBlocks))
+	for txHash, block := range candidateTxBlocks {
+		candidates = append(candidates, candidateTx{hash: txHash, block: block})
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].block == candidates[j].block {
+			return strings.ToLower(candidates[i].hash.Hex()) < strings.ToLower(candidates[j].hash.Hex())
+		}
+		return candidates[i].block < candidates[j].block
+	})
+
+	type rpcTx struct {
+		Hash common.Hash     `json:"hash"`
+		From common.Address  `json:"from"`
+		To   *common.Address `json:"to"`
+	}
+
+	filtered := make([]smartLPEvent, 0, len(candidates))
+	minFailedBlock := uint64(0)
+	recordFailed := func(bn uint64) {
+		if bn == 0 {
+			bn = from
+		}
+		if minFailedBlock == 0 || bn < minFailedBlock {
+			minFailedBlock = bn
+		}
+	}
+
+	for _, item := range candidates {
+		var tx rpcTx
+		txCtx, cancel := context.WithTimeout(ctx, callTimeout)
+		err := blockchain.Client.Client().CallContext(txCtx, &tx, "eth_getTransactionByHash", item.hash)
+		cancel()
+		if err != nil {
+			if debug {
+				log.Printf("[SmartLP] remove watcher tx lookup failed tx=%s err=%v", strings.ToLower(item.hash.Hex()), err)
+			}
+			recordFailed(item.block)
+			continue
+		}
+
+		fromAddr := tx.From
+		var contractTo common.Address
+		if tx.To != nil {
+			contractTo = *tx.To
+		}
+
+		if fromAddr == (common.Address{}) || contractTo == (common.Address{}) {
+			txObjCtx, txObjCancel := context.WithTimeout(ctx, callTimeout)
+			txObj, _, txErr := blockchain.Client.TransactionByHash(txObjCtx, item.hash)
+			txObjCancel()
+			if txErr == nil && txObj != nil {
+				if contractTo == (common.Address{}) && txObj.To() != nil {
+					contractTo = *txObj.To()
+				}
+				if fromAddr == (common.Address{}) && blockchain.ChainID != nil {
+					signer := types.LatestSignerForChainID(blockchain.ChainID)
+					if sender, senderErr := types.Sender(signer, txObj); senderErr == nil {
+						fromAddr = sender
+					}
+				}
+			}
+		}
+
+		if fromAddr == (common.Address{}) || contractTo == (common.Address{}) {
+			recordFailed(item.block)
+			continue
+		}
+
+		receiptCtx, receiptCancel := context.WithTimeout(ctx, callTimeout)
+		receipt, err := blockchain.Client.TransactionReceipt(receiptCtx, item.hash)
+		receiptCancel()
+		if err != nil || receipt == nil {
+			if debug {
+				log.Printf("[SmartLP] remove watcher receipt lookup failed tx=%s err=%v", strings.ToLower(item.hash.Hex()), err)
+			}
+			recordFailed(item.block)
+			continue
+		}
+
+		txEvents := scanner.scanReceipt(ctx, receipt, fromAddr, contractTo, item.hash)
+		for _, ev := range txEvents {
+			if strings.ToLower(strings.TrimSpace(ev.action)) != "remove" {
+				continue
+			}
+			wallet := strings.ToLower(strings.TrimSpace(ev.walletAddress))
+			if _, ok := watch[wallet]; !ok {
+				continue
+			}
+			ev.source = "watch_remove"
+			filtered = append(filtered, ev)
+		}
+	}
+
+	if len(filtered) > 0 {
+		if err := s.insertEvents(ctx, filtered); err != nil {
+			log.Printf("[SmartLP] remove watcher insert failed: %v", err)
+			return
+		}
+		log.Printf("[SmartLP] remove watcher inserted events: %d", len(filtered))
+	}
+
+	lastScanned := to
+	if minFailedBlock > 0 {
+		if minFailedBlock <= from {
+			lastScanned = from - 1
+		} else {
+			lastScanned = minFailedBlock - 1
+		}
+	}
+
+	if lastScanned >= from {
+		if err := s.saveRemoveLastScannedBlock(ctx, lastScanned); err != nil {
+			log.Printf("[SmartLP] remove watcher save state failed: %v", err)
+		}
+	} else if debug && minFailedBlock > 0 {
+		log.Printf("[SmartLP] remove watcher preserved scan cursor (retry from block=%d)", from)
+	}
 }
 
 func smartLPWebsocketURL() string {

@@ -367,6 +367,28 @@ func (s *ClickHouseService) Migrate(ctx context.Context) error {
 		) ENGINE = ReplacingMergeTree(updated_at)
 		ORDER BY id
 		`,
+		`
+		CREATE TABLE IF NOT EXISTS smart_lp_watched_wallets (
+			chain LowCardinality(String),
+			wallet_address String,
+			last_add_at DateTime,
+			source LowCardinality(String),
+			updated_at DateTime,
+			ingest_id UUID DEFAULT generateUUIDv4()
+		) ENGINE = ReplacingMergeTree(updated_at)
+		PARTITION BY toDate(updated_at)
+		ORDER BY (chain, wallet_address)
+		TTL updated_at + INTERVAL 30 DAY
+		`,
+		`ALTER TABLE smart_lp_watched_wallets MODIFY TTL updated_at + INTERVAL 30 DAY`,
+		`
+		CREATE TABLE IF NOT EXISTS smart_lp_remove_scan_state (
+			id UInt8,
+			last_block UInt64,
+			updated_at DateTime
+		) ENGINE = ReplacingMergeTree(updated_at)
+		ORDER BY id
+		`,
 	}
 
 	for _, q := range queries {

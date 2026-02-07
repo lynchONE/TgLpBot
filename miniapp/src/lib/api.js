@@ -111,7 +111,7 @@ export async function fetchSmartMoneyOverview({
             pools: [],
             wallets_24h: [],
             summary: {},
-            warnings: ['smart_money response is empty'],
+            warnings: [`smart_money 接口返回空响应体 (HTTP ${resp.status})`],
         };
     }
     try {

@@ -75,7 +75,7 @@ func (s *SmartLPService) GetTopAddedLiquidityPools(ctx context.Context, chain st
 	chainFilter := ""
 	args := make([]interface{}, 0, 1)
 	if chain != "" {
-		chainFilter = "AND chain = ?"
+		chainFilter = "AND lowerUTF8(chain) = ?"
 		args = append(args, chain)
 	}
 
@@ -155,7 +155,7 @@ func (s *SmartLPService) GetPoolAddEvents(ctx context.Context, chain string, loo
 	args := make([]interface{}, 0, 4)
 	args = append(args, poolVersion, poolID)
 	if chain != "" {
-		chainFilter = "AND chain = ?"
+		chainFilter = "AND lowerUTF8(chain) = ?"
 		args = append(args, chain)
 	}
 
@@ -256,7 +256,7 @@ func (s *SmartLPService) GetTopAddWalletsInPools(ctx context.Context, chain stri
 	chain = strings.ToLower(strings.TrimSpace(chain))
 	chainFilter := ""
 	if chain != "" {
-		chainFilter = "AND chain = ?"
+		chainFilter = "AND lowerUTF8(chain) = ?"
 		args = append(args, chain)
 	}
 

@@ -238,6 +238,15 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 	poolSvc := pool.NewPoolService()
 
 	warnings := make([]string, 0, 2)
+	if len(ranks) == 0 && chain != "" {
+		fallbackRanks, ferr := smSvc.GetTopAddedLiquidityPools(ctx, "", poolsWindow, poolLimit)
+		if ferr != nil {
+			warnings = append(warnings, fmt.Sprintf("pool rank fallback failed: %v", ferr))
+		} else if len(fallbackRanks) > 0 {
+			ranks = fallbackRanks
+			warnings = append(warnings, fmt.Sprintf("pool rank fallback used (chain=%s returned empty)", chain))
+		}
+	}
 	pools := make([]smart_lp.SmartLPPoolKey, 0, len(ranks))
 	outPools := make([]smartMoneyOverviewPool, 0, len(ranks))
 	poolInfoByKey := make(map[string]*pool.PoolInfo, len(ranks))
@@ -655,7 +664,7 @@ func querySmartMoneyCashflows(ctx context.Context, conn smartMoneyClickHouseQuer
 	chain = strings.ToLower(strings.TrimSpace(chain))
 	chainFilter := ""
 	if chain != "" {
-		chainFilter = "AND chain = ?"
+		chainFilter = "AND lowerUTF8(chain) = ?"
 		args = append(args, chain)
 	}
 
@@ -734,7 +743,7 @@ func querySmartMoneyEventTrend(ctx context.Context, conn smartMoneyClickHouseQue
 	chain = strings.ToLower(strings.TrimSpace(chain))
 	chainFilter := ""
 	if chain != "" {
-		chainFilter = "AND chain = ?"
+		chainFilter = "AND lowerUTF8(chain) = ?"
 		args = append(args, chain)
 	}
 
