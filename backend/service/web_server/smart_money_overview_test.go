@@ -19,6 +19,12 @@ type fakeRows struct {
 	err  error
 }
 
+type fakeEventTrendRows struct {
+	idx  int
+	data []smartMoneyEventTrendRow
+	err  error
+}
+
 func (r *fakeRows) Next() bool {
 	if r == nil {
 		return false
@@ -57,6 +63,41 @@ func (r *fakeRows) Totals(dest ...any) error { return nil }
 func (r *fakeRows) Columns() []string        { return nil }
 func (r *fakeRows) Close() error             { return nil }
 func (r *fakeRows) Err() error               { return r.err }
+
+func (r *fakeEventTrendRows) Next() bool {
+	if r == nil {
+		return false
+	}
+	if r.idx >= len(r.data) {
+		return false
+	}
+	r.idx++
+	return true
+}
+
+func (r *fakeEventTrendRows) Scan(dest ...any) error {
+	if r == nil {
+		return nil
+	}
+	if r.idx <= 0 || r.idx > len(r.data) {
+		return nil
+	}
+	row := r.data[r.idx-1]
+	*dest[0].(*int32) = row.HoursAgo
+	*dest[1].(*uint64) = row.AddEvents
+	*dest[2].(*uint64) = row.RemoveEvents
+	*dest[3].(*uint64) = row.DistinctWallet
+	return nil
+}
+
+func (r *fakeEventTrendRows) ScanStruct(dest any) error { return nil }
+func (r *fakeEventTrendRows) ColumnTypes() []driver.ColumnType {
+	return nil
+}
+func (r *fakeEventTrendRows) Totals(dest ...any) error { return nil }
+func (r *fakeEventTrendRows) Columns() []string        { return nil }
+func (r *fakeEventTrendRows) Close() error             { return nil }
+func (r *fakeEventTrendRows) Err() error               { return r.err }
 
 type fakeCHConn struct {
 	lastQuery string
@@ -109,6 +150,61 @@ func TestQuerySmartMoneyCashflows_ParsesRowsAndUsesNetAmounts(t *testing.T) {
 	}
 	if len(conn.lastArgs) == 0 {
 		t.Fatalf("expected query args")
+	}
+}
+
+func TestQuerySmartMoneyEventTrend_BuildsHourlyAggregationQuery(t *testing.T) {
+	conn := &fakeCHConn{
+		rows: &fakeEventTrendRows{
+			data: []smartMoneyEventTrendRow{
+				{HoursAgo: 2, AddEvents: 5, RemoveEvents: 1, DistinctWallet: 3},
+			},
+		},
+	}
+
+	pools := []smart_lp.SmartLPPoolKey{
+		{PoolVersion: "v3", PoolID: "0xpool"},
+	}
+
+	rows, err := querySmartMoneyEventTrend(context.Background(), conn, "bsc", pools, 24*time.Hour)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].HoursAgo != 2 || rows[0].AddEvents != 5 || rows[0].RemoveEvents != 1 || rows[0].DistinctWallet != 3 {
+		t.Fatalf("unexpected row: %+v", rows[0])
+	}
+
+	if !strings.Contains(conn.lastQuery, "hours_ago") || !strings.Contains(conn.lastQuery, "sum(if(action='add'") {
+		t.Fatalf("unexpected trend query: %s", conn.lastQuery)
+	}
+}
+
+func TestBuildSmartMoneySummary_AggregatesMetrics(t *testing.T) {
+	pools := []smartMoneyOverviewPool{{PoolID: "a"}, {PoolID: "b"}}
+	wallets := []smartMoneyOverviewWallet{
+		{WalletAddress: "0x1", InUSDT24h: 200, OutUSDT24h: 100, PnLUSDT24h: 100, EventCount24h: 4, EventCount1h: 1},
+		{WalletAddress: "0x2", InUSDT24h: 80, OutUSDT24h: 100, PnLUSDT24h: -20, EventCount24h: 2, EventCount1h: 0},
+		{WalletAddress: "0x3", InUSDT24h: 0, OutUSDT24h: 0, PnLUSDT24h: 0, EventCount24h: 1, EventCount1h: 1},
+	}
+
+	summary := buildSmartMoneySummary(pools, wallets, 2)
+	if summary.PoolCount != 2 || summary.WalletCount != 3 {
+		t.Fatalf("unexpected counts: %+v", summary)
+	}
+	if summary.TotalInUSDT24h != 280 || summary.TotalOutUSDT24h != 200 || summary.TotalPnLUSDT24h != 80 {
+		t.Fatalf("unexpected totals: %+v", summary)
+	}
+	if summary.PositiveWallets24h != 1 || summary.NegativeWallets24h != 1 || summary.ZeroWallets24h != 1 {
+		t.Fatalf("unexpected wallet buckets: %+v", summary)
+	}
+	if summary.MissingPriceTokenCnt != 2 {
+		t.Fatalf("unexpected missing token count: %+v", summary)
+	}
+	if summary.CoverageRatio24h <= 0.66 || summary.CoverageRatio24h > 0.67 {
+		t.Fatalf("unexpected coverage ratio: %+v", summary)
 	}
 }
 

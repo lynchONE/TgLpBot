@@ -1,35 +1,73 @@
 package pricing
 
 import (
+	"TgLpBot/base/config"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 type TokenPriceService struct {
 	client *http.Client
 	ttl    time.Duration
+	stale  time.Duration
 
-	mu    sync.RWMutex
-	cache map[string]cachedTokenPrice
+	rateLimitCooldown time.Duration
+
+	mu               sync.RWMutex
+	cache            map[string]cachedTokenPrice
+	rateLimitedUntil time.Time
+
+	fetchGroup singleflight.Group
 }
 
 type cachedTokenPrice struct {
 	priceUSD float64
 	expires  time.Time
+	staleTil time.Time
+}
+
+type ProviderHTTPError struct {
+	Provider string
+	Status   int
+	Body     string
+}
+
+func (e *ProviderHTTPError) Error() string {
+	if e == nil {
+		return "provider http error"
+	}
+	provider := strings.TrimSpace(e.Provider)
+	if provider == "" {
+		provider = "provider"
+	}
+	if e.Status > 0 {
+		return fmt.Sprintf("%s token_price api error: status=%d", provider, e.Status)
+	}
+	return fmt.Sprintf("%s token_price api error", provider)
+}
+
+func (e *ProviderHTTPError) IsRateLimit() bool {
+	return e != nil && e.Status == http.StatusTooManyRequests
 }
 
 func NewTokenPriceService() *TokenPriceService {
 	return &TokenPriceService{
-		client: &http.Client{Timeout: 12 * time.Second},
-		ttl:    30 * time.Second,
-		cache:  make(map[string]cachedTokenPrice),
+		client:            &http.Client{Timeout: 12 * time.Second},
+		ttl:               75 * time.Second,
+		stale:             30 * time.Minute,
+		rateLimitCooldown: 90 * time.Second,
+		cache:             make(map[string]cachedTokenPrice),
 	}
 }
 
@@ -39,11 +77,94 @@ func (s *TokenPriceService) GetUSDPrices(network string, tokenAddresses []string
 		network = "bsc"
 	}
 
-	now := time.Now()
-	out := make(map[string]float64, len(tokenAddresses))
+	addresses := normalizeTokenAddresses(tokenAddresses)
+	if len(addresses) == 0 {
+		return map[string]float64{}, nil
+	}
 
-	missing := make([]string, 0, len(tokenAddresses))
+	now := time.Now()
+	out := make(map[string]float64, len(addresses))
+	stalePrices := make(map[string]float64, len(addresses))
+
+	missing := make([]string, 0, len(addresses))
+	for _, addr := range addresses {
+		if p, ok := defaultFallbackPrice(network, addr); ok {
+			out[addr] = p
+			s.putCache(addr, p, now)
+			continue
+		}
+
+		fresh, stale, hasFresh, hasStale := s.getCachedPrice(addr, now)
+		if hasFresh {
+			out[addr] = fresh
+			continue
+		}
+		if hasStale {
+			stalePrices[addr] = stale
+		}
+		missing = append(missing, addr)
+	}
+
+	if len(missing) == 0 {
+		return out, nil
+	}
+
+	s.mu.RLock()
+	cooldownUntil := s.rateLimitedUntil
+	s.mu.RUnlock()
+	if cooldownUntil.After(now) {
+		for _, addr := range missing {
+			if p, ok := stalePrices[addr]; ok {
+				out[addr] = p
+				continue
+			}
+			out[addr] = 0
+		}
+		return out, &ProviderHTTPError{Provider: "geckoterminal", Status: http.StatusTooManyRequests}
+	}
+
+	fetched, err := s.fetchPrices(network, missing)
+	if err != nil {
+		var httpErr *ProviderHTTPError
+		if errors.As(err, &httpErr) && httpErr.IsRateLimit() {
+			s.mu.Lock()
+			s.rateLimitedUntil = time.Now().Add(s.rateLimitCooldown)
+			s.mu.Unlock()
+		}
+		for _, addr := range missing {
+			if p, ok := fetched[addr]; ok && p > 0 {
+				out[addr] = p
+				s.putCache(addr, p, now)
+				continue
+			}
+			if p, ok := stalePrices[addr]; ok {
+				out[addr] = p
+				continue
+			}
+			out[addr] = 0
+		}
+		return out, err
+	}
+
+	for _, addr := range missing {
+		if p, ok := fetched[addr]; ok && p > 0 {
+			out[addr] = p
+			s.putCache(addr, p, now)
+			continue
+		}
+		if p, ok := stalePrices[addr]; ok {
+			out[addr] = p
+			continue
+		}
+		out[addr] = 0
+	}
+
+	return out, nil
+}
+
+func normalizeTokenAddresses(tokenAddresses []string) []string {
 	seen := make(map[string]struct{}, len(tokenAddresses))
+	out := make([]string, 0, len(tokenAddresses))
 	for _, a := range tokenAddresses {
 		addr := strings.ToLower(strings.TrimSpace(a))
 		if addr == "" {
@@ -53,34 +174,126 @@ func (s *TokenPriceService) GetUSDPrices(network string, tokenAddresses []string
 			continue
 		}
 		seen[addr] = struct{}{}
-
-		s.mu.RLock()
-		c, ok := s.cache[addr]
-		s.mu.RUnlock()
-		if ok && c.expires.After(now) {
-			out[addr] = c.priceUSD
-			continue
-		}
-		missing = append(missing, addr)
+		out = append(out, addr)
 	}
+	return out
+}
 
-	if len(missing) == 0 {
-		return out, nil
+func (s *TokenPriceService) getCachedPrice(addr string, now time.Time) (fresh float64, stale float64, hasFresh bool, hasStale bool) {
+	s.mu.RLock()
+	c, ok := s.cache[addr]
+	s.mu.RUnlock()
+	if !ok || c.priceUSD <= 0 {
+		return 0, 0, false, false
 	}
-
-	fetched, err := s.fetchGeckoTokenPrices(network, missing)
-	if err != nil {
-		return out, err
+	if c.expires.After(now) {
+		return c.priceUSD, c.priceUSD, true, true
 	}
+	if c.staleTil.After(now) {
+		return 0, c.priceUSD, false, true
+	}
+	return 0, 0, false, false
+}
 
+func (s *TokenPriceService) putCache(addr string, price float64, now time.Time) {
+	if strings.TrimSpace(addr) == "" || price <= 0 {
+		return
+	}
 	s.mu.Lock()
-	for addr, p := range fetched {
-		s.cache[addr] = cachedTokenPrice{priceUSD: p, expires: now.Add(s.ttl)}
+	s.cache[addr] = cachedTokenPrice{priceUSD: price, expires: now.Add(s.ttl), staleTil: now.Add(s.stale)}
+	s.mu.Unlock()
+}
+
+func (s *TokenPriceService) fetchPrices(network string, tokenAddresses []string) (map[string]float64, error) {
+	addresses := normalizeTokenAddresses(tokenAddresses)
+	if len(addresses) == 0 {
+		return map[string]float64{}, nil
+	}
+
+	sorted := append([]string(nil), addresses...)
+	sort.Strings(sorted)
+	key := network + "|" + strings.Join(sorted, ",")
+	v, err, _ := s.fetchGroup.Do(key, func() (any, error) {
+		out := make(map[string]float64, len(addresses))
+		const chunkSize = 25
+		for start := 0; start < len(addresses); start += chunkSize {
+			end := start + chunkSize
+			if end > len(addresses) {
+				end = len(addresses)
+			}
+			batch := addresses[start:end]
+			part, ferr := s.fetchGeckoTokenPrices(network, batch)
+			if ferr != nil {
+				return out, ferr
+			}
+			for addr, price := range part {
+				if price > 0 {
+					out[addr] = price
+				}
+			}
+		}
+		return out, nil
+	})
+	if err != nil {
+		if partial, ok := v.(map[string]float64); ok {
+			return partial, err
+		}
+		return map[string]float64{}, err
+	}
+	data, ok := v.(map[string]float64)
+	if !ok || data == nil {
+		return map[string]float64{}, nil
+	}
+	out := make(map[string]float64, len(data))
+	for addr, p := range data {
 		out[addr] = p
 	}
-	s.mu.Unlock()
-
 	return out, nil
+}
+
+var defaultBSCStableAddresses = map[string]float64{
+	"0x55d398326f99059ff775485246999027b3197955": 1,
+	"0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d": 1,
+	"0xe9e7cea3dedca5984780bafc599bd69add087d56": 1,
+	"0x1af3f329e8be154074d8769d1ffabf0a3ef00b1d": 1,
+}
+
+func defaultFallbackPrice(network string, addr string) (float64, bool) {
+	network = strings.ToLower(strings.TrimSpace(network))
+	addr = strings.ToLower(strings.TrimSpace(addr))
+	if addr == "" {
+		return 0, false
+	}
+	if network != "bsc" {
+		return 0, false
+	}
+
+	if config.AppConfig != nil {
+		usdt := strings.ToLower(strings.TrimSpace(config.AppConfig.USDTAddress))
+		usdc := strings.ToLower(strings.TrimSpace(config.AppConfig.USDCAddress))
+		busd := strings.ToLower(strings.TrimSpace(config.AppConfig.BUSDAddress))
+		if addr == usdt || addr == usdc || addr == busd {
+			return 1, true
+		}
+		wbnb := strings.ToLower(strings.TrimSpace(config.AppConfig.WBNBAddress))
+		if wbnb != "" && addr == wbnb {
+			p := GetBNBPriceUSDT()
+			if p > 0 {
+				return p, true
+			}
+		}
+	}
+
+	if p, ok := defaultBSCStableAddresses[addr]; ok {
+		return p, true
+	}
+	if addr == "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c" {
+		p := GetBNBPriceUSDT()
+		if p > 0 {
+			return p, true
+		}
+	}
+	return 0, false
 }
 
 type geckoTokenPriceResponse struct {
@@ -92,6 +305,10 @@ type geckoTokenPriceResponse struct {
 }
 
 func (s *TokenPriceService) fetchGeckoTokenPrices(network string, tokenAddresses []string) (map[string]float64, error) {
+	if len(tokenAddresses) == 0 {
+		return map[string]float64{}, nil
+	}
+	tokenAddresses = normalizeTokenAddresses(tokenAddresses)
 	if len(tokenAddresses) == 0 {
 		return map[string]float64{}, nil
 	}
@@ -114,7 +331,11 @@ func (s *TokenPriceService) fetchGeckoTokenPrices(network string, tokenAddresses
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("geckoterminal token_price api error: status=%d body=%s", resp.StatusCode, string(body))
+		bodyText := strings.TrimSpace(string(body))
+		if len(bodyText) > 320 {
+			bodyText = bodyText[:320]
+		}
+		return nil, &ProviderHTTPError{Provider: "geckoterminal", Status: resp.StatusCode, Body: bodyText}
 	}
 
 	var parsed geckoTokenPriceResponse
@@ -137,14 +358,6 @@ func (s *TokenPriceService) fetchGeckoTokenPrices(network string, tokenAddresses
 			continue
 		}
 		out[addr] = f
-	}
-
-	// Missing prices are treated as 0.
-	for _, a := range tokenAddresses {
-		addr := strings.ToLower(strings.TrimSpace(a))
-		if _, ok := out[addr]; !ok {
-			out[addr] = 0
-		}
 	}
 
 	return out, nil

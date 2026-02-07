@@ -40,18 +40,54 @@ type smartMoneyOverviewWallet struct {
 	PnLUSDT24h    float64 `json:"pnl_usdt_24h"`
 	InUSDT24h     float64 `json:"in_usdt_24h"`
 	OutUSDT24h    float64 `json:"out_usdt_24h"`
+	PnLMarginPct  float64 `json:"pnl_margin_pct,omitempty"`
 	EventCount24h int     `json:"event_count_24h"`
 	EventCount1h  int     `json:"event_count_1h,omitempty"`
 }
 
+type smartMoneyOverviewSummary struct {
+	PoolCount            int     `json:"pool_count"`
+	WalletCount          int     `json:"wallet_count"`
+	TotalInUSDT24h       float64 `json:"total_in_usdt_24h"`
+	TotalOutUSDT24h      float64 `json:"total_out_usdt_24h"`
+	TotalPnLUSDT24h      float64 `json:"total_pnl_usdt_24h"`
+	PositiveWallets24h   int     `json:"positive_wallets_24h"`
+	NegativeWallets24h   int     `json:"negative_wallets_24h"`
+	ZeroWallets24h       int     `json:"zero_wallets_24h"`
+	TotalEvents24h       int     `json:"total_events_24h"`
+	TotalEvents1h        int     `json:"total_events_1h"`
+	CoverageRatio24h     float64 `json:"coverage_ratio_24h"`
+	MissingPriceTokenCnt int     `json:"missing_price_token_count"`
+}
+
+type smartMoneyOverviewHistogramBucket struct {
+	Label      string  `json:"label"`
+	RangeMin   float64 `json:"range_min"`
+	RangeMax   float64 `json:"range_max"`
+	Wallets    int     `json:"wallets"`
+	Share      float64 `json:"share"`
+	TotalPnL24 float64 `json:"total_pnl_usdt_24h"`
+}
+
+type smartMoneyOverviewEventTrendPoint struct {
+	HoursAgo       int `json:"hours_ago"`
+	AddEvents      int `json:"add_events"`
+	RemoveEvents   int `json:"remove_events"`
+	TotalEvents    int `json:"total_events"`
+	DistinctWallet int `json:"distinct_wallets"`
+}
+
 type smartMoneyOverviewResponse struct {
-	Chain          string                     `json:"chain"`
-	PoolsWindowSec int                        `json:"pools_window_sec"`
-	PnLWindowSec   int                        `json:"pnl_window_sec"`
-	UpdatedAt      time.Time                  `json:"updated_at"`
-	Pools          []smartMoneyOverviewPool   `json:"pools"`
-	Wallets24h     []smartMoneyOverviewWallet `json:"wallets_24h"`
-	Warnings       []string                   `json:"warnings,omitempty"`
+	Chain          string                              `json:"chain"`
+	PoolsWindowSec int                                 `json:"pools_window_sec"`
+	PnLWindowSec   int                                 `json:"pnl_window_sec"`
+	UpdatedAt      time.Time                           `json:"updated_at"`
+	Summary        smartMoneyOverviewSummary           `json:"summary"`
+	Pools          []smartMoneyOverviewPool            `json:"pools"`
+	Wallets24h     []smartMoneyOverviewWallet          `json:"wallets_24h"`
+	PnLHistogram24 []smartMoneyOverviewHistogramBucket `json:"pnl_histogram_24h,omitempty"`
+	EventTrend24h  []smartMoneyOverviewEventTrendPoint `json:"event_trend_24h,omitempty"`
+	Warnings       []string                            `json:"warnings,omitempty"`
 }
 
 type smartMoneyCashflowRow struct {
@@ -62,6 +98,13 @@ type smartMoneyCashflowRow struct {
 	Sum0          string
 	Sum1          string
 	EventCount    uint64
+}
+
+type smartMoneyEventTrendRow struct {
+	HoursAgo       int32
+	AddEvents      uint64
+	RemoveEvents   uint64
+	DistinctWallet uint64
 }
 
 func parseIntQuery(q map[string][]string, key string, def int, min int, max int) int {
@@ -292,10 +335,13 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 				}
 			}
 
-			priceSvc := pricing.NewTokenPriceService()
+			priceSvc := s.TokenPrice
+			if priceSvc == nil {
+				priceSvc = pricing.NewTokenPriceService()
+			}
 			prices, perr := priceSvc.GetUSDPrices(chain, tokens)
 			if perr != nil {
-				warnings = append(warnings, fmt.Sprintf("price fetch failed: %v", perr))
+				warnings = append(warnings, fmt.Sprintf("price provider limited/rate-limited; using cached/fallback prices where available"))
 			}
 
 			type walletAgg struct {
@@ -354,13 +400,9 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 				}
 			}
 
-			if len(missingPriceTokens) > 0 {
-				// Keep it short (avoid dumping dozens of addresses).
-				for addr := range missingPriceTokens {
-					missingPriceTokens[addr] = struct{}{}
-					break
-				}
-				warnings = append(warnings, fmt.Sprintf("some token prices are missing; pnl may be underestimated"))
+			missingPriceTokenCount := len(missingPriceTokens)
+			if missingPriceTokenCount > 0 {
+				warnings = append(warnings, fmt.Sprintf("%d token prices are still missing; pnl may be underestimated", missingPriceTokenCount))
 			}
 
 			for _, addr := range wallets {
@@ -374,11 +416,16 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 					cnt = a.cnt
 				}
 				wr := walletRankMap[addr]
+				marginPct := 0.0
+				if outUSDT > 0 {
+					marginPct = (inUSDT - outUSDT) / outUSDT * 100.0
+				}
 				outWallets = append(outWallets, smartMoneyOverviewWallet{
 					WalletAddress: addr,
 					PnLUSDT24h:    inUSDT - outUSDT,
 					InUSDT24h:     inUSDT,
 					OutUSDT24h:    outUSDT,
+					PnLMarginPct:  marginPct,
 					EventCount24h: cnt,
 					EventCount1h:  wr.EventCount,
 				})
@@ -393,6 +440,32 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 				}
 				return outWallets[i].WalletAddress < outWallets[j].WalletAddress
 			})
+
+			trendRows, terr := querySmartMoneyEventTrend(ctx, s.ClickHouse.Conn, chain, pools, 24*time.Hour)
+			if terr != nil {
+				warnings = append(warnings, fmt.Sprintf("event trend query failed: %v", terr))
+			}
+
+			summary := buildSmartMoneySummary(outPools, outWallets, missingPriceTokenCount)
+			hist := buildSmartMoneyHistogram(outWallets)
+			trend := buildSmartMoneyEventTrend(trendRows)
+
+			resp := smartMoneyOverviewResponse{
+				Chain:          chain,
+				PoolsWindowSec: int(poolsWindow.Seconds()),
+				PnLWindowSec:   int(pnlWindow.Seconds()),
+				UpdatedAt:      time.Now(),
+				Summary:        summary,
+				Pools:          outPools,
+				Wallets24h:     outWallets,
+				PnLHistogram24: hist,
+				EventTrend24h:  trend,
+				Warnings:       warnings,
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+			return
 		}
 	}
 
@@ -401,13 +474,139 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 		PoolsWindowSec: int(poolsWindow.Seconds()),
 		PnLWindowSec:   int(pnlWindow.Seconds()),
 		UpdatedAt:      time.Now(),
+		Summary:        buildSmartMoneySummary(outPools, outWallets, 0),
 		Pools:          outPools,
 		Wallets24h:     outWallets,
+		PnLHistogram24: buildSmartMoneyHistogram(outWallets),
+		EventTrend24h:  []smartMoneyOverviewEventTrendPoint{},
 		Warnings:       warnings,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func buildSmartMoneySummary(pools []smartMoneyOverviewPool, wallets []smartMoneyOverviewWallet, missingPriceTokenCount int) smartMoneyOverviewSummary {
+	summary := smartMoneyOverviewSummary{
+		PoolCount:            len(pools),
+		WalletCount:          len(wallets),
+		MissingPriceTokenCnt: missingPriceTokenCount,
+	}
+	if len(wallets) == 0 {
+		return summary
+	}
+
+	for _, w := range wallets {
+		summary.TotalInUSDT24h += w.InUSDT24h
+		summary.TotalOutUSDT24h += w.OutUSDT24h
+		summary.TotalPnLUSDT24h += w.PnLUSDT24h
+		summary.TotalEvents24h += w.EventCount24h
+		summary.TotalEvents1h += w.EventCount1h
+		switch {
+		case w.PnLUSDT24h > 0:
+			summary.PositiveWallets24h++
+		case w.PnLUSDT24h < 0:
+			summary.NegativeWallets24h++
+		default:
+			summary.ZeroWallets24h++
+		}
+	}
+
+	covered := summary.PositiveWallets24h + summary.NegativeWallets24h
+	if summary.WalletCount > 0 {
+		summary.CoverageRatio24h = float64(covered) / float64(summary.WalletCount)
+	}
+	return summary
+}
+
+func buildSmartMoneyHistogram(wallets []smartMoneyOverviewWallet) []smartMoneyOverviewHistogramBucket {
+	if len(wallets) == 0 {
+		return []smartMoneyOverviewHistogramBucket{}
+	}
+	type bucketDef struct {
+		label string
+		min   float64
+		max   float64
+	}
+	buckets := []bucketDef{
+		{label: "<= -1000", min: math.Inf(-1), max: -1000},
+		{label: "-1000 ~ -300", min: -1000, max: -300},
+		{label: "-300 ~ -100", min: -300, max: -100},
+		{label: "-100 ~ -10", min: -100, max: -10},
+		{label: "-10 ~ 10", min: -10, max: 10},
+		{label: "10 ~ 100", min: 10, max: 100},
+		{label: "100 ~ 300", min: 100, max: 300},
+		{label: "300 ~ 1000", min: 300, max: 1000},
+		{label: ">= 1000", min: 1000, max: math.Inf(1)},
+	}
+	out := make([]smartMoneyOverviewHistogramBucket, len(buckets))
+	total := len(wallets)
+	for i, def := range buckets {
+		out[i] = smartMoneyOverviewHistogramBucket{
+			Label:    def.label,
+			RangeMin: def.min,
+			RangeMax: def.max,
+		}
+	}
+
+	for _, wallet := range wallets {
+		v := wallet.PnLUSDT24h
+		for i := range buckets {
+			if i == 0 {
+				if v <= buckets[i].max {
+					out[i].Wallets++
+					out[i].TotalPnL24 += v
+					break
+				}
+				continue
+			}
+			if i == len(buckets)-1 {
+				if v >= buckets[i].min {
+					out[i].Wallets++
+					out[i].TotalPnL24 += v
+					break
+				}
+				continue
+			}
+			if v > buckets[i].min && v <= buckets[i].max {
+				out[i].Wallets++
+				out[i].TotalPnL24 += v
+				break
+			}
+		}
+	}
+
+	if total > 0 {
+		for i := range out {
+			out[i].Share = float64(out[i].Wallets) / float64(total)
+		}
+	}
+	return out
+}
+
+func buildSmartMoneyEventTrend(rows []smartMoneyEventTrendRow) []smartMoneyOverviewEventTrendPoint {
+	out := make([]smartMoneyOverviewEventTrendPoint, 0, 24)
+	byHour := make(map[int]smartMoneyEventTrendRow, len(rows))
+	for _, row := range rows {
+		h := int(row.HoursAgo)
+		if h < 0 || h >= 24 {
+			continue
+		}
+		byHour[h] = row
+	}
+	for h := 23; h >= 0; h-- {
+		row := byHour[h]
+		add := int(row.AddEvents)
+		remove := int(row.RemoveEvents)
+		out = append(out, smartMoneyOverviewEventTrendPoint{
+			HoursAgo:       h,
+			AddEvents:      add,
+			RemoveEvents:   remove,
+			TotalEvents:    add + remove,
+			DistinctWallet: int(row.DistinctWallet),
+		})
+	}
+	return out
 }
 
 type smartMoneyClickHouseQueryer interface {
@@ -485,6 +684,80 @@ func querySmartMoneyCashflows(ctx context.Context, conn smartMoneyClickHouseQuer
 	for rows.Next() {
 		var r smartMoneyCashflowRow
 		if err := rows.Scan(&r.WalletAddress, &r.PoolVersion, &r.PoolID, &r.Action, &r.Sum0, &r.Sum1, &r.EventCount); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func querySmartMoneyEventTrend(ctx context.Context, conn smartMoneyClickHouseQueryer, chain string, pools []smart_lp.SmartLPPoolKey, window time.Duration) ([]smartMoneyEventTrendRow, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if conn == nil {
+		return nil, fmt.Errorf("clickhouse not initialized")
+	}
+	if len(pools) == 0 {
+		return []smartMoneyEventTrendRow{}, nil
+	}
+	if window <= 0 {
+		window = 24 * time.Hour
+	}
+	seconds := int(window.Seconds())
+	if seconds <= 0 {
+		seconds = 86400
+	}
+
+	placeholders := make([]string, 0, len(pools))
+	args := make([]any, 0, 2+2*len(pools))
+	for _, p := range pools {
+		pv := strings.ToLower(strings.TrimSpace(p.PoolVersion))
+		pid := strings.ToLower(strings.TrimSpace(p.PoolID))
+		if pv == "" || pid == "" {
+			continue
+		}
+		placeholders = append(placeholders, "(?, ?)")
+		args = append(args, pv, pid)
+	}
+	if len(placeholders) == 0 {
+		return []smartMoneyEventTrendRow{}, nil
+	}
+
+	chain = strings.ToLower(strings.TrimSpace(chain))
+	chainFilter := ""
+	if chain != "" {
+		chainFilter = "AND chain = ?"
+		args = append(args, chain)
+	}
+
+	q := fmt.Sprintf(`
+		SELECT
+			toInt32(intDiv(dateDiff('second', ts, now()), 3600)) AS hours_ago,
+			sum(if(action='add', 1, 0)) AS add_events,
+			sum(if(action='remove', 1, 0)) AS remove_events,
+			uniqExact(wallet_address) AS distinct_wallets
+		FROM smart_lp_events
+		WHERE ts >= now() - INTERVAL %d SECOND
+			AND action IN ('add', 'remove')
+			AND (pool_version, pool_id) IN (%s)
+			%s
+		GROUP BY hours_ago
+	`, seconds, strings.Join(placeholders, ","), chainFilter)
+
+	rows, err := conn.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]smartMoneyEventTrendRow, 0, 24)
+	for rows.Next() {
+		var r smartMoneyEventTrendRow
+		if err := rows.Scan(&r.HoursAgo, &r.AddEvents, &r.RemoveEvents, &r.DistinctWallet); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
