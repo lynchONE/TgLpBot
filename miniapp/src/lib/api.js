@@ -101,11 +101,24 @@ export async function fetchSmartMoneyOverview({
     const url = `${base}/api/smart_money${qs ? `?${qs}` : ''}`;
 
     const resp = await fetch(url, { method: 'GET', signal });
+    const text = await resp.text().catch(() => '');
     if (!resp.ok) {
-        const text = await resp.text().catch(() => '');
         throw new Error(text || `HTTP ${resp.status}`);
     }
-    return resp.json();
+    const body = String(text || '').trim();
+    if (!body) {
+        return {
+            pools: [],
+            wallets_24h: [],
+            summary: {},
+            warnings: ['smart_money response is empty'],
+        };
+    }
+    try {
+        return JSON.parse(body);
+    } catch {
+        throw new Error(`smart_money invalid JSON: ${body.slice(0, 120)}`);
+    }
 }
 
 export async function setTaskPaused({ apiBaseUrl, initData, taskId, paused, signal }) {
