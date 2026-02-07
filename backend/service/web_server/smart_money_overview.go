@@ -217,9 +217,13 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 	}
 	poolLimit := parseIntQuery(query, "pool_limit", 10, 1, 50)
 	walletLimit := parseIntQuery(query, "wallet_limit", 50, 1, 200)
+	// Keep legacy defaults (1h pools + 24h pnl), while allowing clients to
+	// align windows explicitly via query params.
+	poolsWindowHours := parseIntQuery(query, "pools_window_hours", 1, 1, 168)
+	pnlWindowHours := parseIntQuery(query, "pnl_window_hours", 24, 1, 168)
 
-	poolsWindow := time.Hour
-	pnlWindow := 24 * time.Hour
+	poolsWindow := time.Duration(poolsWindowHours) * time.Hour
+	pnlWindow := time.Duration(pnlWindowHours) * time.Hour
 
 	ctx, cancel := context.WithTimeout(r.Context(), 18*time.Second)
 	defer cancel()
@@ -441,7 +445,7 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 				return outWallets[i].WalletAddress < outWallets[j].WalletAddress
 			})
 
-			trendRows, terr := querySmartMoneyEventTrend(ctx, s.ClickHouse.Conn, chain, pools, 24*time.Hour)
+			trendRows, terr := querySmartMoneyEventTrend(ctx, s.ClickHouse.Conn, chain, pools, pnlWindow)
 			if terr != nil {
 				warnings = append(warnings, fmt.Sprintf("event trend query failed: %v", terr))
 			}

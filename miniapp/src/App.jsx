@@ -6,6 +6,7 @@ import PositionCard from './components/PositionCard.jsx';
 import AutoPnLCurveCard from './components/AutoPnLCurveCard.jsx';
 import SmartMoneyCard from './components/SmartMoneyCard.jsx';
 import SystemConfigCard from './components/SystemConfigCard.jsx';
+import ModuleHeader from './components/ModuleHeader.jsx';
 import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
 import AdminPage from './components/AdminPage.jsx';
 import {
@@ -244,6 +245,29 @@ const icons = {
     alert: 'M12 2L1 21h22L12 2zm0 6a1 1 0 011 1v5a1 1 0 11-2 0V9a1 1 0 011-1zm0 10a1.25 1.25 0 110-2.5A1.25 1.25 0 0112 18z',
 };
 
+function buildTopNavItems({ isAdmin, smartMoneyEnabled }) {
+    const items = [
+        { key: 'hot_pools', label: '热门池子' },
+        { key: 'positions', label: '实时仓位' },
+        { key: 'monitor', label: '监控' },
+    ];
+    if (smartMoneyEnabled) items.push({ key: 'smart_money', label: '聪明钱' });
+    if (isAdmin) items.push({ key: 'admin', label: '管理' });
+    return items;
+}
+
+const HOT_POOL_SORT_TABS = [
+    { key: 'fees', label: '费用' },
+    { key: 'fee_rate', label: '费用率' },
+    { key: 'volume', label: '交易量' },
+];
+
+const POSITION_TASK_TABS = [
+    { key: 'all', label: '全部' },
+    { key: 'manual', label: '手动任务' },
+    { key: 'auto', label: 'Auto任务' },
+];
+
 export default function App() {
     const initData = useInitData();
     const tick = useTick(); // 实时时钟，每秒更新一次
@@ -379,6 +403,11 @@ export default function App() {
     const isMonitor = viewMode === 'monitor';
     const isPositions = viewMode === 'positions';
     const isSmartMoney = viewMode === 'smart_money';
+    const topNavItems = useMemo(
+        () => buildTopNavItems({ isAdmin, smartMoneyEnabled }),
+        [isAdmin, smartMoneyEnabled],
+    );
+    const showWalletSummaryCard = !showAdmin && !isHotPools && !isSmartMoney;
     const hotPoolsDefaultPollSec = 10;
     const hotPoolsPollIntervalSec = Math.max(5, Number(pollOverrideSec || hotPoolsDefaultPollSec));
     const settingsPollIntervalSec = isHotPools ? hotPoolsPollIntervalSec : pollIntervalSec;
@@ -386,6 +415,8 @@ export default function App() {
     const monitorPollSec = Math.max(3, pollIntervalSec);
     const autoPnLCurvePollSec = 15;
     const smartMoneyPollSec = 60;
+    const smartMoneyPoolsWindowHours = 24;
+    const smartMoneyPnLWindowHours = 24;
 
     const adminSelectedUser = useMemo(() => {
         if (!adminSelectedUserId) return null;
@@ -1135,6 +1166,8 @@ export default function App() {
                     chain: 'bsc',
                     poolLimit: 10,
                     walletLimit: 50,
+                    poolsWindowHours: smartMoneyPoolsWindowHours,
+                    pnlWindowHours: smartMoneyPnLWindowHours,
                     signal: controller.signal,
                 });
                 if (aborted) return;
@@ -1158,7 +1191,16 @@ export default function App() {
             controller.abort();
             if (smartMoneyPollRef.current) clearInterval(smartMoneyPollRef.current);
         };
-    }, [apiBaseUrl, initData, hasInitData, isSmartMoney, smartMoneyEnabled, smartMoneyPollSec]);
+    }, [
+        apiBaseUrl,
+        initData,
+        hasInitData,
+        isSmartMoney,
+        smartMoneyEnabled,
+        smartMoneyPollSec,
+        smartMoneyPoolsWindowHours,
+        smartMoneyPnLWindowHours,
+    ]);
 
     const applyPollDraft = () => {
         const raw = String(pollDraftSec || '').trim();
@@ -1753,24 +1795,55 @@ export default function App() {
         return Math.max(0, Math.floor(elapsed / 1000));
     }, [tick]);
 
-    const headerTitle = showAdmin ? '管理面板' : isHotPools ? '热门池子' : isSmartMoney ? '聪明钱' : isMonitor ? '自动任务监控' : '实时仓位';
-    const headerSubtext = showAdmin
-        ? adminSelectedUser
-            ? `用户：${formatUserLabel(adminSelectedUser)}`
-            : adminUsersLoading && adminUsers.length === 0
-                ? '加载用户中...'
-                : adminUsers.length
-                    ? `开启Auto用户：${adminUsers.length}`
-                    : '暂无开启Auto用户'
-        : isHotPools
-            ? `5m · ${hotPoolsData ? `更新：${localUpdateSecAgo}秒前` : hotPoolsLoading ? '加载中...' : '暂无数据'} · 自动刷新 ${hotPoolsPollIntervalSec}s`
-            : isSmartMoney
-                ? `1h池子：${Array.isArray(smartMoney?.pools) ? smartMoney.pools.length : 0} · 24h钱包：${Array.isArray(smartMoney?.wallets_24h) ? smartMoney.wallets_24h.length : 0} · 更新：${formatRelativeTime(smartMoney?.updated_at, tick) || '--'} · 自动刷新 ${smartMoneyPollSec}s`
-                : isMonitor
-                    ? `Auto任务：${Array.isArray(autoMonitor?.tasks) ? autoMonitor.tasks.length : 0} · 更新：${formatRelativeTime(autoMonitor?.updated_at, tick) || '--'} · 自动刷新 ${monitorPollSec}s`
-                    : walletAddress
-                        ? `钱包：${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
-                        : '加载钱包中...';
+    const moduleMetaByMode = useMemo(() => ({
+        hot_pools: {
+            title: '热门池子',
+            icon: icons.chart,
+            subtitle: `5m · ${hotPoolsData ? `更新：${localUpdateSecAgo}秒前` : hotPoolsLoading ? '加载中...' : '暂无数据'} · 自动刷新 ${hotPoolsPollIntervalSec}s`,
+        },
+        positions: {
+            title: '实时仓位',
+            icon: icons.bot,
+            subtitle: walletAddress ? `钱包：${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '加载钱包中...',
+        },
+        monitor: {
+            title: '自动任务监控',
+            icon: icons.bot,
+            subtitle: `Auto任务：${Array.isArray(autoMonitor?.tasks) ? autoMonitor.tasks.length : 0} · 更新：${formatRelativeTime(autoMonitor?.updated_at, tick) || '--'} · 自动刷新 ${monitorPollSec}s`,
+        },
+        smart_money: {
+            title: '聪明钱',
+            icon: icons.search,
+            subtitle: `24h池子：${Array.isArray(smartMoney?.pools) ? smartMoney.pools.length : 0} · 24h钱包：${Array.isArray(smartMoney?.wallets_24h) ? smartMoney.wallets_24h.length : 0} · 更新：${formatRelativeTime(smartMoney?.updated_at, tick) || '--'} · 自动刷新 ${smartMoneyPollSec}s`,
+        },
+        admin: {
+            title: '管理面板',
+            icon: icons.bot,
+            subtitle: adminSelectedUser
+                ? `用户：${formatUserLabel(adminSelectedUser)}`
+                : adminUsersLoading && adminUsers.length === 0
+                    ? '加载用户中...'
+                    : adminUsers.length
+                        ? `开启Auto用户：${adminUsers.length}`
+                        : '暂无开启Auto用户',
+        },
+    }), [
+        adminSelectedUser,
+        adminUsers,
+        adminUsersLoading,
+        autoMonitor,
+        hotPoolsData,
+        hotPoolsLoading,
+        hotPoolsPollIntervalSec,
+        localUpdateSecAgo,
+        monitorPollSec,
+        smartMoney,
+        smartMoneyPollSec,
+        tick,
+        walletAddress,
+    ]);
+    const activeModuleMeta = moduleMetaByMode[viewMode] || moduleMetaByMode.positions;
+
     const hasAdminPositions = Boolean(adminPositions);
     const adminSummaryPlaceholder = adminSelectedUserId
         ? adminPositionsLoading
@@ -1862,11 +1935,11 @@ export default function App() {
                 <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
                         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-700 ring-1 ring-emerald-500/20 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/25">
-                            <Icon path={isHotPools ? icons.chart : isSmartMoney ? icons.search : icons.bot} className="h-5 w-5" />
+                            <Icon path={activeModuleMeta.icon} className="h-5 w-5" />
                         </div>
                         <div>
-                            <div className="text-lg font-extrabold tracking-tight">{headerTitle}</div>
-                            <div className="mt-0.5 text-xs text-zinc-500 dark:text-white/40">{headerSubtext}</div>
+                            <div className="text-lg font-extrabold tracking-tight">{activeModuleMeta.title}</div>
+                            <div className="mt-0.5 text-xs text-zinc-500 dark:text-white/40">{activeModuleMeta.subtitle}</div>
                         </div>
                     </div>
 
@@ -1890,110 +1963,59 @@ export default function App() {
                     </div>
                 </div>
 
-                <div
-                    className={`mt-3 grid ${isAdmin ? 'grid-cols-5' : smartMoneyEnabled ? 'grid-cols-4' : 'grid-cols-3'
-                        } gap-1 rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5`}
-                >
-                    <button
-                        type="button"
-                        onClick={() => setViewMode('hot_pools')}
-                        aria-pressed={viewMode === 'hot_pools'}
-                        className={`rounded-xl px-3 py-2 transition ${viewMode === 'hot_pools'
-                            ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
-                            : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
-                            }`}
-                    >
-                        热门池子
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setViewMode('positions')}
-                        aria-pressed={viewMode === 'positions'}
-                        className={`rounded-xl px-3 py-2 transition ${viewMode === 'positions'
-                            ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
-                            : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
-                            }`}
-                    >
-                        实时仓位
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setViewMode('monitor')}
-                        aria-pressed={viewMode === 'monitor'}
-                        className={`rounded-xl px-3 py-2 transition ${viewMode === 'monitor'
-                            ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
-                            : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
-                            }`}
-                    >
-                        监控
-                    </button>
-                    {smartMoneyEnabled ? (
-                        <button
-                            type="button"
-                            onClick={() => setViewMode('smart_money')}
-                            aria-pressed={viewMode === 'smart_money'}
-                            className={`rounded-xl px-3 py-2 transition ${viewMode === 'smart_money'
-                                ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
-                                : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
-                                }`}
-                        >
-                            聪明钱
-                        </button>
-                    ) : null}
-                    {isAdmin ? (
-                        <button
-                            type="button"
-                            onClick={() => setViewMode('admin')}
-                            aria-pressed={viewMode === 'admin'}
-                            className={`rounded-xl px-3 py-2 transition ${viewMode === 'admin'
-                                ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
-                                : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
-                                }`}
-                        >
-                            管理
-                        </button>
-                    ) : null}
+                <div className="mt-3 rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 dark:border-white/10 dark:bg-white/5">
+                    <div className="flex items-center gap-1 overflow-x-auto text-xs font-semibold">
+                        {topNavItems.map((item) => (
+                            <button
+                                key={item.key}
+                                type="button"
+                                onClick={() => setViewMode(item.key)}
+                                aria-pressed={viewMode === item.key}
+                                className={`shrink-0 rounded-xl px-2 py-2 whitespace-nowrap transition ${viewMode === item.key
+                                    ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
+                                    : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
+                                    }`}
+                            >
+                                {item.label}
+                            </button>
+                        ))}
+                    </div>
                 </div>
 
                 {showAdmin ? (
-                    hasAdminPositions ? (
-                        <div className="mt-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
-                            <div className="flex items-start justify-between gap-4">
-                                <div>
-                                    <div className="text-[11px] text-zinc-500 dark:text-white/40">总余额</div>
-                                    <div className="mt-0.5 text-2xl font-extrabold tabular-nums text-zinc-900 dark:text-emerald-300">
-                                        {formatUsd(totalUsd)}
-                                    </div>
-                                    <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40 tabular-nums">
-                                        {bnbBalance} BNB{typeof bnbUsd === 'number' ? ` ≈ ${formatUsd(bnbUsd)}` : ''}
-                                    </div>
-                                </div>
-                                <div className="text-right">
-                                    <div className="text-[11px] text-zinc-500 dark:text-white/40">自动刷新</div>
-                                    <div className="text-sm font-semibold tabular-nums">{pollIntervalSec}s</div>
-                                </div>
+                    <ModuleHeader
+                        title="管理概览"
+                        subtitle={hasAdminPositions
+                            ? adminSelectedUser
+                                ? `用户：${formatUserLabel(adminSelectedUser)}`
+                                : ''
+                            : adminSummaryPlaceholder}
+                        actions={hasAdminPositions ? (
+                            <div className="text-right">
+                                <div className="text-[11px] text-zinc-500 dark:text-white/40">自动刷新</div>
+                                <div className="text-sm font-semibold tabular-nums">{pollIntervalSec}s</div>
                             </div>
-                        </div>
-                    ) : (
-                        <div className="mt-3 rounded-2xl border border-zinc-200 bg-white/70 p-4 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                            {adminSummaryPlaceholder}
-                        </div>
-                    )
-                ) : isHotPools ? (
-                    <div className="mt-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
-                        <div className="flex items-center justify-between gap-3">
+                        ) : null}
+                    >
+                        {hasAdminPositions ? (
                             <div>
-                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">
-                                    {hotPoolsSort === 'fee_rate' ? '费用率排行' : hotPoolsSort === 'volume' ? '交易量排行' : '费用排行'}
+                                <div className="text-[11px] text-zinc-500 dark:text-white/40">总余额</div>
+                                <div className="mt-0.5 text-2xl font-extrabold tabular-nums text-zinc-900 dark:text-emerald-300">
+                                    {formatUsd(totalUsd)}
+                                </div>
+                                <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40 tabular-nums">
+                                    {bnbBalance} BNB{typeof bnbUsd === 'number' ? ` ≈ ${formatUsd(bnbUsd)}` : ''}
                                 </div>
                             </div>
-                            <div className="flex items-center gap-2">
+                        ) : null}
+                    </ModuleHeader>
+                ) : isHotPools ? (
+                    <ModuleHeader
+                        title={hotPoolsSort === 'fee_rate' ? '费用率排行' : hotPoolsSort === 'volume' ? '交易量排行' : '费用排行'}
+                        actions={(
+                            <>
                                 <div className="flex shrink-0 rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5">
-                                    {[
-                                        { key: 'fees', label: '费用' },
-                                        { key: 'fee_rate', label: '费用率' },
-                                        { key: 'volume', label: '交易量' },
-                                    ].map((tab) => (
+                                    {HOT_POOL_SORT_TABS.map((tab) => (
                                         <button
                                             key={tab.key}
                                             type="button"
@@ -2035,41 +2057,39 @@ export default function App() {
                                         <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-emerald-400 ring-2 ring-white dark:ring-[#111318]" />
                                     ) : null}
                                 </button>
-                            </div>
-                        </div>
-                    </div>
-                ) : (
-                    <div className="mt-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
-                        <div className="flex items-start justify-between gap-4">
-                            <div>
-                                <div className="text-[11px] text-zinc-500 dark:text-white/40">总余额</div>
-                                <div className="mt-0.5 text-2xl font-extrabold tabular-nums text-zinc-900 dark:text-emerald-300">
-                                    {formatUsd(totalUsd)}
-                                </div>
-                                <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40 tabular-nums">
-                                    {bnbBalance} BNB{typeof bnbUsd === 'number' ? ` ≈ ${formatUsd(bnbUsd)}` : ''}
-                                </div>
-                            </div>
+                            </>
+                        )}
+                    />
+                ) : showWalletSummaryCard ? (
+                    <ModuleHeader
+                        title={isMonitor ? '监控概览' : '仓位概览'}
+                        subtitle={`${bnbBalance} BNB${typeof bnbUsd === 'number' ? ` ≈ ${formatUsd(bnbUsd)}` : ''}`}
+                        actions={(
                             <div className="text-right">
                                 <div className="text-[11px] text-zinc-500 dark:text-white/40">自动刷新</div>
                                 <div className="text-sm font-semibold tabular-nums">{pollIntervalSec}s</div>
-                                {!showAdmin && !isHotPools ? (
-                                    <button
-                                        type="button"
-                                        onClick={openGlobalConfig}
-                                        disabled={!hasInitData}
-                                        className={`mt-2 inline-flex rounded-xl px-3 py-2 text-xs font-semibold ring-1 ${hasInitData
-                                            ? 'bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50 dark:bg-white/5 dark:text-white/80 dark:ring-white/10 dark:hover:bg-white/10'
-                                            : 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
-                                            }`}
-                                    >
-                                        全局配置
-                                    </button>
-                                ) : null}
+                                <button
+                                    type="button"
+                                    onClick={openGlobalConfig}
+                                    disabled={!hasInitData}
+                                    className={`mt-2 inline-flex rounded-xl px-3 py-2 text-xs font-semibold ring-1 ${hasInitData
+                                        ? 'bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50 dark:bg-white/5 dark:text-white/80 dark:ring-white/10 dark:hover:bg-white/10'
+                                        : 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
+                                        }`}
+                                >
+                                    全局配置
+                                </button>
+                            </div>
+                        )}
+                    >
+                        <div>
+                            <div className="text-[11px] text-zinc-500 dark:text-white/40">总余额</div>
+                            <div className="mt-0.5 text-2xl font-extrabold tabular-nums text-zinc-900 dark:text-emerald-300">
+                                {formatUsd(totalUsd)}
                             </div>
                         </div>
-                    </div>
-                )}
+                    </ModuleHeader>
+                ) : null}
 
             </header>
 
@@ -2370,54 +2390,25 @@ export default function App() {
                                         <div
                                             className="grid grid-cols-3 gap-1 rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5"
                                         >
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    positionsTabTouchedRef.current = true;
-                                                    setPositionsTaskTab('all');
-                                                    setSelectedTaskIds(new Set());
-                                                    setBatchMode(false);
-                                                }}
-                                                aria-pressed={positionsTaskTab === 'all'}
-                                                className={`rounded-xl px-3 py-2 transition ${positionsTaskTab === 'all'
-                                                    ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
-                                                    : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
-                                                    }`}
-                                            >
-                                                全部
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    positionsTabTouchedRef.current = true;
-                                                    setPositionsTaskTab('manual');
-                                                    setSelectedTaskIds(new Set());
-                                                    setBatchMode(false);
-                                                }}
-                                                aria-pressed={positionsTaskTab === 'manual'}
-                                                className={`rounded-xl px-3 py-2 transition ${positionsTaskTab === 'manual'
-                                                    ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
-                                                    : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
-                                                    }`}
-                                            >
-                                                手动任务
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    positionsTabTouchedRef.current = true;
-                                                    setPositionsTaskTab('auto');
-                                                    setSelectedTaskIds(new Set());
-                                                    setBatchMode(false);
-                                                }}
-                                                aria-pressed={positionsTaskTab === 'auto'}
-                                                className={`rounded-xl px-3 py-2 transition ${positionsTaskTab === 'auto'
-                                                    ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
-                                                    : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
-                                                    }`}
-                                            >
-                                                Auto任务
-                                            </button>
+                                            {POSITION_TASK_TABS.map((tab) => (
+                                                <button
+                                                    key={tab.key}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        positionsTabTouchedRef.current = true;
+                                                        setPositionsTaskTab(tab.key);
+                                                        setSelectedTaskIds(new Set());
+                                                        setBatchMode(false);
+                                                    }}
+                                                    aria-pressed={positionsTaskTab === tab.key}
+                                                    className={`rounded-xl px-3 py-2 transition ${positionsTaskTab === tab.key
+                                                        ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
+                                                        : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
+                                                        }`}
+                                                >
+                                                    {tab.label}
+                                                </button>
+                                            ))}
                                         </div>
                                     ) : null}
 

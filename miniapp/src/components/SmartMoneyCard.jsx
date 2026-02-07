@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { formatRelativeTime } from '../lib/time';
 import { copyToClipboard, hapticNotification, hapticImpact } from '../lib/telegram';
+import ModuleHeader from './ModuleHeader.jsx';
 
 const USD_DISPLAY_LIMIT = 1e15;
 const usdFormatter = new Intl.NumberFormat('en-US', {
@@ -92,38 +93,23 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
     const topWallets = useMemo(() => wallets.slice(0, 20), [wallets]);
     const topPools = useMemo(() => pools.slice(0, 12), [pools]);
     const barMax = useMemo(() => trendBarScale(trend), [trend]);
+    const subtitle = `最近24h池子 ${pools.length} 个 · 最近24h钱包 ${wallets.length} 个 · 更新 ${updatedAtText}`;
 
     return (
-        <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
-            <div className="flex items-start justify-between gap-3">
-                <div>
-                    <div className="text-sm font-extrabold text-zinc-900 dark:text-white/90">
-                        Smart Money
-                        {loading ? (
-                            <span className="ml-2 inline-flex items-center rounded-lg bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-600 dark:bg-white/5 dark:text-white/60">
-                                加载中...
-                            </span>
-                        ) : null}
-                    </div>
-                    <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
-                        最近1h池子 {pools.length} 个 · 最近24h钱包 {wallets.length} 个 · 更新 {updatedAtText}
-                    </div>
-                </div>
-                <button
-                    type="button"
-                    onClick={() => {
-                        hapticImpact('light');
-                        safeCopy(JSON.stringify(overview || {}), onNotice);
-                    }}
-                    disabled={!overview}
-                    className={`inline-flex items-center rounded-xl px-3 py-2 text-xs font-semibold ring-1 ${overview
-                        ? 'bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50 dark:bg-white/5 dark:text-white/80 dark:ring-white/10 dark:hover:bg-white/10'
-                        : 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
-                        }`}
-                >
-                    复制JSON
-                </button>
-            </div>
+        <ModuleHeader
+            title={(
+                <>
+                    Smart Money
+                    {loading ? (
+                        <span className="ml-2 inline-flex items-center rounded-lg bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-600 dark:bg-white/5 dark:text-white/60">
+                            加载中...
+                        </span>
+                    ) : null}
+                </>
+            )}
+            subtitle={subtitle}
+            className="mt-0"
+        >
 
             {warnings.length ? (
                 <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-200">
@@ -259,10 +245,10 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                 </div>
             </div>
 
-            <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                     <div className="mb-2 flex items-center justify-between">
-                        <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">最近1h参与池子</div>
+                        <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">最近24h参与池子</div>
                         <div className="text-[11px] text-zinc-500 dark:text-white/40">Top {topPools.length}</div>
                     </div>
                     {topPools.length ? (
@@ -381,7 +367,6 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                     )}
                 </div>
             </div>
-        </div>
+        </ModuleHeader>
     );
 }
-

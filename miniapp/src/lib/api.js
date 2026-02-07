@@ -78,13 +78,24 @@ export async function fetchMe({ apiBaseUrl, initData, signal }) {
     return resp.json();
 }
 
-export async function fetchSmartMoneyOverview({ apiBaseUrl, initData, chain, poolLimit, walletLimit, signal }) {
+export async function fetchSmartMoneyOverview({
+    apiBaseUrl,
+    initData,
+    chain,
+    poolLimit,
+    walletLimit,
+    poolsWindowHours,
+    pnlWindowHours,
+    signal,
+}) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const params = new URLSearchParams();
     if (initData) params.set('initData', String(initData));
     if (chain) params.set('chain', String(chain));
     if (Number.isFinite(poolLimit)) params.set('pool_limit', String(poolLimit));
     if (Number.isFinite(walletLimit)) params.set('wallet_limit', String(walletLimit));
+    if (Number.isFinite(poolsWindowHours)) params.set('pools_window_hours', String(poolsWindowHours));
+    if (Number.isFinite(pnlWindowHours)) params.set('pnl_window_hours', String(pnlWindowHours));
 
     const qs = params.toString();
     const url = `${base}/api/smart_money${qs ? `?${qs}` : ''}`;
