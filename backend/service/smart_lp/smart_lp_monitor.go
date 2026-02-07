@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/big"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -308,7 +309,7 @@ func (s *SmartLPMonitor) runWebsocketSession(wsURL string, monitorAddrList []com
 		log.Printf("[SmartLP] websocket subscribed new heads monitor_contracts=%d", len(monitorAddrList))
 	}
 
-	blockQueue := make(chan uint64, 512)
+	blockQueue := make(chan uint64, 4096)
 	workerDone := make(chan struct{})
 	go func() {
 		defer close(workerDone)
@@ -396,16 +397,46 @@ func (s *SmartLPMonitor) smartLPWebsocketBlockWorker(blockQueue <-chan uint64, m
 			continue
 		}
 
-		events, err := s.scanSmartLPBlockWithScanner(context.Background(), bn, monitorAddrs, scanner)
-		if err != nil {
-			log.Printf("[SmartLP] websocket scan block failed block=%d err=%v", bn, err)
+		attempts := 0
+		var events []smartLPEvent
+		for {
+			var err error
+			events, err = s.scanSmartLPBlockWithScanner(context.Background(), bn, monitorAddrs, scanner)
+			if err == nil {
+				break
+			}
+
+			attempts++
+			if attempts == 1 || attempts%5 == 0 {
+				log.Printf("[SmartLP] websocket scan block failed (retrying) block=%d attempts=%d err=%v", bn, attempts, err)
+			}
+			if !isRetryableRPCError(err) {
+				log.Printf("[SmartLP] websocket scan block failed (non-retryable) block=%d err=%v", bn, err)
+				events = nil
+				break
+			}
+
+			// Backoff to avoid hammering overloaded RPC providers.
+			backoff := time.Duration(attempts) * time.Second
+			if backoff > 20*time.Second {
+				backoff = 20 * time.Second
+			}
+			t := time.NewTimer(backoff)
+			select {
+			case <-s.stopChan:
+				t.Stop()
+				return
+			case <-t.C:
+			}
+		}
+		if events == nil {
 			continue
 		}
 		if len(events) == 0 {
 			continue
 		}
 		insertCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		err = s.insertEvents(insertCtx, events)
+		err := s.insertEvents(insertCtx, events)
 		cancel()
 		if err != nil {
 			log.Printf("[SmartLP] insert events failed: %v", err)
@@ -443,6 +474,7 @@ func (s *SmartLPMonitor) scanSmartLPBlockWithScanner(ctx context.Context, blockN
 		To   *common.Address `json:"to"`
 	}
 	type rpcBlock struct {
+		Timestamp    string  `json:"timestamp"`
 		Transactions []rpcTx `json:"transactions"`
 	}
 
@@ -477,6 +509,11 @@ func (s *SmartLPMonitor) scanSmartLPBlockWithScanner(ctx context.Context, blockN
 		return nil, fmt.Errorf("eth_getBlockByNumber failed block=%d: %w", blockNumber, err)
 	}
 
+	blockTime := time.Now()
+	if ts, ok := parseHexUint64(blk.Timestamp); ok && ts > 0 {
+		blockTime = time.Unix(int64(ts), 0).UTC()
+	}
+
 	events := make([]smartLPEvent, 0)
 	receiptErrs := 0
 	candidateTxs := 0
@@ -496,9 +533,28 @@ func (s *SmartLPMonitor) scanSmartLPBlockWithScanner(ctx context.Context, blockN
 		}
 		candidateTxs++
 
-		receiptCtx, cancel := context.WithTimeout(ctx, callTimeout)
-		receipt, err := blockchain.Client.TransactionReceipt(receiptCtx, tx.Hash)
-		cancel()
+		var receipt *types.Receipt
+		var err error
+	receiptRetry:
+		for attempt := 1; attempt <= 3; attempt++ {
+			receiptCtx, cancel := context.WithTimeout(ctx, callTimeout)
+			receipt, err = blockchain.Client.TransactionReceipt(receiptCtx, tx.Hash)
+			cancel()
+			if err == nil && receipt != nil {
+				break
+			}
+			if attempt >= 3 || !isRetryableRPCError(err) {
+				break
+			}
+			delay := time.Duration(attempt) * 500 * time.Millisecond
+			t := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				break receiptRetry
+			case <-t.C:
+			}
+		}
 		if err != nil || receipt == nil {
 			receiptErrs++
 			if scanner.debug && receiptErrs <= 3 {
@@ -507,7 +563,7 @@ func (s *SmartLPMonitor) scanSmartLPBlockWithScanner(ctx context.Context, blockN
 			continue
 		}
 
-		txEvents := scanner.scanReceipt(ctx, receipt, tx.From, contractTo, tx.Hash)
+		txEvents := scanner.scanReceipt(ctx, receipt, tx.From, contractTo, tx.Hash, blockTime)
 		if len(txEvents) > 0 {
 			events = append(events, txEvents...)
 		}
@@ -814,6 +870,32 @@ func isRetryableRPCError(err error) bool {
 		return true
 	case strings.Contains(msg, "rate limit"):
 		return true
+	case strings.Contains(msg, "service unavailable"):
+		return true
+	case strings.Contains(msg, "unable to complete request at this time"):
+		return true
+	case strings.Contains(msg, "temporarily unavailable"):
+		return true
+	case strings.Contains(msg, "bad gateway"):
+		return true
+	case strings.Contains(msg, "gateway timeout"):
+		return true
+	case strings.Contains(msg, "\"code\":-32001"):
+		return true
+	case strings.Contains(msg, "code\":-32001"):
+		return true
+	case strings.Contains(msg, "http 503"):
+		return true
+	case strings.Contains(msg, " 503 "):
+		return true
+	case strings.Contains(msg, "http 502"):
+		return true
+	case strings.Contains(msg, " 502 "):
+		return true
+	case strings.Contains(msg, "http 504"):
+		return true
+	case strings.Contains(msg, " 504 "):
+		return true
 	default:
 		return false
 	}
@@ -919,6 +1001,7 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 		To   *common.Address `json:"to"`
 	}
 	type rpcBlock struct {
+		Timestamp    string  `json:"timestamp"`
 		Transactions []rpcTx `json:"transactions"`
 	}
 
@@ -978,6 +1061,11 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 		blocksScanned++
 		logProgress(bn)
 
+		blockTime := time.Now()
+		if ts, ok := parseHexUint64(blk.Timestamp); ok && ts > 0 {
+			blockTime = time.Unix(int64(ts), 0).UTC()
+		}
+
 		txsScanned += len(blk.Transactions)
 
 		for _, tx := range blk.Transactions {
@@ -997,10 +1085,29 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 
 			fromAddr := tx.From
 
-			receiptCtx, cancel := context.WithTimeout(ctx, callTimeout)
-			receipt, err := blockchain.Client.TransactionReceipt(receiptCtx, tx.Hash)
-			cancel()
-			if err != nil {
+			var receipt *types.Receipt
+			var err error
+		receiptRetry:
+			for attempt := 1; attempt <= 3; attempt++ {
+				receiptCtx, cancel := context.WithTimeout(ctx, callTimeout)
+				receipt, err = blockchain.Client.TransactionReceipt(receiptCtx, tx.Hash)
+				cancel()
+				if err == nil && receipt != nil {
+					break
+				}
+				if attempt >= 3 || !isRetryableRPCError(err) {
+					break
+				}
+				delay := time.Duration(attempt) * 500 * time.Millisecond
+				t := time.NewTimer(delay)
+				select {
+				case <-ctx.Done():
+					t.Stop()
+					break receiptRetry
+				case <-t.C:
+				}
+			}
+			if err != nil || receipt == nil {
 				receiptErrs++
 				if debug && receiptErrs <= 3 {
 					log.Printf("[SmartLP] receipt fetch failed tx=%s err=%v", strings.ToLower(tx.Hash.Hex()), err)
@@ -1061,18 +1168,46 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 							if pm == nil {
 								v3PosCache[posKey] = v3Pos{ok: false}
 							} else {
-								callCtx, cancel := context.WithTimeout(ctx, callTimeout)
-								p, err := pm.Positions(&bind.CallOpts{Context: callCtx}, tokenID)
-								cancel()
-								if err != nil {
-									posErrs++
-									if debug && posErrs <= 3 {
-										log.Printf("[SmartLP] v3 positions call failed npm=%s token_id=%s tx=%s err=%v", strings.ToLower(lg.Address.Hex()), tokenID.String(), strings.ToLower(tx.Hash.Hex()), err)
-									}
-									v3PosCache[posKey] = v3Pos{ok: false}
-								} else {
-									v3PosCache[posKey] = v3Pos{token0: p.Token0, token1: p.Token1, fee: p.Fee, tickL: p.TickLower, tickU: p.TickUpper, ok: true}
+								callPositions := func(blockNum *big.Int) (*blockchain.V3PositionInfo, error) {
+									callCtx, cancel := context.WithTimeout(ctx, callTimeout)
+									p, err := pm.Positions(&bind.CallOpts{Context: callCtx, BlockNumber: blockNum}, tokenID)
+									cancel()
+									return p, err
 								}
+
+								resolveFrom := func(blockNum *big.Int) (v3Pos, bool) {
+									p, err := callPositions(blockNum)
+									if err != nil {
+										posErrs++
+										if debug && posErrs <= 3 {
+											log.Printf("[SmartLP] v3 positions call failed npm=%s token_id=%s tx=%s err=%v", strings.ToLower(lg.Address.Hex()), tokenID.String(), strings.ToLower(tx.Hash.Hex()), err)
+										}
+										return v3Pos{ok: false}, false
+									}
+									if p == nil || p.Token0 == (common.Address{}) || p.Token1 == (common.Address{}) {
+										return v3Pos{ok: false}, true
+									}
+									return v3Pos{token0: p.Token0, token1: p.Token1, fee: p.Fee, tickL: p.TickLower, tickU: p.TickUpper, ok: true}, true
+								}
+
+								// Prefer metadata at the event block. For "remove" events, also try block-1 because many UIs
+								// burn the NFT in the same tx, wiping `positions(tokenId)` at the end of the block.
+								resolved := v3Pos{ok: false}
+								if bn > 0 {
+									if p1, ok := resolveFrom(new(big.Int).SetUint64(bn)); ok && p1.ok {
+										resolved = p1
+									} else if action == "remove" && bn > 1 {
+										if p2, ok2 := resolveFrom(new(big.Int).SetUint64(bn - 1)); ok2 && p2.ok {
+											resolved = p2
+										}
+									}
+								}
+								if !resolved.ok {
+									if p3, ok3 := resolveFrom(nil); ok3 && p3.ok {
+										resolved = p3
+									}
+								}
+								v3PosCache[posKey] = resolved
 							}
 							pos = v3PosCache[posKey]
 						}
@@ -1104,7 +1239,7 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 
 						eventSeq := bn*1_000_000 + uint64(lg.Index)
 						events = append(events, smartLPEvent{
-							ts:              time.Now(),
+							ts:              blockTime,
 							eventSeq:        eventSeq,
 							chain:           chain,
 							poolVersion:     "v3",
@@ -1199,7 +1334,7 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 
 					eventSeq := bn*1_000_000 + uint64(lg.Index)
 					events = append(events, smartLPEvent{
-						ts:              time.Now(),
+						ts:              blockTime,
 						eventSeq:        eventSeq,
 						chain:           chain,
 						poolVersion:     "v4",
@@ -1297,7 +1432,7 @@ func newSmartLPReceiptScanner(chain string, callTimeout time.Duration, debug boo
 	return sc
 }
 
-func (sc *smartLPReceiptScanner) scanReceipt(ctx context.Context, receipt *types.Receipt, fromAddr common.Address, contractTo common.Address, txHash common.Hash) []smartLPEvent {
+func (sc *smartLPReceiptScanner) scanReceipt(ctx context.Context, receipt *types.Receipt, fromAddr common.Address, contractTo common.Address, txHash common.Hash, blockTime time.Time) []smartLPEvent {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -1308,6 +1443,11 @@ func (sc *smartLPReceiptScanner) scanReceipt(ctx context.Context, receipt *types
 	txHashStr := strings.ToLower(txHash.Hex())
 	contractToStr := strings.ToLower(contractTo.Hex())
 	fromStr := strings.ToLower(fromAddr.Hex())
+
+	eventTime := blockTime
+	if eventTime.IsZero() {
+		eventTime = time.Now()
+	}
 
 	events := make([]smartLPEvent, 0)
 	for _, lg := range receipt.Logs {
@@ -1363,17 +1503,48 @@ func (sc *smartLPReceiptScanner) scanReceipt(ctx context.Context, receipt *types
 					if pm == nil {
 						sc.v3PosCache[posKey] = smartLPV3Pos{ok: false}
 					} else {
-						callCtx, cancel := context.WithTimeout(ctx, sc.callTimeout)
-						p, err := pm.Positions(&bind.CallOpts{Context: callCtx}, tokenID)
-						cancel()
-						if err != nil {
-							if sc.debug {
-								log.Printf("[SmartLP] v3 positions call failed npm=%s token_id=%s tx=%s err=%v", strings.ToLower(lg.Address.Hex()), tokenID.String(), txHashStr, err)
-							}
-							sc.v3PosCache[posKey] = smartLPV3Pos{ok: false}
-						} else {
-							sc.v3PosCache[posKey] = smartLPV3Pos{token0: p.Token0, token1: p.Token1, fee: p.Fee, tickL: p.TickLower, tickU: p.TickUpper, ok: true}
+						callPositions := func(blockNum *big.Int) (*blockchain.V3PositionInfo, error) {
+							callCtx, cancel := context.WithTimeout(ctx, sc.callTimeout)
+							p, err := pm.Positions(&bind.CallOpts{Context: callCtx, BlockNumber: blockNum}, tokenID)
+							cancel()
+							return p, err
 						}
+
+						resolveFrom := func(blockNum *big.Int) (smartLPV3Pos, bool) {
+							p, err := callPositions(blockNum)
+							if err != nil {
+								if sc.debug {
+									log.Printf("[SmartLP] v3 positions call failed npm=%s token_id=%s tx=%s err=%v", strings.ToLower(lg.Address.Hex()), tokenID.String(), txHashStr, err)
+								}
+								return smartLPV3Pos{ok: false}, false
+							}
+							if p == nil || p.Token0 == (common.Address{}) || p.Token1 == (common.Address{}) {
+								return smartLPV3Pos{ok: false}, true
+							}
+							return smartLPV3Pos{token0: p.Token0, token1: p.Token1, fee: p.Fee, tickL: p.TickLower, tickU: p.TickUpper, ok: true}, true
+						}
+
+						// Prefer metadata at the event block. For "remove" events, also try block-1 because many UIs
+						// burn the NFT in the same tx, wiping `positions(tokenId)` at the end of the block.
+						bn := lg.BlockNumber
+						resolved := smartLPV3Pos{ok: false}
+
+						if bn > 0 {
+							if p1, ok := resolveFrom(new(big.Int).SetUint64(bn)); ok && p1.ok {
+								resolved = p1
+							} else if action == "remove" && bn > 1 {
+								if p2, ok2 := resolveFrom(new(big.Int).SetUint64(bn - 1)); ok2 && p2.ok {
+									resolved = p2
+								}
+							}
+						}
+						if !resolved.ok {
+							if p3, ok3 := resolveFrom(nil); ok3 && p3.ok {
+								resolved = p3
+							}
+						}
+
+						sc.v3PosCache[posKey] = resolved
 					}
 					pos = sc.v3PosCache[posKey]
 				}
@@ -1405,7 +1576,7 @@ func (sc *smartLPReceiptScanner) scanReceipt(ctx context.Context, receipt *types
 				bn := lg.BlockNumber
 				eventSeq := bn*1_000_000 + uint64(lg.Index)
 				events = append(events, smartLPEvent{
-					ts:              time.Now(),
+					ts:              eventTime,
 					eventSeq:        eventSeq,
 					chain:           sc.chain,
 					poolVersion:     "v3",
@@ -1500,7 +1671,7 @@ func (sc *smartLPReceiptScanner) scanReceipt(ctx context.Context, receipt *types
 			bn := lg.BlockNumber
 			eventSeq := bn*1_000_000 + uint64(lg.Index)
 			events = append(events, smartLPEvent{
-				ts:              time.Now(),
+				ts:              eventTime,
 				eventSeq:        eventSeq,
 				chain:           sc.chain,
 				poolVersion:     "v4",
@@ -1648,6 +1819,23 @@ func parseHexAddressList(raw string) []common.Address {
 	return addrs
 }
 
+func parseHexUint64(raw string) (uint64, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	raw = strings.TrimPrefix(raw, "0x")
+	raw = strings.TrimPrefix(raw, "0X")
+	if raw == "" {
+		return 0, false
+	}
+	v, err := strconv.ParseUint(raw, 16, 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
 func (s *SmartLPMonitor) upsertWatchedWallets(ctx context.Context, events []smartLPEvent, source string) error {
 	if s == nil || s.ch == nil || s.ch.Conn == nil || len(events) == 0 {
 		return nil
@@ -1723,6 +1911,41 @@ func (s *SmartLPMonitor) loadWatchedWallets(ctx context.Context, chain string) (
 		return out, nil
 	}
 
+	loadFromEvents := func() (map[string]struct{}, error) {
+		fallback := make(map[string]struct{})
+		rows, err := s.ch.Conn.Query(ctx, `
+			SELECT wallet_address
+			FROM smart_lp_events
+			WHERE ts >= now() - INTERVAL 15 DAY
+				AND lowerUTF8(chain) = ?
+				AND action = 'add'
+				AND wallet_address != ''
+			GROUP BY wallet_address
+		`, chain)
+		if err != nil {
+			return fallback, err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var wallet string
+			if err := rows.Scan(&wallet); err != nil {
+				return fallback, err
+			}
+			wallet = strings.ToLower(strings.TrimSpace(wallet))
+			if common.IsHexAddress(wallet) {
+				fallback[wallet] = struct{}{}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return fallback, err
+		}
+		if config.AppConfig != nil && config.AppConfig.SmartLPDebug && len(fallback) > 0 {
+			log.Printf("[SmartLP] remove watcher watchlist fallback: derived %d wallets from smart_lp_events", len(fallback))
+		}
+		return fallback, nil
+	}
+
 	rows, err := s.ch.Conn.Query(ctx, `
 		SELECT wallet_address
 		FROM smart_lp_watched_wallets
@@ -1730,7 +1953,9 @@ func (s *SmartLPMonitor) loadWatchedWallets(ctx context.Context, chain string) (
 		GROUP BY wallet_address
 	`, chain)
 	if err != nil {
-		return out, err
+		// Fallback for older ClickHouse schemas or when the watchlist table is empty/unavailable:
+		// derive the watchlist from recent add-liquidity events.
+		return loadFromEvents()
 	}
 	defer rows.Close()
 
@@ -1747,7 +1972,13 @@ func (s *SmartLPMonitor) loadWatchedWallets(ctx context.Context, chain string) (
 	if err := rows.Err(); err != nil {
 		return out, err
 	}
-	return out, nil
+	if len(out) > 0 {
+		return out, nil
+	}
+
+	// Backfill path: existing deployments may have smart_lp_events but an empty watchlist table.
+	// Without a watchlist, the remove watcher will never record remove events.
+	return loadFromEvents()
 }
 
 func (s *SmartLPMonitor) loadRemoveLastScannedBlock(ctx context.Context) (uint64, bool, error) {
@@ -1997,11 +2228,52 @@ func (s *SmartLPMonitor) runRemoveWatcherOnce() {
 		}
 	}
 
+	blockTimeCache := make(map[uint64]time.Time)
+	getBlockTime := func(bn uint64) time.Time {
+		if bn == 0 {
+			return time.Time{}
+		}
+		if t, ok := blockTimeCache[bn]; ok {
+			return t
+		}
+		headerCtx, headerCancel := context.WithTimeout(ctx, callTimeout)
+		header, err := blockchain.Client.HeaderByNumber(headerCtx, new(big.Int).SetUint64(bn))
+		headerCancel()
+		if err != nil || header == nil {
+			if debug {
+				log.Printf("[SmartLP] remove watcher header lookup failed block=%d err=%v", bn, err)
+			}
+			blockTimeCache[bn] = time.Time{}
+			return time.Time{}
+		}
+		t := time.Unix(int64(header.Time), 0).UTC()
+		blockTimeCache[bn] = t
+		return t
+	}
+
 	for _, item := range candidates {
 		var tx rpcTx
-		txCtx, cancel := context.WithTimeout(ctx, callTimeout)
-		err := blockchain.Client.Client().CallContext(txCtx, &tx, "eth_getTransactionByHash", item.hash)
-		cancel()
+		var err error
+	txLookupRetry:
+		for attempt := 1; attempt <= 3; attempt++ {
+			txCtx, cancel := context.WithTimeout(ctx, callTimeout)
+			err = blockchain.Client.Client().CallContext(txCtx, &tx, "eth_getTransactionByHash", item.hash)
+			cancel()
+			if err == nil {
+				break
+			}
+			if attempt >= 3 || !isRetryableRPCError(err) {
+				break
+			}
+			delay := time.Duration(attempt) * 500 * time.Millisecond
+			t := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				break txLookupRetry
+			case <-t.C:
+			}
+		}
 		if err != nil {
 			if debug {
 				log.Printf("[SmartLP] remove watcher tx lookup failed tx=%s err=%v", strings.ToLower(item.hash.Hex()), err)
@@ -2038,9 +2310,27 @@ func (s *SmartLPMonitor) runRemoveWatcherOnce() {
 			continue
 		}
 
-		receiptCtx, receiptCancel := context.WithTimeout(ctx, callTimeout)
-		receipt, err := blockchain.Client.TransactionReceipt(receiptCtx, item.hash)
-		receiptCancel()
+		var receipt *types.Receipt
+	receiptLookupRetry:
+		for attempt := 1; attempt <= 3; attempt++ {
+			receiptCtx, receiptCancel := context.WithTimeout(ctx, callTimeout)
+			receipt, err = blockchain.Client.TransactionReceipt(receiptCtx, item.hash)
+			receiptCancel()
+			if err == nil && receipt != nil {
+				break
+			}
+			if attempt >= 3 || !isRetryableRPCError(err) {
+				break
+			}
+			delay := time.Duration(attempt) * 500 * time.Millisecond
+			t := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				break receiptLookupRetry
+			case <-t.C:
+			}
+		}
 		if err != nil || receipt == nil {
 			if debug {
 				log.Printf("[SmartLP] remove watcher receipt lookup failed tx=%s err=%v", strings.ToLower(item.hash.Hex()), err)
@@ -2049,7 +2339,8 @@ func (s *SmartLPMonitor) runRemoveWatcherOnce() {
 			continue
 		}
 
-		txEvents := scanner.scanReceipt(ctx, receipt, fromAddr, contractTo, item.hash)
+		blockTime := getBlockTime(item.block)
+		txEvents := scanner.scanReceipt(ctx, receipt, fromAddr, contractTo, item.hash, blockTime)
 		for _, ev := range txEvents {
 			if strings.ToLower(strings.TrimSpace(ev.action)) != "remove" {
 				continue

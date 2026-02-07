@@ -6,7 +6,6 @@ import (
 	"TgLpBot/service/pricing"
 	"TgLpBot/service/smart_lp"
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"math/big"
@@ -478,8 +477,7 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 				Warnings:       warnings,
 			}
 
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(resp)
+			writeJSON(w, http.StatusOK, resp)
 			return
 		}
 	}
@@ -497,8 +495,7 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 		Warnings:       warnings,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func buildSmartMoneySummary(pools []smartMoneyOverviewPool, wallets []smartMoneyOverviewWallet, missingPriceTokenCount int) smartMoneyOverviewSummary {

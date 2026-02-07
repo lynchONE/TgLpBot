@@ -7,7 +7,6 @@ import (
 	"TgLpBot/service/pricing"
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"math"
 	"math/big"
@@ -338,8 +337,7 @@ func (s *Server) handleSmartMoneyWalletPositions(w http.ResponseWriter, r *http.
 		Positions:     out,
 		Warnings:      warnings,
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func sanitizeFloat(v float64) float64 {
