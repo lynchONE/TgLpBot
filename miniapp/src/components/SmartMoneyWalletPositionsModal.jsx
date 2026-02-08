@@ -109,10 +109,6 @@ export default function SmartMoneyWalletPositionsModal({
             setData(null);
             return;
         }
-        if (!apiBaseUrl) {
-            setError('apiBaseUrl 未配置');
-            return;
-        }
         if (!addr) {
             setError('walletAddress 为空');
             return;
@@ -370,4 +366,3 @@ export default function SmartMoneyWalletPositionsModal({
         </div>
     );
 }
-
