@@ -1339,7 +1339,7 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 							txHash:          strings.ToLower(tx.Hash.Hex()),
 							blockNumber:     bn,
 							logIndex:        uint32(lg.Index),
-							contractAddress: strings.ToLower(contractTo.Hex()),
+							contractAddress: strings.ToLower(lg.Address.Hex()),
 							source:          src,
 						})
 						if action == "add" && watch != nil && common.IsHexAddress(walletKey) {
@@ -1444,7 +1444,7 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 						txHash:          strings.ToLower(tx.Hash.Hex()),
 						blockNumber:     bn,
 						logIndex:        uint32(lg.Index),
-						contractAddress: strings.ToLower(contractTo.Hex()),
+						contractAddress: strings.ToLower(lg.Address.Hex()),
 						source:          src,
 					})
 					if action == "add" && watch != nil && common.IsHexAddress(walletKey) {
@@ -1536,7 +1536,6 @@ func (sc *smartLPReceiptScanner) scanReceipt(ctx context.Context, receipt *types
 	}
 
 	txHashStr := strings.ToLower(txHash.Hex())
-	contractToStr := strings.ToLower(contractTo.Hex())
 	fromStr := strings.ToLower(fromAddr.Hex())
 
 	eventTime := blockTime
@@ -1689,7 +1688,7 @@ func (sc *smartLPReceiptScanner) scanReceipt(ctx context.Context, receipt *types
 					txHash:          txHashStr,
 					blockNumber:     bn,
 					logIndex:        uint32(lg.Index),
-					contractAddress: contractToStr,
+					contractAddress: strings.ToLower(lg.Address.Hex()),
 					source:          "v3_npm",
 				})
 				continue
@@ -1784,7 +1783,7 @@ func (sc *smartLPReceiptScanner) scanReceipt(ctx context.Context, receipt *types
 				txHash:          txHashStr,
 				blockNumber:     bn,
 				logIndex:        uint32(lg.Index),
-				contractAddress: contractToStr,
+				contractAddress: strings.ToLower(lg.Address.Hex()),
 				source:          "v4_pool_manager",
 			})
 			continue

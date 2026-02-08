@@ -147,12 +147,55 @@ func (s *Server) handleSmartMoneyWalletPositions(w http.ResponseWriter, r *http.
 	v4Pools, _ := querySmartMoneyWalletRecentV4Pools(ctx, s.ClickHouse.Conn, chain, walletAddr, window, 200)
 
 	warnings := make([]string, 0, 4)
+
+	// Dedupe refs defensively: older SmartLP ingestions used non-NPM contract_address values,
+	// which can lead to duplicate (token_id, pool_id) groups.
+	if len(refs) > 0 {
+		seen := make(map[string]struct{}, len(refs))
+		uniq := make([]smartMoneyWalletV3TokenRef, 0, len(refs))
+		for _, ref := range refs {
+			tok := strings.TrimSpace(ref.TokenID)
+			pid := strings.ToLower(strings.TrimSpace(ref.PoolID))
+			if tok == "" {
+				continue
+			}
+			key := tok + "|" + pid
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			uniq = append(uniq, ref)
+		}
+		refs = uniq
+	}
+
 	out := make([]smartMoneyWalletLPPosition, 0, len(refs))
 
 	metaCache := newSmartMoneyTokenMetaCache()
 
 	priceTokensSet := make(map[string]struct{})
 	priceTokens := make([]string, 0, 2*len(refs))
+
+	// V3 position managers (used to materialize current positions).
+	v3Managers := make([]common.Address, 0, 2)
+	if common.IsHexAddress(config.AppConfig.PancakeV3PositionManagerAddress) {
+		v3Managers = append(v3Managers, common.HexToAddress(config.AppConfig.PancakeV3PositionManagerAddress))
+	}
+	if common.IsHexAddress(config.AppConfig.UniswapV3PositionManagerAddress) {
+		v3Managers = append(v3Managers, common.HexToAddress(config.AppConfig.UniswapV3PositionManagerAddress))
+	}
+	pmCache := make(map[common.Address]*blockchain.V3PositionManager, len(v3Managers))
+	if blockchain.Client == nil {
+		warnings = append(warnings, "blockchain client not initialized; cannot load wallet positions")
+	} else {
+		for _, npmAddr := range v3Managers {
+			if pm, pmErr := blockchain.NewV3PositionManager(npmAddr, blockchain.Client); pmErr == nil {
+				pmCache[npmAddr] = pm
+			} else {
+				warnings = append(warnings, fmt.Sprintf("init V3 position manager failed: %s", npmAddr.Hex()))
+			}
+		}
+	}
 
 	// Fetch and compute V3 positions.
 	type v3Computed struct {
@@ -168,29 +211,51 @@ func (s *Server) handleSmartMoneyWalletPositions(w http.ResponseWriter, r *http.
 			if gctx.Err() != nil {
 				return gctx.Err()
 			}
-			npmStr := strings.ToLower(strings.TrimSpace(ref.NPMAddress))
-			if !common.IsHexAddress(npmStr) {
-				return nil
-			}
 			tokenID, ok := new(big.Int).SetString(strings.TrimSpace(ref.TokenID), 10)
 			if !ok || tokenID == nil || tokenID.Sign() <= 0 {
 				return nil
 			}
 
-			npmAddr := common.HexToAddress(npmStr)
-			pm, pmErr := blockchain.NewV3PositionManager(npmAddr, blockchain.Client)
-			if pmErr != nil {
-				mu.Lock()
-				warnings = append(warnings, fmt.Sprintf("init V3 position manager failed: %s", npmAddr.Hex()))
-				mu.Unlock()
+			// Prefer the event-provided contract address if it is a known NPM; otherwise try all configured NPMs.
+			npmOrder := make([]common.Address, 0, len(pmCache))
+			npmHint := strings.ToLower(strings.TrimSpace(ref.NPMAddress))
+			if common.IsHexAddress(npmHint) {
+				h := common.HexToAddress(npmHint)
+				if _, ok := pmCache[h]; ok {
+					npmOrder = append(npmOrder, h)
+				}
+			}
+			for _, a := range v3Managers {
+				if len(npmOrder) > 0 && a == npmOrder[0] {
+					continue
+				}
+				if _, ok := pmCache[a]; ok {
+					npmOrder = append(npmOrder, a)
+				}
+			}
+			if len(npmOrder) == 0 {
 				return nil
 			}
 
-			info, pErr := pm.Positions(&bind.CallOpts{Context: gctx}, tokenID)
-			if pErr != nil || info == nil {
-				return nil
+			var info *blockchain.V3PositionInfo
+			usedNPM := common.Address{}
+			for _, npmAddr := range npmOrder {
+				pm := pmCache[npmAddr]
+				if pm == nil {
+					continue
+				}
+				var pErr error
+				info, pErr = pm.Positions(&bind.CallOpts{Context: gctx}, tokenID)
+				if pErr != nil || info == nil {
+					continue
+				}
+				if info.Liquidity == nil || info.Liquidity.Sign() == 0 {
+					continue
+				}
+				usedNPM = npmAddr
+				break
 			}
-			if info.Liquidity == nil || info.Liquidity.Sign() == 0 {
+			if usedNPM == (common.Address{}) || info == nil || info.Liquidity == nil || info.Liquidity.Sign() == 0 {
 				return nil
 			}
 
@@ -224,7 +289,7 @@ func (s *Server) handleSmartMoneyWalletPositions(w http.ResponseWriter, r *http.
 			amt1 := amountToFloat(amountToString(amt1Raw), dec1)
 
 			inRange := currentTick >= info.TickLower && currentTick <= info.TickUpper
-			exchange := v3ExchangeLabel(npmAddr)
+			exchange := v3ExchangeLabel(usedNPM)
 			feePct := 0.0
 			if info.Fee > 0 {
 				feePct = float64(info.Fee) / 10000.0
