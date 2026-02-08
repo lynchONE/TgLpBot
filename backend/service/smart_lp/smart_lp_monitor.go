@@ -126,7 +126,6 @@ func (s *SmartLPMonitor) Start() {
 		}
 		log.Printf("[SmartLP] websocket enabled url=%s", wsURL)
 		go s.runWebsocket(wsURL)
-		go s.runRemoveWatcherLoop()
 		return
 	}
 
@@ -138,7 +137,6 @@ func (s *SmartLPMonitor) Start() {
 		}
 	}
 	go s.runLoop()
-	go s.runRemoveWatcherLoop()
 }
 
 func (s *SmartLPMonitor) Stop() {
@@ -392,6 +390,16 @@ func (s *SmartLPMonitor) smartLPWebsocketBlockWorker(blockQueue <-chan uint64, m
 		return
 	}
 
+	chain := strings.ToLower(strings.TrimSpace(scanner.chain))
+	if chain == "" {
+		chain = "bsc"
+	}
+	watch, err := s.loadWatchedWallets(context.Background(), chain)
+	if err != nil {
+		log.Printf("[SmartLP] websocket load watchlist failed: %v", err)
+		watch = make(map[string]struct{})
+	}
+
 	for bn := range blockQueue {
 		if blockchain.Client == nil || blockchain.ChainID == nil {
 			continue
@@ -401,7 +409,7 @@ func (s *SmartLPMonitor) smartLPWebsocketBlockWorker(blockQueue <-chan uint64, m
 		var events []smartLPEvent
 		for {
 			var err error
-			events, err = s.scanSmartLPBlockWithScanner(context.Background(), bn, monitorAddrs, scanner)
+			events, err = s.scanSmartLPBlockWithScanner(context.Background(), bn, monitorAddrs, watch, scanner)
 			if err == nil {
 				break
 			}
@@ -449,7 +457,7 @@ func (s *SmartLPMonitor) smartLPWebsocketBlockWorker(blockQueue <-chan uint64, m
 	}
 }
 
-func (s *SmartLPMonitor) scanSmartLPBlockWithScanner(ctx context.Context, blockNumber uint64, monitorAddrs map[common.Address]struct{}, scanner *smartLPReceiptScanner) ([]smartLPEvent, error) {
+func (s *SmartLPMonitor) scanSmartLPBlockWithScanner(ctx context.Context, blockNumber uint64, monitorAddrs map[common.Address]struct{}, watch map[string]struct{}, scanner *smartLPReceiptScanner) ([]smartLPEvent, error) {
 	if s == nil || scanner == nil {
 		return nil, nil
 	}
@@ -526,10 +534,21 @@ func (s *SmartLPMonitor) scanSmartLPBlockWithScanner(ctx context.Context, blockN
 			continue
 		}
 		contractTo := *tx.To
+
+		isMonitorTx := true
 		if monitorAddrs != nil {
-			if _, ok := monitorAddrs[contractTo]; !ok {
-				continue
+			_, isMonitorTx = monitorAddrs[contractTo]
+		}
+
+		isWatchedTx := false
+		if !isMonitorTx && watch != nil {
+			if _, ok := watch[strings.ToLower(tx.From.Hex())]; ok {
+				isWatchedTx = true
 			}
+		}
+
+		if !isMonitorTx && !isWatchedTx {
+			continue
 		}
 		candidateTxs++
 
@@ -564,8 +583,38 @@ func (s *SmartLPMonitor) scanSmartLPBlockWithScanner(ctx context.Context, blockN
 		}
 
 		txEvents := scanner.scanReceipt(ctx, receipt, tx.From, contractTo, tx.Hash, blockTime)
-		if len(txEvents) > 0 {
+		if len(txEvents) == 0 {
+			continue
+		}
+
+		// If this tx was discovered via the monitored contract list, keep all parsed
+		// events and also update the in-memory watchlist on new add-liquidity actions.
+		// If it was discovered via the watchlist, only keep remove-liquidity events to
+		// avoid expanding the tracked "add" surface beyond SmartLP contract activity.
+		if isMonitorTx {
 			events = append(events, txEvents...)
+			if watch != nil {
+				for _, ev := range txEvents {
+					if strings.ToLower(strings.TrimSpace(ev.action)) != "add" {
+						continue
+					}
+					wallet := strings.ToLower(strings.TrimSpace(ev.walletAddress))
+					if common.IsHexAddress(wallet) {
+						watch[wallet] = struct{}{}
+					}
+					break
+				}
+			}
+			continue
+		}
+
+		// Watched-wallet tx: keep only remove events and label them as watch_remove.
+		for _, ev := range txEvents {
+			if strings.ToLower(strings.TrimSpace(ev.action)) != "remove" {
+				continue
+			}
+			ev.source = "watch_remove"
+			events = append(events, ev)
 		}
 	}
 
@@ -617,12 +666,23 @@ func (s *SmartLPMonitor) runOnce() {
 		return
 	}
 
+	chain := strings.ToLower(strings.TrimSpace(config.AppConfig.AutoLPChain))
+	if chain == "" {
+		chain = "bsc"
+	}
+
 	scanTimeout := 10 * time.Minute
 	if config.AppConfig != nil && config.AppConfig.SmartLPScanTimeoutSeconds > 0 {
 		scanTimeout = time.Duration(config.AppConfig.SmartLPScanTimeoutSeconds) * time.Second
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), scanTimeout)
 	defer cancel()
+
+	watch, err := s.loadWatchedWallets(ctx, chain)
+	if err != nil {
+		log.Printf("[SmartLP] load watchlist failed: %v", err)
+		watch = make(map[string]struct{})
+	}
 
 	head, err := blockchain.Client.BlockNumber(ctx)
 	if err != nil {
@@ -663,7 +723,7 @@ func (s *SmartLPMonitor) runOnce() {
 	}
 	log.Printf("[SmartLP] scanning blocks %d-%d (head=%d mode=receipts v3_managers=%d v4=%v)", from, to, headBlock, len(v3Managers), hasV4)
 
-	events, lastScanned, err := s.scanBlocks(ctx, from, to, monitorAddrs, v3Managers, v4PoolManager)
+	events, lastScanned, err := s.scanBlocks(ctx, from, to, monitorAddrs, watch, v3Managers, v4PoolManager)
 	if err != nil {
 		log.Printf("[SmartLP] scan blocks failed: %v", err)
 		if len(events) > 0 {
@@ -901,7 +961,7 @@ func isRetryableRPCError(err error) bool {
 	}
 }
 
-func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monitorAddrs map[common.Address]struct{}, v3Managers []common.Address, v4PoolManager common.Address) ([]smartLPEvent, uint64, error) {
+func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monitorAddrs map[common.Address]struct{}, watch map[string]struct{}, v3Managers []common.Address, v4PoolManager common.Address) ([]smartLPEvent, uint64, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -1076,14 +1136,27 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 				continue
 			}
 			contractTo := *tx.To
+
+			isMonitorTx := true
 			if monitorAddrs != nil {
-				if _, ok := monitorAddrs[contractTo]; !ok {
-					continue
-				}
+				_, isMonitorTx = monitorAddrs[contractTo]
 			}
-			candidateTxs++
 
 			fromAddr := tx.From
+			walletKey := strings.ToLower(strings.TrimSpace(fromAddr.Hex()))
+
+			isWatchedTx := false
+			if !isMonitorTx && watch != nil {
+				if _, ok := watch[walletKey]; ok {
+					isWatchedTx = true
+				}
+			}
+
+			if !isMonitorTx && !isWatchedTx {
+				continue
+			}
+
+			candidateTxs++
 
 			var receipt *types.Receipt
 			var err error
@@ -1115,6 +1188,8 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 				continue
 			}
 
+			watchOnlyRemove := isWatchedTx && !isMonitorTx
+
 			for _, lg := range receipt.Logs {
 				if lg == nil || len(lg.Topics) == 0 {
 					continue
@@ -1132,6 +1207,9 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 						case decreaseID:
 							action = "remove"
 						default:
+							continue
+						}
+						if watchOnlyRemove && action != "remove" {
 							continue
 						}
 
@@ -1238,6 +1316,10 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 						net1 := netErc20TransferMagnitude(receipt, pos.token1, fromAddr, action)
 
 						eventSeq := bn*1_000_000 + uint64(lg.Index)
+						src := "v3_npm"
+						if watchOnlyRemove {
+							src = "watch_remove"
+						}
 						events = append(events, smartLPEvent{
 							ts:              blockTime,
 							eventSeq:        eventSeq,
@@ -1258,8 +1340,11 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 							blockNumber:     bn,
 							logIndex:        uint32(lg.Index),
 							contractAddress: strings.ToLower(contractTo.Hex()),
-							source:          "v3_npm",
+							source:          src,
 						})
+						if action == "add" && watch != nil && common.IsHexAddress(walletKey) {
+							watch[walletKey] = struct{}{}
+						}
 						continue
 					}
 				}
@@ -1294,6 +1379,9 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 					action := "add"
 					if liqDelta.Sign() < 0 {
 						action = "remove"
+					}
+					if watchOnlyRemove && action != "remove" {
+						continue
 					}
 
 					poolID := strings.ToLower(lg.Topics[1].Hex())
@@ -1333,6 +1421,10 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 					}
 
 					eventSeq := bn*1_000_000 + uint64(lg.Index)
+					src := "v4_pool_manager"
+					if watchOnlyRemove {
+						src = "watch_remove"
+					}
 					events = append(events, smartLPEvent{
 						ts:              blockTime,
 						eventSeq:        eventSeq,
@@ -1353,8 +1445,11 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 						blockNumber:     bn,
 						logIndex:        uint32(lg.Index),
 						contractAddress: strings.ToLower(contractTo.Hex()),
-						source:          "v4_pool_manager",
+						source:          src,
 					})
+					if action == "add" && watch != nil && common.IsHexAddress(walletKey) {
+						watch[walletKey] = struct{}{}
+					}
 					continue
 				}
 			}
@@ -2307,6 +2402,13 @@ func (s *SmartLPMonitor) runRemoveWatcherOnce() {
 
 		if fromAddr == (common.Address{}) || contractTo == (common.Address{}) {
 			recordFailed(item.block)
+			continue
+		}
+
+		// Only fetch receipts for watched wallets; otherwise we may waste RPC budget on
+		// unrelated DecreaseLiquidity/ModifyLiquidity activity and miss the wallets we care about.
+		walletKey := strings.ToLower(fromAddr.Hex())
+		if _, ok := watch[walletKey]; !ok {
 			continue
 		}
 
