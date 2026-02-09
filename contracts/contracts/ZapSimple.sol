@@ -113,6 +113,10 @@ contract ZapSimple is ReentrancyGuard, Ownable {
 
     uint256 private constant BPS_DENOMINATOR = 10_000;
 
+    /// @dev Custom error selector: Permit2AllowanceIsFixedAtInfinity()
+    /// Some Permit2 deployments revert on approve() once allowance is set to infinity.
+    bytes4 private constant PERMIT2_ALLOWANCE_IS_FIXED_AT_INFINITY = 0x3f68539a;
+
     /*//////////////////////////////////////////////////////////////
                                  CONFIG
     //////////////////////////////////////////////////////////////*/
@@ -952,15 +956,13 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         require(amount1 <= type(uint128).max, "amount1 too large");
 
         // Setup Permit2 allowances for V4 PositionManager
-        uint48 expiration = uint48(block.timestamp + 3600);
-        
         if (amount0 > 0) {
             IERC20(token0).forceApprove(PERMIT2, amount0);
-            IPermit2(PERMIT2).approve(token0, positionManager, uint160(amount0), expiration);
+            _permit2ApproveInfinity(token0, positionManager);
         }
         if (amount1 > 0) {
             IERC20(token1).forceApprove(PERMIT2, amount1);
-            IPermit2(PERMIT2).approve(token1, positionManager, uint160(amount1), expiration);
+            _permit2ApproveInfinity(token1, positionManager);
         }
 
         // Calculate liquidity using actual current price
@@ -1005,6 +1007,34 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         // Reset Permit2 approvals
         IERC20(token0).forceApprove(PERMIT2, 0);
         IERC20(token1).forceApprove(PERMIT2, 0);
+    }
+
+    /// @dev Approve Permit2 allowance for `spender` to infinity.
+    /// V4 PositionManager implementations may require Permit2 allowance to be fixed at infinity.
+    function _permit2ApproveInfinity(address token, address spender) internal {
+        // If already infinite, skip external state change (and avoid revert on some Permit2 variants).
+        (uint160 allowedAmount, uint48 allowedExpiration, ) = IPermit2(PERMIT2).allowance(address(this), token, spender);
+        if (allowedAmount == type(uint160).max && allowedExpiration == type(uint48).max) {
+            return;
+        }
+
+        try IPermit2(PERMIT2).approve(token, spender, type(uint160).max, type(uint48).max) {
+            // ok
+        } catch (bytes memory reason) {
+            bytes4 selector;
+            if (reason.length >= 4) {
+                assembly {
+                    selector := mload(add(reason, 32))
+                }
+            }
+            if (selector == PERMIT2_ALLOWANCE_IS_FIXED_AT_INFINITY) {
+                // Allowance already fixed at infinity; nothing to do.
+                return;
+            }
+            assembly {
+                revert(add(reason, 32), mload(reason))
+            }
+        }
     }
 
     /**
