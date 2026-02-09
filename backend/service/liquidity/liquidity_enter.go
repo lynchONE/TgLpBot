@@ -1452,6 +1452,9 @@ func (s *LiquidityService) enterV4FromToken(
 	log.Printf("[Liquidity] Calling ZapInV4... PoolId=%s SwapAmt=%s", task.PoolId, swapAmount.String())
 	tx, err := zap.ZapInV4(auth, zapParams)
 	if err != nil {
+		if hint := evmRevertHint(err); hint != "" {
+			return nil, fmt.Errorf("ZapInV4 failed: %s: %w", hint, err)
+		}
 		return nil, fmt.Errorf("ZapInV4 failed: %w", err)
 	}
 	log.Printf("[Liquidity] ZapInV4 sent: %s", tx.Hash().Hex())

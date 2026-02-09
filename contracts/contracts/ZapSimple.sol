@@ -957,11 +957,11 @@ contract ZapSimple is ReentrancyGuard, Ownable {
 
         // Setup Permit2 allowances for V4 PositionManager
         if (amount0 > 0) {
-            IERC20(token0).forceApprove(PERMIT2, amount0);
+            _forceApprovePermit2Infinity(token0);
             _permit2ApproveInfinity(token0, positionManager);
         }
         if (amount1 > 0) {
-            IERC20(token1).forceApprove(PERMIT2, amount1);
+            _forceApprovePermit2Infinity(token1);
             _permit2ApproveInfinity(token1, positionManager);
         }
 
@@ -1003,10 +1003,6 @@ contract ZapSimple is ReentrancyGuard, Ownable {
 
         // Get tokenId
         tokenId = IPositionManager(positionManager).nextTokenId() - 1;
-
-        // Reset Permit2 approvals
-        IERC20(token0).forceApprove(PERMIT2, 0);
-        IERC20(token1).forceApprove(PERMIT2, 0);
     }
 
     /// @dev Approve Permit2 allowance for `spender` to infinity.
@@ -1035,6 +1031,16 @@ contract ZapSimple is ReentrancyGuard, Ownable {
                 revert(add(reason, 32), mload(reason))
             }
         }
+    }
+
+    /// @dev Ensure ERC20 allowance from this contract -> Permit2 is infinite.
+    /// Some tokens (notably tokens that integrate with Permit2) revert if approving Permit2 to any value other than `type(uint256).max`.
+    function _forceApprovePermit2Infinity(address token) internal {
+        uint256 cur = IERC20(token).allowance(address(this), PERMIT2);
+        if (cur == type(uint256).max) {
+            return;
+        }
+        IERC20(token).forceApprove(PERMIT2, type(uint256).max);
     }
 
     /**

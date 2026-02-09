@@ -57,6 +57,9 @@ func tuneZapTxGasLimit(label string, auth *bind.TransactOpts, buildTx func(*bind
 	preview.NoSend = true
 	tx, err := buildTx(&preview)
 	if err != nil {
+		if hint := evmRevertHint(err); hint != "" {
+			log.Printf("[Liquidity] %s gasLimit hint: %s", label, hint)
+		}
 		if minLimit > 0 {
 			auth.GasLimit = minLimit
 			log.Printf("[Liquidity] %s gasLimit: EstimateGas failed, fallback to min=%d (mult=%.4f max=%d): %v",

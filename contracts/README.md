@@ -27,6 +27,9 @@ WETH_ADDRESS=0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c
 
 # Optional
 VERIFY=1
+
+# Optional: force deploy gasPrice
+# GAS_PRICE_GWEI=1
 ```
 
 Deploy:
@@ -35,6 +38,14 @@ Deploy:
 npm run deploy:mainnet
 # or
 npm run deploy:testnet
+```
+
+ZapSimple deploy:
+
+```bash
+npm run deploy-zap:mainnet
+# or
+npm run deploy-zap:testnet
 ```
 
 The deploy script prints suggested bot `.env` keys (`ZAP_V3_ADDRESS`, `ZAP_V4_ADDRESS`). You can set both to the same `ZapSimple` address.
@@ -53,4 +64,7 @@ UNISWAP_V4_POSITION_MANAGER_ADDRESS=0x...
 ## Notes
 
 - TgLpBot builds OKX `/swap` calldata with `userWalletAddress=<ZapSimple>` and passes it to `ZapSimple` (`SwapParams.callData`), so swap + mint happen atomically and dust is refunded by the contract.
-- Exiting positions is done via the V3 NFT Position Manager and the V4 PositionManager (the zap contract does not provide an “exit to USDT” helper).
+- Exiting positions is done via the V3 NFT Position Manager and the V4 PositionManager (the zap contract does not provide an "exit to USDT" helper).
+- If you hit `execution reverted: 0x3f68539a` on `ZapInV4`, that selector is `Permit2AllowanceIsFixedAtInfinity()`. This often shows up during `eth_estimateGas` (so no tx appears on BscScan). Deploy the latest `ZapSimple` and update the bot `ZAP_V4_ADDRESS` to the new contract address.
+- If deployment fails with `insufficient funds for gas * price + value`, top up the deployer BNB. You can also set `GAS_PRICE_GWEI` to override the gas price used by `scripts/deploy_zap_simple.js`.
+
