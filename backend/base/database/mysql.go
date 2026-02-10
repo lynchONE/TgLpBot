@@ -75,6 +75,9 @@ func autoMigrate() error {
 		&models.TradeRecord{},
 		&models.WalletBalanceSnapshot{},
 		&models.StrategyTask{},
+		&models.SmartMoneyFollowConfig{},
+		&models.SmartMoneyFollowJob{},
+		&models.SmartMoneyFollowTask{},
 	)
 }
 

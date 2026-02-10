@@ -290,6 +290,12 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 		task.OutOfRangeSince = &now
 	}
 
+	// Follow tasks are copy-trading positions: keep the tick range consistent with the target wallet.
+	// Do not auto-rebalance or stop-loss based on out-of-range.
+	if task.IsFollow {
+		return
+	}
+
 	duration := time.Since(*task.OutOfRangeSince)
 
 	// Determine direction (use stable price when possible).

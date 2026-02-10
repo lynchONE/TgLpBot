@@ -162,6 +162,96 @@ export async function fetchSmartMoneyWalletPositions({
     }
 }
 
+export async function fetchSmartMoneyFollowConfig({
+    apiBaseUrl,
+    initData,
+    chain,
+    walletAddress,
+    signal,
+}) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const params = new URLSearchParams();
+    if (initData) params.set('initData', String(initData));
+    if (chain) params.set('chain', String(chain));
+    if (walletAddress) params.set('wallet_address', String(walletAddress));
+
+    const qs = params.toString();
+    const url = `${base}/api/smart_money_follow_config${qs ? `?${qs}` : ''}`;
+
+    const resp = await fetch(url, { method: 'GET', signal });
+    const text = await resp.text().catch(() => '');
+    if (!resp.ok) {
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    const body = String(text || '').trim();
+    if (!body) {
+        return {
+            config: {
+                chain: String(chain || 'bsc'),
+                wallet_address: String(walletAddress || ''),
+                enabled: false,
+                max_total_amount_usdt: 0,
+                per_trade_amount_usdt: 0,
+                delay_min_seconds: 0,
+                delay_max_seconds: 60,
+            },
+            warnings: [`smart_money_follow_config 接口返回空响应体 (HTTP ${resp.status})`],
+        };
+    }
+    try {
+        return JSON.parse(body);
+    } catch {
+        throw new Error(`smart_money_follow_config invalid JSON: ${body.slice(0, 120)}`);
+    }
+}
+
+export async function saveSmartMoneyFollowConfig({
+    apiBaseUrl,
+    initData,
+    chain,
+    walletAddress,
+    enabled,
+    maxTotalAmountUSDT,
+    perTradeAmountUSDT,
+    delayMinSeconds,
+    delayMaxSeconds,
+    signal,
+}) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/smart_money_follow_config`;
+
+    const payload = {
+        initData,
+        chain: chain ? String(chain) : undefined,
+        wallet_address: walletAddress ? String(walletAddress) : undefined,
+        enabled: typeof enabled === 'boolean' ? enabled : undefined,
+        max_total_amount_usdt: Number.isFinite(Number(maxTotalAmountUSDT)) ? Number(maxTotalAmountUSDT) : undefined,
+        per_trade_amount_usdt: Number.isFinite(Number(perTradeAmountUSDT)) ? Number(perTradeAmountUSDT) : undefined,
+        delay_min_seconds: Number.isFinite(Number(delayMinSeconds)) ? Number(delayMinSeconds) : undefined,
+        delay_max_seconds: Number.isFinite(Number(delayMaxSeconds)) ? Number(delayMaxSeconds) : undefined,
+    };
+
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+    });
+    const text = await resp.text().catch(() => '');
+    if (!resp.ok) {
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    const body = String(text || '').trim();
+    if (!body) {
+        return { ok: true };
+    }
+    try {
+        return JSON.parse(body);
+    } catch {
+        throw new Error(`smart_money_follow_config invalid JSON: ${body.slice(0, 120)}`);
+    }
+}
+
 export async function setTaskPaused({ apiBaseUrl, initData, taskId, paused, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/task_action?action=pause`;

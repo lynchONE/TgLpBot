@@ -427,6 +427,182 @@ func (s *SmartLPService) GetRecentAddWalletCounts(ctx context.Context, pools []S
 	return out, nil
 }
 
+// GetWalletEventsSince returns SmartLP add/remove events for a wallet since a given event_seq cursor.
+// It is used by background services (e.g. Smart Money follow) to track wallet behavior incrementally.
+func (s *SmartLPService) GetWalletEventsSince(ctx context.Context, chain string, wallet string, sinceEventSeq uint64, limit int) ([]SmartLPEvent, error) {
+	out := make([]SmartLPEvent, 0)
+	if s == nil || s.ch == nil || s.ch.Conn == nil {
+		return out, fmt.Errorf("clickhouse not initialized")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	wallet = strings.ToLower(strings.TrimSpace(wallet))
+	if wallet == "" {
+		return out, nil
+	}
+
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 2000 {
+		limit = 2000
+	}
+
+	chain = strings.ToLower(strings.TrimSpace(chain))
+	chainFilter := ""
+	args := make([]interface{}, 0, 3)
+	args = append(args, wallet, sinceEventSeq)
+	if chain != "" {
+		chainFilter = "AND lowerUTF8(chain) = ?"
+		args = append(args, chain)
+	}
+
+	q := fmt.Sprintf(`
+		SELECT
+			ts, event_seq, chain, pool_version, pool_id, wallet_address, action, token_id,
+			amount0, amount1, net_amount0, net_amount1, liquidity_delta, tick_lower, tick_upper,
+			tx_hash, block_number, log_index
+		FROM smart_lp_events
+		WHERE wallet_address = ?
+			AND event_seq > ?
+			AND action IN ('add', 'remove')
+			%s
+		ORDER BY event_seq ASC
+		LIMIT %d
+	`, chainFilter, limit)
+
+	rows, err := s.ch.Conn.Query(ctx, q, args...)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var ev SmartLPEvent
+		var tickL int32
+		var tickU int32
+		if err := rows.Scan(
+			&ev.Ts,
+			&ev.EventSeq,
+			&ev.Chain,
+			&ev.PoolVersion,
+			&ev.PoolID,
+			&ev.WalletAddress,
+			&ev.Action,
+			&ev.TokenID,
+			&ev.Amount0,
+			&ev.Amount1,
+			&ev.NetAmount0,
+			&ev.NetAmount1,
+			&ev.LiquidityDelta,
+			&tickL,
+			&tickU,
+			&ev.TxHash,
+			&ev.BlockNumber,
+			&ev.LogIndex,
+		); err != nil {
+			return out, err
+		}
+		ev.TickLower = int(tickL)
+		ev.TickUpper = int(tickU)
+		out = append(out, ev)
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+// GetWalletEventsSinceTime returns SmartLP add/remove events for a wallet since a timestamp (inclusive).
+// This is primarily used to bootstrap a cursor when a follow config is newly enabled.
+func (s *SmartLPService) GetWalletEventsSinceTime(ctx context.Context, chain string, wallet string, since time.Time, limit int) ([]SmartLPEvent, error) {
+	out := make([]SmartLPEvent, 0)
+	if s == nil || s.ch == nil || s.ch.Conn == nil {
+		return out, fmt.Errorf("clickhouse not initialized")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	wallet = strings.ToLower(strings.TrimSpace(wallet))
+	if wallet == "" {
+		return out, nil
+	}
+
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 2000 {
+		limit = 2000
+	}
+
+	chain = strings.ToLower(strings.TrimSpace(chain))
+	chainFilter := ""
+	args := make([]interface{}, 0, 3)
+	args = append(args, wallet, since)
+	if chain != "" {
+		chainFilter = "AND lowerUTF8(chain) = ?"
+		args = append(args, chain)
+	}
+
+	q := fmt.Sprintf(`
+		SELECT
+			ts, event_seq, chain, pool_version, pool_id, wallet_address, action, token_id,
+			amount0, amount1, net_amount0, net_amount1, liquidity_delta, tick_lower, tick_upper,
+			tx_hash, block_number, log_index
+		FROM smart_lp_events
+		WHERE wallet_address = ?
+			AND ts >= ?
+			AND action IN ('add', 'remove')
+			%s
+		ORDER BY event_seq ASC
+		LIMIT %d
+	`, chainFilter, limit)
+
+	rows, err := s.ch.Conn.Query(ctx, q, args...)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var ev SmartLPEvent
+		var tickL int32
+		var tickU int32
+		if err := rows.Scan(
+			&ev.Ts,
+			&ev.EventSeq,
+			&ev.Chain,
+			&ev.PoolVersion,
+			&ev.PoolID,
+			&ev.WalletAddress,
+			&ev.Action,
+			&ev.TokenID,
+			&ev.Amount0,
+			&ev.Amount1,
+			&ev.NetAmount0,
+			&ev.NetAmount1,
+			&ev.LiquidityDelta,
+			&tickL,
+			&tickU,
+			&ev.TxHash,
+			&ev.BlockNumber,
+			&ev.LogIndex,
+		); err != nil {
+			return out, err
+		}
+		ev.TickLower = int(tickL)
+		ev.TickUpper = int(tickU)
+		out = append(out, ev)
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
 func smartLPPoolKey(poolVersion string, poolID string) string {
 	return strings.ToLower(strings.TrimSpace(poolVersion)) + "|" + strings.ToLower(strings.TrimSpace(poolID))
 }

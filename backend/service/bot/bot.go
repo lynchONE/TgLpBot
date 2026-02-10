@@ -9,6 +9,7 @@ import (
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/pool"
 	"TgLpBot/service/smart_lp"
+	"TgLpBot/service/smart_money_follow"
 	"TgLpBot/service/strategy"
 	"TgLpBot/service/user"
 	"TgLpBot/service/wallet"
@@ -32,6 +33,7 @@ type Bot struct {
 	autoLPService    *auto_lp.AutoLPService
 	smartLPMonitor   *smart_lp.SmartLPMonitor
 	smartLPService   *smart_lp.SmartLPService
+	smartMoneyFollow *smart_money_follow.SmartMoneyFollowService
 	autoLPCfgService *auto_lp.AutoLPUserConfigService
 	configService    *user.GlobalConfigService
 	taskService      *strategy.StrategyTaskService
@@ -61,6 +63,7 @@ func NewBot(ch *clickhouse.ClickHouseService) (*Bot, error) {
 		autoLPService:    auto_lp.NewAutoLPService(ch),
 		smartLPMonitor:   smart_lp.NewSmartLPMonitor(ch),
 		smartLPService:   smart_lp.NewSmartLPService(ch),
+		smartMoneyFollow: smart_money_follow.NewSmartMoneyFollowService(ch),
 		autoLPCfgService: auto_lp.NewAutoLPUserConfigService(),
 		configService:    user.NewGlobalConfigService(),
 		taskService:      strategy.NewStrategyTaskService(),
@@ -103,6 +106,35 @@ func NewBot(ch *clickhouse.ClickHouseService) (*Bot, error) {
 				bot.sendMessage(user.TelegramID, message)
 			} else {
 				log.Printf("Failed to notify user %d: %v", userID, err)
+			}
+		})
+	}
+
+	// Set Smart Money follow notifier (reuse the same user->telegram mapping)
+	if bot.smartMoneyFollow != nil {
+		bot.smartMoneyFollow.SetNotifier(func(userID uint, message string) {
+			user, err := bot.userService.GetUserByID(userID)
+			if err == nil {
+				bot.sendMessage(user.TelegramID, message)
+			} else {
+				log.Printf("Failed to notify user %d: %v", userID, err)
+			}
+		})
+		bot.smartMoneyFollow.SetTaskCardNotifier(func(userID uint, taskID uint) {
+			user, err := bot.userService.GetUserByID(userID)
+			if err != nil {
+				log.Printf("Failed to notify task card user %d: %v", userID, err)
+				return
+			}
+			task, err := bot.taskService.GetByID(userID, taskID)
+			if err != nil {
+				log.Printf("Failed to notify task card user %d task #%d: %v", userID, taskID, err)
+				return
+			}
+
+			msg, err := bot.sendTaskCardMessage(user.TelegramID, bot.formatTaskCardWithRefresh(task), bot.taskKeyboardWithRefresh(task))
+			if err == nil && msg.MessageID != 0 {
+				bot.startTaskAutoRefresh(user.TelegramID, msg.MessageID, task.ID, userID)
 			}
 		})
 	}
@@ -240,6 +272,9 @@ func (b *Bot) Start() {
 	}
 	if b.smartLPMonitor != nil {
 		b.smartLPMonitor.Start()
+	}
+	if b.smartMoneyFollow != nil {
+		b.smartMoneyFollow.Start()
 	}
 	if b.snapshotService != nil {
 		b.snapshotService.Start()
@@ -627,6 +662,9 @@ func (b *Bot) Stop() {
 	}
 	if b.smartLPMonitor != nil {
 		b.smartLPMonitor.Stop()
+	}
+	if b.smartMoneyFollow != nil {
+		b.smartMoneyFollow.Stop()
 	}
 	if b.snapshotService != nil {
 		b.snapshotService.Stop()

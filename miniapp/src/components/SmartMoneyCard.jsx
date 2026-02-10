@@ -61,6 +61,12 @@ function shortHex(value, head = 6, tail = 4) {
     return `${s.slice(0, head)}...${s.slice(-tail)}`;
 }
 
+function normalizeWalletAddress(value) {
+    const s = String(value || '').trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(s)) return '';
+    return `0x${s.slice(2).toLowerCase()}`;
+}
+
 async function safeCopy(value, onNotice) {
     const text = String(value || '').trim();
     if (!text) return;
@@ -102,6 +108,8 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
 
     const [walletModalOpen, setWalletModalOpen] = useState(false);
     const [walletModalAddr, setWalletModalAddr] = useState('');
+    const [customWalletAddr, setCustomWalletAddr] = useState('');
+    const [customWalletErr, setCustomWalletErr] = useState('');
 
     const updatedAtText = useMemo(
         () => formatRelativeTime(overview?.updated_at, tick) || '--',
@@ -295,6 +303,59 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                     <div className="mb-2 flex items-center justify-between">
                         <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">最近{pnlWindowLabel}钱包盈亏</div>
                         <div className="text-[11px] text-zinc-500 dark:text-white/40">Top {topWallets.length}</div>
+                    </div>
+                    <div className="mb-2 rounded-xl border border-zinc-200 bg-white/70 p-2 dark:border-white/10 dark:bg-white/5">
+                        <div className="text-[10px] text-zinc-500 dark:text-white/40">Custom wallet (view positions / follow)</div>
+                        <div className="mt-1 flex items-center gap-2">
+                            <input
+                                type="text"
+                                inputMode="text"
+                                autoComplete="off"
+                                value={customWalletAddr}
+                                onChange={(e) => {
+                                    setCustomWalletAddr(e.target.value);
+                                    if (customWalletErr) setCustomWalletErr('');
+                                }}
+                                onKeyDown={(e) => {
+                                    if (e.key !== 'Enter') return;
+                                    const normalized = normalizeWalletAddress(customWalletAddr);
+                                    if (!normalized) {
+                                        hapticNotification('error');
+                                        setCustomWalletErr('Invalid wallet address (expected 0x...)');
+                                        return;
+                                    }
+                                    hapticImpact('light');
+                                    if (customWalletErr) setCustomWalletErr('');
+                                    setCustomWalletAddr(normalized);
+                                    setWalletModalAddr(normalized);
+                                    setWalletModalOpen(true);
+                                }}
+                                className="min-w-0 flex-1 rounded-lg bg-white px-2 py-1 text-[12px] font-semibold text-zinc-900 outline-none ring-0 dark:bg-white/5 dark:text-white/80"
+                                placeholder="0x..."
+                            />
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    const normalized = normalizeWalletAddress(customWalletAddr);
+                                    if (!normalized) {
+                                        hapticNotification('error');
+                                        setCustomWalletErr('Invalid wallet address (expected 0x...)');
+                                        return;
+                                    }
+                                    hapticImpact('light');
+                                    if (customWalletErr) setCustomWalletErr('');
+                                    setCustomWalletAddr(normalized);
+                                    setWalletModalAddr(normalized);
+                                    setWalletModalOpen(true);
+                                }}
+                                className="shrink-0 inline-flex items-center rounded-lg bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
+                            >
+                                Open
+                            </button>
+                        </div>
+                        {customWalletErr ? (
+                            <div className="mt-1 text-[10px] text-red-600 dark:text-red-300">{customWalletErr}</div>
+                        ) : null}
                     </div>
                     {wallets.length ? (
                         <div className="mt-2">

@@ -27,6 +27,10 @@ type StrategyTask struct {
 	// IsAuto marks tasks created by the AutoLP system (manual tasks are false).
 	IsAuto bool `gorm:"default:false;index" json:"is_auto"`
 
+	// IsFollow marks tasks created by Smart Money wallet follow (copy-trading).
+	// Follow tasks keep the tick range consistent with the target wallet; they should not auto-rebalance.
+	IsFollow bool `gorm:"default:false;index" json:"is_follow"`
+
 	// Pool meta (cached for display)
 	PoolVersion  string `gorm:"size:10;default:'v3'" json:"pool_version"`
 	Exchange     string `gorm:"size:50" json:"exchange"`
