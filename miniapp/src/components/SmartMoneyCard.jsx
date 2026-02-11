@@ -287,81 +287,81 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                             <div className="text-[11px] text-zinc-500 dark:text-white/40">Top {topWallets.length}</div>
                         </div>
                         {topWallets.length ? (
-                            <div className="overflow-x-auto">
-                                <table className="min-w-full text-left text-[11px]">
-                                    <thead className="text-zinc-500 dark:text-white/40">
-                                        <tr>
-                                            <th className="pb-1 pr-3 font-medium">钱包</th>
-                                            <th className="pb-1 pr-3 text-right font-medium">In</th>
-                                            <th className="pb-1 pr-3 text-right font-medium">Out</th>
-                                            <th className="pb-1 pr-3 text-right font-medium">PnL</th>
-                                            <th className="pb-1 pr-3 text-right font-medium">1h/{pnlWindowLabel}</th>
-                                            <th className="pb-1 pr-0 text-right font-medium">操作</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="text-zinc-800 dark:text-white/85">
-                                        {topWallets.map((wallet) => {
-                                            const addr = String(wallet?.wallet_address || '').trim();
-                                            const inUsd = Number(wallet?.in_usdt_24h ?? 0);
-                                            const outUsd = Number(wallet?.out_usdt_24h ?? 0);
-                                            const pnl = Number(wallet?.pnl_usdt_24h ?? 0);
-                                            const margin = Number(wallet?.pnl_margin_pct ?? 0);
-                                            const cnt1h = Number(wallet?.event_count_1h ?? 0);
-                                            const cnt24h = Number(wallet?.event_count_24h ?? 0);
-                                            const pnlTone = kpiTone(pnl);
-                                            return (
-                                                <tr key={addr} className="border-t border-zinc-200/70 dark:border-white/10">
-                                                    <td className="py-1.5 pr-3 font-semibold">{shortHex(addr, 10, 8) || '--'}</td>
-                                                    <td className="py-1.5 pr-3 text-right tabular-nums">{formatUsd(inUsd)}</td>
-                                                    <td className="py-1.5 pr-3 text-right tabular-nums">{formatUsd(outUsd)}</td>
-                                                    <td className={`py-1.5 pr-3 text-right tabular-nums font-semibold ${pnlTone}`}>
-                                                        {formatUsd(pnl)}
-                                                        <span className="ml-1 text-[10px] opacity-70">({formatPct(margin)})</span>
-                                                    </td>
-                                                    <td className="py-1.5 pr-3 text-right tabular-nums text-zinc-500 dark:text-white/40">
-                                                        {Number.isFinite(cnt1h) ? cnt1h : '--'} / {Number.isFinite(cnt24h) ? cnt24h : '--'}
-                                                    </td>
-                                                    <td className="py-1.5 pr-0 text-right">
-                                                        <div className="inline-flex items-center gap-1.5">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    hapticImpact('light');
-                                                                    safeCopy(addr, onNotice);
-                                                                }}
-                                                                className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
-                                                            >
-                                                                复制
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    hapticImpact('light');
-                                                                    setFollowModalAddr(addr);
-                                                                    setFollowModalOpen(true);
-                                                                }}
-                                                                className="inline-flex items-center rounded-lg bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
-                                                            >
-                                                                跟单
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    hapticImpact('light');
-                                                                    setWalletModalAddr(addr);
-                                                                    setWalletModalOpen(true);
-                                                                }}
-                                                                className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
-                                                            >
-                                                                仓位
-                                                            </button>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
+                            <div className="space-y-2">
+                                {topWallets.map((wallet, index) => {
+                                    const addr = String(wallet?.wallet_address || '').trim();
+                                    const inUsd = Number(wallet?.in_usdt_24h ?? 0);
+                                    const outUsd = Number(wallet?.out_usdt_24h ?? 0);
+                                    const pnl = Number(wallet?.pnl_usdt_24h ?? 0);
+                                    const margin = Number(wallet?.pnl_margin_pct ?? 0);
+                                    const cnt1h = Number(wallet?.event_count_1h ?? 0);
+                                    const cnt24h = Number(wallet?.event_count_24h ?? 0);
+                                    const rank = index + 1;
+                                    const rankTone = rank <= 3
+                                        ? 'bg-emerald-500/15 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200'
+                                        : 'bg-zinc-100 text-zinc-700 dark:bg-white/5 dark:text-white/70';
+                                    const pnlTone = kpiTone(pnl);
+                                    return (
+                                        <div key={addr || String(index)} className="rounded-xl border border-zinc-200 bg-white p-2.5 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                                            <div className="flex items-start justify-between gap-2">
+                                                <div className="min-w-0">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`inline-flex h-5 min-w-[20px] items-center justify-center rounded-md px-1 text-[10px] font-bold ${rankTone}`}>
+                                                            #{rank}
+                                                        </span>
+                                                        <span className="truncate font-mono text-[11px] font-semibold text-zinc-900 dark:text-white/90">
+                                                            {shortHex(addr, 10, 8) || '--'}
+                                                        </span>
+                                                    </div>
+                                                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-500 dark:text-white/40">
+                                                        <span>In {formatUsd(inUsd)}</span>
+                                                        <span>Out {formatUsd(outUsd)}</span>
+                                                        <span>1h/{pnlWindowLabel} {Number.isFinite(cnt1h) ? cnt1h : '--'}/{Number.isFinite(cnt24h) ? cnt24h : '--'}</span>
+                                                    </div>
+                                                </div>
+                                                <div className="shrink-0 text-right">
+                                                    <div className={`text-sm font-extrabold tabular-nums ${pnlTone}`}>{formatUsd(pnl)}</div>
+                                                    <div className="text-[10px] text-zinc-500 dark:text-white/40">{formatPct(margin)}</div>
+                                                </div>
+                                            </div>
+
+                                            <div className="mt-2 flex items-center justify-end gap-1.5">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        hapticImpact('light');
+                                                        safeCopy(addr, onNotice);
+                                                    }}
+                                                    className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
+                                                >
+                                                    复制
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        hapticImpact('light');
+                                                        setFollowModalAddr(addr);
+                                                        setFollowModalOpen(true);
+                                                    }}
+                                                    className="inline-flex items-center rounded-lg bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
+                                                >
+                                                    跟单
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        hapticImpact('light');
+                                                        setWalletModalAddr(addr);
+                                                        setWalletModalOpen(true);
+                                                    }}
+                                                    className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
+                                                >
+                                                    仓位
+                                                </button>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         ) : (
                             <div className="rounded-xl border border-zinc-200 bg-white/70 p-3 text-[11px] text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
