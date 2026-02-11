@@ -108,6 +108,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
     const enabledFollowWallets = useMemo(() => {
         if (!Array.isArray(followConfigs)) return [];
         return followConfigs
+            .filter((cfg) => Boolean(cfg?.enabled))
             .map((cfg) => {
                 const walletAddress = normalizeWalletAddress(cfg?.wallet_address);
                 if (!walletAddress) return null;
@@ -146,7 +147,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
             apiBaseUrl,
             initData,
             chain,
-            enabledOnly: true,
+            enabledOnly: false,
             limit: 200,
             signal: controller.signal,
         })
@@ -290,17 +291,16 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                             <div className="space-y-2">
                                 {topWallets.map((wallet, index) => {
                                     const addr = String(wallet?.wallet_address || '').trim();
-                                    const inUsd = Number(wallet?.in_usdt_24h ?? 0);
-                                    const outUsd = Number(wallet?.out_usdt_24h ?? 0);
-                                    const pnl = Number(wallet?.pnl_usdt_24h ?? 0);
-                                    const margin = Number(wallet?.pnl_margin_pct ?? 0);
+                                    const balanceDeltaUsd = Number(wallet?.balance_delta_usdt_24h ?? wallet?.pnl_usdt_24h ?? 0);
+                                    const startValueUsd = Number(wallet?.start_value_usdt_24h ?? 0);
+                                    const endValueUsd = Number(wallet?.end_value_usdt_24h ?? 0);
                                     const cnt1h = Number(wallet?.event_count_1h ?? 0);
                                     const cnt24h = Number(wallet?.event_count_24h ?? 0);
                                     const rank = index + 1;
                                     const rankTone = rank <= 3
                                         ? 'bg-emerald-500/15 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200'
                                         : 'bg-zinc-100 text-zinc-700 dark:bg-white/5 dark:text-white/70';
-                                    const pnlTone = kpiTone(pnl);
+                                    const pnlTone = kpiTone(balanceDeltaUsd);
                                     return (
                                         <div key={addr || String(index)} className="rounded-xl border border-zinc-200 bg-white p-2.5 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
                                             <div className="flex items-start justify-between gap-2">
@@ -314,14 +314,14 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                                         </span>
                                                     </div>
                                                     <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-500 dark:text-white/40">
-                                                        <span>In {formatUsd(inUsd)}</span>
-                                                        <span>Out {formatUsd(outUsd)}</span>
+                                                        <span>24h净变化 {formatUsd(balanceDeltaUsd)}</span>
+                                                        <span className="opacity-80">T0 {formatUsd(startValueUsd)} → T1 {formatUsd(endValueUsd)}</span>
                                                         <span>1h/{pnlWindowLabel} {Number.isFinite(cnt1h) ? cnt1h : '--'}/{Number.isFinite(cnt24h) ? cnt24h : '--'}</span>
                                                     </div>
                                                 </div>
                                                 <div className="shrink-0 text-right">
-                                                    <div className={`text-sm font-extrabold tabular-nums ${pnlTone}`}>{formatUsd(pnl)}</div>
-                                                    <div className="text-[10px] text-zinc-500 dark:text-white/40">{formatPct(margin)}</div>
+                                                    <div className={`text-sm font-extrabold tabular-nums ${pnlTone}`}>{formatUsd(balanceDeltaUsd)}</div>
+                                                    <div className="text-[10px] text-zinc-500 dark:text-white/40">24h净变化</div>
                                                 </div>
                                             </div>
 

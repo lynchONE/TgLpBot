@@ -21,6 +21,12 @@ type fakeRows struct {
 	err  error
 }
 
+type fakeSnapshotRows struct {
+	idx  int
+	data []smartMoneyWalletSnapshotRow
+	err  error
+}
+
 type fakeEventTrendRows struct {
 	idx  int
 	data []smartMoneyEventTrendRow
@@ -65,6 +71,44 @@ func (r *fakeRows) Totals(dest ...any) error { return nil }
 func (r *fakeRows) Columns() []string        { return nil }
 func (r *fakeRows) Close() error             { return nil }
 func (r *fakeRows) Err() error               { return r.err }
+
+func (r *fakeSnapshotRows) Next() bool {
+	if r == nil {
+		return false
+	}
+	if r.idx >= len(r.data) {
+		return false
+	}
+	r.idx++
+	return true
+}
+
+func (r *fakeSnapshotRows) Scan(dest ...any) error {
+	if r == nil {
+		return nil
+	}
+	if r.idx <= 0 || r.idx > len(r.data) {
+		return nil
+	}
+	row := r.data[r.idx-1]
+	*dest[0].(*string) = row.WalletAddress
+	*dest[1].(*string) = row.PoolVersion
+	*dest[2].(*string) = row.PoolID
+	*dest[3].(*string) = row.StartSum0
+	*dest[4].(*string) = row.StartSum1
+	*dest[5].(*string) = row.EndSum0
+	*dest[6].(*string) = row.EndSum1
+	return nil
+}
+
+func (r *fakeSnapshotRows) ScanStruct(dest any) error { return nil }
+func (r *fakeSnapshotRows) ColumnTypes() []driver.ColumnType {
+	return nil
+}
+func (r *fakeSnapshotRows) Totals(dest ...any) error { return nil }
+func (r *fakeSnapshotRows) Columns() []string        { return nil }
+func (r *fakeSnapshotRows) Close() error             { return nil }
+func (r *fakeSnapshotRows) Err() error               { return r.err }
 
 func (r *fakeEventTrendRows) Next() bool {
 	if r == nil {
@@ -181,6 +225,47 @@ func TestQuerySmartMoneyEventTrend_BuildsHourlyAggregationQuery(t *testing.T) {
 
 	if !strings.Contains(conn.lastQuery, "hours_ago") || !strings.Contains(conn.lastQuery, "sum(if(action='add'") {
 		t.Fatalf("unexpected trend query: %s", conn.lastQuery)
+	}
+}
+
+func TestQuerySmartMoneyWalletSnapshots_BuildsSnapshotQueryAndParsesRows(t *testing.T) {
+	conn := &fakeCHConn{
+		rows: &fakeSnapshotRows{
+			data: []smartMoneyWalletSnapshotRow{
+				{
+					WalletAddress: "0xabc",
+					PoolVersion:   "v3",
+					PoolID:        "0xpool",
+					StartSum0:     "100",
+					StartSum1:     "200",
+					EndSum0:       "130",
+					EndSum1:       "260",
+				},
+			},
+		},
+	}
+
+	pools := []smart_lp.SmartLPPoolKey{
+		{PoolVersion: "v3", PoolID: "0xpool"},
+	}
+	wallets := []string{"0xabc"}
+
+	rows, err := querySmartMoneyWalletSnapshots(context.Background(), conn, "bsc", pools, wallets, 24*time.Hour)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].WalletAddress != "0xabc" || rows[0].StartSum0 != "100" || rows[0].EndSum1 != "260" {
+		t.Fatalf("unexpected row: %+v", rows[0])
+	}
+
+	if !strings.Contains(conn.lastQuery, "sumIf") || !strings.Contains(conn.lastQuery, "ts < now() - INTERVAL") {
+		t.Fatalf("expected snapshot query to contain T0/T1 logic, got: %s", conn.lastQuery)
+	}
+	if !strings.Contains(conn.lastQuery, "if(action='add', -toInt256OrZero") {
+		t.Fatalf("expected snapshot query to apply signed net amounts, got: %s", conn.lastQuery)
 	}
 }
 

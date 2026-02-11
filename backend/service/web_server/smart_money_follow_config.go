@@ -332,42 +332,47 @@ func (s *Server) handleSmartMoneyFollowConfigUpsert(w http.ResponseWriter, r *ht
 		return
 	}
 
-	assign := models.SmartMoneyFollowConfig{
-		UserID:             user.ID,
-		Chain:              chain,
-		WalletAddress:      walletAddr,
-		Enabled:            enabled,
-		MaxTotalAmountUSDT: maxTotal,
-		PerTradeAmountUSDT: perTrade,
-		DelayMinSeconds:    delayMin,
-		DelayMaxSeconds:    delayMax,
-	}
+	if hasExisting {
+		prevEnabled := cfg.Enabled
+		cfg.Enabled = enabled
+		cfg.MaxTotalAmountUSDT = maxTotal
+		cfg.PerTradeAmountUSDT = perTrade
+		cfg.DelayMinSeconds = delayMin
+		cfg.DelayMaxSeconds = delayMax
 
-	if enabled {
-		if !hasExisting || !cfg.Enabled {
-			assign.LastEnabledAt = &now
+		if enabled {
+			if !prevEnabled || cfg.LastEnabledAt == nil || cfg.LastEnabledAt.IsZero() {
+				cfg.LastEnabledAt = &now
+			}
+			cfg.LastDisabledAt = nil
 		} else {
-			assign.LastEnabledAt = cfg.LastEnabledAt
+			if prevEnabled {
+				cfg.LastDisabledAt = &now
+			}
 		}
-		assign.LastDisabledAt = nil
+
+		if err := database.DB.Save(&cfg).Error; err != nil {
+			http.Error(w, "failed to save follow config", http.StatusInternalServerError)
+			return
+		}
 	} else {
-		if hasExisting && cfg.Enabled {
-			assign.LastDisabledAt = &now
-		} else {
-			assign.LastDisabledAt = cfg.LastDisabledAt
+		cfg = models.SmartMoneyFollowConfig{
+			UserID:             user.ID,
+			Chain:              chain,
+			WalletAddress:      walletAddr,
+			Enabled:            enabled,
+			MaxTotalAmountUSDT: maxTotal,
+			PerTradeAmountUSDT: perTrade,
+			DelayMinSeconds:    delayMin,
+			DelayMaxSeconds:    delayMax,
 		}
-		assign.LastEnabledAt = cfg.LastEnabledAt
-	}
-
-	base := models.SmartMoneyFollowConfig{
-		UserID:        user.ID,
-		Chain:         chain,
-		WalletAddress: walletAddr,
-	}
-
-	if err := database.DB.Where(&base).Assign(assign).FirstOrCreate(&base).Error; err != nil {
-		http.Error(w, "failed to save follow config", http.StatusInternalServerError)
-		return
+		if enabled {
+			cfg.LastEnabledAt = &now
+		}
+		if err := database.DB.Create(&cfg).Error; err != nil {
+			http.Error(w, "failed to save follow config", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// Cancel pending jobs when disabled (does not close existing positions).

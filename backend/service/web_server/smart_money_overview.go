@@ -35,13 +35,19 @@ type smartMoneyOverviewPool struct {
 }
 
 type smartMoneyOverviewWallet struct {
-	WalletAddress string  `json:"wallet_address"`
-	PnLUSDT24h    float64 `json:"pnl_usdt_24h"`
-	InUSDT24h     float64 `json:"in_usdt_24h"`
-	OutUSDT24h    float64 `json:"out_usdt_24h"`
-	PnLMarginPct  float64 `json:"pnl_margin_pct,omitempty"`
-	EventCount24h int     `json:"event_count_24h"`
-	EventCount1h  int     `json:"event_count_1h,omitempty"`
+	WalletAddress string `json:"wallet_address"`
+	// BalanceDeltaUSDT24h represents estimated wallet balance delta over the window
+	// using T0/T1 snapshot valuation:
+	// delta = end_value_usdt_24h - start_value_usdt_24h.
+	BalanceDeltaUSDT24h float64 `json:"balance_delta_usdt_24h"`
+	StartValueUSDT24h   float64 `json:"start_value_usdt_24h"`
+	EndValueUSDT24h     float64 `json:"end_value_usdt_24h"`
+	PnLUSDT24h          float64 `json:"pnl_usdt_24h"`
+	InUSDT24h           float64 `json:"in_usdt_24h"`
+	OutUSDT24h          float64 `json:"out_usdt_24h"`
+	PnLMarginPct        float64 `json:"pnl_margin_pct,omitempty"`
+	EventCount24h       int     `json:"event_count_24h"`
+	EventCount1h        int     `json:"event_count_1h,omitempty"`
 }
 
 type smartMoneyOverviewSummary struct {
@@ -104,6 +110,16 @@ type smartMoneyEventTrendRow struct {
 	AddEvents      uint64
 	RemoveEvents   uint64
 	DistinctWallet uint64
+}
+
+type smartMoneyWalletSnapshotRow struct {
+	WalletAddress string
+	PoolVersion   string
+	PoolID        string
+	StartSum0     string
+	StartSum1     string
+	EndSum0       string
+	EndSum1       string
 }
 
 func parseIntQuery(q map[string][]string, key string, def int, min int, max int) int {
@@ -322,51 +338,120 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 		flowRows, ferr := querySmartMoneyCashflows(ctx, s.ClickHouse.Conn, chain, pools, wallets, pnlWindow)
 		if ferr != nil {
 			warnings = append(warnings, fmt.Sprintf("cashflow query failed: %v", ferr))
-		} else {
-			decimalsCache := make(map[string]int)
+			flowRows = []smartMoneyCashflowRow{}
+		}
 
-			// Collect unique tokens for pricing.
-			tokenSet := make(map[string]struct{}, 2*len(pools))
-			tokens := make([]string, 0, 2*len(pools))
-			for _, pk := range pools {
-				info := poolInfoByKey[pk.PoolVersion+"|"+pk.PoolID]
-				if info == nil {
-					continue
+		snapshotRows, serr := querySmartMoneyWalletSnapshots(ctx, s.ClickHouse.Conn, chain, pools, wallets, pnlWindow)
+		useSnapshot := true
+		if serr != nil {
+			warnings = append(warnings, fmt.Sprintf("snapshot query failed: %v", serr))
+			snapshotRows = []smartMoneyWalletSnapshotRow{}
+			useSnapshot = false
+		}
+		if useSnapshot && len(snapshotRows) == 0 && len(flowRows) > 0 {
+			warnings = append(warnings, "snapshot valuation returned empty; fallback to event cashflow delta")
+			useSnapshot = false
+		}
+
+		decimalsCache := make(map[string]int)
+
+		// Collect unique tokens for pricing.
+		tokenSet := make(map[string]struct{}, 2*len(pools))
+		tokens := make([]string, 0, 2*len(pools))
+		for _, pk := range pools {
+			info := poolInfoByKey[pk.PoolVersion+"|"+pk.PoolID]
+			if info == nil {
+				continue
+			}
+			t0 := strings.ToLower(strings.TrimSpace(info.Token0))
+			t1 := strings.ToLower(strings.TrimSpace(info.Token1))
+			if common.IsHexAddress(t0) {
+				if _, ok := tokenSet[t0]; !ok {
+					tokenSet[t0] = struct{}{}
+					tokens = append(tokens, t0)
 				}
-				t0 := strings.ToLower(strings.TrimSpace(info.Token0))
-				t1 := strings.ToLower(strings.TrimSpace(info.Token1))
-				if common.IsHexAddress(t0) {
-					if _, ok := tokenSet[t0]; !ok {
-						tokenSet[t0] = struct{}{}
-						tokens = append(tokens, t0)
-					}
-				}
-				if common.IsHexAddress(t1) {
-					if _, ok := tokenSet[t1]; !ok {
-						tokenSet[t1] = struct{}{}
-						tokens = append(tokens, t1)
-					}
+			}
+			if common.IsHexAddress(t1) {
+				if _, ok := tokenSet[t1]; !ok {
+					tokenSet[t1] = struct{}{}
+					tokens = append(tokens, t1)
 				}
 			}
+		}
 
-			priceSvc := s.TokenPrice
-			if priceSvc == nil {
-				priceSvc = pricing.NewTokenPriceService()
+		priceSvc := s.TokenPrice
+		if priceSvc == nil {
+			priceSvc = pricing.NewTokenPriceService()
+		}
+		prices, perr := priceSvc.GetUSDPrices(chain, tokens)
+		if perr != nil {
+			warnings = append(warnings, "price provider limited/rate-limited; using cached/fallback prices where available")
+		}
+
+		type walletFlowAgg struct {
+			inUSDT  float64
+			outUSDT float64
+			cnt     int
+		}
+		type walletSnapshotAgg struct {
+			startUSDT float64
+			endUSDT   float64
+		}
+
+		flowAgg := make(map[string]*walletFlowAgg)
+		snapshotAgg := make(map[string]*walletSnapshotAgg)
+
+		missingPriceTokens := make(map[string]struct{})
+		for _, row := range flowRows {
+			addr := strings.ToLower(strings.TrimSpace(row.WalletAddress))
+			if addr == "" {
+				continue
 			}
-			prices, perr := priceSvc.GetUSDPrices(chain, tokens)
-			if perr != nil {
-				warnings = append(warnings, fmt.Sprintf("price provider limited/rate-limited; using cached/fallback prices where available"))
+			info := poolInfoByKey[strings.ToLower(strings.TrimSpace(row.PoolVersion))+"|"+strings.ToLower(strings.TrimSpace(row.PoolID))]
+			if info == nil {
+				continue
+			}
+			t0 := strings.ToLower(strings.TrimSpace(info.Token0))
+			t1 := strings.ToLower(strings.TrimSpace(info.Token1))
+			if !common.IsHexAddress(t0) || !common.IsHexAddress(t1) {
+				continue
 			}
 
-			type walletAgg struct {
-				inUSDT  float64
-				outUSDT float64
-				cnt     int
-			}
-			agg := make(map[string]*walletAgg)
+			p0 := prices[t0]
+			p1 := prices[t1]
 
-			missingPriceTokens := make(map[string]struct{})
-			for _, row := range flowRows {
+			dec0 := getDecimalsCached(t0, decimalsCache)
+			dec1 := getDecimalsCached(t1, decimalsCache)
+			amt0 := amountToFloat(row.Sum0, dec0)
+			amt1 := amountToFloat(row.Sum1, dec1)
+
+			usd := amt0*p0 + amt1*p1
+			if (math.Abs(amt0) > 0 && p0 == 0) || (math.Abs(amt1) > 0 && p1 == 0) {
+				if math.Abs(amt0) > 0 && p0 == 0 {
+					missingPriceTokens[t0] = struct{}{}
+				}
+				if math.Abs(amt1) > 0 && p1 == 0 {
+					missingPriceTokens[t1] = struct{}{}
+				}
+			}
+
+			a := flowAgg[addr]
+			if a == nil {
+				a = &walletFlowAgg{}
+				flowAgg[addr] = a
+			}
+			a.cnt += int(row.EventCount)
+
+			switch strings.ToLower(strings.TrimSpace(row.Action)) {
+			case "add":
+				a.outUSDT += usd
+			case "remove":
+				a.inUSDT += usd
+			}
+		}
+
+		if useSnapshot {
+			for _, row := range snapshotRows {
 				addr := strings.ToLower(strings.TrimSpace(row.WalletAddress))
 				if addr == "" {
 					continue
@@ -386,100 +471,119 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 
 				dec0 := getDecimalsCached(t0, decimalsCache)
 				dec1 := getDecimalsCached(t1, decimalsCache)
-				amt0 := amountToFloat(row.Sum0, dec0)
-				amt1 := amountToFloat(row.Sum1, dec1)
 
-				usd := amt0*p0 + amt1*p1
-				if (amt0 > 0 && p0 == 0) || (amt1 > 0 && p1 == 0) {
-					if amt0 > 0 && p0 == 0 {
-						missingPriceTokens[t0] = struct{}{}
-					}
-					if amt1 > 0 && p1 == 0 {
-						missingPriceTokens[t1] = struct{}{}
-					}
+				startAmt0 := amountToFloat(row.StartSum0, dec0)
+				startAmt1 := amountToFloat(row.StartSum1, dec1)
+				endAmt0 := amountToFloat(row.EndSum0, dec0)
+				endAmt1 := amountToFloat(row.EndSum1, dec1)
+
+				if (math.Abs(startAmt0) > 0 || math.Abs(endAmt0) > 0) && p0 == 0 {
+					missingPriceTokens[t0] = struct{}{}
+				}
+				if (math.Abs(startAmt1) > 0 || math.Abs(endAmt1) > 0) && p1 == 0 {
+					missingPriceTokens[t1] = struct{}{}
 				}
 
-				a := agg[addr]
+				a := snapshotAgg[addr]
 				if a == nil {
-					a = &walletAgg{}
-					agg[addr] = a
+					a = &walletSnapshotAgg{}
+					snapshotAgg[addr] = a
 				}
-				a.cnt += int(row.EventCount)
-
-				switch strings.ToLower(strings.TrimSpace(row.Action)) {
-				case "add":
-					a.outUSDT += usd
-				case "remove":
-					a.inUSDT += usd
-				}
+				a.startUSDT += startAmt0*p0 + startAmt1*p1
+				a.endUSDT += endAmt0*p0 + endAmt1*p1
 			}
-
-			missingPriceTokenCount := len(missingPriceTokens)
-			if missingPriceTokenCount > 0 {
-				warnings = append(warnings, fmt.Sprintf("%d token prices are still missing; pnl may be underestimated", missingPriceTokenCount))
-			}
-
-			for _, addr := range wallets {
-				a := agg[addr]
-				inUSDT := 0.0
-				outUSDT := 0.0
-				cnt := 0
-				if a != nil {
-					inUSDT = a.inUSDT
-					outUSDT = a.outUSDT
-					cnt = a.cnt
-				}
-				wr := walletRankMap[addr]
-				marginPct := 0.0
-				if outUSDT > 0 {
-					marginPct = (inUSDT - outUSDT) / outUSDT * 100.0
-				}
-				outWallets = append(outWallets, smartMoneyOverviewWallet{
-					WalletAddress: addr,
-					PnLUSDT24h:    inUSDT - outUSDT,
-					InUSDT24h:     inUSDT,
-					OutUSDT24h:    outUSDT,
-					PnLMarginPct:  marginPct,
-					EventCount24h: cnt,
-					EventCount1h:  wr.EventCount,
-				})
-			}
-
-			sort.Slice(outWallets, func(i, j int) bool {
-				if outWallets[i].PnLUSDT24h != outWallets[j].PnLUSDT24h {
-					return outWallets[i].PnLUSDT24h > outWallets[j].PnLUSDT24h
-				}
-				if outWallets[i].EventCount1h != outWallets[j].EventCount1h {
-					return outWallets[i].EventCount1h > outWallets[j].EventCount1h
-				}
-				return outWallets[i].WalletAddress < outWallets[j].WalletAddress
-			})
-
-			trendRows, terr := querySmartMoneyEventTrend(ctx, s.ClickHouse.Conn, chain, pools, pnlWindow)
-			if terr != nil {
-				warnings = append(warnings, fmt.Sprintf("event trend query failed: %v", terr))
-			}
-
-			summary := buildSmartMoneySummary(outPools, outWallets, missingPriceTokenCount)
-			hist := buildSmartMoneyHistogram(outWallets)
-			trend := buildSmartMoneyEventTrend(trendRows)
-
-			resp := smartMoneyOverviewResponse{
-				Chain:          chain,
-				PoolsWindowSec: int(poolsWindow.Seconds()),
-				PnLWindowSec:   int(pnlWindow.Seconds()),
-				UpdatedAt:      time.Now(),
-				Summary:        summary,
-				Pools:          outPools,
-				Wallets24h:     outWallets,
-				PnLHistogram24: hist,
-				EventTrend24h:  trend,
-				Warnings:       warnings,
-			}
-
-			writeJSON(w, http.StatusOK, resp)
-			return
 		}
+
+		missingPriceTokenCount := len(missingPriceTokens)
+		if missingPriceTokenCount > 0 {
+			warnings = append(warnings, fmt.Sprintf("%d token prices are still missing; pnl may be underestimated", missingPriceTokenCount))
+		}
+		if useSnapshot {
+			warnings = append(warnings, "wallet pnl uses T0/T1 snapshot valuation: delta=end_value-start_value")
+		} else {
+			warnings = append(warnings, "snapshot valuation unavailable; fallback to event cashflow delta")
+		}
+
+		for _, addr := range wallets {
+			flow := flowAgg[addr]
+			rawInUSDT := 0.0
+			rawOutUSDT := 0.0
+			cnt := 0
+			if flow != nil {
+				rawInUSDT = flow.inUSDT
+				rawOutUSDT = flow.outUSDT
+				cnt = flow.cnt
+			}
+
+			startValueUSDT := 0.0
+			endValueUSDT := 0.0
+			if useSnapshot {
+				snapshot := snapshotAgg[addr]
+				if snapshot != nil {
+					startValueUSDT = snapshot.startUSDT
+					endValueUSDT = snapshot.endUSDT
+				}
+			} else {
+				endValueUSDT = rawInUSDT - rawOutUSDT
+			}
+
+			balanceDeltaUSDT := endValueUSDT - startValueUSDT
+			marginPct := 0.0
+			if math.Abs(startValueUSDT) > 1e-9 {
+				marginPct = balanceDeltaUSDT / math.Abs(startValueUSDT) * 100.0
+			} else if rawOutUSDT > 0 {
+				marginPct = balanceDeltaUSDT / rawOutUSDT * 100.0
+			}
+
+			wr := walletRankMap[addr]
+			outWallets = append(outWallets, smartMoneyOverviewWallet{
+				WalletAddress:       addr,
+				BalanceDeltaUSDT24h: balanceDeltaUSDT,
+				StartValueUSDT24h:   startValueUSDT,
+				EndValueUSDT24h:     endValueUSDT,
+				PnLUSDT24h:          balanceDeltaUSDT,
+				InUSDT24h:           rawInUSDT,
+				OutUSDT24h:          rawOutUSDT,
+				PnLMarginPct:        marginPct,
+				EventCount24h:       cnt,
+				EventCount1h:        wr.EventCount,
+			})
+		}
+
+		sort.Slice(outWallets, func(i, j int) bool {
+			if outWallets[i].PnLUSDT24h != outWallets[j].PnLUSDT24h {
+				return outWallets[i].PnLUSDT24h > outWallets[j].PnLUSDT24h
+			}
+			if outWallets[i].EventCount1h != outWallets[j].EventCount1h {
+				return outWallets[i].EventCount1h > outWallets[j].EventCount1h
+			}
+			return outWallets[i].WalletAddress < outWallets[j].WalletAddress
+		})
+
+		trendRows, terr := querySmartMoneyEventTrend(ctx, s.ClickHouse.Conn, chain, pools, pnlWindow)
+		if terr != nil {
+			warnings = append(warnings, fmt.Sprintf("event trend query failed: %v", terr))
+		}
+
+		summary := buildSmartMoneySummary(outPools, outWallets, missingPriceTokenCount)
+		hist := buildSmartMoneyHistogram(outWallets)
+		trend := buildSmartMoneyEventTrend(trendRows)
+
+		resp := smartMoneyOverviewResponse{
+			Chain:          chain,
+			PoolsWindowSec: int(poolsWindow.Seconds()),
+			PnLWindowSec:   int(pnlWindow.Seconds()),
+			UpdatedAt:      time.Now(),
+			Summary:        summary,
+			Pools:          outPools,
+			Wallets24h:     outWallets,
+			PnLHistogram24: hist,
+			EventTrend24h:  trend,
+			Warnings:       warnings,
+		}
+
+		writeJSON(w, http.StatusOK, resp)
+		return
 	}
 
 	resp := smartMoneyOverviewResponse{
@@ -698,6 +802,85 @@ func querySmartMoneyCashflows(ctx context.Context, conn smartMoneyClickHouseQuer
 	for rows.Next() {
 		var r smartMoneyCashflowRow
 		if err := rows.Scan(&r.WalletAddress, &r.PoolVersion, &r.PoolID, &r.Action, &r.Sum0, &r.Sum1, &r.EventCount); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func querySmartMoneyWalletSnapshots(ctx context.Context, conn smartMoneyClickHouseQueryer, chain string, pools []smart_lp.SmartLPPoolKey, wallets []string, window time.Duration) ([]smartMoneyWalletSnapshotRow, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if conn == nil {
+		return nil, fmt.Errorf("clickhouse not initialized")
+	}
+	if len(pools) == 0 || len(wallets) == 0 {
+		return []smartMoneyWalletSnapshotRow{}, nil
+	}
+
+	if window <= 0 {
+		window = 24 * time.Hour
+	}
+	seconds := int(window.Seconds())
+	if seconds <= 0 {
+		seconds = 86400
+	}
+
+	placeholders := make([]string, 0, len(pools))
+	args := make([]any, 0, 2+2*len(pools))
+	args = append(args, wallets)
+	for _, p := range pools {
+		pv := strings.ToLower(strings.TrimSpace(p.PoolVersion))
+		pid := strings.ToLower(strings.TrimSpace(p.PoolID))
+		if pv == "" || pid == "" {
+			continue
+		}
+		placeholders = append(placeholders, "(?, ?)")
+		args = append(args, pv, pid)
+	}
+	if len(placeholders) == 0 {
+		return []smartMoneyWalletSnapshotRow{}, nil
+	}
+
+	chain = strings.ToLower(strings.TrimSpace(chain))
+	chainFilter := ""
+	if chain != "" {
+		chainFilter = "AND lowerUTF8(chain) = ?"
+		args = append(args, chain)
+	}
+
+	q := fmt.Sprintf(`
+		SELECT
+			wallet_address,
+			pool_version,
+			pool_id,
+			toString(sumIf(if(action='add', -toInt256OrZero(if(net_amount0 != '' AND net_amount0 != '0', net_amount0, amount0)), toInt256OrZero(if(net_amount0 != '' AND net_amount0 != '0', net_amount0, amount0))), ts < now() - INTERVAL %d SECOND)) AS start_sum0,
+			toString(sumIf(if(action='add', -toInt256OrZero(if(net_amount1 != '' AND net_amount1 != '0', net_amount1, amount1)), toInt256OrZero(if(net_amount1 != '' AND net_amount1 != '0', net_amount1, amount1))), ts < now() - INTERVAL %d SECOND)) AS start_sum1,
+			toString(sum(if(action='add', -toInt256OrZero(if(net_amount0 != '' AND net_amount0 != '0', net_amount0, amount0)), toInt256OrZero(if(net_amount0 != '' AND net_amount0 != '0', net_amount0, amount0))))) AS end_sum0,
+			toString(sum(if(action='add', -toInt256OrZero(if(net_amount1 != '' AND net_amount1 != '0', net_amount1, amount1)), toInt256OrZero(if(net_amount1 != '' AND net_amount1 != '0', net_amount1, amount1))))) AS end_sum1
+		FROM smart_lp_events
+		WHERE action IN ('add', 'remove')
+			AND wallet_address IN (?)
+			AND (pool_version, pool_id) IN (%s)
+			%s
+		GROUP BY wallet_address, pool_version, pool_id
+	`, seconds, seconds, strings.Join(placeholders, ","), chainFilter)
+
+	rows, err := conn.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]smartMoneyWalletSnapshotRow, 0)
+	for rows.Next() {
+		var r smartMoneyWalletSnapshotRow
+		if err := rows.Scan(&r.WalletAddress, &r.PoolVersion, &r.PoolID, &r.StartSum0, &r.StartSum1, &r.EndSum0, &r.EndSum1); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
