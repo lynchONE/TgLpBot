@@ -148,7 +148,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
     }, [followConfigs]);
 
     useEffect(() => {
-        if (!apiBaseUrl || !initData) {
+        if (!initData) {
             setFollowConfigs([]);
             setFollowConfigsError('');
             setFollowConfigsLoading(false);
@@ -197,7 +197,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
 
     useEffect(() => {
         if (activeTab !== 'golden') return;
-        if (!apiBaseUrl || !initData) {
+        if (!initData) {
             setGoldenError('');
             setGoldenLoading(false);
             return;
@@ -242,7 +242,12 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
     const subtitle = `最近${poolWindowLabel}池子 ${pools.length} 个 · 最近${pnlWindowLabel}钱包 ${wallets.length} 个 · 更新 ${updatedAtText}`;
 
     async function handleSaveGoldenDog() {
-        if (!apiBaseUrl || !initData) return;
+        if (!initData) {
+            hapticNotification('error');
+            setGoldenError('未获取到 initData，无法保存金狗通知配置');
+            if (typeof onNotice === 'function') onNotice('未获取到 initData，无法保存金狗通知配置', 'error');
+            return;
+        }
         const minWallets = toIntInRange(goldenMinWallets, 2, 100, 3);
         const windowMinutes = toIntInRange(goldenWindowMinutes, 1, 180, 10);
         const cooldownMinutes = toIntInRange(goldenCooldownMinutes, 0, 1440, 30);

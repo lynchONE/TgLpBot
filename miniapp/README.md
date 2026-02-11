@@ -51,7 +51,7 @@ BACKEND_API_BASE_URL=http://<你的服务器IP>:8080
 | `/api/task_action?action=xxx` | `/api/task_delete`, `/api/task_pause`, `/api/task_stop` | action 可选值: `delete`, `pause`, `stop` |
 | `/api/admin?endpoint=xxx` | `/api/admin/autolp_disable`, `/api/admin/autolp_stats`, `/api/admin/realtime_positions`, `/api/admin/realtime_users`, `/api/admin/system_config`, `/api/admin/online_users`, `/api/admin/active_tasks` | endpoint 可选值: `autolp_disable`, `autolp_stats`, `realtime_positions`, `realtime_users`, `system_config`, `online_users`, `active_tasks` |
 
-**当前 API 文件数量**: 9 个（在 12 个限制内）
+**当前 API 文件数量**: 11 个（在 12 个限制内）
 
 ## 管理员页面功能
 
