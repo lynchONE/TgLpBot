@@ -175,6 +175,7 @@ func (s *Server) handleSmartMoneyFollowConfigs(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
@@ -233,6 +234,7 @@ func (s *Server) handleSmartMoneyFollowConfigGet(w http.ResponseWriter, r *http.
 		return
 	}
 
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }

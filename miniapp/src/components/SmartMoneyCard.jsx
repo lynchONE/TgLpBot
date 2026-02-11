@@ -536,7 +536,31 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                 chain={chain}
                 walletAddress={followModalAddr}
                 onNotice={onNotice}
-                onSaved={() => {
+                onSaved={(savedCfg) => {
+                    if (savedCfg && normalizeWalletAddress(savedCfg?.wallet_address)) {
+                        const normalizedWallet = normalizeWalletAddress(savedCfg?.wallet_address);
+                        const normalizedChain = String(savedCfg?.chain || chain || '').trim().toLowerCase();
+                        setFollowConfigs((prev) => {
+                            const list = Array.isArray(prev) ? [...prev] : [];
+                            const nextCfg = {
+                                ...savedCfg,
+                                wallet_address: normalizedWallet,
+                                chain: normalizedChain,
+                                enabled: Boolean(savedCfg?.enabled),
+                            };
+                            const idx = list.findIndex((it) => {
+                                const w = normalizeWalletAddress(it?.wallet_address);
+                                const c = String(it?.chain || '').trim().toLowerCase();
+                                return w === normalizedWallet && c === normalizedChain;
+                            });
+                            if (idx >= 0) {
+                                list[idx] = { ...list[idx], ...nextCfg };
+                            } else {
+                                list.unshift(nextCfg);
+                            }
+                            return list;
+                        });
+                    }
                     setFollowConfigNonce((v) => v + 1);
                 }}
                 onOpenPositions={(addr) => {

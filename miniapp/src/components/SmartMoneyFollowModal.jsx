@@ -190,8 +190,9 @@ export default function SmartMoneyFollowModal({
             }
 
             hapticNotification('success');
-            if (typeof onNotice === 'function') onNotice(followEnabled ? '跟单已开启' : '跟单已停用', 'success');
-            if (typeof onSaved === 'function') onSaved();
+            const enabledAfterSave = cfg ? Boolean(cfg?.enabled) : Boolean(followEnabled);
+            if (typeof onNotice === 'function') onNotice(enabledAfterSave ? '跟单已开启' : '跟单已停用', 'success');
+            if (typeof onSaved === 'function') onSaved(cfg || null);
         } catch (e) {
             hapticNotification('error');
             setError(String(e?.message || e));
