@@ -315,7 +315,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                                     </div>
                                                     <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-500 dark:text-white/40">
                                                         <span>24h净变化 {formatUsd(balanceDeltaUsd)}</span>
-                                                        <span className="opacity-80">T0 {formatUsd(startValueUsd)} → T1 {formatUsd(endValueUsd)}</span>
+                                                        <span className="opacity-80">今日0点 {formatUsd(startValueUsd)} → 当前 {formatUsd(endValueUsd)}</span>
                                                         <span>1h/{pnlWindowLabel} {Number.isFinite(cnt1h) ? cnt1h : '--'}/{Number.isFinite(cnt24h) ? cnt24h : '--'}</span>
                                                     </div>
                                                 </div>

@@ -250,7 +250,7 @@ func TestQuerySmartMoneyWalletSnapshots_BuildsSnapshotQueryAndParsesRows(t *test
 	}
 	wallets := []string{"0xabc"}
 
-	rows, err := querySmartMoneyWalletSnapshots(context.Background(), conn, "bsc", pools, wallets, 24*time.Hour)
+	rows, err := querySmartMoneyWalletSnapshots(context.Background(), conn, "bsc", pools, wallets, time.Now().Add(-24*time.Hour))
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -261,8 +261,8 @@ func TestQuerySmartMoneyWalletSnapshots_BuildsSnapshotQueryAndParsesRows(t *test
 		t.Fatalf("unexpected row: %+v", rows[0])
 	}
 
-	if !strings.Contains(conn.lastQuery, "sumIf") || !strings.Contains(conn.lastQuery, "ts < now() - INTERVAL") {
-		t.Fatalf("expected snapshot query to contain T0/T1 logic, got: %s", conn.lastQuery)
+	if !strings.Contains(conn.lastQuery, "sumIf") || !strings.Contains(conn.lastQuery, "ts < ?") {
+		t.Fatalf("expected snapshot query to contain day-start snapshot logic, got: %s", conn.lastQuery)
 	}
 	if !strings.Contains(conn.lastQuery, "if(action='add', -toInt256OrZero") {
 		t.Fatalf("expected snapshot query to apply signed net amounts, got: %s", conn.lastQuery)

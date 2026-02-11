@@ -36,8 +36,8 @@ type smartMoneyOverviewPool struct {
 
 type smartMoneyOverviewWallet struct {
 	WalletAddress string `json:"wallet_address"`
-	// BalanceDeltaUSDT24h represents estimated wallet balance delta over the window
-	// using T0/T1 snapshot valuation:
+	// BalanceDeltaUSDT24h represents estimated wallet balance delta from today's
+	// 00:00 to now:
 	// delta = end_value_usdt_24h - start_value_usdt_24h.
 	BalanceDeltaUSDT24h float64 `json:"balance_delta_usdt_24h"`
 	StartValueUSDT24h   float64 `json:"start_value_usdt_24h"`
@@ -191,6 +191,15 @@ func getDecimalsCached(addr string, cache map[string]int) int {
 	return int(dec)
 }
 
+func smartMoneyDayStart(now time.Time) time.Time {
+	loc := time.Local
+	if shanghai, err := time.LoadLocation("Asia/Shanghai"); err == nil {
+		loc = shanghai
+	}
+	n := now.In(loc)
+	return time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, loc)
+}
+
 func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -333,6 +342,9 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 		walletRankMap[addr] = wr
 	}
 
+	nowTs := time.Now()
+	dayStart := smartMoneyDayStart(nowTs)
+
 	outWallets := make([]smartMoneyOverviewWallet, 0, len(wallets))
 	if len(wallets) > 0 && len(pools) > 0 {
 		flowRows, ferr := querySmartMoneyCashflows(ctx, s.ClickHouse.Conn, chain, pools, wallets, pnlWindow)
@@ -341,7 +353,7 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 			flowRows = []smartMoneyCashflowRow{}
 		}
 
-		snapshotRows, serr := querySmartMoneyWalletSnapshots(ctx, s.ClickHouse.Conn, chain, pools, wallets, pnlWindow)
+		snapshotRows, serr := querySmartMoneyWalletSnapshots(ctx, s.ClickHouse.Conn, chain, pools, wallets, dayStart)
 		useSnapshot := true
 		if serr != nil {
 			warnings = append(warnings, fmt.Sprintf("snapshot query failed: %v", serr))
@@ -349,7 +361,6 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 			useSnapshot = false
 		}
 		if useSnapshot && len(snapshotRows) == 0 && len(flowRows) > 0 {
-			warnings = append(warnings, "snapshot valuation returned empty; fallback to event cashflow delta")
 			useSnapshot = false
 		}
 
@@ -498,11 +509,8 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 		if missingPriceTokenCount > 0 {
 			warnings = append(warnings, fmt.Sprintf("%d token prices are still missing; pnl may be underestimated", missingPriceTokenCount))
 		}
-		if useSnapshot {
-			warnings = append(warnings, "wallet pnl uses T0/T1 snapshot valuation: delta=end_value-start_value")
-		} else {
-			warnings = append(warnings, "snapshot valuation unavailable; fallback to event cashflow delta")
-		}
+		// Keep warnings focused on data quality (e.g. missing prices), avoid
+		// showing internal calculation strategy notices in UI.
 
 		for _, addr := range wallets {
 			flow := flowAgg[addr]
@@ -573,7 +581,7 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 			Chain:          chain,
 			PoolsWindowSec: int(poolsWindow.Seconds()),
 			PnLWindowSec:   int(pnlWindow.Seconds()),
-			UpdatedAt:      time.Now(),
+			UpdatedAt:      nowTs,
 			Summary:        summary,
 			Pools:          outPools,
 			Wallets24h:     outWallets,
@@ -590,7 +598,7 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 		Chain:          chain,
 		PoolsWindowSec: int(poolsWindow.Seconds()),
 		PnLWindowSec:   int(pnlWindow.Seconds()),
-		UpdatedAt:      time.Now(),
+		UpdatedAt:      nowTs,
 		Summary:        buildSmartMoneySummary(outPools, outWallets, 0),
 		Pools:          outPools,
 		Wallets24h:     outWallets,
@@ -812,7 +820,7 @@ func querySmartMoneyCashflows(ctx context.Context, conn smartMoneyClickHouseQuer
 	return out, nil
 }
 
-func querySmartMoneyWalletSnapshots(ctx context.Context, conn smartMoneyClickHouseQueryer, chain string, pools []smart_lp.SmartLPPoolKey, wallets []string, window time.Duration) ([]smartMoneyWalletSnapshotRow, error) {
+func querySmartMoneyWalletSnapshots(ctx context.Context, conn smartMoneyClickHouseQueryer, chain string, pools []smart_lp.SmartLPPoolKey, wallets []string, startAt time.Time) ([]smartMoneyWalletSnapshotRow, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -822,18 +830,14 @@ func querySmartMoneyWalletSnapshots(ctx context.Context, conn smartMoneyClickHou
 	if len(pools) == 0 || len(wallets) == 0 {
 		return []smartMoneyWalletSnapshotRow{}, nil
 	}
-
-	if window <= 0 {
-		window = 24 * time.Hour
+	if startAt.IsZero() {
+		startAt = smartMoneyDayStart(time.Now())
 	}
-	seconds := int(window.Seconds())
-	if seconds <= 0 {
-		seconds = 86400
-	}
+	startAt = startAt.UTC()
 
 	placeholders := make([]string, 0, len(pools))
-	args := make([]any, 0, 2+2*len(pools))
-	args = append(args, wallets)
+	args := make([]any, 0, 3+2*len(pools))
+	args = append(args, startAt, startAt, wallets)
 	for _, p := range pools {
 		pv := strings.ToLower(strings.TrimSpace(p.PoolVersion))
 		pid := strings.ToLower(strings.TrimSpace(p.PoolID))
@@ -859,8 +863,8 @@ func querySmartMoneyWalletSnapshots(ctx context.Context, conn smartMoneyClickHou
 			wallet_address,
 			pool_version,
 			pool_id,
-			toString(sumIf(if(action='add', -toInt256OrZero(if(net_amount0 != '' AND net_amount0 != '0', net_amount0, amount0)), toInt256OrZero(if(net_amount0 != '' AND net_amount0 != '0', net_amount0, amount0))), ts < now() - INTERVAL %d SECOND)) AS start_sum0,
-			toString(sumIf(if(action='add', -toInt256OrZero(if(net_amount1 != '' AND net_amount1 != '0', net_amount1, amount1)), toInt256OrZero(if(net_amount1 != '' AND net_amount1 != '0', net_amount1, amount1))), ts < now() - INTERVAL %d SECOND)) AS start_sum1,
+			toString(sumIf(if(action='add', -toInt256OrZero(if(net_amount0 != '' AND net_amount0 != '0', net_amount0, amount0)), toInt256OrZero(if(net_amount0 != '' AND net_amount0 != '0', net_amount0, amount0))), ts < ?)) AS start_sum0,
+			toString(sumIf(if(action='add', -toInt256OrZero(if(net_amount1 != '' AND net_amount1 != '0', net_amount1, amount1)), toInt256OrZero(if(net_amount1 != '' AND net_amount1 != '0', net_amount1, amount1))), ts < ?)) AS start_sum1,
 			toString(sum(if(action='add', -toInt256OrZero(if(net_amount0 != '' AND net_amount0 != '0', net_amount0, amount0)), toInt256OrZero(if(net_amount0 != '' AND net_amount0 != '0', net_amount0, amount0))))) AS end_sum0,
 			toString(sum(if(action='add', -toInt256OrZero(if(net_amount1 != '' AND net_amount1 != '0', net_amount1, amount1)), toInt256OrZero(if(net_amount1 != '' AND net_amount1 != '0', net_amount1, amount1))))) AS end_sum1
 		FROM smart_lp_events
@@ -869,7 +873,7 @@ func querySmartMoneyWalletSnapshots(ctx context.Context, conn smartMoneyClickHou
 			AND (pool_version, pool_id) IN (%s)
 			%s
 		GROUP BY wallet_address, pool_version, pool_id
-	`, seconds, seconds, strings.Join(placeholders, ","), chainFilter)
+	`, strings.Join(placeholders, ","), chainFilter)
 
 	rows, err := conn.Query(ctx, q, args...)
 	if err != nil {
