@@ -32,6 +32,15 @@ const formatUsd = (v) => {
     return usdFormatter.format(n);
 };
 
+const formatFeeUsd = (v) => {
+    const n = Number(v ?? 0);
+    if (!Number.isFinite(n) || Math.abs(n) > USD_DISPLAY_LIMIT) return '$--';
+    if (n === 0) return usdFormatter.format(0);
+    const abs = Math.abs(n);
+    if (abs < 0.01) return `${n < 0 ? '-' : ''}<$0.01`;
+    return usdFormatter.format(n);
+};
+
 const STABLE_SYMBOLS = new Set(['USDT', 'USDC', 'BUSD', 'DAI']);
 
 const normalizeSymbol = (value) => String(value || '').trim().toUpperCase();
@@ -190,6 +199,12 @@ export default function PositionCard({
         [position?.current_tick, decimals0, decimals1]
     );
     const currentPrice = stableIndex === 0 ? safeInvert(currentPriceBase) : currentPriceBase;
+
+    const openPrice = useMemo(() => {
+        if (stableIndex < 0) return null;
+        const n = Number(position?.open_price);
+        return Number.isFinite(n) && n > 0 ? n : null;
+    }, [position?.open_price, stableIndex]);
 
     const rangeLowerBase = useMemo(
         () => priceFromTick(position?.tick_lower, decimals0, decimals1),
@@ -406,7 +421,7 @@ export default function PositionCard({
                         <div className="text-xs font-semibold text-zinc-700 dark:text-white/70">余额信息</div>
                         {!expanded && (
                             <div className="text-[10px] text-zinc-500 dark:text-white/40 tabular-nums">
-                                钱包 {formatUsd(position?.totals?.wallet_usd)} · 仓位 {formatUsd(position?.totals?.position_usd)} · 费用 {formatUsd(position?.totals?.fee_usd)}
+                                钱包 {formatUsd(position?.totals?.wallet_usd)} · 仓位 {formatUsd(position?.totals?.position_usd)} · 费用 {formatFeeUsd(position?.totals?.fee_usd)}
                             </div>
                         )}
                     </div>
@@ -441,7 +456,7 @@ export default function PositionCard({
                             </div>
                             <div className="text-right">
                                 <div className="text-sm font-semibold text-emerald-700 dark:text-emerald-300 tabular-nums">{row.fee_amount}</div>
-                                <div className="text-[11px] text-emerald-700/70 dark:text-emerald-300/70 tabular-nums">{formatUsd(row.fee_usd)}</div>
+                                <div className="text-[11px] text-emerald-700/70 dark:text-emerald-300/70 tabular-nums">{formatFeeUsd(row.fee_usd)}</div>
                             </div>
                         </div>
                     ))}
@@ -450,7 +465,7 @@ export default function PositionCard({
                         <div className="text-zinc-600 dark:text-white/60">小计</div>
                         <div className="text-right text-zinc-900 dark:text-white/80">{formatUsd(position?.totals?.wallet_usd)}</div>
                         <div className="text-right text-zinc-900 dark:text-white/80">{formatUsd(position?.totals?.position_usd)}</div>
-                        <div className="text-right text-emerald-700 dark:text-emerald-300">{formatUsd(position?.totals?.fee_usd)}</div>
+                        <div className="text-right text-emerald-700 dark:text-emerald-300">{formatFeeUsd(position?.totals?.fee_usd)}</div>
                     </div>
                 </div>
             </div>
@@ -489,6 +504,7 @@ export default function PositionCard({
 
             <PriceRangeVisualizer
                 currentPrice={currentPrice}
+                openPrice={openPrice}
                 minPrice={rangeMin}
                 maxPrice={rangeMax}
                 token0={token0}

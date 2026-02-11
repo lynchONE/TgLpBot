@@ -14,6 +14,7 @@ const formatPrice = (value) => {
  * 
  * Props:
  * - currentPrice: Number
+ * - openPrice: Number (optional)
  * - minPrice: Number
  * - maxPrice: Number
  * - token0: { symbol, decimals }
@@ -25,6 +26,7 @@ const formatPrice = (value) => {
  */
 export default function PriceRangeVisualizer({
     currentPrice,
+    openPrice,
     minPrice,
     maxPrice,
     token0,
@@ -94,6 +96,14 @@ export default function PriceRangeVisualizer({
         return Math.max(0, Math.min(100, p));
     }, [currentPrice, minPrice, maxPrice]);
 
+    const openPercent = useMemo(() => {
+        if (!Number.isFinite(openPrice) || !Number.isFinite(minPrice) || !Number.isFinite(maxPrice)) return null;
+        if (maxPrice === minPrice) return null;
+        const p = ((openPrice - minPrice) / (maxPrice - minPrice)) * 100;
+        if (!Number.isFinite(p) || p < 0 || p > 100) return null;
+        return p;
+    }, [openPrice, minPrice, maxPrice]);
+
     // Calculate Deviation for title (e.g. ±6.00%)
     // Usually (max - min) / 2 / mid * 100 ? Or just (max/min - 1) ?
     const deviation = useMemo(() => {
@@ -128,6 +138,7 @@ export default function PriceRangeVisualizer({
     // Map range to [5%, 95%] to avoid edges
     const mapPercent = (p) => 5 + (p * 0.9);
     const finalPercent = mapPercent(percent);
+    const openFinalPercent = openPercent === null ? null : mapPercent(openPercent);
 
     return (
         <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
@@ -140,6 +151,13 @@ export default function PriceRangeVisualizer({
                 <div className="bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[10px] px-1.5 py-0.5 rounded font-medium">
                     {deviation ? `${deviation.toFixed(2)}%` : '--'}
                 </div>
+
+                {/* Open Price */}
+                {Number.isFinite(openPrice) && openPrice > 0 ? (
+                    <div className="text-[10px] font-semibold tabular-nums text-sky-600 dark:text-sky-300">
+                        开仓 {formatPrice(openPrice)}
+                    </div>
+                ) : null}
 
                 {/* Current Price */}
                 <div className={`text-[10px] font-bold tabular-nums ml-auto ${inRange ? 'text-emerald-500' : 'text-rose-500'}`}>
@@ -171,6 +189,19 @@ export default function PriceRangeVisualizer({
                         transform: 'translateX(-50%)'
                     }}
                 ></div>
+
+                {/* Open Price Marker */}
+                {openFinalPercent !== null ? (
+                    <div
+                        className="absolute top-0 bottom-0 w-0.5 z-10 bg-sky-500/80 dark:bg-sky-400/80"
+                        style={{
+                            left: `${openFinalPercent}%`,
+                            opacity: 1,
+                            transform: 'translateX(-50%)',
+                        }}
+                        title={`开仓价 ${formatPrice(openPrice)}`}
+                    ></div>
+                ) : null}
             </div>
 
             {/* Price Values Row (Only Numbers) */}

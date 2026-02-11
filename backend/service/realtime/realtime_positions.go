@@ -209,6 +209,7 @@ type RealtimePosition struct {
 	TickLower         int        `json:"tick_lower"`
 	TickUpper         int        `json:"tick_upper"`
 	RangePercent      float64    `json:"range_percent"`
+	OpenPrice         float64    `json:"open_price,omitempty"`
 	TaskRangeLowerPct float64    `json:"task_range_lower_pct,omitempty"`
 	TaskRangeUpperPct float64    `json:"task_range_upper_pct,omitempty"`
 	OutOfRange        string     `json:"out_of_range"`
@@ -953,6 +954,7 @@ func (s *RealtimePositionsService) buildV3Position(
 	outOfRangeText := "0/0"
 	var runningSince *time.Time
 	statusLabel := "运行中"
+	openPrice := 0.0
 
 	if task != nil {
 		poolID = strings.TrimSpace(task.PoolId)
@@ -964,6 +966,9 @@ func (s *RealtimePositionsService) buildV3Position(
 		}
 		runningSince = &task.CreatedAt
 		statusLabel = statusLabelFromTask(task)
+		if task.GuardOpenPrice > 0 {
+			openPrice = task.GuardOpenPrice
+		}
 	}
 
 	// Resolve the V3 pool address from factory to avoid mismatches / stale DB pool IDs.
@@ -1113,6 +1118,7 @@ func (s *RealtimePositionsService) buildV3Position(
 		TickLower:         tickLower,
 		TickUpper:         tickUpper,
 		RangePercent:      rangePct,
+		OpenPrice:         openPrice,
 		TaskRangeLowerPct: taskRangeLowerPct,
 		TaskRangeUpperPct: taskRangeUpperPct,
 		OutOfRange:        outOfRangeText,
@@ -1299,6 +1305,7 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		TickLower:         tickLower,
 		TickUpper:         tickUpper,
 		RangePercent:      rangePct,
+		OpenPrice:         task.GuardOpenPrice,
 		TaskRangeLowerPct: taskRangeLowerPct,
 		TaskRangeUpperPct: taskRangeUpperPct,
 		OutOfRange:        formatOutOfRange(task, tickLower, tickUpper, currentTick),
@@ -2087,9 +2094,25 @@ func buildTokenRow(token common.Address, meta cachedTokenMeta, priceUSD float64,
 		WalletUSD:      w * priceUSD,
 		PositionAmount: fmt.Sprintf("%.2f", p),
 		PositionUSD:    p * priceUSD,
-		FeeAmount:      fmt.Sprintf("%.2f", f),
+		FeeAmount:      formatFeeAmount(f),
 		FeeUSD:         f * priceUSD,
 	}
+}
+
+func formatFeeAmount(v float64) string {
+	if v == 0 || math.IsNaN(v) || math.IsInf(v, 0) {
+		return "0.00"
+	}
+	if math.Abs(v) < 0.01 {
+		s := fmt.Sprintf("%.6f", v)
+		s = strings.TrimRight(s, "0")
+		s = strings.TrimRight(s, ".")
+		if s == "" || s == "-0" {
+			return "0.00"
+		}
+		return s
+	}
+	return fmt.Sprintf("%.2f", v)
 }
 
 func toFloat(v *big.Int, decimals int) float64 {
