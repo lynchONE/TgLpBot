@@ -36,3 +36,13 @@ func TestHandleSmartMoneyFollowConfigPost_InvalidJSON(t *testing.T) {
 		t.Fatalf("expected %d, got %d body=%q", http.StatusBadRequest, w.Code, w.Body.String())
 	}
 }
+
+func TestHandleSmartMoneyFollowConfigs_MethodNotAllowed(t *testing.T) {
+	srv := &Server{}
+	req := httptest.NewRequest(http.MethodPost, "/api/smart_money_follow_configs", nil)
+	w := httptest.NewRecorder()
+	srv.handleSmartMoneyFollowConfigs(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected %d, got %d body=%q", http.StatusMethodNotAllowed, w.Code, w.Body.String())
+	}
+}

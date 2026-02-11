@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { fetchSmartMoneyWalletPositions, fetchSmartMoneyFollowConfig, saveSmartMoneyFollowConfig } from '../lib/api';
+import { fetchSmartMoneyWalletPositions } from '../lib/api';
 import { copyToClipboard, hapticImpact, hapticNotification } from '../lib/telegram';
 
 const Icon = ({ path, className = '' }) => (
@@ -91,17 +91,6 @@ export default function SmartMoneyWalletPositionsModal({
     const [data, setData] = useState(null);
     const [nonce, setNonce] = useState(0);
 
-    const [followLoading, setFollowLoading] = useState(false);
-    const [followError, setFollowError] = useState('');
-    const [followSaving, setFollowSaving] = useState(false);
-    const [followConfig, setFollowConfig] = useState(null);
-
-    const [followEnabled, setFollowEnabled] = useState(false);
-    const [followPerTrade, setFollowPerTrade] = useState('');
-    const [followMaxTotal, setFollowMaxTotal] = useState('');
-    const [followDelayMin, setFollowDelayMin] = useState('0');
-    const [followDelayMax, setFollowDelayMax] = useState('60');
-
     const addr = String(walletAddress || '').trim();
     const chainLabel = String(chain || 'bsc').trim() || 'bsc';
     const windowLabel = Number.isFinite(Number(windowHours)) && Number(windowHours) > 0 ? `${Number(windowHours)}h` : '';
@@ -118,15 +107,6 @@ export default function SmartMoneyWalletPositionsModal({
             setLoading(false);
             setError('');
             setData(null);
-            setFollowLoading(false);
-            setFollowError('');
-            setFollowSaving(false);
-            setFollowConfig(null);
-            setFollowEnabled(false);
-            setFollowPerTrade('');
-            setFollowMaxTotal('');
-            setFollowDelayMin('0');
-            setFollowDelayMax('60');
             return;
         }
         if (!addr) {
@@ -167,93 +147,6 @@ export default function SmartMoneyWalletPositionsModal({
             controller.abort();
         };
     }, [open, apiBaseUrl, initData, chainLabel, addr, windowHours, limit, nonce]);
-
-    useEffect(() => {
-        if (!open) return;
-        if (!addr) {
-            setFollowError('walletAddress 为空');
-            return;
-        }
-
-        let aborted = false;
-        const controller = new AbortController();
-
-        setFollowLoading(true);
-        setFollowError('');
-
-        fetchSmartMoneyFollowConfig({
-            apiBaseUrl,
-            initData,
-            chain: chainLabel,
-            walletAddress: addr,
-            signal: controller.signal,
-        })
-            .then((resp) => {
-                if (aborted) return;
-                const cfg = resp?.config || null;
-                setFollowConfig(cfg);
-                setFollowEnabled(Boolean(cfg?.enabled));
-                setFollowPerTrade(String(cfg?.per_trade_amount_usdt ?? ''));
-                setFollowMaxTotal(String(cfg?.max_total_amount_usdt ?? ''));
-                setFollowDelayMin(String(cfg?.delay_min_seconds ?? 0));
-                setFollowDelayMax(String(cfg?.delay_max_seconds ?? 60));
-            })
-            .catch((e) => {
-                if (aborted) return;
-                setFollowError(String(e?.message || e));
-                setFollowConfig(null);
-            })
-            .finally(() => {
-                if (aborted) return;
-                setFollowLoading(false);
-            });
-
-        return () => {
-            aborted = true;
-            controller.abort();
-        };
-    }, [open, apiBaseUrl, initData, chainLabel, addr, nonce]);
-
-    async function handleSaveFollow() {
-        if (!addr) return;
-        setFollowSaving(true);
-        setFollowError('');
-        try {
-            const per = Number(followPerTrade);
-            const max = Number(followMaxTotal);
-            const dMin = Number(followDelayMin);
-            const dMax = Number(followDelayMax);
-
-            const resp = await saveSmartMoneyFollowConfig({
-                apiBaseUrl,
-                initData,
-                chain: chainLabel,
-                walletAddress: addr,
-                enabled: Boolean(followEnabled),
-                perTradeAmountUSDT: Number.isFinite(per) ? per : undefined,
-                maxTotalAmountUSDT: Number.isFinite(max) ? max : undefined,
-                delayMinSeconds: Number.isFinite(dMin) ? dMin : undefined,
-                delayMaxSeconds: Number.isFinite(dMax) ? dMax : undefined,
-            });
-            const cfg = resp?.config || null;
-            setFollowConfig(cfg);
-            if (cfg) {
-                setFollowEnabled(Boolean(cfg?.enabled));
-                setFollowPerTrade(String(cfg?.per_trade_amount_usdt ?? ''));
-                setFollowMaxTotal(String(cfg?.max_total_amount_usdt ?? ''));
-                setFollowDelayMin(String(cfg?.delay_min_seconds ?? 0));
-                setFollowDelayMax(String(cfg?.delay_max_seconds ?? 60));
-            }
-            hapticNotification('success');
-            if (typeof onNotice === 'function') onNotice('跟单配置已保存', 'success');
-        } catch (e) {
-            hapticNotification('error');
-            setFollowError(String(e?.message || e));
-            if (typeof onNotice === 'function') onNotice(`保存失败: ${String(e?.message || e)}`, 'error');
-        } finally {
-            setFollowSaving(false);
-        }
-    }
 
     if (!open) return null;
 
@@ -325,115 +218,6 @@ export default function SmartMoneyWalletPositionsModal({
                         <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
                             <div className="text-[11px] text-zinc-500 dark:text-white/40">总仓位估值</div>
                             <div className={`mt-0.5 font-semibold tabular-nums ${kpiTone(totalUsd)}`}>{formatUsd(totalUsd)}</div>
-                        </div>
-                    </div>
-
-                    <div className="mt-3 rounded-2xl border border-zinc-200 bg-white/70 p-3 dark:border-white/10 dark:bg-white/5">
-                        <div className="flex items-center justify-between gap-3">
-                            <div className="min-w-0">
-                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">跟单</div>
-                                <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">
-                                    {followLoading ? '加载配置中…' : '钱包开 LP 我也开 / 钱包撤 LP 我也撤（延迟随机 ≤ 60s）'}
-                                </div>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    hapticImpact('light');
-                                    setFollowEnabled((v) => !v);
-                                }}
-                                className={`shrink-0 inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold transition ${
-                                    followEnabled
-                                        ? 'bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15'
-                                        : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
-                                }`}
-                            >
-                                {followEnabled ? '已启用' : '已停用'}
-                            </button>
-                        </div>
-
-                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                            <label className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-[10px] text-zinc-500 dark:text-white/40">单次跟单（USDT）</div>
-                                <input
-                                    type="number"
-                                    inputMode="decimal"
-                                    min="0"
-                                    step="0.01"
-                                    value={followPerTrade}
-                                    onChange={(e) => setFollowPerTrade(e.target.value)}
-                                    className="mt-1 w-full rounded-lg bg-white px-2 py-1 text-[12px] font-semibold tabular-nums text-zinc-900 outline-none ring-0 dark:bg-white/5 dark:text-white/80"
-                                    placeholder="例如 20"
-                                    disabled={followSaving}
-                                />
-                            </label>
-                            <label className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-[10px] text-zinc-500 dark:text-white/40">最大跟单（USDT）</div>
-                                <input
-                                    type="number"
-                                    inputMode="decimal"
-                                    min="0"
-                                    step="0.01"
-                                    value={followMaxTotal}
-                                    onChange={(e) => setFollowMaxTotal(e.target.value)}
-                                    className="mt-1 w-full rounded-lg bg-white px-2 py-1 text-[12px] font-semibold tabular-nums text-zinc-900 outline-none ring-0 dark:bg-white/5 dark:text-white/80"
-                                    placeholder="例如 200"
-                                    disabled={followSaving}
-                                />
-                            </label>
-                            <label className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-[10px] text-zinc-500 dark:text-white/40">延迟最小（秒）</div>
-                                <input
-                                    type="number"
-                                    inputMode="numeric"
-                                    min="0"
-                                    max="60"
-                                    step="1"
-                                    value={followDelayMin}
-                                    onChange={(e) => setFollowDelayMin(e.target.value)}
-                                    className="mt-1 w-full rounded-lg bg-white px-2 py-1 text-[12px] font-semibold tabular-nums text-zinc-900 outline-none ring-0 dark:bg-white/5 dark:text-white/80"
-                                    placeholder="0"
-                                    disabled={followSaving}
-                                />
-                            </label>
-                            <label className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-[10px] text-zinc-500 dark:text-white/40">延迟最大（秒）</div>
-                                <input
-                                    type="number"
-                                    inputMode="numeric"
-                                    min="0"
-                                    max="60"
-                                    step="1"
-                                    value={followDelayMax}
-                                    onChange={(e) => setFollowDelayMax(e.target.value)}
-                                    className="mt-1 w-full rounded-lg bg-white px-2 py-1 text-[12px] font-semibold tabular-nums text-zinc-900 outline-none ring-0 dark:bg-white/5 dark:text-white/80"
-                                    placeholder="60"
-                                    disabled={followSaving}
-                                />
-                            </label>
-                        </div>
-
-                        {followError ? (
-                            <div className="mt-2 rounded-xl border border-red-500/30 bg-red-500/10 p-2 text-[11px] text-red-700 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-200">
-                                {followError}
-                            </div>
-                        ) : null}
-
-                        <div className="mt-3 flex items-center justify-between gap-2">
-                            <div className="text-[10px] text-zinc-500 dark:text-white/40">
-                                停用只会停止后续跟单，不会自动撤出已有跟单仓位。
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    hapticImpact('light');
-                                    handleSaveFollow();
-                                }}
-                                disabled={followSaving || followLoading}
-                                className="inline-flex items-center rounded-lg bg-emerald-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-600 disabled:opacity-60 disabled:hover:bg-emerald-500"
-                            >
-                                {followSaving ? '保存中…' : '保存'}
-                            </button>
                         </div>
                     </div>
 

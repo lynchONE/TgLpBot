@@ -205,6 +205,45 @@ export async function fetchSmartMoneyFollowConfig({
     }
 }
 
+export async function fetchSmartMoneyFollowConfigs({
+    apiBaseUrl,
+    initData,
+    chain,
+    enabledOnly = true,
+    limit = 100,
+    signal,
+}) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const params = new URLSearchParams();
+    if (initData) params.set('initData', String(initData));
+    if (chain) params.set('chain', String(chain));
+    params.set('enabled_only', enabledOnly ? '1' : '0');
+    if (Number.isFinite(limit)) params.set('limit', String(limit));
+
+    const qs = params.toString();
+    const url = `${base}/api/smart_money_follow_configs${qs ? `?${qs}` : ''}`;
+
+    const resp = await fetch(url, { method: 'GET', signal });
+    const text = await resp.text().catch(() => '');
+    if (!resp.ok) {
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    const body = String(text || '').trim();
+    if (!body) {
+        return {
+            chain: String(chain || 'bsc'),
+            configs: [],
+            enabled_count: 0,
+            warnings: [`smart_money_follow_configs 接口返回空响应体 (HTTP ${resp.status})`],
+        };
+    }
+    try {
+        return JSON.parse(body);
+    } catch {
+        throw new Error(`smart_money_follow_configs invalid JSON: ${body.slice(0, 120)}`);
+    }
+}
+
 export async function saveSmartMoneyFollowConfig({
     apiBaseUrl,
     initData,
@@ -220,11 +259,19 @@ export async function saveSmartMoneyFollowConfig({
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/smart_money_follow_config`;
 
+    const normalizedEnabled = (() => {
+        if (typeof enabled === 'boolean') return enabled;
+        if (typeof enabled === 'number') return enabled !== 0;
+        const text = String(enabled ?? '').trim().toLowerCase();
+        if (!text) return false;
+        return text === '1' || text === 'true' || text === 'yes' || text === 'on';
+    })();
+
     const payload = {
         initData,
         chain: chain ? String(chain) : undefined,
         wallet_address: walletAddress ? String(walletAddress) : undefined,
-        enabled: typeof enabled === 'boolean' ? enabled : undefined,
+        enabled: normalizedEnabled,
         max_total_amount_usdt: Number.isFinite(Number(maxTotalAmountUSDT)) ? Number(maxTotalAmountUSDT) : undefined,
         per_trade_amount_usdt: Number.isFinite(Number(perTradeAmountUSDT)) ? Number(perTradeAmountUSDT) : undefined,
         delay_min_seconds: Number.isFinite(Number(delayMinSeconds)) ? Number(delayMinSeconds) : undefined,

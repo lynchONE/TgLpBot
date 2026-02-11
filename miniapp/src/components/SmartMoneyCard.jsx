@@ -1,8 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { formatRelativeTime } from '../lib/time';
+import { fetchSmartMoneyFollowConfigs } from '../lib/api';
 import { copyToClipboard, hapticNotification, hapticImpact } from '../lib/telegram';
 import ModuleHeader from './ModuleHeader.jsx';
 import SmartMoneyEventTrendChart from './SmartMoneyEventTrendChart.jsx';
+import SmartMoneyFollowModal from './SmartMoneyFollowModal.jsx';
 import SmartMoneyWalletPositionsModal from './SmartMoneyWalletPositionsModal.jsx';
 import SmartMoneyWalletPnLChart from './SmartMoneyWalletPnLChart.jsx';
 
@@ -108,8 +110,14 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
 
     const [walletModalOpen, setWalletModalOpen] = useState(false);
     const [walletModalAddr, setWalletModalAddr] = useState('');
+    const [followModalOpen, setFollowModalOpen] = useState(false);
+    const [followModalAddr, setFollowModalAddr] = useState('');
     const [customWalletAddr, setCustomWalletAddr] = useState('');
     const [customWalletErr, setCustomWalletErr] = useState('');
+    const [followConfigsLoading, setFollowConfigsLoading] = useState(false);
+    const [followConfigsError, setFollowConfigsError] = useState('');
+    const [followConfigs, setFollowConfigs] = useState([]);
+    const [followConfigNonce, setFollowConfigNonce] = useState(0);
 
     const updatedAtText = useMemo(
         () => formatRelativeTime(overview?.updated_at, tick) || '--',
@@ -122,6 +130,71 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
         () => trend.some((p) => Number(p?.total_events ?? 0) > 0),
         [trend],
     );
+    const enabledFollowWallets = useMemo(() => {
+        if (!Array.isArray(followConfigs)) return [];
+        return followConfigs
+            .map((cfg) => {
+                const walletAddress = normalizeWalletAddress(cfg?.wallet_address);
+                if (!walletAddress) return null;
+                return {
+                    wallet_address: walletAddress,
+                    per_trade_amount_usdt: Number(cfg?.per_trade_amount_usdt ?? 0),
+                    max_total_amount_usdt: Number(cfg?.max_total_amount_usdt ?? 0),
+                    delay_min_seconds: Number(cfg?.delay_min_seconds ?? 0),
+                    delay_max_seconds: Number(cfg?.delay_max_seconds ?? 60),
+                    updated_at: cfg?.updated_at,
+                };
+            })
+            .filter(Boolean)
+            .sort((a, b) => {
+                const ta = Date.parse(String(a?.updated_at || '')) || 0;
+                const tb = Date.parse(String(b?.updated_at || '')) || 0;
+                return tb - ta;
+            });
+    }, [followConfigs]);
+
+    useEffect(() => {
+        if (!apiBaseUrl || !initData) {
+            setFollowConfigs([]);
+            setFollowConfigsError('');
+            setFollowConfigsLoading(false);
+            return;
+        }
+
+        let aborted = false;
+        const controller = new AbortController();
+
+        setFollowConfigsLoading(true);
+        setFollowConfigsError('');
+
+        fetchSmartMoneyFollowConfigs({
+            apiBaseUrl,
+            initData,
+            chain,
+            enabledOnly: true,
+            limit: 100,
+            signal: controller.signal,
+        })
+            .then((resp) => {
+                if (aborted) return;
+                setFollowConfigs(Array.isArray(resp?.configs) ? resp.configs : []);
+            })
+            .catch((e) => {
+                if (aborted) return;
+                setFollowConfigs([]);
+                setFollowConfigsError(String(e?.message || e));
+            })
+            .finally(() => {
+                if (aborted) return;
+                setFollowConfigsLoading(false);
+            });
+
+        return () => {
+            aborted = true;
+            controller.abort();
+        };
+    }, [apiBaseUrl, initData, chain, followConfigNonce]);
+
     const subtitle = `最近${poolsWindowLabel}池子 ${pools.length} 个 · 最近${pnlWindowLabel}钱包 ${wallets.length} 个 · 更新 ${updatedAtText}`;
 
     return (
@@ -300,6 +373,78 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                 </div>
 
                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                    <div className="mb-2 rounded-xl border border-zinc-200 bg-white/70 p-2 dark:border-white/10 dark:bg-white/5">
+                        <div className="flex items-center justify-between gap-2">
+                            <div className="text-[10px] text-zinc-500 dark:text-white/40">已开启跟单钱包</div>
+                            <div className="inline-flex items-center gap-1.5">
+                                <span className="text-[10px] text-zinc-500 dark:text-white/40">{followConfigsLoading ? '加载中…' : `${enabledFollowWallets.length} 个`}</span>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        hapticImpact('light');
+                                        setFollowConfigNonce((v) => v + 1);
+                                    }}
+                                    className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
+                                >
+                                    刷新
+                                </button>
+                            </div>
+                        </div>
+
+                        {followConfigsError ? (
+                            <div className="mt-1 text-[10px] text-red-600 dark:text-red-300">{followConfigsError}</div>
+                        ) : null}
+
+                        {!followConfigsError && enabledFollowWallets.length === 0 ? (
+                            <div className="mt-1 text-[10px] text-zinc-500 dark:text-white/50">当前没有开启跟单的钱包</div>
+                        ) : null}
+
+                        {enabledFollowWallets.length ? (
+                            <div className="mt-1 space-y-1">
+                                {enabledFollowWallets.slice(0, 5).map((cfg) => {
+                                    const wallet = String(cfg?.wallet_address || '');
+                                    const perTrade = Number(cfg?.per_trade_amount_usdt ?? 0);
+                                    const maxTotal = Number(cfg?.max_total_amount_usdt ?? 0);
+                                    const dMin = Number(cfg?.delay_min_seconds ?? 0);
+                                    const dMax = Number(cfg?.delay_max_seconds ?? 60);
+                                    return (
+                                        <div key={wallet} className="flex items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white p-2 dark:border-white/10 dark:bg-[#0f1116]">
+                                            <div className="min-w-0">
+                                                <div className="truncate text-[11px] font-semibold text-zinc-800 dark:text-white/85">{shortHex(wallet, 10, 8)}</div>
+                                                <div className="text-[10px] text-zinc-500 dark:text-white/40">
+                                                    单次 {formatUsd(perTrade)} · 总额 {formatUsd(maxTotal)} · 延迟 {Number.isFinite(dMin) ? dMin : 0}-{Number.isFinite(dMax) ? dMax : 60}s
+                                                </div>
+                                            </div>
+                                            <div className="shrink-0 inline-flex items-center gap-1.5">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        hapticImpact('light');
+                                                        safeCopy(wallet, onNotice);
+                                                    }}
+                                                    className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
+                                                >
+                                                    复制
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        hapticImpact('light');
+                                                        setFollowModalAddr(wallet);
+                                                        setFollowModalOpen(true);
+                                                    }}
+                                                    className="inline-flex items-center rounded-lg bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
+                                                >
+                                                    设置
+                                                </button>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        ) : null}
+                    </div>
+
                     <div className="mb-2 flex items-center justify-between">
                         <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">最近{pnlWindowLabel}钱包盈亏</div>
                         <div className="text-[11px] text-zinc-500 dark:text-white/40">Top {topWallets.length}</div>
@@ -327,8 +472,8 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                     hapticImpact('light');
                                     if (customWalletErr) setCustomWalletErr('');
                                     setCustomWalletAddr(normalized);
-                                    setWalletModalAddr(normalized);
-                                    setWalletModalOpen(true);
+                                    setFollowModalAddr(normalized);
+                                    setFollowModalOpen(true);
                                 }}
                                 className="min-w-0 flex-1 rounded-lg bg-white px-2 py-1 text-[12px] font-semibold text-zinc-900 outline-none ring-0 dark:bg-white/5 dark:text-white/80"
                                 placeholder="0x..."
@@ -345,12 +490,31 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                     hapticImpact('light');
                                     if (customWalletErr) setCustomWalletErr('');
                                     setCustomWalletAddr(normalized);
-                                    setWalletModalAddr(normalized);
-                                    setWalletModalOpen(true);
+                                    setFollowModalAddr(normalized);
+                                    setFollowModalOpen(true);
                                 }}
                                 className="shrink-0 inline-flex items-center rounded-lg bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
                             >
-                                Open
+                                跟单
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    const normalized = normalizeWalletAddress(customWalletAddr);
+                                    if (!normalized) {
+                                        hapticNotification('error');
+                                        setCustomWalletErr('Invalid wallet address (expected 0x...)');
+                                        return;
+                                    }
+                                    hapticImpact('light');
+                                    if (customWalletErr) setCustomWalletErr('');
+                                    setCustomWalletAddr(normalized);
+                                    setWalletModalAddr(normalized);
+                                    setWalletModalOpen(true);
+                                }}
+                                className="shrink-0 inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
+                            >
+                                仓位
                             </button>
                         </div>
                         {customWalletErr ? (
@@ -413,10 +577,21 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                                             type="button"
                                                             onClick={() => {
                                                                 hapticImpact('light');
+                                                                setFollowModalAddr(addr);
+                                                                setFollowModalOpen(true);
+                                                            }}
+                                                            className="inline-flex items-center rounded-lg bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
+                                                        >
+                                                            跟单
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                hapticImpact('light');
                                                                 setWalletModalAddr(addr);
                                                                 setWalletModalOpen(true);
                                                             }}
-                                                            className="inline-flex items-center rounded-lg bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
+                                                            className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
                                                         >
                                                             仓位
                                                         </button>
@@ -448,6 +623,28 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                 walletAddress={walletModalAddr}
                 windowHours={pnlWindowHours}
                 onNotice={onNotice}
+            />
+
+            <SmartMoneyFollowModal
+                open={followModalOpen}
+                onClose={() => {
+                    setFollowModalOpen(false);
+                    setFollowModalAddr('');
+                }}
+                apiBaseUrl={apiBaseUrl}
+                initData={initData}
+                chain={chain}
+                walletAddress={followModalAddr}
+                onNotice={onNotice}
+                onSaved={() => {
+                    setFollowConfigNonce((v) => v + 1);
+                }}
+                onOpenPositions={(addr) => {
+                    const normalized = normalizeWalletAddress(addr);
+                    if (!normalized) return;
+                    setWalletModalAddr(normalized);
+                    setWalletModalOpen(true);
+                }}
             />
         </ModuleHeader>
     );

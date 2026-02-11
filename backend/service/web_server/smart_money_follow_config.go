@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +37,13 @@ type smartMoneyFollowConfigUpsertResponse struct {
 	Config models.SmartMoneyFollowConfig `json:"config"`
 }
 
+type smartMoneyFollowConfigsResponse struct {
+	Chain        string                          `json:"chain"`
+	EnabledOnly  bool                            `json:"enabled_only"`
+	EnabledCount int64                           `json:"enabled_count"`
+	Configs      []models.SmartMoneyFollowConfig `json:"configs"`
+}
+
 func normalizeChain(v string) string {
 	v = strings.ToLower(strings.TrimSpace(v))
 	if v == "" {
@@ -50,6 +58,39 @@ func normalizeWalletAddress(v string) (string, bool) {
 		return "", false
 	}
 	return strings.ToLower(common.HexToAddress(v).Hex()), true
+}
+
+func parseBoolQuery(v string, def bool) bool {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if v == "" {
+		return def
+	}
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return def
+	}
+}
+
+func parseIntQueryRange(v string, def int, min int, max int) int {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	if n < min {
+		return min
+	}
+	if n > max {
+		return max
+	}
+	return n
 }
 
 func clampInt(v int, min int, max int) int {
@@ -74,6 +115,68 @@ func (s *Server) handleSmartMoneyFollowConfig(w http.ResponseWriter, r *http.Req
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+}
+
+func (s *Server) handleSmartMoneyFollowConfigs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	query := r.URL.Query()
+	chain := normalizeChain(query.Get("chain"))
+	enabledOnly := parseBoolQuery(query.Get("enabled_only"), true)
+	limit := parseIntQueryRange(query.Get("limit"), 100, 1, 500)
+
+	initData := initDataFromQuery(r)
+	user, status, msg := authenticateTelegramWebAppUser(initData)
+	if status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+	check, status, msg, err := requireUserAccess(user.ID)
+	if err != nil {
+		http.Error(w, msg, status)
+		return
+	}
+	if status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+	if status, msg := requireMiniAppPermission(check); status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+	if status, msg := requireSmartMoneyPermission(check); status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+
+	resp := smartMoneyFollowConfigsResponse{
+		Chain:       chain,
+		EnabledOnly: enabledOnly,
+		Configs:     make([]models.SmartMoneyFollowConfig, 0),
+	}
+
+	countQ := database.DB.Model(&models.SmartMoneyFollowConfig{}).
+		Where("user_id = ? AND chain = ? AND enabled = ?", user.ID, chain, true)
+	if err := countQ.Count(&resp.EnabledCount).Error; err != nil {
+		http.Error(w, "failed to count follow configs", http.StatusInternalServerError)
+		return
+	}
+
+	q := database.DB.Where("user_id = ? AND chain = ?", user.ID, chain)
+	if enabledOnly {
+		q = q.Where("enabled = ?", true)
+	}
+
+	if err := q.Order("updated_at DESC").Limit(limit).Find(&resp.Configs).Error; err != nil {
+		http.Error(w, "failed to load follow configs", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) handleSmartMoneyFollowConfigGet(w http.ResponseWriter, r *http.Request) {
