@@ -78,6 +78,8 @@ func autoMigrate() error {
 		&models.SmartMoneyFollowConfig{},
 		&models.SmartMoneyFollowJob{},
 		&models.SmartMoneyFollowTask{},
+		&models.SmartMoneyGoldenDogConfig{},
+		&models.SmartMoneyGoldenDogAlertState{},
 	)
 }
 

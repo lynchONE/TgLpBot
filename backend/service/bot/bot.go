@@ -10,6 +10,7 @@ import (
 	"TgLpBot/service/pool"
 	"TgLpBot/service/smart_lp"
 	"TgLpBot/service/smart_money_follow"
+	"TgLpBot/service/smart_money_golden_dog"
 	"TgLpBot/service/strategy"
 	"TgLpBot/service/user"
 	"TgLpBot/service/wallet"
@@ -34,6 +35,7 @@ type Bot struct {
 	smartLPMonitor   *smart_lp.SmartLPMonitor
 	smartLPService   *smart_lp.SmartLPService
 	smartMoneyFollow *smart_money_follow.SmartMoneyFollowService
+	goldenDog        *smart_money_golden_dog.SmartMoneyGoldenDogService
 	autoLPCfgService *auto_lp.AutoLPUserConfigService
 	configService    *user.GlobalConfigService
 	taskService      *strategy.StrategyTaskService
@@ -64,6 +66,7 @@ func NewBot(ch *clickhouse.ClickHouseService) (*Bot, error) {
 		smartLPMonitor:   smart_lp.NewSmartLPMonitor(ch),
 		smartLPService:   smart_lp.NewSmartLPService(ch),
 		smartMoneyFollow: smart_money_follow.NewSmartMoneyFollowService(ch),
+		goldenDog:        smart_money_golden_dog.NewSmartMoneyGoldenDogService(ch),
 		autoLPCfgService: auto_lp.NewAutoLPUserConfigService(),
 		configService:    user.NewGlobalConfigService(),
 		taskService:      strategy.NewStrategyTaskService(),
@@ -275,6 +278,9 @@ func (b *Bot) Start() {
 	}
 	if b.smartMoneyFollow != nil {
 		b.smartMoneyFollow.Start()
+	}
+	if b.goldenDog != nil {
+		b.goldenDog.Start()
 	}
 	if b.snapshotService != nil {
 		b.snapshotService.Start()

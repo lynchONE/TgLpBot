@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { formatRelativeTime } from '../lib/time';
-import { fetchSmartMoneyFollowConfigs } from '../lib/api';
+import { fetchSmartMoneyFollowConfigs, fetchSmartMoneyGoldenDogConfig, saveSmartMoneyGoldenDogConfig } from '../lib/api';
 import { copyToClipboard, hapticImpact, hapticNotification } from '../lib/telegram';
 import ModuleHeader from './ModuleHeader.jsx';
 import SmartMoneyFollowModal from './SmartMoneyFollowModal.jsx';
@@ -71,6 +71,14 @@ function kpiTone(value) {
     return 'text-zinc-700 dark:text-white/80';
 }
 
+function toIntInRange(v, min, max, fallback) {
+    const n = Math.round(Number(String(v ?? '').trim()));
+    if (!Number.isFinite(n)) return fallback;
+    if (n < min) return min;
+    if (n > max) return max;
+    return n;
+}
+
 export default function SmartMoneyCard({ overview, loading = false, tick, onNotice, apiBaseUrl, initData }) {
     const pools = Array.isArray(overview?.pools) ? overview.pools : [];
     const wallets = Array.isArray(overview?.wallets_24h) ? overview.wallets_24h : [];
@@ -97,6 +105,16 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
     const [followConfigsError, setFollowConfigsError] = useState('');
     const [followConfigs, setFollowConfigs] = useState([]);
     const [followConfigNonce, setFollowConfigNonce] = useState(0);
+
+    const [goldenLoading, setGoldenLoading] = useState(false);
+    const [goldenSaving, setGoldenSaving] = useState(false);
+    const [goldenError, setGoldenError] = useState('');
+    const [goldenNonce, setGoldenNonce] = useState(0);
+
+    const [goldenEnabled, setGoldenEnabled] = useState(false);
+    const [goldenMinWallets, setGoldenMinWallets] = useState('3');
+    const [goldenWindowMinutes, setGoldenWindowMinutes] = useState('10');
+    const [goldenCooldownMinutes, setGoldenCooldownMinutes] = useState('30');
 
     const updatedAtText = useMemo(
         () => formatRelativeTime(overview?.updated_at, tick) || '--',
@@ -153,7 +171,13 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
         })
             .then((resp) => {
                 if (aborted) return;
-                setFollowConfigs(Array.isArray(resp?.configs) ? resp.configs : []);
+                const incoming = Array.isArray(resp?.configs) ? resp.configs : [];
+                setFollowConfigs((prev) => {
+                    const prevList = Array.isArray(prev) ? prev : [];
+                    if (incoming.length > 0) return incoming;
+                    const prevEnabled = prevList.filter((cfg) => Boolean(cfg?.enabled));
+                    return prevEnabled.length > 0 ? prevList : [];
+                });
             })
             .catch((e) => {
                 if (aborted) return;
@@ -171,7 +195,88 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
         };
     }, [apiBaseUrl, initData, chain, followConfigNonce]);
 
+    useEffect(() => {
+        if (activeTab !== 'golden') return;
+        if (!apiBaseUrl || !initData) {
+            setGoldenError('');
+            setGoldenLoading(false);
+            return;
+        }
+
+        let aborted = false;
+        const controller = new AbortController();
+
+        setGoldenLoading(true);
+        setGoldenError('');
+
+        fetchSmartMoneyGoldenDogConfig({
+            apiBaseUrl,
+            initData,
+            chain,
+            signal: controller.signal,
+        })
+            .then((resp) => {
+                if (aborted) return;
+                const cfg = resp?.config || null;
+                if (!cfg) return;
+                setGoldenEnabled(Boolean(cfg?.enabled));
+                setGoldenMinWallets(String(cfg?.min_wallets ?? 3));
+                setGoldenWindowMinutes(String(cfg?.window_minutes ?? 10));
+                setGoldenCooldownMinutes(String(cfg?.cooldown_minutes ?? 30));
+            })
+            .catch((e) => {
+                if (aborted) return;
+                setGoldenError(String(e?.message || e));
+            })
+            .finally(() => {
+                if (aborted) return;
+                setGoldenLoading(false);
+            });
+
+        return () => {
+            aborted = true;
+            controller.abort();
+        };
+    }, [activeTab, apiBaseUrl, initData, chain, goldenNonce]);
+
     const subtitle = `最近${poolWindowLabel}池子 ${pools.length} 个 · 最近${pnlWindowLabel}钱包 ${wallets.length} 个 · 更新 ${updatedAtText}`;
+
+    async function handleSaveGoldenDog() {
+        if (!apiBaseUrl || !initData) return;
+        const minWallets = toIntInRange(goldenMinWallets, 2, 100, 3);
+        const windowMinutes = toIntInRange(goldenWindowMinutes, 1, 180, 10);
+        const cooldownMinutes = toIntInRange(goldenCooldownMinutes, 0, 1440, 30);
+
+        setGoldenSaving(true);
+        setGoldenError('');
+        try {
+            const resp = await saveSmartMoneyGoldenDogConfig({
+                apiBaseUrl,
+                initData,
+                chain,
+                enabled: Boolean(goldenEnabled),
+                minWallets,
+                windowMinutes,
+                cooldownMinutes,
+            });
+            const cfg = resp?.config || null;
+            if (cfg) {
+                setGoldenEnabled(Boolean(cfg?.enabled));
+                setGoldenMinWallets(String(cfg?.min_wallets ?? minWallets));
+                setGoldenWindowMinutes(String(cfg?.window_minutes ?? windowMinutes));
+                setGoldenCooldownMinutes(String(cfg?.cooldown_minutes ?? cooldownMinutes));
+            }
+            hapticNotification('success');
+            if (typeof onNotice === 'function') onNotice('已保存金狗通知配置', 'success');
+            setGoldenNonce((v) => v + 1);
+        } catch (e) {
+            hapticNotification('error');
+            setGoldenError(String(e?.message || e));
+            if (typeof onNotice === 'function') onNotice(`保存失败: ${String(e?.message || e)}`, 'error');
+        } finally {
+            setGoldenSaving(false);
+        }
+    }
 
     return (
         <ModuleHeader
@@ -221,6 +326,17 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                     }`}
                 >
                     跟单
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setActiveTab('golden')}
+                    className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${
+                        activeTab === 'golden'
+                            ? 'bg-emerald-500 text-white'
+                            : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
+                    }`}
+                >
+                    金狗通知
                 </button>
             </div>
 
@@ -370,7 +486,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                         )}
                     </div>
                 </div>
-            ) : (
+            ) : activeTab === 'follow' ? (
                 <div className="mt-3 space-y-3">
                     <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                         <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">自定义跟单钱包</div>
@@ -507,6 +623,114 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                 })}
                             </div>
                         ) : null}
+                    </div>
+                </div>
+            ) : (
+                <div className="mt-3 space-y-3">
+                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                        <div className="flex items-center justify-between gap-2">
+                            <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">金狗通知</div>
+                            <div className="inline-flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        hapticImpact('light');
+                                        setGoldenEnabled((v) => !v);
+                                    }}
+                                    disabled={goldenSaving || goldenLoading}
+                                    className={`inline-flex items-center rounded-lg px-2 py-1 text-[10px] font-semibold transition ${
+                                        goldenEnabled
+                                            ? 'bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15'
+                                            : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
+                                    }`}
+                                >
+                                    {goldenEnabled ? '已启用' : '已停用'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        hapticImpact('light');
+                                        setGoldenNonce((v) => v + 1);
+                                    }}
+                                    disabled={goldenSaving || goldenLoading}
+                                    className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 disabled:opacity-60 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
+                                >
+                                    刷新
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                            <label className="rounded-xl border border-zinc-200 bg-white/70 p-2 dark:border-white/10 dark:bg-white/5">
+                                <div className="text-[10px] text-zinc-500 dark:text-white/40">触发钱包数</div>
+                                <input
+                                    type="number"
+                                    inputMode="numeric"
+                                    min="2"
+                                    max="100"
+                                    step="1"
+                                    value={goldenMinWallets}
+                                    onChange={(e) => setGoldenMinWallets(e.target.value)}
+                                    disabled={goldenSaving || goldenLoading}
+                                    className="mt-1 w-full rounded-lg bg-white px-2 py-1 text-[12px] font-semibold tabular-nums text-zinc-900 outline-none ring-0 dark:bg-white/5 dark:text-white/80"
+                                    placeholder="3"
+                                />
+                            </label>
+                            <label className="rounded-xl border border-zinc-200 bg-white/70 p-2 dark:border-white/10 dark:bg-white/5">
+                                <div className="text-[10px] text-zinc-500 dark:text-white/40">时间窗口(分钟)</div>
+                                <input
+                                    type="number"
+                                    inputMode="numeric"
+                                    min="1"
+                                    max="180"
+                                    step="1"
+                                    value={goldenWindowMinutes}
+                                    onChange={(e) => setGoldenWindowMinutes(e.target.value)}
+                                    disabled={goldenSaving || goldenLoading}
+                                    className="mt-1 w-full rounded-lg bg-white px-2 py-1 text-[12px] font-semibold tabular-nums text-zinc-900 outline-none ring-0 dark:bg-white/5 dark:text-white/80"
+                                    placeholder="10"
+                                />
+                            </label>
+                            <label className="rounded-xl border border-zinc-200 bg-white/70 p-2 dark:border-white/10 dark:bg-white/5">
+                                <div className="text-[10px] text-zinc-500 dark:text-white/40">冷却(分钟)</div>
+                                <input
+                                    type="number"
+                                    inputMode="numeric"
+                                    min="0"
+                                    max="1440"
+                                    step="1"
+                                    value={goldenCooldownMinutes}
+                                    onChange={(e) => setGoldenCooldownMinutes(e.target.value)}
+                                    disabled={goldenSaving || goldenLoading}
+                                    className="mt-1 w-full rounded-lg bg-white px-2 py-1 text-[12px] font-semibold tabular-nums text-zinc-900 outline-none ring-0 dark:bg-white/5 dark:text-white/80"
+                                    placeholder="30"
+                                />
+                            </label>
+                        </div>
+
+                        <div className="mt-2 text-[10px] text-zinc-500 dark:text-white/40">
+                            Bark 通知地址复用全局配置中的 Bark 设置（Key/Server/Group）。
+                        </div>
+
+                        {goldenError ? (
+                            <div className="mt-2 rounded-xl border border-red-500/30 bg-red-500/10 p-2 text-[11px] text-red-700 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-200">
+                                {goldenError}
+                            </div>
+                        ) : null}
+
+                        <div className="mt-3 flex items-center justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    hapticImpact('light');
+                                    handleSaveGoldenDog();
+                                }}
+                                disabled={goldenSaving || goldenLoading}
+                                className="inline-flex items-center rounded-lg bg-emerald-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-600 disabled:opacity-60 disabled:hover:bg-emerald-500"
+                            >
+                                {goldenSaving ? '保存中…' : goldenLoading ? '加载中…' : '保存'}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

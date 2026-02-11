@@ -299,6 +299,83 @@ export async function saveSmartMoneyFollowConfig({
     }
 }
 
+export async function fetchSmartMoneyGoldenDogConfig({ apiBaseUrl, initData, chain, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const params = new URLSearchParams();
+    if (initData) params.set('initData', String(initData));
+    if (chain) params.set('chain', String(chain));
+
+    const qs = params.toString();
+    const url = `${base}/api/smart_money_golden_dog_config${qs ? `?${qs}` : ''}`;
+
+    const resp = await fetch(url, { method: 'GET', signal });
+    const text = await resp.text().catch(() => '');
+    if (!resp.ok) {
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    const body = String(text || '').trim();
+    if (!body) {
+        return {
+            config: {
+                chain: String(chain || 'bsc'),
+                enabled: false,
+                min_wallets: 3,
+                window_minutes: 10,
+                cooldown_minutes: 30,
+            },
+            warnings: [`smart_money_golden_dog_config 接口返回空响应体 (HTTP ${resp.status})`],
+        };
+    }
+    try {
+        return JSON.parse(body);
+    } catch {
+        throw new Error(`smart_money_golden_dog_config invalid JSON: ${body.slice(0, 120)}`);
+    }
+}
+
+export async function saveSmartMoneyGoldenDogConfig({
+    apiBaseUrl,
+    initData,
+    chain,
+    enabled,
+    minWallets,
+    windowMinutes,
+    cooldownMinutes,
+    signal,
+}) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/smart_money_golden_dog_config`;
+
+    const payload = {
+        initData,
+        chain: chain ? String(chain) : undefined,
+        enabled: typeof enabled === 'boolean' ? enabled : Boolean(enabled),
+        min_wallets: Number.isFinite(Number(minWallets)) ? Number(minWallets) : undefined,
+        window_minutes: Number.isFinite(Number(windowMinutes)) ? Number(windowMinutes) : undefined,
+        cooldown_minutes: Number.isFinite(Number(cooldownMinutes)) ? Number(cooldownMinutes) : undefined,
+    };
+
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+    });
+    const text = await resp.text().catch(() => '');
+    if (!resp.ok) {
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    const body = String(text || '').trim();
+    if (!body) {
+        return { ok: true };
+    }
+    try {
+        return JSON.parse(body);
+    } catch {
+        throw new Error(`smart_money_golden_dog_config invalid JSON: ${body.slice(0, 120)}`);
+    }
+}
+
 export async function setTaskPaused({ apiBaseUrl, initData, taskId, paused, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/task_action?action=pause`;

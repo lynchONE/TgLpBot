@@ -190,9 +190,20 @@ export default function SmartMoneyFollowModal({
             }
 
             hapticNotification('success');
-            const enabledAfterSave = cfg ? Boolean(cfg?.enabled) : Boolean(followEnabled);
+            const fallbackCfg = {
+                chain: chainLabel,
+                wallet_address: addr,
+                enabled: Boolean(followEnabled),
+                per_trade_amount_usdt: Number.isFinite(per) ? Number(per) : 0,
+                max_total_amount_usdt: Number.isFinite(max) ? Number(max) : 0,
+                delay_min_seconds: normalizedDelayRange.min,
+                delay_max_seconds: normalizedDelayRange.max,
+                updated_at: new Date().toISOString(),
+            };
+            const finalCfg = cfg || fallbackCfg;
+            const enabledAfterSave = Boolean(finalCfg?.enabled);
             if (typeof onNotice === 'function') onNotice(enabledAfterSave ? '跟单已开启' : '跟单已停用', 'success');
-            if (typeof onSaved === 'function') onSaved(cfg || null);
+            if (typeof onSaved === 'function') onSaved(finalCfg);
         } catch (e) {
             hapticNotification('error');
             setError(String(e?.message || e));
