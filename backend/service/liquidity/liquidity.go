@@ -11,8 +11,9 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
+	"time"
 
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"gorm.io/gorm"
 )
@@ -73,26 +74,34 @@ func (s *LiquidityService) approveToken(
 
 	approveAmount := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
 
-	// Create approve transaction
+	// Some tokens (e.g. USDT-style) require allowance to be set to 0 before changing from a non-zero value.
+	// Use a "forceApprove" pattern when current allowance is non-zero.
+	if allowance.Sign() > 0 {
+		nonce0, err := blockchain.GetNonce(from)
+		if err != nil {
+			return err
+		}
+		auth0, err := s.buildAuth(privateKey, nonce0, big.NewInt(0), opts)
+		if err != nil {
+			return err
+		}
+		tx0, err := erc20.Approve(auth0, spender, big.NewInt(0))
+		if err != nil {
+			return fmt.Errorf("failed to reset allowance to 0: %w", err)
+		}
+		if _, err := s.waitMined(tx0); err != nil {
+			return fmt.Errorf("reset allowance tx failed: %w", err)
+		}
+	}
+
 	nonce, err := blockchain.GetNonce(from)
 	if err != nil {
 		return err
 	}
-
-	gasPrice, err := blockchain.GetGasPriceWithMultiplier(normalizeGasMultiplier(opts.GasMultiplier))
+	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), opts)
 	if err != nil {
 		return err
 	}
-
-	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, blockchain.ChainID)
-	if err != nil {
-		return err
-	}
-
-	auth.Nonce = big.NewInt(int64(nonce))
-	auth.Value = big.NewInt(0)
-	auth.GasLimit = 0 // 让节点自动估算 gas
-	auth.GasPrice = gasPrice
 
 	tx, err := erc20.Approve(auth, spender, approveAmount)
 	if err != nil {
@@ -104,6 +113,101 @@ func (s *LiquidityService) approveToken(
 		return fmt.Errorf("approve tx failed: %w", err)
 	}
 
+	return nil
+}
+
+// approveTokenViaPermit2 approves `spender` to spend `token` from `from` via Permit2 (finite allowance).
+// This is needed for routers that pull tokens through Permit2 rather than ERC20 allowance.
+func (s *LiquidityService) approveTokenViaPermit2(
+	privateKey *ecdsa.PrivateKey,
+	from common.Address,
+	token common.Address,
+	spender common.Address,
+	amount *big.Int,
+	opts TxOptions,
+) error {
+	if blockchain.Client == nil || blockchain.ChainID == nil {
+		return fmt.Errorf("blockchain client not initialized")
+	}
+	if amount == nil || amount.Sign() <= 0 {
+		return nil
+	}
+
+	// 1) Ensure ERC20 allowance: token -> Permit2
+	if err := s.approveToken(privateKey, from, token, blockchain.Permit2Address, amount, opts); err != nil {
+		return fmt.Errorf("approve token->Permit2 failed: %w", err)
+	}
+
+	// 2) Ensure Permit2 allowance: owner -> spender (finite)
+	permit2, err := blockchain.NewPermit2(blockchain.Permit2Address, blockchain.Client)
+	if err != nil {
+		return fmt.Errorf("init Permit2 failed: %w", err)
+	}
+	allow, err := permit2.Allowance(nil, from, token, spender)
+	if err != nil {
+		return fmt.Errorf("failed to get Permit2 allowance: %w", err)
+	}
+
+	maxAmount := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 160), big.NewInt(1))
+	maxExpiration := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 48), big.NewInt(1))
+
+	now := time.Now().Unix()
+	if allow != nil && allow.Amount != nil && allow.Expiration != nil {
+		// If already infinite, do nothing (some Permit2 variants revert if you try to change infinity).
+		if allow.Amount.Cmp(maxAmount) == 0 && allow.Expiration.Cmp(maxExpiration) == 0 {
+			return nil
+		}
+		// Otherwise, if the existing finite allowance is sufficient and unexpired, keep it.
+		if allow.Amount.Cmp(amount) >= 0 && allow.Expiration.Sign() > 0 && allow.Expiration.Int64() > now {
+			return nil
+		}
+	}
+
+	tryApprove := func(apprAmount *big.Int, apprExpiration *big.Int) error {
+		nonce, nerr := blockchain.GetNonce(from)
+		if nerr != nil {
+			return nerr
+		}
+		auth, aerr := s.buildAuth(privateKey, nonce, big.NewInt(0), opts)
+		if aerr != nil {
+			return aerr
+		}
+		tx, terr := permit2.Approve(auth, token, spender, apprAmount, apprExpiration)
+		if terr != nil {
+			// Permit2AllowanceIsFixedAtInfinity()
+			if strings.Contains(terr.Error(), permit2AllowanceIsFixedAtInfinitySelector) {
+				// Treat as success only if the on-chain allowance is already infinite.
+				if a2, aerr := permit2.Allowance(nil, from, token, spender); aerr == nil && a2 != nil &&
+					a2.Amount != nil && a2.Expiration != nil &&
+					a2.Amount.Cmp(maxAmount) == 0 && a2.Expiration.Cmp(maxExpiration) == 0 {
+					return nil
+				}
+			}
+			return terr
+		}
+		if _, werr := s.waitMined(tx); werr != nil {
+			if strings.Contains(werr.Error(), permit2AllowanceIsFixedAtInfinitySelector) {
+				if a2, aerr := permit2.Allowance(nil, from, token, spender); aerr == nil && a2 != nil &&
+					a2.Amount != nil && a2.Expiration != nil &&
+					a2.Amount.Cmp(maxAmount) == 0 && a2.Expiration.Cmp(maxExpiration) == 0 {
+					return nil
+				}
+			}
+			return werr
+		}
+		return nil
+	}
+
+	// 1) Prefer finite allowance (what wallets show as "finite Permit2 approve").
+	finiteExpiration := big.NewInt(now + int64(30*24*60*60)) // 30 days
+	if err := tryApprove(amount, finiteExpiration); err == nil {
+		return nil
+	}
+
+	// 2) Fallback: some tokens/routers require Permit2 allowance to be fixed at infinity.
+	if err2 := tryApprove(maxAmount, maxExpiration); err2 != nil {
+		return fmt.Errorf("permit2 approve failed (finite+infinite attempts): %w", err2)
+	}
 	return nil
 }
 

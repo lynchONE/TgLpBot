@@ -1788,9 +1788,15 @@ func (s *LiquidityService) swapExactInViaOKXWithHash(
 	log.Printf("[Liquidity] OKX swap: %s -> %s amount=%s router=%s approveTarget=%s",
 		tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), to.Hex(), approveAddr.Hex())
 
-	// Approve TokenApprove 合约
-	if err := s.approveToken(privateKey, walletAddr, tokenIn, approveAddr, amountIn, TxOptions{}); err != nil {
-		return "", fmt.Errorf("approve TokenApprove contract failed: %w", err)
+	// Approve spender (ERC20 or Permit2).
+	if approveAddr == blockchain.Permit2Address {
+		if err := s.approveTokenViaPermit2(privateKey, walletAddr, tokenIn, to, amountIn, TxOptions{}); err != nil {
+			return "", fmt.Errorf("approve via Permit2 failed: %w", err)
+		}
+	} else {
+		if err := s.approveToken(privateKey, walletAddr, tokenIn, approveAddr, amountIn, TxOptions{}); err != nil {
+			return "", fmt.Errorf("approve spender failed: %w", err)
+		}
 	}
 
 	nonce, err := blockchain.GetNonce(walletAddr)
