@@ -79,15 +79,34 @@ func (s *SmartLPService) GetTopAddedLiquidityPools(ctx context.Context, chain st
 		args = append(args, chain)
 	}
 
+	// Only count wallets that have a positive net liquidity delta within the lookback window
+	// (i.e., "add then fully撤销" should not be considered as still adding the pool).
 	q := fmt.Sprintf(`
-		SELECT pool_version, pool_id,
-			sum(toFloat64OrZero(liquidity_delta)) AS added_liquidity,
-			uniqExact(wallet_address) AS wallet_count
-		FROM smart_lp_events
-		WHERE ts >= now() - INTERVAL %d SECOND
-			AND action = 'add'
-			AND pool_version != '' AND pool_id != ''
-			%s
+		SELECT
+			pool_version,
+			pool_id,
+			sum(add_liquidity) AS added_liquidity,
+			count() AS wallet_count
+		FROM (
+			SELECT
+				pool_version,
+				pool_id,
+				wallet_address,
+				sumIf(toFloat64OrZero(liquidity_delta), action = 'add') AS add_liquidity,
+				sum(
+					if(pool_version = 'v4',
+						toInt256OrZero(liquidity_delta),
+						if(action = 'add', toInt256OrZero(liquidity_delta), -toInt256OrZero(liquidity_delta))
+					)
+				) AS net_liquidity
+			FROM smart_lp_events
+			WHERE ts >= now() - INTERVAL %d SECOND
+				AND action IN ('add', 'remove')
+				AND pool_version != '' AND pool_id != ''
+				%s
+			GROUP BY pool_version, pool_id, wallet_address
+			HAVING net_liquidity > 0
+		)
 		GROUP BY pool_version, pool_id
 		ORDER BY wallet_count DESC, added_liquidity DESC
 		LIMIT %d

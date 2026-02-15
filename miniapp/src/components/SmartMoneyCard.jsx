@@ -4,6 +4,7 @@ import { fetchSmartMoneyFollowConfigs, fetchSmartMoneyGoldenDogConfig, saveSmart
 import { copyToClipboard, hapticImpact, hapticNotification } from '../lib/telegram';
 import ModuleHeader from './ModuleHeader.jsx';
 import SmartMoneyFollowModal from './SmartMoneyFollowModal.jsx';
+import SmartMoneyPoolAddsModal from './SmartMoneyPoolAddsModal.jsx';
 import SmartMoneyWalletPositionsModal from './SmartMoneyWalletPositionsModal.jsx';
 
 const USD_DISPLAY_LIMIT = 1e15;
@@ -86,6 +87,13 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
     const poolWindowLabel = formatWindowLabel(overview?.pools_window_sec) || '2h';
     const pnlWindowLabel = formatWindowLabel(overview?.pnl_window_sec) || '24h';
     const chain = String(overview?.chain || 'bsc').trim() || 'bsc';
+    const poolsWindowHours = useMemo(() => {
+        const sec = Number(overview?.pools_window_sec ?? 0);
+        if (!Number.isFinite(sec) || sec <= 0) return 2;
+        const h = sec / 3600;
+        if (h <= 0) return 2;
+        return Math.max(1, Math.min(168, Math.round(h)));
+    }, [overview?.pools_window_sec]);
     const pnlWindowHours = useMemo(() => {
         const sec = Number(overview?.pnl_window_sec ?? 0);
         if (!Number.isFinite(sec) || sec <= 0) return 24;
@@ -99,6 +107,9 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
     const [walletModalAddr, setWalletModalAddr] = useState('');
     const [followModalOpen, setFollowModalOpen] = useState(false);
     const [followModalAddr, setFollowModalAddr] = useState('');
+    const [poolAddsOpen, setPoolAddsOpen] = useState(false);
+    const [poolAddsPoolVersion, setPoolAddsPoolVersion] = useState('');
+    const [poolAddsPoolId, setPoolAddsPoolId] = useState('');
     const [customWalletAddr, setCustomWalletAddr] = useState('');
     const [customWalletErr, setCustomWalletErr] = useState('');
     const [followConfigsLoading, setFollowConfigsLoading] = useState(false);
@@ -379,16 +390,32 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                                     </td>
                                                     <td className="py-1.5 pr-3 text-right tabular-nums">{Number.isFinite(walletCount) ? walletCount : '--'}</td>
                                                     <td className="py-1.5 pr-0 text-right">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => {
-                                                                hapticImpact('light');
-                                                                safeCopy(poolId, onNotice);
-                                                            }}
-                                                            className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
-                                                        >
-                                                            复制
-                                                        </button>
+                                                        <div className="inline-flex items-center gap-1.5">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    hapticImpact('light');
+                                                                    safeCopy(poolId, onNotice);
+                                                                }}
+                                                                className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
+                                                            >
+                                                                复制
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    const pv = String(pool?.pool_version || '').trim().toLowerCase();
+                                                                    if (!pv || !poolId) return;
+                                                                    hapticImpact('light');
+                                                                    setPoolAddsPoolVersion(pv);
+                                                                    setPoolAddsPoolId(poolId);
+                                                                    setPoolAddsOpen(true);
+                                                                }}
+                                                                className="inline-flex items-center rounded-lg bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
+                                                            >
+                                                                明细
+                                                            </button>
+                                                        </div>
                                                     </td>
                                                 </tr>
                                             );
@@ -752,6 +779,36 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                 walletAddress={walletModalAddr}
                 windowHours={pnlWindowHours}
                 onNotice={onNotice}
+            />
+
+            <SmartMoneyPoolAddsModal
+                open={poolAddsOpen}
+                onClose={() => {
+                    setPoolAddsOpen(false);
+                    setPoolAddsPoolVersion('');
+                    setPoolAddsPoolId('');
+                }}
+                apiBaseUrl={apiBaseUrl}
+                initData={initData}
+                chain={chain}
+                poolVersion={poolAddsPoolVersion}
+                poolId={poolAddsPoolId}
+                windowHours={poolsWindowHours}
+                onNotice={onNotice}
+                onOpenFollow={(addr) => {
+                    const normalized = normalizeWalletAddress(addr);
+                    if (!normalized) return;
+                    setPoolAddsOpen(false);
+                    setFollowModalAddr(normalized);
+                    setFollowModalOpen(true);
+                }}
+                onOpenPositions={(addr) => {
+                    const normalized = normalizeWalletAddress(addr);
+                    if (!normalized) return;
+                    setPoolAddsOpen(false);
+                    setWalletModalAddr(normalized);
+                    setWalletModalOpen(true);
+                }}
             />
 
             <SmartMoneyFollowModal

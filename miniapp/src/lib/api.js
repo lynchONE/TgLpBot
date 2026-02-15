@@ -121,6 +121,55 @@ export async function fetchSmartMoneyOverview({
     }
 }
 
+export async function fetchSmartMoneyPoolAdds({
+    apiBaseUrl,
+    initData,
+    chain,
+    poolVersion,
+    poolId,
+    windowHours,
+    limit,
+    feesLimit,
+    signal,
+}) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const params = new URLSearchParams();
+    if (initData) params.set('initData', String(initData));
+    if (chain) params.set('chain', String(chain));
+    if (poolVersion) params.set('pool_version', String(poolVersion));
+    if (poolId) params.set('pool_id', String(poolId));
+    if (Number.isFinite(windowHours)) params.set('window_hours', String(windowHours));
+    if (Number.isFinite(limit)) params.set('limit', String(limit));
+    if (Number.isFinite(feesLimit)) params.set('fees_limit', String(feesLimit));
+
+    const qs = params.toString();
+    const url = `${base}/api/smart_money_pool_adds${qs ? `?${qs}` : ''}`;
+
+    const resp = await fetch(url, { method: 'GET', signal });
+    const text = await resp.text().catch(() => '');
+    if (!resp.ok) {
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    const body = String(text || '').trim();
+    if (!body) {
+        return {
+            chain: String(chain || 'bsc'),
+            window_sec: 0,
+            pool: {
+                pool_version: String(poolVersion || ''),
+                pool_id: String(poolId || ''),
+            },
+            wallets: [],
+            warnings: [`smart_money_pool_adds 鎺ュ彛杩斿洖绌哄搷搴斾綋 (HTTP ${resp.status})`],
+        };
+    }
+    try {
+        return JSON.parse(body);
+    } catch {
+        throw new Error(`smart_money_pool_adds invalid JSON: ${body.slice(0, 120)}`);
+    }
+}
+
 export async function fetchSmartMoneyWalletPositions({
     apiBaseUrl,
     initData,
