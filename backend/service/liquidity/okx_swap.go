@@ -3,6 +3,7 @@ package liquidity
 import (
 	"TgLpBot/base/blockchain"
 	"TgLpBot/base/config"
+	"TgLpBot/service/chainexec"
 	"TgLpBot/service/exchange"
 	"context"
 	"crypto/ecdsa"
@@ -14,6 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 func normalizeOkxSwapGasMultiplier(v float64) float64 {
@@ -30,8 +32,8 @@ func normalizeOkxSwapGasMultiplier(v float64) float64 {
 // - use node EstimateGas when possible
 // - take max(estimate, okxSuggested)
 // - apply a safety multiplier (default 1.30) and min/max bounds if configured
-func okxSwapGasLimit(from common.Address, to common.Address, value *big.Int, data []byte, okxSuggested uint64) (uint64, error) {
-	if blockchain.Client == nil {
+func okxSwapGasLimit(client *ethclient.Client, from common.Address, to common.Address, value *big.Int, data []byte, okxSuggested uint64) (uint64, error) {
+	if client == nil {
 		return 0, fmt.Errorf("blockchain client not initialized")
 	}
 	if value == nil {
@@ -45,7 +47,7 @@ func okxSwapGasLimit(from common.Address, to common.Address, value *big.Int, dat
 		Data:  data,
 	}
 
-	estimated, err := blockchain.Client.EstimateGas(context.Background(), msg)
+	estimated, err := client.EstimateGas(context.Background(), msg)
 	if err != nil {
 		if okxSuggested == 0 {
 			return 0, fmt.Errorf("estimate gas failed: %w", err)
@@ -86,40 +88,51 @@ func okxSwapGasLimit(from common.Address, to common.Address, value *big.Int, dat
 	return gasLimit, nil
 }
 
-// swapExactInViaOKX executes a swap transaction returned by OKX DEX /swap API from the user's wallet.
-// It returns the balance delta of tokenOut observed on the wallet.
-func (s *LiquidityService) swapExactInViaOKX(
+type okxSwapExecutionResult struct {
+	TxHash   string
+	Receipt  *types.Receipt
+	DeltaOut *big.Int
+}
+
+// executeOKXSwapExactIn executes a swap transaction returned by OKX DEX /swap API from the user's wallet.
+// It returns txHash + receipt + tokenOut balance delta (best-effort).
+func (s *LiquidityService) executeOKXSwapExactIn(
+	exec chainexec.EVMExecutor,
 	privateKey *ecdsa.PrivateKey,
 	walletAddr common.Address,
 	tokenIn common.Address,
 	tokenOut common.Address,
 	amountIn *big.Int,
 	slippagePercent float64,
-) (*big.Int, error) {
-	if config.AppConfig == nil {
-		return nil, fmt.Errorf("config not loaded")
+) (*okxSwapExecutionResult, error) {
+	if exec == nil {
+		return nil, fmt.Errorf("executor is nil")
 	}
-	if blockchain.Client == nil || blockchain.ChainID == nil {
+	cc := exec.Config()
+	client := exec.Client()
+	chainID := exec.ChainID()
+
+	if client == nil || chainID == nil {
 		return nil, fmt.Errorf("blockchain client not initialized")
 	}
 	if amountIn == nil || amountIn.Sign() <= 0 {
-		return big.NewInt(0), nil
+		return &okxSwapExecutionResult{DeltaOut: big.NewInt(0)}, nil
 	}
 	if tokenIn == tokenOut {
-		return new(big.Int).Set(amountIn), nil
+		return &okxSwapExecutionResult{DeltaOut: new(big.Int).Set(amountIn)}, nil
 	}
 
 	if s.okxService == nil {
 		s.okxService = exchange.NewOKXDexService()
 	}
 
-	outBefore, _ := blockchain.GetTokenBalance(tokenOut, walletAddr)
+	outBefore, _ := blockchain.GetTokenBalanceWithClient(client, tokenOut, walletAddr)
 	if outBefore == nil {
 		outBefore = big.NewInt(0)
 	}
 
 	swapReq := exchange.SwapRequest{
-		ChainID:           fmt.Sprintf("%d", config.AppConfig.BSCChainID),
+		ChainID:           fmt.Sprintf("%d", cc.ChainID),
 		FromTokenAddress:  tokenIn.Hex(),
 		ToTokenAddress:    tokenOut.Hex(),
 		Amount:            amountIn.String(),
@@ -141,11 +154,11 @@ func (s *LiquidityService) swapExactInViaOKX(
 	}
 	estGas := strings.TrimSpace(swapResp.Data[0].Tx.Gas)
 	if estGas != "" {
-		log.Printf("[Liquidity] OKX swap preview: %s -> %s amountIn=%s expectedOut=%s txGas=%s slippage=%.4f%%",
-			tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), expectedOut, estGas, slippagePercent)
+		log.Printf("[Liquidity] OKX swap preview: chain=%s %s -> %s amountIn=%s expectedOut=%s txGas=%s slippage=%.4f%%",
+			exec.Chain(), tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), expectedOut, estGas, slippagePercent)
 	} else {
-		log.Printf("[Liquidity] OKX swap preview: %s -> %s amountIn=%s expectedOut=%s slippage=%.4f%%",
-			tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), expectedOut, slippagePercent)
+		log.Printf("[Liquidity] OKX swap preview: chain=%s %s -> %s amountIn=%s expectedOut=%s slippage=%.4f%%",
+			exec.Chain(), tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), expectedOut, slippagePercent)
 	}
 
 	txObj := swapResp.Data[0].Tx
@@ -179,75 +192,88 @@ func (s *LiquidityService) swapExactInViaOKX(
 
 	swapTx := blockchain.OkxSwapTx{To: to, Value: value, Data: data}
 	_ = ValidateOkxSmartSwapTx("swap", swapTx)
-	if err := EnforceOkxSwapRouter("swap", swapTx); err != nil {
+	if err := EnforceOkxSwapRouter("swap", cc.OKXSwapRouter, swapTx); err != nil {
 		return nil, err
 	}
 
-	// 获取 OKX TokenApprove 合约地址
-	chainID := fmt.Sprintf("%d", config.AppConfig.BSCChainID)
-	approveSpender, err := s.okxService.GetApproveSpender(chainID, tokenIn.Hex())
+	chainIDText := fmt.Sprintf("%d", cc.ChainID)
+	approveSpender, err := s.okxService.GetApproveSpender(chainIDText, tokenIn.Hex())
 	if err != nil {
 		log.Printf("[Liquidity] Warning: failed to get OKX approve spender, using router as fallback: %v", err)
-		approveSpender = to.Hex() // 降级到使用 router
+		approveSpender = to.Hex()
+	}
+	if !common.IsHexAddress(approveSpender) {
+		return nil, fmt.Errorf("OKX approve spender invalid: %s", approveSpender)
 	}
 	approveAddr := common.HexToAddress(approveSpender)
 
-	log.Printf("[Liquidity] OKX swap: %s -> %s amount=%s router=%s approveTarget=%s",
-		tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), to.Hex(), approveAddr.Hex())
+	allowedSpenders := map[common.Address]struct{}{
+		to:                        {},
+		blockchain.Permit2Address: {},
+	}
+	if common.IsHexAddress(cc.OKXTokenApproveAddress) {
+		allowedSpenders[common.HexToAddress(cc.OKXTokenApproveAddress)] = struct{}{}
+	}
+	if _, ok := allowedSpenders[approveAddr]; !ok {
+		return nil, fmt.Errorf("OKX approve spender not allowed: %s (router=%s tokenApprove=%s)", approveAddr.Hex(), to.Hex(), strings.TrimSpace(cc.OKXTokenApproveAddress))
+	}
 
-	// Approve spender to spend tokenIn (ERC20 or Permit2).
+	log.Printf("[Liquidity] OKX swap: chain=%s %s -> %s amount=%s router=%s approveTarget=%s",
+		exec.Chain(), tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), to.Hex(), approveAddr.Hex())
+
 	if approveAddr == blockchain.Permit2Address {
-		if err := s.approveTokenViaPermit2(privateKey, walletAddr, tokenIn, to, amountIn, TxOptions{}); err != nil {
+		if err := s.approveTokenViaPermit2(client, chainID, privateKey, walletAddr, tokenIn, to, amountIn, TxOptions{}); err != nil {
 			return nil, fmt.Errorf("approve via Permit2 failed: %w", err)
 		}
 	} else {
-		if err := s.approveToken(privateKey, walletAddr, tokenIn, approveAddr, amountIn, TxOptions{}); err != nil {
+		if err := s.approveToken(client, chainID, privateKey, walletAddr, tokenIn, approveAddr, amountIn, TxOptions{}); err != nil {
 			return nil, fmt.Errorf("approve spender failed: %w", err)
 		}
 	}
 
-	nonce, err := blockchain.GetNonce(walletAddr)
+	nonce, err := blockchain.GetNonceWithClient(client, walletAddr)
 	if err != nil {
 		return nil, err
 	}
-	gasPrice, err := blockchain.GetGasPrice()
+	gasPrice, err := blockchain.GetGasPriceWithClient(client)
 	if err != nil {
 		return nil, err
 	}
 
-	gasLimit, err := okxSwapGasLimit(walletAddr, to, value, data, okxGasLimit)
+	gasLimit, err := okxSwapGasLimit(client, walletAddr, to, value, data, okxGasLimit)
 	if err != nil {
 		return nil, err
 	}
 	log.Printf("[Liquidity] OKX swap gasLimit: okx=%d final=%d", okxGasLimit, gasLimit)
 
 	rawTx := types.NewTransaction(nonce, to, value, gasLimit, gasPrice, data)
-	signed, err := types.SignTx(rawTx, types.NewEIP155Signer(blockchain.ChainID), privateKey)
+	signed, err := types.SignTx(rawTx, types.NewEIP155Signer(chainID), privateKey)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := blockchain.SendTransaction(signed); err != nil {
+	if err := blockchain.SendTransactionWithClient(client, signed); err != nil {
 		return nil, err
 	}
+
 	txHash := signed.Hash().Hex()
-	receipt, err := s.waitMined(signed)
+	receipt, err := s.waitMined(client, chainID, signed)
 	if err != nil {
 		return nil, err
 	}
 
-	// Prefer receipt logs over balance reads to avoid "RPC lag / load balancer" stale reads.
+	// Prefer receipt logs over balance reads to avoid public RPC stale reads.
 	if d := ReceiptTokenTransferDelta(receipt, tokenOut, walletAddr); d != nil && d.Sign() > 0 {
-		return d, nil
+		return &okxSwapExecutionResult{TxHash: txHash, Receipt: receipt, DeltaOut: d}, nil
 	}
 
-	outAfter, _ := blockchain.GetTokenBalance(tokenOut, walletAddr)
+	outAfter, _ := blockchain.GetTokenBalanceWithClient(client, tokenOut, walletAddr)
 	if outAfter == nil {
 		outAfter = big.NewInt(0)
 	}
 	delta := new(big.Int).Sub(outAfter, outBefore)
 	if delta.Sign() <= 0 {
 		minWanted := new(big.Int).Add(outBefore, big.NewInt(1))
-		if synced, werr := s.waitTokenBalanceAtLeast(tokenOut, walletAddr, minWanted, "OKX swap out"); werr == nil && synced != nil {
+		if synced, werr := s.waitTokenBalanceAtLeast(client, tokenOut, walletAddr, minWanted, "OKX swap out"); werr == nil && synced != nil {
 			outAfter = synced
 			delta = new(big.Int).Sub(outAfter, outBefore)
 		}
@@ -256,12 +282,30 @@ func (s *LiquidityService) swapExactInViaOKX(
 		delta = big.NewInt(0)
 	}
 	if delta.Sign() == 0 {
-		expectedOut := strings.TrimSpace(swapResp.Data[0].RouterResult.ToTokenAmount)
-		if expectedOut == "" {
-			expectedOut = "unknown"
-		}
 		log.Printf("[Liquidity] Warning: OKX swap mined but tokenOut delta is 0 (tx=%s tokenOut=%s expected=%s outBefore=%s outAfter=%s)",
 			txHash, tokenOut.Hex(), expectedOut, outBefore.String(), outAfter.String())
 	}
-	return delta, nil
+
+	return &okxSwapExecutionResult{TxHash: txHash, Receipt: receipt, DeltaOut: delta}, nil
+}
+
+// swapExactInViaOKX executes a swap transaction returned by OKX DEX /swap API from the user's wallet.
+// It returns the balance delta of tokenOut observed on the wallet.
+func (s *LiquidityService) swapExactInViaOKX(
+	exec chainexec.EVMExecutor,
+	privateKey *ecdsa.PrivateKey,
+	walletAddr common.Address,
+	tokenIn common.Address,
+	tokenOut common.Address,
+	amountIn *big.Int,
+	slippagePercent float64,
+) (*big.Int, error) {
+	r, err := s.executeOKXSwapExactIn(exec, privateKey, walletAddr, tokenIn, tokenOut, amountIn, slippagePercent)
+	if err != nil {
+		return nil, err
+	}
+	if r == nil || r.DeltaOut == nil {
+		return big.NewInt(0), nil
+	}
+	return r.DeltaOut, nil
 }

@@ -87,10 +87,14 @@ func (b *Bot) promptEntrySwap(chatID int64, task *models.StrategyTask, tokenSymb
 	}).Error
 	task.Status = models.StrategyStatusWaiting
 
-	text := fmt.Sprintf("检测到该池子不包含 USDT，需要先将 USDT 兑换为 %s 才能开仓。\n\n是否允许？", tokenSymbol)
+	stableSym, _, _ := stableSymbolForChain(task.Chain)
+	if strings.TrimSpace(stableSym) == "" {
+		stableSym = "USDT"
+	}
+	text := fmt.Sprintf("检测到该池子不包含 %s，需要先将 %s 兑换为 %s 才能开仓。\n\n是否允许？", stableSym, stableSym, tokenSymbol)
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("✅ 允许兑换为 %s", tokenSymbol), fmt.Sprintf("entry_swap_allow_%d", task.ID)),
+			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("✅ 允许 %s→%s", stableSym, tokenSymbol), fmt.Sprintf("entry_swap_allow_%d", task.ID)),
 			tgbotapi.NewInlineKeyboardButtonData("❌ 取消开仓", fmt.Sprintf("entry_swap_cancel_%d", task.ID)),
 		),
 	)

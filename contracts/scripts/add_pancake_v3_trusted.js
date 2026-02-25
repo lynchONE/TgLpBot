@@ -1,46 +1,62 @@
-const { ethers } = require("hardhat");
+const { ethers, network } = require("hardhat");
+const {
+  getNetworkPrefixes,
+  usesGlobalFallback,
+  readEnvForNetwork,
+  readZapAddressForNetwork,
+} = require("./utils/network_env");
 
 async function main() {
-    console.log("🔧 Adding PancakeSwap V3 Position Manager to trusted list...");
+  const networkName = network.name;
+  const prefixes = getNetworkPrefixes(networkName);
+  const preferredPrefix = prefixes[0];
 
-    const zapAddress = process.env.ZAP_V3_ADDRESS || process.env.ZAP_V4_ADDRESS;
-    if (!zapAddress) {
-        console.error("❌ ZAP_V3_ADDRESS or ZAP_V4_ADDRESS not found in environment variables.");
-        process.exit(1);
-    }
-    console.log(`   Contract: ${zapAddress}`);
+  if (networkName === "base" || networkName === "baseSepolia") {
+    console.error("This script is BSC-only. Base networks should use Uniswap/Aerodrome managers.");
+    process.exit(1);
+  }
 
-    const pancakeV3NPM = process.env.PANCAKE_V3_NPM_ADDRESS || "0x46A15B0b27311cedF172AB29E4f4766fbE7F4364";
-    console.log(`   PancakeSwap V3 NPM: ${pancakeV3NPM}`);
+  console.log(`Adding trusted Pancake V3 PM on network: ${networkName}`);
+  console.log(`Environment prefixes (priority): ${prefixes.join(", ")}`);
 
-    const ZapSimple = await ethers.getContractFactory("ZapSimple");
-    const zap = ZapSimple.attach(zapAddress);
+  const zapAddress = readZapAddressForNetwork(networkName);
+  if (!zapAddress) {
+    const globalHint = usesGlobalFallback(networkName)
+      ? ", or global ZAP_V3_ADDRESS / ZAP_V4_ADDRESS"
+      : "";
+    console.error(
+      `Missing zap address. Set ${preferredPrefix}_ZAP_V3_ADDRESS / ${preferredPrefix}_ZAP_V4_ADDRESS${globalHint}.`
+    );
+    process.exit(1);
+  }
 
-    // Check current whitelist status
-    const isTrusted = await zap.trustedV3PositionManagers(pancakeV3NPM);
-    console.log(`\n📋 Current Status: ${isTrusted ? "✅ Already trusted" : "❌ Not trusted"}`);
+  const pancakeV3NPM =
+    readEnvForNetwork(networkName, "PANCAKE_V3_NPM_ADDRESS") ||
+    "0x46A15B0b27311cedF172AB29E4f4766fbE7F4364";
 
-    if (isTrusted) {
-        console.log("✅ PancakeSwap V3 NPM is already in the trusted list, no action needed.");
-        return;
-    }
+  console.log("Contract:", zapAddress);
+  console.log("Pancake V3 NPM:", pancakeV3NPM);
 
-    console.log(`\n🚀 Adding PancakeSwap V3 NPM to trusted list...`);
+  const ZapSimple = await ethers.getContractFactory("ZapSimple");
+  const zap = ZapSimple.attach(zapAddress);
 
-    // Call setTrustedV3PositionManagers([pancakeV3NPM], true)
-    const tx = await zap.setTrustedV3PositionManagers([pancakeV3NPM], true);
-    console.log(`⏳ Transaction sent: ${tx.hash}`);
-    await tx.wait();
-    console.log("✅ PancakeSwap V3 NPM successfully added to trusted list!");
+  const isTrusted = await zap.trustedV3PositionManagers(pancakeV3NPM);
+  if (isTrusted) {
+    console.log("Already trusted. No update needed.");
+    return;
+  }
 
-    // Verify
-    const isNowTrusted = await zap.trustedV3PositionManagers(pancakeV3NPM);
-    console.log(`\n✅ Verification: ${isNowTrusted ? "SUCCESS - Trusted" : "FAILED - Not trusted"}`);
+  const tx = await zap.setTrustedV3PositionManagers([pancakeV3NPM], true);
+  console.log("setTrustedV3PositionManagers tx:", tx.hash);
+  await tx.wait();
+
+  const verified = await zap.trustedV3PositionManagers(pancakeV3NPM);
+  console.log("Verification:", verified ? "SUCCESS" : "FAILED");
 }
 
 main()
-    .then(() => process.exit(0))
-    .catch((error) => {
-        console.error(error);
-        process.exit(1);
-    });
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

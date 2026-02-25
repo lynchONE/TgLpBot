@@ -68,7 +68,8 @@ func NewPermit2(address common.Address, client *ethclient.Client) (*Permit2, err
 	if err != nil {
 		return nil, err
 	}
-	contract := bind.NewBoundContract(address, parsed, client, client, client)
+	rc := wrapRPCRetryClient(client)
+	contract := bind.NewBoundContract(address, parsed, rc, rc, rc)
 	return &Permit2{contract: contract, address: address}, nil
 }
 

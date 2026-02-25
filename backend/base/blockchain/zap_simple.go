@@ -292,7 +292,8 @@ func NewZapSimple(address common.Address, client *ethclient.Client) (*ZapSimple,
 	if err != nil {
 		return nil, err
 	}
-	contract := bind.NewBoundContract(address, parsed, client, client, client)
+	rc := wrapRPCRetryClient(client)
+	contract := bind.NewBoundContract(address, parsed, rc, rc, rc)
 	return &ZapSimple{contract: contract, address: address}, nil
 }
 

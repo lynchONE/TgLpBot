@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 // v3PoolABI is used for pool meta reads (token0/token1/fee). Some V3 forks return
@@ -114,7 +115,11 @@ const v3PoolFeeGrowthABI = `[
 
 // GetV3PoolCurrentTick returns the current tick from a UniswapV3/PancakeV3-style pool via slot0().
 func GetV3PoolCurrentTick(poolAddress common.Address) (int, error) {
-	if Client == nil {
+	return GetV3PoolCurrentTickWithClient(Client, poolAddress)
+}
+
+func GetV3PoolCurrentTickWithClient(client *ethclient.Client, poolAddress common.Address) (int, error) {
+	if client == nil {
 		return 0, fmt.Errorf("blockchain client not initialized")
 	}
 
@@ -132,7 +137,7 @@ func GetV3PoolCurrentTick(poolAddress common.Address) (int, error) {
 	var raw []byte
 	var callErr error
 	for attempt := 1; attempt <= 3; attempt++ {
-		raw, callErr = Client.CallContract(context.Background(), msg, nil)
+		raw, callErr = client.CallContract(context.Background(), msg, nil)
 		if callErr == nil {
 			break
 		}
@@ -164,7 +169,11 @@ func GetV3PoolCurrentTick(poolAddress common.Address) (int, error) {
 
 // GetV3PoolCurrentTickAtBlock returns the tick from slot0() at a given block number.
 func GetV3PoolCurrentTickAtBlock(poolAddress common.Address, blockNumber uint64) (int, error) {
-	if Client == nil {
+	return GetV3PoolCurrentTickAtBlockWithClient(Client, poolAddress, blockNumber)
+}
+
+func GetV3PoolCurrentTickAtBlockWithClient(client *ethclient.Client, poolAddress common.Address, blockNumber uint64) (int, error) {
+	if client == nil {
 		return 0, fmt.Errorf("blockchain client not initialized")
 	}
 	if blockNumber == 0 {
@@ -186,7 +195,7 @@ func GetV3PoolCurrentTickAtBlock(poolAddress common.Address, blockNumber uint64)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	raw, err := callContractWithRetryAtBlock(ctx, msg, block)
+	raw, err := callContractWithRetryAtBlock(client, ctx, msg, block)
 	if err != nil {
 		return 0, fmt.Errorf("call slot0 failed: %w", err)
 	}
@@ -209,7 +218,11 @@ func GetV3PoolCurrentTickAtBlock(poolAddress common.Address, blockNumber uint64)
 
 // GetV3PoolSlot0 returns the sqrtPriceX96 and current tick from a V3 pool.
 func GetV3PoolSlot0(poolAddress common.Address) (*big.Int, int, error) {
-	if Client == nil {
+	return GetV3PoolSlot0WithClient(Client, poolAddress)
+}
+
+func GetV3PoolSlot0WithClient(client *ethclient.Client, poolAddress common.Address) (*big.Int, int, error) {
+	if client == nil {
 		return nil, 0, fmt.Errorf("blockchain client not initialized")
 	}
 
@@ -224,7 +237,7 @@ func GetV3PoolSlot0(poolAddress common.Address) (*big.Int, int, error) {
 	}
 
 	msg := ethereum.CallMsg{To: &poolAddress, Data: data}
-	raw, err := Client.CallContract(context.Background(), msg, nil)
+	raw, err := client.CallContract(context.Background(), msg, nil)
 	if err != nil {
 		return nil, 0, fmt.Errorf("call slot0 failed: %w", err)
 	}
@@ -251,7 +264,11 @@ func GetV3PoolSlot0(poolAddress common.Address) (*big.Int, int, error) {
 
 // GetV3PoolTokens returns (token0, token1) from a UniswapV3/PancakeV3-style pool.
 func GetV3PoolTokens(poolAddress common.Address) (common.Address, common.Address, error) {
-	if Client == nil {
+	return GetV3PoolTokensWithClient(Client, poolAddress)
+}
+
+func GetV3PoolTokensWithClient(client *ethclient.Client, poolAddress common.Address) (common.Address, common.Address, error) {
+	if client == nil {
 		return common.Address{}, common.Address{}, fmt.Errorf("blockchain client not initialized")
 	}
 
@@ -266,9 +283,12 @@ func GetV3PoolTokens(poolAddress common.Address) (common.Address, common.Address
 			return common.Address{}, fmt.Errorf("pack %s failed: %w", method, err)
 		}
 		msg := ethereum.CallMsg{To: &poolAddress, Data: data}
-		raw, err := Client.CallContract(context.Background(), msg, nil)
+		raw, err := client.CallContract(context.Background(), msg, nil)
 		if err != nil {
 			return common.Address{}, fmt.Errorf("call %s failed: %w", method, err)
+		}
+		if len(raw) == 0 {
+			return common.Address{}, fmt.Errorf("call %s returned empty result (wrong chain or not a V3 pool)", method)
 		}
 		out, err := parsedABI.Unpack(method, raw)
 		if err != nil {
@@ -299,7 +319,11 @@ func GetV3PoolTokens(poolAddress common.Address) (common.Address, common.Address
 
 // GetV3PoolFee returns the fee tier from a UniswapV3/PancakeV3-style pool.
 func GetV3PoolFee(poolAddress common.Address) (uint32, error) {
-	if Client == nil {
+	return GetV3PoolFeeWithClient(Client, poolAddress)
+}
+
+func GetV3PoolFeeWithClient(client *ethclient.Client, poolAddress common.Address) (uint32, error) {
+	if client == nil {
 		return 0, fmt.Errorf("blockchain client not initialized")
 	}
 
@@ -314,9 +338,12 @@ func GetV3PoolFee(poolAddress common.Address) (uint32, error) {
 	}
 
 	msg := ethereum.CallMsg{To: &poolAddress, Data: data}
-	raw, err := Client.CallContract(context.Background(), msg, nil)
+	raw, err := client.CallContract(context.Background(), msg, nil)
 	if err != nil {
 		return 0, fmt.Errorf("call fee failed: %w", err)
+	}
+	if len(raw) == 0 {
+		return 0, fmt.Errorf("call fee returned empty result (wrong chain or not a V3 pool)")
 	}
 
 	out, err := parsedABI.Unpack("fee", raw)
@@ -338,7 +365,11 @@ func GetV3PoolFee(poolAddress common.Address) (uint32, error) {
 
 // GetV3PoolFeeGrowthGlobals returns feeGrowthGlobal0X128 and feeGrowthGlobal1X128 from the pool.
 func GetV3PoolFeeGrowthGlobals(poolAddress common.Address) (*big.Int, *big.Int, error) {
-	if Client == nil {
+	return GetV3PoolFeeGrowthGlobalsWithClient(Client, poolAddress)
+}
+
+func GetV3PoolFeeGrowthGlobalsWithClient(client *ethclient.Client, poolAddress common.Address) (*big.Int, *big.Int, error) {
+	if client == nil {
 		return nil, nil, fmt.Errorf("blockchain client not initialized")
 	}
 
@@ -353,7 +384,7 @@ func GetV3PoolFeeGrowthGlobals(poolAddress common.Address) (*big.Int, *big.Int, 
 			return nil, fmt.Errorf("pack %s failed: %w", method, err)
 		}
 		msg := ethereum.CallMsg{To: &poolAddress, Data: data}
-		raw, err := Client.CallContract(context.Background(), msg, nil)
+		raw, err := client.CallContract(context.Background(), msg, nil)
 		if err != nil {
 			return nil, fmt.Errorf("call %s failed: %w", method, err)
 		}
@@ -384,7 +415,11 @@ func GetV3PoolFeeGrowthGlobals(poolAddress common.Address) (*big.Int, *big.Int, 
 
 // GetV3PoolTickFeeGrowthOutside returns feeGrowthOutside0/1 for a given tick.
 func GetV3PoolTickFeeGrowthOutside(poolAddress common.Address, tick int) (*big.Int, *big.Int, bool, error) {
-	if Client == nil {
+	return GetV3PoolTickFeeGrowthOutsideWithClient(Client, poolAddress, tick)
+}
+
+func GetV3PoolTickFeeGrowthOutsideWithClient(client *ethclient.Client, poolAddress common.Address, tick int) (*big.Int, *big.Int, bool, error) {
+	if client == nil {
 		return nil, nil, false, fmt.Errorf("blockchain client not initialized")
 	}
 
@@ -398,7 +433,7 @@ func GetV3PoolTickFeeGrowthOutside(poolAddress common.Address, tick int) (*big.I
 		return nil, nil, false, fmt.Errorf("pack ticks failed: %w", err)
 	}
 	msg := ethereum.CallMsg{To: &poolAddress, Data: data}
-	raw, err := Client.CallContract(context.Background(), msg, nil)
+	raw, err := client.CallContract(context.Background(), msg, nil)
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("call ticks failed: %w", err)
 	}

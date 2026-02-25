@@ -81,8 +81,9 @@ func (b *Bot) handleTaskDelete(query *tgbotapi.CallbackQuery, user *models.User)
 		b.sendMessage(chatID, fmt.Sprintf("获取任务失败：%v", err))
 		return
 	}
+	stableSym, _, _ := stableSymbolForChain(task.Chain)
 
-	text := fmt.Sprintf("⚠️ *确认删除任务 #%d？*\n\n删除后将从列表中移除（不可恢复）。\n\n注意：删除不会撤出链上流动性/兑换 USDT；如需撤仓请先点击“停止任务”，或自行在钱包里撤仓。", task.ID)
+	text := fmt.Sprintf("⚠️ *确认删除任务 #%d？*\n\n删除后将从列表中移除（不可恢复）。\n\n注意：删除不会撤出链上流动性/兑换 %s；如需撤仓请先点击“停止任务”，或自行在钱包里撤仓。", task.ID, stableSym)
 	if task.IsAuto {
 		text += "\n\n🤖 该任务由 AutoLP 创建，删除不会关闭 AutoLP；如要停止自动开仓请在 /auto 中关闭。"
 	}
@@ -212,7 +213,8 @@ func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 				"exit_give_up_at":     nil,
 				"error_message":       "",
 			})
-			b.sendMessage(query.Message.Chat.ID, "🛑 已切换为手动停止：系统将继续撤出并兑换 USDT（最多重试 3 次）。")
+			stableSym, _, _ := stableSymbolForChain(task.Chain)
+			b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("🛑 已切换为手动停止：系统将继续撤出并兑换 %s（最多重试 3 次）。", stableSym))
 		} else {
 			b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("⏳ 正在撤出中（已失败 %d 次，最多 3 次），请稍候…", task.ExitRetryCount))
 		}
@@ -298,7 +300,8 @@ func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 		return
 	}
 
-	b.sendMessage(query.Message.Chat.ID, "🛑 已提交手动停止：后台将撤出流动性并兑换成 USDT（最多重试 3 次）。")
+	stableSym, _, _ := stableSymbolForChain(task.Chain)
+	b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("🛑 已提交手动停止：后台将撤出流动性并兑换成 %s（最多重试 3 次）。", stableSym))
 
 	task, _ = b.taskService.GetByID(user.ID, taskID)
 	finalText := "🛑 *已提交停止请求* (后台处理中)\n\n" + b.formatTaskCard(task)
@@ -531,8 +534,9 @@ func (b *Bot) handleTaskSwapDust(query *tgbotapi.CallbackQuery, user *models.Use
 		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("获取任务失败：%v", err))
 		return
 	}
+	stableSym, _, _ := stableSymbolForChain(task.Chain)
 
-	loadingMsg, _ := b.sendMessage(query.Message.Chat.ID, "⏳ 正在兑换残余代币为 USDT，请稍候...")
+	loadingMsg, _ := b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("⏳ 正在兑换残余代币为 %s，请稍候...", stableSym))
 	defer func() {
 		if loadingMsg.MessageID != 0 {
 			b.api.Send(tgbotapi.NewDeleteMessage(loadingMsg.Chat.ID, loadingMsg.MessageID))
@@ -548,7 +552,7 @@ func (b *Bot) handleTaskSwapDust(query *tgbotapi.CallbackQuery, user *models.Use
 	}
 
 	if len(txHashes) == 0 {
-		b.sendMessage(query.Message.Chat.ID, "✅ 残余资产已是 USDT 或无需兑换。")
+		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("✅ 残余资产已是 %s 或无需兑换。", stableSym))
 	} else {
 		var txLinksText string
 		txLinksText = "✅ 残余代币已提交兑换：\n"
@@ -557,9 +561,9 @@ func (b *Bot) handleTaskSwapDust(query *tgbotapi.CallbackQuery, user *models.Use
 			if len(parts) == 2 {
 				desc := parts[0]
 				txHash := parts[1]
-				txLinksText += fmt.Sprintf("%d. **%s**\n   [查看交易](https://bscscan.com/tx/%s)\n", i+1, desc, txHash)
+				txLinksText += fmt.Sprintf("%d. **%s**\n   [查看交易](%s)\n", i+1, desc, explorerTxURL(task.Chain, txHash))
 			} else {
-				txLinksText += fmt.Sprintf("%d. [查看交易](https://bscscan.com/tx/%s)\n", i+1, txInfo)
+				txLinksText += fmt.Sprintf("%d. [查看交易](%s)\n", i+1, explorerTxURL(task.Chain, txInfo))
 			}
 		}
 		b.sendMessage(query.Message.Chat.ID, txLinksText)

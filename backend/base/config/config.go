@@ -12,6 +12,63 @@ import (
 	"github.com/joho/godotenv"
 )
 
+type ChainKind string
+
+const (
+	ChainKindEVM    ChainKind = "evm"
+	ChainKindSolana ChainKind = "solana"
+)
+
+type V3DeploymentConfig struct {
+	Name                   string
+	FactoryAddress         string
+	PositionManagerAddress string
+}
+
+// ChainConfig defines per-chain runtime configuration.
+// For now we only execute EVM chains (bsc/base); the shape is designed to keep
+// chain parameters centralized and allow future non-EVM executors (e.g. Solana).
+type ChainConfig struct {
+	Chain string
+	Kind  ChainKind
+
+	RpcURL   string
+	RpcWSURL string
+	ChainID  int64
+
+	StableSymbol   string
+	StableAddress  string
+	StableDecimals int
+
+	// Optional secondary stables (used for entry-token planning and stable-side detection).
+	USDTAddress string
+	USDCAddress string
+	BUSDAddress string
+
+	WrappedNativeSymbol  string
+	WrappedNativeAddress string
+
+	// OKX DEX allowlist (optional, but strongly recommended).
+	OKXSwapRouter          string
+	OKXTokenApproveAddress string
+
+	// Zap contracts (V3/V4 can be same address).
+	ZapV3Address string
+	ZapV4Address string
+
+	// Uniswap V4 addresses (optional per chain).
+	UniswapV4PoolManagerAddress     string
+	UniswapV4StateViewAddress       string
+	UniswapV4PositionManagerAddress string
+
+	// V3 deployments (Uniswap/Pancake/Aerodrome Slipstream etc).
+	V3Deployments                   []V3DeploymentConfig
+	DefaultV3PositionManagerAddress string
+
+	// Explorer URL template: fmt.Sprintf(template, txHash)
+	ExplorerTxURLTemplate string
+}
+
 type Config struct {
 	// Telegram
 	TelegramBotToken                 string
@@ -175,6 +232,10 @@ type Config struct {
 	SmartLPMaxBlocksPerScan    int
 	SmartLPRPCTimeoutSeconds   int
 	SmartLPScanTimeoutSeconds  int
+
+	// Multi-chain (single instance). Chains are keyed by lower-case chain slug (e.g. "bsc", "base").
+	EnabledChains []string
+	Chains        map[string]ChainConfig
 }
 
 var AppConfig *Config
@@ -450,6 +511,9 @@ func LoadConfig() error {
 		SmartLPScanTimeoutSeconds:  smartLPScanTimeoutSeconds,
 	}
 
+	// Build per-chain configs (single-instance multi-chain).
+	AppConfig.initChainConfigs()
+
 	// Enforce encryption key to avoid storing/decrypting private keys insecurely.
 	if _, err := security.DecodeHexKey32(AppConfig.EncryptionKey); err != nil {
 		return fmt.Errorf("invalid ENCRYPTION_KEY: %w", err)
@@ -482,6 +546,17 @@ func LoadConfig() error {
 	log.Printf("   - BSC RPC URL: %s", AppConfig.BSCRpcURL)
 	log.Printf("   - BSC RPC WS URL: %s", AppConfig.BSCRpcWSURL)
 	log.Printf("   - BSC Chain ID: %d", AppConfig.BSCChainID)
+	if len(AppConfig.EnabledChains) > 0 {
+		log.Printf("   - Enabled Chains: %s", strings.Join(AppConfig.EnabledChains, ","))
+		for _, ch := range AppConfig.EnabledChains {
+			cc, ok := AppConfig.GetChainConfig(ch)
+			if !ok {
+				continue
+			}
+			log.Printf("     * %s kind=%s chainId=%d rpc=%s stable=%s(%d) zapV3=%s",
+				cc.Chain, cc.Kind, cc.ChainID, cc.RpcURL, cc.StableSymbol, cc.StableDecimals, cc.ZapV3Address)
+		}
+	}
 	log.Printf("   - MySQL: %s@%s:%s/%s", AppConfig.MySQLUser, AppConfig.MySQLHost, AppConfig.MySQLPort, AppConfig.MySQLDatabase)
 	log.Printf("   - Redis: %s:%s (DB: %d)", AppConfig.RedisHost, AppConfig.RedisPort, AppConfig.RedisDB)
 	log.Printf("   - ClickHouse: %s db=%s proto=%s debug=%v", AppConfig.ClickHouseAddr, AppConfig.ClickHouseDB, AppConfig.ClickHouseProtocol, AppConfig.ClickHouseDebug)
@@ -516,6 +591,279 @@ func LoadConfig() error {
 	log.Println("========================================")
 
 	return nil
+}
+
+func NormalizeChain(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if v == "" {
+		return "bsc"
+	}
+	return v
+}
+
+// EnabledChainsNormalized returns the server-enabled chain list (normalized, de-duplicated).
+// It always returns a non-empty slice (fallback to ["bsc"]).
+func EnabledChainsNormalized() []string {
+	if AppConfig == nil || len(AppConfig.EnabledChains) == 0 {
+		return []string{"bsc"}
+	}
+
+	seen := make(map[string]struct{}, len(AppConfig.EnabledChains))
+	out := make([]string, 0, len(AppConfig.EnabledChains))
+	for _, c := range AppConfig.EnabledChains {
+		ch := NormalizeChain(c)
+		if ch == "" {
+			continue
+		}
+		if _, ok := seen[ch]; ok {
+			continue
+		}
+		seen[ch] = struct{}{}
+		out = append(out, ch)
+	}
+	if len(out) == 0 {
+		return []string{"bsc"}
+	}
+	return out
+}
+
+// PickEnabledChain picks a safe chain from the server-enabled chain list.
+// - Prefer the provided chain when enabled.
+// - Otherwise prefer "bsc" when enabled.
+// - Otherwise fall back to the first enabled chain.
+func PickEnabledChain(preferred string) string {
+	preferred = NormalizeChain(preferred)
+	enabled := EnabledChainsNormalized()
+
+	for _, c := range enabled {
+		if NormalizeChain(c) == preferred {
+			return preferred
+		}
+	}
+	for _, c := range enabled {
+		if NormalizeChain(c) == "bsc" {
+			return "bsc"
+		}
+	}
+	if len(enabled) > 0 {
+		return NormalizeChain(enabled[0])
+	}
+	return "bsc"
+}
+
+func parseChainList(v string) []string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	seen := make(map[string]struct{}, len(parts))
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		ch := NormalizeChain(p)
+		if ch == "" {
+			continue
+		}
+		if _, ok := seen[ch]; ok {
+			continue
+		}
+		seen[ch] = struct{}{}
+		out = append(out, ch)
+	}
+	return out
+}
+
+func getEnvInt(key string, defaultValue int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return defaultValue
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return defaultValue
+	}
+	return n
+}
+
+func getEnvInt64(key string, defaultValue int64) int64 {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return defaultValue
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return defaultValue
+	}
+	return n
+}
+
+func getEnvStr(key string) string {
+	return strings.TrimSpace(os.Getenv(key))
+}
+
+func pickFirstNonEmpty(values ...string) string {
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func buildV3Deployment(name, factoryAddr, npmAddr string) V3DeploymentConfig {
+	return V3DeploymentConfig{
+		Name:                   strings.TrimSpace(name),
+		FactoryAddress:         strings.TrimSpace(factoryAddr),
+		PositionManagerAddress: strings.TrimSpace(npmAddr),
+	}
+}
+
+func (c *Config) initChainConfigs() {
+	if c == nil {
+		return
+	}
+
+	enabled := parseChainList(getEnv("CHAINS", ""))
+	if len(enabled) == 0 {
+		enabled = []string{"bsc"}
+	}
+
+	chains := make(map[string]ChainConfig, len(enabled))
+	for _, chain := range enabled {
+		switch chain {
+		case "bsc":
+			pancakeFactory := getEnv("PANCAKE_V3_FACTORY_ADDRESS", "0x0BFbcf9fa4f9C56B0F40a671Ad40E0805A091865")
+			uniswapFactory := getEnv("UNISWAP_V3_FACTORY_ADDRESS", "0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7")
+
+			okxRouter := pickFirstNonEmpty(getEnvStr("OKX_SWAP_ROUTER_BSC"), c.OKXSwapRouter)
+			okxApprove := pickFirstNonEmpty(getEnvStr("OKX_TOKEN_APPROVE_ADDRESS_BSC"), c.OKXTokenApproveAddress)
+
+			cc := ChainConfig{
+				Chain:    "bsc",
+				Kind:     ChainKindEVM,
+				RpcURL:   strings.TrimSpace(c.BSCRpcURL),
+				RpcWSURL: strings.TrimSpace(c.BSCRpcWSURL),
+				ChainID:  c.BSCChainID,
+
+				StableSymbol:   "USDT",
+				StableAddress:  strings.TrimSpace(c.USDTAddress),
+				StableDecimals: getEnvInt("BSC_USDT_DECIMALS", 18),
+				USDTAddress:    strings.TrimSpace(c.USDTAddress),
+				USDCAddress:    strings.TrimSpace(c.USDCAddress),
+				BUSDAddress:    strings.TrimSpace(c.BUSDAddress),
+
+				WrappedNativeSymbol:  "WBNB",
+				WrappedNativeAddress: strings.TrimSpace(c.WBNBAddress),
+
+				OKXSwapRouter:          okxRouter,
+				OKXTokenApproveAddress: okxApprove,
+
+				ZapV3Address: strings.TrimSpace(c.ZapV3Address),
+				ZapV4Address: strings.TrimSpace(c.ZapV4Address),
+
+				UniswapV4PoolManagerAddress:     strings.TrimSpace(c.UniswapV4PoolManagerAddress),
+				UniswapV4StateViewAddress:       strings.TrimSpace(c.UniswapV4StateViewAddress),
+				UniswapV4PositionManagerAddress: strings.TrimSpace(c.UniswapV4PositionManagerAddress),
+
+				ExplorerTxURLTemplate: pickFirstNonEmpty(getEnvStr("BSC_EXPLORER_TX_URL_TEMPLATE"), "https://bscscan.com/tx/%s"),
+			}
+
+			cc.V3Deployments = []V3DeploymentConfig{
+				buildV3Deployment("PancakeSwap V3", pancakeFactory, strings.TrimSpace(c.PancakeV3PositionManagerAddress)),
+				buildV3Deployment("Uniswap V3", uniswapFactory, strings.TrimSpace(c.UniswapV3PositionManagerAddress)),
+			}
+			cc.DefaultV3PositionManagerAddress = pickFirstNonEmpty(c.PancakeV3PositionManagerAddress, c.UniswapV3PositionManagerAddress)
+			chains[chain] = cc
+
+		case "base":
+			// Allow per-chain overrides; fall back to global OKX allowlist when not set.
+			okxRouter := pickFirstNonEmpty(getEnvStr("OKX_SWAP_ROUTER_BASE"), c.OKXSwapRouter)
+			okxApprove := pickFirstNonEmpty(getEnvStr("OKX_TOKEN_APPROVE_ADDRESS_BASE"), c.OKXTokenApproveAddress)
+
+			uniswapFactory := getEnvStr("BASE_UNISWAP_V3_FACTORY_ADDRESS")
+			uniswapNPM := getEnvStr("BASE_UNISWAP_V3_NPM_ADDRESS")
+			aeroFactory := getEnvStr("BASE_AERODROME_V3_FACTORY_ADDRESS")
+			aeroNPM := getEnvStr("BASE_AERODROME_V3_NPM_ADDRESS")
+
+			cc := ChainConfig{
+				Chain:    "base",
+				Kind:     ChainKindEVM,
+				RpcURL:   strings.TrimSpace(getEnvStr("BASE_RPC_URL")),
+				RpcWSURL: strings.TrimSpace(getEnvStr("BASE_RPC_WS_URL")),
+				ChainID:  getEnvInt64("BASE_CHAIN_ID", 8453),
+
+				StableSymbol:   "USDC",
+				StableAddress:  strings.TrimSpace(getEnvStr("BASE_USDC_ADDRESS")),
+				StableDecimals: getEnvInt("BASE_USDC_DECIMALS", getEnvInt("BASE_USDT_DECIMALS", 6)),
+				USDTAddress:    strings.TrimSpace(getEnvStr("BASE_USDT_ADDRESS")),
+				USDCAddress:    strings.TrimSpace(getEnvStr("BASE_USDC_ADDRESS")),
+
+				WrappedNativeSymbol:  "WETH",
+				WrappedNativeAddress: strings.TrimSpace(getEnvStr("BASE_WETH_ADDRESS")),
+
+				OKXSwapRouter:          okxRouter,
+				OKXTokenApproveAddress: okxApprove,
+
+				ZapV3Address: strings.TrimSpace(getEnvStr("BASE_ZAP_V3_ADDRESS")),
+				ZapV4Address: strings.TrimSpace(getEnvStr("BASE_ZAP_V4_ADDRESS")),
+
+				UniswapV4PoolManagerAddress:     strings.TrimSpace(getEnvStr("BASE_UNISWAP_V4_POOL_MANAGER_ADDRESS")),
+				UniswapV4StateViewAddress:       strings.TrimSpace(getEnvStr("BASE_UNISWAP_V4_STATE_VIEW_ADDRESS")),
+				UniswapV4PositionManagerAddress: strings.TrimSpace(getEnvStr("BASE_UNISWAP_V4_POSITION_MANAGER_ADDRESS")),
+
+				ExplorerTxURLTemplate: pickFirstNonEmpty(getEnvStr("BASE_EXPLORER_TX_URL_TEMPLATE"), "https://basescan.org/tx/%s"),
+			}
+
+			cc.V3Deployments = []V3DeploymentConfig{
+				buildV3Deployment("Uniswap V3", uniswapFactory, uniswapNPM),
+				buildV3Deployment("Aerodrome Slipstream", aeroFactory, aeroNPM),
+			}
+			cc.DefaultV3PositionManagerAddress = pickFirstNonEmpty(uniswapNPM, aeroNPM)
+			chains[chain] = cc
+
+		default:
+			// Unknown chain key: keep a placeholder config so callers can error with context.
+			chains[chain] = ChainConfig{Chain: chain}
+		}
+	}
+
+	c.EnabledChains = enabled
+	c.Chains = chains
+}
+
+func (c *Config) GetChainConfig(chain string) (ChainConfig, bool) {
+	if c == nil {
+		return ChainConfig{}, false
+	}
+	chain = NormalizeChain(chain)
+	if c.Chains == nil {
+		return ChainConfig{}, false
+	}
+	cc, ok := c.Chains[chain]
+	return cc, ok
+}
+
+// ExplorerTxURL returns a chain-scoped explorer transaction URL for the given txHash.
+// It returns empty string when chain config is missing or template is not configured.
+func ExplorerTxURL(chain string, txHash string) string {
+	txHash = strings.TrimSpace(txHash)
+	if txHash == "" {
+		return ""
+	}
+	if AppConfig == nil {
+		return ""
+	}
+	chain = NormalizeChain(chain)
+	cc, ok := AppConfig.GetChainConfig(chain)
+	if !ok {
+		return ""
+	}
+	tpl := strings.TrimSpace(cc.ExplorerTxURLTemplate)
+	if tpl == "" {
+		return ""
+	}
+	return fmt.Sprintf(tpl, txHash)
 }
 
 func normalizeTelegramWebAppURL(v string) string {

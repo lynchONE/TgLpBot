@@ -543,6 +543,9 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleImportWallet(query, user)
 	case query.Data == "view_wallets":
 		b.handleViewWallets(query, user)
+	// New position chain selection (multi-chain)
+	case strings.HasPrefix(query.Data, "newpos_chain_"):
+		b.handleNewPositionChainSelect(query, user)
 	case strings.HasPrefix(query.Data, "set_wallet_"):
 		b.handleSetDefaultWallet(query, user)
 	case strings.HasPrefix(query.Data, "delete_wallet_"):
@@ -553,6 +556,10 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleViewWallets(query, user)
 	case query.Data == "wallet_swap_to_usdt":
 		b.handleWalletSwapToUSDTPrompt(query, user)
+	case strings.HasPrefix(query.Data, "wallet_swap_chain_"):
+		b.handleWalletSwapChainSelect(query, user)
+	case strings.HasPrefix(query.Data, "wallet_swap_to_usdt_confirm_"):
+		b.handleWalletSwapToUSDTConfirm(query, user)
 	case query.Data == "wallet_swap_to_usdt_confirm":
 		b.handleWalletSwapToUSDTConfirm(query, user)
 	case query.Data == "wallet_swap_to_usdt_cancel":
@@ -616,6 +623,12 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleConfigExtraNotificationsToggle(query, user)
 	case query.Data == "config_filter_chinese_toggle":
 		b.handleConfigFilterChineseToggle(query, user)
+	case query.Data == "config_multi_chain_toggle":
+		b.handleConfigMultiChainToggle(query, user)
+	case query.Data == "config_default_chain":
+		b.handleConfigDefaultChain(query, user)
+	case strings.HasPrefix(query.Data, "config_default_chain_set_") || query.Data == "config_default_chain_cancel":
+		b.handleConfigDefaultChainSelect(query, user)
 	case query.Data == "view_config":
 		b.handleViewConfig(query, user)
 	// Task management callbacks

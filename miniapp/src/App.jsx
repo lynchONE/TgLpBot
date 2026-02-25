@@ -318,6 +318,7 @@ export default function App() {
     }));
 
     const [poolSearchOpen, setPoolSearchOpen] = useState(false);
+    const [poolSearchChain, setPoolSearchChain] = useState('bsc');
     const [poolSearchQuery, setPoolSearchQuery] = useState('');
     const [poolSearchResults, setPoolSearchResults] = useState([]);
     const [poolSearchPerformed, setPoolSearchPerformed] = useState(false);
@@ -381,6 +382,20 @@ export default function App() {
     const [globalConfig, setGlobalConfig] = useState(null);
     const [globalConfigError, setGlobalConfigError] = useState('');
     const [globalConfigLoading, setGlobalConfigLoading] = useState(false);
+
+    const multiChainEnabled = globalConfig?.multi_chain_enabled ?? true;
+    const userDefaultChain = useMemo(() => {
+        const raw = String(globalConfig?.default_chain || 'bsc').trim().toLowerCase();
+        if (raw === 'base' || raw === 'bsc') return raw;
+        return 'bsc';
+    }, [globalConfig?.default_chain]);
+
+    // Single-chain mode: lock pool search chain to default chain.
+    useEffect(() => {
+        if (!multiChainEnabled) {
+            setPoolSearchChain(userDefaultChain);
+        }
+    }, [multiChainEnabled, userDefaultChain]);
 
     // 加载进度状态
     const [pollProgress, setPollProgress] = useState(0);
@@ -1102,7 +1117,7 @@ export default function App() {
                     apiBaseUrl,
                     initData,
                     sort: hotPoolsSort,
-                    chain: 'bsc',
+                    chain: multiChainEnabled ? 'bsc' : userDefaultChain,
                     timeframeMinutes: 5,
                     limit: 20,
                     includePools: positionsPoolAddresses,
@@ -1143,7 +1158,7 @@ export default function App() {
             controller.abort();
             if (hotPoolsPollRef.current) clearInterval(hotPoolsPollRef.current);
         };
-    }, [apiBaseUrl, initData, hasInitData, isHotPools, hotPoolsSort, hotPoolsPollIntervalSec, positionsPoolAddresses.join(',')]);
+    }, [apiBaseUrl, initData, hasInitData, isHotPools, hotPoolsSort, hotPoolsPollIntervalSec, positionsPoolAddresses.join(','), multiChainEnabled, userDefaultChain]);
 
     useEffect(() => {
         if (!hasInitData || !isSmartMoney || !smartMoneyEnabled) {
@@ -1319,13 +1334,13 @@ export default function App() {
                 apiBaseUrl,
                 initData,
                 q: keyword,
-                chain: 'bsc',
+                chain: poolSearchChain,
                 limit: 10,
                 signal: controller.signal,
             });
             if (controller.signal.aborted) return;
             const rows = Array.isArray(resp?.data) ? resp.data : [];
-            setPoolSearchResults(rows.slice(0, 10));
+            setPoolSearchResults(rows.slice(0, 10).map((p) => ({ ...p, chain: poolSearchChain })));
         } catch (e) {
             if (controller.signal.aborted) return;
             setPoolSearchResults([]);
@@ -1375,7 +1390,9 @@ export default function App() {
             showNotice('该池子已加入黑名单，不能开仓。', 'error');
             return;
         }
-        setOpenPositionPool(pool);
+        let chain = String(pool?.chain || hotPoolsData?.chain || 'bsc').trim().toLowerCase() || 'bsc';
+        if (!multiChainEnabled) chain = userDefaultChain;
+        setOpenPositionPool({ ...pool, chain });
         resetOpenPositionDraft();
     };
 
@@ -1423,6 +1440,7 @@ export default function App() {
             const resp = await openPosition({
                 apiBaseUrl,
                 initData,
+                chain: openPositionPool?.chain || 'bsc',
                 poolAddress: openPositionPool?.pool_address,
                 poolVersion: openPositionPool?.protocol_version,
                 amount,
@@ -1435,8 +1453,13 @@ export default function App() {
             resetOpenPositionDraft();
         } catch (e) {
             const msg = String(e?.message || e || '').trim();
-            if (msg.includes('entry swap required') || msg.includes('pool does not contain USDT')) {
-                setOpenPositionError('该池子不含 USDT，请开启“允许兑换”后重试。');
+            if (
+                msg.includes('entry swap required') ||
+                msg.includes('pool does not contain USDT') ||
+                msg.includes('pool does not contain USDC') ||
+                msg.includes('pool does not contain a supported entry token')
+            ) {
+                setOpenPositionError('该池子不含默认入场币，请开启“允许兑换”后重试。');
             } else {
                 setOpenPositionError(msg || '开仓失败，请稍后重试。');
             }
@@ -1575,6 +1598,28 @@ export default function App() {
             setGlobalConfigLoading(false);
         }
     };
+
+    // Load once on boot so chain-mode settings can affect UX (single-chain mode hides chain selectors).
+    useEffect(() => {
+        if (!hasInitData) return;
+        let aborted = false;
+        const controller = new AbortController();
+
+        fetchGlobalConfig({ apiBaseUrl, initData, signal: controller.signal })
+            .then((resp) => {
+                if (aborted) return;
+                setGlobalConfig(resp?.config || resp || null);
+            })
+            .catch((e) => {
+                if (aborted) return;
+                console.error('[GlobalConfig] Load failed:', e);
+            });
+
+        return () => {
+            aborted = true;
+            controller.abort();
+        };
+    }, [apiBaseUrl, initData, hasInitData]);
 
     const openGlobalConfig = () => {
         setGlobalConfigOpen(true);
@@ -2487,6 +2532,23 @@ export default function App() {
                             <div className="mt-4 space-y-3">
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="text-[11px] text-zinc-500 dark:text-white/40">搜索池子 (池子ID/代币名称)</div>
+                                    <div className="mt-2 flex items-center gap-2">
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">Chain</div>
+                                        <select
+                                            value={poolSearchChain}
+                                            onChange={(e) => {
+                                                setPoolSearchChain(e.target.value);
+                                                setPoolSearchResults([]);
+                                                setPoolSearchError('');
+                                                setPoolSearchPerformed(false);
+                                            }}
+                                            disabled={!multiChainEnabled}
+                                            className="rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90"
+                                        >
+                                            <option value="bsc">BSC</option>
+                                            <option value="base">Base</option>
+                                        </select>
+                                    </div>
                                     <div className="mt-1 flex gap-2">
                                         <input
                                             ref={poolSearchInputRef}
@@ -3229,7 +3291,7 @@ export default function App() {
                 apiBaseUrl={apiBaseUrl}
                 theme={theme}
                 pool={klinePool}
-                chain={hotPoolsData?.chain || 'bsc'}
+                chain={klinePool?.chain || hotPoolsData?.chain || 'bsc'}
             />
         </div >
     );

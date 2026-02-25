@@ -1783,7 +1783,7 @@ func (s *AutoLPService) tryOpenCandidate(ctx context.Context, userID uint, a Aut
 		return false, nil
 	}
 
-	if ok, err := s.hasActiveTask(userID, a.ProtocolVersion, a.PoolAddress); err != nil {
+	if ok, err := s.hasActiveTask(userID, a.Chain, a.ProtocolVersion, a.PoolAddress); err != nil {
 		return false, err
 	} else if ok {
 		return false, nil
@@ -1940,16 +1940,34 @@ func autoLPSelectWorstTaskForSwitch(tasks []models.StrategyTask, analysisByPool 
 }
 
 func autoLPCandidateContainsUSDT(a AutoLPAnalysis) bool {
-	if config.AppConfig == nil || !common.IsHexAddress(config.AppConfig.USDTAddress) {
+	chain := config.NormalizeChain(a.Chain)
+	if chain == "" && config.AppConfig != nil {
+		chain = config.NormalizeChain(config.AppConfig.AutoLPChain)
+	}
+	if chain == "" {
+		chain = "bsc"
+	}
+
+	// Prefer chain-scoped stable address (Base uses different USDT address/decimals).
+	stableAddr := ""
+	if config.AppConfig != nil {
+		if cc, ok := config.AppConfig.GetChainConfig(chain); ok && common.IsHexAddress(cc.StableAddress) {
+			stableAddr = strings.ToLower(strings.TrimSpace(cc.StableAddress))
+		} else if chain == "bsc" && common.IsHexAddress(config.AppConfig.USDTAddress) {
+			// Backward-compatible fallback for legacy single-chain config.
+			stableAddr = strings.ToLower(strings.TrimSpace(config.AppConfig.USDTAddress))
+		}
+	}
+	if stableAddr == "" {
 		return true
 	}
-	usdt := strings.ToLower(strings.TrimSpace(config.AppConfig.USDTAddress))
+
 	t0 := strings.ToLower(strings.TrimSpace(a.Token0Address))
 	t1 := strings.ToLower(strings.TrimSpace(a.Token1Address))
 	if t0 == "" || t1 == "" {
 		return true
 	}
-	return t0 == usdt || t1 == usdt
+	return t0 == stableAddr || t1 == stableAddr
 }
 
 func autoLPTaskRangePct(task *models.StrategyTask) (float64, float64) {
@@ -2084,7 +2102,7 @@ func (s *AutoLPService) trySwitchWorstAutoTask(ctx context.Context, cfg models.A
 	if !ok {
 		return false, nil
 	}
-	if ok, err := s.hasActiveTask(userID, top.ProtocolVersion, top.PoolAddress); err != nil {
+	if ok, err := s.hasActiveTask(userID, top.Chain, top.ProtocolVersion, top.PoolAddress); err != nil {
 		return false, err
 	} else if ok {
 		// Top1 已有活跃任务（包含当前自动任务），不换仓
@@ -2221,7 +2239,7 @@ func (s *AutoLPService) trySwitchManualTask(ctx context.Context, cfg models.Auto
 			strings.EqualFold(strings.TrimSpace(best.PoolAddress), strings.TrimSpace(task.PoolId)) {
 			continue
 		}
-		if ok, err := s.hasActiveTask(userID, best.ProtocolVersion, best.PoolAddress); err != nil {
+		if ok, err := s.hasActiveTask(userID, best.Chain, best.ProtocolVersion, best.PoolAddress); err != nil {
 			return false, err
 		} else if ok {
 			continue
@@ -2318,7 +2336,13 @@ func (s *AutoLPService) executeBestCandidateForUser(ctx context.Context, cfg mod
 		return nil
 	}
 
-	if ok, err := s.hasEnoughUSDT(userID, amountPerTask); err != nil {
+	checkChain := "bsc"
+	if config.AppConfig != nil {
+		if v := config.NormalizeChain(config.AppConfig.AutoLPChain); v != "" {
+			checkChain = v
+		}
+	}
+	if ok, err := s.hasEnoughUSDT(userID, checkChain, amountPerTask); err != nil {
 		return err
 	} else if !ok {
 		return nil
@@ -2373,11 +2397,11 @@ func (s *AutoLPService) executeBestCandidate(ctx context.Context, userID uint, s
 	openWithAmount := func(a AutoLPAnalysis) (bool, error) {
 		amount := config.AppConfig.AutoLPAmountUSDT
 		if a.Resonance == "STRONG" {
-			if ok, _ := s.hasEnoughUSDT(userID, amount*2); ok {
+			if ok, _ := s.hasEnoughUSDT(userID, a.Chain, amount*2); ok {
 				amount = amount * 2
 			}
 		}
-		if ok, _ := s.hasEnoughUSDT(userID, amount); !ok {
+		if ok, _ := s.hasEnoughUSDT(userID, a.Chain, amount); !ok {
 			return false, nil
 		}
 		return s.tryOpenCandidate(ctx, userID, a, amount)
@@ -2411,12 +2435,32 @@ func (s *AutoLPService) executeBestCandidate(ctx context.Context, userID uint, s
 	return nil
 }
 
-func (s *AutoLPService) hasEnoughUSDT(userID uint, amountUSDT float64) (bool, error) {
-	if config.AppConfig == nil || !common.IsHexAddress(config.AppConfig.USDTAddress) {
-		return false, fmt.Errorf("USDT address not set")
+func (s *AutoLPService) hasEnoughUSDT(userID uint, chain string, amountUSDT float64) (bool, error) {
+	if config.AppConfig == nil {
+		return false, fmt.Errorf("config not loaded")
 	}
-	if blockchain.Client == nil {
-		return false, fmt.Errorf("blockchain client not initialized")
+	chain = config.NormalizeChain(chain)
+	if chain == "" {
+		chain = config.NormalizeChain(config.AppConfig.AutoLPChain)
+	}
+	if chain == "" {
+		chain = "bsc"
+	}
+
+	cc, ok := config.AppConfig.GetChainConfig(chain)
+	if !ok {
+		return false, fmt.Errorf("chain config not found: %s", chain)
+	}
+	if !common.IsHexAddress(cc.StableAddress) {
+		return false, fmt.Errorf("stable address not set for chain=%s", chain)
+	}
+	if cc.StableDecimals <= 0 {
+		return false, fmt.Errorf("stable decimals not set for chain=%s", chain)
+	}
+
+	client, _, err := blockchain.GetEVMClient(chain)
+	if err != nil {
+		return false, err
 	}
 
 	ws := wallet.NewWalletService()
@@ -2425,13 +2469,14 @@ func (s *AutoLPService) hasEnoughUSDT(userID uint, amountUSDT float64) (bool, er
 		return false, err
 	}
 	walletAddr := ws.GetWalletAddress(wallet)
-	usdt := common.HexToAddress(config.AppConfig.USDTAddress)
-	bal, err := blockchain.GetTokenBalance(usdt, walletAddr)
+
+	stable := common.HexToAddress(cc.StableAddress)
+	bal, err := blockchain.GetTokenBalanceWithClient(client, stable, walletAddr)
 	if err != nil || bal == nil {
 		return false, err
 	}
 
-	need, err := convert.FloatUSDTToWei(amountUSDT)
+	need, err := convert.FloatToUnits(amountUSDT, cc.StableDecimals)
 	if err != nil {
 		return false, err
 	}
@@ -2439,6 +2484,14 @@ func (s *AutoLPService) hasEnoughUSDT(userID uint, amountUSDT float64) (bool, er
 }
 
 func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, a AutoLPAnalysis, amountUSDT float64) (*models.StrategyTask, float64, error) {
+	chain := config.NormalizeChain(a.Chain)
+	if chain == "" && config.AppConfig != nil {
+		chain = config.NormalizeChain(config.AppConfig.AutoLPChain)
+	}
+	if chain == "" {
+		chain = "bsc"
+	}
+
 	version := strings.ToLower(strings.TrimSpace(a.ProtocolVersion))
 	poolID := strings.TrimSpace(a.PoolAddress)
 	if version != "v3" && version != "v4" {
@@ -2479,9 +2532,12 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 	var info *pool.PoolInfo
 	switch version {
 	case "v4":
+		if chain != "bsc" {
+			return nil, 1, fmt.Errorf("v4 not supported on chain=%s", chain)
+		}
 		info, err = s.poolService.GetV4PoolInfo(poolID)
 	default:
-		info, err = s.poolService.GetPoolInfo(poolID)
+		info, err = s.poolService.GetPoolInfoForChain(chain, poolID)
 	}
 	if err != nil {
 		return nil, 1, err
@@ -2509,7 +2565,7 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 		return nil, 1, fmt.Errorf("filtered chinese token symbol")
 	}
 
-	currentTick, err := getCurrentTickByVersion(version, poolID)
+	currentTick, err := getCurrentTickByVersion(chain, version, poolID)
 	if err != nil {
 		return nil, 1, err
 	}
@@ -2518,6 +2574,7 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 	// AutoLP widths are decided in stable price terms (e.g., "USDT price down/up").
 	// Uniswap ticks are in token1/token0 terms, so when the stable coin is token0 we must convert.
 	tmpTask := &models.StrategyTask{
+		Chain:         chain,
 		PoolId:        poolID,
 		PoolVersion:   version,
 		Token0Symbol:  info.Token0Symbol,
@@ -2591,6 +2648,7 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 
 	task := &models.StrategyTask{
 		UserID: userID,
+		Chain:  chain,
 		IsAuto: true,
 
 		PoolId:      poolID,
@@ -2663,7 +2721,8 @@ func (s *AutoLPService) buildTaskForCandidate(ctx context.Context, userID uint, 
 	return task, gasMult, nil
 }
 
-func (s *AutoLPService) hasActiveTask(userID uint, poolVersion string, poolID string) (bool, error) {
+func (s *AutoLPService) hasActiveTask(userID uint, chain string, poolVersion string, poolID string) (bool, error) {
+	chain = config.NormalizeChain(chain)
 	poolVersion = strings.ToLower(strings.TrimSpace(poolVersion))
 	poolID = strings.ToLower(strings.TrimSpace(poolID))
 	if poolVersion == "" || poolID == "" {
@@ -2671,7 +2730,7 @@ func (s *AutoLPService) hasActiveTask(userID uint, poolVersion string, poolID st
 	}
 	var count int64
 	if err := database.DB.Model(&models.StrategyTask{}).
-		Where("user_id = ? AND LOWER(pool_version) = ? AND LOWER(pool_id) = ? AND status IN ?", userID, poolVersion, poolID, []models.StrategyStatus{
+		Where("user_id = ? AND chain = ? AND LOWER(pool_version) = ? AND LOWER(pool_id) = ? AND status IN ?", userID, chain, poolVersion, poolID, []models.StrategyStatus{
 			models.StrategyStatusOpening,
 			models.StrategyStatusRunning,
 			models.StrategyStatusWaiting,
@@ -2730,26 +2789,54 @@ func (s *AutoLPService) countActiveAutoTasks(userID uint) (int64, error) {
 	return count, nil
 }
 
-func getCurrentTickByVersion(poolVersion string, poolID string) (int, error) {
+func getCurrentTickByVersion(chain string, poolVersion string, poolID string) (int, error) {
 	if config.AppConfig == nil {
 		return 0, fmt.Errorf("config not loaded")
 	}
+	chain = config.NormalizeChain(chain)
+	if chain == "" {
+		chain = "bsc"
+	}
 	switch strings.ToLower(strings.TrimSpace(poolVersion)) {
 	case "v4":
-		if !common.IsHexAddress(config.AppConfig.UniswapV4PoolManagerAddress) {
+		// V4 reads are still single-chain; restrict to bsc until v4 helpers are refactored.
+		if chain != "bsc" {
+			return 0, fmt.Errorf("v4 not supported on chain=%s", chain)
+		}
+
+		pmAddrStr := ""
+		stateViewStr := ""
+		if config.AppConfig != nil {
+			if cc, ok := config.AppConfig.GetChainConfig(chain); ok {
+				pmAddrStr = strings.TrimSpace(cc.UniswapV4PoolManagerAddress)
+				stateViewStr = strings.TrimSpace(cc.UniswapV4StateViewAddress)
+			}
+			if !common.IsHexAddress(pmAddrStr) {
+				pmAddrStr = strings.TrimSpace(config.AppConfig.UniswapV4PoolManagerAddress)
+			}
+			if !common.IsHexAddress(stateViewStr) {
+				stateViewStr = strings.TrimSpace(config.AppConfig.UniswapV4StateViewAddress)
+			}
+		}
+
+		if !common.IsHexAddress(pmAddrStr) {
 			return 0, fmt.Errorf("UNISWAP_V4_POOL_MANAGER_ADDRESS not set")
 		}
-		if !common.IsHexAddress(config.AppConfig.UniswapV4StateViewAddress) {
+		if !common.IsHexAddress(stateViewStr) {
 			return 0, fmt.Errorf("UNISWAP_V4_STATE_VIEW_ADDRESS not set")
 		}
-		poolManager := common.HexToAddress(config.AppConfig.UniswapV4PoolManagerAddress)
-		stateView := common.HexToAddress(config.AppConfig.UniswapV4StateViewAddress)
+		poolManager := common.HexToAddress(pmAddrStr)
+		stateView := common.HexToAddress(stateViewStr)
 		return blockchain.GetUniswapV4PoolCurrentTickViaStateView(stateView, poolManager, poolID)
 	default:
 		if !common.IsHexAddress(poolID) {
 			return 0, fmt.Errorf("invalid V3 pool address: %s", poolID)
 		}
-		return blockchain.GetV3PoolCurrentTick(common.HexToAddress(poolID))
+		client, _, err := blockchain.GetEVMClient(chain)
+		if err != nil {
+			return 0, err
+		}
+		return blockchain.GetV3PoolCurrentTickWithClient(client, common.HexToAddress(poolID))
 	}
 }
 

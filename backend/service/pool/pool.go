@@ -3,14 +3,16 @@ package pool
 import (
 	"TgLpBot/base/blockchain"
 	"TgLpBot/base/config"
+	"context"
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 )
 
-// PoolInfo represents information about a liquidity pool
+// PoolInfo represents information about a liquidity pool.
 type PoolInfo struct {
 	Address      string
 	Exchange     string
@@ -20,37 +22,39 @@ type PoolInfo struct {
 	Token1Symbol string
 	Fee          int
 	TickSpacing  int
-	CurrentTick  int // 保留字段以兼容现有代码，但不再查询
+	CurrentTick  int // kept for backward compatibility; not queried anymore
 	HooksAddress string
 }
 
-// PoolService handles pool-related operations
+// PoolService handles pool-related operations.
 type PoolService struct {
-	// 使用纯链上查询，不再依赖外部 API
+	// Pure on-chain reads (no external API dependency).
 }
 
-// NewPoolService creates a new pool service
+// NewPoolService creates a new pool service.
 func NewPoolService() *PoolService {
 	return &PoolService{}
 }
 
-// GetPoolInfo retrieves information about a V3 pool from blockchain
-// Supports PancakeSwap V3, Uniswap V3 on BSC
+// GetPoolInfo retrieves information about a V3 pool from blockchain (default chain: bsc).
 func (s *PoolService) GetPoolInfo(poolAddress string) (*PoolInfo, error) {
-	// Normalize pool address
+	return s.GetPoolInfoForChain("bsc", poolAddress)
+}
+
+// GetPoolInfoForChain retrieves information about a V3 pool from blockchain for a given chain.
+func (s *PoolService) GetPoolInfoForChain(chain string, poolAddress string) (*PoolInfo, error) {
 	poolAddress = strings.TrimSpace(poolAddress)
 	if !strings.HasPrefix(poolAddress, "0x") && !strings.HasPrefix(poolAddress, "0X") {
 		poolAddress = "0x" + poolAddress
 	}
+	chain = config.NormalizeChain(chain)
 
-	log.Printf("[PoolService] GetPoolInfo called for: %s", poolAddress)
-
-	// 直接使用链上查询
-	return s.getPoolInfoFromChain(poolAddress)
+	log.Printf("[PoolService] GetPoolInfo called: chain=%s pool=%s", chain, poolAddress)
+	return s.getPoolInfoFromChain(chain, poolAddress)
 }
 
-// GetV4PoolInfo retrieves information about a Uniswap V4 pool using PoolId
-// Reads PositionManager.poolKeys(bytes25(poolId)) for complete pool information
+// GetV4PoolInfo retrieves information about a Uniswap V4 pool using PoolId (legacy default chain).
+// NOTE: V4 reads still use the legacy default client until v4_pool.go is refactored to be multi-chain.
 func (s *PoolService) GetV4PoolInfo(poolId string) (*PoolInfo, error) {
 	// Normalize PoolId
 	poolId = strings.TrimSpace(poolId)
@@ -61,27 +65,26 @@ func (s *PoolService) GetV4PoolInfo(poolId string) (*PoolInfo, error) {
 	log.Printf("[PoolService] GetV4PoolInfo called for: %s", poolId)
 
 	if blockchain.Client == nil {
-		return nil, fmt.Errorf("区块链客户端未初始化")
+		return nil, fmt.Errorf("blockchain client not initialized")
 	}
 
 	if config.AppConfig == nil || !common.IsHexAddress(config.AppConfig.UniswapV4PositionManagerAddress) {
-		return nil, fmt.Errorf("V4 PositionManager 地址未配置")
+		return nil, fmt.Errorf("V4 PositionManager address not configured")
 	}
 
-	// 从 PositionManager 读取 PoolKey
+	// Read PoolKey from PositionManager.poolKeys(bytes25(poolId)).
 	posm := common.HexToAddress(config.AppConfig.UniswapV4PositionManagerAddress)
 	c0, c1, fee, tickSpacing, hooks, err := blockchain.GetUniswapV4PoolKeyFromPositionManager(posm, poolId)
 	if err != nil {
-		return nil, fmt.Errorf("读取 V4 PoolKey 失败: %w", err)
+		return nil, fmt.Errorf("read V4 PoolKey failed: %w", err)
 	}
 
-	// 获取代币符号
+	// Token symbols
 	token0Symbol, err := blockchain.GetTokenSymbol(c0)
 	if err != nil {
 		log.Printf("[PoolService] Warning: could not get token0 symbol: %v", err)
 		token0Symbol = "UNKNOWN"
 	}
-
 	token1Symbol, err := blockchain.GetTokenSymbol(c1)
 	if err != nil {
 		log.Printf("[PoolService] Warning: could not get token1 symbol: %v", err)
@@ -104,9 +107,8 @@ func (s *PoolService) GetV4PoolInfo(poolId string) (*PoolInfo, error) {
 	}, nil
 }
 
-// calculateTickSpacing calculates tick spacing based on fee tier
+// calculateTickSpacing calculates tick spacing based on fee tier.
 func (s *PoolService) calculateTickSpacing(fee int) int {
-	// Standard tick spacing for common fee tiers
 	switch fee {
 	case 100:
 		return 1
@@ -119,49 +121,75 @@ func (s *PoolService) calculateTickSpacing(fee int) int {
 	case 10000:
 		return 200
 	default:
-		// Default to 60 for unknown fee tiers
 		return 60
 	}
 }
 
-// getPoolInfoFromChain 从链上直接读取 V3 池子信息（备用方案）
-func (s *PoolService) getPoolInfoFromChain(poolAddress string) (*PoolInfo, error) {
-	if blockchain.Client == nil {
-		return nil, fmt.Errorf("区块链客户端未初始化")
+// getPoolInfoFromChain reads a V3 pool directly from chain.
+func (s *PoolService) getPoolInfoFromChain(chain string, poolAddress string) (*PoolInfo, error) {
+	chain = config.NormalizeChain(chain)
+	client, _, err := blockchain.GetEVMClient(chain)
+	if err != nil {
+		return nil, err
+	}
+	if config.AppConfig == nil {
+		return nil, fmt.Errorf("config not loaded")
+	}
+	cc, ok := config.AppConfig.GetChainConfig(chain)
+	if !ok {
+		return nil, fmt.Errorf("chain config not found: %s", chain)
 	}
 
 	poolAddr := common.HexToAddress(poolAddress)
-
-	// 1. 读取 token0 和 token1
-	token0, token1, err := blockchain.GetV3PoolTokens(poolAddr)
-	if err != nil {
-		return nil, fmt.Errorf("读取池子代币地址失败: %w", err)
+	if !common.IsHexAddress(poolAddress) {
+		return nil, fmt.Errorf("invalid pool address: %s", poolAddress)
 	}
 
-	// 2. 读取手续费率
-	fee, err := blockchain.GetV3PoolFee(poolAddr)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	code, err := client.CodeAt(ctx, poolAddr, nil)
 	if err != nil {
-		return nil, fmt.Errorf("读取池子手续费失败: %w", err)
+		return nil, fmt.Errorf("read pool bytecode failed (chain=%s pool=%s): %w", chain, poolAddress, err)
+	}
+	if len(code) == 0 {
+		return nil, fmt.Errorf("pool address has no contract code on chain=%s: %s", chain, poolAddress)
 	}
 
-	// 3. 获取代币符号
-	token0Symbol, err := blockchain.GetTokenSymbol(token0)
+	// 1) token0/token1
+	token0, token1, err := blockchain.GetV3PoolTokensWithClient(client, poolAddr)
+	if err != nil {
+		return nil, fmt.Errorf("read pool tokens failed: %w", err)
+	}
+
+	// 2) fee
+	fee, err := blockchain.GetV3PoolFeeWithClient(client, poolAddr)
+	if err != nil {
+		return nil, fmt.Errorf("read pool fee failed: %w", err)
+	}
+
+	// 3) token symbols
+	token0Symbol, err := blockchain.GetTokenSymbolWithClient(client, token0)
 	if err != nil {
 		log.Printf("[PoolService] Warning: could not get token0 symbol: %v", err)
 		token0Symbol = "UNKNOWN"
 	}
 
-	token1Symbol, err := blockchain.GetTokenSymbol(token1)
+	token1Symbol, err := blockchain.GetTokenSymbolWithClient(client, token1)
 	if err != nil {
 		log.Printf("[PoolService] Warning: could not get token1 symbol: %v", err)
 		token1Symbol = "UNKNOWN"
 	}
 
-	// 4. 通过池子的 factory() 方法判断是哪个交易所
-	exchange := s.determineExchangeFromFactory(poolAddr)
+	// 4) exchange by factory()
+	exchange := "V3 Pool"
+	factoryAddr, err := blockchain.GetV3PoolFactoryWithClient(client, poolAddr)
+	if err != nil {
+		log.Printf("[PoolService] Warning: read pool factory failed: %v", err)
+	} else {
+		exchange = s.determineExchangeFromFactory(factoryAddr, cc)
+	}
 
 	tickSpacing := s.calculateTickSpacing(int(fee))
-
 	log.Printf("[PoolService] Pool info retrieved from chain: %s %s/%s (fee: %d)", exchange, token0Symbol, token1Symbol, fee)
 
 	return &PoolInfo{
@@ -178,32 +206,20 @@ func (s *PoolService) getPoolInfoFromChain(poolAddress string) (*PoolInfo, error
 	}, nil
 }
 
-// determineExchangeFromFactory 通过读取池子的 factory() 方法来精确判断交易所
-func (s *PoolService) determineExchangeFromFactory(poolAddr common.Address) string {
-	// 直接从池子读取它的 factory 地址
-	factoryAddr, err := blockchain.GetV3PoolFactory(poolAddr)
-	if err != nil {
-		log.Printf("[PoolService] Warning: 无法读取池子的 factory 地址: %v", err)
-		return "V3 Pool"
+func (s *PoolService) determineExchangeFromFactory(factoryAddr common.Address, cc config.ChainConfig) string {
+	factoryHex := strings.ToLower(strings.TrimSpace(factoryAddr.Hex()))
+	for _, dep := range cc.V3Deployments {
+		want := strings.ToLower(strings.TrimSpace(dep.FactoryAddress))
+		if !common.IsHexAddress(want) {
+			continue
+		}
+		if factoryHex == strings.ToLower(want) {
+			name := strings.TrimSpace(dep.Name)
+			if name == "" {
+				return "V3 Pool"
+			}
+			return name
+		}
 	}
-
-	// 已知的工厂合约地址 (BSC 主网)
-	pancakeFactory := common.HexToAddress("0x0BFbcf9fa4f9C56B0F40a671Ad40E0805A091865")
-	uniswapFactory := common.HexToAddress("0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7")
-
-	log.Printf("[PoolService] Pool factory 地址: %s", factoryAddr.Hex())
-
-	// 根据 factory 地址判断交易所
-	if factoryAddr == pancakeFactory {
-		log.Printf("[PoolService] 识别为 PancakeSwap V3")
-		return "PancakeSwap V3"
-	}
-	if factoryAddr == uniswapFactory {
-		log.Printf("[PoolService] 识别为 Uniswap V3")
-		return "Uniswap V3"
-	}
-
-	// 未知的工厂
-	log.Printf("[PoolService] Warning: 未知的工厂地址 %s，返回默认值", factoryAddr.Hex())
 	return "V3 Pool"
 }

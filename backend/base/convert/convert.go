@@ -59,3 +59,48 @@ func ParseBigIntFlexible(s string) (*big.Int, error) {
 	}
 	return v, nil
 }
+
+// FloatToUnits converts a float amount to integer base units with the given decimals.
+func FloatToUnits(amount float64, decimals int) (*big.Int, error) {
+	if amount <= 0 {
+		return nil, fmt.Errorf("amount must be > 0")
+	}
+	if decimals < 0 || decimals > 36 {
+		return nil, fmt.Errorf("invalid decimals: %d", decimals)
+	}
+
+	f := new(big.Float).SetFloat64(amount)
+	scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil)
+	f.Mul(f, new(big.Float).SetInt(scale))
+	i, _ := f.Int(nil)
+	if i == nil || i.Sign() <= 0 {
+		return nil, fmt.Errorf("amount too small")
+	}
+	return i, nil
+}
+
+// ScaleDecimals scales an integer amount between decimal systems (flooring when scaling down).
+func ScaleDecimals(amount *big.Int, fromDecimals int, toDecimals int) (*big.Int, error) {
+	if amount == nil {
+		return nil, fmt.Errorf("amount is nil")
+	}
+	if fromDecimals < 0 || fromDecimals > 36 || toDecimals < 0 || toDecimals > 36 {
+		return nil, fmt.Errorf("invalid decimals: from=%d to=%d", fromDecimals, toDecimals)
+	}
+	if fromDecimals == toDecimals {
+		return new(big.Int).Set(amount), nil
+	}
+	if amount.Sign() == 0 {
+		return big.NewInt(0), nil
+	}
+
+	if fromDecimals > toDecimals {
+		diff := fromDecimals - toDecimals
+		div := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(diff)), nil)
+		return new(big.Int).Div(new(big.Int).Set(amount), div), nil
+	}
+
+	diff := toDecimals - fromDecimals
+	mul := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(diff)), nil)
+	return new(big.Int).Mul(new(big.Int).Set(amount), mul), nil
+}

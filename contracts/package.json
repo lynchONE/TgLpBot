@@ -9,8 +9,18 @@
     "deploy:mainnet": "hardhat run scripts/deploy.js --network bsc",
     "deploy-zap:testnet": "hardhat run scripts/deploy_zap_simple.js --network bscTestnet",
     "deploy-zap:mainnet": "hardhat run scripts/deploy_zap_simple.js --network bsc",
+    "deploy-zap:base": "hardhat run scripts/deploy_zap_simple.js --network base",
+    "deploy-zap:baseSepolia": "hardhat run scripts/deploy_zap_simple.js --network baseSepolia",
+    "update-trusted:bsc": "hardhat run scripts/update_trusted.js --network bsc",
+    "update-trusted:base": "hardhat run scripts/update_trusted.js --network base",
+    "update-trusted:baseSepolia": "hardhat run scripts/update_trusted.js --network baseSepolia",
+    "read-config:bsc": "hardhat run scripts/read_config.js --network bsc",
+    "read-config:base": "hardhat run scripts/read_config.js --network base",
+    "read-config:baseSepolia": "hardhat run scripts/read_config.js --network baseSepolia",
     "verify:testnet": "hardhat verify --network bscTestnet",
-    "verify:mainnet": "hardhat verify --network bsc"
+    "verify:mainnet": "hardhat verify --network bsc",
+    "verify:base": "hardhat verify --network base",
+    "verify:baseSepolia": "hardhat verify --network baseSepolia"
   },
   "devDependencies": {
     "dotenv": "^16.3.1",

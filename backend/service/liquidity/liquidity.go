@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"gorm.io/gorm"
 )
 
@@ -51,13 +52,18 @@ func NewLiquidityService() *LiquidityService {
 
 // approveToken approves a token for spending
 func (s *LiquidityService) approveToken(
+	client *ethclient.Client,
+	chainID *big.Int,
 	privateKey *ecdsa.PrivateKey,
 	from, token, spender common.Address,
 	amount *big.Int,
 	opts TxOptions,
 ) error {
+	if client == nil || chainID == nil {
+		return fmt.Errorf("blockchain client not initialized")
+	}
 	// Check current allowance
-	erc20, err := blockchain.NewERC20(token, blockchain.Client)
+	erc20, err := blockchain.NewERC20(token, client)
 	if err != nil {
 		return err
 	}
@@ -77,11 +83,11 @@ func (s *LiquidityService) approveToken(
 	// Some tokens (e.g. USDT-style) require allowance to be set to 0 before changing from a non-zero value.
 	// Use a "forceApprove" pattern when current allowance is non-zero.
 	if allowance.Sign() > 0 {
-		nonce0, err := blockchain.GetNonce(from)
+		nonce0, err := blockchain.GetNonceWithClient(client, from)
 		if err != nil {
 			return err
 		}
-		auth0, err := s.buildAuth(privateKey, nonce0, big.NewInt(0), opts)
+		auth0, err := s.buildAuth(client, chainID, privateKey, nonce0, big.NewInt(0), opts)
 		if err != nil {
 			return err
 		}
@@ -89,16 +95,16 @@ func (s *LiquidityService) approveToken(
 		if err != nil {
 			return fmt.Errorf("failed to reset allowance to 0: %w", err)
 		}
-		if _, err := s.waitMined(tx0); err != nil {
+		if _, err := s.waitMined(client, chainID, tx0); err != nil {
 			return fmt.Errorf("reset allowance tx failed: %w", err)
 		}
 	}
 
-	nonce, err := blockchain.GetNonce(from)
+	nonce, err := blockchain.GetNonceWithClient(client, from)
 	if err != nil {
 		return err
 	}
-	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), opts)
+	auth, err := s.buildAuth(client, chainID, privateKey, nonce, big.NewInt(0), opts)
 	if err != nil {
 		return err
 	}
@@ -109,7 +115,7 @@ func (s *LiquidityService) approveToken(
 	}
 
 	// Wait for approval tx to be mined to avoid racing subsequent calls.
-	if _, err := s.waitMined(tx); err != nil {
+	if _, err := s.waitMined(client, chainID, tx); err != nil {
 		return fmt.Errorf("approve tx failed: %w", err)
 	}
 
@@ -119,6 +125,8 @@ func (s *LiquidityService) approveToken(
 // approveTokenViaPermit2 approves `spender` to spend `token` from `from` via Permit2 (finite allowance).
 // This is needed for routers that pull tokens through Permit2 rather than ERC20 allowance.
 func (s *LiquidityService) approveTokenViaPermit2(
+	client *ethclient.Client,
+	chainID *big.Int,
 	privateKey *ecdsa.PrivateKey,
 	from common.Address,
 	token common.Address,
@@ -126,7 +134,7 @@ func (s *LiquidityService) approveTokenViaPermit2(
 	amount *big.Int,
 	opts TxOptions,
 ) error {
-	if blockchain.Client == nil || blockchain.ChainID == nil {
+	if client == nil || chainID == nil {
 		return fmt.Errorf("blockchain client not initialized")
 	}
 	if amount == nil || amount.Sign() <= 0 {
@@ -134,12 +142,12 @@ func (s *LiquidityService) approveTokenViaPermit2(
 	}
 
 	// 1) Ensure ERC20 allowance: token -> Permit2
-	if err := s.approveToken(privateKey, from, token, blockchain.Permit2Address, amount, opts); err != nil {
+	if err := s.approveToken(client, chainID, privateKey, from, token, blockchain.Permit2Address, amount, opts); err != nil {
 		return fmt.Errorf("approve token->Permit2 failed: %w", err)
 	}
 
 	// 2) Ensure Permit2 allowance: owner -> spender (finite)
-	permit2, err := blockchain.NewPermit2(blockchain.Permit2Address, blockchain.Client)
+	permit2, err := blockchain.NewPermit2(blockchain.Permit2Address, client)
 	if err != nil {
 		return fmt.Errorf("init Permit2 failed: %w", err)
 	}
@@ -164,11 +172,11 @@ func (s *LiquidityService) approveTokenViaPermit2(
 	}
 
 	tryApprove := func(apprAmount *big.Int, apprExpiration *big.Int) error {
-		nonce, nerr := blockchain.GetNonce(from)
+		nonce, nerr := blockchain.GetNonceWithClient(client, from)
 		if nerr != nil {
 			return nerr
 		}
-		auth, aerr := s.buildAuth(privateKey, nonce, big.NewInt(0), opts)
+		auth, aerr := s.buildAuth(client, chainID, privateKey, nonce, big.NewInt(0), opts)
 		if aerr != nil {
 			return aerr
 		}
@@ -185,7 +193,7 @@ func (s *LiquidityService) approveTokenViaPermit2(
 			}
 			return terr
 		}
-		if _, werr := s.waitMined(tx); werr != nil {
+		if _, werr := s.waitMined(client, chainID, tx); werr != nil {
 			if strings.Contains(werr.Error(), permit2AllowanceIsFixedAtInfinitySelector) {
 				if a2, aerr := permit2.Allowance(nil, from, token, spender); aerr == nil && a2 != nil &&
 					a2.Amount != nil && a2.Expiration != nil &&

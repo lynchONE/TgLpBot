@@ -1,6 +1,7 @@
 package trade
 
 import (
+	"TgLpBot/base/config"
 	"TgLpBot/base/convert"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
@@ -40,6 +41,7 @@ func (s *TradeRecordService) CreateOpenRecord(
 		return fmt.Errorf("task is nil")
 	}
 
+	chain := config.NormalizeChain(task.Chain)
 	now := time.Now()
 
 	openSpent := openUSDTSpentWei
@@ -60,6 +62,7 @@ func (s *TradeRecordService) CreateOpenRecord(
 	rec := &models.TradeRecord{
 		UserID:            task.UserID,
 		TaskID:            task.ID,
+		Chain:             chain,
 		PoolVersion:       strings.TrimSpace(task.PoolVersion),
 		PoolId:            strings.TrimSpace(task.PoolId),
 		Exchange:          strings.TrimSpace(task.Exchange),
@@ -81,11 +84,12 @@ func (s *TradeRecordService) CreateOpenRecord(
 	return database.DB.Create(rec).Error
 }
 
-func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, closeTxHash string, closeUSDTReceivedWei, closeGasSpentWei *big.Int, bnbPriceUSDT float64) error {
+func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, closeTxHash string, closeUSDTReceivedWei, closeGasSpentWei *big.Int, nativePriceUSD float64) error {
 	if task == nil {
 		return fmt.Errorf("task is nil")
 	}
 
+	chain := config.NormalizeChain(task.Chain)
 	var rec models.TradeRecord
 	err := database.DB.
 		Where("user_id = ? AND task_id = ? AND status = ?", task.UserID, task.ID, models.TradeStatusOpen).
@@ -105,7 +109,7 @@ func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, cl
 		}
 		// 计算 Gas 的 USDT 价值
 		totalGasWei := nonNilBigInt(closeGasSpentWei)
-		totalGasUSDT := calcGasUSDT(totalGasWei, bnbPriceUSDT)
+		totalGasUSDT := calcGasUSDT(totalGasWei, nativePriceUSD)
 
 		profit := new(big.Int).Sub(nonNilBigInt(closeUSDTReceivedWei), openSpent)
 		profit.Sub(profit, totalGasUSDT) // 扣除 Gas 费用
@@ -114,6 +118,7 @@ func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, cl
 		closed := &models.TradeRecord{
 			UserID:            task.UserID,
 			TaskID:            task.ID,
+			Chain:             chain,
 			PoolVersion:       strings.TrimSpace(task.PoolVersion),
 			PoolId:            strings.TrimSpace(task.PoolId),
 			Exchange:          strings.TrimSpace(task.Exchange),
@@ -153,7 +158,7 @@ func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, cl
 
 	// 计算开仓+平仓 Gas 的 USDT 总价值
 	totalGasWei := new(big.Int).Add(openGasWei, nonNilBigInt(closeGasSpentWei))
-	totalGasUSDT := calcGasUSDT(totalGasWei, bnbPriceUSDT)
+	totalGasUSDT := calcGasUSDT(totalGasWei, nativePriceUSD)
 
 	// 收益 = 撤出USDT - 投入USDT - 总Gas(USDT)
 	profit := new(big.Int).Sub(nonNilBigInt(closeUSDTReceivedWei), openSpent)
@@ -162,6 +167,7 @@ func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, cl
 
 	updates := map[string]interface{}{
 		"closed_at":           &now,
+		"chain":               chain,
 		"close_tx_hash":       strings.TrimSpace(closeTxHash),
 		"close_usdt_received": safeBigIntString(closeUSDTReceivedWei),
 		"close_gas_spent_wei": safeBigIntString(closeGasSpentWei),
@@ -188,12 +194,13 @@ func (s *TradeRecordService) ApplyExitDelta(
 	closeUSDTReceivedDeltaWei *big.Int,
 	closeGasSpentDeltaWei *big.Int,
 	finalize bool,
-	bnbPriceUSDT float64,
+	nativePriceUSD float64,
 ) (*models.TradeRecord, error) {
 	if task == nil {
 		return nil, fmt.Errorf("task is nil")
 	}
 
+	chain := config.NormalizeChain(task.Chain)
 	var rec models.TradeRecord
 	err := database.DB.
 		Where("user_id = ? AND task_id = ? AND status = ?", task.UserID, task.ID, models.TradeStatusOpen).
@@ -243,6 +250,10 @@ func (s *TradeRecordService) ApplyExitDelta(
 		"close_usdt_received": newReceived.String(),
 		"close_gas_spent_wei": newGas.String(),
 	}
+	if chain != "" && strings.TrimSpace(rec.Chain) != chain {
+		updates["chain"] = chain
+		rec.Chain = chain
+	}
 	if strings.TrimSpace(rec.CloseTxHash) == "" && closeTxHash != "" {
 		updates["close_tx_hash"] = closeTxHash
 		rec.CloseTxHash = closeTxHash
@@ -271,7 +282,7 @@ func (s *TradeRecordService) ApplyExitDelta(
 		}
 
 		totalGasWei := new(big.Int).Add(openGasWei, newGas)
-		totalGasUSDT := calcGasUSDT(totalGasWei, bnbPriceUSDT)
+		totalGasUSDT := calcGasUSDT(totalGasWei, nativePriceUSD)
 
 		profit := new(big.Int).Sub(newReceived, openSpent)
 		profit.Sub(profit, totalGasUSDT)
@@ -302,15 +313,15 @@ func (s *TradeRecordService) ApplyExitDelta(
 }
 
 // calcGasUSDT 将 BNB Gas (wei) 转换为 USDT (wei)
-func calcGasUSDT(gasWei *big.Int, bnbPriceUSDT float64) *big.Int {
-	if gasWei == nil || gasWei.Sign() <= 0 || bnbPriceUSDT <= 0 {
+func calcGasUSDT(gasWei *big.Int, nativePriceUSD float64) *big.Int {
+	if gasWei == nil || gasWei.Sign() <= 0 || nativePriceUSD <= 0 {
 		return big.NewInt(0)
 	}
 	// gasWei 是 BNB 的 wei 单位 (1e18)
 	// USDT 也是 1e18 精度
 	// USDT = gasWei * bnbPriceUSDT
 	gasFloat := new(big.Float).SetInt(gasWei)
-	priceFloat := new(big.Float).SetFloat64(bnbPriceUSDT)
+	priceFloat := new(big.Float).SetFloat64(nativePriceUSD)
 	result := new(big.Float).Mul(gasFloat, priceFloat)
 	resultInt, _ := result.Int(nil)
 	return resultInt

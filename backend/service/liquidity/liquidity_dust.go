@@ -6,6 +6,7 @@ import (
 	"TgLpBot/base/convert"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	"TgLpBot/service/chainexec"
 	"fmt"
 	"math/big"
 	"strings"
@@ -22,11 +23,18 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 	if config.AppConfig == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
-	if blockchain.Client == nil || blockchain.ChainID == nil {
-		return nil, fmt.Errorf("blockchain client not initialized")
+	task.Chain = config.NormalizeChain(task.Chain)
+	exec, err := chainexec.GetEVM(task.Chain)
+	if err != nil {
+		return nil, err
 	}
-	if !common.IsHexAddress(config.AppConfig.USDTAddress) {
-		return nil, fmt.Errorf("USDT address not set")
+	cc := exec.Config()
+	client := exec.Client()
+	if client == nil {
+		return nil, fmt.Errorf("blockchain client not initialized for chain=%s", exec.Chain())
+	}
+	if !common.IsHexAddress(cc.StableAddress) {
+		return nil, fmt.Errorf("stable address not set for chain=%s", exec.Chain())
 	}
 
 	rec, err := s.tradeRecordService.GetLatestOpenRecord(task.UserID, task.ID)
@@ -64,7 +72,7 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 		return nil, fmt.Errorf("failed to parse private key: %w", err)
 	}
 	walletAddr := s.walletService.GetWalletAddress(wallet)
-	usdtAddr := common.HexToAddress(config.AppConfig.USDTAddress)
+	usdtAddr := common.HexToAddress(cc.StableAddress)
 
 	txHashes := make([]string, 0, 2)
 
@@ -79,24 +87,24 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 
 	if dust0.Sign() > 0 {
 		if token0Addr != usdtAddr {
-			bnbBefore, _ := blockchain.GetBalance(walletAddr)
-			if bnbBefore == nil {
-				bnbBefore = big.NewInt(0)
+			nativeBefore, _ := blockchain.GetBalanceWithClient(client, walletAddr)
+			if nativeBefore == nil {
+				nativeBefore = big.NewInt(0)
 			}
-			usdtBefore, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
+			usdtBefore, _ := blockchain.GetTokenBalanceWithClient(client, usdtAddr, walletAddr)
 			if usdtBefore == nil {
 				usdtBefore = big.NewInt(0)
 			}
-			txHash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, token0Addr, usdtAddr, dust0, task.SlippageTolerance)
+			txHash, err := s.swapDeltaToUSDTWithHash(exec, privateKey, walletAddr, token0Addr, usdtAddr, dust0, task.SlippageTolerance)
 			if err != nil {
 				return txHashes, err
 			}
 			if txHash != "" {
-				bnbAfter, _ := blockchain.GetBalance(walletAddr)
-				if bnbAfter == nil {
-					bnbAfter = big.NewInt(0)
+				nativeAfter, _ := blockchain.GetBalanceWithClient(client, walletAddr)
+				if nativeAfter == nil {
+					nativeAfter = big.NewInt(0)
 				}
-				gasSpentWei := new(big.Int).Sub(bnbBefore, bnbAfter)
+				gasSpentWei := new(big.Int).Sub(nativeBefore, nativeAfter)
 				if gasSpentWei.Sign() < 0 {
 					gasSpentWei = big.NewInt(0)
 				}
@@ -104,21 +112,25 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 					openGasWei.Add(openGasWei, gasSpentWei)
 				}
 
-				usdtAfter, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
+				usdtAfter, _ := blockchain.GetTokenBalanceWithClient(client, usdtAddr, walletAddr)
 				if usdtAfter == nil {
 					usdtAfter = big.NewInt(0)
 				}
-				usdtDelta := new(big.Int).Sub(usdtAfter, usdtBefore)
-				if usdtDelta.Sign() < 0 {
-					usdtDelta = big.NewInt(0)
+				usdtDeltaRaw := new(big.Int).Sub(usdtAfter, usdtBefore)
+				if usdtDeltaRaw.Sign() < 0 {
+					usdtDeltaRaw = big.NewInt(0)
 				}
-				if receipt, rerr := s.getReceiptWithRetry(common.HexToHash(txHash)); rerr == nil && receipt != nil {
+				if receipt, rerr := s.getReceiptWithRetry(client, common.HexToHash(txHash)); rerr == nil && receipt != nil {
 					if d := ReceiptTokenTransferDelta(receipt, usdtAddr, walletAddr); d != nil && d.Sign() > 0 {
-						usdtDelta = d
+						usdtDeltaRaw = d
 					}
 				}
-				if usdtDelta.Sign() > 0 && openSpentWei.Sign() > 0 {
-					openSpentWei.Sub(openSpentWei, usdtDelta)
+				usdtDeltaWei, derr := convert.ScaleDecimals(usdtDeltaRaw, cc.StableDecimals, 18)
+				if derr != nil || usdtDeltaWei == nil {
+					usdtDeltaWei = new(big.Int).Set(usdtDeltaRaw)
+				}
+				if usdtDeltaWei.Sign() > 0 && openSpentWei.Sign() > 0 {
+					openSpentWei.Sub(openSpentWei, usdtDeltaWei)
 					if openSpentWei.Sign() < 0 {
 						openSpentWei = big.NewInt(0)
 					}
@@ -142,24 +154,24 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 
 	if dust1.Sign() > 0 {
 		if token1Addr != usdtAddr {
-			bnbBefore, _ := blockchain.GetBalance(walletAddr)
-			if bnbBefore == nil {
-				bnbBefore = big.NewInt(0)
+			nativeBefore, _ := blockchain.GetBalanceWithClient(client, walletAddr)
+			if nativeBefore == nil {
+				nativeBefore = big.NewInt(0)
 			}
-			usdtBefore, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
+			usdtBefore, _ := blockchain.GetTokenBalanceWithClient(client, usdtAddr, walletAddr)
 			if usdtBefore == nil {
 				usdtBefore = big.NewInt(0)
 			}
-			txHash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, token1Addr, usdtAddr, dust1, task.SlippageTolerance)
+			txHash, err := s.swapDeltaToUSDTWithHash(exec, privateKey, walletAddr, token1Addr, usdtAddr, dust1, task.SlippageTolerance)
 			if err != nil {
 				return txHashes, err
 			}
 			if txHash != "" {
-				bnbAfter, _ := blockchain.GetBalance(walletAddr)
-				if bnbAfter == nil {
-					bnbAfter = big.NewInt(0)
+				nativeAfter, _ := blockchain.GetBalanceWithClient(client, walletAddr)
+				if nativeAfter == nil {
+					nativeAfter = big.NewInt(0)
 				}
-				gasSpentWei := new(big.Int).Sub(bnbBefore, bnbAfter)
+				gasSpentWei := new(big.Int).Sub(nativeBefore, nativeAfter)
 				if gasSpentWei.Sign() < 0 {
 					gasSpentWei = big.NewInt(0)
 				}
@@ -167,21 +179,25 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 					openGasWei.Add(openGasWei, gasSpentWei)
 				}
 
-				usdtAfter, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
+				usdtAfter, _ := blockchain.GetTokenBalanceWithClient(client, usdtAddr, walletAddr)
 				if usdtAfter == nil {
 					usdtAfter = big.NewInt(0)
 				}
-				usdtDelta := new(big.Int).Sub(usdtAfter, usdtBefore)
-				if usdtDelta.Sign() < 0 {
-					usdtDelta = big.NewInt(0)
+				usdtDeltaRaw := new(big.Int).Sub(usdtAfter, usdtBefore)
+				if usdtDeltaRaw.Sign() < 0 {
+					usdtDeltaRaw = big.NewInt(0)
 				}
-				if receipt, rerr := s.getReceiptWithRetry(common.HexToHash(txHash)); rerr == nil && receipt != nil {
+				if receipt, rerr := s.getReceiptWithRetry(client, common.HexToHash(txHash)); rerr == nil && receipt != nil {
 					if d := ReceiptTokenTransferDelta(receipt, usdtAddr, walletAddr); d != nil && d.Sign() > 0 {
-						usdtDelta = d
+						usdtDeltaRaw = d
 					}
 				}
-				if usdtDelta.Sign() > 0 && openSpentWei.Sign() > 0 {
-					openSpentWei.Sub(openSpentWei, usdtDelta)
+				usdtDeltaWei, derr := convert.ScaleDecimals(usdtDeltaRaw, cc.StableDecimals, 18)
+				if derr != nil || usdtDeltaWei == nil {
+					usdtDeltaWei = new(big.Int).Set(usdtDeltaRaw)
+				}
+				if usdtDeltaWei.Sign() > 0 && openSpentWei.Sign() > 0 {
+					openSpentWei.Sub(openSpentWei, usdtDeltaWei)
 					if openSpentWei.Sign() < 0 {
 						openSpentWei = big.NewInt(0)
 					}
@@ -207,9 +223,12 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 }
 
 func (s *LiquidityService) resolveTaskTokenAddresses(task *models.StrategyTask) (common.Address, common.Address, error) {
+	if task == nil {
+		return common.Address{}, common.Address{}, fmt.Errorf("task is nil")
+	}
+
 	token0Addr := common.Address{}
 	token1Addr := common.Address{}
-	resolvedFromChain := false
 	if common.IsHexAddress(task.Token0Address) {
 		token0Addr = common.HexToAddress(task.Token0Address)
 	}
@@ -220,17 +239,30 @@ func (s *LiquidityService) resolveTaskTokenAddresses(task *models.StrategyTask) 
 		return token0Addr, token1Addr, nil
 	}
 
+	chain := config.NormalizeChain(task.Chain)
+	exec, err := chainexec.GetEVM(chain)
+	if err != nil {
+		return common.Address{}, common.Address{}, err
+	}
+	cc := exec.Config()
+	client := exec.Client()
+	if client == nil {
+		return common.Address{}, common.Address{}, fmt.Errorf("blockchain client not initialized for chain=%s", exec.Chain())
+	}
+
 	version := strings.ToLower(strings.TrimSpace(task.PoolVersion))
 	switch version {
 	case "v4":
-		// Try PositionManager.positions(tokenId)
-		if common.IsHexAddress(config.AppConfig.UniswapV4PositionManagerAddress) {
+		pmAddrStr := strings.TrimSpace(cc.UniswapV4PositionManagerAddress)
+		if !common.IsHexAddress(pmAddrStr) && config.AppConfig != nil {
+			pmAddrStr = strings.TrimSpace(config.AppConfig.UniswapV4PositionManagerAddress)
+		}
+		if common.IsHexAddress(pmAddrStr) {
 			tokenId, _ := convert.ParseBigInt(task.V4TokenID)
 			if tokenId.Sign() > 0 {
-				v4pmAddr := common.HexToAddress(config.AppConfig.UniswapV4PositionManagerAddress)
-				if v4pm, err := blockchain.NewV4PositionManager(v4pmAddr, blockchain.Client); err == nil {
+				v4pmAddr := common.HexToAddress(pmAddrStr)
+				if v4pm, err := blockchain.NewV4PositionManager(v4pmAddr, client); err == nil {
 					if pos, err := v4pm.Positions(nil, tokenId); err == nil && pos != nil {
-						resolvedFromChain = true
 						if token0Addr == (common.Address{}) {
 							token0Addr = pos.Token0
 						}
@@ -241,38 +273,10 @@ func (s *LiquidityService) resolveTaskTokenAddresses(task *models.StrategyTask) 
 				}
 			}
 		}
-
-		// Try PoolKey from PositionManager / Initialize event
-		if (token0Addr == common.Address{} || token1Addr == common.Address{}) && strings.TrimSpace(task.PoolId) != "" {
-			if common.IsHexAddress(config.AppConfig.UniswapV4PositionManagerAddress) {
-				pmAddr := common.HexToAddress(config.AppConfig.UniswapV4PositionManagerAddress)
-				if c0, c1, _, _, _, err := blockchain.GetUniswapV4PoolKeyFromPositionManager(pmAddr, task.PoolId); err == nil {
-					resolvedFromChain = true
-					if token0Addr == (common.Address{}) {
-						token0Addr = c0
-					}
-					if token1Addr == (common.Address{}) {
-						token1Addr = c1
-					}
-				} else if common.IsHexAddress(config.AppConfig.UniswapV4PoolManagerAddress) {
-					poolMgr := common.HexToAddress(config.AppConfig.UniswapV4PoolManagerAddress)
-					if c0, c1, _, _, _, err := blockchain.GetUniswapV4PoolKeyFromInitializeEvent(poolMgr, task.PoolId); err == nil {
-						resolvedFromChain = true
-						if token0Addr == (common.Address{}) {
-							token0Addr = c0
-						}
-						if token1Addr == (common.Address{}) {
-							token1Addr = c1
-						}
-					}
-				}
-			}
-		}
 	default:
 		if common.IsHexAddress(task.PoolId) {
 			poolAddr := common.HexToAddress(task.PoolId)
-			if c0, c1, err := blockchain.GetV3PoolTokens(poolAddr); err == nil {
-				resolvedFromChain = true
+			if c0, c1, err := blockchain.GetV3PoolTokensWithClient(client, poolAddr); err == nil {
 				if token0Addr == (common.Address{}) {
 					token0Addr = c0
 				}
@@ -286,19 +290,13 @@ func (s *LiquidityService) resolveTaskTokenAddresses(task *models.StrategyTask) 
 			tokenId, _ := convert.ParseBigInt(task.V3TokenID)
 			if tokenId.Sign() > 0 {
 				pmAddrStr := strings.TrimSpace(task.V3PositionManagerAddress)
-				if pmAddrStr == "" {
-					ex := strings.ToLower(strings.TrimSpace(task.Exchange))
-					if strings.Contains(ex, "pancake") && common.IsHexAddress(config.AppConfig.PancakeV3PositionManagerAddress) {
-						pmAddrStr = config.AppConfig.PancakeV3PositionManagerAddress
-					} else if common.IsHexAddress(config.AppConfig.UniswapV3PositionManagerAddress) {
-						pmAddrStr = config.AppConfig.UniswapV3PositionManagerAddress
-					}
+				if pmAddrStr == "" && common.IsHexAddress(cc.DefaultV3PositionManagerAddress) {
+					pmAddrStr = strings.TrimSpace(cc.DefaultV3PositionManagerAddress)
 				}
 				if common.IsHexAddress(pmAddrStr) {
 					pmAddr := common.HexToAddress(pmAddrStr)
-					if v3pm, err := blockchain.NewV3PositionManager(pmAddr, blockchain.Client); err == nil {
+					if v3pm, err := blockchain.NewV3PositionManager(pmAddr, client); err == nil {
 						if pos, err := v3pm.Positions(nil, tokenId); err == nil && pos != nil {
-							resolvedFromChain = true
 							if token0Addr == (common.Address{}) {
 								token0Addr = pos.Token0
 							}
@@ -313,13 +311,6 @@ func (s *LiquidityService) resolveTaskTokenAddresses(task *models.StrategyTask) 
 	}
 
 	if token0Addr == (common.Address{}) || token1Addr == (common.Address{}) {
-		isExplicitZero := func(addr string) bool {
-			addr = strings.TrimSpace(addr)
-			return common.IsHexAddress(addr) && common.HexToAddress(addr) == (common.Address{})
-		}
-		if version == "v4" && (resolvedFromChain || isExplicitZero(task.Token0Address) || isExplicitZero(task.Token1Address)) {
-			return common.Address{}, common.Address{}, fmt.Errorf("native currency not supported (use WBNB)")
-		}
 		return common.Address{}, common.Address{}, fmt.Errorf("token address missing (pool_version=%s pool_id=%s)", version, strings.TrimSpace(task.PoolId))
 	}
 	return token0Addr, token1Addr, nil

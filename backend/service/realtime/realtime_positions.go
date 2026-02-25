@@ -195,6 +195,7 @@ type RealtimeSummary struct {
 }
 
 type RealtimePosition struct {
+	Chain             string     `json:"chain"`
 	Version           string     `json:"version"`
 	Exchange          string     `json:"exchange"`
 	Title             string     `json:"title"`
@@ -328,13 +329,13 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 	}
 	if common.IsHexAddress(usdtAddrStr) {
 		usdtAddr := common.HexToAddress(usdtAddrStr)
-		if usdtBal := s.getWalletTokenBalance(usdtAddr, walletAddr); usdtBal != nil && usdtBal.Sign() > 0 {
-			meta := s.getTokenMeta(usdtAddr)
+		if usdtBal := s.getWalletTokenBalance("bsc", usdtAddr, walletAddr); usdtBal != nil && usdtBal.Sign() > 0 {
+			meta := s.getTokenMeta("bsc", usdtAddr)
 			prices, _ := s.priceService.GetUSDPrices("bsc", []string{usdtAddr.Hex()})
 			price := prices[strings.ToLower(usdtAddr.Hex())]
 			usd := toFloat(usdtBal, meta.decimals) * price
 			if usd > 0 {
-				extraWalletTokenUSD[strings.ToLower(usdtAddr.Hex())] = usd
+				extraWalletTokenUSD["bsc|"+strings.ToLower(usdtAddr.Hex())] = usd
 			}
 		}
 	}
@@ -374,12 +375,55 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 		if common.IsHexAddress(t.V3PositionManagerAddress) {
 			return strings.TrimSpace(t.V3PositionManagerAddress)
 		}
-		ex := strings.ToLower(strings.TrimSpace(t.Exchange))
-		if strings.Contains(ex, "pancake") && common.IsHexAddress(config.AppConfig.PancakeV3PositionManagerAddress) {
-			return strings.TrimSpace(config.AppConfig.PancakeV3PositionManagerAddress)
+		chain := config.NormalizeChain(t.Chain)
+		if chain == "" {
+			chain = "bsc"
 		}
-		if strings.Contains(ex, "uniswap") && common.IsHexAddress(config.AppConfig.UniswapV3PositionManagerAddress) {
-			return strings.TrimSpace(config.AppConfig.UniswapV3PositionManagerAddress)
+		ex := strings.ToLower(strings.TrimSpace(t.Exchange))
+
+		if config.AppConfig != nil {
+			// Prefer chain-scoped deployments when available.
+			if cc, ok := config.AppConfig.GetChainConfig(chain); ok {
+				if ex != "" {
+					for _, dep := range cc.V3Deployments {
+						if !common.IsHexAddress(dep.PositionManagerAddress) {
+							continue
+						}
+						name := strings.ToLower(strings.TrimSpace(dep.Name))
+						if name == "" {
+							continue
+						}
+						// Heuristic: match common DEX names.
+						if strings.Contains(ex, "pancake") && strings.Contains(name, "pancake") {
+							return strings.TrimSpace(dep.PositionManagerAddress)
+						}
+						if strings.Contains(ex, "uniswap") && strings.Contains(name, "uniswap") {
+							return strings.TrimSpace(dep.PositionManagerAddress)
+						}
+						if strings.Contains(ex, "aero") && (strings.Contains(name, "aero") || strings.Contains(name, "slipstream")) {
+							return strings.TrimSpace(dep.PositionManagerAddress)
+						}
+					}
+				}
+				if common.IsHexAddress(cc.DefaultV3PositionManagerAddress) {
+					return strings.TrimSpace(cc.DefaultV3PositionManagerAddress)
+				}
+				for _, dep := range cc.V3Deployments {
+					if common.IsHexAddress(dep.PositionManagerAddress) {
+						return strings.TrimSpace(dep.PositionManagerAddress)
+					}
+				}
+			}
+
+			// Legacy single-chain fallback (BSC).
+			if chain == "bsc" {
+				if strings.Contains(ex, "pancake") && common.IsHexAddress(config.AppConfig.PancakeV3PositionManagerAddress) {
+					return strings.TrimSpace(config.AppConfig.PancakeV3PositionManagerAddress)
+				}
+				if strings.Contains(ex, "uniswap") && common.IsHexAddress(config.AppConfig.UniswapV3PositionManagerAddress) {
+					return strings.TrimSpace(config.AppConfig.UniswapV3PositionManagerAddress)
+				}
+			}
 		}
 		return ""
 	}
@@ -396,7 +440,14 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 			if strings.EqualFold(strings.TrimSpace(t.PoolVersion), "v4") {
 				continue
 			}
-			addV3NPM(resolveTaskNPM(t))
+			chain := config.NormalizeChain(t.Chain)
+			if chain == "" {
+				chain = "bsc"
+			}
+			// V3 on-chain NFT scan is currently BSC-scoped; avoid mixing NPMs from other chains into the scan set.
+			if chain == "bsc" {
+				addV3NPM(resolveTaskNPM(t))
+			}
 
 			tokenKey := strings.TrimSpace(t.V3TokenID)
 			if tokenKey == "" {
@@ -405,10 +456,11 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 				}
 				continue
 			}
-			key := tokenKey + "|" + strings.ToLower(strings.TrimSpace(resolveTaskNPM(t)))
+			key := tokenKey + "|" + chain + "|" + strings.ToLower(strings.TrimSpace(resolveTaskNPM(t)))
 			taskByV3Token[key] = t
-			if prev, ok := taskByV3TokenID[tokenKey]; !ok || t.UpdatedAt.After(prev.UpdatedAt) {
-				taskByV3TokenID[tokenKey] = t
+			byIDKey := chain + "|" + tokenKey
+			if prev, ok := taskByV3TokenID[byIDKey]; !ok || t.UpdatedAt.After(prev.UpdatedAt) {
+				taskByV3TokenID[byIDKey] = t
 			}
 		}
 	} else {
@@ -495,7 +547,7 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 			_ = idGroup.Wait()
 
 			for _, tokenId := range tokenIDsRaw {
-				seenKey := strings.TrimSpace(tokenId.String()) + "|" + strings.ToLower(npmAddr.Hex())
+				seenKey := strings.TrimSpace(tokenId.String()) + "|bsc|" + strings.ToLower(npmAddr.Hex())
 				if _, ok := seenV3[seenKey]; ok {
 					continue
 				}
@@ -509,7 +561,7 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 			for _, tokenId := range tokenIDs {
 				tid := new(big.Int).Set(tokenId)
 				g.Go(func() error {
-					p, warn := s.buildV3Position(pm, npmAddr, walletAddr, tid, taskByV3Token, taskByV3TokenID)
+					p, warn := s.buildV3Position("bsc", pm, npmAddr, walletAddr, tid, taskByV3Token, taskByV3TokenID)
 					positionsMu.Lock()
 					defer positionsMu.Unlock()
 					if warn != "" {
@@ -540,13 +592,17 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 		g.SetLimit(6)
 		for _, k := range taskKeys {
 			task := taskByV3Token[k]
+			chain := config.NormalizeChain(task.Chain)
+			if chain == "" {
+				chain = "bsc"
+			}
 			tokenStr := strings.TrimSpace(task.V3TokenID)
 			npmStr := resolveTaskNPM(task)
 			if tokenStr == "" || tokenStr == "0" || !common.IsHexAddress(npmStr) {
 				continue
 			}
 			npmAddr := common.HexToAddress(npmStr)
-			seenKey := tokenStr + "|" + strings.ToLower(npmAddr.Hex())
+			seenKey := tokenStr + "|" + chain + "|" + strings.ToLower(npmAddr.Hex())
 			if _, ok := seenV3[seenKey]; ok {
 				continue
 			}
@@ -559,14 +615,21 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 			tid = new(big.Int).Set(tid)
 
 			g.Go(func() error {
-				key := strings.ToLower(npmAddr.Hex())
+				key := chain + "|" + strings.ToLower(npmAddr.Hex())
 
 				mu.Lock()
 				pm := pmCache[key]
 				mu.Unlock()
 
 				if pm == nil {
-					created, err := blockchain.NewV3PositionManager(npmAddr, blockchain.Client)
+					client, _, err := blockchain.GetEVMClient(chain)
+					if err != nil || client == nil {
+						mu.Lock()
+						resp.Warnings = append(resp.Warnings, fmt.Sprintf("V3 RPC not configured for chain=%s (npm=%s)", chain, npmAddr.Hex()))
+						mu.Unlock()
+						return nil
+					}
+					created, err := blockchain.NewV3PositionManager(npmAddr, client)
 					if err != nil {
 						mu.Lock()
 						resp.Warnings = append(resp.Warnings, fmt.Sprintf("初始化 V3 PositionManager 失败: %s", npmAddr.Hex()))
@@ -579,7 +642,7 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 					mu.Unlock()
 				}
 
-				p, warn := s.buildV3Position(pm, npmAddr, walletAddr, tid, taskByV3Token, taskByV3TokenID)
+				p, warn := s.buildV3Position(chain, pm, npmAddr, walletAddr, tid, taskByV3Token, taskByV3TokenID)
 
 				mu.Lock()
 				defer mu.Unlock()
@@ -692,17 +755,22 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 			if addr == "" {
 				continue
 			}
-			if prev, ok := walletTokenUSD[addr]; !ok || row.WalletUSD > prev {
-				walletTokenUSD[addr] = row.WalletUSD
+			chainKey := strings.ToLower(strings.TrimSpace(p.Chain))
+			if chainKey == "" {
+				chainKey = "bsc"
+			}
+			key := chainKey + "|" + addr
+			if prev, ok := walletTokenUSD[key]; !ok || row.WalletUSD > prev {
+				walletTokenUSD[key] = row.WalletUSD
 			}
 		}
 	}
-	for addr, usd := range extraWalletTokenUSD {
+	for key, usd := range extraWalletTokenUSD {
 		if usd <= 0 {
 			continue
 		}
-		if prev, ok := walletTokenUSD[addr]; !ok || usd > prev {
-			walletTokenUSD[addr] = usd
+		if prev, ok := walletTokenUSD[key]; !ok || usd > prev {
+			walletTokenUSD[key] = usd
 		}
 	}
 	for _, v := range walletTokenUSD {
@@ -901,6 +969,7 @@ func scanERC721OwnedTokenIDs(contract common.Address, wallet common.Address, fro
 }
 
 func (s *RealtimePositionsService) buildV3Position(
+	chain string,
 	pm *blockchain.V3PositionManager,
 	npmAddr common.Address,
 	walletAddr common.Address,
@@ -908,6 +977,10 @@ func (s *RealtimePositionsService) buildV3Position(
 	taskByV3Token map[string]models.StrategyTask,
 	taskByV3TokenID map[string]models.StrategyTask,
 ) (*RealtimePosition, string) {
+	chain = config.NormalizeChain(chain)
+	if chain == "" {
+		chain = "bsc"
+	}
 	var warn string
 
 	info, err := pm.Positions(nil, tokenId)
@@ -918,7 +991,7 @@ func (s *RealtimePositionsService) buildV3Position(
 				return nil, ""
 			}
 		}
-		return nil, fmt.Sprintf("读取 V3 positions() 失败: tokenId=%s err=%v", tokenId.String(), err)
+		return nil, fmt.Sprintf("读取 V3 positions() 失败: chain=%s npm=%s tokenId=%s err=%v", chain, npmAddr.Hex(), tokenId.String(), err)
 	}
 
 	token0 := info.Token0
@@ -936,15 +1009,15 @@ func (s *RealtimePositionsService) buildV3Position(
 		return nil, ""
 	}
 
-	meta0 := s.getTokenMeta(token0)
-	meta1 := s.getTokenMeta(token1)
+	meta0 := s.getTokenMeta(chain, token0)
+	meta1 := s.getTokenMeta(chain, token1)
 
 	// Try find matching task for richer fields.
-	taskKey := strings.TrimSpace(tokenId.String()) + "|" + strings.ToLower(strings.TrimSpace(npmAddr.Hex()))
+	taskKey := strings.TrimSpace(tokenId.String()) + "|" + chain + "|" + strings.ToLower(strings.TrimSpace(npmAddr.Hex()))
 	var task *models.StrategyTask
 	if t, ok := taskByV3Token[taskKey]; ok {
 		task = &t
-	} else if t, ok := taskByV3TokenID[strings.TrimSpace(tokenId.String())]; ok {
+	} else if t, ok := taskByV3TokenID[chain+"|"+strings.TrimSpace(tokenId.String())]; ok {
 		task = &t
 	}
 
@@ -973,7 +1046,7 @@ func (s *RealtimePositionsService) buildV3Position(
 
 	// Resolve the V3 pool address from factory to avoid mismatches / stale DB pool IDs.
 	poolAddr := common.Address{}
-	if resolved, _, rErr := s.getV3PoolAddress(npmAddr, token0, token1, info.Fee); rErr == nil && resolved != (common.Address{}) {
+	if resolved, _, rErr := s.getV3PoolAddress(chain, npmAddr, token0, token1, info.Fee); rErr == nil && resolved != (common.Address{}) {
 		poolAddr = resolved
 		poolID = resolved.Hex()
 	} else if poolID != "" && common.IsHexAddress(poolID) {
@@ -994,7 +1067,7 @@ func (s *RealtimePositionsService) buildV3Position(
 	var sqrtP *big.Int
 	hasSlot0 := false
 	if poolAddr != (common.Address{}) {
-		sp, t, usedStale, age, err := s.getV3Slot0(poolAddr)
+		sp, t, usedStale, age, err := s.getV3Slot0(chain, poolAddr)
 		if err != nil && sp == nil {
 			warn = fmt.Sprintf("读取 V3 Pool slot0 失败: pool=%s tokenId=%s err=%v", poolAddr.Hex(), tokenId.String(), err)
 		} else {
@@ -1022,7 +1095,7 @@ func (s *RealtimePositionsService) buildV3Position(
 	}
 
 	if hasSlot0 && poolAddr != (common.Address{}) {
-		fee0, fee1, usedStale, age, feeErr := s.calcV3UnclaimedFeesCached(poolAddr, currentTick, info)
+		fee0, fee1, usedStale, age, feeErr := s.calcV3UnclaimedFeesCached(chain, poolAddr, currentTick, info)
 		if feeErr != nil && (fee0 == nil || fee1 == nil) {
 			msg := fmt.Sprintf("V3 手续费计算失败: tokenId=%s err=%v", tokenId.String(), feeErr)
 			if warn == "" {
@@ -1050,11 +1123,11 @@ func (s *RealtimePositionsService) buildV3Position(
 	amt0Raw, amt1Raw := pool.AmountsForLiquidity(sqrtP, sqrtA, sqrtB, liq)
 
 	// Wallet balances
-	w0 := s.getWalletTokenBalance(token0, walletAddr)
-	w1 := s.getWalletTokenBalance(token1, walletAddr)
+	w0 := s.getWalletTokenBalance(chain, token0, walletAddr)
+	w1 := s.getWalletTokenBalance(chain, token1, walletAddr)
 
 	// Prices
-	prices, _ := s.priceService.GetUSDPrices("bsc", []string{token0.Hex(), token1.Hex()})
+	prices, _ := s.priceService.GetUSDPrices(chain, []string{token0.Hex(), token1.Hex()})
 	price0 := prices[strings.ToLower(token0.Hex())]
 	price1 := prices[strings.ToLower(token1.Hex())]
 
@@ -1104,6 +1177,7 @@ func (s *RealtimePositionsService) buildV3Position(
 		}
 	}
 	return &RealtimePosition{
+		Chain:             chain,
 		Version:           "v3",
 		Exchange:          exchange,
 		Title:             title,
@@ -1234,13 +1308,18 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 	sqrtB, _ := pool.SqrtRatioAtTick(int32(tickUpper))
 	amt0Raw, amt1Raw := pool.AmountsForLiquidity(sqrtP, sqrtA, sqrtB, liq)
 
-	w0 := s.getWalletTokenBalance(c0, walletAddr)
-	w1 := s.getWalletTokenBalance(c1, walletAddr)
+	chain := config.NormalizeChain(task.Chain)
+	if chain == "" {
+		chain = "bsc"
+	}
 
-	meta0 := s.getTokenMeta(c0)
-	meta1 := s.getTokenMeta(c1)
+	w0 := s.getWalletTokenBalance(chain, c0, walletAddr)
+	w1 := s.getWalletTokenBalance(chain, c1, walletAddr)
 
-	prices, _ := s.priceService.GetUSDPrices("bsc", []string{c0.Hex(), c1.Hex()})
+	meta0 := s.getTokenMeta(chain, c0)
+	meta1 := s.getTokenMeta(chain, c1)
+
+	prices, _ := s.priceService.GetUSDPrices(chain, []string{c0.Hex(), c1.Hex()})
 	price0 := prices[strings.ToLower(c0.Hex())]
 	price1 := prices[strings.ToLower(c1.Hex())]
 
@@ -1291,6 +1370,7 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		}
 	}
 	return &RealtimePosition{
+		Chain:             chain,
 		Version:           "v4",
 		Exchange:          exchange,
 		Title:             title,
@@ -1329,6 +1409,11 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 		version = "v3"
 	}
 
+	chain := config.NormalizeChain(task.Chain)
+	if chain == "" {
+		chain = "bsc"
+	}
+
 	// Only show placeholders for tasks that are in some pending state and have no tokenId.
 	if !task.RebalancePending && strings.TrimSpace(task.ExitPendingAction) == "" {
 		return nil, ""
@@ -1365,9 +1450,12 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 		}
 	default:
 		if common.IsHexAddress(poolID) {
-			if t, err := blockchain.GetV3PoolCurrentTick(common.HexToAddress(poolID)); err == nil {
-				currentTick = t
-				gotTick = true
+			poolAddr := common.HexToAddress(poolID)
+			if client, _, err := blockchain.GetEVMClient(chain); err == nil && client != nil {
+				if t, err := blockchain.GetV3PoolCurrentTickWithClient(client, poolAddr); err == nil {
+					currentTick = t
+					gotTick = true
+				}
 			}
 		}
 	}
@@ -1396,19 +1484,22 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 
 	// Best-effort: for V3 tasks, derive token0/token1 from pool if missing.
 	if version == "v3" && token0 == (common.Address{}) && token1 == (common.Address{}) && common.IsHexAddress(poolID) {
-		if t0, t1, err := blockchain.GetV3PoolTokens(common.HexToAddress(poolID)); err == nil {
-			token0 = t0
-			token1 = t1
+		poolAddr := common.HexToAddress(poolID)
+		if client, _, err := blockchain.GetEVMClient(chain); err == nil && client != nil {
+			if t0, t1, err := blockchain.GetV3PoolTokensWithClient(client, poolAddr); err == nil {
+				token0 = t0
+				token1 = t1
+			}
 		}
 	}
 
 	meta0 := cachedTokenMeta{symbol: strings.TrimSpace(task.Token0Symbol), decimals: pricing.DefaultTokenDecimals}
 	meta1 := cachedTokenMeta{symbol: strings.TrimSpace(task.Token1Symbol), decimals: pricing.DefaultTokenDecimals}
 	if token0 != (common.Address{}) {
-		meta0 = s.getTokenMeta(token0)
+		meta0 = s.getTokenMeta(chain, token0)
 	}
 	if token1 != (common.Address{}) {
-		meta1 = s.getTokenMeta(token1)
+		meta1 = s.getTokenMeta(chain, token1)
 	}
 	if strings.TrimSpace(meta0.symbol) == "" {
 		if token0 != (common.Address{}) {
@@ -1425,8 +1516,8 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 		}
 	}
 
-	w0 := s.getWalletTokenBalance(token0, walletAddr)
-	w1 := s.getWalletTokenBalance(token1, walletAddr)
+	w0 := s.getWalletTokenBalance(chain, token0, walletAddr)
+	w1 := s.getWalletTokenBalance(chain, token1, walletAddr)
 
 	price0 := 0.0
 	price1 := 0.0
@@ -1438,7 +1529,7 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 		addrList = append(addrList, token1.Hex())
 	}
 	if len(addrList) > 0 {
-		prices, _ := s.priceService.GetUSDPrices("bsc", addrList)
+		prices, _ := s.priceService.GetUSDPrices(chain, addrList)
 		if token0 != (common.Address{}) {
 			price0 = prices[strings.ToLower(token0.Hex())]
 		}
@@ -1495,6 +1586,7 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 	}
 
 	return &RealtimePosition{
+		Chain:             chain,
 		Version:           version,
 		Exchange:          exchange,
 		Title:             title,
@@ -1519,8 +1611,13 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 	}, ""
 }
 
-func (s *RealtimePositionsService) getTokenMeta(addr common.Address) cachedTokenMeta {
-	key := strings.ToLower(addr.Hex())
+func (s *RealtimePositionsService) getTokenMeta(chain string, addr common.Address) cachedTokenMeta {
+	chain = config.NormalizeChain(chain)
+	if chain == "" {
+		chain = "bsc"
+	}
+
+	key := chain + "|" + strings.ToLower(addr.Hex())
 	now := time.Now()
 	s.tokenMetaMu.RLock()
 	if m, ok := s.tokenMeta[key]; ok && m.expires.After(now) {
@@ -1533,17 +1630,18 @@ func (s *RealtimePositionsService) getTokenMeta(addr common.Address) cachedToken
 	decimals := pricing.DefaultTokenDecimals
 	ttl := 24 * time.Hour
 
-	if blockchain.Client == nil {
+	client, _, err := blockchain.GetEVMClient(chain)
+	if err != nil || client == nil {
 		symbol = addr.Hex()
 		ttl = 5 * time.Minute
 	} else {
-		if sym, err := blockchain.GetTokenSymbol(addr); err == nil && strings.TrimSpace(sym) != "" {
+		if sym, err := blockchain.GetTokenSymbolWithClient(client, addr); err == nil && strings.TrimSpace(sym) != "" {
 			symbol = strings.TrimSpace(sym)
 		} else {
 			symbol = addr.Hex()
 			ttl = 5 * time.Minute
 		}
-		if dec, err := blockchain.GetTokenDecimals(addr); err == nil && dec > 0 {
+		if dec, err := blockchain.GetTokenDecimalsWithClient(client, addr); err == nil && dec > 0 {
 			decimals = int(dec)
 		} else {
 			decimals = pricing.DefaultTokenDecimals
@@ -1558,13 +1656,18 @@ func (s *RealtimePositionsService) getTokenMeta(addr common.Address) cachedToken
 	return m
 }
 
-func (s *RealtimePositionsService) getWalletTokenBalance(tokenAddress, walletAddress common.Address) *big.Int {
+func (s *RealtimePositionsService) getWalletTokenBalance(chain string, tokenAddress, walletAddress common.Address) *big.Int {
 	if (tokenAddress == common.Address{}) || (walletAddress == common.Address{}) {
 		return big.NewInt(0)
 	}
 
+	chain = config.NormalizeChain(chain)
+	if chain == "" {
+		chain = "bsc"
+	}
+
 	now := time.Now()
-	key := strings.ToLower(walletAddress.Hex()) + "|" + strings.ToLower(tokenAddress.Hex())
+	key := chain + "|" + strings.ToLower(walletAddress.Hex()) + "|" + strings.ToLower(tokenAddress.Hex())
 
 	s.balanceMu.RLock()
 	if c, ok := s.balance[key]; ok && c.value != nil && c.expires.After(now) {
@@ -1580,7 +1683,16 @@ func (s *RealtimePositionsService) getWalletTokenBalance(tokenAddress, walletAdd
 	}
 	s.balanceMu.RUnlock()
 
-	bal, err := blockchain.GetTokenBalance(tokenAddress, walletAddress)
+	client, _, errClient := blockchain.GetEVMClient(chain)
+	var (
+		bal *big.Int
+		err error
+	)
+	if errClient == nil && client != nil {
+		bal, err = blockchain.GetTokenBalanceWithClient(client, tokenAddress, walletAddress)
+	} else {
+		err = errClient
+	}
 	if err == nil && bal != nil {
 		s.balanceMu.Lock()
 		s.balance[key] = cachedTokenBalance{
@@ -1600,13 +1712,18 @@ func (s *RealtimePositionsService) getWalletTokenBalance(tokenAddress, walletAdd
 	return big.NewInt(0)
 }
 
-func (s *RealtimePositionsService) getV3PoolAddress(npmAddr common.Address, token0 common.Address, token1 common.Address, fee uint64) (common.Address, bool, error) {
+func (s *RealtimePositionsService) getV3PoolAddress(chain string, npmAddr common.Address, token0 common.Address, token1 common.Address, fee uint64) (common.Address, bool, error) {
 	if (npmAddr == common.Address{}) || (token0 == common.Address{}) || (token1 == common.Address{}) {
 		return common.Address{}, false, fmt.Errorf("v3 pool key missing")
 	}
 
+	chain = config.NormalizeChain(chain)
+	if chain == "" {
+		chain = "bsc"
+	}
+
 	now := time.Now()
-	key := strings.ToLower(npmAddr.Hex()) + "|" + strings.ToLower(token0.Hex()) + "|" + strings.ToLower(token1.Hex()) + "|" + strconv.FormatUint(fee, 10)
+	key := chain + "|" + strings.ToLower(npmAddr.Hex()) + "|" + strings.ToLower(token0.Hex()) + "|" + strings.ToLower(token1.Hex()) + "|" + strconv.FormatUint(fee, 10)
 
 	s.v3PoolMu.RLock()
 	if c, ok := s.v3Pool[key]; ok && c.expires.After(now) {
@@ -1619,7 +1736,7 @@ func (s *RealtimePositionsService) getV3PoolAddress(npmAddr common.Address, toke
 	}
 	s.v3PoolMu.RUnlock()
 
-	addr, err := resolveV3PoolAddress(nil, 10*time.Second, npmAddr, token0, token1, fee)
+	addr, err := resolveV3PoolAddress(chain, nil, 10*time.Second, npmAddr, token0, token1, fee)
 	ttl := 24 * time.Hour
 	if err != nil || addr == (common.Address{}) {
 		ttl = 30 * time.Second
@@ -1641,13 +1758,18 @@ func (s *RealtimePositionsService) getV3PoolAddress(npmAddr common.Address, toke
 	return addr, false, nil
 }
 
-func (s *RealtimePositionsService) getV3Slot0(poolAddress common.Address) (*big.Int, int, bool, time.Duration, error) {
+func (s *RealtimePositionsService) getV3Slot0(chain string, poolAddress common.Address) (*big.Int, int, bool, time.Duration, error) {
 	if (poolAddress == common.Address{}) {
 		return nil, 0, false, 0, fmt.Errorf("empty pool address")
 	}
 
+	chain = config.NormalizeChain(chain)
+	if chain == "" {
+		chain = "bsc"
+	}
+
 	now := time.Now()
-	key := strings.ToLower(poolAddress.Hex())
+	key := chain + "|" + strings.ToLower(poolAddress.Hex())
 
 	s.v3Slot0Mu.RLock()
 	if c, ok := s.v3Slot0[key]; ok && c.sqrtPriceX96 != nil && c.expires.After(now) {
@@ -1666,7 +1788,17 @@ func (s *RealtimePositionsService) getV3Slot0(poolAddress common.Address) (*big.
 	}
 	s.v3Slot0Mu.RUnlock()
 
-	sqrt, tick, err := blockchain.GetV3PoolSlot0(poolAddress)
+	client, _, errClient := blockchain.GetEVMClient(chain)
+	var (
+		sqrt *big.Int
+		tick int
+		err  error
+	)
+	if errClient == nil && client != nil {
+		sqrt, tick, err = blockchain.GetV3PoolSlot0WithClient(client, poolAddress)
+	} else {
+		err = errClient
+	}
 	if err == nil && sqrt != nil {
 		s.v3Slot0Mu.Lock()
 		s.v3Slot0[key] = cachedV3Slot0{
@@ -1686,13 +1818,18 @@ func (s *RealtimePositionsService) getV3Slot0(poolAddress common.Address) (*big.
 	return nil, 0, false, 0, err
 }
 
-func (s *RealtimePositionsService) getV3FeeGrowthGlobals(poolAddress common.Address) (*big.Int, *big.Int, bool, time.Duration, error) {
+func (s *RealtimePositionsService) getV3FeeGrowthGlobals(chain string, poolAddress common.Address) (*big.Int, *big.Int, bool, time.Duration, error) {
 	if (poolAddress == common.Address{}) {
 		return nil, nil, false, 0, fmt.Errorf("empty pool address")
 	}
 
+	chain = config.NormalizeChain(chain)
+	if chain == "" {
+		chain = "bsc"
+	}
+
 	now := time.Now()
-	key := strings.ToLower(poolAddress.Hex())
+	key := chain + "|" + strings.ToLower(poolAddress.Hex())
 
 	s.v3FeeMu.RLock()
 	if c, ok := s.v3FeeCache[key]; ok && c.global0 != nil && c.global1 != nil && c.expires.After(now) {
@@ -1712,7 +1849,17 @@ func (s *RealtimePositionsService) getV3FeeGrowthGlobals(poolAddress common.Addr
 	}
 	s.v3FeeMu.RUnlock()
 
-	g0, g1, err := blockchain.GetV3PoolFeeGrowthGlobals(poolAddress)
+	client, _, errClient := blockchain.GetEVMClient(chain)
+	var (
+		g0  *big.Int
+		g1  *big.Int
+		err error
+	)
+	if errClient == nil && client != nil {
+		g0, g1, err = blockchain.GetV3PoolFeeGrowthGlobalsWithClient(client, poolAddress)
+	} else {
+		err = errClient
+	}
 	if err == nil && g0 != nil && g1 != nil {
 		s.v3FeeMu.Lock()
 		s.v3FeeCache[key] = cachedV3FeeGrowthGlobals{
@@ -1733,13 +1880,18 @@ func (s *RealtimePositionsService) getV3FeeGrowthGlobals(poolAddress common.Addr
 	return nil, nil, false, 0, err
 }
 
-func (s *RealtimePositionsService) getV3TickFeeGrowthOutside(poolAddress common.Address, tick int) (*big.Int, *big.Int, bool, bool, time.Duration, error) {
+func (s *RealtimePositionsService) getV3TickFeeGrowthOutside(chain string, poolAddress common.Address, tick int) (*big.Int, *big.Int, bool, bool, time.Duration, error) {
 	if (poolAddress == common.Address{}) {
 		return nil, nil, false, false, 0, fmt.Errorf("empty pool address")
 	}
 
+	chain = config.NormalizeChain(chain)
+	if chain == "" {
+		chain = "bsc"
+	}
+
 	now := time.Now()
-	key := strings.ToLower(poolAddress.Hex()) + "|" + strconv.Itoa(tick)
+	key := chain + "|" + strings.ToLower(poolAddress.Hex()) + "|" + strconv.Itoa(tick)
 
 	s.v3TickFeeMu.RLock()
 	if c, ok := s.v3TickFeeCache[key]; ok && c.fee0 != nil && c.fee1 != nil && c.expires.After(now) {
@@ -1762,7 +1914,18 @@ func (s *RealtimePositionsService) getV3TickFeeGrowthOutside(poolAddress common.
 	}
 	s.v3TickFeeMu.RUnlock()
 
-	f0, f1, initialized, err := blockchain.GetV3PoolTickFeeGrowthOutside(poolAddress, tick)
+	client, _, errClient := blockchain.GetEVMClient(chain)
+	var (
+		f0          *big.Int
+		f1          *big.Int
+		initialized bool
+		err         error
+	)
+	if errClient == nil && client != nil {
+		f0, f1, initialized, err = blockchain.GetV3PoolTickFeeGrowthOutsideWithClient(client, poolAddress, tick)
+	} else {
+		err = errClient
+	}
 	if err == nil && f0 != nil && f1 != nil {
 		s.v3TickFeeMu.Lock()
 		s.v3TickFeeCache[key] = cachedV3TickFeeGrowthOutside{
@@ -1784,7 +1947,7 @@ func (s *RealtimePositionsService) getV3TickFeeGrowthOutside(poolAddress common.
 	return nil, nil, false, false, 0, err
 }
 
-func (s *RealtimePositionsService) calcV3UnclaimedFeesCached(poolAddr common.Address, currentTick int, pos *blockchain.V3PositionInfo) (*big.Int, *big.Int, bool, time.Duration, error) {
+func (s *RealtimePositionsService) calcV3UnclaimedFeesCached(chain string, poolAddr common.Address, currentTick int, pos *blockchain.V3PositionInfo) (*big.Int, *big.Int, bool, time.Duration, error) {
 	if pos == nil {
 		return nil, nil, false, 0, fmt.Errorf("position info missing")
 	}
@@ -1795,18 +1958,23 @@ func (s *RealtimePositionsService) calcV3UnclaimedFeesCached(poolAddr common.Add
 		return nil, nil, false, 0, fmt.Errorf("pool address missing")
 	}
 
+	chain = config.NormalizeChain(chain)
+	if chain == "" {
+		chain = "bsc"
+	}
+
 	owed0 := cloneBig(pos.TokensOwed0)
 	owed1 := cloneBig(pos.TokensOwed1)
 
-	global0, global1, staleG, ageG, errG := s.getV3FeeGrowthGlobals(poolAddr)
+	global0, global1, staleG, ageG, errG := s.getV3FeeGrowthGlobals(chain, poolAddr)
 	if errG != nil && (global0 == nil || global1 == nil) {
 		return nil, nil, false, 0, fmt.Errorf("read feeGrowthGlobal failed: %w", errG)
 	}
-	lower0, lower1, _, staleL, ageL, errL := s.getV3TickFeeGrowthOutside(poolAddr, pos.TickLower)
+	lower0, lower1, _, staleL, ageL, errL := s.getV3TickFeeGrowthOutside(chain, poolAddr, pos.TickLower)
 	if errL != nil && (lower0 == nil || lower1 == nil) {
 		return nil, nil, false, 0, fmt.Errorf("read tickLower feeGrowthOutside failed: %w", errL)
 	}
-	upper0, upper1, _, staleU, ageU, errU := s.getV3TickFeeGrowthOutside(poolAddr, pos.TickUpper)
+	upper0, upper1, _, staleU, ageU, errU := s.getV3TickFeeGrowthOutside(chain, poolAddr, pos.TickUpper)
 	if errU != nil && (upper0 == nil || upper1 == nil) {
 		return nil, nil, false, 0, fmt.Errorf("read tickUpper feeGrowthOutside failed: %w", errU)
 	}

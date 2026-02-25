@@ -264,33 +264,63 @@ func defaultFallbackPrice(network string, addr string) (float64, bool) {
 	if addr == "" {
 		return 0, false
 	}
-	if network != "bsc" {
-		return 0, false
-	}
 
 	if config.AppConfig != nil {
-		usdt := strings.ToLower(strings.TrimSpace(config.AppConfig.USDTAddress))
-		usdc := strings.ToLower(strings.TrimSpace(config.AppConfig.USDCAddress))
-		busd := strings.ToLower(strings.TrimSpace(config.AppConfig.BUSDAddress))
-		if addr == usdt || addr == usdc || addr == busd {
-			return 1, true
-		}
-		wbnb := strings.ToLower(strings.TrimSpace(config.AppConfig.WBNBAddress))
-		if wbnb != "" && addr == wbnb {
-			p := GetBNBPriceUSDT()
-			if p > 0 {
-				return p, true
+		if cc, ok := config.AppConfig.GetChainConfig(network); ok {
+			stables := []string{
+				cc.StableAddress,
+				cc.USDCAddress,
+				cc.BUSDAddress,
+			}
+			for _, stable := range stables {
+				stable = strings.ToLower(strings.TrimSpace(stable))
+				if stable == "" {
+					continue
+				}
+				if addr == stable {
+					return 1, true
+				}
+			}
+
+			wrapped := strings.ToLower(strings.TrimSpace(cc.WrappedNativeAddress))
+			if wrapped != "" && addr == wrapped {
+				// Avoid recursive calls into token_price via GetNativePriceUSD; keep static fallbacks here.
+				switch network {
+				case "bsc":
+					if p := GetBNBPriceUSDT(); p > 0 {
+						return p, true
+					}
+				case "base":
+					return 2500, true
+				default:
+					return 1000, true
+				}
+			}
+		} else if network == "bsc" {
+			// Backward-compatible fallback for legacy single-chain config values.
+			usdt := strings.ToLower(strings.TrimSpace(config.AppConfig.USDTAddress))
+			usdc := strings.ToLower(strings.TrimSpace(config.AppConfig.USDCAddress))
+			busd := strings.ToLower(strings.TrimSpace(config.AppConfig.BUSDAddress))
+			if addr == usdt || addr == usdc || addr == busd {
+				return 1, true
+			}
+			wbnb := strings.ToLower(strings.TrimSpace(config.AppConfig.WBNBAddress))
+			if wbnb != "" && addr == wbnb {
+				if p := GetBNBPriceUSDT(); p > 0 {
+					return p, true
+				}
 			}
 		}
 	}
 
-	if p, ok := defaultBSCStableAddresses[addr]; ok {
-		return p, true
-	}
-	if addr == "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c" {
-		p := GetBNBPriceUSDT()
-		if p > 0 {
+	if network == "bsc" {
+		if p, ok := defaultBSCStableAddresses[addr]; ok {
 			return p, true
+		}
+		if addr == "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c" {
+			if p := GetBNBPriceUSDT(); p > 0 {
+				return p, true
+			}
 		}
 	}
 	return 0, false

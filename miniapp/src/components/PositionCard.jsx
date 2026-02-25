@@ -179,17 +179,25 @@ export default function PositionCard({
 
     const titleRight = formatUsd(totalValue);
 
+    const chain = useMemo(() => {
+        const v = String(position?.chain || '').trim().toLowerCase();
+        return v || 'bsc';
+    }, [position?.chain]);
+
+    const explorerBase = useMemo(() => (chain === 'base' ? 'https://basescan.org' : 'https://bscscan.com'), [chain]);
+    const geckoNetwork = useMemo(() => (chain === 'base' ? 'base' : 'bsc'), [chain]);
+
     const poolLink = useMemo(() => {
         const pool = normalizeHexPrefixed(position?.pool_id);
         if (!pool) return null;
-        if (/^0x[a-fA-F0-9]{40}$/.test(pool)) return `https://bscscan.com/address/${pool}`;
-        if (/^0x[a-fA-F0-9]{64}$/.test(pool)) return `https://www.geckoterminal.com/bsc/pools/${pool.toLowerCase()}`;
+        if (/^0x[a-fA-F0-9]{40}$/.test(pool)) return `${explorerBase}/address/${pool}`;
+        if (/^0x[a-fA-F0-9]{64}$/.test(pool)) return `https://www.geckoterminal.com/${geckoNetwork}/pools/${pool.toLowerCase()}`;
         return null;
-    }, [position?.pool_id]);
+    }, [position?.pool_id, explorerBase, geckoNetwork]);
 
-    const openWallet = () => openLink(`https://bscscan.com/address/${walletAddress}`);
+    const openWallet = () => openLink(`${explorerBase}/address/${walletAddress}`);
     const openPool = () => poolLink && openLink(poolLink);
-    const openToken = (addr) => addr && openLink(`https://gmgn.ai/bsc/token/${addr}`);
+    const openToken = (addr) => addr && openLink(`${explorerBase}/token/${addr}`);
 
     const decimals0 = useMemo(() => Number(token0?.decimals ?? 18), [token0?.decimals]);
     const decimals1 = useMemo(() => Number(token1?.decimals ?? 18), [token1?.decimals]);

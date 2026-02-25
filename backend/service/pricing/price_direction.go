@@ -99,8 +99,13 @@ func IsStableSymbol(sym string) bool {
 	return isStableSymbol(sym)
 }
 
-func isStableAddress(addr string) bool {
+func isStableAddress(chain string, addr string) bool {
 	if config.AppConfig == nil {
+		return false
+	}
+	chain = config.NormalizeChain(chain)
+	cc, ok := config.AppConfig.GetChainConfig(chain)
+	if !ok {
 		return false
 	}
 	addr = strings.ToLower(strings.TrimSpace(addr))
@@ -108,9 +113,9 @@ func isStableAddress(addr string) bool {
 		return false
 	}
 	stables := []string{
-		config.AppConfig.USDTAddress,
-		config.AppConfig.USDCAddress,
-		config.AppConfig.BUSDAddress,
+		cc.StableAddress,
+		cc.USDCAddress,
+		cc.BUSDAddress,
 	}
 	for _, stable := range stables {
 		stable = strings.ToLower(strings.TrimSpace(stable))
@@ -125,8 +130,8 @@ func isStableAddress(addr string) bool {
 }
 
 // IsStableAddress exposes stable-coin address checks to other packages.
-func IsStableAddress(addr string) bool {
-	return isStableAddress(addr)
+func IsStableAddress(chain string, addr string) bool {
+	return isStableAddress(chain, addr)
 }
 
 const DefaultTokenDecimals = 18
@@ -170,11 +175,12 @@ func stableSideFromTask(task *models.StrategyTask) int {
 		return stableUnknown
 	}
 
+	chain := config.NormalizeChain(task.Chain)
 	token0Addr, token1Addr := resolveTokenAddresses(task)
-	if isStableAddress(token0Addr) {
+	if isStableAddress(chain, token0Addr) {
 		return 0
 	}
-	if isStableAddress(token1Addr) {
+	if isStableAddress(chain, token1Addr) {
 		return 1
 	}
 
@@ -189,12 +195,13 @@ func stableSideFromTask(task *models.StrategyTask) int {
 	return stableUnknown
 }
 
-func GetTokenDecimals(addr string) int {
+func GetTokenDecimals(chain string, addr string) int {
+	chain = config.NormalizeChain(chain)
 	addr = strings.TrimSpace(addr)
 	if !common.IsHexAddress(addr) {
 		return DefaultTokenDecimals
 	}
-	key := strings.ToLower(addr)
+	key := chain + "|" + strings.ToLower(addr)
 	now := time.Now()
 
 	decimalsCache.mu.RLock()
@@ -204,11 +211,12 @@ func GetTokenDecimals(addr string) int {
 	}
 	decimalsCache.mu.RUnlock()
 
-	if blockchain.Client == nil {
+	client, _, err := blockchain.GetEVMClient(chain)
+	if err != nil {
 		return DefaultTokenDecimals
 	}
 
-	decimals, err := blockchain.GetTokenDecimals(common.HexToAddress(addr))
+	decimals, err := blockchain.GetTokenDecimalsWithClient(client, common.HexToAddress(addr))
 	if err != nil || decimals == 0 {
 		decimalsCache.mu.Lock()
 		decimalsCache.values[key] = cachedDecimals{
@@ -237,6 +245,7 @@ func resolveTokenAddresses(task *models.StrategyTask) (string, string) {
 		return "", ""
 	}
 
+	chain := config.NormalizeChain(task.Chain)
 	token0Addr := strings.TrimSpace(task.Token0Address)
 	token1Addr := strings.TrimSpace(task.Token1Address)
 	valid0 := common.IsHexAddress(token0Addr)
@@ -251,12 +260,16 @@ func resolveTokenAddresses(task *models.StrategyTask) (string, string) {
 	}
 
 	poolID := strings.TrimSpace(task.PoolId)
-	if !common.IsHexAddress(poolID) || blockchain.Client == nil {
+	if !common.IsHexAddress(poolID) {
+		return token0Addr, token1Addr
+	}
+	client, _, err := blockchain.GetEVMClient(chain)
+	if err != nil {
 		return token0Addr, token1Addr
 	}
 
 	now := time.Now()
-	cacheKey := strings.ToLower(poolID)
+	cacheKey := chain + "|" + strings.ToLower(poolID)
 	poolTokenCache.mu.RLock()
 	if c, ok := poolTokenCache.values[cacheKey]; ok && c.expires.After(now) {
 		poolTokenCache.mu.RUnlock()
@@ -264,7 +277,7 @@ func resolveTokenAddresses(task *models.StrategyTask) (string, string) {
 	}
 	poolTokenCache.mu.RUnlock()
 
-	token0, token1, err := blockchain.GetV3PoolTokens(common.HexToAddress(poolID))
+	token0, token1, err := blockchain.GetV3PoolTokensWithClient(client, common.HexToAddress(poolID))
 	if err != nil {
 		poolTokenCache.mu.Lock()
 		poolTokenCache.values[cacheKey] = cachedPoolTokens{
@@ -325,9 +338,10 @@ func getPriceDisplayContext(task *models.StrategyTask) priceDisplayContext {
 		return priceDisplayContext{}
 	}
 
+	chain := config.NormalizeChain(task.Chain)
 	token0Addr, token1Addr := resolveTokenAddresses(task)
-	dec0 := GetTokenDecimals(token0Addr)
-	dec1 := GetTokenDecimals(token1Addr)
+	dec0 := GetTokenDecimals(chain, token0Addr)
+	dec1 := GetTokenDecimals(chain, token1Addr)
 
 	side := stableSideFromTask(task)
 	base := strings.TrimSpace(task.Token0Symbol)

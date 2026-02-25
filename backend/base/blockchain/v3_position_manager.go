@@ -177,7 +177,8 @@ func NewV3PositionManager(address common.Address, client *ethclient.Client) (*V3
 	if err != nil {
 		return nil, err
 	}
-	contract := bind.NewBoundContract(address, parsed, client, client, client)
+	rc := wrapRPCRetryClient(client)
+	contract := bind.NewBoundContract(address, parsed, rc, rc, rc)
 	return &V3PositionManager{contract: contract, address: address}, nil
 }
 

@@ -84,7 +84,7 @@ func GetV4PoolFeeGrowthGlobals(stateView, poolManager common.Address, poolID str
 	msg := ethereum.CallMsg{To: &stateView, Data: data}
 	callCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	raw, err := callContractWithRetry(callCtx, msg)
+	raw, err := callContractWithRetry(Client, callCtx, msg)
 	if err != nil {
 		// We need feeGrowthGlobal to compute fees; bubble up the error so callers can fallback/cached-read.
 		v4Debugf("getFeeGrowthGlobals failed: %v", err)
@@ -135,7 +135,7 @@ func GetV4TickFeeGrowthOutside(stateView, poolManager common.Address, poolID str
 	if err == nil {
 		msg := ethereum.CallMsg{To: &stateView, Data: data}
 		callCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-		raw, callErr := callContractWithRetry(callCtx, msg)
+		raw, callErr := callContractWithRetry(Client, callCtx, msg)
 		cancel()
 		if callErr == nil {
 			out, unpackErr := parsedABI.Unpack("getTickFeeGrowthOutside", raw)
@@ -162,7 +162,7 @@ func GetV4TickFeeGrowthOutside(stateView, poolManager common.Address, poolID str
 	msg := ethereum.CallMsg{To: &stateView, Data: data}
 	callCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	raw, err := callContractWithRetry(callCtx, msg)
+	raw, err := callContractWithRetry(Client, callCtx, msg)
 	if err != nil {
 		// Some implementations revert for uninitialized ticks; treat that as 0.
 		// For other errors (e.g., RPC rate limit), bubble up the error so callers can fallback/cached-read.

@@ -355,12 +355,16 @@ func (s *Server) handleSearchPools(w http.ResponseWriter, r *http.Request) {
 		)
 		switch pv {
 		case "v4":
-			poolInfo, infoErr = poolService.GetV4PoolInfo(poolAddr)
+			if strings.EqualFold(chain, "bsc") {
+				poolInfo, infoErr = poolService.GetV4PoolInfo(poolAddr)
+			} else {
+				continue
+			}
 		default:
 			if !common.IsHexAddress(poolAddr) {
 				continue
 			}
-			poolInfo, infoErr = poolService.GetPoolInfo(poolAddr)
+			poolInfo, infoErr = poolService.GetPoolInfoForChain(chain, poolAddr)
 		}
 		if infoErr != nil || poolInfo == nil {
 			continue
@@ -379,14 +383,18 @@ func (s *Server) handleSearchPools(w http.ResponseWriter, r *http.Request) {
 		)
 		if isV4PoolId(poolAddr) {
 			version = "v4"
-			poolInfo, infoErr = poolService.GetV4PoolInfo(poolAddr)
+			if strings.EqualFold(chain, "bsc") {
+				poolInfo, infoErr = poolService.GetV4PoolInfo(poolAddr)
+			} else {
+				infoErr = fmt.Errorf("v4 not supported on chain=%s", chain)
+			}
 		} else {
 			version = "v3"
 			if !common.IsHexAddress(poolAddr) {
 				http.Error(w, "invalid pool address", http.StatusBadRequest)
 				return
 			}
-			poolInfo, infoErr = poolService.GetPoolInfo(poolAddr)
+			poolInfo, infoErr = poolService.GetPoolInfoForChain(chain, poolAddr)
 		}
 		if infoErr == nil && poolInfo != nil {
 			minimal := dexScreenerPair{

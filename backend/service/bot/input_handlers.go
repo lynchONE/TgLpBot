@@ -101,6 +101,30 @@ func isV4PoolId(text string) bool {
 // handlePoolAddress handles pool address input for creating new position
 func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
 	poolInput := strings.TrimSpace(message.Text)
+	chainSession, _ := database.GetUserSession(user.TelegramID, sessionNewPositionChain)
+	chain := config.NormalizeChain(chainSession)
+	if strings.TrimSpace(chainSession) == "" {
+		if cfg, err := b.configService.GetOrCreate(user.ID); err == nil && cfg != nil && !cfg.MultiChainEnabled {
+			chain = config.PickEnabledChain(cfg.DefaultChain)
+			_ = database.SetUserSession(user.TelegramID, sessionNewPositionChain, chain, 30*time.Minute)
+		} else {
+			chains := enabledChains()
+			if len(chains) == 1 {
+				chain = config.NormalizeChain(chains[0])
+				_ = database.SetUserSession(user.TelegramID, sessionNewPositionChain, chain, 30*time.Minute)
+			} else {
+				_ = database.SetUserSession(user.TelegramID, sessionPendingPoolInput, poolInput, 30*time.Minute)
+				_ = database.SetUserSession(user.TelegramID, "state", sessionNewPositionState, 30*time.Minute)
+				b.sendMessageWithKeyboard(
+					message.Chat.ID,
+					"📊 *创建新仓位*\n\n已检测到池子地址/PoolId，请先选择链：",
+					newPositionChainKeyboard(chains),
+				)
+				return
+			}
+		}
+	}
+	stableSym, _, _ := stableSymbolForChain(chain)
 
 	// Check if user has a wallet first
 	wallets, err := b.walletService.GetUserWallets(user.ID)
@@ -112,16 +136,25 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
 
 	// Check if it's a V4 PoolId (64 hex chars)
 	if isV4PoolId(poolInput) {
+		if chain != "bsc" {
+			b.sendMessage(message.Chat.ID, "❌ V4 PoolId 当前仅支持 BSC 链，请切换到 BSC 或输入 V3 池子地址。")
+			return
+		}
+
 		b.sendMessage(message.Chat.ID, "⏳ 正在查询 Uniswap V4 池子信息...")
 
 		poolInfo, err := b.poolService.GetV4PoolInfo(poolInput)
 		if err != nil {
-			b.sendMessage(message.Chat.ID, fmt.Sprintf("❌ 查询 V4 池子信息失败：%v", err))
+			b.sendMessage(
+				message.Chat.ID,
+				fmt.Sprintf("❌ 查询池子信息失败（chain=%s, pool=%s）：%v\n\n请确认地址、链和协议版本是否正确。", chain, poolInput, err),
+			)
 			database.ClearUserSession(user.TelegramID)
 			return
 		}
 
 		// Store pool info in session
+		_ = database.SetUserSession(user.TelegramID, sessionNewPositionChain, chain, 30*time.Minute)
 		database.SetUserSession(user.TelegramID, "pool_address", poolInput, 30*time.Minute)
 		// V4 does not have a per-pool contract address; we query state via PoolManager.
 		// Store PoolManager address for later tick queries if configured.
@@ -157,13 +190,7 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
 				break
 			}
 		}
-		bnbBal, usdtBal := b.getWalletBalances(defaultWallet.Address)
-		balanceText := fmt.Sprintf(
-			"\n💰 *当前钱包：* `%s`\n💎 BNB: %s\n💵 USDT: %s\n",
-			defaultWallet.Address[:10]+"..."+defaultWallet.Address[len(defaultWallet.Address)-8:],
-			bnbBal,
-			usdtBal,
-		)
+		balanceText := b.getPoolInfoWalletBalanceText(chain, defaultWallet.Address)
 
 		// Display pool information
 		text := fmt.Sprintf(`📊 *Uniswap V4 池子信息*
@@ -177,9 +204,9 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
 
 *格式选项：*
 1️⃣ 使用百分比范围: '金额 百分比'
-   例如: '100 5' (表示投入 100 USDT，当前价格 ±5%%)
+   例如: '100 5' (表示投入 100 %s，当前价格 ±5%%)
 2️⃣ 使用上下不对称百分比: '金额 下百分比 上百分比'
-   例如: '100 1 3' (表示投入 100 USDT，当前价格下方 1%%、上方 3%%)
+   例如: '100 1 3' (表示投入 100 %s，当前价格下方 1%%、上方 3%%)
 3️⃣ 可选滑点: 末尾追加 's=滑点'
    例如: '100 5 s=0.5' 或 '100 1 3 s=0.5' (不填则使用全局滑点)
 
@@ -193,6 +220,8 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
 			poolInput[:10],
 			poolInput[len(poolInput)-8:],
 			balanceText,
+			stableSym,
+			stableSym,
 		)
 
 		b.sendMessage(message.Chat.ID, text)
@@ -209,14 +238,18 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
 	// Query V3 pool information
 	b.sendMessage(message.Chat.ID, "⏳ 正在查询 V3 池子信息...")
 
-	poolInfo, err := b.poolService.GetPoolInfo(poolInput)
+	poolInfo, err := b.poolService.GetPoolInfoForChain(chain, poolInput)
 	if err != nil {
-		b.sendMessage(message.Chat.ID, fmt.Sprintf("❌ 查询池子信息失败：%v\n\n请确认地址是否正确。", err))
+		b.sendMessage(
+			message.Chat.ID,
+			fmt.Sprintf("❌ 查询池子信息失败（chain=%s, pool=%s）：%v\n\n请确认地址、链和协议版本是否正确。", chain, poolInput, err),
+		)
 		database.ClearUserSession(user.TelegramID)
 		return
 	}
 
 	// Store pool info in session
+	_ = database.SetUserSession(user.TelegramID, sessionNewPositionChain, chain, 30*time.Minute)
 	database.SetUserSession(user.TelegramID, "pool_address", poolInput, 30*time.Minute)
 	database.SetUserSession(user.TelegramID, "pool_contract_address", poolInfo.Address, 30*time.Minute)
 	database.SetUserSession(user.TelegramID, "pool_version", "v3", 30*time.Minute)
@@ -240,13 +273,7 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
 				break
 			}
 		}
-		bnbBal, usdtBal := b.getWalletBalances(defaultWallet.Address)
-		balanceText = fmt.Sprintf(
-			"\n💰 *当前钱包：* `%s`\n💎 BNB: %s\n💵 USDT: %s\n",
-			defaultWallet.Address[:10]+"..."+defaultWallet.Address[len(defaultWallet.Address)-8:],
-			bnbBal,
-			usdtBal,
-		)
+		balanceText = b.getPoolInfoWalletBalanceText(chain, defaultWallet.Address)
 	}
 
 	// Display pool information
@@ -260,9 +287,9 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
 
 *格式选项：*
 1️⃣ 使用百分比范围: '金额 百分比'
-   例如: '100 5' (表示投入 100 USDT，当前价格 ±5%%)
+   例如: '100 5' (表示投入 100 %s，当前价格 ±5%%)
 2️⃣ 使用上下不对称百分比: '金额 下百分比 上百分比'
-   例如: '100 1 3' (表示投入 100 USDT，当前价格下方 1%%、上方 3%%)
+   例如: '100 1 3' (表示投入 100 %s，当前价格下方 1%%、上方 3%%)
 3️⃣ 可选滑点: 末尾追加 's=滑点'
    例如: '100 5 s=0.5' 或 '100 1 3 s=0.5' (不填则使用全局滑点)
 
@@ -274,6 +301,8 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
 		poolInfo.Token1Symbol,
 		float64(poolInfo.Fee)/10000,
 		balanceText,
+		stableSym,
+		stableSym,
 	)
 
 	b.sendMessage(message.Chat.ID, text)
@@ -282,6 +311,13 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
 // handleTickRange handles tick range input
 func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 	input := strings.TrimSpace(message.Text)
+	chain, chainErr := resolveNewPositionChain(user.ID, user.TelegramID)
+	if chainErr != nil {
+		database.ClearUserSession(user.TelegramID)
+		b.sendMessage(message.Chat.ID, "会话已过期或未选择链。请重新使用 /newposition 并先选择链。")
+		return
+	}
+	stableSym, _, _ := stableSymbolForChain(chain)
 
 	// Expect:
 	// - "amount percentage" (symmetric)
@@ -346,14 +382,14 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 		// "amount percentage"
 		a, err := strconv.ParseFloat(fields[0], 64)
 		if err != nil || a <= 0 {
-			b.sendMessage(message.Chat.ID, "金额无效。请输入正数。\n\n例如：`100 5` 表示投入 100 USDT，当前价格 ±5%。")
+			b.sendMessage(message.Chat.ID, fmt.Sprintf("金额无效。请输入正数。\n\n例如：`100 5` 表示投入 100 %s，当前价格 ±5%%。", stableSym))
 			return
 		}
 
 		percentStr := strings.TrimSuffix(fields[1], "%")
 		pct, err := strconv.ParseFloat(percentStr, 64)
 		if err != nil || pct <= 0 || pct >= 100 {
-			b.sendMessage(message.Chat.ID, "百分比无效。请输入 0 到 100 之间的数字（不含 100）。\n\n例如：`100 5` 表示投入 100 USDT，当前价格 ±5%。")
+			b.sendMessage(message.Chat.ID, fmt.Sprintf("百分比无效。请输入 0 到 100 之间的数字（不含 100）。\n\n例如：`100 5` 表示投入 100 %s，当前价格 ±5%%。", stableSym))
 			return
 		}
 
@@ -365,7 +401,7 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 		// "amount lowerPct upperPct"
 		a, err := strconv.ParseFloat(fields[0], 64)
 		if err != nil || a <= 0 {
-			b.sendMessage(message.Chat.ID, "金额无效。请输入正数。\n\n例如：`100 1 3`（投入 100 USDT，当前价格下方 1%、上方 3%）")
+			b.sendMessage(message.Chat.ID, fmt.Sprintf("金额无效。请输入正数。\n\n例如：`100 1 3`（投入 100 %s，当前价格下方 1%%、上方 3%%）", stableSym))
 			return
 		}
 		lowStr := strings.TrimSuffix(fields[1], "%")
@@ -373,7 +409,7 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 		lowPct, err1 := strconv.ParseFloat(lowStr, 64)
 		upPct, err2 := strconv.ParseFloat(upStr, 64)
 		if err1 != nil || err2 != nil || lowPct <= 0 || upPct <= 0 || lowPct >= 100 || upPct >= 100 {
-			b.sendMessage(message.Chat.ID, "百分比无效。请输入 0 到 100 之间的数字（不含 100）。\n\n例如：`100 1 3`（投入 100 USDT，当前价格下方 1%、上方 3%）")
+			b.sendMessage(message.Chat.ID, fmt.Sprintf("百分比无效。请输入 0 到 100 之间的数字（不含 100）。\n\n例如：`100 1 3`（投入 100 %s，当前价格下方 1%%、上方 3%%）", stableSym))
 			return
 		}
 
@@ -381,13 +417,14 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 		stableLowerPctReq = lowPct
 		stableUpperPctReq = upPct
 	default:
-		b.sendMessage(message.Chat.ID, "格式无效。请使用：\n1) `金额 百分比`（例如：`100 5` 表示投入 100 USDT，当前价格 ±5%）\n2) `金额 下百分比 上百分比`（例如：`100 1 3` 表示投入 100 USDT，当前价格下方 1%、上方 3%）\n可选滑点：末尾追加 `s=0.5`")
+		b.sendMessage(message.Chat.ID, fmt.Sprintf("格式无效。请使用：\n1) `金额 百分比`（例如：`100 5` 表示投入 100 %s，当前价格 ±5%%）\n2) `金额 下百分比 上百分比`（例如：`100 1 3` 表示投入 100 %s，当前价格下方 1%%、上方 3%%）\n可选滑点：末尾追加 `s=0.5`", stableSym, stableSym))
 		return
 	}
 
-	// Validate amount against default wallet USDT balance when possible
+	// Validate amount against default wallet stable balance when possible
 	wallets, wErr := b.walletService.GetUserWallets(user.ID)
-	if wErr == nil && len(wallets) > 0 && blockchain.Client != nil {
+	client, _, _ := blockchain.GetEVMClient(chain)
+	if wErr == nil && len(wallets) > 0 && client != nil {
 		defaultWallet := wallets[0]
 		for _, w := range wallets {
 			if w.IsDefault {
@@ -396,20 +433,22 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 			}
 		}
 		addr := common.HexToAddress(defaultWallet.Address)
-		usdtAddrStr := "0x55d398326f99059fF775485246999027B3197955"
-		if config.AppConfig != nil && common.IsHexAddress(config.AppConfig.USDTAddress) {
-			usdtAddrStr = config.AppConfig.USDTAddress
+		stableSym, stableDecimals, stableAddrStr := stableSymbolForChain(chain)
+		if !common.IsHexAddress(stableAddrStr) && chain == "bsc" {
+			stableAddrStr = "0x55d398326f99059fF775485246999027B3197955"
 		}
-		usdtAddr := common.HexToAddress(usdtAddrStr)
-		usdtBal, err := blockchain.GetTokenBalance(usdtAddr, addr)
-		if err == nil {
-			usdtFloat := new(big.Float).SetInt(usdtBal)
-			divisor := new(big.Float).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
-			usdtFloat.Quo(usdtFloat, divisor)
-			usdtAvailable, _ := usdtFloat.Float64()
-			if amount-usdtAvailable > 1e-9 {
-				b.sendMessage(message.Chat.ID, fmt.Sprintf("余额不足。当前钱包 USDT 余额：%.2f\n\n请输入不超过余额的金额。", usdtAvailable))
-				return
+		if common.IsHexAddress(stableAddrStr) {
+			stableAddr := common.HexToAddress(stableAddrStr)
+			stableBal, err := blockchain.GetTokenBalanceWithClient(client, stableAddr, addr)
+			if err == nil {
+				stableFloat := new(big.Float).SetInt(stableBal)
+				divisor := new(big.Float).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(stableDecimals)), nil))
+				stableFloat.Quo(stableFloat, divisor)
+				stableAvailable, _ := stableFloat.Float64()
+				if amount-stableAvailable > 1e-9 {
+					b.sendMessage(message.Chat.ID, fmt.Sprintf("余额不足。当前钱包 %s 余额：%.2f\n\n请输入不超过余额的金额。", stableSym, stableAvailable))
+					return
+				}
 			}
 		}
 	}
@@ -437,6 +476,7 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 
 	// Prepare a minimal task context for stable-side detection and stable/tick percentage conversion.
 	tmpTask := &models.StrategyTask{
+		Chain:         chain,
 		PoolId:        poolID,
 		PoolVersion:   poolVersion,
 		Token0Symbol:  token0Symbol,
@@ -484,7 +524,12 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 			return
 		}
 
-		currentTick, err = blockchain.GetV3PoolCurrentTick(common.HexToAddress(poolContractAddrStr))
+		client, _, cerr := blockchain.GetEVMClient(chain)
+		if cerr != nil {
+			b.sendMessage(message.Chat.ID, fmt.Sprintf("连接链节点失败，无法按百分比计算 tick 范围：%v", cerr))
+			return
+		}
+		currentTick, err = blockchain.GetV3PoolCurrentTickWithClient(client, common.HexToAddress(poolContractAddrStr))
 		if err != nil {
 			b.sendMessage(message.Chat.ID, fmt.Sprintf("获取当前 tick 失败，无法按百分比计算 tick 范围：%v", err))
 			return
@@ -556,9 +601,9 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 %s
 🎯 当前 Tick：%d
 📊 Tick 范围：%d 到 %d
-💰 投入金额：%.2f USDT
+💰 投入金额：%.2f %s
 
-⏳ 正在创建任务并开仓...`, rangeLine, currentTick, tickLower, tickUpper, amount))
+⏳ 正在创建任务并开仓...`, rangeLine, currentTick, tickLower, tickUpper, amount, stableSym))
 
 	// 调用创建任务逻辑
 	b.createPositionTask(message.Chat.ID, user)
@@ -566,6 +611,13 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 
 // createPositionTask 创建任务并开仓
 func (b *Bot) createPositionTask(chatID int64, user *models.User) {
+	chain, chainErr := resolveNewPositionChain(user.ID, user.TelegramID)
+	if chainErr != nil {
+		database.ClearUserSession(user.TelegramID)
+		b.sendMessage(chatID, "会话已过期或未选择链。请重新使用 /newposition 并先选择链。")
+		return
+	}
+
 	// Get stored data
 	poolAddress, _ := database.GetUserSession(user.TelegramID, "pool_address")
 	poolVersion, _ := database.GetUserSession(user.TelegramID, "pool_version")
@@ -617,6 +669,7 @@ func (b *Bot) createPositionTask(chatID int64, user *models.User) {
 	// Create Strategy Task
 	task := &models.StrategyTask{
 		UserID:               user.ID,
+		Chain:                chain,
 		PoolId:               poolAddress,
 		PoolVersion:          poolVersion,
 		Exchange:             poolExchange,
@@ -695,6 +748,13 @@ func (b *Bot) handlePositionAmount(message *tgbotapi.Message, user *models.User)
 	}
 
 	// Get stored data
+	chain, chainErr := resolveNewPositionChain(user.ID, user.TelegramID)
+	if chainErr != nil {
+		database.ClearUserSession(user.TelegramID)
+		b.sendMessage(message.Chat.ID, "会话已过期或未选择链。请重新使用 /newposition 并先选择链。")
+		return
+	}
+	stableSym, _, _ := stableSymbolForChain(chain)
 	poolAddress, _ := database.GetUserSession(user.TelegramID, "pool_address")
 	tickLowerStr, _ := database.GetUserSession(user.TelegramID, "tick_lower")
 	tickUpperStr, _ := database.GetUserSession(user.TelegramID, "tick_upper")
@@ -714,7 +774,7 @@ func (b *Bot) handlePositionAmount(message *tgbotapi.Message, user *models.User)
 📊 *仓位信息：*
 池子地址：`+"`%s`"+`
 Tick 范围：%d 到 %d
-投入金额：%.2f USDT
+投入金额：%.2f %s
 
 🔄 任务已启动，正在后台运行...
 
@@ -723,6 +783,7 @@ Tick 范围：%d 到 %d
 		tickLower,
 		tickUpper,
 		amount,
+		stableSym,
 	)
 
 	b.sendMessage(message.Chat.ID, text)

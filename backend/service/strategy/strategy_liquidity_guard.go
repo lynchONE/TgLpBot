@@ -146,24 +146,42 @@ func (s *StrategyService) readOnChainTaskLiquidity(task *models.StrategyTask) (*
 	if config.AppConfig == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
-	if blockchain.Client == nil {
-		return nil, fmt.Errorf("blockchain client not initialized")
-	}
 
+	chain := config.NormalizeChain(task.Chain)
 	version := strings.ToLower(strings.TrimSpace(task.PoolVersion))
 	switch version {
 	case "v4":
+		// V4 reads are still single-chain; restrict to bsc until v4 blockchain helpers are refactored.
+		if chain != "bsc" {
+			return nil, fmt.Errorf("v4 not supported on chain=%s", chain)
+		}
+		if blockchain.Client == nil {
+			return nil, fmt.Errorf("blockchain client not initialized")
+		}
+
 		tokenId, err := convert.ParseBigIntFlexible(task.V4TokenID)
 		if err != nil || tokenId == nil || tokenId.Sign() <= 0 {
 			return nil, fmt.Errorf("invalid V4 tokenId")
 		}
-		if !common.IsHexAddress(config.AppConfig.UniswapV4PositionManagerAddress) {
+		cc, ok := config.AppConfig.GetChainConfig(chain)
+		if !ok {
+			return nil, fmt.Errorf("chain config not found: %s", chain)
+		}
+		pmAddrStr := strings.TrimSpace(cc.UniswapV4PositionManagerAddress)
+		poolMgrStr := strings.TrimSpace(cc.UniswapV4PoolManagerAddress)
+		if !common.IsHexAddress(pmAddrStr) {
+			pmAddrStr = strings.TrimSpace(config.AppConfig.UniswapV4PositionManagerAddress)
+		}
+		if !common.IsHexAddress(poolMgrStr) {
+			poolMgrStr = strings.TrimSpace(config.AppConfig.UniswapV4PoolManagerAddress)
+		}
+		if !common.IsHexAddress(pmAddrStr) {
 			return nil, fmt.Errorf("UNISWAP_V4_POSITION_MANAGER_ADDRESS not configured")
 		}
-		v4pmAddr := common.HexToAddress(config.AppConfig.UniswapV4PositionManagerAddress)
+		v4pmAddr := common.HexToAddress(pmAddrStr)
 		poolMgr := common.Address{}
-		if common.IsHexAddress(config.AppConfig.UniswapV4PoolManagerAddress) {
-			poolMgr = common.HexToAddress(config.AppConfig.UniswapV4PoolManagerAddress)
+		if common.IsHexAddress(poolMgrStr) {
+			poolMgr = common.HexToAddress(poolMgrStr)
 		}
 		pos, err := blockchain.GetV4PositionInfo(v4pmAddr, poolMgr, task.PoolId, tokenId)
 		if err != nil {
@@ -179,7 +197,26 @@ func (s *StrategyService) readOnChainTaskLiquidity(task *models.StrategyTask) (*
 			return nil, fmt.Errorf("invalid V3 tokenId")
 		}
 
+		client, _, err := blockchain.GetEVMClient(chain)
+		if err != nil {
+			return nil, err
+		}
+
 		pmAddrStr := strings.TrimSpace(task.V3PositionManagerAddress)
+		if !common.IsHexAddress(pmAddrStr) {
+			if cc, ok := config.AppConfig.GetChainConfig(chain); ok {
+				if common.IsHexAddress(cc.DefaultV3PositionManagerAddress) {
+					pmAddrStr = strings.TrimSpace(cc.DefaultV3PositionManagerAddress)
+				} else {
+					for _, dep := range cc.V3Deployments {
+						if common.IsHexAddress(dep.PositionManagerAddress) {
+							pmAddrStr = strings.TrimSpace(dep.PositionManagerAddress)
+							break
+						}
+					}
+				}
+			}
+		}
 		if !common.IsHexAddress(pmAddrStr) {
 			ex := strings.ToLower(strings.TrimSpace(task.Exchange))
 			if strings.Contains(ex, "pancake") && common.IsHexAddress(config.AppConfig.PancakeV3PositionManagerAddress) {
@@ -192,7 +229,7 @@ func (s *StrategyService) readOnChainTaskLiquidity(task *models.StrategyTask) (*
 			return nil, fmt.Errorf("V3 position manager address not configured")
 		}
 
-		v3pm, err := blockchain.NewV3PositionManager(common.HexToAddress(pmAddrStr), blockchain.Client)
+		v3pm, err := blockchain.NewV3PositionManager(common.HexToAddress(pmAddrStr), client)
 		if err != nil {
 			return nil, fmt.Errorf("init v3 position manager failed: %w", err)
 		}

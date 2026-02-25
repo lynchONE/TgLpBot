@@ -506,13 +506,18 @@ func (s *SmartMoneyFollowService) executeAdd(job models.SmartMoneyFollowJob, cfg
 		return 0, "", fmt.Errorf("service not initialized")
 	}
 
+	chain = config.NormalizeChain(job.Chain)
+
 	var info *pool.PoolInfo
 	var err error
 	switch poolVersion {
 	case "v4":
+		if chain != "bsc" {
+			return 0, "", fmt.Errorf("v4 not supported on chain=%s", chain)
+		}
 		info, err = s.poolSvc.GetV4PoolInfo(poolID)
 	default:
-		info, err = s.poolSvc.GetPoolInfo(poolID)
+		info, err = s.poolSvc.GetPoolInfoForChain(chain, poolID)
 	}
 	if err != nil || info == nil {
 		return 0, "", fmt.Errorf("failed to load pool info: %v", err)
@@ -526,6 +531,9 @@ func (s *SmartMoneyFollowService) executeAdd(job models.SmartMoneyFollowJob, cfg
 	currentTick := 0
 	switch poolVersion {
 	case "v4":
+		if chain != "bsc" {
+			return 0, "", fmt.Errorf("v4 not supported on chain=%s", chain)
+		}
 		if config.AppConfig == nil || !common.IsHexAddress(config.AppConfig.UniswapV4PoolManagerAddress) {
 			return 0, "", fmt.Errorf("UNISWAP_V4_POOL_MANAGER_ADDRESS not set")
 		}
@@ -539,7 +547,11 @@ func (s *SmartMoneyFollowService) executeAdd(job models.SmartMoneyFollowJob, cfg
 		if !common.IsHexAddress(poolID) {
 			return 0, "", fmt.Errorf("invalid pool id")
 		}
-		currentTick, err = blockchain.GetV3PoolCurrentTick(common.HexToAddress(poolID))
+		client, _, cerr := blockchain.GetEVMClient(chain)
+		if cerr != nil {
+			return 0, "", cerr
+		}
+		currentTick, err = blockchain.GetV3PoolCurrentTickWithClient(client, common.HexToAddress(poolID))
 	}
 	if err != nil {
 		return 0, "", fmt.Errorf("failed to read current tick")
@@ -570,6 +582,7 @@ func (s *SmartMoneyFollowService) executeAdd(job models.SmartMoneyFollowJob, cfg
 
 	task := &models.StrategyTask{
 		UserID:               job.UserID,
+		Chain:                chain,
 		PoolId:               poolID,
 		PoolVersion:          poolVersion,
 		Exchange:             strings.TrimSpace(info.Exchange),

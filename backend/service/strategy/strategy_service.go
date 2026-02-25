@@ -233,7 +233,7 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 	now := time.Now()
 
 	// Try to get from cache first
-	cacheKey := fmt.Sprintf("%s_%s", task.PoolVersion, task.PoolId)
+	cacheKey := fmt.Sprintf("%s_%s_%s", config.NormalizeChain(task.Chain), task.PoolVersion, task.PoolId)
 	if cached, ok := tickCache[cacheKey]; ok {
 		currentTick = cached
 	} else {
@@ -816,14 +816,18 @@ func (s *StrategyService) refreshTaskPoolMeta(task *models.StrategyTask) error {
 		return fmt.Errorf("pool id is empty")
 	}
 
+	chain := config.NormalizeChain(task.Chain)
 	version := strings.ToLower(strings.TrimSpace(task.PoolVersion))
 	var info *pool.PoolInfo
 	var err error
 	switch version {
 	case "v4":
+		if chain != "bsc" {
+			return fmt.Errorf("v4 not supported on chain=%s", chain)
+		}
 		info, err = s.poolService.GetV4PoolInfo(poolID)
 	default:
-		info, err = s.poolService.GetPoolInfo(poolID)
+		info, err = s.poolService.GetPoolInfoForChain(chain, poolID)
 	}
 	if err != nil {
 		return err
@@ -876,28 +880,50 @@ func (s *StrategyService) refreshTaskPoolMeta(task *models.StrategyTask) error {
 }
 
 func (s *StrategyService) getCurrentTick(task *models.StrategyTask) (int, error) {
+	chain := config.NormalizeChain(task.Chain)
 	version := strings.ToLower(strings.TrimSpace(task.PoolVersion))
 	switch version {
 	case "v4":
 		if config.AppConfig == nil {
 			return 0, fmt.Errorf("config not loaded")
 		}
-		if !common.IsHexAddress(config.AppConfig.UniswapV4PoolManagerAddress) {
+		if chain != "bsc" {
+			return 0, fmt.Errorf("v4 not supported on chain=%s", chain)
+		}
+
+		cc, ok := config.AppConfig.GetChainConfig(chain)
+		if !ok {
+			return 0, fmt.Errorf("chain config not found: %s", chain)
+		}
+
+		poolManagerStr := strings.TrimSpace(cc.UniswapV4PoolManagerAddress)
+		stateViewStr := strings.TrimSpace(cc.UniswapV4StateViewAddress)
+		if !common.IsHexAddress(poolManagerStr) {
+			poolManagerStr = strings.TrimSpace(config.AppConfig.UniswapV4PoolManagerAddress)
+		}
+		if !common.IsHexAddress(stateViewStr) {
+			stateViewStr = strings.TrimSpace(config.AppConfig.UniswapV4StateViewAddress)
+		}
+		if !common.IsHexAddress(poolManagerStr) {
 			return 0, fmt.Errorf("UNISWAP_V4_POOL_MANAGER_ADDRESS not set")
 		}
-		poolManager := common.HexToAddress(config.AppConfig.UniswapV4PoolManagerAddress)
-		// Use StateView directly (PoolManager.slot0 is not supported on this deployment)
-		if !common.IsHexAddress(config.AppConfig.UniswapV4StateViewAddress) {
+		if !common.IsHexAddress(stateViewStr) {
 			return 0, fmt.Errorf("UNISWAP_V4_STATE_VIEW_ADDRESS not configured for V4 tick query")
 		}
-		stateView := common.HexToAddress(config.AppConfig.UniswapV4StateViewAddress)
+
+		poolManager := common.HexToAddress(poolManagerStr)
+		stateView := common.HexToAddress(stateViewStr)
 		currentTick, err := blockchain.GetUniswapV4PoolCurrentTickViaStateView(stateView, poolManager, task.PoolId)
 		return currentTick, err
 	default:
 		if !common.IsHexAddress(task.PoolId) {
 			return 0, fmt.Errorf("invalid V3 pool address: %s", task.PoolId)
 		}
-		return blockchain.GetV3PoolCurrentTick(common.HexToAddress(task.PoolId))
+		client, _, err := blockchain.GetEVMClient(chain)
+		if err != nil {
+			return 0, err
+		}
+		return blockchain.GetV3PoolCurrentTickWithClient(client, common.HexToAddress(task.PoolId))
 	}
 }
 

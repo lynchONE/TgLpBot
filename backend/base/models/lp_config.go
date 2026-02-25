@@ -40,6 +40,10 @@ type GlobalConfig struct {
 	// Token filters
 	FilterChineseTokens bool `gorm:"not null;default:false" json:"filter_chinese_tokens"`
 
+	// Chain selection mode (per-user UX)
+	MultiChainEnabled bool   `gorm:"not null;default:true" json:"multi_chain_enabled"`
+	DefaultChain      string `gorm:"size:16;not null;default:'bsc'" json:"default_chain"`
+
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`

@@ -6,155 +6,249 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"strings"
+	"sync"
+	"time"
 
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-var Client *ethclient.Client
-var ChainID *big.Int
-var clientInstance *ClientWrapper
+// Legacy single-chain globals (default chain: "bsc"). Avoid using these in multi-chain logic.
+var (
+	Client  *ethclient.Client
+	ChainID *big.Int
+)
 
-// ClientWrapper wraps ethclient.Client with additional methods
-type ClientWrapper struct {
-	Client *ethclient.Client // 公开以便访问
-	Ctx    context.Context   // 上下文
-}
+var (
+	evmMu       sync.RWMutex
+	evmClients  = make(map[string]*ethclient.Client)
+	evmChainIDs = make(map[string]*big.Int)
+)
 
-// GetClient returns the global client wrapper instance
-func GetClient() *ClientWrapper {
-	if clientInstance == nil && Client != nil {
-		clientInstance = &ClientWrapper{
-			Client: Client,
-			Ctx:    context.Background(),
+// InitBlockchains initializes per-chain blockchain clients (single-instance multi-chain).
+// Enabled chains are loaded from config.AppConfig.EnabledChains / CHAINS env.
+func InitBlockchains() error {
+	if config.AppConfig == nil {
+		return fmt.Errorf("config not loaded")
+	}
+
+	enabled := config.AppConfig.EnabledChains
+	if len(enabled) == 0 {
+		enabled = []string{"bsc"}
+	}
+
+	type initResult struct {
+		chain   string
+		client  *ethclient.Client
+		chainID *big.Int
+	}
+
+	results := make([]initResult, 0, len(enabled))
+	var errs []string
+
+	for _, raw := range enabled {
+		chain := config.NormalizeChain(raw)
+		cc, ok := config.AppConfig.GetChainConfig(chain)
+		if !ok {
+			errs = append(errs, fmt.Sprintf("%s: chain config not found", chain))
+			continue
+		}
+		if cc.Kind != config.ChainKindEVM {
+			errs = append(errs, fmt.Sprintf("%s: chain kind not supported: %s", chain, cc.Kind))
+			continue
+		}
+
+		rpcURL := strings.TrimSpace(cc.RpcURL)
+		if rpcURL == "" {
+			errs = append(errs, fmt.Sprintf("%s: rpc url not configured", chain))
+			continue
+		}
+
+		log.Printf("Connecting to %s network (chainId=%d): %s", chain, cc.ChainID, rpcURL)
+		c, err := ethclient.Dial(rpcURL)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: dial failed: %v", chain, err))
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		blockNumber, err := c.BlockNumber(ctx)
+		cancel()
+		if err != nil {
+			c.Close()
+			errs = append(errs, fmt.Sprintf("%s: get block number failed: %v", chain, err))
+			continue
+		}
+
+		log.Printf("%s blockchain connected successfully, current block: %d", chain, blockNumber)
+		results = append(results, initResult{
+			chain:   chain,
+			client:  c,
+			chainID: big.NewInt(cc.ChainID),
+		})
+	}
+
+	evmMu.Lock()
+	for _, c := range evmClients {
+		if c != nil {
+			c.Close()
 		}
 	}
-	return clientInstance
-}
-
-// InitBlockchain initializes blockchain client
-func InitBlockchain() error {
-	log.Printf("Connecting to BSC network: %s", config.AppConfig.BSCRpcURL)
-
-	var err error
-	Client, err = ethclient.Dial(config.AppConfig.BSCRpcURL)
-	if err != nil {
-		return fmt.Errorf("failed to connect to BSC network: %w", err)
+	evmClients = make(map[string]*ethclient.Client, len(results))
+	evmChainIDs = make(map[string]*big.Int, len(results))
+	for _, r := range results {
+		evmClients[r.chain] = r.client
+		if r.chainID == nil {
+			evmChainIDs[r.chain] = big.NewInt(0)
+		} else {
+			evmChainIDs[r.chain] = new(big.Int).Set(r.chainID)
+		}
 	}
 
-	ChainID = big.NewInt(config.AppConfig.BSCChainID)
-	log.Printf("Chain ID set to: %d", config.AppConfig.BSCChainID)
-
-	// Test connection with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*1000000000) // 30 seconds
-	defer cancel()
-
-	log.Println("Testing blockchain connection...")
-	blockNumber, err := Client.BlockNumber(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get block number: %w", err)
+	// Keep legacy globals pointing at bsc when available (backward compatibility).
+	Client = nil
+	ChainID = nil
+	if c, ok := evmClients["bsc"]; ok {
+		Client = c
+		if id := evmChainIDs["bsc"]; id != nil {
+			ChainID = new(big.Int).Set(id)
+		}
+	} else if len(enabled) > 0 {
+		first := config.NormalizeChain(enabled[0])
+		if c := evmClients[first]; c != nil {
+			Client = c
+			if id := evmChainIDs[first]; id != nil {
+				ChainID = new(big.Int).Set(id)
+			}
+		}
 	}
 
-	log.Printf("BSC blockchain connected successfully, current block: %d", blockNumber)
+	evmMu.Unlock()
+
+	if len(evmClients) == 0 {
+		if len(errs) > 0 {
+			return fmt.Errorf("init blockchains failed: %s", strings.Join(errs, "; "))
+		}
+		return fmt.Errorf("no blockchain clients initialized")
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("init blockchains partial failure: %s", strings.Join(errs, "; "))
+	}
 	return nil
 }
 
-// CloseBlockchain closes the blockchain client
-func CloseBlockchain() {
-	if Client != nil {
-		Client.Close()
+// CloseBlockchains closes all initialized blockchain clients.
+func CloseBlockchains() {
+	evmMu.Lock()
+	for _, c := range evmClients {
+		if c != nil {
+			c.Close()
+		}
 	}
+	evmClients = make(map[string]*ethclient.Client)
+	evmChainIDs = make(map[string]*big.Int)
+	Client = nil
+	ChainID = nil
+	evmMu.Unlock()
 }
 
-// GetBalance returns the balance of an address
-func GetBalance(address common.Address) (*big.Int, error) {
-	balance, err := Client.BalanceAt(context.Background(), address, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get balance: %w", err)
+// GetEVMClient returns the EVM client and chainId for a given chain key (e.g. "bsc", "base").
+func GetEVMClient(chain string) (*ethclient.Client, *big.Int, error) {
+	chain = config.NormalizeChain(chain)
+	evmMu.RLock()
+	c := evmClients[chain]
+	id := evmChainIDs[chain]
+	evmMu.RUnlock()
+	if c == nil {
+		return nil, nil, fmt.Errorf("evm client not initialized for chain=%s", chain)
 	}
-	return balance, nil
+	if id == nil {
+		id = big.NewInt(0)
+	}
+	return c, new(big.Int).Set(id), nil
 }
 
-// GetTokenBalance returns the balance of a token for an address
-func GetTokenBalance(tokenAddress, walletAddress common.Address) (*big.Int, error) {
-	token, err := NewERC20(tokenAddress, Client)
+// InitBlockchain initializes blockchain clients (backward compatible wrapper).
+func InitBlockchain() error { return InitBlockchains() }
+
+// CloseBlockchain closes blockchain clients (backward compatible wrapper).
+func CloseBlockchain() { CloseBlockchains() }
+
+// GetBalanceWithClient returns the native balance (wei) of an address.
+func GetBalanceWithClient(client *ethclient.Client, address common.Address) (*big.Int, error) {
+	if client == nil {
+		return nil, fmt.Errorf("blockchain client not initialized")
+	}
+	return client.BalanceAt(context.Background(), address, nil)
+}
+
+// GetTokenBalanceWithClient returns the balance (raw units) of a token for an address.
+func GetTokenBalanceWithClient(client *ethclient.Client, tokenAddress, walletAddress common.Address) (*big.Int, error) {
+	if client == nil {
+		return nil, fmt.Errorf("blockchain client not initialized")
+	}
+	token, err := NewERC20(tokenAddress, client)
 	if err != nil {
 		return nil, err
 	}
-
-	balance, err := token.BalanceOf(nil, walletAddress)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get token balance: %w", err)
-	}
-
-	return balance, nil
+	return token.BalanceOf(nil, walletAddress)
 }
 
-// GetTokenDecimals returns the decimals of a token
-func GetTokenDecimals(tokenAddress common.Address) (uint8, error) {
-	token, err := NewERC20(tokenAddress, Client)
+// GetTokenDecimalsWithClient returns token decimals.
+func GetTokenDecimalsWithClient(client *ethclient.Client, tokenAddress common.Address) (uint8, error) {
+	if client == nil {
+		return 0, fmt.Errorf("blockchain client not initialized")
+	}
+	token, err := NewERC20(tokenAddress, client)
 	if err != nil {
 		return 0, err
 	}
-
-	decimals, err := token.Decimals(nil)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get token decimals: %w", err)
-	}
-
-	return decimals, nil
+	return token.Decimals(nil)
 }
 
-// GetTokenSymbol returns the symbol of a token
-func GetTokenSymbol(tokenAddress common.Address) (string, error) {
-	token, err := NewERC20(tokenAddress, Client)
+// GetTokenSymbolWithClient returns token symbol.
+func GetTokenSymbolWithClient(client *ethclient.Client, tokenAddress common.Address) (string, error) {
+	if client == nil {
+		return "", fmt.Errorf("blockchain client not initialized")
+	}
+	token, err := NewERC20(tokenAddress, client)
 	if err != nil {
 		return "", err
 	}
-
-	symbol, err := token.Symbol(nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to get token symbol: %w", err)
-	}
-
-	return symbol, nil
+	return token.Symbol(nil)
 }
 
-// GetNonce returns the nonce for an address
-func GetNonce(address common.Address) (uint64, error) {
-	nonce, err := Client.PendingNonceAt(context.Background(), address)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get nonce: %w", err)
+// GetNonceWithClient returns the pending nonce for an address.
+func GetNonceWithClient(client *ethclient.Client, address common.Address) (uint64, error) {
+	if client == nil {
+		return 0, fmt.Errorf("blockchain client not initialized")
 	}
-	return nonce, nil
+	return client.PendingNonceAt(context.Background(), address)
 }
 
-// GetGasPrice returns the current gas price
-func GetGasPrice() (*big.Int, error) {
-	gasPrice, err := Client.SuggestGasPrice(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("failed to get gas price: %w", err)
+// GetGasPriceWithClient returns suggested gas price (legacy/AccessList).
+func GetGasPriceWithClient(client *ethclient.Client) (*big.Int, error) {
+	if client == nil {
+		return nil, fmt.Errorf("blockchain client not initialized")
 	}
-
-	return gasPrice, nil
+	return client.SuggestGasPrice(context.Background())
 }
 
-// GetGasPriceWithMultiplier returns suggestGasPrice*multiplier.
-func GetGasPriceWithMultiplier(multiplier float64) (*big.Int, error) {
-	if Client == nil {
+// GetGasPriceWithMultiplierWithClient returns suggestGasPrice*multiplier (legacy/AccessList).
+func GetGasPriceWithMultiplierWithClient(client *ethclient.Client, multiplier float64) (*big.Int, error) {
+	if client == nil {
 		return nil, fmt.Errorf("blockchain client not initialized")
 	}
 	if multiplier <= 0 {
 		multiplier = 1
 	}
 
-	gasPrice, err := Client.SuggestGasPrice(context.Background())
+	gasPrice, err := client.SuggestGasPrice(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("failed to get gas price: %w", err)
+		return nil, err
 	}
 
 	if multiplier != 1 {
@@ -172,103 +266,83 @@ func GetGasPriceWithMultiplier(multiplier float64) (*big.Int, error) {
 	return gasPrice, nil
 }
 
-// SignTransaction signs a transaction with private key
-func SignTransaction(tx *types.Transaction, privateKeyHex string) (*types.Transaction, error) {
+// SendTransactionWithClient sends a signed transaction.
+func SendTransactionWithClient(client *ethclient.Client, signedTx *types.Transaction) error {
+	if client == nil {
+		return fmt.Errorf("blockchain client not initialized")
+	}
+	if signedTx == nil {
+		return fmt.Errorf("signed tx is nil")
+	}
+	return client.SendTransaction(context.Background(), signedTx)
+}
+
+// GetTransactionReceiptWithClient returns the receipt of a transaction.
+func GetTransactionReceiptWithClient(client *ethclient.Client, txHash common.Hash) (*types.Receipt, error) {
+	if client == nil {
+		return nil, fmt.Errorf("blockchain client not initialized")
+	}
+	return client.TransactionReceipt(context.Background(), txHash)
+}
+
+// SignTransactionWithChainID signs a transaction with the given chainId.
+func SignTransactionWithChainID(tx *types.Transaction, chainID *big.Int, privateKeyHex string) (*types.Transaction, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("tx is nil")
+	}
+	if chainID == nil {
+		return nil, fmt.Errorf("chainID is nil")
+	}
 	privateKey, err := crypto.HexToECDSA(privateKeyHex)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse private key: %w", err)
 	}
-
-	signedTx, err := types.SignTx(tx, types.NewEIP155Signer(ChainID), privateKey)
+	signedTx, err := types.SignTx(tx, types.NewEIP155Signer(chainID), privateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign transaction: %w", err)
 	}
-
 	return signedTx, nil
 }
 
-// SendTransaction sends a signed transaction
-func SendTransaction(signedTx *types.Transaction) (common.Hash, error) {
-	err := Client.SendTransaction(context.Background(), signedTx)
-	if err != nil {
-		return common.Hash{}, fmt.Errorf("failed to send transaction: %w", err)
-	}
+// ------------------------------------------------------------------------------------
+// Legacy helpers for default chain (kept for backwards compatibility).
+// ------------------------------------------------------------------------------------
 
+func GetBalance(address common.Address) (*big.Int, error) {
+	return GetBalanceWithClient(Client, address)
+}
+
+func GetTokenBalance(tokenAddress, walletAddress common.Address) (*big.Int, error) {
+	return GetTokenBalanceWithClient(Client, tokenAddress, walletAddress)
+}
+
+func GetTokenDecimals(tokenAddress common.Address) (uint8, error) {
+	return GetTokenDecimalsWithClient(Client, tokenAddress)
+}
+
+func GetTokenSymbol(tokenAddress common.Address) (string, error) {
+	return GetTokenSymbolWithClient(Client, tokenAddress)
+}
+
+func GetNonce(address common.Address) (uint64, error) { return GetNonceWithClient(Client, address) }
+
+func GetGasPrice() (*big.Int, error) { return GetGasPriceWithClient(Client) }
+
+func SignTransaction(tx *types.Transaction, privateKeyHex string) (*types.Transaction, error) {
+	return SignTransactionWithChainID(tx, ChainID, privateKeyHex)
+}
+
+func SendTransaction(signedTx *types.Transaction) (common.Hash, error) {
+	if err := SendTransactionWithClient(Client, signedTx); err != nil {
+		return common.Hash{}, err
+	}
 	return signedTx.Hash(), nil
 }
 
-// WaitForTransaction waits for a transaction to be mined
 func WaitForTransaction(txHash common.Hash) (*types.Receipt, error) {
-	ctx := context.Background()
-
-	receipt, err := Client.TransactionReceipt(ctx, txHash)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get transaction receipt: %w", err)
-	}
-
-	return receipt, nil
+	return GetTransactionReceiptWithClient(Client, txHash)
 }
 
-// GetTransactionReceipt returns the receipt of a transaction
 func GetTransactionReceipt(txHash common.Hash) (*types.Receipt, error) {
-	receipt, err := Client.TransactionReceipt(context.Background(), txHash)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get transaction receipt: %w", err)
-	}
-	return receipt, nil
-}
-
-// CallContract calls a contract method and returns the raw result
-func (c *ClientWrapper) CallContract(contractAddress common.Address, data []byte) ([]byte, error) {
-	if c.Client == nil {
-		return nil, fmt.Errorf("client not initialized")
-	}
-
-	msg := ethereum.CallMsg{
-		To:   &contractAddress,
-		Data: data,
-	}
-
-	result, err := c.Client.CallContract(context.Background(), msg, nil)
-	if err != nil {
-		return nil, fmt.Errorf("contract call failed: %w", err)
-	}
-
-	return result, nil
-}
-
-// CallContractUnpack calls a contract method and unpacks the result using the provided ABI
-func (c *ClientWrapper) CallContractUnpack(contractAddress common.Address, contractABI abi.ABI, method string, args ...interface{}) ([]interface{}, error) {
-	if c.Client == nil {
-		return nil, fmt.Errorf("client not initialized")
-	}
-
-	// Pack the method call
-	data, err := contractABI.Pack(method, args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to pack method call: %w", err)
-	}
-
-	// Call the contract
-	result, err := c.CallContract(contractAddress, data)
-	if err != nil {
-		return nil, err
-	}
-
-	// Unpack the result
-	unpacked, err := contractABI.Unpack(method, result)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unpack result: %w", err)
-	}
-
-	return unpacked, nil
-}
-
-// FilterLogs filters logs based on the filter query
-func (c *ClientWrapper) FilterLogs(query ethereum.FilterQuery) ([]types.Log, error) {
-	if c.Client == nil {
-		return nil, fmt.Errorf("client not initialized")
-	}
-
-	return c.Client.FilterLogs(context.Background(), query)
+	return GetTransactionReceiptWithClient(Client, txHash)
 }

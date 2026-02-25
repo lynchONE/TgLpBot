@@ -300,5 +300,6 @@ func v4ExtsloadContract(address common.Address, client *ethclient.Client) (*bind
 	if v4ExtsloadErr != nil {
 		return nil, v4ExtsloadErr
 	}
-	return bind.NewBoundContract(address, v4ExtsloadParsed, client, client, client), nil
+	rc := wrapRPCRetryClient(client)
+	return bind.NewBoundContract(address, v4ExtsloadParsed, rc, rc, rc), nil
 }

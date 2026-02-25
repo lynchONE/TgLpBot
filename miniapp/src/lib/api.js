@@ -683,11 +683,12 @@ export async function fetchPoolOHLCV({ apiBaseUrl, initData, chain, poolAddress,
     return resp.json();
 }
 
-export async function openPosition({ apiBaseUrl, initData, poolAddress, poolVersion, amount, rangeLowerPct, rangeUpperPct, slippageTolerance, allowEntrySwap, signal }) {
+export async function openPosition({ apiBaseUrl, initData, chain, poolAddress, poolVersion, amount, rangeLowerPct, rangeUpperPct, slippageTolerance, allowEntrySwap, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/trading?endpoint=open_position`;
     const payload = {
         initData,
+        chain,
         pool_address: poolAddress,
         pool_version: poolVersion,
         amount,

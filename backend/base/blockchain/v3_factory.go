@@ -9,6 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 const v3FactoryABI = `[
@@ -28,11 +29,19 @@ const v3FactoryABI = `[
 ]`
 
 func GetV3PoolFromFactory(factory common.Address, tokenA common.Address, tokenB common.Address, fee uint64) (common.Address, error) {
-	return GetV3PoolFromFactoryCtx(context.Background(), factory, tokenA, tokenB, fee)
+	return GetV3PoolFromFactoryCtxWithClient(Client, context.Background(), factory, tokenA, tokenB, fee)
 }
 
 func GetV3PoolFromFactoryCtx(ctx context.Context, factory common.Address, tokenA common.Address, tokenB common.Address, fee uint64) (common.Address, error) {
-	if Client == nil {
+	return GetV3PoolFromFactoryCtxWithClient(Client, ctx, factory, tokenA, tokenB, fee)
+}
+
+func GetV3PoolFromFactoryWithClient(client *ethclient.Client, factory common.Address, tokenA common.Address, tokenB common.Address, fee uint64) (common.Address, error) {
+	return GetV3PoolFromFactoryCtxWithClient(client, context.Background(), factory, tokenA, tokenB, fee)
+}
+
+func GetV3PoolFromFactoryCtxWithClient(client *ethclient.Client, ctx context.Context, factory common.Address, tokenA common.Address, tokenB common.Address, fee uint64) (common.Address, error) {
+	if client == nil {
 		return common.Address{}, fmt.Errorf("blockchain client not initialized")
 	}
 	if ctx == nil {
@@ -50,7 +59,7 @@ func GetV3PoolFromFactoryCtx(ctx context.Context, factory common.Address, tokenA
 	}
 
 	msg := ethereum.CallMsg{To: &factory, Data: data}
-	raw, err := Client.CallContract(ctx, msg, nil)
+	raw, err := client.CallContract(ctx, msg, nil)
 	if err != nil {
 		return common.Address{}, err
 	}
@@ -73,7 +82,11 @@ func GetV3PoolFromFactoryCtx(ctx context.Context, factory common.Address, tokenA
 
 // GetV3PoolFactory returns the factory address of a V3 pool by calling pool.factory()
 func GetV3PoolFactory(poolAddress common.Address) (common.Address, error) {
-	if Client == nil {
+	return GetV3PoolFactoryWithClient(Client, poolAddress)
+}
+
+func GetV3PoolFactoryWithClient(client *ethclient.Client, poolAddress common.Address) (common.Address, error) {
+	if client == nil {
 		return common.Address{}, fmt.Errorf("blockchain client not initialized")
 	}
 
@@ -96,7 +109,7 @@ func GetV3PoolFactory(poolAddress common.Address) (common.Address, error) {
 	}
 
 	msg := ethereum.CallMsg{To: &poolAddress, Data: data}
-	raw, err := Client.CallContract(context.Background(), msg, nil)
+	raw, err := client.CallContract(context.Background(), msg, nil)
 	if err != nil {
 		return common.Address{}, fmt.Errorf("call factory failed: %w", err)
 	}

@@ -89,14 +89,14 @@ func main() {
 	log.Println("========================================")
 	log.Println("⛓️  开始初始化区块链客户端...")
 	log.Println("========================================")
-	if err := blockchain.InitBlockchain(); err != nil {
+	if err := blockchain.InitBlockchains(); err != nil {
 		log.Printf("⚠️  警告: 区块链初始化失败: %v", err)
 		log.Println("💡 机器人将继续运行，但池子查询可能会失败")
 	} else {
 		log.Println("✅ 区块链客户端初始化成功")
 	}
 	log.Println("========================================")
-	defer blockchain.CloseBlockchain()
+	defer blockchain.CloseBlockchains()
 
 	// Create and start bot
 	log.Println("========================================")
@@ -121,7 +121,7 @@ func main() {
 		telegramBot.Stop()
 		database.CloseMySQL()
 		database.CloseRedis()
-		blockchain.CloseBlockchain()
+		blockchain.CloseBlockchains()
 		log.Println("✅ 服务已停止")
 		os.Exit(0)
 	}()

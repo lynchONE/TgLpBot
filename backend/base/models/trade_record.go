@@ -17,9 +17,10 @@ const (
 
 // TradeRecord represents one full cycle: enter (open) + exit (close).
 type TradeRecord struct {
-	ID     uint `gorm:"primaryKey" json:"id"`
-	UserID uint `gorm:"not null;index" json:"user_id"`
-	TaskID uint `gorm:"not null;index" json:"task_id"`
+	ID     uint   `gorm:"primaryKey" json:"id"`
+	UserID uint   `gorm:"not null;index" json:"user_id"`
+	TaskID uint   `gorm:"not null;index" json:"task_id"`
+	Chain  string `gorm:"size:10;not null;default:'bsc';index" json:"chain"`
 
 	PoolVersion  string `gorm:"size:10" json:"pool_version"`
 	PoolId       string `gorm:"size:66;index" json:"pool_id"` // V3 pool address or V4 poolId

@@ -104,7 +104,8 @@ func NewERC20(address common.Address, client *ethclient.Client) (*ERC20, error) 
 		return nil, err
 	}
 
-	contract := bind.NewBoundContract(address, parsed, client, client, client)
+	rc := wrapRPCRetryClient(client)
+	contract := bind.NewBoundContract(address, parsed, rc, rc, rc)
 
 	return &ERC20{
 		contract: contract,

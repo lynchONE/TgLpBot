@@ -1,19 +1,31 @@
-const { ethers, run } = require("hardhat");
+const { ethers, run, network } = require("hardhat");
+const {
+  getNetworkPrefixes,
+  resolveTrustedConfigForNetwork,
+  getExplorerApiKeyForNetwork,
+  isTruthyEnv,
+  getNativeSymbolForNetwork,
+} = require("./utils/network_env");
 
 async function main() {
-  console.log("开始部署 ZapSimple 合约...");
+  const networkName = network.name;
+  const prefixes = getNetworkPrefixes(networkName);
+  const nativeSymbol = getNativeSymbolForNetwork(networkName);
+  const preferredPrefix = prefixes[0];
+
+  console.log(`Deploying ZapSimple on network: ${networkName}`);
+  console.log(`Environment prefixes (priority): ${prefixes.join(", ")}`);
 
   const [deployer] = await ethers.getSigners();
   const deployerAddress = await deployer.getAddress();
   const provider = deployer.provider;
-
   if (!provider) {
     throw new Error("No provider available (Hardhat runtime not initialized?)");
   }
 
   const balance = await provider.getBalance(deployerAddress);
   console.log("Deployer:", deployerAddress);
-  console.log("Balance:", ethers.formatEther(balance), "BNB");
+  console.log("Balance:", ethers.formatEther(balance), nativeSymbol);
 
   const ZapSimple = await ethers.getContractFactory("ZapSimple");
 
@@ -21,11 +33,9 @@ async function main() {
   try {
     const deployTx = await ZapSimple.getDeployTransaction();
     const feeData = await provider.getFeeData();
-
-    const gasPrice =
-      process.env.GAS_PRICE_GWEI
-        ? ethers.parseUnits(process.env.GAS_PRICE_GWEI, "gwei")
-        : feeData.gasPrice || feeData.maxFeePerGas;
+    const gasPrice = process.env.GAS_PRICE_GWEI
+      ? ethers.parseUnits(process.env.GAS_PRICE_GWEI, "gwei")
+      : feeData.gasPrice || feeData.maxFeePerGas;
 
     if (gasPrice) {
       const gasEstimate = await provider.estimateGas({
@@ -38,20 +48,20 @@ async function main() {
 
       console.log("Estimated deploy gas:", gasEstimate.toString(), "gas");
       console.log("Estimated gas price:", ethers.formatUnits(gasPrice, "gwei"), "gwei");
-      console.log("Estimated deploy cost: ~", ethers.formatEther(estimatedCost), "BNB");
+      console.log(`Estimated deploy cost: ~${ethers.formatEther(estimatedCost)} ${nativeSymbol}`);
 
       if (balance < bufferCost) {
         const short = bufferCost - balance;
         console.error(
-          `❌ 部署钱包 BNB 不足：需要约 ${ethers.formatEther(bufferCost)} BNB（含10%缓冲），还差约 ${ethers.formatEther(short)} BNB。`
+          `Insufficient deployer balance: need about ${ethers.formatEther(bufferCost)} ${nativeSymbol} (with 10% buffer), short ${ethers.formatEther(short)} ${nativeSymbol}.`
         );
         process.exit(1);
       }
     } else {
-      console.log("⚠️  Could not determine gas price; skipping balance pre-check.");
+      console.log("Could not determine gas price; skipping balance pre-check.");
     }
-  } catch (e) {
-    console.log("⚠️  Pre-check failed (will attempt deploy anyway):", e?.message || e);
+  } catch (error) {
+    console.log("Pre-check failed (will attempt deploy anyway):", error?.message || error);
   }
 
   const deployOverrides = {};
@@ -62,71 +72,79 @@ async function main() {
 
   const zapSimple = await ZapSimple.deploy(deployOverrides);
   await zapSimple.waitForDeployment();
-
   const address = await zapSimple.getAddress();
-  console.log("✅ ZapSimple 部署成功!");
-  console.log("   合约地址:", address);
+
+  console.log("ZapSimple deployed successfully.");
+  console.log("Contract address:", address);
 
   // Optional: configure trusted addresses (recommended)
-  const okxRouter = process.env.OKX_SWAP_ROUTER;
-  const okxApprove = process.env.OKX_TOKEN_APPROVE_ADDRESS;
-  const pancakeV3pm = process.env.PANCAKE_V3_NPM_ADDRESS;
-  const uniswapV3pm = process.env.UNISWAP_V3_NPM_ADDRESS;
-  const v3pm = process.env.V3_POSITION_MANAGER_ADDRESS || pancakeV3pm || uniswapV3pm;
-  const v4pm = process.env.UNISWAP_V4_POSITION_MANAGER_ADDRESS || process.env.V4_POSITION_MANAGER_ADDRESS;
+  const trusted = resolveTrustedConfigForNetwork(networkName);
+  const okxRouter = trusted.okxRouter;
+  const okxApprove = trusted.okxApprove;
+  const v3pm = trusted.v3Primary;
+  const v4pm = trusted.v4pm;
 
   if (okxRouter && okxApprove && v3pm) {
-    console.log("\n设置合约 TrustedAddresses...");
-    const tx = await zapSimple.setTrustedAddresses(
-      okxRouter,
-      okxApprove,
-      v3pm,
-      v4pm || ethers.ZeroAddress
-    );
-    console.log("   tx:", tx.hash);
+    console.log("Setting trusted addresses...");
+    const tx = await zapSimple.setTrustedAddresses(okxRouter, okxApprove, v3pm, v4pm || ethers.ZeroAddress);
+    console.log("setTrustedAddresses tx:", tx.hash);
     await tx.wait();
-    console.log("✅ TrustedAddresses 已设置");
-    console.log("   OKX Router:", okxRouter);
-    console.log("   OKX TokenApprove:", okxApprove);
-    console.log("   V3 PositionManager:", v3pm);
-    console.log("   V4 PositionManager:", v4pm || ethers.ZeroAddress);
 
-    // If both PancakeV3 + UniswapV3 NPMs are provided, allowlist the "other" one too.
-    const extras = [pancakeV3pm, uniswapV3pm]
-      .map((a) => (a || "").trim())
-      .filter((a) => a && ethers.isAddress(a) && a.toLowerCase() !== v3pm.toLowerCase());
-    const uniqueExtras = [...new Map(extras.map((a) => [a.toLowerCase(), a])).values()];
+    console.log("Trusted addresses set.");
+    console.log("OKX Router:", okxRouter);
+    console.log("OKX TokenApprove:", okxApprove);
+    console.log("V3 PositionManager:", v3pm);
+    console.log("V4 PositionManager:", v4pm || ethers.ZeroAddress);
+
+    // If multiple V3 position managers are configured for this chain family, allowlist additional ones.
+    const uniqueExtras = trusted.v3Extras
+      .filter((item) => ethers.isAddress(item))
+      .filter((item) => item.toLowerCase() !== v3pm.toLowerCase());
 
     if (uniqueExtras.length > 0) {
-      console.log("\n设置额外 Trusted V3 PositionManagers...");
+      console.log("Setting extra trusted V3 position managers...");
       const tx2 = await zapSimple.setTrustedV3PositionManagers(uniqueExtras, true);
-      console.log("   tx:", tx2.hash);
+      console.log("setTrustedV3PositionManagers tx:", tx2.hash);
       await tx2.wait();
-      console.log("✅ 额外 V3 PositionManagers 已设置:", uniqueExtras.join(", "));
+      console.log("Extra trusted V3 position managers:", uniqueExtras.join(", "));
     }
   } else {
-    console.log(
-      "\n⚠️  未设置 TrustedAddresses（缺少 env：OKX_SWAP_ROUTER / OKX_TOKEN_APPROVE_ADDRESS / V3_POSITION_MANAGER_ADDRESS 或 PANCAKE_V3_NPM_ADDRESS 或 UNISWAP_V3_NPM_ADDRESS）"
-    );
+    console.log("Skipped setTrustedAddresses because required env is missing.");
+    console.log(`Required keys for ${networkName}:`);
+    for (const hint of trusted.missingHints) {
+      console.log(`- ${hint}`);
+    }
+    if (trusted.family === "base") {
+      console.log(
+        `- ${preferredPrefix} uses Uniswap/Aerodrome V3 managers only (no Pancake for Base networks)`
+      );
+    }
   }
 
-  console.log("\n请更新机器人 .env：");
-  console.log(`   ZAP_V3_ADDRESS=${address}`);
-  console.log(`   ZAP_V4_ADDRESS=${address}`);
+  console.log("Update bot env with:");
+  console.log(`ZAP_V3_ADDRESS=${address}`);
+  console.log(`ZAP_V4_ADDRESS=${address}`);
+  console.log(`${preferredPrefix}_ZAP_V3_ADDRESS=${address}`);
+  console.log(`${preferredPrefix}_ZAP_V4_ADDRESS=${address}`);
 
-  // Verify on BSCScan (if API key is set)
-  if (process.env.BSCSCAN_API_KEY) {
-    console.log("\n等待区块确认后验证合约...");
-    await new Promise((resolve) => setTimeout(resolve, 30000));
-
-    try {
-      await run("verify:verify", {
-        address,
-        constructorArguments: [],
-      });
-      console.log("✅ 合约已在 BSCScan 验证");
-    } catch (error) {
-      console.log("验证失败:", error.message);
+  // Verify if explicitly enabled, or if explorer API key is configured.
+  const explorerApiKey = getExplorerApiKeyForNetwork(networkName);
+  const shouldVerify = isTruthyEnv("VERIFY") || Boolean(explorerApiKey);
+  if (shouldVerify) {
+    if (!explorerApiKey) {
+      console.log("VERIFY is enabled but explorer API key is missing; skipping verification.");
+    } else {
+      console.log("Waiting for block confirmations before verification...");
+      await new Promise((resolve) => setTimeout(resolve, 30000));
+      try {
+        await run("verify:verify", {
+          address,
+          constructorArguments: [],
+        });
+        console.log(`Contract verified on explorer for ${networkName}.`);
+      } catch (error) {
+        console.log("Verification failed:", error?.message || error);
+      }
     }
   }
 }
@@ -137,4 +155,3 @@ main()
     console.error(error);
     process.exit(1);
   });
-

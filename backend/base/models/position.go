@@ -19,8 +19,9 @@ const (
 
 // Position represents a liquidity position/task
 type Position struct {
-	ID     uint `gorm:"primaryKey" json:"id"`
-	UserID uint `gorm:"not null;index" json:"user_id"`
+	ID     uint   `gorm:"primaryKey" json:"id"`
+	UserID uint   `gorm:"not null;index" json:"user_id"`
+	Chain  string `gorm:"size:10;not null;default:'bsc';index" json:"chain"`
 
 	// Pool information
 	PoolAddress   string `gorm:"size:42;not null;index" json:"pool_address"`

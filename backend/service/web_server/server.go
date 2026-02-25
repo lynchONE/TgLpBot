@@ -32,6 +32,11 @@ func NewServer(ch *clickhouse.ClickHouseService) *Server {
 func (s *Server) Start(port string) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/pools", s.handleGetPools)
+	mux.HandleFunc("/api/positions", s.handlePositions)
+	mux.HandleFunc("/api/settings", s.handleSettings)
+	mux.HandleFunc("/api/task_action", s.handleTaskAction)
+	mux.HandleFunc("/api/admin", s.handleAdmin)
+	mux.HandleFunc("/api/trading", s.handleTrading)
 	mux.HandleFunc("/api/hot_pools", s.handleHotPools)
 	mux.HandleFunc("/api/search_pools", s.handleSearchPools)
 	mux.HandleFunc("/api/pool_ohlcv", s.handlePoolOHLCV)
@@ -41,6 +46,7 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/autolp_pnl_curve", s.handleAutoLPPnLCurve)
 	mux.HandleFunc("/api/me", s.handleMe)
 	mux.HandleFunc("/api/realtime_positions", s.handleRealtimePositions)
+	mux.HandleFunc("/api/smart_money", s.handleSmartMoneyOverview)
 	mux.HandleFunc("/api/smart_money_overview", s.handleSmartMoneyOverview)
 	mux.HandleFunc("/api/smart_money_pool_adds", s.handleSmartMoneyPoolAdds)
 	mux.HandleFunc("/api/smart_money_wallet_positions", s.handleSmartMoneyWalletPositions)
@@ -127,6 +133,23 @@ type PoolResponse struct {
 var poolFeeFromNameRegex = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*%\s*$`)
 
 func (s *Server) handleGetPools(w http.ResponseWriter, r *http.Request) {
+	if endpoint := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("endpoint"))); endpoint != "" {
+		switch endpoint {
+		case "hot_pools":
+			s.handleHotPools(w, r)
+			return
+		case "search_pools":
+			s.handleSearchPools(w, r)
+			return
+		case "pool_ohlcv":
+			s.handlePoolOHLCV(w, r)
+			return
+		default:
+			http.Error(w, "invalid endpoint", http.StatusBadRequest)
+			return
+		}
+	}
+
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return

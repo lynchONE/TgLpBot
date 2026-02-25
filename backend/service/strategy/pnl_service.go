@@ -145,19 +145,32 @@ func (s *PnLService) GetTaskPnL(task *models.StrategyTask) (*PnLInfo, error) {
 		expectedWei = big.NewInt(0)
 	}
 
-	dustUSDTWei := big.NewInt(0)
-	if dust0.Sign() > 0 && isUSDTToken(task.Token0Symbol, task.Token0Address) {
-		dustUSDTWei.Add(dustUSDTWei, dust0)
+	_, _, stableDecimals := stableTokenForChain(task.Chain)
+	dustUSDTWei := big.NewInt(0) // internal USD(1e18) representation
+	addStableDust := func(raw *big.Int) {
+		if raw == nil || raw.Sign() <= 0 {
+			return
+		}
+		scaled, err := convert.ScaleDecimals(raw, stableDecimals, 18)
+		if err != nil || scaled == nil {
+			// Fallback: keep raw units (best-effort) to avoid breaking the PnL view.
+			dustUSDTWei.Add(dustUSDTWei, raw)
+			return
+		}
+		dustUSDTWei.Add(dustUSDTWei, scaled)
 	}
-	if dust1.Sign() > 0 && isUSDTToken(task.Token1Symbol, task.Token1Address) {
-		dustUSDTWei.Add(dustUSDTWei, dust1)
+	if dust0.Sign() > 0 && isPrimaryStableToken(task.Chain, task.Token0Symbol, task.Token0Address) {
+		addStableDust(dust0)
+	}
+	if dust1.Sign() > 0 && isPrimaryStableToken(task.Chain, task.Token1Symbol, task.Token1Address) {
+		addStableDust(dust1)
 	}
 
-	if dust0.Sign() > 0 && isUSDTToken(task.Token0Symbol, task.Token0Address) {
-		dustUSDTValue += weiToFloat(dust0, pricing.GetTokenDecimals(task.Token0Address))
+	if dust0.Sign() > 0 && isPrimaryStableToken(task.Chain, task.Token0Symbol, task.Token0Address) {
+		dustUSDTValue += weiToFloat(dust0, pricing.GetTokenDecimals(task.Chain, task.Token0Address))
 	}
-	if dust1.Sign() > 0 && isUSDTToken(task.Token1Symbol, task.Token1Address) {
-		dustUSDTValue += weiToFloat(dust1, pricing.GetTokenDecimals(task.Token1Address))
+	if dust1.Sign() > 0 && isPrimaryStableToken(task.Chain, task.Token1Symbol, task.Token1Address) {
+		dustUSDTValue += weiToFloat(dust1, pricing.GetTokenDecimals(task.Chain, task.Token1Address))
 	}
 
 	// NetInvestedUSDT aims to reflect the USDT amount actually locked in the position.
@@ -205,10 +218,10 @@ func (s *PnLService) GetTaskPnL(task *models.StrategyTask) (*PnLInfo, error) {
 	dec0 := pricing.DefaultTokenDecimals
 	dec1 := pricing.DefaultTokenDecimals
 	if dust0.Sign() > 0 {
-		dec0 = pricing.GetTokenDecimals(task.Token0Address)
+		dec0 = pricing.GetTokenDecimals(task.Chain, task.Token0Address)
 	}
 	if dust1.Sign() > 0 {
-		dec1 = pricing.GetTokenDecimals(task.Token1Address)
+		dec1 = pricing.GetTokenDecimals(task.Chain, task.Token1Address)
 	}
 
 	return &PnLInfo{
@@ -253,7 +266,27 @@ func (s *PnLService) getV3CurrentValue(task *models.StrategyTask) (totalVal, fee
 	}
 	tokenId, _ := new(big.Int).SetString(task.V3TokenID, 10)
 
+	chain := config.NormalizeChain(task.Chain)
+	client, _, err := blockchain.GetEVMClient(chain)
+	if err != nil {
+		return 0, 0, 0, nil, err
+	}
+
 	pmAddrStr := strings.TrimSpace(task.V3PositionManagerAddress)
+	if !common.IsHexAddress(pmAddrStr) && config.AppConfig != nil {
+		if cc, ok := config.AppConfig.GetChainConfig(chain); ok {
+			if common.IsHexAddress(cc.DefaultV3PositionManagerAddress) {
+				pmAddrStr = strings.TrimSpace(cc.DefaultV3PositionManagerAddress)
+			} else {
+				for _, dep := range cc.V3Deployments {
+					if common.IsHexAddress(dep.PositionManagerAddress) {
+						pmAddrStr = strings.TrimSpace(dep.PositionManagerAddress)
+						break
+					}
+				}
+			}
+		}
+	}
 	if !common.IsHexAddress(pmAddrStr) {
 		ex := strings.ToLower(strings.TrimSpace(task.Exchange))
 		if strings.Contains(ex, "pancake") && config.AppConfig != nil && common.IsHexAddress(config.AppConfig.PancakeV3PositionManagerAddress) {
@@ -266,7 +299,7 @@ func (s *PnLService) getV3CurrentValue(task *models.StrategyTask) (totalVal, fee
 		return 0, 0, 0, nil, fmt.Errorf("V3 position manager address missing")
 	}
 	pmAddress := common.HexToAddress(pmAddrStr)
-	pm, err := blockchain.NewV3PositionManager(pmAddress, blockchain.Client)
+	pm, err := blockchain.NewV3PositionManager(pmAddress, client)
 	if err != nil {
 		return 0, 0, 0, nil, fmt.Errorf("init V3 PM failed: %w", err)
 	}
@@ -282,7 +315,7 @@ func (s *PnLService) getV3CurrentValue(task *models.StrategyTask) (totalVal, fee
 	if common.IsHexAddress(task.PoolId) {
 		poolAddr = common.HexToAddress(task.PoolId)
 	}
-	if resolved, rErr := resolveV3PoolAddress(nil, 10*time.Second, pmAddress, pos.Token0, pos.Token1, pos.Fee); rErr == nil && resolved != (common.Address{}) {
+	if resolved, rErr := resolveV3PoolAddress(chain, nil, 10*time.Second, pmAddress, pos.Token0, pos.Token1, pos.Fee); rErr == nil && resolved != (common.Address{}) {
 		poolAddr = resolved
 	}
 	if poolAddr == (common.Address{}) {
@@ -291,7 +324,7 @@ func (s *PnLService) getV3CurrentValue(task *models.StrategyTask) (totalVal, fee
 
 	// 3. Get Current Price (Slot0)
 	currentTick := 0
-	sqrtPriceX96, currentTick, err = blockchain.GetV3PoolSlot0(poolAddr)
+	sqrtPriceX96, currentTick, err = blockchain.GetV3PoolSlot0WithClient(client, poolAddr)
 	if err != nil {
 		return 0, 0, 0, nil, fmt.Errorf("get slot0 failed: %w", err)
 	}
@@ -304,7 +337,7 @@ func (s *PnLService) getV3CurrentValue(task *models.StrategyTask) (totalVal, fee
 
 	fees0 := cloneBig(pos.TokensOwed0)
 	fees1 := cloneBig(pos.TokensOwed1)
-	if fee0, fee1, usedStale, age, feeErr := s.calcV3UnclaimedFeesCached(poolAddr, currentTick, pos); fee0 != nil && fee1 != nil {
+	if fee0, fee1, usedStale, age, feeErr := s.calcV3UnclaimedFeesCached(chain, poolAddr, currentTick, pos); fee0 != nil && fee1 != nil {
 		fees0 = fee0
 		fees1 = fee1
 		if feeErr != nil {
@@ -435,11 +468,11 @@ func (s *PnLService) calculateUSDTValue(
 ) (totalUSDT, feesUSDT, holdUSDT float64) {
 	token0Symbol := strings.ToUpper(strings.TrimSpace(task.Token0Symbol))
 	token1Symbol := strings.ToUpper(strings.TrimSpace(task.Token1Symbol))
-	isStable0 := pricing.IsStableSymbol(token0Symbol) || pricing.IsStableAddress(task.Token0Address)
-	isStable1 := pricing.IsStableSymbol(token1Symbol) || pricing.IsStableAddress(task.Token1Address)
+	isStable0 := pricing.IsStableSymbol(token0Symbol) || pricing.IsStableAddress(task.Chain, task.Token0Address)
+	isStable1 := pricing.IsStableSymbol(token1Symbol) || pricing.IsStableAddress(task.Chain, task.Token1Address)
 
-	dec0 := pricing.GetTokenDecimals(task.Token0Address)
-	dec1 := pricing.GetTokenDecimals(task.Token1Address)
+	dec0 := pricing.GetTokenDecimals(task.Chain, task.Token0Address)
+	dec1 := pricing.GetTokenDecimals(task.Chain, task.Token1Address)
 	if dec0 <= 0 {
 		dec0 = pricing.DefaultTokenDecimals
 	}
@@ -493,15 +526,40 @@ func (s *PnLService) calculateUSDTValue(
 		feesUSDT = f0 + f1
 		holdUSDT = h0 + h1
 	} else {
-		// Neither is USDT (e.g. KGST/WBNB). Try to estimate value via WBNB price.
-		// Check if either token is WBNB, and use approximate WBNB price to estimate.
-		isWBNB0 := strings.ToUpper(token0Symbol) == "WBNB" || strings.ToUpper(token0Symbol) == "BNB" ||
-			strings.EqualFold(task.Token0Address, config.AppConfig.WBNBAddress)
-		isWBNB1 := strings.ToUpper(token1Symbol) == "WBNB" || strings.ToUpper(token1Symbol) == "BNB" ||
-			strings.EqualFold(task.Token1Address, config.AppConfig.WBNBAddress)
+		// Neither side is stable. Try to estimate value via the chain native gas token price (WBNB/WETH...).
+		chain := config.NormalizeChain(task.Chain)
+		wrappedSym := ""
+		wrappedAddr := ""
+		if config.AppConfig != nil {
+			if cc, ok := config.AppConfig.GetChainConfig(chain); ok {
+				wrappedSym = strings.ToUpper(strings.TrimSpace(cc.WrappedNativeSymbol))
+				wrappedAddr = strings.TrimSpace(cc.WrappedNativeAddress)
+			}
+		}
+		nativeSym := strings.TrimPrefix(wrappedSym, "W")
+		if nativeSym == "" {
+			switch chain {
+			case "base":
+				wrappedSym = "WETH"
+				nativeSym = "ETH"
+			default:
+				wrappedSym = "WBNB"
+				nativeSym = "BNB"
+			}
+		}
+		isWBNB0 := token0Symbol == wrappedSym || token0Symbol == nativeSym
+		isWBNB1 := token1Symbol == wrappedSym || token1Symbol == nativeSym
+		if common.IsHexAddress(wrappedAddr) {
+			if strings.EqualFold(strings.TrimSpace(task.Token0Address), wrappedAddr) {
+				isWBNB0 = true
+			}
+			if strings.EqualFold(strings.TrimSpace(task.Token1Address), wrappedAddr) {
+				isWBNB1 = true
+			}
+		}
 
-		// Get real-time BNB price from PancakeSwap V3 WBNB/USDT pool
-		bnbPriceUSDT := s.GetBNBPriceUSDT()
+		// Native price in USD/USDT (best-effort).
+		bnbPriceUSDT := pricing.GetNativePriceUSD(chain)
 
 		if isWBNB0 && !isWBNB1 {
 			// Token0 is WBNB, price is in WBNB terms
@@ -548,27 +606,53 @@ func weiToFloat(wei *big.Int, decimals int) float64 {
 	return val
 }
 
-func isUSDTToken(symbol, addr string) bool {
+func stableTokenForChain(chain string) (symbol string, addr string, decimals int) {
+	chain = config.NormalizeChain(chain)
+	symbol = "USDT"
+	decimals = 18
+
+	if config.AppConfig == nil {
+		return
+	}
+	if cc, ok := config.AppConfig.GetChainConfig(chain); ok {
+		if strings.TrimSpace(cc.StableSymbol) != "" {
+			symbol = strings.TrimSpace(cc.StableSymbol)
+		}
+		addr = strings.TrimSpace(cc.StableAddress)
+		if cc.StableDecimals > 0 {
+			decimals = cc.StableDecimals
+		}
+		return
+	}
+
+	// Backward-compatible fallback for legacy single-chain config.
+	addr = strings.TrimSpace(config.AppConfig.USDTAddress)
+	return
+}
+
+func isPrimaryStableToken(chain, symbol, addr string) bool {
+	stableSym, stableAddr, _ := stableTokenForChain(chain)
+	if stableSym != "" && strings.EqualFold(strings.TrimSpace(symbol), stableSym) {
+		return true
+	}
+	if common.IsHexAddress(stableAddr) && strings.EqualFold(strings.TrimSpace(addr), stableAddr) {
+		return true
+	}
+	// Last-resort fallback: treat USDT symbol as stable.
 	if strings.EqualFold(strings.TrimSpace(symbol), "USDT") {
 		return true
 	}
-	if config.AppConfig == nil {
-		return false
-	}
-	usdtAddr := strings.TrimSpace(config.AppConfig.USDTAddress)
-	if !common.IsHexAddress(usdtAddr) {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(addr), usdtAddr)
+	return false
 }
 
-func (s *PnLService) getV3FeeGrowthGlobalsCached(poolAddress common.Address) (*big.Int, *big.Int, bool, time.Duration, error) {
+func (s *PnLService) getV3FeeGrowthGlobalsCached(chain string, poolAddress common.Address) (*big.Int, *big.Int, bool, time.Duration, error) {
 	if (poolAddress == common.Address{}) {
 		return nil, nil, false, 0, fmt.Errorf("empty pool address")
 	}
 
+	chain = config.NormalizeChain(chain)
 	now := time.Now()
-	key := strings.ToLower(poolAddress.Hex())
+	key := chain + "|" + strings.ToLower(poolAddress.Hex())
 
 	s.v3FeeMu.RLock()
 	if c, ok := s.v3FeeCache[key]; ok && c.global0 != nil && c.global1 != nil && c.expires.After(now) {
@@ -588,7 +672,11 @@ func (s *PnLService) getV3FeeGrowthGlobalsCached(poolAddress common.Address) (*b
 	}
 	s.v3FeeMu.RUnlock()
 
-	g0, g1, err := blockchain.GetV3PoolFeeGrowthGlobals(poolAddress)
+	client, _, err := blockchain.GetEVMClient(chain)
+	if err != nil {
+		return nil, nil, false, 0, err
+	}
+	g0, g1, err := blockchain.GetV3PoolFeeGrowthGlobalsWithClient(client, poolAddress)
 	if err == nil && g0 != nil && g1 != nil {
 		s.v3FeeMu.Lock()
 		s.v3FeeCache[key] = cachedV3FeeGrowthGlobals{
@@ -607,13 +695,14 @@ func (s *PnLService) getV3FeeGrowthGlobalsCached(poolAddress common.Address) (*b
 	return nil, nil, false, 0, err
 }
 
-func (s *PnLService) getV3TickFeeGrowthOutsideCached(poolAddress common.Address, tick int) (*big.Int, *big.Int, bool, bool, time.Duration, error) {
+func (s *PnLService) getV3TickFeeGrowthOutsideCached(chain string, poolAddress common.Address, tick int) (*big.Int, *big.Int, bool, bool, time.Duration, error) {
 	if (poolAddress == common.Address{}) {
 		return nil, nil, false, false, 0, fmt.Errorf("empty pool address")
 	}
 
+	chain = config.NormalizeChain(chain)
 	now := time.Now()
-	key := strings.ToLower(poolAddress.Hex()) + "|" + strconv.Itoa(tick)
+	key := chain + "|" + strings.ToLower(poolAddress.Hex()) + "|" + strconv.Itoa(tick)
 
 	s.v3TickFeeMu.RLock()
 	if c, ok := s.v3TickFeeCache[key]; ok && c.fee0 != nil && c.fee1 != nil && c.expires.After(now) {
@@ -636,7 +725,11 @@ func (s *PnLService) getV3TickFeeGrowthOutsideCached(poolAddress common.Address,
 	}
 	s.v3TickFeeMu.RUnlock()
 
-	f0, f1, initialized, err := blockchain.GetV3PoolTickFeeGrowthOutside(poolAddress, tick)
+	client, _, err := blockchain.GetEVMClient(chain)
+	if err != nil {
+		return nil, nil, false, false, 0, err
+	}
+	f0, f1, initialized, err := blockchain.GetV3PoolTickFeeGrowthOutsideWithClient(client, poolAddress, tick)
 	if err == nil && f0 != nil && f1 != nil {
 		s.v3TickFeeMu.Lock()
 		s.v3TickFeeCache[key] = cachedV3TickFeeGrowthOutside{
@@ -656,7 +749,7 @@ func (s *PnLService) getV3TickFeeGrowthOutsideCached(poolAddress common.Address,
 	return nil, nil, false, false, 0, err
 }
 
-func (s *PnLService) calcV3UnclaimedFeesCached(poolAddr common.Address, currentTick int, pos *blockchain.V3PositionInfo) (*big.Int, *big.Int, bool, time.Duration, error) {
+func (s *PnLService) calcV3UnclaimedFeesCached(chain string, poolAddr common.Address, currentTick int, pos *blockchain.V3PositionInfo) (*big.Int, *big.Int, bool, time.Duration, error) {
 	if pos == nil {
 		return nil, nil, false, 0, fmt.Errorf("position info missing")
 	}
@@ -671,15 +764,15 @@ func (s *PnLService) calcV3UnclaimedFeesCached(poolAddr common.Address, currentT
 		return owed0, owed1, false, 0, fmt.Errorf("pool address missing")
 	}
 
-	global0, global1, staleG, ageG, errG := s.getV3FeeGrowthGlobalsCached(poolAddr)
+	global0, global1, staleG, ageG, errG := s.getV3FeeGrowthGlobalsCached(chain, poolAddr)
 	if errG != nil && (global0 == nil || global1 == nil) {
 		return owed0, owed1, false, 0, fmt.Errorf("read feeGrowthGlobal failed: %w", errG)
 	}
-	lower0, lower1, _, staleL, ageL, errL := s.getV3TickFeeGrowthOutsideCached(poolAddr, pos.TickLower)
+	lower0, lower1, _, staleL, ageL, errL := s.getV3TickFeeGrowthOutsideCached(chain, poolAddr, pos.TickLower)
 	if errL != nil && (lower0 == nil || lower1 == nil) {
 		return owed0, owed1, false, 0, fmt.Errorf("read tickLower feeGrowthOutside failed: %w", errL)
 	}
-	upper0, upper1, _, staleU, ageU, errU := s.getV3TickFeeGrowthOutsideCached(poolAddr, pos.TickUpper)
+	upper0, upper1, _, staleU, ageU, errU := s.getV3TickFeeGrowthOutsideCached(chain, poolAddr, pos.TickUpper)
 	if errU != nil && (upper0 == nil || upper1 == nil) {
 		return owed0, owed1, false, 0, fmt.Errorf("read tickUpper feeGrowthOutside failed: %w", errU)
 	}

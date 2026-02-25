@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 func isRPCRateLimited(err error) bool {
@@ -16,6 +17,15 @@ func isRPCRateLimited(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	if strings.Contains(msg, "too many requests") {
+		return true
+	}
+	if strings.Contains(msg, "cu limit exceeded") {
+		return true
+	}
+	if strings.Contains(msg, "request too fast") {
+		return true
+	}
+	if strings.Contains(msg, "-32003") {
 		return true
 	}
 	if strings.Contains(msg, "rate limit") || strings.Contains(msg, "ratelimit") {
@@ -71,8 +81,8 @@ func rpcRetryDelay(attempt int, err error) time.Duration {
 	return time.Duration(attempt) * 250 * time.Millisecond
 }
 
-func callContractWithRetry(ctx context.Context, msg ethereum.CallMsg) ([]byte, error) {
-	if Client == nil {
+func callContractWithRetry(client *ethclient.Client, ctx context.Context, msg ethereum.CallMsg) ([]byte, error) {
+	if client == nil {
 		return nil, fmt.Errorf("blockchain client not initialized")
 	}
 	if ctx == nil {
@@ -82,7 +92,7 @@ func callContractWithRetry(ctx context.Context, msg ethereum.CallMsg) ([]byte, e
 	const maxAttempts = 4
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		raw, err := Client.CallContract(ctx, msg, nil)
+		raw, err := client.CallContract(ctx, msg, nil)
 		if err == nil {
 			return raw, nil
 		}
@@ -104,8 +114,8 @@ func callContractWithRetry(ctx context.Context, msg ethereum.CallMsg) ([]byte, e
 	return nil, lastErr
 }
 
-func callContractWithRetryAtBlock(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
-	if Client == nil {
+func callContractWithRetryAtBlock(client *ethclient.Client, ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
+	if client == nil {
 		return nil, fmt.Errorf("blockchain client not initialized")
 	}
 	if ctx == nil {
@@ -115,7 +125,7 @@ func callContractWithRetryAtBlock(ctx context.Context, msg ethereum.CallMsg, blo
 	const maxAttempts = 4
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		raw, err := Client.CallContract(ctx, msg, blockNumber)
+		raw, err := client.CallContract(ctx, msg, blockNumber)
 		if err == nil {
 			return raw, nil
 		}

@@ -548,7 +548,7 @@ func GetUniswapV4PoolCurrentTickViaStateView(stateView common.Address, poolManag
 	msg := ethereum.CallMsg{To: &stateView, Data: data}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	raw, err := callContractWithRetry(ctx, msg)
+	raw, err := callContractWithRetry(Client, ctx, msg)
 	if err != nil {
 		return 0, fmt.Errorf("call state view getSlot0 failed: %w", err)
 	}
@@ -607,7 +607,7 @@ func GetUniswapV4PoolCurrentTickViaStateViewAtBlock(stateView common.Address, po
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	raw, err := callContractWithRetryAtBlock(ctx, msg, block)
+	raw, err := callContractWithRetryAtBlock(Client, ctx, msg, block)
 	if err != nil {
 		return 0, fmt.Errorf("call state view getSlot0 failed: %w", err)
 	}
@@ -664,7 +664,7 @@ func GetUniswapV4PoolSlot0ViaStateView(stateView common.Address, poolManager com
 	msg := ethereum.CallMsg{To: &stateView, Data: data}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	raw, err := callContractWithRetry(ctx, msg)
+	raw, err := callContractWithRetry(Client, ctx, msg)
 	if err != nil {
 		return nil, 0, fmt.Errorf("call state view getSlot0 failed: %w", err)
 	}

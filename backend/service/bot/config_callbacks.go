@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"fmt"
@@ -167,6 +168,125 @@ func (b *Bot) handleConfigBarkGroup(query *tgbotapi.CallbackQuery, user *models.
 	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
 	database.SetUserSession(user.TelegramID, "state", "awaiting_global_bark_group", 30*time.Minute)
 	b.sendMessage(query.Message.Chat.ID, "👥 请输入 Bark Group（分组，可为空）。\n发送 `clear` 清空分组。\n发送 /cancel 取消。")
+}
+
+func configDefaultChainKeyboard(chains []string, current string) any {
+	rows := make([][]tgbotapi.InlineKeyboardButton, 0, 4)
+	cur := make([]tgbotapi.InlineKeyboardButton, 0, 2)
+
+	current = config.NormalizeChain(current)
+	for _, c := range chains {
+		ch := config.NormalizeChain(c)
+		if ch == "" {
+			continue
+		}
+		label := chainLabel(ch)
+		if ch == current {
+			label = "✅ " + label
+		}
+		cur = append(cur, tgbotapi.NewInlineKeyboardButtonData(label, "config_default_chain_set_"+ch))
+		if len(cur) >= 2 {
+			rows = append(rows, cur)
+			cur = make([]tgbotapi.InlineKeyboardButton, 0, 2)
+		}
+	}
+	if len(cur) > 0 {
+		rows = append(rows, cur)
+	}
+	rows = append(rows, []tgbotapi.InlineKeyboardButton{
+		tgbotapi.NewInlineKeyboardButtonData("取消", "config_default_chain_cancel"),
+	})
+
+	return tgbotapi.NewInlineKeyboardMarkup(rows...)
+}
+
+func (b *Bot) handleConfigMultiChainToggle(query *tgbotapi.CallbackQuery, user *models.User) {
+	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
+	cfg, err := b.configService.GetOrCreate(user.ID)
+	if err != nil {
+		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("❌ 获取配置失败：%v", err))
+		return
+	}
+
+	newValue := !cfg.MultiChainEnabled
+	if _, err := b.configService.Update(user.ID, map[string]interface{}{
+		"multi_chain_enabled": newValue,
+	}); err != nil {
+		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("❌ 更新配置失败：%v", err))
+		return
+	}
+
+	// Clear chain-scoped sessions so the next flow picks up the new mode.
+	_ = database.DeleteUserSession(user.TelegramID, sessionNewPositionChain)
+	_ = database.DeleteUserSession(user.TelegramID, sessionWalletSwapChain)
+
+	if newValue {
+		b.sendMessage(query.Message.Chat.ID, "✅ 已开启多链模式（开仓/换币将提示选择链）")
+	} else {
+		effective := config.PickEnabledChain(cfg.DefaultChain)
+		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("✅ 已关闭多链模式（默认使用 %s）", chainLabel(effective)))
+	}
+
+	// Refresh menu.
+	b.handleViewConfig(query, user)
+}
+
+func (b *Bot) handleConfigDefaultChain(query *tgbotapi.CallbackQuery, user *models.User) {
+	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
+	cfg, err := b.configService.GetOrCreate(user.ID)
+	if err != nil {
+		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("❌ 获取配置失败：%v", err))
+		return
+	}
+
+	chains := enabledChains()
+	text := fmt.Sprintf("🔗 请选择默认链（关闭多链模式时生效）\n\n当前默认链：*%s*", chainLabel(cfg.DefaultChain))
+	b.sendMessageWithKeyboard(query.Message.Chat.ID, text, configDefaultChainKeyboard(chains, cfg.DefaultChain))
+}
+
+func (b *Bot) handleConfigDefaultChainSelect(query *tgbotapi.CallbackQuery, user *models.User) {
+	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
+	if query == nil || query.Message == nil || query.Message.Chat == nil {
+		return
+	}
+
+	data := strings.TrimSpace(query.Data)
+	if data == "config_default_chain_cancel" {
+		b.sendMessage(query.Message.Chat.ID, "✅ 已取消")
+		return
+	}
+
+	chain := config.NormalizeChain(strings.TrimPrefix(data, "config_default_chain_set_"))
+	if chain == "" {
+		b.sendMessage(query.Message.Chat.ID, "❌ 无效的链")
+		return
+	}
+
+	enabled := false
+	for _, c := range enabledChains() {
+		if config.NormalizeChain(c) == chain {
+			enabled = true
+			break
+		}
+	}
+	if !enabled {
+		b.sendMessage(query.Message.Chat.ID, "❌ 当前未启用该链，请检查 CHAINS 配置")
+		return
+	}
+
+	if _, err := b.configService.Update(user.ID, map[string]interface{}{
+		"default_chain": chain,
+	}); err != nil {
+		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("❌ 更新配置失败：%v", err))
+		return
+	}
+
+	// Clear chain-scoped sessions so the next flow picks up the new default.
+	_ = database.DeleteUserSession(user.TelegramID, sessionNewPositionChain)
+	_ = database.DeleteUserSession(user.TelegramID, sessionWalletSwapChain)
+
+	b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("✅ 默认链已设置为 *%s*", chainLabel(chain)))
+	b.handleViewConfig(query, user)
 }
 
 func (b *Bot) handleViewConfig(query *tgbotapi.CallbackQuery, user *models.User) {

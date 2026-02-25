@@ -3,6 +3,7 @@ package web_server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -24,6 +25,7 @@ import (
 
 type openPositionRequest struct {
 	InitData       string   `json:"initData"`
+	Chain          string   `json:"chain"`
 	PoolAddress    string   `json:"pool_address"`
 	PoolVersion    string   `json:"pool_version"`
 	Amount         float64  `json:"amount"`
@@ -130,6 +132,7 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req.InitData = strings.TrimSpace(req.InitData)
+	req.Chain = strings.TrimSpace(req.Chain)
 	req.PoolAddress = strings.TrimSpace(req.PoolAddress)
 	req.PoolVersion = strings.ToLower(strings.TrimSpace(req.PoolVersion))
 
@@ -155,6 +158,11 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "config not loaded", http.StatusInternalServerError)
 		return
 	}
+
+	var (
+		chain string
+		cc    config.ChainConfig
+	)
 
 	user, status, msg := authenticateTelegramWebAppUser(req.InitData)
 	if status != 0 {
@@ -187,6 +195,36 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 检查任务额度
+	cfgService := userSvc.NewGlobalConfigService()
+	cfg, cfgErr := cfgService.GetOrCreate(user.ID)
+	if cfgErr != nil {
+		http.Error(w, "failed to load config", http.StatusInternalServerError)
+		return
+	}
+
+	// Resolve effective chain based on user's chain mode.
+	requestedChain := strings.TrimSpace(req.Chain)
+	if cfg != nil && !cfg.MultiChainEnabled {
+		chain = config.PickEnabledChain(cfg.DefaultChain)
+	} else if requestedChain != "" {
+		chain = config.NormalizeChain(requestedChain)
+	} else {
+		// Backwards-compatible default for older clients.
+		chain = config.PickEnabledChain("bsc")
+	}
+
+	var ok bool
+	cc, ok = config.AppConfig.GetChainConfig(chain)
+	if !ok || strings.TrimSpace(cc.Chain) == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(openPositionError{
+			Code:    "invalid_chain",
+			Message: "unsupported chain (enable it via CHAINS env)",
+		})
+		return
+	}
+
 	if !check.IsAdmin && check.Access != nil {
 		taskCount, countErr := userSvc.NewAccessService().CountUserActiveTasks(user.ID)
 		if countErr != nil {
@@ -235,9 +273,13 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 	var poolInfo *pool.PoolInfo
 	switch poolVersion {
 	case "v4":
+		if chain != "bsc" {
+			http.Error(w, "V4 not supported on this chain yet", http.StatusBadRequest)
+			return
+		}
 		poolInfo, err = poolService.GetV4PoolInfo(poolAddress)
 	default:
-		poolInfo, err = poolService.GetPoolInfo(poolAddress)
+		poolInfo, err = poolService.GetPoolInfoForChain(chain, poolAddress)
 	}
 	if err != nil || poolInfo == nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -257,17 +299,17 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !req.AllowEntrySwap {
-		usdtAddrStr := strings.TrimSpace(config.AppConfig.USDTAddress)
-		if common.IsHexAddress(usdtAddrStr) {
-			usdtAddr := strings.ToLower(usdtAddrStr)
+		stableAddrStr := strings.TrimSpace(cc.StableAddress)
+		if common.IsHexAddress(stableAddrStr) {
+			stableAddr := strings.ToLower(stableAddrStr)
 			token0 := strings.ToLower(strings.TrimSpace(poolInfo.Token0))
 			token1 := strings.ToLower(strings.TrimSpace(poolInfo.Token1))
-			if token0 != usdtAddr && token1 != usdtAddr {
+			if token0 != stableAddr && token1 != stableAddr {
 				w.WriteHeader(http.StatusConflict)
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(openPositionError{
 					Code:    "entry_swap_required",
-					Message: "pool does not contain USDT",
+					Message: fmt.Sprintf("pool does not contain %s", strings.TrimSpace(cc.StableSymbol)),
 				})
 				return
 			}
@@ -275,6 +317,7 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tmpTask := &models.StrategyTask{
+		Chain:         chain,
 		PoolId:        poolAddress,
 		PoolVersion:   poolVersion,
 		Token0Symbol:  poolInfo.Token0Symbol,
@@ -307,7 +350,12 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid pool address", http.StatusBadRequest)
 			return
 		}
-		currentTick, err = blockchain.GetV3PoolCurrentTick(common.HexToAddress(poolAddress))
+		client, _, cerr := blockchain.GetEVMClient(chain)
+		if cerr != nil {
+			http.Error(w, cerr.Error(), http.StatusInternalServerError)
+			return
+		}
+		currentTick, err = blockchain.GetV3PoolCurrentTickWithClient(client, common.HexToAddress(poolAddress))
 	}
 	if err != nil {
 		http.Error(w, "failed to read current tick", http.StatusInternalServerError)
@@ -324,13 +372,6 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 	tickLowerPctEff, tickUpperPctEff := tc.CalculatePercentagesFromTicks(currentTick, tickLower, tickUpper)
 	rangePctEff := (tickLowerPctEff + tickUpperPctEff) / 2.0
 
-	cfgService := userSvc.NewGlobalConfigService()
-	cfg, cfgErr := cfgService.GetOrCreate(user.ID)
-	if cfgErr != nil {
-		http.Error(w, "failed to load config", http.StatusInternalServerError)
-		return
-	}
-
 	slippage := cfg.SlippageTolerance
 	if req.Slippage != nil {
 		slippage = *req.Slippage
@@ -343,6 +384,7 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 
 	task := &models.StrategyTask{
 		UserID:               user.ID,
+		Chain:                chain,
 		PoolId:               poolAddress,
 		PoolVersion:          poolVersion,
 		Exchange:             poolInfo.Exchange,

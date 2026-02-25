@@ -35,6 +35,10 @@ func globalConfigKeyboard() tgbotapi.InlineKeyboardMarkup {
 			tgbotapi.NewInlineKeyboardButtonData("🈲 过滤中文代币", "config_filter_chinese_toggle"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🌐 多链模式", "config_multi_chain_toggle"),
+			tgbotapi.NewInlineKeyboardButtonData("🔗 默认链", "config_default_chain"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("🔄 刷新", "view_config"),
 		),
 	)
@@ -75,6 +79,8 @@ func formatGlobalConfigMenuText(cfg *models.GlobalConfig) string {
 👥 Bark Group：%s
 📝 日志通知：%s
 🈲 过滤中文代币：%s
+🧭 多链模式：%s
+🔗 默认链：%s
 
 请选择要配置的选项：`,
 		cfg.RebalanceTimeout,
@@ -89,5 +95,7 @@ func formatGlobalConfigMenuText(cfg *models.GlobalConfig) string {
 		barkGroup,
 		boolToOnOff(cfg.ExtraNotificationsEnabled),
 		boolToOnOff(cfg.FilterChineseTokens),
+		boolToOnOff(cfg.MultiChainEnabled),
+		chainLabel(cfg.DefaultChain),
 	)
 }

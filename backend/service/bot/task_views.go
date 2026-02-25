@@ -35,7 +35,11 @@ func getCurrentTickForTask(task *models.StrategyTask) (int, error) {
 		if !common.IsHexAddress(task.PoolId) {
 			return 0, fmt.Errorf("invalid V3 pool address: %s", task.PoolId)
 		}
-		return blockchain.GetV3PoolCurrentTick(common.HexToAddress(task.PoolId))
+		client, _, err := blockchain.GetEVMClient(task.Chain)
+		if err != nil {
+			return 0, err
+		}
+		return blockchain.GetV3PoolCurrentTickWithClient(client, common.HexToAddress(task.PoolId))
 	}
 }
 
@@ -179,9 +183,9 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 		poolID = "-"
 	}
 
-	// Display actual invested amount (USDT delta) if we have an open trade record.
-	// Calculate PnL
-	amountLine := fmt.Sprintf("初始投入：%.2f USDT", task.AmountUSDT)
+	// Display actual invested amount in the chain's configured stable token.
+	stableSym, _, _ := stableSymbolForChain(task.Chain)
+	amountLine := fmt.Sprintf("初始投入：%.2f %s", task.AmountUSDT, stableSym)
 	if b.pnlService != nil {
 		canPnL := true
 		if task.RebalancePending {
@@ -253,7 +257,7 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 					}
 				}
 				if len(dustParts) > 0 {
-					dustLine = fmt.Sprintf("\n🧹 开仓残余：%s (≈%.2f USDT)", strings.Join(dustParts, " + "), pnl.DustValueUSDT)
+					dustLine = fmt.Sprintf("\n🧹 开仓残余：%s (≈%.2f %s)", strings.Join(dustParts, " + "), pnl.DustValueUSDT, stableSym)
 				}
 
 				// 使用 NetInvestedUSDT（净投入 = 实际支出 - 残余价值）更准确反映仓位内金额
@@ -268,12 +272,12 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 				}
 
 				amountLine = fmt.Sprintf(
-					"📊 资产状况：\n📈 绝对盈亏：%s%.2f USDT %s\n💵 当前价值：%.2f USDT\n🎁 未领手续费：%s USDT\n💰 实际投入：%.2f USDT (预期 %.2f USDT)%s",
-					sign, pnl.AbsolutePnLUSDT, emojiStr,
-					pnl.HoldingsUSDT,
-					feesText,
-					actualInvested,
-					task.AmountUSDT,
+					"📊 资产状况：\n📈 绝对盈亏：%s%.2f %s %s\n💵 当前价值：%.2f %s\n🎁 未领手续费：%s %s\n💰 实际投入：%.2f %s (预期 %.2f %s)%s",
+					sign, pnl.AbsolutePnLUSDT, stableSym, emojiStr,
+					pnl.HoldingsUSDT, stableSym,
+					feesText, stableSym,
+					actualInvested, stableSym,
+					task.AmountUSDT, stableSym,
 					dustLine,
 				)
 			}
@@ -295,6 +299,7 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 		positionInfo = "\n🎫 头寸 ID：-- (撤出中)"
 	}
 
+	positionInfo = fmt.Sprintf("\n⛓ Chain: %s", chainLabel(task.Chain)) + positionInfo
 	currentPriceInfo, priceRangeInfo := buildPriceDisplayLines(task)
 
 	rangePctText := ""

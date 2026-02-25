@@ -6,6 +6,7 @@ import (
 	"TgLpBot/base/convert"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	"TgLpBot/service/chainexec"
 	"TgLpBot/service/exchange"
 	"TgLpBot/service/pricing"
 	"TgLpBot/service/trade"
@@ -26,6 +27,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 // SwapToUSDTError marks an error that happened during the "swap back to USDT" phase,
@@ -85,22 +87,23 @@ func effectiveExitSlippagePercent(task *models.StrategyTask) float64 {
 	return expanded
 }
 
-func (s *LiquidityService) quoteTokenValueInUSDT(tokenAddr common.Address, amount *big.Int, walletAddr common.Address) (float64, bool) {
+func (s *LiquidityService) quoteTokenValueInUSDT(exec chainexec.EVMExecutor, tokenAddr common.Address, amount *big.Int, walletAddr common.Address) (float64, bool) {
 	if amount == nil || amount.Sign() <= 0 {
 		return 0, true
 	}
-	if config.AppConfig == nil {
+	if exec == nil {
 		return 0, false
 	}
-	if !common.IsHexAddress(config.AppConfig.USDTAddress) {
+	cc := exec.Config()
+	if !common.IsHexAddress(cc.StableAddress) {
 		return 0, false
 	}
 	if s.okxService == nil {
 		s.okxService = exchange.NewOKXDexService()
 	}
 
-	usdtAddr := common.HexToAddress(config.AppConfig.USDTAddress)
-	chainID := fmt.Sprintf("%d", config.AppConfig.BSCChainID)
+	usdtAddr := common.HexToAddress(cc.StableAddress)
+	chainID := fmt.Sprintf("%d", cc.ChainID)
 
 	resp, err := s.okxService.GetSwapData(exchange.SwapRequest{
 		ChainID:           chainID,
@@ -123,12 +126,11 @@ func (s *LiquidityService) quoteTokenValueInUSDT(tokenAddr common.Address, amoun
 		return 0, false
 	}
 
-	// USDT on BSC uses 18 decimals.
-	return toFloat64(toAmount, 18), true
+	return toFloat64(toAmount, cc.StableDecimals), true
 }
 
-func (s *LiquidityService) shouldSkipExitSwapToUSDT(tokenAddr common.Address, amountIn *big.Int, walletAddr common.Address, label string) (bool, float64) {
-	v, ok := s.quoteTokenValueInUSDT(tokenAddr, amountIn, walletAddr)
+func (s *LiquidityService) shouldSkipExitSwapToUSDT(exec chainexec.EVMExecutor, tokenAddr common.Address, amountIn *big.Int, walletAddr common.Address, label string) (bool, float64) {
+	v, ok := s.quoteTokenValueInUSDT(exec, tokenAddr, amountIn, walletAddr)
 	if !ok {
 		return false, 0
 	}
@@ -229,7 +231,7 @@ func receiptGasCostWei(receipt *types.Receipt) *big.Int {
 	return new(big.Int).Mul(receipt.EffectiveGasPrice, new(big.Int).SetUint64(receipt.GasUsed))
 }
 
-func (s *LiquidityService) gasCostWeiFromReceipt(txHash common.Hash, receipt *types.Receipt) *big.Int {
+func (s *LiquidityService) gasCostWeiFromReceipt(client *ethclient.Client, txHash common.Hash, receipt *types.Receipt) *big.Int {
 	if receipt == nil {
 		return big.NewInt(0)
 	}
@@ -237,12 +239,12 @@ func (s *LiquidityService) gasCostWeiFromReceipt(txHash common.Hash, receipt *ty
 		return cost
 	}
 	// Fallback for nodes that don't provide EffectiveGasPrice in receipts.
-	if blockchain.Client == nil || receipt.GasUsed == 0 {
+	if client == nil || receipt.GasUsed == 0 {
 		return big.NewInt(0)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	tx, _, err := blockchain.Client.TransactionByHash(ctx, txHash)
+	tx, _, err := client.TransactionByHash(ctx, txHash)
 	cancel()
 	if err != nil || tx == nil {
 		return big.NewInt(0)
@@ -267,7 +269,7 @@ func (s *LiquidityService) gasCostWeiFromReceipt(txHash common.Hash, receipt *ty
 	}
 
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
-	header, err := blockchain.Client.HeaderByNumber(ctx2, receipt.BlockNumber)
+	header, err := client.HeaderByNumber(ctx2, receipt.BlockNumber)
 	cancel2()
 	if err != nil || header == nil || header.BaseFee == nil {
 		gp := tx.GasPrice()
@@ -316,8 +318,8 @@ func (s *LiquidityService) exitTokenSyncDurations() (time.Duration, time.Duratio
 	return timeout, poll
 }
 
-func (s *LiquidityService) getReceiptWithRetry(txHash common.Hash) (*types.Receipt, error) {
-	if blockchain.Client == nil {
+func (s *LiquidityService) getReceiptWithRetry(client *ethclient.Client, txHash common.Hash) (*types.Receipt, error) {
+	if client == nil {
 		return nil, fmt.Errorf("blockchain client not initialized")
 	}
 	timeout, poll := s.exitTokenSyncDurations()
@@ -325,7 +327,7 @@ func (s *LiquidityService) getReceiptWithRetry(txHash common.Hash) (*types.Recei
 	var lastErr error
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		receipt, err := blockchain.Client.TransactionReceipt(ctx, txHash)
+		receipt, err := client.TransactionReceipt(ctx, txHash)
 		cancel()
 		if err == nil && receipt != nil {
 			return receipt, nil
@@ -341,8 +343,8 @@ func (s *LiquidityService) getReceiptWithRetry(txHash common.Hash) (*types.Recei
 	}
 }
 
-func (s *LiquidityService) waitTokenBalanceAtLeast(token common.Address, wallet common.Address, min *big.Int, label string) (*big.Int, error) {
-	bal, err := blockchain.GetTokenBalance(token, wallet)
+func (s *LiquidityService) waitTokenBalanceAtLeast(client *ethclient.Client, token common.Address, wallet common.Address, min *big.Int, label string) (*big.Int, error) {
+	bal, err := blockchain.GetTokenBalanceWithClient(client, token, wallet)
 	if bal == nil {
 		bal = big.NewInt(0)
 	}
@@ -359,7 +361,7 @@ func (s *LiquidityService) waitTokenBalanceAtLeast(token common.Address, wallet 
 
 	for time.Now().Before(deadline) {
 		time.Sleep(poll)
-		bal, err = blockchain.GetTokenBalance(token, wallet)
+		bal, err = blockchain.GetTokenBalanceWithClient(client, token, wallet)
 		if bal == nil {
 			bal = big.NewInt(0)
 		}
@@ -383,12 +385,16 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 	if config.AppConfig == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
-	if blockchain.Client == nil || blockchain.ChainID == nil {
-		return nil, fmt.Errorf("blockchain client not initialized")
-	}
 	if task == nil {
 		return nil, fmt.Errorf("task is nil")
 	}
+	task.Chain = config.NormalizeChain(task.Chain)
+	exec, err := chainexec.GetEVM(task.Chain)
+	if err != nil {
+		return nil, err
+	}
+	cc := exec.Config()
+	client := exec.Client()
 
 	wallet, err := s.walletService.GetDefaultWallet(userID)
 	if err != nil {
@@ -405,14 +411,17 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 	}
 
 	walletAddr := s.walletService.GetWalletAddress(wallet)
-	usdtAddr := common.HexToAddress(config.AppConfig.USDTAddress)
+	if !common.IsHexAddress(cc.StableAddress) {
+		return nil, fmt.Errorf("stable address not set for chain=%s", exec.Chain())
+	}
+	usdtAddr := common.HexToAddress(cc.StableAddress)
 
 	// Capture balance before exiting (used for "actual received" and gas cost).
-	usdtBefore, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
+	usdtBefore, _ := blockchain.GetTokenBalanceWithClient(client, usdtAddr, walletAddr)
 	if usdtBefore == nil {
 		usdtBefore = big.NewInt(0)
 	}
-	bnbBefore, _ := blockchain.GetBalance(walletAddr)
+	bnbBefore, _ := blockchain.GetBalanceWithClient(client, walletAddr)
 	if bnbBefore == nil {
 		bnbBefore = big.NewInt(0)
 	}
@@ -440,7 +449,7 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 					continue
 				}
 				seen[tok] = struct{}{}
-				bal, err := blockchain.GetTokenBalance(tok, walletAddr)
+				bal, err := blockchain.GetTokenBalanceWithClient(client, tok, walletAddr)
 				if err != nil {
 					log.Printf("[Liquidity] Warning: read pre-exit token balance failed (%s): %v", tok.Hex(), err)
 					bal = big.NewInt(0)
@@ -464,9 +473,9 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 	} else {
 		switch strings.ToLower(strings.TrimSpace(task.PoolVersion)) {
 		case "v4":
-			txHashes, exitErr = s.exitV4ToUSDT(privateKey, walletAddr, usdtAddr, task, swapDeltas, opts)
+			txHashes, exitErr = s.exitV4ToUSDT(exec, privateKey, walletAddr, usdtAddr, task, swapDeltas, opts)
 		default:
-			txHashes, exitErr = s.exitV3ToUSDT(privateKey, walletAddr, usdtAddr, task, swapDeltas, opts)
+			txHashes, exitErr = s.exitV3ToUSDT(exec, privateKey, walletAddr, usdtAddr, task, swapDeltas, opts)
 		}
 	}
 
@@ -485,7 +494,7 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 		var expectedMinBalances map[common.Address]*big.Int
 		if exitErr == nil && len(sweepPreBalances) > 0 {
 			if exitHash, ok := firstTxHash(txHashes); ok {
-				receipt, rerr := s.getReceiptWithRetry(exitHash)
+				receipt, rerr := s.getReceiptWithRetry(client, exitHash)
 				if rerr != nil {
 					log.Printf("[Liquidity] Warning: fetch exit receipt failed, skip expected-balance check: %v", rerr)
 				} else if receipt != nil {
@@ -532,7 +541,7 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 			}
 		}
 
-		sweepHashes, err := s.swapWalletTokensToUSDT(privateKey, walletAddr, usdtAddr, task, expectedMinBalances, sweepPreBalances)
+		sweepHashes, err := s.swapWalletTokensToUSDT(exec, privateKey, walletAddr, usdtAddr, task, expectedMinBalances, sweepPreBalances)
 		if len(sweepHashes) > 0 {
 			txHashes = append(txHashes, sweepHashes...)
 		}
@@ -553,11 +562,11 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 
 	// 无论是否有错误，都计算实际收到的 USDT 和消耗的 Gas
 	// 这样即使部分操作失败，也能正确记录已收到的金额
-	usdtAfter, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
+	usdtAfter, _ := blockchain.GetTokenBalanceWithClient(client, usdtAddr, walletAddr)
 	if usdtAfter == nil {
 		usdtAfter = big.NewInt(0)
 	}
-	bnbAfter, _ := blockchain.GetBalance(walletAddr)
+	bnbAfter, _ := blockchain.GetBalanceWithClient(client, walletAddr)
 	if bnbAfter == nil {
 		bnbAfter = big.NewInt(0)
 	}
@@ -578,18 +587,25 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 	receiptUSDT := big.NewInt(0)
 	receiptGas := big.NewInt(0)
 	for _, h := range extractTxHashes(txHashes) {
-		receipt, rerr := s.getReceiptWithRetry(h)
+		receipt, rerr := s.getReceiptWithRetry(client, h)
 		if rerr != nil || receipt == nil {
 			continue
 		}
 		receiptUSDT.Add(receiptUSDT, ReceiptTokenTransferDelta(receipt, usdtAddr, walletAddr))
-		receiptGas.Add(receiptGas, s.gasCostWeiFromReceipt(h, receipt))
+		receiptGas.Add(receiptGas, s.gasCostWeiFromReceipt(client, h, receipt))
 	}
 	if receiptUSDT.Cmp(actualReceived) > 0 {
 		actualReceived = receiptUSDT
 	}
 	if receiptGas.Cmp(gasSpent) > 0 {
 		gasSpent = receiptGas
+	}
+
+	// Scale stablecoin units to internal USD(1e18) representation for records/PnL (Base USDT is often 6 decimals).
+	actualReceivedWei, cerr := convert.ScaleDecimals(actualReceived, cc.StableDecimals, 18)
+	if cerr != nil || actualReceivedWei == nil {
+		log.Printf("[Liquidity] Warning: scale stable received failed: %v (chain=%s stableDecimals=%d)", cerr, exec.Chain(), cc.StableDecimals)
+		actualReceivedWei = new(big.Int).Set(actualReceived)
 	}
 
 	mainHash := ""
@@ -608,22 +624,22 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 	var tradeRec *models.TradeRecord
 	if shouldUpdateRecords {
 		trSvc := trade.NewTradeRecordService()
-		bnbPriceUSDT := 0.0
+		nativePriceUSD := 0.0
 		if finalizeTradeRecord {
 			// Only needed when finalizing the record (Profit/TotalGasUSDT computation).
-			bnbPriceUSDT = pricing.GetBNBPriceUSDT()
+			nativePriceUSD = pricing.GetNativePriceUSD(exec.Chain())
 		}
-		if rec, err := trSvc.ApplyExitDelta(task, mainHash, actualReceived, gasSpent, finalizeTradeRecord, bnbPriceUSDT); err == nil {
+		if rec, err := trSvc.ApplyExitDelta(task, mainHash, actualReceivedWei, gasSpent, finalizeTradeRecord, nativePriceUSD); err == nil {
 			tradeRec = rec
 		} else if finalizeTradeRecord {
 			// Legacy fallback: create a closed record so we don't lose the exit summary.
-			_ = trSvc.CloseLatestOpenRecord(task, mainHash, actualReceived, gasSpent, bnbPriceUSDT)
+			_ = trSvc.CloseLatestOpenRecord(task, mainHash, actualReceivedWei, gasSpent, nativePriceUSD)
 		}
 	}
 
 	// Update/Create Transaction record (best-effort). Use cumulative amount when available.
 	txHash := strings.TrimSpace(mainHash)
-	amountOut := actualReceived.String()
+	amountOut := actualReceivedWei.String()
 	if tradeRec != nil {
 		if strings.TrimSpace(tradeRec.CloseTxHash) != "" {
 			txHash = strings.TrimSpace(tradeRec.CloseTxHash)
@@ -639,9 +655,9 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 				log.Printf("[Liquidity] Warning: update exit transaction amount_out failed: %v", err)
 			}
 		} else {
-			usdtAddr := common.HexToAddress(config.AppConfig.USDTAddress)
 			txRecord := models.Transaction{
 				UserID:          task.UserID,
+				Chain:           task.Chain,
 				TaskID:          task.ID,
 				TxHash:          txHash,
 				Type:            models.TxTypeRemoveLiquidity,
@@ -788,6 +804,7 @@ func (s *LiquidityService) reservedDustForOtherOpenTasks(userID uint, excludeTas
 }
 
 func (s *LiquidityService) swapWalletTokensToUSDT(
+	exec chainexec.EVMExecutor,
 	privateKey *ecdsa.PrivateKey,
 	walletAddr common.Address,
 	usdtAddr common.Address,
@@ -797,6 +814,14 @@ func (s *LiquidityService) swapWalletTokensToUSDT(
 ) ([]string, error) {
 	if task == nil {
 		return nil, fmt.Errorf("task is nil")
+	}
+
+	if exec == nil {
+		return nil, fmt.Errorf("executor is nil")
+	}
+	client := exec.Client()
+	if client == nil {
+		return nil, fmt.Errorf("blockchain client not initialized")
 	}
 
 	token0, token1, err := s.resolveTaskTokenAddresses(task)
@@ -859,14 +884,14 @@ func (s *LiquidityService) swapWalletTokensToUSDT(
 		var bal *big.Int
 		if minExpected != nil {
 			var werr error
-			bal, werr = s.waitTokenBalanceAtLeast(tok.addr, walletAddr, minExpected, label)
+			bal, werr = s.waitTokenBalanceAtLeast(client, tok.addr, walletAddr, minExpected, label)
 			if werr != nil {
 				errs = append(errs, werr)
 				continue
 			}
 		} else {
 			var rerr error
-			bal, rerr = blockchain.GetTokenBalance(tok.addr, walletAddr)
+			bal, rerr = blockchain.GetTokenBalanceWithClient(client, tok.addr, walletAddr)
 			if rerr != nil {
 				errs = append(errs, fmt.Errorf("读取 %s 余额失败 (%s): %w", label, tok.addr.Hex(), rerr))
 				continue
@@ -898,13 +923,13 @@ func (s *LiquidityService) swapWalletTokensToUSDT(
 			continue
 		}
 
-		if skip, _ := s.shouldSkipExitSwapToUSDT(tok.addr, toSwap, walletAddr, label); skip {
+		if skip, _ := s.shouldSkipExitSwapToUSDT(exec, tok.addr, toSwap, walletAddr, label); skip {
 			// Skip tiny swaps to avoid spending gas on < 1 USDT outputs.
 			expectedRemaining[tok.addr] = cloneBig(bal)
 			continue
 		}
 
-		swapTxHash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, tok.addr, usdtAddr, toSwap, effectiveExitSlippagePercent(task))
+		swapTxHash, err := s.swapDeltaToUSDTWithHash(exec, privateKey, walletAddr, tok.addr, usdtAddr, toSwap, effectiveExitSlippagePercent(task))
 		if err != nil {
 			errs = append(errs, fmt.Errorf("清仓兑换 %s→USDT 失败 (%s) amount=%s: %w", label, tok.addr.Hex(), toSwap.String(), err))
 			continue
@@ -923,7 +948,7 @@ func (s *LiquidityService) swapWalletTokensToUSDT(
 
 	// 校验：swap 后检查是否仍有余额（仅打印警告，不返回错误以避免重试导致重复兑换）
 	for _, tok := range targets {
-		bal, err := blockchain.GetTokenBalance(tok.addr, walletAddr)
+		bal, err := blockchain.GetTokenBalanceWithClient(client, tok.addr, walletAddr)
 		label := tok.symbol
 		if label == "" {
 			label = tok.addr.Hex()
@@ -949,12 +974,18 @@ func (s *LiquidityService) swapWalletTokensToUSDT(
 	return txHashes, nil
 }
 
-func (s *LiquidityService) buildAuth(privateKey *ecdsa.PrivateKey, nonce uint64, value *big.Int, opts TxOptions) (*bind.TransactOpts, error) {
-	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, blockchain.ChainID)
+func (s *LiquidityService) buildAuth(client *ethclient.Client, chainID *big.Int, privateKey *ecdsa.PrivateKey, nonce uint64, value *big.Int, opts TxOptions) (*bind.TransactOpts, error) {
+	if client == nil {
+		return nil, fmt.Errorf("blockchain client not initialized")
+	}
+	if chainID == nil {
+		return nil, fmt.Errorf("chainID not set")
+	}
+	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, chainID)
 	if err != nil {
 		return nil, err
 	}
-	gasPrice, err := blockchain.GetGasPriceWithMultiplier(normalizeGasMultiplier(opts.GasMultiplier))
+	gasPrice, err := blockchain.GetGasPriceWithMultiplierWithClient(client, normalizeGasMultiplier(opts.GasMultiplier))
 	if err != nil {
 		return nil, err
 	}
@@ -965,13 +996,13 @@ func (s *LiquidityService) buildAuth(privateKey *ecdsa.PrivateKey, nonce uint64,
 	return auth, nil
 }
 
-func (s *LiquidityService) waitMined(tx *types.Transaction) (*types.Receipt, error) {
+func (s *LiquidityService) waitMined(client *ethclient.Client, chainID *big.Int, tx *types.Transaction) (*types.Receipt, error) {
 	if tx == nil {
 		return nil, fmt.Errorf("tx is nil")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	receipt, err := bind.WaitMined(ctx, blockchain.Client, tx)
+	receipt, err := bind.WaitMined(ctx, client, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -979,7 +1010,7 @@ func (s *LiquidityService) waitMined(tx *types.Transaction) (*types.Receipt, err
 		return nil, fmt.Errorf("receipt is nil")
 	}
 	if receipt.Status != types.ReceiptStatusSuccessful {
-		reason := tryGetRevertReason(tx, receipt)
+		reason := tryGetRevertReason(client, chainID, tx, receipt)
 		if reason != "" {
 			return receipt, fmt.Errorf("tx reverted: %s (%s)", tx.Hash().Hex(), reason)
 		}
@@ -988,8 +1019,8 @@ func (s *LiquidityService) waitMined(tx *types.Transaction) (*types.Receipt, err
 	return receipt, nil
 }
 
-func tryGetRevertReason(tx *types.Transaction, receipt *types.Receipt) string {
-	if blockchain.Client == nil || tx == nil || receipt == nil {
+func tryGetRevertReason(client *ethclient.Client, chainID *big.Int, tx *types.Transaction, receipt *types.Receipt) string {
+	if client == nil || tx == nil || receipt == nil {
 		return ""
 	}
 	if tx.To() == nil {
@@ -997,8 +1028,8 @@ func tryGetRevertReason(tx *types.Transaction, receipt *types.Receipt) string {
 	}
 
 	var from common.Address
-	if blockchain.ChainID != nil {
-		signer := types.LatestSignerForChainID(blockchain.ChainID)
+	if chainID != nil {
+		signer := types.LatestSignerForChainID(chainID)
 		if sender, err := types.Sender(signer, tx); err == nil {
 			from = sender
 		}
@@ -1014,13 +1045,13 @@ func tryGetRevertReason(tx *types.Transaction, receipt *types.Receipt) string {
 	callCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	_, callErr := blockchain.Client.CallContract(callCtx, msg, receipt.BlockNumber)
+	_, callErr := client.CallContract(callCtx, msg, receipt.BlockNumber)
 	if callErr != nil {
 		if reason := unpackRevertReasonFromError(callErr); reason != "" {
 			return reason
 		}
 		// Some public RPCs prune history ("missing trie node"); latest often still returns the reason.
-		_, callErr2 := blockchain.Client.CallContract(callCtx, msg, nil)
+		_, callErr2 := client.CallContract(callCtx, msg, nil)
 		if callErr2 != nil {
 			if reason := unpackRevertReasonFromError(callErr2); reason != "" {
 				return reason
@@ -1063,28 +1094,62 @@ func unpackRevertReasonFromError(err error) string {
 	return reason
 }
 
-func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr common.Address, usdtAddr common.Address, task *models.StrategyTask, swapDeltas bool, opts TxOptions) ([]string, error) {
+func (s *LiquidityService) exitV3ToUSDT(exec chainexec.EVMExecutor, privateKey *ecdsa.PrivateKey, walletAddr common.Address, usdtAddr common.Address, task *models.StrategyTask, swapDeltas bool, opts TxOptions) ([]string, error) {
+	if exec == nil {
+		return nil, fmt.Errorf("executor is nil")
+	}
+	cc := exec.Config()
+	client := exec.Client()
+	chainID := exec.ChainID()
+	if client == nil || chainID == nil {
+		return nil, fmt.Errorf("blockchain client not initialized")
+	}
+	if !common.IsHexAddress(cc.ZapV3Address) {
+		return nil, fmt.Errorf("ZAP_V3_ADDRESS not set for chain=%s", exec.Chain())
+	}
+
 	var txHashes []string
 	var swapErr error
 
 	// Capture initial USDT balance for calculating output
-	usdtBefore, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
+	usdtBefore, _ := blockchain.GetTokenBalanceWithClient(client, usdtAddr, walletAddr)
 	if usdtBefore == nil {
 		usdtBefore = big.NewInt(0)
 	}
-
-	pmAddrStr := strings.TrimSpace(config.AppConfig.UniswapV3PositionManagerAddress)
-	if strings.Contains(strings.ToLower(task.Exchange), "pancake") {
-		pmAddrStr = config.AppConfig.PancakeV3PositionManagerAddress
-	} else if task.V3PositionManagerAddress != "" {
-		pmAddrStr = task.V3PositionManagerAddress
+	pmAddrStr := strings.TrimSpace(task.V3PositionManagerAddress)
+	if pmAddrStr == "" && common.IsHexAddress(task.PoolId) {
+		poolAddr := common.HexToAddress(task.PoolId)
+		if factory, ferr := blockchain.GetV3PoolFactoryWithClient(client, poolAddr); ferr == nil && factory != (common.Address{}) {
+			fhex := strings.ToLower(factory.Hex())
+			for _, dep := range cc.V3Deployments {
+				wantFactory := strings.ToLower(strings.TrimSpace(dep.FactoryAddress))
+				if !common.IsHexAddress(wantFactory) {
+					continue
+				}
+				if fhex == strings.ToLower(wantFactory) && common.IsHexAddress(dep.PositionManagerAddress) {
+					pmAddrStr = strings.TrimSpace(dep.PositionManagerAddress)
+					break
+				}
+			}
+		}
+	}
+	if pmAddrStr == "" && common.IsHexAddress(cc.DefaultV3PositionManagerAddress) {
+		pmAddrStr = strings.TrimSpace(cc.DefaultV3PositionManagerAddress)
+	}
+	if !common.IsHexAddress(pmAddrStr) {
+		for _, dep := range cc.V3Deployments {
+			if common.IsHexAddress(dep.PositionManagerAddress) {
+				pmAddrStr = strings.TrimSpace(dep.PositionManagerAddress)
+				break
+			}
+		}
 	}
 
 	if !common.IsHexAddress(pmAddrStr) {
 		return nil, fmt.Errorf("V3 position manager address not configured")
 	}
 	pmAddr := common.HexToAddress(pmAddrStr)
-	zapAddr := common.HexToAddress(config.AppConfig.ZapV3Address)
+	zapAddr := common.HexToAddress(cc.ZapV3Address)
 
 	// 获取 TokenID
 	tokenId, err := convert.ParseBigIntFlexible(task.V3TokenID)
@@ -1097,7 +1162,7 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	}
 
 	// 1. 获取 Position 信息 (确认 Liquidity 和 Token)
-	v3pm, err := blockchain.NewV3PositionManager(pmAddr, blockchain.Client)
+	v3pm, err := blockchain.NewV3PositionManager(pmAddr, client)
 	if err != nil {
 		return nil, fmt.Errorf("init v3 position manager failed: %w", err)
 	}
@@ -1131,7 +1196,7 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 
 	// 4. Approve NFT 给 Zap 合约（优化：使用 setApprovalForAll）
 	// 检查是否已经 setApprovalForAll
-	isApprovedForAll, err := s.isNFTApprovedForAll(pmAddr, walletAddr, zapAddr)
+	isApprovedForAll, err := s.isNFTApprovedForAll(client, pmAddr, walletAddr, zapAddr)
 	if err != nil {
 		log.Printf("[Liquidity] Warning: failed to check isApprovedForAll: %v", err)
 	}
@@ -1139,10 +1204,10 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	if !isApprovedForAll {
 		// 首次使用，设置 setApprovalForAll（一次性授权所有 NFT）
 		log.Printf("[Liquidity] V3 exit: Setting ApprovalForAll for Zap contract (one-time setup)")
-		if err := s.setNFTApprovalForAll(privateKey, walletAddr, pmAddr, zapAddr, true, opts); err != nil {
+		if err := s.setNFTApprovalForAll(client, chainID, privateKey, walletAddr, pmAddr, zapAddr, true, opts); err != nil {
 			// 如果 setApprovalForAll 失败，降级到单个 approve
 			log.Printf("[Liquidity] Warning: setApprovalForAll failed, falling back to single approve: %v", err)
-			if err := s.approveNFT(privateKey, walletAddr, pmAddr, zapAddr, tokenId, opts); err != nil {
+			if err := s.approveNFT(client, chainID, privateKey, walletAddr, pmAddr, zapAddr, tokenId, opts); err != nil {
 				return nil, fmt.Errorf("approve NFT failed: %w", err)
 			}
 		}
@@ -1151,8 +1216,8 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	}
 
 	// 3. 记录余额（用于计算获得的代币）
-	b0Before, _ := blockchain.GetTokenBalance(token0, walletAddr)
-	b1Before, _ := blockchain.GetTokenBalance(token1, walletAddr)
+	b0Before, _ := blockchain.GetTokenBalanceWithClient(client, token0, walletAddr)
+	b1Before, _ := blockchain.GetTokenBalanceWithClient(client, token1, walletAddr)
 	if b0Before == nil {
 		b0Before = big.NewInt(0)
 	}
@@ -1161,16 +1226,16 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	}
 
 	// 4. 调用 ZapOutV3
-	nonce, err := blockchain.GetNonce(walletAddr)
+	nonce, err := blockchain.GetNonceWithClient(client, walletAddr)
 	if err != nil {
 		return nil, err
 	}
-	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), opts)
+	auth, err := s.buildAuth(client, chainID, privateKey, nonce, big.NewInt(0), opts)
 	if err != nil {
 		return nil, err
 	}
 
-	zap, err := blockchain.NewZapSimple(zapAddr, blockchain.Client)
+	zap, err := blockchain.NewZapSimple(zapAddr, client)
 	if err != nil {
 		return nil, fmt.Errorf("init zap contract failed: %w", err)
 	}
@@ -1187,7 +1252,7 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	log.Printf("[Liquidity] V3 exit: tx sent %s", tx.Hash().Hex())
 	txHashes = append(txHashes, "撤出流动性|"+tx.Hash().Hex())
 
-	receipt, err := s.waitMined(tx)
+	receipt, err := s.waitMined(client, chainID, tx)
 	if err != nil {
 		return txHashes, fmt.Errorf("ZapOutV3 tx failed: %w", err)
 	}
@@ -1200,8 +1265,8 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 		d0 = cloneBig(a0)
 		d1 = cloneBig(a1)
 	} else {
-		b0After, _ := blockchain.GetTokenBalance(token0, walletAddr)
-		b1After, _ := blockchain.GetTokenBalance(token1, walletAddr)
+		b0After, _ := blockchain.GetTokenBalanceWithClient(client, token0, walletAddr)
+		b1After, _ := blockchain.GetTokenBalanceWithClient(client, token1, walletAddr)
 		if b0After == nil {
 			b0After = big.NewInt(0)
 		}
@@ -1226,8 +1291,8 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 			if task.Token0Symbol != "" {
 				symbol = task.Token0Symbol
 			}
-			if skip, _ := s.shouldSkipExitSwapToUSDT(token0, d0, walletAddr, symbol); !skip {
-				if swapTxHash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, token0, usdtAddr, d0, effectiveExitSlippagePercent(task)); err != nil {
+			if skip, _ := s.shouldSkipExitSwapToUSDT(exec, token0, d0, walletAddr, symbol); !skip {
+				if swapTxHash, err := s.swapDeltaToUSDTWithHash(exec, privateKey, walletAddr, token0, usdtAddr, d0, effectiveExitSlippagePercent(task)); err != nil {
 					swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT failed: %w", symbol, err))
 				} else if swapTxHash != "" {
 					txHashes = append(txHashes, fmt.Sprintf("兑换 %s→USDT|%s", symbol, swapTxHash))
@@ -1242,8 +1307,8 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 			if task.Token1Symbol != "" {
 				symbol = task.Token1Symbol
 			}
-			if skip, _ := s.shouldSkipExitSwapToUSDT(token1, d1, walletAddr, symbol); !skip {
-				if swapTxHash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, token1, usdtAddr, d1, effectiveExitSlippagePercent(task)); err != nil {
+			if skip, _ := s.shouldSkipExitSwapToUSDT(exec, token1, d1, walletAddr, symbol); !skip {
+				if swapTxHash, err := s.swapDeltaToUSDTWithHash(exec, privateKey, walletAddr, token1, usdtAddr, d1, effectiveExitSlippagePercent(task)); err != nil {
 					swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT failed: %w", symbol, err))
 				} else if swapTxHash != "" {
 					txHashes = append(txHashes, fmt.Sprintf("兑换 %s→USDT|%s", symbol, swapTxHash))
@@ -1258,7 +1323,7 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	}
 
 	// 6. Record Transaction (Calc total USDT received)
-	usdtAfter, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
+	usdtAfter, _ := blockchain.GetTokenBalanceWithClient(client, usdtAddr, walletAddr)
 	if usdtAfter == nil {
 		usdtAfter = big.NewInt(0)
 	}
@@ -1286,6 +1351,7 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	if swapDeltas && mainHash != "" {
 		txRecord := models.Transaction{
 			UserID:          task.UserID,
+			Chain:           task.Chain,
 			TaskID:          task.ID,
 			TxHash:          mainHash, // Use ZapOut hash
 			Type:            models.TxTypeRemoveLiquidity,
@@ -1310,7 +1376,7 @@ func (s *LiquidityService) exitV3ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 }
 
 // approveNFT checks approval and approves if needed (ERC721)
-func (s *LiquidityService) approveNFT(privateKey *ecdsa.PrivateKey, walletAddr, tokenAddr, spender common.Address, tokenId *big.Int, opts TxOptions) error {
+func (s *LiquidityService) approveNFT(client *ethclient.Client, chainID *big.Int, privateKey *ecdsa.PrivateKey, walletAddr, tokenAddr, spender common.Address, tokenId *big.Int, opts TxOptions) error {
 	// 简单的 ERC721 ABI 用于 getApproved 和 approve
 	const erc721ABI = `[{"constant":true,"inputs":[{"name":"tokenId","type":"uint256"}],"name":"getApproved","outputs":[{"name":"","type":"address"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"to","type":"address"},{"name":"tokenId","type":"uint256"}],"name":"approve","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"}]`
 
@@ -1327,7 +1393,7 @@ func (s *LiquidityService) approveNFT(privateKey *ecdsa.PrivateKey, walletAddr, 
 		return err
 	}
 	msg := ethereum.CallMsg{To: &tokenAddr, Data: data}
-	res, err := blockchain.Client.CallContract(context.Background(), msg, nil)
+	res, err := client.CallContract(context.Background(), msg, nil)
 	if err == nil {
 		if out, err = parsed.Unpack("getApproved", res); err == nil && len(out) > 0 {
 			if approvedAddr, ok := out[0].(common.Address); ok && approvedAddr == spender {
@@ -1337,37 +1403,47 @@ func (s *LiquidityService) approveNFT(privateKey *ecdsa.PrivateKey, walletAddr, 
 	}
 
 	// Approve
-	nonce, err := blockchain.GetNonce(walletAddr)
+	nonce, err := blockchain.GetNonceWithClient(client, walletAddr)
 	if err != nil {
 		return err
 	}
-	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), opts)
+	auth, err := s.buildAuth(client, chainID, privateKey, nonce, big.NewInt(0), opts)
 	if err != nil {
 		return err
 	}
 
-	contract := bind.NewBoundContract(tokenAddr, parsed, blockchain.Client, blockchain.Client, blockchain.Client)
+	contract := bind.NewBoundContract(tokenAddr, parsed, client, client, client)
 	tx, err := contract.Transact(auth, "approve", spender, tokenId)
 	if err != nil {
 		return err
 	}
-	_, err = s.waitMined(tx)
+	_, err = s.waitMined(client, chainID, tx)
 	return err
 }
 
-func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr common.Address, usdtAddr common.Address, task *models.StrategyTask, swapDeltas bool, opts TxOptions) ([]string, error) {
+func (s *LiquidityService) exitV4ToUSDT(exec chainexec.EVMExecutor, privateKey *ecdsa.PrivateKey, walletAddr common.Address, usdtAddr common.Address, task *models.StrategyTask, swapDeltas bool, opts TxOptions) ([]string, error) {
 	var txHashes []string
 	var swapErr error
 
-	if !common.IsHexAddress(config.AppConfig.UniswapV4PoolManagerAddress) {
-		return nil, fmt.Errorf("UNISWAP_V4_POOL_MANAGER_ADDRESS not set")
+	if exec == nil {
+		return nil, fmt.Errorf("executor is nil")
 	}
-	if !common.IsHexAddress(config.AppConfig.UniswapV4PositionManagerAddress) {
-		return nil, fmt.Errorf("UNISWAP_V4_POSITION_MANAGER_ADDRESS not set")
+	cc := exec.Config()
+	client := exec.Client()
+	chainID := exec.ChainID()
+	if client == nil || chainID == nil {
+		return nil, fmt.Errorf("blockchain client not initialized")
+	}
+
+	if !common.IsHexAddress(cc.UniswapV4PoolManagerAddress) {
+		return nil, fmt.Errorf("UNISWAP_V4_POOL_MANAGER_ADDRESS not set for chain=%s", exec.Chain())
+	}
+	if !common.IsHexAddress(cc.UniswapV4PositionManagerAddress) {
+		return nil, fmt.Errorf("UNISWAP_V4_POSITION_MANAGER_ADDRESS not set for chain=%s", exec.Chain())
 	}
 
 	// Capture initial USDT balance
-	usdtBefore, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
+	usdtBefore, _ := blockchain.GetTokenBalanceWithClient(client, usdtAddr, walletAddr)
 	if usdtBefore == nil {
 		usdtBefore = big.NewInt(0)
 	}
@@ -1393,11 +1469,11 @@ func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 		return nil, fmt.Errorf("native currency not supported for swap flow (use WBNB)")
 	}
 
-	b0Before, _ := blockchain.GetTokenBalance(c0, walletAddr)
-	b1Before, _ := blockchain.GetTokenBalance(c1, walletAddr)
+	b0Before, _ := blockchain.GetTokenBalanceWithClient(client, c0, walletAddr)
+	b1Before, _ := blockchain.GetTokenBalanceWithClient(client, c1, walletAddr)
 
-	v4pmAddr := common.HexToAddress(config.AppConfig.UniswapV4PositionManagerAddress)
-	v4pm, err := blockchain.NewV4PositionManager(v4pmAddr, blockchain.Client)
+	v4pmAddr := common.HexToAddress(cc.UniswapV4PositionManagerAddress)
+	v4pm, err := blockchain.NewV4PositionManager(v4pmAddr, client)
 	if err != nil {
 		return nil, fmt.Errorf("init v4 position manager failed: %w", err)
 	}
@@ -1478,7 +1554,7 @@ func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	if err != nil {
 		return nil, err
 	}
-	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), opts)
+	auth, err := s.buildAuth(client, chainID, privateKey, nonce, big.NewInt(0), opts)
 	if err != nil {
 		return nil, err
 	}
@@ -1491,12 +1567,12 @@ func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	removeTxHash := tx.Hash().Hex()
 	txHashes = append(txHashes, fmt.Sprintf("V4撤仓|%s", removeTxHash))
 
-	if _, err := s.waitMined(tx); err != nil {
+	if _, err := s.waitMined(client, chainID, tx); err != nil {
 		return txHashes, fmt.Errorf("v4 remove tx failed: %w", err)
 	}
 
-	b0After, _ := blockchain.GetTokenBalance(c0, walletAddr)
-	b1After, _ := blockchain.GetTokenBalance(c1, walletAddr)
+	b0After, _ := blockchain.GetTokenBalanceWithClient(client, c0, walletAddr)
+	b1After, _ := blockchain.GetTokenBalanceWithClient(client, c1, walletAddr)
 	d0 := new(big.Int).Sub(b0After, b0Before)
 	d1 := new(big.Int).Sub(b1After, b1Before)
 	if d0.Sign() < 0 {
@@ -1511,7 +1587,7 @@ func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	// Prefer cached symbols from task; fall back to on-chain ERC20 symbol; finally fall back to address.
 	sym0 := strings.TrimSpace(task.Token0Symbol)
 	if sym0 == "" {
-		if s0, sErr := blockchain.GetTokenSymbol(c0); sErr == nil && strings.TrimSpace(s0) != "" {
+		if s0, sErr := blockchain.GetTokenSymbolWithClient(client, c0); sErr == nil && strings.TrimSpace(s0) != "" {
 			sym0 = strings.TrimSpace(s0)
 		} else {
 			sym0 = c0.Hex()
@@ -1519,7 +1595,7 @@ func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	}
 	sym1 := strings.TrimSpace(task.Token1Symbol)
 	if sym1 == "" {
-		if s1, sErr := blockchain.GetTokenSymbol(c1); sErr == nil && strings.TrimSpace(s1) != "" {
+		if s1, sErr := blockchain.GetTokenSymbolWithClient(client, c1); sErr == nil && strings.TrimSpace(s1) != "" {
 			sym1 = strings.TrimSpace(s1)
 		} else {
 			sym1 = c1.Hex()
@@ -1529,10 +1605,10 @@ func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	if swapDeltas {
 		var swapErrs []error
 		if d0.Sign() > 0 && c0 != usdtAddr {
-			if skip, _ := s.shouldSkipExitSwapToUSDT(c0, d0, walletAddr, sym0); skip {
+			if skip, _ := s.shouldSkipExitSwapToUSDT(exec, c0, d0, walletAddr, sym0); skip {
 				goto swap1
 			}
-			if hash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, c0, usdtAddr, d0, effectiveExitSlippagePercent(task)); err != nil {
+			if hash, err := s.swapDeltaToUSDTWithHash(exec, privateKey, walletAddr, c0, usdtAddr, d0, effectiveExitSlippagePercent(task)); err != nil {
 				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT failed: %w", sym0, err))
 			} else if hash != "" {
 				txHashes = append(txHashes, fmt.Sprintf("交换 %s→USDT|%s", sym0, hash))
@@ -1542,10 +1618,10 @@ func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 		}
 	swap1:
 		if d1.Sign() > 0 && c1 != usdtAddr {
-			if skip, _ := s.shouldSkipExitSwapToUSDT(c1, d1, walletAddr, sym1); skip {
+			if skip, _ := s.shouldSkipExitSwapToUSDT(exec, c1, d1, walletAddr, sym1); skip {
 				goto afterSwap
 			}
-			if hash, err := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, c1, usdtAddr, d1, effectiveExitSlippagePercent(task)); err != nil {
+			if hash, err := s.swapDeltaToUSDTWithHash(exec, privateKey, walletAddr, c1, usdtAddr, d1, effectiveExitSlippagePercent(task)); err != nil {
 				swapErrs = append(swapErrs, fmt.Errorf("swap %s→USDT failed: %w", sym1, err))
 			} else if hash != "" {
 				txHashes = append(txHashes, fmt.Sprintf("交换 %s→USDT|%s", sym1, hash))
@@ -1560,7 +1636,7 @@ func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 	}
 
 	// Record Transaction
-	usdtAfter, _ := blockchain.GetTokenBalance(usdtAddr, walletAddr)
+	usdtAfter, _ := blockchain.GetTokenBalanceWithClient(client, usdtAddr, walletAddr)
 	if usdtAfter == nil {
 		usdtAfter = big.NewInt(0)
 	}
@@ -1573,6 +1649,7 @@ func (s *LiquidityService) exitV4ToUSDT(privateKey *ecdsa.PrivateKey, walletAddr
 
 	txRecord := models.Transaction{
 		UserID:          task.UserID,
+		Chain:           task.Chain,
 		TaskID:          task.ID,
 		TxHash:          mainHash,
 		Type:            models.TxTypeRemoveLiquidity,
@@ -1601,6 +1678,7 @@ func tFromBytes32(h string) common.Address {
 }
 
 func (s *LiquidityService) swapDeltaToUSDT(
+	exec chainexec.EVMExecutor,
 	privateKey *ecdsa.PrivateKey,
 	walletAddr common.Address,
 	tokenIn common.Address,
@@ -1608,6 +1686,14 @@ func (s *LiquidityService) swapDeltaToUSDT(
 	amountIn *big.Int,
 	slippagePercent float64,
 ) error {
+	if exec == nil {
+		return fmt.Errorf("executor is nil")
+	}
+	client := exec.Client()
+	if client == nil {
+		return fmt.Errorf("blockchain client not initialized")
+	}
+
 	if amountIn == nil || amountIn.Sign() <= 0 {
 		return nil
 	}
@@ -1616,7 +1702,7 @@ func (s *LiquidityService) swapDeltaToUSDT(
 	}
 
 	// 检查实际余额
-	actualBalance, err := blockchain.GetTokenBalance(tokenIn, walletAddr)
+	actualBalance, err := blockchain.GetTokenBalanceWithClient(client, tokenIn, walletAddr)
 	if err != nil {
 		log.Printf("[Liquidity] Warning: failed to get token balance: %v", err)
 	} else {
@@ -1626,7 +1712,7 @@ func (s *LiquidityService) swapDeltaToUSDT(
 		log.Printf("[Liquidity] Token %s balance: %s, attempting to swap: %s", tokenIn.Hex(), actualBalance.String(), amountIn.String())
 		// 如果实际余额小于要 swap 的数量，先等待 RPC 同步再决定是否截断。
 		if actualBalance.Cmp(amountIn) < 0 {
-			synced, werr := s.waitTokenBalanceAtLeast(tokenIn, walletAddr, amountIn, tokenIn.Hex())
+			synced, werr := s.waitTokenBalanceAtLeast(client, tokenIn, walletAddr, amountIn, tokenIn.Hex())
 			if werr == nil && synced != nil && synced.Cmp(amountIn) >= 0 {
 				actualBalance = synced
 			} else if synced != nil && synced.Sign() > 0 && synced.Cmp(amountIn) < 0 {
@@ -1638,12 +1724,13 @@ func (s *LiquidityService) swapDeltaToUSDT(
 		}
 	}
 
-	_, err = s.swapExactInViaOKX(privateKey, walletAddr, tokenIn, usdtAddr, amountIn, slippagePercent)
+	_, err = s.swapExactInViaOKX(exec, privateKey, walletAddr, tokenIn, usdtAddr, amountIn, slippagePercent)
 	return err
 }
 
 // swapDeltaToUSDTWithHash 与 swapDeltaToUSDT 类似，但返回交易哈希
 func (s *LiquidityService) swapDeltaToUSDTWithHash(
+	exec chainexec.EVMExecutor,
 	privateKey *ecdsa.PrivateKey,
 	walletAddr common.Address,
 	tokenIn common.Address,
@@ -1651,6 +1738,14 @@ func (s *LiquidityService) swapDeltaToUSDTWithHash(
 	amountIn *big.Int,
 	slippagePercent float64,
 ) (string, error) {
+	if exec == nil {
+		return "", fmt.Errorf("executor is nil")
+	}
+	client := exec.Client()
+	if client == nil {
+		return "", fmt.Errorf("blockchain client not initialized")
+	}
+
 	if amountIn == nil || amountIn.Sign() <= 0 {
 		return "", nil
 	}
@@ -1659,7 +1754,7 @@ func (s *LiquidityService) swapDeltaToUSDTWithHash(
 	}
 
 	// 检查实际余额
-	actualBalance, err := blockchain.GetTokenBalance(tokenIn, walletAddr)
+	actualBalance, err := blockchain.GetTokenBalanceWithClient(client, tokenIn, walletAddr)
 	if err != nil {
 		log.Printf("[Liquidity] Warning: failed to get token balance: %v", err)
 	} else {
@@ -1669,7 +1764,7 @@ func (s *LiquidityService) swapDeltaToUSDTWithHash(
 		log.Printf("[Liquidity] Token %s balance: %s, attempting to swap: %s", tokenIn.Hex(), actualBalance.String(), amountIn.String())
 		// 如果实际余额小于要 swap 的数量，先等待 RPC 同步再决定是否截断。
 		if actualBalance.Cmp(amountIn) < 0 {
-			synced, werr := s.waitTokenBalanceAtLeast(tokenIn, walletAddr, amountIn, tokenIn.Hex())
+			synced, werr := s.waitTokenBalanceAtLeast(client, tokenIn, walletAddr, amountIn, tokenIn.Hex())
 			if werr == nil && synced != nil && synced.Cmp(amountIn) >= 0 {
 				actualBalance = synced
 			} else if synced != nil && synced.Sign() > 0 && synced.Cmp(amountIn) < 0 {
@@ -1681,12 +1776,13 @@ func (s *LiquidityService) swapDeltaToUSDTWithHash(
 		}
 	}
 
-	txHash, err := s.swapExactInViaOKXWithHash(privateKey, walletAddr, tokenIn, usdtAddr, amountIn, slippagePercent)
+	txHash, err := s.swapExactInViaOKXWithHash(exec, privateKey, walletAddr, tokenIn, usdtAddr, amountIn, slippagePercent)
 	return txHash, err
 }
 
 // swapExactInViaOKXWithHash 与 swapExactInViaOKX 类似，但返回交易哈希
 func (s *LiquidityService) swapExactInViaOKXWithHash(
+	exec chainexec.EVMExecutor,
 	privateKey *ecdsa.PrivateKey,
 	walletAddr common.Address,
 	tokenIn common.Address,
@@ -1694,10 +1790,13 @@ func (s *LiquidityService) swapExactInViaOKXWithHash(
 	amountIn *big.Int,
 	slippagePercent float64,
 ) (string, error) {
-	if config.AppConfig == nil {
-		return "", fmt.Errorf("config not loaded")
+	if exec == nil {
+		return "", fmt.Errorf("executor is nil")
 	}
-	if blockchain.Client == nil || blockchain.ChainID == nil {
+	cc := exec.Config()
+	client := exec.Client()
+	chainID := exec.ChainID()
+	if client == nil || chainID == nil {
 		return "", fmt.Errorf("blockchain client not initialized")
 	}
 	if amountIn == nil || amountIn.Sign() <= 0 {
@@ -1712,7 +1811,7 @@ func (s *LiquidityService) swapExactInViaOKXWithHash(
 	}
 
 	swapReq := exchange.SwapRequest{
-		ChainID:           fmt.Sprintf("%d", config.AppConfig.BSCChainID),
+		ChainID:           fmt.Sprintf("%d", cc.ChainID),
 		FromTokenAddress:  tokenIn.Hex(),
 		ToTokenAddress:    tokenOut.Hex(),
 		Amount:            amountIn.String(),
@@ -1772,13 +1871,13 @@ func (s *LiquidityService) swapExactInViaOKXWithHash(
 
 	swapTx := blockchain.OkxSwapTx{To: to, Value: value, Data: data}
 	_ = ValidateOkxSmartSwapTx("swap", swapTx)
-	if err := EnforceOkxSwapRouter("swap", swapTx); err != nil {
+	if err := EnforceOkxSwapRouter("swap", cc.OKXSwapRouter, swapTx); err != nil {
 		return "", err
 	}
 
 	// 获取 OKX TokenApprove 合约地址
-	chainID := fmt.Sprintf("%d", config.AppConfig.BSCChainID)
-	approveSpender, err := s.okxService.GetApproveSpender(chainID, tokenIn.Hex())
+	chainIDText := fmt.Sprintf("%d", cc.ChainID)
+	approveSpender, err := s.okxService.GetApproveSpender(chainIDText, tokenIn.Hex())
 	if err != nil {
 		log.Printf("[Liquidity] Warning: failed to get OKX approve spender, using router as fallback: %v", err)
 		approveSpender = to.Hex()
@@ -1790,41 +1889,41 @@ func (s *LiquidityService) swapExactInViaOKXWithHash(
 
 	// Approve spender (ERC20 or Permit2).
 	if approveAddr == blockchain.Permit2Address {
-		if err := s.approveTokenViaPermit2(privateKey, walletAddr, tokenIn, to, amountIn, TxOptions{}); err != nil {
+		if err := s.approveTokenViaPermit2(client, chainID, privateKey, walletAddr, tokenIn, to, amountIn, TxOptions{}); err != nil {
 			return "", fmt.Errorf("approve via Permit2 failed: %w", err)
 		}
 	} else {
-		if err := s.approveToken(privateKey, walletAddr, tokenIn, approveAddr, amountIn, TxOptions{}); err != nil {
+		if err := s.approveToken(client, chainID, privateKey, walletAddr, tokenIn, approveAddr, amountIn, TxOptions{}); err != nil {
 			return "", fmt.Errorf("approve spender failed: %w", err)
 		}
 	}
 
-	nonce, err := blockchain.GetNonce(walletAddr)
+	nonce, err := blockchain.GetNonceWithClient(client, walletAddr)
 	if err != nil {
 		return "", err
 	}
-	gasPrice, err := blockchain.GetGasPrice()
+	gasPrice, err := blockchain.GetGasPriceWithClient(client)
 	if err != nil {
 		return "", err
 	}
 
-	gasLimit, err := okxSwapGasLimit(walletAddr, to, value, data, okxGasLimit)
+	gasLimit, err := okxSwapGasLimit(client, walletAddr, to, value, data, okxGasLimit)
 	if err != nil {
 		return "", err
 	}
 	log.Printf("[Liquidity] OKX swap gasLimit: okx=%d final=%d", okxGasLimit, gasLimit)
 
 	rawTx := types.NewTransaction(nonce, to, value, gasLimit, gasPrice, data)
-	signed, err := types.SignTx(rawTx, types.NewEIP155Signer(blockchain.ChainID), privateKey)
+	signed, err := types.SignTx(rawTx, types.NewEIP155Signer(chainID), privateKey)
 	if err != nil {
 		return "", err
 	}
-	if _, err := blockchain.SendTransaction(signed); err != nil {
+	if err := blockchain.SendTransactionWithClient(client, signed); err != nil {
 		return "", err
 	}
 
 	txHash := signed.Hash().Hex()
-	if _, err := s.waitMined(signed); err != nil {
+	if _, err := s.waitMined(client, chainID, signed); err != nil {
 		return txHash, err
 	}
 
@@ -1832,7 +1931,7 @@ func (s *LiquidityService) swapExactInViaOKXWithHash(
 }
 
 // isNFTApprovedForAll 检查是否已经 setApprovalForAll
-func (s *LiquidityService) isNFTApprovedForAll(nftContract, owner, operator common.Address) (bool, error) {
+func (s *LiquidityService) isNFTApprovedForAll(client *ethclient.Client, nftContract, owner, operator common.Address) (bool, error) {
 	const erc721ABI = `[{"constant":true,"inputs":[{"name":"owner","type":"address"},{"name":"operator","type":"address"}],"name":"isApprovedForAll","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"view","type":"function"}]`
 
 	parsed, err := abi.JSON(strings.NewReader(erc721ABI))
@@ -1846,7 +1945,7 @@ func (s *LiquidityService) isNFTApprovedForAll(nftContract, owner, operator comm
 	}
 
 	msg := ethereum.CallMsg{To: &nftContract, Data: data}
-	res, err := blockchain.Client.CallContract(context.Background(), msg, nil)
+	res, err := client.CallContract(context.Background(), msg, nil)
 	if err != nil {
 		return false, err
 	}
@@ -1868,6 +1967,8 @@ func (s *LiquidityService) isNFTApprovedForAll(nftContract, owner, operator comm
 
 // setNFTApprovalForAll 设置 setApprovalForAll
 func (s *LiquidityService) setNFTApprovalForAll(
+	client *ethclient.Client,
+	chainID *big.Int,
 	privateKey *ecdsa.PrivateKey,
 	walletAddr common.Address,
 	nftContract common.Address,
@@ -1882,22 +1983,22 @@ func (s *LiquidityService) setNFTApprovalForAll(
 		return err
 	}
 
-	nonce, err := blockchain.GetNonce(walletAddr)
+	nonce, err := blockchain.GetNonceWithClient(client, walletAddr)
 	if err != nil {
 		return err
 	}
 
-	auth, err := s.buildAuth(privateKey, nonce, big.NewInt(0), opts)
+	auth, err := s.buildAuth(client, chainID, privateKey, nonce, big.NewInt(0), opts)
 	if err != nil {
 		return err
 	}
 
-	contract := bind.NewBoundContract(nftContract, parsed, blockchain.Client, blockchain.Client, blockchain.Client)
+	contract := bind.NewBoundContract(nftContract, parsed, client, client, client)
 	tx, err := contract.Transact(auth, "setApprovalForAll", operator, approved)
 	if err != nil {
 		return err
 	}
 
-	_, err = s.waitMined(tx)
+	_, err = s.waitMined(client, chainID, tx)
 	return err
 }

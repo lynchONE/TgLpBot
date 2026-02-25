@@ -80,7 +80,8 @@ func NewV4PositionManager(address common.Address, client *ethclient.Client) (*V4
 	if err != nil {
 		return nil, err
 	}
-	contract := bind.NewBoundContract(address, parsed, client, client, client)
+	rc := wrapRPCRetryClient(client)
+	contract := bind.NewBoundContract(address, parsed, rc, rc, rc)
 	return &V4PositionManager{contract: contract, address: address}, nil
 }
 

@@ -706,14 +706,14 @@ func (s *StrategyService) onExitAttemptFailed(task *models.StrategyTask, attempt
 				desc := parts[0]
 				txHash := strings.TrimSpace(parts[1])
 				if txHash != "" {
-					txText += fmt.Sprintf("%d. **%s**\n   [查看交易](https://bscscan.com/tx/%s)\n", i+1, desc, txHash)
+					txText += fmt.Sprintf("%d. **%s**\n   [查看交易](%s)\n", i+1, desc, explorerTxURL(task.Chain, txHash))
 				} else {
 					txText += fmt.Sprintf("%d. **%s**\n", i+1, desc)
 				}
 			} else {
 				txHash := strings.TrimSpace(txInfo)
 				if txHash != "" {
-					txText += fmt.Sprintf("%d. [查看交易](https://bscscan.com/tx/%s)\n", i+1, txHash)
+					txText += fmt.Sprintf("%d. [查看交易](%s)\n", i+1, explorerTxURL(task.Chain, txHash))
 				}
 			}
 		}
@@ -1022,12 +1022,12 @@ func (s *StrategyService) finishStopAfterExit(task *models.StrategyTask, now tim
 			if len(parts) == 2 {
 				desc := parts[0]
 				txHash := parts[1]
-				msg += fmt.Sprintf("%d. **%s**\n   [查看交易](https://bscscan.com/tx/%s)\n", i+1, desc, txHash)
+				msg += fmt.Sprintf("%d. **%s**\n   [查看交易](%s)\n", i+1, desc, explorerTxURL(task.Chain, txHash))
 				if strings.Contains(desc, "→USDT") || strings.Contains(desc, "->USDT") {
 					hasSwapTx = true
 				}
 			} else {
-				msg += fmt.Sprintf("%d. [查看交易](https://bscscan.com/tx/%s)\n", i+1, txInfo)
+				msg += fmt.Sprintf("%d. [查看交易](%s)\n", i+1, explorerTxURL(task.Chain, txInfo))
 				if strings.Contains(txInfo, "→USDT") || strings.Contains(txInfo, "->USDT") {
 					hasSwapTx = true
 				}
@@ -1130,12 +1130,12 @@ func (s *StrategyService) finishCooldownAfterExit(task *models.StrategyTask, now
 			if len(parts) == 2 {
 				desc := parts[0]
 				txHash := parts[1]
-				msg += fmt.Sprintf("%d. **%s**\n   [查看交易](https://bscscan.com/tx/%s)\n", i+1, desc, txHash)
+				msg += fmt.Sprintf("%d. **%s**\n   [查看交易](%s)\n", i+1, desc, explorerTxURL(task.Chain, txHash))
 				if strings.Contains(desc, "→USDT") || strings.Contains(desc, "->USDT") {
 					hasSwapTx = true
 				}
 			} else {
-				msg += fmt.Sprintf("%d. [查看交易](https://bscscan.com/tx/%s)\n", i+1, txInfo)
+				msg += fmt.Sprintf("%d. [查看交易](%s)\n", i+1, explorerTxURL(task.Chain, txInfo))
 				if strings.Contains(txInfo, "→USDT") || strings.Contains(txInfo, "->USDT") {
 					hasSwapTx = true
 				}

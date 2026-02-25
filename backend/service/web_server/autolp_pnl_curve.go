@@ -382,7 +382,7 @@ func (s *Server) handleAutoLPPnLCurve(w http.ResponseWriter, r *http.Request) {
 		}
 
 		pnlSvc := strategy.NewPnLService()
-		bnbPriceUSDT := pricing.GetBNBPriceUSDT()
+		nativePriceByChain := make(map[string]float64, 2)
 
 		for _, ot := range openTrades {
 			task, ok := taskByID[ot.TaskID]
@@ -397,8 +397,17 @@ func (s *Server) handleAutoLPPnLCurve(w http.ResponseWriter, r *http.Request) {
 
 			pnl := info.AbsolutePnLUSDT
 			if gasWei, ok := new(big.Int).SetString(strings.TrimSpace(ot.OpenGasSpentWei), 10); ok && gasWei != nil && gasWei.Sign() > 0 {
-				gasBNB, _ := weiStrToFloat18(gasWei.String())
-				pnl -= gasBNB * bnbPriceUSDT
+				chain := strings.ToLower(strings.TrimSpace(task.Chain))
+				if chain == "" {
+					chain = "bsc"
+				}
+				nativePriceUSD := nativePriceByChain[chain]
+				if nativePriceUSD <= 0 {
+					nativePriceUSD = pricing.GetNativePriceUSD(chain)
+					nativePriceByChain[chain] = nativePriceUSD
+				}
+				gasNative, _ := weiStrToFloat18(gasWei.String())
+				pnl -= gasNative * nativePriceUSD
 			}
 			unrealized += pnl
 		}

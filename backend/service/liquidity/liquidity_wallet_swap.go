@@ -5,6 +5,7 @@ import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	"TgLpBot/service/chainexec"
 	"TgLpBot/service/exchange"
 	"fmt"
 	"log"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 // WalletSwapToUSDTReport is a best-effort report for swapping wallet tokens into USDT.
@@ -29,14 +31,29 @@ func (s *LiquidityService) SwapWalletOtherTokensToUSDT(userID uint, slippagePerc
 	if config.AppConfig == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
-	if blockchain.Client == nil || blockchain.ChainID == nil {
-		return nil, fmt.Errorf("blockchain client not initialized")
+	return s.SwapWalletOtherTokensToUSDTForChain(userID, "bsc", slippagePercent)
+}
+
+func (s *LiquidityService) SwapWalletOtherTokensToUSDTForChain(userID uint, chain string, slippagePercent float64) (*WalletSwapToUSDTReport, error) {
+	if config.AppConfig == nil {
+		return nil, fmt.Errorf("config not loaded")
 	}
 	if database.DB == nil {
 		return nil, fmt.Errorf("db not initialized")
 	}
-	if !common.IsHexAddress(config.AppConfig.USDTAddress) {
-		return nil, fmt.Errorf("USDT address not set")
+
+	chain = config.NormalizeChain(chain)
+	exec, err := chainexec.GetEVM(chain)
+	if err != nil {
+		return nil, err
+	}
+	cc := exec.Config()
+	client := exec.Client()
+	if client == nil {
+		return nil, fmt.Errorf("blockchain client not initialized for chain=%s", exec.Chain())
+	}
+	if !common.IsHexAddress(cc.StableAddress) {
+		return nil, fmt.Errorf("stable address not set for chain=%s", exec.Chain())
 	}
 
 	wallet, err := s.walletService.GetDefaultWallet(userID)
@@ -53,12 +70,12 @@ func (s *LiquidityService) SwapWalletOtherTokensToUSDT(userID uint, slippagePerc
 	}
 
 	walletAddr := s.walletService.GetWalletAddress(wallet)
-	usdtAddr := common.HexToAddress(config.AppConfig.USDTAddress)
+	usdtAddr := common.HexToAddress(cc.StableAddress)
 
-	excluded := excludedSwapTokens()
+	excluded := excludedSwapTokens(cc)
 	excluded[usdtAddr] = struct{}{}
 
-	candidates, err := s.collectUserTaskTokens(userID)
+	candidates, err := s.collectUserTaskTokensForChain(userID, exec.Chain())
 	if err != nil {
 		return nil, err
 	}
@@ -78,54 +95,56 @@ func (s *LiquidityService) SwapWalletOtherTokensToUSDT(userID uint, slippagePerc
 			continue
 		}
 
-		bal, berr := blockchain.GetTokenBalance(tokenAddr, walletAddr)
+		bal, berr := blockchain.GetTokenBalanceWithClient(client, tokenAddr, walletAddr)
 		if berr != nil {
-			report.Failed = append(report.Failed, fmt.Sprintf("%s->USDT|get balance failed: %v", tokenLabel(tokenAddr, symGuess), berr))
+			report.Failed = append(report.Failed, fmt.Sprintf("%s->USDT|get balance failed: %v", tokenLabel(client, tokenAddr, symGuess), berr))
 			continue
 		}
 		if bal == nil || bal.Sign() <= 0 {
 			continue
 		}
 
-		txHash, serr := s.swapDeltaToUSDTWithHash(privateKey, walletAddr, tokenAddr, usdtAddr, bal, slippagePercent)
+		txHash, serr := s.swapDeltaToUSDTWithHash(exec, privateKey, walletAddr, tokenAddr, usdtAddr, bal, slippagePercent)
 		if serr != nil {
-			report.Failed = append(report.Failed, fmt.Sprintf("%s->USDT|%v", tokenLabel(tokenAddr, symGuess), serr))
+			report.Failed = append(report.Failed, fmt.Sprintf("%s->USDT|%v", tokenLabel(client, tokenAddr, symGuess), serr))
 			continue
 		}
 		if strings.TrimSpace(txHash) == "" {
-			report.Failed = append(report.Failed, fmt.Sprintf("%s->USDT|empty tx hash", tokenLabel(tokenAddr, symGuess)))
+			report.Failed = append(report.Failed, fmt.Sprintf("%s->USDT|empty tx hash", tokenLabel(client, tokenAddr, symGuess)))
 			continue
 		}
 
-		report.Swapped = append(report.Swapped, fmt.Sprintf("%s->USDT|%s", tokenLabel(tokenAddr, symGuess), txHash))
+		report.Swapped = append(report.Swapped, fmt.Sprintf("%s->USDT|%s", tokenLabel(client, tokenAddr, symGuess), txHash))
 	}
 
 	return report, nil
 }
 
-func excludedSwapTokens() map[common.Address]struct{} {
+func excludedSwapTokens(cc config.ChainConfig) map[common.Address]struct{} {
 	excluded := make(map[common.Address]struct{})
-	if config.AppConfig == nil {
-		return excluded
-	}
+
 	// Stable coins
-	if common.IsHexAddress(config.AppConfig.USDCAddress) {
-		excluded[common.HexToAddress(config.AppConfig.USDCAddress)] = struct{}{}
+	if common.IsHexAddress(cc.StableAddress) {
+		excluded[common.HexToAddress(cc.StableAddress)] = struct{}{}
 	}
-	if common.IsHexAddress(config.AppConfig.BUSDAddress) {
-		excluded[common.HexToAddress(config.AppConfig.BUSDAddress)] = struct{}{}
+	if common.IsHexAddress(cc.USDCAddress) {
+		excluded[common.HexToAddress(cc.USDCAddress)] = struct{}{}
 	}
-	// Treat WBNB as BNB for safety (avoid swapping user's gas asset equivalent).
-	if common.IsHexAddress(config.AppConfig.WBNBAddress) {
-		excluded[common.HexToAddress(config.AppConfig.WBNBAddress)] = struct{}{}
+	if common.IsHexAddress(cc.BUSDAddress) {
+		excluded[common.HexToAddress(cc.BUSDAddress)] = struct{}{}
+	}
+
+	// Treat wrapped native token as the gas asset equivalent (avoid swapping user's gas token).
+	if common.IsHexAddress(cc.WrappedNativeAddress) {
+		excluded[common.HexToAddress(cc.WrappedNativeAddress)] = struct{}{}
 	}
 	return excluded
 }
 
-func tokenLabel(tokenAddr common.Address, symGuess string) string {
+func tokenLabel(client *ethclient.Client, tokenAddr common.Address, symGuess string) string {
 	sym := strings.TrimSpace(symGuess)
-	if sym == "" && blockchain.Client != nil {
-		if erc20, err := blockchain.NewERC20(tokenAddr, blockchain.Client); err == nil {
+	if sym == "" && client != nil {
+		if erc20, err := blockchain.NewERC20(tokenAddr, client); err == nil {
 			if s2, err := erc20.Symbol(nil); err == nil {
 				sym = strings.TrimSpace(s2)
 			}
@@ -137,10 +156,11 @@ func tokenLabel(tokenAddr common.Address, symGuess string) string {
 	return sym
 }
 
-func (s *LiquidityService) collectUserTaskTokens(userID uint) (map[common.Address]string, error) {
+func (s *LiquidityService) collectUserTaskTokensForChain(userID uint, chain string) (map[common.Address]string, error) {
 	var tasks []models.StrategyTask
 	if err := database.DB.Select(
 		"id",
+		"chain",
 		"pool_version",
 		"exchange",
 		"pool_id",
@@ -151,7 +171,7 @@ func (s *LiquidityService) collectUserTaskTokens(userID uint) (map[common.Addres
 		"v3_position_manager_address",
 		"v3_token_id",
 		"v4_token_id",
-	).Where("user_id = ?", userID).Find(&tasks).Error; err != nil {
+	).Where("user_id = ? AND chain = ?", userID, config.NormalizeChain(chain)).Find(&tasks).Error; err != nil {
 		return nil, fmt.Errorf("query tasks failed: %w", err)
 	}
 
@@ -202,14 +222,28 @@ type WalletTokenInfo struct {
 // ScanWalletTokensForSwap 扫描钱包中符合兑换条件的代币
 // 返回价值大于 minValueUSDT 且非 BNB/WBNB/稳定币的代币列表
 func (s *LiquidityService) ScanWalletTokensForSwap(userID uint, minValueUSDT float64) ([]WalletTokenInfo, error) {
+	return s.ScanWalletTokensForSwapForChain(userID, "bsc", minValueUSDT)
+}
+
+func (s *LiquidityService) ScanWalletTokensForSwapForChain(userID uint, chain string, minValueUSDT float64) ([]WalletTokenInfo, error) {
 	if config.AppConfig == nil {
-		return nil, fmt.Errorf("配置未加载")
-	}
-	if blockchain.Client == nil || blockchain.ChainID == nil {
-		return nil, fmt.Errorf("区块链客户端未初始化")
+		return nil, fmt.Errorf("config not loaded")
 	}
 	if database.DB == nil {
-		return nil, fmt.Errorf("数据库未初始化")
+		return nil, fmt.Errorf("db not initialized")
+	}
+
+	exec, err := chainexec.GetEVM(chain)
+	if err != nil {
+		return nil, err
+	}
+	cc := exec.Config()
+	client := exec.Client()
+	if client == nil {
+		return nil, fmt.Errorf("blockchain client not initialized for chain=%s", exec.Chain())
+	}
+	if !common.IsHexAddress(cc.StableAddress) {
+		return nil, fmt.Errorf("stable address not set for chain=%s", exec.Chain())
 	}
 
 	wallet, err := s.walletService.GetDefaultWallet(userID)
@@ -218,12 +252,12 @@ func (s *LiquidityService) ScanWalletTokensForSwap(userID uint, minValueUSDT flo
 	}
 
 	walletAddr := s.walletService.GetWalletAddress(wallet)
-	usdtAddr := common.HexToAddress(config.AppConfig.USDTAddress)
+	usdtAddr := common.HexToAddress(cc.StableAddress)
 
-	excluded := excludedSwapTokens()
+	excluded := excludedSwapTokens(cc)
 	excluded[usdtAddr] = struct{}{}
 
-	candidates, err := s.collectUserTaskTokens(userID)
+	candidates, err := s.collectUserTaskTokensForChain(userID, exec.Chain())
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +272,7 @@ func (s *LiquidityService) ScanWalletTokensForSwap(userID uint, minValueUSDT flo
 			continue
 		}
 
-		bal, berr := blockchain.GetTokenBalance(tokenAddr, walletAddr)
+		bal, berr := blockchain.GetTokenBalanceWithClient(client, tokenAddr, walletAddr)
 		if berr != nil {
 			continue
 		}
@@ -247,12 +281,12 @@ func (s *LiquidityService) ScanWalletTokensForSwap(userID uint, minValueUSDT flo
 		}
 
 		// 获取代币符号
-		symbol := tokenLabel(tokenAddr, symGuess)
+		symbol := tokenLabel(client, tokenAddr, symGuess)
 
 		// 获取代币小数位数
 		decimals := 18
-		if blockchain.Client != nil {
-			if erc20, err := blockchain.NewERC20(tokenAddr, blockchain.Client); err == nil {
+		if client != nil {
+			if erc20, err := blockchain.NewERC20(tokenAddr, client); err == nil {
 				if d, err := erc20.Decimals(nil); err == nil {
 					decimals = int(d)
 				}
@@ -264,7 +298,7 @@ func (s *LiquidityService) ScanWalletTokensForSwap(userID uint, minValueUSDT flo
 		balanceStr := fmt.Sprintf("%.4f", balFloat)
 
 		// 获取代币的 USDT 价值 (使用 OKX DEX 报价)
-		valueUSDT := s.getTokenValueInUSDT(tokenAddr, bal, walletAddr)
+		valueUSDT := s.getTokenValueInStable(exec, tokenAddr, bal, walletAddr)
 
 		// 只返回价值大于阈值的代币
 		if valueUSDT >= minValueUSDT {
@@ -293,22 +327,29 @@ func toFloat64(val *big.Int, decimals int) float64 {
 }
 
 // getTokenValueInUSDT 获取代币的 USDT 价值
-func (s *LiquidityService) getTokenValueInUSDT(tokenAddr common.Address, amount *big.Int, walletAddr common.Address) float64 {
+func (s *LiquidityService) getTokenValueInStable(exec chainexec.EVMExecutor, tokenAddr common.Address, amount *big.Int, walletAddr common.Address) float64 {
 	if amount == nil || amount.Sign() <= 0 {
+		return 0
+	}
+	if exec == nil {
 		return 0
 	}
 	if s.okxService == nil {
 		return 0
 	}
 
-	usdtAddr := common.HexToAddress(config.AppConfig.USDTAddress)
-	chainID := blockchain.ChainID.String()
+	cc := exec.Config()
+	if !common.IsHexAddress(cc.StableAddress) {
+		return 0
+	}
+	stableAddr := common.HexToAddress(cc.StableAddress)
+	chainID := fmt.Sprintf("%d", cc.ChainID)
 
 	// 使用 OKX DEX 获取报价
 	resp, err := s.okxService.GetSwapData(exchange.SwapRequest{
 		ChainID:           chainID,
 		FromTokenAddress:  tokenAddr.Hex(),
-		ToTokenAddress:    usdtAddr.Hex(),
+		ToTokenAddress:    stableAddr.Hex(),
 		Amount:            amount.String(),
 		Slippage:          "0.01", // 1% slippage for quote
 		UserWalletAddress: walletAddr.Hex(),
@@ -333,5 +374,5 @@ func (s *LiquidityService) getTokenValueInUSDT(tokenAddr common.Address, amount 
 	}
 
 	// USDT 精度是 18
-	return toFloat64(toAmount, 18)
+	return toFloat64(toAmount, cc.StableDecimals)
 }
