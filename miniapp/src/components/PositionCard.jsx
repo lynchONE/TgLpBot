@@ -393,7 +393,7 @@ export default function PositionCard({
                 {/* ══════════════════════════════════════════
                     区域 3：余额明细（可折叠）
                 ══════════════════════════════════════════ */}
-                <div className="rounded-xl border border-zinc-100/80 bg-zinc-50/80 dark:border-white/6 dark:bg-white/3">
+                <div className="rounded-xl border border-zinc-100/80 bg-zinc-50/80 dark:border-white/10 dark:bg-[#0f1116]">
                     <button type="button" onClick={() => setExpanded(!expanded)}
                         className="w-full flex items-center justify-between px-3 py-2.5">
                         <div className="flex items-center gap-2">
@@ -413,7 +413,7 @@ export default function PositionCard({
                     <div className={`collapsible-content ${expanded ? 'expanded' : 'collapsed'}`}>
                         <div className="px-3 pb-3">
                             {/* 表头 */}
-                            <div className="grid grid-cols-4 gap-2 pb-1.5 border-b border-zinc-200/60 dark:border-white/6">
+                            <div className="grid grid-cols-4 gap-2 pb-1.5 border-b border-zinc-200/60 dark:border-white/10">
                                 <div className="text-[10px] font-medium text-zinc-400 dark:text-white/30 uppercase tracking-wide">Token</div>
                                 <div className="text-[10px] font-medium text-zinc-400 dark:text-white/30 uppercase tracking-wide text-right flex items-center justify-end gap-0.5">
                                     <Icon path={icons.wallet} className="h-2.5 w-2.5" />钱包
@@ -424,7 +424,7 @@ export default function PositionCard({
 
                             {/* Token 行 */}
                             {[token0, token1].filter(Boolean).map((row) => (
-                                <div key={row.address} className="grid grid-cols-4 gap-2 items-center py-2 border-b border-zinc-100/60 dark:border-white/4 last:border-0">
+                                <div key={row.address} className="grid grid-cols-4 gap-2 items-center py-2 border-b border-zinc-100/60 dark:border-white/10 last:border-0">
                                     <div className="min-w-0">
                                         <div className="text-xs font-bold text-zinc-900 dark:text-white/90 truncate">{row.symbol}</div>
                                         <div className="text-[10px] text-zinc-400 dark:text-white/35">
@@ -463,7 +463,7 @@ export default function PositionCard({
                 <div className="flex items-center gap-2">
                     {/* 策略区间（左侧，flex-1） */}
                     {taskRange ? (
-                        <div className="flex-1 min-w-0 flex items-center gap-1.5 rounded-xl border border-zinc-100/80 bg-zinc-50/80 px-2.5 py-2 dark:border-white/6 dark:bg-white/3">
+                        <div className="flex-1 min-w-0 flex items-center gap-1.5 rounded-xl border border-zinc-100/80 bg-zinc-50/80 px-2.5 py-2 dark:border-white/10 dark:bg-[#0f1116]">
                             <div className="h-1.5 w-1.5 rounded-full bg-sky-500 shrink-0" />
                             <div className="text-[10px] text-zinc-500 dark:text-white/45 truncate">再平衡</div>
                             <div className="text-[11px] font-bold tabular-nums text-sky-600 dark:text-sky-400 ml-auto shrink-0">{taskRange.text}</div>

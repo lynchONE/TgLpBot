@@ -132,7 +132,7 @@ export default function PriceRangeVisualizer({
         : 'text-rose-500 dark:text-rose-400';
 
     return (
-        <div className="mt-2.5 rounded-xl border border-zinc-100/80 bg-zinc-50/80 p-3 dark:border-white/6 dark:bg-white/3">
+        <div className="mt-2.5 rounded-xl border border-zinc-100/80 bg-zinc-50/80 p-3 dark:border-white/10 dark:bg-[#0f1116]">
 
             {/* ── 标题行 ── */}
             <div className="flex items-center justify-between gap-2 mb-3">
@@ -148,13 +148,13 @@ export default function PriceRangeVisualizer({
                     )}
                     {/* 格数 badge */}
                     {gridCount ? (
-                        <span className="text-[10px] font-medium rounded-md bg-zinc-200/70 px-1.5 py-0.5 text-zinc-500 dark:bg-white/8 dark:text-white/40">
+                        <span className="text-[10px] font-medium rounded-md bg-zinc-200/70 px-1.5 py-0.5 text-zinc-500 dark:bg-white/10 dark:text-white/40">
                             {gridCount} 格
                         </span>
                     ) : null}
                     {/* 幅度 badge */}
                     {deviation ? (
-                        <span className="text-[10px] font-medium rounded-md bg-zinc-200/70 px-1.5 py-0.5 text-zinc-500 dark:bg-white/8 dark:text-white/40">
+                        <span className="text-[10px] font-medium rounded-md bg-zinc-200/70 px-1.5 py-0.5 text-zinc-500 dark:bg-white/10 dark:text-white/40">
                             ±{deviation.toFixed(2)}%
                         </span>
                     ) : null}
@@ -177,7 +177,7 @@ export default function PriceRangeVisualizer({
                     style={{ top: '50%', transform: 'translateY(-50%)', height: 20 }}
                 >
                     {/* 基础背景 */}
-                    <div className="absolute inset-0 bg-zinc-200/90 dark:bg-white/8" />
+                    <div className="absolute inset-0 bg-zinc-200/90 dark:bg-white/10" />
 
                     {/* 区间激活填充：in-range 时亮绿，out 时暗红 */}
                     <div
@@ -351,7 +351,7 @@ export default function PriceRangeVisualizer({
             )}
 
             {/* ── 底部统计行（紧凑横排）── */}
-            <div className="mt-2.5 flex items-center border-t border-zinc-200/60 dark:border-white/6 pt-2 text-[10px]">
+            <div className="mt-2.5 flex items-center border-t border-zinc-200/60 dark:border-white/10 pt-2 text-[10px]">
                 <span className="text-zinc-400 dark:text-white/35">刷新</span>
                 <span className="ml-1 font-bold text-zinc-600 dark:text-white/60 tabular-nums">{pollIntervalSec}s</span>
                 <span className="mx-2 text-zinc-300 dark:text-white/15">·</span>

@@ -1410,6 +1410,28 @@ export default function App() {
         setOpenPositionPool(null);
     };
 
+    // Refresh config when opening the modal so toggles from the bot take effect without a full reload.
+    useEffect(() => {
+        if (!openPositionPool || !hasInitData) return;
+
+        let aborted = false;
+        const controller = new AbortController();
+
+        fetchGlobalConfig({ apiBaseUrl, initData, signal: controller.signal })
+            .then((resp) => {
+                if (aborted) return;
+                setGlobalConfig(resp?.config || resp || null);
+            })
+            .catch(() => {
+                // ignore; keep existing config
+            });
+
+        return () => {
+            aborted = true;
+            controller.abort();
+        };
+    }, [apiBaseUrl, initData, hasInitData, openPositionPool]);
+
     useEffect(() => {
         if (!openPositionPool || !hasInitData || !multiWalletEnabled) return;
 
@@ -3005,32 +3027,23 @@ export default function App() {
 
             {
                 openPositionPool ? (
-                    <div className="fixed inset-0 z-50">
-                        <button
-                            type="button"
-                            className="absolute inset-0 cursor-default bg-black/40"
-                            onClick={closeOpenPosition}
-                            aria-label="关闭开仓"
-                        />
-                        <div className="absolute inset-x-0 bottom-0 max-h-[85vh] touch-pan-y overflow-y-auto overscroll-contain rounded-t-2xl border border-zinc-200 bg-white p-4 pb-6 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
-                            <div className="flex items-center justify-between gap-2">
-                                <div className="min-w-0">
-                                    <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">一键开仓</div>
-                                    <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40 truncate">
-                                        {openPositionPool?.trading_pair || '--'}
-                                    </div>
+                    <BottomSheet
+                        open={Boolean(openPositionPool)}
+                        onClose={closeOpenPosition}
+                        maxHeightClass="max-h-[85vh]"
+                        className="bg-white dark:bg-[#111318] backdrop-blur-none"
+                        headerClassName="px-4 pt-4 pb-3"
+                        contentClassName="px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+                        title={
+                            <div className="min-w-0">
+                                <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/90">一键开仓</div>
+                                <div className="mt-0.5 truncate text-[11px] font-medium text-zinc-500 dark:text-white/40">
+                                    {openPositionPool?.trading_pair || '--'}
                                 </div>
-                                <button
-                                    type="button"
-                                    onClick={closeOpenPosition}
-                                    className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                    aria-label="关闭"
-                                >
-                                    <Icon path={icons.close} className="h-5 w-5" />
-                                </button>
                             </div>
-
-                            <div className="mt-4 space-y-4">
+                        }
+                    >
+                        <div className="space-y-4">
                                 {multiWalletEnabled ? (
                                     <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                         <div className="flex items-center justify-between gap-2">
@@ -3057,7 +3070,7 @@ export default function App() {
                                             <div className="mt-2 text-xs text-zinc-500 dark:text-white/50">未找到钱包</div>
                                         ) : null}
 
-                                        <div className="mt-2 space-y-2">
+                                    <div className="mt-2 max-h-56 overflow-y-auto overscroll-contain space-y-2 pr-1">
                                             {(Array.isArray(walletsData?.wallets) ? walletsData.wallets : []).map((w) => {
                                                 const id = String(w?.id || '').trim();
                                                 const addr = String(w?.address || '').trim();
@@ -3233,9 +3246,8 @@ export default function App() {
                                 >
                                     {openPositionLoading ? '开仓中...' : '确认开仓'}
                                 </button>
-                            </div>
                         </div>
-                    </div>
+                    </BottomSheet>
                 ) : null
             }
 

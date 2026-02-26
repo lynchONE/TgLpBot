@@ -181,14 +181,32 @@ func (b *Bot) handleTaskStopRefresh(query *tgbotapi.CallbackQuery, user *models.
 
 func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 	b.api.Send(tgbotapi.NewCallback(query.ID, "正在停止任务..."))
+	chatID := user.TelegramID
+	messageID := 0
+	if query.Message != nil && query.Message.Chat != nil {
+		chatID = query.Message.Chat.ID
+		messageID = query.Message.MessageID
+	}
 	taskID, err := parseTaskID("task_stop_", query.Data)
 	if err != nil {
-		b.sendMessage(query.Message.Chat.ID, "无效的任务ID")
+		b.sendMessage(chatID, "无效的任务ID")
 		return
 	}
 	task, err := b.taskService.GetByID(user.ID, taskID)
 	if err != nil {
-		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("获取任务失败：%v", err))
+		if strings.Contains(strings.ToLower(err.Error()), "task not found") {
+			_, _ = b.api.Send(tgbotapi.NewCallback(query.ID, "任务不存在"))
+			text := fmt.Sprintf("⚠️ 任务 #%d 不存在（可能已删除或已结束）。\n\n请返回 /tasks 列表刷新。", taskID)
+			if messageID != 0 {
+				b.stopTaskAutoRefresh(chatID, messageID)
+				_ = b.editMessageReplyMarkup(chatID, messageID, tgbotapi.NewInlineKeyboardMarkup())
+				_ = b.editMessageText(chatID, messageID, text)
+			} else {
+				b.sendMessage(chatID, text)
+			}
+			return
+		}
+		b.sendMessage(chatID, fmt.Sprintf("获取任务失败：%v", err))
 		return
 	}
 

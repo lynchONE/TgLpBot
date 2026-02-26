@@ -203,14 +203,14 @@ export default function AutoMonitorCard({ task, tick, isBlacklisted = false }) {
                 ) : null}
 
                 {/* ── 基准 vs 当前 对比数据 ── */}
-                <div className="mt-3 rounded-xl border border-zinc-100/80 overflow-hidden dark:border-white/6">
+                <div className="mt-3 rounded-xl border border-zinc-100/80 overflow-hidden dark:border-white/10">
                     {/* 表头 */}
-                    <div className="grid grid-cols-3 gap-0 border-b border-zinc-100/80 dark:border-white/6">
+                    <div className="grid grid-cols-3 gap-0 border-b border-zinc-100/80 dark:border-white/10">
                         <div className="px-3 py-2 text-[10px] font-semibold text-zinc-400 dark:text-white/30 uppercase tracking-wide">指标</div>
-                        <div className={`px-2 py-2 text-[10px] font-semibold uppercase tracking-wide text-right border-l dark:border-white/6 ${isPeakBaseline ? 'text-amber-600/80 dark:text-amber-400/70 bg-amber-500/5' : 'text-sky-600/80 dark:text-sky-400/70 bg-sky-500/5'}`}>
+                        <div className={`px-2 py-2 text-[10px] font-semibold uppercase tracking-wide text-right border-l dark:border-white/10 ${isPeakBaseline ? 'text-amber-600/80 dark:text-amber-400/70 bg-amber-500/5' : 'text-sky-600/80 dark:text-sky-400/70 bg-sky-500/5'}`}>
                             基准<span className="ml-1 normal-case text-[9px] opacity-75">({baselineLabel})</span>
                         </div>
-                        <div className="px-2 py-2 text-[10px] font-semibold text-zinc-500/80 dark:text-white/45 uppercase tracking-wide text-right border-l bg-zinc-50/80 dark:bg-white/3 dark:border-white/6">
+                        <div className="px-2 py-2 text-[10px] font-semibold text-zinc-500/80 dark:text-white/45 uppercase tracking-wide text-right border-l bg-zinc-50/80 dark:bg-[#0f1116] dark:border-white/10">
                             当前 <span className="normal-case text-[9px] opacity-60">{currentAtText}</span>
                         </div>
                     </div>
@@ -257,7 +257,7 @@ export default function AutoMonitorCard({ task, tick, isBlacklisted = false }) {
                 </div>
 
                 {/* ── 撤退卫士状态 ── */}
-                <div className="mt-2.5 rounded-xl border border-zinc-100/80 bg-zinc-50/80 p-3 dark:border-white/6 dark:bg-white/3">
+                <div className="mt-2.5 rounded-xl border border-zinc-100/80 bg-zinc-50/80 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                     <div className="flex flex-wrap items-center gap-1.5">
                         <div className="text-[11px] font-semibold text-zinc-600 dark:text-white/60 mr-0.5">撤退卫士</div>
                         <GuardBadge tone={volBadge.tone}>交易量: {volBadge.text}</GuardBadge>
