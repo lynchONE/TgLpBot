@@ -427,47 +427,47 @@ export default function PositionCard({
                     </button>
 
                     <div className={`collapsible-content ${expanded ? 'expanded' : 'collapsed'}`}>
-                        <div className="px-2.5 pb-2">
+                        <div className="px-3 pb-3">
                             {/* 表头 */}
-                            <div className="grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-1.5 pb-1 border-b border-zinc-200/50 dark:border-white/5">
-                                <div className="text-[9px] font-medium text-zinc-400 dark:text-white/30 tracking-wide">Token</div>
-                                <div className="text-[9px] font-medium text-zinc-400 dark:text-white/30 tracking-wide text-right flex items-center justify-end gap-0.5">
-                                    <Icon path={icons.wallet} className="h-2 w-2" />钱包
+                            <div className="grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2 pb-1.5 border-b border-zinc-200/50 dark:border-white/5">
+                                <div className="text-[10px] font-bold text-zinc-400 dark:text-white/40 tracking-wide uppercase">Token</div>
+                                <div className="text-[10px] font-bold text-zinc-400 dark:text-white/40 tracking-wide uppercase text-right flex items-center justify-end gap-1">
+                                    <Icon path={icons.wallet} className="h-2.5 w-2.5" />钱包
                                 </div>
-                                <div className="text-[9px] font-medium text-zinc-400 dark:text-white/30 tracking-wide text-right">仓位</div>
-                                <div className="text-[9px] font-medium text-emerald-600/70 dark:text-emerald-400/60 tracking-wide text-right">手续费</div>
+                                <div className="text-[10px] font-bold text-zinc-400 dark:text-white/40 tracking-wide uppercase text-right">仓位</div>
+                                <div className="text-[10px] font-bold text-emerald-600/70 dark:text-emerald-500/70 tracking-wide uppercase text-right">手续费</div>
                             </div>
 
                             {/* Token 行 */}
                             {[token0, token1].filter(Boolean).map((row) => (
-                                <div key={row.address} className="grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-1.5 items-center py-1 border-b border-zinc-100/40 dark:border-white/5 last:border-0">
+                                <div key={row.address} className="grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2 items-center py-2 border-b border-zinc-100/40 dark:border-white/5 last:border-0">
                                     <div className="min-w-0 pr-1">
-                                        <div className="text-[11px] font-bold text-zinc-800 dark:text-white/85 truncate">{row.symbol}</div>
-                                        <div className="text-[9px] text-zinc-400 dark:text-white/35">
+                                        <div className="text-[11px] font-bold text-zinc-800 dark:text-white/90 truncate">{row.symbol}</div>
+                                        <div className="text-[10px] text-zinc-500 dark:text-white/40 font-mono">
                                             {row.price_usd_text || `$${Number(row.price_usd || 0).toFixed(4)}`}
                                         </div>
                                     </div>
                                     <div className="text-right min-w-0">
-                                        <div className="text-[11px] font-semibold text-zinc-700 dark:text-white/70 tabular-nums truncate">{row.wallet_amount}</div>
-                                        <div className="text-[9px] text-zinc-400 dark:text-white/35 tabular-nums truncate">{formatUsd(row.wallet_usd)}</div>
+                                        <div className="text-[11px] font-bold text-zinc-700 dark:text-white/80 font-mono tabular-nums truncate">{row.wallet_amount}</div>
+                                        <div className="text-[10px] text-zinc-500 dark:text-white/40 font-mono tabular-nums truncate">{formatUsd(row.wallet_usd)}</div>
                                     </div>
                                     <div className="text-right min-w-0">
-                                        <div className="text-[11px] font-semibold text-zinc-700 dark:text-white/70 tabular-nums truncate">{row.position_amount}</div>
-                                        <div className="text-[9px] text-zinc-400 dark:text-white/35 tabular-nums truncate">{formatUsd(row.position_usd)}</div>
+                                        <div className="text-[11px] font-bold text-zinc-700 dark:text-white/80 font-mono tabular-nums truncate">{row.position_amount}</div>
+                                        <div className="text-[10px] text-zinc-500 dark:text-white/40 font-mono tabular-nums truncate">{formatUsd(row.position_usd)}</div>
                                     </div>
                                     <div className="text-right min-w-0">
-                                        <div className="text-[11px] font-semibold text-emerald-600/90 dark:text-emerald-400/90 tabular-nums truncate">{row.fee_amount}</div>
-                                        <div className="text-[9px] text-emerald-600/50 dark:text-emerald-400/50 tabular-nums truncate">{formatFeeUsd(row.fee_usd)}</div>
+                                        <div className="text-[11px] font-bold text-emerald-600/90 dark:text-emerald-400/90 font-mono tabular-nums truncate">{row.fee_amount}</div>
+                                        <div className="text-[10px] text-emerald-600/60 dark:text-emerald-500/60 font-mono tabular-nums truncate">{formatFeeUsd(row.fee_usd)}</div>
                                     </div>
                                 </div>
                             ))}
 
                             {/* 小计行 */}
-                            <div className="pt-1.5 grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-1.5 mt-0.5 border-t border-zinc-100/40 dark:border-white/5">
-                                <div className="text-[10px] font-semibold text-zinc-500 dark:text-white/40">小计</div>
-                                <div className="text-right text-[10px] font-semibold text-zinc-600 dark:text-white/60 tabular-nums truncate">{formatUsd(position?.totals?.wallet_usd)}</div>
-                                <div className="text-right text-[10px] font-semibold text-zinc-600 dark:text-white/60 tabular-nums truncate">{formatUsd(position?.totals?.position_usd)}</div>
-                                <div className="text-right text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums truncate">{formatFeeUsd(position?.totals?.fee_usd)}</div>
+                            <div className="pt-2 grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2 mt-1 border-t border-zinc-100/40 dark:border-white/5">
+                                <div className="text-[11px] font-bold text-zinc-500 dark:text-white/50">小计</div>
+                                <div className="text-right text-[11px] font-bold text-zinc-700 dark:text-white/80 font-mono tabular-nums truncate">{formatUsd(position?.totals?.wallet_usd)}</div>
+                                <div className="text-right text-[11px] font-bold text-zinc-700 dark:text-white/80 font-mono tabular-nums truncate">{formatUsd(position?.totals?.position_usd)}</div>
+                                <div className="text-right text-[11px] font-bold text-emerald-600 dark:text-emerald-500 font-mono tabular-nums truncate">{formatFeeUsd(position?.totals?.fee_usd)}</div>
                             </div>
                         </div>
                     </div>
