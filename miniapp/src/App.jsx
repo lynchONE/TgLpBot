@@ -1783,7 +1783,18 @@ export default function App() {
             const resp = await stopTask({ apiBaseUrl, initData, taskId: id });
             showNotice(resp?.message || '已发起停止，正在撤出并兑换成 USDT', 'success');
         } catch (e) {
-            showNotice(String(e?.message || e), 'error');
+            const msg = String(e?.message || e || '').trim();
+            if (msg.includes('task not found')) {
+                showNotice(`任务 #${id} 不存在（可能已删除/已停止），已刷新列表。`, 'warning');
+                try {
+                    const resp = await fetchRealtimePositions({ apiBaseUrl, initData });
+                    setData(resp);
+                } catch {
+                    // ignore
+                }
+                return;
+            }
+            showNotice(msg || '停止失败，请稍后重试。', 'error');
         }
     };
 
@@ -2527,7 +2538,14 @@ export default function App() {
 
                                         {visibleTaskPositions.map((p) => (
                                             <PositionCard
-                                                key={`${p.version}:${p.position_id}`}
+                                                key={[
+                                                    String(p?.chain || ''),
+                                                    String(p?.version || ''),
+                                                    String(p?.exchange || ''),
+                                                    String(p?.pool_id || ''),
+                                                    String(p?.position_id || ''),
+                                                    String(p?.task_id || ''),
+                                                ].join(':')}
                                                 position={p}
                                                 walletAddress={walletAddress}
                                                 bnbBalance={bnbBalance}
@@ -2990,11 +3008,11 @@ export default function App() {
                     <div className="fixed inset-0 z-50">
                         <button
                             type="button"
-                            className="absolute inset-0 bg-black/40"
+                            className="absolute inset-0 cursor-default bg-black/40"
                             onClick={closeOpenPosition}
                             aria-label="关闭开仓"
                         />
-                        <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                        <div className="absolute inset-x-0 bottom-0 max-h-[85vh] touch-pan-y overflow-y-auto overscroll-contain rounded-t-2xl border border-zinc-200 bg-white p-4 pb-6 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
                             <div className="flex items-center justify-between gap-2">
                                 <div className="min-w-0">
                                     <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">一键开仓</div>

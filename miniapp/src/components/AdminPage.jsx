@@ -442,10 +442,17 @@ export default function AdminPage({
                                     </div>
                                 )}
 
-                                <div className="space-y-3">
-                                    {userPositionsList.map((p) => (
-                                        <PositionCard
-                                            key={`${p.version}:${p.position_id}`}
+                                    <div className="space-y-3">
+                                        {userPositionsList.map((p) => (
+                                            <PositionCard
+                                            key={[
+                                                String(p?.chain || ''),
+                                                String(p?.version || ''),
+                                                String(p?.exchange || ''),
+                                                String(p?.pool_id || ''),
+                                                String(p?.position_id || ''),
+                                                String(p?.task_id || ''),
+                                            ].join(':')}
                                             position={p}
                                             walletAddress={userSummary?.walletAddress}
                                             bnbBalance={userSummary?.bnbBalance}
