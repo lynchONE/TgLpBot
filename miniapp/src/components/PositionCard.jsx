@@ -12,11 +12,10 @@ const Icon = ({ path, className = '' }) => (
 const icons = {
     trend: 'M3 17l6-6 4 4 7-7v4h2V4h-8v2h4l-5 5-4-4-7 7z',
     wallet: 'M4 7a3 3 0 013-3h13v4H7a1 1 0 000 2h14v7a3 3 0 01-3 3H7a3 3 0 01-3-3V7zm16 6h-5v4h5v-4z',
-    refresh: 'M17.65 6.35A7.95 7.95 0 0012 4V1L7 6l5 5V7a5 5 0 11-5 5H5a7 7 0 107.65-5.65z',
-    link: 'M3.9 12a5 5 0 015-5h3v2h-3a3 3 0 000 6h3v2h-3a5 5 0 01-5-5zm7-1h2v2h-2v-2zm4.1-4h3a5 5 0 010 10h-3v-2h3a3 3 0 000-6h-3V7z',
     kebab: 'M12 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4z',
     chevronDown: 'M6 9l6 6 6-6',
-    chevronUp: 'M18 15l-6-6-6 6',
+    arrowUp: 'M7 14l5-5 5 5',
+    arrowDown: 'M7 10l5 5 5-5',
 };
 
 const USD_DISPLAY_LIMIT = 1e15;
@@ -42,9 +41,7 @@ const formatFeeUsd = (v) => {
 };
 
 const STABLE_SYMBOLS = new Set(['USDT', 'USDC', 'BUSD', 'DAI']);
-
 const normalizeSymbol = (value) => String(value || '').trim().toUpperCase();
-
 const isStableSymbol = (symbol) => STABLE_SYMBOLS.has(normalizeSymbol(symbol));
 
 const priceFromTick = (tick, decimals0 = 18, decimals1 = 18) => {
@@ -81,28 +78,21 @@ const formatPrice = (value) => {
     for (let i = 0; i < frac.length; i++) {
         if (frac[i] !== '0') {
             nonZero += 1;
-            if (nonZero === 2) {
-                cut = i + 1;
-                break;
-            }
+            if (nonZero === 2) { cut = i + 1; break; }
         }
     }
     const trimmed = frac.slice(0, cut);
     return trimmed ? `${sign}${intPart}.${trimmed}` : `${sign}${intPart}`;
 };
 
-const pillClassForStatus = (label) => {
+const getStatusTheme = (label) => {
     if (label?.includes('错误'))
-        return 'bg-red-500/10 text-red-700 ring-red-500/20 dark:bg-red-500/15 dark:text-red-300 dark:ring-red-500/30';
-    if (label?.includes('暂停'))
-        return 'bg-amber-500/10 text-amber-800 ring-amber-500/20 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/30';
-    if (label?.includes('再平衡') || label?.includes('止损') || label?.includes('撤出'))
-        return 'bg-amber-500/10 text-amber-800 ring-amber-500/20 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/30';
-    if (label?.includes('停止'))
-        return 'bg-amber-500/10 text-amber-800 ring-amber-500/20 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/30';
+        return { pill: 'bg-red-500/15 text-red-600 ring-red-500/25 dark:text-red-300 dark:ring-red-400/30', dot: 'bg-red-500', bar: 'bg-gradient-to-b from-red-500 to-red-600' };
+    if (label?.includes('暂停') || label?.includes('停止') || label?.includes('再平衡') || label?.includes('撤出'))
+        return { pill: 'bg-amber-500/15 text-amber-700 ring-amber-500/25 dark:text-amber-300 dark:ring-amber-400/30', dot: 'bg-amber-500', bar: 'bg-gradient-to-b from-amber-400 to-amber-500' };
     if (label?.includes('等待'))
-        return 'bg-sky-500/10 text-sky-800 ring-sky-500/20 dark:bg-sky-500/15 dark:text-sky-300 dark:ring-sky-500/30';
-    return 'bg-emerald-500/10 text-emerald-800 ring-emerald-500/20 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/30';
+        return { pill: 'bg-sky-500/15 text-sky-700 ring-sky-500/25 dark:text-sky-300 dark:ring-sky-400/30', dot: 'bg-sky-500', bar: 'bg-gradient-to-b from-sky-400 to-sky-500' };
+    return { pill: 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/25 dark:text-emerald-300 dark:ring-emerald-400/30', dot: 'bg-emerald-500', bar: 'bg-gradient-to-b from-emerald-400 to-emerald-500' };
 };
 
 const normalizeHexPrefixed = (v) => {
@@ -110,6 +100,12 @@ const normalizeHexPrefixed = (v) => {
     if (!raw) return '';
     if (raw.startsWith('0x') || raw.startsWith('0X')) return `0x${raw.slice(2)}`;
     return `0x${raw}`;
+};
+
+// 由 tickSpacing 推导费率标签
+const feeRateFromTickSpacing = (ts) => {
+    const map = { 1: '0.01%', 10: '0.05%', 50: '0.25%', 60: '0.30%', 100: '0.50%', 200: '1%', 2000: '2%' };
+    return map[Number(ts)] ?? null;
 };
 
 export default function PositionCard({
@@ -127,15 +123,14 @@ export default function PositionCard({
     isSelected = false,
     onToggleSelect,
 }) {
-    // 展开/折叠状态
     const [expanded, setExpanded] = useState(true);
 
-    // 实时更新的时间显示
     const runningDuration = useDurationFrom(position?.running_since);
     const updateTimeText = useRelativeTime(updatedAt);
 
     const token0 = position?.token_rows?.[0];
     const token1 = position?.token_rows?.[1];
+
     const stableIndex = useMemo(() => {
         if (isStableSymbol(token0?.symbol)) return 0;
         if (isStableSymbol(token1?.symbol)) return 1;
@@ -145,45 +140,24 @@ export default function PositionCard({
         if (Number.isFinite(p1) && p1 > 0.98 && p1 < 1.02) return 1;
         return -1;
     }, [token0?.symbol, token1?.symbol, token0?.price_usd, token1?.price_usd]);
+
     const baseSymbol = stableIndex === 0 ? token1?.symbol : token0?.symbol;
     const quoteSymbol = stableIndex === 0 ? token0?.symbol : token1?.symbol;
     const pairLabel = baseSymbol && quoteSymbol ? `${baseSymbol}/${quoteSymbol}` : baseSymbol || quoteSymbol || '';
 
-    // 计算当前总价值和PnL
     const { totalValue, pnlAbsolute, pnlPercent, hasPnL } = useMemo(() => {
         const positionUsd = Number(position?.totals?.position_usd || 0);
         const feeUsd = Number(position?.totals?.fee_usd || 0);
         const total = (Number.isFinite(positionUsd) ? positionUsd : 0) + (Number.isFinite(feeUsd) ? feeUsd : 0);
-
-        // 从position获取初始成本
         const initialCost = Number(position?.initial_cost_usd || position?.net_invested_usd || 0);
-
         if (Number.isFinite(initialCost) && initialCost > 0) {
             const pnl = total - initialCost;
-            const pnlPct = (pnl / initialCost) * 100;
-            return {
-                totalValue: total,
-                pnlAbsolute: pnl,
-                pnlPercent: pnlPct,
-                hasPnL: true,
-            };
+            return { totalValue: total, pnlAbsolute: pnl, pnlPercent: (pnl / initialCost) * 100, hasPnL: true };
         }
-
-        return {
-            totalValue: total,
-            pnlAbsolute: 0,
-            pnlPercent: 0,
-            hasPnL: false,
-        };
+        return { totalValue: total, pnlAbsolute: 0, pnlPercent: 0, hasPnL: false };
     }, [position?.totals?.position_usd, position?.totals?.fee_usd, position?.initial_cost_usd, position?.net_invested_usd]);
 
-    const titleRight = formatUsd(totalValue);
-
-    const chain = useMemo(() => {
-        const v = String(position?.chain || '').trim().toLowerCase();
-        return v || 'bsc';
-    }, [position?.chain]);
-
+    const chain = useMemo(() => String(position?.chain || '').trim().toLowerCase() || 'bsc', [position?.chain]);
     const explorerBase = useMemo(() => (chain === 'base' ? 'https://basescan.org' : 'https://bscscan.com'), [chain]);
     const geckoNetwork = useMemo(() => (chain === 'base' ? 'base' : 'bsc'), [chain]);
 
@@ -202,10 +176,7 @@ export default function PositionCard({
     const decimals0 = useMemo(() => Number(token0?.decimals ?? 18), [token0?.decimals]);
     const decimals1 = useMemo(() => Number(token1?.decimals ?? 18), [token1?.decimals]);
 
-    const currentPriceBase = useMemo(
-        () => priceFromTick(position?.current_tick, decimals0, decimals1),
-        [position?.current_tick, decimals0, decimals1]
-    );
+    const currentPriceBase = useMemo(() => priceFromTick(position?.current_tick, decimals0, decimals1), [position?.current_tick, decimals0, decimals1]);
     const currentPrice = stableIndex === 0 ? safeInvert(currentPriceBase) : currentPriceBase;
 
     const openPrice = useMemo(() => {
@@ -214,14 +185,8 @@ export default function PositionCard({
         return Number.isFinite(n) && n > 0 ? n : null;
     }, [position?.open_price, stableIndex]);
 
-    const rangeLowerBase = useMemo(
-        () => priceFromTick(position?.tick_lower, decimals0, decimals1),
-        [position?.tick_lower, decimals0, decimals1]
-    );
-    const rangeUpperBase = useMemo(
-        () => priceFromTick(position?.tick_upper, decimals0, decimals1),
-        [position?.tick_upper, decimals0, decimals1]
-    );
+    const rangeLowerBase = useMemo(() => priceFromTick(position?.tick_lower, decimals0, decimals1), [position?.tick_lower, decimals0, decimals1]);
+    const rangeUpperBase = useMemo(() => priceFromTick(position?.tick_upper, decimals0, decimals1), [position?.tick_upper, decimals0, decimals1]);
     const rangeLower = stableIndex === 0 ? safeInvert(rangeLowerBase) : rangeLowerBase;
     const rangeUpper = stableIndex === 0 ? safeInvert(rangeUpperBase) : rangeUpperBase;
     const rangeReady = Number.isFinite(rangeLower) && Number.isFinite(rangeUpper);
@@ -234,37 +199,14 @@ export default function PositionCard({
         if (!Number.isFinite(low) || !Number.isFinite(up) || low <= 0 || up <= 0) return null;
         const asymmetric = Math.abs(low - up) >= 0.01;
         const avg = (low + up) / 2;
-        if (!asymmetric) {
-            return { low, up, text: `±${avg.toFixed(2)}%` };
-        }
-        return { low, up, text: `下 ${low.toFixed(2)}% / 上 ${up.toFixed(2)}%` };
+        return asymmetric ? { text: `下 ${low.toFixed(2)}% / 上 ${up.toFixed(2)}%` } : { text: `±${avg.toFixed(2)}%` };
     }, [position?.task_range_lower_pct, position?.task_range_upper_pct]);
-
-    const priceProgress = useMemo(() => {
-        if (!Number.isFinite(currentPrice) || !Number.isFinite(rangeMin) || !Number.isFinite(rangeMax)) return null;
-        const den = rangeMax - rangeMin;
-        if (!Number.isFinite(den) || den <= 0) return null;
-        const p = (currentPrice - rangeMin) / den;
-        if (!Number.isFinite(p)) return null;
-        return Math.max(0, Math.min(1, p));
-    }, [currentPrice, rangeMin, rangeMax]);
-    const progressPercent = useMemo(() => {
-        if (priceProgress === null) return null;
-        return Math.max(0, Math.min(100, priceProgress * 100));
-    }, [priceProgress]);
-
-    const currentPriceText = Number.isFinite(currentPrice)
-        ? `${formatPrice(currentPrice)}${quoteSymbol ? ` ${quoteSymbol}` : ''}`
-        : '--';
-    const rangeText = rangeReady
-        ? `${formatPrice(rangeMin)} ~ ${formatPrice(rangeMax)}${quoteSymbol ? ` ${quoteSymbol}` : ''}`
-        : '--';
-    const pairMetaText = pairLabel ? `${pairLabel} · ` : '';
 
     const taskId = useMemo(() => {
         const raw = Number(position?.task_id);
         return Number.isFinite(raw) && raw > 0 ? raw : 0;
     }, [position?.task_id]);
+
     const taskPaused = Boolean(position?.task_paused);
     const statusLabel = String(position?.status_label || '');
     const isStopped = statusLabel.includes('已停止');
@@ -283,8 +225,7 @@ export default function PositionCard({
     useEffect(() => {
         if (!menuOpen) return;
         const onPointerDown = (e) => {
-            if (!menuRef.current) return;
-            if (menuRef.current.contains(e.target)) return;
+            if (!menuRef.current || menuRef.current.contains(e.target)) return;
             setMenuOpen(false);
         };
         document.addEventListener('mousedown', onPointerDown);
@@ -298,12 +239,7 @@ export default function PositionCard({
     const runAction = async (action, handler) => {
         if (!handler || actionPending) return;
         setActionPending(action);
-        try {
-            await handler();
-        } finally {
-            setActionPending('');
-            setMenuOpen(false);
-        }
+        try { await handler(); } finally { setActionPending(''); setMenuOpen(false); }
     };
 
     const togglePause = () => runAction('pause', () => onSetTaskPaused?.(taskId, !taskPaused));
@@ -311,230 +247,253 @@ export default function PositionCard({
     const stopTask = () => runAction('stop', () => onStopTask?.(taskId));
     const deleteTask = () => runAction('delete', () => onDeleteTask?.(taskId));
 
+    const pnlPositive = pnlAbsolute >= 0;
+    const statusTheme = getStatusTheme(statusLabel);
+
+    // 费率标签（从 tickSpacing 推导）
+    const feeLabel = useMemo(() => {
+        const ts = position?.pool?.tickSpacing ?? position?.tick_spacing;
+        return feeRateFromTickSpacing(ts);
+    }, [position?.pool?.tickSpacing, position?.tick_spacing]);
+
     return (
-        <div className="relative rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none transition-transform duration-200 active:scale-[0.98]">
-            {canTaskAction ? (
-                <div className="absolute right-4 top-4 z-20" ref={menuRef}>
+        <div className="relative rounded-2xl border border-zinc-200/80 bg-white/60 backdrop-blur-md shadow-sm overflow-hidden dark:border-white/10 dark:bg-white/5 dark:shadow-none transition-all duration-200 active:scale-[0.985]">
+            {/* 左侧状态颜色指示条 */}
+            <div className={`absolute left-0 top-0 bottom-0 w-[3px] ${statusTheme.bar}`} />
+
+            {/* 操作菜单 */}
+            {canTaskAction && (
+                <div className="absolute right-3 top-3 z-20" ref={menuRef}>
                     <button
                         type="button"
                         onClick={() => setMenuOpen((v) => !v)}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-white/70 text-zinc-700 hover:bg-white active:bg-white dark:border-white/10 dark:bg-[#0f1116] dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-zinc-200/80 bg-white/80 text-zinc-500 hover:bg-white hover:text-zinc-700 active:scale-95 transition-all dark:border-white/10 dark:bg-white/5 dark:text-white/50 dark:hover:bg-white/10 dark:hover:text-white/80"
                         aria-label="任务操作"
-                        aria-expanded={menuOpen}
                         disabled={Boolean(actionPending)}
                     >
-                        <Icon path={icons.kebab} className="h-5 w-5" />
+                        <Icon path={icons.kebab} className="h-4 w-4" />
                     </button>
-                    {menuOpen ? (
-                        <div className="absolute right-0 top-full z-20 mt-2 w-36 overflow-hidden rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md shadow-lg dark:border-white/10 dark:bg-white/5">
-                            {typeof onSetTaskPaused === 'function' ? (
-                                <button
-                                    type="button"
-                                    onClick={togglePause}
-                                    disabled={!canPauseAction || Boolean(actionPending)}
-                                    className="w-full px-3 py-2 text-left text-xs font-semibold text-zinc-800 hover:bg-zinc-100 active:bg-zinc-100 disabled:opacity-50 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/10"
-                                >
+                    {menuOpen && (
+                        <div className="absolute right-0 top-full z-20 mt-1.5 w-36 overflow-hidden rounded-xl border border-zinc-200/80 bg-white/90 backdrop-blur-xl shadow-xl dark:border-white/10 dark:bg-[#1a1d24]/95">
+                            {typeof onSetTaskPaused === 'function' && (
+                                <button type="button" onClick={togglePause} disabled={!canPauseAction || Boolean(actionPending)}
+                                    className="w-full px-3 py-2.5 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:text-white/70 dark:hover:bg-white/8">
                                     {actionPending === 'pause' ? '处理中...' : taskPaused ? '恢复任务' : '暂停任务'}
                                 </button>
-                            ) : null}
-                            {typeof onUpdateTaskRange === 'function' ? (
-                                <button
-                                    type="button"
-                                    onClick={editRange}
-                                    disabled={!canUpdateRangeAction || Boolean(actionPending)}
-                                    className="w-full border-t border-zinc-100 px-3 py-2 text-left text-xs font-semibold text-zinc-800 hover:bg-zinc-100 active:bg-zinc-100 disabled:opacity-50 dark:border-white/10 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/10"
-                                >
+                            )}
+                            {typeof onUpdateTaskRange === 'function' && (
+                                <button type="button" onClick={editRange} disabled={!canUpdateRangeAction || Boolean(actionPending)}
+                                    className="w-full border-t border-zinc-100/80 px-3 py-2.5 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:border-white/8 dark:text-white/70 dark:hover:bg-white/8">
                                     {actionPending === 'range' ? '处理中...' : '修改区间'}
                                 </button>
-                            ) : null}
-                            {typeof onStopTask === 'function' ? (
-                                <button
-                                    type="button"
-                                    onClick={stopTask}
-                                    disabled={!canStopAction || Boolean(actionPending)}
-                                    className="w-full border-t border-zinc-100 px-3 py-2 text-left text-xs font-semibold text-amber-700 hover:bg-amber-50 active:bg-amber-50 disabled:opacity-50 dark:border-white/10 dark:text-amber-300 dark:hover:bg-white/10 dark:active:bg-white/10"
-                                >
+                            )}
+                            {typeof onStopTask === 'function' && (
+                                <button type="button" onClick={stopTask} disabled={!canStopAction || Boolean(actionPending)}
+                                    className="w-full border-t border-zinc-100/80 px-3 py-2.5 text-left text-xs font-semibold text-amber-600 hover:bg-amber-50 disabled:opacity-40 transition-colors dark:border-white/8 dark:text-amber-400 dark:hover:bg-amber-500/10">
                                     {actionPending === 'stop' ? '处理中...' : isStopping ? '停止中...' : '停止任务'}
                                 </button>
-                            ) : null}
-                            {typeof onDeleteTask === 'function' ? (
-                                <button
-                                    type="button"
-                                    onClick={deleteTask}
-                                    disabled={!canDeleteAction || Boolean(actionPending)}
-                                    className="w-full border-t border-zinc-100 px-3 py-2 text-left text-xs font-semibold text-red-600 hover:bg-red-50 active:bg-red-50 disabled:opacity-50 dark:border-white/10 dark:text-red-300 dark:hover:bg-white/10 dark:active:bg-white/10"
-                                >
+                            )}
+                            {typeof onDeleteTask === 'function' && (
+                                <button type="button" onClick={deleteTask} disabled={!canDeleteAction || Boolean(actionPending)}
+                                    className="w-full border-t border-zinc-100/80 px-3 py-2.5 text-left text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-40 transition-colors dark:border-white/8 dark:text-red-400 dark:hover:bg-red-500/10">
                                     {actionPending === 'delete' ? '删除中...' : '删除任务'}
                                 </button>
-                            ) : null}
-                        </div>
-                    ) : null}
-                </div>
-            ) : null}
-            <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start gap-3">
-                    {/* 批量选择复选框 */}
-                    {batchMode && (
-                        <button
-                            type="button"
-                            onClick={onToggleSelect}
-                            className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition ${isSelected
-                                ? 'border-emerald-500 bg-emerald-500 text-white'
-                                : 'border-zinc-300 bg-white dark:border-zinc-600 dark:bg-zinc-800'
-                                }`}
-                        >
-                            {isSelected && (
-                                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                </svg>
                             )}
-                        </button>
+                        </div>
                     )}
-                    <div>
-                        <div className="text-base font-semibold text-zinc-900 dark:text-white/90">{position?.title}</div>
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                            <span
-                                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${pillClassForStatus(
-                                    position?.status_label
-                                )}`}
-                            >
-                                <span className="h-1.5 w-1.5 rounded-full bg-current opacity-90" />
-                                {position?.status_label || '运行中'}
-                            </span>
-                            <span className="inline-flex items-center gap-1 rounded-full bg-white/70 px-2 py-0.5 text-xs text-zinc-700 ring-1 ring-zinc-200 dark:bg-[#0f1116] dark:text-white/70 dark:ring-white/10">
-                                <Icon path={icons.trend} className="h-3.5 w-3.5 text-zinc-500 dark:text-white/60" />
-                                {bnbBalance} BNB
-                            </span>
+                </div>
+            )}
+
+            <div className="pl-4 pr-3 pt-3.5 pb-3 space-y-2.5">
+
+                {/* ══════════════════════════════════════════
+                    区域 1：标题行
+                ══════════════════════════════════════════ */}
+                <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-2.5 min-w-0">
+                        {/* 批量复选框 */}
+                        {batchMode && (
+                            <button type="button" onClick={onToggleSelect}
+                                className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition-all active:scale-90 ${isSelected ? 'border-emerald-500 bg-emerald-500 text-white shadow-sm shadow-emerald-500/30' : 'border-zinc-300 bg-white dark:border-zinc-600 dark:bg-zinc-800'}`}>
+                                {isSelected && (
+                                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                )}
+                            </button>
+                        )}
+                        <div className="min-w-0">
+                            {/* 交易对名称 + 费率 */}
+                            <div className="flex items-center gap-1.5 flex-wrap pr-8">
+                                <span className="text-base font-bold text-zinc-900 dark:text-white/95 leading-tight">
+                                    {position?.title}
+                                </span>
+                                {feeLabel && (
+                                    <span className="inline-flex items-center rounded-md bg-violet-500/12 px-1.5 py-0.5 text-[10px] font-bold text-violet-600 dark:bg-violet-500/18 dark:text-violet-300 ring-1 ring-violet-500/20 dark:ring-violet-400/25 shrink-0">
+                                        {feeLabel}
+                                    </span>
+                                )}
+                            </div>
+                            {/* 状态 + 任务ID + BNB */}
+                            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${statusTheme.pill}`}>
+                                    <span className={`h-1.5 w-1.5 rounded-full ${statusTheme.dot}`} />
+                                    {statusLabel || '运行中'}
+                                </span>
+                                {taskId > 0 && (
+                                    <span className="text-[10px] font-medium text-zinc-400 dark:text-white/30">
+                                        #{taskId}
+                                    </span>
+                                )}
+                                <span className="inline-flex items-center gap-0.5 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-white/6 dark:text-white/40">
+                                    <Icon path={icons.trend} className="h-2.5 w-2.5" />
+                                    {bnbBalance} BNB
+                                </span>
+                            </div>
                         </div>
                     </div>
-                </div>
-                <div className={`text-right ${canTaskAction ? 'pr-12' : ''}`}>
-                    <div className="text-xs text-zinc-500 dark:text-white/50">总计（仓位+手续费）</div>
-                    <div className="text-lg font-extrabold text-emerald-700 dark:text-emerald-300">{titleRight}</div>
-                    {hasPnL && (
-                        <div className={`text-sm font-bold tabular-nums ${pnlAbsolute >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
-                            {pnlAbsolute >= 0 ? '+' : ''}{formatUsd(pnlAbsolute)} ({pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%)
-                        </div>
-                    )}
-                </div>
-            </div>
 
-            <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                <button
-                    type="button"
-                    onClick={() => setExpanded(!expanded)}
-                    className="w-full flex items-center justify-between"
-                >
-                    <div className="flex items-center gap-2">
-                        <div className="text-xs font-semibold text-zinc-700 dark:text-white/70">余额信息</div>
-                        {!expanded && (
-                            <div className="text-[10px] text-zinc-500 dark:text-white/40 tabular-nums">
-                                钱包 {formatUsd(position?.totals?.wallet_usd)} · 仓位 {formatUsd(position?.totals?.position_usd)} · 费用 {formatFeeUsd(position?.totals?.fee_usd)}
+                    {/* 总价值 + PnL */}
+                    <div className={`text-right shrink-0 ${canTaskAction ? 'pr-9' : ''}`}>
+                        <div className="text-[10px] font-medium text-zinc-400 dark:text-white/35 uppercase tracking-wide mb-0.5">总计</div>
+                        <div className="text-xl font-extrabold text-zinc-900 dark:text-white/95 tabular-nums leading-none">
+                            {formatUsd(totalValue)}
+                        </div>
+                        {hasPnL && (
+                            <div className={`mt-1 inline-flex items-center gap-0.5 rounded-lg px-1.5 py-0.5 text-[11px] font-bold tabular-nums ${pnlPositive ? 'bg-emerald-500/12 text-emerald-600 dark:text-emerald-400' : 'bg-red-500/12 text-red-600 dark:text-red-400'}`}>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-2.5 w-2.5 shrink-0">
+                                    <path d={pnlPositive ? icons.arrowUp : icons.arrowDown} />
+                                </svg>
+                                {pnlAbsolute >= 0 ? '+' : ''}{formatUsd(pnlAbsolute)}
+                                <span className="opacity-70 ml-0.5">({pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%)</span>
                             </div>
                         )}
                     </div>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`h-4 w-4 text-zinc-500 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}>
-                        <path d={icons.chevronDown} />
-                    </svg>
-                </button>
-                <div className={`collapsible-content ${expanded ? 'expanded' : 'collapsed'}`}>
-                    <div className="mt-3 grid grid-cols-4 gap-2 text-[11px] text-zinc-500 dark:text-white/40">
-                        <div>Token</div>
-                        <div className="flex items-center gap-1 justify-end">
-                            <Icon path={icons.wallet} className="h-3.5 w-3.5" />
-                            钱包
-                        </div>
-                        <div className="justify-end flex items-center gap-1"># 仓位</div>
-                        <div className="justify-end flex items-center gap-1 text-emerald-700/80 dark:text-emerald-300/80">手续费</div>
-                    </div>
+                </div>
 
-                    {[token0, token1].filter(Boolean).map((row) => (
-                        <div key={row.address} className="mt-3 grid grid-cols-4 gap-2 items-start">
-                            <div className="min-w-0">
-                                <div className="text-sm font-bold text-zinc-900 dark:text-white/90 truncate" title={row.symbol}>{row.symbol}</div>
-                                <div className="text-[11px] text-zinc-500 dark:text-white/40 truncate">{row.price_usd_text || `$${Number(row.price_usd || 0).toFixed(4)}`}</div>
+                {/* ══════════════════════════════════════════
+                    区域 2：价格范围可视化（最重要，移至上方）
+                ══════════════════════════════════════════ */}
+                <PriceRangeVisualizer
+                    currentPrice={currentPrice}
+                    openPrice={openPrice}
+                    minPrice={rangeMin}
+                    maxPrice={rangeMax}
+                    token0={token0}
+                    token1={token1}
+                    tickLower={position?.tick_lower}
+                    tickUpper={position?.tick_upper}
+                    tickSpacing={position?.pool?.tickSpacing || position?.tick_spacing}
+                    inRange={position?.in_range}
+                    pollIntervalSec={pollIntervalSec}
+                    runningDuration={runningDuration}
+                    updateTimeText={updateTimeText}
+                />
+
+                {/* ══════════════════════════════════════════
+                    区域 3：余额明细（可折叠）
+                ══════════════════════════════════════════ */}
+                <div className="rounded-xl border border-zinc-100/80 bg-zinc-50/80 dark:border-white/6 dark:bg-white/3">
+                    <button type="button" onClick={() => setExpanded(!expanded)}
+                        className="w-full flex items-center justify-between px-3 py-2.5">
+                        <div className="flex items-center gap-2">
+                            <div className="text-[11px] font-semibold text-zinc-600 dark:text-white/60 uppercase tracking-wide">余额明细</div>
+                            {!expanded && (
+                                <div className="text-[10px] text-zinc-400 dark:text-white/35 tabular-nums">
+                                    仓位 {formatUsd(position?.totals?.position_usd)} · 费用 {formatFeeUsd(position?.totals?.fee_usd)}
+                                </div>
+                            )}
+                        </div>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                            className={`h-3.5 w-3.5 text-zinc-400 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}>
+                            <path d={icons.chevronDown} />
+                        </svg>
+                    </button>
+
+                    <div className={`collapsible-content ${expanded ? 'expanded' : 'collapsed'}`}>
+                        <div className="px-3 pb-3">
+                            {/* 表头 */}
+                            <div className="grid grid-cols-4 gap-2 pb-1.5 border-b border-zinc-200/60 dark:border-white/6">
+                                <div className="text-[10px] font-medium text-zinc-400 dark:text-white/30 uppercase tracking-wide">Token</div>
+                                <div className="text-[10px] font-medium text-zinc-400 dark:text-white/30 uppercase tracking-wide text-right flex items-center justify-end gap-0.5">
+                                    <Icon path={icons.wallet} className="h-2.5 w-2.5" />钱包
+                                </div>
+                                <div className="text-[10px] font-medium text-zinc-400 dark:text-white/30 uppercase tracking-wide text-right">仓位</div>
+                                <div className="text-[10px] font-medium text-emerald-600/70 dark:text-emerald-400/60 uppercase tracking-wide text-right">手续费</div>
                             </div>
-                            <div className="text-right">
-                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90 tabular-nums">{row.wallet_amount}</div>
-                                <div className="text-[11px] text-zinc-500 dark:text-white/40 tabular-nums">{formatUsd(row.wallet_usd)}</div>
-                            </div>
-                            <div className="text-right">
-                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90 tabular-nums">{row.position_amount}</div>
-                                <div className="text-[11px] text-zinc-500 dark:text-white/40 tabular-nums">{formatUsd(row.position_usd)}</div>
-                            </div>
-                            <div className="text-right">
-                                <div className="text-sm font-semibold text-emerald-700 dark:text-emerald-300 tabular-nums">{row.fee_amount}</div>
-                                <div className="text-[11px] text-emerald-700/70 dark:text-emerald-300/70 tabular-nums">{formatFeeUsd(row.fee_usd)}</div>
+
+                            {/* Token 行 */}
+                            {[token0, token1].filter(Boolean).map((row) => (
+                                <div key={row.address} className="grid grid-cols-4 gap-2 items-center py-2 border-b border-zinc-100/60 dark:border-white/4 last:border-0">
+                                    <div className="min-w-0">
+                                        <div className="text-xs font-bold text-zinc-900 dark:text-white/90 truncate">{row.symbol}</div>
+                                        <div className="text-[10px] text-zinc-400 dark:text-white/35">
+                                            {row.price_usd_text || `$${Number(row.price_usd || 0).toFixed(4)}`}
+                                        </div>
+                                    </div>
+                                    <div className="text-right">
+                                        <div className="text-xs font-semibold text-zinc-800 dark:text-white/80 tabular-nums">{row.wallet_amount}</div>
+                                        <div className="text-[10px] text-zinc-400 dark:text-white/35 tabular-nums">{formatUsd(row.wallet_usd)}</div>
+                                    </div>
+                                    <div className="text-right">
+                                        <div className="text-xs font-semibold text-zinc-800 dark:text-white/80 tabular-nums">{row.position_amount}</div>
+                                        <div className="text-[10px] text-zinc-400 dark:text-white/35 tabular-nums">{formatUsd(row.position_usd)}</div>
+                                    </div>
+                                    <div className="text-right">
+                                        <div className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">{row.fee_amount}</div>
+                                        <div className="text-[10px] text-emerald-600/60 dark:text-emerald-400/55 tabular-nums">{formatFeeUsd(row.fee_usd)}</div>
+                                    </div>
+                                </div>
+                            ))}
+
+                            {/* 小计行 */}
+                            <div className="pt-2 grid grid-cols-4 gap-2">
+                                <div className="text-[11px] font-semibold text-zinc-500 dark:text-white/50">小计</div>
+                                <div className="text-right text-[11px] font-semibold text-zinc-700 dark:text-white/70 tabular-nums">{formatUsd(position?.totals?.wallet_usd)}</div>
+                                <div className="text-right text-[11px] font-semibold text-zinc-700 dark:text-white/70 tabular-nums">{formatUsd(position?.totals?.position_usd)}</div>
+                                <div className="text-right text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">{formatFeeUsd(position?.totals?.fee_usd)}</div>
                             </div>
                         </div>
-                    ))}
-
-                    <div className="mt-3 border-t border-zinc-200 pt-3 grid grid-cols-4 gap-2 text-sm font-semibold tabular-nums dark:border-white/10">
-                        <div className="text-zinc-600 dark:text-white/60">小计</div>
-                        <div className="text-right text-zinc-900 dark:text-white/80">{formatUsd(position?.totals?.wallet_usd)}</div>
-                        <div className="text-right text-zinc-900 dark:text-white/80">{formatUsd(position?.totals?.position_usd)}</div>
-                        <div className="text-right text-emerald-700 dark:text-emerald-300">{formatFeeUsd(position?.totals?.fee_usd)}</div>
                     </div>
                 </div>
-            </div>
 
-            <div className="mt-3 grid grid-cols-4 gap-2">
-                <button
-                    onClick={openWallet}
-                    className="rounded-xl border border-zinc-200 bg-white/70 py-2 text-xs font-semibold text-zinc-700 hover:bg-white active:bg-white dark:border-white/10 dark:bg-[#0f1116] dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15"
-                >
-                    钱包
-                </button>
-                <button
-                    onClick={openPool}
-                    disabled={!poolLink}
-                    className="rounded-xl border border-zinc-200 bg-white/70 py-2 text-xs font-semibold text-zinc-700 hover:bg-white active:bg-white disabled:opacity-40 dark:border-white/10 dark:bg-[#0f1116] dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15"
-                >
-                    池子
-                </button>
-                <button
-                    onClick={() => openToken(token0?.address)}
-                    disabled={!token0?.address}
-                    className="rounded-xl border border-zinc-200 bg-white/70 py-2 text-xs font-semibold text-zinc-700 hover:bg-white active:bg-white disabled:opacity-40 dark:border-white/10 dark:bg-[#0f1116] dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15 truncate px-1"
-                    title={token0?.symbol || 'Token0'}
-                >
-                    {token0?.symbol || 'Token0'}
-                </button>
-                <button
-                    onClick={() => openToken(token1?.address)}
-                    disabled={!token1?.address}
-                    className="rounded-xl border border-zinc-200 bg-white/70 py-2 text-xs font-semibold text-zinc-700 hover:bg-white active:bg-white disabled:opacity-40 dark:border-white/10 dark:bg-[#0f1116] dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15 truncate px-1"
-                    title={token1?.symbol || 'Token1'}
-                >
-                    {token1?.symbol || 'Token1'}
-                </button>
-            </div>
+                {/* ══════════════════════════════════════════
+                    区域 4：底部操作行（策略区间 + 快捷链接）
+                ══════════════════════════════════════════ */}
+                <div className="flex items-center gap-2">
+                    {/* 策略区间（左侧，flex-1） */}
+                    {taskRange ? (
+                        <div className="flex-1 min-w-0 flex items-center gap-1.5 rounded-xl border border-zinc-100/80 bg-zinc-50/80 px-2.5 py-2 dark:border-white/6 dark:bg-white/3">
+                            <div className="h-1.5 w-1.5 rounded-full bg-sky-500 shrink-0" />
+                            <div className="text-[10px] text-zinc-500 dark:text-white/45 truncate">再平衡</div>
+                            <div className="text-[11px] font-bold tabular-nums text-sky-600 dark:text-sky-400 ml-auto shrink-0">{taskRange.text}</div>
+                        </div>
+                    ) : (
+                        <div className="flex-1" />
+                    )}
 
-            <PriceRangeVisualizer
-                currentPrice={currentPrice}
-                openPrice={openPrice}
-                minPrice={rangeMin}
-                maxPrice={rangeMax}
-                token0={token0}
-                token1={token1}
-                tickLower={position?.tick_lower}
-                tickUpper={position?.tick_upper}
-                tickSpacing={position?.pool?.tickSpacing || position?.tick_spacing}
-                inRange={position?.in_range}
-                // Stats props
-                pollIntervalSec={pollIntervalSec}
-                runningDuration={runningDuration}
-                updateTimeText={updateTimeText}
-            />
-
-            {taskRange ? (
-                <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700 dark:border-white/10 dark:bg-[#0f1116] dark:text-white/70">
-                    <div className="flex items-center justify-between gap-2">
-                        <div className="font-semibold">策略区间（下次再平衡）</div>
-                        <div className="font-semibold tabular-nums">{taskRange.text}</div>
+                    {/* 快捷链接按钮（右侧）*/}
+                    <div className="flex items-center gap-1 shrink-0">
+                        {[
+                            { label: '钱包', onClick: openWallet, disabled: false },
+                            { label: '池子', onClick: openPool, disabled: !poolLink },
+                            { label: token0?.symbol || 'T0', onClick: () => openToken(token0?.address), disabled: !token0?.address },
+                            { label: token1?.symbol || 'T1', onClick: () => openToken(token1?.address), disabled: !token1?.address },
+                        ].map(({ label, onClick, disabled }) => (
+                            <button
+                                key={label}
+                                onClick={onClick}
+                                disabled={disabled}
+                                title={label}
+                                className="rounded-lg border border-zinc-200/80 bg-white/60 px-2 py-1.5 text-[10px] font-semibold text-zinc-600 hover:bg-white hover:border-zinc-300 active:scale-95 disabled:opacity-35 transition-all dark:border-white/8 dark:bg-white/4 dark:text-white/55 dark:hover:bg-white/10 dark:hover:border-white/15 truncate max-w-[44px]"
+                            >
+                                {label}
+                            </button>
+                        ))}
                     </div>
                 </div>
-            ) : null}
+
+            </div>
         </div>
     );
 }

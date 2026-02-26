@@ -209,6 +209,7 @@ type RealtimePosition struct {
 	CurrentTick       int        `json:"current_tick"`
 	TickLower         int        `json:"tick_lower"`
 	TickUpper         int        `json:"tick_upper"`
+	TickSpacing       int        `json:"tick_spacing,omitempty"` // 费率对应的 tick 间距，用于前端计算格数
 	RangePercent      float64    `json:"range_percent"`
 	OpenPrice         float64    `json:"open_price,omitempty"`
 	TaskRangeLowerPct float64    `json:"task_range_lower_pct,omitempty"`
@@ -219,6 +220,26 @@ type RealtimePosition struct {
 
 	TokenRows []RealtimeTokenRow `json:"token_rows"`
 	Totals    RealtimeTotals     `json:"totals"`
+}
+
+// tickSpacingFromFee 根据标准 V3 费率（单位 bps×100，例如 3000=0.30%）推导 tick spacing。
+func tickSpacingFromFee(fee uint64) int {
+	switch fee {
+	case 100:
+		return 1
+	case 500:
+		return 10
+	case 2500:
+		return 50
+	case 3000:
+		return 60
+	case 10000:
+		return 200
+	case 20000:
+		return 2000
+	default:
+		return 0
+	}
 }
 
 type RealtimeTokenRow struct {
@@ -1177,20 +1198,26 @@ func (s *RealtimePositionsService) buildV3Position(
 		}
 	}
 	return &RealtimePosition{
-		Chain:             chain,
-		Version:           "v3",
-		Exchange:          exchange,
-		Title:             title,
-		PoolID:            poolID,
-		PositionID:        tokenId.String(),
-		TaskID:            taskID,
-		TaskPaused:        taskPaused,
-		TaskIsAuto:        taskIsAuto,
-		StatusLabel:       statusLabel,
-		InRange:           inRange,
-		CurrentTick:       currentTick,
-		TickLower:         tickLower,
-		TickUpper:         tickUpper,
+		Chain:       chain,
+		Version:     "v3",
+		Exchange:    exchange,
+		Title:       title,
+		PoolID:      poolID,
+		PositionID:  tokenId.String(),
+		TaskID:      taskID,
+		TaskPaused:  taskPaused,
+		TaskIsAuto:  taskIsAuto,
+		StatusLabel: statusLabel,
+		InRange:     inRange,
+		CurrentTick: currentTick,
+		TickLower:   tickLower,
+		TickUpper:   tickUpper,
+		TickSpacing: func() int {
+			if task != nil && task.TickSpacing > 0 {
+				return task.TickSpacing
+			}
+			return tickSpacingFromFee(info.Fee)
+		}(),
 		RangePercent:      rangePct,
 		OpenPrice:         openPrice,
 		TaskRangeLowerPct: taskRangeLowerPct,
@@ -1384,6 +1411,7 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		CurrentTick:       currentTick,
 		TickLower:         tickLower,
 		TickUpper:         tickUpper,
+		TickSpacing:       task.TickSpacing,
 		RangePercent:      rangePct,
 		OpenPrice:         task.GuardOpenPrice,
 		TaskRangeLowerPct: taskRangeLowerPct,
@@ -1600,6 +1628,7 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 		CurrentTick:       currentTick,
 		TickLower:         tickLower,
 		TickUpper:         tickUpper,
+		TickSpacing:       task.TickSpacing,
 		RangePercent:      rangePct,
 		TaskRangeLowerPct: taskRangeLowerPct,
 		TaskRangeUpperPct: taskRangeUpperPct,

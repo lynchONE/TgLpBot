@@ -19,6 +19,7 @@ import {
     fetchAdminRealtimePositions,
     fetchAdminRealtimeUsers,
     fetchGlobalConfig,
+    fetchWallets,
     fetchHotPools,
     fetchSearchPools,
     fetchMe,
@@ -127,6 +128,7 @@ const storage = {
 const STORAGE_THEME = 'tglp_theme';
 const STORAGE_POLL_SEC = 'tglp_poll_interval_sec';
 const STORAGE_HOT_POOLS_FILTER = 'tglp_hot_pools_filter_v1';
+const STORAGE_OPEN_POSITION_WALLET_ID = 'tglp_open_position_wallet_id';
 
 const USD_DISPLAY_LIMIT = 1e15;
 const usdFormatter = new Intl.NumberFormat('en-US', {
@@ -339,6 +341,10 @@ export default function App() {
     const [openPositionAllowSwap, setOpenPositionAllowSwap] = useState(false);
     const [openPositionError, setOpenPositionError] = useState('');
     const [openPositionLoading, setOpenPositionLoading] = useState(false);
+    const [walletsData, setWalletsData] = useState(null);
+    const [walletsError, setWalletsError] = useState('');
+    const [walletsLoading, setWalletsLoading] = useState(false);
+    const [openPositionWalletId, setOpenPositionWalletId] = useState(() => storage.get(STORAGE_OPEN_POSITION_WALLET_ID) || '');
 
     const [taskRangeEdit, setTaskRangeEdit] = useState(null);
     const [taskRangeLower, setTaskRangeLower] = useState('');
@@ -386,6 +392,7 @@ export default function App() {
     const [globalConfigLoading, setGlobalConfigLoading] = useState(false);
 
     const multiChainEnabled = globalConfig?.multi_chain_enabled ?? true;
+    const multiWalletEnabled = globalConfig?.multi_wallet_enabled ?? false;
     const userDefaultChain = useMemo(() => {
         const raw = String(globalConfig?.default_chain || 'bsc').trim().toLowerCase();
         if (raw === 'base' || raw === 'bsc') return raw;
@@ -1403,6 +1410,50 @@ export default function App() {
         setOpenPositionPool(null);
     };
 
+    useEffect(() => {
+        if (!openPositionPool || !hasInitData || !multiWalletEnabled) return;
+
+        let aborted = false;
+        const controller = new AbortController();
+
+        setWalletsLoading(true);
+        setWalletsError('');
+
+        const chain = String(openPositionPool?.chain || '').trim().toLowerCase();
+        fetchWallets({ apiBaseUrl, initData, chain, signal: controller.signal })
+            .then((resp) => {
+                if (aborted) return;
+                setWalletsData(resp || null);
+
+                const list = Array.isArray(resp?.wallets) ? resp.wallets : [];
+                if (list.length === 0) {
+                    setOpenPositionWalletId('');
+                    storage.remove(STORAGE_OPEN_POSITION_WALLET_ID);
+                    return;
+                }
+
+                const saved = String(storage.get(STORAGE_OPEN_POSITION_WALLET_ID) || '').trim();
+                const savedOk = saved && list.some((w) => String(w?.id) === saved);
+                const next = savedOk ? saved : String((list.find((w) => w?.is_default) || list[0])?.id || '');
+                setOpenPositionWalletId(next);
+                if (next) storage.set(STORAGE_OPEN_POSITION_WALLET_ID, next);
+            })
+            .catch((e) => {
+                if (aborted) return;
+                setWalletsData(null);
+                setWalletsError(String(e?.message || e));
+            })
+            .finally(() => {
+                if (aborted) return;
+                setWalletsLoading(false);
+            });
+
+        return () => {
+            aborted = true;
+            controller.abort();
+        };
+    }, [apiBaseUrl, initData, hasInitData, multiWalletEnabled, openPositionPool]);
+
     const handleOpenPosition = async () => {
         if (!openPositionPool) return;
         if (!hasInitData) {
@@ -1436,6 +1487,35 @@ export default function App() {
             slippage = v;
         }
 
+        if (multiWalletEnabled) {
+            if (walletsLoading) {
+                setOpenPositionError('钱包加载中，请稍后再试。');
+                return;
+            }
+            if (walletsError) {
+                setOpenPositionError(walletsError);
+                return;
+            }
+            const list = Array.isArray(walletsData?.wallets) ? walletsData.wallets : [];
+            if (list.length === 0) {
+                setOpenPositionError('未找到可用的钱包。');
+                return;
+            }
+            if (list.length > 1) {
+                const wid = Number(openPositionWalletId);
+                if (!Number.isFinite(wid) || wid <= 0) {
+                    setOpenPositionError('请选择钱包。');
+                    return;
+                }
+            } else {
+                const onlyId = String(list[0]?.id || '').trim();
+                if (onlyId && String(openPositionWalletId || '') !== onlyId) {
+                    setOpenPositionWalletId(onlyId);
+                    storage.set(STORAGE_OPEN_POSITION_WALLET_ID, onlyId);
+                }
+            }
+        }
+
         setOpenPositionLoading(true);
         setOpenPositionError('');
         try {
@@ -1450,6 +1530,7 @@ export default function App() {
                 rangeUpperPct: range.upper,
                 slippageTolerance: slippage,
                 allowEntrySwap: openPositionAllowSwap,
+                walletId: openPositionWalletId,
             });
             setOpenPositionPool(null);
             resetOpenPositionDraft();
@@ -2932,6 +3013,87 @@ export default function App() {
                             </div>
 
                             <div className="mt-4 space-y-4">
+                                {multiWalletEnabled ? (
+                                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">选择钱包</div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">
+                                                {walletsLoading
+                                                    ? '加载中...'
+                                                    : [
+                                                        String(walletsData?.chain || '').toUpperCase(),
+                                                        walletsData?.native_symbol && walletsData?.stable_symbol
+                                                            ? `${walletsData.native_symbol}/${walletsData.stable_symbol}`
+                                                            : '',
+                                                    ].filter(Boolean).join(' · ')}
+                                            </div>
+                                        </div>
+
+                                        {walletsError ? (
+                                            <div className="mt-2 rounded-xl border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-700 dark:text-red-200">
+                                                {walletsError}
+                                            </div>
+                                        ) : null}
+
+                                        {!walletsLoading && !walletsError && Array.isArray(walletsData?.wallets) && walletsData.wallets.length === 0 ? (
+                                            <div className="mt-2 text-xs text-zinc-500 dark:text-white/50">未找到钱包</div>
+                                        ) : null}
+
+                                        <div className="mt-2 space-y-2">
+                                            {(Array.isArray(walletsData?.wallets) ? walletsData.wallets : []).map((w) => {
+                                                const id = String(w?.id || '').trim();
+                                                const addr = String(w?.address || '').trim();
+                                                const name = String(w?.name || '').trim();
+                                                const shortAddr = addr.length > 12 ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : addr;
+                                                const selected = id && id === String(openPositionWalletId || '').trim();
+
+                                                return (
+                                                    <button
+                                                        key={id || addr}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            if (!id) return;
+                                                            setOpenPositionWalletId(id);
+                                                            storage.set(STORAGE_OPEN_POSITION_WALLET_ID, id);
+                                                            setOpenPositionError('');
+                                                            hapticSelection();
+                                                        }}
+                                                        className={`w-full rounded-xl border px-3 py-2 text-left transition ${selected
+                                                            ? 'border-emerald-500/40 bg-emerald-500/10 ring-1 ring-emerald-500/20 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:ring-emerald-400/20'
+                                                            : 'border-zinc-200 bg-white/70 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10'
+                                                            }`}
+                                                    >
+                                                        <div className="flex items-center justify-between gap-3">
+                                                            <div className="min-w-0">
+                                                                <div className="flex items-center gap-2">
+                                                                    <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/85">
+                                                                        {name || shortAddr || `Wallet ${id}`}
+                                                                    </div>
+                                                                    {w?.is_default ? (
+                                                                        <span className="shrink-0 rounded-full bg-zinc-500/10 px-2 py-0.5 text-[10px] font-semibold text-zinc-600 dark:text-white/60">
+                                                                            默认
+                                                                        </span>
+                                                                    ) : null}
+                                                                </div>
+                                                                <div className="mt-0.5 truncate text-[11px] text-zinc-500 dark:text-white/40">
+                                                                    {addr || '--'}
+                                                                </div>
+                                                            </div>
+                                                            <div className="shrink-0 text-right">
+                                                                <div className="text-xs font-semibold tabular-nums text-zinc-900 dark:text-white/85">
+                                                                    {String(w?.stable_balance ?? '--')} {walletsData?.stable_symbol || 'USDT'}
+                                                                </div>
+                                                                <div className="mt-0.5 text-[11px] tabular-nums text-zinc-500 dark:text-white/45">
+                                                                    {String(w?.native_balance ?? '--')} {walletsData?.native_symbol || 'BNB'}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                ) : null}
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">投入金额 (USDT)</div>
                                     <input
