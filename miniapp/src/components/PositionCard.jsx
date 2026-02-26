@@ -447,21 +447,21 @@ export default function PositionCard({
                             {[token0, token1].filter(Boolean).map((row) => (
                                 <div key={row.address} className="grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2 items-center py-2 border-b border-zinc-100/60 dark:border-white/10 last:border-0">
                                     <div className="min-w-0 pr-1">
-                                        <div className="text-[13px] font-bold text-zinc-900 dark:text-white/95 truncate">{row.symbol}</div>
+                                        <div className="text-[15px] font-bold text-zinc-900 dark:text-white/95 truncate">{row.symbol}</div>
                                         <div className="text-xs text-zinc-500 dark:text-white/50 font-mono">
                                             {row.price_usd_text || `$${Number(row.price_usd || 0).toFixed(4)}`}
                                         </div>
                                     </div>
                                     <div className="text-right min-w-0">
-                                        <div className="text-[13px] font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">{row.wallet_amount}</div>
+                                        <div className="text-[15px] font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">{row.wallet_amount}</div>
                                         <div className="text-xs text-zinc-500 dark:text-white/50 font-mono tabular-nums truncate">{formatUsd(row.wallet_usd)}</div>
                                     </div>
                                     <div className="text-right min-w-0">
-                                        <div className="text-[13px] font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">{row.position_amount}</div>
+                                        <div className="text-[15px] font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">{row.position_amount}</div>
                                         <div className="text-xs text-zinc-500 dark:text-white/50 font-mono tabular-nums truncate">{formatUsd(row.position_usd)}</div>
                                     </div>
                                     <div className="text-right min-w-0">
-                                        <div className="text-[13px] font-bold text-emerald-600 dark:text-emerald-400 font-mono tabular-nums truncate">{row.fee_amount}</div>
+                                        <div className="text-[15px] font-bold text-emerald-600 dark:text-emerald-400 font-mono tabular-nums truncate">{row.fee_amount}</div>
                                         <div className="text-xs text-emerald-600/70 dark:text-emerald-400/70 font-mono tabular-nums truncate">{formatFeeUsd(row.fee_usd)}</div>
                                     </div>
                                 </div>
