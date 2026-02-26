@@ -122,18 +122,17 @@ export default function PriceRangeVisualizer({
         return gridLines.filter((_, i) => (i + 1) % step === 0);
     }, [gridLines]);
 
-    // 指针颜色方案
+    // 指针颜色方案 (修改为更高级的蓝色)
     const pointerColor = inRange
-        ? { bg: '#10b981', shadow: 'rgba(16,185,129,0.7)', ring: 'rgba(16,185,129,0.25)' }
-        : { bg: '#ef4444', shadow: 'rgba(239,68,68,0.7)', ring: 'rgba(239,68,68,0.2)' };
+        ? { bg: '#3b82f6', shadow: 'rgba(59,130,246,0.5)', ring: 'rgba(59,130,246,0.2)' }
+        : { bg: '#ef4444', shadow: 'rgba(239,68,68,0.5)', ring: 'rgba(239,68,68,0.2)' };
 
     const priceTextColor = inRange
-        ? 'text-emerald-500 dark:text-emerald-400'
+        ? 'text-blue-500 dark:text-blue-400'
         : 'text-rose-500 dark:text-rose-400';
 
     return (
         <div className="mt-2.5 rounded-xl border border-zinc-100/80 bg-zinc-50/80 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-
             {/* ── 标题行 ── */}
             <div className="flex items-center justify-between gap-2 mb-3">
                 <div className="flex items-center gap-1.5 flex-wrap">
@@ -179,10 +178,10 @@ export default function PriceRangeVisualizer({
                     {/* 基础背景 */}
                     <div className="absolute inset-0 bg-zinc-200/90 dark:bg-white/10" />
 
-                    {/* 区间激活填充：in-range 时亮绿，out 时暗红 */}
+                    {/* 区间激活填充：in-range 时亮蓝，out 时暗红 */}
                     <div
                         className={`absolute top-0 bottom-0 transition-colors duration-500 ${inRange
-                            ? 'bg-gradient-to-r from-emerald-400/25 via-emerald-300/30 to-emerald-400/25 dark:from-emerald-500/20 dark:via-emerald-400/25 dark:to-emerald-500/20'
+                            ? 'bg-gradient-to-r from-blue-500/10 via-blue-400/20 to-blue-500/10 dark:from-blue-400/10 dark:via-blue-300/15 dark:to-blue-400/10'
                             : 'bg-gradient-to-r from-rose-400/10 via-rose-300/15 to-rose-400/10 dark:from-rose-500/10 dark:via-rose-400/12 dark:to-rose-500/10'
                             }`}
                         style={{ left: '4%', right: '4%' }}
@@ -213,14 +212,14 @@ export default function PriceRangeVisualizer({
                         />
                     ))}
 
-                    {/* 左边界（下限，绿） */}
+                    {/* 左边界（下限，蓝） */}
                     <div
-                        className="absolute top-0 bottom-0 bg-emerald-500"
+                        className="absolute top-0 bottom-0 bg-blue-500/80 dark:bg-blue-400/80"
                         style={{ left: '4%', width: 2 }}
                     />
                     {/* 右边界（上限，红） */}
                     <div
-                        className="absolute top-0 bottom-0 bg-rose-500"
+                        className="absolute top-0 bottom-0 bg-rose-500/80 dark:bg-rose-400/80"
                         style={{ left: '96%', width: 2 }}
                     />
                 </div>
@@ -243,64 +242,34 @@ export default function PriceRangeVisualizer({
                 {/* ── 当前价格指针（精致滑块样式）── */}
                 {finalPercent !== null && (
                     <div
-                        className="absolute top-1/2 z-20"
+                        className="absolute top-1/2 z-20 flex flex-col items-center justify-center pointer-events-none"
                         style={{
                             left: `${finalPercent}%`,
                             transform: 'translateX(-50%) translateY(-50%)',
                             transition: 'left 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+                            height: 36
                         }}
                     >
-                        {/* 外圈光晕（pulse 时更大） */}
-                        <div
-                            className="absolute rounded-full"
-                            style={{
-                                width: isPulse ? 28 : 22,
-                                height: isPulse ? 28 : 22,
-                                top: '50%',
-                                left: '50%',
-                                transform: 'translate(-50%, -50%)',
-                                background: pointerColor.ring,
-                                transition: 'all 0.3s ease',
-                            }}
-                        />
-                        {/* 中圈（半透明） */}
-                        <div
-                            className="absolute rounded-full"
-                            style={{
-                                width: 16,
-                                height: 16,
-                                top: '50%',
-                                left: '50%',
-                                transform: 'translate(-50%, -50%)',
-                                background: pointerColor.bg,
-                                opacity: 0.3,
-                            }}
-                        />
-                        {/* 核心圆点 */}
+                        {/* 指针主体：倒三角 */}
                         <div
                             style={{
-                                width: 10,
-                                height: 10,
-                                borderRadius: '50%',
-                                background: pointerColor.bg,
-                                boxShadow: `0 0 ${isPulse ? 12 : 8}px ${pointerColor.shadow}, 0 0 0 2px white`,
-                                transition: 'box-shadow 0.3s ease',
-                            }}
-                        />
-                        {/* 上方小三角标（指向轨道）*/}
-                        <div
-                            className="absolute"
-                            style={{
-                                left: '50%',
-                                bottom: '100%',
-                                transform: 'translateX(-50%)',
-                                marginBottom: 3,
                                 width: 0,
                                 height: 0,
-                                borderLeft: '4px solid transparent',
-                                borderRight: '4px solid transparent',
-                                borderTop: `5px solid ${pointerColor.bg}`,
-                                opacity: 0.9,
+                                borderLeft: '5px solid transparent',
+                                borderRight: '5px solid transparent',
+                                borderTop: `6px solid ${pointerColor.bg}`,
+                                filter: `drop-shadow(0 1px 2px ${pointerColor.shadow})`,
+                                transform: 'translateY(1px)'
+                            }}
+                        />
+                        {/* 指针竖线：切断轨道 */}
+                        <div
+                            style={{
+                                width: 2,
+                                height: 24,
+                                backgroundColor: pointerColor.bg,
+                                borderRadius: 1,
+                                boxShadow: `0 0 2px ${pointerColor.shadow}`,
                             }}
                         />
                     </div>

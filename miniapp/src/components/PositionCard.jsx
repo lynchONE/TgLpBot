@@ -145,6 +145,16 @@ export default function PositionCard({
     const quoteSymbol = stableIndex === 0 ? token0?.symbol : token1?.symbol;
     const pairLabel = baseSymbol && quoteSymbol ? `${baseSymbol}/${quoteSymbol}` : baseSymbol || quoteSymbol || '';
 
+    const displayTitle = useMemo(() => {
+        if (!position?.title) return pairLabel || '--';
+        const parts = position.title.split('-');
+        if (parts.length >= 3) {
+            // "panv3-USDT-POWER-1.0%" -> "USDT-POWER"
+            return parts.slice(1, -1).join('-');
+        }
+        return position.title;
+    }, [position?.title, pairLabel]);
+
     const { totalValue, pnlAbsolute, pnlPercent, hasPnL } = useMemo(() => {
         const positionUsd = Number(position?.totals?.position_usd || 0);
         const feeUsd = Number(position?.totals?.fee_usd || 0);
@@ -258,59 +268,13 @@ export default function PositionCard({
 
     return (
         <div className="relative rounded-2xl border border-zinc-200/80 bg-white/60 backdrop-blur-md shadow-sm overflow-hidden dark:border-white/10 dark:bg-white/5 dark:shadow-none transition-all duration-200 active:scale-[0.985]">
-            {/* 左侧状态颜色指示条 */}
-            <div className={`absolute left-0 top-0 bottom-0 w-[3px] ${statusTheme.bar}`} />
-
-            {/* 操作菜单 */}
-            {canTaskAction && (
-                <div className="absolute right-3 top-3 z-20" ref={menuRef}>
-                    <button
-                        type="button"
-                        onClick={() => setMenuOpen((v) => !v)}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-zinc-200/80 bg-white/80 text-zinc-500 hover:bg-white hover:text-zinc-700 active:scale-95 transition-all dark:border-white/10 dark:bg-white/5 dark:text-white/50 dark:hover:bg-white/10 dark:hover:text-white/80"
-                        aria-label="任务操作"
-                        disabled={Boolean(actionPending)}
-                    >
-                        <Icon path={icons.kebab} className="h-4 w-4" />
-                    </button>
-                    {menuOpen && (
-                        <div className="absolute right-0 top-full z-20 mt-1.5 w-36 overflow-hidden rounded-xl border border-zinc-200/80 bg-white/90 backdrop-blur-xl shadow-xl dark:border-white/10 dark:bg-[#1a1d24]/95">
-                            {typeof onSetTaskPaused === 'function' && (
-                                <button type="button" onClick={togglePause} disabled={!canPauseAction || Boolean(actionPending)}
-                                    className="w-full px-3 py-2.5 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:text-white/70 dark:hover:bg-white/8">
-                                    {actionPending === 'pause' ? '处理中...' : taskPaused ? '恢复任务' : '暂停任务'}
-                                </button>
-                            )}
-                            {typeof onUpdateTaskRange === 'function' && (
-                                <button type="button" onClick={editRange} disabled={!canUpdateRangeAction || Boolean(actionPending)}
-                                    className="w-full border-t border-zinc-100/80 px-3 py-2.5 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:border-white/8 dark:text-white/70 dark:hover:bg-white/8">
-                                    {actionPending === 'range' ? '处理中...' : '修改区间'}
-                                </button>
-                            )}
-                            {typeof onStopTask === 'function' && (
-                                <button type="button" onClick={stopTask} disabled={!canStopAction || Boolean(actionPending)}
-                                    className="w-full border-t border-zinc-100/80 px-3 py-2.5 text-left text-xs font-semibold text-amber-600 hover:bg-amber-50 disabled:opacity-40 transition-colors dark:border-white/8 dark:text-amber-400 dark:hover:bg-amber-500/10">
-                                    {actionPending === 'stop' ? '处理中...' : isStopping ? '停止中...' : '停止任务'}
-                                </button>
-                            )}
-                            {typeof onDeleteTask === 'function' && (
-                                <button type="button" onClick={deleteTask} disabled={!canDeleteAction || Boolean(actionPending)}
-                                    className="w-full border-t border-zinc-100/80 px-3 py-2.5 text-left text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-40 transition-colors dark:border-white/8 dark:text-red-400 dark:hover:bg-red-500/10">
-                                    {actionPending === 'delete' ? '删除中...' : '删除任务'}
-                                </button>
-                            )}
-                        </div>
-                    )}
-                </div>
-            )}
-
-            <div className="pl-4 pr-3 pt-3.5 pb-3 space-y-2.5">
-
+            <div className="pl-4 pr-3 pt-3.5 pb-3 flex flex-col gap-2.5">
                 {/* ══════════════════════════════════════════
-                    区域 1：标题行
+                    区域 1：标题行 & 操作菜单
                 ══════════════════════════════════════════ */}
                 <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-2.5 min-w-0">
+                    {/* 左侧主要信息 */}
+                    <div className="flex items-start gap-2.5 min-w-0 flex-1">
                         {/* 批量复选框 */}
                         {batchMode && (
                             <button type="button" onClick={onToggleSelect}
@@ -322,11 +286,11 @@ export default function PositionCard({
                                 )}
                             </button>
                         )}
-                        <div className="min-w-0">
+                        <div className="flex flex-col gap-1.5 min-w-0 flex-1">
                             {/* 交易对名称 + 费率 */}
-                            <div className="flex items-center gap-1.5 flex-wrap pr-8">
-                                <span className="text-base font-bold text-zinc-900 dark:text-white/95 leading-tight">
-                                    {position?.title}
+                            <div className="flex items-center gap-1.5 flex-wrap pr-2">
+                                <span className="text-base font-bold text-zinc-900 dark:text-white/95 leading-tight truncate max-w-full">
+                                    {displayTitle}
                                 </span>
                                 {feeLabel && (
                                     <span className="inline-flex items-center rounded-md bg-violet-500/12 px-1.5 py-0.5 text-[10px] font-bold text-violet-600 dark:bg-violet-500/18 dark:text-violet-300 ring-1 ring-violet-500/20 dark:ring-violet-400/25 shrink-0">
@@ -335,37 +299,83 @@ export default function PositionCard({
                                 )}
                             </div>
                             {/* 状态 + 任务ID + BNB */}
-                            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${statusTheme.pill}`}>
-                                    <span className={`h-1.5 w-1.5 rounded-full ${statusTheme.dot}`} />
-                                    {statusLabel || '运行中'}
+                            <div className="flex flex-wrap items-center gap-1.5 pr-2">
+                                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 shrink-0 ${statusTheme.pill}`}>
+                                    <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${statusTheme.dot}`} />
+                                    <span className="truncate max-w-[70px]">{statusLabel || '运行中'}</span>
                                 </span>
                                 {taskId > 0 && (
-                                    <span className="text-[10px] font-medium text-zinc-400 dark:text-white/30">
+                                    <span className="text-[10px] font-medium text-zinc-400 dark:text-white/30 shrink-0">
                                         #{taskId}
                                     </span>
                                 )}
-                                <span className="inline-flex items-center gap-0.5 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-white/6 dark:text-white/40">
-                                    <Icon path={icons.trend} className="h-2.5 w-2.5" />
-                                    {bnbBalance} BNB
+                                <span className="inline-flex items-center gap-0.5 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-white/6 dark:text-white/40 shrink-0">
+                                    <Icon path={icons.trend} className="h-2.5 w-2.5 shrink-0" />
+                                    <span className="truncate max-w-[70px]">{bnbBalance} BNB</span>
                                 </span>
                             </div>
                         </div>
                     </div>
 
-                    {/* 总价值 + PnL */}
-                    <div className={`text-right shrink-0 ${canTaskAction ? 'pr-9' : ''}`}>
-                        <div className="text-[10px] font-medium text-zinc-400 dark:text-white/35 uppercase tracking-wide mb-0.5">总计</div>
-                        <div className="text-xl font-extrabold text-zinc-900 dark:text-white/95 tabular-nums leading-none">
-                            {formatUsd(totalValue)}
+                    {/* 右侧：总价值 + 操作菜单 */}
+                    <div className="flex shrink-0 items-start gap-2.5">
+                        {/* 总价值 + PnL */}
+                        <div className="text-right">
+                            <div className="text-[10px] font-medium text-zinc-400 dark:text-white/35 uppercase tracking-wide mb-0.5">总计</div>
+                            <div className="text-xl font-extrabold text-zinc-900 dark:text-white/95 tabular-nums leading-none">
+                                {formatUsd(totalValue)}
+                            </div>
+                            {hasPnL && (
+                                <div className={`mt-1 inline-flex items-center gap-0.5 rounded-lg px-1.5 py-0.5 text-[11px] font-bold tabular-nums ${pnlPositive ? 'bg-emerald-500/12 text-emerald-600 dark:text-emerald-400' : 'bg-red-500/12 text-red-600 dark:text-red-400'}`}>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-2.5 w-2.5 shrink-0">
+                                        <path d={pnlPositive ? icons.arrowUp : icons.arrowDown} />
+                                    </svg>
+                                    {pnlAbsolute >= 0 ? '+' : ''}{formatUsd(pnlAbsolute)}
+                                    <span className="opacity-70 ml-0.5">({pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%)</span>
+                                </div>
+                            )}
                         </div>
-                        {hasPnL && (
-                            <div className={`mt-1 inline-flex items-center gap-0.5 rounded-lg px-1.5 py-0.5 text-[11px] font-bold tabular-nums ${pnlPositive ? 'bg-emerald-500/12 text-emerald-600 dark:text-emerald-400' : 'bg-red-500/12 text-red-600 dark:text-red-400'}`}>
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-2.5 w-2.5 shrink-0">
-                                    <path d={pnlPositive ? icons.arrowUp : icons.arrowDown} />
-                                </svg>
-                                {pnlAbsolute >= 0 ? '+' : ''}{formatUsd(pnlAbsolute)}
-                                <span className="opacity-70 ml-0.5">({pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%)</span>
+
+                        {/* 操作菜单 */}
+                        {canTaskAction && (
+                            <div className="relative z-20 translate-y-[-2px]" ref={menuRef}>
+                                <button
+                                    type="button"
+                                    onClick={() => setMenuOpen((v) => !v)}
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-zinc-200/80 bg-white/80 text-zinc-500 hover:bg-white hover:text-zinc-700 active:scale-95 transition-all dark:border-white/10 dark:bg-white/5 dark:text-white/50 dark:hover:bg-white/10 dark:hover:text-white/80"
+                                    aria-label="任务操作"
+                                    disabled={Boolean(actionPending)}
+                                >
+                                    <Icon path={icons.kebab} className="h-4 w-4" />
+                                </button>
+                                {menuOpen && (
+                                    <div className="absolute right-0 top-full z-30 mt-1.5 w-36 overflow-hidden rounded-xl border border-zinc-200/80 bg-white/90 backdrop-blur-xl shadow-xl dark:border-white/10 dark:bg-[#1a1d24]/95">
+                                        {typeof onSetTaskPaused === 'function' && (
+                                            <button type="button" onClick={togglePause} disabled={!canPauseAction || Boolean(actionPending)}
+                                                className="w-full px-3 py-2.5 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:text-white/70 dark:hover:bg-white/8">
+                                                {actionPending === 'pause' ? '处理中...' : taskPaused ? '恢复任务' : '暂停任务'}
+                                            </button>
+                                        )}
+                                        {typeof onUpdateTaskRange === 'function' && (
+                                            <button type="button" onClick={editRange} disabled={!canUpdateRangeAction || Boolean(actionPending)}
+                                                className="w-full border-t border-zinc-100/80 px-3 py-2.5 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:border-white/8 dark:text-white/70 dark:hover:bg-white/8">
+                                                {actionPending === 'range' ? '处理中...' : '修改区间'}
+                                            </button>
+                                        )}
+                                        {typeof onStopTask === 'function' && (
+                                            <button type="button" onClick={stopTask} disabled={!canStopAction || Boolean(actionPending)}
+                                                className="w-full border-t border-zinc-100/80 px-3 py-2.5 text-left text-xs font-semibold text-amber-600 hover:bg-amber-50 disabled:opacity-40 transition-colors dark:border-white/8 dark:text-amber-400 dark:hover:bg-amber-500/10">
+                                                {actionPending === 'stop' ? '处理中...' : isStopping ? '停止中...' : '停止任务'}
+                                            </button>
+                                        )}
+                                        {typeof onDeleteTask === 'function' && (
+                                            <button type="button" onClick={deleteTask} disabled={!canDeleteAction || Boolean(actionPending)}
+                                                className="w-full border-t border-zinc-100/80 px-3 py-2.5 text-left text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-40 transition-colors dark:border-white/8 dark:text-red-400 dark:hover:bg-red-500/10">
+                                                {actionPending === 'delete' ? '删除中...' : '删除任务'}
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
@@ -413,7 +423,7 @@ export default function PositionCard({
                     <div className={`collapsible-content ${expanded ? 'expanded' : 'collapsed'}`}>
                         <div className="px-3 pb-3">
                             {/* 表头 */}
-                            <div className="grid grid-cols-4 gap-2 pb-1.5 border-b border-zinc-200/60 dark:border-white/10">
+                            <div className="grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2 pb-1.5 border-b border-zinc-200/60 dark:border-white/10">
                                 <div className="text-[10px] font-medium text-zinc-400 dark:text-white/30 uppercase tracking-wide">Token</div>
                                 <div className="text-[10px] font-medium text-zinc-400 dark:text-white/30 uppercase tracking-wide text-right flex items-center justify-end gap-0.5">
                                     <Icon path={icons.wallet} className="h-2.5 w-2.5" />钱包
@@ -424,34 +434,34 @@ export default function PositionCard({
 
                             {/* Token 行 */}
                             {[token0, token1].filter(Boolean).map((row) => (
-                                <div key={row.address} className="grid grid-cols-4 gap-2 items-center py-2 border-b border-zinc-100/60 dark:border-white/10 last:border-0">
-                                    <div className="min-w-0">
+                                <div key={row.address} className="grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2 items-center py-2 border-b border-zinc-100/60 dark:border-white/10 last:border-0">
+                                    <div className="min-w-0 pr-1">
                                         <div className="text-xs font-bold text-zinc-900 dark:text-white/90 truncate">{row.symbol}</div>
                                         <div className="text-[10px] text-zinc-400 dark:text-white/35">
                                             {row.price_usd_text || `$${Number(row.price_usd || 0).toFixed(4)}`}
                                         </div>
                                     </div>
-                                    <div className="text-right">
-                                        <div className="text-xs font-semibold text-zinc-800 dark:text-white/80 tabular-nums">{row.wallet_amount}</div>
-                                        <div className="text-[10px] text-zinc-400 dark:text-white/35 tabular-nums">{formatUsd(row.wallet_usd)}</div>
+                                    <div className="text-right min-w-0">
+                                        <div className="text-xs font-semibold text-zinc-800 dark:text-white/80 tabular-nums truncate">{row.wallet_amount}</div>
+                                        <div className="text-[10px] text-zinc-400 dark:text-white/35 tabular-nums truncate">{formatUsd(row.wallet_usd)}</div>
                                     </div>
-                                    <div className="text-right">
-                                        <div className="text-xs font-semibold text-zinc-800 dark:text-white/80 tabular-nums">{row.position_amount}</div>
-                                        <div className="text-[10px] text-zinc-400 dark:text-white/35 tabular-nums">{formatUsd(row.position_usd)}</div>
+                                    <div className="text-right min-w-0">
+                                        <div className="text-xs font-semibold text-zinc-800 dark:text-white/80 tabular-nums truncate">{row.position_amount}</div>
+                                        <div className="text-[10px] text-zinc-400 dark:text-white/35 tabular-nums truncate">{formatUsd(row.position_usd)}</div>
                                     </div>
-                                    <div className="text-right">
-                                        <div className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">{row.fee_amount}</div>
-                                        <div className="text-[10px] text-emerald-600/60 dark:text-emerald-400/55 tabular-nums">{formatFeeUsd(row.fee_usd)}</div>
+                                    <div className="text-right min-w-0">
+                                        <div className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums truncate">{row.fee_amount}</div>
+                                        <div className="text-[10px] text-emerald-600/60 dark:text-emerald-400/55 tabular-nums truncate">{formatFeeUsd(row.fee_usd)}</div>
                                     </div>
                                 </div>
                             ))}
 
                             {/* 小计行 */}
-                            <div className="pt-2 grid grid-cols-4 gap-2">
+                            <div className="pt-2 grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2">
                                 <div className="text-[11px] font-semibold text-zinc-500 dark:text-white/50">小计</div>
-                                <div className="text-right text-[11px] font-semibold text-zinc-700 dark:text-white/70 tabular-nums">{formatUsd(position?.totals?.wallet_usd)}</div>
-                                <div className="text-right text-[11px] font-semibold text-zinc-700 dark:text-white/70 tabular-nums">{formatUsd(position?.totals?.position_usd)}</div>
-                                <div className="text-right text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">{formatFeeUsd(position?.totals?.fee_usd)}</div>
+                                <div className="text-right text-[11px] font-semibold text-zinc-700 dark:text-white/70 tabular-nums truncate">{formatUsd(position?.totals?.wallet_usd)}</div>
+                                <div className="text-right text-[11px] font-semibold text-zinc-700 dark:text-white/70 tabular-nums truncate">{formatUsd(position?.totals?.position_usd)}</div>
+                                <div className="text-right text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums truncate">{formatFeeUsd(position?.totals?.fee_usd)}</div>
                             </div>
                         </div>
                     </div>
