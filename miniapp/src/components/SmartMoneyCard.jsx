@@ -324,33 +324,30 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                 <button
                     type="button"
                     onClick={() => setActiveTab('overview')}
-                    className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${
-                        activeTab === 'overview'
+                    className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${activeTab === 'overview'
                             ? 'bg-emerald-500 text-white'
                             : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
-                    }`}
+                        }`}
                 >
                     概览
                 </button>
                 <button
                     type="button"
                     onClick={() => setActiveTab('follow')}
-                    className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${
-                        activeTab === 'follow'
+                    className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${activeTab === 'follow'
                             ? 'bg-emerald-500 text-white'
                             : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
-                    }`}
+                        }`}
                 >
                     跟单
                 </button>
                 <button
                     type="button"
                     onClick={() => setActiveTab('golden')}
-                    className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${
-                        activeTab === 'golden'
+                    className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${activeTab === 'golden'
                             ? 'bg-emerald-500 text-white'
                             : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
-                    }`}
+                        }`}
                 >
                     金狗通知
                 </button>
@@ -424,7 +421,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                 </table>
                             </div>
                         ) : (
-                            <div className="rounded-xl border border-zinc-200 bg-white/70 p-3 text-[11px] text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                            <div className="rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 text-[11px] text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
                                 暂无池子数据
                             </div>
                         )}
@@ -450,7 +447,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                         : 'bg-zinc-100 text-zinc-700 dark:bg-white/5 dark:text-white/70';
                                     const pnlTone = kpiTone(balanceDeltaUsd);
                                     return (
-                                        <div key={addr || String(index)} className="rounded-xl border border-zinc-200 bg-white p-2.5 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                                        <div key={addr || String(index)} className="rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md p-2.5 shadow-sm transition-transform duration-200 active:scale-[0.98] dark:border-white/10 dark:bg-white/5 dark:shadow-none">
                                             <div className="flex items-start justify-between gap-2">
                                                 <div className="min-w-0">
                                                     <div className="flex items-center gap-2">
@@ -512,7 +509,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                 })}
                             </div>
                         ) : (
-                            <div className="rounded-xl border border-zinc-200 bg-white/70 p-3 text-[11px] text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                            <div className="rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 text-[11px] text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
                                 暂无钱包数据
                             </div>
                         )}
@@ -609,7 +606,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                     const dMin = Number(cfg?.delay_min_seconds ?? 0);
                                     const dMax = Number(cfg?.delay_max_seconds ?? 60);
                                     return (
-                                        <div key={wallet} className="flex items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white p-2 dark:border-white/10 dark:bg-[#111318]">
+                                        <div key={wallet} className="flex items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white/40 backdrop-blur-md p-2 dark:border-white/10 dark:bg-white/5">
                                             <div className="min-w-0">
                                                 <div className="truncate text-[11px] font-semibold text-zinc-800 dark:text-white/85">{shortHex(wallet, 10, 8)}</div>
                                                 <div className="text-[10px] text-zinc-500 dark:text-white/40">
@@ -670,11 +667,10 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                         setGoldenEnabled((v) => !v);
                                     }}
                                     disabled={goldenSaving || goldenLoading}
-                                    className={`inline-flex items-center rounded-lg px-2 py-1 text-[10px] font-semibold transition ${
-                                        goldenEnabled
+                                    className={`inline-flex items-center rounded-lg px-2 py-1 text-[10px] font-semibold transition ${goldenEnabled
                                             ? 'bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15'
                                             : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
-                                    }`}
+                                        }`}
                                 >
                                     {goldenEnabled ? '已启用' : '已停用'}
                                 </button>
@@ -693,7 +689,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                         </div>
 
                         <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                            <label className="rounded-xl border border-zinc-200 bg-white/70 p-2 dark:border-white/10 dark:bg-white/5">
+                            <label className="rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md p-2 dark:border-white/10 dark:bg-white/5">
                                 <div className="text-[10px] text-zinc-500 dark:text-white/40">触发钱包数</div>
                                 <input
                                     type="number"
@@ -708,7 +704,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                     placeholder="3"
                                 />
                             </label>
-                            <label className="rounded-xl border border-zinc-200 bg-white/70 p-2 dark:border-white/10 dark:bg-white/5">
+                            <label className="rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md p-2 dark:border-white/10 dark:bg-white/5">
                                 <div className="text-[10px] text-zinc-500 dark:text-white/40">时间窗口(分钟)</div>
                                 <input
                                     type="number"
@@ -723,7 +719,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                     placeholder="10"
                                 />
                             </label>
-                            <label className="rounded-xl border border-zinc-200 bg-white/70 p-2 dark:border-white/10 dark:bg-white/5">
+                            <label className="rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md p-2 dark:border-white/10 dark:bg-white/5">
                                 <div className="text-[10px] text-zinc-500 dark:text-white/40">冷却(分钟)</div>
                                 <input
                                     type="number"

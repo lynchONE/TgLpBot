@@ -332,7 +332,7 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	chainID := exec.ChainID()
 	_ = chainID
 
-	wallet, err := s.walletService.GetDefaultWallet(userID)
+	wallet, err := s.walletService.ResolveTaskWallet(userID, task.WalletID, task.WalletAddress)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get wallet: %w", err)
 	}

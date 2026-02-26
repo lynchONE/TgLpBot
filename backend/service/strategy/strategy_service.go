@@ -525,7 +525,7 @@ func (s *StrategyService) handleWaitingTask(task *models.StrategyTask) {
 		if exec == nil {
 			return
 		}
-		if ok, err := exec.TryRunUser(task.UserID, func(_ string) {
+		if ok, err := exec.TryRunTask(task.UserID, task.WalletID, task.WalletAddress, func(_ string) {
 			s.runCooldownReopen(task.ID, task.UserID)
 		}); err != nil {
 			log.Printf("[Strategy] schedule cooldown reopen failed: task_id=%d user_id=%d err=%v", task.ID, task.UserID, err)
@@ -553,7 +553,7 @@ func (s *StrategyService) handleWaitingTask(task *models.StrategyTask) {
 		if exec == nil {
 			return
 		}
-		if ok, err := exec.TryRunUser(task.UserID, func(_ string) {
+		if ok, err := exec.TryRunTask(task.UserID, task.WalletID, task.WalletAddress, func(_ string) {
 			s.runWaitingReopen(task.ID, task.UserID)
 		}); err != nil {
 			log.Printf("[Strategy] schedule waiting reopen failed: task_id=%d user_id=%d err=%v", task.ID, task.UserID, err)

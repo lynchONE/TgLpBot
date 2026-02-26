@@ -312,7 +312,7 @@ export default function PositionCard({
     const deleteTask = () => runAction('delete', () => onDeleteTask?.(taskId));
 
     return (
-        <div className="relative rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+        <div className="relative rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none transition-transform duration-200 active:scale-[0.98]">
             {canTaskAction ? (
                 <div className="absolute right-4 top-4 z-20" ref={menuRef}>
                     <button
@@ -326,7 +326,7 @@ export default function PositionCard({
                         <Icon path={icons.kebab} className="h-5 w-5" />
                     </button>
                     {menuOpen ? (
-                        <div className="absolute right-0 top-full z-20 mt-2 w-36 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-white/10 dark:bg-[#111318]">
+                        <div className="absolute right-0 top-full z-20 mt-2 w-36 overflow-hidden rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md shadow-lg dark:border-white/10 dark:bg-white/5">
                             {typeof onSetTaskPaused === 'function' ? (
                                 <button
                                     type="button"

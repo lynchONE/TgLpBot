@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import BottomSheet from './BottomSheet.jsx';
 
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
@@ -64,63 +65,44 @@ export default function KlineModal({ open, onClose, theme, pool, chain }) {
         }
     }, [poolAddress, isV4ID, dextoolsChain, dexScreenerChain, theme]);
 
-    if (!open) return null;
-
     return (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4">
-            {/* Backdrop */}
-            <button
-                type="button"
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
-                onClick={onClose}
-                aria-label="关闭"
-            />
-
-            {/* Modal Content */}
-            <div className="relative w-full max-w-lg overflow-hidden rounded-t-2xl sm:rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-white/10 dark:bg-[#111318] flex flex-col h-[92vh] sm:h-[700px]">
-                {/* Header */}
-                <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-zinc-100 dark:border-white/5 bg-white/50 dark:bg-white/5 shrink-0">
-                    <div className="min-w-0">
-                        <div className="truncate text-sm font-bold text-zinc-900 dark:text-white/90">{title}</div>
-                        <div className="flex items-center gap-2 mt-0.5">
-                            <div className="truncate text-[10px] font-medium text-zinc-500 dark:text-white/40 font-mono">
-                                {poolAddress ? `${poolAddress.slice(0, 10)}...${poolAddress.slice(-8)}` : ''}
-                            </div>
-                            {isV4ID && (
-                                <span className="shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300">
-                                    V4 · DEXTools
-                                </span>
-                            )}
+        <BottomSheet
+            open={open}
+            onClose={onClose}
+            maxHeightClass="h-[92vh] sm:h-[700px] max-h-none"
+            className="overflow-hidden"
+            headerClassName="px-4 py-3 border-b border-zinc-100 dark:border-white/5 bg-zinc-50/50 dark:bg-[#111318]/50 shrink-0"
+            contentClassName=""
+            title={
+                <div>
+                    <div className="truncate text-sm font-bold text-zinc-900 dark:text-white/90">{title}</div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                        <div className="truncate text-[10px] font-medium text-zinc-500 dark:text-white/40 font-mono">
+                            {poolAddress ? `${poolAddress.slice(0, 10)}...${poolAddress.slice(-8)}` : ''}
                         </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-100 text-zinc-600 transition hover:bg-zinc-200 active:bg-zinc-300 dark:bg-zinc-800 dark:text-white dark:hover:bg-zinc-700 dark:active:bg-zinc-600"
-                            aria-label="关闭"
-                        >
-                            <Icon path={icons.close} className="h-5 w-5" />
-                        </button>
+                        {isV4ID && (
+                            <span className="shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300">
+                                V4 · DEXTools
+                            </span>
+                        )}
                     </div>
                 </div>
-
-                {/* Iframe Container */}
-                <div className="flex-1 w-full bg-[#111318] relative">
-                    {poolAddress ? (
-                        <iframe
-                            src={embedUrl}
-                            className="absolute inset-0 w-full h-full border-0"
-                            title={isV4ID ? "DEXTools Chart" : "DexScreener Chart"}
-                            allowFullScreen
-                        />
-                    ) : (
-                        <div className="flex flex-col items-center justify-center h-full text-zinc-500 dark:text-white/40 text-sm gap-2">
-                            <span>无效的合约地址</span>
-                        </div>
-                    )}
-                </div>
+            }
+        >
+            <div className="w-full h-full bg-[#111318] relative min-h-[500px]">
+                {poolAddress ? (
+                    <iframe
+                        src={embedUrl}
+                        className="absolute inset-0 w-full h-full border-0"
+                        title={isV4ID ? "DEXTools Chart" : "DexScreener Chart"}
+                        allowFullScreen
+                    />
+                ) : (
+                    <div className="flex flex-col items-center justify-center h-full text-zinc-500 dark:text-white/40 text-sm gap-2 mt-10">
+                        <span>无效的合约地址</span>
+                    </div>
+                )}
             </div>
-        </div>
+        </BottomSheet>
     );
 }

@@ -1,7 +1,7 @@
 import React from 'react';
 
 // 骨架屏基础样式
-const baseClass = 'animate-pulse bg-zinc-200 dark:bg-zinc-700 rounded';
+const baseClass = 'animate-shimmer rounded';
 
 // 骨架线条
 export const SkeletonLine = ({ className = '', width = 'full', height = '4' }) => (
@@ -21,7 +21,7 @@ export const SkeletonCircle = ({ size = 10, className = '' }) => (
 
 // 热门池子卡片骨架
 export const SkeletonHotPoolCard = () => (
-    <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318]">
+    <div className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm dark:border-white/10 dark:bg-white/5">
         <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
@@ -50,7 +50,7 @@ export const SkeletonHotPoolCard = () => (
 
 // 仓位卡片骨架
 export const SkeletonPositionCard = () => (
-    <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318]">
+    <div className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm dark:border-white/10 dark:bg-white/5">
         <div className="flex items-start justify-between gap-3">
             <div>
                 <div className={`${baseClass} h-6 w-32`} />

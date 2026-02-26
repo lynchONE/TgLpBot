@@ -231,6 +231,35 @@ func (b *Bot) handleConfigMultiChainToggle(query *tgbotapi.CallbackQuery, user *
 	b.handleViewConfig(query, user)
 }
 
+func (b *Bot) handleConfigMultiWalletToggle(query *tgbotapi.CallbackQuery, user *models.User) {
+	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
+	cfg, err := b.configService.GetOrCreate(user.ID)
+	if err != nil {
+		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("❌ 获取配置失败：%v", err))
+		return
+	}
+
+	newValue := !cfg.MultiWalletEnabled
+	if _, err := b.configService.Update(user.ID, map[string]interface{}{
+		"multi_wallet_enabled": newValue,
+	}); err != nil {
+		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("❌ 更新配置失败：%v", err))
+		return
+	}
+
+	// Clear wallet-scoped sessions so the next flow picks up the new mode.
+	_ = database.DeleteUserSession(user.TelegramID, sessionNewPositionWalletID)
+
+	if newValue {
+		b.sendMessage(query.Message.Chat.ID, "✅ 已开启多钱包模式（开仓将提示选择钱包）")
+	} else {
+		b.sendMessage(query.Message.Chat.ID, "✅ 已关闭多钱包模式（开仓将使用默认钱包）")
+	}
+
+	// Refresh menu.
+	b.handleViewConfig(query, user)
+}
+
 func (b *Bot) handleConfigDefaultChain(query *tgbotapi.CallbackQuery, user *models.User) {
 	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
 	cfg, err := b.configService.GetOrCreate(user.ID)

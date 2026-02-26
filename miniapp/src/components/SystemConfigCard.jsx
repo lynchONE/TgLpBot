@@ -252,7 +252,7 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
     };
 
     return (
-        <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+        <div className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none transition-transform duration-200 active:scale-[0.98]">
             <div className="text-sm font-semibold text-zinc-900 dark:text-white/90 mb-3">
                 系统配置
             </div>

@@ -255,7 +255,7 @@ export default function AutoPnLCurveCard({ data, loading, error, theme = 'dark' 
     const truncated = Boolean(data?.truncated);
 
     return (
-        <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+        <div className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none">
             <div className="flex items-start justify-between gap-3">
                 <div>
                     <div className="text-sm font-extrabold text-zinc-900 dark:text-white/90">盈利曲线</div>

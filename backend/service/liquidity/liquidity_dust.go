@@ -59,7 +59,7 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 		return nil, err
 	}
 
-	wallet, err := s.walletService.GetDefaultWallet(userID)
+	wallet, err := s.walletService.ResolveTaskWallet(userID, task.WalletID, task.WalletAddress)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get wallet: %w", err)
 	}

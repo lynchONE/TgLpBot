@@ -60,6 +60,27 @@ func (e *Executor) TryRunUser(userID uint, fn func(walletAddress string)) (bool,
 	return ok, nil
 }
 
+// TryRunTask runs a function serialized by the task's wallet address.
+// Resolution rule: wallet_id/wallet_address -> default wallet (legacy tasks).
+func (e *Executor) TryRunTask(userID uint, walletID uint, walletAddress string, fn func(walletAddress string)) (bool, error) {
+	if e == nil || fn == nil || userID == 0 {
+		return false, nil
+	}
+	if e.walletSvc == nil {
+		e.walletSvc = wallet.NewWalletService()
+	}
+	w, err := e.walletSvc.ResolveTaskWallet(userID, walletID, walletAddress)
+	if err != nil {
+		return false, err
+	}
+	addr := strings.TrimSpace(w.Address)
+	if !common.IsHexAddress(addr) {
+		return false, fmt.Errorf("invalid wallet address: %s", addr)
+	}
+	ok := e.TryRunWallet(addr, func() { fn(addr) })
+	return ok, nil
+}
+
 var (
 	defaultOnce sync.Once
 	defaultExec *Executor

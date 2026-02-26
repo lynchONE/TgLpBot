@@ -83,7 +83,7 @@ export default function AdminActiveTasks({
 
     if (loading && tasks.length === 0) {
         return (
-            <div className="rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+            <div className="rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
                 加载中...
             </div>
         );
@@ -91,7 +91,7 @@ export default function AdminActiveTasks({
 
     if (tasks.length === 0) {
         return (
-            <div className="rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+            <div className="rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
                 暂无活跃任务
             </div>
         );
@@ -145,7 +145,7 @@ export default function AdminActiveTasks({
                     return (
                         <div
                             key={t.task_id}
-                            className="rounded-xl border border-zinc-200 bg-white/70 p-3 dark:border-white/10 dark:bg-white/5"
+                            className="rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 dark:border-white/10 dark:bg-white/5"
                             onClick={() => onSelectTask?.(t)}
                         >
                             <div className="flex items-start justify-between gap-3">

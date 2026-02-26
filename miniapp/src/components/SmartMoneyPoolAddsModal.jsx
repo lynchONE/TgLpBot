@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import BottomSheet from './BottomSheet.jsx';
 import { fetchSmartMoneyPoolAdds } from '../lib/api';
 import { copyToClipboard, hapticImpact, hapticNotification } from '../lib/telegram';
 
@@ -165,195 +166,181 @@ export default function SmartMoneyPoolAddsModal({
     if (!open) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
-            <button
-                type="button"
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => {
-                    hapticImpact('light');
-                    if (typeof onClose === 'function') onClose();
-                }}
-                aria-label="Close"
-            />
-            <div className="relative w-full max-w-2xl rounded-t-3xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#0b0d10] sm:rounded-3xl sm:p-5">
-                <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/90">
-                            {title}
-                            {loading ? (
-                                <span className="ml-2 inline-flex items-center rounded-lg bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-600 dark:bg-white/5 dark:text-white/60">
-                                    加载中...
-                                </span>
-                            ) : null}
-                        </div>
-                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-500 dark:text-white/40">
-                            <span>最近 {Number(windowHours) || 2}h 加池子</span>
-                            <span>· {wallets.length} 条</span>
-                            <span>· 手续费为链上可领取估算</span>
-                        </div>
+        <BottomSheet
+            open={open}
+            onClose={() => {
+                hapticImpact('light');
+                if (typeof onClose === 'function') onClose();
+            }}
+            maxHeightClass="h-[92vh] sm:h-[720px] max-w-2xl"
+            headerClassName="px-4 py-3 border-b border-zinc-100 dark:border-white/5 bg-zinc-50/50 dark:bg-[#111318]/50 shrink-0"
+            contentClassName="p-4"
+            title={
+                <div>
+                    <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/90">
+                        {title}
+                        {loading ? (
+                            <span className="ml-2 inline-flex items-center rounded-lg bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-600 dark:bg-white/5 dark:text-white/60">
+                                加载中...
+                            </span>
+                        ) : null}
                     </div>
-                    <div className="flex items-center gap-2">
-                        <button
-                            type="button"
-                            onClick={() => {
-                                hapticImpact('light');
-                                setNonce((v) => v + 1);
-                            }}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100 text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
-                            aria-label="Refresh"
-                            title="Refresh"
-                        >
-                            <Icon path={icons.refresh} className="h-4 w-4" />
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                hapticImpact('light');
-                                if (typeof onClose === 'function') onClose();
-                            }}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100 text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
-                            aria-label="Close"
-                            title="Close"
-                        >
-                            <Icon path={icons.close} className="h-4 w-4" />
-                        </button>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-500 dark:text-white/40">
+                        <span>最近 {Number(windowHours) || 2}h 加池子</span>
+                        <span>· {wallets.length} 条</span>
+                        <span>· 手续费为链上可领取估算</span>
                     </div>
                 </div>
+            }
+            headerRight={
+                <button
+                    type="button"
+                    onClick={() => {
+                        hapticImpact('light');
+                        setNonce((v) => v + 1);
+                    }}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-zinc-100 text-zinc-600 transition hover:bg-zinc-200 active:bg-zinc-300 dark:bg-white/10 dark:text-white/70 dark:hover:bg-white/20"
+                    aria-label="Refresh"
+                    title="Refresh"
+                >
+                    <Icon path={icons.refresh} className="h-4 w-4" />
+                </button>
+            }
+        >
 
-                {warnings.length ? (
-                    <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-200">
-                        <div className="font-semibold">提示</div>
-                        <ul className="mt-1 list-disc space-y-1 pl-4">
-                            {warnings.slice(0, 4).map((w, i) => (
-                                <li key={String(i)}>{String(w)}</li>
-                            ))}
-                        </ul>
-                    </div>
-                ) : null}
+            {warnings.length ? (
+                <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-200">
+                    <div className="font-semibold">提示</div>
+                    <ul className="mt-1 list-disc space-y-1 pl-4">
+                        {warnings.slice(0, 4).map((w, i) => (
+                            <li key={String(i)}>{String(w)}</li>
+                        ))}
+                    </ul>
+                </div>
+            ) : null}
 
-                {error ? (
-                    <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-[11px] text-red-700 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-200">
-                        {error}
-                    </div>
-                ) : null}
+            {error ? (
+                <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-[11px] text-red-700 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-200">
+                    {error}
+                </div>
+            ) : null}
 
-                {!error && !loading && wallets.length === 0 ? (
-                    <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-[11px] text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                        暂无加池子记录
-                    </div>
-                ) : null}
+            {!error && !loading && wallets.length === 0 ? (
+                <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-[11px] text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                    暂无加池子记录
+                </div>
+            ) : null}
 
-                {wallets.length ? (
-                    <div className="mt-3 max-h-[68vh] space-y-2 overflow-auto pr-1">
-                        {wallets.map((row, index) => {
-                            const addr = String(row?.wallet_address || '').trim();
-                            const tickLower = Number(row?.tick_lower);
-                            const tickUpper = Number(row?.tick_upper);
-                            const amt0 = Number(row?.amount0 ?? 0);
-                            const amt1 = Number(row?.amount1 ?? 0);
-                            const totalUsd = Number(row?.total_usd ?? 0);
-                            const feeUsd = Number(row?.claimable_fees_usd ?? 0);
-                            const feeStatus = String(row?.fee_status || '').trim();
-                            const feeErr = String(row?.fee_error || '').trim();
-                            const sym0 = String(pool?.token0_symbol || 'T0').trim();
-                            const sym1 = String(pool?.token1_symbol || 'T1').trim();
-                            const priceLower = Number(row?.price_lower ?? 0);
-                            const priceUpper = Number(row?.price_upper ?? 0);
-                            const priceBase = String(row?.price_base || '').trim();
-                            const priceQuote = String(row?.price_quote || '').trim();
-                            const rangeText = Number.isFinite(priceLower) && priceLower > 0 && Number.isFinite(priceUpper) && priceUpper > 0
-                                ? `${formatPrice(priceLower)} - ${formatPrice(priceUpper)} ${priceQuote || ''}`
-                                : '--';
-                            const feeTone = kpiTone(feeUsd);
+            {wallets.length ? (
+                <div className="mt-3 max-h-[68vh] space-y-2 overflow-auto pr-1">
+                    {wallets.map((row, index) => {
+                        const addr = String(row?.wallet_address || '').trim();
+                        const tickLower = Number(row?.tick_lower);
+                        const tickUpper = Number(row?.tick_upper);
+                        const amt0 = Number(row?.amount0 ?? 0);
+                        const amt1 = Number(row?.amount1 ?? 0);
+                        const totalUsd = Number(row?.total_usd ?? 0);
+                        const feeUsd = Number(row?.claimable_fees_usd ?? 0);
+                        const feeStatus = String(row?.fee_status || '').trim();
+                        const feeErr = String(row?.fee_error || '').trim();
+                        const sym0 = String(pool?.token0_symbol || 'T0').trim();
+                        const sym1 = String(pool?.token1_symbol || 'T1').trim();
+                        const priceLower = Number(row?.price_lower ?? 0);
+                        const priceUpper = Number(row?.price_upper ?? 0);
+                        const priceBase = String(row?.price_base || '').trim();
+                        const priceQuote = String(row?.price_quote || '').trim();
+                        const rangeText = Number.isFinite(priceLower) && priceLower > 0 && Number.isFinite(priceUpper) && priceUpper > 0
+                            ? `${formatPrice(priceLower)} - ${formatPrice(priceUpper)} ${priceQuote || ''}`
+                            : '--';
+                        const feeTone = kpiTone(feeUsd);
 
-                            return (
-                                <div key={`${addr || String(index)}:${tickLower}:${tickUpper}:${index}`} className="rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
-                                    <div className="flex items-start justify-between gap-2">
-                                        <div className="min-w-0">
-                                            <div className="flex items-center gap-2">
-                                                <span className="truncate font-mono text-[11px] font-semibold text-zinc-900 dark:text-white/90">
-                                                    {shortHex(addr, 10, 8) || '--'}
-                                                </span>
-                                                <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-700 dark:bg-white/5 dark:text-white/60">
-                                                    #{index + 1}
-                                                </span>
-                                            </div>
-                                            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-500 dark:text-white/40">
-                                                <span>区间 {Number.isFinite(tickLower) ? tickLower : '--'} → {Number.isFinite(tickUpper) ? tickUpper : '--'}</span>
-                                                <span>· 价格 {rangeText}</span>
-                                                {priceBase ? <span className="opacity-70">({priceBase}/{priceQuote || '--'})</span> : null}
-                                            </div>
-                                        </div>
+                        return (
+                            <div key={`${addr || String(index)}:${tickLower}:${tickUpper}:${index}`} className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none">
+                                <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
                                         <div className="flex items-center gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    hapticImpact('light');
-                                                    safeCopy(addr, onNotice);
-                                                }}
-                                                className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
-                                            >
-                                                复制
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    if (typeof onOpenFollow === 'function') {
-                                                        hapticImpact('light');
-                                                        onOpenFollow(addr);
-                                                    }
-                                                }}
-                                                className="inline-flex items-center rounded-lg bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
-                                            >
-                                                跟单
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    if (typeof onOpenPositions === 'function') {
-                                                        hapticImpact('light');
-                                                        onOpenPositions(addr);
-                                                    }
-                                                }}
-                                                className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
-                                            >
-                                                仓位
-                                            </button>
+                                            <span className="truncate font-mono text-[11px] font-semibold text-zinc-900 dark:text-white/90">
+                                                {shortHex(addr, 10, 8) || '--'}
+                                            </span>
+                                            <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-700 dark:bg-white/5 dark:text-white/60">
+                                                #{index + 1}
+                                            </span>
+                                        </div>
+                                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-500 dark:text-white/40">
+                                            <span>区间 {Number.isFinite(tickLower) ? tickLower : '--'} → {Number.isFinite(tickUpper) ? tickUpper : '--'}</span>
+                                            <span>· 价格 {rangeText}</span>
+                                            {priceBase ? <span className="opacity-70">({priceBase}/{priceQuote || '--'})</span> : null}
                                         </div>
                                     </div>
-
-                                    <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
-                                        <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
-                                            <div className="text-[10px] text-zinc-500 dark:text-white/40">加池子金额</div>
-                                            <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">{formatUsd(totalUsd)}</div>
-                                        </div>
-                                        <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
-                                            <div className="text-[10px] text-zinc-500 dark:text-white/40">Token</div>
-                                            <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">
-                                                {formatTokenAmount(amt0)} {sym0}
-                                            </div>
-                                            <div className="text-[10px] text-zinc-500 dark:text-white/40">
-                                                {formatTokenAmount(amt1)} {sym1}
-                                            </div>
-                                        </div>
-                                        <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
-                                            <div className="text-[10px] text-zinc-500 dark:text-white/40">可领取手续费 (估算)</div>
-                                            <div className={`mt-0.5 font-semibold tabular-nums ${feeTone}`}>
-                                                {feeStatus === 'ok' ? formatUsd(feeUsd) : '--'}
-                                            </div>
-                                            {feeStatus === 'error' && feeErr ? (
-                                                <div className="mt-0.5 text-[10px] text-red-600 dark:text-red-300">{feeErr}</div>
-                                            ) : (
-                                                <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">{feeStatus ? `状态: ${feeStatus}` : ''}</div>
-                                            )}
-                                        </div>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                hapticImpact('light');
+                                                safeCopy(addr, onNotice);
+                                            }}
+                                            className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
+                                        >
+                                            复制
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (typeof onOpenFollow === 'function') {
+                                                    hapticImpact('light');
+                                                    onOpenFollow(addr);
+                                                }
+                                            }}
+                                            className="inline-flex items-center rounded-lg bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
+                                        >
+                                            跟单
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (typeof onOpenPositions === 'function') {
+                                                    hapticImpact('light');
+                                                    onOpenPositions(addr);
+                                                }
+                                            }}
+                                            className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
+                                        >
+                                            仓位
+                                        </button>
                                     </div>
                                 </div>
-                            );
-                        })}
-                    </div>
-                ) : null}
-            </div>
-        </div>
+
+                                <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
+                                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
+                                        <div className="text-[10px] text-zinc-500 dark:text-white/40">加池子金额</div>
+                                        <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">{formatUsd(totalUsd)}</div>
+                                    </div>
+                                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
+                                        <div className="text-[10px] text-zinc-500 dark:text-white/40">Token</div>
+                                        <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">
+                                            {formatTokenAmount(amt0)} {sym0}
+                                        </div>
+                                        <div className="text-[10px] text-zinc-500 dark:text-white/40">
+                                            {formatTokenAmount(amt1)} {sym1}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
+                                        <div className="text-[10px] text-zinc-500 dark:text-white/40">可领取手续费 (估算)</div>
+                                        <div className={`mt-0.5 font-semibold tabular-nums ${feeTone}`}>
+                                            {feeStatus === 'ok' ? formatUsd(feeUsd) : '--'}
+                                        </div>
+                                        {feeStatus === 'error' && feeErr ? (
+                                            <div className="mt-0.5 text-[10px] text-red-600 dark:text-red-300">{feeErr}</div>
+                                        ) : (
+                                            <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">{feeStatus ? `状态: ${feeStatus}` : ''}</div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            ) : null}
+        </BottomSheet>
     );
 }

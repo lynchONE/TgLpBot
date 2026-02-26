@@ -68,6 +68,27 @@ func (b *Bot) handleNewPositionChainSelect(query *tgbotapi.CallbackQuery, user *
 	}
 
 	_ = database.SetUserSession(user.TelegramID, sessionNewPositionChain, chain, 30*time.Minute)
+
+	// Multi-wallet: prompt wallet selection after chain is selected.
+	if cfg, err := b.configService.GetOrCreate(user.ID); err == nil && cfg != nil && cfg.MultiWalletEnabled {
+		if wallets, werr := b.walletService.GetUserWallets(user.ID); werr == nil && len(wallets) > 1 {
+			b.promptNewPositionWalletSelect(query.Message.Chat.ID, user, chain)
+			return
+		}
+	}
+
+	// Default wallet (single-wallet mode / only one wallet).
+	if wallets, werr := b.walletService.GetUserWallets(user.ID); werr == nil && len(wallets) > 0 {
+		defaultWallet := wallets[0]
+		for _, w := range wallets {
+			if w.IsDefault {
+				defaultWallet = w
+				break
+			}
+		}
+		_ = database.SetUserSession(user.TelegramID, sessionNewPositionWalletID, fmt.Sprintf("%d", defaultWallet.ID), 30*time.Minute)
+	}
+
 	_ = database.SetUserSession(user.TelegramID, "state", "awaiting_pool_address", 30*time.Minute)
 
 	// If user pasted pool id/address before selecting chain, continue automatically.
@@ -112,6 +133,27 @@ func (b *Bot) handleNewPositionChainText(message *tgbotapi.Message, user *models
 	}
 
 	_ = database.SetUserSession(user.TelegramID, sessionNewPositionChain, chain, 30*time.Minute)
+
+	// Multi-wallet: prompt wallet selection after chain is selected.
+	if cfg, err := b.configService.GetOrCreate(user.ID); err == nil && cfg != nil && cfg.MultiWalletEnabled {
+		if wallets, werr := b.walletService.GetUserWallets(user.ID); werr == nil && len(wallets) > 1 {
+			b.promptNewPositionWalletSelect(message.Chat.ID, user, chain)
+			return
+		}
+	}
+
+	// Default wallet (single-wallet mode / only one wallet).
+	if wallets, werr := b.walletService.GetUserWallets(user.ID); werr == nil && len(wallets) > 0 {
+		defaultWallet := wallets[0]
+		for _, w := range wallets {
+			if w.IsDefault {
+				defaultWallet = w
+				break
+			}
+		}
+		_ = database.SetUserSession(user.TelegramID, sessionNewPositionWalletID, fmt.Sprintf("%d", defaultWallet.ID), 30*time.Minute)
+	}
+
 	_ = database.SetUserSession(user.TelegramID, "state", "awaiting_pool_address", 30*time.Minute)
 
 	// If user pasted pool id/address before selecting chain, continue automatically.

@@ -1,0 +1,11 @@
+## 1. Implementation
+- [x] 1.1 Model/DB：为 `GlobalConfig` 增加 `multi_wallet_enabled`；为 `StrategyTask` 增加 `wallet_id` + `wallet_address`（并建立索引）。
+- [x] 1.2 Wallet service：增加按 `wallet_id`/`wallet_address` 获取用户钱包的方法；实现“任务钱包解析”工具函数（优先任务绑定钱包，其次默认钱包）。
+- [x] 1.3 Liquidity：`EnterTaskFromUSDT` / `ExitTaskToUSDT` / `SwapTaskDustToUSDT` 等链上交易统一改为使用“任务钱包解析”结果。
+- [x] 1.4 Strategy + txexec：交易串行锁改为按任务钱包地址；退出重试/等待再入场/冷却再入场等路径全量适配。
+- [x] 1.5 Bot：`/config` 增加多钱包模式开关；多钱包模式下 `/newposition` 增加钱包选择步骤（展示余额），并将选择写入创建的任务。
+- [x] 1.6 Web API：新增 `POST /api/settings?endpoint=wallets`（返回钱包列表 + 指定链余额）；`open_position` 支持并校验 `wallet_id`（多钱包模式下必填）。
+- [x] 1.7 Mini App：开单弹窗根据 `multi_wallet_enabled` 显示钱包选择器；拉取钱包列表与余额；提交开单时携带 `wallet_id`。
+- [ ] 1.8 Realtime positions：按“任务钱包”计算 wallet balances（避免使用默认钱包导致显示/过滤错误）；汇总去重 key 增加钱包维度。
+- [ ] 1.9 Tests：补充后端单测（wallet_id 校验、open_position 多钱包必填逻辑、钱包列表接口基础校验）。
+- [x] 1.10 Validate：`cd backend; go test ./...`；`cd miniapp; npm run build`；`openspec validate add-multi-wallet-support --strict`。

@@ -32,6 +32,8 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		s.handleGlobalConfig(w, r)
 	case "autolp_config":
 		s.handleAutoLPConfig(w, r)
+	case "wallets":
+		s.handleWallets(w, r)
 	default:
 		http.Error(w, "invalid endpoint", http.StatusBadRequest)
 	}

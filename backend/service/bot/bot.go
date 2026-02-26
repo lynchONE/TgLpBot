@@ -546,6 +546,9 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 	// New position chain selection (multi-chain)
 	case strings.HasPrefix(query.Data, "newpos_chain_"):
 		b.handleNewPositionChainSelect(query, user)
+	// New position wallet selection (multi-wallet)
+	case strings.HasPrefix(query.Data, "newpos_wallet_"):
+		b.handleNewPositionWalletSelect(query, user)
 	case strings.HasPrefix(query.Data, "set_wallet_"):
 		b.handleSetDefaultWallet(query, user)
 	case strings.HasPrefix(query.Data, "delete_wallet_"):
@@ -625,6 +628,8 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleConfigFilterChineseToggle(query, user)
 	case query.Data == "config_multi_chain_toggle":
 		b.handleConfigMultiChainToggle(query, user)
+	case query.Data == "config_multi_wallet_toggle":
+		b.handleConfigMultiWalletToggle(query, user)
 	case query.Data == "config_default_chain":
 		b.handleConfigDefaultChain(query, user)
 	case strings.HasPrefix(query.Data, "config_default_chain_set_") || query.Data == "config_default_chain_cancel":

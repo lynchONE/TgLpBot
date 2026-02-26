@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import BottomSheet from './BottomSheet.jsx';
 import { fetchSmartMoneyFollowConfig, saveSmartMoneyFollowConfig } from '../lib/api';
 import { copyToClipboard, hapticImpact, hapticNotification } from '../lib/telegram';
 
@@ -216,191 +217,178 @@ export default function SmartMoneyFollowModal({
     if (!open) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4">
-            <button
-                type="button"
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
-                onClick={onClose}
-                aria-label="关闭"
-            />
-
-            <div className="relative w-full max-w-lg overflow-hidden rounded-t-2xl sm:rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-white/10 dark:bg-[#111318] flex flex-col h-[92vh] sm:h-[680px]">
-                <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-zinc-100 dark:border-white/5 bg-white/50 dark:bg-white/5 shrink-0">
-                    <div className="min-w-0">
-                        <div className="truncate text-sm font-bold text-zinc-900 dark:text-white/90">跟单设置</div>
-                        <div className="mt-0.5 flex items-center gap-2 text-[10px] text-zinc-500 dark:text-white/40 font-mono">
-                            <span className="truncate">{shortHex(addr, 12, 10) || '--'}</span>
-                            <span className="shrink-0">·</span>
-                            <span className="shrink-0">{chainLabel}</span>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <button
-                            type="button"
-                            onClick={() => {
-                                hapticImpact('light');
-                                safeCopy(addr, onNotice);
-                            }}
-                            className="inline-flex items-center rounded-lg bg-zinc-100 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
-                        >
-                            复制
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                hapticImpact('light');
-                                setNonce((v) => v + 1);
-                            }}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-100 text-zinc-600 transition hover:bg-zinc-200 active:bg-zinc-300 dark:bg-zinc-800 dark:text-white dark:hover:bg-zinc-700 dark:active:bg-zinc-600"
-                            aria-label="刷新"
-                            title="刷新"
-                        >
-                            <Icon path={icons.refresh} className="h-4 w-4" />
-                        </button>
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-100 text-zinc-600 transition hover:bg-zinc-200 active:bg-zinc-300 dark:bg-zinc-800 dark:text-white dark:hover:bg-zinc-700 dark:active:bg-zinc-600"
-                            aria-label="关闭"
-                        >
-                            <Icon path={icons.close} className="h-5 w-5" />
-                        </button>
+        <BottomSheet
+            open={open}
+            onClose={onClose}
+            maxHeightClass="h-[92vh] sm:h-[680px] max-h-none"
+            headerClassName="px-4 py-3 border-b border-zinc-100 dark:border-white/5 bg-zinc-50/50 dark:bg-[#111318]/50 shrink-0"
+            contentClassName="p-4"
+            title={
+                <div>
+                    <div className="truncate text-sm font-bold text-zinc-900 dark:text-white/90">跟单设置</div>
+                    <div className="mt-0.5 flex items-center gap-2 text-[10px] text-zinc-500 dark:text-white/40 font-mono">
+                        <span className="truncate">{shortHex(addr, 12, 10) || '--'}</span>
+                        <span className="shrink-0">·</span>
+                        <span className="shrink-0">{chainLabel}</span>
                     </div>
                 </div>
-
-                <div className="flex-1 overflow-auto p-4">
-                    <div className="rounded-2xl border border-zinc-200 bg-white/70 p-3 dark:border-white/10 dark:bg-white/5">
-                        <div className="flex items-center justify-between gap-3">
-                            <div className="min-w-0">
-                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">开关</div>
-                                <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">
-                                    {loading ? '加载配置中…' : '钱包开 LP 我也开 / 钱包撤 LP 我也撤'}
-                                </div>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    hapticImpact('light');
-                                    setFollowEnabled((v) => !v);
-                                }}
-                                disabled={saving || loading}
-                                className={`shrink-0 inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold transition ${
-                                    followEnabled
-                                        ? 'bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15'
-                                        : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
-                                }`}
-                            >
-                                {followEnabled ? '已启用' : '已停用'}
-                            </button>
-                        </div>
-
-                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                            <label className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-[10px] text-zinc-500 dark:text-white/40">单次跟单（USDT）</div>
-                                <input
-                                    type="number"
-                                    inputMode="decimal"
-                                    min="0"
-                                    step="0.01"
-                                    value={followPerTrade}
-                                    onChange={(e) => setFollowPerTrade(e.target.value)}
-                                    className="mt-1 w-full rounded-lg bg-white px-2 py-1 text-[12px] font-semibold tabular-nums text-zinc-900 outline-none ring-0 dark:bg-white/5 dark:text-white/80"
-                                    placeholder="例如 20"
-                                    disabled={saving}
-                                />
-                            </label>
-                            <label className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-[10px] text-zinc-500 dark:text-white/40">最大跟单（USDT）</div>
-                                <input
-                                    type="number"
-                                    inputMode="decimal"
-                                    min="0"
-                                    step="0.01"
-                                    value={followMaxTotal}
-                                    onChange={(e) => setFollowMaxTotal(e.target.value)}
-                                    className="mt-1 w-full rounded-lg bg-white px-2 py-1 text-[12px] font-semibold tabular-nums text-zinc-900 outline-none ring-0 dark:bg-white/5 dark:text-white/80"
-                                    placeholder="例如 200"
-                                    disabled={saving}
-                                />
-                            </label>
-                            <label className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-[10px] text-zinc-500 dark:text-white/40">延迟最小（秒）</div>
-                                <input
-                                    type="number"
-                                    inputMode="numeric"
-                                    min="0"
-                                    max="60"
-                                    step="1"
-                                    value={followDelayMin}
-                                    onChange={(e) => setFollowDelayMin(e.target.value)}
-                                    className="mt-1 w-full rounded-lg bg-white px-2 py-1 text-[12px] font-semibold tabular-nums text-zinc-900 outline-none ring-0 dark:bg-white/5 dark:text-white/80"
-                                    placeholder="0"
-                                    disabled={saving}
-                                />
-                            </label>
-                            <label className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-[10px] text-zinc-500 dark:text-white/40">延迟最大（秒）</div>
-                                <input
-                                    type="number"
-                                    inputMode="numeric"
-                                    min="0"
-                                    max="60"
-                                    step="1"
-                                    value={followDelayMax}
-                                    onChange={(e) => setFollowDelayMax(e.target.value)}
-                                    className="mt-1 w-full rounded-lg bg-white px-2 py-1 text-[12px] font-semibold tabular-nums text-zinc-900 outline-none ring-0 dark:bg-white/5 dark:text-white/80"
-                                    placeholder="60"
-                                    disabled={saving}
-                                />
-                            </label>
-                        </div>
-
-                        {error ? (
-                            <div className="mt-2 rounded-xl border border-red-500/30 bg-red-500/10 p-2 text-[11px] text-red-700 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-200">
-                                {error}
-                            </div>
-                        ) : null}
-
-                        <div className="mt-3 flex items-center justify-between gap-2">
-                            <div className="text-[10px] text-zinc-500 dark:text-white/40">
-                                停用只会停止后续跟单，不会自动撤出已有跟单仓位。
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    hapticImpact('light');
-                                    handleSave();
-                                }}
-                                disabled={saving || loading}
-                                className="inline-flex items-center rounded-lg bg-emerald-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-600 disabled:opacity-60 disabled:hover:bg-emerald-500"
-                            >
-                                {saving ? '保存中…' : '保存'}
-                            </button>
+            }
+            headerRight={
+                <>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            hapticImpact('light');
+                            safeCopy(addr, onNotice);
+                        }}
+                        className="inline-flex items-center rounded-lg bg-zinc-100 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
+                    >
+                        复制
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            hapticImpact('light');
+                            setNonce((v) => v + 1);
+                        }}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-zinc-100 text-zinc-600 transition hover:bg-zinc-200 active:bg-zinc-300 dark:bg-white/10 dark:text-white/70 dark:hover:bg-white/20"
+                        aria-label="刷新"
+                        title="刷新"
+                    >
+                        <Icon path={icons.refresh} className="h-4 w-4" />
+                    </button>
+                </>
+            }
+        >
+            <div className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 dark:border-white/10 dark:bg-white/5">
+                <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                        <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">开关</div>
+                        <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">
+                            {loading ? '加载配置中…' : '钱包开 LP 我也开 / 钱包撤 LP 我也撤'}
                         </div>
                     </div>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            hapticImpact('light');
+                            setFollowEnabled((v) => !v);
+                        }}
+                        disabled={saving || loading}
+                        className={`shrink-0 inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold transition ${followEnabled
+                            ? 'bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15'
+                            : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
+                            }`}
+                    >
+                        {followEnabled ? '已启用' : '已停用'}
+                    </button>
+                </div>
 
-                    <div className="mt-3 rounded-2xl border border-zinc-200 bg-white/70 p-3 dark:border-white/10 dark:bg-white/5">
-                        <div className="flex items-center justify-between gap-2">
-                            <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">钱包仓位</div>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    if (typeof onOpenPositions === 'function') {
-                                        hapticImpact('light');
-                                        onOpenPositions(addr);
-                                    }
-                                }}
-                                className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
-                            >
-                                查看仓位
-                            </button>
-                        </div>
-                        <div className="mt-1 text-[10px] text-zinc-500 dark:text-white/40">
-                            跟单页与仓位页已拆分：仓位只展示持仓，跟单只负责开关和参数。
-                        </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                    <label className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
+                        <div className="text-[10px] text-zinc-500 dark:text-white/40">单次跟单（USDT）</div>
+                        <input
+                            type="number"
+                            inputMode="decimal"
+                            min="0"
+                            step="0.01"
+                            value={followPerTrade}
+                            onChange={(e) => setFollowPerTrade(e.target.value)}
+                            className="mt-1 w-full rounded-lg bg-white px-2 py-1 text-[12px] font-semibold tabular-nums text-zinc-900 outline-none ring-0 dark:bg-white/5 dark:text-white/80"
+                            placeholder="例如 20"
+                            disabled={saving}
+                        />
+                    </label>
+                    <label className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
+                        <div className="text-[10px] text-zinc-500 dark:text-white/40">最大跟单（USDT）</div>
+                        <input
+                            type="number"
+                            inputMode="decimal"
+                            min="0"
+                            step="0.01"
+                            value={followMaxTotal}
+                            onChange={(e) => setFollowMaxTotal(e.target.value)}
+                            className="mt-1 w-full rounded-lg bg-white px-2 py-1 text-[12px] font-semibold tabular-nums text-zinc-900 outline-none ring-0 dark:bg-white/5 dark:text-white/80"
+                            placeholder="例如 200"
+                            disabled={saving}
+                        />
+                    </label>
+                    <label className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
+                        <div className="text-[10px] text-zinc-500 dark:text-white/40">延迟最小（秒）</div>
+                        <input
+                            type="number"
+                            inputMode="numeric"
+                            min="0"
+                            max="60"
+                            step="1"
+                            value={followDelayMin}
+                            onChange={(e) => setFollowDelayMin(e.target.value)}
+                            className="mt-1 w-full rounded-lg bg-white px-2 py-1 text-[12px] font-semibold tabular-nums text-zinc-900 outline-none ring-0 dark:bg-white/5 dark:text-white/80"
+                            placeholder="0"
+                            disabled={saving}
+                        />
+                    </label>
+                    <label className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
+                        <div className="text-[10px] text-zinc-500 dark:text-white/40">延迟最大（秒）</div>
+                        <input
+                            type="number"
+                            inputMode="numeric"
+                            min="0"
+                            max="60"
+                            step="1"
+                            value={followDelayMax}
+                            onChange={(e) => setFollowDelayMax(e.target.value)}
+                            className="mt-1 w-full rounded-lg bg-white px-2 py-1 text-[12px] font-semibold tabular-nums text-zinc-900 outline-none ring-0 dark:bg-white/5 dark:text-white/80"
+                            placeholder="60"
+                            disabled={saving}
+                        />
+                    </label>
+                </div>
+
+                {error ? (
+                    <div className="mt-2 rounded-xl border border-red-500/30 bg-red-500/10 p-2 text-[11px] text-red-700 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-200">
+                        {error}
                     </div>
+                ) : null}
+
+                <div className="mt-3 flex items-center justify-between gap-2">
+                    <div className="text-[10px] text-zinc-500 dark:text-white/40">
+                        停用只会停止后续跟单，不会自动撤出已有跟单仓位。
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            hapticImpact('light');
+                            handleSave();
+                        }}
+                        disabled={saving || loading}
+                        className="inline-flex items-center rounded-lg bg-emerald-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-600 disabled:opacity-60 disabled:hover:bg-emerald-500"
+                    >
+                        {saving ? '保存中…' : '保存'}
+                    </button>
                 </div>
             </div>
-        </div>
+
+            <div className="mt-3 rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 dark:border-white/10 dark:bg-white/5">
+                <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">钱包仓位</div>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            if (typeof onOpenPositions === 'function') {
+                                hapticImpact('light');
+                                onOpenPositions(addr);
+                            }
+                        }}
+                        className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
+                    >
+                        查看仓位
+                    </button>
+                </div>
+                <div className="mt-1 text-[10px] text-zinc-500 dark:text-white/40">
+                    跟单页与仓位页已拆分：仓位只展示持仓，跟单只负责开关和参数。
+                </div>
+            </div>
+        </BottomSheet>
     );
 }

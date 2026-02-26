@@ -182,15 +182,21 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
 		database.SetUserSession(user.TelegramID, "pool_tick_spacing", fmt.Sprintf("%d", tickSpacing), 30*time.Minute)
 		database.SetUserSession(user.TelegramID, "state", "awaiting_tick_range", 30*time.Minute)
 
-		// Get wallet info
-		defaultWallet := wallets[0]
-		for _, w := range wallets {
-			if w.IsDefault {
-				defaultWallet = w
-				break
+		// Use selected wallet (multi-wallet mode) or default wallet.
+		selectedWallet, werr := b.ensureNewPositionWalletSession(user.ID, user.TelegramID)
+		addr := ""
+		if werr == nil && selectedWallet != nil {
+			addr = selectedWallet.Address
+		} else if len(wallets) > 0 {
+			addr = wallets[0].Address
+			for _, w := range wallets {
+				if w.IsDefault {
+					addr = w.Address
+					break
+				}
 			}
 		}
-		balanceText := b.getPoolInfoWalletBalanceText(chain, defaultWallet.Address)
+		balanceText := b.getPoolInfoWalletBalanceText(chain, addr)
 
 		// Display pool information
 		text := fmt.Sprintf(`📊 *Uniswap V4 池子信息*
@@ -266,14 +272,20 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
 	// Get wallet balance info
 	var balanceText string
 	if len(wallets) > 0 {
-		defaultWallet := wallets[0]
-		for _, w := range wallets {
-			if w.IsDefault {
-				defaultWallet = w
-				break
+		selectedWallet, werr := b.ensureNewPositionWalletSession(user.ID, user.TelegramID)
+		addr := ""
+		if werr == nil && selectedWallet != nil {
+			addr = selectedWallet.Address
+		} else {
+			addr = wallets[0].Address
+			for _, w := range wallets {
+				if w.IsDefault {
+					addr = w.Address
+					break
+				}
 			}
 		}
-		balanceText = b.getPoolInfoWalletBalanceText(chain, defaultWallet.Address)
+		balanceText = b.getPoolInfoWalletBalanceText(chain, addr)
 	}
 
 	// Display pool information
@@ -318,6 +330,14 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 		return
 	}
 	stableSym, _, _ := stableSymbolForChain(chain)
+
+	// Resolve wallet for this new position (selected wallet in multi-wallet mode, otherwise default).
+	selectedWallet, werr := b.ensureNewPositionWalletSession(user.ID, user.TelegramID)
+	if werr != nil || selectedWallet == nil {
+		database.ClearUserSession(user.TelegramID)
+		b.sendMessage(message.Chat.ID, "⚠️ 您还没有钱包，请先用 /wallet 导入。")
+		return
+	}
 
 	// Expect:
 	// - "amount percentage" (symmetric)
@@ -421,18 +441,10 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 		return
 	}
 
-	// Validate amount against default wallet stable balance when possible
-	wallets, wErr := b.walletService.GetUserWallets(user.ID)
+	// Validate amount against selected wallet stable balance when possible
 	client, _, _ := blockchain.GetEVMClient(chain)
-	if wErr == nil && len(wallets) > 0 && client != nil {
-		defaultWallet := wallets[0]
-		for _, w := range wallets {
-			if w.IsDefault {
-				defaultWallet = w
-				break
-			}
-		}
-		addr := common.HexToAddress(defaultWallet.Address)
+	if client != nil {
+		addr := common.HexToAddress(selectedWallet.Address)
 		stableSym, stableDecimals, stableAddrStr := stableSymbolForChain(chain)
 		if !common.IsHexAddress(stableAddrStr) && chain == "bsc" {
 			stableAddrStr = "0x55d398326f99059fF775485246999027B3197955"
@@ -666,6 +678,14 @@ func (b *Bot) createPositionTask(chatID int64, user *models.User) {
 		}
 	}
 
+	// Resolve wallet selection (or default wallet).
+	selectedWallet, werr := b.resolveNewPositionWallet(user.ID, user.TelegramID)
+	if werr != nil || selectedWallet == nil {
+		b.sendMessage(chatID, "⚠️ 您还没有钱包，请先用 /wallet 导入。")
+		database.ClearUserSession(user.TelegramID)
+		return
+	}
+
 	// Create Strategy Task
 	task := &models.StrategyTask{
 		UserID:               user.ID,
@@ -673,6 +693,8 @@ func (b *Bot) createPositionTask(chatID int64, user *models.User) {
 		PoolId:               poolAddress,
 		PoolVersion:          poolVersion,
 		Exchange:             poolExchange,
+		WalletID:             selectedWallet.ID,
+		WalletAddress:        selectedWallet.Address,
 		Token0Symbol:         token0Symbol,
 		Token1Symbol:         token1Symbol,
 		Token0Address:        token0Addr,

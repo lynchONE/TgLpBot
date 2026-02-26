@@ -14,6 +14,9 @@ const (
 	sessionNewPositionChain = "new_position_chain"
 	sessionNewPositionState = "awaiting_new_position_chain"
 	sessionPendingPoolInput = "pending_pool_input"
+
+	sessionNewPositionWalletID    = "new_position_wallet_id"
+	sessionNewPositionWalletState = "awaiting_new_position_wallet"
 )
 
 func enabledChains() []string {

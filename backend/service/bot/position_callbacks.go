@@ -72,6 +72,14 @@ func (b *Bot) handleConfirmPosition(query *tgbotapi.CallbackQuery, user *models.
 		}
 	}
 
+	// Resolve wallet selection (or default wallet) before clearing session.
+	selectedWallet, werr := b.resolveNewPositionWallet(user.ID, user.TelegramID)
+	if werr != nil || selectedWallet == nil {
+		b.sendMessage(query.Message.Chat.ID, "⚠️ 您还没有钱包，请先用 /wallet 导入。")
+		database.ClearUserSession(user.TelegramID)
+		return
+	}
+
 	// Clear session
 	database.ClearUserSession(user.TelegramID)
 
@@ -82,6 +90,8 @@ func (b *Bot) handleConfirmPosition(query *tgbotapi.CallbackQuery, user *models.
 		PoolId:               poolAddress,
 		PoolVersion:          poolVersion,
 		Exchange:             poolExchange,
+		WalletID:             selectedWallet.ID,
+		WalletAddress:        selectedWallet.Address,
 		Token0Symbol:         token0Symbol,
 		Token1Symbol:         token1Symbol,
 		Token0Address:        token0Addr,

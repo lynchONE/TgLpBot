@@ -339,6 +339,10 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
             setCopied(true);
             hapticNotification('success'); // 复制成功反馈
             setTimeout(() => setCopied(false), 1200);
+            await copyToClipboard(addr);
+            setCopied(true);
+            hapticNotification('success'); // 复制成功反馈
+            setTimeout(() => setCopied(false), 1200);
         } catch {
             hapticNotification('error'); // 复制失败反馈
         }
@@ -346,7 +350,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
 
     return (
         <div
-            className={`rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none ${rankClass} ${isBlacklisted ? 'opacity-50 ring-2 ring-red-500/30' : ''}`}
+            className={`rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm transition-transform duration-200 active:scale-[0.98] dark:border-white/10 dark:bg-white/5 dark:shadow-none ${rankClass} ${isBlacklisted ? 'opacity-50 ring-2 ring-red-500/30' : ''}`}
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
             onTouchMove={handleTouchMove}

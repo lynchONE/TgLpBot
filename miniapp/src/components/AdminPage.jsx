@@ -251,7 +251,7 @@ export default function AdminPage({
 
             {/* 在线用户页面 */}
             {activeTab === 'online_users' && (
-                <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                <div className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none">
                     <div className="flex items-center justify-between mb-3">
                         <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">在线用户</div>
                         <div className="text-[11px] text-zinc-500 dark:text-white/40">{onlineUsers.length} 人</div>
@@ -269,7 +269,7 @@ export default function AdminPage({
 
             {/* 活跃任务页面 */}
             {activeTab === 'active_tasks' && (
-                <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                <div className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none">
                     <div className="flex items-center justify-between mb-3">
                         <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">活跃任务</div>
                         <div className="text-[11px] text-zinc-500 dark:text-white/40">{activeTasks.length} 个</div>
@@ -293,13 +293,13 @@ export default function AdminPage({
             {activeTab === 'user_detail' && (
                 <>
                     {!selectedUser ? (
-                        <div className="rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                        <div className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
                             请从「在线用户」或「活跃任务」中选择用户查看详情。
                         </div>
                     ) : (
                         <>
                             {/* 用户摘要卡片 */}
-                            <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                            <div className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none">
                                 <div className="flex items-start justify-between gap-3">
                                     <div className="min-w-0">
                                         <div className="flex flex-wrap items-center gap-2">
@@ -377,7 +377,7 @@ export default function AdminPage({
 
                             {/* Auto 统计 */}
                             {userAutoStats?.stats && (
-                                <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                                <div className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none">
                                     <div className="text-sm font-semibold text-zinc-900 dark:text-white/90 mb-3">Auto 统计</div>
                                     {userAutoStats.stats.window_label && (
                                         <div className="mb-2 text-[11px] text-zinc-500 dark:text-white/40">
@@ -420,7 +420,7 @@ export default function AdminPage({
                             )}
 
                             {/* 用户仓位 */}
-                            <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                            <div className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none">
                                 <div className="flex items-center justify-between mb-3">
                                     <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">用户仓位</div>
                                     <div className="text-[11px] text-zinc-500 dark:text-white/40">{userPositionsList.length} 个</div>
@@ -437,7 +437,7 @@ export default function AdminPage({
                                 )}
 
                                 {!userPositionsLoading && userPositionsList.length === 0 && !userPositionsError && (
-                                    <div className="rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                                    <div className="rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
                                         该用户暂无仓位
                                     </div>
                                 )}

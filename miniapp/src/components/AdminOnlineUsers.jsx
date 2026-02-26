@@ -38,7 +38,7 @@ export default function AdminOnlineUsers({
 
     if (loading && users.length === 0) {
         return (
-            <div className="rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+            <div className="rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
                 加载中...
             </div>
         );
@@ -46,7 +46,7 @@ export default function AdminOnlineUsers({
 
     if (users.length === 0) {
         return (
-            <div className="rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+            <div className="rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
                 暂无在线用户
             </div>
         );

@@ -462,6 +462,38 @@ func (b *Bot) handleText(message *tgbotapi.Message, user *models.User) {
 		)
 		return false
 	}
+	ensureWalletForPoolInput := func(poolInput string) bool {
+		if raw, _ := database.GetUserSession(user.TelegramID, sessionNewPositionWalletID); strings.TrimSpace(raw) != "" {
+			return true
+		}
+
+		wallets, err := b.walletService.GetUserWallets(user.ID)
+		if err != nil || len(wallets) == 0 {
+			b.sendMessage(message.Chat.ID, "⚠️ 您还没有钱包，请先使用 /wallet 导入。")
+			database.ClearUserSession(user.TelegramID)
+			return false
+		}
+
+		cfg, _ := b.configService.GetOrCreate(user.ID)
+		if cfg != nil && cfg.MultiWalletEnabled && len(wallets) > 1 {
+			chain, _ := database.GetUserSession(user.TelegramID, sessionNewPositionChain)
+			chain = config.NormalizeChain(chain)
+			_ = database.SetUserSession(user.TelegramID, sessionPendingPoolInput, strings.TrimSpace(poolInput), 30*time.Minute)
+			b.promptNewPositionWalletSelect(message.Chat.ID, user, chain)
+			return false
+		}
+
+		// Single-wallet mode (or only one wallet): use default wallet and continue.
+		defaultWallet := wallets[0]
+		for _, w := range wallets {
+			if w.IsDefault {
+				defaultWallet = w
+				break
+			}
+		}
+		_ = database.SetUserSession(user.TelegramID, sessionNewPositionWalletID, fmt.Sprintf("%d", defaultWallet.ID), 30*time.Minute)
+		return true
+	}
 
 	// If no state, check if input looks like a pool address or PoolId
 	if state == "" {
@@ -472,6 +504,9 @@ func (b *Bot) handleText(message *tgbotapi.Message, user *models.User) {
 				return
 			}
 			if !ensureChainForPoolInput(text) {
+				return
+			}
+			if !ensureWalletForPoolInput(text) {
 				return
 			}
 			// Auto-detect pool input, treat as new position
@@ -497,6 +532,8 @@ func (b *Bot) handleText(message *tgbotapi.Message, user *models.User) {
 		b.handleWalletNameInput(message, user)
 	case sessionNewPositionState:
 		b.handleNewPositionChainText(message, user)
+	case sessionNewPositionWalletState:
+		b.handleNewPositionWalletText(message, user)
 	case "awaiting_pool_address":
 		b.handlePoolAddress(message, user)
 	case "awaiting_tick_range":

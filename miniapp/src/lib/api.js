@@ -511,6 +511,31 @@ export async function fetchGlobalConfig({ apiBaseUrl, initData, signal }) {
     return resp.json();
 }
 
+export async function fetchWallets({ apiBaseUrl, initData, chain, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/settings?endpoint=wallets`;
+    const payload = { initData };
+    if (chain) payload.chain = String(chain);
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        let detail = text;
+        try {
+            const parsed = text ? JSON.parse(text) : null;
+            if (parsed?.message) detail = parsed.message;
+        } catch {
+            // ignore JSON parse
+        }
+        throw new Error(detail || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
 export async function fetchAdminRealtimeUsers({ apiBaseUrl, initData, limit, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/admin?endpoint=realtime_users`;
@@ -683,7 +708,7 @@ export async function fetchPoolOHLCV({ apiBaseUrl, initData, chain, poolAddress,
     return resp.json();
 }
 
-export async function openPosition({ apiBaseUrl, initData, chain, poolAddress, poolVersion, amount, rangeLowerPct, rangeUpperPct, slippageTolerance, allowEntrySwap, signal }) {
+export async function openPosition({ apiBaseUrl, initData, chain, poolAddress, poolVersion, amount, rangeLowerPct, rangeUpperPct, slippageTolerance, allowEntrySwap, walletId, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/trading?endpoint=open_position`;
     const payload = {
@@ -696,6 +721,10 @@ export async function openPosition({ apiBaseUrl, initData, chain, poolAddress, p
         range_upper_pct: rangeUpperPct,
         allow_entry_swap: Boolean(allowEntrySwap),
     };
+    const wid = Number(walletId);
+    if (Number.isFinite(wid) && wid > 0) {
+        payload.wallet_id = wid;
+    }
     if (Number.isFinite(slippageTolerance)) {
         payload.slippage_tolerance = slippageTolerance;
     }
@@ -857,6 +886,22 @@ export async function removeCooldown({ apiBaseUrl, initData, tradingPair, signal
             // ignore JSON parse
         }
         throw new Error(detail || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
+export async function saveGlobalConfig({ apiBaseUrl, initData, config, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = base + '/api/settings?endpoint=global_config';
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, ...config }),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || 'HTTP ' + resp.status);
     }
     return resp.json();
 }

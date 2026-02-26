@@ -25,6 +25,7 @@ import (
 
 type openPositionRequest struct {
 	InitData       string   `json:"initData"`
+	WalletID       uint     `json:"wallet_id,omitempty"`
 	Chain          string   `json:"chain"`
 	PoolAddress    string   `json:"pool_address"`
 	PoolVersion    string   `json:"pool_version"`
@@ -243,9 +244,43 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 	}
 
 	walletService := wallet.NewWalletService()
-	if _, err := walletService.GetDefaultWallet(user.ID); err != nil {
+	wallets, err := walletService.GetUserWallets(user.ID)
+	if err != nil || len(wallets) == 0 {
 		http.Error(w, "no wallet found", http.StatusBadRequest)
 		return
+	}
+	defaultWallet := &wallets[0]
+	for i := range wallets {
+		if wallets[i].IsDefault {
+			defaultWallet = &wallets[i]
+			break
+		}
+	}
+
+	requireSelection := cfg != nil && cfg.MultiWalletEnabled && len(wallets) > 1
+	if requireSelection && req.WalletID == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(openPositionError{
+			Code:    "wallet_required",
+			Message: "请选择钱包",
+		})
+		return
+	}
+
+	selectedWallet := defaultWallet
+	if requireSelection {
+		walletRec, werr := walletService.GetWalletByID(user.ID, req.WalletID)
+		if werr != nil || walletRec == nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(openPositionError{
+				Code:    "invalid_wallet",
+				Message: "无效的钱包",
+			})
+			return
+		}
+		selectedWallet = walletRec
 	}
 
 	blacklistSvc := blacklist.NewBlacklistService()
@@ -388,6 +423,8 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		PoolId:               poolAddress,
 		PoolVersion:          poolVersion,
 		Exchange:             poolInfo.Exchange,
+		WalletID:             selectedWallet.ID,
+		WalletAddress:        selectedWallet.Address,
 		Token0Symbol:         poolInfo.Token0Symbol,
 		Token1Symbol:         poolInfo.Token1Symbol,
 		Token0Address:        poolInfo.Token0,

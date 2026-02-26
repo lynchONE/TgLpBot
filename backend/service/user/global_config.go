@@ -29,6 +29,7 @@ func (s *GlobalConfigService) GetOrCreate(userID uint) (*models.GlobalConfig, er
 		UserID:                    userID,
 		MultiChainEnabled:         true,
 		DefaultChain:              "bsc",
+		MultiWalletEnabled:        false,
 		RebalanceTimeout:          300,
 		StopLossThreshold:         10.0,
 		StopLossEnabled:           false,

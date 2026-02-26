@@ -44,6 +44,9 @@ type GlobalConfig struct {
 	MultiChainEnabled bool   `gorm:"not null;default:true" json:"multi_chain_enabled"`
 	DefaultChain      string `gorm:"size:16;not null;default:'bsc'" json:"default_chain"`
 
+	// Wallet selection mode (per-user UX)
+	MultiWalletEnabled bool `gorm:"not null;default:false" json:"multi_wallet_enabled"`
+
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`

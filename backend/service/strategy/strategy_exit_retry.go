@@ -161,7 +161,7 @@ func (s *StrategyService) processExitRetry(task *models.StrategyTask) bool {
 	s.inflightTasks[task.ID] = now
 	s.inflightTasksMu.Unlock()
 
-	if ok, err := exec.TryRunUser(task.UserID, func(_ string) {
+	if ok, err := exec.TryRunTask(task.UserID, task.WalletID, task.WalletAddress, func(_ string) {
 		defer func() {
 			// 交易完成后清理内存锁
 			s.inflightTasksMu.Lock()
@@ -314,7 +314,7 @@ func (s *StrategyService) processRebalanceRetry(task *models.StrategyTask) bool 
 	s.inflightTasks[task.ID] = now
 	s.inflightTasksMu.Unlock()
 
-	if ok, err := exec.TryRunUser(task.UserID, func(_ string) {
+	if ok, err := exec.TryRunTask(task.UserID, task.WalletID, task.WalletAddress, func(_ string) {
 		defer func() {
 			// 交易完成后清理内存锁
 			s.inflightTasksMu.Lock()

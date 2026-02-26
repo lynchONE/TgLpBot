@@ -6,6 +6,7 @@ import PositionCard from './components/PositionCard.jsx';
 import AutoPnLCurveCard from './components/AutoPnLCurveCard.jsx';
 import SmartMoneyCard from './components/SmartMoneyCard.jsx';
 import SystemConfigCard from './components/SystemConfigCard.jsx';
+import BottomSheet from './components/BottomSheet.jsx';
 import ModuleHeader from './components/ModuleHeader.jsx';
 import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
 import AdminPage from './components/AdminPage.jsx';
@@ -243,6 +244,7 @@ const icons = {
     check: 'M9 16.17L4.83 12 3.41 13.41 9 19l12-12-1.41-1.41L9 16.17z',
     reset: 'M12 5V2L7 7l5 5V9a5 5 0 11-5 5H5a7 7 0 107-7z',
     alert: 'M12 2L1 21h22L12 2zm0 6a1 1 0 011 1v5a1 1 0 11-2 0V9a1 1 0 011-1zm0 10a1.25 1.25 0 110-2.5A1.25 1.25 0 0112 18z',
+    fire: 'M17.657 18.657A8 8 0 016.343 7.343S7 9 7.1 10c0 .35.15.68.4.92.54.54 1.47.41 1.83-.26l.16-.32A3.996 3.996 0 0012 3c0 2 2 3 2 5.5 0 1.38-.56 2.63-1.46 3.54a4.01 4.01 0 001.07 6.55z',
 };
 
 function buildTopNavItems({ isAdmin, smartMoneyEnabled }) {
@@ -1843,7 +1845,7 @@ export default function App() {
     const moduleMetaByMode = useMemo(() => ({
         hot_pools: {
             title: '热门池子',
-            icon: icons.chart,
+            icon: icons.fire, // Changed to fire icon
             subtitle: `5m · ${hotPoolsData ? `更新：${localUpdateSecAgo}秒前` : hotPoolsLoading ? '加载中...' : '暂无数据'} · 自动刷新 ${hotPoolsPollIntervalSec}s`,
         },
         positions: {
@@ -1853,7 +1855,7 @@ export default function App() {
         },
         monitor: {
             title: '自动任务监控',
-            icon: icons.bot,
+            icon: icons.chart, // Changed to chart icon
             subtitle: `Auto任务：${Array.isArray(autoMonitor?.tasks) ? autoMonitor.tasks.length : 0} · 更新：${formatRelativeTime(autoMonitor?.updated_at, tick) || '--'} · 自动刷新 ${monitorPollSec}s`,
         },
         smart_money: {
@@ -1863,7 +1865,7 @@ export default function App() {
         },
         admin: {
             title: '管理面板',
-            icon: icons.bot,
+            icon: icons.gear, // Changed to gear icon
             subtitle: adminSelectedUser
                 ? `用户：${formatUserLabel(adminSelectedUser)}`
                 : adminUsersLoading && adminUsers.length === 0
@@ -2008,24 +2010,6 @@ export default function App() {
                     </div>
                 </div>
 
-                <div className="mt-3 rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 dark:border-white/10 dark:bg-white/5">
-                    <div className="flex items-center gap-1 overflow-x-auto text-xs font-semibold">
-                        {topNavItems.map((item) => (
-                            <button
-                                key={item.key}
-                                type="button"
-                                onClick={() => setViewMode(item.key)}
-                                aria-pressed={viewMode === item.key}
-                                className={`shrink-0 rounded-xl px-2 py-2 whitespace-nowrap transition ${viewMode === item.key
-                                    ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
-                                    : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
-                                    }`}
-                            >
-                                {item.label}
-                            </button>
-                        ))}
-                    </div>
-                </div>
 
                 {showAdmin ? (
                     <ModuleHeader
@@ -2311,7 +2295,7 @@ export default function App() {
 
             {/* 移除了"暂无自动任务"提示 */}
 
-            <div className="space-y-4">
+            <div className="space-y-4 animate-fade-in-up">
                 {isHotPools
                     ? hotPoolsVisibleRows.map((row, index) => {
                         const proto = String(row?.protocol_version || '').trim();
@@ -2431,65 +2415,65 @@ export default function App() {
                                     theme={theme}
                                 />
                             )
-                        : !showAdmin && activeData
-                            ? (
-                                <>
-                                    {isPositions ? (
-                                        <div
-                                            className="grid grid-cols-3 gap-1 rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5"
-                                        >
-                                            {POSITION_TASK_TABS.map((tab) => (
-                                                <button
-                                                    key={tab.key}
-                                                    type="button"
-                                                    onClick={() => {
-                                                        positionsTabTouchedRef.current = true;
-                                                        setPositionsTaskTab(tab.key);
-                                                        setSelectedTaskIds(new Set());
-                                                        setBatchMode(false);
-                                                    }}
-                                                    aria-pressed={positionsTaskTab === tab.key}
-                                                    className={`rounded-xl px-3 py-2 transition ${positionsTaskTab === tab.key
-                                                        ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
-                                                        : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
-                                                        }`}
-                                                >
-                                                    {tab.label}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    ) : null}
+                            : !showAdmin && activeData
+                                ? (
+                                    <>
+                                        {isPositions ? (
+                                            <div
+                                                className="grid grid-cols-3 gap-1 rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5"
+                                            >
+                                                {POSITION_TASK_TABS.map((tab) => (
+                                                    <button
+                                                        key={tab.key}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            positionsTabTouchedRef.current = true;
+                                                            setPositionsTaskTab(tab.key);
+                                                            setSelectedTaskIds(new Set());
+                                                            setBatchMode(false);
+                                                        }}
+                                                        aria-pressed={positionsTaskTab === tab.key}
+                                                        className={`rounded-xl px-3 py-2 transition ${positionsTaskTab === tab.key
+                                                            ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
+                                                            : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
+                                                            }`}
+                                                    >
+                                                        {tab.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        ) : null}
 
-                                    {visibleTaskPositions.map((p) => (
-                                        <PositionCard
-                                            key={`${p.version}:${p.position_id}`}
-                                            position={p}
-                                            walletAddress={walletAddress}
-                                            bnbBalance={bnbBalance}
-                                            pollIntervalSec={pollIntervalSec}
-                                            updatedAt={updatedAt}
-                                            allowTaskActions={!showAdmin && hasInitData}
-                                            onSetTaskPaused={handleSetTaskPaused}
-                                            onStopTask={handleStopTask}
-                                            onDeleteTask={handleDeleteTask}
-                                            onUpdateTaskRange={openTaskRangeModal}
-                                            batchMode={batchMode}
-                                            isSelected={selectedTaskIds.has(p.task_id)}
-                                            onToggleSelect={() => toggleTaskSelection(p.task_id)}
-                                        />
-                                    ))}
+                                        {visibleTaskPositions.map((p) => (
+                                            <PositionCard
+                                                key={`${p.version}:${p.position_id}`}
+                                                position={p}
+                                                walletAddress={walletAddress}
+                                                bnbBalance={bnbBalance}
+                                                pollIntervalSec={pollIntervalSec}
+                                                updatedAt={updatedAt}
+                                                allowTaskActions={!showAdmin && hasInitData}
+                                                onSetTaskPaused={handleSetTaskPaused}
+                                                onStopTask={handleStopTask}
+                                                onDeleteTask={handleDeleteTask}
+                                                onUpdateTaskRange={openTaskRangeModal}
+                                                batchMode={batchMode}
+                                                isSelected={selectedTaskIds.has(p.task_id)}
+                                                onToggleSelect={() => toggleTaskSelection(p.task_id)}
+                                            />
+                                        ))}
 
-                                    {isPositions && positionsTaskTab === 'auto' ? (
-                                        <AutoPnLCurveCard
-                                            data={autoPnLCurve}
-                                            loading={autoPnLCurveLoading}
-                                            error={autoPnLCurveError}
-                                            theme={theme}
-                                        />
-                                    ) : null}
-                                </>
-                            )
-                            : null}
+                                        {isPositions && positionsTaskTab === 'auto' ? (
+                                            <AutoPnLCurveCard
+                                                data={autoPnLCurve}
+                                                loading={autoPnLCurveLoading}
+                                                error={autoPnLCurveError}
+                                                theme={theme}
+                                            />
+                                        ) : null}
+                                    </>
+                                )
+                                : null}
             </div>
 
             {
@@ -3284,6 +3268,35 @@ export default function App() {
                     </div>
                 ) : null
             }
+
+            {/* Bottom Navigation */}
+            <nav className="fixed bottom-0 left-0 right-0 max-w-[720px] mx-auto z-40 flex items-center justify-around border-t border-zinc-200 bg-white/80 px-2 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-xl dark:border-white/10 dark:bg-[#0b0d10]/80">
+                {topNavItems.map((item) => {
+                    const isActive = viewMode === item.key;
+                    let iconPath = icons.bot;
+                    if (item.key === 'hot_pools') iconPath = icons.fire;
+                    if (item.key === 'positions') iconPath = icons.chart;
+                    if (item.key === 'monitor') iconPath = icons.alert;
+                    if (item.key === 'smart_money') iconPath = icons.bot;
+                    if (item.key === 'admin') iconPath = icons.gear;
+
+                    return (
+                        <button
+                            key={item.key}
+                            type="button"
+                            onClick={() => setViewMode(item.key)}
+                            aria-pressed={isActive}
+                            className={`flex flex-1 flex-col items-center justify-center rounded-xl transition-colors py-1 ${isActive
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : 'text-zinc-500 hover:text-zinc-900 dark:text-white/40 dark:hover:text-white/80'
+                                }`}
+                        >
+                            <Icon path={iconPath} className={`h-6 w-6 ${isActive ? 'scale-110 transition-transform' : ''}`} />
+                            <span className="mt-1 text-[10px] font-medium">{item.label}</span>
+                        </button>
+                    );
+                })}
+            </nav>
 
             <KlineModal
                 open={Boolean(klinePool)}

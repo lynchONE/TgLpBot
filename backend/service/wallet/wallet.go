@@ -110,6 +110,67 @@ func (s *WalletService) GetUserWallets(userID uint) ([]models.Wallet, error) {
 	return wallets, nil
 }
 
+// GetWalletByID returns a specific wallet for a user.
+func (s *WalletService) GetWalletByID(userID uint, walletID uint) (*models.Wallet, error) {
+	if userID == 0 || walletID == 0 {
+		return nil, errors.New("invalid user_id or wallet_id")
+	}
+	var w models.Wallet
+	if err := database.DB.Where("id = ? AND user_id = ?", walletID, userID).First(&w).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("wallet not found")
+		}
+		return nil, fmt.Errorf("failed to get wallet: %w", err)
+	}
+	return &w, nil
+}
+
+func normalizeWalletAddressForQuery(v string) (string, bool) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", false
+	}
+	if !common.IsHexAddress(v) {
+		return "", false
+	}
+	return common.HexToAddress(v).Hex(), true
+}
+
+// GetWalletByAddress returns a wallet for a user by its address.
+func (s *WalletService) GetWalletByAddress(userID uint, address string) (*models.Wallet, error) {
+	if userID == 0 {
+		return nil, errors.New("invalid user_id")
+	}
+	addr, ok := normalizeWalletAddressForQuery(address)
+	if !ok {
+		return nil, errors.New("invalid wallet address")
+	}
+
+	var w models.Wallet
+	if err := database.DB.Where("user_id = ? AND address = ?", userID, addr).First(&w).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("wallet not found")
+		}
+		return nil, fmt.Errorf("failed to get wallet: %w", err)
+	}
+	return &w, nil
+}
+
+// ResolveTaskWallet returns the wallet bound to a task (wallet_id or wallet_address).
+// If neither is set, it falls back to the user's default wallet (legacy tasks).
+func (s *WalletService) ResolveTaskWallet(userID uint, walletID uint, walletAddress string) (*models.Wallet, error) {
+	if userID == 0 {
+		return nil, errors.New("invalid user_id")
+	}
+	if walletID != 0 {
+		return s.GetWalletByID(userID, walletID)
+	}
+	if strings.TrimSpace(walletAddress) != "" {
+		return s.GetWalletByAddress(userID, walletAddress)
+	}
+	return s.GetDefaultWallet(userID)
+}
+
 // GetDefaultWallet returns the default wallet for a user
 func (s *WalletService) GetDefaultWallet(userID uint) (*models.Wallet, error) {
 	var wallet models.Wallet

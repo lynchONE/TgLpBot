@@ -25,6 +25,10 @@ type StrategyTask struct {
 	Chain  string `gorm:"size:10;not null;default:'bsc';index" json:"chain"`
 	PoolId string `gorm:"size:66;not null;index" json:"pool_id"` // V3 pool address (0x...) or V4 PoolId (0x...32 bytes)
 
+	// Wallet binding: tasks MUST execute on the wallet used at entry time.
+	WalletID      uint   `gorm:"not null;default:0;index" json:"wallet_id"`
+	WalletAddress string `gorm:"size:42;not null;default:'';index" json:"wallet_address"`
+
 	// IsAuto marks tasks created by the AutoLP system (manual tasks are false).
 	IsAuto bool `gorm:"default:false;index" json:"is_auto"`
 
