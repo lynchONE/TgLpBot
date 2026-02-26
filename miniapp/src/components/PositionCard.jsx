@@ -353,13 +353,10 @@ export default function PositionCard({
                             </div>
                             {hasPnL && (
                                 <div className={`mt-1.5 flex flex-col items-end gap-0.5`}>
-                                    <div className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-bold tabular-nums shadow-sm ${pnlPositive
+                                    <div className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[11px] font-bold tabular-nums shadow-sm ${pnlPositive
                                         ? 'bg-emerald-500/15 text-emerald-500 dark:bg-emerald-500/20 dark:text-emerald-400 ring-1 ring-emerald-500/20'
                                         : 'bg-red-500/15 text-red-500 dark:bg-red-500/20 dark:text-red-400 ring-1 ring-red-500/20'
                                         }`}>
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="h-2.5 w-2.5 shrink-0">
-                                            <path d={pnlPositive ? icons.arrowUp : icons.arrowDown} />
-                                        </svg>
                                         {pnlAbsolute >= 0 ? '+' : ''}{formatUsd(pnlAbsolute)}
                                     </div>
                                     <div className={`text-[9px] font-semibold tabular-nums ${pnlPositive ? 'text-emerald-500/70 dark:text-emerald-400/60' : 'text-red-500/70 dark:text-red-400/60'}`}>
@@ -450,32 +447,32 @@ export default function PositionCard({
                             {[token0, token1].filter(Boolean).map((row) => (
                                 <div key={row.address} className="grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2 items-center py-2 border-b border-zinc-100/60 dark:border-white/10 last:border-0">
                                     <div className="min-w-0 pr-1">
-                                        <div className="text-xs font-bold text-zinc-900 dark:text-white/95 truncate">{row.symbol}</div>
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/50 font-mono">
+                                        <div className="text-[13px] font-bold text-zinc-900 dark:text-white/95 truncate">{row.symbol}</div>
+                                        <div className="text-xs text-zinc-500 dark:text-white/50 font-mono">
                                             {row.price_usd_text || `$${Number(row.price_usd || 0).toFixed(4)}`}
                                         </div>
                                     </div>
                                     <div className="text-right min-w-0">
-                                        <div className="text-xs font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">{row.wallet_amount}</div>
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/50 font-mono tabular-nums truncate">{formatUsd(row.wallet_usd)}</div>
+                                        <div className="text-[13px] font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">{row.wallet_amount}</div>
+                                        <div className="text-xs text-zinc-500 dark:text-white/50 font-mono tabular-nums truncate">{formatUsd(row.wallet_usd)}</div>
                                     </div>
                                     <div className="text-right min-w-0">
-                                        <div className="text-xs font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">{row.position_amount}</div>
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/50 font-mono tabular-nums truncate">{formatUsd(row.position_usd)}</div>
+                                        <div className="text-[13px] font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">{row.position_amount}</div>
+                                        <div className="text-xs text-zinc-500 dark:text-white/50 font-mono tabular-nums truncate">{formatUsd(row.position_usd)}</div>
                                     </div>
                                     <div className="text-right min-w-0">
-                                        <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400 font-mono tabular-nums truncate">{row.fee_amount}</div>
-                                        <div className="text-[11px] text-emerald-600/70 dark:text-emerald-400/70 font-mono tabular-nums truncate">{formatFeeUsd(row.fee_usd)}</div>
+                                        <div className="text-[13px] font-bold text-emerald-600 dark:text-emerald-400 font-mono tabular-nums truncate">{row.fee_amount}</div>
+                                        <div className="text-xs text-emerald-600/70 dark:text-emerald-400/70 font-mono tabular-nums truncate">{formatFeeUsd(row.fee_usd)}</div>
                                     </div>
                                 </div>
                             ))}
 
                             {/* 小计行 */}
                             <div className="pt-2 grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2 mt-1 border-t border-zinc-100/60 dark:border-white/10">
-                                <div className="text-[11px] font-bold text-zinc-500 dark:text-white/70">小计</div>
-                                <div className="text-right text-[11px] font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">{formatUsd(position?.totals?.wallet_usd)}</div>
-                                <div className="text-right text-[11px] font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">{formatUsd(position?.totals?.position_usd)}</div>
-                                <div className="text-right text-[11px] font-bold text-emerald-600 dark:text-emerald-400 font-mono tabular-nums truncate">{formatFeeUsd(position?.totals?.fee_usd)}</div>
+                                <div className="text-xs font-bold text-zinc-500 dark:text-white/70">小计</div>
+                                <div className="text-right text-xs font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">{formatUsd(position?.totals?.wallet_usd)}</div>
+                                <div className="text-right text-xs font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">{formatUsd(position?.totals?.position_usd)}</div>
+                                <div className="text-right text-xs font-bold text-emerald-600 dark:text-emerald-400 font-mono tabular-nums truncate">{formatFeeUsd(position?.totals?.fee_usd)}</div>
                             </div>
                         </div>
                     </div>
