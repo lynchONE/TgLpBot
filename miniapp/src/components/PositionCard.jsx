@@ -186,8 +186,38 @@ export default function PositionCard({
     const decimals0 = useMemo(() => Number(token0?.decimals ?? 18), [token0?.decimals]);
     const decimals1 = useMemo(() => Number(token1?.decimals ?? 18), [token1?.decimals]);
 
-    const currentPriceBase = useMemo(() => priceFromTick(position?.current_tick, decimals0, decimals1), [position?.current_tick, decimals0, decimals1]);
+    const currentTick = Number(position?.current_tick);
+    const tickLowerRaw = Number(position?.tick_lower);
+    const tickUpperRaw = Number(position?.tick_upper);
+    const tickSpacingRaw = Number(position?.pool?.tickSpacing ?? position?.tick_spacing);
+
+    const currentPriceBase = useMemo(() => priceFromTick(currentTick, decimals0, decimals1), [currentTick, decimals0, decimals1]);
     const currentPrice = stableIndex === 0 ? safeInvert(currentPriceBase) : currentPriceBase;
+
+    const currentGridIndex = useMemo(() => {
+        if (!Number.isFinite(currentTick) || !Number.isFinite(tickLowerRaw) || !tickSpacingRaw) return null;
+        return Math.floor((currentTick - tickLowerRaw) / tickSpacingRaw) + 1;
+    }, [currentTick, tickLowerRaw, tickSpacingRaw]);
+
+    const { gridLower, gridUpper } = useMemo(() => {
+        if (currentGridIndex === null || !tickSpacingRaw || !Number.isFinite(tickLowerRaw)) return { gridLower: null, gridUpper: null };
+        const t1 = tickLowerRaw + (currentGridIndex - 1) * tickSpacingRaw;
+        const t2 = t1 + tickSpacingRaw;
+        const p1Base = priceFromTick(t1, decimals0, decimals1);
+        const p2Base = priceFromTick(t2, decimals0, decimals1);
+        if (p1Base === null || p2Base === null) return { gridLower: null, gridUpper: null };
+        const p1 = stableIndex === 0 ? safeInvert(p1Base) : p1Base;
+        const p2 = stableIndex === 0 ? safeInvert(p2Base) : p2Base;
+        if (p1 === null || p2 === null) return { gridLower: null, gridUpper: null };
+        return { gridLower: Math.min(p1, p2), gridUpper: Math.max(p1, p2) };
+    }, [currentGridIndex, tickLowerRaw, tickSpacingRaw, decimals0, decimals1, stableIndex]);
+
+    const gridCountRaw = useMemo(() => {
+        if (!Number.isFinite(tickLowerRaw) || !Number.isFinite(tickUpperRaw)) return null;
+        const diff = Math.abs(tickUpperRaw - tickLowerRaw);
+        if (tickSpacingRaw && tickSpacingRaw > 0) return Math.round(diff / tickSpacingRaw);
+        return null;
+    }, [tickLowerRaw, tickUpperRaw, tickSpacingRaw]);
 
     const openPrice = useMemo(() => {
         if (stableIndex < 0) return null;
@@ -209,7 +239,7 @@ export default function PositionCard({
         if (!Number.isFinite(low) || !Number.isFinite(up) || low <= 0 || up <= 0) return null;
         const asymmetric = Math.abs(low - up) >= 0.01;
         const avg = (low + up) / 2;
-        return asymmetric ? { text: `下 ${low.toFixed(2)}% / 上 ${up.toFixed(2)}%` } : { text: `±${avg.toFixed(2)}%` };
+        return { text: asymmetric ? `下 ${low.toFixed(2)}% / 上 ${up.toFixed(2)}%` : `±${avg.toFixed(2)}%`, deviation: avg };
     }, [position?.task_range_lower_pct, position?.task_range_upper_pct]);
 
     const taskId = useMemo(() => {
@@ -298,7 +328,7 @@ export default function PositionCard({
                                     </span>
                                 )}
                             </div>
-                            {/* 状态 + 任务ID + BNB */}
+                            {/* 状态 + 任务ID */}
                             <div className="flex flex-wrap items-center gap-1.5 pr-2">
                                 <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 shrink-0 ${statusTheme.pill}`}>
                                     <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${statusTheme.dot}`} />
@@ -309,10 +339,6 @@ export default function PositionCard({
                                         #{taskId}
                                     </span>
                                 )}
-                                <span className="inline-flex items-center gap-0.5 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-white/6 dark:text-white/40 shrink-0">
-                                    <Icon path={icons.trend} className="h-2.5 w-2.5 shrink-0" />
-                                    <span className="truncate max-w-[70px]">{bnbBalance} BNB</span>
-                                </span>
                             </div>
                         </div>
                     </div>
@@ -382,26 +408,7 @@ export default function PositionCard({
                 </div>
 
                 {/* ══════════════════════════════════════════
-                    区域 2：价格范围可视化（最重要，移至上方）
-                ══════════════════════════════════════════ */}
-                <PriceRangeVisualizer
-                    currentPrice={currentPrice}
-                    openPrice={openPrice}
-                    minPrice={rangeMin}
-                    maxPrice={rangeMax}
-                    token0={token0}
-                    token1={token1}
-                    tickLower={position?.tick_lower}
-                    tickUpper={position?.tick_upper}
-                    tickSpacing={position?.pool?.tickSpacing || position?.tick_spacing}
-                    inRange={position?.in_range}
-                    pollIntervalSec={pollIntervalSec}
-                    runningDuration={runningDuration}
-                    updateTimeText={updateTimeText}
-                />
-
-                {/* ══════════════════════════════════════════
-                    区域 3：余额明细（可折叠）
+                    区域 2：余额明细（可折叠）
                 ══════════════════════════════════════════ */}
                 <div className="rounded-xl border border-zinc-100/80 bg-zinc-50/80 dark:border-white/10 dark:bg-[#0f1116]">
                     <button type="button" onClick={() => setExpanded(!expanded)}
@@ -466,6 +473,22 @@ export default function PositionCard({
                         </div>
                     </div>
                 </div>
+
+                {/* ══════════════════════════════════════════
+                    区域 3：价格范围可视化（移动到余额后）
+                ══════════════════════════════════════════ */}
+                <PriceRangeVisualizer
+                    currentPrice={currentPrice}
+                    minPrice={rangeMin}
+                    maxPrice={rangeMax}
+                    pairLabel={pairLabel}
+                    gridCount={gridCountRaw}
+                    deviation={taskRange?.deviation}
+                    inRange={position?.in_range}
+                    currentGridIndex={currentGridIndex}
+                    currentGridLower={gridLower}
+                    currentGridUpper={gridUpper}
+                />
 
                 {/* ══════════════════════════════════════════
                     区域 4：底部操作行（策略区间 + 快捷链接）

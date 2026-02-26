@@ -1,333 +1,121 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo } from 'react';
 
 const formatPrice = (value) => {
     const n = Number(value);
     if (!Number.isFinite(n)) return '--';
     if (n === 0) return '0';
-    return n.toPrecision(6).replace(/\.?0+$/, '');
+    if (Math.abs(n) < 0.0001) return n.toExponential(4);
+    if (Math.abs(n) > 100000) return n.toExponential(4);
+    return n.toPrecision(6).replace(/\.?0+$/, '').replace(/e[-+]\d+/i, (match) => match.toLowerCase());
 };
-
-// 根据 tick spacing 推断费率标签
-const feeRateFromTickSpacing = (ts) => {
-    const map = { 1: '0.01%', 10: '0.05%', 50: '0.25%', 60: '0.30%', 100: '0.50%', 200: '1%', 2000: '2%' };
-    return map[ts] ?? null;
-};
-
-// 把 [0,100] 映射到 [4,96]，给两侧留一点 padding
-const mapPct = (p) => 4 + p * 0.92;
 
 export default function PriceRangeVisualizer({
     currentPrice,
-    openPrice,
     minPrice,
     maxPrice,
-    token0,
-    token1,
-    tickLower,
-    tickUpper,
-    tickSpacing,
+    pairLabel,
+    gridCount,
+    deviation,
     inRange,
-    pollIntervalSec,
-    runningDuration,
-    updateTimeText,
+    currentGridIndex,
+    currentGridLower,
+    currentGridUpper
 }) {
-    // 价格变化时触发动画脉冲
-    const [isPulse, setIsPulse] = useState(false);
-    const prevPriceRef = useRef(currentPrice);
-
-    useEffect(() => {
-        if (prevPriceRef.current !== currentPrice && Number.isFinite(currentPrice)) {
-            setIsPulse(true);
-            const timer = setTimeout(() => setIsPulse(false), 400);
-            prevPriceRef.current = currentPrice;
-            return () => clearTimeout(timer);
-        }
-    }, [currentPrice]);
-
-    // 格数（tick 区间 / tick spacing）
-    const gridCount = useMemo(() => {
-        const lower = Number(tickLower);
-        const upper = Number(tickUpper);
-        if (!Number.isFinite(lower) || !Number.isFinite(upper)) return null;
-        const diff = Math.abs(upper - lower);
-        if (tickSpacing && tickSpacing > 0) return Math.round(diff / tickSpacing);
-        return null;
-    }, [tickLower, tickUpper, tickSpacing]);
-
-    // 费率标签
-    const feeLabel = useMemo(() => {
-        const ts = Number(tickSpacing);
-        if (!Number.isFinite(ts) || ts <= 0) return null;
-        return feeRateFromTickSpacing(ts);
-    }, [tickSpacing]);
-
-    // 偏移幅度
-    const deviation = useMemo(() => {
-        if (!Number.isFinite(minPrice) || !Number.isFinite(maxPrice)) return null;
-        const mid = (minPrice + maxPrice) / 2;
-        if (mid === 0) return null;
-        return ((maxPrice - minPrice) / 2 / mid) * 100;
-    }, [minPrice, maxPrice]);
-
-    // 当前价映射到 [0,100]（超出区间时 clamp 到 0/100）
     const rawPercent = useMemo(() => {
         if (!Number.isFinite(currentPrice) || !Number.isFinite(minPrice) || !Number.isFinite(maxPrice)) return null;
         if (maxPrice === minPrice) return 50;
         return ((currentPrice - minPrice) / (maxPrice - minPrice)) * 100;
     }, [currentPrice, minPrice, maxPrice]);
 
-    // clamp 后用于指针位置
     const clampedPercent = rawPercent === null ? null : Math.max(0, Math.min(100, rawPercent));
-    const finalPercent = clampedPercent === null ? null : mapPct(clampedPercent);
-
-    // 开仓价映射
-    const openRawPercent = useMemo(() => {
-        if (!Number.isFinite(openPrice) || !Number.isFinite(minPrice) || !Number.isFinite(maxPrice)) return null;
-        if (maxPrice === minPrice) return null;
-        const p = ((openPrice - minPrice) / (maxPrice - minPrice)) * 100;
-        if (!Number.isFinite(p) || p < 0 || p > 100) return null;
-        return p;
-    }, [openPrice, minPrice, maxPrice]);
-    const openFinalPercent = openRawPercent === null ? null : mapPct(openRawPercent);
-
-    // 超出范围偏差
-    const outOfRangePercent = useMemo(() => {
-        if (inRange || rawPercent === null) return null;
-        if (rawPercent < 0) return Math.abs(rawPercent);
-        if (rawPercent > 100) return rawPercent - 100;
-        return 0;
-    }, [inRange, rawPercent]);
-    const isBelow = Number.isFinite(currentPrice) && Number.isFinite(minPrice) && currentPrice < minPrice;
-
     const midPrice = Number.isFinite(minPrice) && Number.isFinite(maxPrice) ? (minPrice + maxPrice) / 2 : null;
 
-    // 生成格子分隔线位置数组（在 bar 内侧 4%-96% 之间均匀分布）
-    // gridLines 是内部分割线（不含两端边界），数量 = gridCount - 1
     const gridLines = useMemo(() => {
-        if (!gridCount || gridCount < 2 || gridCount > 60) return [];
+        if (!gridCount || gridCount < 2 || gridCount > 200) return [];
         const lines = [];
         for (let i = 1; i < gridCount; i++) {
-            // 格子内部百分比位置（相对于 bar 区间 [0,100]）
-            const pct = (i / gridCount) * 100;
-            lines.push(mapPct(pct));
+            lines.push((i / gridCount) * 100);
         }
         return lines;
     }, [gridCount]);
 
-    // 显示的格子数（超多时缩减，避免太密）
     const visibleGridLines = useMemo(() => {
-        if (gridLines.length <= 20) return gridLines;
-        // 每隔 n 条显示一条
-        const step = Math.ceil(gridLines.length / 20);
+        if (gridLines.length <= 40) return gridLines;
+        const step = Math.ceil(gridLines.length / 40);
         return gridLines.filter((_, i) => (i + 1) % step === 0);
     }, [gridLines]);
 
-    // 指针颜色方案 (修改为更高级的蓝色)
-    const pointerColor = inRange
-        ? { bg: '#3b82f6', shadow: 'rgba(59,130,246,0.5)', ring: 'rgba(59,130,246,0.2)' }
-        : { bg: '#ef4444', shadow: 'rgba(239,68,68,0.5)', ring: 'rgba(239,68,68,0.2)' };
-
-    const priceTextColor = inRange
-        ? 'text-blue-500 dark:text-blue-400'
-        : 'text-rose-500 dark:text-rose-400';
-
     return (
-        <div className="mt-2.5 rounded-xl border border-zinc-100/80 bg-zinc-50/80 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-            {/* ── 标题行 ── */}
-            <div className="flex items-center justify-between gap-2 mb-3">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[11px] font-semibold text-zinc-600 dark:text-white/60 uppercase tracking-wide">
-                        价格范围
-                    </span>
-                    {/* 费率 badge */}
-                    {feeLabel && (
-                        <span className="text-[10px] font-semibold rounded-md bg-violet-500/12 px-1.5 py-0.5 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300">
-                            {feeLabel}
-                        </span>
-                    )}
-                    {/* 格数 badge */}
-                    {gridCount ? (
-                        <span className="text-[10px] font-medium rounded-md bg-zinc-200/70 px-1.5 py-0.5 text-zinc-500 dark:bg-white/10 dark:text-white/40">
-                            {gridCount} 格
-                        </span>
-                    ) : null}
-                    {/* 幅度 badge */}
-                    {deviation ? (
-                        <span className="text-[10px] font-medium rounded-md bg-zinc-200/70 px-1.5 py-0.5 text-zinc-500 dark:bg-white/10 dark:text-white/40">
-                            ±{deviation.toFixed(2)}%
-                        </span>
-                    ) : null}
+        <div className="mt-2.5 rounded-[14px] border border-zinc-200/60 bg-[#1c1e22]/5 p-3.5 dark:border-white/5 dark:bg-[#1f2227]">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-3 text-zinc-900 dark:text-zinc-100">
+                <div className="text-[11px] font-bold opacity-80">
+                    价格范围 ({pairLabel || '未知'} {gridCount ? `${gridCount}格` : ''}):
                 </div>
-
-                {/* 当前价格大字 */}
-                <div className={`text-sm font-extrabold tabular-nums leading-none transition-colors duration-300 ${priceTextColor}`}>
-                    {Number.isFinite(currentPrice) ? formatPrice(currentPrice) : '--'}
-                </div>
-            </div>
-
-            {/* ════════════════════════════════════
-                价格轨道主体
-            ════════════════════════════════════ */}
-            <div className="relative select-none" style={{ height: 44 }}>
-
-                {/* ── 轨道底层 ── */}
-                <div
-                    className="absolute inset-x-0 rounded-full overflow-hidden"
-                    style={{ top: '50%', transform: 'translateY(-50%)', height: 20 }}
-                >
-                    {/* 基础背景 */}
-                    <div className="absolute inset-0 bg-zinc-200/90 dark:bg-white/10" />
-
-                    {/* 区间激活填充：in-range 时亮蓝，out 时暗红 */}
-                    <div
-                        className={`absolute top-0 bottom-0 transition-colors duration-500 ${inRange
-                            ? 'bg-gradient-to-r from-blue-500/10 via-blue-400/20 to-blue-500/10 dark:from-blue-400/10 dark:via-blue-300/15 dark:to-blue-400/10'
-                            : 'bg-gradient-to-r from-rose-400/10 via-rose-300/15 to-rose-400/10 dark:from-rose-500/10 dark:via-rose-400/12 dark:to-rose-500/10'
-                            }`}
-                        style={{ left: '4%', right: '4%' }}
-                    />
-
-                    {/* 格子分隔线（内部，半透明细线） */}
-                    {visibleGridLines.map((pos, i) => (
-                        <div
-                            key={i}
-                            className="absolute top-0 bottom-0"
-                            style={{
-                                left: `${pos}%`,
-                                width: 1,
-                                background: 'rgba(0,0,0,0.10)',
-                            }}
-                        />
-                    ))}
-                    {/* 深色模式下格子线 */}
-                    {visibleGridLines.map((pos, i) => (
-                        <div
-                            key={`d${i}`}
-                            className="absolute top-0 bottom-0 dark:block hidden"
-                            style={{
-                                left: `${pos}%`,
-                                width: 1,
-                                background: 'rgba(255,255,255,0.12)',
-                            }}
-                        />
-                    ))}
-
-                    {/* 左边界（下限，蓝） */}
-                    <div
-                        className="absolute top-0 bottom-0 bg-blue-500/80 dark:bg-blue-400/80"
-                        style={{ left: '4%', width: 2 }}
-                    />
-                    {/* 右边界（上限，红） */}
-                    <div
-                        className="absolute top-0 bottom-0 bg-rose-500/80 dark:bg-rose-400/80"
-                        style={{ left: '96%', width: 2 }}
-                    />
-                </div>
-
-                {/* ── 开仓价标记 ── */}
-                {openFinalPercent !== null && (
-                    <div
-                        className="absolute top-0 bottom-0 z-10"
-                        style={{
-                            left: `${openFinalPercent}%`,
-                            transform: 'translateX(-50%)',
-                            width: 2,
-                            background: 'linear-gradient(to bottom, transparent 0%, #38bdf8 20%, #38bdf8 80%, transparent 100%)',
-                            opacity: 0.9,
-                        }}
-                        title={`开仓价 ${formatPrice(openPrice)}`}
-                    />
-                )}
-
-                {/* ── 当前价格指针（精致滑块样式）── */}
-                {finalPercent !== null && (
-                    <div
-                        className="absolute top-1/2 z-20 flex flex-col items-center justify-center pointer-events-none"
-                        style={{
-                            left: `${finalPercent}%`,
-                            transform: 'translateX(-50%) translateY(-50%)',
-                            transition: 'left 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-                            height: 36
-                        }}
-                    >
-                        {/* 指针主体：倒三角 */}
-                        <div
-                            style={{
-                                width: 0,
-                                height: 0,
-                                borderLeft: '5px solid transparent',
-                                borderRight: '5px solid transparent',
-                                borderTop: `6px solid ${pointerColor.bg}`,
-                                filter: `drop-shadow(0 1px 2px ${pointerColor.shadow})`,
-                                transform: 'translateY(1px)'
-                            }}
-                        />
-                        {/* 指针竖线：切断轨道 */}
-                        <div
-                            style={{
-                                width: 2,
-                                height: 24,
-                                backgroundColor: pointerColor.bg,
-                                borderRadius: 1,
-                                boxShadow: `0 0 2px ${pointerColor.shadow}`,
-                            }}
-                        />
+                {deviation !== null && deviation !== undefined && (
+                    <div className="text-[11px] font-bold bg-zinc-800 text-white dark:bg-black/50 px-2 py-0.5 rounded-md">
+                        {deviation.toFixed(2)}%
                     </div>
                 )}
             </div>
 
-            {/* ── 价格标签行 ── */}
-            <div className="mt-1 flex items-start justify-between text-[10px] font-bold tabular-nums px-0.5">
-                {/* 下限 */}
-                <div className="text-left">
-                    <div className="text-emerald-500 dark:text-emerald-400">{formatPrice(minPrice)}</div>
-                    <div className="text-[9px] font-normal text-zinc-400 dark:text-white/25 mt-0.5">下限</div>
-                </div>
-
-                {/* 中间：开仓价 或 中间价 */}
-                <div className="text-center">
-                    {openFinalPercent !== null ? (
-                        <>
-                            <div className="text-sky-500 dark:text-sky-400">{formatPrice(openPrice)}</div>
-                            <div className="text-[9px] font-normal text-sky-400/70 dark:text-sky-400/60 mt-0.5">开仓</div>
-                        </>
-                    ) : midPrice !== null ? (
-                        <>
-                            <div className="text-zinc-400 dark:text-white/30">{formatPrice(midPrice)}</div>
-                            <div className="text-[9px] font-normal text-zinc-300 dark:text-white/20 mt-0.5">中点</div>
-                        </>
-                    ) : null}
-                </div>
-
-                {/* 上限 */}
-                <div className="text-right">
-                    <div className="text-rose-500 dark:text-rose-400">{formatPrice(maxPrice)}</div>
-                    <div className="text-[9px] font-normal text-zinc-400 dark:text-white/25 mt-0.5">上限</div>
-                </div>
+            {/* Track Labels Top */}
+            <div className="flex justify-between text-[11px] font-bold mb-1 px-1">
+                <span className="text-emerald-600 dark:text-emerald-500">下限</span>
+                <span className="text-zinc-400 dark:text-zinc-500">中心</span>
+                <span className="text-rose-600 dark:text-rose-500">上限</span>
             </div>
 
-            {/* ── 超出范围提示 ── */}
-            {!inRange && (
-                <div className="mt-2 flex items-center gap-1.5 rounded-lg border border-rose-500/20 bg-rose-500/8 px-2.5 py-1.5 dark:border-rose-400/15 dark:bg-rose-500/10">
-                    <span className="text-rose-500 text-sm">{isBelow ? '⬇' : '⬆'}</span>
-                    <span className="text-[11px] text-rose-600 dark:text-rose-400">
-                        价格 {formatPrice(currentPrice)} {isBelow ? '低于下限' : '高于上限'}
-                    </span>
-                    <span className="text-[11px] font-bold text-rose-600 dark:text-rose-400 ml-auto tabular-nums">
-                        {outOfRangePercent?.toFixed(2)}%
-                    </span>
-                </div>
-            )}
+            {/* Track */}
+            <div className="relative h-6 bg-[#e4e4e7] dark:bg-[#333539] rounded-full overflow-hidden flex items-center shadow-inner">
+                {/* Left/Right bounds */}
+                <div className="absolute left-[3%] top-0 bottom-0 w-[2px] bg-emerald-500" />
+                <div className="absolute right-[3%] top-0 bottom-0 w-[2px] bg-rose-500" />
 
-            {/* ── 底部统计行（紧凑横排）── */}
-            <div className="mt-2.5 flex items-center border-t border-zinc-200/60 dark:border-white/10 pt-2 text-[10px]">
-                <span className="text-zinc-400 dark:text-white/35">刷新</span>
-                <span className="ml-1 font-bold text-zinc-600 dark:text-white/60 tabular-nums">{pollIntervalSec}s</span>
-                <span className="mx-2 text-zinc-300 dark:text-white/15">·</span>
-                <span className="text-zinc-400 dark:text-white/35">运行</span>
-                <span className="ml-1 font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{runningDuration}</span>
-                <span className="mx-2 text-zinc-300 dark:text-white/15">·</span>
-                <span className="ml-auto text-zinc-400 dark:text-white/35 tabular-nums">{updateTimeText}</span>
+                {/* Ticks container */}
+                <div className="absolute left-[3%] right-[3%] top-0 bottom-0 flex items-end pb-1.5 opacity-40">
+                    {visibleGridLines.map((pct, i) => (
+                        <div key={i} className="absolute w-[1px] h-2.5 bg-zinc-500" style={{ left: `${pct}%`, transform: 'translateX(-50%)' }} />
+                    ))}
+                </div>
+
+                {/* Current Price Pointer */}
+                {clampedPercent !== null && (
+                    <div
+                        className="absolute top-0 bottom-0 w-[3px] rounded-full z-10 transition-all duration-300"
+                        style={{
+                            left: `calc(3% + ${clampedPercent} * 0.94)`,
+                            transform: 'translateX(-50%)',
+                            backgroundColor: inRange ? '#10b981' : '#ef4444',
+                            boxShadow: `0 0 6px ${inRange ? '#10b981' : '#ef4444'}`
+                        }}
+                    />
+                )}
+            </div>
+
+            {/* Track Labels Bottom */}
+            <div className="flex justify-between text-[11px] font-bold mt-1.5 px-1 font-mono">
+                <span className="text-emerald-600 dark:text-emerald-500">{formatPrice(minPrice)}</span>
+                <span className="text-zinc-500 dark:text-zinc-400">{formatPrice(midPrice)}</span>
+                <span className="text-rose-600 dark:text-rose-500">{formatPrice(maxPrice)}</span>
+            </div>
+
+            {/* Current Grid Info */}
+            <div className="mt-4 flex flex-col items-center gap-2.5">
+                {currentGridIndex !== null && currentGridLower !== null && currentGridUpper !== null && (
+                    <div className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 bg-zinc-100 dark:bg-white/5 px-4 py-1.5 rounded-lg flex items-center gap-2 shadow-sm border border-zinc-200/80 dark:border-white/5">
+                        <span className="text-emerald-600 dark:text-emerald-400">第 {currentGridIndex} 格</span>
+                        <span className="text-zinc-300 dark:text-zinc-600">|</span>
+                        <span className="font-mono">{formatPrice(currentGridLower)} - {formatPrice(currentGridUpper)}</span>
+                    </div>
+                )}
+
+                <div className={`w-full text-center py-2.5 rounded-lg text-xs font-bold transition-colors shadow-sm ${inRange
+                        ? 'bg-[#10b981]/10 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20'
+                        : 'bg-[#ef4444]/10 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-500/20'
+                    }`}>
+                    {inRange ? '✅' : '❌'} 价格 <span className="font-mono">{formatPrice(currentPrice)}</span> {inRange ? '在范围内' : '超出范围'}
+                </div>
             </div>
         </div>
     );
