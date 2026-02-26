@@ -352,11 +352,19 @@ export default function PositionCard({
                                 {formatUsd(totalValue)}
                             </div>
                             {hasPnL && (
-                                <div className={`mt-1 inline-flex items-center gap-0.5 rounded px-1 text-[10px] font-bold tabular-nums ${pnlPositive ? 'bg-emerald-500/12 text-emerald-600 dark:text-emerald-400' : 'bg-red-500/12 text-red-600 dark:text-red-400'}`}>
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-2 w-2 shrink-0">
-                                        <path d={pnlPositive ? icons.arrowUp : icons.arrowDown} />
-                                    </svg>
-                                    {pnlAbsolute >= 0 ? '+' : ''}{formatUsd(pnlAbsolute)}
+                                <div className={`mt-1.5 flex flex-col items-end gap-0.5`}>
+                                    <div className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-bold tabular-nums shadow-sm ${pnlPositive
+                                        ? 'bg-emerald-500/15 text-emerald-500 dark:bg-emerald-500/20 dark:text-emerald-400 ring-1 ring-emerald-500/20'
+                                        : 'bg-red-500/15 text-red-500 dark:bg-red-500/20 dark:text-red-400 ring-1 ring-red-500/20'
+                                        }`}>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="h-2.5 w-2.5 shrink-0">
+                                            <path d={pnlPositive ? icons.arrowUp : icons.arrowDown} />
+                                        </svg>
+                                        {pnlAbsolute >= 0 ? '+' : ''}{formatUsd(pnlAbsolute)}
+                                    </div>
+                                    <div className={`text-[9px] font-semibold tabular-nums ${pnlPositive ? 'text-emerald-500/70 dark:text-emerald-400/60' : 'text-red-500/70 dark:text-red-400/60'}`}>
+                                        {pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%
+                                    </div>
                                 </div>
                             )}
                         </div>

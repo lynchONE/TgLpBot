@@ -217,6 +217,8 @@ type RealtimePosition struct {
 	OutOfRange        string     `json:"out_of_range"`
 	RunningSince      *time.Time `json:"running_since,omitempty"`
 	HasLiquidity      bool       `json:"has_liquidity"`
+	InitialCostUSD    float64    `json:"initial_cost_usd,omitempty"`
+	NetInvestedUSD    float64    `json:"net_invested_usd,omitempty"`
 
 	TokenRows []RealtimeTokenRow `json:"token_rows"`
 	Totals    RealtimeTotals     `json:"totals"`
@@ -1225,9 +1227,55 @@ func (s *RealtimePositionsService) buildV3Position(
 		OutOfRange:        outOfRangeText,
 		RunningSince:      runningSince,
 		HasLiquidity:      hasLiquidity,
-		TokenRows:         []RealtimeTokenRow{row0, row1},
-		Totals:            totals,
+		InitialCostUSD: func() float64 {
+			if task == nil || task.AmountUSDT <= 0 {
+				return 0
+			}
+			if actual, ok := getTaskActualInvested(task); ok {
+				return actual
+			}
+			return task.AmountUSDT
+		}(),
+		NetInvestedUSD: func() float64 {
+			if task == nil || task.AmountUSDT <= 0 {
+				return 0
+			}
+			if actual, ok := getTaskActualInvested(task); ok {
+				return actual
+			}
+			return task.AmountUSDT
+		}(),
+		TokenRows: []RealtimeTokenRow{row0, row1},
+		Totals:    totals,
 	}, warn
+}
+
+// getTaskActualInvested 从交易记录获取任务的实际投入金额（与 bot 的 pnlService.getInitialCost 逻辑一致）。
+// 返回 (actualInvested, ok)。ok=false 时应 fallback 到 task.AmountUSDT。
+func getTaskActualInvested(task *models.StrategyTask) (float64, bool) {
+	if task == nil || task.ID == 0 || database.DB == nil {
+		return 0, false
+	}
+	var rec models.TradeRecord
+	err := database.DB.
+		Where("user_id = ? AND task_id = ? AND status = ?", task.UserID, task.ID, models.TradeStatusOpen).
+		Order("opened_at DESC").
+		First(&rec).Error
+	if err != nil {
+		return 0, false
+	}
+	amountWei, err := convert.ParseBigInt(rec.OpenUSDTSpent)
+	if err != nil || amountWei == nil || amountWei.Sign() <= 0 {
+		return 0, false
+	}
+	f := new(big.Float).SetInt(amountWei)
+	div := new(big.Float).SetFloat64(math.Pow(10, 18))
+	f.Quo(f, div)
+	val, _ := f.Float64()
+	if val <= 0 {
+		return 0, false
+	}
+	return val, true
 }
 
 func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, tokenId string, task *models.StrategyTask) (*RealtimePosition, string) {
@@ -1419,8 +1467,20 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		OutOfRange:        formatOutOfRange(task, tickLower, tickUpper, currentTick),
 		RunningSince:      &task.CreatedAt,
 		HasLiquidity:      hasLiquidity,
-		TokenRows:         []RealtimeTokenRow{row0, row1},
-		Totals:            totals,
+		InitialCostUSD: func() float64 {
+			if actual, ok := getTaskActualInvested(task); ok {
+				return actual
+			}
+			return task.AmountUSDT
+		}(),
+		NetInvestedUSD: func() float64 {
+			if actual, ok := getTaskActualInvested(task); ok {
+				return actual
+			}
+			return task.AmountUSDT
+		}(),
+		TokenRows: []RealtimeTokenRow{row0, row1},
+		Totals:    totals,
 	}, warn
 }
 
@@ -1635,8 +1695,20 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 		OutOfRange:        formatOutOfRange(task, tickLower, tickUpper, currentTick),
 		RunningSince:      &task.CreatedAt,
 		HasLiquidity:      false,
-		TokenRows:         []RealtimeTokenRow{row0, row1},
-		Totals:            totals,
+		InitialCostUSD: func() float64 {
+			if actual, ok := getTaskActualInvested(task); ok {
+				return actual
+			}
+			return task.AmountUSDT
+		}(),
+		NetInvestedUSD: func() float64 {
+			if actual, ok := getTaskActualInvested(task); ok {
+				return actual
+			}
+			return task.AmountUSDT
+		}(),
+		TokenRows: []RealtimeTokenRow{row0, row1},
+		Totals:    totals,
 	}, ""
 }
 
