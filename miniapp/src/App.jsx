@@ -2204,34 +2204,36 @@ export default function App() {
                         )}
                     />
                 ) : showWalletSummaryCard ? (
-                    <ModuleHeader
-                        title={isMonitor ? '监控概览' : '仓位概览'}
-                        subtitle={`${bnbBalance} BNB${typeof bnbUsd === 'number' ? ` ≈ ${formatUsd(bnbUsd)}` : ''}`}
-                        actions={(
-                            <div className="text-right">
-                                <div className="text-[11px] text-zinc-500 dark:text-white/40">自动刷新</div>
-                                <div className="text-sm font-semibold tabular-nums">{pollIntervalSec}s</div>
-                                <button
-                                    type="button"
-                                    onClick={openGlobalConfig}
-                                    disabled={!hasInitData}
-                                    className={`mt-2 inline-flex rounded-xl px-3 py-2 text-xs font-semibold ring-1 ${hasInitData
-                                        ? 'bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50 dark:bg-white/5 dark:text-white/80 dark:ring-white/10 dark:hover:bg-white/10'
-                                        : 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
-                                        }`}
-                                >
-                                    全局配置
-                                </button>
+                    <div className="mt-3 rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 px-4 shadow-sm dark:border-white/5 dark:bg-[#16181c] dark:shadow-none flex flex-row items-center justify-between gap-2">
+                        <div className="flex flex-col">
+                            <div className="flex items-center gap-2">
+                                <div className="text-[15px] font-bold text-zinc-900 dark:text-white/95">{isMonitor ? '监控概览' : '仓位概览'}</div>
+                                <div className="text-xs text-zinc-500 dark:text-white/40">{bnbBalance} BNB{typeof bnbUsd === 'number' ? ` ≈ ${formatUsd(bnbUsd)}` : ''}</div>
                             </div>
-                        )}
-                    >
-                        <div>
-                            <div className="text-[11px] text-zinc-500 dark:text-white/40">总余额</div>
-                            <div className="mt-0.5 text-2xl font-extrabold tabular-nums text-zinc-900 dark:text-emerald-300">
-                                {formatUsd(totalUsd)}
+                            <div className="mt-1 flex items-baseline gap-2">
+                                <div className="text-[11px] text-zinc-500 dark:text-white/50">总余额</div>
+                                <div className="text-xl font-extrabold tabular-nums text-zinc-900 dark:text-emerald-400 tracking-tight">
+                                    {formatUsd(totalUsd)}
+                                </div>
                             </div>
                         </div>
-                    </ModuleHeader>
+                        <div className="flex flex-col items-end gap-1.5 shrink-0">
+                            <div className="text-[10px] text-zinc-500 dark:text-white/40 flex items-center gap-1">
+                                刷新 <span className="font-semibold text-zinc-700 dark:text-white/70">{pollIntervalSec}s</span>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={openGlobalConfig}
+                                disabled={!hasInitData}
+                                className={`inline-flex rounded-lg px-2.5 py-1 text-[11px] font-semibold ring-1 min-w-[64px] justify-center transition-colors ${hasInitData
+                                    ? 'bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50 dark:bg-white/10 dark:text-white/90 dark:ring-white/10 dark:hover:bg-white/20'
+                                    : 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
+                                    }`}
+                            >
+                                全局配置
+                            </button>
+                        </div>
+                    </div>
                 ) : null}
 
             </header>
@@ -3044,208 +3046,208 @@ export default function App() {
                         }
                     >
                         <div className="space-y-4">
-                                {multiWalletEnabled ? (
-                                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                        <div className="flex items-center justify-between gap-2">
-                                            <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">选择钱包</div>
-                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">
-                                                {walletsLoading
-                                                    ? '加载中...'
-                                                    : [
-                                                        String(walletsData?.chain || '').toUpperCase(),
-                                                        walletsData?.native_symbol && walletsData?.stable_symbol
-                                                            ? `${walletsData.native_symbol}/${walletsData.stable_symbol}`
-                                                            : '',
-                                                    ].filter(Boolean).join(' · ')}
-                                            </div>
+                            {multiWalletEnabled ? (
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">选择钱包</div>
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">
+                                            {walletsLoading
+                                                ? '加载中...'
+                                                : [
+                                                    String(walletsData?.chain || '').toUpperCase(),
+                                                    walletsData?.native_symbol && walletsData?.stable_symbol
+                                                        ? `${walletsData.native_symbol}/${walletsData.stable_symbol}`
+                                                        : '',
+                                                ].filter(Boolean).join(' · ')}
                                         </div>
+                                    </div>
 
-                                        {walletsError ? (
-                                            <div className="mt-2 rounded-xl border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-700 dark:text-red-200">
-                                                {walletsError}
-                                            </div>
-                                        ) : null}
+                                    {walletsError ? (
+                                        <div className="mt-2 rounded-xl border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-700 dark:text-red-200">
+                                            {walletsError}
+                                        </div>
+                                    ) : null}
 
-                                        {!walletsLoading && !walletsError && Array.isArray(walletsData?.wallets) && walletsData.wallets.length === 0 ? (
-                                            <div className="mt-2 text-xs text-zinc-500 dark:text-white/50">未找到钱包</div>
-                                        ) : null}
+                                    {!walletsLoading && !walletsError && Array.isArray(walletsData?.wallets) && walletsData.wallets.length === 0 ? (
+                                        <div className="mt-2 text-xs text-zinc-500 dark:text-white/50">未找到钱包</div>
+                                    ) : null}
 
                                     <div className="mt-2 max-h-56 overflow-y-auto overscroll-contain space-y-2 pr-1">
-                                            {(Array.isArray(walletsData?.wallets) ? walletsData.wallets : []).map((w) => {
-                                                const id = String(w?.id || '').trim();
-                                                const addr = String(w?.address || '').trim();
-                                                const name = String(w?.name || '').trim();
-                                                const shortAddr = addr.length > 12 ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : addr;
-                                                const selected = id && id === String(openPositionWalletId || '').trim();
+                                        {(Array.isArray(walletsData?.wallets) ? walletsData.wallets : []).map((w) => {
+                                            const id = String(w?.id || '').trim();
+                                            const addr = String(w?.address || '').trim();
+                                            const name = String(w?.name || '').trim();
+                                            const shortAddr = addr.length > 12 ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : addr;
+                                            const selected = id && id === String(openPositionWalletId || '').trim();
 
-                                                return (
-                                                    <button
-                                                        key={id || addr}
-                                                        type="button"
-                                                        onClick={() => {
-                                                            if (!id) return;
-                                                            setOpenPositionWalletId(id);
-                                                            storage.set(STORAGE_OPEN_POSITION_WALLET_ID, id);
-                                                            setOpenPositionError('');
-                                                            hapticSelection();
-                                                        }}
-                                                        className={`w-full rounded-xl border px-3 py-2 text-left transition ${selected
-                                                            ? 'border-emerald-500/40 bg-emerald-500/10 ring-1 ring-emerald-500/20 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:ring-emerald-400/20'
-                                                            : 'border-zinc-200 bg-white/70 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10'
-                                                            }`}
-                                                    >
-                                                        <div className="flex items-center justify-between gap-3">
-                                                            <div className="min-w-0">
-                                                                <div className="flex items-center gap-2">
-                                                                    <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/85">
-                                                                        {name || shortAddr || `Wallet ${id}`}
-                                                                    </div>
-                                                                    {w?.is_default ? (
-                                                                        <span className="shrink-0 rounded-full bg-zinc-500/10 px-2 py-0.5 text-[10px] font-semibold text-zinc-600 dark:text-white/60">
-                                                                            默认
-                                                                        </span>
-                                                                    ) : null}
+                                            return (
+                                                <button
+                                                    key={id || addr}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        if (!id) return;
+                                                        setOpenPositionWalletId(id);
+                                                        storage.set(STORAGE_OPEN_POSITION_WALLET_ID, id);
+                                                        setOpenPositionError('');
+                                                        hapticSelection();
+                                                    }}
+                                                    className={`w-full rounded-xl border px-3 py-2 text-left transition ${selected
+                                                        ? 'border-emerald-500/40 bg-emerald-500/10 ring-1 ring-emerald-500/20 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:ring-emerald-400/20'
+                                                        : 'border-zinc-200 bg-white/70 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10'
+                                                        }`}
+                                                >
+                                                    <div className="flex items-center justify-between gap-3">
+                                                        <div className="min-w-0">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/85">
+                                                                    {name || shortAddr || `Wallet ${id}`}
                                                                 </div>
-                                                                <div className="mt-0.5 truncate text-[11px] text-zinc-500 dark:text-white/40">
-                                                                    {addr || '--'}
-                                                                </div>
+                                                                {w?.is_default ? (
+                                                                    <span className="shrink-0 rounded-full bg-zinc-500/10 px-2 py-0.5 text-[10px] font-semibold text-zinc-600 dark:text-white/60">
+                                                                        默认
+                                                                    </span>
+                                                                ) : null}
                                                             </div>
-                                                            <div className="shrink-0 text-right">
-                                                                <div className="text-xs font-semibold tabular-nums text-zinc-900 dark:text-white/85">
-                                                                    {String(w?.stable_balance ?? '--')} {walletsData?.stable_symbol || 'USDT'}
-                                                                </div>
-                                                                <div className="mt-0.5 text-[11px] tabular-nums text-zinc-500 dark:text-white/45">
-                                                                    {String(w?.native_balance ?? '--')} {walletsData?.native_symbol || 'BNB'}
-                                                                </div>
+                                                            <div className="mt-0.5 truncate text-[11px] text-zinc-500 dark:text-white/40">
+                                                                {addr || '--'}
                                                             </div>
                                                         </div>
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
+                                                        <div className="shrink-0 text-right">
+                                                            <div className="text-xs font-semibold tabular-nums text-zinc-900 dark:text-white/85">
+                                                                {String(w?.stable_balance ?? '--')} {walletsData?.stable_symbol || 'USDT'}
+                                                            </div>
+                                                            <div className="mt-0.5 text-[11px] tabular-nums text-zinc-500 dark:text-white/45">
+                                                                {String(w?.native_balance ?? '--')} {walletsData?.native_symbol || 'BNB'}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </button>
+                                            );
+                                        })}
                                     </div>
-                                ) : null}
-                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">投入金额 (USDT)</div>
+                                </div>
+                            ) : null}
+                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">投入金额 (USDT)</div>
+                                <input
+                                    value={openPositionAmount}
+                                    onChange={(e) => {
+                                        setOpenPositionAmount(e.target.value);
+                                        setOpenPositionError('');
+                                    }}
+                                    inputMode="decimal"
+                                    className="mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                    placeholder="例如 100"
+                                />
+                            </div>
+
+                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">自定义区间 (%)</div>
+                                <div className="mt-2 grid grid-cols-2 gap-2">
                                     <input
-                                        value={openPositionAmount}
+                                        value={openPositionRangeLower}
                                         onChange={(e) => {
-                                            setOpenPositionAmount(e.target.value);
+                                            setOpenPositionRangeLower(e.target.value);
                                             setOpenPositionError('');
                                         }}
                                         inputMode="decimal"
-                                        className="mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
-                                        placeholder="例如 100"
+                                        className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                        placeholder="下限 %"
                                     />
-                                </div>
-
-                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">自定义区间 (%)</div>
-                                    <div className="mt-2 grid grid-cols-2 gap-2">
-                                        <input
-                                            value={openPositionRangeLower}
-                                            onChange={(e) => {
-                                                setOpenPositionRangeLower(e.target.value);
-                                                setOpenPositionError('');
-                                            }}
-                                            inputMode="decimal"
-                                            className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
-                                            placeholder="下限 %"
-                                        />
-                                        <input
-                                            value={openPositionRangeUpper}
-                                            onChange={(e) => {
-                                                setOpenPositionRangeUpper(e.target.value);
-                                                setOpenPositionError('');
-                                            }}
-                                            inputMode="decimal"
-                                            className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
-                                            placeholder="上限 %"
-                                        />
-                                    </div>
-                                    <div className="mt-2 flex flex-wrap gap-2">
-                                        {quickRangeOptions.map((option) => (
-                                            <button
-                                                key={option.value}
-                                                type="button"
-                                                onClick={() => {
-                                                    if (option.value.includes(' ')) {
-                                                        const parts = option.value.split(/\s+/);
-                                                        setOpenPositionRangeLower(parts[0] || '');
-                                                        setOpenPositionRangeUpper(parts[1] || '');
-                                                    } else {
-                                                        const normalized = option.value.replace(/[^0-9.]/g, '');
-                                                        setOpenPositionRangeLower(normalized);
-                                                        setOpenPositionRangeUpper(normalized);
-                                                    }
-                                                    setOpenPositionError('');
-                                                }}
-                                                className="rounded-xl px-3 py-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-500/30 bg-gradient-to-r from-emerald-50 via-emerald-100/60 to-sky-100/60 hover:from-emerald-100 hover:via-emerald-200/70 hover:to-sky-200/70 dark:text-emerald-200 dark:ring-emerald-400/30 dark:from-emerald-500/10 dark:via-emerald-400/10 dark:to-sky-400/10"
-                                            >
-                                                {option.label}
-                                            </button>
-                                        ))}
-                                    </div>
-                                    <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                        请输入下限与上限百分比（如 1 / 3 表示下 1% 上 3%）。
-                                    </div>
-                                </div>
-
-                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">滑点 (%)</div>
-                                    <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">不填则使用全局滑点，仅对本次开仓与后续再平衡生效。</div>
                                     <input
-                                        value={openPositionSlippage}
+                                        value={openPositionRangeUpper}
                                         onChange={(e) => {
-                                            setOpenPositionSlippage(e.target.value);
+                                            setOpenPositionRangeUpper(e.target.value);
                                             setOpenPositionError('');
                                         }}
                                         inputMode="decimal"
-                                        className="mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
-                                        placeholder="例如 0.5（可选）"
+                                        className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                        placeholder="上限 %"
                                     />
                                 </div>
-
-                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="flex items-center justify-between gap-3">
-                                        <div>
-                                            <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">允许兑换</div>
-                                            <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
-                                                池子不含 USDT 时，允许自动兑换入场代币。
-                                            </div>
-                                        </div>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                    {quickRangeOptions.map((option) => (
                                         <button
+                                            key={option.value}
                                             type="button"
                                             onClick={() => {
-                                                setOpenPositionAllowSwap((v) => !v);
+                                                if (option.value.includes(' ')) {
+                                                    const parts = option.value.split(/\s+/);
+                                                    setOpenPositionRangeLower(parts[0] || '');
+                                                    setOpenPositionRangeUpper(parts[1] || '');
+                                                } else {
+                                                    const normalized = option.value.replace(/[^0-9.]/g, '');
+                                                    setOpenPositionRangeLower(normalized);
+                                                    setOpenPositionRangeUpper(normalized);
+                                                }
                                                 setOpenPositionError('');
                                             }}
-                                            className={`inline-flex h-8 items-center rounded-full border px-3 text-xs font-semibold transition ${openPositionAllowSwap
-                                                ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-700 dark:text-emerald-200'
-                                                : 'border-zinc-200 bg-white/70 text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-white/60'
-                                                }`}
+                                            className="rounded-xl px-3 py-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-500/30 bg-gradient-to-r from-emerald-50 via-emerald-100/60 to-sky-100/60 hover:from-emerald-100 hover:via-emerald-200/70 hover:to-sky-200/70 dark:text-emerald-200 dark:ring-emerald-400/30 dark:from-emerald-500/10 dark:via-emerald-400/10 dark:to-sky-400/10"
                                         >
-                                            {openPositionAllowSwap ? '已开启' : '已关闭'}
+                                            {option.label}
                                         </button>
-                                    </div>
+                                    ))}
                                 </div>
+                                <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
+                                    请输入下限与上限百分比（如 1 / 3 表示下 1% 上 3%）。
+                                </div>
+                            </div>
 
-                                {openPositionError ? (
-                                    <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
-                                        {openPositionError}
+                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">滑点 (%)</div>
+                                <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">不填则使用全局滑点，仅对本次开仓与后续再平衡生效。</div>
+                                <input
+                                    value={openPositionSlippage}
+                                    onChange={(e) => {
+                                        setOpenPositionSlippage(e.target.value);
+                                        setOpenPositionError('');
+                                    }}
+                                    inputMode="decimal"
+                                    className="mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                    placeholder="例如 0.5（可选）"
+                                />
+                            </div>
+
+                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div>
+                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">允许兑换</div>
+                                        <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
+                                            池子不含 USDT 时，允许自动兑换入场代币。
+                                        </div>
                                     </div>
-                                ) : null}
-                                <button
-                                    type="button"
-                                    onClick={handleOpenPosition}
-                                    disabled={openPositionLoading}
-                                    className={`w-full rounded-xl px-3 py-2 text-sm font-semibold text-white shadow-sm transition ${openPositionLoading
-                                        ? 'cursor-not-allowed bg-emerald-500/60'
-                                        : 'bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700'
-                                        }`}
-                                >
-                                    {openPositionLoading ? '开仓中...' : '确认开仓'}
-                                </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setOpenPositionAllowSwap((v) => !v);
+                                            setOpenPositionError('');
+                                        }}
+                                        className={`inline-flex h-8 items-center rounded-full border px-3 text-xs font-semibold transition ${openPositionAllowSwap
+                                            ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-700 dark:text-emerald-200'
+                                            : 'border-zinc-200 bg-white/70 text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-white/60'
+                                            }`}
+                                    >
+                                        {openPositionAllowSwap ? '已开启' : '已关闭'}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {openPositionError ? (
+                                <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
+                                    {openPositionError}
+                                </div>
+                            ) : null}
+                            <button
+                                type="button"
+                                onClick={handleOpenPosition}
+                                disabled={openPositionLoading}
+                                className={`w-full rounded-xl px-3 py-2 text-sm font-semibold text-white shadow-sm transition ${openPositionLoading
+                                    ? 'cursor-not-allowed bg-emerald-500/60'
+                                    : 'bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700'
+                                    }`}
+                            >
+                                {openPositionLoading ? '开仓中...' : '确认开仓'}
+                            </button>
                         </div>
                     </BottomSheet>
                 ) : null
