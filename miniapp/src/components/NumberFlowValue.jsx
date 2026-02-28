@@ -69,7 +69,7 @@ function splitTextSegments(text) {
         if (!parsed) {
             out.push({ type: 'text', key: `t-${start}-${end}`, text: raw });
         } else {
-            out.push({ type: 'number', key: `n-${start}-${end}-${raw}`, ...parsed });
+            out.push({ type: 'number', key: `n-${start}-${end}`, ...parsed });
         }
         last = end;
     }
@@ -112,6 +112,13 @@ export default function NumberFlowValue({
         easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
         fill: 'both',
     }), [durationMs]);
+    const baseFlowProps = useMemo(() => ({
+        transformTiming: timing,
+        spinTiming: timing,
+        opacityTiming: timing,
+        animated: true,
+        respectMotionPreference: false,
+    }), [timing]);
     const rootClassName = `inline-flex items-center tabular-nums lining-nums ${className}`.trim();
 
     if (typeof formatter !== 'function') {
@@ -125,9 +132,7 @@ export default function NumberFlowValue({
                     value={n}
                     locales={locale}
                     format={formatOptions}
-                    transformTiming={timing}
-                    spinTiming={timing}
-                    opacityTiming={timing}
+                    {...baseFlowProps}
                 />
             </span>
         );
@@ -149,9 +154,7 @@ export default function NumberFlowValue({
                             value={seg.value}
                             locales={locale}
                             format={seg.format}
-                            transformTiming={timing}
-                            spinTiming={timing}
-                            opacityTiming={timing}
+                            {...baseFlowProps}
                         />
                     );
                 }
