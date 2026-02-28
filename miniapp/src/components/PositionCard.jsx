@@ -339,11 +339,6 @@ export default function PositionCard({
                                         #{taskId}
                                     </span>
                                 )}
-                                {runningDuration ? (
-                                    <span className="inline-flex items-center rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-600 ring-1 ring-zinc-200 dark:bg-white/10 dark:text-white/70 dark:ring-white/15">
-                                        运行 {runningDuration}
-                                    </span>
-                                ) : null}
                                 {updateTimeText ? (
                                     <span className="inline-flex items-center rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-600 ring-1 ring-zinc-200 dark:bg-white/10 dark:text-white/70 dark:ring-white/15">
                                         更新 {updateTimeText}
@@ -477,7 +472,28 @@ export default function PositionCard({
                                 </div>
                             ))}
 
-                            {/* 小计行 */}
+                            <div className="pt-2">
+                                <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap pb-1">
+                                    {[
+                                        { key: 'wallet', label: '钱包', onClick: openWallet, disabled: false },
+                                        { key: 'pool', label: '池子', onClick: openPool, disabled: !poolLink },
+                                        { key: 'token0', label: token0?.symbol || 'Token0', onClick: () => openToken(token0?.address), disabled: !token0?.address },
+                                        { key: 'token1', label: token1?.symbol || 'Token1', onClick: () => openToken(token1?.address), disabled: !token1?.address },
+                                    ].map(({ key, label, onClick, disabled }) => (
+                                        <button
+                                            key={key}
+                                            onClick={onClick}
+                                            disabled={disabled}
+                                            title={label}
+                                            className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-100 active:scale-[0.98] disabled:opacity-40 dark:border-white/15 dark:bg-white/10 dark:text-white/80 dark:hover:bg-white/15"
+                                        >
+                                            <span className="truncate">{label}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* 灏忚琛?*/}
                             <div className="pt-2 grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2 mt-1 border-t border-zinc-100/60 dark:border-white/10">
                                 <div className="text-xs font-bold text-zinc-500 dark:text-white/70">小计</div>
                                 <div className="text-right text-xs font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">{formatUsd(position?.totals?.wallet_usd)}</div>
@@ -488,9 +504,6 @@ export default function PositionCard({
                     </div>
                 </div>
 
-                {/* ══════════════════════════════════════════
-                    区域 3：价格范围可视化（移动到余额后）
-                ══════════════════════════════════════════ */}
                 <PriceRangeVisualizer
                     currentPrice={currentPrice}
                     minPrice={rangeMin}
@@ -502,44 +515,9 @@ export default function PositionCard({
                     currentGridIndex={currentGridIndex}
                     currentGridLower={gridLower}
                     currentGridUpper={gridUpper}
+                    taskRangeText={taskRange?.text || ''}
+                    runningDuration={runningDuration}
                 />
-
-                {/* ══════════════════════════════════════════
-                    区域 4：底部操作行（策略区间 + 快捷链接）
-                ══════════════════════════════════════════ */}
-                <div className="mt-1 rounded-xl border border-zinc-100/90 bg-zinc-50/80 p-2.5 dark:border-white/10 dark:bg-[#0f1116]">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                        <div className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-lg bg-sky-500/10 px-2 py-1 ring-1 ring-sky-500/20 dark:bg-sky-500/15">
-                            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-500" />
-                            <span className="text-[10px] font-medium text-zinc-500 dark:text-white/50">策略区间</span>
-                            <span className="truncate text-[11px] font-bold tabular-nums text-sky-600 dark:text-sky-300">{taskRange?.text || '--'}</span>
-                        </div>
-                        {runningDuration ? (
-                            <div className="inline-flex items-center rounded-lg bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-500/20 dark:bg-emerald-500/15 dark:text-emerald-300">
-                                运行 {runningDuration}
-                            </div>
-                        ) : null}
-                    </div>
-
-                    <div className="mt-2 grid grid-cols-2 gap-1.5">
-                        {[
-                            { key: 'wallet', label: '钱包', onClick: openWallet, disabled: false },
-                            { key: 'pool', label: '池子', onClick: openPool, disabled: !poolLink },
-                            { key: 'token0', label: token0?.symbol || 'Token0', onClick: () => openToken(token0?.address), disabled: !token0?.address },
-                            { key: 'token1', label: token1?.symbol || 'Token1', onClick: () => openToken(token1?.address), disabled: !token1?.address },
-                        ].map(({ key, label, onClick, disabled }) => (
-                            <button
-                                key={key}
-                                onClick={onClick}
-                                disabled={disabled}
-                                title={label}
-                                className="inline-flex items-center justify-center rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-100 active:scale-[0.98] disabled:opacity-40 dark:border-white/15 dark:bg-white/10 dark:text-white/80 dark:hover:bg-white/15"
-                            >
-                                <span className="truncate">{label}</span>
-                            </button>
-                        ))}
-                    </div>
-                </div>
 
             </div>
         </div>
