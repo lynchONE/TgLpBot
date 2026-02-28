@@ -21,7 +21,9 @@
 - 加入了强烈的深浅色模式适配处理 (`dark:bg-[#1f222a]/90`)，使夜间模式更加深邃。
 
 ### 2.3 顶部切换栏重绘 (Top Tab Switchers)
-顶部的 `POSITION_TASK_TABS` 与 `HOT_POOL_SORT_TABS` 从一个简单的细框变为了带有内发光投影细节 (`shadow-inner ring-1 ring-zinc-200/50`) 与悬浮块 (`relative bg-white shadow-sm ring-1 ring-black/5`) 的动态切换器。这能在手机触摸端提供更加精确和舒适的点击面。
+顶部的 `POSITION_TASK_TABS` 与 `HOT_POOL_SORT_TABS` 从一个简单的细框变为了带有内发光投影细节 (`shadow-inner ring-1 ring-zinc-200/50`) 的动态切换器。这能在手机触摸端提供更加精确和舒适的点击面。
+- **色彩丰富度提升**: 处于激活状态的 Tab 从单调的绿色变成了富有动感的渐变色（`bg-gradient-to-r from-emerald-400 to-teal-500` 与 `from-blue-500 to-indigo-500`），并带有彩色发光的阴影。
+- **空间优化与防换行**: 针对标题与 Tab 互相挤压导致换行的问题，强制为左侧标题增加了 `whitespace-nowrap truncate` 和 `shrink-0`，并精简了右侧 Tab 的字号 (`text-[12px]`)、边距 (`px-2.5`) 组合，保证单行完整呈现，杜绝多行挤压破版的情况。
 
 ## 3. 测试与验证
 通过 `npm run build` 验证全部代码编译通过，没有任何构建警告与错误。相关的代码重构只修改了 UI 层展示逻辑 (`miniapp/src/App.jsx`)，不影响背后的实际业务开仓与刷新流程。

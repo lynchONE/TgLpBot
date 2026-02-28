@@ -2174,16 +2174,16 @@ export default function App() {
                         title={hotPoolsSort === 'fee_rate' ? '费用率排行' : hotPoolsSort === 'volume' ? '交易量排行' : '费用排行'}
                         actions={(
                             <>
-                                <div className="flex shrink-0 p-1 bg-zinc-100/80 rounded-2xl dark:bg-[#1a1d24] shadow-inner ring-1 ring-zinc-200/50 dark:ring-black/20">
+                                <div className="flex shrink-0 p-0.5 bg-zinc-100/80 rounded-xl dark:bg-[#16181d] shadow-inner ring-1 ring-zinc-200/50 dark:ring-black/20 max-w-[60%] overflow-x-auto no-scrollbar">
                                     {HOT_POOL_SORT_TABS.map((tab) => (
                                         <button
                                             key={tab.key}
                                             type="button"
                                             onClick={() => setHotPoolsSort(tab.key)}
                                             aria-pressed={hotPoolsSort === tab.key}
-                                            className={`relative rounded-xl px-4 py-1.5 text-[13px] font-semibold whitespace-nowrap transition-all duration-300 ${hotPoolsSort === tab.key
-                                                ? 'bg-white text-emerald-600 shadow-sm ring-1 ring-black/5 dark:bg-[#2a2e37] dark:text-emerald-400 dark:ring-white/10'
-                                                : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'
+                                            className={`relative rounded-lg px-2.5 py-1 text-[12px] font-bold whitespace-nowrap transition-all duration-300 ${hotPoolsSort === tab.key
+                                                ? 'bg-gradient-to-r from-emerald-400 to-teal-500 text-white shadow-md shadow-emerald-500/20 dark:from-emerald-500 dark:to-teal-600 dark:text-white dark:shadow-emerald-900/40 ring-1 ring-black/5 dark:ring-white/10'
+                                                : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-white/5'
                                                 }`}
                                         >
                                             {tab.label}
@@ -2556,7 +2556,7 @@ export default function App() {
                                     <>
                                         {isPositions ? (
                                             <div
-                                                className="grid grid-cols-3 gap-1 p-1 bg-zinc-100/80 rounded-2xl dark:bg-[#1a1d24] shadow-inner ring-1 ring-zinc-200/50 dark:ring-black/20"
+                                                className="grid grid-cols-3 gap-1 p-0.5 bg-zinc-100/80 rounded-xl dark:bg-[#16181d] shadow-inner ring-1 ring-zinc-200/50 dark:ring-black/20"
                                             >
                                                 {POSITION_TASK_TABS.map((tab) => (
                                                     <button
@@ -2569,9 +2569,9 @@ export default function App() {
                                                             setBatchMode(false);
                                                         }}
                                                         aria-pressed={positionsTaskTab === tab.key}
-                                                        className={`relative rounded-xl px-3 py-2 text-[13px] font-semibold transition-all duration-300 ${positionsTaskTab === tab.key
-                                                            ? 'bg-white text-emerald-600 shadow-sm ring-1 ring-black/5 dark:bg-[#2a2e37] dark:text-emerald-400 dark:ring-white/10'
-                                                            : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'
+                                                        className={`relative rounded-lg px-2.5 py-1 text-[12px] font-bold transition-all duration-300 ${positionsTaskTab === tab.key
+                                                            ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white shadow-md shadow-blue-500/20 dark:from-blue-600 dark:to-indigo-600 dark:text-white dark:shadow-blue-900/40 ring-1 ring-black/5 dark:ring-white/10'
+                                                            : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-white/5'
                                                             }`}
                                                     >
                                                         {tab.label}
