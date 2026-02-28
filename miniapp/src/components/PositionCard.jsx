@@ -339,6 +339,16 @@ export default function PositionCard({
                                         #{taskId}
                                     </span>
                                 )}
+                                {runningDuration ? (
+                                    <span className="inline-flex items-center rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-600 ring-1 ring-zinc-200 dark:bg-white/10 dark:text-white/70 dark:ring-white/15">
+                                        运行 {runningDuration}
+                                    </span>
+                                ) : null}
+                                {updateTimeText ? (
+                                    <span className="inline-flex items-center rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-600 ring-1 ring-zinc-200 dark:bg-white/10 dark:text-white/70 dark:ring-white/15">
+                                        更新 {updateTimeText}
+                                    </span>
+                                ) : null}
                             </div>
                         </div>
                     </div>
@@ -497,34 +507,35 @@ export default function PositionCard({
                 {/* ══════════════════════════════════════════
                     区域 4：底部操作行（策略区间 + 快捷链接）
                 ══════════════════════════════════════════ */}
-                <div className="flex items-center gap-2">
-                    {/* 策略区间（左侧，flex-1） */}
-                    {taskRange ? (
-                        <div className="flex-1 min-w-0 flex items-center gap-1.5 rounded-xl border border-zinc-100/80 bg-zinc-50/80 px-2.5 py-2 dark:border-white/10 dark:bg-[#0f1116]">
-                            <div className="h-1.5 w-1.5 rounded-full bg-sky-500 shrink-0" />
-                            <div className="text-[10px] text-zinc-500 dark:text-white/45 truncate">再平衡</div>
-                            <div className="text-[11px] font-bold tabular-nums text-sky-600 dark:text-sky-400 ml-auto shrink-0">{taskRange.text}</div>
+                <div className="mt-1 rounded-xl border border-zinc-100/90 bg-zinc-50/80 p-2.5 dark:border-white/10 dark:bg-[#0f1116]">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                        <div className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-lg bg-sky-500/10 px-2 py-1 ring-1 ring-sky-500/20 dark:bg-sky-500/15">
+                            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-500" />
+                            <span className="text-[10px] font-medium text-zinc-500 dark:text-white/50">策略区间</span>
+                            <span className="truncate text-[11px] font-bold tabular-nums text-sky-600 dark:text-sky-300">{taskRange?.text || '--'}</span>
                         </div>
-                    ) : (
-                        <div className="flex-1" />
-                    )}
+                        {runningDuration ? (
+                            <div className="inline-flex items-center rounded-lg bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-500/20 dark:bg-emerald-500/15 dark:text-emerald-300">
+                                运行 {runningDuration}
+                            </div>
+                        ) : null}
+                    </div>
 
-                    {/* 快捷链接按钮（右侧）*/}
-                    <div className="flex items-center gap-1 shrink-0">
+                    <div className="mt-2 grid grid-cols-2 gap-1.5">
                         {[
-                            { label: '钱包', onClick: openWallet, disabled: false },
-                            { label: '池子', onClick: openPool, disabled: !poolLink },
-                            { label: token0?.symbol || 'T0', onClick: () => openToken(token0?.address), disabled: !token0?.address },
-                            { label: token1?.symbol || 'T1', onClick: () => openToken(token1?.address), disabled: !token1?.address },
-                        ].map(({ label, onClick, disabled }) => (
+                            { key: 'wallet', label: '钱包', onClick: openWallet, disabled: false },
+                            { key: 'pool', label: '池子', onClick: openPool, disabled: !poolLink },
+                            { key: 'token0', label: token0?.symbol || 'Token0', onClick: () => openToken(token0?.address), disabled: !token0?.address },
+                            { key: 'token1', label: token1?.symbol || 'Token1', onClick: () => openToken(token1?.address), disabled: !token1?.address },
+                        ].map(({ key, label, onClick, disabled }) => (
                             <button
-                                key={label}
+                                key={key}
                                 onClick={onClick}
                                 disabled={disabled}
                                 title={label}
-                                className="rounded-lg border border-zinc-200/80 bg-white/60 px-2 py-1.5 text-[10px] font-semibold text-zinc-600 hover:bg-white hover:border-zinc-300 active:scale-95 disabled:opacity-35 transition-all dark:border-white/8 dark:bg-white/4 dark:text-white/55 dark:hover:bg-white/10 dark:hover:border-white/15 truncate max-w-[44px]"
+                                className="inline-flex items-center justify-center rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-100 active:scale-[0.98] disabled:opacity-40 dark:border-white/15 dark:bg-white/10 dark:text-white/80 dark:hover:bg-white/15"
                             >
-                                {label}
+                                <span className="truncate">{label}</span>
                             </button>
                         ))}
                     </div>

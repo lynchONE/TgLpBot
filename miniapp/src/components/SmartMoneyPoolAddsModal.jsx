@@ -172,9 +172,9 @@ export default function SmartMoneyPoolAddsModal({
                 hapticImpact('light');
                 if (typeof onClose === 'function') onClose();
             }}
-            maxHeightClass="h-[92vh] sm:h-[720px] max-w-2xl"
+            maxHeightClass="max-h-[92vh] sm:max-h-[720px] max-w-2xl"
             headerClassName="px-4 py-3 border-b border-zinc-100 dark:border-white/5 bg-zinc-50/50 dark:bg-[#111318]/50 shrink-0"
-            contentClassName="p-4"
+            contentClassName="p-4 pb-5"
             title={
                 <div>
                     <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/90">
@@ -232,7 +232,7 @@ export default function SmartMoneyPoolAddsModal({
             ) : null}
 
             {wallets.length ? (
-                <div className="mt-3 max-h-[68vh] space-y-2 overflow-auto pr-1">
+                <div className="mt-3 space-y-2">
                     {wallets.map((row, index) => {
                         const addr = String(row?.wallet_address || '').trim();
                         const tickLower = Number(row?.tick_lower);
@@ -255,7 +255,7 @@ export default function SmartMoneyPoolAddsModal({
                         const feeTone = kpiTone(feeUsd);
 
                         return (
-                            <div key={`${addr || String(index)}:${tickLower}:${tickUpper}:${index}`} className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none">
+                            <div key={`${addr || String(index)}:${tickLower}:${tickUpper}:${index}`} className="rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm dark:border-white/10 dark:bg-[#141821] dark:shadow-none">
                                 <div className="flex items-start justify-between gap-2">
                                     <div className="min-w-0">
                                         <div className="flex items-center gap-2">

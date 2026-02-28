@@ -80,7 +80,10 @@ export default function BottomSheet({
                 </div>
 
                 {/* Content Area */}
-                <div className={`flex-1 overflow-y-auto overscroll-contain ${contentClassName}`}>
+                <div
+                    className={`flex-1 overflow-y-auto overscroll-contain touch-pan-y ${contentClassName}`}
+                    style={{ WebkitOverflowScrolling: 'touch' }}
+                >
                     {children}
                 </div>
             </div>

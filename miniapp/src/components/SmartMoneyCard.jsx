@@ -64,14 +64,6 @@ async function safeCopy(value, onNotice) {
     }
 }
 
-function kpiTone(value) {
-    const n = Number(value ?? 0);
-    if (!Number.isFinite(n)) return 'text-zinc-500 dark:text-white/40';
-    if (n > 0) return 'text-emerald-600 dark:text-emerald-300';
-    if (n < 0) return 'text-red-600 dark:text-red-300';
-    return 'text-zinc-700 dark:text-white/80';
-}
-
 function toIntInRange(v, min, max, fallback) {
     const n = Math.round(Number(String(v ?? '').trim()));
     if (!Number.isFinite(n)) return fallback;
@@ -82,10 +74,8 @@ function toIntInRange(v, min, max, fallback) {
 
 export default function SmartMoneyCard({ overview, loading = false, tick, onNotice, apiBaseUrl, initData }) {
     const pools = Array.isArray(overview?.pools) ? overview.pools : [];
-    const wallets = Array.isArray(overview?.wallets_24h) ? overview.wallets_24h : [];
     const warnings = Array.isArray(overview?.warnings) ? overview.warnings : [];
     const poolWindowLabel = formatWindowLabel(overview?.pools_window_sec) || '2h';
-    const pnlWindowLabel = formatWindowLabel(overview?.pnl_window_sec) || '24h';
     const chain = String(overview?.chain || 'bsc').trim() || 'bsc';
     const poolsWindowHours = useMemo(() => {
         const sec = Number(overview?.pools_window_sec ?? 0);
@@ -131,7 +121,6 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
         () => formatRelativeTime(overview?.updated_at, tick) || '--',
         [overview?.updated_at, tick],
     );
-    const topWallets = useMemo(() => wallets.slice(0, 30), [wallets]);
     const topPools = useMemo(() => pools.slice(0, 20), [pools]);
 
     const enabledFollowWallets = useMemo(() => {
@@ -250,7 +239,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
         };
     }, [activeTab, apiBaseUrl, initData, chain, goldenNonce]);
 
-    const subtitle = `最近${poolWindowLabel}池子 ${pools.length} 个 · 最近${pnlWindowLabel}钱包 ${wallets.length} 个 · 更新 ${updatedAtText}`;
+    const subtitle = `最近${poolWindowLabel}池子 ${pools.length} 个 · 更新 ${updatedAtText}`;
 
     async function handleSaveGoldenDog() {
         if (!initData) {
@@ -354,166 +343,84 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
             </div>
 
             {activeTab === 'overview' ? (
-                <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-2">
-                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                        <div className="mb-2 flex items-center justify-between">
-                            <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">最近{poolWindowLabel}参与池子</div>
-                            <div className="text-[11px] text-zinc-500 dark:text-white/40">Top {topPools.length}</div>
-                        </div>
-                        {topPools.length ? (
-                            <div className="overflow-x-auto">
-                                <table className="min-w-full text-left text-[11px]">
-                                    <thead className="text-zinc-500 dark:text-white/40">
-                                        <tr>
-                                            <th className="pb-1 pr-3 font-medium">池子</th>
-                                            <th className="pb-1 pr-3 font-medium">版本/费率</th>
-                                            <th className="pb-1 pr-3 text-right font-medium">钱包数</th>
-                                            <th className="pb-1 pr-0 text-right font-medium">操作</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="text-zinc-800 dark:text-white/85">
-                                        {topPools.map((pool) => {
-                                            const poolId = String(pool?.pool_id || '').trim();
-                                            const pair = String(pool?.pair || '').trim();
-                                            const version = String(pool?.pool_version || '').trim().toUpperCase();
-                                            const feePct = Number(pool?.fee_pct);
-                                            const walletCount = Number(pool?.wallet_count ?? 0);
-                                            return (
-                                                <tr key={`${version}:${poolId}`} className="border-t border-zinc-200/70 dark:border-white/10">
-                                                    <td className="py-1.5 pr-3 font-semibold">{pair || shortHex(poolId, 10, 6) || '--'}</td>
-                                                    <td className="py-1.5 pr-3 text-zinc-500 dark:text-white/40">
-                                                        {version || '--'}
-                                                        {Number.isFinite(feePct) && feePct > 0 ? ` · ${formatPct(feePct)}` : ''}
-                                                    </td>
-                                                    <td className="py-1.5 pr-3 text-right tabular-nums">{Number.isFinite(walletCount) ? walletCount : '--'}</td>
-                                                    <td className="py-1.5 pr-0 text-right">
-                                                        <div className="inline-flex items-center gap-1.5">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    hapticImpact('light');
-                                                                    safeCopy(poolId, onNotice);
-                                                                }}
-                                                                className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
-                                                            >
-                                                                复制
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    const pv = String(pool?.pool_version || '').trim().toLowerCase();
-                                                                    if (!pv || !poolId) return;
-                                                                    hapticImpact('light');
-                                                                    setPoolAddsPoolVersion(pv);
-                                                                    setPoolAddsPoolId(poolId);
-                                                                    setPoolAddsOpen(true);
-                                                                }}
-                                                                className="inline-flex items-center rounded-lg bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
-                                                            >
-                                                                明细
-                                                            </button>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
-                            </div>
-                        ) : (
-                            <div className="rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 text-[11px] text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                                暂无池子数据
-                            </div>
-                        )}
+                <div className="mt-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                    <div className="mb-3 flex items-center justify-between">
+                        <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">最近{poolWindowLabel}参与池子</div>
+                        <div className="text-[11px] text-zinc-500 dark:text-white/40">{topPools.length} 个</div>
                     </div>
 
-                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                        <div className="mb-2 flex items-center justify-between">
-                            <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">最近{pnlWindowLabel}钱包盈亏</div>
-                            <div className="text-[11px] text-zinc-500 dark:text-white/40">Top {topWallets.length}</div>
-                        </div>
-                        {topWallets.length ? (
-                            <div className="space-y-2">
-                                {topWallets.map((wallet, index) => {
-                                    const addr = String(wallet?.wallet_address || '').trim();
-                                    const balanceDeltaUsd = Number(wallet?.balance_delta_usdt_24h ?? wallet?.pnl_usdt_24h ?? 0);
-                                    const startValueUsd = Number(wallet?.start_value_usdt_24h ?? 0);
-                                    const endValueUsd = Number(wallet?.end_value_usdt_24h ?? 0);
-                                    const cnt1h = Number(wallet?.event_count_1h ?? 0);
-                                    const cnt24h = Number(wallet?.event_count_24h ?? 0);
-                                    const rank = index + 1;
-                                    const rankTone = rank <= 3
-                                        ? 'bg-emerald-500/15 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200'
-                                        : 'bg-zinc-100 text-zinc-700 dark:bg-white/5 dark:text-white/70';
-                                    const pnlTone = kpiTone(balanceDeltaUsd);
-                                    return (
-                                        <div key={addr || String(index)} className="rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md p-2.5 shadow-sm transition-transform duration-200 active:scale-[0.98] dark:border-white/10 dark:bg-white/5 dark:shadow-none">
-                                            <div className="flex items-start justify-between gap-2">
-                                                <div className="min-w-0">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className={`inline-flex h-5 min-w-[20px] items-center justify-center rounded-md px-1 text-[10px] font-bold ${rankTone}`}>
-                                                            #{rank}
-                                                        </span>
-                                                        <span className="truncate font-mono text-[11px] font-semibold text-zinc-900 dark:text-white/90">
-                                                            {shortHex(addr, 10, 8) || '--'}
-                                                        </span>
-                                                    </div>
-                                                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-500 dark:text-white/40">
-                                                        <span>24h净变化 {formatUsd(balanceDeltaUsd)}</span>
-                                                        <span className="opacity-80">今日0点 {formatUsd(startValueUsd)} → 当前 {formatUsd(endValueUsd)}</span>
-                                                        <span>1h/{pnlWindowLabel} {Number.isFinite(cnt1h) ? cnt1h : '--'}/{Number.isFinite(cnt24h) ? cnt24h : '--'}</span>
-                                                    </div>
+                    {topPools.length ? (
+                        <div className="max-h-[58vh] space-y-2 overflow-y-auto overscroll-contain pr-1">
+                            {topPools.map((pool, index) => {
+                                const poolId = String(pool?.pool_id || '').trim();
+                                const pair = String(pool?.pair || '').trim();
+                                const version = String(pool?.pool_version || '').trim().toUpperCase();
+                                const feePct = Number(pool?.fee_pct);
+                                const walletCount = Number(pool?.wallet_count ?? 0);
+                                const rank = index + 1;
+                                const key = `${version || 'POOL'}:${poolId || rank}`;
+                                return (
+                                    <div
+                                        key={key}
+                                        className="rounded-xl border border-zinc-200 bg-white p-2.5 shadow-sm dark:border-white/10 dark:bg-[#141821] dark:shadow-none"
+                                    >
+                                        <div className="flex items-start justify-between gap-2">
+                                            <div className="min-w-0">
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-md bg-zinc-100 px-1 text-[10px] font-bold text-zinc-700 dark:bg-white/10 dark:text-white/80">
+                                                        #{rank}
+                                                    </span>
+                                                    <span className="truncate text-[12px] font-semibold text-zinc-900 dark:text-white/90">
+                                                        {pair || shortHex(poolId, 10, 6) || '--'}
+                                                    </span>
                                                 </div>
-                                                <div className="shrink-0 text-right">
-                                                    <div className={`text-sm font-extrabold tabular-nums ${pnlTone}`}>{formatUsd(balanceDeltaUsd)}</div>
-                                                    <div className="text-[10px] text-zinc-500 dark:text-white/40">24h净变化</div>
+                                                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-500 dark:text-white/45">
+                                                    <span>{version || '--'}</span>
+                                                    {Number.isFinite(feePct) && feePct > 0 ? <span>{formatPct(feePct)}</span> : null}
                                                 </div>
                                             </div>
-
-                                            <div className="mt-2 flex items-center justify-end gap-1.5">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        hapticImpact('light');
-                                                        safeCopy(addr, onNotice);
-                                                    }}
-                                                    className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
-                                                >
-                                                    复制
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        hapticImpact('light');
-                                                        setFollowModalAddr(addr);
-                                                        setFollowModalOpen(true);
-                                                    }}
-                                                    className="inline-flex items-center rounded-lg bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
-                                                >
-                                                    跟单
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        hapticImpact('light');
-                                                        setWalletModalAddr(addr);
-                                                        setWalletModalOpen(true);
-                                                    }}
-                                                    className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
-                                                >
-                                                    仓位
-                                                </button>
+                                            <div className="shrink-0 rounded-lg bg-emerald-500/10 px-2 py-1 text-right text-[10px] font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+                                                钱包数 {Number.isFinite(walletCount) ? walletCount : '--'}
                                             </div>
                                         </div>
-                                    );
-                                })}
-                            </div>
-                        ) : (
-                            <div className="rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 text-[11px] text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                                暂无钱包数据
-                            </div>
-                        )}
-                    </div>
+
+                                        <div className="mt-2 flex items-center justify-end gap-1.5">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    hapticImpact('light');
+                                                    safeCopy(poolId, onNotice);
+                                                }}
+                                                disabled={!poolId}
+                                                className="inline-flex items-center rounded-lg bg-zinc-100 px-2.5 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 disabled:opacity-40 dark:bg-white/8 dark:text-white/75 dark:hover:bg-white/12"
+                                            >
+                                                复制池子ID
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const pv = String(pool?.pool_version || '').trim().toLowerCase();
+                                                    if (!pv || !poolId) return;
+                                                    hapticImpact('light');
+                                                    setPoolAddsPoolVersion(pv);
+                                                    setPoolAddsPoolId(poolId);
+                                                    setPoolAddsOpen(true);
+                                                }}
+                                                disabled={!poolId || !version}
+                                                className="inline-flex items-center rounded-lg bg-emerald-500 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-emerald-600 disabled:opacity-40"
+                                            >
+                                                查看明细
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        <div className="rounded-xl border border-zinc-200 bg-white p-3 text-[11px] text-zinc-500 dark:border-white/10 dark:bg-[#131821] dark:text-white/60">
+                            暂无池子数据
+                        </div>
+                    )}
                 </div>
             ) : activeTab === 'follow' ? (
                 <div className="mt-3 space-y-3">
