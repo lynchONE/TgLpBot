@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, HistogramSeries } from 'lightweight-charts';
+import NumberFlowValue from './NumberFlowValue.jsx';
 
 const USD_DISPLAY_LIMIT = 1e15;
 const usdFormatter = new Intl.NumberFormat('en-US', {
@@ -161,8 +162,8 @@ export default function SmartMoneyWalletPnLChart({ wallets, theme = 'dark', wind
     return (
         <div>
             <div className="mb-1 flex items-center justify-between text-[11px] text-zinc-500 dark:text-white/40">
-                <span>Top 钱包盈亏（{windowLabel}）</span>
-                <span>{data.length} wallets</span>
+                <span>Top 钱包盈亏（<NumberFlowValue value={windowLabel} formatter={() => windowLabel} />）</span>
+                <span><NumberFlowValue value={data.length} formatOptions={{ maximumFractionDigits: 0 }} /> wallets</span>
             </div>
             <div ref={containerRef} className="h-[160px] w-full" />
             {chartError ? (
@@ -173,4 +174,3 @@ export default function SmartMoneyWalletPnLChart({ wallets, theme = 'dark', wind
         </div>
     );
 }
-
