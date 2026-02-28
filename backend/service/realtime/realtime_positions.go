@@ -33,6 +33,7 @@ type RealtimePositionsService struct {
 	walletService *wallet.WalletService
 	taskService   *strategy.StrategyTaskService
 	priceService  *pricing.TokenPriceService
+	pnlService    *strategy.PnLService
 
 	computeGroup singleflight.Group
 
@@ -145,6 +146,7 @@ func NewRealtimePositionsService() *RealtimePositionsService {
 		walletService:  wallet.NewWalletService(),
 		taskService:    strategy.NewStrategyTaskService(),
 		priceService:   pricing.NewTokenPriceService(),
+		pnlService:     strategy.NewPnLService(),
 		cache:          make(map[uint]cachedRealtimePositions),
 		tokenMeta:      make(map[string]cachedTokenMeta),
 		balance:        make(map[string]cachedTokenBalance),
@@ -220,6 +222,9 @@ type RealtimePosition struct {
 	HasLiquidity      bool       `json:"has_liquidity"`
 	InitialCostUSD    float64    `json:"initial_cost_usd,omitempty"`
 	NetInvestedUSD    float64    `json:"net_invested_usd,omitempty"`
+	CurrentValueUSD   float64    `json:"current_value_usd,omitempty"`
+	AbsolutePnLUSD    float64    `json:"absolute_pnl_usd,omitempty"`
+	HasPnL            bool       `json:"has_pnl,omitempty"`
 
 	TokenRows []RealtimeTokenRow `json:"token_rows"`
 	Totals    RealtimeTotals     `json:"totals"`
@@ -1174,12 +1179,23 @@ func (s *RealtimePositionsService) buildV3Position(
 	taskID := uint(0)
 	taskPaused := false
 	taskIsAuto := false
+	initialCostUSD := 0.0
+	netInvestedUSD := 0.0
+	currentValueUSD := 0.0
+	absolutePnLUSD := 0.0
+	hasPnL := false
 	taskRangeLowerPct := 0.0
 	taskRangeUpperPct := 0.0
 	if task != nil {
 		taskID = task.ID
 		taskPaused = task.Paused
 		taskIsAuto = task.IsAuto
+		pnlMetrics := s.getTaskPnLViewMetrics(task)
+		initialCostUSD = pnlMetrics.initialCost
+		netInvestedUSD = pnlMetrics.netInvested
+		currentValueUSD = pnlMetrics.currentValue
+		absolutePnLUSD = pnlMetrics.absolutePnL
+		hasPnL = pnlMetrics.hasPnL
 
 		lowerPct := task.RangeLowerPercentage
 		upperPct := task.RangeUpperPercentage
@@ -1234,26 +1250,13 @@ func (s *RealtimePositionsService) buildV3Position(
 		OutOfRange:        outOfRangeText,
 		RunningSince:      runningSince,
 		HasLiquidity:      hasLiquidity,
-		InitialCostUSD: func() float64 {
-			if task == nil || task.AmountUSDT <= 0 {
-				return 0
-			}
-			if actual, ok := getTaskActualInvested(task); ok {
-				return actual
-			}
-			return task.AmountUSDT
-		}(),
-		NetInvestedUSD: func() float64 {
-			if task == nil || task.AmountUSDT <= 0 {
-				return 0
-			}
-			if actual, ok := getTaskActualInvested(task); ok {
-				return actual
-			}
-			return task.AmountUSDT
-		}(),
-		TokenRows: []RealtimeTokenRow{row0, row1},
-		Totals:    totals,
+		InitialCostUSD:    initialCostUSD,
+		NetInvestedUSD:    netInvestedUSD,
+		CurrentValueUSD:   currentValueUSD,
+		AbsolutePnLUSD:    absolutePnLUSD,
+		HasPnL:            hasPnL,
+		TokenRows:         []RealtimeTokenRow{row0, row1},
+		Totals:            totals,
 	}, warn
 }
 
@@ -1283,6 +1286,57 @@ func getTaskActualInvested(task *models.StrategyTask) (float64, bool) {
 		return 0, false
 	}
 	return val, true
+}
+
+type taskPnLViewMetrics struct {
+	initialCost  float64
+	netInvested  float64
+	currentValue float64
+	absolutePnL  float64
+	hasPnL       bool
+}
+
+// getTaskPnLViewMetrics uses the exact same PnL service as bot task cards.
+// It provides invested/current/PnL values for miniapp with unified semantics.
+func (s *RealtimePositionsService) getTaskPnLViewMetrics(task *models.StrategyTask) taskPnLViewMetrics {
+	metrics := taskPnLViewMetrics{}
+	if task == nil || task.AmountUSDT <= 0 {
+		return metrics
+	}
+
+	fallback := task.AmountUSDT
+	if actual, ok := getTaskActualInvested(task); ok && actual > 0 {
+		fallback = actual
+	}
+
+	metrics.initialCost = fallback
+	metrics.netInvested = fallback
+
+	if s != nil && s.pnlService != nil {
+		if pnl, err := s.pnlService.GetTaskPnL(task); err == nil && pnl != nil {
+			if pnl.InitialCostUSDT > 0 {
+				metrics.initialCost = pnl.InitialCostUSDT
+			}
+			if pnl.NetInvestedUSDT > 0 {
+				metrics.netInvested = pnl.NetInvestedUSDT
+			}
+			if !math.IsNaN(pnl.CurrentValueUSDT) && !math.IsInf(pnl.CurrentValueUSDT, 0) {
+				metrics.currentValue = pnl.CurrentValueUSDT
+			}
+			if !math.IsNaN(pnl.AbsolutePnLUSDT) && !math.IsInf(pnl.AbsolutePnLUSDT, 0) {
+				metrics.absolutePnL = pnl.AbsolutePnLUSDT
+				metrics.hasPnL = true
+			}
+		}
+	}
+
+	if metrics.initialCost <= 0 {
+		metrics.initialCost = fallback
+	}
+	if metrics.netInvested <= 0 {
+		metrics.netInvested = metrics.initialCost
+	}
+	return metrics
 }
 
 func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, tokenId string, task *models.StrategyTask) (*RealtimePosition, string) {
@@ -1451,6 +1505,12 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 			taskRangeUpperPct = upperPct
 		}
 	}
+	pnlMetrics := s.getTaskPnLViewMetrics(task)
+	initialCostUSD := pnlMetrics.initialCost
+	netInvestedUSD := pnlMetrics.netInvested
+	currentValueUSD := pnlMetrics.currentValue
+	absolutePnLUSD := pnlMetrics.absolutePnL
+	hasPnL := pnlMetrics.hasPnL
 	return &RealtimePosition{
 		Chain:             chain,
 		Version:           "v4",
@@ -1475,20 +1535,13 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		OutOfRange:        formatOutOfRange(task, tickLower, tickUpper, currentTick),
 		RunningSince:      &task.CreatedAt,
 		HasLiquidity:      hasLiquidity,
-		InitialCostUSD: func() float64 {
-			if actual, ok := getTaskActualInvested(task); ok {
-				return actual
-			}
-			return task.AmountUSDT
-		}(),
-		NetInvestedUSD: func() float64 {
-			if actual, ok := getTaskActualInvested(task); ok {
-				return actual
-			}
-			return task.AmountUSDT
-		}(),
-		TokenRows: []RealtimeTokenRow{row0, row1},
-		Totals:    totals,
+		InitialCostUSD:    initialCostUSD,
+		NetInvestedUSD:    netInvestedUSD,
+		CurrentValueUSD:   currentValueUSD,
+		AbsolutePnLUSD:    absolutePnLUSD,
+		HasPnL:            hasPnL,
+		TokenRows:         []RealtimeTokenRow{row0, row1},
+		Totals:            totals,
 	}, warn
 }
 
@@ -1680,6 +1733,12 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 			taskRangeUpperPct = upperPct
 		}
 	}
+	pnlMetrics := s.getTaskPnLViewMetrics(task)
+	initialCostUSD := pnlMetrics.initialCost
+	netInvestedUSD := pnlMetrics.netInvested
+	currentValueUSD := pnlMetrics.currentValue
+	absolutePnLUSD := pnlMetrics.absolutePnL
+	hasPnL := pnlMetrics.hasPnL
 
 	return &RealtimePosition{
 		Chain:             chain,
@@ -1704,20 +1763,13 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 		OutOfRange:        formatOutOfRange(task, tickLower, tickUpper, currentTick),
 		RunningSince:      &task.CreatedAt,
 		HasLiquidity:      false,
-		InitialCostUSD: func() float64 {
-			if actual, ok := getTaskActualInvested(task); ok {
-				return actual
-			}
-			return task.AmountUSDT
-		}(),
-		NetInvestedUSD: func() float64 {
-			if actual, ok := getTaskActualInvested(task); ok {
-				return actual
-			}
-			return task.AmountUSDT
-		}(),
-		TokenRows: []RealtimeTokenRow{row0, row1},
-		Totals:    totals,
+		InitialCostUSD:    initialCostUSD,
+		NetInvestedUSD:    netInvestedUSD,
+		CurrentValueUSD:   currentValueUSD,
+		AbsolutePnLUSD:    absolutePnLUSD,
+		HasPnL:            hasPnL,
+		TokenRows:         []RealtimeTokenRow{row0, row1},
+		Totals:            totals,
 	}, ""
 }
 

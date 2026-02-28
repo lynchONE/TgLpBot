@@ -169,6 +169,19 @@ export default function PositionCard({
     }, [position?.title, pairLabel]);
 
     const { totalValue, pnlAbsolute, hasPnL } = useMemo(() => {
+        const backendCurrentValue = Number(position?.current_value_usd);
+        const backendAbsolutePnL = Number(position?.absolute_pnl_usd);
+        const backendHasPnL = Boolean(position?.has_pnl)
+            && Number.isFinite(backendCurrentValue)
+            && Number.isFinite(backendAbsolutePnL);
+        if (backendHasPnL) {
+            return {
+                totalValue: backendCurrentValue,
+                pnlAbsolute: backendAbsolutePnL,
+                hasPnL: true,
+            };
+        }
+
         const positionUsd = Number(position?.totals?.position_usd || 0);
         const feeUsd = Number(position?.totals?.fee_usd || 0);
         const total = (Number.isFinite(positionUsd) ? positionUsd : 0) + (Number.isFinite(feeUsd) ? feeUsd : 0);
@@ -182,7 +195,15 @@ export default function PositionCard({
             return { totalValue: total, pnlAbsolute: pnl, hasPnL: true };
         }
         return { totalValue: total, pnlAbsolute: 0, hasPnL: false };
-    }, [position?.totals?.position_usd, position?.totals?.fee_usd, position?.initial_cost_usd, position?.net_invested_usd]);
+    }, [
+        position?.has_pnl,
+        position?.current_value_usd,
+        position?.absolute_pnl_usd,
+        position?.totals?.position_usd,
+        position?.totals?.fee_usd,
+        position?.initial_cost_usd,
+        position?.net_invested_usd,
+    ]);
 
     const chain = useMemo(() => String(position?.chain || '').trim().toLowerCase() || 'bsc', [position?.chain]);
     const gmgnNetwork = useMemo(() => (chain === 'base' ? 'base' : 'bsc'), [chain]);
