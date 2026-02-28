@@ -1,87 +1,84 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
+import NumberFlow from '@number-flow/react';
 
-const DIGITS = Array.from({ length: 50 }, (_, i) => i % 10);
+const NUM_SEGMENT_RE = /[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/g;
 
-function clampDigit(n) {
-    const v = Number(n);
-    if (!Number.isFinite(v)) return 0;
-    if (v < 0) return 0;
-    if (v > 9) return 9;
-    return Math.round(v);
+function isAsciiWordChar(ch) {
+    if (!ch) return false;
+    return /[A-Za-z0-9_]/.test(ch);
 }
 
-function buildTokens(text) {
+function parseNumberSegment(raw) {
+    if (!raw) return null;
+    const sign = raw[0] === '+' || raw[0] === '-' ? raw[0] : '';
+    const unsigned = sign ? raw.slice(1) : raw;
+    const parts = unsigned.split('.');
+    const intPartRaw = parts[0] || '';
+    const fracPartRaw = parts[1] || '';
+    const clean = `${sign}${unsigned.replace(/,/g, '')}`;
+    const value = Number(clean);
+    if (!Number.isFinite(value)) return null;
+
+    const format = {
+        useGrouping: intPartRaw.includes(','),
+    };
+
+    if (fracPartRaw.length > 0) {
+        format.minimumFractionDigits = fracPartRaw.length;
+        format.maximumFractionDigits = fracPartRaw.length;
+    }
+
+    if (sign === '+') {
+        format.signDisplay = 'always';
+    }
+
+    const intDigits = intPartRaw.replace(/,/g, '');
+    if (intDigits.length > 1 && intDigits.startsWith('0')) {
+        format.minimumIntegerDigits = intDigits.length;
+    }
+
+    return { value, format };
+}
+
+function splitTextSegments(text) {
     const input = String(text ?? '');
     if (!input) return [];
 
-    const decimalIndex = input.lastIndexOf('.');
-    const integerEnd = decimalIndex >= 0 ? decimalIndex : input.length;
-    const integerPlaces = new Array(integerEnd).fill(-1);
-
-    let place = 0;
-    for (let i = integerEnd - 1; i >= 0; i -= 1) {
-        const ch = input[i];
-        if (ch >= '0' && ch <= '9') {
-            integerPlaces[i] = place;
-            place += 1;
-        }
-    }
-
-    let fracPlace = 0;
     const out = [];
-    for (let i = 0; i < input.length; i += 1) {
-        const ch = input[i];
-        const isDigit = ch >= '0' && ch <= '9';
-        if (!isDigit) {
-            out.push({ type: 'char', key: `c-${i}-${ch}`, char: ch });
+    let last = 0;
+    let match;
+    while ((match = NUM_SEGMENT_RE.exec(input)) !== null) {
+        const raw = match[0];
+        const start = match.index;
+        const end = start + raw.length;
+
+        const prev = start > 0 ? input[start - 1] : '';
+        const next = end < input.length ? input[end] : '';
+        const looksLikeHexPrefix = raw === '0' && (next === 'x' || next === 'X');
+        if (looksLikeHexPrefix) {
             continue;
         }
-        if (i < integerEnd) {
-            out.push({ type: 'digit', key: `i-${integerPlaces[i]}`, digit: Number(ch) });
+        if (isAsciiWordChar(prev) && isAsciiWordChar(next)) {
             continue;
         }
-        fracPlace += 1;
-        out.push({ type: 'digit', key: `f-${fracPlace}`, digit: Number(ch) });
+
+        if (start > last) {
+            out.push({ type: 'text', key: `t-${last}-${start}`, text: input.slice(last, start) });
+        }
+        const parsed = parseNumberSegment(raw);
+        if (!parsed) {
+            out.push({ type: 'text', key: `t-${start}-${end}`, text: raw });
+        } else {
+            out.push({ type: 'number', key: `n-${start}-${end}-${raw}`, ...parsed });
+        }
+        last = end;
     }
+
+    if (last < input.length) {
+        out.push({ type: 'text', key: `t-${last}-${input.length}`, text: input.slice(last) });
+    }
+
     return out;
-}
-
-function DigitWheel({ digit, durationMs = 420 }) {
-    const targetDigit = clampDigit(digit);
-    const [offset, setOffset] = useState(20 + targetDigit);
-
-    useEffect(() => {
-        setOffset((prev) => {
-            const prevDigit = ((prev % 10) + 10) % 10;
-            let delta = targetDigit - prevDigit;
-            if (delta > 5) delta -= 10;
-            if (delta < -5) delta += 10;
-            let next = prev + delta;
-            while (next < 10) next += 10;
-            while (next > 39) next -= 10;
-            return next;
-        });
-    }, [targetDigit]);
-
-    return (
-        <span className="relative inline-flex h-[1em] w-[0.62em] overflow-hidden">
-            <span
-                className="absolute left-0 top-0 flex flex-col leading-none transition-transform will-change-transform"
-                style={{
-                    transform: `translateY(-${offset}em)`,
-                    transitionDuration: `${durationMs}ms`,
-                    transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
-                }}
-                aria-hidden="true"
-            >
-                {DIGITS.map((n, idx) => (
-                    <span key={idx} className="flex h-[1em] items-center justify-center leading-none">
-                        {n}
-                    </span>
-                ))}
-            </span>
-        </span>
-    );
 }
 
 export default function NumberFlowValue({
@@ -110,23 +107,57 @@ export default function NumberFlowValue({
         return numberFormatter.format(n);
     }, [formatter, value, fallback, numberFormatter]);
 
-    const tokens = useMemo(() => buildTokens(text), [text]);
-    const hasDigit = tokens.some((t) => t.type === 'digit');
-    const rootClassName = `inline-flex items-center align-[-0.08em] tabular-nums lining-nums leading-none ${className}`.trim();
+    const timing = useMemo(() => ({
+        duration: durationMs,
+        easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+        fill: 'both',
+    }), [durationMs]);
+    const rootClassName = `inline-flex items-center tabular-nums lining-nums ${className}`.trim();
 
-    if (!hasDigit) {
+    if (typeof formatter !== 'function') {
+        const n = Number(value);
+        if (!Number.isFinite(n)) {
+            return <span className={rootClassName}>{text}</span>;
+        }
+        return (
+            <span className={rootClassName} aria-label={text}>
+                <NumberFlow
+                    value={n}
+                    locales={locale}
+                    format={formatOptions}
+                    transformTiming={timing}
+                    spinTiming={timing}
+                    opacityTiming={timing}
+                />
+            </span>
+        );
+    }
+
+    const segments = splitTextSegments(text);
+    const hasNumber = segments.some((s) => s.type === 'number');
+    if (!hasNumber) {
         return <span className={rootClassName}>{text}</span>;
     }
 
     return (
         <span className={rootClassName} aria-label={text}>
-            {tokens.map((token) => {
-                if (token.type === 'digit') {
-                    return <DigitWheel key={token.key} digit={token.digit} durationMs={durationMs} />;
+            {segments.map((seg) => {
+                if (seg.type === 'number') {
+                    return (
+                        <NumberFlow
+                            key={seg.key}
+                            value={seg.value}
+                            locales={locale}
+                            format={seg.format}
+                            transformTiming={timing}
+                            spinTiming={timing}
+                            opacityTiming={timing}
+                        />
+                    );
                 }
                 return (
-                    <span key={token.key} className="inline-block">
-                        {token.char}
+                    <span key={seg.key} className="inline-flex items-center">
+                        {seg.text}
                     </span>
                 );
             })}
