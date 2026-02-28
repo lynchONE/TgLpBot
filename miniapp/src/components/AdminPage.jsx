@@ -223,10 +223,10 @@ export default function AdminPage({
     const userSummary = useMemo(() => {
         if (!userPositions) return null;
         return {
-            totalUsd: userPositions.total_usdt_value || 0,
-            bnbBalance: userPositions.bnb_balance || '0',
-            bnbUsd: userPositions.bnb_usdt_value,
-            walletAddress: userPositions.wallet_address,
+            totalUsd: userPositions.summary?.total_usd || 0,
+            bnbBalance: userPositions.wallet?.bnb_balance || '0',
+            bnbUsd: userPositions.wallet?.bnb_usd,
+            walletAddress: userPositions.wallet?.address,
         };
     }, [userPositions]);
 
@@ -453,9 +453,9 @@ export default function AdminPage({
                                     </div>
                                 )}
 
-                                    <div className="space-y-3">
-                                        {userPositionsList.map((p) => (
-                                            <PositionCard
+                                <div className="space-y-3">
+                                    {userPositionsList.map((p) => (
+                                        <PositionCard
                                             key={[
                                                 String(p?.chain || ''),
                                                 String(p?.version || ''),

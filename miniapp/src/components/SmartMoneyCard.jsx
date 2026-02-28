@@ -126,7 +126,7 @@ function PoolOverviewCard({
     rank, pair, poolId, version, feePct, walletCount,
     previewStatus, previewWallets, previewError, previewTotalUsd,
     hasNoPreview, defaultShow, needsExpand,
-    onCopyPoolId, onViewDetails, onCopyWallet, onLoadPreview,
+    onCopyPoolId, onViewDetails, onCopyWallet, onLoadPreview, onQuickOpen,
 }) {
     const [expanded, setExpanded] = useState(false);
     const displayWallets = expanded ? previewWallets : previewWallets.slice(0, defaultShow);
@@ -228,9 +228,11 @@ function PoolOverviewCard({
                                     <span className="text-[11px] font-bold tabular-nums text-zinc-900 dark:text-white/85">
                                         ${Number.isFinite(amountUsd) ? formatUsdPlain(amountUsd) : '--'}
                                     </span>
-                                    <span className="min-w-[36px] text-right text-[10px] font-semibold tabular-nums text-emerald-600 dark:text-emerald-300">
-                                        {Number.isFinite(sharePct) ? formatPct(sharePct, 1) : '--'}
-                                    </span>
+                                    {hasRange ? (
+                                        <span className="min-w-[36px] text-right text-[10px] font-semibold tabular-nums text-emerald-600 dark:text-emerald-300">
+                                            {formatPct(Math.abs(priceUpper - priceLower) / (priceUpper + priceLower) * 100, 1)}
+                                        </span>
+                                    ) : null}
                                 </div>
                             </div>
                             {/* Row 2: range — full width, never truncated */}
@@ -276,6 +278,17 @@ function PoolOverviewCard({
             <div className="mt-2 flex items-center justify-end gap-1.5">
                 <button
                     type="button"
+                    onClick={() => {
+                        hapticImpact('light');
+                        if (onQuickOpen) onQuickOpen(previewWallets);
+                    }}
+                    disabled={!poolId || !version}
+                    className="inline-flex items-center rounded-lg bg-blue-500/15 px-2.5 py-1 text-[10px] font-bold text-blue-600 ring-1 ring-blue-500/25 hover:bg-blue-500/25 disabled:opacity-40 dark:bg-blue-500/20 dark:text-blue-300 dark:ring-blue-500/30"
+                >
+                    快速开单
+                </button>
+                <button
+                    type="button"
                     onClick={onCopyPoolId}
                     disabled={!poolId}
                     className="inline-flex items-center rounded-lg bg-amber-300 px-2.5 py-1 text-[10px] font-semibold text-amber-950 hover:bg-amber-200 disabled:opacity-40 dark:bg-amber-300 dark:text-amber-950 dark:hover:bg-amber-200"
@@ -295,7 +308,7 @@ function PoolOverviewCard({
     );
 }
 
-export default function SmartMoneyCard({ overview, loading = false, tick, onNotice, apiBaseUrl, initData }) {
+export default function SmartMoneyCard({ overview, loading = false, tick, onNotice, apiBaseUrl, initData, onQuickOpenPool }) {
     const pools = Array.isArray(overview?.pools) ? overview.pools : [];
     const warnings = Array.isArray(overview?.warnings) ? overview.warnings : [];
     const poolWindowLabel = formatWindowLabel(overview?.pools_window_sec) || '2h';
@@ -769,6 +782,18 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                         onCopyWallet={(addr) => {
                                             hapticImpact('light');
                                             safeCopy(addr, onNotice);
+                                        }}
+                                        onQuickOpen={(wList) => {
+                                            if (typeof onQuickOpenPool === 'function') {
+                                                onQuickOpenPool({
+                                                    pool_address: poolId,
+                                                    pool_id: poolId,
+                                                    protocol_version: version,
+                                                    trading_pair: pair,
+                                                    chain,
+                                                    smartMoneyWallets: wList || previewWallets, // Pass down the smart money data
+                                                });
+                                            }
                                         }}
                                         onLoadPreview={() => {
                                             // On-demand load for pools that weren't preloaded

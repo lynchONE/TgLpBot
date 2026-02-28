@@ -2561,6 +2561,7 @@ export default function App() {
                                     apiBaseUrl={apiBaseUrl}
                                     initData={initData}
                                     theme={theme}
+                                    onQuickOpenPool={openPositionModal}
                                 />
                             )
                             : !showAdmin && activeData
@@ -3237,6 +3238,76 @@ export default function App() {
                                     请输入下限与上限百分比（如 1 / 3 表示下 1% 上 3%）。
                                 </div>
                             </div>
+
+                            {/* Smart Money Quick Ranges */}
+                            {(() => {
+                                const wallets = openPositionPool?.smartMoneyWallets || [];
+                                if (!wallets.length) return null;
+
+                                const rangeMap = new Map();
+                                wallets.forEach(w => {
+                                    const lower = Number(w?.price_lower ?? 0);
+                                    const upper = Number(w?.price_upper ?? 0);
+                                    if (Number.isFinite(lower) && lower > 0 && Number.isFinite(upper) && upper > 0) {
+                                        const pct = ((Math.abs(upper - lower) / (upper + lower)) * 100);
+                                        // key up to 1 decimal point to group similar ranges together
+                                        const key = pct.toFixed(1);
+                                        if (!rangeMap.has(key)) {
+                                            rangeMap.set(key, pct);
+                                        }
+                                    }
+                                });
+
+                                const uniqueRanges = Array.from(rangeMap.values()).sort((a, b) => a - b);
+                                if (!uniqueRanges.length) return null;
+
+                                return (
+                                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                        <div className="flex items-center justify-between">
+                                            <div className="text-xs font-semibold text-zinc-900 dark:text-white/80 flex items-center gap-1.5">
+                                                <span className="flex h-4 w-4 items-center justify-center rounded-sm bg-blue-500/20 text-blue-600 dark:text-blue-300">
+                                                    <Icon path={icons.layer} className="h-3 w-3" />
+                                                </span>
+                                                聪明钱区间快捷开单
+                                            </div>
+                                        </div>
+                                        <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">一键填充该池子中热门聪明钱开仓的具体区间：</div>
+                                        <div className="mt-2.5 flex flex-wrap gap-2">
+                                            {uniqueRanges.slice(0, 5).map(pct => {
+                                                const half = pct / 2;
+                                                return (
+                                                    <React.Fragment key={pct}>
+                                                        {pct >= 1.0 ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setOpenPositionRangeLower(half.toFixed(2));
+                                                                    setOpenPositionRangeUpper(half.toFixed(2));
+                                                                    hapticSelection();
+                                                                }}
+                                                                className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-white/10 dark:bg-[#1a1c23] dark:text-white/80 dark:hover:bg-white/5 transition-colors"
+                                                            >
+                                                                ±{half.toFixed(2)}%
+                                                            </button>
+                                                        ) : null}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setOpenPositionRangeLower(pct.toFixed(2));
+                                                                setOpenPositionRangeUpper(pct.toFixed(2));
+                                                                hapticSelection();
+                                                            }}
+                                                            className="rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-bold text-blue-700 hover:bg-blue-100 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20 transition-colors"
+                                                        >
+                                                            ±{pct.toFixed(2)}%
+                                                        </button>
+                                                    </React.Fragment>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                );
+                            })()}
 
                             <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                 <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">滑点 (%)</div>
