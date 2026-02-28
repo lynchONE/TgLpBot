@@ -41,7 +41,7 @@ export default function BottomSheet({
     if (!isVisible) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+        <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center">
             {/* Backdrop */}
             <div
                 className={`absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ease-in-out ${isAnimating ? 'opacity-100' : 'opacity-0'}`}
@@ -87,6 +87,6 @@ export default function BottomSheet({
                     {children}
                 </div>
             </div>
-        </div>
+        </div >
     );
 }
