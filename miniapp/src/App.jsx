@@ -2988,7 +2988,7 @@ export default function App() {
 
             {
                 settingsOpen ? (
-                    <div className="fixed inset-0 z-50">
+                    <div className="fixed inset-0 z-[60]">
                         <button
                             type="button"
                             className="absolute inset-0 cursor-default bg-black/40"
