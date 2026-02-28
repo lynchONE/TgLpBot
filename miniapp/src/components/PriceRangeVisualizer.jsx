@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import NumberFlowValue from './NumberFlowValue.jsx';
 
 const formatPrice = (value) => {
     const n = Number(value);
@@ -86,11 +87,12 @@ export default function PriceRangeVisualizer({
         <div className="mt-2 rounded-xl border border-zinc-200/60 bg-[#1c1e22]/5 p-2.5 dark:border-white/5 dark:bg-[#1f2227]">
             <div className="mb-2 flex items-center justify-between text-zinc-900 dark:text-zinc-100">
                 <div className="text-[10px] font-bold opacity-85">
-                    价格范围 ({pairLabel || '未知'} {gridCount ? `${gridCount}格` : ''})
+                    价格范围 ({pairLabel || '未知'}{' '}
+                    {gridCount ? <><NumberFlowValue value={gridCount} formatOptions={{ maximumFractionDigits: 0 }} />格</> : ''})
                 </div>
                 {deviation !== null && deviation !== undefined ? (
                     <div className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-bold text-white dark:bg-black/50">
-                        {deviation.toFixed(2)}%
+                        <NumberFlowValue value={deviation} formatter={(v) => `${Number(v).toFixed(2)}%`} />
                     </div>
                 ) : null}
             </div>
@@ -125,9 +127,15 @@ export default function PriceRangeVisualizer({
             </div>
 
             <div className="mt-1 flex justify-between px-1 font-mono text-[10px] font-bold">
-                <span className="text-emerald-600 dark:text-emerald-500">{formatPrice(minPrice)}</span>
-                <span className="text-zinc-500 dark:text-zinc-400">{formatPrice(midPrice)}</span>
-                <span className="text-rose-600 dark:text-rose-500">{formatPrice(maxPrice)}</span>
+                <span className="text-emerald-600 dark:text-emerald-500">
+                    <NumberFlowValue value={minPrice} formatter={(v) => formatPrice(v)} />
+                </span>
+                <span className="text-zinc-500 dark:text-zinc-400">
+                    <NumberFlowValue value={midPrice} formatter={(v) => formatPrice(v)} />
+                </span>
+                <span className="text-rose-600 dark:text-rose-500">
+                    <NumberFlowValue value={maxPrice} formatter={(v) => formatPrice(v)} />
+                </span>
             </div>
 
             <div
@@ -136,12 +144,15 @@ export default function PriceRangeVisualizer({
                     : 'border-rose-200 bg-rose-500/8 dark:border-rose-500/20'
                     }`}
             >
-                <div className="min-w-0 flex-1 truncate text-zinc-700 dark:text-zinc-300" title={gridInfoText}>{gridInfoText}</div>
+                <div className="min-w-0 flex-1 truncate text-zinc-700 dark:text-zinc-300" title={gridInfoText}>
+                    <NumberFlowValue value={gridInfoText} formatter={() => gridInfoText} />
+                </div>
+                
                 <div
                     className={`shrink-0 max-w-[72%] truncate text-right ${visualInRange ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}
                     title={statusText}
                 >
-                    {statusText}
+                    <NumberFlowValue value={statusText} formatter={() => statusText} />
                 </div>
             </div>
 
@@ -149,12 +160,12 @@ export default function PriceRangeVisualizer({
                 <div className={`mt-1.5 flex items-center gap-2 ${taskRangeText && runningDuration ? 'justify-between' : taskRangeText ? 'justify-start' : 'justify-end'}`}>
                     {taskRangeText ? (
                         <span className="inline-flex items-center rounded-md bg-sky-500/10 px-2 py-1 text-[10px] font-semibold text-sky-700 ring-1 ring-sky-500/20 dark:bg-sky-500/15 dark:text-sky-300">
-                            策略范围 {taskRangeText}
+                            策略范围 <NumberFlowValue value={taskRangeText} formatter={() => taskRangeText} />
                         </span>
                     ) : null}
                     {runningDuration ? (
                         <span className="inline-flex items-center rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-500/20 dark:bg-emerald-500/15 dark:text-emerald-300">
-                            运行 {runningDuration}
+                            运行 <NumberFlowValue value={runningDuration} formatter={() => runningDuration} />
                         </span>
                     ) : null}
                 </div>

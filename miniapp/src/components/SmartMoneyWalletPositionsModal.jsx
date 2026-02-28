@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import BottomSheet from './BottomSheet.jsx';
+import NumberFlowValue from './NumberFlowValue.jsx';
 import { fetchSmartMoneyWalletPositions } from '../lib/api';
 import { copyToClipboard, hapticImpact, hapticNotification } from '../lib/telegram';
 
@@ -168,7 +169,7 @@ export default function SmartMoneyWalletPositionsModal({
                         {windowLabel ? (
                             <>
                                 <span className="shrink-0">·</span>
-                                <span className="shrink-0">最近{windowLabel}</span>
+                                <span className="shrink-0">最近<NumberFlowValue value={windowLabel} formatter={() => windowLabel} /></span>
                             </>
                         ) : null}
                     </div>
@@ -204,11 +205,15 @@ export default function SmartMoneyWalletPositionsModal({
             <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
                     <div className="text-[11px] text-zinc-500 dark:text-white/40">活跃仓位</div>
-                    <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">{positions.length}</div>
+                    <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">
+                        <NumberFlowValue value={positions.length} formatOptions={{ maximumFractionDigits: 0 }} />
+                    </div>
                 </div>
                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
                     <div className="text-[11px] text-zinc-500 dark:text-white/40">总仓位估值</div>
-                    <div className={`mt-0.5 font-semibold tabular-nums ${kpiTone(totalUsd)}`}>{formatUsd(totalUsd)}</div>
+                    <div className={`mt-0.5 font-semibold tabular-nums ${kpiTone(totalUsd)}`}>
+                        <NumberFlowValue value={totalUsd} formatter={(v) => formatUsd(v)} />
+                    </div>
                 </div>
             </div>
 
@@ -274,7 +279,7 @@ export default function SmartMoneyWalletPositionsModal({
                                             ) : null}
                                             {Number.isFinite(feePct) && feePct > 0 ? (
                                                 <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-700 dark:bg-white/10 dark:text-white/70">
-                                                    {formatPct(feePct)}
+                                                    <NumberFlowValue value={feePct} formatter={(v) => formatPct(v)} />
                                                 </span>
                                             ) : null}
                                             <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold ${inRange ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-200' : 'bg-zinc-500/10 text-zinc-700 dark:text-white/60'}`}>
@@ -284,12 +289,14 @@ export default function SmartMoneyWalletPositionsModal({
                                         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-zinc-500 dark:text-white/40">
                                             <span className="font-mono">{shortHex(poolId, 10, 8) || '--'}</span>
                                             <span>·</span>
-                                            <span className="font-mono">#{positionId || '--'}</span>
+                                            <span className="font-mono">#<NumberFlowValue value={positionId || '--'} formatter={() => (positionId || '--')} /></span>
                                         </div>
                                     </div>
                                     <div className="shrink-0 text-right">
                                         <div className="text-[10px] text-zinc-500 dark:text-white/40">仓位估值</div>
-                                        <div className={`mt-0.5 text-sm font-extrabold tabular-nums ${kpiTone(posUsd)}`}>{formatUsd(posUsd)}</div>
+                                        <div className={`mt-0.5 text-sm font-extrabold tabular-nums ${kpiTone(posUsd)}`}>
+                                            <NumberFlowValue value={posUsd} formatter={(v) => formatUsd(v)} />
+                                        </div>
                                     </div>
                                 </div>
 
@@ -297,19 +304,31 @@ export default function SmartMoneyWalletPositionsModal({
                                     <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
                                         <div className="text-[10px] text-zinc-500 dark:text-white/40">区间</div>
                                         <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">
-                                            {Number.isFinite(tickLower) ? tickLower : '--'} → {Number.isFinite(tickUpper) ? tickUpper : '--'}
+                                            <NumberFlowValue
+                                                value={Number.isFinite(tickLower) ? tickLower : '--'}
+                                                formatter={() => (Number.isFinite(tickLower) ? String(tickLower) : '--')}
+                                            />
+                                            {' '}→{' '}
+                                            <NumberFlowValue
+                                                value={Number.isFinite(tickUpper) ? tickUpper : '--'}
+                                                formatter={() => (Number.isFinite(tickUpper) ? String(tickUpper) : '--')}
+                                            />
                                         </div>
                                         <div className="text-[10px] text-zinc-500 dark:text-white/40">
-                                            当前 {Number.isFinite(currentTick) ? currentTick : '--'}
+                                            当前{' '}
+                                            <NumberFlowValue
+                                                value={Number.isFinite(currentTick) ? currentTick : '--'}
+                                                formatter={() => (Number.isFinite(currentTick) ? String(currentTick) : '--')}
+                                            />
                                         </div>
                                     </div>
                                     <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
                                         <div className="text-[10px] text-zinc-500 dark:text-white/40">Token Amount</div>
                                         <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">
-                                            {formatTokenAmount(amount0)} {sym0 || 'T0'}
+                                            <NumberFlowValue value={amount0} formatter={(v) => formatTokenAmount(v)} /> {sym0 || 'T0'}
                                         </div>
                                         <div className="text-[10px] text-zinc-500 dark:text-white/40">
-                                            {formatTokenAmount(amount1)} {sym1 || 'T1'}
+                                            <NumberFlowValue value={amount1} formatter={(v) => formatTokenAmount(v)} /> {sym1 || 'T1'}
                                         </div>
                                     </div>
                                 </div>
@@ -317,11 +336,15 @@ export default function SmartMoneyWalletPositionsModal({
                                 <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
                                     <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
                                         <div className="text-[10px] text-zinc-500 dark:text-white/40">{sym0 || 'Token0'} 估值</div>
-                                        <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">{formatUsd(usd0)}</div>
+                                        <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">
+                                            <NumberFlowValue value={usd0} formatter={(v) => formatUsd(v)} />
+                                        </div>
                                     </div>
                                     <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
                                         <div className="text-[10px] text-zinc-500 dark:text-white/40">{sym1 || 'Token1'} 估值</div>
-                                        <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">{formatUsd(usd1)}</div>
+                                        <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">
+                                            <NumberFlowValue value={usd1} formatter={(v) => formatUsd(v)} />
+                                        </div>
                                     </div>
                                 </div>
 

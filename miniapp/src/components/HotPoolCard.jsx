@@ -2,6 +2,7 @@ import React, { useMemo, useState, useRef, useCallback } from 'react';
 import { copyToClipboard, hapticNotification, hapticImpact } from '../lib/telegram';
 import uniswapIcon from '../image/uniswap.svg';
 import pancakeIcon from '../image/pancake.svg';
+import NumberFlowValue from './NumberFlowValue.jsx';
 
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -113,7 +114,9 @@ const PositionBadge = ({ pool }) => {
 
     return (
         <div className="inline-flex items-center gap-1 rounded-lg bg-purple-500/15 px-2 py-0.5 text-[11px] font-bold text-purple-700 ring-1 ring-purple-500/25 dark:bg-purple-500/20 dark:text-purple-200 dark:ring-purple-500/30">
-            <span>💰 持仓 {formatUsdCompact(usd)}</span>
+            <span>
+                💰 持仓 <NumberFlowValue value={usd} formatter={(v) => formatUsdCompact(v)} />
+            </span>
         </div>
     );
 };
@@ -198,7 +201,7 @@ const ChangeIndicator = ({ currentValue, previousValue, label = '变化' }) => {
             <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d={isIncrease ? icons.arrowUp : icons.arrowDown} clipRule="evenodd" />
             </svg>
-            <span>{formatValue(absValue)}</span>
+            <NumberFlowValue value={absValue} formatter={(v) => formatValue(v)} />
         </span>
     );
 };
@@ -235,7 +238,7 @@ const CountChangeIndicator = ({ currentValue, previousValue, label = '变化' })
             <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d={isIncrease ? icons.arrowUp : icons.arrowDown} clipRule="evenodd" />
             </svg>
-            <span>{formatCount(absValue)}</span>
+            <NumberFlowValue value={absValue} formatter={(v) => formatCount(v)} />
         </span>
     );
 };
@@ -290,19 +293,6 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
         if (rank === 3) return 'rank-bronze';
         return '';
     }, [rank]);
-
-    const mainValue = useMemo(() => {
-        if (metric === 'volume') {
-            const v = Number(pool?.total_volume ?? 0);
-            return Number.isFinite(v) && v > 0 ? formatUsdCompact(v) : '--';
-        }
-        if (metric === 'fee_rate') {
-            const v = Number(pool?.fee_rate ?? 0);
-            return Number.isFinite(v) && v > 0 ? formatRatePct(v) : '--';
-        }
-        const v = Number(pool?.total_fees ?? 0);
-        return Number.isFinite(v) && v > 0 ? formatUsd(v) : '--';
-    }, [metric, pool?.fee_rate, pool?.total_fees, pool?.total_volume]);
 
     const priceDisplay = useMemo(() => {
         const v = String(pool?.price_display || '').trim();
@@ -366,7 +356,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                         </div>
                         {pool?.fee_percentage ? (
                             <div className="rounded-lg bg-sky-500/10 px-2 py-0.5 text-[11px] font-semibold text-sky-700 ring-1 ring-sky-500/20 dark:bg-sky-500/15 dark:text-sky-200 dark:ring-sky-500/30">
-                                {formatFeePercent(pool.fee_percentage)}
+                                <NumberFlowValue value={pool.fee_percentage} formatter={(v) => formatFeePercent(v)} />
                             </div>
                         ) : null}
                         <button
@@ -398,7 +388,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                             <div className="text-zinc-500 dark:text-white/40 flex items-center">
                                 交易量:{' '}
                                 <span className="font-semibold text-sky-600 dark:text-sky-200 tabular-nums">
-                                    {formatUsdCompact(volumeValue)}
+                                    <NumberFlowValue value={volumeValue} formatter={(v) => formatUsdCompact(v)} />
                                 </span>
                                 <ChangeIndicator
                                     currentValue={pool?.total_volume}
@@ -411,7 +401,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                             <div className="text-zinc-500 dark:text-white/40 flex items-center">
                                 TVL:{' '}
                                 <span className="font-semibold text-zinc-900 dark:text-white/80 tabular-nums">
-                                    {formatUsdCompact(tvlValue)}
+                                    <NumberFlowValue value={tvlValue} formatter={(v) => formatUsdCompact(v)} />
                                 </span>
                                 <ChangeIndicator
                                     currentValue={pool?.current_pool_value}
@@ -424,7 +414,10 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                             <div className="text-zinc-500 dark:text-white/40 flex items-center">
                                 交易笔数:{' '}
                                 <span className="font-semibold text-orange-600 dark:text-orange-300 tabular-nums">
-                                    {pool.transaction_count.toLocaleString()}
+                                    <NumberFlowValue
+                                        value={pool.transaction_count}
+                                        formatter={(v) => Number(v || 0).toLocaleString()}
+                                    />
                                 </span>
                                 <CountChangeIndicator
                                     currentValue={pool?.transaction_count}
@@ -439,7 +432,22 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                 <div className="text-right shrink-0 min-w-[110px]">
                     <div className="flex items-baseline justify-end gap-1 flex-wrap">
                         <div className="text-base font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums flex items-center">
-                            {mainValue}
+                            {metric === 'volume' ? (
+                                <NumberFlowValue value={pool?.total_volume} formatter={(v) => {
+                                    const n = Number(v ?? 0);
+                                    return Number.isFinite(n) && n > 0 ? formatUsdCompact(n) : '--';
+                                }} />
+                            ) : metric === 'fee_rate' ? (
+                                <NumberFlowValue value={pool?.fee_rate} formatter={(v) => {
+                                    const n = Number(v ?? 0);
+                                    return Number.isFinite(n) && n > 0 ? formatRatePct(n) : '--';
+                                }} />
+                            ) : (
+                                <NumberFlowValue value={pool?.total_fees} formatter={(v) => {
+                                    const n = Number(v ?? 0);
+                                    return Number.isFinite(n) && n > 0 ? formatUsd(n) : '--';
+                                }} />
+                            )}
                             <ChangeIndicator
                                 currentValue={metric === 'volume' ? pool?.total_volume : pool?.total_fees}
                                 previousValue={metric === 'volume' ? previousData?.total_volume : previousData?.total_fees}
@@ -452,12 +460,12 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                             className={`mt-0.5 text-[10px] font-semibold tabular-nums truncate max-w-[110px] ${priceDisplayClass}`}
                             title={priceDisplay}
                         >
-                            {priceDisplay}
+                            <NumberFlowValue value={priceDisplay} formatter={() => priceDisplay} />
                         </div>
                     ) : null}
                     {secondaryMetricText ? (
                         <div className="mt-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-300 tabular-nums">
-                            {secondaryMetricText}
+                            <NumberFlowValue value={secondaryMetricText} formatter={() => secondaryMetricText} />
                         </div>
                     ) : null}
                 </div>

@@ -1,5 +1,6 @@
 import React from 'react';
 import { formatRelativeTime } from '../lib/time';
+import NumberFlowValue from './NumberFlowValue.jsx';
 
 /**
  * 格式化用户标签
@@ -119,14 +120,14 @@ export default function AdminActiveTasks({
             {/* 统计摘要 */}
             <div className="flex items-center justify-between rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-white/10 dark:bg-[#0f1116]">
                 <div className="text-xs text-zinc-600 dark:text-white/60">
-                    共 <span className="font-semibold text-zinc-900 dark:text-white">{tasks.length}</span> 个活跃任务
+                    共 <span className="font-semibold text-zinc-900 dark:text-white"><NumberFlowValue value={tasks.length} formatOptions={{ maximumFractionDigits: 0 }} /></span> 个活跃任务
                 </div>
                 <div className="flex items-center gap-3 text-[11px]">
                     <span className="text-emerald-600 dark:text-emerald-400">
-                        <span className="font-semibold">{autoCount}</span> 自动
+                        <span className="font-semibold"><NumberFlowValue value={autoCount} formatOptions={{ maximumFractionDigits: 0 }} /></span> 自动
                     </span>
                     <span className="text-sky-600 dark:text-sky-400">
-                        <span className="font-semibold">{manualCount}</span> 手动
+                        <span className="font-semibold"><NumberFlowValue value={manualCount} formatOptions={{ maximumFractionDigits: 0 }} /></span> 手动
                     </span>
                 </div>
             </div>
@@ -175,15 +176,15 @@ export default function AdminActiveTasks({
                                         )}
                                     </div>
                                     <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40">
-                                        {userLabel} · ID {t.task_id}
+                                        {userLabel} · ID <NumberFlowValue value={t.task_id || 0} formatOptions={{ maximumFractionDigits: 0 }} />
                                     </div>
                                 </div>
                                 <div className="text-right shrink-0">
                                     <div className="text-sm font-semibold tabular-nums text-zinc-900 dark:text-white/80">
-                                        ${amountUsd}
+                                        <NumberFlowValue value={amountUsd} formatter={() => `$${amountUsd}`} />
                                     </div>
                                     <div className="mt-0.5 text-[10px] text-zinc-400 dark:text-white/30">
-                                        {lastCheck}
+                                        <NumberFlowValue value={lastCheck} formatter={() => lastCheck} />
                                     </div>
                                 </div>
                             </div>

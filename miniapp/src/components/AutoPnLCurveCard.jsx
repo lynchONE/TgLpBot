@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, createSeriesMarkers, LineSeries, LineStyle } from 'lightweight-charts';
+import NumberFlowValue from './NumberFlowValue.jsx';
 
 const USD_DISPLAY_LIMIT = 1e15;
 const usdFormatter = new Intl.NumberFormat('en-US', {
@@ -267,7 +268,7 @@ export default function AutoPnLCurveCard({ data, loading, error, theme = 'dark' 
                 <div className="text-right">
                     <div className="text-[11px] text-zinc-500 dark:text-white/40">总收益</div>
                     <div className={`text-lg font-extrabold tabular-nums ${totalProfit >= 0 ? 'text-emerald-600 dark:text-emerald-300' : 'text-red-600 dark:text-red-300'}`}>
-                        {formatUsd(totalProfit)}
+                        <NumberFlowValue value={totalProfit} formatter={(v) => formatUsd(v)} />
                     </div>
                 </div>
             </div>
@@ -275,15 +276,21 @@ export default function AutoPnLCurveCard({ data, loading, error, theme = 'dark' 
             <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
                     <div className="text-[11px] text-zinc-500 dark:text-white/40">已实现(含Gas)</div>
-                    <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">{formatUsd(realizedProfit)}</div>
+                    <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">
+                        <NumberFlowValue value={realizedProfit} formatter={(v) => formatUsd(v)} />
+                    </div>
                 </div>
                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
                     <div className="text-[11px] text-zinc-500 dark:text-white/40">未实现(浮动)</div>
-                    <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">{formatUsd(unrealizedProfit)}</div>
+                    <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">
+                        <NumberFlowValue value={unrealizedProfit} formatter={(v) => formatUsd(v)} />
+                    </div>
                 </div>
                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
                     <div className="text-[11px] text-zinc-500 dark:text-white/40">交易数</div>
-                    <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">{Number(data?.trades_count ?? 0) || 0}</div>
+                    <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">
+                        <NumberFlowValue value={Number(data?.trades_count ?? 0) || 0} formatOptions={{ maximumFractionDigits: 0 }} />
+                    </div>
                 </div>
             </div>
 
@@ -357,7 +364,9 @@ export default function AutoPnLCurveCard({ data, loading, error, theme = 'dark' 
                                                     {label} {e.pair || '--'} <span className="ml-2 text-zinc-500 dark:text-white/40">{formatEventTime(e.t)}</span>
                                                 </div>
                                             </div>
-                                            <div className={`shrink-0 font-semibold tabular-nums ${tone}`}>{valueText}</div>
+                                            <div className={`shrink-0 font-semibold tabular-nums ${tone}`}>
+                                                <NumberFlowValue value={valueText} formatter={() => valueText} />
+                                            </div>
                                         </div>
                                     );
                                 })}

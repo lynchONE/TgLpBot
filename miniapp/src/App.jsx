@@ -8,6 +8,7 @@ import SmartMoneyCard from './components/SmartMoneyCard.jsx';
 import SystemConfigCard from './components/SystemConfigCard.jsx';
 import BottomSheet from './components/BottomSheet.jsx';
 import ModuleHeader from './components/ModuleHeader.jsx';
+import NumberFlowValue from './components/NumberFlowValue.jsx';
 import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
 import AdminPage from './components/AdminPage.jsx';
 import {
@@ -2119,7 +2120,9 @@ export default function App() {
                         </div>
                         <div>
                             <div className="text-lg font-extrabold tracking-tight">{activeModuleMeta.title}</div>
-                            <div className="mt-0.5 text-xs text-zinc-500 dark:text-white/40">{activeModuleMeta.subtitle}</div>
+                            <div className="mt-0.5 text-xs text-zinc-500 dark:text-white/40">
+                                <NumberFlowValue value={activeModuleMeta.subtitle} formatter={() => activeModuleMeta.subtitle} />
+                            </div>
                         </div>
                     </div>
 
@@ -2155,7 +2158,9 @@ export default function App() {
                         actions={hasAdminPositions ? (
                             <div className="text-right">
                                 <div className="text-[11px] text-zinc-500 dark:text-white/40">自动刷新</div>
-                                <div className="text-sm font-semibold tabular-nums">{pollIntervalSec}s</div>
+                                <div className="text-sm font-semibold tabular-nums">
+                                    <NumberFlowValue value={pollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s
+                                </div>
                             </div>
                         ) : null}
                     >
@@ -2163,10 +2168,11 @@ export default function App() {
                             <div>
                                 <div className="text-[11px] text-zinc-500 dark:text-white/40">总余额</div>
                                 <div className="mt-0.5 text-2xl font-extrabold tabular-nums text-zinc-900 dark:text-emerald-300">
-                                    {formatUsd(totalUsd)}
+                                    <NumberFlowValue value={totalUsd} formatter={(v) => formatUsd(v)} />
                                 </div>
                                 <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40 tabular-nums">
-                                    {bnbBalance} BNB{typeof bnbUsd === 'number' ? ` ≈ ${formatUsd(bnbUsd)}` : ''}
+                                    <NumberFlowValue value={bnbBalance} formatter={() => String(bnbBalance ?? '0')} /> BNB
+                                    {typeof bnbUsd === 'number' ? <> ≈ <NumberFlowValue value={bnbUsd} formatter={(v) => formatUsd(v)} /></> : ''}
                                 </div>
                             </div>
                         ) : null}
@@ -2227,18 +2233,21 @@ export default function App() {
                         <div className="flex flex-col">
                             <div className="flex items-center gap-2">
                                 <div className="text-[15px] font-bold text-zinc-900 dark:text-white/95">{isMonitor ? '监控概览' : '仓位概览'}</div>
-                                <div className="text-xs text-zinc-500 dark:text-white/40">{bnbBalance} BNB{typeof bnbUsd === 'number' ? ` ≈ ${formatUsd(bnbUsd)}` : ''}</div>
+                                <div className="text-xs text-zinc-500 dark:text-white/40">
+                                    <NumberFlowValue value={bnbBalance} formatter={() => String(bnbBalance ?? '0')} /> BNB
+                                    {typeof bnbUsd === 'number' ? <> ≈ <NumberFlowValue value={bnbUsd} formatter={(v) => formatUsd(v)} /></> : ''}
+                                </div>
                             </div>
                             <div className="mt-1 flex items-baseline gap-2">
                                 <div className="text-[11px] text-zinc-500 dark:text-white/50">总余额</div>
                                 <div className="text-xl font-extrabold tabular-nums text-zinc-900 dark:text-emerald-400 tracking-tight">
-                                    {formatUsd(totalUsd)}
+                                    <NumberFlowValue value={totalUsd} formatter={(v) => formatUsd(v)} />
                                 </div>
                             </div>
                         </div>
                         <div className="flex flex-col items-end gap-1.5 shrink-0">
                             <div className="text-[10px] text-zinc-500 dark:text-white/40 flex items-center gap-1">
-                                刷新 <span className="font-semibold text-zinc-700 dark:text-white/70">{pollIntervalSec}s</span>
+                                刷新 <span className="font-semibold text-zinc-700 dark:text-white/70"><NumberFlowValue value={pollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s</span>
                             </div>
                             <button
                                 type="button"
@@ -2913,11 +2922,15 @@ export default function App() {
                                         <div className="grid grid-cols-2 gap-3 text-xs text-zinc-500 dark:text-white/50">
                                             <div>
                                                 <div>再平衡超时</div>
-                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{rebalanceText}</div>
+                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">
+                                                    <NumberFlowValue value={rebalanceText} formatter={() => rebalanceText} />
+                                                </div>
                                             </div>
                                             <div>
                                                 <div>滑点</div>
-                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{slippageText}</div>
+                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">
+                                                    <NumberFlowValue value={slippageText} formatter={() => slippageText} />
+                                                </div>
                                             </div>
                                             <div>
                                                 <div>秒止损</div>
@@ -2925,7 +2938,9 @@ export default function App() {
                                             </div>
                                             <div>
                                                 <div>秒止损阈值</div>
-                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{stopLossDelayText}</div>
+                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">
+                                                    <NumberFlowValue value={stopLossDelayText} formatter={() => stopLossDelayText} />
+                                                </div>
                                             </div>
                                             <div>
                                                 <div>复投</div>
@@ -2933,7 +2948,9 @@ export default function App() {
                                             </div>
                                             <div>
                                                 <div>剩余资产容忍度</div>
-                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{residualText}</div>
+                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">
+                                                    <NumberFlowValue value={residualText} formatter={() => residualText} />
+                                                </div>
                                             </div>
                                             <div>
                                                 <div>日志通知</div>
@@ -2992,7 +3009,11 @@ export default function App() {
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">自动刷新</div>
                                     <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
-                                        当前：{settingsPollIntervalSec}s（{pollOverrideSec ? '自定义' : `默认 ${settingsServerPollIntervalSec}s`})
+                                        当前：<NumberFlowValue value={settingsPollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s（
+                                        {pollOverrideSec
+                                            ? '自定义'
+                                            : <>默认 <NumberFlowValue value={settingsServerPollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s</>}
+                                        ）
                                     </div>
                                     <div className="mt-3 flex flex-wrap gap-2">
                                         {[5, 10, 15, 30, 60].map((sec) => (

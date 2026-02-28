@@ -1,8 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { formatRelativeTime } from '../lib/time';
-import { fetchSmartMoneyFollowConfigs, fetchSmartMoneyGoldenDogConfig, saveSmartMoneyGoldenDogConfig } from '../lib/api';
+import {
+    fetchSmartMoneyFollowConfigs,
+    fetchSmartMoneyGoldenDogConfig,
+    fetchSmartMoneyPoolAdds,
+    saveSmartMoneyGoldenDogConfig,
+} from '../lib/api';
 import { copyToClipboard, hapticImpact, hapticNotification } from '../lib/telegram';
 import ModuleHeader from './ModuleHeader.jsx';
+import NumberFlowValue from './NumberFlowValue.jsx';
 import SmartMoneyFollowModal from './SmartMoneyFollowModal.jsx';
 import SmartMoneyPoolAddsModal from './SmartMoneyPoolAddsModal.jsx';
 import SmartMoneyWalletPositionsModal from './SmartMoneyWalletPositionsModal.jsx';
@@ -13,6 +19,10 @@ const usdFormatter = new Intl.NumberFormat('en-US', {
     currency: 'USD',
     maximumFractionDigits: 2,
 });
+const usdPlainFormatter = new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+});
 
 function formatUsd(v) {
     const n = Number(v ?? 0);
@@ -20,10 +30,24 @@ function formatUsd(v) {
     return usdFormatter.format(n);
 }
 
+function formatUsdPlain(v) {
+    const n = Number(v ?? 0);
+    if (!Number.isFinite(n) || Math.abs(n) > USD_DISPLAY_LIMIT) return '--';
+    return usdPlainFormatter.format(n);
+}
+
 function formatPct(v, digits = 2) {
     const n = Number(v);
     if (!Number.isFinite(n)) return '--';
     return `${n.toFixed(digits)}%`;
+}
+
+function formatPrice(v) {
+    const n = Number(v ?? 0);
+    if (!Number.isFinite(n) || n <= 0) return '--';
+    if (n >= 1000) return n.toFixed(2);
+    if (n >= 1) return n.toFixed(4).replace(/\.?0+$/, '');
+    return n.toPrecision(4);
 }
 
 function formatWindowLabel(windowSec) {
@@ -116,6 +140,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
     const [goldenMinWallets, setGoldenMinWallets] = useState('3');
     const [goldenWindowMinutes, setGoldenWindowMinutes] = useState('10');
     const [goldenCooldownMinutes, setGoldenCooldownMinutes] = useState('30');
+    const [poolAddsPreviewMap, setPoolAddsPreviewMap] = useState({});
 
     const updatedAtText = useMemo(
         () => formatRelativeTime(overview?.updated_at, tick) || '--',
@@ -146,6 +171,143 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                 return tb - ta;
             });
     }, [followConfigs]);
+
+    useEffect(() => {
+        setPoolAddsPreviewMap({});
+    }, [chain, initData]);
+
+    useEffect(() => {
+        if (activeTab !== 'overview') return;
+        if (!initData) return;
+        if (!Array.isArray(topPools) || topPools.length === 0) return;
+
+        const now = Date.now();
+        const targets = topPools
+            .map((pool) => {
+                const poolVersion = String(pool?.pool_version || '').trim().toLowerCase();
+                const poolId = String(pool?.pool_id || '').trim();
+                if (!poolVersion || !poolId) return null;
+                if (poolVersion !== 'v3' && poolVersion !== 'v4') return null;
+                const walletCount = Number(pool?.wallet_count ?? 0);
+                const limit = Number.isFinite(walletCount) && walletCount > 0
+                    ? Math.max(20, Math.min(200, Math.round(walletCount)))
+                    : 60;
+                return {
+                    key: `${poolVersion}:${poolId}`,
+                    poolVersion,
+                    poolId,
+                    limit,
+                };
+            })
+            .filter(Boolean)
+            .filter((item) => {
+                const cached = poolAddsPreviewMap[item.key];
+                if (!cached) return true;
+                const fetchedAt = Number(cached?.fetchedAt ?? 0);
+                if (cached?.status === 'loading') return false;
+                if (cached?.status === 'error' && now - fetchedAt < 20_000) return false;
+                if (cached?.status === 'success' && now - fetchedAt < 45_000) return false;
+                return true;
+            });
+
+        if (targets.length === 0) return;
+
+        let aborted = false;
+        const controller = new AbortController();
+
+        setPoolAddsPreviewMap((prev) => {
+            const next = { ...(prev || {}) };
+            targets.forEach((item) => {
+                const prevItem = next[item.key] || {};
+                next[item.key] = {
+                    ...prevItem,
+                    status: 'loading',
+                    error: '',
+                    fetchedAt: Number(prevItem?.fetchedAt ?? 0),
+                    wallets: Array.isArray(prevItem?.wallets) ? prevItem.wallets : [],
+                    totalUsd: Number(prevItem?.totalUsd ?? 0),
+                };
+            });
+            return next;
+        });
+
+        let cursor = 0;
+        const worker = async () => {
+            while (!aborted) {
+                const task = targets[cursor];
+                cursor += 1;
+                if (!task) break;
+
+                try {
+                    const resp = await fetchSmartMoneyPoolAdds({
+                        apiBaseUrl,
+                        initData,
+                        chain,
+                        poolVersion: task.poolVersion,
+                        poolId: task.poolId,
+                        windowHours: poolsWindowHours,
+                        limit: task.limit,
+                        feesLimit: 0,
+                        signal: controller.signal,
+                    });
+                    if (aborted) return;
+
+                    const rawWallets = Array.isArray(resp?.wallets) ? resp.wallets : [];
+                    const totalUsd = rawWallets.reduce((acc, row) => {
+                        const n = Number(row?.total_usd ?? 0);
+                        if (!Number.isFinite(n) || n <= 0) return acc;
+                        return acc + n;
+                    }, 0);
+
+                    const wallets = rawWallets.map((row, rowIndex) => {
+                        const amountUsd = Number(row?.total_usd ?? 0);
+                        const sharePct = totalUsd > 0 && Number.isFinite(amountUsd) ? (amountUsd / totalUsd) * 100 : 0;
+                        return {
+                            ...row,
+                            _rank: rowIndex + 1,
+                            _share_pct: sharePct,
+                        };
+                    });
+
+                    setPoolAddsPreviewMap((prev) => ({
+                        ...(prev || {}),
+                        [task.key]: {
+                            status: 'success',
+                            error: '',
+                            fetchedAt: Date.now(),
+                            wallets,
+                            totalUsd,
+                            warnings: Array.isArray(resp?.warnings) ? resp.warnings : [],
+                        },
+                    }));
+                } catch (e) {
+                    if (aborted) return;
+                    setPoolAddsPreviewMap((prev) => {
+                        const prevItem = (prev || {})[task.key] || {};
+                        return {
+                            ...(prev || {}),
+                            [task.key]: {
+                                ...prevItem,
+                                status: 'error',
+                                error: String(e?.message || e),
+                                fetchedAt: Date.now(),
+                                wallets: Array.isArray(prevItem?.wallets) ? prevItem.wallets : [],
+                                totalUsd: Number(prevItem?.totalUsd ?? 0),
+                            },
+                        };
+                    });
+                }
+            }
+        };
+
+        const workers = Array.from({ length: Math.min(3, targets.length) }, () => worker());
+        Promise.all(workers).catch(() => { });
+
+        return () => {
+            aborted = true;
+            controller.abort();
+        };
+    }, [activeTab, apiBaseUrl, initData, chain, poolsWindowHours, topPools, poolAddsPreviewMap]);
 
     useEffect(() => {
         if (!initData) {
@@ -346,19 +508,27 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                 <div className="mt-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                     <div className="mb-3 flex items-center justify-between">
                         <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">最近{poolWindowLabel}参与池子</div>
-                        <div className="text-[11px] text-zinc-500 dark:text-white/40">{topPools.length} 个</div>
+                        <div className="text-[11px] text-zinc-500 dark:text-white/40">
+                            <NumberFlowValue value={topPools.length} formatOptions={{ maximumFractionDigits: 0 }} /> 个
+                        </div>
                     </div>
 
                     {topPools.length ? (
-                        <div className="max-h-[58vh] space-y-2 overflow-y-auto overscroll-contain pr-1">
+                        <div className="max-h-[62vh] space-y-2 overflow-y-auto overscroll-contain pr-1">
                             {topPools.map((pool, index) => {
                                 const poolId = String(pool?.pool_id || '').trim();
                                 const pair = String(pool?.pair || '').trim();
                                 const version = String(pool?.pool_version || '').trim().toUpperCase();
+                                const poolVersionLower = String(pool?.pool_version || '').trim().toLowerCase();
                                 const feePct = Number(pool?.fee_pct);
                                 const walletCount = Number(pool?.wallet_count ?? 0);
                                 const rank = index + 1;
                                 const key = `${version || 'POOL'}:${poolId || rank}`;
+                                const previewKey = `${poolVersionLower}:${poolId}`;
+                                const preview = poolAddsPreviewMap[previewKey] || null;
+                                const previewStatus = String(preview?.status || '');
+                                const previewWallets = Array.isArray(preview?.wallets) ? preview.wallets : [];
+                                const previewError = String(preview?.error || '').trim();
                                 return (
                                     <div
                                         key={key}
@@ -368,7 +538,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                             <div className="min-w-0">
                                                 <div className="flex items-center gap-1.5">
                                                     <span className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-md bg-zinc-100 px-1 text-[10px] font-bold text-zinc-700 dark:bg-white/10 dark:text-white/80">
-                                                        #{rank}
+                                                        #<NumberFlowValue value={rank} formatOptions={{ maximumFractionDigits: 0 }} />
                                                     </span>
                                                     <span className="truncate text-[12px] font-semibold text-zinc-900 dark:text-white/90">
                                                         {pair || shortHex(poolId, 10, 6) || '--'}
@@ -376,12 +546,98 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                                 </div>
                                                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-500 dark:text-white/45">
                                                     <span>{version || '--'}</span>
-                                                    {Number.isFinite(feePct) && feePct > 0 ? <span>{formatPct(feePct)}</span> : null}
+                                                    {Number.isFinite(feePct) && feePct > 0 ? (
+                                                        <span>
+                                                            <NumberFlowValue value={feePct} formatter={(v) => formatPct(v)} />
+                                                        </span>
+                                                    ) : null}
                                                 </div>
                                             </div>
                                             <div className="shrink-0 rounded-lg bg-emerald-500/10 px-2 py-1 text-right text-[10px] font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
-                                                钱包数 {Number.isFinite(walletCount) ? walletCount : '--'}
+                                                钱包数{' '}
+                                                <NumberFlowValue
+                                                    value={Number.isFinite(walletCount) ? walletCount : 0}
+                                                    formatOptions={{ maximumFractionDigits: 0 }}
+                                                />
                                             </div>
+                                        </div>
+
+                                        <div className="mt-2 rounded-lg border border-zinc-200 bg-zinc-50/80 p-2 dark:border-white/10 dark:bg-[#0f1116]">
+                                            <div className="mb-1 grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] items-center gap-2 text-[10px] font-semibold text-zinc-500 dark:text-white/45">
+                                                <span className="truncate">钱包 / 区间</span>
+                                                <span className="truncate text-right">金额(USDT)</span>
+                                                <span className="text-right">占比</span>
+                                            </div>
+
+                                            {previewStatus === 'loading' && previewWallets.length === 0 ? (
+                                                <div className="space-y-1.5">
+                                                    <div className="h-8 animate-shimmer rounded-lg" />
+                                                    <div className="h-8 animate-shimmer rounded-lg" />
+                                                </div>
+                                            ) : null}
+
+                                            {previewStatus === 'error' ? (
+                                                <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 text-[10px] text-red-700 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-200">
+                                                    {previewError || '加载失败，稍后自动重试'}
+                                                </div>
+                                            ) : null}
+
+                                            {previewWallets.length > 0 ? (
+                                                <div className="max-h-44 space-y-1 overflow-y-auto overscroll-contain pr-1">
+                                                    {previewWallets.map((row, rowIdx) => {
+                                                        const walletAddr = String(row?.wallet_address || '').trim();
+                                                        const amountUsd = Number(row?.total_usd ?? 0);
+                                                        const sharePct = Number(row?._share_pct ?? 0);
+                                                        const priceLower = Number(row?.price_lower ?? 0);
+                                                        const priceUpper = Number(row?.price_upper ?? 0);
+                                                        const quote = String(row?.price_quote || '').trim();
+                                                        const rangeText = Number.isFinite(priceLower) && priceLower > 0 && Number.isFinite(priceUpper) && priceUpper > 0
+                                                            ? `${formatPrice(priceLower)} - ${formatPrice(priceUpper)} ${quote || ''}`
+                                                            : '--';
+                                                        return (
+                                                            <div
+                                                                key={`${walletAddr || rowIdx}-${row?._rank || rowIdx}`}
+                                                                className="rounded-lg border border-zinc-200/80 bg-white/80 px-2 py-1.5 dark:border-white/10 dark:bg-white/5"
+                                                            >
+                                                                <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] items-center gap-2">
+                                                                    <div className="min-w-0">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                hapticImpact('light');
+                                                                                safeCopy(walletAddr, onNotice);
+                                                                            }}
+                                                                            className="max-w-full truncate font-mono text-[10px] font-semibold text-zinc-900 hover:text-emerald-700 dark:text-white/90 dark:hover:text-emerald-300"
+                                                                            title={walletAddr}
+                                                                        >
+                                                                            {shortHex(walletAddr, 8, 6) || '--'}
+                                                                        </button>
+                                                                        <div className="mt-0.5 truncate text-[10px] text-zinc-500 dark:text-white/45">
+                                                                            区间 {rangeText}
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="truncate text-right text-[11px] font-semibold text-zinc-900 dark:text-white/85">
+                                                                        <NumberFlowValue
+                                                                            value={Number.isFinite(amountUsd) ? amountUsd : 0}
+                                                                            formatter={(v) => formatUsdPlain(v)}
+                                                                        />
+                                                                    </div>
+                                                                    <div className="text-right text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
+                                                                        <NumberFlowValue
+                                                                            value={Number.isFinite(sharePct) ? sharePct : 0}
+                                                                            formatter={(v) => `${formatPct(v, 1)}`}
+                                                                        />
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            ) : previewStatus !== 'loading' ? (
+                                                <div className="rounded-lg border border-zinc-200/80 bg-white/70 px-2 py-1.5 text-[10px] text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/55">
+                                                    暂无参与钱包明细
+                                                </div>
+                                            ) : null}
                                         </div>
 
                                         <div className="mt-2 flex items-center justify-end gap-1.5">
@@ -392,7 +648,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                                     safeCopy(poolId, onNotice);
                                                 }}
                                                 disabled={!poolId}
-                                                className="inline-flex items-center rounded-lg bg-zinc-100 px-2.5 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 disabled:opacity-40 dark:bg-white/8 dark:text-white/75 dark:hover:bg-white/12"
+                                                className="inline-flex items-center rounded-lg bg-amber-300 px-2.5 py-1 text-[10px] font-semibold text-amber-950 hover:bg-amber-200 disabled:opacity-40 dark:bg-amber-300 dark:text-amber-950 dark:hover:bg-amber-200"
                                             >
                                                 复制池子ID
                                             </button>
@@ -482,7 +738,9 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                         <div className="mb-2 flex items-center justify-between">
                             <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">已开启跟单钱包</div>
                             <div className="inline-flex items-center gap-2">
-                                <span className="text-[11px] text-zinc-500 dark:text-white/40">{followConfigsLoading ? '加载中…' : `${enabledFollowWallets.length} 个`}</span>
+                                <span className="text-[11px] text-zinc-500 dark:text-white/40">
+                                    {followConfigsLoading ? '加载中…' : <><NumberFlowValue value={enabledFollowWallets.length} formatOptions={{ maximumFractionDigits: 0 }} /> 个</>}
+                                </span>
                                 <button
                                     type="button"
                                     onClick={() => {
@@ -517,7 +775,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                             <div className="min-w-0">
                                                 <div className="truncate text-[11px] font-semibold text-zinc-800 dark:text-white/85">{shortHex(wallet, 10, 8)}</div>
                                                 <div className="text-[10px] text-zinc-500 dark:text-white/40">
-                                                    单次 {formatUsd(perTrade)} · 总额 {formatUsd(maxTotal)} · 延迟 {Number.isFinite(dMin) ? dMin : 0}-{Number.isFinite(dMax) ? dMax : 60}s
+                                                    单次 <NumberFlowValue value={perTrade} formatter={(v) => formatUsd(v)} /> · 总额 <NumberFlowValue value={maxTotal} formatter={(v) => formatUsd(v)} /> · 延迟 <NumberFlowValue value={Number.isFinite(dMin) ? dMin : 0} formatOptions={{ maximumFractionDigits: 0 }} />-<NumberFlowValue value={Number.isFinite(dMax) ? dMax : 60} formatOptions={{ maximumFractionDigits: 0 }} />s
                                                 </div>
                                             </div>
                                             <div className="shrink-0 inline-flex items-center gap-1.5">

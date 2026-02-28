@@ -12,6 +12,7 @@ import {
     disableAdminAutoLP,
 } from '../lib/api';
 import { formatRelativeTime } from '../lib/time';
+import NumberFlowValue from './NumberFlowValue.jsx';
 
 /**
  * 格式化用户标签
@@ -254,7 +255,9 @@ export default function AdminPage({
                 <div className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none">
                     <div className="flex items-center justify-between mb-3">
                         <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">在线用户</div>
-                        <div className="text-[11px] text-zinc-500 dark:text-white/40">{onlineUsers.length} 人</div>
+                        <div className="text-[11px] text-zinc-500 dark:text-white/40">
+                            <NumberFlowValue value={onlineUsers.length} formatOptions={{ maximumFractionDigits: 0 }} /> 人
+                        </div>
                     </div>
                     <AdminOnlineUsers
                         users={onlineUsers}
@@ -272,7 +275,9 @@ export default function AdminPage({
                 <div className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none">
                     <div className="flex items-center justify-between mb-3">
                         <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">活跃任务</div>
-                        <div className="text-[11px] text-zinc-500 dark:text-white/40">{activeTasks.length} 个</div>
+                        <div className="text-[11px] text-zinc-500 dark:text-white/40">
+                            <NumberFlowValue value={activeTasks.length} formatOptions={{ maximumFractionDigits: 0 }} /> 个
+                        </div>
                     </div>
                     <AdminActiveTasks
                         tasks={activeTasks}
@@ -340,11 +345,15 @@ export default function AdminPage({
                                             <div>
                                                 <div className="text-[11px] text-zinc-500 dark:text-white/40">总余额</div>
                                                 <div className="mt-0.5 text-xl font-extrabold tabular-nums text-zinc-900 dark:text-emerald-300">
-                                                    ${userSummary.totalUsd.toFixed(2)}
+                                                    <NumberFlowValue value={userSummary.totalUsd} formatter={(v) => `$${Number(v || 0).toFixed(2)}`} />
                                                 </div>
                                                 <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40 tabular-nums">
-                                                    {userSummary.bnbBalance} BNB
-                                                    {typeof userSummary.bnbUsd === 'number' ? ` ≈ $${userSummary.bnbUsd.toFixed(2)}` : ''}
+                                                    <NumberFlowValue value={userSummary.bnbBalance} formatter={() => String(userSummary.bnbBalance || '0')} /> BNB
+                                                    {typeof userSummary.bnbUsd === 'number' ? (
+                                                        <span>
+                                                            {' '}≈ <NumberFlowValue value={userSummary.bnbUsd} formatter={(v) => `$${Number(v || 0).toFixed(2)}`} />
+                                                        </span>
+                                                    ) : ''}
                                                 </div>
                                             </div>
                                             <button
@@ -370,7 +379,7 @@ export default function AdminPage({
 
                                 {disableAutoResult && (
                                     <div className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-700 dark:text-emerald-200">
-                                        已发起关闭：找到 {disableAutoResult.tasks_found} 个 Auto 任务，已请求撤出 {disableAutoResult.exit_requested} 个。
+                                        已发起关闭：找到 <NumberFlowValue value={disableAutoResult.tasks_found || 0} formatOptions={{ maximumFractionDigits: 0 }} /> 个 Auto 任务，已请求撤出 <NumberFlowValue value={disableAutoResult.exit_requested || 0} formatOptions={{ maximumFractionDigits: 0 }} /> 个。
                                     </div>
                                 )}
                             </div>
@@ -388,25 +397,25 @@ export default function AdminPage({
                                         <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                             <div className="text-[11px] text-zinc-500 dark:text-white/40">累计收益</div>
                                             <div className="mt-0.5 text-sm font-extrabold tabular-nums text-emerald-700 dark:text-emerald-300">
-                                                {userAutoStats?.formatted?.profit_usdt ?? '--'} USDT
+                                                <NumberFlowValue value={userAutoStats?.formatted?.profit_usdt ?? '--'} formatter={() => `${userAutoStats?.formatted?.profit_usdt ?? '--'}`} /> USDT
                                             </div>
                                         </div>
                                         <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                             <div className="text-[11px] text-zinc-500 dark:text-white/40">Gas 消耗</div>
                                             <div className="mt-0.5 text-sm font-extrabold tabular-nums text-zinc-900 dark:text-white/80">
-                                                {userAutoStats?.formatted?.gas_usdt ?? '--'} USDT
+                                                <NumberFlowValue value={userAutoStats?.formatted?.gas_usdt ?? '--'} formatter={() => `${userAutoStats?.formatted?.gas_usdt ?? '--'}`} /> USDT
                                             </div>
                                         </div>
                                         <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                             <div className="text-[11px] text-zinc-500 dark:text-white/40">开仓 / 再平衡</div>
                                             <div className="mt-0.5 text-sm font-extrabold tabular-nums text-zinc-900 dark:text-white/80">
-                                                {userAutoStats.stats.open_count} / {userAutoStats.stats.rebalance_count}
+                                                <NumberFlowValue value={userAutoStats.stats.open_count || 0} formatOptions={{ maximumFractionDigits: 0 }} /> / <NumberFlowValue value={userAutoStats.stats.rebalance_count || 0} formatOptions={{ maximumFractionDigits: 0 }} />
                                             </div>
                                         </div>
                                         <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                             <div className="text-[11px] text-zinc-500 dark:text-white/40">撤退卫士</div>
                                             <div className="mt-0.5 text-sm font-extrabold tabular-nums text-zinc-900 dark:text-white/80">
-                                                {userAutoStats.stats.guard_count}
+                                                <NumberFlowValue value={userAutoStats.stats.guard_count || 0} formatOptions={{ maximumFractionDigits: 0 }} />
                                             </div>
                                         </div>
                                     </div>
@@ -423,7 +432,9 @@ export default function AdminPage({
                             <div className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none">
                                 <div className="flex items-center justify-between mb-3">
                                     <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">用户仓位</div>
-                                    <div className="text-[11px] text-zinc-500 dark:text-white/40">{userPositionsList.length} 个</div>
+                                    <div className="text-[11px] text-zinc-500 dark:text-white/40">
+                                        <NumberFlowValue value={userPositionsList.length} formatOptions={{ maximumFractionDigits: 0 }} /> 个
+                                    </div>
                                 </div>
 
                                 {userPositionsError && (

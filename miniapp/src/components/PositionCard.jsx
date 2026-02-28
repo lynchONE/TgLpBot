@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { openLink } from '../lib/telegram';
 import { useDurationFrom, useRelativeTime } from '../lib/time';
 import PriceRangeVisualizer from './PriceRangeVisualizer';
+import NumberFlowValue from './NumberFlowValue.jsx';
 
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -341,7 +342,7 @@ export default function PositionCard({
                                 </span>
                                 {feeLabel && (
                                     <span className="inline-flex items-center rounded bg-violet-500/12 px-1.5 py-0.5 text-[10px] font-bold text-violet-600 dark:bg-violet-500/18 dark:text-violet-300 ring-1 ring-violet-500/20 dark:ring-violet-400/25 shrink-0">
-                                        {feeLabel}
+                                        <NumberFlowValue value={feeLabel} formatter={() => feeLabel} />
                                     </span>
                                 )}
                             </div>
@@ -353,12 +354,12 @@ export default function PositionCard({
                                 </span>
                                 {taskId > 0 && (
                                     <span className="text-[10px] font-medium text-zinc-400 dark:text-white/30 shrink-0">
-                                        #{taskId}
+                                        #<NumberFlowValue value={taskId} formatOptions={{ maximumFractionDigits: 0 }} />
                                     </span>
                                 )}
                                 {updateTimeText ? (
                                     <span className="inline-flex items-center rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-600 ring-1 ring-zinc-200 dark:bg-white/10 dark:text-white/70 dark:ring-white/15">
-                                        更新 {updateTimeText}
+                                        更新 <NumberFlowValue value={updateTimeText} formatter={() => updateTimeText} />
                                     </span>
                                 ) : null}
                             </div>
@@ -371,7 +372,7 @@ export default function PositionCard({
                         <div className="text-right">
                             <div className="text-[9px] font-medium text-zinc-400 dark:text-white/35 uppercase tracking-wide mb-0.5">总计</div>
                             <div className="text-lg font-extrabold text-zinc-900 dark:text-white/95 tabular-nums leading-none">
-                                {formatUsd(totalValue)}
+                                <NumberFlowValue value={totalValue} formatter={(v) => formatUsd(v)} />
                             </div>
                             {hasPnL && (
                                 <div className="mt-1.5">
@@ -379,7 +380,10 @@ export default function PositionCard({
                                         ? 'bg-emerald-500/15 text-emerald-500 dark:bg-emerald-500/20 dark:text-emerald-400 ring-1 ring-emerald-500/20'
                                         : 'bg-red-500/15 text-red-500 dark:bg-red-500/20 dark:text-red-400 ring-1 ring-red-500/20'
                                         }`}>
-                                        {pnlAbsolute >= 0 ? '+' : ''}{formatBotAmount(pnlAbsolute)}
+                                        <NumberFlowValue
+                                            value={pnlAbsolute}
+                                            formatter={(v) => `${Number(v) >= 0 ? '+' : ''}${formatBotAmount(v)}`}
+                                        />
                                     </div>
                                 </div>
                             )}
@@ -440,7 +444,7 @@ export default function PositionCard({
                             <div className="text-[10px] font-semibold text-zinc-500 dark:text-white/50 uppercase tracking-wide">余额明细</div>
                             {!expanded && (
                                 <div className="text-[9px] text-zinc-400 dark:text-white/35 tabular-nums">
-                                    仓位 {formatUsd(position?.totals?.position_usd)} · 费用 {formatFeeUsd(position?.totals?.fee_usd)}
+                                    仓位 <NumberFlowValue value={position?.totals?.position_usd} formatter={(v) => formatUsd(v)} /> · 费用 <NumberFlowValue value={position?.totals?.fee_usd} formatter={(v) => formatFeeUsd(v)} />
                                 </div>
                             )}
                         </div>
@@ -468,20 +472,35 @@ export default function PositionCard({
                                     <div className="min-w-0 pr-1">
                                         <div className="text-[13px] font-bold text-zinc-900 dark:text-white/95 truncate">{row.symbol}</div>
                                         <div className="text-xs text-zinc-500 dark:text-white/50 font-mono">
-                                            {row.price_usd_text || `$${Number(row.price_usd || 0).toFixed(4)}`}
+                                            <NumberFlowValue
+                                                value={row.price_usd_text || `$${Number(row.price_usd || 0).toFixed(4)}`}
+                                                formatter={() => row.price_usd_text || `$${Number(row.price_usd || 0).toFixed(4)}`}
+                                            />
                                         </div>
                                     </div>
                                     <div className="text-right min-w-0">
-                                        <div className="text-[13px] font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">{row.wallet_amount}</div>
-                                        <div className="text-xs text-zinc-500 dark:text-white/50 font-mono tabular-nums truncate">{formatUsd(row.wallet_usd)}</div>
+                                        <div className="text-[13px] font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">
+                                            <NumberFlowValue value={row.wallet_amount} formatter={() => String(row.wallet_amount ?? '--')} />
+                                        </div>
+                                        <div className="text-xs text-zinc-500 dark:text-white/50 font-mono tabular-nums truncate">
+                                            <NumberFlowValue value={row.wallet_usd} formatter={(v) => formatUsd(v)} />
+                                        </div>
                                     </div>
                                     <div className="text-right min-w-0">
-                                        <div className="text-[13px] font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">{row.position_amount}</div>
-                                        <div className="text-xs text-zinc-500 dark:text-white/50 font-mono tabular-nums truncate">{formatUsd(row.position_usd)}</div>
+                                        <div className="text-[13px] font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">
+                                            <NumberFlowValue value={row.position_amount} formatter={() => String(row.position_amount ?? '--')} />
+                                        </div>
+                                        <div className="text-xs text-zinc-500 dark:text-white/50 font-mono tabular-nums truncate">
+                                            <NumberFlowValue value={row.position_usd} formatter={(v) => formatUsd(v)} />
+                                        </div>
                                     </div>
                                     <div className="text-right min-w-0">
-                                        <div className="text-[13px] font-bold text-emerald-600 dark:text-emerald-400 font-mono tabular-nums truncate">{row.fee_amount}</div>
-                                        <div className="text-xs text-emerald-600/70 dark:text-emerald-400/70 font-mono tabular-nums truncate">{formatFeeUsd(row.fee_usd)}</div>
+                                        <div className="text-[13px] font-bold text-emerald-600 dark:text-emerald-400 font-mono tabular-nums truncate">
+                                            <NumberFlowValue value={row.fee_amount} formatter={() => String(row.fee_amount ?? '--')} />
+                                        </div>
+                                        <div className="text-xs text-emerald-600/70 dark:text-emerald-400/70 font-mono tabular-nums truncate">
+                                            <NumberFlowValue value={row.fee_usd} formatter={(v) => formatFeeUsd(v)} />
+                                        </div>
                                     </div>
                                 </div>
                             ))}
@@ -510,9 +529,15 @@ export default function PositionCard({
                             {/* 灏忚琛?*/}
                             <div className="pt-2 grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2 mt-1 border-t border-zinc-100/60 dark:border-white/10">
                                 <div className="text-xs font-bold text-zinc-500 dark:text-white/70">小计</div>
-                                <div className="text-right text-xs font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">{formatUsd(position?.totals?.wallet_usd)}</div>
-                                <div className="text-right text-xs font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">{formatUsd(position?.totals?.position_usd)}</div>
-                                <div className="text-right text-xs font-bold text-emerald-600 dark:text-emerald-400 font-mono tabular-nums truncate">{formatFeeUsd(position?.totals?.fee_usd)}</div>
+                                <div className="text-right text-xs font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">
+                                    <NumberFlowValue value={position?.totals?.wallet_usd} formatter={(v) => formatUsd(v)} />
+                                </div>
+                                <div className="text-right text-xs font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">
+                                    <NumberFlowValue value={position?.totals?.position_usd} formatter={(v) => formatUsd(v)} />
+                                </div>
+                                <div className="text-right text-xs font-bold text-emerald-600 dark:text-emerald-400 font-mono tabular-nums truncate">
+                                    <NumberFlowValue value={position?.totals?.fee_usd} formatter={(v) => formatFeeUsd(v)} />
+                                </div>
                             </div>
                         </div>
                     </div>

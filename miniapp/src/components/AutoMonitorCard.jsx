@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { formatRelativeTime } from '../lib/time';
+import NumberFlowValue from './NumberFlowValue.jsx';
 
 const USD_DISPLAY_LIMIT = 1e15;
 const usdFormatter = new Intl.NumberFormat('en-US', {
@@ -184,7 +185,7 @@ export default function AutoMonitorCard({ task, tick, isBlacklisted = false }) {
                             )}
                         </div>
                         <div className="mt-0.5 text-[10px] text-zinc-400 dark:text-white/35">
-                            #{task?.task_id} · {task?.exchange || '--'} · {status || '--'}
+                            #<NumberFlowValue value={task?.task_id || 0} formatOptions={{ maximumFractionDigits: 0 }} /> · {task?.exchange || '--'} · {status || '--'}
                         </div>
                     </div>
                     <div className="flex flex-wrap items-end justify-end gap-1 shrink-0">
@@ -211,7 +212,7 @@ export default function AutoMonitorCard({ task, tick, isBlacklisted = false }) {
                             基准<span className="ml-1 normal-case text-[9px] opacity-75">({baselineLabel})</span>
                         </div>
                         <div className="px-2 py-2 text-[10px] font-semibold text-zinc-500/80 dark:text-white/45 uppercase tracking-wide text-right border-l bg-zinc-50/80 dark:bg-[#0f1116] dark:border-white/10">
-                            当前 <span className="normal-case text-[9px] opacity-60">{currentAtText}</span>
+                            当前 <span className="normal-case text-[9px] opacity-60"><NumberFlowValue value={currentAtText} formatter={() => currentAtText} /></span>
                         </div>
                     </div>
 
@@ -240,13 +241,13 @@ export default function AutoMonitorCard({ task, tick, isBlacklisted = false }) {
                                 <div key={key} className={`grid grid-cols-3 border-b border-zinc-100/60 dark:border-white/4 last:border-0 ${idx % 2 === 0 ? '' : 'bg-zinc-50/40 dark:bg-white/[0.015]'}`}>
                                     <div className="px-3 py-1.5 text-zinc-500 dark:text-white/40">{label}</div>
                                     <div className={`px-2 py-1.5 text-right tabular-nums border-l dark:border-white/4 ${isPeakBaseline ? 'bg-amber-500/[0.04]' : 'bg-sky-500/[0.04]'}`}>
-                                        {baseVal !== null ? fmt(baseVal) : '--'}
+                                        {baseVal !== null ? <NumberFlowValue value={baseVal} formatter={(v) => fmt(v)} /> : '--'}
                                     </div>
                                     <div className="px-2 py-1.5 text-right tabular-nums border-l dark:border-white/4 flex items-center justify-end gap-0.5">
-                                        <span>{curVal !== null ? fmt(curVal) : '--'}</span>
+                                        <span>{curVal !== null ? <NumberFlowValue value={curVal} formatter={(v) => fmt(v)} /> : '--'}</span>
                                         {pct !== null && (
                                             <span className={`text-[9px] font-bold ${pct > 0 ? 'text-emerald-500' : 'text-red-500'}`}>
-                                                {pct > 0 ? '↑' : '↓'}{Math.abs(pct).toFixed(0)}%
+                                                {pct > 0 ? '↑' : '↓'}<NumberFlowValue value={Math.abs(pct)} formatter={(v) => `${Number(v).toFixed(0)}%`} />
                                             </span>
                                         )}
                                     </div>
@@ -269,19 +270,19 @@ export default function AutoMonitorCard({ task, tick, isBlacklisted = false }) {
                         <div className="flex items-center gap-1">
                             <span className="text-zinc-400 dark:text-white/35">连续跌破:</span>
                             <span className={`font-bold tabular-nums ${task?.range_break_down_streak >= 2 ? 'text-red-500' : task?.range_break_down_streak >= 1 ? 'text-amber-500' : 'text-zinc-600 dark:text-white/60'}`}>
-                                {task?.range_break_down_streak || 0}<span className="opacity-50">/2</span>
+                                <NumberFlowValue value={task?.range_break_down_streak || 0} formatOptions={{ maximumFractionDigits: 0 }} /><span className="opacity-50">/2</span>
                             </span>
                         </div>
                         <div className="flex items-center gap-1">
                             <span className="text-zinc-400 dark:text-white/35">连续涨破:</span>
                             <span className={`font-bold tabular-nums ${task?.range_break_up_streak >= 2 ? 'text-amber-500' : 'text-zinc-600 dark:text-white/60'}`}>
-                                {task?.range_break_up_streak || 0}<span className="opacity-50">/2</span>
+                                <NumberFlowValue value={task?.range_break_up_streak || 0} formatOptions={{ maximumFractionDigits: 0 }} /><span className="opacity-50">/2</span>
                             </span>
                         </div>
                         {task?.next_range_multiplier > 1 && (
                             <div className="flex items-center gap-1">
                                 <span className="text-zinc-400 dark:text-white/35">下次扩大:</span>
-                                <span className="font-bold text-amber-500">{task.next_range_multiplier}x</span>
+                                <span className="font-bold text-amber-500"><NumberFlowValue value={task.next_range_multiplier} formatter={(v) => `${v}x`} /></span>
                             </div>
                         )}
                     </div>
@@ -293,11 +294,13 @@ export default function AutoMonitorCard({ task, tick, isBlacklisted = false }) {
                             <div className="text-[11px] font-semibold text-zinc-700 dark:text-white/70 mb-1.5">交易量撤退</div>
                             <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[10px]">
                                 <div className="text-zinc-400 dark:text-white/35">阈值跌幅</div>
-                                <div className="text-right font-semibold tabular-nums">{formatPct(Number(gv?.drop_pct || 0) * 100, 0)}</div>
+                                <div className="text-right font-semibold tabular-nums">
+                                    <NumberFlowValue value={Number(gv?.drop_pct || 0) * 100} formatter={(v) => formatPct(v, 0)} />
+                                </div>
                                 <div className="text-zinc-400 dark:text-white/35">当前/阈值</div>
                                 <div className="text-right font-semibold tabular-nums text-[9px] leading-snug">
-                                    {formatUsd(gv?.current_volume_5m)}<br />
-                                    <span className="opacity-60">/ {formatUsd(gv?.threshold)}</span>
+                                    <NumberFlowValue value={gv?.current_volume_5m} formatter={(v) => formatUsd(v)} /><br />
+                                    <span className="opacity-60">/ <NumberFlowValue value={gv?.threshold} formatter={(v) => formatUsd(v)} /></span>
                                 </div>
                                 {[
                                     { label: '命中阈值', hit: gv?.hit },
@@ -323,9 +326,13 @@ export default function AutoMonitorCard({ task, tick, isBlacklisted = false }) {
                             <div className="text-[11px] font-semibold text-zinc-700 dark:text-white/70 mb-1.5">价格+Tx撤退</div>
                             <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[10px]">
                                 <div className="text-zinc-400 dark:text-white/35">价格阈值</div>
-                                <div className="text-right font-semibold tabular-nums">{formatPct(Number(gp?.price_drop_pct || gp?.drop_pct || 0) * 100, 0)}</div>
+                                <div className="text-right font-semibold tabular-nums">
+                                    <NumberFlowValue value={Number(gp?.price_drop_pct || gp?.drop_pct || 0) * 100} formatter={(v) => formatPct(v, 0)} />
+                                </div>
                                 <div className="text-zinc-400 dark:text-white/35">Tx阈值</div>
-                                <div className="text-right font-semibold tabular-nums">{formatPct(Number(gp?.tx_drop_pct || gp?.drop_pct || 0) * 100, 0)}</div>
+                                <div className="text-right font-semibold tabular-nums">
+                                    <NumberFlowValue value={Number(gp?.tx_drop_pct || gp?.drop_pct || 0) * 100} formatter={(v) => formatPct(v, 0)} />
+                                </div>
                                 {[
                                     { label: '价格命中', hit: gp?.price_hit },
                                     { label: 'Tx命中', hit: gp?.tx_hit },

@@ -1,5 +1,6 @@
 import React from 'react';
 import { formatRelativeTime } from '../lib/time';
+import NumberFlowValue from './NumberFlowValue.jsx';
 
 /**
  * 格式化用户标签
@@ -92,18 +93,18 @@ export default function AdminOnlineUsers({
                             </div>
                             <div className="text-right shrink-0">
                                 <div className={`text-xs font-semibold ${selected ? 'text-emerald-700 dark:text-emerald-200' : 'text-zinc-700 dark:text-white/70'}`}>
-                                    {totalTasks} 个任务
+                                    <NumberFlowValue value={totalTasks} formatOptions={{ maximumFractionDigits: 0 }} /> 个任务
                                 </div>
                                 <div className={`mt-0.5 text-[11px] ${selected ? 'text-emerald-700/70 dark:text-emerald-200/70' : 'text-zinc-500 dark:text-white/40'}`}>
-                                    {autoTasks > 0 && <span className="text-emerald-600 dark:text-emerald-400">{autoTasks} 自动</span>}
+                                    {autoTasks > 0 && <span className="text-emerald-600 dark:text-emerald-400"><NumberFlowValue value={autoTasks} formatOptions={{ maximumFractionDigits: 0 }} /> 自动</span>}
                                     {autoTasks > 0 && manualTasks > 0 && <span> / </span>}
-                                    {manualTasks > 0 && <span className="text-sky-600 dark:text-sky-400">{manualTasks} 手动</span>}
+                                    {manualTasks > 0 && <span className="text-sky-600 dark:text-sky-400"><NumberFlowValue value={manualTasks} formatOptions={{ maximumFractionDigits: 0 }} /> 手动</span>}
                                 </div>
                                 <div
                                     className={`mt-0.5 text-[10px] ${selected ? 'text-emerald-700/60 dark:text-emerald-200/60' : 'text-zinc-400 dark:text-white/30'
                                         }`}
                                 >
-                                    {updatedText}
+                                    <NumberFlowValue value={updatedText} formatter={() => updatedText} />
                                 </div>
                             </div>
                         </div>

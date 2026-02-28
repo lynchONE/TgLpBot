@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import BottomSheet from './BottomSheet.jsx';
+import NumberFlowValue from './NumberFlowValue.jsx';
 
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
@@ -75,10 +76,12 @@ export default function KlineModal({ open, onClose, theme, pool, chain }) {
             contentClassName=""
             title={
                 <div>
-                    <div className="truncate text-sm font-bold text-zinc-900 dark:text-white/90">{title}</div>
+                    <div className="truncate text-sm font-bold text-zinc-900 dark:text-white/90">
+                        <NumberFlowValue value={title} formatter={() => title} />
+                    </div>
                     <div className="flex items-center gap-2 mt-0.5">
                         <div className="truncate text-[10px] font-medium text-zinc-500 dark:text-white/40 font-mono">
-                            {poolAddress ? `${poolAddress.slice(0, 10)}...${poolAddress.slice(-8)}` : ''}
+                            {poolAddress ? <NumberFlowValue value={`${poolAddress.slice(0, 10)}...${poolAddress.slice(-8)}`} formatter={(v) => v} /> : ''}
                         </div>
                         {isV4ID && (
                             <span className="shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300">

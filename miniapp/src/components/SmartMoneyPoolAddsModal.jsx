@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import BottomSheet from './BottomSheet.jsx';
+import NumberFlowValue from './NumberFlowValue.jsx';
 import { fetchSmartMoneyPoolAdds } from '../lib/api';
 import { copyToClipboard, hapticImpact, hapticNotification } from '../lib/telegram';
 
@@ -186,8 +187,8 @@ export default function SmartMoneyPoolAddsModal({
                         ) : null}
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-500 dark:text-white/40">
-                        <span>最近 {Number(windowHours) || 2}h 加池子</span>
-                        <span>· {wallets.length} 条</span>
+                        <span>最近 <NumberFlowValue value={Number(windowHours) || 2} formatOptions={{ maximumFractionDigits: 0 }} />h 加池子</span>
+                        <span>· <NumberFlowValue value={wallets.length} formatOptions={{ maximumFractionDigits: 0 }} /> 条</span>
                         <span>· 手续费为链上可领取估算</span>
                     </div>
                 </div>
@@ -263,12 +264,23 @@ export default function SmartMoneyPoolAddsModal({
                                                 {shortHex(addr, 10, 8) || '--'}
                                             </span>
                                             <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-700 dark:bg-white/5 dark:text-white/60">
-                                                #{index + 1}
+                                                #<NumberFlowValue value={index + 1} formatOptions={{ maximumFractionDigits: 0 }} />
                                             </span>
                                         </div>
                                         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-500 dark:text-white/40">
-                                            <span>区间 {Number.isFinite(tickLower) ? tickLower : '--'} → {Number.isFinite(tickUpper) ? tickUpper : '--'}</span>
-                                            <span>· 价格 {rangeText}</span>
+                                            <span>
+                                                区间{' '}
+                                                <NumberFlowValue
+                                                    value={Number.isFinite(tickLower) ? tickLower : '--'}
+                                                    formatter={() => (Number.isFinite(tickLower) ? String(tickLower) : '--')}
+                                                />
+                                                {' '}→{' '}
+                                                <NumberFlowValue
+                                                    value={Number.isFinite(tickUpper) ? tickUpper : '--'}
+                                                    formatter={() => (Number.isFinite(tickUpper) ? String(tickUpper) : '--')}
+                                                />
+                                            </span>
+                                            <span>· 价格 <NumberFlowValue value={rangeText} formatter={() => rangeText} /></span>
                                             {priceBase ? <span className="opacity-70">({priceBase}/{priceQuote || '--'})</span> : null}
                                         </div>
                                     </div>
@@ -313,21 +325,25 @@ export default function SmartMoneyPoolAddsModal({
                                 <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
                                     <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
                                         <div className="text-[10px] text-zinc-500 dark:text-white/40">加池子金额</div>
-                                        <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">{formatUsd(totalUsd)}</div>
+                                        <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">
+                                            <NumberFlowValue value={totalUsd} formatter={(v) => formatUsd(v)} />
+                                        </div>
                                     </div>
                                     <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
                                         <div className="text-[10px] text-zinc-500 dark:text-white/40">Token</div>
                                         <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">
-                                            {formatTokenAmount(amt0)} {sym0}
+                                            <NumberFlowValue value={amt0} formatter={(v) => formatTokenAmount(v)} /> {sym0}
                                         </div>
                                         <div className="text-[10px] text-zinc-500 dark:text-white/40">
-                                            {formatTokenAmount(amt1)} {sym1}
+                                            <NumberFlowValue value={amt1} formatter={(v) => formatTokenAmount(v)} /> {sym1}
                                         </div>
                                     </div>
                                     <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
                                         <div className="text-[10px] text-zinc-500 dark:text-white/40">可领取手续费 (估算)</div>
                                         <div className={`mt-0.5 font-semibold tabular-nums ${feeTone}`}>
-                                            {feeStatus === 'ok' ? formatUsd(feeUsd) : '--'}
+                                            {feeStatus === 'ok'
+                                                ? <NumberFlowValue value={feeUsd} formatter={(v) => formatUsd(v)} />
+                                                : '--'}
                                         </div>
                                         {feeStatus === 'error' && feeErr ? (
                                             <div className="mt-0.5 text-[10px] text-red-600 dark:text-red-300">{feeErr}</div>
