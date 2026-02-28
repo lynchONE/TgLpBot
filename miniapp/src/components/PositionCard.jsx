@@ -24,6 +24,11 @@ const usdFormatter = new Intl.NumberFormat('en-US', {
     currency: 'USD',
     maximumFractionDigits: 2,
 });
+const botAmountFormatter = new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+    useGrouping: false,
+});
 
 const formatUsd = (v) => {
     const n = Number(v ?? 0);
@@ -38,6 +43,13 @@ const formatFeeUsd = (v) => {
     const abs = Math.abs(n);
     if (abs < 0.01) return `${n < 0 ? '-' : ''}<$0.01`;
     return usdFormatter.format(n);
+};
+
+const formatBotAmount = (v) => {
+    const n = Number(v ?? 0);
+    if (!Number.isFinite(n) || Math.abs(n) > USD_DISPLAY_LIMIT) return '--';
+    if (Math.abs(n) < 0.005) return '0.00';
+    return botAmountFormatter.format(n);
 };
 
 const STABLE_SYMBOLS = new Set(['USDT', 'USDC', 'BUSD', 'DAI']);
@@ -155,16 +167,20 @@ export default function PositionCard({
         return position.title;
     }, [position?.title, pairLabel]);
 
-    const { totalValue, pnlAbsolute, pnlPercent, hasPnL } = useMemo(() => {
+    const { totalValue, pnlAbsolute, hasPnL } = useMemo(() => {
         const positionUsd = Number(position?.totals?.position_usd || 0);
         const feeUsd = Number(position?.totals?.fee_usd || 0);
         const total = (Number.isFinite(positionUsd) ? positionUsd : 0) + (Number.isFinite(feeUsd) ? feeUsd : 0);
-        const initialCost = Number(position?.initial_cost_usd || position?.net_invested_usd || 0);
-        if (Number.isFinite(initialCost) && initialCost > 0) {
-            const pnl = total - initialCost;
-            return { totalValue: total, pnlAbsolute: pnl, pnlPercent: (pnl / initialCost) * 100, hasPnL: true };
+        const netInvested = Number(position?.net_invested_usd);
+        const initialCost = Number(position?.initial_cost_usd);
+        const costBasis = Number.isFinite(netInvested) && netInvested > 0
+            ? netInvested
+            : (Number.isFinite(initialCost) && initialCost > 0 ? initialCost : 0);
+        if (costBasis > 0) {
+            const pnl = total - costBasis;
+            return { totalValue: total, pnlAbsolute: pnl, hasPnL: true };
         }
-        return { totalValue: total, pnlAbsolute: 0, pnlPercent: 0, hasPnL: false };
+        return { totalValue: total, pnlAbsolute: 0, hasPnL: false };
     }, [position?.totals?.position_usd, position?.totals?.fee_usd, position?.initial_cost_usd, position?.net_invested_usd]);
 
     const chain = useMemo(() => String(position?.chain || '').trim().toLowerCase() || 'bsc', [position?.chain]);
@@ -323,7 +339,7 @@ export default function PositionCard({
                                     {displayTitle}
                                 </span>
                                 {feeLabel && (
-                                    <span className="inline-flex items-center rounded bg-violet-500/12 px-1 text-[9px] font-bold text-violet-600 dark:bg-violet-500/18 dark:text-violet-300 ring-1 ring-violet-500/20 dark:ring-violet-400/25 shrink-0">
+                                    <span className="inline-flex items-center rounded bg-violet-500/12 px-1.5 py-0.5 text-[10px] font-bold text-violet-600 dark:bg-violet-500/18 dark:text-violet-300 ring-1 ring-violet-500/20 dark:ring-violet-400/25 shrink-0">
                                         {feeLabel}
                                     </span>
                                 )}
@@ -357,15 +373,12 @@ export default function PositionCard({
                                 {formatUsd(totalValue)}
                             </div>
                             {hasPnL && (
-                                <div className={`mt-1.5 flex flex-col items-end gap-0.5`}>
+                                <div className="mt-1.5">
                                     <div className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[11px] font-bold tabular-nums shadow-sm ${pnlPositive
                                         ? 'bg-emerald-500/15 text-emerald-500 dark:bg-emerald-500/20 dark:text-emerald-400 ring-1 ring-emerald-500/20'
                                         : 'bg-red-500/15 text-red-500 dark:bg-red-500/20 dark:text-red-400 ring-1 ring-red-500/20'
                                         }`}>
-                                        {pnlAbsolute >= 0 ? '+' : ''}{formatUsd(pnlAbsolute)}
-                                    </div>
-                                    <div className={`text-[9px] font-semibold tabular-nums ${pnlPositive ? 'text-emerald-500/70 dark:text-emerald-400/60' : 'text-red-500/70 dark:text-red-400/60'}`}>
-                                        {pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%
+                                        {pnlAbsolute >= 0 ? '+' : ''}{formatBotAmount(pnlAbsolute)}
                                     </div>
                                 </div>
                             )}

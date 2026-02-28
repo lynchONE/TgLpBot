@@ -56,16 +56,17 @@ export default function PriceRangeVisualizer({
     const visualInRange = hasRange ? !outOfRangeInfo : Boolean(inRange);
 
     const statusText = useMemo(() => {
-        if (!Number.isFinite(currentPrice)) return '价格不可用';
-        if (visualInRange) return '价格在范围内';
-        if (!outOfRangeInfo) return '价格超出范围';
-        if (outOfRangeInfo.direction === 'above') return `高于上限 ${formatPercent(outOfRangeInfo.percent)}`;
-        return `低于下限 ${formatPercent(outOfRangeInfo.percent)}`;
+        const currentLabel = `当前价 ${formatPrice(currentPrice)}`;
+        if (!Number.isFinite(currentPrice)) return `${currentLabel} · 不可用`;
+        if (visualInRange) return `${currentLabel} · 在范围内`;
+        if (!outOfRangeInfo) return `${currentLabel} · 超出范围`;
+        if (outOfRangeInfo.direction === 'above') return `${currentLabel} · 高于上限 ${formatPercent(outOfRangeInfo.percent)}`;
+        return `${currentLabel} · 低于下限 ${formatPercent(outOfRangeInfo.percent)}`;
     }, [currentPrice, visualInRange, outOfRangeInfo]);
 
     const gridInfoText = useMemo(() => {
         if (currentGridIndex === null || currentGridLower === null || currentGridUpper === null) return '当前网格 --';
-        return `第 ${currentGridIndex} 格 | ${formatPrice(currentGridLower)} - ${formatPrice(currentGridUpper)}`;
+        return `第${currentGridIndex}格 | ${formatPrice(currentGridLower)} - ${formatPrice(currentGridUpper)}`;
     }, [currentGridIndex, currentGridLower, currentGridUpper]);
 
     const gridLines = useMemo(() => {
@@ -101,10 +102,10 @@ export default function PriceRangeVisualizer({
             </div>
 
             <div className="relative flex h-4 items-center overflow-hidden rounded-full bg-[#e4e4e7] shadow-inner dark:bg-[#333539]">
-                <div className="absolute left-[3%] top-0 bottom-0 w-[2px] bg-emerald-500" />
-                <div className="absolute right-[3%] top-0 bottom-0 w-[2px] bg-rose-500" />
+                <div className="absolute bottom-0 top-0 left-[3%] w-[2px] bg-emerald-500" />
+                <div className="absolute bottom-0 top-0 right-[3%] w-[2px] bg-rose-500" />
 
-                <div className="absolute left-[3%] right-[3%] top-0 bottom-0 flex items-end pb-1 opacity-40">
+                <div className="absolute bottom-0 top-0 left-[3%] right-[3%] flex items-end pb-1 opacity-40">
                     {visibleGridLines.map((pct, i) => (
                         <div key={i} className="absolute h-2 w-[1px] bg-zinc-500" style={{ left: `${pct}%`, transform: 'translateX(-50%)' }} />
                     ))}
@@ -129,12 +130,17 @@ export default function PriceRangeVisualizer({
                 <span className="text-rose-600 dark:text-rose-500">{formatPrice(maxPrice)}</span>
             </div>
 
-            <div className={`mt-2 flex items-center gap-2 rounded-lg border px-2 py-1.5 text-[10px] font-semibold ${visualInRange
-                ? 'border-emerald-200 bg-emerald-500/8 dark:border-emerald-500/20'
-                : 'border-rose-200 bg-rose-500/8 dark:border-rose-500/20'
-                }`}>
+            <div
+                className={`mt-2 flex items-center gap-2 rounded-lg border px-2 py-1.5 text-[10px] font-semibold ${visualInRange
+                    ? 'border-emerald-200 bg-emerald-500/8 dark:border-emerald-500/20'
+                    : 'border-rose-200 bg-rose-500/8 dark:border-rose-500/20'
+                    }`}
+            >
                 <div className="min-w-0 flex-1 truncate text-zinc-700 dark:text-zinc-300" title={gridInfoText}>{gridInfoText}</div>
-                <div className={`shrink-0 whitespace-nowrap ${visualInRange ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                <div
+                    className={`shrink-0 max-w-[72%] truncate text-right ${visualInRange ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}
+                    title={statusText}
+                >
                     {statusText}
                 </div>
             </div>
