@@ -50,6 +50,31 @@ function formatPrice(v) {
     return n.toPrecision(4);
 }
 
+/** 紧凑价格格式 — 极小数值用下标零表示法 (e.g. 0.0₃6959) */
+const SUBSCRIPT_DIGITS = ['₀', '₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉'];
+function compactPrice(v) {
+    const n = Number(v ?? 0);
+    if (!Number.isFinite(n) || n <= 0) return '--';
+    if (n >= 1000) return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+    if (n >= 1) return n.toFixed(4).replace(/\.?0+$/, '');
+    if (n >= 0.01) return n.toPrecision(4);
+    // count leading zeros after "0."
+    const s = n.toFixed(20);
+    const dotIdx = s.indexOf('.');
+    if (dotIdx < 0) return n.toPrecision(4);
+    let zeroCount = 0;
+    for (let i = dotIdx + 1; i < s.length; i++) {
+        if (s[i] === '0') zeroCount++;
+        else break;
+    }
+    if (zeroCount < 2) return n.toPrecision(4);
+    // get significant digits (4-5 digits after leading zeros)
+    const sigStart = dotIdx + 1 + zeroCount;
+    const sigDigits = s.slice(sigStart, sigStart + 4).replace(/0+$/, '') || '0';
+    const sub = String(zeroCount).split('').map(d => SUBSCRIPT_DIGITS[Number(d)] || d).join('');
+    return `0.0${sub}${sigDigits}`;
+}
+
 function formatWindowLabel(windowSec) {
     const sec = Number(windowSec ?? 0);
     if (!Number.isFinite(sec) || sec <= 0) return '';
@@ -94,6 +119,180 @@ function toIntInRange(v, min, max, fallback) {
     if (n < min) return min;
     if (n > max) return max;
     return n;
+}
+
+/** 池子概览卡片 — 重新设计的钱包明细展示 */
+function PoolOverviewCard({
+    rank, pair, poolId, version, feePct, walletCount,
+    previewStatus, previewWallets, previewError, previewTotalUsd,
+    hasNoPreview, defaultShow, needsExpand,
+    onCopyPoolId, onViewDetails, onCopyWallet, onLoadPreview,
+}) {
+    const [expanded, setExpanded] = useState(false);
+    const displayWallets = expanded ? previewWallets : previewWallets.slice(0, defaultShow);
+    const hiddenCount = previewWallets.length - defaultShow;
+
+    return (
+        <div className="rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm transition-shadow active:shadow-md dark:border-white/10 dark:bg-[#141821] dark:shadow-none">
+            {/* ─── 池子头部 ─── */}
+            <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-1.5">
+                    <span className="inline-flex h-5 min-w-[22px] shrink-0 items-center justify-center rounded-md bg-emerald-500/15 px-1 text-[10px] font-bold tabular-nums text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+                        #{rank}
+                    </span>
+                    <span className="truncate text-[13px] font-bold text-zinc-900 dark:text-white/90">
+                        {pair || shortHex(poolId, 10, 6) || '--'}
+                    </span>
+                    <span className="shrink-0 rounded bg-zinc-100 px-1 py-0.5 text-[9px] font-semibold text-zinc-600 dark:bg-white/10 dark:text-white/60">
+                        {version || '--'}
+                    </span>
+                    {Number.isFinite(feePct) && feePct > 0 ? (
+                        <span className="shrink-0 rounded bg-zinc-100 px-1 py-0.5 text-[9px] font-semibold text-zinc-600 dark:bg-white/10 dark:text-white/60">
+                            {formatPct(feePct)}
+                        </span>
+                    ) : null}
+                </div>
+                <div className="shrink-0 flex items-center gap-1.5">
+                    {previewTotalUsd > 0 ? (
+                        <span className="rounded-lg bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
+                            ${formatUsdPlain(previewTotalUsd)}
+                        </span>
+                    ) : null}
+                    <span className="rounded-lg bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+                        {Number.isFinite(walletCount) ? walletCount : 0} 钱包
+                    </span>
+                </div>
+            </div>
+
+            {/* ─── 钱包明细 ─── */}
+            <div className="mt-2 space-y-1.5">
+                {/* Loading skeleton */}
+                {previewStatus === 'loading' && previewWallets.length === 0 ? (
+                    <div className="space-y-1.5">
+                        <div className="h-12 animate-shimmer rounded-xl" />
+                        <div className="h-12 animate-shimmer rounded-xl" />
+                    </div>
+                ) : null}
+
+                {/* Error */}
+                {previewStatus === 'error' ? (
+                    <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-[10px] text-red-700 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-200">
+                        {previewError || '加载失败'}
+                        <button
+                            type="button"
+                            onClick={onLoadPreview}
+                            className="ml-2 underline hover:no-underline"
+                        >
+                            重试
+                        </button>
+                    </div>
+                ) : null}
+
+                {/* Not loaded yet (on-demand) */}
+                {hasNoPreview && previewStatus !== 'error' ? (
+                    <button
+                        type="button"
+                        onClick={onLoadPreview}
+                        className="w-full rounded-xl border border-dashed border-zinc-300 bg-zinc-50/50 py-2.5 text-[11px] font-medium text-zinc-500 transition hover:border-emerald-400 hover:text-emerald-600 dark:border-white/15 dark:bg-white/5 dark:text-white/50 dark:hover:border-emerald-400 dark:hover:text-emerald-300"
+                    >
+                        点击加载钱包明细
+                    </button>
+                ) : null}
+
+                {/* Wallet rows — new 2-row layout */}
+                {displayWallets.map((row, rowIdx) => {
+                    const walletAddr = String(row?.wallet_address || '').trim();
+                    const amountUsd = Number(row?.total_usd ?? 0);
+                    const sharePct = Number(row?._share_pct ?? 0);
+                    const priceLower = Number(row?.price_lower ?? 0);
+                    const priceUpper = Number(row?.price_upper ?? 0);
+                    const quote = String(row?.price_quote || '').trim();
+                    const hasRange = Number.isFinite(priceLower) && priceLower > 0 && Number.isFinite(priceUpper) && priceUpper > 0;
+
+                    return (
+                        <div
+                            key={`${walletAddr || rowIdx}-${row?._rank || rowIdx}`}
+                            className="rounded-xl border border-zinc-200/80 bg-zinc-50/60 p-2 dark:border-white/10 dark:bg-white/[0.03]"
+                        >
+                            {/* Row 1: wallet + amount + share */}
+                            <div className="flex items-center justify-between gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => onCopyWallet(walletAddr)}
+                                    className="font-mono text-[11px] font-semibold text-zinc-800 hover:text-emerald-600 dark:text-white/85 dark:hover:text-emerald-300"
+                                    title={walletAddr}
+                                >
+                                    {shortHex(walletAddr, 8, 6) || '--'}
+                                </button>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-[11px] font-bold tabular-nums text-zinc-900 dark:text-white/85">
+                                        ${Number.isFinite(amountUsd) ? formatUsdPlain(amountUsd) : '--'}
+                                    </span>
+                                    <span className="min-w-[36px] text-right text-[10px] font-semibold tabular-nums text-emerald-600 dark:text-emerald-300">
+                                        {Number.isFinite(sharePct) ? formatPct(sharePct, 1) : '--'}
+                                    </span>
+                                </div>
+                            </div>
+                            {/* Row 2: range — full width, never truncated */}
+                            {hasRange ? (
+                                <div className="mt-1 flex items-center gap-1 text-[10px]">
+                                    <span className="shrink-0 text-zinc-400 dark:text-white/30">区间</span>
+                                    <span className="font-mono tabular-nums text-zinc-600 dark:text-white/55">
+                                        {compactPrice(priceLower)}
+                                    </span>
+                                    <span className="text-zinc-400 dark:text-white/30">→</span>
+                                    <span className="font-mono tabular-nums text-zinc-600 dark:text-white/55">
+                                        {compactPrice(priceUpper)}
+                                    </span>
+                                    {quote ? (
+                                        <span className="text-zinc-400 dark:text-white/25">{quote}</span>
+                                    ) : null}
+                                </div>
+                            ) : null}
+                        </div>
+                    );
+                })}
+
+                {/* Empty state */}
+                {previewWallets.length === 0 && previewStatus === 'success' ? (
+                    <div className="rounded-xl border border-zinc-200/80 bg-zinc-50/50 px-3 py-2 text-[10px] text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/55">
+                        暂无参与钱包明细
+                    </div>
+                ) : null}
+
+                {/* Expand/collapse toggle */}
+                {needsExpand ? (
+                    <button
+                        type="button"
+                        onClick={() => setExpanded((v) => !v)}
+                        className="w-full rounded-lg py-1 text-[10px] font-semibold text-zinc-500 hover:text-emerald-600 dark:text-white/40 dark:hover:text-emerald-300"
+                    >
+                        {expanded ? '收起' : `展开全部 (还有 ${hiddenCount} 个)`}
+                    </button>
+                ) : null}
+            </div>
+
+            {/* ─── 底部操作 ─── */}
+            <div className="mt-2 flex items-center justify-end gap-1.5">
+                <button
+                    type="button"
+                    onClick={onCopyPoolId}
+                    disabled={!poolId}
+                    className="inline-flex items-center rounded-lg bg-amber-300 px-2.5 py-1 text-[10px] font-semibold text-amber-950 hover:bg-amber-200 disabled:opacity-40 dark:bg-amber-300 dark:text-amber-950 dark:hover:bg-amber-200"
+                >
+                    复制池子ID
+                </button>
+                <button
+                    type="button"
+                    onClick={onViewDetails}
+                    disabled={!poolId || !version}
+                    className="inline-flex items-center rounded-lg bg-emerald-500 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-emerald-600 disabled:opacity-40"
+                >
+                    查看明细
+                </button>
+            </div>
+        </div>
+    );
 }
 
 export default function SmartMoneyCard({ overview, loading = false, tick, onNotice, apiBaseUrl, initData }) {
@@ -148,6 +347,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
         [overview?.updated_at, tick],
     );
     const topPools = useMemo(() => pools.slice(0, 20), [pools]);
+    const preloadPools = useMemo(() => pools.slice(0, 3), [pools]);
 
     const enabledFollowWallets = useMemo(() => {
         if (!Array.isArray(followConfigs)) return [];
@@ -184,11 +384,11 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
     useEffect(() => {
         if (activeTab !== 'overview') return;
         if (!initData) return;
-        if (!Array.isArray(topPools) || topPools.length === 0) return;
+        if (!Array.isArray(preloadPools) || preloadPools.length === 0) return;
 
         const now = Date.now();
         const previewCache = poolAddsPreviewRef.current || {};
-        const targets = topPools
+        const targets = preloadPools
             .map((pool) => {
                 const poolVersion = String(pool?.pool_version || '').trim().toLowerCase();
                 const poolId = String(pool?.pool_id || '').trim();
@@ -313,7 +513,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
             aborted = true;
             controller.abort();
         };
-    }, [activeTab, apiBaseUrl, initData, chain, poolsWindowHours, topPools]);
+    }, [activeTab, apiBaseUrl, initData, chain, poolsWindowHours, preloadPools]);
 
     useEffect(() => {
         if (!initData) {
@@ -482,8 +682,8 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                     type="button"
                     onClick={() => setActiveTab('overview')}
                     className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${activeTab === 'overview'
-                            ? 'bg-emerald-500 text-white'
-                            : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
+                        ? 'bg-emerald-500 text-white'
+                        : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
                         }`}
                 >
                     概览
@@ -492,8 +692,8 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                     type="button"
                     onClick={() => setActiveTab('follow')}
                     className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${activeTab === 'follow'
-                            ? 'bg-emerald-500 text-white'
-                            : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
+                        ? 'bg-emerald-500 text-white'
+                        : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
                         }`}
                 >
                     跟单
@@ -502,8 +702,8 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                     type="button"
                     onClick={() => setActiveTab('golden')}
                     className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${activeTab === 'golden'
-                            ? 'bg-emerald-500 text-white'
-                            : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
+                        ? 'bg-emerald-500 text-white'
+                        : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
                         }`}
                 >
                     金狗通知
@@ -511,16 +711,14 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
             </div>
 
             {activeTab === 'overview' ? (
-                <div className="mt-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                    <div className="mb-3 flex items-center justify-between">
+                <div className="mt-3 space-y-3">
+                    <div className="flex items-center justify-between">
                         <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">最近{poolWindowLabel}参与池子</div>
-                        <div className="text-[11px] text-zinc-500 dark:text-white/40">
-                            <NumberFlowValue value={topPools.length} formatOptions={{ maximumFractionDigits: 0 }} /> 个
-                        </div>
+                        <span className="text-[11px] text-zinc-500 dark:text-white/40">{topPools.length} 个</span>
                     </div>
 
                     {topPools.length ? (
-                        <div className="max-h-[62vh] space-y-2 overflow-y-auto overscroll-contain pr-1">
+                        <div className="space-y-3">
                             {topPools.map((pool, index) => {
                                 const poolId = String(pool?.pool_id || '').trim();
                                 const pair = String(pool?.pair || '').trim();
@@ -535,146 +733,99 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                 const previewStatus = String(preview?.status || '');
                                 const previewWallets = Array.isArray(preview?.wallets) ? preview.wallets : [];
                                 const previewError = String(preview?.error || '').trim();
+                                const previewTotalUsd = Number(preview?.totalUsd ?? 0);
+                                const hasNoPreview = !preview && previewStatus !== 'loading';
+                                const DEFAULT_SHOW = 3;
+                                const needsExpand = previewWallets.length > DEFAULT_SHOW;
+
                                 return (
-                                    <div
+                                    <PoolOverviewCard
                                         key={key}
-                                        className="rounded-xl border border-zinc-200 bg-white p-2.5 shadow-sm dark:border-white/10 dark:bg-[#141821] dark:shadow-none"
-                                    >
-                                        <div className="flex items-start justify-between gap-2">
-                                            <div className="min-w-0">
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className="inline-flex h-5 min-w-[22px] items-center justify-center rounded-md bg-zinc-100 px-1 text-[10px] font-bold text-zinc-700 dark:bg-white/10 dark:text-white/80">
-                                                        #<NumberFlowValue value={rank} formatOptions={{ maximumFractionDigits: 0 }} />
-                                                    </span>
-                                                    <span className="truncate text-[12px] font-semibold text-zinc-900 dark:text-white/90">
-                                                        {pair || shortHex(poolId, 10, 6) || '--'}
-                                                    </span>
-                                                </div>
-                                                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-500 dark:text-white/45">
-                                                    <span>{version || '--'}</span>
-                                                    {Number.isFinite(feePct) && feePct > 0 ? (
-                                                        <span>
-                                                            <NumberFlowValue value={feePct} formatter={(v) => formatPct(v)} />
-                                                        </span>
-                                                    ) : null}
-                                                </div>
-                                            </div>
-                                            <div className="shrink-0 rounded-lg bg-emerald-500/10 px-2 py-1 text-right text-[10px] font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
-                                                钱包数{' '}
-                                                <NumberFlowValue
-                                                    value={Number.isFinite(walletCount) ? walletCount : 0}
-                                                    formatOptions={{ maximumFractionDigits: 0 }}
-                                                />
-                                            </div>
-                                        </div>
-
-                                        <div className="mt-2 rounded-lg border border-zinc-200 bg-zinc-50/80 p-2 dark:border-white/10 dark:bg-[#0f1116]">
-                                            <div className="mb-1 grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] items-center gap-2 text-[10px] font-semibold text-zinc-500 dark:text-white/45">
-                                                <span className="truncate">钱包 / 区间</span>
-                                                <span className="truncate text-right">金额(USDT)</span>
-                                                <span className="text-right">占比</span>
-                                            </div>
-
-                                            {previewStatus === 'loading' && previewWallets.length === 0 ? (
-                                                <div className="space-y-1.5">
-                                                    <div className="h-8 animate-shimmer rounded-lg" />
-                                                    <div className="h-8 animate-shimmer rounded-lg" />
-                                                </div>
-                                            ) : null}
-
-                                            {previewStatus === 'error' ? (
-                                                <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 text-[10px] text-red-700 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-200">
-                                                    {previewError || '加载失败，稍后自动重试'}
-                                                </div>
-                                            ) : null}
-
-                                            {previewWallets.length > 0 ? (
-                                                <div className="max-h-44 space-y-1 overflow-y-auto overscroll-contain pr-1">
-                                                    {previewWallets.map((row, rowIdx) => {
-                                                        const walletAddr = String(row?.wallet_address || '').trim();
-                                                        const amountUsd = Number(row?.total_usd ?? 0);
-                                                        const sharePct = Number(row?._share_pct ?? 0);
-                                                        const priceLower = Number(row?.price_lower ?? 0);
-                                                        const priceUpper = Number(row?.price_upper ?? 0);
-                                                        const quote = String(row?.price_quote || '').trim();
-                                                        const rangeText = Number.isFinite(priceLower) && priceLower > 0 && Number.isFinite(priceUpper) && priceUpper > 0
-                                                            ? `${formatPrice(priceLower)} - ${formatPrice(priceUpper)} ${quote || ''}`
-                                                            : '--';
-                                                        return (
-                                                            <div
-                                                                key={`${walletAddr || rowIdx}-${row?._rank || rowIdx}`}
-                                                                className="rounded-lg border border-zinc-200/80 bg-white/80 px-2 py-1.5 dark:border-white/10 dark:bg-white/5"
-                                                            >
-                                                                <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] items-center gap-2">
-                                                                    <div className="min-w-0">
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => {
-                                                                                hapticImpact('light');
-                                                                                safeCopy(walletAddr, onNotice);
-                                                                            }}
-                                                                            className="max-w-full truncate font-mono text-[10px] font-semibold text-zinc-900 hover:text-emerald-700 dark:text-white/90 dark:hover:text-emerald-300"
-                                                                            title={walletAddr}
-                                                                        >
-                                                                            {shortHex(walletAddr, 8, 6) || '--'}
-                                                                        </button>
-                                                                        <div className="mt-0.5 truncate text-[10px] text-zinc-500 dark:text-white/45">
-                                                                            区间 {rangeText}
-                                                                        </div>
-                                                                    </div>
-                                                                    <div className="truncate text-right text-[11px] font-semibold text-zinc-900 dark:text-white/85">
-                                                                        <NumberFlowValue
-                                                                            value={Number.isFinite(amountUsd) ? amountUsd : 0}
-                                                                            formatter={(v) => formatUsdPlain(v)}
-                                                                        />
-                                                                    </div>
-                                                                    <div className="text-right text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
-                                                                        <NumberFlowValue
-                                                                            value={Number.isFinite(sharePct) ? sharePct : 0}
-                                                                            formatter={(v) => `${formatPct(v, 1)}`}
-                                                                        />
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            ) : previewStatus !== 'loading' ? (
-                                                <div className="rounded-lg border border-zinc-200/80 bg-white/70 px-2 py-1.5 text-[10px] text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/55">
-                                                    暂无参与钱包明细
-                                                </div>
-                                            ) : null}
-                                        </div>
-
-                                        <div className="mt-2 flex items-center justify-end gap-1.5">
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    hapticImpact('light');
-                                                    safeCopy(poolId, onNotice);
-                                                }}
-                                                disabled={!poolId}
-                                                className="inline-flex items-center rounded-lg bg-amber-300 px-2.5 py-1 text-[10px] font-semibold text-amber-950 hover:bg-amber-200 disabled:opacity-40 dark:bg-amber-300 dark:text-amber-950 dark:hover:bg-amber-200"
-                                            >
-                                                复制池子ID
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    const pv = String(pool?.pool_version || '').trim().toLowerCase();
-                                                    if (!pv || !poolId) return;
-                                                    hapticImpact('light');
-                                                    setPoolAddsPoolVersion(pv);
-                                                    setPoolAddsPoolId(poolId);
-                                                    setPoolAddsOpen(true);
-                                                }}
-                                                disabled={!poolId || !version}
-                                                className="inline-flex items-center rounded-lg bg-emerald-500 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-emerald-600 disabled:opacity-40"
-                                            >
-                                                查看明细
-                                            </button>
-                                        </div>
-                                    </div>
+                                        rank={rank}
+                                        pair={pair}
+                                        poolId={poolId}
+                                        version={version}
+                                        feePct={feePct}
+                                        walletCount={walletCount}
+                                        previewStatus={previewStatus}
+                                        previewWallets={previewWallets}
+                                        previewError={previewError}
+                                        previewTotalUsd={previewTotalUsd}
+                                        hasNoPreview={hasNoPreview}
+                                        defaultShow={DEFAULT_SHOW}
+                                        needsExpand={needsExpand}
+                                        onCopyPoolId={() => {
+                                            hapticImpact('light');
+                                            safeCopy(poolId, onNotice);
+                                        }}
+                                        onViewDetails={() => {
+                                            const pv = poolVersionLower;
+                                            if (!pv || !poolId) return;
+                                            hapticImpact('light');
+                                            setPoolAddsPoolVersion(pv);
+                                            setPoolAddsPoolId(poolId);
+                                            setPoolAddsOpen(true);
+                                        }}
+                                        onCopyWallet={(addr) => {
+                                            hapticImpact('light');
+                                            safeCopy(addr, onNotice);
+                                        }}
+                                        onLoadPreview={() => {
+                                            // On-demand load for pools that weren't preloaded
+                                            if (previewStatus === 'loading') return;
+                                            const controller = new AbortController();
+                                            setPoolAddsPreviewMap((prev) => ({
+                                                ...(prev || {}),
+                                                [previewKey]: {
+                                                    ...(prev?.[previewKey] || {}),
+                                                    status: 'loading',
+                                                    error: '',
+                                                    fetchedAt: Date.now(),
+                                                },
+                                            }));
+                                            const limit = Number.isFinite(walletCount) && walletCount > 0
+                                                ? Math.max(20, Math.min(200, Math.round(walletCount)))
+                                                : 60;
+                                            fetchSmartMoneyPoolAdds({
+                                                apiBaseUrl,
+                                                initData,
+                                                chain,
+                                                poolVersion: poolVersionLower,
+                                                poolId,
+                                                windowHours: poolsWindowHours,
+                                                limit,
+                                                feesLimit: 0,
+                                                signal: controller.signal,
+                                            })
+                                                .then((resp) => {
+                                                    const rawWallets = Array.isArray(resp?.wallets) ? resp.wallets : [];
+                                                    const totalUsd = rawWallets.reduce((acc, row) => {
+                                                        const n = Number(row?.total_usd ?? 0);
+                                                        return Number.isFinite(n) && n > 0 ? acc + n : acc;
+                                                    }, 0);
+                                                    const wallets = rawWallets.map((row, ri) => ({
+                                                        ...row,
+                                                        _rank: ri + 1,
+                                                        _share_pct: totalUsd > 0 ? ((Number(row?.total_usd ?? 0) || 0) / totalUsd) * 100 : 0,
+                                                    }));
+                                                    setPoolAddsPreviewMap((prev) => ({
+                                                        ...(prev || {}),
+                                                        [previewKey]: { status: 'success', error: '', fetchedAt: Date.now(), wallets, totalUsd },
+                                                    }));
+                                                })
+                                                .catch((e) => {
+                                                    setPoolAddsPreviewMap((prev) => ({
+                                                        ...(prev || {}),
+                                                        [previewKey]: {
+                                                            ...(prev?.[previewKey] || {}),
+                                                            status: 'error',
+                                                            error: String(e?.message || e),
+                                                            fetchedAt: Date.now(),
+                                                        },
+                                                    }));
+                                                });
+                                        }}
+                                    />
                                 );
                             })}
                         </div>
@@ -839,8 +990,8 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                     }}
                                     disabled={goldenSaving || goldenLoading}
                                     className={`inline-flex items-center rounded-lg px-2 py-1 text-[10px] font-semibold transition ${goldenEnabled
-                                            ? 'bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15'
-                                            : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
+                                        ? 'bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15'
+                                        : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
                                         }`}
                                 >
                                     {goldenEnabled ? '已启用' : '已停用'}

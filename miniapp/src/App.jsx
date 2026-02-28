@@ -1372,11 +1372,12 @@ export default function App() {
     const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
 
     const quickRangeOptions = [
+        { label: '±1%', value: '±1' },
         { label: '±3%', value: '±3' },
         { label: '±5%', value: '±5' },
-        { label: '±8%', value: '±8' },
         { label: '±10%', value: '±10' },
-        { label: '1% / 3%', value: '1 3' },
+        { label: '±20%', value: '±20' },
+        { label: '±30%', value: '±30' },
     ];
     const parseRangeInput = (lowerRaw, upperRaw) => {
         const lower = Number(String(lowerRaw || '').trim());
@@ -1390,7 +1391,7 @@ export default function App() {
         setOpenPositionRangeLower('');
         setOpenPositionRangeUpper('');
         setOpenPositionSlippage('');
-        setOpenPositionAllowSwap(false);
+
         setOpenPositionError('');
     };
 
@@ -1553,23 +1554,14 @@ export default function App() {
                 rangeLowerPct: range.lower,
                 rangeUpperPct: range.upper,
                 slippageTolerance: slippage,
-                allowEntrySwap: openPositionAllowSwap,
+                allowEntrySwap: true,
                 walletId: openPositionWalletId,
             });
             setOpenPositionPool(null);
             resetOpenPositionDraft();
         } catch (e) {
             const msg = String(e?.message || e || '').trim();
-            if (
-                msg.includes('entry swap required') ||
-                msg.includes('pool does not contain USDT') ||
-                msg.includes('pool does not contain USDC') ||
-                msg.includes('pool does not contain a supported entry token')
-            ) {
-                setOpenPositionError('该池子不含默认入场币，请开启“允许兑换”后重试。');
-            } else {
-                setOpenPositionError(msg || '开仓失败，请稍后重试。');
-            }
+            setOpenPositionError(msg || '开仓失败，请稍后重试。');
         } finally {
             setOpenPositionLoading(false);
         }
@@ -3248,29 +3240,7 @@ export default function App() {
                                 />
                             </div>
 
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="flex items-center justify-between gap-3">
-                                    <div>
-                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">允许兑换</div>
-                                        <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
-                                            池子不含 USDT 时，允许自动兑换入场代币。
-                                        </div>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setOpenPositionAllowSwap((v) => !v);
-                                            setOpenPositionError('');
-                                        }}
-                                        className={`inline-flex h-8 items-center rounded-full border px-3 text-xs font-semibold transition ${openPositionAllowSwap
-                                            ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-700 dark:text-emerald-200'
-                                            : 'border-zinc-200 bg-white/70 text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-white/60'
-                                            }`}
-                                    >
-                                        {openPositionAllowSwap ? '已开启' : '已关闭'}
-                                    </button>
-                                </div>
-                            </div>
+
 
                             {openPositionError ? (
                                 <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">

@@ -383,49 +383,51 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                         </button>
                     </div>
 
-                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-                        {showVolume ? (
-                            <div className="text-zinc-500 dark:text-white/40 flex items-center">
-                                交易量:{' '}
-                                <span className="font-semibold text-sky-600 dark:text-sky-200 tabular-nums">
-                                    <NumberFlowValue value={volumeValue} formatter={(v) => formatUsdCompact(v)} />
-                                </span>
-                                <ChangeIndicator
-                                    currentValue={pool?.total_volume}
-                                    previousValue={previousData?.total_volume}
-                                    label="交易量变化"
-                                />
-                            </div>
-                        ) : null}
-                        {showTVL ? (
-                            <div className="text-zinc-500 dark:text-white/40 flex items-center">
-                                TVL:{' '}
-                                <span className="font-semibold text-zinc-900 dark:text-white/80 tabular-nums">
-                                    <NumberFlowValue value={tvlValue} formatter={(v) => formatUsdCompact(v)} />
-                                </span>
-                                <ChangeIndicator
-                                    currentValue={pool?.current_pool_value}
-                                    previousValue={previousData?.current_pool_value}
-                                    label="TVL变化"
-                                />
-                            </div>
-                        ) : null}
-                        {pool?.transaction_count > 0 ? (
-                            <div className="text-zinc-500 dark:text-white/40 flex items-center">
-                                交易笔数:{' '}
-                                <span className="font-semibold text-orange-600 dark:text-orange-300 tabular-nums">
-                                    <NumberFlowValue
-                                        value={pool.transaction_count}
-                                        formatter={(v) => Number(v || 0).toLocaleString()}
+                    <div className="mt-2 text-xs space-y-1">
+                        <div className="flex items-center gap-x-4">
+                            {showVolume ? (
+                                <div className="text-zinc-500 dark:text-white/40 flex items-center">
+                                    交易量:{' '}
+                                    <span className="font-semibold text-sky-600 dark:text-sky-200 tabular-nums">
+                                        <NumberFlowValue value={volumeValue} formatter={(v) => formatUsdCompact(v)} />
+                                    </span>
+                                    <ChangeIndicator
+                                        currentValue={pool?.total_volume}
+                                        previousValue={previousData?.total_volume}
+                                        label="交易量变化"
                                     />
-                                </span>
-                                <CountChangeIndicator
-                                    currentValue={pool?.transaction_count}
-                                    previousValue={previousData?.transaction_count}
-                                    label="交易笔数变化"
-                                />
-                            </div>
-                        ) : null}
+                                </div>
+                            ) : null}
+                            {showTVL ? (
+                                <div className="text-zinc-500 dark:text-white/40 flex items-center">
+                                    TVL:{' '}
+                                    <span className="font-semibold text-zinc-900 dark:text-white/80 tabular-nums">
+                                        <NumberFlowValue value={tvlValue} formatter={(v) => formatUsdCompact(v)} />
+                                    </span>
+                                    <ChangeIndicator
+                                        currentValue={pool?.current_pool_value}
+                                        previousValue={previousData?.current_pool_value}
+                                        label="TVL变化"
+                                    />
+                                </div>
+                            ) : null}
+                            {pool?.transaction_count > 0 ? (
+                                <div className="text-zinc-500 dark:text-white/40 flex items-center ml-auto">
+                                    交易笔数:{' '}
+                                    <span className="font-semibold text-orange-600 dark:text-orange-300 tabular-nums">
+                                        <NumberFlowValue
+                                            value={pool.transaction_count}
+                                            formatter={(v) => Number(v || 0).toLocaleString()}
+                                        />
+                                    </span>
+                                    <CountChangeIndicator
+                                        currentValue={pool?.transaction_count}
+                                        previousValue={previousData?.transaction_count}
+                                        label="交易笔数变化"
+                                    />
+                                </div>
+                            ) : null}
+                        </div>
                     </div>
                 </div>
 
@@ -490,6 +492,6 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                     {isBlacklisted ? '黑名单' : '一键开仓'}
                 </button>
             </div>
-        </div>
+        </div >
     );
 }
