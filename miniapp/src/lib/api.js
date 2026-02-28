@@ -473,7 +473,7 @@ export async function deleteTask({ apiBaseUrl, initData, taskId, signal }) {
     return resp.json();
 }
 
-export async function updateTaskRange({ apiBaseUrl, initData, taskId, rangeLowerPct, rangeUpperPct, signal }) {
+export async function updateTaskRange({ apiBaseUrl, initData, taskId, rangeLowerPct, rangeUpperPct, amountUSDT, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/task_action?action=update_range`;
     const payload = {
@@ -482,6 +482,10 @@ export async function updateTaskRange({ apiBaseUrl, initData, taskId, rangeLower
         range_lower_pct: rangeLowerPct,
         range_upper_pct: rangeUpperPct,
     };
+    const amount = Number(amountUSDT);
+    if (Number.isFinite(amount) && amount > 0) {
+        payload.amount_usdt = amount;
+    }
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

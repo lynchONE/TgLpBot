@@ -204,6 +204,7 @@ type RealtimePosition struct {
 	TaskID            uint       `json:"task_id,omitempty"`
 	TaskPaused        bool       `json:"task_paused"`
 	TaskIsAuto        bool       `json:"task_is_auto"`
+	TaskAmountUSDT    float64    `json:"task_amount_usdt,omitempty"`
 	StatusLabel       string     `json:"status_label"`
 	InRange           bool       `json:"in_range"`
 	CurrentTick       int        `json:"current_tick"`
@@ -1200,15 +1201,21 @@ func (s *RealtimePositionsService) buildV3Position(
 		}
 	}
 	return &RealtimePosition{
-		Chain:       chain,
-		Version:     "v3",
-		Exchange:    exchange,
-		Title:       title,
-		PoolID:      poolID,
-		PositionID:  tokenId.String(),
-		TaskID:      taskID,
-		TaskPaused:  taskPaused,
-		TaskIsAuto:  taskIsAuto,
+		Chain:      chain,
+		Version:    "v3",
+		Exchange:   exchange,
+		Title:      title,
+		PoolID:     poolID,
+		PositionID: tokenId.String(),
+		TaskID:     taskID,
+		TaskPaused: taskPaused,
+		TaskIsAuto: taskIsAuto,
+		TaskAmountUSDT: func() float64 {
+			if task == nil || task.AmountUSDT <= 0 {
+				return 0
+			}
+			return task.AmountUSDT
+		}(),
 		StatusLabel: statusLabel,
 		InRange:     inRange,
 		CurrentTick: currentTick,
@@ -1454,6 +1461,7 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		TaskID:            task.ID,
 		TaskPaused:        task.Paused,
 		TaskIsAuto:        task.IsAuto,
+		TaskAmountUSDT:    task.AmountUSDT,
 		StatusLabel:       statusLabelFromTask(task),
 		InRange:           inRange,
 		CurrentTick:       currentTick,
@@ -1683,6 +1691,7 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 		TaskID:            task.ID,
 		TaskPaused:        task.Paused,
 		TaskIsAuto:        task.IsAuto,
+		TaskAmountUSDT:    task.AmountUSDT,
 		StatusLabel:       statusLabelFromTask(task),
 		InRange:           inRange,
 		CurrentTick:       currentTick,

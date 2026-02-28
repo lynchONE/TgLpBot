@@ -184,20 +184,21 @@ export default function PositionCard({
     }, [position?.totals?.position_usd, position?.totals?.fee_usd, position?.initial_cost_usd, position?.net_invested_usd]);
 
     const chain = useMemo(() => String(position?.chain || '').trim().toLowerCase() || 'bsc', [position?.chain]);
-    const explorerBase = useMemo(() => (chain === 'base' ? 'https://basescan.org' : 'https://bscscan.com'), [chain]);
+    const gmgnNetwork = useMemo(() => (chain === 'base' ? 'base' : 'bsc'), [chain]);
+    const gmgnBase = useMemo(() => `https://gmgn.ai/${gmgnNetwork}`, [gmgnNetwork]);
     const geckoNetwork = useMemo(() => (chain === 'base' ? 'base' : 'bsc'), [chain]);
 
     const poolLink = useMemo(() => {
         const pool = normalizeHexPrefixed(position?.pool_id);
         if (!pool) return null;
-        if (/^0x[a-fA-F0-9]{40}$/.test(pool)) return `${explorerBase}/address/${pool}`;
+        if (/^0x[a-fA-F0-9]{40}$/.test(pool)) return `${gmgnBase}/address/${pool}`;
         if (/^0x[a-fA-F0-9]{64}$/.test(pool)) return `https://www.geckoterminal.com/${geckoNetwork}/pools/${pool.toLowerCase()}`;
         return null;
-    }, [position?.pool_id, explorerBase, geckoNetwork]);
+    }, [position?.pool_id, gmgnBase, geckoNetwork]);
 
-    const openWallet = () => openLink(`${explorerBase}/address/${walletAddress}`);
+    const openWallet = () => openLink(`${gmgnBase}/address/${walletAddress}`);
     const openPool = () => poolLink && openLink(poolLink);
-    const openToken = (addr) => addr && openLink(`${explorerBase}/token/${addr}`);
+    const openToken = (addr) => addr && openLink(`${gmgnBase}/token/${addr}`);
 
     const decimals0 = useMemo(() => Number(token0?.decimals ?? 18), [token0?.decimals]);
     const decimals1 = useMemo(() => Number(token1?.decimals ?? 18), [token1?.decimals]);

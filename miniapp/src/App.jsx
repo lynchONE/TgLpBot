@@ -349,6 +349,7 @@ export default function App() {
     const [taskRangeEdit, setTaskRangeEdit] = useState(null);
     const [taskRangeLower, setTaskRangeLower] = useState('');
     const [taskRangeUpper, setTaskRangeUpper] = useState('');
+    const [taskRangeAmount, setTaskRangeAmount] = useState('');
     const [taskRangeError, setTaskRangeError] = useState('');
     const [taskRangeLoading, setTaskRangeLoading] = useState(false);
 
@@ -1847,18 +1848,29 @@ export default function App() {
         if (!Number.isFinite(id) || id <= 0) return;
         const low = Number(position?.task_range_lower_pct);
         const up = Number(position?.task_range_upper_pct);
+        const amount = Number(position?.task_amount_usdt);
+        const fallbackAmount = Number(position?.net_invested_usd ?? position?.initial_cost_usd);
         setTaskRangeEdit({
             taskId: id,
             title: String(position?.title || '').trim() || `任务 #${id}`,
         });
         setTaskRangeLower(Number.isFinite(low) && low > 0 ? String(low) : '');
         setTaskRangeUpper(Number.isFinite(up) && up > 0 ? String(up) : '');
+        setTaskRangeAmount(
+            Number.isFinite(amount) && amount > 0
+                ? String(amount)
+                : (Number.isFinite(fallbackAmount) && fallbackAmount > 0 ? fallbackAmount.toFixed(2) : ''),
+        );
         setTaskRangeError('');
     }, [hasInitData, showAdmin]);
 
     const closeTaskRangeModal = () => {
         if (taskRangeLoading) return;
         setTaskRangeEdit(null);
+        setTaskRangeLower('');
+        setTaskRangeUpper('');
+        setTaskRangeAmount('');
+        setTaskRangeError('');
     };
 
     const submitTaskRange = async () => {
@@ -1866,6 +1878,11 @@ export default function App() {
         if (!hasInitData || showAdmin) return;
 
         const range = parseRangeInput(taskRangeLower, taskRangeUpper);
+        const amount = Number(String(taskRangeAmount || '').trim());
+        if (!Number.isFinite(amount) || amount <= 0) {
+            setTaskRangeError('金额无效，请输入大于 0 的 USDT 数值。');
+            return;
+        }
         if (!range || range.lower <= 0 || range.upper <= 0 || range.lower >= 100 || range.upper >= 100) {
             setTaskRangeError('区间无效，请输入 0-100 之间的百分比。');
             return;
@@ -1887,11 +1904,13 @@ export default function App() {
                 taskId: taskRangeEdit.taskId,
                 rangeLowerPct: range.lower,
                 rangeUpperPct: range.upper,
+                amountUSDT: amount,
             });
             showNotice('区间已更新（下次再平衡生效）', 'success');
             setTaskRangeEdit(null);
             setTaskRangeLower('');
             setTaskRangeUpper('');
+            setTaskRangeAmount('');
         } catch (e) {
             setTaskRangeError(String(e?.message || e || '修改失败'));
         } finally {
@@ -3308,6 +3327,25 @@ export default function App() {
                                     </div>
                                     <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
                                         修改后的区间将对下次再平衡生效。
+                                    </div>
+                                </div>
+
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">下次重平衡金额 (USDT)</div>
+                                    <div className="mt-2">
+                                        <input
+                                            value={taskRangeAmount}
+                                            onChange={(e) => {
+                                                setTaskRangeAmount(e.target.value);
+                                                setTaskRangeError('');
+                                            }}
+                                            inputMode="decimal"
+                                            className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                            placeholder="USDT 金额"
+                                        />
+                                    </div>
+                                    <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
+                                        金额会和区间一起在下次重平衡时生效。
                                     </div>
                                 </div>
 

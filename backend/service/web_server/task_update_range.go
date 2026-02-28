@@ -2,6 +2,7 @@ package web_server
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -12,10 +13,11 @@ import (
 )
 
 type taskUpdateRangeRequest struct {
-	InitData      string  `json:"initData"`
-	TaskID        uint    `json:"taskId"`
-	RangeLowerPct float64 `json:"range_lower_pct"`
-	RangeUpperPct float64 `json:"range_upper_pct"`
+	InitData      string   `json:"initData"`
+	TaskID        uint     `json:"taskId"`
+	RangeLowerPct float64  `json:"range_lower_pct"`
+	RangeUpperPct float64  `json:"range_upper_pct"`
+	AmountUSDT    *float64 `json:"amount_usdt,omitempty"`
 }
 
 type taskUpdateRangeResponse struct {
@@ -23,6 +25,7 @@ type taskUpdateRangeResponse struct {
 	TaskID        uint      `json:"task_id"`
 	RangeLowerPct float64   `json:"range_lower_pct"`
 	RangeUpperPct float64   `json:"range_upper_pct"`
+	AmountUSDT    float64   `json:"amount_usdt,omitempty"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
@@ -49,6 +52,13 @@ func (s *Server) handleTaskUpdateRange(w http.ResponseWriter, r *http.Request) {
 	if req.RangeLowerPct <= 0 || req.RangeUpperPct <= 0 || req.RangeLowerPct >= 100 || req.RangeUpperPct >= 100 {
 		http.Error(w, "invalid range", http.StatusBadRequest)
 		return
+	}
+	if req.AmountUSDT != nil {
+		amt := *req.AmountUSDT
+		if !isValidPositiveAmount(amt) {
+			http.Error(w, "invalid amount", http.StatusBadRequest)
+			return
+		}
 	}
 
 	user, status, msg := authenticateTelegramWebAppUser(initData)
@@ -94,6 +104,9 @@ func (s *Server) handleTaskUpdateRange(w http.ResponseWriter, r *http.Request) {
 		"range_lower_percentage": tickLowerPct,
 		"range_upper_percentage": tickUpperPct,
 	}
+	if req.AmountUSDT != nil {
+		updates["amount_usdt"] = *req.AmountUSDT
+	}
 	if err := taskService.Update(user.ID, req.TaskID, updates); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -104,11 +117,23 @@ func (s *Server) handleTaskUpdateRange(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	amountUSDT := task.AmountUSDT
+	if req.AmountUSDT != nil {
+		amountUSDT = *req.AmountUSDT
+	}
 	_ = json.NewEncoder(w).Encode(taskUpdateRangeResponse{
 		OK:            true,
 		TaskID:        req.TaskID,
 		RangeLowerPct: req.RangeLowerPct,
 		RangeUpperPct: req.RangeUpperPct,
+		AmountUSDT:    amountUSDT,
 		UpdatedAt:     now,
 	})
+}
+
+func isValidPositiveAmount(v float64) bool {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return false
+	}
+	return v > 0
 }
