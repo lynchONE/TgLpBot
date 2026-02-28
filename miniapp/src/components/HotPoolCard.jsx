@@ -384,20 +384,22 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                     </div>
 
                     <div className="mt-2 text-xs space-y-1">
-                        <div className="flex items-center gap-x-4">
-                            {showVolume ? (
-                                <div className="text-zinc-500 dark:text-white/40 flex items-center">
-                                    交易量:{' '}
-                                    <span className="font-semibold text-sky-600 dark:text-sky-200 tabular-nums">
-                                        <NumberFlowValue value={volumeValue} formatter={(v) => formatUsdCompact(v)} />
-                                    </span>
-                                    <ChangeIndicator
-                                        currentValue={pool?.total_volume}
-                                        previousValue={previousData?.total_volume}
-                                        label="交易量变化"
-                                    />
-                                </div>
-                            ) : null}
+                        {/* 第一行：交易量 */}
+                        {showVolume ? (
+                            <div className="text-zinc-500 dark:text-white/40 flex items-center">
+                                交易量:{' '}
+                                <span className="font-semibold text-sky-600 dark:text-sky-200 tabular-nums">
+                                    <NumberFlowValue value={volumeValue} formatter={(v) => formatUsdCompact(v)} />
+                                </span>
+                                <ChangeIndicator
+                                    currentValue={pool?.total_volume}
+                                    previousValue={previousData?.total_volume}
+                                    label="交易量变化"
+                                />
+                            </div>
+                        ) : null}
+                        {/* 第二行：TVL（左）+ 交易笔数（右） */}
+                        <div className="flex items-center justify-between gap-2">
                             {showTVL ? (
                                 <div className="text-zinc-500 dark:text-white/40 flex items-center">
                                     TVL:{' '}
@@ -410,9 +412,9 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                                         label="TVL变化"
                                     />
                                 </div>
-                            ) : null}
+                            ) : <div />}
                             {pool?.transaction_count > 0 ? (
-                                <div className="text-zinc-500 dark:text-white/40 flex items-center ml-auto">
+                                <div className="text-zinc-500 dark:text-white/40 flex items-center shrink-0">
                                     交易笔数:{' '}
                                     <span className="font-semibold text-orange-600 dark:text-orange-300 tabular-nums">
                                         <NumberFlowValue
