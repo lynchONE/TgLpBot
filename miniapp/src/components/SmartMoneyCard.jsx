@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { formatRelativeTime } from '../lib/time';
 import {
     fetchSmartMoneyFollowConfigs,
@@ -141,6 +141,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
     const [goldenWindowMinutes, setGoldenWindowMinutes] = useState('10');
     const [goldenCooldownMinutes, setGoldenCooldownMinutes] = useState('30');
     const [poolAddsPreviewMap, setPoolAddsPreviewMap] = useState({});
+    const poolAddsPreviewRef = useRef({});
 
     const updatedAtText = useMemo(
         () => formatRelativeTime(overview?.updated_at, tick) || '--',
@@ -173,6 +174,10 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
     }, [followConfigs]);
 
     useEffect(() => {
+        poolAddsPreviewRef.current = poolAddsPreviewMap || {};
+    }, [poolAddsPreviewMap]);
+
+    useEffect(() => {
         setPoolAddsPreviewMap({});
     }, [chain, initData]);
 
@@ -182,6 +187,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
         if (!Array.isArray(topPools) || topPools.length === 0) return;
 
         const now = Date.now();
+        const previewCache = poolAddsPreviewRef.current || {};
         const targets = topPools
             .map((pool) => {
                 const poolVersion = String(pool?.pool_version || '').trim().toLowerCase();
@@ -201,7 +207,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
             })
             .filter(Boolean)
             .filter((item) => {
-                const cached = poolAddsPreviewMap[item.key];
+                const cached = previewCache[item.key];
                 if (!cached) return true;
                 const fetchedAt = Number(cached?.fetchedAt ?? 0);
                 if (cached?.status === 'loading') return false;
@@ -307,7 +313,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
             aborted = true;
             controller.abort();
         };
-    }, [activeTab, apiBaseUrl, initData, chain, poolsWindowHours, topPools, poolAddsPreviewMap]);
+    }, [activeTab, apiBaseUrl, initData, chain, poolsWindowHours, topPools]);
 
     useEffect(() => {
         if (!initData) {
