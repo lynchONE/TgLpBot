@@ -147,7 +147,7 @@ export default function PriceRangeVisualizer({
                 <div className="min-w-0 flex-1 truncate text-zinc-700 dark:text-zinc-300" title={gridInfoText}>
                     <NumberFlowValue value={gridInfoText} formatter={() => gridInfoText} />
                 </div>
-                
+
                 <div
                     className={`shrink-0 max-w-[72%] truncate text-right ${visualInRange ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}
                     title={statusText}
@@ -160,7 +160,7 @@ export default function PriceRangeVisualizer({
                 <div className={`mt-1.5 flex items-center gap-2 ${taskRangeText && runningDuration ? 'justify-between' : taskRangeText ? 'justify-start' : 'justify-end'}`}>
                     {taskRangeText ? (
                         <span className="inline-flex items-center rounded-md bg-sky-500/10 px-2 py-1 text-[10px] font-semibold text-sky-700 ring-1 ring-sky-500/20 dark:bg-sky-500/15 dark:text-sky-300">
-                            策略范围 <NumberFlowValue value={taskRangeText} formatter={() => taskRangeText} />
+                            下次重平衡 <NumberFlowValue value={taskRangeText} formatter={() => taskRangeText} />
                         </span>
                     ) : null}
                     {runningDuration ? (

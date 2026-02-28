@@ -51,7 +51,7 @@ export default function BottomSheet({
 
             {/* Sheet wrapper */}
             <div
-                className={`relative w-full sm:max-w-md flex flex-col bg-white/80 dark:bg-[#111318]/90 backdrop-blur-xl border-t sm:border border-zinc-200/50 dark:border-white/10 rounded-t-3xl sm:rounded-3xl shadow-2xl transition-transform duration-300 ease-in-out ${maxHeightClass} ${className} ${isAnimating ? 'translate-y-0 sm:scale-100 opacity-100' : 'translate-y-full sm:translate-y-0 sm:scale-95 opacity-0'}`}
+                className={`relative w-full sm:max-w-md flex flex-col overflow-hidden bg-white/80 dark:bg-[#111318]/90 backdrop-blur-xl border-t sm:border border-zinc-200/50 dark:border-white/10 rounded-t-3xl sm:rounded-3xl shadow-2xl transition-transform duration-300 ease-in-out ${maxHeightClass} ${className} ${isAnimating ? 'translate-y-0 sm:scale-100 opacity-100' : 'translate-y-full sm:translate-y-0 sm:scale-95 opacity-0'}`}
             >
                 {/* 顶部抓手 (移动端暗示可下拉) */}
                 <div
@@ -81,7 +81,7 @@ export default function BottomSheet({
 
                 {/* Content Area */}
                 <div
-                    className={`flex-1 overflow-y-auto overscroll-contain touch-pan-y ${contentClassName}`}
+                    className={`flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y ${contentClassName}`}
                     style={{ WebkitOverflowScrolling: 'touch' }}
                 >
                     {children}

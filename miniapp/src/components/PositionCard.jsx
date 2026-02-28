@@ -278,8 +278,13 @@ export default function PositionCard({
         if (!Number.isFinite(low) || !Number.isFinite(up) || low <= 0 || up <= 0) return null;
         const asymmetric = Math.abs(low - up) >= 0.01;
         const avg = (low + up) / 2;
-        return { text: asymmetric ? `下 ${low.toFixed(2)}% / 上 ${up.toFixed(2)}%` : `±${avg.toFixed(2)}%`, deviation: avg };
-    }, [position?.task_range_lower_pct, position?.task_range_upper_pct]);
+        let text = asymmetric ? `下 ${low.toFixed(2)}% / 上 ${up.toFixed(2)}%` : `±${avg.toFixed(2)}%`;
+        const amountUsdt = Number(position?.task_amount_usdt);
+        if (Number.isFinite(amountUsdt) && amountUsdt > 0) {
+            text += ` | $${amountUsdt.toFixed(2)}`;
+        }
+        return { text, deviation: avg };
+    }, [position?.task_range_lower_pct, position?.task_range_upper_pct, position?.task_amount_usdt]);
 
     const taskId = useMemo(() => {
         const raw = Number(position?.task_id);
@@ -433,7 +438,7 @@ export default function PositionCard({
                                         {typeof onUpdateTaskRange === 'function' && (
                                             <button type="button" onClick={editRange} disabled={!canUpdateRangeAction || Boolean(actionPending)}
                                                 className="w-full border-t border-zinc-100/80 px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:border-white/5 dark:text-white/70 dark:hover:bg-white/5">
-                                                {actionPending === 'range' ? '处理中...' : '修改区间'}
+                                                {actionPending === 'range' ? '处理中...' : '修改再平衡参数'}
                                             </button>
                                         )}
                                         {typeof onStopTask === 'function' && (

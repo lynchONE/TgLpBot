@@ -1882,8 +1882,8 @@ export default function App() {
         }
 
         const ok = await requestConfirm({
-            title: '修改区间',
-            message: '确认修改该任务区间？\n修改后的区间将对下次再平衡生效。',
+            title: '修改再平衡参数',
+            message: '确认修改？\n修改后的区间和金额都将在【下次再平衡时】生效。\n注意：本次修改不会直接改变当前的持仓。',
             confirmText: '确认修改',
         });
         if (!ok) return;
@@ -3359,7 +3359,7 @@ export default function App() {
                         <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
                             <div className="flex items-center justify-between gap-2">
                                 <div className="min-w-0">
-                                    <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">修改区间</div>
+                                    <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">修改再平衡参数</div>
                                     <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40 truncate">
                                         {taskRangeEdit?.title || '--'}
                                     </div>
@@ -3401,7 +3401,7 @@ export default function App() {
                                         />
                                     </div>
                                     <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                        修改后的区间将对下次再平衡生效。
+                                        修改后的区间将在【下次再平衡时】生效。
                                     </div>
                                 </div>
 
@@ -3420,7 +3420,7 @@ export default function App() {
                                         />
                                     </div>
                                     <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                        金额会和区间一起在下次重平衡时生效。
+                                        当前持仓不会直接变动，金额和区间都将在【下次再平衡时】生效。
                                     </div>
                                 </div>
 
