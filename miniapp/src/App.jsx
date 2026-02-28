@@ -1982,12 +1982,12 @@ export default function App() {
         monitor: {
             title: '自动任务监控',
             icon: icons.chart, // Changed to chart icon
-            subtitle: `Auto任务：${Array.isArray(autoMonitor?.tasks) ? autoMonitor.tasks.length : 0} · 更新：${formatRelativeTime(autoMonitor?.updated_at, tick) || '--'} · 自动刷新 ${monitorPollSec}s`,
+            subtitle: `Auto任务：${Array.isArray(autoMonitor?.tasks) ? autoMonitor.tasks.length : 0} · 更新：${formatRelativeTime(autoMonitor?.updated_at, tick) || '--'}`,
         },
         smart_money: {
             title: '聪明钱',
             icon: icons.search,
-            subtitle: `最近2h池子 ${Array.isArray(smartMoney?.pools) ? smartMoney.pools.length : 0} · 更新 ${formatRelativeTime(smartMoney?.updated_at, tick) || '--'} · 自动刷新 ${smartMoneyPollSec}s`,
+            subtitle: `最近2h池子 ${Array.isArray(smartMoney?.pools) ? smartMoney.pools.length : 0} · 更新 ${formatRelativeTime(smartMoney?.updated_at, tick) || '--'}`,
         },
         admin: {
             title: '管理面板',
