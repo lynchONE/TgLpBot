@@ -64,7 +64,7 @@ function DigitWheel({ digit, durationMs = 420 }) {
     }, [targetDigit]);
 
     return (
-        <span className="relative inline-flex h-[1em] w-[0.62em] overflow-hidden align-[-0.08em]">
+        <span className="relative inline-flex h-[1em] w-[0.62em] overflow-hidden">
             <span
                 className="absolute left-0 top-0 flex flex-col leading-none transition-transform will-change-transform"
                 style={{
@@ -112,13 +112,14 @@ export default function NumberFlowValue({
 
     const tokens = useMemo(() => buildTokens(text), [text]);
     const hasDigit = tokens.some((t) => t.type === 'digit');
+    const rootClassName = `inline-flex items-center align-[-0.08em] tabular-nums leading-none ${className}`.trim();
 
     if (!hasDigit) {
-        return <span className={`tabular-nums ${className}`}>{text}</span>;
+        return <span className={rootClassName}>{text}</span>;
     }
 
     return (
-        <span className={`inline-flex items-baseline tabular-nums ${className}`} aria-label={text}>
+        <span className={rootClassName} aria-label={text}>
             {tokens.map((token) => {
                 if (token.type === 'digit') {
                     return <DigitWheel key={token.key} digit={token.digit} durationMs={durationMs} />;
