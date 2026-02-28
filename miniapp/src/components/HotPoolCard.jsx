@@ -1,7 +1,8 @@
 import React, { useMemo, useState, useRef, useCallback } from 'react';
-import { copyToClipboard, hapticNotification, hapticImpact } from '../lib/telegram';
+import { copyToClipboard, hapticNotification, hapticImpact, openLink } from '../lib/telegram';
 import uniswapIcon from '../image/uniswap.svg';
 import pancakeIcon from '../image/pancake.svg';
+import gmgnIcon from '../image/gmgn.svg';
 import NumberFlowValue from './NumberFlowValue.jsx';
 
 const Icon = ({ path, className = '' }) => (
@@ -265,7 +266,9 @@ const CountChangeIndicator = ({ currentValue, previousValue, label = '变化' })
     return el;
 };
 
-export default function HotPoolCard({ pool, metric, previousData, onOpenKline, onOpenPosition, onBlacklist, onBlacklistRequest, rank, apiBaseUrl, isBlacklisted = false }) {
+const STABLE_COINS = ['usdc', 'usdt', 'busd', 'dai', 'frax', 'usdd', 'fdusd', 'wbnb', 'weth', 'wsol', 'bnb', 'eth', 'sol'];
+
+export default function HotPoolCard({ pool, metric, previousData, onOpenKline, onOpenPosition, onBlacklist, onBlacklistRequest, rank, apiBaseUrl, isBlacklisted = false, chain }) {
     const [copied, setCopied] = useState(false);
     const addr = String(pool?.pool_address || '').trim();
     const canOpenKline = useMemo(() => isPoolAddressLike(addr), [addr]);
@@ -315,6 +318,35 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
         if (rank === 3) return 'rank-bronze';
         return '';
     }, [rank]);
+
+    const gmgnNetwork = useMemo(() => (chain === 'base' ? 'base' : 'bsc'), [chain]);
+
+    const gmgnTokenAddr = useMemo(() => {
+        if (!pool || !pool.trading_pair) return null;
+        const tokens = pool.trading_pair.split('/').map(t => t.trim().toLowerCase());
+        if (tokens.length !== 2) return pool.token0_address || pool.token1_address;
+
+        const t0 = tokens[0];
+        const t1 = tokens[1];
+
+        const t0IsStable = STABLE_COINS.includes(t0);
+        const t1IsStable = STABLE_COINS.includes(t1);
+
+        // 如果左边是稳定币，右边不是，则返回 token1
+        if (t0IsStable && !t1IsStable) return pool.token1_address;
+        // 如果右边是稳定币，左边不是，则返回 token0
+        if (t1IsStable && !t0IsStable) return pool.token0_address;
+
+        // 如果无法判断或两个都是，默认返回 token0
+        return pool.token0_address || pool.token1_address;
+    }, [pool, chain]);
+
+    const openGmgn = useCallback(() => {
+        if (gmgnTokenAddr) {
+            hapticImpact('light');
+            openLink(`https://gmgn.ai/${gmgnNetwork}/token/${gmgnTokenAddr}`);
+        }
+    }, [gmgnTokenAddr, gmgnNetwork]);
 
     const priceDisplay = useMemo(() => {
         const v = String(pool?.price_display || '').trim();
@@ -498,6 +530,17 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
             <div className="mt-3 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 flex-wrap">
                     <DexBadge pool={pool} />
+                    {gmgnTokenAddr ? (
+                        <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); openGmgn(); }}
+                            className="inline-flex items-center gap-1 rounded-lg bg-zinc-800 px-2 py-0.5 text-[11px] font-semibold text-white ring-1 ring-white/10 dark:bg-[#1a1c23] dark:ring-white/10 transition-colors hover:bg-zinc-700 dark:hover:bg-[#252831]"
+                            title="在 GMGN 查看代币"
+                        >
+                            <img src={gmgnIcon} alt="GMGN" className="h-3.5 w-3.5" />
+                            <span>GMGN</span>
+                        </button>
+                    ) : null}
                     <PositionBadge pool={pool} />
                     {isBlacklisted ? (
                         <div className="inline-flex items-center gap-1 rounded-lg bg-red-500/15 px-2 py-0.5 text-[11px] font-bold text-red-700 ring-1 ring-red-500/25 dark:bg-red-500/20 dark:text-red-200 dark:ring-red-500/30">

@@ -2461,6 +2461,7 @@ export default function App() {
                                 rank={index + 1}
                                 apiBaseUrl={apiBaseUrl}
                                 isBlacklisted={blacklist.has(addr)}
+                                chain={hotPoolsData?.chain || 'bsc'}
                             />
                         );
                     })
@@ -2759,6 +2760,7 @@ export default function App() {
                                                     onOpenKline={setKlinePool}
                                                     onOpenPosition={selectPoolFromSearch}
                                                     onBlacklistRequest={openBlacklistPrompt}
+                                                    chain={poolSearchChain}
                                                 />
                                             );
                                         })}
