@@ -473,7 +473,7 @@ export default function PositionCard({
                             ))}
 
                             <div className="pt-2">
-                                <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap pb-1">
+                                <div className="grid grid-cols-4 gap-1.5">
                                     {[
                                         { key: 'wallet', label: '钱包', onClick: openWallet, disabled: false },
                                         { key: 'pool', label: '池子', onClick: openPool, disabled: !poolLink },
@@ -485,7 +485,7 @@ export default function PositionCard({
                                             onClick={onClick}
                                             disabled={disabled}
                                             title={label}
-                                            className="inline-flex shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-100 active:scale-[0.98] disabled:opacity-40 dark:border-white/15 dark:bg-white/10 dark:text-white/80 dark:hover:bg-white/15"
+                                            className="inline-flex min-w-0 items-center justify-center rounded-lg border border-zinc-200 bg-white px-1.5 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-100 active:scale-[0.98] disabled:opacity-40 dark:border-white/15 dark:bg-white/10 dark:text-white/80 dark:hover:bg-white/15"
                                         >
                                             <span className="truncate">{label}</span>
                                         </button>
