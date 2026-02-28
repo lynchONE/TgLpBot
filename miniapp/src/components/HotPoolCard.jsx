@@ -173,13 +173,22 @@ function formatPairLabel(tradingPair) {
 }
 
 // 通用变化指示器组件 - 用于显示数值变化（费用、交易量等）
+// 如果本轮数据无变化(diff===0)，保持上次的变化箭头不消失
 const ChangeIndicator = ({ currentValue, previousValue, label = '变化' }) => {
-    if (previousValue === undefined || previousValue === null) return null;
+    const lastRef = useRef(null);
+    if (previousValue === undefined || previousValue === null) {
+        return lastRef.current ? lastRef.current.el : null;
+    }
 
     const current = Number(currentValue || 0);
     const previous = Number(previousValue || 0);
     const diff = current - previous;
-    if (diff === 0 || !Number.isFinite(diff)) return null;
+
+    if (!Number.isFinite(diff)) return lastRef.current ? lastRef.current.el : null;
+
+    // diff===0 时使用上次缓存的结果
+    if (diff === 0 && lastRef.current) return lastRef.current.el;
+    if (diff === 0) return null;
 
     const isIncrease = diff > 0;
     const absValue = Math.abs(diff);
@@ -192,7 +201,7 @@ const ChangeIndicator = ({ currentValue, previousValue, label = '变化' }) => {
         return val.toFixed(2);
     };
 
-    return (
+    const el = (
         <span
             className={`ml-1 inline-flex items-center text-[10px] font-bold ${isIncrease ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
                 }`}
@@ -204,16 +213,27 @@ const ChangeIndicator = ({ currentValue, previousValue, label = '变化' }) => {
             <NumberFlowValue value={absValue} formatter={(v) => formatValue(v)} />
         </span>
     );
+    lastRef.current = { el };
+    return el;
 };
 
 // 数量变化指示器组件 - 用于显示交易笔数等非美元数值的变化
+// 如果本轮数据无变化(diff===0)，保持上次的变化箭头不消失
 const CountChangeIndicator = ({ currentValue, previousValue, label = '变化' }) => {
-    if (previousValue === undefined || previousValue === null) return null;
+    const lastRef = useRef(null);
+    if (previousValue === undefined || previousValue === null) {
+        return lastRef.current ? lastRef.current.el : null;
+    }
 
     const current = Number(currentValue || 0);
     const previous = Number(previousValue || 0);
     const diff = current - previous;
-    if (diff === 0 || !Number.isFinite(diff)) return null;
+
+    if (!Number.isFinite(diff)) return lastRef.current ? lastRef.current.el : null;
+
+    // diff===0 时使用上次缓存的结果
+    if (diff === 0 && lastRef.current) return lastRef.current.el;
+    if (diff === 0) return null;
 
     const isIncrease = diff > 0;
     const absValue = Math.abs(diff);
@@ -229,7 +249,7 @@ const CountChangeIndicator = ({ currentValue, previousValue, label = '变化' })
         return Math.round(val).toString();
     };
 
-    return (
+    const el = (
         <span
             className={`ml-1 inline-flex items-center text-[10px] font-bold ${isIncrease ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
                 }`}
@@ -241,6 +261,8 @@ const CountChangeIndicator = ({ currentValue, previousValue, label = '变化' })
             <NumberFlowValue value={absValue} formatter={(v) => formatCount(v)} />
         </span>
     );
+    lastRef.current = { el };
+    return el;
 };
 
 export default function HotPoolCard({ pool, metric, previousData, onOpenKline, onOpenPosition, onBlacklist, onBlacklistRequest, rank, apiBaseUrl, isBlacklisted = false }) {
@@ -398,38 +420,20 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                                 />
                             </div>
                         ) : null}
-                        {/* 第二行：TVL（左）+ 交易笔数（右） */}
-                        <div className="flex items-center justify-between gap-2">
-                            {showTVL ? (
-                                <div className="text-zinc-500 dark:text-white/40 flex items-center">
-                                    TVL:{' '}
-                                    <span className="font-semibold text-zinc-900 dark:text-white/80 tabular-nums">
-                                        <NumberFlowValue value={tvlValue} formatter={(v) => formatUsdCompact(v)} />
-                                    </span>
-                                    <ChangeIndicator
-                                        currentValue={pool?.current_pool_value}
-                                        previousValue={previousData?.current_pool_value}
-                                        label="TVL变化"
-                                    />
-                                </div>
-                            ) : <div />}
-                            {pool?.transaction_count > 0 ? (
-                                <div className="text-zinc-500 dark:text-white/40 flex items-center shrink-0">
-                                    交易笔数:{' '}
-                                    <span className="font-semibold text-orange-600 dark:text-orange-300 tabular-nums">
-                                        <NumberFlowValue
-                                            value={pool.transaction_count}
-                                            formatter={(v) => Number(v || 0).toLocaleString()}
-                                        />
-                                    </span>
-                                    <CountChangeIndicator
-                                        currentValue={pool?.transaction_count}
-                                        previousValue={previousData?.transaction_count}
-                                        label="交易笔数变化"
-                                    />
-                                </div>
-                            ) : null}
-                        </div>
+                        {/* 第二行：TVL */}
+                        {showTVL ? (
+                            <div className="text-zinc-500 dark:text-white/40 flex items-center">
+                                TVL:{' '}
+                                <span className="font-semibold text-zinc-900 dark:text-white/80 tabular-nums">
+                                    <NumberFlowValue value={tvlValue} formatter={(v) => formatUsdCompact(v)} />
+                                </span>
+                                <ChangeIndicator
+                                    currentValue={pool?.current_pool_value}
+                                    previousValue={previousData?.current_pool_value}
+                                    label="TVL变化"
+                                />
+                            </div>
+                        ) : null}
                     </div>
                 </div>
 
@@ -470,6 +474,22 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                     {secondaryMetricText ? (
                         <div className="mt-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-300 tabular-nums">
                             <NumberFlowValue value={secondaryMetricText} formatter={() => secondaryMetricText} />
+                        </div>
+                    ) : null}
+                    {pool?.transaction_count > 0 ? (
+                        <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40 flex items-center justify-end">
+                            交易笔数:{' '}
+                            <span className="font-semibold text-orange-600 dark:text-orange-300 tabular-nums">
+                                <NumberFlowValue
+                                    value={pool.transaction_count}
+                                    formatter={(v) => Number(v || 0).toLocaleString()}
+                                />
+                            </span>
+                            <CountChangeIndicator
+                                currentValue={pool?.transaction_count}
+                                previousValue={previousData?.transaction_count}
+                                label="交易笔数变化"
+                            />
                         </div>
                     ) : null}
                 </div>

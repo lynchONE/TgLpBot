@@ -3197,7 +3197,7 @@ export default function App() {
                                         placeholder="上限 %"
                                     />
                                 </div>
-                                <div className="mt-2 flex flex-wrap gap-2">
+                                <div className="mt-2 flex flex-wrap gap-1.5">
                                     {quickRangeOptions.map((option) => (
                                         <button
                                             key={option.value}
@@ -3214,7 +3214,7 @@ export default function App() {
                                                 }
                                                 setOpenPositionError('');
                                             }}
-                                            className="rounded-xl px-3 py-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-500/30 bg-gradient-to-r from-emerald-50 via-emerald-100/60 to-sky-100/60 hover:from-emerald-100 hover:via-emerald-200/70 hover:to-sky-200/70 dark:text-emerald-200 dark:ring-emerald-400/30 dark:from-emerald-500/10 dark:via-emerald-400/10 dark:to-sky-400/10"
+                                            className="rounded-lg px-2 py-1 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-500/30 bg-gradient-to-r from-amber-50 via-amber-100/60 to-yellow-100/60 hover:from-amber-100 hover:via-amber-200/70 hover:to-yellow-200/70 dark:text-amber-200 dark:ring-amber-400/30 dark:from-amber-500/10 dark:via-amber-400/10 dark:to-yellow-400/10"
                                         >
                                             {option.label}
                                         </button>
