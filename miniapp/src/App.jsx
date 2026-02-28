@@ -2174,7 +2174,7 @@ export default function App() {
                         title={hotPoolsSort === 'fee_rate' ? '费用率排行' : hotPoolsSort === 'volume' ? '交易量排行' : '费用排行'}
                         actions={(
                             <>
-                                <div className="flex shrink-0 p-0.5 bg-zinc-100/80 rounded-xl dark:bg-[#16181d] shadow-inner ring-1 ring-zinc-200/50 dark:ring-black/20 max-w-[60%] overflow-x-auto no-scrollbar">
+                                <div className="flex shrink-0 p-0.5 bg-zinc-100/80 rounded-xl dark:bg-[#16181d] shadow-inner ring-1 ring-zinc-200/50 dark:ring-black/20">
                                     {HOT_POOL_SORT_TABS.map((tab) => (
                                         <button
                                             key={tab.key}
@@ -2253,43 +2253,54 @@ export default function App() {
                                 全局配置
                             </button>
                         </div>
+                    </div >
+                ) : null
+                }
+
+            </header >
+
+            {
+                isHotPools && hotPoolsError ? (
+                    <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-200">
+                        {hotPoolsError}
                     </div>
-                ) : null}
+                ) : null
+            }
 
-            </header>
+            {
+                isHotPools && hotPoolsLoading && hotPoolsRows.length === 0 ? (
+                    <SkeletonList count={5} Card={SkeletonHotPoolCard} />
+                ) : null
+            }
 
-            {isHotPools && hotPoolsError ? (
-                <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-200">
-                    {hotPoolsError}
-                </div>
-            ) : null}
+            {
+                isHotPools && !hotPoolsLoading && !hotPoolsError && hotPoolsData && hotPoolsRows.length === 0 ? (
+                    <div className="mb-4 rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                        暂无热门池子数据。
+                    </div>
+                ) : null
+            }
 
-            {isHotPools && hotPoolsLoading && hotPoolsRows.length === 0 ? (
-                <SkeletonList count={5} Card={SkeletonHotPoolCard} />
-            ) : null}
+            {
+                isHotPools && !hotPoolsLoading && !hotPoolsError && hotPoolsData && hotPoolsRows.length > 0 && hotPoolsFilterEnabled && hotPoolsVisibleRows.length === 0 ? (
+                    <div className="mb-4 rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                        筛选后暂无热门池子数据。
+                    </div>
+                ) : null
+            }
 
-            {isHotPools && !hotPoolsLoading && !hotPoolsError && hotPoolsData && hotPoolsRows.length === 0 ? (
-                <div className="mb-4 rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                    暂无热门池子数据。
-                </div>
-            ) : null}
-
-            {isHotPools && !hotPoolsLoading && !hotPoolsError && hotPoolsData && hotPoolsRows.length > 0 && hotPoolsFilterEnabled && hotPoolsVisibleRows.length === 0 ? (
-                <div className="mb-4 rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                    筛选后暂无热门池子数据。
-                </div>
-            ) : null}
-
-            {!isHotPools && showAdmin ? (
-                <AdminPage
-                    apiBaseUrl={apiBaseUrl}
-                    initData={initData}
-                    hasInitData={hasInitData}
-                    tick={tick}
-                    pollIntervalSec={pollIntervalSec}
-                    onNotice={showNotice}
-                />
-            ) : null}
+            {
+                !isHotPools && showAdmin ? (
+                    <AdminPage
+                        apiBaseUrl={apiBaseUrl}
+                        initData={initData}
+                        hasInitData={hasInitData}
+                        tick={tick}
+                        pollIntervalSec={pollIntervalSec}
+                        onNotice={showNotice}
+                    />
+                ) : null
+            }
 
             {
                 !isHotPools && initDataMissing ? (
@@ -2656,7 +2667,7 @@ export default function App() {
                                 </button>
                             </div>
 
-                            <div className="mt-4 space-y-3">
+                            <div className="mt-4 space-y-3 pb-20">
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="text-[11px] text-zinc-500 dark:text-white/40">搜索池子 (池子ID/代币名称)</div>
                                     <div className="mt-2 flex items-center gap-2">
@@ -2783,7 +2794,7 @@ export default function App() {
                                 </button>
                             </div>
 
-                            <div className="mt-4 space-y-4">
+                            <div className="mt-4 space-y-4 pb-20">
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="mt-1">
                                         <div className="text-[11px] text-zinc-500 dark:text-white/40">搜索 (交易对/地址)</div>
