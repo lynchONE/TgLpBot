@@ -75,7 +75,7 @@ function DigitWheel({ digit, durationMs = 420 }) {
                 aria-hidden="true"
             >
                 {DIGITS.map((n, idx) => (
-                    <span key={idx} className="h-[1em] leading-[1em]">
+                    <span key={idx} className="flex h-[1em] items-center justify-center leading-none">
                         {n}
                     </span>
                 ))}
@@ -112,7 +112,7 @@ export default function NumberFlowValue({
 
     const tokens = useMemo(() => buildTokens(text), [text]);
     const hasDigit = tokens.some((t) => t.type === 'digit');
-    const rootClassName = `inline-flex items-center align-[-0.08em] tabular-nums leading-none ${className}`.trim();
+    const rootClassName = `inline-flex items-center align-[-0.08em] tabular-nums lining-nums leading-none ${className}`.trim();
 
     if (!hasDigit) {
         return <span className={rootClassName}>{text}</span>;
