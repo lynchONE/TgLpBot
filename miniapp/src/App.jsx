@@ -11,6 +11,7 @@ import ModuleHeader from './components/ModuleHeader.jsx';
 import NumberFlowValue from './components/NumberFlowValue.jsx';
 import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
 import AdminPage from './components/AdminPage.jsx';
+import { Bot, BarChart2, Filter, Search, Moon, Sun, Settings, X, Check, RotateCcw, AlertTriangle, Flame } from 'lucide-react';
 import {
     deleteTask,
     disableAdminAutoLP,
@@ -229,25 +230,24 @@ function formatOnOff(value) {
     return value ? '开启' : '关闭';
 }
 
-const Icon = ({ path, className = '' }) => (
-    <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="0.5" className={className} aria-hidden="true">
-        <path d={path} />
-    </svg>
-);
-
 const icons = {
-    bot: 'M12 2a2 2 0 012 2v1h1a3 3 0 013 3v7a7 7 0 11-14 0V8a3 3 0 013-3h1V4a2 2 0 012-2zm-4 7a1.25 1.25 0 100 2.5A1.25 1.25 0 008 9zm8 0a1.25 1.25 0 100 2.5A1.25 1.25 0 0016 9zm-7.5 6.5h7a3.5 3.5 0 01-7 0z',
-    chart: 'M4 19h16v2H2V3h2v16zm4-2H6v-6h2v6zm5 0h-2V7h2v10zm5 0h-2v-4h2v4z',
-    filter: 'M3 5h18l-7 8v5.5l-4 2V13L3 5z',
-    search: 'M10 2a8 8 0 105.293 14.293l4.707 4.707a1 1 0 001.414-1.414l-4.707-4.707A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z',
-    moon: 'M12 3a9 9 0 109 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 01-4.4 2.26 5.403 5.403 0 01-3.14-9.8c-.44-.06-.9-.1-1.36-.1z',
-    sun: 'M12 7a5 5 0 100 10 5 5 0 000-10zM2 13h2a1 1 0 100-2H2a1 1 0 100 2zm18 0h2a1 1 0 100-2h-2a1 1 0 100 2zM11 2v2a1 1 0 102 0V2a1 1 0 10-2 0zm0 18v2a1 1 0 102 0v-2a1 1 0 10-2 0zM5.99 4.58a1 1 0 10-1.41 1.41l1.06 1.06a1 1 0 001.41-1.41L5.99 4.58zm12.37 12.37a1 1 0 10-1.41 1.41l1.06 1.06a1 1 0 001.41-1.41l-1.06-1.06zm1.06-10.96a1 1 0 10-1.41-1.41l-1.06 1.06a1 1 0 001.41 1.41l1.06-1.06zM7.05 18.36a1 1 0 10-1.41-1.41l-1.06 1.06a1 1 0 001.41 1.41l1.06-1.06z',
-    gear: 'M19.14 12.94a7.43 7.43 0 00.05-.94 7.43 7.43 0 00-.05-.94l2.11-1.65a.5.5 0 00.12-.63l-2-3.46a.5.5 0 00-.6-.22l-2.49 1a7.18 7.18 0 00-1.63-.94l-.38-2.65A.5.5 0 0013.79 2h-3.6a.5.5 0 00-.49.41l-.38 2.65a7.18 7.18 0 00-1.63.94l-2.49-1a.5.5 0 00-.6.22l-2 3.46a.5.5 0 00.12.63l2.11 1.65a7.43 7.43 0 000 1.88l-2.11 1.65a.5.5 0 00-.12.63l2 3.46a.5.5 0 00.6.22l2.49-1c.5.39 1.05.72 1.63.94l.38 2.65a.5.5 0 00.49.41h3.6a.5.5 0 00.49-.41l.38-2.65a7.18 7.18 0 001.63-.94l2.49 1a.5.5 0 00.6-.22l2-3.46a.5.5 0 00-.12-.63l-2.11-1.65zM12 15.5A3.5 3.5 0 1112 8a3.5 3.5 0 010 7.5z',
-    close: 'M6.225 4.811a1 1 0 011.414 0L12 9.172l4.361-4.361a1 1 0 111.414 1.414L13.414 10.586l4.361 4.361a1 1 0 01-1.414 1.414L12 12l-4.361 4.361a1 1 0 01-1.414-1.414l4.361-4.361-4.361-4.361a1 1 0 010-1.414z',
-    check: 'M9 16.17L4.83 12 3.41 13.41 9 19l12-12-1.41-1.41L9 16.17z',
-    reset: 'M12 5V2L7 7l5 5V9a5 5 0 11-5 5H5a7 7 0 107-7z',
-    alert: 'M12 2L1 21h22L12 2zm0 6a1 1 0 011 1v5a1 1 0 11-2 0V9a1 1 0 011-1zm0 10a1.25 1.25 0 110-2.5A1.25 1.25 0 0112 18z',
-    fire: 'M17.657 18.657A8 8 0 016.343 7.343S7 9 7.1 10c0 .35.15.68.4.92.54.54 1.47.41 1.83-.26l.16-.32A3.996 3.996 0 0012 3c0 2 2 3 2 5.5 0 1.38-.56 2.63-1.46 3.54a4.01 4.01 0 001.07 6.55z',
+    bot: Bot,
+    chart: BarChart2,
+    filter: Filter,
+    search: Search,
+    moon: Moon,
+    sun: Sun,
+    gear: Settings,
+    close: X,
+    check: Check,
+    reset: RotateCcw,
+    alert: AlertTriangle,
+    fire: Flame,
+};
+
+const Icon = ({ path: IconCmp, className = '' }) => {
+    if (!IconCmp) return null;
+    return <IconCmp className={className} strokeWidth={2} />;
 };
 
 function buildTopNavItems({ isAdmin, smartMoneyEnabled }) {
@@ -2174,16 +2174,16 @@ export default function App() {
                         title={hotPoolsSort === 'fee_rate' ? '费用率排行' : hotPoolsSort === 'volume' ? '交易量排行' : '费用排行'}
                         actions={(
                             <>
-                                <div className="flex shrink-0 rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5">
+                                <div className="flex shrink-0 p-1 bg-zinc-100/80 rounded-2xl dark:bg-[#1a1d24] shadow-inner ring-1 ring-zinc-200/50 dark:ring-black/20">
                                     {HOT_POOL_SORT_TABS.map((tab) => (
                                         <button
                                             key={tab.key}
                                             type="button"
                                             onClick={() => setHotPoolsSort(tab.key)}
                                             aria-pressed={hotPoolsSort === tab.key}
-                                            className={`rounded-xl px-3 py-2 whitespace-nowrap transition ${hotPoolsSort === tab.key
-                                                ? 'bg-emerald-500 text-white shadow-sm'
-                                                : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
+                                            className={`relative rounded-xl px-4 py-1.5 text-[13px] font-semibold whitespace-nowrap transition-all duration-300 ${hotPoolsSort === tab.key
+                                                ? 'bg-white text-emerald-600 shadow-sm ring-1 ring-black/5 dark:bg-[#2a2e37] dark:text-emerald-400 dark:ring-white/10'
+                                                : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'
                                                 }`}
                                         >
                                             {tab.label}
@@ -2556,7 +2556,7 @@ export default function App() {
                                     <>
                                         {isPositions ? (
                                             <div
-                                                className="grid grid-cols-3 gap-1 rounded-2xl border border-zinc-200 bg-zinc-100/70 p-1 text-xs font-semibold dark:border-white/10 dark:bg-white/5"
+                                                className="grid grid-cols-3 gap-1 p-1 bg-zinc-100/80 rounded-2xl dark:bg-[#1a1d24] shadow-inner ring-1 ring-zinc-200/50 dark:ring-black/20"
                                             >
                                                 {POSITION_TASK_TABS.map((tab) => (
                                                     <button
@@ -2569,9 +2569,9 @@ export default function App() {
                                                             setBatchMode(false);
                                                         }}
                                                         aria-pressed={positionsTaskTab === tab.key}
-                                                        className={`rounded-xl px-3 py-2 transition ${positionsTaskTab === tab.key
-                                                            ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white'
-                                                            : 'text-zinc-600 hover:bg-white/60 dark:text-white/50 dark:hover:bg-white/10'
+                                                        className={`relative rounded-xl px-3 py-2 text-[13px] font-semibold transition-all duration-300 ${positionsTaskTab === tab.key
+                                                            ? 'bg-white text-emerald-600 shadow-sm ring-1 ring-black/5 dark:bg-[#2a2e37] dark:text-emerald-400 dark:ring-white/10'
+                                                            : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'
                                                             }`}
                                                     >
                                                         {tab.label}
@@ -3493,33 +3493,35 @@ export default function App() {
             }
 
             {/* Bottom Navigation */}
-            <nav className="fixed bottom-0 left-0 right-0 max-w-[720px] mx-auto z-40 flex items-center justify-around border-t border-zinc-200 bg-white/80 px-2 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-xl dark:border-white/10 dark:bg-[#0b0d10]/80">
-                {topNavItems.map((item) => {
-                    const isActive = viewMode === item.key;
-                    let iconPath = icons.bot;
-                    if (item.key === 'hot_pools') iconPath = icons.fire;
-                    if (item.key === 'positions') iconPath = icons.chart;
-                    if (item.key === 'monitor') iconPath = icons.alert;
-                    if (item.key === 'smart_money') iconPath = icons.bot;
-                    if (item.key === 'admin') iconPath = icons.gear;
+            <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none pb-[max(0.75rem,env(safe-area-inset-bottom))] px-4">
+                <nav className="pointer-events-auto max-w-[400px] mx-auto flex items-center justify-between rounded-full border border-zinc-200/60 bg-white/95 px-3 py-2.5 shadow-2xl backdrop-blur-xl dark:border-white/10 dark:bg-[#1a1c23]/95 dark:shadow-black/70 ring-1 ring-black/5 dark:ring-white/5">
+                    {topNavItems.map((item) => {
+                        const isActive = viewMode === item.key;
+                        let iconPath = icons.bot;
+                        if (item.key === 'hot_pools') iconPath = icons.fire;
+                        if (item.key === 'positions') iconPath = icons.chart;
+                        if (item.key === 'monitor') iconPath = icons.alert;
+                        if (item.key === 'smart_money') iconPath = icons.bot;
+                        if (item.key === 'admin') iconPath = icons.gear;
 
-                    return (
-                        <button
-                            key={item.key}
-                            type="button"
-                            onClick={() => setViewMode(item.key)}
-                            aria-pressed={isActive}
-                            className={`flex flex-1 flex-col items-center justify-center rounded-xl transition-colors py-1 ${isActive
-                                ? 'text-emerald-600 dark:text-emerald-400'
-                                : 'text-zinc-500 hover:text-zinc-900 dark:text-white/40 dark:hover:text-white/80'
-                                }`}
-                        >
-                            <Icon path={iconPath} className={`h-6 w-6 ${isActive ? 'scale-110 transition-transform' : ''}`} />
-                            <span className="mt-1 text-[10px] font-medium">{item.label}</span>
-                        </button>
-                    );
-                })}
-            </nav>
+                        return (
+                            <button
+                                key={item.key}
+                                type="button"
+                                onClick={() => setViewMode(item.key)}
+                                aria-pressed={isActive}
+                                className={`relative flex flex-col items-center justify-center rounded-full px-4 py-1.5 transition-all duration-300 ${isActive
+                                    ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400'
+                                    : 'text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300'
+                                    }`}
+                            >
+                                <Icon path={iconPath} className={`h-5 w-5 transition-transform duration-300 ${isActive ? 'scale-110 mb-0.5' : 'mb-0 scale-100'}`} />
+                                {isActive && <span className="text-[10px] font-bold tracking-wide mt-0.5">{item.label}</span>}
+                            </button>
+                        );
+                    })}
+                </nav>
+            </div>
 
             <KlineModal
                 open={Boolean(klinePool)}
