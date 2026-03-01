@@ -10,6 +10,8 @@ import {
     fetchAdminRealtimePositions,
     fetchAdminAutoLPStats,
     disableAdminAutoLP,
+    fetchAdminUserAccess,
+    setAdminSmartMoneyEnabled,
 } from '../lib/api';
 import { formatRelativeTime } from '../lib/time';
 import NumberFlowValue from './NumberFlowValue.jsx';
@@ -75,6 +77,11 @@ export default function AdminPage({
     const [disableAutoError, setDisableAutoError] = useState('');
     const [disableAutoResult, setDisableAutoResult] = useState(null);
 
+    // SmartMoney 权限管理
+    const [userAccess, setUserAccess] = useState(null);
+    const [smartMoneyToggling, setSmartMoneyToggling] = useState(false);
+    const [smartMoneyError, setSmartMoneyError] = useState('');
+
     // 加载在线用户
     const loadOnlineUsers = useCallback(async () => {
         if (!hasInitData) return;
@@ -137,7 +144,6 @@ export default function AdminPage({
 
     // 关闭用户 Auto
     const handleDisableAuto = useCallback(async () => {
-        if (!hasInitData || !selectedUser?.user_id) return;
         setDisableAutoLoading(true);
         setDisableAutoError('');
         setDisableAutoResult(null);
@@ -156,6 +162,39 @@ export default function AdminPage({
         }
     }, [apiBaseUrl, initData, hasInitData, selectedUser, onNotice]);
 
+    // 加载用户访问权限
+    const loadUserAccess = useCallback(async (userId) => {
+        if (!hasInitData || !userId) return;
+        try {
+            const data = await fetchAdminUserAccess({ apiBaseUrl, initData, userId });
+            setUserAccess(data);
+        } catch {
+            setUserAccess(null);
+        }
+    }, [apiBaseUrl, initData, hasInitData]);
+
+    // 切换 SmartMoney 权限
+    const handleToggleSmartMoney = useCallback(async () => {
+        if (!hasInitData || !selectedUser?.user_id) return;
+        const newEnabled = !(userAccess?.smart_money_enabled ?? false);
+        setSmartMoneyToggling(true);
+        setSmartMoneyError('');
+        try {
+            const updated = await setAdminSmartMoneyEnabled({
+                apiBaseUrl,
+                initData,
+                userId: selectedUser.user_id,
+                enabled: newEnabled,
+            });
+            setUserAccess(updated);
+            onNotice?.(`聪明钱权限已${newEnabled ? '开启' : '关闭'}`);
+        } catch (e) {
+            setSmartMoneyError(String(e?.message || e));
+        } finally {
+            setSmartMoneyToggling(false);
+        }
+    }, [apiBaseUrl, initData, hasInitData, selectedUser, userAccess, onNotice]);
+
     // 初始加载
     useEffect(() => {
         if (activeTab === 'online_users') {
@@ -170,8 +209,9 @@ export default function AdminPage({
         if (selectedUser?.user_id) {
             loadUserPositions(selectedUser.user_id);
             loadUserAutoStats(selectedUser.user_id);
+            loadUserAccess(selectedUser.user_id);
         }
-    }, [selectedUser, loadUserPositions, loadUserAutoStats]);
+    }, [selectedUser, loadUserPositions, loadUserAutoStats, loadUserAccess]);
 
     // 轮询刷新
     useEffect(() => {
@@ -193,10 +233,12 @@ export default function AdminPage({
         setSelectedUser(user);
         setUserPositions(null);
         setUserAutoStats(null);
+        setUserAccess(null);
         setUserPositionsError('');
         setUserAutoStatsError('');
         setDisableAutoError('');
         setDisableAutoResult(null);
+        setSmartMoneyError('');
         setActiveTab('user_detail');
     }, []);
 
@@ -382,6 +424,33 @@ export default function AdminPage({
                                         已发起关闭：找到 <NumberFlowValue value={disableAutoResult.tasks_found || 0} formatOptions={{ maximumFractionDigits: 0 }} /> 个 Auto 任务，已请求撤出 <NumberFlowValue value={disableAutoResult.exit_requested || 0} formatOptions={{ maximumFractionDigits: 0 }} /> 个。
                                     </div>
                                 )}
+
+                                {/* 聪明钱权限 */}
+                                <div className="mt-3 pt-3 border-t border-zinc-100 dark:border-white/5">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div>
+                                            <div className="text-[11px] font-semibold text-zinc-700 dark:text-white/70">聪明钱权限</div>
+                                            <div className="text-[10px] text-zinc-400 dark:text-white/30">
+                                                {userAccess ? (userAccess.smart_money_enabled ? '已开启' : '未开启') : '加载中…'}
+                                            </div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={handleToggleSmartMoney}
+                                            disabled={smartMoneyToggling || !userAccess}
+                                            className={`rounded-xl px-3 py-2 text-xs font-semibold ring-1 transition disabled:opacity-50 ${
+                                                userAccess?.smart_money_enabled
+                                                    ? 'bg-amber-500/10 text-amber-700 ring-amber-500/25 hover:bg-amber-500/20 dark:text-amber-300'
+                                                    : 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/25 hover:bg-emerald-500/20 dark:text-emerald-300'
+                                            }`}
+                                        >
+                                            {smartMoneyToggling ? '…' : (userAccess?.smart_money_enabled ? '撤销权限' : '授予权限')}
+                                        </button>
+                                    </div>
+                                    {smartMoneyError && (
+                                        <div className="mt-2 text-[10px] text-red-600 dark:text-red-400">{smartMoneyError}</div>
+                                    )}
+                                </div>
                             </div>
 
                             {/* Auto 统计 */}

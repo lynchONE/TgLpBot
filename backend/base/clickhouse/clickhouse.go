@@ -400,6 +400,44 @@ func (s *ClickHouseService) Migrate(ctx context.Context) error {
 	return nil
 }
 
+// WatchedWalletEntry represents a wallet to upsert into the smart_lp_watched_wallets table.
+type WatchedWalletEntry struct {
+	Chain         string
+	WalletAddress string
+}
+
+// UpsertWatchedWallets inserts user-managed wallets into the ClickHouse watched wallets table
+// so that the SmartLP monitor will include them in its scan.
+func (s *ClickHouseService) UpsertWatchedWallets(ctx context.Context, entries []WatchedWalletEntry) error {
+	if s == nil || s.Conn == nil || len(entries) == 0 {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	batch, err := s.PrepareBatch(ctx, `INSERT INTO smart_lp_watched_wallets (
+		chain, wallet_address, last_add_at, source, updated_at
+	)`)
+	if err != nil {
+		return fmt.Errorf("prepare batch for watched wallets failed: %w", err)
+	}
+	defer func() { _ = batch.Abort() }()
+
+	now := time.Now()
+	for _, e := range entries {
+		chain := strings.ToLower(strings.TrimSpace(e.Chain))
+		wallet := strings.ToLower(strings.TrimSpace(e.WalletAddress))
+		if chain == "" || wallet == "" {
+			continue
+		}
+		if err := batch.Append(chain, wallet, now, "user_managed", now); err != nil {
+			return fmt.Errorf("append watched wallet failed: %w", err)
+		}
+	}
+	return batch.Send()
+}
+
 var clickhouseIdent = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
 func (s *ClickHouseService) ResetAll(ctx context.Context) error {

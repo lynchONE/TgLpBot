@@ -12,6 +12,8 @@ import NumberFlowValue from './NumberFlowValue.jsx';
 import SmartMoneyFollowModal from './SmartMoneyFollowModal.jsx';
 import SmartMoneyPoolAddsModal from './SmartMoneyPoolAddsModal.jsx';
 import SmartMoneyWalletPositionsModal from './SmartMoneyWalletPositionsModal.jsx';
+import SmartMoneyWatchedWalletsTab from './SmartMoneyWatchedWalletsTab.jsx';
+import SmartMoney24hPoolAddsCard from './SmartMoney24hPoolAddsCard.jsx';
 
 const USD_DISPLAY_LIMIT = 1e15;
 const usdFormatter = new Intl.NumberFormat('en-US', {
@@ -721,6 +723,26 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                 >
                     金狗通知
                 </button>
+                <button
+                    type="button"
+                    onClick={() => setActiveTab('monitor')}
+                    className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${activeTab === 'monitor'
+                        ? 'bg-emerald-500 text-white'
+                        : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
+                        }`}
+                >
+                    监控
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setActiveTab('24h')}
+                    className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${activeTab === '24h'
+                        ? 'bg-emerald-500 text-white'
+                        : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
+                        }`}
+                >
+                    24h加池
+                </button>
             </div>
 
             {activeTab === 'overview' ? (
@@ -1108,6 +1130,25 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                         </div>
                     </div>
                 </div>
+            )}
+
+            {activeTab === 'monitor' && (
+                <SmartMoneyWatchedWalletsTab
+                    apiBaseUrl={apiBaseUrl}
+                    initData={initData}
+                    chain={chain}
+                    onNotice={onNotice}
+                />
+            )}
+
+            {activeTab === '24h' && (
+                <SmartMoney24hPoolAddsCard
+                    apiBaseUrl={apiBaseUrl}
+                    initData={initData}
+                    chain={chain}
+                    onNotice={onNotice}
+                    onQuickOpenPool={onQuickOpenPool}
+                />
             )}
 
             <SmartMoneyWalletPositionsModal

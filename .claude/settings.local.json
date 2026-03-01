@@ -8,7 +8,15 @@
       "Bash(go test:*)",
       "Bash(npx vite build)",
       "Bash(node:*)",
-      "Bash(go vet:*)"
+      "Bash(go vet:*)",
+      "Bash(xargs dirname)",
+      "Bash(done)",
+      "Bash(wc -l /mnt/e/goProject/TgLpBot/miniapp/src/components/*.jsx)",
+      "Bash(cd /mnt/e/goProject/TgLpBot/miniapp && npm run build 2>&1 | tail -20)",
+      "Bash(npx --yes acorn --ecma2020 --module src/lib/api.js > /dev/null 2>&1 && echo \"api.js: OK\" || echo \"api.js: FAIL\")",
+      "Bash(npm install 2>&1 | tail -5)",
+      "Bash(npm run build 2>&1 | tail -20)",
+      "Bash(git config --global --add safe.directory /mnt/e/goProject/TgLpBot && git status --short)"
     ]
   }
 }

@@ -646,6 +646,36 @@ export async function fetchAdminActiveTasks({ apiBaseUrl, initData, limit, signa
     return resp.json();
 }
 
+export async function fetchAdminUserAccess({ apiBaseUrl, initData, userId, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const params = new URLSearchParams({ endpoint: 'user_access' });
+    if (initData) params.set('initData', String(initData));
+    if (userId) params.set('userId', String(userId));
+    const url = `${base}/api/admin?${params.toString()}`;
+    const resp = await fetch(url, { method: 'GET', signal });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
+export async function setAdminSmartMoneyEnabled({ apiBaseUrl, initData, userId, enabled, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/admin?endpoint=user_access`;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, userId, smartMoneyEnabled: enabled }),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
 export async function fetchHotPools({ apiBaseUrl, initData, sort, chain, timeframeMinutes, limit, dex, includePools, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const params = new URLSearchParams();
@@ -906,6 +936,90 @@ export async function saveGlobalConfig({ apiBaseUrl, initData, config, signal })
     if (!resp.ok) {
         const text = await resp.text().catch(() => '');
         throw new Error(text || 'HTTP ' + resp.status);
+    }
+    return resp.json();
+}
+
+// ─── Smart Money Watched Wallets ────────────────────────────────────
+
+export async function fetchSmartMoneyWatchedWallets({ apiBaseUrl, initData, chain, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const params = new URLSearchParams();
+    if (initData) params.set('initData', String(initData));
+    if (chain) params.set('chain', String(chain));
+    const qs = params.toString();
+    const url = `${base}/api/smart_money_watched_wallets${qs ? `?${qs}` : ''}`;
+    const resp = await fetch(url, { method: 'GET', signal });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
+export async function addSmartMoneyWatchedWallets({ apiBaseUrl, initData, chain, wallets, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/smart_money_watched_wallets`;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, chain, wallets }),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
+export async function removeSmartMoneyWatchedWallets({ apiBaseUrl, initData, chain, walletAddresses, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/smart_money_watched_wallets`;
+    const resp = await fetch(url, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, chain, wallet_addresses: walletAddresses }),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
+export async function updateSmartMoneyWatchedWalletLabel({ apiBaseUrl, initData, chain, walletAddress, label, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/smart_money_watched_wallets`;
+    const resp = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, chain, wallet_address: walletAddress, label }),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
+// ─── Smart Money 24h Pool Adds ──────────────────────────────────────
+
+export async function fetchSmartMoney24hPoolAdds({ apiBaseUrl, initData, chain, windowHours, poolLimit, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const params = new URLSearchParams();
+    if (initData) params.set('initData', String(initData));
+    if (chain) params.set('chain', String(chain));
+    if (Number.isFinite(windowHours)) params.set('window_hours', String(windowHours));
+    if (Number.isFinite(poolLimit)) params.set('pool_limit', String(poolLimit));
+    const qs = params.toString();
+    const url = `${base}/api/smart_money_24h_pool_adds${qs ? `?${qs}` : ''}`;
+    const resp = await fetch(url, { method: 'GET', signal });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
     }
     return resp.json();
 }

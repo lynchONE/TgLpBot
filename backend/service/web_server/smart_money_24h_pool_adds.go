@@ -1,0 +1,291 @@
+package web_server
+
+import (
+	"TgLpBot/service/pool"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+)
+
+type smartMoney24hPool struct {
+	PoolVersion  string  `json:"pool_version"`
+	PoolID       string  `json:"pool_id"`
+	Pair         string  `json:"pair,omitempty"`
+	FeePct       float64 `json:"fee_pct,omitempty"`
+	Token0Symbol string  `json:"token0_symbol,omitempty"`
+	Token1Symbol string  `json:"token1_symbol,omitempty"`
+	Exchange     string  `json:"exchange,omitempty"`
+	EventCount   int     `json:"event_count"`
+	WalletCount  int     `json:"wallet_count"`
+	FirstAddAt   string  `json:"first_add_at"`
+	LastAddAt    string  `json:"last_add_at"`
+}
+
+type smartMoney24hHourlyTrend struct {
+	Hour          string `json:"hour"`
+	AddCount      int    `json:"add_count"`
+	WalletCount   int    `json:"wallet_count"`
+	DistinctPools int    `json:"distinct_pools"`
+}
+
+type smartMoney24hDistBucket struct {
+	Range string `json:"range"`
+	Count int    `json:"count"`
+}
+
+type smartMoney24hResponse struct {
+	Chain                 string                     `json:"chain"`
+	WindowHours           int                        `json:"window_hours"`
+	UpdatedAt             time.Time                  `json:"updated_at"`
+	TotalPools            int                        `json:"total_pools"`
+	TotalWallets          int                        `json:"total_wallets"`
+	TotalEvents           int                        `json:"total_events"`
+	Pools                 []smartMoney24hPool        `json:"pools"`
+	HourlyTrend           []smartMoney24hHourlyTrend `json:"hourly_trend"`
+	TickRangeDistribution []smartMoney24hDistBucket  `json:"tick_range_distribution"`
+	Warnings              []string                   `json:"warnings,omitempty"`
+}
+
+func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.ClickHouse == nil || s.ClickHouse.Conn == nil {
+		http.Error(w, "ClickHouse not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	initData := initDataFromQuery(r)
+	user, status, msg := authenticateTelegramWebAppUser(initData)
+	if status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+	check, status, msg, err := requireUserAccess(user.ID)
+	if err != nil {
+		http.Error(w, msg, status)
+		return
+	}
+	if status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+	if status, msg := requireSmartMoneyPermission(check); status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+
+	query := r.URL.Query()
+	chain := strings.ToLower(strings.TrimSpace(query.Get("chain")))
+	if chain == "" {
+		chain = "bsc"
+	}
+	windowHours := 24
+	if v := strings.TrimSpace(query.Get("window_hours")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 168 {
+			windowHours = n
+		}
+	}
+	poolLimit := 30
+	if v := strings.TrimSpace(query.Get("pool_limit")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 100 {
+			poolLimit = n
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+
+	windowSec := windowHours * 3600
+	warnings := make([]string, 0, 2)
+
+	// 1. Query top pools by wallet count in window
+	poolQuery := fmt.Sprintf(`
+		SELECT
+			pool_version,
+			pool_id,
+			count() AS event_count,
+			uniqExact(wallet_address) AS wallet_count,
+			min(ts) AS first_add_at,
+			max(ts) AS last_add_at
+		FROM smart_lp_events
+		WHERE ts >= now() - INTERVAL %d SECOND
+			AND action = 'add'
+			AND lowerUTF8(chain) = ?
+			AND pool_version != '' AND pool_id != ''
+		GROUP BY pool_version, pool_id
+		ORDER BY wallet_count DESC, event_count DESC
+		LIMIT %d
+	`, windowSec, poolLimit)
+
+	rows, err := s.ClickHouse.Conn.Query(ctx, poolQuery, chain)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("pool query failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	outPools := make([]smartMoney24hPool, 0, poolLimit)
+	totalEvents := 0
+	for rows.Next() {
+		var pv, pid string
+		var eventCnt, walletCnt uint64
+		var firstAdd, lastAdd time.Time
+		if err := rows.Scan(&pv, &pid, &eventCnt, &walletCnt, &firstAdd, &lastAdd); err != nil {
+			warnings = append(warnings, fmt.Sprintf("pool scan error: %v", err))
+			continue
+		}
+		totalEvents += int(eventCnt)
+		outPools = append(outPools, smartMoney24hPool{
+			PoolVersion: pv,
+			PoolID:      pid,
+			EventCount:  int(eventCnt),
+			WalletCount: int(walletCnt),
+			FirstAddAt:  firstAdd.Format(time.RFC3339),
+			LastAddAt:   lastAdd.Format(time.RFC3339),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		warnings = append(warnings, fmt.Sprintf("pool rows error: %v", err))
+	}
+
+	// Resolve pool info
+	poolSvc := pool.NewPoolService()
+	for i := range outPools {
+		p := &outPools[i]
+		var info *pool.PoolInfo
+		var infoErr error
+		if strings.ToLower(p.PoolVersion) == "v4" {
+			info, infoErr = poolSvc.GetV4PoolInfo(p.PoolID)
+		} else {
+			info, infoErr = poolSvc.GetPoolInfo(p.PoolID)
+		}
+		if infoErr != nil || info == nil {
+			continue
+		}
+		p.Exchange = strings.TrimSpace(info.Exchange)
+		p.Token0Symbol = strings.TrimSpace(info.Token0Symbol)
+		p.Token1Symbol = strings.TrimSpace(info.Token1Symbol)
+		if p.Token0Symbol != "" || p.Token1Symbol != "" {
+			p.Pair = strings.TrimSpace(p.Token0Symbol + "/" + p.Token1Symbol)
+			if p.Pair == "/" {
+				p.Pair = ""
+			}
+		}
+		if info.Fee > 0 {
+			p.FeePct = float64(info.Fee) / 10000.0
+		}
+	}
+
+	// 2. Total unique wallets
+	var totalWallets uint64
+	totalWalletsQ := fmt.Sprintf(`
+		SELECT uniqExact(wallet_address)
+		FROM smart_lp_events
+		WHERE ts >= now() - INTERVAL %d SECOND
+			AND action = 'add'
+			AND lowerUTF8(chain) = ?
+	`, windowSec)
+	if err := s.ClickHouse.Conn.QueryRow(ctx, totalWalletsQ, chain).Scan(&totalWallets); err != nil {
+		warnings = append(warnings, fmt.Sprintf("total wallets query failed: %v", err))
+	}
+
+	// 3. Hourly trend
+	hourlyQ := fmt.Sprintf(`
+		SELECT
+			toStartOfHour(ts) AS hour,
+			count() AS add_count,
+			uniqExact(wallet_address) AS wallet_count,
+			uniqExact(concat(pool_version, '|', pool_id)) AS distinct_pools
+		FROM smart_lp_events
+		WHERE ts >= now() - INTERVAL %d SECOND
+			AND action = 'add'
+			AND lowerUTF8(chain) = ?
+		GROUP BY hour
+		ORDER BY hour ASC
+	`, windowSec)
+
+	hRows, err := s.ClickHouse.Conn.Query(ctx, hourlyQ, chain)
+	if err != nil {
+		warnings = append(warnings, fmt.Sprintf("hourly trend query failed: %v", err))
+	}
+	hourlyTrend := make([]smartMoney24hHourlyTrend, 0, 24)
+	if hRows != nil {
+		defer hRows.Close()
+		for hRows.Next() {
+			var hour time.Time
+			var addCnt, walletCnt, poolCnt uint64
+			if err := hRows.Scan(&hour, &addCnt, &walletCnt, &poolCnt); err != nil {
+				continue
+			}
+			hourlyTrend = append(hourlyTrend, smartMoney24hHourlyTrend{
+				Hour:          hour.Format(time.RFC3339),
+				AddCount:      int(addCnt),
+				WalletCount:   int(walletCnt),
+				DistinctPools: int(poolCnt),
+			})
+		}
+	}
+
+	// 4. Tick range width distribution
+	tickRangeQ := fmt.Sprintf(`
+		SELECT
+			multiIf(
+				abs(tick_upper - tick_lower) <= 200, '极窄 (≤200 ticks)',
+				abs(tick_upper - tick_lower) <= 1000, '窄 (200-1k ticks)',
+				abs(tick_upper - tick_lower) <= 5000, '中等 (1k-5k ticks)',
+				abs(tick_upper - tick_lower) <= 20000, '宽 (5k-20k ticks)',
+				'超宽 (20k+ ticks)'
+			) AS range_label,
+			count() AS cnt
+		FROM smart_lp_events
+		WHERE ts >= now() - INTERVAL %d SECOND
+			AND action = 'add'
+			AND lowerUTF8(chain) = ?
+			AND tick_lower != 0 AND tick_upper != 0
+		GROUP BY range_label
+		ORDER BY cnt DESC
+	`, windowSec)
+
+	tRows, err := s.ClickHouse.Conn.Query(ctx, tickRangeQ, chain)
+	if err != nil {
+		warnings = append(warnings, fmt.Sprintf("tick range query failed: %v", err))
+	}
+	tickRangeDist := make([]smartMoney24hDistBucket, 0, 5)
+	if tRows != nil {
+		defer tRows.Close()
+		for tRows.Next() {
+			var label string
+			var cnt uint64
+			if err := tRows.Scan(&label, &cnt); err != nil {
+				continue
+			}
+			tickRangeDist = append(tickRangeDist, smartMoney24hDistBucket{
+				Range: label,
+				Count: int(cnt),
+			})
+		}
+	}
+
+	resp := smartMoney24hResponse{
+		Chain:                 chain,
+		WindowHours:           windowHours,
+		UpdatedAt:             time.Now(),
+		TotalPools:            len(outPools),
+		TotalWallets:          int(totalWallets),
+		TotalEvents:           totalEvents,
+		Pools:                 outPools,
+		HourlyTrend:           hourlyTrend,
+		TickRangeDistribution: tickRangeDist,
+		Warnings:              warnings,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	json.NewEncoder(w).Encode(resp)
+}
