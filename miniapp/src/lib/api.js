@@ -1007,13 +1007,14 @@ export async function updateSmartMoneyWatchedWalletLabel({ apiBaseUrl, initData,
 
 // ─── Smart Money 24h Pool Adds ──────────────────────────────────────
 
-export async function fetchSmartMoney24hPoolAdds({ apiBaseUrl, initData, chain, windowHours, poolLimit, signal }) {
+export async function fetchSmartMoney24hPoolAdds({ apiBaseUrl, initData, chain, windowHours, poolLimit, topWalletLimit, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const params = new URLSearchParams();
     if (initData) params.set('initData', String(initData));
     if (chain) params.set('chain', String(chain));
     if (Number.isFinite(windowHours)) params.set('window_hours', String(windowHours));
     if (Number.isFinite(poolLimit)) params.set('pool_limit', String(poolLimit));
+    if (Number.isFinite(topWalletLimit)) params.set('top_wallet_limit', String(topWalletLimit));
     const qs = params.toString();
     const url = `${base}/api/smart_money_24h_pool_adds${qs ? `?${qs}` : ''}`;
     const resp = await fetch(url, { method: 'GET', signal });

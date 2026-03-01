@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { copyToClipboard, hapticImpact, hapticNotification } from '../lib/telegram';
 import {
     fetchSmartMoneyWatchedWallets,
@@ -7,6 +7,12 @@ import {
     updateSmartMoneyWatchedWalletLabel,
 } from '../lib/api';
 
+function normalizeAddress(value) {
+    const text = String(value || '').trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(text)) return '';
+    return `0x${text.slice(2).toLowerCase()}`;
+}
+
 function shortHex(value, head = 6, tail = 4) {
     const s = String(value || '').trim();
     if (!s) return '';
@@ -14,28 +20,35 @@ function shortHex(value, head = 6, tail = 4) {
     return `${s.slice(0, head)}...${s.slice(-tail)}`;
 }
 
+function formatTime(value) {
+    const ts = Date.parse(String(value || ''));
+    if (!Number.isFinite(ts) || ts <= 0) return '--';
+    const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+    if (diffSec < 60) return `${diffSec}s`;
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m`;
+    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h`;
+    return `${Math.floor(diffSec / 86400)}d`;
+}
+
 export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chain, onNotice }) {
     const [wallets, setWallets] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-    const [nonce, setNonce] = useState(0);
+    const [refreshTick, setRefreshTick] = useState(0);
 
-    // Add form
+    const [query, setQuery] = useState('');
+    const [selected, setSelected] = useState(new Set());
+
     const [showAddForm, setShowAddForm] = useState(false);
     const [addInput, setAddInput] = useState('');
     const [addLabel, setAddLabel] = useState('');
     const [adding, setAdding] = useState(false);
-
-    // Select for batch delete
-    const [selected, setSelected] = useState(new Set());
     const [deleting, setDeleting] = useState(false);
 
-    // Inline label editing
-    const [editingId, setEditingId] = useState(null);
+    const [editingAddr, setEditingAddr] = useState('');
     const [editLabel, setEditLabel] = useState('');
     const [savingLabel, setSavingLabel] = useState(false);
 
-    // Fetch wallets
     useEffect(() => {
         if (!apiBaseUrl || !initData) return;
         let cancelled = false;
@@ -44,13 +57,22 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
         setLoading(true);
         setError('');
         fetchSmartMoneyWatchedWallets({ apiBaseUrl, initData, chain, signal: ac.signal })
-            .then((data) => {
+            .then((resp) => {
                 if (cancelled) return;
-                setWallets(Array.isArray(data?.wallets) ? data.wallets : []);
+                const list = Array.isArray(resp?.wallets) ? resp.wallets : [];
+                setWallets(list);
+                setSelected((prev) => {
+                    if (!prev.size) return prev;
+                    const keep = new Set();
+                    const valid = new Set(list.map((w) => String(w?.wallet_address || '').trim().toLowerCase()));
+                    prev.forEach((addr) => {
+                        if (valid.has(String(addr).toLowerCase())) keep.add(addr);
+                    });
+                    return keep;
+                });
             })
             .catch((err) => {
-                if (cancelled) return;
-                setError(String(err?.message || err || '加载失败'));
+                if (!cancelled) setError(String(err?.message || err || '加载失败'));
             })
             .finally(() => {
                 if (!cancelled) setLoading(false);
@@ -60,45 +82,91 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
             cancelled = true;
             ac.abort();
         };
-    }, [apiBaseUrl, initData, chain, nonce]);
+    }, [apiBaseUrl, initData, chain, refreshTick]);
 
-    // Add wallets
+    const filteredWallets = useMemo(() => {
+        const keyword = String(query || '').trim().toLowerCase();
+        if (!keyword) return wallets;
+        return wallets.filter((row) => {
+            const addr = String(row?.wallet_address || '').toLowerCase();
+            const label = String(row?.label || '').toLowerCase();
+            return addr.includes(keyword) || label.includes(keyword);
+        });
+    }, [wallets, query]);
+
+    const selectedCount = selected.size;
+    const allFilteredSelected = filteredWallets.length > 0 && filteredWallets.every((row) => selected.has(String(row?.wallet_address || '').trim().toLowerCase()));
+
+    const toggleSelect = useCallback((walletAddress) => {
+        const normalized = String(walletAddress || '').trim().toLowerCase();
+        if (!normalized) return;
+        setSelected((prev) => {
+            const next = new Set(prev);
+            if (next.has(normalized)) next.delete(normalized);
+            else next.add(normalized);
+            return next;
+        });
+    }, []);
+
+    const toggleSelectAllFiltered = useCallback(() => {
+        setSelected((prev) => {
+            const next = new Set(prev);
+            if (allFilteredSelected) {
+                filteredWallets.forEach((row) => next.delete(String(row?.wallet_address || '').trim().toLowerCase()));
+            } else {
+                filteredWallets.forEach((row) => {
+                    const addr = String(row?.wallet_address || '').trim().toLowerCase();
+                    if (addr) next.add(addr);
+                });
+            }
+            return next;
+        });
+    }, [allFilteredSelected, filteredWallets]);
+
     const handleAdd = useCallback(async () => {
         if (!addInput.trim()) return;
         setAdding(true);
         setError('');
         try {
-            // Parse addresses: one per line or comma-separated
-            const lines = addInput
+            const rawList = addInput
                 .split(/[\n,;]+/)
                 .map((s) => s.trim())
-                .filter((s) => /^0x[0-9a-fA-F]{40}$/.test(s));
+                .filter(Boolean);
 
-            if (lines.length === 0) {
-                setError('未找到有效的钱包地址 (格式: 0x...)');
+            const normalized = rawList.map(normalizeAddress).filter(Boolean);
+            const unique = Array.from(new Set(normalized));
+            const invalidCount = rawList.length - normalized.length;
+
+            if (!unique.length) {
+                setError('未检测到有效钱包地址（格式: 0x...）');
                 return;
             }
 
-            const walletEntries = lines.map((addr) => ({
+            const payload = unique.map((addr) => ({
                 address: addr,
-                label: addLabel.trim() || '',
+                label: String(addLabel || '').trim(),
             }));
 
             const resp = await addSmartMoneyWatchedWallets({
                 apiBaseUrl,
                 initData,
                 chain,
-                wallets: walletEntries,
+                wallets: payload,
             });
 
+            const added = Number(resp?.added ?? 0);
+            const duplicates = Number(resp?.duplicates ?? 0);
+            const msgParts = [`新增 ${added}`];
+            if (duplicates > 0) msgParts.push(`重复 ${duplicates}`);
+            if (invalidCount > 0) msgParts.push(`无效 ${invalidCount}`);
+
             hapticNotification('success');
-            const msg = `添加 ${resp?.added || 0} 个${resp?.duplicates ? `，重复 ${resp.duplicates} 个` : ''}`;
-            if (onNotice) onNotice(msg);
+            if (onNotice) onNotice(msgParts.join('，'));
 
             setAddInput('');
             setAddLabel('');
             setShowAddForm(false);
-            setNonce((v) => v + 1);
+            setRefreshTick((v) => v + 1);
         } catch (err) {
             setError(String(err?.message || err || '添加失败'));
             hapticNotification('error');
@@ -107,76 +175,83 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
         }
     }, [addInput, addLabel, apiBaseUrl, initData, chain, onNotice]);
 
-    // Remove wallets
-    const handleRemoveSelected = useCallback(async () => {
-        if (selected.size === 0) return;
+    const handleDeleteSelected = useCallback(async () => {
+        const toDelete = Array.from(selected);
+        if (!toDelete.length) return;
         setDeleting(true);
         setError('');
         try {
-            const addrs = Array.from(selected);
             const resp = await removeSmartMoneyWatchedWallets({
                 apiBaseUrl,
                 initData,
                 chain,
-                walletAddresses: addrs,
+                walletAddresses: toDelete,
             });
-
             hapticNotification('success');
-            if (onNotice) onNotice(`已移除 ${resp?.deleted || 0} 个监控地址`);
-
+            if (onNotice) onNotice(`已移除 ${Number(resp?.deleted ?? 0)} 个钱包`);
             setSelected(new Set());
-            setNonce((v) => v + 1);
+            setRefreshTick((v) => v + 1);
         } catch (err) {
-            setError(String(err?.message || err || '移除失败'));
+            setError(String(err?.message || err || '删除失败'));
             hapticNotification('error');
         } finally {
             setDeleting(false);
         }
     }, [selected, apiBaseUrl, initData, chain, onNotice]);
 
-    // Update label
-    const handleSaveLabel = useCallback(
-        async (walletAddress) => {
-            setSavingLabel(true);
-            try {
-                await updateSmartMoneyWatchedWalletLabel({
-                    apiBaseUrl,
-                    initData,
-                    chain,
-                    walletAddress,
-                    label: editLabel.trim(),
-                });
-                hapticNotification('success');
-                setEditingId(null);
-                setNonce((v) => v + 1);
-            } catch (err) {
-                setError(String(err?.message || err || '更新失败'));
-                hapticNotification('error');
-            } finally {
-                setSavingLabel(false);
-            }
-        },
-        [editLabel, apiBaseUrl, initData, chain],
-    );
-
-    const toggleSelect = useCallback((addr) => {
-        setSelected((prev) => {
-            const next = new Set(prev);
-            if (next.has(addr)) next.delete(addr);
-            else next.add(addr);
-            return next;
-        });
-    }, []);
-
-    const selectAll = useCallback(() => {
-        if (selected.size === wallets.length) {
-            setSelected(new Set());
-        } else {
-            setSelected(new Set(wallets.map((w) => w.wallet_address)));
+    const handleSaveLabel = useCallback(async (walletAddress) => {
+        const addr = String(walletAddress || '').trim();
+        if (!addr) return;
+        setSavingLabel(true);
+        setError('');
+        try {
+            await updateSmartMoneyWatchedWalletLabel({
+                apiBaseUrl,
+                initData,
+                chain,
+                walletAddress: addr,
+                label: String(editLabel || '').trim(),
+            });
+            hapticNotification('success');
+            if (onNotice) onNotice('备注已更新');
+            setEditingAddr('');
+            setRefreshTick((v) => v + 1);
+        } catch (err) {
+            setError(String(err?.message || err || '更新备注失败'));
+            hapticNotification('error');
+        } finally {
+            setSavingLabel(false);
         }
-    }, [wallets, selected]);
+    }, [apiBaseUrl, initData, chain, editLabel, onNotice]);
 
-    // Loading state
+    const handleDeleteOne = useCallback(async (walletAddress) => {
+        const addr = String(walletAddress || '').trim().toLowerCase();
+        if (!addr) return;
+        setDeleting(true);
+        setError('');
+        try {
+            await removeSmartMoneyWatchedWallets({
+                apiBaseUrl,
+                initData,
+                chain,
+                walletAddresses: [addr],
+            });
+            hapticNotification('success');
+            if (onNotice) onNotice('已移除 1 个钱包');
+            setSelected((prev) => {
+                const next = new Set(prev);
+                next.delete(addr);
+                return next;
+            });
+            setRefreshTick((v) => v + 1);
+        } catch (err) {
+            setError(String(err?.message || err || '删除失败'));
+            hapticNotification('error');
+        } finally {
+            setDeleting(false);
+        }
+    }, [apiBaseUrl, initData, chain, onNotice]);
+
     if (loading) {
         return (
             <div className="mt-3 space-y-2">
@@ -189,43 +264,52 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
 
     return (
         <div className="mt-3 space-y-3">
-            {/* Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">
                     监控钱包
                     <span className="ml-1 text-zinc-400 dark:text-white/40">({wallets.length}/50)</span>
                 </div>
-                <div className="flex gap-1.5">
-                    {wallets.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            hapticImpact('light');
+                            setRefreshTick((v) => v + 1);
+                        }}
+                        className="rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-600 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/60 dark:hover:bg-white/10"
+                    >
+                        刷新
+                    </button>
+                    {filteredWallets.length > 0 && (
                         <button
                             type="button"
                             onClick={() => {
                                 hapticImpact('light');
-                                selectAll();
+                                toggleSelectAllFiltered();
                             }}
                             className="rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-600 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/60 dark:hover:bg-white/10"
                         >
-                            {selected.size === wallets.length ? '取消全选' : '全选'}
+                            {allFilteredSelected ? '取消全选' : '全选结果'}
                         </button>
                     )}
-                    {selected.size > 0 && (
+                    {selectedCount > 0 && (
                         <button
                             type="button"
                             onClick={() => {
                                 hapticImpact('medium');
-                                handleRemoveSelected();
+                                handleDeleteSelected();
                             }}
                             disabled={deleting}
                             className="rounded-lg bg-red-500/10 px-2 py-1 text-[10px] font-semibold text-red-600 hover:bg-red-500/20 disabled:opacity-50 dark:text-red-400"
                         >
-                            {deleting ? '删除中…' : `删除 (${selected.size})`}
+                            {deleting ? '删除中...' : `删除(${selectedCount})`}
                         </button>
                     )}
                     <button
                         type="button"
                         onClick={() => {
                             hapticImpact('light');
-                            setShowAddForm(!showAddForm);
+                            setShowAddForm((v) => !v);
                         }}
                         className="rounded-lg bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-600 hover:bg-emerald-500/20 dark:text-emerald-400"
                     >
@@ -234,19 +318,24 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                 </div>
             </div>
 
-            {/* Add Form */}
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-white/[0.02]">
+                <input
+                    type="text"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="搜索地址或备注..."
+                    className="w-full rounded-lg bg-white px-2.5 py-1.5 text-[11px] text-zinc-900 outline-none ring-0 placeholder:text-zinc-400 dark:bg-white/5 dark:text-white/80 dark:placeholder:text-white/25"
+                />
+            </div>
+
             {showAddForm && (
                 <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 dark:border-emerald-500/10 dark:bg-emerald-500/5">
-                    <div className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
-                        添加监控地址
-                    </div>
-                    <div className="mt-1 text-[10px] text-zinc-500 dark:text-white/40">
-                        每行一个地址，或用逗号分隔，支持批量添加
-                    </div>
+                    <div className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">批量添加监控地址</div>
+                    <div className="mt-1 text-[10px] text-zinc-500 dark:text-white/40">每行一个地址，或用逗号分隔；自动去重。</div>
                     <textarea
                         value={addInput}
                         onChange={(e) => setAddInput(e.target.value)}
-                        placeholder={'0x1234...abcd\n0x5678...efgh'}
+                        placeholder={'0x1234...abcd\n0x5678...ef01'}
                         rows={3}
                         className="mt-2 w-full rounded-lg bg-white px-2.5 py-1.5 font-mono text-[11px] text-zinc-900 outline-none ring-0 placeholder:text-zinc-400 dark:bg-white/5 dark:text-white/80 dark:placeholder:text-white/25"
                     />
@@ -254,7 +343,7 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                         type="text"
                         value={addLabel}
                         onChange={(e) => setAddLabel(e.target.value)}
-                        placeholder="备注名 (可选，批量添加时统一设置)"
+                        placeholder="备注（可选）"
                         maxLength={100}
                         className="mt-1.5 w-full rounded-lg bg-white px-2.5 py-1.5 text-[11px] text-zinc-900 outline-none ring-0 placeholder:text-zinc-400 dark:bg-white/5 dark:text-white/80 dark:placeholder:text-white/25"
                     />
@@ -265,51 +354,40 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                             disabled={adding || !addInput.trim()}
                             className="rounded-lg bg-emerald-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-600 disabled:opacity-50"
                         >
-                            {adding ? '添加中…' : '批量添加'}
+                            {adding ? '添加中...' : '批量添加'}
                         </button>
                     </div>
                 </div>
             )}
 
-            {/* Error */}
             {error && (
                 <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-2 text-[11px] text-red-700 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-200">
                     {error}
                 </div>
             )}
 
-            {/* Empty state */}
-            {wallets.length === 0 && !showAddForm && (
+            {filteredWallets.length === 0 && (
                 <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-6 text-center dark:border-white/10 dark:bg-white/[0.02]">
-                    <div className="text-sm text-zinc-400 dark:text-white/30">暂无监控钱包</div>
-                    <div className="mt-1 text-[11px] text-zinc-400 dark:text-white/25">
-                        点击「+ 添加」按钮开始监控聪明钱地址
-                    </div>
+                    <div className="text-sm text-zinc-400 dark:text-white/30">暂无匹配的钱包</div>
                 </div>
             )}
 
-            {/* Wallet List */}
-            {wallets.map((w) => {
-                const addr = String(w.wallet_address || '').trim();
+            {filteredWallets.map((row) => {
+                const addr = String(row?.wallet_address || '').trim().toLowerCase();
                 const isSelected = selected.has(addr);
-                const isEditing = editingId === w.id;
-
+                const isEditing = editingAddr === addr;
                 return (
                     <div
-                        key={w.id || addr}
+                        key={String(row?.id || addr)}
                         className={`flex items-center gap-2 rounded-xl border p-2.5 transition ${
                             isSelected
                                 ? 'border-red-500/30 bg-red-500/5 dark:border-red-500/20 dark:bg-red-500/5'
                                 : 'border-zinc-200 bg-white dark:border-white/10 dark:bg-white/[0.02]'
                         }`}
                     >
-                        {/* Checkbox */}
                         <button
                             type="button"
-                            onClick={() => {
-                                hapticImpact('light');
-                                toggleSelect(addr);
-                            }}
+                            onClick={() => toggleSelect(addr)}
                             className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${
                                 isSelected
                                     ? 'border-red-500 bg-red-500 text-white'
@@ -323,9 +401,8 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                             )}
                         </button>
 
-                        {/* Content */}
                         <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-2">
                                 <button
                                     type="button"
                                     onClick={() => {
@@ -333,14 +410,16 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                                         hapticNotification('success');
                                         if (onNotice) onNotice('已复制地址');
                                     }}
-                                    className="font-mono text-[11px] font-semibold text-zinc-800 hover:text-emerald-600 dark:text-white/80 dark:hover:text-emerald-400"
+                                    className="font-mono text-[11px] font-semibold text-zinc-800 hover:text-emerald-600 dark:text-white/80 dark:hover:text-emerald-300"
                                     title={addr}
                                 >
-                                    {shortHex(addr)}
+                                    {shortHex(addr, 8, 6)}
                                 </button>
+                                <span className="text-[10px] text-zinc-400 dark:text-white/30">
+                                    {formatTime(row?.created_at)}
+                                </span>
                             </div>
 
-                            {/* Label */}
                             {isEditing ? (
                                 <div className="mt-1 flex items-center gap-1">
                                     <input
@@ -351,10 +430,10 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                                         autoFocus
                                         onKeyDown={(e) => {
                                             if (e.key === 'Enter') handleSaveLabel(addr);
-                                            if (e.key === 'Escape') setEditingId(null);
+                                            if (e.key === 'Escape') setEditingAddr('');
                                         }}
                                         className="w-full rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-700 outline-none dark:bg-white/10 dark:text-white/70"
-                                        placeholder="输入备注名"
+                                        placeholder="输入备注"
                                     />
                                     <button
                                         type="button"
@@ -362,11 +441,11 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                                         disabled={savingLabel}
                                         className="shrink-0 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400"
                                     >
-                                        {savingLabel ? '…' : '保存'}
+                                        {savingLabel ? '...' : '保存'}
                                     </button>
                                     <button
                                         type="button"
-                                        onClick={() => setEditingId(null)}
+                                        onClick={() => setEditingAddr('')}
                                         className="shrink-0 text-[10px] text-zinc-400"
                                     >
                                         取消
@@ -377,36 +456,24 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                                     type="button"
                                     onClick={() => {
                                         hapticImpact('light');
-                                        setEditingId(w.id);
-                                        setEditLabel(w.label || '');
+                                        setEditingAddr(addr);
+                                        setEditLabel(String(row?.label || ''));
                                     }}
                                     className="mt-0.5 text-[10px] text-zinc-400 hover:text-zinc-600 dark:text-white/30 dark:hover:text-white/60"
                                 >
-                                    {w.label ? w.label : '点击添加备注'}
+                                    {String(row?.label || '').trim() || '点击添加备注'}
                                 </button>
                             )}
                         </div>
 
-                        {/* Single delete */}
                         <button
                             type="button"
-                            onClick={async () => {
+                            onClick={() => {
                                 hapticImpact('medium');
-                                try {
-                                    await removeSmartMoneyWatchedWallets({
-                                        apiBaseUrl,
-                                        initData,
-                                        chain,
-                                        walletAddresses: [addr],
-                                    });
-                                    hapticNotification('success');
-                                    if (onNotice) onNotice('已移除');
-                                    setNonce((v) => v + 1);
-                                } catch (err) {
-                                    setError(String(err?.message || '移除失败'));
-                                }
+                                handleDeleteOne(addr);
                             }}
-                            className="shrink-0 rounded-lg p-1 text-zinc-400 hover:bg-red-500/10 hover:text-red-500 dark:text-white/30 dark:hover:text-red-400"
+                            disabled={deleting}
+                            className="shrink-0 rounded-lg p-1 text-zinc-400 hover:bg-red-500/10 hover:text-red-500 disabled:opacity-50 dark:text-white/30 dark:hover:text-red-400"
                             title="移除"
                         >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
