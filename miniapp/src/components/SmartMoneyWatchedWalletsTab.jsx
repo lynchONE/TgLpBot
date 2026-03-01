@@ -50,9 +50,20 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
     const [savingLabel, setSavingLabel] = useState(false);
 
     useEffect(() => {
-        if (!apiBaseUrl || !initData) return;
+        if (!apiBaseUrl || !initData) {
+            setLoading(false);
+            setError(!initData ? '缺少 initData，无法加载监控列表' : '缺少 API 地址，无法加载监控列表');
+            return;
+        }
         let cancelled = false;
         const ac = new AbortController();
+        const timeout = setTimeout(() => {
+            try {
+                ac.abort();
+            } catch {
+                // ignore
+            }
+        }, 12000);
 
         setLoading(true);
         setError('');
@@ -72,7 +83,13 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                 });
             })
             .catch((err) => {
-                if (!cancelled) setError(String(err?.message || err || '加载失败'));
+                if (cancelled) return;
+                const message = String(err?.message || err || '');
+                if (message.toLowerCase().includes('aborted') || message.toLowerCase().includes('abort')) {
+                    setError('请求超时，请点“刷新”重试');
+                    return;
+                }
+                setError(message || '加载失败');
             })
             .finally(() => {
                 if (!cancelled) setLoading(false);
@@ -80,6 +97,7 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
 
         return () => {
             cancelled = true;
+            clearTimeout(timeout);
             ac.abort();
         };
     }, [apiBaseUrl, initData, chain, refreshTick]);

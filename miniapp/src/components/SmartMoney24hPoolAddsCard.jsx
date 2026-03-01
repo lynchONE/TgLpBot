@@ -177,9 +177,20 @@ export default function SmartMoney24hPoolAddsCard({ apiBaseUrl, initData, chain,
     const [poolLimit, setPoolLimit] = useState(30);
 
     useEffect(() => {
-        if (!apiBaseUrl || !initData) return;
+        if (!apiBaseUrl || !initData) {
+            setLoading(false);
+            setError(!initData ? '缺少 initData，无法加载 24h 加池数据' : '缺少 API 地址，无法加载 24h 加池数据');
+            return;
+        }
         let cancelled = false;
         const ac = new AbortController();
+        const timeout = setTimeout(() => {
+            try {
+                ac.abort();
+            } catch {
+                // ignore
+            }
+        }, 15000);
 
         setLoading(true);
         setError('');
@@ -196,7 +207,13 @@ export default function SmartMoney24hPoolAddsCard({ apiBaseUrl, initData, chain,
                 if (!cancelled) setData(resp || null);
             })
             .catch((err) => {
-                if (!cancelled) setError(String(err?.message || err || '加载失败'));
+                if (cancelled) return;
+                const message = String(err?.message || err || '');
+                if (message.toLowerCase().includes('aborted') || message.toLowerCase().includes('abort')) {
+                    setError('请求超时，请点“刷新”重试');
+                    return;
+                }
+                setError(message || '加载失败');
             })
             .finally(() => {
                 if (!cancelled) setLoading(false);
@@ -204,6 +221,7 @@ export default function SmartMoney24hPoolAddsCard({ apiBaseUrl, initData, chain,
 
         return () => {
             cancelled = true;
+            clearTimeout(timeout);
             ac.abort();
         };
     }, [apiBaseUrl, initData, chain, windowHours, poolLimit, refreshTick]);
