@@ -334,19 +334,8 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 	windowSec := windowHours * 3600
 	warnings := make([]string, 0, 4)
 	watchedWalletFilterSQL := ""
+	watchedFilterArgCount := 0
 	if watchedOnly {
-		watchedWalletFilterSQL = `
-			AND wallet_address IN (
-				SELECT wallet_address
-				FROM (
-					SELECT wallet_address, argMax(source, updated_at) AS latest_source
-					FROM smart_lp_watched_wallets
-					WHERE lowerUTF8(chain) = ?
-					GROUP BY wallet_address
-				)
-				WHERE latest_source != 'user_removed'
-			)
-		`
 		var watchTableCnt uint64
 		tableErr := s.ClickHouse.Conn.QueryRow(ctx, `
 			SELECT count()
@@ -354,13 +343,48 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 			WHERE database = currentDatabase()
 				AND name = 'smart_lp_watched_wallets'
 		`).Scan(&watchTableCnt)
-		if tableErr != nil || watchTableCnt == 0 {
-			watchedOnly = false
-			watchedWalletFilterSQL = ""
+		if tableErr == nil && watchTableCnt > 0 {
+			watchedWalletFilterSQL = `
+				AND wallet_address IN (
+					SELECT wallet_address
+					FROM (
+						SELECT wallet_address
+						FROM (
+							SELECT wallet_address, argMax(source, updated_at) AS latest_source
+							FROM smart_lp_watched_wallets
+							WHERE lowerUTF8(chain) = ?
+							GROUP BY wallet_address
+						)
+						WHERE latest_source != 'user_removed'
+						UNION DISTINCT
+						SELECT wallet_address
+						FROM smart_lp_events
+						WHERE ts >= now() - INTERVAL 15 DAY
+							AND action = 'add'
+							AND lowerUTF8(chain) = ?
+							AND wallet_address != ''
+						GROUP BY wallet_address
+					)
+				)
+			`
+			watchedFilterArgCount = 2
+		} else {
+			watchedWalletFilterSQL = `
+				AND wallet_address IN (
+					SELECT wallet_address
+					FROM smart_lp_events
+					WHERE ts >= now() - INTERVAL 15 DAY
+						AND action = 'add'
+						AND lowerUTF8(chain) = ?
+						AND wallet_address != ''
+					GROUP BY wallet_address
+				)
+			`
+			watchedFilterArgCount = 1
 			if tableErr != nil {
-				warnings = append(warnings, fmt.Sprintf("watched-wallet filter disabled: %v", tableErr))
+				warnings = append(warnings, fmt.Sprintf("watched-wallet table check failed; fallback to event-discovered wallets: %v", tableErr))
 			} else {
-				warnings = append(warnings, "watched-wallet filter disabled: smart_lp_watched_wallets table not found")
+				warnings = append(warnings, "smart_lp_watched_wallets table not found; fallback to event-discovered wallets")
 			}
 		}
 	}
@@ -385,10 +409,12 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 		LIMIT %d
 	`, windowSec, watchedWalletFilterSQL, poolLimit)
 
-	poolArgs := make([]any, 0, 2)
+	poolArgs := make([]any, 0, 1+watchedFilterArgCount)
 	poolArgs = append(poolArgs, chain)
 	if watchedOnly {
-		poolArgs = append(poolArgs, chain)
+		for i := 0; i < watchedFilterArgCount; i++ {
+			poolArgs = append(poolArgs, chain)
+		}
 	}
 	rows, err := s.ClickHouse.Conn.Query(ctx, poolQuery, poolArgs...)
 	if err != nil {
@@ -498,10 +524,12 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 
 	// 1.1 Query total added token amounts for selected pools and convert to USD.
 	selectedPlaceholders := make([]string, 0, len(outPools))
-	selectedArgs := make([]any, 0, 2+2*len(outPools))
+	selectedArgs := make([]any, 0, 1+watchedFilterArgCount+2*len(outPools))
 	selectedArgs = append(selectedArgs, chain)
 	if watchedOnly {
-		selectedArgs = append(selectedArgs, chain)
+		for i := 0; i < watchedFilterArgCount; i++ {
+			selectedArgs = append(selectedArgs, chain)
+		}
 	}
 	for i := range outPools {
 		selectedPlaceholders = append(selectedPlaceholders, "(?, ?)")
@@ -635,10 +663,12 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 			AND lowerUTF8(chain) = ?
 			%s
 	`, windowSec, watchedWalletFilterSQL)
-	totalWalletArgs := make([]any, 0, 2)
+	totalWalletArgs := make([]any, 0, 1+watchedFilterArgCount)
 	totalWalletArgs = append(totalWalletArgs, chain)
 	if watchedOnly {
-		totalWalletArgs = append(totalWalletArgs, chain)
+		for i := 0; i < watchedFilterArgCount; i++ {
+			totalWalletArgs = append(totalWalletArgs, chain)
+		}
 	}
 	if err := s.ClickHouse.Conn.QueryRow(ctx, totalWalletsQ, totalWalletArgs...).Scan(&totalWallets); err != nil {
 		warnings = append(warnings, fmt.Sprintf("total wallets query failed: %v", err))
@@ -660,10 +690,12 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 		ORDER BY hour ASC
 	`, windowSec, watchedWalletFilterSQL)
 
-	hourlyArgs := make([]any, 0, 2)
+	hourlyArgs := make([]any, 0, 1+watchedFilterArgCount)
 	hourlyArgs = append(hourlyArgs, chain)
 	if watchedOnly {
-		hourlyArgs = append(hourlyArgs, chain)
+		for i := 0; i < watchedFilterArgCount; i++ {
+			hourlyArgs = append(hourlyArgs, chain)
+		}
 	}
 	hRows, err := s.ClickHouse.Conn.Query(ctx, hourlyQ, hourlyArgs...)
 	if err != nil {
@@ -708,10 +740,12 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 		ORDER BY cnt DESC
 	`, windowSec, watchedWalletFilterSQL)
 
-	tickArgs := make([]any, 0, 2)
+	tickArgs := make([]any, 0, 1+watchedFilterArgCount)
 	tickArgs = append(tickArgs, chain)
 	if watchedOnly {
-		tickArgs = append(tickArgs, chain)
+		for i := 0; i < watchedFilterArgCount; i++ {
+			tickArgs = append(tickArgs, chain)
+		}
 	}
 	tRows, err := s.ClickHouse.Conn.Query(ctx, tickRangeQ, tickArgs...)
 	if err != nil {
@@ -750,10 +784,12 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 		LIMIT %d
 	`, windowSec, watchedWalletFilterSQL, topWalletLimit)
 
-	topWalletArgs := make([]any, 0, 2)
+	topWalletArgs := make([]any, 0, 1+watchedFilterArgCount)
 	topWalletArgs = append(topWalletArgs, chain)
 	if watchedOnly {
-		topWalletArgs = append(topWalletArgs, chain)
+		for i := 0; i < watchedFilterArgCount; i++ {
+			topWalletArgs = append(topWalletArgs, chain)
+		}
 	}
 	topWalletRows, topWalletErr := s.ClickHouse.Conn.Query(ctx, topWalletQuery, topWalletArgs...)
 	topWallets := make([]smartMoney24hTopWallet, 0, topWalletLimit)
@@ -798,10 +834,12 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 		GROUP BY range_label
 	`, windowSec, watchedWalletFilterSQL)
 
-	walletDistArgs := make([]any, 0, 2)
+	walletDistArgs := make([]any, 0, 1+watchedFilterArgCount)
 	walletDistArgs = append(walletDistArgs, chain)
 	if watchedOnly {
-		walletDistArgs = append(walletDistArgs, chain)
+		for i := 0; i < watchedFilterArgCount; i++ {
+			walletDistArgs = append(walletDistArgs, chain)
+		}
 	}
 	walletDistRows, walletDistErr := s.ClickHouse.Conn.Query(ctx, walletDistQuery, walletDistArgs...)
 	walletDistCount := map[string]int{

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -83,6 +84,37 @@ type watchedWalletCHRow struct {
 	UpdatedAt     time.Time
 }
 
+func mergeWatchedWalletRows(groups ...[]watchedWalletCHRow) []watchedWalletCHRow {
+	byAddress := make(map[string]watchedWalletCHRow)
+	for _, rows := range groups {
+		for _, row := range rows {
+			addr := strings.ToLower(strings.TrimSpace(row.WalletAddress))
+			if !common.IsHexAddress(addr) {
+				continue
+			}
+			row.WalletAddress = addr
+			if row.Source == "" {
+				row.Source = "scan_add"
+			}
+			prev, ok := byAddress[addr]
+			if !ok || row.UpdatedAt.After(prev.UpdatedAt) {
+				byAddress[addr] = row
+			}
+		}
+	}
+	out := make([]watchedWalletCHRow, 0, len(byAddress))
+	for _, row := range byAddress {
+		out = append(out, row)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+			return out[i].WalletAddress < out[j].WalletAddress
+		}
+		return out[i].UpdatedAt.After(out[j].UpdatedAt)
+	})
+	return out
+}
+
 func (s *Server) loadCHWatchedWallets(chain string) ([]watchedWalletCHRow, error) {
 	out := make([]watchedWalletCHRow, 0, 128)
 	if s == nil || s.ClickHouse == nil || s.ClickHouse.Conn == nil {
@@ -121,6 +153,63 @@ func (s *Server) loadCHWatchedWallets(chain string) ([]watchedWalletCHRow, error
 		row.Source = strings.ToLower(strings.TrimSpace(row.Source))
 		if !common.IsHexAddress(row.WalletAddress) {
 			continue
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+func (s *Server) loadCHDiscoveredWalletsFromEvents(chain string, limit int) ([]watchedWalletCHRow, error) {
+	out := make([]watchedWalletCHRow, 0, 128)
+	if s == nil || s.ClickHouse == nil || s.ClickHouse.Conn == nil {
+		return out, nil
+	}
+	chain = strings.ToLower(strings.TrimSpace(chain))
+	if chain == "" {
+		chain = "bsc"
+	}
+	if limit <= 0 || limit > 10000 {
+		limit = 5000
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+
+	q := fmt.Sprintf(`
+		SELECT
+			wallet_address,
+			argMax(source, ts) AS source,
+			max(ts) AS updated_at
+		FROM smart_lp_events
+		WHERE lowerUTF8(chain) = ?
+			AND action = 'add'
+			AND wallet_address != ''
+		GROUP BY wallet_address
+		ORDER BY updated_at DESC
+		LIMIT %d
+	`, limit)
+
+	rows, err := s.ClickHouse.Conn.Query(ctx, q, chain)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var row watchedWalletCHRow
+		if err := rows.Scan(&row.WalletAddress, &row.Source, &row.UpdatedAt); err != nil {
+			return out, err
+		}
+		row.WalletAddress = strings.ToLower(strings.TrimSpace(row.WalletAddress))
+		row.Source = strings.ToLower(strings.TrimSpace(row.Source))
+		if !common.IsHexAddress(row.WalletAddress) {
+			continue
+		}
+		if row.Source == "" {
+			row.Source = "scan_add"
 		}
 		out = append(out, row)
 	}
@@ -173,6 +262,11 @@ func (s *Server) handleWatchedWalletsGet(w http.ResponseWriter, r *http.Request)
 	if chErr != nil {
 		warnings = append(warnings, fmt.Sprintf("watchlist query from clickhouse failed: %v", chErr))
 	}
+	discoveredWallets, discoveredErr := s.loadCHDiscoveredWalletsFromEvents(chain, 5000)
+	if discoveredErr != nil {
+		warnings = append(warnings, fmt.Sprintf("event discovery query from clickhouse failed: %v", discoveredErr))
+	}
+	chWallets = mergeWatchedWalletRows(chWallets, discoveredWallets)
 
 	for _, row := range chWallets {
 		if row.Source == "user_removed" {
