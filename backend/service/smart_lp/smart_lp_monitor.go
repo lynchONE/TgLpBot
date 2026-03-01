@@ -33,6 +33,21 @@ type SmartLPMonitor struct {
 
 	removeTicker   *time.Ticker
 	removeInterval time.Duration
+
+	onRemoveEvents func(events []SmartLPRemoveEvent)
+}
+
+// SmartLPRemoveEvent is the exported type for smart money remove events.
+type SmartLPRemoveEvent struct {
+	Chain         string
+	PoolVersion   string
+	PoolID        string
+	WalletAddress string
+	Amount0       string
+	Amount1       string
+	TickLower     int
+	TickUpper     int
+	Ts            time.Time
 }
 
 type smartLPV3Pos struct {
@@ -108,6 +123,11 @@ func NewSmartLPMonitor(ch *clickhouse.ClickHouseService) *SmartLPMonitor {
 		removeTicker:   time.NewTicker(removeInterval),
 		removeInterval: removeInterval,
 	}
+}
+
+// SetOnRemoveEvents registers a callback that fires after remove events are persisted.
+func (s *SmartLPMonitor) SetOnRemoveEvents(fn func(events []SmartLPRemoveEvent)) {
+	s.onRemoveEvents = fn
 }
 
 func (s *SmartLPMonitor) Start() {
@@ -450,6 +470,7 @@ func (s *SmartLPMonitor) smartLPWebsocketBlockWorker(blockQueue <-chan uint64, m
 			log.Printf("[SmartLP] insert events failed: %v", err)
 			continue
 		}
+		s.fireRemoveCallback(events)
 		if err := s.upsertWatchedWallets(context.Background(), events, "scan_add"); err != nil {
 			log.Printf("[SmartLP] upsert watched wallets failed: %v", err)
 		}
@@ -731,6 +752,7 @@ func (s *SmartLPMonitor) runOnce() {
 				log.Printf("[SmartLP] insert events failed: %v", err)
 				return
 			}
+			s.fireRemoveCallback(events)
 			if err := s.upsertWatchedWallets(ctx, events, "scan_add"); err != nil {
 				log.Printf("[SmartLP] upsert watched wallets failed: %v", err)
 			}
@@ -751,6 +773,7 @@ func (s *SmartLPMonitor) runOnce() {
 			log.Printf("[SmartLP] insert events failed: %v", err)
 			return
 		}
+		s.fireRemoveCallback(events)
 		if err := s.upsertWatchedWallets(ctx, events, "scan_add"); err != nil {
 			log.Printf("[SmartLP] upsert watched wallets failed: %v", err)
 		}
@@ -881,6 +904,33 @@ func (s *SmartLPMonitor) insertEvents(ctx context.Context, events []smartLPEvent
 	}
 
 	return batch.Send()
+}
+
+// fireRemoveCallback extracts remove events from the list and calls the onRemoveEvents callback.
+func (s *SmartLPMonitor) fireRemoveCallback(events []smartLPEvent) {
+	if s.onRemoveEvents == nil {
+		return
+	}
+	var removes []SmartLPRemoveEvent
+	for _, ev := range events {
+		if strings.ToLower(strings.TrimSpace(ev.action)) != "remove" {
+			continue
+		}
+		removes = append(removes, SmartLPRemoveEvent{
+			Chain:         ev.chain,
+			PoolVersion:   ev.poolVersion,
+			PoolID:        ev.poolID,
+			WalletAddress: ev.walletAddress,
+			Amount0:       ev.amount0,
+			Amount1:       ev.amount1,
+			TickLower:     ev.tickLower,
+			TickUpper:     ev.tickUpper,
+			Ts:            ev.ts,
+		})
+	}
+	if len(removes) > 0 {
+		go s.onRemoveEvents(removes)
+	}
 }
 
 func isRetryableClickHouseError(err error) bool {
@@ -2460,6 +2510,7 @@ func (s *SmartLPMonitor) runRemoveWatcherOnce() {
 			log.Printf("[SmartLP] remove watcher insert failed: %v", err)
 			return
 		}
+		s.fireRemoveCallback(filtered)
 		log.Printf("[SmartLP] remove watcher inserted events: %d", len(filtered))
 	}
 

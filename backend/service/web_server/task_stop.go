@@ -108,6 +108,7 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 			"rebalance_next_retry_at": nil,
 			"rebalance_last_error":    "",
 			"error_message":           "",
+			"paused":                  false,
 		}
 		if err := taskService.Update(user.ID, req.TaskID, updates); err != nil {
 			http.Error(w, "failed to update task", http.StatusInternalServerError)
@@ -206,6 +207,7 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 		"rebalance_next_retry_at": nil,
 		"rebalance_last_error":    "",
 		"error_message":           "",
+		"paused":                  false,
 	}
 	if err := taskService.Update(user.ID, req.TaskID, updates); err != nil {
 		http.Error(w, "failed to update task", http.StatusInternalServerError)

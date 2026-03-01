@@ -158,7 +158,7 @@ export default function SmartMoneyWalletPositionsModal({
             onClose={onClose}
             maxHeightClass="h-[92vh] sm:h-[720px] max-h-none"
             headerClassName="px-4 py-3 border-b border-zinc-100 dark:border-white/5 bg-zinc-50/50 dark:bg-[#111318]/50 shrink-0"
-            contentClassName="p-4"
+            contentClassName="p-4 pb-20"
             title={
                 <div>
                     <div className="truncate text-sm font-bold text-zinc-900 dark:text-white/90">钱包仓位</div>

@@ -1119,8 +1119,12 @@ func (s *RealtimePositionsService) buildV3Position(
 		outOfRangeText = formatOutOfRange(task, tickLower, tickUpper, currentTick)
 	}
 
-	if rangePct <= 0 && currentTick != 0 {
-		rangePct = estimateRangePercent(currentTick, tickLower, tickUpper)
+	// Prefer actual tick-based range so that rangePct reflects the CURRENT
+	// position, not the (possibly just-updated) rebalance target stored on the task.
+	if currentTick != 0 {
+		if estimated := estimateRangePercent(currentTick, tickLower, tickUpper); estimated > 0 {
+			rangePct = estimated
+		}
 	}
 
 	if hasSlot0 && poolAddr != (common.Address{}) {
@@ -1470,11 +1474,15 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 	totals.TotalUSD = totals.WalletUSD + totals.PositionUSD + totals.FeeUSD
 
 	inRange := currentTick >= tickLower && currentTick <= tickUpper
-	rangePct := task.RangePercentage
-	if task.RangeLowerPercentage > 0 && task.RangeUpperPercentage > 0 {
-		rangePct = (task.RangeLowerPercentage + task.RangeUpperPercentage) / 2.0
-	} else if rangePct <= 0 {
-		rangePct = estimateRangePercent(currentTick, tickLower, tickUpper)
+	// Prefer actual tick-based range so that rangePct reflects the CURRENT
+	// position, not the (possibly just-updated) rebalance target stored on the task.
+	rangePct := estimateRangePercent(currentTick, tickLower, tickUpper)
+	if rangePct <= 0 {
+		if task.RangeLowerPercentage > 0 && task.RangeUpperPercentage > 0 {
+			rangePct = (task.RangeLowerPercentage + task.RangeUpperPercentage) / 2.0
+		} else if task.RangePercentage > 0 {
+			rangePct = task.RangePercentage
+		}
 	}
 
 	exchange := strings.TrimSpace(task.Exchange)
@@ -1614,11 +1622,18 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 		inRange = currentTick >= tickLower && currentTick <= tickUpper
 	}
 
-	rangePct := task.RangePercentage
-	if task.RangeLowerPercentage > 0 && task.RangeUpperPercentage > 0 {
-		rangePct = (task.RangeLowerPercentage + task.RangeUpperPercentage) / 2.0
-	} else if rangePct <= 0 && gotTick && tickLower < tickUpper {
+	// Prefer actual tick-based range so that rangePct reflects the CURRENT
+	// position, not the (possibly just-updated) rebalance target stored on the task.
+	rangePct := 0.0
+	if gotTick && tickLower < tickUpper {
 		rangePct = estimateRangePercent(currentTick, tickLower, tickUpper)
+	}
+	if rangePct <= 0 {
+		if task.RangeLowerPercentage > 0 && task.RangeUpperPercentage > 0 {
+			rangePct = (task.RangeLowerPercentage + task.RangeUpperPercentage) / 2.0
+		} else if task.RangePercentage > 0 {
+			rangePct = task.RangePercentage
+		}
 	}
 
 	token0 := common.Address{}

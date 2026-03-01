@@ -175,7 +175,7 @@ export default function SmartMoneyPoolAddsModal({
             }}
             maxHeightClass="max-h-[92vh] sm:max-h-[720px] max-w-2xl"
             headerClassName="px-4 py-3 border-b border-zinc-100 dark:border-white/5 bg-zinc-50/50 dark:bg-[#111318]/50 shrink-0"
-            contentClassName="p-4 pb-5"
+            contentClassName="p-4 pb-20"
             title={
                 <div>
                     <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/90">

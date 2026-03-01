@@ -109,6 +109,9 @@ func main() {
 	log.Println("✅ Bot 创建成功")
 	log.Println("========================================")
 
+	// Wire WebSocket hub from web server into bot for smart money exit notifications.
+	telegramBot.SetWSHub(webServer.Hub)
+
 	// Handle graceful shutdown
 	go func() {
 		sigChan := make(chan os.Signal, 1)

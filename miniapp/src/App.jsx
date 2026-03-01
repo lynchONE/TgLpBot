@@ -37,9 +37,11 @@ import {
     fetchBlacklist,
     fetchCooldowns,
     removeCooldown,
+    saveGlobalConfig,
 } from './lib/api';
 import { getTelegramWebApp, hapticImpact, hapticNotification, hapticSelection } from './lib/telegram';
 import { formatRelativeTime, useTick } from './lib/time';
+import { useWebSocket } from './lib/useWebSocket';
 
 function resolveApiBaseUrl() {
     const queryApiBase = new URLSearchParams(window.location.search).get('apiBaseUrl');
@@ -392,6 +394,9 @@ export default function App() {
     const [globalConfig, setGlobalConfig] = useState(null);
     const [globalConfigError, setGlobalConfigError] = useState('');
     const [globalConfigLoading, setGlobalConfigLoading] = useState(false);
+
+    // Smart money exit WebSocket notifications
+    const [wsNotifications, setWsNotifications] = useState([]);
 
     const multiChainEnabled = globalConfig?.multi_chain_enabled ?? true;
     const multiWalletEnabled = globalConfig?.multi_wallet_enabled ?? false;
@@ -1720,6 +1725,31 @@ export default function App() {
         };
     }, [apiBaseUrl, initData, hasInitData]);
 
+    // WebSocket connection for real-time smart money exit notifications
+    const wsUrl = useMemo(() => {
+        if (!apiBaseUrl || !initData || !hasInitData) return '';
+        const base = String(apiBaseUrl).replace(/\/$/, '').replace(/^http/, 'ws');
+        return base + '/api/ws?initData=' + encodeURIComponent(initData);
+    }, [apiBaseUrl, initData, hasInitData]);
+
+    const handleWsMessage = useCallback((msg) => {
+        if (msg && msg.type === 'smart_money_exit' && msg.data) {
+            const id = Date.now() + Math.random();
+            setWsNotifications(prev => [{ ...msg.data, _id: id }, ...prev].slice(0, 20));
+            hapticNotification('warning');
+            // Auto-dismiss after 30 seconds
+            setTimeout(() => {
+                setWsNotifications(prev => prev.filter(n => n._id !== id));
+            }, 30000);
+        }
+    }, []);
+
+    useWebSocket({ url: wsUrl, onMessage: handleWsMessage, enabled: hasInitData && !!wsUrl });
+
+    const dismissWsNotification = useCallback((id) => {
+        setWsNotifications(prev => prev.filter(n => n._id !== id));
+    }, []);
+
     const openGlobalConfig = () => {
         setGlobalConfigOpen(true);
         loadGlobalConfig();
@@ -2646,6 +2676,36 @@ export default function App() {
             }
 
             {
+                isPositions && wsNotifications.length > 0 ? (
+                    <div className="mt-4 space-y-2">
+                        {wsNotifications.map((n) => (
+                            <div key={n._id} className="relative rounded-2xl border border-orange-500/30 bg-orange-500/10 p-3 text-xs text-orange-700 dark:text-orange-200">
+                                <button
+                                    type="button"
+                                    onClick={() => dismissWsNotification(n._id)}
+                                    className="absolute right-2 top-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-orange-500/20 text-orange-700 hover:bg-orange-500/30 dark:text-orange-200"
+                                    aria-label="dismiss"
+                                >
+                                    <Icon path={icons.close} className="h-3 w-3" />
+                                </button>
+                                <div className="font-semibold">
+                                    Smart Money 撤仓
+                                </div>
+                                <div className="mt-1 space-y-0.5">
+                                    <div>钱包: {n.wallet?.length > 12 ? n.wallet.slice(0, 6) + '...' + n.wallet.slice(-4) : n.wallet}</div>
+                                    <div>池子: {n.token0_symbol || '?'}/{n.token1_symbol || '?'} ({n.pool_version})</div>
+                                    {(n.amount0 && n.amount0 !== '0') || (n.amount1 && n.amount1 !== '0') ? (
+                                        <div>金额: {n.amount0 || '0'} / {n.amount1 || '0'}</div>
+                                    ) : null}
+                                    <div className="text-[10px] opacity-60">{n.timestamp ? new Date(n.timestamp).toLocaleTimeString() : ''}</div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                ) : null
+            }
+
+            {
                 poolSearchOpen ? (
                     <div className="fixed inset-0 z-[60]">
                         <button
@@ -2965,6 +3025,26 @@ export default function App() {
                                             <div>
                                                 <div>过滤中文代币</div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.filter_chinese_tokens)}</div>
+                                            </div>
+                                            <div>
+                                                <div>聪明钱撤仓通知</div>
+                                                <button
+                                                    type="button"
+                                                    onClick={async () => {
+                                                        const next = !globalCfg.smart_money_exit_notify_enabled;
+                                                        try {
+                                                            const resp = await saveGlobalConfig({ apiBaseUrl, initData, config: { smart_money_exit_notify_enabled: next } });
+                                                            setGlobalConfig(resp?.config || resp || null);
+                                                            hapticSelection();
+                                                            showNotice(next ? '聪明钱撤仓通知已开启' : '聪明钱撤仓通知已关闭', 'success');
+                                                        } catch (e) {
+                                                            showNotice(String(e?.message || e), 'error');
+                                                        }
+                                                    }}
+                                                    className={`mt-1 text-sm font-semibold ${globalCfg.smart_money_exit_notify_enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400 dark:text-white/30'}`}
+                                                >
+                                                    {formatOnOff(globalCfg.smart_money_exit_notify_enabled)}
+                                                </button>
                                             </div>
                                         </div>
                                     </div>

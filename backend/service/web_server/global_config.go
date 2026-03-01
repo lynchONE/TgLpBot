@@ -9,10 +9,6 @@ import (
 	userSvc "TgLpBot/service/user"
 )
 
-type globalConfigRequest struct {
-	InitData string `json:"initData"`
-}
-
 type globalConfigResponse struct {
 	OK     bool                 `json:"ok"`
 	Config *models.GlobalConfig `json:"config,omitempty"`
@@ -25,15 +21,24 @@ func (s *Server) handleGlobalConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, 8*1024)
-	var req globalConfigRequest
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
 
-	initData := strings.TrimSpace(req.InitData)
+	initDataRaw, ok := raw["initData"]
+	if !ok {
+		http.Error(w, "missing initData", http.StatusBadRequest)
+		return
+	}
+	var initData string
+	if err := json.Unmarshal(initDataRaw, &initData); err != nil {
+		http.Error(w, "invalid initData", http.StatusBadRequest)
+		return
+	}
+	initData = strings.TrimSpace(initData)
+
 	user, status, msg := authenticateTelegramWebAppUser(initData)
 	if status != 0 {
 		http.Error(w, msg, status)
@@ -55,6 +60,23 @@ func (s *Server) handleGlobalConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfgService := userSvc.NewGlobalConfigService()
+
+	// If request contains updatable fields, apply them.
+	updates := make(map[string]interface{})
+	if v, ok := raw["smart_money_exit_notify_enabled"]; ok {
+		var b bool
+		if err := json.Unmarshal(v, &b); err == nil {
+			updates["smart_money_exit_notify_enabled"] = b
+		}
+	}
+
+	if len(updates) > 0 {
+		if _, err := cfgService.Update(user.ID, updates); err != nil {
+			http.Error(w, "failed to update config", http.StatusInternalServerError)
+			return
+		}
+	}
+
 	cfg, err := cfgService.GetOrCreate(user.ID)
 	if err != nil {
 		http.Error(w, "failed to load config", http.StatusInternalServerError)
