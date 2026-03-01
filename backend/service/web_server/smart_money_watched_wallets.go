@@ -59,6 +59,9 @@ type watchedWalletJSON struct {
 	WalletAddress string `json:"wallet_address"`
 	Label         string `json:"label"`
 	CreatedAt     string `json:"created_at"`
+	Source        string `json:"source,omitempty"`
+	Removable     bool   `json:"removable"`
+	EditableLabel bool   `json:"editable_label"`
 }
 
 func walletToJSON(w *models.SmartMoneyWatchedWallet) watchedWalletJSON {
@@ -68,7 +71,63 @@ func walletToJSON(w *models.SmartMoneyWatchedWallet) watchedWalletJSON {
 		WalletAddress: w.WalletAddress,
 		Label:         w.Label,
 		CreatedAt:     w.CreatedAt.Format(time.RFC3339),
+		Source:        "user_managed",
+		Removable:     true,
+		EditableLabel: true,
 	}
+}
+
+type watchedWalletCHRow struct {
+	WalletAddress string
+	Source        string
+	UpdatedAt     time.Time
+}
+
+func (s *Server) loadCHWatchedWallets(chain string) ([]watchedWalletCHRow, error) {
+	out := make([]watchedWalletCHRow, 0, 128)
+	if s == nil || s.ClickHouse == nil || s.ClickHouse.Conn == nil {
+		return out, nil
+	}
+	chain = strings.ToLower(strings.TrimSpace(chain))
+	if chain == "" {
+		chain = "bsc"
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	rows, err := s.ClickHouse.Conn.Query(ctx, `
+		SELECT
+			wallet_address,
+			argMax(source, updated_at) AS source,
+			max(updated_at) AS updated_at
+		FROM smart_lp_watched_wallets
+		WHERE lowerUTF8(chain) = ?
+		GROUP BY wallet_address
+		ORDER BY updated_at DESC
+		LIMIT 5000
+	`, chain)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var row watchedWalletCHRow
+		if err := rows.Scan(&row.WalletAddress, &row.Source, &row.UpdatedAt); err != nil {
+			return out, err
+		}
+		row.WalletAddress = strings.ToLower(strings.TrimSpace(row.WalletAddress))
+		row.Source = strings.ToLower(strings.TrimSpace(row.Source))
+		if !common.IsHexAddress(row.WalletAddress) {
+			continue
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	return out, nil
 }
 
 func (s *Server) handleWatchedWalletsGet(w http.ResponseWriter, r *http.Request) {
@@ -96,15 +155,80 @@ func (s *Server) handleWatchedWalletsGet(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	items := make([]watchedWalletJSON, 0, len(wallets))
+	userByAddress := make(map[string]*models.SmartMoneyWatchedWallet, len(wallets))
 	for i := range wallets {
+		addr := strings.ToLower(strings.TrimSpace(wallets[i].WalletAddress))
+		if !common.IsHexAddress(addr) {
+			continue
+		}
+		userByAddress[addr] = &wallets[i]
+	}
+
+	items := make([]watchedWalletJSON, 0, len(wallets)+64)
+	seen := make(map[string]struct{}, len(wallets)+64)
+	systemTotal := 0
+	warnings := make([]string, 0, 1)
+
+	chWallets, chErr := s.loadCHWatchedWallets(chain)
+	if chErr != nil {
+		warnings = append(warnings, fmt.Sprintf("watchlist query from clickhouse failed: %v", chErr))
+	}
+
+	for _, row := range chWallets {
+		if row.Source == "user_removed" {
+			continue
+		}
+		addr := row.WalletAddress
+		if !common.IsHexAddress(addr) {
+			continue
+		}
+		if _, ok := seen[addr]; ok {
+			continue
+		}
+		if userRow, ok := userByAddress[addr]; ok {
+			items = append(items, walletToJSON(userRow))
+			seen[addr] = struct{}{}
+			continue
+		}
+
+		createdAt := row.UpdatedAt
+		if createdAt.IsZero() {
+			createdAt = time.Now()
+		}
+		items = append(items, watchedWalletJSON{
+			ID:            0,
+			Chain:         chain,
+			WalletAddress: addr,
+			Label:         "",
+			CreatedAt:     createdAt.Format(time.RFC3339),
+			Source:        row.Source,
+			Removable:     true,
+			EditableLabel: false,
+		})
+		seen[addr] = struct{}{}
+		systemTotal++
+	}
+
+	for i := range wallets {
+		addr := strings.ToLower(strings.TrimSpace(wallets[i].WalletAddress))
+		if !common.IsHexAddress(addr) {
+			continue
+		}
+		if _, ok := seen[addr]; ok {
+			continue
+		}
 		items = append(items, walletToJSON(&wallets[i]))
+		seen[addr] = struct{}{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"wallets": items,
-		"total":   len(items),
+		"wallets":      items,
+		"total":        len(items),
+		"manual_total": len(wallets),
+		"system_total": systemTotal,
+		"max_manual":   maxWatchedWalletsPerUser,
+		"warnings":     warnings,
 	})
 }
 
@@ -306,14 +430,35 @@ func (s *Server) handleWatchedWalletsRemove(w http.ResponseWriter, r *http.Reque
 	result := database.DB.Where("user_id = ? AND chain = ? AND wallet_address IN ?",
 		user.ID, chain, normalized).Delete(&models.SmartMoneyWatchedWallet{})
 
-	deleted := int64(0)
+	deletedDB := int64(0)
 	if result.Error == nil {
-		deleted = result.RowsAffected
+		deletedDB = result.RowsAffected
+	}
+
+	removedFromWatchlist := 0
+	warnings := make([]string, 0, 1)
+	if s.ClickHouse != nil && len(normalized) > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.ClickHouse.MarkWatchedWalletsRemoved(ctx, chain, normalized); err != nil {
+			warnings = append(warnings, fmt.Sprintf("clickhouse watchlist remove failed: %v", err))
+		} else {
+			removedFromWatchlist = len(normalized)
+		}
+	}
+
+	deleted := int(deletedDB)
+	if removedFromWatchlist > deleted {
+		deleted = removedFromWatchlist
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"deleted": deleted,
+		"deleted":                deleted,
+		"db_deleted":             deletedDB,
+		"watchlist_removed":      removedFromWatchlist,
+		"warnings":               warnings,
+		"watchlist_remove_chain": chain,
 	})
 }
 

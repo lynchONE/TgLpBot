@@ -2091,7 +2091,9 @@ func (s *SmartLPMonitor) loadWatchedWallets(ctx context.Context, chain string) (
 	}
 
 	rows, err := s.ch.Conn.Query(ctx, `
-		SELECT wallet_address
+		SELECT
+			wallet_address,
+			argMax(source, updated_at) AS latest_source
 		FROM smart_lp_watched_wallets
 		WHERE lowerUTF8(chain) = ?
 		GROUP BY wallet_address
@@ -2103,13 +2105,20 @@ func (s *SmartLPMonitor) loadWatchedWallets(ctx context.Context, chain string) (
 	}
 	defer rows.Close()
 
+	tableWalletCount := 0
 	for rows.Next() {
 		var wallet string
-		if err := rows.Scan(&wallet); err != nil {
+		var latestSource string
+		if err := rows.Scan(&wallet, &latestSource); err != nil {
 			return out, err
 		}
+		tableWalletCount++
 		wallet = strings.ToLower(strings.TrimSpace(wallet))
+		latestSource = strings.ToLower(strings.TrimSpace(latestSource))
 		if common.IsHexAddress(wallet) {
+			if latestSource == "user_removed" {
+				continue
+			}
 			out[wallet] = struct{}{}
 		}
 	}
@@ -2117,6 +2126,11 @@ func (s *SmartLPMonitor) loadWatchedWallets(ctx context.Context, chain string) (
 		return out, err
 	}
 	if len(out) > 0 {
+		return out, nil
+	}
+
+	if tableWalletCount > 0 {
+		// Explicitly empty watchlist (all removed) should remain empty.
 		return out, nil
 	}
 

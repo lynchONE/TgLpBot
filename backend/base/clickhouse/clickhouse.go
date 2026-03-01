@@ -438,6 +438,48 @@ func (s *ClickHouseService) UpsertWatchedWallets(ctx context.Context, entries []
 	return batch.Send()
 }
 
+// MarkWatchedWalletsRemoved appends tombstone records to the watched-wallet table.
+// The latest source "user_removed" (by updated_at) means the wallet is no longer monitored.
+func (s *ClickHouseService) MarkWatchedWalletsRemoved(ctx context.Context, chain string, walletAddresses []string) error {
+	if s == nil || s.Conn == nil || len(walletAddresses) == 0 {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	chain = strings.ToLower(strings.TrimSpace(chain))
+	if chain == "" {
+		chain = "bsc"
+	}
+
+	batch, err := s.PrepareBatch(ctx, `INSERT INTO smart_lp_watched_wallets (
+		chain, wallet_address, last_add_at, source, updated_at
+	)`)
+	if err != nil {
+		return fmt.Errorf("prepare batch for watched wallet tombstones failed: %w", err)
+	}
+	defer func() { _ = batch.Abort() }()
+
+	now := time.Now()
+	lastAddAt := time.Unix(0, 0)
+	seen := make(map[string]struct{}, len(walletAddresses))
+	for _, raw := range walletAddresses {
+		addr := strings.ToLower(strings.TrimSpace(raw))
+		if addr == "" {
+			continue
+		}
+		if _, ok := seen[addr]; ok {
+			continue
+		}
+		seen[addr] = struct{}{}
+		if err := batch.Append(chain, addr, lastAddAt, "user_removed", now); err != nil {
+			return fmt.Errorf("append watched wallet tombstone failed: %w", err)
+		}
+	}
+	return batch.Send()
+}
+
 var clickhouseIdent = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
 func (s *ClickHouseService) ResetAll(ctx context.Context) error {

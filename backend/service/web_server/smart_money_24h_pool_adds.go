@@ -5,13 +5,17 @@ import (
 	"TgLpBot/service/pricing"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 type smartMoney24hPool struct {
@@ -118,6 +122,152 @@ func orderedBuckets(counts map[string]int, order []string) []smartMoney24hDistBu
 	return out
 }
 
+type smartMoney24hPoolInfoCacheEntry struct {
+	Info      *pool.PoolInfo
+	ExpiresAt time.Time
+}
+
+var smartMoney24hPoolInfoCache sync.Map
+
+func clonePoolInfo(info *pool.PoolInfo) *pool.PoolInfo {
+	if info == nil {
+		return nil
+	}
+	c := *info
+	return &c
+}
+
+func loadSmartMoney24hPoolInfoCache(key string) *pool.PoolInfo {
+	key = strings.ToLower(strings.TrimSpace(key))
+	if key == "" {
+		return nil
+	}
+	raw, ok := smartMoney24hPoolInfoCache.Load(key)
+	if !ok {
+		return nil
+	}
+	entry, ok := raw.(smartMoney24hPoolInfoCacheEntry)
+	if !ok {
+		smartMoney24hPoolInfoCache.Delete(key)
+		return nil
+	}
+	if entry.Info == nil || time.Now().After(entry.ExpiresAt) {
+		smartMoney24hPoolInfoCache.Delete(key)
+		return nil
+	}
+	return clonePoolInfo(entry.Info)
+}
+
+func storeSmartMoney24hPoolInfoCache(key string, info *pool.PoolInfo, ttl time.Duration) {
+	key = strings.ToLower(strings.TrimSpace(key))
+	if key == "" || info == nil {
+		return
+	}
+	if ttl <= 0 {
+		ttl = 15 * time.Minute
+	}
+	smartMoney24hPoolInfoCache.Store(key, smartMoney24hPoolInfoCacheEntry{
+		Info:      clonePoolInfo(info),
+		ExpiresAt: time.Now().Add(ttl),
+	})
+}
+
+func applyPoolInfoTo24hPool(p *smartMoney24hPool, info *pool.PoolInfo) {
+	if p == nil || info == nil {
+		return
+	}
+	p.Exchange = strings.TrimSpace(info.Exchange)
+	p.Token0Symbol = strings.TrimSpace(info.Token0Symbol)
+	p.Token1Symbol = strings.TrimSpace(info.Token1Symbol)
+	if p.Token0Symbol != "" || p.Token1Symbol != "" {
+		p.Pair = strings.TrimSpace(p.Token0Symbol + "/" + p.Token1Symbol)
+		if p.Pair == "/" {
+			p.Pair = ""
+		}
+	}
+	if info.Fee > 0 {
+		p.FeePct = float64(info.Fee) / 10000.0
+	}
+}
+
+func fetchPoolInfoBestEffort(
+	ctx context.Context,
+	poolSvc *pool.PoolService,
+	chain string,
+	poolVersion string,
+	poolID string,
+	timeout time.Duration,
+) (*pool.PoolInfo, error) {
+	if poolSvc == nil {
+		return nil, fmt.Errorf("pool service is nil")
+	}
+	type result struct {
+		info *pool.PoolInfo
+		err  error
+	}
+	outCh := make(chan result, 1)
+	go func() {
+		pv := strings.ToLower(strings.TrimSpace(poolVersion))
+		if pv == "v4" {
+			info, err := poolSvc.GetV4PoolInfo(poolID)
+			outCh <- result{info: info, err: err}
+			return
+		}
+		info, err := poolSvc.GetPoolInfoForChain(chain, poolID)
+		outCh <- result{info: info, err: err}
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-timer.C:
+		return nil, context.DeadlineExceeded
+	case r := <-outCh:
+		return r.info, r.err
+	}
+}
+
+func getUSDPricesBestEffort(
+	ctx context.Context,
+	priceSvc *pricing.TokenPriceService,
+	chain string,
+	tokens []string,
+	timeout time.Duration,
+) (map[string]float64, error) {
+	if priceSvc == nil {
+		return map[string]float64{}, fmt.Errorf("price service is nil")
+	}
+	if len(tokens) == 0 {
+		return map[string]float64{}, nil
+	}
+
+	type result struct {
+		prices map[string]float64
+		err    error
+	}
+	outCh := make(chan result, 1)
+	go func() {
+		prices, err := priceSvc.GetUSDPrices(chain, tokens)
+		outCh <- result{prices: prices, err: err}
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return map[string]float64{}, ctx.Err()
+	case <-timer.C:
+		return map[string]float64{}, context.DeadlineExceeded
+	case r := <-outCh:
+		if r.prices == nil {
+			return map[string]float64{}, r.err
+		}
+		return r.prices, r.err
+	}
+}
+
 func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -171,12 +321,49 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 			topWalletLimit = clampInt24h(n, 1, 100)
 		}
 	}
+	watchedOnly := true
+	if v := strings.ToLower(strings.TrimSpace(query.Get("watched_only"))); v != "" {
+		if v == "0" || v == "false" || v == "no" {
+			watchedOnly = false
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 
 	windowSec := windowHours * 3600
-	warnings := make([]string, 0, 2)
+	warnings := make([]string, 0, 4)
+	watchedWalletFilterSQL := ""
+	if watchedOnly {
+		watchedWalletFilterSQL = `
+			AND wallet_address IN (
+				SELECT wallet_address
+				FROM (
+					SELECT wallet_address, argMax(source, updated_at) AS latest_source
+					FROM smart_lp_watched_wallets
+					WHERE lowerUTF8(chain) = ?
+					GROUP BY wallet_address
+				)
+				WHERE latest_source != 'user_removed'
+			)
+		`
+		var watchTableCnt uint64
+		tableErr := s.ClickHouse.Conn.QueryRow(ctx, `
+			SELECT count()
+			FROM system.tables
+			WHERE database = currentDatabase()
+				AND name = 'smart_lp_watched_wallets'
+		`).Scan(&watchTableCnt)
+		if tableErr != nil || watchTableCnt == 0 {
+			watchedOnly = false
+			watchedWalletFilterSQL = ""
+			if tableErr != nil {
+				warnings = append(warnings, fmt.Sprintf("watched-wallet filter disabled: %v", tableErr))
+			} else {
+				warnings = append(warnings, "watched-wallet filter disabled: smart_lp_watched_wallets table not found")
+			}
+		}
+	}
 
 	// 1. Query top pools by wallet count in window
 	poolQuery := fmt.Sprintf(`
@@ -191,13 +378,19 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 		WHERE ts >= now() - INTERVAL %d SECOND
 			AND action = 'add'
 			AND lowerUTF8(chain) = ?
+			%s
 			AND pool_version != '' AND pool_id != ''
 		GROUP BY pool_version, pool_id
 		ORDER BY wallet_count DESC, event_count DESC
 		LIMIT %d
-	`, windowSec, poolLimit)
+	`, windowSec, watchedWalletFilterSQL, poolLimit)
 
-	rows, err := s.ClickHouse.Conn.Query(ctx, poolQuery, chain)
+	poolArgs := make([]any, 0, 2)
+	poolArgs = append(poolArgs, chain)
+	if watchedOnly {
+		poolArgs = append(poolArgs, chain)
+	}
+	rows, err := s.ClickHouse.Conn.Query(ctx, poolQuery, poolArgs...)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("pool query failed: %v", err), http.StatusInternalServerError)
 		return
@@ -228,44 +421,88 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 		warnings = append(warnings, fmt.Sprintf("pool rows error: %v", err))
 	}
 
-	// Resolve pool info
+	// Resolve pool info with bounded concurrency and soft per-pool timeout.
 	poolSvc := pool.NewPoolService()
 	poolIndex := make(map[string]*smartMoney24hPool, len(outPools))
 	poolInfoByKey := make(map[string]*pool.PoolInfo, len(outPools))
+	poolInfoCacheTTL := 20 * time.Minute
+	poolInfoSoftTimeout := 1200 * time.Millisecond
+	poolInfoResolveWindow := 6 * time.Second
+	resolveCtx, resolveCancel := context.WithTimeout(ctx, poolInfoResolveWindow)
+	defer resolveCancel()
+	g, gctx := errgroup.WithContext(resolveCtx)
+	g.SetLimit(6)
+
+	var poolInfoMu sync.Mutex
+	poolInfoTimeoutCnt := 0
+	poolInfoErrorCnt := 0
 	for i := range outPools {
 		p := &outPools[i]
 		pv := strings.ToLower(strings.TrimSpace(p.PoolVersion))
 		pid := strings.ToLower(strings.TrimSpace(p.PoolID))
 		poolIndex[pv+"|"+pid] = p
-		var info *pool.PoolInfo
-		var infoErr error
-		if pv == "v4" {
-			info, infoErr = poolSvc.GetV4PoolInfo(p.PoolID)
-		} else {
-			info, infoErr = poolSvc.GetPoolInfo(p.PoolID)
-		}
-		if infoErr != nil || info == nil {
-			continue
-		}
-		poolInfoByKey[pv+"|"+pid] = info
-		p.Exchange = strings.TrimSpace(info.Exchange)
-		p.Token0Symbol = strings.TrimSpace(info.Token0Symbol)
-		p.Token1Symbol = strings.TrimSpace(info.Token1Symbol)
-		if p.Token0Symbol != "" || p.Token1Symbol != "" {
-			p.Pair = strings.TrimSpace(p.Token0Symbol + "/" + p.Token1Symbol)
-			if p.Pair == "/" {
-				p.Pair = ""
+	}
+	for i := range outPools {
+		i := i
+		g.Go(func() error {
+			if gctx.Err() != nil {
+				return nil
 			}
-		}
-		if info.Fee > 0 {
-			p.FeePct = float64(info.Fee) / 10000.0
-		}
+			p := &outPools[i]
+			pv := strings.ToLower(strings.TrimSpace(p.PoolVersion))
+			pid := strings.ToLower(strings.TrimSpace(p.PoolID))
+			key := pv + "|" + pid
+			if key == "|" {
+				return nil
+			}
+
+			info := loadSmartMoney24hPoolInfoCache(key)
+			if info == nil {
+				fetched, infoErr := fetchPoolInfoBestEffort(gctx, poolSvc, chain, pv, p.PoolID, poolInfoSoftTimeout)
+				if infoErr != nil {
+					if errors.Is(infoErr, context.DeadlineExceeded) {
+						poolInfoMu.Lock()
+						poolInfoTimeoutCnt++
+						poolInfoMu.Unlock()
+					} else if !errors.Is(infoErr, context.Canceled) {
+						poolInfoMu.Lock()
+						poolInfoErrorCnt++
+						poolInfoMu.Unlock()
+					}
+					return nil
+				}
+				if fetched == nil {
+					return nil
+				}
+				info = fetched
+				storeSmartMoney24hPoolInfoCache(key, info, poolInfoCacheTTL)
+			}
+
+			applyPoolInfoTo24hPool(p, info)
+			poolInfoMu.Lock()
+			poolInfoByKey[key] = info
+			poolInfoMu.Unlock()
+			return nil
+		})
+	}
+	_ = g.Wait()
+	if poolInfoTimeoutCnt > 0 {
+		warnings = append(warnings, fmt.Sprintf("pool metadata timeout on %d pools; returned partial metadata", poolInfoTimeoutCnt))
+	}
+	if poolInfoErrorCnt > 0 {
+		warnings = append(warnings, fmt.Sprintf("pool metadata errors on %d pools; returned partial metadata", poolInfoErrorCnt))
+	}
+	if resolveCtx.Err() != nil && !errors.Is(resolveCtx.Err(), context.Canceled) {
+		warnings = append(warnings, "pool metadata stage reached time budget; returned partial metadata")
 	}
 
 	// 1.1 Query total added token amounts for selected pools and convert to USD.
 	selectedPlaceholders := make([]string, 0, len(outPools))
-	selectedArgs := make([]any, 0, 1+2*len(outPools))
+	selectedArgs := make([]any, 0, 2+2*len(outPools))
 	selectedArgs = append(selectedArgs, chain)
+	if watchedOnly {
+		selectedArgs = append(selectedArgs, chain)
+	}
 	for i := range outPools {
 		selectedPlaceholders = append(selectedPlaceholders, "(?, ?)")
 		selectedArgs = append(selectedArgs, outPools[i].PoolVersion, outPools[i].PoolID)
@@ -283,9 +520,10 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 			WHERE ts >= now() - INTERVAL %d SECOND
 				AND action = 'add'
 				AND lowerUTF8(chain) = ?
+				%s
 				AND (pool_version, pool_id) IN (%s)
 			GROUP BY pool_version, pool_id
-		`, windowSec, strings.Join(selectedPlaceholders, ","))
+		`, windowSec, watchedWalletFilterSQL, strings.Join(selectedPlaceholders, ","))
 
 		amountRows, amountErr := s.ClickHouse.Conn.Query(ctx, poolAmountQuery, selectedArgs...)
 		if amountErr != nil {
@@ -334,9 +572,13 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	prices, priceErr := priceSvc.GetUSDPrices(chain, tokens)
+	prices, priceErr := getUSDPricesBestEffort(ctx, priceSvc, chain, tokens, 1800*time.Millisecond)
 	if priceErr != nil {
-		warnings = append(warnings, "price provider limited/rate-limited; using cached/fallback prices where available")
+		if errors.Is(priceErr, context.DeadlineExceeded) {
+			warnings = append(warnings, "price query timeout; using cached/fallback prices where available")
+		} else {
+			warnings = append(warnings, "price provider limited/rate-limited; using cached/fallback prices where available")
+		}
 	}
 
 	decimalsCache := make(map[string]int)
@@ -391,8 +633,14 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 		WHERE ts >= now() - INTERVAL %d SECOND
 			AND action = 'add'
 			AND lowerUTF8(chain) = ?
-	`, windowSec)
-	if err := s.ClickHouse.Conn.QueryRow(ctx, totalWalletsQ, chain).Scan(&totalWallets); err != nil {
+			%s
+	`, windowSec, watchedWalletFilterSQL)
+	totalWalletArgs := make([]any, 0, 2)
+	totalWalletArgs = append(totalWalletArgs, chain)
+	if watchedOnly {
+		totalWalletArgs = append(totalWalletArgs, chain)
+	}
+	if err := s.ClickHouse.Conn.QueryRow(ctx, totalWalletsQ, totalWalletArgs...).Scan(&totalWallets); err != nil {
 		warnings = append(warnings, fmt.Sprintf("total wallets query failed: %v", err))
 	}
 
@@ -407,11 +655,17 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 		WHERE ts >= now() - INTERVAL %d SECOND
 			AND action = 'add'
 			AND lowerUTF8(chain) = ?
+			%s
 		GROUP BY hour
 		ORDER BY hour ASC
-	`, windowSec)
+	`, windowSec, watchedWalletFilterSQL)
 
-	hRows, err := s.ClickHouse.Conn.Query(ctx, hourlyQ, chain)
+	hourlyArgs := make([]any, 0, 2)
+	hourlyArgs = append(hourlyArgs, chain)
+	if watchedOnly {
+		hourlyArgs = append(hourlyArgs, chain)
+	}
+	hRows, err := s.ClickHouse.Conn.Query(ctx, hourlyQ, hourlyArgs...)
 	if err != nil {
 		warnings = append(warnings, fmt.Sprintf("hourly trend query failed: %v", err))
 	}
@@ -448,12 +702,18 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 		WHERE ts >= now() - INTERVAL %d SECOND
 			AND action = 'add'
 			AND lowerUTF8(chain) = ?
+			%s
 			AND tick_lower != 0 AND tick_upper != 0
 		GROUP BY range_label
 		ORDER BY cnt DESC
-	`, windowSec)
+	`, windowSec, watchedWalletFilterSQL)
 
-	tRows, err := s.ClickHouse.Conn.Query(ctx, tickRangeQ, chain)
+	tickArgs := make([]any, 0, 2)
+	tickArgs = append(tickArgs, chain)
+	if watchedOnly {
+		tickArgs = append(tickArgs, chain)
+	}
+	tRows, err := s.ClickHouse.Conn.Query(ctx, tickRangeQ, tickArgs...)
 	if err != nil {
 		warnings = append(warnings, fmt.Sprintf("tick range query failed: %v", err))
 	}
@@ -483,13 +743,19 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 		WHERE ts >= now() - INTERVAL %d SECOND
 			AND action = 'add'
 			AND lowerUTF8(chain) = ?
+			%s
 			AND wallet_address != ''
 		GROUP BY wallet_address
 		ORDER BY pool_count DESC, add_count DESC
 		LIMIT %d
-	`, windowSec, topWalletLimit)
+	`, windowSec, watchedWalletFilterSQL, topWalletLimit)
 
-	topWalletRows, topWalletErr := s.ClickHouse.Conn.Query(ctx, topWalletQuery, chain)
+	topWalletArgs := make([]any, 0, 2)
+	topWalletArgs = append(topWalletArgs, chain)
+	if watchedOnly {
+		topWalletArgs = append(topWalletArgs, chain)
+	}
+	topWalletRows, topWalletErr := s.ClickHouse.Conn.Query(ctx, topWalletQuery, topWalletArgs...)
 	topWallets := make([]smartMoney24hTopWallet, 0, topWalletLimit)
 	if topWalletErr != nil {
 		warnings = append(warnings, fmt.Sprintf("top wallets query failed: %v", topWalletErr))
@@ -525,13 +791,19 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 			WHERE ts >= now() - INTERVAL %d SECOND
 				AND action = 'add'
 				AND lowerUTF8(chain) = ?
+				%s
 				AND wallet_address != ''
 			GROUP BY wallet_address
 		)
 		GROUP BY range_label
-	`, windowSec)
+	`, windowSec, watchedWalletFilterSQL)
 
-	walletDistRows, walletDistErr := s.ClickHouse.Conn.Query(ctx, walletDistQuery, chain)
+	walletDistArgs := make([]any, 0, 2)
+	walletDistArgs = append(walletDistArgs, chain)
+	if watchedOnly {
+		walletDistArgs = append(walletDistArgs, chain)
+	}
+	walletDistRows, walletDistErr := s.ClickHouse.Conn.Query(ctx, walletDistQuery, walletDistArgs...)
 	walletDistCount := map[string]int{
 		"1 pool":    0,
 		"2 pools":   0,

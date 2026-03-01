@@ -30,11 +30,19 @@ function formatTime(value) {
     return `${Math.floor(diffSec / 86400)}d`;
 }
 
+function sourceLabel(source) {
+    const s = String(source || '').trim().toLowerCase();
+    if (!s || s === 'user_managed') return 'Manual';
+    if (s === 'scan_add' || s === 'smart_lp') return 'Contract';
+    return s;
+}
+
 export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chain, onNotice }) {
     const [wallets, setWallets] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [refreshTick, setRefreshTick] = useState(0);
+    const [stats, setStats] = useState({ manualTotal: 0, systemTotal: 0, maxManual: 50 });
 
     const [query, setQuery] = useState('');
     const [selected, setSelected] = useState(new Set());
@@ -52,7 +60,7 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
     useEffect(() => {
         if (!initData) {
             setLoading(false);
-            setError('缺少 initData，无法加载监控列表');
+            setError('Missing initData; cannot load watched wallets');
             return;
         }
         let cancelled = false;
@@ -72,6 +80,14 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                 if (cancelled) return;
                 const list = Array.isArray(resp?.wallets) ? resp.wallets : [];
                 setWallets(list);
+                const manualTotal = Number(resp?.manual_total ?? list.filter((w) => String(w?.source || 'user_managed').toLowerCase() === 'user_managed').length);
+                const systemTotal = Number(resp?.system_total ?? Math.max(0, list.length - manualTotal));
+                const maxManual = Number(resp?.max_manual ?? 50);
+                setStats({
+                    manualTotal: Number.isFinite(manualTotal) && manualTotal >= 0 ? manualTotal : 0,
+                    systemTotal: Number.isFinite(systemTotal) && systemTotal >= 0 ? systemTotal : 0,
+                    maxManual: Number.isFinite(maxManual) && maxManual > 0 ? maxManual : 50,
+                });
                 setSelected((prev) => {
                     if (!prev.size) return prev;
                     const keep = new Set();
@@ -86,10 +102,10 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                 if (cancelled) return;
                 const message = String(err?.message || err || '');
                 if (message.toLowerCase().includes('aborted') || message.toLowerCase().includes('abort')) {
-                    setError('请求超时，请点“刷新”重试');
+                    setError('Request timed out. Please click refresh and retry.');
                     return;
                 }
-                setError(message || '加载失败');
+                setError(message || '鍔犺浇澶辫触');
             })
             .finally(() => {
                 if (!cancelled) setLoading(false);
@@ -113,7 +129,8 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
     }, [wallets, query]);
 
     const selectedCount = selected.size;
-    const allFilteredSelected = filteredWallets.length > 0 && filteredWallets.every((row) => selected.has(String(row?.wallet_address || '').trim().toLowerCase()));
+    const allFilteredSelectable = filteredWallets.filter((row) => row?.removable !== false);
+    const allFilteredSelected = allFilteredSelectable.length > 0 && allFilteredSelectable.every((row) => selected.has(String(row?.wallet_address || '').trim().toLowerCase()));
 
     const toggleSelect = useCallback((walletAddress) => {
         const normalized = String(walletAddress || '').trim().toLowerCase();
@@ -133,6 +150,7 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                 filteredWallets.forEach((row) => next.delete(String(row?.wallet_address || '').trim().toLowerCase()));
             } else {
                 filteredWallets.forEach((row) => {
+                    if (row?.removable === false) return;
                     const addr = String(row?.wallet_address || '').trim().toLowerCase();
                     if (addr) next.add(addr);
                 });
@@ -156,7 +174,7 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
             const invalidCount = rawList.length - normalized.length;
 
             if (!unique.length) {
-                setError('未检测到有效钱包地址（格式: 0x...）');
+                setError('No valid wallet addresses detected (format: 0x...)');
                 return;
             }
 
@@ -174,19 +192,19 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
 
             const added = Number(resp?.added ?? 0);
             const duplicates = Number(resp?.duplicates ?? 0);
-            const msgParts = [`新增 ${added}`];
-            if (duplicates > 0) msgParts.push(`重复 ${duplicates}`);
-            if (invalidCount > 0) msgParts.push(`无效 ${invalidCount}`);
+            const msgParts = [`Added ${added}`];
+            if (duplicates > 0) msgParts.push(`Duplicate ${duplicates}`);
+            if (invalidCount > 0) msgParts.push(`Invalid ${invalidCount}`);
 
             hapticNotification('success');
-            if (onNotice) onNotice(msgParts.join('，'));
+            if (onNotice) onNotice(msgParts.join(', '));
 
             setAddInput('');
             setAddLabel('');
             setShowAddForm(false);
             setRefreshTick((v) => v + 1);
         } catch (err) {
-            setError(String(err?.message || err || '添加失败'));
+            setError(String(err?.message || err || '娣诲姞澶辫触'));
             hapticNotification('error');
         } finally {
             setAdding(false);
@@ -206,11 +224,11 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                 walletAddresses: toDelete,
             });
             hapticNotification('success');
-            if (onNotice) onNotice(`已移除 ${Number(resp?.deleted ?? 0)} 个钱包`);
+            if (onNotice) onNotice(`Removed ${Number(resp?.deleted ?? 0)} wallet(s)`);
             setSelected(new Set());
             setRefreshTick((v) => v + 1);
         } catch (err) {
-            setError(String(err?.message || err || '删除失败'));
+            setError(String(err?.message || err || '鍒犻櫎澶辫触'));
             hapticNotification('error');
         } finally {
             setDeleting(false);
@@ -231,11 +249,11 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                 label: String(editLabel || '').trim(),
             });
             hapticNotification('success');
-            if (onNotice) onNotice('备注已更新');
+            if (onNotice) onNotice('Label updated');
             setEditingAddr('');
             setRefreshTick((v) => v + 1);
         } catch (err) {
-            setError(String(err?.message || err || '更新备注失败'));
+            setError(String(err?.message || err || 'Update label failed'));
             hapticNotification('error');
         } finally {
             setSavingLabel(false);
@@ -255,7 +273,7 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                 walletAddresses: [addr],
             });
             hapticNotification('success');
-            if (onNotice) onNotice('已移除 1 个钱包');
+            if (onNotice) onNotice('Removed 1 wallet');
             setSelected((prev) => {
                 const next = new Set(prev);
                 next.delete(addr);
@@ -263,7 +281,7 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
             });
             setRefreshTick((v) => v + 1);
         } catch (err) {
-            setError(String(err?.message || err || '删除失败'));
+            setError(String(err?.message || err || '鍒犻櫎澶辫触'));
             hapticNotification('error');
         } finally {
             setDeleting(false);
@@ -284,8 +302,10 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
         <div className="mt-3 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-xs font-semibold text-zinc-700 dark:text-white/80">
-                    监控钱包
-                    <span className="ml-1 text-zinc-400 dark:text-white/40">({wallets.length}/50)</span>
+                    Watched Wallets
+                    <span className="ml-1 text-zinc-400 dark:text-white/40">
+                        ({wallets.length} total / manual {stats.manualTotal}/{stats.maxManual} / contract {stats.systemTotal})
+                    </span>
                 </div>
                 <div className="flex items-center gap-1.5">
                     <button
@@ -296,7 +316,7 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                         }}
                         className="rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-600 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/60 dark:hover:bg-white/10"
                     >
-                        刷新
+                        Refresh
                     </button>
                     {filteredWallets.length > 0 && (
                         <button
@@ -307,7 +327,7 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                             }}
                             className="rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-600 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/60 dark:hover:bg-white/10"
                         >
-                            {allFilteredSelected ? '取消全选' : '全选结果'}
+                            {allFilteredSelected ? 'Unselect All' : 'Select All'}
                         </button>
                     )}
                     {selectedCount > 0 && (
@@ -320,7 +340,7 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                             disabled={deleting}
                             className="rounded-lg bg-red-500/10 px-2 py-1 text-[10px] font-semibold text-red-600 hover:bg-red-500/20 disabled:opacity-50 dark:text-red-400"
                         >
-                            {deleting ? '删除中...' : `删除(${selectedCount})`}
+                            {deleting ? 'Removing...' : `Remove (${selectedCount})`}
                         </button>
                     )}
                     <button
@@ -331,7 +351,7 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                         }}
                         className="rounded-lg bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-600 hover:bg-emerald-500/20 dark:text-emerald-400"
                     >
-                        {showAddForm ? '收起' : '+ 添加'}
+                        {showAddForm ? 'Collapse' : '+ Add'}
                     </button>
                 </div>
             </div>
@@ -341,15 +361,17 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                     type="text"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    placeholder="搜索地址或备注..."
+                    placeholder="Search address or label..."
                     className="w-full rounded-lg bg-white px-2.5 py-1.5 text-[11px] text-zinc-900 outline-none ring-0 placeholder:text-zinc-400 dark:bg-white/5 dark:text-white/80 dark:placeholder:text-white/25"
                 />
             </div>
 
             {showAddForm && (
                 <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 dark:border-emerald-500/10 dark:bg-emerald-500/5">
-                    <div className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">批量添加监控地址</div>
-                    <div className="mt-1 text-[10px] text-zinc-500 dark:text-white/40">每行一个地址，或用逗号分隔；自动去重。</div>
+                    <div className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">Batch Add Watched Wallets</div>
+                    <div className="mt-1 text-[10px] text-zinc-500 dark:text-white/40">
+                        One wallet per line, or comma separated. Duplicates are removed automatically.
+                    </div>
                     <textarea
                         value={addInput}
                         onChange={(e) => setAddInput(e.target.value)}
@@ -361,7 +383,7 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                         type="text"
                         value={addLabel}
                         onChange={(e) => setAddLabel(e.target.value)}
-                        placeholder="备注（可选）"
+                        placeholder="Label (optional)"
                         maxLength={100}
                         className="mt-1.5 w-full rounded-lg bg-white px-2.5 py-1.5 text-[11px] text-zinc-900 outline-none ring-0 placeholder:text-zinc-400 dark:bg-white/5 dark:text-white/80 dark:placeholder:text-white/25"
                     />
@@ -372,7 +394,7 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                             disabled={adding || !addInput.trim()}
                             className="rounded-lg bg-emerald-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-600 disabled:opacity-50"
                         >
-                            {adding ? '添加中...' : '批量添加'}
+                            {adding ? 'Adding...' : 'Batch Add'}
                         </button>
                     </div>
                 </div>
@@ -386,7 +408,16 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
 
             {filteredWallets.length === 0 && (
                 <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-6 text-center dark:border-white/10 dark:bg-white/[0.02]">
-                    <div className="text-sm text-zinc-400 dark:text-white/30">暂无匹配的钱包</div>
+                    {wallets.length === 0 ? (
+                        <>
+                            <div className="text-sm text-zinc-500 dark:text-white/40">No watched wallets yet</div>
+                            <div className="mt-1 text-[11px] text-zinc-400 dark:text-white/30">
+                                Click &quot;+ Add&quot; to start monitoring smart-money wallets.
+                            </div>
+                        </>
+                    ) : (
+                        <div className="text-sm text-zinc-400 dark:text-white/30">No wallets match current filter</div>
+                    )}
                 </div>
             )}
 
@@ -394,6 +425,13 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                 const addr = String(row?.wallet_address || '').trim().toLowerCase();
                 const isSelected = selected.has(addr);
                 const isEditing = editingAddr === addr;
+                const editableLabel = row?.editable_label !== false;
+                const removable = row?.removable !== false;
+                const src = String(row?.source || 'user_managed').trim().toLowerCase();
+                const srcText = sourceLabel(src);
+                const srcClass = src === 'user_managed'
+                    ? 'bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
+                    : 'bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300';
                 return (
                     <div
                         key={String(row?.id || addr)}
@@ -405,12 +443,16 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                     >
                         <button
                             type="button"
-                            onClick={() => toggleSelect(addr)}
+                            onClick={() => {
+                                if (!removable) return;
+                                toggleSelect(addr);
+                            }}
+                            disabled={!removable}
                             className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${
                                 isSelected
                                     ? 'border-red-500 bg-red-500 text-white'
                                     : 'border-zinc-300 dark:border-white/20'
-                            }`}
+                            } ${!removable ? 'opacity-40' : ''}`}
                         >
                             {isSelected && (
                                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
@@ -426,7 +468,7 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                                     onClick={() => {
                                         copyToClipboard(addr);
                                         hapticNotification('success');
-                                        if (onNotice) onNotice('已复制地址');
+                                        if (onNotice) onNotice('宸插鍒跺湴鍧€');
                                     }}
                                     className="font-mono text-[11px] font-semibold text-zinc-800 hover:text-emerald-600 dark:text-white/80 dark:hover:text-emerald-300"
                                     title={addr}
@@ -436,9 +478,12 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                                 <span className="text-[10px] text-zinc-400 dark:text-white/30">
                                     {formatTime(row?.created_at)}
                                 </span>
+                                <span className={`rounded px-1 py-0.5 text-[9px] font-semibold ${srcClass}`}>
+                                    {srcText}
+                                </span>
                             </div>
 
-                            {isEditing ? (
+                            {isEditing && editableLabel ? (
                                 <div className="mt-1 flex items-center gap-1">
                                     <input
                                         type="text"
@@ -451,7 +496,7 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                                             if (e.key === 'Escape') setEditingAddr('');
                                         }}
                                         className="w-full rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-700 outline-none dark:bg-white/10 dark:text-white/70"
-                                        placeholder="输入备注"
+                                        placeholder="杈撳叆澶囨敞"
                                     />
                                     <button
                                         type="button"
@@ -459,17 +504,17 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                                         disabled={savingLabel}
                                         className="shrink-0 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400"
                                     >
-                                        {savingLabel ? '...' : '保存'}
+                                        {savingLabel ? '...' : 'Save'}
                                     </button>
                                     <button
                                         type="button"
                                         onClick={() => setEditingAddr('')}
                                         className="shrink-0 text-[10px] text-zinc-400"
                                     >
-                                        取消
+                                        鍙栨秷
                                     </button>
                                 </div>
-                            ) : (
+                            ) : editableLabel ? (
                                 <button
                                     type="button"
                                     onClick={() => {
@@ -479,20 +524,25 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
                                     }}
                                     className="mt-0.5 text-[10px] text-zinc-400 hover:text-zinc-600 dark:text-white/30 dark:hover:text-white/60"
                                 >
-                                    {String(row?.label || '').trim() || '点击添加备注'}
+                                    {String(row?.label || '').trim() || 'Click to add label'}
                                 </button>
+                            ) : (
+                                <div className="mt-0.5 text-[10px] text-zinc-400 dark:text-white/35">
+                                    {String(row?.label || '').trim() || 'Contract monitored wallet'}
+                                </div>
                             )}
                         </div>
 
                         <button
                             type="button"
                             onClick={() => {
+                                if (!removable) return;
                                 hapticImpact('medium');
                                 handleDeleteOne(addr);
                             }}
-                            disabled={deleting}
+                            disabled={deleting || !removable}
                             className="shrink-0 rounded-lg p-1 text-zinc-400 hover:bg-red-500/10 hover:text-red-500 disabled:opacity-50 dark:text-white/30 dark:hover:text-red-400"
-                            title="移除"
+                            title={removable ? 'Remove' : 'Not removable'}
                         >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <line x1="18" y1="6" x2="6" y2="18" />
