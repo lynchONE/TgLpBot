@@ -26,6 +26,7 @@ import {
     fetchSearchPools,
     fetchMe,
     fetchSmartMoneyOverview,
+    fetchSmartMoneyPoolAdds,
     fetchRealtimePositions,
     openPosition,
     updateTaskRange,
@@ -344,6 +345,8 @@ export default function App() {
     const [openPositionAllowSwap, setOpenPositionAllowSwap] = useState(false);
     const [openPositionError, setOpenPositionError] = useState('');
     const [openPositionLoading, setOpenPositionLoading] = useState(false);
+    const [openPositionSmartWallets, setOpenPositionSmartWallets] = useState([]);
+    const [openPositionSmartWalletsLoading, setOpenPositionSmartWalletsLoading] = useState(false);
     const [walletsData, setWalletsData] = useState(null);
     const [walletsError, setWalletsError] = useState('');
     const [walletsLoading, setWalletsLoading] = useState(false);
@@ -1384,6 +1387,49 @@ export default function App() {
         { label: '±20%', value: '±20' },
         { label: '±30%', value: '±30' },
     ];
+    const smartMoneyQuickRangeOptions = useMemo(() => {
+        const wallets = Array.isArray(openPositionSmartWallets) ? openPositionSmartWallets : [];
+        if (!wallets.length) return [];
+
+        const byRange = new Map();
+        wallets.forEach((w) => {
+            const lower = Number(w?.price_lower ?? 0);
+            const upper = Number(w?.price_upper ?? 0);
+            if (!Number.isFinite(lower) || !Number.isFinite(upper) || lower <= 0 || upper <= 0) return;
+
+            const denom = Math.abs(lower) + Math.abs(upper);
+            if (!Number.isFinite(denom) || denom <= 0) return;
+
+            const pct = (Math.abs(upper - lower) / denom) * 100;
+            if (!Number.isFinite(pct) || pct <= 0) return;
+
+            const key = pct.toFixed(1);
+            const prev = byRange.get(key);
+            if (prev) {
+                prev.count += 1;
+                return;
+            }
+            byRange.set(key, { pct: Number(key), count: 1 });
+        });
+
+        return Array.from(byRange.values())
+            .sort((a, b) => {
+                if (a.count !== b.count) return b.count - a.count;
+                return a.pct - b.pct;
+            })
+            .map((item) => ({
+                label: `+/-${item.pct.toFixed(item.pct >= 10 ? 0 : 1)}%`,
+                value: item.pct.toFixed(1),
+                source: 'smart_money',
+                count: item.count,
+            }));
+    }, [openPositionSmartWallets]);
+
+    const effectiveQuickRangeOptions = useMemo(() => {
+        if (smartMoneyQuickRangeOptions.length > 0) return smartMoneyQuickRangeOptions.slice(0, 6);
+        return quickRangeOptions.slice(0, 6);
+    }, [quickRangeOptions, smartMoneyQuickRangeOptions]);
+
     const parseRangeInput = (lowerRaw, upperRaw) => {
         const lower = Number(String(lowerRaw || '').trim());
         const upper = Number(String(upperRaw || '').trim());
@@ -1409,12 +1455,17 @@ export default function App() {
         }
         let chain = String(pool?.chain || hotPoolsData?.chain || 'bsc').trim().toLowerCase() || 'bsc';
         if (!multiChainEnabled) chain = userDefaultChain;
+        const smartWallets = Array.isArray(pool?.smartMoneyWallets) ? pool.smartMoneyWallets : [];
+        setOpenPositionSmartWallets(smartWallets);
+        setOpenPositionSmartWalletsLoading(false);
         setOpenPositionPool({ ...pool, chain });
         resetOpenPositionDraft();
     };
 
     const closeOpenPosition = () => {
         if (openPositionLoading) return;
+        setOpenPositionSmartWallets([]);
+        setOpenPositionSmartWalletsLoading(false);
         setOpenPositionPool(null);
     };
 
@@ -1439,6 +1490,64 @@ export default function App() {
             controller.abort();
         };
     }, [apiBaseUrl, initData, hasInitData, openPositionPool]);
+
+    useEffect(() => {
+        if (!openPositionPool || !hasInitData) return;
+
+        const existing = Array.isArray(openPositionPool?.smartMoneyWallets)
+            ? openPositionPool.smartMoneyWallets
+            : [];
+        if (existing.length > 0) {
+            setOpenPositionSmartWallets(existing);
+            setOpenPositionSmartWalletsLoading(false);
+            return;
+        }
+
+        const poolId = String(openPositionPool?.pool_id || openPositionPool?.pool_address || '').trim();
+        const poolVersion = String(openPositionPool?.protocol_version || openPositionPool?.pool_version || '')
+            .trim()
+            .toLowerCase();
+        const chain = String(openPositionPool?.chain || hotPoolsData?.chain || 'bsc').trim().toLowerCase() || 'bsc';
+
+        if (!poolId || !poolVersion) {
+            setOpenPositionSmartWallets([]);
+            setOpenPositionSmartWalletsLoading(false);
+            return;
+        }
+
+        let aborted = false;
+        const controller = new AbortController();
+
+        setOpenPositionSmartWalletsLoading(true);
+        fetchSmartMoneyPoolAdds({
+            apiBaseUrl,
+            initData,
+            chain,
+            poolVersion,
+            poolId,
+            windowHours: 24,
+            limit: 120,
+            feesLimit: 0,
+            signal: controller.signal,
+        })
+            .then((resp) => {
+                if (aborted) return;
+                const wallets = Array.isArray(resp?.wallets) ? resp.wallets : [];
+                setOpenPositionSmartWallets(wallets);
+            })
+            .catch(() => {
+                if (aborted) return;
+                setOpenPositionSmartWallets([]);
+            })
+            .finally(() => {
+                if (!aborted) setOpenPositionSmartWalletsLoading(false);
+            });
+
+        return () => {
+            aborted = true;
+            controller.abort();
+        };
+    }, [apiBaseUrl, initData, hasInitData, hotPoolsData?.chain, openPositionPool]);
 
     useEffect(() => {
         if (!openPositionPool || !hasInitData || !multiWalletEnabled) return;
@@ -3292,7 +3401,7 @@ export default function App() {
                                     />
                                 </div>
                                 <div className="mt-2 flex flex-wrap gap-1.5">
-                                    {quickRangeOptions.map((option) => (
+                                    {effectiveQuickRangeOptions.map((option) => (
                                         <button
                                             key={option.value}
                                             type="button"
@@ -3321,7 +3430,7 @@ export default function App() {
 
                             {/* Smart Money Quick Ranges */}
                             {(() => {
-                                const wallets = openPositionPool?.smartMoneyWallets || [];
+                                const wallets = [];
                                 if (!wallets.length) return null;
 
                                 const rangeMap = new Map();

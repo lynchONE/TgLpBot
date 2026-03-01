@@ -131,12 +131,12 @@ func (s *Server) loadCHWatchedWallets(chain string) ([]watchedWalletCHRow, error
 	rows, err := s.ClickHouse.Conn.Query(ctx, `
 		SELECT
 			wallet_address,
-			argMax(source, updated_at) AS source,
-			max(updated_at) AS updated_at
+			argMax(source, updated_at) AS latest_source,
+			max(updated_at) AS latest_updated_at
 		FROM smart_lp_watched_wallets
 		WHERE lowerUTF8(chain) = ?
 		GROUP BY wallet_address
-		ORDER BY updated_at DESC
+		ORDER BY latest_updated_at DESC
 		LIMIT 5000
 	`, chain)
 	if err != nil {
@@ -260,11 +260,11 @@ func (s *Server) handleWatchedWalletsGet(w http.ResponseWriter, r *http.Request)
 
 	chWallets, chErr := s.loadCHWatchedWallets(chain)
 	if chErr != nil {
-		warnings = append(warnings, fmt.Sprintf("watchlist query from clickhouse failed: %v", chErr))
+		warnings = append(warnings, "ClickHouse 监控钱包查询失败，已尝试使用合约事件发现数据")
 	}
 	discoveredWallets, discoveredErr := s.loadCHDiscoveredWalletsFromEvents(chain, 5000)
 	if discoveredErr != nil {
-		warnings = append(warnings, fmt.Sprintf("event discovery query from clickhouse failed: %v", discoveredErr))
+		warnings = append(warnings, "ClickHouse 合约发现钱包查询失败")
 	}
 	chWallets = mergeWatchedWalletRows(chWallets, discoveredWallets)
 

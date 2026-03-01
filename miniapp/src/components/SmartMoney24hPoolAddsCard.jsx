@@ -275,7 +275,7 @@ export default function SmartMoney24hPoolAddsCard({ apiBaseUrl, initData, chain,
                                     : 'text-zinc-600 hover:bg-zinc-200 dark:text-white/70 dark:hover:bg-white/10'
                             }`}
                         >
-                            {h}h
+                            {h}小时
                         </button>
                     ))}
                 </div>
@@ -285,9 +285,9 @@ export default function SmartMoney24hPoolAddsCard({ apiBaseUrl, initData, chain,
                         onChange={(e) => setPoolLimit(Number(e.target.value))}
                         className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-[10px] font-semibold text-zinc-700 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white/70"
                     >
-                        <option value={20}>Top 20 pools</option>
-                        <option value={30}>Top 30 pools</option>
-                        <option value={50}>Top 50 pools</option>
+                        <option value={20}>前 20 个池子</option>
+                        <option value={30}>前 30 个池子</option>
+                        <option value={50}>前 50 个池子</option>
                     </select>
                     <button
                         type="button"
@@ -337,12 +337,12 @@ export default function SmartMoney24hPoolAddsCard({ apiBaseUrl, initData, chain,
             )}
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <DistributionBars title="池子金额区间分布 (USD)" items={poolAmountDist} colorClass="bg-amber-500" />
+                <DistributionBars title="池子金额区间分布（美元）" items={poolAmountDist} colorClass="bg-amber-500" />
                 <DistributionBars title="钱包加池数量分布" items={walletPoolDist} colorClass="bg-emerald-500" />
             </div>
 
             {tickRangeDist.length > 0 && (
-                <DistributionBars title="区间宽度分布 (ticks)" items={tickRangeDist} colorClass="bg-blue-500" />
+                <DistributionBars title="区间宽度分布（ticks）" items={tickRangeDist} colorClass="bg-blue-500" />
             )}
 
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">

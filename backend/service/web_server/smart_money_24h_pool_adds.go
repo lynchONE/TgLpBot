@@ -382,9 +382,9 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 			`
 			watchedFilterArgCount = 1
 			if tableErr != nil {
-				warnings = append(warnings, fmt.Sprintf("watched-wallet table check failed; fallback to event-discovered wallets: %v", tableErr))
+				warnings = append(warnings, fmt.Sprintf("监控钱包表检查失败，已降级为事件发现钱包: %v", tableErr))
 			} else {
-				warnings = append(warnings, "smart_lp_watched_wallets table not found; fallback to event-discovered wallets")
+				warnings = append(warnings, "未找到 smart_lp_watched_wallets 表，已降级为事件发现钱包")
 			}
 		}
 	}
@@ -418,7 +418,7 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 	}
 	rows, err := s.ClickHouse.Conn.Query(ctx, poolQuery, poolArgs...)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("pool query failed: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("池子查询失败: %v", err), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
@@ -430,7 +430,7 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 		var eventCnt, walletCnt uint64
 		var firstAdd, lastAdd time.Time
 		if err := rows.Scan(&pv, &pid, &eventCnt, &walletCnt, &firstAdd, &lastAdd); err != nil {
-			warnings = append(warnings, fmt.Sprintf("pool scan error: %v", err))
+			warnings = append(warnings, fmt.Sprintf("池子结果解析失败: %v", err))
 			continue
 		}
 		totalEvents += int(eventCnt)
@@ -444,7 +444,7 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 		})
 	}
 	if err := rows.Err(); err != nil {
-		warnings = append(warnings, fmt.Sprintf("pool rows error: %v", err))
+		warnings = append(warnings, fmt.Sprintf("池子结果遍历失败: %v", err))
 	}
 
 	// Resolve pool info with bounded concurrency and soft per-pool timeout.
@@ -513,13 +513,13 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 	}
 	_ = g.Wait()
 	if poolInfoTimeoutCnt > 0 {
-		warnings = append(warnings, fmt.Sprintf("pool metadata timeout on %d pools; returned partial metadata", poolInfoTimeoutCnt))
+		warnings = append(warnings, fmt.Sprintf("有 %d 个池子元数据查询超时，已返回部分结果", poolInfoTimeoutCnt))
 	}
 	if poolInfoErrorCnt > 0 {
-		warnings = append(warnings, fmt.Sprintf("pool metadata errors on %d pools; returned partial metadata", poolInfoErrorCnt))
+		warnings = append(warnings, fmt.Sprintf("有 %d 个池子元数据查询失败，已返回部分结果", poolInfoErrorCnt))
 	}
 	if resolveCtx.Err() != nil && !errors.Is(resolveCtx.Err(), context.Canceled) {
-		warnings = append(warnings, "pool metadata stage reached time budget; returned partial metadata")
+		warnings = append(warnings, "池子元数据查询达到时间上限，已返回部分结果")
 	}
 
 	// 1.1 Query total added token amounts for selected pools and convert to USD.
@@ -555,13 +555,13 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 
 		amountRows, amountErr := s.ClickHouse.Conn.Query(ctx, poolAmountQuery, selectedArgs...)
 		if amountErr != nil {
-			warnings = append(warnings, fmt.Sprintf("pool amount query failed: %v", amountErr))
+			warnings = append(warnings, fmt.Sprintf("池子金额查询失败: %v", amountErr))
 		} else {
 			defer amountRows.Close()
 			for amountRows.Next() {
 				var row smartMoney24hPoolAmountRow
 				if err := amountRows.Scan(&row.PoolVersion, &row.PoolID, &row.Sum0, &row.Sum1); err != nil {
-					warnings = append(warnings, fmt.Sprintf("pool amount scan failed: %v", err))
+					warnings = append(warnings, fmt.Sprintf("池子金额结果解析失败: %v", err))
 					continue
 				}
 				row.PoolVersion = strings.ToLower(strings.TrimSpace(row.PoolVersion))
@@ -569,7 +569,7 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 				poolAmountRows = append(poolAmountRows, row)
 			}
 			if err := amountRows.Err(); err != nil {
-				warnings = append(warnings, fmt.Sprintf("pool amount rows error: %v", err))
+				warnings = append(warnings, fmt.Sprintf("池子金额结果遍历失败: %v", err))
 			}
 		}
 	}
@@ -603,9 +603,9 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 	prices, priceErr := getUSDPricesBestEffort(ctx, priceSvc, chain, tokens, 1800*time.Millisecond)
 	if priceErr != nil {
 		if errors.Is(priceErr, context.DeadlineExceeded) {
-			warnings = append(warnings, "price query timeout; using cached/fallback prices where available")
+			warnings = append(warnings, "价格查询超时，已使用缓存或兜底价格")
 		} else {
-			warnings = append(warnings, "price provider limited/rate-limited; using cached/fallback prices where available")
+			warnings = append(warnings, "价格服务触发限流，已使用缓存或兜底价格")
 		}
 	}
 
@@ -671,7 +671,7 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	if err := s.ClickHouse.Conn.QueryRow(ctx, totalWalletsQ, totalWalletArgs...).Scan(&totalWallets); err != nil {
-		warnings = append(warnings, fmt.Sprintf("total wallets query failed: %v", err))
+		warnings = append(warnings, fmt.Sprintf("总钱包数查询失败: %v", err))
 	}
 
 	// 3. Hourly trend
@@ -699,7 +699,7 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 	}
 	hRows, err := s.ClickHouse.Conn.Query(ctx, hourlyQ, hourlyArgs...)
 	if err != nil {
-		warnings = append(warnings, fmt.Sprintf("hourly trend query failed: %v", err))
+		warnings = append(warnings, fmt.Sprintf("每小时趋势查询失败: %v", err))
 	}
 	hourlyTrend := make([]smartMoney24hHourlyTrend, 0, 24)
 	if hRows != nil {
@@ -749,7 +749,7 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 	}
 	tRows, err := s.ClickHouse.Conn.Query(ctx, tickRangeQ, tickArgs...)
 	if err != nil {
-		warnings = append(warnings, fmt.Sprintf("tick range query failed: %v", err))
+		warnings = append(warnings, fmt.Sprintf("区间分布查询失败: %v", err))
 	}
 	tickRangeDist := make([]smartMoney24hDistBucket, 0, 5)
 	if tRows != nil {
@@ -794,7 +794,7 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 	topWalletRows, topWalletErr := s.ClickHouse.Conn.Query(ctx, topWalletQuery, topWalletArgs...)
 	topWallets := make([]smartMoney24hTopWallet, 0, topWalletLimit)
 	if topWalletErr != nil {
-		warnings = append(warnings, fmt.Sprintf("top wallets query failed: %v", topWalletErr))
+		warnings = append(warnings, fmt.Sprintf("头部钱包查询失败: %v", topWalletErr))
 	} else {
 		defer topWalletRows.Close()
 		for topWalletRows.Next() {
@@ -850,7 +850,7 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 		"10+ pools": 0,
 	}
 	if walletDistErr != nil {
-		warnings = append(warnings, fmt.Sprintf("wallet distribution query failed: %v", walletDistErr))
+		warnings = append(warnings, fmt.Sprintf("钱包分布查询失败: %v", walletDistErr))
 	} else {
 		defer walletDistRows.Close()
 		for walletDistRows.Next() {
