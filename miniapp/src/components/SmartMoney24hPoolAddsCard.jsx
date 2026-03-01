@@ -177,9 +177,9 @@ export default function SmartMoney24hPoolAddsCard({ apiBaseUrl, initData, chain,
     const [poolLimit, setPoolLimit] = useState(30);
 
     useEffect(() => {
-        if (!apiBaseUrl || !initData) {
+        if (!initData) {
             setLoading(false);
-            setError(!initData ? '缺少 initData，无法加载 24h 加池数据' : '缺少 API 地址，无法加载 24h 加池数据');
+            setError('缺少 initData，无法加载 24h 加池数据');
             return;
         }
         let cancelled = false;

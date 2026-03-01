@@ -50,9 +50,9 @@ export default function SmartMoneyWatchedWalletsTab({ apiBaseUrl, initData, chai
     const [savingLabel, setSavingLabel] = useState(false);
 
     useEffect(() => {
-        if (!apiBaseUrl || !initData) {
+        if (!initData) {
             setLoading(false);
-            setError(!initData ? '缺少 initData，无法加载监控列表' : '缺少 API 地址，无法加载监控列表');
+            setError('缺少 initData，无法加载监控列表');
             return;
         }
         let cancelled = false;
