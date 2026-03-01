@@ -260,6 +260,31 @@ func (b *Bot) handleConfigMultiWalletToggle(query *tgbotapi.CallbackQuery, user 
 	b.handleViewConfig(query, user)
 }
 
+func (b *Bot) handleConfigSmartMoneyExitToggle(query *tgbotapi.CallbackQuery, user *models.User) {
+	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
+	cfg, err := b.configService.GetOrCreate(user.ID)
+	if err != nil {
+		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("❌ 获取配置失败：%v", err))
+		return
+	}
+
+	newValue := !cfg.SmartMoneyExitNotifyEnabled
+	if _, err := b.configService.Update(user.ID, map[string]interface{}{
+		"smart_money_exit_notify_enabled": newValue,
+	}); err != nil {
+		b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("❌ 更新配置失败：%v", err))
+		return
+	}
+
+	if newValue {
+		b.sendMessage(query.Message.Chat.ID, "✅ 已开启聪明钱撤退通知（同池子聪明钱撤出时推送提醒）")
+	} else {
+		b.sendMessage(query.Message.Chat.ID, "✅ 已关闭聪明钱撤退通知")
+	}
+
+	b.handleViewConfig(query, user)
+}
+
 func (b *Bot) handleConfigDefaultChain(query *tgbotapi.CallbackQuery, user *models.User) {
 	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
 	cfg, err := b.configService.GetOrCreate(user.ID)

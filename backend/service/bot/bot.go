@@ -642,6 +642,8 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleConfigMultiChainToggle(query, user)
 	case query.Data == "config_multi_wallet_toggle":
 		b.handleConfigMultiWalletToggle(query, user)
+	case query.Data == "config_smart_money_exit_toggle":
+		b.handleConfigSmartMoneyExitToggle(query, user)
 	case query.Data == "config_default_chain":
 		b.handleConfigDefaultChain(query, user)
 	case strings.HasPrefix(query.Data, "config_default_chain_set_") || query.Data == "config_default_chain_cancel":

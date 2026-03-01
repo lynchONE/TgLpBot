@@ -272,6 +272,15 @@ export default function PositionCard({
     const rangeMin = rangeReady ? Math.min(rangeLower, rangeUpper) : null;
     const rangeMax = rangeReady ? Math.max(rangeLower, rangeUpper) : null;
 
+    // 当前仓位实际区间宽度百分比（基于 tick_lower/tick_upper 和 currentPrice，不受再平衡参数影响）
+    const actualRangeDeviation = useMemo(() => {
+        if (!Number.isFinite(currentPrice) || !Number.isFinite(rangeMin) || !Number.isFinite(rangeMax) || currentPrice <= 0) return null;
+        const up = ((rangeMax / currentPrice) - 1) * 100;
+        const down = (1 - (rangeMin / currentPrice)) * 100;
+        const avg = (Math.max(0, up) + Math.max(0, down)) / 2;
+        return Number.isFinite(avg) && avg > 0 ? avg : null;
+    }, [currentPrice, rangeMin, rangeMax]);
+
     const taskRange = useMemo(() => {
         const low = Number(position?.task_range_lower_pct);
         const up = Number(position?.task_range_upper_pct);
@@ -575,7 +584,7 @@ export default function PositionCard({
                     maxPrice={rangeMax}
                     pairLabel={pairLabel}
                     gridCount={gridCountRaw}
-                    deviation={taskRange?.deviation}
+                    deviation={actualRangeDeviation}
                     inRange={position?.in_range}
                     currentGridIndex={currentGridIndex}
                     currentGridLower={gridLower}

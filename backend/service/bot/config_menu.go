@@ -40,6 +40,7 @@ func globalConfigKeyboard() tgbotapi.InlineKeyboardMarkup {
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("👛 多钱包模式", "config_multi_wallet_toggle"),
+			tgbotapi.NewInlineKeyboardButtonData("🧠 聪明钱撤退通知", "config_smart_money_exit_toggle"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("🔄 刷新", "view_config"),
@@ -85,6 +86,7 @@ func formatGlobalConfigMenuText(cfg *models.GlobalConfig) string {
 🧭 多链模式：%s
 👛 多钱包模式：%s
 🔗 默认链：%s
+🧠 聪明钱撤退通知：%s
 
 请选择要配置的选项：`,
 		cfg.RebalanceTimeout,
@@ -102,5 +104,6 @@ func formatGlobalConfigMenuText(cfg *models.GlobalConfig) string {
 		boolToOnOff(cfg.MultiChainEnabled),
 		boolToOnOff(cfg.MultiWalletEnabled),
 		chainLabel(cfg.DefaultChain),
+		boolToOnOff(cfg.SmartMoneyExitNotifyEnabled),
 	)
 }
