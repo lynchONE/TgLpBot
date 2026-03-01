@@ -1023,7 +1023,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                         ) : null}
                     </div>
                 </div>
-            ) : (
+            ) : activeTab === 'golden' ? (
                 <div className="mt-3 space-y-3">
                     <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                         <div className="flex items-center justify-between gap-2">
@@ -1130,7 +1130,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                         </div>
                     </div>
                 </div>
-            )}
+            ) : null}
 
             {activeTab === 'monitor' && (
                 <SmartMoneyWatchedWalletsTab
