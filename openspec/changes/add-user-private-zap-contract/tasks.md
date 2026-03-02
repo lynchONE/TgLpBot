@@ -1,0 +1,16 @@
+## 1. Implementation
+- [x] 1.1 DB: Add model/table for `wallet_id + chain -> private_zap_address + version (+ deployment tx/config tx hashes)` with a unique index.
+- [x] 1.2 Config: Add `PRIVATE_ZAP_ENABLED` and `PRIVATE_ZAP_VERSION` (optionally per-chain overrides).
+- [x] 1.3 Blockchain: Add ZapSimple deploy support in Go (bytecode source via `go:embed` artifact or compiled constant), plus helpers to call `setTrustedAddresses` and `setTrustedV3PositionManagers`.
+- [x] 1.4 Service: Implement `EnsurePrivateZapContract(wallet, chain)` which:
+  - loads existing binding
+  - redeploys when missing or version mismatch
+  - configures trusted addresses using `ChainConfig` (OKX router/approve + V3/V4 position managers; allowlist extra V3 managers)
+  - persists binding atomically (avoid duplicates under concurrency)
+- [x] 1.5 Liquidity Enter (V3/V4): Replace `cc.ZapV3Address/ZapV4Address` with resolved per-wallet address; approvals and event parsing must use the resolved address.
+- [x] 1.6 Liquidity Exit (V3): Exit via direct NPM calls (`decreaseLiquidity+collect`) and do not depend on Zap/private Zap bindings.
+- [x] 1.7 Upgrade behavior: When `PRIVATE_ZAP_VERSION` changes, old bindings are ignored and a new contract is deployed/bound on next open for each wallet.
+- [x] 1.8 Observability: Add structured logs for deploy/bind actions (wallet, chain, version, tx hashes) without leaking secrets.
+- [x] 1.9 Tests: Add unit tests for binding/version logic (and basic DB uniqueness behavior).
+- [x] 1.10 Performance: Add Redis cache for private zap binding lookup (`wallet_id+chain+kind+version`) with TTL=1h and DB fallback repopulation.
+- [x] 1.11 Verification: `cd backend; go test ./...` + `cd contracts; npm run compile` + `openspec validate add-user-private-zap-contract --strict`.

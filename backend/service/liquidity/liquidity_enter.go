@@ -471,9 +471,9 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	var res *EnterResult
 	switch version {
 	case "v4":
-		res, err = s.enterV4FromToken(exec, privateKey, walletAddr, entryToken, entryAmount, task, opts)
+		res, err = s.enterV4FromToken(exec, wallet, privateKey, walletAddr, entryToken, entryAmount, task, opts)
 	default:
-		res, err = s.enterV3FromToken(exec, privateKey, walletAddr, entryToken, entryAmount, task, opts)
+		res, err = s.enterV3FromToken(exec, wallet, privateKey, walletAddr, entryToken, entryAmount, task, opts)
 	}
 	if err != nil {
 		return nil, err
@@ -598,6 +598,7 @@ func (s *LiquidityService) okxSlippageDecimal(slippagePercent float64) string {
 
 func (s *LiquidityService) enterV3FromToken(
 	exec chainexec.EVMExecutor,
+	wallet *models.Wallet,
 	privateKey *ecdsa.PrivateKey,
 	walletAddr common.Address,
 	tokenIn common.Address,
@@ -614,8 +615,8 @@ func (s *LiquidityService) enterV3FromToken(
 	if client == nil || chainID == nil {
 		return nil, fmt.Errorf("blockchain client not initialized")
 	}
-	if !common.IsHexAddress(cc.ZapV3Address) {
-		return nil, fmt.Errorf("ZAP_V3_ADDRESS not set for chain=%s", exec.Chain())
+	if wallet == nil {
+		return nil, fmt.Errorf("wallet is nil")
 	}
 
 	// 获取 PositionManager 地址
@@ -688,7 +689,10 @@ func (s *LiquidityService) enterV3FromToken(
 		return nil, fmt.Errorf("unexpected v3 token ordering")
 	}
 
-	zapAddr := common.HexToAddress(cc.ZapV3Address)
+	zapAddr, err := s.resolveZapAddress(exec, wallet, privateKey, walletAddr, zapUsageV3, opts)
+	if err != nil {
+		return nil, err
+	}
 
 	if token0 != tokenIn && token1 != tokenIn {
 		return nil, fmt.Errorf("V3 pool does not contain entry token")
@@ -1260,6 +1264,7 @@ func (s *LiquidityService) prepareOKXSwapParams(
 
 func (s *LiquidityService) enterV4FromToken(
 	exec chainexec.EVMExecutor,
+	wallet *models.Wallet,
 	privateKey *ecdsa.PrivateKey,
 	walletAddr common.Address,
 	tokenIn common.Address,
@@ -1276,11 +1281,13 @@ func (s *LiquidityService) enterV4FromToken(
 	if client == nil || chainID == nil {
 		return nil, fmt.Errorf("blockchain client not initialized")
 	}
-
-	if !common.IsHexAddress(cc.ZapV4Address) {
-		return nil, fmt.Errorf("ZAP_V4_ADDRESS not set for chain=%s", exec.Chain())
+	if wallet == nil {
+		return nil, fmt.Errorf("wallet is nil")
 	}
-	zapAddr := common.HexToAddress(cc.ZapV4Address)
+	zapAddr, err := s.resolveZapAddress(exec, wallet, privateKey, walletAddr, zapUsageV4, opts)
+	if err != nil {
+		return nil, err
+	}
 
 	if !common.IsHexAddress(cc.UniswapV4PoolManagerAddress) {
 		return nil, fmt.Errorf("UNISWAP_V4_POOL_MANAGER_ADDRESS not set for chain=%s", exec.Chain())
@@ -1395,10 +1402,10 @@ func (s *LiquidityService) enterV4FromToken(
 		return nil, fmt.Errorf("UNISWAP_V4_STATE_VIEW_ADDRESS not configured")
 	}
 	stateView := common.HexToAddress(config.AppConfig.UniswapV4StateViewAddress)
-	var err error
-	sqrtPriceX96, currentTick, err = blockchain.GetUniswapV4PoolSlot0ViaStateView(stateView, poolManager, task.PoolId)
-	if err != nil {
-		return nil, fmt.Errorf("get v4 slot0 via StateView failed: %w", err)
+	var slot0Err error
+	sqrtPriceX96, currentTick, slot0Err = blockchain.GetUniswapV4PoolSlot0ViaStateView(stateView, poolManager, task.PoolId)
+	if slot0Err != nil {
+		return nil, fmt.Errorf("get v4 slot0 via StateView failed: %w", slot0Err)
 	}
 
 	// Validate tick range against the actual tickSpacing.

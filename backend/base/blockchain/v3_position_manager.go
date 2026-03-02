@@ -115,6 +115,13 @@ const v3PositionManagerABI = `[
     "type": "function"
   },
   {
+    "inputs": [{ "internalType": "bytes[]", "name": "data", "type": "bytes[]" }],
+    "name": "multicall",
+    "outputs": [{ "internalType": "bytes[]", "name": "results", "type": "bytes[]" }],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
     "inputs": [
       { "internalType": "uint256", "name": "tokenId", "type": "uint256" }
     ],
@@ -141,6 +148,7 @@ const v3PositionManagerABI = `[
 type V3PositionManager struct {
 	contract *bind.BoundContract
 	address  common.Address
+	abi      abi.ABI
 }
 
 type V3PositionInfo struct {
@@ -179,7 +187,18 @@ func NewV3PositionManager(address common.Address, client *ethclient.Client) (*V3
 	}
 	rc := wrapRPCRetryClient(client)
 	contract := bind.NewBoundContract(address, parsed, rc, rc, rc)
-	return &V3PositionManager{contract: contract, address: address}, nil
+	return &V3PositionManager{contract: contract, address: address, abi: parsed}, nil
+}
+
+// Pack builds calldata for internal calls used by multicall.
+func (m *V3PositionManager) Pack(method string, args ...interface{}) ([]byte, error) {
+	if m == nil {
+		return nil, fmt.Errorf("position manager is nil")
+	}
+	if strings.TrimSpace(method) == "" {
+		return nil, fmt.Errorf("method is empty")
+	}
+	return m.abi.Pack(method, args...)
 }
 
 func (m *V3PositionManager) GetApproved(opts *bind.CallOpts, tokenId *big.Int) (common.Address, error) {
@@ -265,6 +284,10 @@ func (m *V3PositionManager) Collect(
 
 func (m *V3PositionManager) Burn(opts *bind.TransactOpts, tokenId *big.Int) (*types.Transaction, error) {
 	return m.contract.Transact(opts, "burn", tokenId)
+}
+
+func (m *V3PositionManager) Multicall(opts *bind.TransactOpts, data [][]byte) (*types.Transaction, error) {
+	return m.contract.Transact(opts, "multicall", data)
 }
 
 func (m *V3PositionManager) PositionTokensAndLiquidity(opts *bind.CallOpts, tokenId *big.Int) (common.Address, common.Address, *big.Int, error) {

@@ -36,6 +36,11 @@ type ChainConfig struct {
 	RpcWSURL string
 	ChainID  int64
 
+	// PrivateZapVersion is the currently required private Zap contract version for this chain.
+	// When PrivateZapEnabled=true and a wallet's bound Zap version mismatches this value, the backend
+	// will redeploy and re-bind a new private Zap contract on next usage.
+	PrivateZapVersion int
+
 	StableSymbol   string
 	StableAddress  string
 	StableDecimals int
@@ -121,6 +126,10 @@ type Config struct {
 	ZapGasLimitMultiplier float64
 	ZapGasLimitMin        uint64
 	ZapGasLimitMax        uint64
+
+	// Private per-wallet Zap contracts (deploy + bind).
+	PrivateZapEnabled bool
+	PrivateZapVersion int
 
 	// ClickHouse
 	ClickHouseAddr               string
@@ -401,6 +410,10 @@ func LoadConfig() error {
 		ZapGasLimitMin:        zapGasLimitMin,
 		ZapGasLimitMax:        zapGasLimitMax,
 
+		// Private per-wallet Zap contracts
+		PrivateZapEnabled: getEnvBool("PRIVATE_ZAP_ENABLED", false),
+		PrivateZapVersion: getEnvInt("PRIVATE_ZAP_VERSION", 1),
+
 		// ClickHouse
 		ClickHouseAddr:               getEnv("CLICKHOUSE_ADDR", "localhost:9000"),
 		ClickHouseDB:                 getEnv("CLICKHOUSE_DB", "default"),
@@ -541,6 +554,8 @@ func LoadConfig() error {
 	log.Printf("   - OKX Swap GasLimit Min/Max: %d/%d", AppConfig.OKXSwapGasLimitMin, AppConfig.OKXSwapGasLimitMax)
 	log.Printf("   - Zap GasLimit Multiplier: %.4f", AppConfig.ZapGasLimitMultiplier)
 	log.Printf("   - Zap GasLimit Min/Max: %d/%d", AppConfig.ZapGasLimitMin, AppConfig.ZapGasLimitMax)
+	log.Printf("   - Private Zap Enabled: %v", AppConfig.PrivateZapEnabled)
+	log.Printf("   - Private Zap Version: %d", AppConfig.PrivateZapVersion)
 	log.Printf("   - Pancake V3 NPM: %s", AppConfig.PancakeV3PositionManagerAddress)
 	log.Printf("   - Uniswap V3 NPM: %s", AppConfig.UniswapV3PositionManagerAddress)
 	log.Printf("   - BSC RPC URL: %s", AppConfig.BSCRpcURL)
@@ -740,11 +755,12 @@ func (c *Config) initChainConfigs() {
 			okxApprove := pickFirstNonEmpty(getEnvStr("OKX_TOKEN_APPROVE_ADDRESS_BSC"), c.OKXTokenApproveAddress)
 
 			cc := ChainConfig{
-				Chain:    "bsc",
-				Kind:     ChainKindEVM,
-				RpcURL:   strings.TrimSpace(c.BSCRpcURL),
-				RpcWSURL: strings.TrimSpace(c.BSCRpcWSURL),
-				ChainID:  c.BSCChainID,
+				Chain:             "bsc",
+				Kind:              ChainKindEVM,
+				RpcURL:            strings.TrimSpace(c.BSCRpcURL),
+				RpcWSURL:          strings.TrimSpace(c.BSCRpcWSURL),
+				ChainID:           c.BSCChainID,
+				PrivateZapVersion: getEnvInt("BSC_PRIVATE_ZAP_VERSION", c.PrivateZapVersion),
 
 				StableSymbol:   "USDT",
 				StableAddress:  strings.TrimSpace(c.USDTAddress),
@@ -787,11 +803,12 @@ func (c *Config) initChainConfigs() {
 			aeroNPM := getEnvStr("BASE_AERODROME_V3_NPM_ADDRESS")
 
 			cc := ChainConfig{
-				Chain:    "base",
-				Kind:     ChainKindEVM,
-				RpcURL:   strings.TrimSpace(getEnvStr("BASE_RPC_URL")),
-				RpcWSURL: strings.TrimSpace(getEnvStr("BASE_RPC_WS_URL")),
-				ChainID:  getEnvInt64("BASE_CHAIN_ID", 8453),
+				Chain:             "base",
+				Kind:              ChainKindEVM,
+				RpcURL:            strings.TrimSpace(getEnvStr("BASE_RPC_URL")),
+				RpcWSURL:          strings.TrimSpace(getEnvStr("BASE_RPC_WS_URL")),
+				ChainID:           getEnvInt64("BASE_CHAIN_ID", 8453),
+				PrivateZapVersion: getEnvInt("BASE_PRIVATE_ZAP_VERSION", c.PrivateZapVersion),
 
 				StableSymbol:   "USDC",
 				StableAddress:  strings.TrimSpace(getEnvStr("BASE_USDC_ADDRESS")),

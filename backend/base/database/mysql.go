@@ -62,6 +62,7 @@ func autoMigrate() error {
 	return DB.AutoMigrate(
 		&models.User{},
 		&models.Wallet{},
+		&models.WalletChainContract{},
 		&models.LPConfig{},
 		&models.GlobalConfig{},
 		&models.SystemConfig{},

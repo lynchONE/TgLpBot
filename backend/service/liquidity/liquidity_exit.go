@@ -430,15 +430,12 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 	// after liquidity removal is mined, balanceOf() may still return an old state for a short time.
 	// We capture pre-exit balances and later enforce "min expected" balances (pre + receipt delta)
 	// before swapping, so we don't miss tokens due to stale RPC reads.
-	var sweepToken0 common.Address
-	var sweepToken1 common.Address
 	var sweepPreBalances map[common.Address]*big.Int
 	if sweepWallet {
 		t0, t1, tokErr := s.resolveTaskTokenAddresses(task)
 		if tokErr != nil {
 			log.Printf("[Liquidity] Warning: resolveTaskTokenAddresses (pre-exit) failed, skip expected-balance check: %v", tokErr)
 		} else {
-			sweepToken0, sweepToken1 = t0, t1
 			sweepPreBalances = make(map[common.Address]*big.Int)
 			seen := make(map[common.Address]struct{})
 			for _, tok := range []common.Address{t0, t1} {
@@ -507,30 +504,6 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 						want := new(big.Int).Add(cloneBig(before), delta)
 						if cur, ok := expectedMinBalances[tok]; !ok || want.Cmp(cur) > 0 {
 							expectedMinBalances[tok] = want
-						}
-					}
-
-					// V3 fallback: use ZapOutV3 event deltas when Transfer logs are not available.
-					if strings.ToLower(strings.TrimSpace(task.PoolVersion)) != "v4" {
-						if common.IsHexAddress(config.AppConfig.ZapV3Address) {
-							tokenId, _ := convert.ParseBigIntFlexible(task.V3TokenID)
-							if tokenId != nil && tokenId.Sign() > 0 {
-								zapAddr := common.HexToAddress(config.AppConfig.ZapV3Address)
-								if a0, a1, ok := parseZapOutV3Result(receipt, zapAddr, walletAddr, tokenId); ok {
-									if sweepToken0 != (common.Address{}) && sweepToken0 != usdtAddr {
-										if _, exists := expectedMinBalances[sweepToken0]; !exists && a0.Sign() > 0 {
-											before := sweepPreBalances[sweepToken0]
-											expectedMinBalances[sweepToken0] = new(big.Int).Add(cloneBig(before), cloneBig(a0))
-										}
-									}
-									if sweepToken1 != (common.Address{}) && sweepToken1 != usdtAddr {
-										if _, exists := expectedMinBalances[sweepToken1]; !exists && a1.Sign() > 0 {
-											before := sweepPreBalances[sweepToken1]
-											expectedMinBalances[sweepToken1] = new(big.Int).Add(cloneBig(before), cloneBig(a1))
-										}
-									}
-								}
-							}
 						}
 					}
 
@@ -687,55 +660,6 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 	}
 
 	return txHashes, nil
-}
-
-func parseZapOutV3Result(receipt *types.Receipt, zapAddr common.Address, user common.Address, tokenId *big.Int) (*big.Int, *big.Int, bool) {
-	if receipt == nil {
-		return nil, nil, false
-	}
-	parsed, err := abi.JSON(strings.NewReader(blockchain.ZapSimpleABI))
-	if err != nil {
-		return nil, nil, false
-	}
-	ev, ok := parsed.Events["ZapOutV3"]
-	if !ok {
-		return nil, nil, false
-	}
-
-	for _, lg := range receipt.Logs {
-		if lg == nil || lg.Address != zapAddr || len(lg.Topics) == 0 || lg.Topics[0] != ev.ID {
-			continue
-		}
-		if len(lg.Topics) < 3 {
-			continue
-		}
-		if user != (common.Address{}) {
-			// topic[1] is indexed user (address) padded to 32 bytes.
-			if common.BytesToAddress(lg.Topics[1].Bytes()) != user {
-				continue
-			}
-		}
-		if tokenId != nil && tokenId.Sign() > 0 {
-			if new(big.Int).SetBytes(lg.Topics[2].Bytes()).Cmp(tokenId) != 0 {
-				continue
-			}
-		}
-		out, err := parsed.Unpack("ZapOutV3", lg.Data)
-		if err != nil || len(out) < 2 {
-			continue
-		}
-		amount0, _ := out[0].(*big.Int)
-		amount1, _ := out[1].(*big.Int)
-		if amount0 == nil {
-			amount0 = big.NewInt(0)
-		}
-		if amount1 == nil {
-			amount1 = big.NewInt(0)
-		}
-		return amount0, amount1, true
-	}
-
-	return nil, nil, false
 }
 
 type otherTaskDustRow struct {
@@ -1104,17 +1028,17 @@ func (s *LiquidityService) exitV3ToUSDT(exec chainexec.EVMExecutor, privateKey *
 	if client == nil || chainID == nil {
 		return nil, fmt.Errorf("blockchain client not initialized")
 	}
-	if !common.IsHexAddress(cc.ZapV3Address) {
-		return nil, fmt.Errorf("ZAP_V3_ADDRESS not set for chain=%s", exec.Chain())
-	}
 
 	var txHashes []string
 	var swapErr error
 
-	// Capture initial USDT balance for calculating output
-	usdtBefore, _ := blockchain.GetTokenBalanceWithClient(client, usdtAddr, walletAddr)
-	if usdtBefore == nil {
-		usdtBefore = big.NewInt(0)
+	// Capture initial USDT balance for calculating output (only when swapping deltas here).
+	usdtBefore := big.NewInt(0)
+	if swapDeltas {
+		usdtBefore, _ = blockchain.GetTokenBalanceWithClient(client, usdtAddr, walletAddr)
+		if usdtBefore == nil {
+			usdtBefore = big.NewInt(0)
+		}
 	}
 	pmAddrStr := strings.TrimSpace(task.V3PositionManagerAddress)
 	if pmAddrStr == "" && common.IsHexAddress(task.PoolId) {
@@ -1149,7 +1073,6 @@ func (s *LiquidityService) exitV3ToUSDT(exec chainexec.EVMExecutor, privateKey *
 		return nil, fmt.Errorf("V3 position manager address not configured")
 	}
 	pmAddr := common.HexToAddress(pmAddrStr)
-	zapAddr := common.HexToAddress(cc.ZapV3Address)
 
 	// 获取 TokenID
 	tokenId, err := convert.ParseBigIntFlexible(task.V3TokenID)
@@ -1174,106 +1097,225 @@ func (s *LiquidityService) exitV3ToUSDT(exec chainexec.EVMExecutor, privateKey *
 	token1 := posInfo.Token1
 	liq := big.NewInt(0)
 	if posInfo.Liquidity != nil {
-		liq = posInfo.Liquidity
+		liq = cloneBig(posInfo.Liquidity)
 	}
 	owed0 := big.NewInt(0)
 	owed1 := big.NewInt(0)
 	if posInfo.TokensOwed0 != nil {
-		owed0 = posInfo.TokensOwed0
+		owed0 = cloneBig(posInfo.TokensOwed0)
 	}
 	if posInfo.TokensOwed1 != nil {
-		owed1 = posInfo.TokensOwed1
+		owed1 = cloneBig(posInfo.TokensOwed1)
 	}
-	// Idempotency: if the position is already emptied (no liquidity + no fees owed), skip ZapOut.
+	// Idempotency: if the position is already emptied (no liquidity + no fees owed), skip.
 	if liq.Sign() <= 0 && owed0.Sign() <= 0 && owed1.Sign() <= 0 {
-		log.Printf("[Liquidity] V3 exit: position already empty, skipping ZapOutV3 tokenId=%s", tokenId.String())
+		log.Printf("[Liquidity] V3 exit: position already empty, skipping exit tokenId=%s", tokenId.String())
 		return txHashes, nil
 	}
 
 	// V3 撤仓不做滑点校验：amount0Min/amount1Min 置 0，避免因价格波动导致撤仓交易 revert。
 	amount0Min := big.NewInt(0)
 	amount1Min := big.NewInt(0)
+	deadline := big.NewInt(time.Now().Add(20 * time.Minute).Unix())
 
-	// 4. Approve NFT 给 Zap 合约（优化：使用 setApprovalForAll）
-	// 检查是否已经 setApprovalForAll
-	isApprovedForAll, err := s.isNFTApprovedForAll(client, pmAddr, walletAddr, zapAddr)
-	if err != nil {
-		log.Printf("[Liquidity] Warning: failed to check isApprovedForAll: %v", err)
+	maxUint128 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 128), big.NewInt(1))
+	collectParams := blockchain.V3CollectParams{
+		TokenId:    tokenId,
+		Recipient:  walletAddr,
+		Amount0Max: maxUint128,
+		Amount1Max: maxUint128,
 	}
 
-	if !isApprovedForAll {
-		// 首次使用，设置 setApprovalForAll（一次性授权所有 NFT）
-		log.Printf("[Liquidity] V3 exit: Setting ApprovalForAll for Zap contract (one-time setup)")
-		if err := s.setNFTApprovalForAll(client, chainID, privateKey, walletAddr, pmAddr, zapAddr, true, opts); err != nil {
-			// 如果 setApprovalForAll 失败，降级到单个 approve
-			log.Printf("[Liquidity] Warning: setApprovalForAll failed, falling back to single approve: %v", err)
-			if err := s.approveNFT(client, chainID, privateKey, walletAddr, pmAddr, zapAddr, tokenId, opts); err != nil {
-				return nil, fmt.Errorf("approve NFT failed: %w", err)
+	// Capture pre-exit balances for fallback delta calculation.
+	b0Before := big.NewInt(0)
+	b1Before := big.NewInt(0)
+	if swapDeltas {
+		b0Before, _ = blockchain.GetTokenBalanceWithClient(client, token0, walletAddr)
+		b1Before, _ = blockchain.GetTokenBalanceWithClient(client, token1, walletAddr)
+		if b0Before == nil {
+			b0Before = big.NewInt(0)
+		}
+		if b1Before == nil {
+			b1Before = big.NewInt(0)
+		}
+	}
+
+	var exitReceipt *types.Receipt
+	// Prefer a single tx via NPM.multicall(decreaseLiquidity + collect). Fallback to 2 txs when multicall is unavailable.
+	if liq.Sign() > 0 {
+		decParams := blockchain.V3DecreaseLiquidityParams{
+			TokenId:    tokenId,
+			Liquidity:  liq, // uint128
+			Amount0Min: amount0Min,
+			Amount1Min: amount1Min,
+			Deadline:   deadline,
+		}
+
+		decData, derr := v3pm.Pack("decreaseLiquidity", decParams)
+		colData, cerr := v3pm.Pack("collect", collectParams)
+		if derr == nil && cerr == nil {
+			nonce, err := blockchain.GetNonceWithClient(client, walletAddr)
+			if err != nil {
+				return nil, err
+			}
+			auth, err := s.buildAuth(client, chainID, privateKey, nonce, big.NewInt(0), opts)
+			if err != nil {
+				return nil, err
+			}
+
+			tuneZapTxGasLimit("V3 exit NPM multicall", auth, func(o *bind.TransactOpts) (*types.Transaction, error) {
+				return v3pm.Multicall(o, [][]byte{decData, colData})
+			})
+
+			log.Printf("[Liquidity] V3 exit: Calling NPM.multicall(decreaseLiquidity+collect) tokenId=%s liquidity=%s amount0Min=%s amount1Min=%s",
+				tokenId.String(), liq.String(), amount0Min.String(), amount1Min.String())
+
+			tx, err := v3pm.Multicall(auth, [][]byte{decData, colData})
+			if err == nil && tx != nil {
+				log.Printf("[Liquidity] V3 exit: tx sent %s", tx.Hash().Hex())
+				txHashes = append(txHashes, "撤出流动性|"+tx.Hash().Hex())
+
+				receipt, err := s.waitMined(client, chainID, tx)
+				if err != nil {
+					return txHashes, fmt.Errorf("NPM.multicall tx failed: %w", err)
+				}
+				exitReceipt = receipt
+			} else if err != nil {
+				log.Printf("[Liquidity] Warning: NPM.multicall failed, falling back to decreaseLiquidity+collect: %v", err)
+			}
+		} else {
+			if derr != nil {
+				log.Printf("[Liquidity] Warning: pack decreaseLiquidity calldata failed, falling back: %v", derr)
+			}
+			if cerr != nil {
+				log.Printf("[Liquidity] Warning: pack collect calldata failed, falling back: %v", cerr)
 			}
 		}
+
+		if exitReceipt == nil {
+			nonce, err := blockchain.GetNonceWithClient(client, walletAddr)
+			if err != nil {
+				return nil, err
+			}
+			auth, err := s.buildAuth(client, chainID, privateKey, nonce, big.NewInt(0), opts)
+			if err != nil {
+				return nil, err
+			}
+
+			tuneZapTxGasLimit("V3 exit NPM decreaseLiquidity", auth, func(o *bind.TransactOpts) (*types.Transaction, error) {
+				return v3pm.DecreaseLiquidity(o, decParams)
+			})
+
+			log.Printf("[Liquidity] V3 exit: Calling NPM.decreaseLiquidity tokenId=%s liquidity=%s amount0Min=%s amount1Min=%s",
+				tokenId.String(), liq.String(), amount0Min.String(), amount1Min.String())
+
+			decTx, err := v3pm.DecreaseLiquidity(auth, decParams)
+			if err != nil {
+				return nil, fmt.Errorf("decreaseLiquidity call failed: %w", err)
+			}
+			log.Printf("[Liquidity] V3 exit: decreaseLiquidity tx sent %s", decTx.Hash().Hex())
+			txHashes = append(txHashes, "减少流动性|"+decTx.Hash().Hex())
+			if _, err := s.waitMined(client, chainID, decTx); err != nil {
+				return txHashes, fmt.Errorf("decreaseLiquidity tx failed: %w", err)
+			}
+
+			nonce, err = blockchain.GetNonceWithClient(client, walletAddr)
+			if err != nil {
+				return txHashes, err
+			}
+			auth, err = s.buildAuth(client, chainID, privateKey, nonce, big.NewInt(0), opts)
+			if err != nil {
+				return txHashes, err
+			}
+
+			tuneZapTxGasLimit("V3 exit NPM collect", auth, func(o *bind.TransactOpts) (*types.Transaction, error) {
+				return v3pm.Collect(o, collectParams)
+			})
+
+			log.Printf("[Liquidity] V3 exit: Calling NPM.collect tokenId=%s", tokenId.String())
+			colTx, err := v3pm.Collect(auth, collectParams)
+			if err != nil {
+				return txHashes, fmt.Errorf("collect call failed: %w", err)
+			}
+			log.Printf("[Liquidity] V3 exit: collect tx sent %s", colTx.Hash().Hex())
+
+			// Ensure sweepWallet expected-balance check uses the tx that actually transfers tokens to the wallet.
+			txHashes = append([]string{"撤出流动性|" + colTx.Hash().Hex()}, txHashes...)
+
+			receipt, err := s.waitMined(client, chainID, colTx)
+			if err != nil {
+				return txHashes, fmt.Errorf("collect tx failed: %w", err)
+			}
+			exitReceipt = receipt
+		}
 	} else {
-		log.Printf("[Liquidity] V3 exit: Already approved for all NFTs, skipping approve")
+		nonce, err := blockchain.GetNonceWithClient(client, walletAddr)
+		if err != nil {
+			return nil, err
+		}
+		auth, err := s.buildAuth(client, chainID, privateKey, nonce, big.NewInt(0), opts)
+		if err != nil {
+			return nil, err
+		}
+
+		tuneZapTxGasLimit("V3 exit NPM collect", auth, func(o *bind.TransactOpts) (*types.Transaction, error) {
+			return v3pm.Collect(o, collectParams)
+		})
+
+		log.Printf("[Liquidity] V3 exit: Calling NPM.collect (fees only) tokenId=%s", tokenId.String())
+		tx, err := v3pm.Collect(auth, collectParams)
+		if err != nil {
+			return nil, fmt.Errorf("collect call failed: %w", err)
+		}
+		log.Printf("[Liquidity] V3 exit: collect tx sent %s", tx.Hash().Hex())
+		txHashes = append(txHashes, "撤出流动性|"+tx.Hash().Hex())
+
+		receipt, err := s.waitMined(client, chainID, tx)
+		if err != nil {
+			return txHashes, fmt.Errorf("collect tx failed: %w", err)
+		}
+		exitReceipt = receipt
 	}
 
-	// 3. 记录余额（用于计算获得的代币）
-	b0Before, _ := blockchain.GetTokenBalanceWithClient(client, token0, walletAddr)
-	b1Before, _ := blockchain.GetTokenBalanceWithClient(client, token1, walletAddr)
-	if b0Before == nil {
-		b0Before = big.NewInt(0)
-	}
-	if b1Before == nil {
-		b1Before = big.NewInt(0)
+	if exitReceipt == nil {
+		return txHashes, fmt.Errorf("exit receipt is nil")
 	}
 
-	// 4. 调用 ZapOutV3
-	nonce, err := blockchain.GetNonceWithClient(client, walletAddr)
-	if err != nil {
-		return nil, err
-	}
-	auth, err := s.buildAuth(client, chainID, privateKey, nonce, big.NewInt(0), opts)
-	if err != nil {
-		return nil, err
-	}
-
-	zap, err := blockchain.NewZapSimple(zapAddr, client)
-	if err != nil {
-		return nil, fmt.Errorf("init zap contract failed: %w", err)
-	}
-
-	tuneZapTxGasLimit("V3 exit zapOutV3", auth, func(o *bind.TransactOpts) (*types.Transaction, error) {
-		return zap.ZapOutV3(o, pmAddr, tokenId, walletAddr, amount0Min, amount1Min)
-	})
-
-	log.Printf("[Liquidity] V3 exit: Calling ZapOutV3 tokenId=%s amount0Min=%s amount1Min=%s", tokenId.String(), amount0Min.String(), amount1Min.String())
-	tx, err := zap.ZapOutV3(auth, pmAddr, tokenId, walletAddr, amount0Min, amount1Min)
-	if err != nil {
-		return nil, fmt.Errorf("ZapOutV3 call failed: %w", err)
-	}
-	log.Printf("[Liquidity] V3 exit: tx sent %s", tx.Hash().Hex())
-	txHashes = append(txHashes, "撤出流动性|"+tx.Hash().Hex())
-
-	receipt, err := s.waitMined(client, chainID, tx)
-	if err != nil {
-		return txHashes, fmt.Errorf("ZapOutV3 tx failed: %w", err)
+	// sweepWallet mode does the swap at a higher level via swapWalletTokensToUSDT().
+	if !swapDeltas {
+		return txHashes, nil
 	}
 
 	// 5. 计算获得的代币并 Swap 回 USDT
-	// Prefer the ZapOutV3 event amounts (exact deltas), fall back to wallet balance deltas.
-	d0 := big.NewInt(0)
-	d1 := big.NewInt(0)
-	if a0, a1, ok := parseZapOutV3Result(receipt, zapAddr, walletAddr, tokenId); ok {
-		d0 = cloneBig(a0)
-		d1 = cloneBig(a1)
-	} else {
+	hasTokenTransferLog := func(tok common.Address) bool {
+		if exitReceipt == nil || tok == (common.Address{}) {
+			return false
+		}
+		for _, lg := range exitReceipt.Logs {
+			if lg == nil || lg.Address != tok || len(lg.Topics) == 0 || lg.Topics[0] != erc20TransferEventID {
+				continue
+			}
+			return true
+		}
+		return false
+	}
+
+	d0 := ReceiptTokenTransferDelta(exitReceipt, token0, walletAddr)
+	d1 := ReceiptTokenTransferDelta(exitReceipt, token1, walletAddr)
+
+	// Fallback to balance deltas only when Transfer logs are not available for the token.
+	if token0 != (common.Address{}) && !hasTokenTransferLog(token0) {
 		b0After, _ := blockchain.GetTokenBalanceWithClient(client, token0, walletAddr)
-		b1After, _ := blockchain.GetTokenBalanceWithClient(client, token1, walletAddr)
 		if b0After == nil {
 			b0After = big.NewInt(0)
 		}
+		d0 = new(big.Int).Sub(b0After, b0Before)
+	}
+	if token1 != (common.Address{}) && !hasTokenTransferLog(token1) {
+		b1After, _ := blockchain.GetTokenBalanceWithClient(client, token1, walletAddr)
 		if b1After == nil {
 			b1After = big.NewInt(0)
 		}
-		d0 = new(big.Int).Sub(b0After, b0Before)
 		d1 = new(big.Int).Sub(b1After, b1Before)
 	}
 	if d0.Sign() < 0 {
@@ -1333,7 +1375,7 @@ func (s *LiquidityService) exitV3ToUSDT(exec chainexec.EVMExecutor, privateKey *
 		totalUSDTReceived = big.NewInt(0)
 	}
 
-	// Use the first hash (ZapOut) as the main hash, or a new one?
+	// Use the first hash (exit tx) as the main hash, or a new one?
 	// The user wants to see one entry for "Remove Liquidity".
 	mainHash := ""
 	if len(txHashes) > 0 {
@@ -1353,11 +1395,11 @@ func (s *LiquidityService) exitV3ToUSDT(exec chainexec.EVMExecutor, privateKey *
 			UserID:          task.UserID,
 			Chain:           task.Chain,
 			TaskID:          task.ID,
-			TxHash:          mainHash, // Use ZapOut hash
+			TxHash:          mainHash, // Use exit hash (multicall or collect)
 			Type:            models.TxTypeRemoveLiquidity,
 			Status:          models.TxStatusConfirmed,
 			FromAddress:     walletAddr.Hex(),
-			ToAddress:       zapAddr.Hex(),
+			ToAddress:       pmAddr.Hex(),
 			TokenInAddress:  pmAddr.Hex(), // Representing the pool/position
 			TokenOutAddress: usdtAddr.Hex(),
 			AmountIn:        "0",
@@ -1373,52 +1415,6 @@ func (s *LiquidityService) exitV3ToUSDT(exec chainexec.EVMExecutor, privateKey *
 		return txHashes, &SwapToUSDTError{Err: swapErr}
 	}
 	return txHashes, nil
-}
-
-// approveNFT checks approval and approves if needed (ERC721)
-func (s *LiquidityService) approveNFT(client *ethclient.Client, chainID *big.Int, privateKey *ecdsa.PrivateKey, walletAddr, tokenAddr, spender common.Address, tokenId *big.Int, opts TxOptions) error {
-	// 简单的 ERC721 ABI 用于 getApproved 和 approve
-	const erc721ABI = `[{"constant":true,"inputs":[{"name":"tokenId","type":"uint256"}],"name":"getApproved","outputs":[{"name":"","type":"address"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"to","type":"address"},{"name":"tokenId","type":"uint256"}],"name":"approve","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"}]`
-
-	parsed, err := abi.JSON(strings.NewReader(erc721ABI))
-	if err != nil {
-		return err
-	}
-
-	// Check approved
-	var out []interface{}
-	// Pack call
-	data, err := parsed.Pack("getApproved", tokenId)
-	if err != nil {
-		return err
-	}
-	msg := ethereum.CallMsg{To: &tokenAddr, Data: data}
-	res, err := client.CallContract(context.Background(), msg, nil)
-	if err == nil {
-		if out, err = parsed.Unpack("getApproved", res); err == nil && len(out) > 0 {
-			if approvedAddr, ok := out[0].(common.Address); ok && approvedAddr == spender {
-				return nil // Already approved
-			}
-		}
-	}
-
-	// Approve
-	nonce, err := blockchain.GetNonceWithClient(client, walletAddr)
-	if err != nil {
-		return err
-	}
-	auth, err := s.buildAuth(client, chainID, privateKey, nonce, big.NewInt(0), opts)
-	if err != nil {
-		return err
-	}
-
-	contract := bind.NewBoundContract(tokenAddr, parsed, client, client, client)
-	tx, err := contract.Transact(auth, "approve", spender, tokenId)
-	if err != nil {
-		return err
-	}
-	_, err = s.waitMined(client, chainID, tx)
-	return err
 }
 
 func (s *LiquidityService) exitV4ToUSDT(exec chainexec.EVMExecutor, privateKey *ecdsa.PrivateKey, walletAddr common.Address, usdtAddr common.Address, task *models.StrategyTask, swapDeltas bool, opts TxOptions) ([]string, error) {
@@ -1928,77 +1924,4 @@ func (s *LiquidityService) swapExactInViaOKXWithHash(
 	}
 
 	return txHash, nil
-}
-
-// isNFTApprovedForAll 检查是否已经 setApprovalForAll
-func (s *LiquidityService) isNFTApprovedForAll(client *ethclient.Client, nftContract, owner, operator common.Address) (bool, error) {
-	const erc721ABI = `[{"constant":true,"inputs":[{"name":"owner","type":"address"},{"name":"operator","type":"address"}],"name":"isApprovedForAll","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"view","type":"function"}]`
-
-	parsed, err := abi.JSON(strings.NewReader(erc721ABI))
-	if err != nil {
-		return false, err
-	}
-
-	data, err := parsed.Pack("isApprovedForAll", owner, operator)
-	if err != nil {
-		return false, err
-	}
-
-	msg := ethereum.CallMsg{To: &nftContract, Data: data}
-	res, err := client.CallContract(context.Background(), msg, nil)
-	if err != nil {
-		return false, err
-	}
-
-	var out []interface{}
-	out, err = parsed.Unpack("isApprovedForAll", res)
-	if err != nil {
-		return false, err
-	}
-
-	if len(out) > 0 {
-		if approved, ok := out[0].(bool); ok {
-			return approved, nil
-		}
-	}
-
-	return false, nil
-}
-
-// setNFTApprovalForAll 设置 setApprovalForAll
-func (s *LiquidityService) setNFTApprovalForAll(
-	client *ethclient.Client,
-	chainID *big.Int,
-	privateKey *ecdsa.PrivateKey,
-	walletAddr common.Address,
-	nftContract common.Address,
-	operator common.Address,
-	approved bool,
-	opts TxOptions,
-) error {
-	const erc721ABI = `[{"constant":false,"inputs":[{"name":"operator","type":"address"},{"name":"approved","type":"bool"}],"name":"setApprovalForAll","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"}]`
-
-	parsed, err := abi.JSON(strings.NewReader(erc721ABI))
-	if err != nil {
-		return err
-	}
-
-	nonce, err := blockchain.GetNonceWithClient(client, walletAddr)
-	if err != nil {
-		return err
-	}
-
-	auth, err := s.buildAuth(client, chainID, privateKey, nonce, big.NewInt(0), opts)
-	if err != nil {
-		return err
-	}
-
-	contract := bind.NewBoundContract(nftContract, parsed, client, client, client)
-	tx, err := contract.Transact(auth, "setApprovalForAll", operator, approved)
-	if err != nil {
-		return err
-	}
-
-	_, err = s.waitMined(client, chainID, tx)
-	return err
 }
