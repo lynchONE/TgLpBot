@@ -231,10 +231,6 @@ func (s *LiquidityService) executeOKXSwapExactIn(
 		}
 	}
 
-	nonce, err := blockchain.GetNonceWithClient(client, walletAddr)
-	if err != nil {
-		return nil, err
-	}
 	gasPrice, err := blockchain.GetGasPriceWithClient(client)
 	if err != nil {
 		return nil, err
@@ -246,12 +242,18 @@ func (s *LiquidityService) executeOKXSwapExactIn(
 	}
 	log.Printf("[Liquidity] OKX swap gasLimit: okx=%d final=%d", okxGasLimit, gasLimit)
 
-	rawTx := types.NewTransaction(nonce, to, value, gasLimit, gasPrice, data)
-	signed, err := types.SignTx(rawTx, types.NewEIP155Signer(chainID), privateKey)
+	signed, err := blockchain.SendRawTransactionWithRetry(blockchain.SendRawTxParams{
+		Client:     client,
+		ChainID:    chainID,
+		PrivateKey: privateKey,
+		From:       walletAddr,
+		To:         to,
+		Value:      value,
+		Data:       data,
+		GasLimit:   gasLimit,
+		GasPrice:   gasPrice,
+	})
 	if err != nil {
-		return nil, err
-	}
-	if err := blockchain.SendTransactionWithClient(client, signed); err != nil {
 		return nil, err
 	}
 

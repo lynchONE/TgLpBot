@@ -368,6 +368,13 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	if usdtBefore == nil {
 		usdtBefore = big.NewInt(0)
 	}
+	// Cap entry amount to actual wallet balance to avoid "transfer amount exceeds balance"
+	// when wallet has less than configured AmountUSDT (e.g., after rebalance exit: gas, slippage, IL).
+	if usdtBefore.Sign() > 0 && usdtBefore.Cmp(usdtAmount) < 0 {
+		log.Printf("[Liquidity] Entry amount capped to wallet balance: configured=%s actual=%s (stable=%s)",
+			usdtAmount.String(), usdtBefore.String(), usdtAddr.Hex())
+		usdtAmount = new(big.Int).Set(usdtBefore)
+	}
 	t0Before := big.NewInt(0)
 	t1Before := big.NewInt(0)
 	if token0Addr != (common.Address{}) {
@@ -1494,6 +1501,14 @@ func (s *LiquidityService) enterV4FromToken(
 	if err := s.approveToken(client, chainID, privateKey, walletAddr, tokenIn, zapAddr, amountIn, opts); err != nil {
 		log.Printf("[Liquidity] DEBUG: approveToken failed: %v", err)
 		return nil, fmt.Errorf("approve entry token to zap failed: %w", err)
+	}
+
+	// Balance check before ZapInV4 (mirrors V3 flow). Prevents on-chain revert
+	// "BEP20: transfer amount exceeds balance" when wallet has less than expected.
+	if balEntry, balErr := blockchain.GetTokenBalanceWithClient(client, tokenIn, walletAddr); balErr != nil {
+		return nil, fmt.Errorf("check entry token balance failed: %w", balErr)
+	} else if balEntry.Cmp(amountIn) < 0 {
+		return nil, fmt.Errorf("V4 entry token balance insufficient: have=%s need=%s token=%s", balEntry.String(), amountIn.String(), tokenIn.Hex())
 	}
 
 	poolKeySimple := blockchain.PoolKeySimple{

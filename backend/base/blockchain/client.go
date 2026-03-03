@@ -3,6 +3,7 @@ package blockchain
 import (
 	"TgLpBot/base/config"
 	"context"
+	"crypto/ecdsa"
 	"fmt"
 	"log"
 	"math/big"
@@ -275,6 +276,85 @@ func SendTransactionWithClient(client *ethclient.Client, signedTx *types.Transac
 		return fmt.Errorf("signed tx is nil")
 	}
 	return client.SendTransaction(context.Background(), signedTx)
+}
+
+// SendRawTxParams holds parameters for building and sending a raw (non-contract) transaction
+// with automatic retry for transient BSC mempool errors.
+type SendRawTxParams struct {
+	Client     *ethclient.Client
+	ChainID    *big.Int
+	PrivateKey *ecdsa.PrivateKey
+	From       common.Address
+	To         common.Address
+	Value      *big.Int
+	Data       []byte
+	GasLimit   uint64
+	GasPrice   *big.Int
+}
+
+// SendRawTransactionWithRetry builds, signs, and sends a legacy transaction.
+// It retries on "nonce too low" (re-fetches nonce and re-signs) and
+// "in-flight transaction limit" (waits for pending txs to clear).
+// Returns the successfully sent signed transaction.
+func SendRawTransactionWithRetry(p SendRawTxParams) (*types.Transaction, error) {
+	if p.Client == nil {
+		return nil, fmt.Errorf("blockchain client not initialized")
+	}
+	if p.ChainID == nil {
+		return nil, fmt.Errorf("chainID is nil")
+	}
+	if p.PrivateKey == nil {
+		return nil, fmt.Errorf("private key is nil")
+	}
+
+	const maxAttempts = 4
+
+	nonce, err := GetNonceWithClient(p.Client, p.From)
+	if err != nil {
+		return nil, fmt.Errorf("get nonce failed: %w", err)
+	}
+
+	signer := types.NewEIP155Signer(p.ChainID)
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		rawTx := types.NewTransaction(nonce, p.To, p.Value, p.GasLimit, p.GasPrice, p.Data)
+		signed, signErr := types.SignTx(rawTx, signer, p.PrivateKey)
+		if signErr != nil {
+			return nil, fmt.Errorf("sign tx failed: %w", signErr)
+		}
+
+		sendErr := SendTransactionWithClient(p.Client, signed)
+		if sendErr == nil {
+			return signed, nil
+		}
+
+		if attempt == maxAttempts || !IsSendTxRetryable(sendErr) {
+			return nil, sendErr
+		}
+
+		log.Printf("[blockchain] SendRawTransactionWithRetry attempt %d/%d failed: %v", attempt, maxAttempts, sendErr)
+
+		if IsNonceTooLowError(sendErr) {
+			// Nonce was stale; wait briefly for RPC to sync then re-fetch.
+			time.Sleep(500 * time.Millisecond)
+		} else {
+			// in-flight limit or rate limit: wait longer for mempool to drain.
+			delay := time.Duration(attempt) * 2 * time.Second
+			if delay > 6*time.Second {
+				delay = 6 * time.Second
+			}
+			time.Sleep(delay)
+		}
+
+		// Always re-fetch nonce before next attempt.
+		freshNonce, nerr := GetNonceWithClient(p.Client, p.From)
+		if nerr != nil {
+			return nil, fmt.Errorf("re-fetch nonce after retry failed: %w", nerr)
+		}
+		nonce = freshNonce
+	}
+
+	return nil, fmt.Errorf("SendRawTransactionWithRetry: exhausted all attempts")
 }
 
 // GetTransactionReceiptWithClient returns the receipt of a transaction.

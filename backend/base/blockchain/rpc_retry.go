@@ -69,6 +69,32 @@ func isRetryableRPCCallError(err error) bool {
 	return false
 }
 
+// isInFlightLimitError returns true when the BSC node rejects the tx
+// because the sender already has too many pending transactions in its mempool.
+func isInFlightLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "in-flight transaction limit")
+}
+
+// IsNonceTooLowError returns true when the node rejects the tx because
+// its nonce has already been consumed by a confirmed or pending transaction.
+func IsNonceTooLowError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "nonce too low")
+}
+
+// IsSendTxRetryable returns true if a SendTransaction error is transient
+// and may be resolved by waiting and/or re-fetching the nonce.
+func IsSendTxRetryable(err error) bool {
+	return isInFlightLimitError(err) || IsNonceTooLowError(err) || isRPCRateLimited(err)
+}
+
 func rpcRetryDelay(attempt int, err error) time.Duration {
 	if attempt < 1 {
 		attempt = 1
