@@ -43,7 +43,7 @@ func main() {
 		log.Fatalf("❌ MySQL 初始化失败: %v", err)
 	}
 	defer database.CloseMySQL()
-	rpcpool.StartDefaultHealthChecker(45 * time.Second)
+	rpcpool.StartDefaultHealthChecker(time.Hour)
 	defer rpcpool.StopDefaultHealthChecker()
 
 	// Security: migrate any legacy plaintext wallet private keys to encrypted storage.

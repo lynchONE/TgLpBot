@@ -662,71 +662,6 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 	return txHashes, nil
 }
 
-type otherTaskDustRow struct {
-	Token0Address string `gorm:"column:token0_address"`
-	Token1Address string `gorm:"column:token1_address"`
-	OpenDust0     string `gorm:"column:open_dust0"`
-	OpenDust1     string `gorm:"column:open_dust1"`
-}
-
-// reservedDustForOtherOpenTasks returns the sum of recorded dust amounts (OpenDust0/OpenDust1)
-// for other open tasks (same user, TradeStatusOpen) keyed by token address.
-// It is best-effort: query failures are returned to callers so they can decide whether to ignore.
-func (s *LiquidityService) reservedDustForOtherOpenTasks(userID uint, excludeTaskID uint, tokens []common.Address) (map[common.Address]*big.Int, error) {
-	reserved := make(map[common.Address]*big.Int)
-	if userID == 0 || len(tokens) == 0 {
-		return reserved, nil
-	}
-
-	tokenSet := make(map[common.Address]struct{}, len(tokens))
-	for _, t := range tokens {
-		if t == (common.Address{}) {
-			continue
-		}
-		tokenSet[t] = struct{}{}
-	}
-	if len(tokenSet) == 0 {
-		return reserved, nil
-	}
-
-	var rows []otherTaskDustRow
-	err := database.DB.
-		Table("trade_records tr").
-		Select("st.token0_address AS token0_address, st.token1_address AS token1_address, tr.open_dust0 AS open_dust0, tr.open_dust1 AS open_dust1").
-		Joins("JOIN strategy_tasks st ON st.id = tr.task_id").
-		Where("tr.user_id = ? AND tr.status = ? AND tr.task_id <> ?", userID, models.TradeStatusOpen, excludeTaskID).
-		Scan(&rows).Error
-	if err != nil {
-		return reserved, err
-	}
-
-	add := func(addrStr string, dustStr string) {
-		if !common.IsHexAddress(addrStr) {
-			return
-		}
-		addr := common.HexToAddress(strings.TrimSpace(addrStr))
-		if _, ok := tokenSet[addr]; !ok {
-			return
-		}
-		dust, perr := convert.ParseBigInt(dustStr)
-		if perr != nil || dust == nil || dust.Sign() <= 0 {
-			return
-		}
-		if cur := reserved[addr]; cur != nil {
-			cur.Add(cur, dust)
-			return
-		}
-		reserved[addr] = cloneBig(dust)
-	}
-
-	for _, r := range rows {
-		add(r.Token0Address, r.OpenDust0)
-		add(r.Token1Address, r.OpenDust1)
-	}
-
-	return reserved, nil
-}
-
 func (s *LiquidityService) swapWalletTokensToUSDT(
 	exec chainexec.EVMExecutor,
 	privateKey *ecdsa.PrivateKey,
@@ -783,11 +718,6 @@ func (s *LiquidityService) swapWalletTokensToUSDT(
 	for _, tok := range targets {
 		targetAddrs = append(targetAddrs, tok.addr)
 	}
-	reservedOtherDust, rerr := s.reservedDustForOtherOpenTasks(task.UserID, task.ID, targetAddrs)
-	if rerr != nil {
-		log.Printf("[Liquidity] Warning: 读取其他任务残余余额失败，可能导致收益归属不准确: %v", rerr)
-		reservedOtherDust = nil
-	}
 
 	var txHashes []string
 	var errs []error
@@ -826,26 +756,8 @@ func (s *LiquidityService) swapWalletTokensToUSDT(
 			continue
 		}
 
-		// Keep other open tasks' recorded dust for this token in the wallet, so one task's sweep
-		// won't accidentally "consume" other tasks' residuals and mis-attribute the PnL.
-		keep := big.NewInt(0)
-		if reservedOtherDust != nil {
-			if v := reservedOtherDust[tok.addr]; v != nil && v.Sign() > 0 {
-				keep = cloneBig(v)
-			}
-		}
-		if preBalances != nil {
-			if pre := preBalances[tok.addr]; pre != nil && pre.Sign() > 0 && keep.Cmp(pre) > 0 {
-				// Only reserve what existed before this exit; exit deltas always belong to this task.
-				keep = cloneBig(pre)
-			}
-		}
-		expectedRemaining[tok.addr] = cloneBig(keep)
-
-		toSwap := new(big.Int).Sub(cloneBig(bal), keep)
-		if toSwap.Sign() <= 0 {
-			continue
-		}
+		expectedRemaining[tok.addr] = big.NewInt(0)
+		toSwap := cloneBig(bal)
 
 		if skip, _ := s.shouldSkipExitSwapToUSDT(exec, tok.addr, toSwap, walletAddr, label); skip {
 			// Skip tiny swaps to avoid spending gas on < 1 USDT outputs.
@@ -887,7 +799,7 @@ func (s *LiquidityService) swapWalletTokensToUSDT(
 		}
 		if bal != nil && bal.Sign() > 0 && bal.Cmp(keep) > 0 {
 			// 仅打印警告日志，不返回错误，避免触发重试机制导致同一代币被多次兑换
-			log.Printf("[Liquidity] Warning: 清仓兑换后仍有 %s 余额未兑换 (%s): %s（预留 %s；可能是 swap 滑点或小额残余）", label, tok.addr.Hex(), bal.String(), keep.String())
+			log.Printf("[Liquidity] Warning: 清仓兑换后仍有 %s 余额未兑换 (%s): %s（允许保留 %s；可能是 swap 滑点或小额残余/跳过小额兑换）", label, tok.addr.Hex(), bal.String(), keep.String())
 		}
 	}
 

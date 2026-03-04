@@ -16,7 +16,7 @@ var (
 // and updates their availability/status fields in DB. It is safe to call multiple times.
 func StartDefaultHealthChecker(interval time.Duration) {
 	if interval <= 0 {
-		interval = 45 * time.Second
+		interval = time.Hour
 	}
 	bgOnce.Do(func() {
 		ctx, cancel := context.WithCancel(context.Background())
