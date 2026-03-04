@@ -72,6 +72,8 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		s.handleAdminOnlineUsers(w, r)
 	case "active_tasks":
 		s.handleAdminActiveTasks(w, r)
+	case "rpc_pool":
+		s.handleAdminRPCPool(w, r)
 	default:
 		http.Error(w, "invalid endpoint", http.StatusBadRequest)
 	}

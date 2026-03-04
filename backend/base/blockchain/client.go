@@ -2,6 +2,7 @@ package blockchain
 
 import (
 	"TgLpBot/base/config"
+	"TgLpBot/base/rpcpool"
 	"context"
 	"crypto/ecdsa"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"golang.org/x/sync/singleflight"
 )
 
 // Legacy single-chain globals (default chain: "bsc"). Avoid using these in multi-chain logic.
@@ -27,6 +29,14 @@ var (
 	evmMu       sync.RWMutex
 	evmClients  = make(map[string]*ethclient.Client)
 	evmChainIDs = make(map[string]*big.Int)
+	evmRPCURLs  = make(map[string]string)
+
+	evmEnsureSF singleflight.Group
+)
+
+var (
+	rpcRefreshOnce sync.Once
+	rpcRefreshStop context.CancelFunc
 )
 
 // InitBlockchains initializes per-chain blockchain clients (single-instance multi-chain).
@@ -41,95 +51,49 @@ func InitBlockchains() error {
 		enabled = []string{"bsc"}
 	}
 
-	type initResult struct {
-		chain   string
-		client  *ethclient.Client
-		chainID *big.Int
-	}
-
-	results := make([]initResult, 0, len(enabled))
-	var errs []string
-
-	for _, raw := range enabled {
-		chain := config.NormalizeChain(raw)
-		cc, ok := config.AppConfig.GetChainConfig(chain)
-		if !ok {
-			errs = append(errs, fmt.Sprintf("%s: chain config not found", chain))
-			continue
-		}
-		if cc.Kind != config.ChainKindEVM {
-			errs = append(errs, fmt.Sprintf("%s: chain kind not supported: %s", chain, cc.Kind))
-			continue
-		}
-
-		rpcURL := strings.TrimSpace(cc.RpcURL)
-		if rpcURL == "" {
-			errs = append(errs, fmt.Sprintf("%s: rpc url not configured", chain))
-			continue
-		}
-
-		log.Printf("Connecting to %s network (chainId=%d): %s", chain, cc.ChainID, rpcURL)
-		c, err := ethclient.Dial(rpcURL)
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("%s: dial failed: %v", chain, err))
-			continue
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		blockNumber, err := c.BlockNumber(ctx)
-		cancel()
-		if err != nil {
-			c.Close()
-			errs = append(errs, fmt.Sprintf("%s: get block number failed: %v", chain, err))
-			continue
-		}
-
-		log.Printf("%s blockchain connected successfully, current block: %d", chain, blockNumber)
-		results = append(results, initResult{
-			chain:   chain,
-			client:  c,
-			chainID: big.NewInt(cc.ChainID),
-		})
-	}
-
 	evmMu.Lock()
 	for _, c := range evmClients {
 		if c != nil {
 			c.Close()
 		}
 	}
-	evmClients = make(map[string]*ethclient.Client, len(results))
-	evmChainIDs = make(map[string]*big.Int, len(results))
-	for _, r := range results {
-		evmClients[r.chain] = r.client
-		if r.chainID == nil {
-			evmChainIDs[r.chain] = big.NewInt(0)
-		} else {
-			evmChainIDs[r.chain] = new(big.Int).Set(r.chainID)
+	evmClients = make(map[string]*ethclient.Client)
+	evmChainIDs = make(map[string]*big.Int)
+	evmRPCURLs = make(map[string]string)
+	Client = nil
+	ChainID = nil
+	evmMu.Unlock()
+
+	var errs []string
+	for _, raw := range enabled {
+		chain := config.NormalizeChain(raw)
+		if err := ensureEVMClient(chain); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", chain, err))
 		}
 	}
 
 	// Keep legacy globals pointing at bsc when available (backward compatibility).
-	Client = nil
-	ChainID = nil
-	if c, ok := evmClients["bsc"]; ok {
-		Client = c
-		if id := evmChainIDs["bsc"]; id != nil {
-			ChainID = new(big.Int).Set(id)
-		}
-	} else if len(enabled) > 0 {
-		first := config.NormalizeChain(enabled[0])
-		if c := evmClients[first]; c != nil {
+	evmMu.Lock()
+	if Client == nil {
+		if c, ok := evmClients["bsc"]; ok && c != nil {
 			Client = c
-			if id := evmChainIDs[first]; id != nil {
+			if id := evmChainIDs["bsc"]; id != nil {
 				ChainID = new(big.Int).Set(id)
+			}
+		} else if len(enabled) > 0 {
+			first := config.NormalizeChain(enabled[0])
+			if c := evmClients[first]; c != nil {
+				Client = c
+				if id := evmChainIDs[first]; id != nil {
+					ChainID = new(big.Int).Set(id)
+				}
 			}
 		}
 	}
-
+	n := len(evmClients)
 	evmMu.Unlock()
 
-	if len(evmClients) == 0 {
+	if n == 0 {
 		if len(errs) > 0 {
 			return fmt.Errorf("init blockchains failed: %s", strings.Join(errs, "; "))
 		}
@@ -151,6 +115,7 @@ func CloseBlockchains() {
 	}
 	evmClients = make(map[string]*ethclient.Client)
 	evmChainIDs = make(map[string]*big.Int)
+	evmRPCURLs = make(map[string]string)
 	Client = nil
 	ChainID = nil
 	evmMu.Unlock()
@@ -159,6 +124,9 @@ func CloseBlockchains() {
 // GetEVMClient returns the EVM client and chainId for a given chain key (e.g. "bsc", "base").
 func GetEVMClient(chain string) (*ethclient.Client, *big.Int, error) {
 	chain = config.NormalizeChain(chain)
+	if err := ensureEVMClient(chain); err != nil {
+		return nil, nil, err
+	}
 	evmMu.RLock()
 	c := evmClients[chain]
 	id := evmChainIDs[chain]
@@ -170,6 +138,149 @@ func GetEVMClient(chain string) (*ethclient.Client, *big.Int, error) {
 		id = big.NewInt(0)
 	}
 	return c, new(big.Int).Set(id), nil
+}
+
+func ensureEVMClient(chain string) error {
+	if config.AppConfig == nil {
+		return fmt.Errorf("config not loaded")
+	}
+	chain = config.NormalizeChain(chain)
+	cc, ok := config.AppConfig.GetChainConfig(chain)
+	if !ok {
+		return fmt.Errorf("chain config not found: %s", chain)
+	}
+	if cc.Kind != config.ChainKindEVM {
+		return fmt.Errorf("chain kind not supported: %s kind=%s", chain, cc.Kind)
+	}
+
+	_, err, _ := evmEnsureSF.Do(chain, func() (interface{}, error) {
+		const maxAttempts = 2
+		var lastErr error
+		for attempt := 1; attempt <= maxAttempts; attempt++ {
+			eff, _ := rpcpool.Default().EffectiveURL(context.Background(), chain, rpcpool.TransportHTTP)
+			targetURL := strings.TrimSpace(eff.URL)
+			if targetURL == "" {
+				targetURL = strings.TrimSpace(cc.RpcURL)
+			}
+			if targetURL == "" {
+				return nil, fmt.Errorf("rpc url not configured for chain=%s", chain)
+			}
+
+			evmMu.RLock()
+			curClient := evmClients[chain]
+			curURL := strings.TrimSpace(evmRPCURLs[chain])
+			evmMu.RUnlock()
+
+			if curClient != nil && curURL != "" && curURL == targetURL {
+				return nil, nil
+			}
+
+			log.Printf("[blockchain] refreshing %s rpc: %s -> %s", chain, rpcpool.MaskURL(curURL), rpcpool.MaskURL(targetURL))
+
+			c, dialErr := ethclient.Dial(targetURL)
+			if dialErr != nil {
+				lastErr = fmt.Errorf("dial failed: %w", dialErr)
+				if eff.Source == rpcpool.SourceDB && eff.Endpoint != nil && attempt < maxAttempts {
+					_ = disableEndpointOnClientError(eff.Endpoint.ID, dialErr)
+					continue
+				}
+				return nil, lastErr
+			}
+
+			// Quick sanity check to avoid switching to a dead endpoint.
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			_, bnErr := c.BlockNumber(ctx)
+			cancel()
+			if bnErr != nil {
+				c.Close()
+				lastErr = fmt.Errorf("block number probe failed: %w", bnErr)
+				if eff.Source == rpcpool.SourceDB && eff.Endpoint != nil && attempt < maxAttempts {
+					_ = disableEndpointOnClientError(eff.Endpoint.ID, bnErr)
+					continue
+				}
+				return nil, lastErr
+			}
+
+			evmMu.Lock()
+			prev := evmClients[chain]
+			evmClients[chain] = c
+			evmChainIDs[chain] = big.NewInt(cc.ChainID)
+			evmRPCURLs[chain] = targetURL
+
+			// Keep legacy globals pointing at bsc when available.
+			if chain == "bsc" {
+				Client = c
+				ChainID = new(big.Int).Set(evmChainIDs[chain])
+			}
+			evmMu.Unlock()
+
+			if prev != nil {
+				prev.Close()
+			}
+			return nil, nil
+		}
+		if lastErr != nil {
+			return nil, lastErr
+		}
+		return nil, fmt.Errorf("ensure evm client failed")
+	})
+	return err
+}
+
+func disableEndpointOnClientError(endpointID uint, err error) error {
+	m := rpcpool.Default()
+	if m == nil {
+		return nil
+	}
+	if rpcpool.IsQuotaExhaustedError(err) {
+		return m.DisableUntilNextMonth(context.Background(), endpointID)
+	}
+	until := time.Now().Add(10 * time.Minute)
+	return m.DisableEndpoint(context.Background(), endpointID, until, rpcpool.ReasonHealthFail)
+}
+
+// StartRPCPoolRefresher periodically ensures EVM clients match the current RPC pool selection.
+// It helps legacy code paths that still use the global default client.
+func StartRPCPoolRefresher(interval time.Duration) {
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	rpcRefreshOnce.Do(func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		rpcRefreshStop = cancel
+		go func() {
+			t := time.NewTicker(interval)
+			defer t.Stop()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					ensureAllEnabledChains()
+				}
+			}
+		}()
+	})
+}
+
+func StopRPCPoolRefresher() {
+	if rpcRefreshStop != nil {
+		rpcRefreshStop()
+	}
+}
+
+func ensureAllEnabledChains() {
+	if config.AppConfig == nil {
+		return
+	}
+	enabled := config.AppConfig.EnabledChains
+	if len(enabled) == 0 {
+		enabled = []string{"bsc"}
+	}
+	for _, ch := range enabled {
+		_ = ensureEVMClient(ch)
+	}
 }
 
 // InitBlockchain initializes blockchain clients (backward compatible wrapper).

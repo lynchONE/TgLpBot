@@ -66,6 +66,7 @@ func autoMigrate() error {
 		&models.LPConfig{},
 		&models.GlobalConfig{},
 		&models.SystemConfig{},
+		&models.RpcEndpoint{},
 		&models.AutoLPUserConfig{},
 		&models.AutoLPEvent{},
 		&models.Position{},

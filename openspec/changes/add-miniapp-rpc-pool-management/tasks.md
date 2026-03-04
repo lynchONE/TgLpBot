@@ -1,0 +1,12 @@
+## 1. Implementation
+- [x] 1.1 Add `RpcEndpoint` GORM model + AutoMigrate table
+- [x] 1.2 Implement RPC pool manager (select current, health/status, failover)
+- [x] 1.3 Implement monthly “quota exhausted” disabling (disable until next month)
+- [x] 1.4 Wire blockchain HTTP client selection to RPC pool (bsc/base)
+- [x] 1.5 Wire websocket URL selection to RPC pool (SmartLP monitor and any WS users)
+- [x] 1.6 Add admin APIs: list/add/switch/disable endpoints (`/api/admin/rpc_pool`)
+- [x] 1.7 Update compat routing (`/api/admin?endpoint=rpc_pool`) and Vercel proxy allowlist (`miniapp/api/admin.js`)
+- [x] 1.8 Add Mini App admin “RPC” tab UI (status list + add form + manual switch)
+- [x] 1.9 Add Go unit tests for pool selection/failover and admin handler validation
+- [x] 1.10 Run `cd backend; go test ./...`
+- [x] 1.11 (Optional) Run `cd miniapp; npm run build`

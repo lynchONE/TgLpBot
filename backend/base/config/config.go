@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -558,8 +559,8 @@ func LoadConfig() error {
 	log.Printf("   - Private Zap Version: %d", AppConfig.PrivateZapVersion)
 	log.Printf("   - Pancake V3 NPM: %s", AppConfig.PancakeV3PositionManagerAddress)
 	log.Printf("   - Uniswap V3 NPM: %s", AppConfig.UniswapV3PositionManagerAddress)
-	log.Printf("   - BSC RPC URL: %s", AppConfig.BSCRpcURL)
-	log.Printf("   - BSC RPC WS URL: %s", AppConfig.BSCRpcWSURL)
+	log.Printf("   - BSC RPC URL: %s", maskURL(AppConfig.BSCRpcURL))
+	log.Printf("   - BSC RPC WS URL: %s", maskURL(AppConfig.BSCRpcWSURL))
 	log.Printf("   - BSC Chain ID: %d", AppConfig.BSCChainID)
 	if len(AppConfig.EnabledChains) > 0 {
 		log.Printf("   - Enabled Chains: %s", strings.Join(AppConfig.EnabledChains, ","))
@@ -569,7 +570,7 @@ func LoadConfig() error {
 				continue
 			}
 			log.Printf("     * %s kind=%s chainId=%d rpc=%s stable=%s(%d) zapV3=%s",
-				cc.Chain, cc.Kind, cc.ChainID, cc.RpcURL, cc.StableSymbol, cc.StableDecimals, cc.ZapV3Address)
+				cc.Chain, cc.Kind, cc.ChainID, maskURL(cc.RpcURL), cc.StableSymbol, cc.StableDecimals, cc.ZapV3Address)
 		}
 	}
 	log.Printf("   - MySQL: %s@%s:%s/%s", AppConfig.MySQLUser, AppConfig.MySQLHost, AppConfig.MySQLPort, AppConfig.MySQLDatabase)
@@ -920,6 +921,18 @@ func maskString(s string) string {
 		return "***"
 	}
 	return s[:4] + "..." + s[len(s)-4:]
+}
+
+func maskURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "<未设置>"
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "***"
+	}
+	return fmt.Sprintf("%s://%s/…", u.Scheme, u.Host)
 }
 
 func getEnv(key, defaultValue string) string {

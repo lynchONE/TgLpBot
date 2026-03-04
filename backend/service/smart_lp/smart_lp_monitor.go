@@ -4,6 +4,7 @@ import (
 	"TgLpBot/base/blockchain"
 	"TgLpBot/base/clickhouse"
 	"TgLpBot/base/config"
+	"TgLpBot/base/rpcpool"
 	"context"
 	"fmt"
 	"log"
@@ -144,8 +145,8 @@ func (s *SmartLPMonitor) Start() {
 			s.ticker.Stop()
 			s.ticker = nil
 		}
-		log.Printf("[SmartLP] websocket enabled url=%s", wsURL)
-		go s.runWebsocket(wsURL)
+		log.Printf("[SmartLP] websocket enabled url=%s", rpcpool.MaskURL(wsURL))
+		go s.runWebsocket()
 		return
 	}
 
@@ -190,7 +191,7 @@ func (s *SmartLPMonitor) runLoop() {
 	}
 }
 
-func (s *SmartLPMonitor) runWebsocket(wsURL string) {
+func (s *SmartLPMonitor) runWebsocket() {
 	if config.AppConfig == nil || !config.AppConfig.SmartLPEnabled {
 		return
 	}
@@ -247,8 +248,24 @@ func (s *SmartLPMonitor) runWebsocket(wsURL string) {
 	scanner := newSmartLPReceiptScanner(chain, callTimeout, debug, v3Managers, v4PoolManager)
 
 	backoff := 1 * time.Second
+	var lastURL string
 	for {
+		eff, _ := rpcpool.Default().EffectiveURL(context.Background(), "bsc", rpcpool.TransportWS)
+		wsURL := strings.TrimSpace(eff.URL)
+		if wsURL == "" {
+			log.Println("[SmartLP] websocket url not configured; stopping websocket monitor")
+			return
+		}
+		if lastURL != "" && wsURL != lastURL {
+			log.Printf("[SmartLP] websocket rpc switched %s -> %s", rpcpool.MaskURL(lastURL), rpcpool.MaskURL(wsURL))
+		}
+		lastURL = wsURL
+
 		if err := s.runWebsocketSession(wsURL, monitorAddrList, monitorAddrs, scanner); err != nil {
+			// If WS endpoint is DB-backed, mark it unhealthy to enable failover.
+			if eff.Source == rpcpool.SourceDB && eff.Endpoint != nil {
+				_ = disableEndpointOnSessionError(eff.Endpoint.ID, err)
+			}
 			select {
 			case <-s.stopChan:
 				log.Println("[SmartLP] websocket monitor stopped")
@@ -2550,13 +2567,18 @@ func smartLPWebsocketURL() string {
 	if config.AppConfig == nil {
 		return ""
 	}
-	wsURL := strings.TrimSpace(config.AppConfig.BSCRpcWSURL)
-	if wsURL != "" {
-		return wsURL
+	eff, _ := rpcpool.Default().EffectiveURL(context.Background(), "bsc", rpcpool.TransportWS)
+	return strings.TrimSpace(eff.URL)
+}
+
+func disableEndpointOnSessionError(endpointID uint, err error) error {
+	m := rpcpool.Default()
+	if m == nil {
+		return nil
 	}
-	rpcURL := strings.TrimSpace(config.AppConfig.BSCRpcURL)
-	if strings.HasPrefix(rpcURL, "ws://") || strings.HasPrefix(rpcURL, "wss://") {
-		return rpcURL
+	if rpcpool.IsQuotaExhaustedError(err) {
+		return m.DisableUntilNextMonth(context.Background(), endpointID)
 	}
-	return ""
+	until := time.Now().Add(10 * time.Minute)
+	return m.DisableEndpoint(context.Background(), endpointID, until, rpcpool.ReasonHealthFail)
 }

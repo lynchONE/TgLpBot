@@ -817,6 +817,71 @@ export async function updateSystemConfig({ apiBaseUrl, initData, config, signal 
 
 // 黑名单 API
 
+// RPC Pool (Admin)
+
+async function adminRPCPoolRequest({ apiBaseUrl, payload, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/admin?endpoint=rpc_pool`;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload || {}),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
+export async function fetchAdminRPCPool({ apiBaseUrl, initData, signal }) {
+    return adminRPCPoolRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'list' },
+        signal,
+    });
+}
+
+export async function addAdminRPCEndpoint({ apiBaseUrl, initData, chain, transport, url, setCurrent, signal }) {
+    return adminRPCPoolRequest({
+        apiBaseUrl,
+        payload: {
+            initData,
+            action: 'add',
+            chain,
+            transport,
+            url,
+            set_current: Boolean(setCurrent),
+        },
+        signal,
+    });
+}
+
+export async function switchAdminRPCEndpoint({ apiBaseUrl, initData, endpointId, signal }) {
+    return adminRPCPoolRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'switch', endpoint_id: Number(endpointId) },
+        signal,
+    });
+}
+
+export async function disableAdminRPCEndpointNextMonth({ apiBaseUrl, initData, endpointId, signal }) {
+    return adminRPCPoolRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'disable', endpoint_id: Number(endpointId), disable_next_month: true },
+        signal,
+    });
+}
+
+export async function enableAdminRPCEndpoint({ apiBaseUrl, initData, endpointId, signal }) {
+    return adminRPCPoolRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'enable', endpoint_id: Number(endpointId) },
+        signal,
+    });
+}
+
 export async function fetchBlacklist({ apiBaseUrl, initData, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/trading?endpoint=blacklist&initData=${encodeURIComponent(initData)}`;

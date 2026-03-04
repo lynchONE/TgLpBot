@@ -5,6 +5,7 @@ import (
 	"TgLpBot/base/clickhouse"
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
+	"TgLpBot/base/rpcpool"
 	"TgLpBot/base/timeutil"
 	"TgLpBot/service/bot"
 	"TgLpBot/service/wallet"
@@ -14,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 func main() {
@@ -41,6 +43,8 @@ func main() {
 		log.Fatalf("❌ MySQL 初始化失败: %v", err)
 	}
 	defer database.CloseMySQL()
+	rpcpool.StartDefaultHealthChecker(45 * time.Second)
+	defer rpcpool.StopDefaultHealthChecker()
 
 	// Security: migrate any legacy plaintext wallet private keys to encrypted storage.
 	ws := wallet.NewWalletService()
@@ -97,6 +101,8 @@ func main() {
 	}
 	log.Println("========================================")
 	defer blockchain.CloseBlockchains()
+	blockchain.StartRPCPoolRefresher(30 * time.Second)
+	defer blockchain.StopRPCPoolRefresher()
 
 	// Create and start bot
 	log.Println("========================================")
@@ -122,8 +128,10 @@ func main() {
 		log.Println("🛑 收到停止信号，正在优雅关闭...")
 		log.Println("========================================")
 		telegramBot.Stop()
+		rpcpool.StopDefaultHealthChecker()
 		database.CloseMySQL()
 		database.CloseRedis()
+		blockchain.StopRPCPoolRefresher()
 		blockchain.CloseBlockchains()
 		log.Println("✅ 服务已停止")
 		os.Exit(0)

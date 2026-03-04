@@ -74,6 +74,7 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/admin/online_users", s.handleAdminOnlineUsers)
 	mux.HandleFunc("/api/admin/active_tasks", s.handleAdminActiveTasks)
 	mux.HandleFunc("/api/admin/user_access", s.handleAdminUserAccess)
+	mux.HandleFunc("/api/admin/rpc_pool", s.handleAdminRPCPool)
 	mux.HandleFunc("/api/blacklist", handleBlacklist)
 	mux.HandleFunc("/api/cooldowns", handleCooldowns)
 	mux.HandleFunc("/api/ws", s.handleWebSocket)

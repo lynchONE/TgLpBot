@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import AdminOnlineUsers from './AdminOnlineUsers.jsx';
 import AdminActiveTasks from './AdminActiveTasks.jsx';
+import AdminRPCPool from './AdminRPCPool.jsx';
 import SystemConfigCard from './SystemConfigCard.jsx';
 import PositionCard from './PositionCard.jsx';
 import { SkeletonList, SkeletonPositionCard } from './Skeleton.jsx';
@@ -39,6 +40,7 @@ const ADMIN_TABS = [
     { key: 'active_tasks', label: '活跃任务' },
     { key: 'user_detail', label: '用户详情' },
     { key: 'system_config', label: '系统配置' },
+    { key: 'rpc_pool', label: 'RPC' },
 ];
 
 /**
@@ -334,6 +336,16 @@ export default function AdminPage({
             {/* 系统配置页面 */}
             {activeTab === 'system_config' && (
                 <SystemConfigCard apiBaseUrl={apiBaseUrl} initData={initData} onNotice={onNotice} />
+            )}
+
+            {activeTab === 'rpc_pool' && (
+                <AdminRPCPool
+                    apiBaseUrl={apiBaseUrl}
+                    initData={initData}
+                    hasInitData={hasInitData}
+                    pollIntervalSec={pollIntervalSec}
+                    onNotice={onNotice}
+                />
             )}
 
             {/* 用户详情页面 */}
