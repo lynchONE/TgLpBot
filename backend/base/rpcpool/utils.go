@@ -16,6 +16,9 @@ func validateURLForTransport(raw string, transport string) error {
 	if raw == "" {
 		return fmt.Errorf("rpc url is empty")
 	}
+	if len(raw) > 512 {
+		return fmt.Errorf("rpc url too long (max 512 chars)")
+	}
 
 	u, err := url.Parse(raw)
 	if err != nil {
