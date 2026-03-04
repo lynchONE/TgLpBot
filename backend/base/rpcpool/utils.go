@@ -43,6 +43,40 @@ func validateURLForTransport(raw string, transport string) error {
 	return nil
 }
 
+func deriveNameFromURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	if u.Host == "" {
+		return ""
+	}
+	host := strings.TrimSpace(u.Host)
+	// Safety: keep derived default names reasonably short (DB column is varchar(64)).
+	if len(host) > 64 {
+		host = host[:64]
+	}
+	return host
+}
+
+func normalizeEndpointName(name string, rpcURL string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = deriveNameFromURL(rpcURL)
+	}
+	if name == "" {
+		return "", nil
+	}
+	if len(name) > 64 {
+		return "", fmt.Errorf("rpc name too long (max 64 chars)")
+	}
+	return name, nil
+}
+
 func truncateString(s string, max int) string {
 	s = strings.TrimSpace(s)
 	if max <= 0 || len(s) <= max {

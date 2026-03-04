@@ -15,11 +15,12 @@ import (
 
 type adminRPCPoolRequest struct {
 	InitData string `json:"initData"`
-	Action   string `json:"action"` // list | add | switch | disable | enable
+	Action   string `json:"action"` // list | add | rename | switch | disable | enable
 
 	EndpointID uint   `json:"endpoint_id,omitempty"`
 	Chain      string `json:"chain,omitempty"`
 	Transport  string `json:"transport,omitempty"` // http | ws
+	Name       string `json:"name,omitempty"`
 	URL        string `json:"url,omitempty"`
 	SetCurrent bool   `json:"set_current,omitempty"`
 
@@ -32,6 +33,7 @@ type adminRPCEndpointDTO struct {
 	ID        uint   `json:"id"`
 	Chain     string `json:"chain"`
 	Transport string `json:"transport"`
+	Name      string `json:"name,omitempty"`
 
 	URL       string `json:"url"`
 	URLMasked string `json:"url_masked"`
@@ -148,9 +150,26 @@ func (s *Server) handleAdminRPCPool(w http.ResponseWriter, r *http.Request) {
 	case "add":
 		chain := strings.TrimSpace(req.Chain)
 		transport := strings.TrimSpace(req.Transport)
+		name := strings.TrimSpace(req.Name)
 		url := strings.TrimSpace(req.URL)
-		_, err := mgr.AddEndpoint(ctx, chain, transport, url, req.SetCurrent)
+		_, err := mgr.AddEndpoint(ctx, chain, transport, name, url, req.SetCurrent)
 		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeRPCPoolList(w, ctx)
+		return
+	case "rename":
+		if req.EndpointID == 0 {
+			http.Error(w, "endpoint_id required", http.StatusBadRequest)
+			return
+		}
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
+			http.Error(w, "name required", http.StatusBadRequest)
+			return
+		}
+		if err := mgr.RenameEndpoint(ctx, req.EndpointID, name); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -242,6 +261,7 @@ func writeRPCPoolList(w http.ResponseWriter, ctx context.Context) {
 				ID:                  ep.ID,
 				Chain:               ep.Chain,
 				Transport:           ep.Transport,
+				Name:                ep.Name,
 				URL:                 ep.URL,
 				URLMasked:           rpcpool.MaskURL(ep.URL),
 				IsCurrent:           ep.IsCurrent,

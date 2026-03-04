@@ -843,7 +843,7 @@ export async function fetchAdminRPCPool({ apiBaseUrl, initData, signal }) {
     });
 }
 
-export async function addAdminRPCEndpoint({ apiBaseUrl, initData, chain, transport, url, setCurrent, signal }) {
+export async function addAdminRPCEndpoint({ apiBaseUrl, initData, chain, transport, name, url, setCurrent, signal }) {
     return adminRPCPoolRequest({
         apiBaseUrl,
         payload: {
@@ -851,9 +851,18 @@ export async function addAdminRPCEndpoint({ apiBaseUrl, initData, chain, transpo
             action: 'add',
             chain,
             transport,
+            name,
             url,
             set_current: Boolean(setCurrent),
         },
+        signal,
+    });
+}
+
+export async function renameAdminRPCEndpoint({ apiBaseUrl, initData, endpointId, name, signal }) {
+    return adminRPCPoolRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'rename', endpoint_id: Number(endpointId), name },
         signal,
     });
 }

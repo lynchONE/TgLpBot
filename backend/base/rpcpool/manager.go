@@ -194,12 +194,13 @@ func (m *Manager) EffectiveURL(ctx context.Context, chain string, transport stri
 	return Effective{Source: SourceEnv, URL: envURL}, nil
 }
 
-func (m *Manager) AddEndpoint(ctx context.Context, chain string, transport string, url string, setCurrent bool) (*models.RpcEndpoint, error) {
+func (m *Manager) AddEndpoint(ctx context.Context, chain string, transport string, name string, url string, setCurrent bool) (*models.RpcEndpoint, error) {
 	if m == nil || m.store == nil {
 		return nil, fmt.Errorf("rpcpool store not available")
 	}
 	chain = config.NormalizeChain(chain)
 	transport = NormalizeTransport(transport)
+	name = strings.TrimSpace(name)
 	url = strings.TrimSpace(url)
 	if err := validateChainTransport(chain, transport); err != nil {
 		return nil, err
@@ -207,10 +208,15 @@ func (m *Manager) AddEndpoint(ctx context.Context, chain string, transport strin
 	if err := validateURLForTransport(url, transport); err != nil {
 		return nil, err
 	}
+	name, err := normalizeEndpointName(name, url)
+	if err != nil {
+		return nil, err
+	}
 
 	ep := &models.RpcEndpoint{
 		Chain:     chain,
 		Transport: transport,
+		Name:      name,
 		URL:       url,
 		IsCurrent: false,
 	}
@@ -241,6 +247,27 @@ func (m *Manager) SwitchCurrent(ctx context.Context, endpointID uint) error {
 		return fmt.Errorf("rpc endpoint is unavailable")
 	}
 	return m.store.SetCurrent(ctx, ep.Chain, ep.Transport, endpointID)
+}
+
+func (m *Manager) RenameEndpoint(ctx context.Context, endpointID uint, name string) error {
+	if m == nil || m.store == nil {
+		return fmt.Errorf("rpcpool store not available")
+	}
+	ep, err := m.store.GetByID(ctx, endpointID)
+	if err != nil {
+		return err
+	}
+	if ep == nil {
+		return fmt.Errorf("rpc endpoint not found")
+	}
+	name, err = normalizeEndpointName(name, ep.URL)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("rpc name is empty")
+	}
+	return m.store.UpdateByID(ctx, endpointID, map[string]interface{}{"Name": name})
 }
 
 func (m *Manager) DisableEndpoint(ctx context.Context, endpointID uint, until time.Time, reason string) error {

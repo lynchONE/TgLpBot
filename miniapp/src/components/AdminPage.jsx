@@ -40,7 +40,7 @@ const ADMIN_TABS = [
     { key: 'active_tasks', label: '活跃任务' },
     { key: 'user_detail', label: '用户详情' },
     { key: 'system_config', label: '系统配置' },
-    { key: 'rpc_pool', label: 'RPC 节点池' },
+    { key: 'rpc_pool', label: 'RPC' },
 ];
 
 /**

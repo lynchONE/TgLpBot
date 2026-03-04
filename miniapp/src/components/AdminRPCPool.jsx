@@ -4,6 +4,7 @@ import {
     disableAdminRPCEndpointNextMonth,
     enableAdminRPCEndpoint,
     fetchAdminRPCPool,
+    renameAdminRPCEndpoint,
     switchAdminRPCEndpoint,
 } from '../lib/api';
 
@@ -173,10 +174,21 @@ function formatTransport(transport) {
 
 function formatSource(source) {
     const v = String(source || '').toLowerCase();
+    if (v === 'db') return '节点池';
     if (v === 'pool') return '节点池';
     if (v === 'env') return '环境变量';
     if (v === 'none') return '无';
     return String(source || '--');
+}
+
+function formatDisabledReason(reason) {
+    const raw = String(reason || '').trim();
+    if (!raw) return '';
+    const v = raw.toLowerCase();
+    if (v === 'quota_exhausted') return '额度用尽';
+    if (v === 'health_fail') return '探活失败';
+    if (v === 'manual') return '手动禁用';
+    return raw;
 }
 
 function isUnavailable(endpoint) {
@@ -189,6 +201,259 @@ function maskUrl(url, fallbackMasked) {
     return String(fallbackMasked || s);
 }
 
+function deriveNameFromUrl(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return '';
+    try {
+        const u = new URL(s);
+        return String(u.host || '').trim();
+    } catch {
+        return '';
+    }
+}
+
+function endpointDisplayName(ep) {
+    const name = String(ep?.name || '').trim();
+    if (name) return name;
+    const derived = deriveNameFromUrl(ep?.url);
+    if (derived) return derived;
+    if (ep?.id) return `#${ep.id}`;
+    return '--';
+}
+
+function EndpointCard({ ep, onSwitch, onDisableNextMonth, onEnable, onRename }) {
+    const [detailsOpen, setDetailsOpen] = useState(false);
+    const [nameDraft, setNameDraft] = useState(() => String(ep?.name || '').trim() || deriveNameFromUrl(ep?.url) || '');
+    const [renaming, setRenaming] = useState(false);
+    const [renameError, setRenameError] = useState('');
+
+    useEffect(() => {
+        setNameDraft(String(ep?.name || '').trim() || deriveNameFromUrl(ep?.url) || '');
+    }, [ep?.id, ep?.name, ep?.url]);
+
+    const displayName = endpointDisplayName(ep);
+    const unnamed = !String(ep?.name || '').trim();
+
+    return (
+        <div className="rounded-2xl border border-zinc-200 bg-white/60 p-3 shadow-sm dark:border-white/10 dark:bg-white/5">
+            <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/90 truncate">
+                            {displayName}
+                        </div>
+                        <div className="text-[11px] text-zinc-400 dark:text-white/30">#{ep?.id || '--'}</div>
+                        {unnamed && (
+                            <span className="rounded-lg bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-500/25 dark:text-amber-200">
+                                未命名
+                            </span>
+                        )}
+                        {ep?.is_current && (
+                            <span className="rounded-lg bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-500/25 dark:text-emerald-300">
+                                当前
+                            </span>
+                        )}
+                        {isUnavailable(ep) ? (
+                            <span className="rounded-lg bg-red-500/10 px-2 py-0.5 text-[11px] font-semibold text-red-700 ring-1 ring-red-500/25 dark:text-red-200">
+                                不可用
+                            </span>
+                        ) : (
+                            <span className="rounded-lg bg-zinc-500/10 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 ring-1 ring-zinc-500/25 dark:text-white/70">
+                                可用
+                            </span>
+                        )}
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40 truncate">
+                        {maskUrl(ep?.url, ep?.url_masked)}
+                    </div>
+
+                    {detailsOpen && (
+                        <div className="mt-2 rounded-xl border border-zinc-200 bg-white/50 p-3 text-[11px] text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-white/50">
+                            <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                                <div>延迟：{Number(ep?.last_latency_ms || 0)} ms</div>
+                                <div>连续失败：{Number(ep?.consecutive_failures || 0)}</div>
+                                <div>最近检测：{formatTime(ep?.last_checked_at)}</div>
+                                <div>最近成功：{formatTime(ep?.last_success_at)}</div>
+                                {ep?.disabled_until && (
+                                    <div className="col-span-2">
+                                        禁用至：{formatTime(ep?.disabled_until)} {ep?.disabled_reason ? `(${formatDisabledReason(ep.disabled_reason)})` : ''}
+                                    </div>
+                                )}
+                                {ep?.last_error && (
+                                    <div className="col-span-2 text-red-700/80 dark:text-red-200/80">
+                                        最近错误：{String(ep.last_error)}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="mt-3">
+                                <div className="text-[11px] font-semibold text-zinc-700 dark:text-white/70">名称</div>
+                                <div className="mt-1 flex items-center gap-2">
+                                    <input
+                                        value={nameDraft}
+                                        onChange={(e) => setNameDraft(e.target.value)}
+                                        placeholder="例如：备用1 / xxx-provider"
+                                        className="flex-1 min-w-0 rounded-xl border border-zinc-200 bg-white/60 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none focus:border-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={async () => {
+                                            const nextName = String(nameDraft || '').trim();
+                                            if (!nextName) {
+                                                setRenameError('请填写名称');
+                                                return;
+                                            }
+                                            setRenaming(true);
+                                            setRenameError('');
+                                            try {
+                                                await onRename?.(ep?.id, nextName);
+                                            } catch (e) {
+                                                setRenameError(String(e?.message || e));
+                                            } finally {
+                                                setRenaming(false);
+                                            }
+                                        }}
+                                        disabled={renaming}
+                                        className={`shrink-0 rounded-xl px-3 py-2 text-xs font-semibold ring-1 transition ${renaming
+                                            ? 'cursor-not-allowed bg-zinc-200 text-zinc-500 ring-zinc-200 dark:bg-white/10 dark:text-white/30 dark:ring-white/10'
+                                            : 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 hover:bg-emerald-500/15 dark:text-emerald-200'
+                                            }`}
+                                    >
+                                        {renaming ? '保存中...' : '保存'}
+                                    </button>
+                                </div>
+                                <div className="mt-1 text-[10px] text-zinc-400 dark:text-white/30">最多 64 字，用于区分节点</div>
+                                {renameError && (
+                                    <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-[11px] text-red-700 dark:text-red-200">
+                                        {renameError}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                <div className="shrink-0 flex flex-col gap-2">
+                    <button
+                        type="button"
+                        onClick={() => onSwitch?.(ep?.id)}
+                        disabled={isUnavailable(ep)}
+                        className={`rounded-xl px-3 py-2 text-xs font-semibold ring-1 transition ${isUnavailable(ep)
+                            ? 'cursor-not-allowed bg-zinc-200 text-zinc-500 ring-zinc-200 dark:bg-white/10 dark:text-white/30 dark:ring-white/10'
+                            : 'bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-100 dark:bg-white/5 dark:text-white/80 dark:ring-white/10 dark:hover:bg-white/10'
+                            }`}
+                    >
+                        切换
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => onDisableNextMonth?.(ep?.id)}
+                        className="rounded-xl px-3 py-2 text-xs font-semibold ring-1 bg-red-500/10 text-red-700 ring-red-500/20 hover:bg-red-500/15 dark:text-red-200"
+                    >
+                        禁用到下月
+                    </button>
+                    {isUnavailable(ep) && (
+                        <button
+                            type="button"
+                            onClick={() => onEnable?.(ep?.id)}
+                            className="rounded-xl px-3 py-2 text-xs font-semibold ring-1 bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 hover:bg-emerald-500/15 dark:text-emerald-200"
+                        >
+                            启用
+                        </button>
+                    )}
+                    <button
+                        type="button"
+                        onClick={() => setDetailsOpen((v) => !v)}
+                        className="rounded-xl px-3 py-2 text-xs font-semibold ring-1 bg-zinc-100 text-zinc-700 ring-zinc-200 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/80 dark:ring-white/10 dark:hover:bg-white/10"
+                    >
+                        {detailsOpen ? '收起详情' : '详情'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function TransportSection({ group, transport, onSwitch, onDisableNextMonth, onEnable, onRename }) {
+    const [open, setOpen] = useState(false);
+
+    const endpoints = group?.endpoints || [];
+    const unavailableCount = endpoints.filter((ep) => isUnavailable(ep)).length;
+    const availableCount = Math.max(0, endpoints.length - unavailableCount);
+
+    const effID = Number(group?.effective_endpoint_id || 0);
+    const effEndpoint = effID ? endpoints.find((ep) => Number(ep?.id || 0) === effID) : null;
+    const effName = effEndpoint ? endpointDisplayName(effEndpoint) : '';
+    const effURL = maskUrl(group?.effective_url, group?.effective_url_masked);
+    const effectiveLabel = effName || (effURL && effURL !== '--' ? effURL : '未配置');
+
+    return (
+        <div className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none">
+            <button
+                type="button"
+                onClick={() => setOpen((v) => !v)}
+                className="w-full flex items-start justify-between gap-3 text-left"
+            >
+                <div className="min-w-0">
+                    <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">{formatTransport(transport)}</div>
+                    <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40 truncate">
+                        当前：{effectiveLabel}（{formatSource(group?.effective_source)}）
+                    </div>
+                    {effName && effURL && effURL !== '--' && (
+                        <div className="mt-0.5 text-[11px] text-zinc-400 dark:text-white/30 truncate">
+                            {effURL}
+                        </div>
+                    )}
+                </div>
+
+                <div className="shrink-0 flex items-center gap-2">
+                    <div className="text-[11px] font-semibold text-zinc-600 dark:text-white/50">
+                        可用 {availableCount} / 不可用 {unavailableCount}
+                    </div>
+                    <span className={`shrink-0 transition ${open ? 'rotate-180' : ''}`} aria-hidden="true">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                            <path
+                                d="M7 10l5 5 5-5"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                            />
+                        </svg>
+                    </span>
+                </div>
+            </button>
+
+            {open && (
+                <div className="mt-3 space-y-2">
+                    {group?.env_url && (
+                        <div className="rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 text-[11px] text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/40">
+                            环境变量兜底：{maskUrl(group.env_url, group.env_url_masked)}
+                        </div>
+                    )}
+
+                    {endpoints.length === 0 && (
+                        <div className="rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                            节点池为空（如配置了环境变量，会使用环境变量兜底）
+                        </div>
+                    )}
+
+                    {endpoints.map((ep) => (
+                        <EndpointCard
+                            key={ep.id}
+                            ep={ep}
+                            onSwitch={onSwitch}
+                            onDisableNextMonth={onDisableNextMonth}
+                            onEnable={onEnable}
+                            onRename={onRename}
+                        />
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
 export default function AdminRPCPool({ apiBaseUrl, initData, hasInitData, pollIntervalSec = 15, onNotice }) {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -199,11 +464,36 @@ export default function AdminRPCPool({ apiBaseUrl, initData, hasInitData, pollIn
     const [draft, setDraft] = useState({
         chain: 'bsc',
         transport: 'http',
+        name: '',
         url: '',
         setCurrent: false,
     });
 
     const groups = useMemo(() => data?.groups || [], [data]);
+    const groupMap = useMemo(() => {
+        const out = {};
+        for (const g of groups) {
+            const chain = String(g?.chain || '').toLowerCase();
+            const transport = String(g?.transport || '').toLowerCase();
+            if (!chain || !transport) continue;
+            out[`${chain}:${transport}`] = g;
+        }
+        return out;
+    }, [groups]);
+    const chains = useMemo(() => {
+        const found = new Set(groups.map((g) => String(g?.chain || '').toLowerCase()).filter(Boolean));
+        const ordered = [];
+        for (const k of ['bsc', 'base']) {
+            if (found.has(k)) {
+                ordered.push(k);
+                found.delete(k);
+            }
+        }
+        for (const rest of Array.from(found).sort()) {
+            ordered.push(rest);
+        }
+        return ordered;
+    }, [groups]);
 
     const load = useCallback(async () => {
         if (!hasInitData) return;
@@ -233,6 +523,7 @@ export default function AdminRPCPool({ apiBaseUrl, initData, hasInitData, pollIn
 
     const handleAdd = useCallback(async () => {
         if (!hasInitData) return;
+        const name = String(draft.name || '').trim();
         const url = String(draft.url || '').trim();
         if (!url) {
             setAddError('请填写 URL');
@@ -246,10 +537,11 @@ export default function AdminRPCPool({ apiBaseUrl, initData, hasInitData, pollIn
                 initData,
                 chain: draft.chain,
                 transport: draft.transport,
+                name,
                 url,
                 setCurrent: Boolean(draft.setCurrent),
             });
-            setDraft((prev) => ({ ...prev, url: '', setCurrent: false }));
+            setDraft((prev) => ({ ...prev, name: '', url: '', setCurrent: false }));
             onNotice?.('已添加 RPC 节点');
             load();
         } catch (e) {
@@ -292,6 +584,17 @@ export default function AdminRPCPool({ apiBaseUrl, initData, hasInitData, pollIn
         }
     }, [apiBaseUrl, initData, hasInitData, onNotice, load]);
 
+    const handleRename = useCallback(async (endpointId, name) => {
+        if (!hasInitData) return;
+        const id = Number(endpointId || 0);
+        if (!id) throw new Error('缺少 endpointId');
+        const nextName = String(name || '').trim();
+        if (!nextName) throw new Error('请填写名称');
+        await renameAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: id, name: nextName });
+        onNotice?.('名称已更新');
+        load();
+    }, [apiBaseUrl, initData, hasInitData, onNotice, load]);
+
     return (
         <div className="space-y-4">
             <div className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none">
@@ -325,7 +628,7 @@ export default function AdminRPCPool({ apiBaseUrl, initData, hasInitData, pollIn
             <div className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none">
                 <div className="text-sm font-semibold text-zinc-900 dark:text-white/90 mb-3">添加节点</div>
                 <div className="grid grid-cols-1 gap-3">
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                         <label className="space-y-1">
                             <div className="text-[11px] font-semibold text-zinc-600 dark:text-white/60">链</div>
                             <FancySelect
@@ -349,15 +652,34 @@ export default function AdminRPCPool({ apiBaseUrl, initData, hasInitData, pollIn
                             />
                         </label>
                     </div>
-                    <label className="space-y-1">
-                        <div className="text-[11px] font-semibold text-zinc-600 dark:text-white/60">URL</div>
-                        <input
-                            value={draft.url}
-                            onChange={(e) => setDraft((p) => ({ ...p, url: e.target.value }))}
-                            placeholder={draft.transport === 'ws' ? 'wss://...' : 'https://...'}
-                            className="w-full rounded-xl border border-zinc-200 bg-white/60 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none focus:border-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
-                        />
-                    </label>
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <label className="space-y-1">
+                            <div className="text-[11px] font-semibold text-zinc-600 dark:text-white/60">名称</div>
+                            <input
+                                value={draft.name}
+                                onChange={(e) => setDraft((p) => ({ ...p, name: e.target.value }))}
+                                placeholder="例如：主用 / 备用1"
+                                className="w-full rounded-xl border border-zinc-200 bg-white/60 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none focus:border-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
+                            />
+                            <div className="text-[10px] text-zinc-400 dark:text-white/30">最多 64 字；留空会自动使用域名</div>
+                        </label>
+                        <label className="space-y-1">
+                            <div className="text-[11px] font-semibold text-zinc-600 dark:text-white/60">URL</div>
+                            <input
+                                value={draft.url}
+                                onChange={(e) =>
+                                    setDraft((p) => {
+                                        const nextUrl = e.target.value;
+                                        const keepName = String(p.name || '').trim();
+                                        const derived = deriveNameFromUrl(nextUrl);
+                                        return { ...p, url: nextUrl, name: keepName ? p.name : (derived || p.name) };
+                                    })}
+                                placeholder={draft.transport === 'ws' ? 'wss://...' : 'https://...'}
+                                className="w-full rounded-xl border border-zinc-200 bg-white/60 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none focus:border-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
+                            />
+                        </label>
+                    </div>
                     <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-white/60">
                         <input
                             type="checkbox"
@@ -389,111 +711,43 @@ export default function AdminRPCPool({ apiBaseUrl, initData, hasInitData, pollIn
                 </div>
             </div>
 
-            {groups.map((g) => (
+            {chains.map((chain) => (
                 <div
-                    key={`${g.chain}:${g.transport}`}
+                    key={chain}
                     className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none"
                 >
                     <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                            <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">
-                                {formatChain(g.chain)} / {formatTransport(g.transport)}
-                            </div>
+                            <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">{formatChain(chain)}</div>
                             <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
-                                当前：{maskUrl(g.effective_url, g.effective_url_masked)}（{formatSource(g.effective_source)}）
+                                HTTP / WebSocket 分开展示，默认折叠；点开后可查看节点详情/重命名/手动切换
                             </div>
-                            {g.env_url && (
-                                <div className="mt-0.5 text-[11px] text-zinc-400 dark:text-white/30">
-                                    环境变量：{maskUrl(g.env_url, g.env_url_masked)}
-                                </div>
-                            )}
                         </div>
                     </div>
 
-                    <div className="mt-3 space-y-2">
-                        {(g.endpoints || []).length === 0 && (
-                            <div className="rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                                节点池为空（如配置了环境变量，会使用环境变量兜底）
-                            </div>
-                        )}
-
-                        {(g.endpoints || []).map((ep) => (
-                            <div
-                                key={ep.id}
-                                className="rounded-2xl border border-zinc-200 bg-white/60 p-3 shadow-sm dark:border-white/10 dark:bg-white/5"
-                            >
-                                <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                            <div className="text-xs font-semibold text-zinc-900 dark:text-white/90 truncate">
-                                                #{ep.id} {maskUrl(ep.url, ep.url_masked)}
-                                            </div>
-                                            {ep.is_current && (
-                                                <span className="rounded-lg bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-500/25 dark:text-emerald-300">
-                                                    当前
-                                                </span>
-                                            )}
-                                            {isUnavailable(ep) ? (
-                                                <span className="rounded-lg bg-red-500/10 px-2 py-0.5 text-[11px] font-semibold text-red-700 ring-1 ring-red-500/25 dark:text-red-200">
-                                                    不可用
-                                                </span>
-                                            ) : (
-                                                <span className="rounded-lg bg-zinc-500/10 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 ring-1 ring-zinc-500/25 dark:text-white/70">
-                                                    可用
-                                                </span>
-                                            )}
-                                        </div>
-
-                                        <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-zinc-500 dark:text-white/40">
-                                            <div>延迟：{Number(ep.last_latency_ms || 0)} ms</div>
-                                            <div>连续失败：{Number(ep.consecutive_failures || 0)}</div>
-                                            <div>最近检测：{formatTime(ep.last_checked_at)}</div>
-                                            <div>最近成功：{formatTime(ep.last_success_at)}</div>
-                                            {ep.disabled_until && (
-                                                <div className="col-span-2">
-                                                    禁用至：{formatTime(ep.disabled_until)} {ep.disabled_reason ? `(${ep.disabled_reason})` : ''}
-                                                </div>
-                                            )}
-                                            {ep.last_error && (
-                                                <div className="col-span-2 text-red-700/80 dark:text-red-200/80">
-                                                    最近错误：{String(ep.last_error)}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    <div className="shrink-0 flex flex-col gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => handleSwitch(ep.id)}
-                                            disabled={isUnavailable(ep)}
-                                            className={`rounded-xl px-3 py-2 text-xs font-semibold ring-1 transition ${isUnavailable(ep)
-                                                ? 'cursor-not-allowed bg-zinc-200 text-zinc-500 ring-zinc-200 dark:bg-white/10 dark:text-white/30 dark:ring-white/10'
-                                                : 'bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-100 dark:bg-white/5 dark:text-white/80 dark:ring-white/10 dark:hover:bg-white/10'
-                                                }`}
-                                        >
-                                            切换
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleDisableNextMonth(ep.id)}
-                                            className="rounded-xl px-3 py-2 text-xs font-semibold ring-1 bg-red-500/10 text-red-700 ring-red-500/20 hover:bg-red-500/15 dark:text-red-200"
-                                        >
-                                            禁用到下月
-                                        </button>
-                                        {isUnavailable(ep) && (
-                                            <button
-                                                type="button"
-                                                onClick={() => handleEnable(ep.id)}
-                                                className="rounded-xl px-3 py-2 text-xs font-semibold ring-1 bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 hover:bg-emerald-500/15 dark:text-emerald-200"
-                                            >
-                                                启用
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
+                    <div className="mt-3 space-y-3">
+                        {['http', 'ws'].map((transport) => {
+                            const key = `${chain}:${transport}`;
+                            const g = groupMap[key] || {
+                                chain,
+                                transport,
+                                effective_source: 'none',
+                                effective_url: '',
+                                effective_url_masked: '',
+                                endpoints: [],
+                            };
+                            return (
+                                <TransportSection
+                                    key={key}
+                                    group={g}
+                                    transport={transport}
+                                    onSwitch={handleSwitch}
+                                    onDisableNextMonth={handleDisableNextMonth}
+                                    onEnable={handleEnable}
+                                    onRename={handleRename}
+                                />
+                            );
+                        })}
                     </div>
                 </div>
             ))}

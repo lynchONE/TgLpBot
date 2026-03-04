@@ -14,6 +14,7 @@ type RpcEndpoint struct {
 
 	Chain     string `gorm:"type:varchar(16);not null;index:idx_rpc_chain_transport_current,priority:1;index:idx_rpc_chain_transport_url,unique,priority:1" json:"chain"`
 	Transport string `gorm:"type:varchar(8);not null;index:idx_rpc_chain_transport_current,priority:2;index:idx_rpc_chain_transport_url,unique,priority:2" json:"transport"`
+	Name      string `gorm:"type:varchar(64);not null;default:''" json:"name"`
 	URL       string `gorm:"type:varchar(512);not null;index:idx_rpc_chain_transport_url,unique,priority:3" json:"url"`
 
 	IsCurrent bool `gorm:"not null;default:false;index:idx_rpc_chain_transport_current,priority:3" json:"is_current"`
