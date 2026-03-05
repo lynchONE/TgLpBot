@@ -135,3 +135,20 @@ export async function exchangeTelegramLogin({
     signal,
   });
 }
+
+export async function generateLoginCode({ apiBaseUrl, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/web_login?endpoint=generate_code`;
+  return requestJson(url, { method: 'POST', signal });
+}
+
+export async function checkLoginCode({ apiBaseUrl, code, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/web_login?endpoint=check_code`;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+    signal,
+  });
+}

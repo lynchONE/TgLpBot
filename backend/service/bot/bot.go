@@ -341,7 +341,7 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 // handleCommand handles bot commands
 func (b *Bot) handleCommand(message *tgbotapi.Message, user *models.User) {
 	cmd := message.Command()
-	if cmd != "start" && cmd != "help" && cmd != "cancel" {
+	if cmd != "start" && cmd != "help" && cmd != "cancel" && cmd != "weblogin" {
 		if !b.checkUserAuthorized(message.Chat.ID, user) {
 			return
 		}
@@ -380,6 +380,8 @@ func (b *Bot) handleCommand(message *tgbotapi.Message, user *models.User) {
 		b.handleAdmin(message, user)
 	case "smart_money":
 		b.handleSmartMoney(message, user)
+	case "weblogin":
+		b.handleWebLogin(message, user)
 	default:
 		b.sendMessage(message.Chat.ID, "未知命令。使用 /help 查看可用命令。")
 	}

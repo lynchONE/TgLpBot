@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   BrainCircuit,
@@ -13,15 +13,17 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import {
-  exchangeTelegramLogin,
+  checkLoginCode,
   fetchHotPools,
   fetchPoolOHLCV,
   fetchRealtimePositions,
   fetchSmartMoneyOverview,
+  generateLoginCode,
 } from './api';
 import { WEBAPP_CONFIG } from './config';
 import KlineChart from './components/KlineChart';
 import PanelShell, { EmptyState, MetricCard } from './components/PanelShell';
+import telegramLogo from './img/telegram.svg';
 import {
   DEFAULT_WIDGETS,
   WIDGETS,
@@ -50,21 +52,6 @@ const KLINE_PRESETS = [
   { key: '15m', label: '15m', timeframe: 'minute', aggregate: 15, limit: 220 },
   { key: '1h', label: '1h', timeframe: 'hour', aggregate: 1, limit: 200 },
 ];
-
-function mountTelegramWidget(containerEl, botUsername, callbackName) {
-  if (!containerEl) return;
-  containerEl.innerHTML = '';
-
-  const script = document.createElement('script');
-  script.async = true;
-  script.src = 'https://telegram.org/js/telegram-widget.js?22';
-  script.setAttribute('data-telegram-login', botUsername);
-  script.setAttribute('data-size', 'large');
-  script.setAttribute('data-radius', '8');
-  script.setAttribute('data-request-access', 'write');
-  script.setAttribute('data-onauth', callbackName);
-  containerEl.appendChild(script);
-}
 
 function storageGet(key) {
   try {
@@ -430,68 +417,68 @@ export default function App() {
     });
   }, [chain, hotPools]);
 
-  const handleLoginAuth = useCallback(
-    async (authUser) => {
-      const resp = await exchangeTelegramLogin({
-        apiBaseUrl,
-        id: authUser?.id,
-        first_name: authUser?.first_name,
-        last_name: authUser?.last_name,
-        username: authUser?.username,
-        photo_url: authUser?.photo_url,
-        auth_date: authUser?.auth_date,
-        hash: authUser?.hash,
-      });
-      const nextInitData = String(resp?.initData || '').trim();
-      if (!nextInitData) throw new Error('后端未返回 initData');
-      setInitData(nextInitData);
-      setLoginUser(resp?.user || null);
-    },
-    [apiBaseUrl]
-  );
+  const [loginCode, setLoginCode] = useState('');
+  const [loginCodeExpiry, setLoginCodeExpiry] = useState(0);
+  const pollRef = useRef(null);
 
-  const tgWidgetRef = React.useRef(null);
-  const tgWidgetMounted = React.useRef(false);
+  const handleLoginFromResp = useCallback((resp) => {
+    const nextInitData = String(resp?.initData || '').trim();
+    if (!nextInitData) throw new Error('后端未返回 initData');
+    setInitData(nextInitData);
+    setLoginUser(resp?.user || null);
+    setLoginCode('');
+  }, []);
 
+  const startCodeLogin = useCallback(async () => {
+    setLoginBusy(true);
+    setLoginError('');
+    setLoginCode('');
+    try {
+      const resp = await generateLoginCode({ apiBaseUrl });
+      if (!resp?.code) throw new Error('生成验证码失败');
+      setLoginCode(resp.code);
+      setLoginCodeExpiry(Date.now() + (resp.expires_in || 300) * 1000);
+    } catch (e) {
+      setLoginError(String(e?.message || e));
+    } finally {
+      setLoginBusy(false);
+    }
+  }, [apiBaseUrl]);
+
+  // Poll for code confirmation
   useEffect(() => {
-    if (hasInitData || loginUser) return;
-
-    const botUsername = String(WEBAPP_CONFIG.telegramBotUsername || '').trim();
-    if (!botUsername) {
-      setLoginError('缺少 VITE_TELEGRAM_BOT_USERNAME 配置');
+    if (!loginCode || hasInitData) {
+      if (pollRef.current) clearInterval(pollRef.current);
       return;
     }
 
-    const callbackName = '__tglp_telegram_login_cb';
-    window[callbackName] = async (authUser) => {
-      if (!authUser) {
-        setLoginError('已取消登录或未授权');
+    const poll = async () => {
+      if (Date.now() > loginCodeExpiry) {
+        setLoginCode('');
+        setLoginError('验证码已过期，请重新获取');
+        if (pollRef.current) clearInterval(pollRef.current);
         return;
       }
-      setLoginBusy(true);
-      setLoginError('');
       try {
-        await handleLoginAuth(authUser);
-      } catch (e) {
-        setLoginError(String(e?.message || e));
-      } finally {
-        setLoginBusy(false);
+        const resp = await checkLoginCode({ apiBaseUrl, code: loginCode });
+        if (resp?.ok && resp?.initData) {
+          handleLoginFromResp(resp);
+          if (pollRef.current) clearInterval(pollRef.current);
+        } else if (resp?.status === 'expired') {
+          setLoginCode('');
+          setLoginError('验证码已过期，请重新获取');
+          if (pollRef.current) clearInterval(pollRef.current);
+        }
+      } catch {
+        // ignore poll errors
       }
     };
 
-    const timer = setTimeout(() => {
-      if (tgWidgetRef.current && !tgWidgetMounted.current) {
-        tgWidgetMounted.current = true;
-        mountTelegramWidget(tgWidgetRef.current, botUsername, callbackName);
-      }
-    }, 0);
-
+    pollRef.current = setInterval(poll, 2000);
     return () => {
-      clearTimeout(timer);
-      delete window[callbackName];
-      tgWidgetMounted.current = false;
+      if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [handleLoginAuth, hasInitData, loginUser]);
+  }, [apiBaseUrl, handleLoginFromResp, hasInitData, loginCode, loginCodeExpiry]);
 
   const logout = useCallback(() => {
     setInitData('');
@@ -804,7 +791,7 @@ export default function App() {
         <div className="title-block">
           <div className="eyebrow">TGLPBOT WEB TERMINAL</div>
           <h1>多模块交易工作台</h1>
-          <p>右上角 Telegram 图标点击后唤起二维码登录。模块支持拖拽重排。</p>
+          <p>点击右上角 Telegram 图标获取验证码，在 Bot 中发送即可登录。模块支持拖拽重排。</p>
         </div>
 
         <div className="top-actions">
@@ -829,8 +816,28 @@ export default function App() {
                 退出
               </button>
             </div>
+          ) : loginCode ? (
+            <div className="login-code-box">
+              <div className="login-code-label">验证码</div>
+              <div className="login-code-value">{loginCode}</div>
+              <div className="login-code-hint">
+                在 Telegram 中发送: <code>/weblogin {loginCode}</code>
+              </div>
+              <button type="button" className="ghost-chip" onClick={() => { setLoginCode(''); setLoginError(''); }}>
+                取消
+              </button>
+            </div>
           ) : (
-            <div ref={tgWidgetRef} className="telegram-widget-wrap" />
+            <button
+              type="button"
+              className="telegram-icon-btn"
+              onClick={startCodeLogin}
+              disabled={loginBusy}
+              title="获取登录验证码"
+              aria-label="获取登录验证码"
+            >
+              <img src={telegramLogo} alt="Telegram" />
+            </button>
           )}
         </div>
       </header>
@@ -869,7 +876,7 @@ export default function App() {
         {!hasInitData ? (
           <div className="warning-box">
             <AlertTriangle size={14} />
-            <span>请点击右上角 Telegram 图标，扫码完成登录后再查看数据。</span>
+            <span>请点击右上角 Telegram 图标获取验证码，在 Bot 中发送 /weblogin 验证码 完成登录。</span>
           </div>
         ) : null}
       </section>

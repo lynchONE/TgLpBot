@@ -65,6 +65,12 @@ func (s *Server) handleWebLogin(w http.ResponseWriter, r *http.Request) {
 	case "", "telegram_login":
 		s.handleTelegramLogin(w, r)
 		return
+	case "generate_code":
+		s.handleGenerateLoginCode(w, r)
+		return
+	case "check_code":
+		s.handleCheckLoginCode(w, r)
+		return
 	default:
 		http.Error(w, "invalid endpoint", http.StatusBadRequest)
 		return
