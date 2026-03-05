@@ -1,7 +1,7 @@
 function fallbackApiBaseUrl() {
   const host = window.location.hostname;
   if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:8080';
-  return '';
+  return window.location.origin;
 }
 
 function normalizeChain(value) {
