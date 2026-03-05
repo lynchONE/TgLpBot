@@ -572,11 +572,8 @@ body {
 }
 
 .workbench.layout-work-3 {
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr;
-}
-.workbench.layout-work-3 > .module-slot:first-child {
-  grid-row: 1 / -1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: 1fr;
 }
 
 .workbench.layout-work-4 {
@@ -984,7 +981,10 @@ body {
     grid-template-rows: none;
   }
   /* Work mode keeps 2-col on medium screens */
-  .workbench.layout-work-3,
+  .workbench.layout-work-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: 1fr;
+  }
   .workbench.layout-work-4 {
     grid-template-columns: 1fr 1fr;
     grid-template-rows: 1fr 1fr;
