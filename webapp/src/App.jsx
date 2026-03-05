@@ -164,6 +164,7 @@ export default function App() {
   });
 
   const [keyword, setKeyword] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
   const [hotPools, setHotPools] = useState([]);
   const [hotPoolsLoading, setHotPoolsLoading] = useState(false);
   const [hotPoolsError, setHotPoolsError] = useState('');
@@ -591,11 +592,17 @@ export default function App() {
               {item.label}
             </button>
           ))}
+          <button type="button" className={`sort-tab search-toggle ${searchOpen ? 'active' : ''}`} onClick={() => setSearchOpen((v) => !v)}>
+            <Search size={12} />
+          </button>
         </div>
-        <div className="search-row">
-          <Search size={14} />
-          <input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="搜索交易对/地址" />
-        </div>
+
+        {searchOpen && (
+          <div className="search-row">
+            <Search size={14} />
+            <input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="搜索交易对/地址" autoFocus />
+          </div>
+        )}
 
         {hotPoolsError ? <div className="error-text">{hotPoolsError}</div> : null}
 
@@ -640,6 +647,7 @@ export default function App() {
                           if (factoryName) return <span className="badge badge-dex">{factoryName}</span>;
                           return null;
                         })()}
+                        {userPosUsd > 0 && <span className="badge badge-pos">持仓 {formatUsdCompact(userPosUsd)}</span>}
                       </div>
                       <div className="pool-card-addr">
                         <span>{shortAddress(addr, 6, 4)}</span>
@@ -647,10 +655,11 @@ export default function App() {
                           <svg viewBox="0 0 24 24" fill="currentColor" width="12" height="12"><path d="M16 1H4a2 2 0 00-2 2v14h2V3h12V1zm3 4H8a2 2 0 00-2 2v14a2 2 0 002 2h11a2 2 0 002-2V7a2 2 0 00-2-2zm0 16H8V7h11v14z"/></svg>
                         </button>
                       </div>
-                      <div className="pool-card-stats">
-                        {volume > 0 && <span>交易量: <b>{formatUsdCompact(volume)}</b></span>}
-                        {tvl > 0 && <span>TVL: <b>{formatUsdCompact(tvl)}</b></span>}
-                        {txCount > 0 && <span>笔数: <b>{txCount.toLocaleString()}</b></span>}
+                      <div className="pool-card-stats-row">
+                        {volume > 0 && <span>Vol <b>{formatUsdCompact(volume)}</b></span>}
+                        {tvl > 0 && <span>TVL <b>{formatUsdCompact(tvl)}</b></span>}
+                        {txCount > 0 && <span>Txns <b>{txCount.toLocaleString()}</b></span>}
+                        {feeRate > 0 && <span className="stat-purple">Fee/TVL <b>{feeRate.toFixed(3)}%</b></span>}
                       </div>
                     </div>
                     <div className="pool-card-right">
@@ -664,20 +673,7 @@ export default function App() {
                           {priceDisplay}
                         </div>
                       )}
-                      {hotSort !== 'fee_rate' && feeRate > 0 && (
-                        <div className="pool-card-secondary">{feeRate.toFixed(3)}%</div>
-                      )}
-                      {hotSort === 'fee_rate' && totalFees > 0 && (
-                        <div className="pool-card-secondary">{formatUsdCompact(totalFees)}</div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="pool-card-bottom">
-                    <div className="pool-card-badges">
-                      {userPosUsd > 0 && <span className="badge badge-pos">持仓 {formatUsdCompact(userPosUsd)}</span>}
-                    </div>
-                    <div className="pool-card-actions">
-                      <button type="button" className="mini-link accent" onClick={(e) => { e.stopPropagation(); setOpenPosPool({ ...pool, chain }); }}>一键开仓</button>
+                      <button type="button" className="open-pos-btn" onClick={(e) => { e.stopPropagation(); setOpenPosPool({ ...pool, chain }); }}>开仓</button>
                     </div>
                   </div>
                 </div>
@@ -1063,12 +1059,15 @@ export default function App() {
             draggable
             onDragStart={(e) => {
               setDraggingKey(widget.key);
+              e.dataTransfer.effectAllowed = 'move';
               e.dataTransfer.setData('text/plain', widget.key);
             }}
             onDragOver={(e) => {
-              if (!draggingKey || draggingKey === widget.key) return;
               e.preventDefault();
-              setDragOverKey(widget.key);
+              e.dataTransfer.dropEffect = 'move';
+              if (draggingKey && draggingKey !== widget.key) {
+                setDragOverKey(widget.key);
+              }
             }}
             onDrop={(e) => {
               e.preventDefault();
@@ -1086,7 +1085,6 @@ export default function App() {
           >
             <div className="drag-hint">
               <GripVertical size={12} />
-              <span>拖拽重排</span>
             </div>
             {panelMap[widget.key]}
           </div>
