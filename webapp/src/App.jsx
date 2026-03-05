@@ -184,7 +184,10 @@ export default function App() {
   const [dragOverKey, setDragOverKey] = useState('');
 
   const hasInitData = Boolean(initData);
-  const activeWidgets = useMemo(() => WIDGETS.filter((x) => widgets.includes(x.key)), [widgets]);
+  const activeWidgets = useMemo(() => {
+    const map = Object.fromEntries(WIDGETS.map((w) => [w.key, w]));
+    return widgets.map((k) => map[k]).filter(Boolean);
+  }, [widgets]);
   const layoutClass = moduleLayoutClass(activeWidgets.length);
 
   const selectedPoolAddress = useMemo(

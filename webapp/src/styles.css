@@ -459,7 +459,7 @@ body {
   position: relative;
   z-index: 1;
   margin-top: 14px;
-  min-height: calc(100vh - 235px);
+  height: calc(100vh - 235px);
   display: grid;
   gap: 12px;
 }
@@ -914,7 +914,12 @@ body {
   }
 
   .workbench {
+    height: auto;
     min-height: 0;
+  }
+
+  .module-slot {
+    max-height: 70vh;
   }
 }
 
