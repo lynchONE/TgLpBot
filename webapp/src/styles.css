@@ -13,6 +13,26 @@
   --radius-md: 12px;
 }
 
+/* Dark scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(138, 160, 194, 0.35) transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(138, 160, 194, 0.35);
+  border-radius: 3px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(138, 160, 194, 0.55);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -488,6 +508,11 @@ body {
   animation: slide-up 320ms ease;
 }
 
+/* Only cap height on hot-pools panel */
+.module-slot.module-hot_pools {
+  max-height: 75vh;
+}
+
 .module-slot.dragging {
   opacity: 0.55;
 }
@@ -916,10 +941,6 @@ body {
   .workbench {
     height: auto;
     min-height: 0;
-  }
-
-  .module-slot {
-    max-height: 70vh;
   }
 }
 
