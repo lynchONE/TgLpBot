@@ -45,6 +45,7 @@ import {
   formatUsdCompact,
   normalizePoolAddress,
   normalizeWidgetSelection,
+  pickNonStableTokenAddress,
   shortAddress,
 } from './utils';
 
@@ -117,10 +118,17 @@ function openExternal(url) {
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
-function buildDexScreenerEmbedUrl(poolAddress, chainName) {
-  if (!poolAddress) return '';
-  const c = String(chainName || 'bsc').toLowerCase() === 'base' ? 'base' : 'bsc';
-  return `https://dexscreener.com/${c}/${poolAddress}?embed=1&theme=dark&trades=1&info=0&interval=1&chartType=price`;
+function buildDexScreenerEmbedUrl(pool, chainName) {
+  if (!pool) return '';
+  const c = String(pool?.chain || chainName || 'bsc').toLowerCase() === 'base' ? 'base' : 'bsc';
+  const factory = String(pool?.factory_name || '').toLowerCase();
+  const isV4 = factory.includes('v4');
+  // V4 pools: DEXScreener doesn't recognise pool ID, use non-stable token address instead
+  const addr = isV4
+    ? pickNonStableTokenAddress(pool)
+    : normalizePoolAddress(pool?.pool_address || pool?.pool_id);
+  if (!addr) return '';
+  return `https://dexscreener.com/${c}/${addr}?embed=1&theme=dark&trades=1&info=0&interval=1&chartType=price`;
 }
 
 function getDexIcon(factoryName) {
@@ -196,8 +204,8 @@ export default function App() {
   );
   const selectedPoolGmgnUrl = useMemo(() => buildGmgnUrl(selectedPool, chain), [selectedPool, chain]);
   const selectedPoolEmbedUrl = useMemo(
-    () => buildDexScreenerEmbedUrl(selectedPoolAddress, selectedPool?.chain || chain),
-    [selectedPoolAddress, selectedPool?.chain, chain]
+    () => buildDexScreenerEmbedUrl(selectedPool, chain),
+    [selectedPool, chain]
   );
 
   const filteredHotPools = useMemo(() => {

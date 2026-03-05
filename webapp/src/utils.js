@@ -80,7 +80,7 @@ const GMGN_STABLE_SYMBOLS = new Set([
   'sol',
 ]);
 
-function pickGmgnTokenAddress(pool) {
+export function pickNonStableTokenAddress(pool) {
   const pair = String(pool?.trading_pair || pool?.pair || '').trim();
   const token0 = String(pool?.token0_address || pool?.token0 || '').trim();
   const token1 = String(pool?.token1_address || pool?.token1 || '').trim();
@@ -96,7 +96,7 @@ function pickGmgnTokenAddress(pool) {
 }
 
 export function buildGmgnUrl(pool, fallbackChain = 'bsc') {
-  const tokenAddress = pickGmgnTokenAddress(pool);
+  const tokenAddress = pickNonStableTokenAddress(pool);
   if (!tokenAddress) return '';
   const chain =
     String(pool?.chain || fallbackChain || 'bsc').trim().toLowerCase() === 'base'
