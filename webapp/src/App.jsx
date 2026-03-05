@@ -4,6 +4,8 @@ import {
   BrainCircuit,
   BriefcaseBusiness,
   CandlestickChart,
+  Check,
+  Copy,
   Flame,
   GripVertical,
   Link2,
@@ -11,6 +13,7 @@ import {
   Maximize,
   Minimize,
   Search,
+  Settings,
   SlidersHorizontal,
 } from 'lucide-react';
 import {
@@ -56,6 +59,7 @@ const STORAGE = {
   chain: 'tglp_web_chain',
   widgets: 'tglp_web_widgets',
   sort: 'tglp_web_hot_pools_sort',
+  refreshInterval: 'tglp_web_refresh_interval',
 };
 
 function storageGet(key) {
@@ -189,6 +193,11 @@ export default function App() {
   const [loginBusy, setLoginBusy] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [workMode, setWorkMode] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [refreshInterval, setRefreshInterval] = useState(() => {
+    const saved = Number(storageGet(STORAGE.refreshInterval));
+    return saved >= 10 ? saved : 10;
+  });
   const [draggingKey, setDraggingKey] = useState('');
   const [dragOverKey, setDragOverKey] = useState('');
 
@@ -242,13 +251,14 @@ export default function App() {
     storageSet(STORAGE.chain, chain);
     storageSet(STORAGE.widgets, JSON.stringify(widgets));
     storageSet(STORAGE.sort, hotSort);
+    storageSet(STORAGE.refreshInterval, String(refreshInterval));
 
     if (loginUser) {
       storageSet(STORAGE.loginUser, JSON.stringify(loginUser));
     } else {
       storageRemove(STORAGE.loginUser);
     }
-  }, [chain, hotSort, initData, loginUser, widgets]);
+  }, [chain, hotSort, initData, loginUser, refreshInterval, widgets]);
 
   useEffect(() => {
     if (!workMode) return;
@@ -256,6 +266,15 @@ export default function App() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [workMode]);
+
+  useEffect(() => {
+    if (!showSettings) return;
+    const handler = (e) => {
+      if (!e.target.closest('.settings-wrap')) setShowSettings(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showSettings]);
 
   const selectPool = useCallback(
     (pool, fallbackChain) => {
@@ -361,21 +380,21 @@ export default function App() {
 
   useEffect(() => {
     if (!hasInitData) return undefined;
-    const timer = window.setInterval(() => loadHotPools(), 15_000);
+    const timer = window.setInterval(() => loadHotPools(), refreshInterval * 1000);
     return () => window.clearInterval(timer);
-  }, [hasInitData, loadHotPools]);
+  }, [hasInitData, loadHotPools, refreshInterval]);
 
   useEffect(() => {
     if (!hasInitData) return undefined;
-    const timer = window.setInterval(() => loadPositions(), 10_000);
+    const timer = window.setInterval(() => loadPositions(), refreshInterval * 1000);
     return () => window.clearInterval(timer);
-  }, [hasInitData, loadPositions]);
+  }, [hasInitData, loadPositions, refreshInterval]);
 
   useEffect(() => {
     if (!hasInitData) return undefined;
-    const timer = window.setInterval(() => loadSmart(), 45_000);
+    const timer = window.setInterval(() => loadSmart(), Math.max(refreshInterval * 1000, 30_000));
     return () => window.clearInterval(timer);
-  }, [hasInitData, loadSmart]);
+  }, [hasInitData, loadSmart, refreshInterval]);
 
   useEffect(() => {
     if (!hotPools.length) return;
@@ -904,6 +923,32 @@ export default function App() {
                 <div className="user-name">{loginUser?.first_name || 'Telegram User'}</div>
                 <div className="user-sub">@{loginUser?.username || 'unknown'}</div>
               </div>
+              <div className="settings-wrap">
+                <button type="button" className="settings-btn" onClick={() => setShowSettings((v) => !v)}>
+                  <Settings size={15} />
+                </button>
+                {showSettings && (
+                  <div className="settings-popover">
+                    <div className="settings-row">
+                      <span className="settings-label">数据刷新间隔</span>
+                      <div className="settings-input-wrap">
+                        <input
+                          type="number"
+                          className="settings-input"
+                          min={10}
+                          value={refreshInterval}
+                          onChange={(e) => {
+                            const v = Math.max(10, Math.round(Number(e.target.value) || 10));
+                            setRefreshInterval(v);
+                          }}
+                        />
+                        <span className="settings-unit">秒</span>
+                      </div>
+                    </div>
+                    <div className="settings-hint">最低 10 秒，当前每 {refreshInterval} 秒刷新</div>
+                  </div>
+                )}
+              </div>
               <button type="button" className="logout-btn" onClick={logout}>
                 <LogOut size={13} />
                 退出
@@ -911,11 +956,27 @@ export default function App() {
             </div>
           ) : loginCode ? (
             <div className="login-code-box">
-              <div className="login-code-label">验证码</div>
-              <div className="login-code-value">{loginCode}</div>
-              <div className="login-code-hint">
-                在 Telegram 中发送: <code>/weblogin {loginCode}</code>
+              <div className="login-code-top">
+                <div className="login-code-badge">验证码</div>
+                <div className="login-code-value">{loginCode}</div>
               </div>
+              <div className="login-code-cmd-row">
+                <code className="login-code-cmd">/weblogin {loginCode}</code>
+                <button
+                  type="button"
+                  className="login-copy-btn"
+                  onClick={(e) => {
+                    navigator.clipboard.writeText(`/weblogin ${loginCode}`);
+                    const btn = e.currentTarget;
+                    btn.classList.add('copied');
+                    setTimeout(() => btn.classList.remove('copied'), 1500);
+                  }}
+                >
+                  <Copy size={12} className="copy-icon" />
+                  <Check size={12} className="check-icon" />
+                </button>
+              </div>
+              <div className="login-code-hint">在 Telegram Bot 中发送上方指令完成登录</div>
               <button type="button" className="ghost-chip" onClick={() => { setLoginCode(''); setLoginError(''); }}>
                 取消
               </button>
