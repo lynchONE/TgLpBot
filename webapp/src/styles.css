@@ -612,6 +612,10 @@ body {
   flex-direction: column;
   gap: 8px;
 }
+/* Remove gap when using row-style items */
+.data-list:has(.pool-row) {
+  gap: 0;
+}
 
 .data-list.compact {
   gap: 6px;
@@ -871,119 +875,158 @@ body {
 }
 
 /* ═══════════════════════════════════════
-   Pool Card
+   Pool Row — OKX-inspired style
 ═══════════════════════════════════════ */
-.pool-card {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--bg-card);
-  padding: 12px;
-  cursor: pointer;
-  transition: border-color 160ms, background 160ms;
-}
-.pool-card:hover {
-  border-color: rgba(255, 177, 26, 0.35);
-}
-.pool-card.selected {
-  border-color: var(--accent);
-  background: rgba(255, 177, 26, 0.06);
-}
-.pool-card-top {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-}
-.pool-card-left {
-  min-width: 0;
-  flex: 1;
-}
-.pool-card-pair {
+.pool-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(134, 153, 184, 0.08);
+  cursor: pointer;
+  transition: background 120ms;
+}
+.pool-row:last-child {
+  border-bottom: none;
+}
+.pool-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.pool-row.selected {
+  background: rgba(255, 177, 26, 0.05);
+}
+
+/* Avatar circle */
+.pool-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: linear-gradient(135deg, #1e293b, #0f172a);
+  border: 1.5px solid rgba(134, 153, 184, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+  color: #94a3b8;
+  overflow: hidden;
+}
+.pool-avatar img {
+  width: 22px;
+  height: 22px;
+}
+
+/* Info block */
+.pool-info {
+  flex: 1;
+  min-width: 0;
+}
+.pool-name-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   flex-wrap: wrap;
 }
-.pool-pair-name {
+.pool-name {
   font-size: 13px;
   font-weight: 700;
-  color: var(--text);
+  color: #f1f5f9;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 120px;
+  max-width: 160px;
 }
-.pool-card-addr {
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--text-muted);
-  display: flex;
+.tag {
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-}
-.pool-card-stats-row {
-  margin-top: 6px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  font-size: 10.5px;
-  color: var(--text-muted);
-  line-height: 1;
-}
-.pool-card-stats-row b {
-  color: var(--text);
-  font-weight: 600;
-}
-.pool-card-stats-row .stat-purple {
-  color: #a78bfa;
-}
-.pool-card-stats-row .stat-purple b {
-  color: #c4b5fd;
-}
-.pool-card-right {
-  text-align: right;
-  flex-shrink: 0;
-  min-width: 90px;
-}
-.pool-card-metric {
-  font-size: 16px;
-  font-weight: 800;
-  color: var(--positive);
-  font-variant-numeric: tabular-nums;
-}
-.pool-card-price {
-  font-size: 11px;
-  font-weight: 600;
-  margin-top: 2px;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-.pool-card-price.up { color: var(--positive); }
-.pool-card-price.down { color: var(--negative); }
-.pool-card-secondary {
-  font-size: 11px;
-  font-weight: 600;
-  color: #a78bfa;
-  margin-top: 2px;
-}
-
-/* Open position button */
-.open-pos-btn {
-  margin-top: 6px;
-  padding: 3px 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
   font-size: 10px;
   font-weight: 700;
-  color: #fff;
-  background: linear-gradient(135deg, #22c55e, #16a34a);
-  border: none;
-  border-radius: 999px;
-  cursor: pointer;
+  line-height: 1.4;
   white-space: nowrap;
-  transition: opacity 150ms, transform 150ms;
 }
-.open-pos-btn:hover {
-  opacity: 0.85;
-  transform: scale(1.05);
+.tag-blue {
+  background: rgba(56, 189, 248, 0.12);
+  color: #7dd3fc;
+}
+.tag-dex {
+  background: rgba(251, 191, 36, 0.1);
+  color: #fbbf24;
+}
+.tag-purple {
+  background: rgba(168, 85, 247, 0.12);
+  color: #c084fc;
+}
+
+/* Meta line */
+.pool-meta-line {
+  margin-top: 3px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #64748b;
+  flex-wrap: wrap;
+}
+.pool-meta-line b {
+  color: #94a3b8;
+  font-weight: 600;
+}
+.pool-addr {
+  cursor: pointer;
+  transition: color 120ms;
+}
+.pool-addr:hover {
+  color: #94a3b8;
+}
+.dot-sep {
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: #475569;
+  flex-shrink: 0;
+}
+
+/* Values block */
+.pool-values {
+  text-align: right;
+  flex-shrink: 0;
+  min-width: 70px;
+}
+.pool-main-val {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f1f5f9;
+  font-variant-numeric: tabular-nums;
+}
+.pool-sub-val {
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 2px;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+.pool-sub-val.up { color: #22d38a; }
+.pool-sub-val.down { color: #ff5e76; }
+.pool-sub-val.purple { color: #a78bfa; }
+
+/* Buy button — OKX green pill */
+.pool-buy-btn {
+  flex-shrink: 0;
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  background: #22c55e;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 120ms;
+}
+.pool-buy-btn:hover {
+  background: #16a34a;
 }
 
 /* Search toggle in sort tabs */
@@ -1013,12 +1056,6 @@ body {
 .badge-dex {
   background: rgba(251, 191, 36, 0.12);
   color: #fcd34d;
-}
-.dex-icon {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  flex-shrink: 0;
 }
 
 /* Sort toggle tabs */

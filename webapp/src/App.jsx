@@ -624,58 +624,56 @@ export default function App() {
               const priceDisplay = String(pool?.price_display || '');
               const factoryName = String(pool?.factory_name || pool?.dex || '');
               const userPosUsd = Number(pool?.userPositionUsd || 0);
+              const pair = String(pool?.trading_pair || '--');
+              const pairInitials = pair.split(/[\/\-]/).map((s) => s.trim().charAt(0).toUpperCase()).join('').slice(0, 2);
+              const dex = getDexIcon(factoryName);
 
               return (
                 <div
                   key={`${pool?.protocol_version || ''}:${addr || idx}`}
-                  className={`pool-card ${selected ? 'selected' : ''}`}
+                  className={`pool-row ${selected ? 'selected' : ''}`}
                   onClick={() => selectPool({ ...pool, chain }, chain)}
                 >
-                  <div className="pool-card-top">
-                    <div className="pool-card-left">
-                      <div className="pool-card-pair">
-                        <span className="pool-pair-name">{pool?.trading_pair || '--'}</span>
-                        {feePct > 0 && <span className="badge badge-fee">{feePct.toFixed(2).replace(/\.?0+$/, '')}%</span>}
-                        {(() => {
-                          const dex = getDexIcon(factoryName);
-                          if (dex) return (
-                            <span className="badge badge-dex">
-                              <img src={dex.src} alt="" className="dex-icon" />
-                              {dex.label && <span>{dex.label}</span>}
-                            </span>
-                          );
-                          if (factoryName) return <span className="badge badge-dex">{factoryName}</span>;
-                          return null;
-                        })()}
-                        {userPosUsd > 0 && <span className="badge badge-pos">持仓 {formatUsdCompact(userPosUsd)}</span>}
-                      </div>
-                      <div className="pool-card-addr">
-                        <span>{shortAddress(addr, 6, 4)}</span>
-                        <button type="button" className="icon-btn-tiny" onClick={(e) => { e.stopPropagation(); copyAddr(addr); }} title="复制地址">
-                          <svg viewBox="0 0 24 24" fill="currentColor" width="12" height="12"><path d="M16 1H4a2 2 0 00-2 2v14h2V3h12V1zm3 4H8a2 2 0 00-2 2v14a2 2 0 002 2h11a2 2 0 002-2V7a2 2 0 00-2-2zm0 16H8V7h11v14z"/></svg>
-                        </button>
-                      </div>
-                      <div className="pool-card-stats-row">
-                        {volume > 0 && <span>Vol <b>{formatUsdCompact(volume)}</b></span>}
-                        {tvl > 0 && <span>TVL <b>{formatUsdCompact(tvl)}</b></span>}
-                        {txCount > 0 && <span>Txns <b>{txCount.toLocaleString()}</b></span>}
-                        {feeRate > 0 && <span className="stat-purple">Fee/TVL <b>{feeRate.toFixed(3)}%</b></span>}
-                      </div>
+                  {/* Avatar */}
+                  <div className="pool-avatar" style={dex ? { borderColor: dex.color + '60' } : undefined}>
+                    {dex ? <img src={dex.src} alt="" /> : <span>{pairInitials}</span>}
+                  </div>
+
+                  {/* Info block */}
+                  <div className="pool-info">
+                    <div className="pool-name-line">
+                      <span className="pool-name">{pair}</span>
+                      {feePct > 0 && <span className="tag tag-blue">{feePct.toFixed(2).replace(/\.?0+$/, '')}%</span>}
+                      {dex?.label && <span className="tag tag-dex">{dex.label}</span>}
+                      {userPosUsd > 0 && <span className="tag tag-purple">持仓</span>}
                     </div>
-                    <div className="pool-card-right">
-                      <div className="pool-card-metric">
-                        {hotSort === 'volume' ? formatUsdCompact(volume) :
-                         hotSort === 'fee_rate' ? (feeRate > 0 ? `${feeRate.toFixed(3)}%` : '--') :
-                         formatUsdCompact(totalFees)}
-                      </div>
-                      {priceDisplay && (
-                        <div className={`pool-card-price ${priceDisplay.includes('↑') || priceDisplay.includes('+') ? 'up' : priceDisplay.includes('↓') || priceDisplay.includes('-') ? 'down' : ''}`}>
-                          {priceDisplay}
-                        </div>
-                      )}
-                      <button type="button" className="open-pos-btn" onClick={(e) => { e.stopPropagation(); setOpenPosPool({ ...pool, chain }); }}>开仓</button>
+                    <div className="pool-meta-line">
+                      <span className="pool-addr" onClick={(e) => { e.stopPropagation(); copyAddr(addr); }}>{shortAddress(addr, 6, 4)}</span>
+                      <span className="dot-sep" />
+                      {volume > 0 && <span>Vol <b>{formatUsdCompact(volume)}</b></span>}
+                      {tvl > 0 && <span>TVL <b>{formatUsdCompact(tvl)}</b></span>}
+                      {txCount > 0 && <span>{txCount.toLocaleString()}笔</span>}
                     </div>
                   </div>
+
+                  {/* Values block */}
+                  <div className="pool-values">
+                    <div className="pool-main-val">
+                      {hotSort === 'volume' ? formatUsdCompact(volume) :
+                       hotSort === 'fee_rate' ? (feeRate > 0 ? `${feeRate.toFixed(3)}%` : '--') :
+                       formatUsdCompact(totalFees)}
+                    </div>
+                    {priceDisplay ? (
+                      <div className={`pool-sub-val ${priceDisplay.includes('↑') || priceDisplay.includes('+') ? 'up' : priceDisplay.includes('↓') || priceDisplay.includes('-') ? 'down' : ''}`}>
+                        {priceDisplay}
+                      </div>
+                    ) : feeRate > 0 && hotSort !== 'fee_rate' ? (
+                      <div className="pool-sub-val purple">{feeRate.toFixed(3)}%</div>
+                    ) : null}
+                  </div>
+
+                  {/* Action */}
+                  <button type="button" className="pool-buy-btn" onClick={(e) => { e.stopPropagation(); setOpenPosPool({ ...pool, chain }); }}>开仓</button>
                 </div>
               );
             })
