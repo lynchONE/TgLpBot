@@ -129,7 +129,8 @@ function buildDexScreenerEmbedUrl(pool, chainName) {
   if (!pool) return '';
   const c = String(pool?.chain || chainName || 'bsc').toLowerCase() === 'base' ? 'base' : 'bsc';
   const factory = String(pool?.factory_name || '').toLowerCase();
-  const isV4 = factory.includes('v4');
+  const version = String(pool?.pool_version || pool?.protocol_version || '').toLowerCase();
+  const isV4 = factory.includes('v4') || version.includes('v4');
   // V4 pools: DEXScreener doesn't recognise pool ID, use non-stable token address instead
   const addr = isV4
     ? pickNonStableTokenAddress(pool)
@@ -890,6 +891,10 @@ export default function App() {
                         pool_address: pool?.pool_id,
                         trading_pair: pool?.pair,
                         factory_name: pool?.factory_name,
+                        token0: pool?.token0,
+                        token1: pool?.token1,
+                        token0_symbol: pool?.token0_symbol,
+                        token1_symbol: pool?.token1_symbol,
                         chain,
                       },
                       chain
