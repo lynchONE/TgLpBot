@@ -16,7 +16,6 @@ import {
   checkLoginCode,
   deleteTask,
   fetchHotPools,
-  fetchPoolOHLCV,
   fetchRealtimePositions,
   fetchSmartMoneyOverview,
   generateLoginCode,
@@ -26,7 +25,6 @@ import {
   updateTaskRange,
 } from './api';
 import { WEBAPP_CONFIG } from './config';
-import KlineChart from './components/KlineChart';
 import PanelShell, { EmptyState, MetricCard } from './components/PanelShell';
 import OpenPositionModal from './components/OpenPositionModal';
 import TaskActionMenu from './components/TaskActionMenu';
@@ -56,15 +54,7 @@ const STORAGE = {
   chain: 'tglp_web_chain',
   widgets: 'tglp_web_widgets',
   sort: 'tglp_web_hot_pools_sort',
-  kline: 'tglp_web_kline_preset',
 };
-
-const KLINE_PRESETS = [
-  { key: '1m', label: '1m', timeframe: 'minute', aggregate: 1, limit: 300 },
-  { key: '5m', label: '5m', timeframe: 'minute', aggregate: 5, limit: 260 },
-  { key: '15m', label: '15m', timeframe: 'minute', aggregate: 15, limit: 220 },
-  { key: '1h', label: '1h', timeframe: 'hour', aggregate: 1, limit: 200 },
-];
 
 function storageGet(key) {
   try {
@@ -162,10 +152,6 @@ export default function App() {
     const raw = String(storageGet(STORAGE.sort) || '').toLowerCase();
     return raw === 'fee_rate' || raw === 'volume' || raw === 'fees' ? raw : 'fees';
   });
-  const [klinePresetKey, setKlinePresetKey] = useState(() => {
-    const raw = String(storageGet(STORAGE.kline) || '5m');
-    return KLINE_PRESETS.some((x) => x.key === raw) ? raw : '5m';
-  });
 
   const [keyword, setKeyword] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -183,10 +169,6 @@ export default function App() {
   const [smartError, setSmartError] = useState('');
 
   const [selectedPool, setSelectedPool] = useState(null);
-  const [candles, setCandles] = useState([]);
-  const [klineLoading, setKlineLoading] = useState(false);
-  const [klineError, setKlineError] = useState('');
-  const [klineUpdatedAt, setKlineUpdatedAt] = useState('');
 
   const [refreshing, setRefreshing] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false);
@@ -199,17 +181,11 @@ export default function App() {
   const activeWidgets = useMemo(() => WIDGETS.filter((x) => widgets.includes(x.key)), [widgets]);
   const layoutClass = moduleLayoutClass(activeWidgets.length);
 
-  const klinePreset = useMemo(
-    () => KLINE_PRESETS.find((x) => x.key === klinePresetKey) || KLINE_PRESETS[1],
-    [klinePresetKey]
-  );
-
   const selectedPoolAddress = useMemo(
     () => normalizePoolAddress(selectedPool?.pool_address || selectedPool?.pool_id),
     [selectedPool]
   );
   const selectedPoolGmgnUrl = useMemo(() => buildGmgnUrl(selectedPool, chain), [selectedPool, chain]);
-  const latestCandle = useMemo(() => (candles.length ? candles[candles.length - 1] : null), [candles]);
 
   const filteredHotPools = useMemo(() => {
     const q = String(keyword || '').trim().toLowerCase();
@@ -243,14 +219,13 @@ export default function App() {
     storageSet(STORAGE.chain, chain);
     storageSet(STORAGE.widgets, JSON.stringify(widgets));
     storageSet(STORAGE.sort, hotSort);
-    storageSet(STORAGE.kline, klinePresetKey);
 
     if (loginUser) {
       storageSet(STORAGE.loginUser, JSON.stringify(loginUser));
     } else {
       storageRemove(STORAGE.loginUser);
     }
-  }, [chain, hotSort, initData, klinePresetKey, loginUser, widgets]);
+  }, [chain, hotSort, initData, loginUser, widgets]);
 
   const selectPool = useCallback(
     (pool, fallbackChain) => {
@@ -346,53 +321,6 @@ export default function App() {
     [apiBaseUrl, chain, hasInitData, initData]
   );
 
-  const loadKline = useCallback(
-    async (signal) => {
-      if (!hasInitData) {
-        setCandles([]);
-        setKlineError('请先点击右上角 Telegram 图标扫码登录。');
-        return;
-      }
-      if (!selectedPoolAddress) {
-        setCandles([]);
-        setKlineError('');
-        return;
-      }
-
-      setKlineLoading(true);
-      setKlineError('');
-      try {
-        const resp = await fetchPoolOHLCV({
-          apiBaseUrl,
-          initData,
-          chain: selectedPool?.chain || chain,
-          poolAddress: selectedPoolAddress,
-          timeframe: klinePreset.timeframe,
-          aggregate: klinePreset.aggregate,
-          limit: klinePreset.limit,
-          signal,
-        });
-        setCandles(Array.isArray(resp?.candles) ? resp.candles : []);
-        setKlineUpdatedAt(resp?.updated_at || new Date().toISOString());
-      } catch (e) {
-        if (e?.name !== 'AbortError') setKlineError(String(e?.message || e));
-      } finally {
-        setKlineLoading(false);
-      }
-    },
-    [
-      apiBaseUrl,
-      chain,
-      hasInitData,
-      initData,
-      klinePreset.aggregate,
-      klinePreset.limit,
-      klinePreset.timeframe,
-      selectedPool?.chain,
-      selectedPoolAddress,
-    ]
-  );
-
   useEffect(() => {
     const ctrl = new AbortController();
     loadHotPools(ctrl.signal);
@@ -400,13 +328,6 @@ export default function App() {
     loadSmart(ctrl.signal);
     return () => ctrl.abort();
   }, [loadHotPools, loadPositions, loadSmart]);
-
-  useEffect(() => {
-    if (!selectedPoolAddress || !hasInitData) return;
-    const ctrl = new AbortController();
-    loadKline(ctrl.signal);
-    return () => ctrl.abort();
-  }, [hasInitData, loadKline, selectedPoolAddress]);
 
   useEffect(() => {
     if (!hasInitData) return undefined;
@@ -425,12 +346,6 @@ export default function App() {
     const timer = window.setInterval(() => loadSmart(), 45_000);
     return () => window.clearInterval(timer);
   }, [hasInitData, loadSmart]);
-
-  useEffect(() => {
-    if (!hasInitData || !selectedPoolAddress) return undefined;
-    const timer = window.setInterval(() => loadKline(), 30_000);
-    return () => window.clearInterval(timer);
-  }, [hasInitData, loadKline, selectedPoolAddress]);
 
   useEffect(() => {
     if (!hotPools.length) return;
@@ -515,15 +430,14 @@ export default function App() {
     setHotPools([]);
     setPositions(null);
     setSmart(null);
-    setCandles([]);
   }, []);
 
   const refreshAll = useCallback(async () => {
     if (!hasInitData) return;
     setRefreshing(true);
-    await Promise.allSettled([loadHotPools(), loadPositions(), loadSmart(), loadKline()]);
+    await Promise.allSettled([loadHotPools(), loadPositions(), loadSmart()]);
     setRefreshing(false);
-  }, [hasInitData, loadHotPools, loadKline, loadPositions, loadSmart]);
+  }, [hasInitData, loadHotPools, loadPositions, loadSmart]);
 
   const toggleWidget = useCallback((key) => {
     setWidgets((prev) => {
@@ -697,63 +611,35 @@ export default function App() {
 
     gmgn_kline: (
       <PanelShell
-        title="GMGN K线"
+        title="GMGN"
         subtitle={selectedPool?.trading_pair || '请选择池子'}
         icon={CandlestickChart}
         actions={
-          <div className="inline-actions">
-            {KLINE_PRESETS.map((x) => (
-              <button
-                type="button"
-                key={x.key}
-                className={`ghost-chip ${klinePresetKey === x.key ? 'active' : ''}`}
-                onClick={() => setKlinePresetKey(x.key)}
-              >
-                {x.label}
-              </button>
-            ))}
-            <button
-              type="button"
-              className="icon-link"
-              disabled={!selectedPoolGmgnUrl}
-              onClick={() => openExternal(selectedPoolGmgnUrl)}
-            >
-              <Link2 size={14} />
-            </button>
-          </div>
+          <button
+            type="button"
+            className="icon-link"
+            disabled={!selectedPoolGmgnUrl}
+            onClick={() => openExternal(selectedPoolGmgnUrl)}
+            title="在新窗口打开"
+          >
+            <Link2 size={14} />
+          </button>
         }
       >
-        {!selectedPoolAddress ? (
-          <EmptyState text="点选池子后自动加载 K 线" />
+        {!selectedPoolGmgnUrl ? (
+          <EmptyState text="点选池子后自动加载 GMGN 页面" />
         ) : (
-          <>
-            <div className="selected-pool-bar">
-              <span>{shortAddress(selectedPoolAddress, 10, 8)}</span>
-              <span>{String(selectedPool?.chain || chain).toUpperCase()}</span>
-              <span>{klineLoading ? '加载中...' : '已连接'}</span>
-            </div>
-
-            {klineError ? <div className="error-text">{klineError}</div> : null}
-
-            <div className="kline-wrap">
-              {klineLoading && candles.length === 0 ? (
-                <EmptyState text="正在加载 K 线..." />
-              ) : candles.length === 0 ? (
-                <EmptyState text="暂无 K 线数据" />
-              ) : (
-                <KlineChart candles={candles} />
-              )}
-            </div>
-
-            <div className="kline-stats">
-              <MetricCard label="Close" value={latestCandle ? formatNumber(latestCandle.c, 8) : '--'} />
-              <MetricCard label="Volume" value={latestCandle ? formatNumber(latestCandle.v, 2) : '--'} />
-              <MetricCard
-                label="Updated"
-                value={klineUpdatedAt ? new Date(klineUpdatedAt).toLocaleTimeString() : '--'}
-              />
-            </div>
-          </>
+          <div className="gmgn-frame-wrap">
+            <iframe
+              key={selectedPoolGmgnUrl}
+              src={selectedPoolGmgnUrl}
+              className="gmgn-iframe"
+              title="GMGN"
+              sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+              referrerPolicy="no-referrer"
+              allow="clipboard-write"
+            />
+          </div>
         )}
       </PanelShell>
     ),
