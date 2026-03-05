@@ -145,6 +145,39 @@ export function normalizeWidgetSelection(value) {
   return next.length ? next : [...DEFAULT_WIDGETS];
 }
 
+export function formatPriceDisplay(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  // e.g. "1 ASTER = 0.71192319 USD" → shorten the number
+  const m = s.match(/^(1\s+\w+\s*=\s*)([0-9.]+)(\s*USD)$/i);
+  if (!m) return s;
+  const n = Number(m[2]);
+  if (!Number.isFinite(n)) return s;
+  let formatted;
+  if (n >= 1000) {
+    formatted = n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  } else if (n >= 1) {
+    formatted = n.toFixed(4);
+  } else if (n >= 0.01) {
+    formatted = n.toFixed(6);
+  } else if (n === 0) {
+    formatted = '0';
+  } else {
+    // For very small numbers like 0.00000038, use subscript notation: 0.0₇38
+    const str = n.toFixed(20).replace(/0+$/, '');
+    const afterDot = str.split('.')[1] || '';
+    const leadingZeros = afterDot.match(/^0*/)[0].length;
+    if (leadingZeros >= 3) {
+      const significant = afterDot.slice(leadingZeros, leadingZeros + 4).replace(/0+$/, '') || '0';
+      const sub = String(leadingZeros).split('').map(c => '₀₁₂₃₄₅₆₇₈₉'[Number(c)]).join('');
+      formatted = `0.0${sub}${significant}`;
+    } else {
+      formatted = n.toFixed(Math.min(8, leadingZeros + 4));
+    }
+  }
+  return `${m[1]}${formatted}${m[3]}`;
+}
+
 export function toUnixSeconds(v) {
   const n = Number(v ?? 0);
   if (!Number.isFinite(n) || n <= 0) return 0;

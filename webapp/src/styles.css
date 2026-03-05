@@ -383,6 +383,41 @@ body {
   font-size: 12px;
 }
 
+/* Chain toggle buttons */
+.chain-toggles {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.chain-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border: 1px solid rgba(138, 160, 194, 0.2);
+  border-radius: 10px;
+  background: rgba(18, 26, 40, 0.6);
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 150ms;
+}
+.chain-btn:hover {
+  border-color: rgba(138, 160, 194, 0.4);
+  color: #94a3b8;
+}
+.chain-btn.active {
+  border-color: rgba(255, 177, 26, 0.5);
+  background: rgba(255, 177, 26, 0.1);
+  color: #fcd34d;
+}
+.chain-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+}
+
 .widget-toggles {
   display: flex;
   gap: 8px;
@@ -979,13 +1014,6 @@ body {
   color: #94a3b8;
   font-weight: 600;
 }
-.pool-addr {
-  cursor: pointer;
-  transition: color 120ms;
-}
-.pool-addr:hover {
-  color: #94a3b8;
-}
 .dot-sep {
   width: 2px;
   height: 2px;
@@ -1000,6 +1028,15 @@ body {
 }
 .meta-accent b {
   color: #c4b5fd;
+}
+.meta-cyan {
+  color: #67e8f9;
+}
+.meta-cyan b {
+  color: #a5f3fc;
+}
+.meta-orange {
+  color: #fb923c;
 }
 
 /* Copy tiny button */
@@ -1032,11 +1069,15 @@ body {
   font-variant-numeric: tabular-nums;
 }
 .pool-sub-val {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   margin-top: 2px;
   color: #64748b;
   font-variant-numeric: tabular-nums;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .pool-sub-val.up { color: #22d38a; }
 .pool-sub-val.down { color: #ff5e76; }

@@ -34,12 +34,15 @@ import NumberFlowValue from './components/NumberFlowValue';
 import telegramLogo from './img/telegram.svg';
 import uniswapLogo from './img/uniswap.svg';
 import pancakeLogo from './img/pancake.svg';
+import bnbLogo from './img/bnb.svg';
+import baseLogo from './img/base.svg';
 import {
   DEFAULT_WIDGETS,
   WIDGETS,
   buildGmgnUrl,
   formatNumber,
   formatPct,
+  formatPriceDisplay,
   formatUsd,
   formatUsdCompact,
   normalizePoolAddress,
@@ -652,12 +655,12 @@ export default function App() {
                       {userPosUsd > 0 && <span className="tag tag-purple">持仓</span>}
                     </div>
                     <div className="pool-meta-line">
-                      <span className="pool-addr">{shortAddress(addr, 6, 4)}</span>
+                      <span className="meta-cyan">Vol <b><NumberFlowValue value={volume} formatter={(v) => formatUsdCompact(v)} /></b></span>
                       <span className="dot-sep" />
-                      <span>Vol <b><NumberFlowValue value={volume} formatter={(v) => formatUsdCompact(v)} /></b></span>
-                      <span>TVL <b><NumberFlowValue value={tvl} formatter={(v) => formatUsdCompact(v)} /></b></span>
-                      <span><NumberFlowValue value={txCount} formatter={(v) => `${Number(v || 0).toLocaleString()}笔`} /></span>
-                      {feeRate > 0 && <span className="meta-accent">Fee/TVL <b><NumberFlowValue value={feeRate} formatter={(v) => `${Number(v).toFixed(3)}%`} /></b></span>}
+                      <span className="meta-cyan">TVL <b><NumberFlowValue value={tvl} formatter={(v) => formatUsdCompact(v)} /></b></span>
+                      <span className="dot-sep" />
+                      <span className="meta-orange"><NumberFlowValue value={txCount} formatter={(v) => `${Number(v || 0).toLocaleString()}笔`} /></span>
+                      {feeRate > 0 && (<><span className="dot-sep" /><span className="meta-accent">Fee/TVL <b><NumberFlowValue value={feeRate} formatter={(v) => `${Number(v).toFixed(3)}%`} /></b></span></>)}
                     </div>
                   </div>
 
@@ -670,8 +673,8 @@ export default function App() {
                       />
                     </div>
                     {priceDisplay ? (
-                      <div className={`pool-sub-val ${priceDisplay.includes('↑') || priceDisplay.includes('+') ? 'up' : priceDisplay.includes('↓') || priceDisplay.includes('-') ? 'down' : ''}`}>
-                        <NumberFlowValue value={priceDisplay} formatter={() => priceDisplay} />
+                      <div className={`pool-sub-val ${priceDisplay.includes('↑') || priceDisplay.includes('+') ? 'up' : priceDisplay.includes('↓') || priceDisplay.includes('-') ? 'down' : ''}`} title={priceDisplay}>
+                        <NumberFlowValue value={priceDisplay} formatter={() => formatPriceDisplay(priceDisplay)} />
                       </div>
                     ) : feeRate > 0 && hotSort !== 'fee_rate' ? (
                       <div className="pool-sub-val purple"><NumberFlowValue value={feeRate} formatter={(v) => `${Number(v).toFixed(3)}%`} /></div>
@@ -1022,14 +1025,15 @@ export default function App() {
           <span>布局与链设置</span>
         </div>
 
-        <div className="config-grid compact">
-          <label className="field small">
-            <span>Chain</span>
-            <select className="surface-input" value={chain} onChange={(e) => setChain(e.target.value)}>
-              <option value="bsc">BSC</option>
-              <option value="base">Base</option>
-            </select>
-          </label>
+        <div className="chain-toggles">
+          <button type="button" className={`chain-btn ${chain === 'bsc' ? 'active' : ''}`} onClick={() => setChain('bsc')}>
+            <img src={bnbLogo} alt="BSC" className="chain-icon" />
+            <span>BSC</span>
+          </button>
+          <button type="button" className={`chain-btn ${chain === 'base' ? 'active' : ''}`} onClick={() => setChain('base')}>
+            <img src={baseLogo} alt="Base" className="chain-icon" />
+            <span>Base</span>
+          </button>
         </div>
 
         <div className="widget-toggles">
