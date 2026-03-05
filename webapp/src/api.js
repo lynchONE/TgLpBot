@@ -107,6 +107,29 @@ export async function fetchSmartMoneyOverview({
   return requestJson(url, { method: 'GET', signal });
 }
 
+export async function fetchSmartMoneyPoolAdds({
+  apiBaseUrl,
+  initData,
+  chain,
+  poolVersion,
+  poolId,
+  windowHours,
+  limit,
+  signal,
+}) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const params = new URLSearchParams();
+  if (initData) params.set('initData', String(initData));
+  if (chain) params.set('chain', String(chain));
+  if (poolVersion) params.set('pool_version', String(poolVersion));
+  if (poolId) params.set('pool_id', String(poolId));
+  if (Number.isFinite(windowHours)) params.set('window_hours', String(windowHours));
+  if (Number.isFinite(limit)) params.set('limit', String(limit));
+  const qs = params.toString();
+  const url = `${base}/api/smart_money_pool_adds${qs ? `?${qs}` : ''}`;
+  return requestJson(url, { method: 'GET', signal });
+}
+
 export async function exchangeTelegramLogin({
   apiBaseUrl,
   id,

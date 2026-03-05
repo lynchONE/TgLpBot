@@ -183,3 +183,25 @@ export function toUnixSeconds(v) {
   if (!Number.isFinite(n) || n <= 0) return 0;
   return Math.floor(n);
 }
+
+const SUBSCRIPT_DIGITS = ['₀', '₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉'];
+export function compactPrice(v) {
+  const n = Number(v ?? 0);
+  if (!Number.isFinite(n) || n <= 0) return '--';
+  if (n >= 1000) return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  if (n >= 1) return n.toFixed(4).replace(/\.?0+$/, '');
+  if (n >= 0.01) return n.toPrecision(4);
+  const s = n.toFixed(20);
+  const dotIdx = s.indexOf('.');
+  if (dotIdx < 0) return n.toPrecision(4);
+  let zeroCount = 0;
+  for (let i = dotIdx + 1; i < s.length; i++) {
+    if (s[i] === '0') zeroCount++;
+    else break;
+  }
+  if (zeroCount < 2) return n.toPrecision(4);
+  const sigStart = dotIdx + 1 + zeroCount;
+  const sigDigits = s.slice(sigStart, sigStart + 4).replace(/0+$/, '') || '0';
+  const sub = String(zeroCount).split('').map(d => SUBSCRIPT_DIGITS[Number(d)] || d).join('');
+  return `0.0${sub}${sigDigits}`;
+}

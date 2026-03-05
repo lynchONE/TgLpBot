@@ -22,6 +22,7 @@ import {
   fetchHotPools,
   fetchRealtimePositions,
   fetchSmartMoneyOverview,
+  fetchSmartMoneyPoolAdds,
   generateLoginCode,
   openPosition as apiOpenPosition,
   setTaskPaused,
@@ -42,6 +43,7 @@ import {
   DEFAULT_WIDGETS,
   WIDGETS,
   buildGmgnUrl,
+  compactPrice,
   formatNumber,
   formatPct,
   formatPriceDisplay,
@@ -541,6 +543,49 @@ export default function App() {
   const summary = positions?.summary || {};
   const smartSummary = smart?.summary || {};
 
+  // Pool adds preview data: { "v3:0x1234": { status, wallets, totalUsd, error } }
+  const [poolAddsMap, setPoolAddsMap] = useState({});
+
+  // Auto-load pool adds for top pools when smart data changes
+  useEffect(() => {
+    if (!smartPools.length || !hasInitData) return;
+    const ctrl = new AbortController();
+    const toLoad = smartPools.slice(0, 12);
+    toLoad.forEach((pool) => {
+      const key = `${pool?.pool_version || ''}:${pool?.pool_id || ''}`;
+      // skip if already loaded or loading
+      if (poolAddsMap[key]?.status === 'success' || poolAddsMap[key]?.status === 'loading') return;
+      setPoolAddsMap((prev) => ({ ...prev, [key]: { status: 'loading', wallets: [], totalUsd: 0, error: '' } }));
+      fetchSmartMoneyPoolAdds({
+        apiBaseUrl,
+        initData,
+        chain,
+        poolVersion: pool?.pool_version,
+        poolId: pool?.pool_id,
+        windowHours: 2,
+        limit: 20,
+        signal: ctrl.signal,
+      })
+        .then((res) => {
+          const wallets = Array.isArray(res?.wallets) ? res.wallets : [];
+          const totalUsd = wallets.reduce((s, w) => s + Number(w?.total_usd || 0), 0);
+          setPoolAddsMap((prev) => ({
+            ...prev,
+            [key]: { status: 'success', wallets, totalUsd, error: '' },
+          }));
+        })
+        .catch((e) => {
+          if (e?.name === 'AbortError') return;
+          setPoolAddsMap((prev) => ({
+            ...prev,
+            [key]: { status: 'error', wallets: [], totalUsd: 0, error: String(e?.message || e) },
+          }));
+        });
+    });
+    return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [smartPools, hasInitData, apiBaseUrl, initData, chain]);
+
   const panelMap = {
     hot_pools: (
       <PanelShell
@@ -813,78 +858,109 @@ export default function App() {
     ),
 
     smart_money: (
-      <PanelShell title="聪明钱" subtitle="2h 池子 + 24h 钱包表现" icon={BrainCircuit}>
+      <PanelShell
+        title="聪明钱"
+        subtitle={`${smartPools.length} 个池子被监控钱包加 LP`}
+        icon={BrainCircuit}
+      >
         {smartError ? <div className="error-text">{smartError}</div> : null}
 
-        <div className="summary-grid">
-          <MetricCard label="池子数" value={formatNumber(smartSummary?.pool_count || 0)} />
-          <MetricCard label="钱包数" value={formatNumber(smartSummary?.wallet_count || 0)} />
-          <MetricCard label="24h PnL" value={formatUsd(smartSummary?.total_pnl_usdt_24h)} tone="strong" />
-          <MetricCard label="24h 事件" value={formatNumber(smartSummary?.total_events_24h || 0)} />
-        </div>
+        <div className="data-list compact">
+          {smartLoading && smartPools.length === 0 ? (
+            <EmptyState text="正在加载聪明钱数据..." />
+          ) : smartPools.length === 0 ? (
+            <EmptyState text="暂无监控钱包加 LP 数据" />
+          ) : (
+            smartPools.slice(0, 20).map((pool, idx) => {
+              const poolKey = `${pool?.pool_version || ''}:${pool?.pool_id || ''}`;
+              const adds = poolAddsMap[poolKey];
+              const wallets = adds?.wallets || [];
+              const totalUsd = adds?.totalUsd || Number(pool?.added_liquidity || 0);
+              const version = String(pool?.pool_version || '').toUpperCase();
+              const feePct = Number(pool?.fee_pct || 0);
 
-        <div className="split-list">
-          <div className="split-col">
-            <div className="list-title">池子热度</div>
-            <div className="data-list compact">
-              {smartLoading && smartPools.length === 0 ? (
-                <EmptyState text="正在加载聪明钱池子..." />
-              ) : smartPools.length === 0 ? (
-                <EmptyState text="暂无池子数据" />
-              ) : (
-                smartPools.slice(0, 24).map((pool, idx) => (
-                  <div
-                    key={`${pool?.pool_version || ''}:${pool?.pool_id || idx}`}
-                    className="data-row compact clickable"
-                    onClick={() =>
-                      selectPool(
-                        {
-                          pool_id: pool?.pool_id,
-                          pool_address: pool?.pool_id,
-                          trading_pair: pool?.pair,
-                          chain,
-                        },
-                        chain
-                      )
-                    }
-                  >
-                    <div className="row-main">
-                      <div className="row-title">{pool?.pair || shortAddress(pool?.pool_id || '')}</div>
-                      <div className="row-subtitle">{shortAddress(pool?.pool_id || '')}</div>
+              return (
+                <div
+                  key={poolKey || idx}
+                  className="sm-pool-card"
+                  onClick={() =>
+                    selectPool(
+                      {
+                        pool_id: pool?.pool_id,
+                        pool_address: pool?.pool_id,
+                        trading_pair: pool?.pair,
+                        factory_name: pool?.factory_name,
+                        chain,
+                      },
+                      chain
+                    )
+                  }
+                >
+                  <div className="sm-pool-header">
+                    <div className="sm-pool-left">
+                      <span className="sm-rank">#{idx + 1}</span>
+                      <span className="sm-pair">{pool?.pair || shortAddress(pool?.pool_id || '')}</span>
+                      {version ? <span className="tag">{version}</span> : null}
+                      {feePct > 0 ? <span className="tag tag-blue">{formatPct(feePct)}</span> : null}
                     </div>
-                    <div className="row-metrics">
-                      <span>{formatNumber(pool?.wallet_count || 0)}</span>
-                      <span>{formatUsdCompact(pool?.added_liquidity || 0)}</span>
+                    <div className="sm-pool-right">
+                      {totalUsd > 0 ? (
+                        <span className="sm-total-usd">${formatNumber(Math.round(totalUsd))}</span>
+                      ) : null}
+                      <span className="sm-wallet-count">
+                        {formatNumber(pool?.wallet_count || 0)} 钱包
+                      </span>
                     </div>
                   </div>
-                ))
-              )}
-            </div>
-          </div>
 
-          <div className="split-col">
-            <div className="list-title">钱包榜单</div>
-            <div className="data-list compact">
-              {smartWallets.length === 0 ? (
-                <EmptyState text="暂无钱包榜单数据" />
-              ) : (
-                smartWallets.slice(0, 20).map((wallet, idx) => {
-                  const pnl = Number(wallet?.pnl_usdt_24h || 0);
-                  return (
-                    <div key={wallet?.wallet_address || idx} className="data-row compact static">
-                      <div className="row-main">
-                        <div className="row-title">{shortAddress(wallet?.wallet_address || '', 8, 6)}</div>
-                        <div className="row-subtitle">事件 {formatNumber(wallet?.event_count_24h || 0)}</div>
-                      </div>
-                      <div className={pnl >= 0 ? 'wallet-pnl positive' : 'wallet-pnl negative'}>
-                        {formatUsdCompact(pnl)}
-                      </div>
+                  {adds?.status === 'loading' && wallets.length === 0 ? (
+                    <div className="sm-wallet-loading">加载钱包明细...</div>
+                  ) : null}
+
+                  {wallets.length > 0 ? (
+                    <div className="sm-wallet-list">
+                      {wallets.slice(0, 5).map((w, wi) => {
+                        const addr = String(w?.wallet_address || '').trim();
+                        const usd = Number(w?.total_usd ?? 0);
+                        const priceLower = Number(w?.price_lower ?? 0);
+                        const priceUpper = Number(w?.price_upper ?? 0);
+                        const quote = String(w?.price_quote || '').trim();
+                        const hasRange =
+                          Number.isFinite(priceLower) &&
+                          priceLower > 0 &&
+                          Number.isFinite(priceUpper) &&
+                          priceUpper > 0;
+                        const rangePct = hasRange
+                          ? (Math.abs(priceUpper - priceLower) / ((priceUpper + priceLower) / 2)) * 100
+                          : 0;
+
+                        return (
+                          <div key={addr || wi} className="sm-wallet-row">
+                            <div className="sm-wallet-addr">{shortAddress(addr, 6, 4)}</div>
+                            <div className="sm-wallet-stats">
+                              <span className="sm-wallet-usd">${formatNumber(Math.round(usd))}</span>
+                              {hasRange ? (
+                                <span className="sm-wallet-range-pct">{formatPct(rangePct, 1)}</span>
+                              ) : null}
+                            </div>
+                            {hasRange ? (
+                              <div className="sm-wallet-range">
+                                <span className="sm-range-label">区间</span>
+                                <span className="sm-range-val">{compactPrice(priceLower)}</span>
+                                <span className="sm-range-arrow">&rarr;</span>
+                                <span className="sm-range-val">{compactPrice(priceUpper)}</span>
+                                {quote ? <span className="sm-range-quote">{quote}</span> : null}
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
+                  ) : null}
+                </div>
+              );
+            })
+          )}
         </div>
       </PanelShell>
     ),
