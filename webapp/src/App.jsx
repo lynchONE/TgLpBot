@@ -31,6 +31,8 @@ import PanelShell, { EmptyState, MetricCard } from './components/PanelShell';
 import OpenPositionModal from './components/OpenPositionModal';
 import TaskActionMenu from './components/TaskActionMenu';
 import telegramLogo from './img/telegram.svg';
+import uniswapLogo from './img/uniswap.svg';
+import pancakeLogo from './img/pancake.svg';
 import {
   DEFAULT_WIDGETS,
   WIDGETS,
@@ -119,6 +121,19 @@ function parseLoginUser(raw) {
 function openExternal(url) {
   if (!url) return;
   window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+function getDexIcon(factoryName) {
+  const name = String(factoryName || '').toLowerCase();
+  if (name.includes('uniswap')) {
+    const m = name.match(/v(\d+)/i);
+    return { src: uniswapLogo, label: m ? `V${m[1]}` : '', color: '#ff007a' };
+  }
+  if (name.includes('pancake') || name.includes('pcs')) {
+    const m = name.match(/v(\d+)/i);
+    return { src: pancakeLogo, label: m ? `V${m[1]}` : '', color: '#d1884f' };
+  }
+  return null;
 }
 
 export default function App() {
@@ -564,18 +579,19 @@ export default function App() {
         title="热门池子"
         subtitle="支持搜索与排序"
         icon={Flame}
-        actions={
-          <select
-            value={hotSort}
-            onChange={(e) => setHotSort(e.target.value)}
-            className="surface-input slim"
-          >
-            <option value="fees">Fees</option>
-            <option value="fee_rate">Fee Rate</option>
-            <option value="volume">Volume</option>
-          </select>
-        }
       >
+        <div className="sort-tabs">
+          {[{ key: 'fees', label: 'Fees' }, { key: 'fee_rate', label: 'Fee Rate' }, { key: 'volume', label: 'Volume' }].map((item) => (
+            <button
+              type="button"
+              key={item.key}
+              className={`sort-tab ${hotSort === item.key ? 'active' : ''}`}
+              onClick={() => setHotSort(item.key)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
         <div className="search-row">
           <Search size={14} />
           <input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="搜索交易对/地址" />
@@ -592,7 +608,6 @@ export default function App() {
             filteredHotPools.slice(0, 60).map((pool, idx) => {
               const addr = normalizePoolAddress(pool?.pool_address || '');
               const selected = selectedPoolAddress && addr === selectedPoolAddress;
-              const gmgn = buildGmgnUrl({ ...pool, chain }, chain);
               const feePct = Number(pool?.fee_percentage || 0);
               const feeRate = Number(pool?.fee_rate || 0);
               const volume = Number(pool?.total_volume || 0);
@@ -614,7 +629,17 @@ export default function App() {
                       <div className="pool-card-pair">
                         <span className="pool-pair-name">{pool?.trading_pair || '--'}</span>
                         {feePct > 0 && <span className="badge badge-fee">{feePct.toFixed(2).replace(/\.?0+$/, '')}%</span>}
-                        {factoryName && <span className="badge badge-dex">{factoryName}</span>}
+                        {(() => {
+                          const dex = getDexIcon(factoryName);
+                          if (dex) return (
+                            <span className="badge badge-dex">
+                              <img src={dex.src} alt="" className="dex-icon" />
+                              {dex.label && <span>{dex.label}</span>}
+                            </span>
+                          );
+                          if (factoryName) return <span className="badge badge-dex">{factoryName}</span>;
+                          return null;
+                        })()}
                       </div>
                       <div className="pool-card-addr">
                         <span>{shortAddress(addr, 6, 4)}</span>
@@ -652,7 +677,6 @@ export default function App() {
                       {userPosUsd > 0 && <span className="badge badge-pos">持仓 {formatUsdCompact(userPosUsd)}</span>}
                     </div>
                     <div className="pool-card-actions">
-                      <button type="button" className="mini-link" disabled={!gmgn} onClick={(e) => { e.stopPropagation(); openExternal(gmgn); }}>GMGN</button>
                       <button type="button" className="mini-link accent" onClick={(e) => { e.stopPropagation(); setOpenPosPool({ ...pool, chain }); }}>一键开仓</button>
                     </div>
                   </div>

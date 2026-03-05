@@ -460,7 +460,7 @@ body {
 
 .drag-hint {
   position: absolute;
-  right: 12px;
+  left: 12px;
   top: 10px;
   z-index: 4;
   border: 1px dashed rgba(138, 160, 194, 0.36);
@@ -989,6 +989,44 @@ body {
 .badge-dex {
   background: rgba(251, 191, 36, 0.12);
   color: #fcd34d;
+}
+.dex-icon {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Sort toggle tabs */
+.sort-tabs {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  background: rgba(18, 26, 40, 0.6);
+  border: 1px solid rgba(138, 160, 194, 0.18);
+  border-radius: 10px;
+  padding: 3px;
+}
+.sort-tab {
+  border: none;
+  background: transparent;
+  color: #8fa2c4;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.sort-tab:hover {
+  color: var(--text);
+  background: rgba(138, 160, 194, 0.1);
+}
+.sort-tab.active {
+  background: rgba(255, 177, 26, 0.18);
+  color: #ffd18d;
+  border: 1px solid rgba(255, 177, 26, 0.35);
 }
 .badge-pos {
   background: rgba(168, 85, 247, 0.15);
