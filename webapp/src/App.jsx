@@ -8,6 +8,8 @@ import {
   GripVertical,
   Link2,
   LogOut,
+  Maximize,
+  Minimize,
   RefreshCw,
   Search,
   SlidersHorizontal,
@@ -187,7 +189,7 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false);
   const [loginError, setLoginError] = useState('');
-
+  const [workMode, setWorkMode] = useState(false);
   const [draggingKey, setDraggingKey] = useState('');
   const [dragOverKey, setDragOverKey] = useState('');
 
@@ -197,6 +199,7 @@ export default function App() {
     return widgets.map((k) => map[k]).filter(Boolean);
   }, [widgets]);
   const layoutClass = moduleLayoutClass(activeWidgets.length);
+  const workLayoutClass = workMode ? `work-mode layout-work-${Math.min(activeWidgets.length, 4)}` : layoutClass;
 
   const selectedPoolAddress = useMemo(
     () => normalizePoolAddress(selectedPool?.pool_address || selectedPool?.pool_id),
@@ -247,6 +250,13 @@ export default function App() {
       storageRemove(STORAGE.loginUser);
     }
   }, [chain, hotSort, initData, loginUser, widgets]);
+
+  useEffect(() => {
+    if (!workMode) return;
+    const handler = (e) => { if (e.key === 'Escape') setWorkMode(false); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [workMode]);
 
   const selectPool = useCallback(
     (pool, fallbackChain) => {
@@ -863,22 +873,35 @@ export default function App() {
   };
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${workMode ? 'work-mode-shell' : ''}`}>
       <div className="bg-orb orb-a" />
       <div className="bg-orb orb-b" />
       <div className="bg-grid" />
 
-      <header className="top-bar">
-        <div className="title-block">
-          <div className="eyebrow">lynchL</div>
-          <h1>LP交易工作台</h1>
-        </div>
-
-        <div className="top-actions">
+      {workMode ? (
+        <div className="work-mode-bar">
+          <button type="button" className="work-mode-exit-btn" onClick={() => setWorkMode(false)}>
+            <Minimize size={14} />
+            退出工作模式
+          </button>
           <button type="button" className="primary-btn" onClick={refreshAll} disabled={refreshing || !hasInitData}>
             <RefreshCw size={14} className={refreshing ? 'spin' : ''} />
-            刷新数据
+            刷新
           </button>
+        </div>
+      ) : (
+        <>
+          <header className="top-bar">
+            <div className="title-block">
+              <div className="eyebrow">lynchL</div>
+              <h1>LP交易工作台</h1>
+            </div>
+
+            <div className="top-actions">
+              <button type="button" className="primary-btn" onClick={refreshAll} disabled={refreshing || !hasInitData}>
+                <RefreshCw size={14} className={refreshing ? 'spin' : ''} />
+                刷新数据
+              </button>
 
           {loginUser ? (
             <div className="user-chip">
@@ -952,6 +975,10 @@ export default function App() {
               {item.label}
             </button>
           ))}
+          <button type="button" className="work-mode-btn" onClick={() => setWorkMode(true)}>
+            <Maximize size={13} />
+            工作模式
+          </button>
         </div>
 
         {!hasInitData ? (
@@ -961,8 +988,10 @@ export default function App() {
           </div>
         ) : null}
       </section>
+      </>
+      )}
 
-      <main className={`workbench ${layoutClass}`}>
+      <main className={`workbench ${workLayoutClass}`}>
         {activeWidgets.map((widget) => (
           <div
             key={widget.key}
