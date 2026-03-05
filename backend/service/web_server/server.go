@@ -77,6 +77,7 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/admin/rpc_pool", s.handleAdminRPCPool)
 	mux.HandleFunc("/api/blacklist", handleBlacklist)
 	mux.HandleFunc("/api/cooldowns", handleCooldowns)
+	mux.HandleFunc("/api/web_login", s.handleWebLogin)
 	mux.HandleFunc("/api/ws", s.handleWebSocket)
 
 	handler := corsMiddleware(mux)

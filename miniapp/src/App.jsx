@@ -134,6 +134,56 @@ const STORAGE_THEME = 'tglp_theme';
 const STORAGE_POLL_SEC = 'tglp_poll_interval_sec';
 const STORAGE_HOT_POOLS_FILTER = 'tglp_hot_pools_filter_v1';
 const STORAGE_OPEN_POSITION_WALLET_ID = 'tglp_open_position_wallet_id';
+const STORAGE_WEB_WORKBENCH_WIDGETS = 'tglp_web_workbench_widgets_v1';
+
+const WEB_WORKBENCH_WIDGETS = [
+    { key: 'hot_pools', label: '热门池子' },
+    { key: 'gmgn_kline', label: 'GMGN K线' },
+    { key: 'positions', label: '仓位' },
+    { key: 'smart_money', label: '聪明钱' },
+];
+const DEFAULT_WEB_WORKBENCH_WIDGETS = WEB_WORKBENCH_WIDGETS.map((item) => item.key);
+
+const GMGN_STABLE_SYMBOLS = new Set(['usdc', 'usdt', 'busd', 'dai', 'frax', 'usdd', 'fdusd', 'wbnb', 'weth', 'wsol', 'bnb', 'eth', 'sol']);
+
+function normalizeWebWorkbenchWidgets(value) {
+    if (!Array.isArray(value)) return [...DEFAULT_WEB_WORKBENCH_WIDGETS];
+    const allow = new Set(DEFAULT_WEB_WORKBENCH_WIDGETS);
+    const seen = new Set();
+    const next = [];
+    for (const raw of value) {
+        const key = String(raw || '').trim();
+        if (!allow.has(key) || seen.has(key)) continue;
+        seen.add(key);
+        next.push(key);
+    }
+    if (next.length === 0) return [...DEFAULT_WEB_WORKBENCH_WIDGETS];
+    return next;
+}
+
+function pickGmgnTokenAddress(pool) {
+    const pair = String(pool?.trading_pair || '').trim();
+    const token0 = String(pool?.token0_address || '').trim();
+    const token1 = String(pool?.token1_address || '').trim();
+    if (!pair) return token0 || token1;
+
+    const symbols = pair.split('/').map((part) => String(part || '').trim().toLowerCase());
+    if (symbols.length !== 2) return token0 || token1;
+
+    const [leftSymbol, rightSymbol] = symbols;
+    const leftStable = GMGN_STABLE_SYMBOLS.has(leftSymbol);
+    const rightStable = GMGN_STABLE_SYMBOLS.has(rightSymbol);
+    if (leftStable && !rightStable) return token1 || token0;
+    if (rightStable && !leftStable) return token0 || token1;
+    return token0 || token1;
+}
+
+function buildGmgnUrl(pool, fallbackChain = 'bsc') {
+    const tokenAddress = pickGmgnTokenAddress(pool);
+    if (!tokenAddress) return '';
+    const chain = String(pool?.chain || fallbackChain || 'bsc').trim().toLowerCase() === 'base' ? 'base' : 'bsc';
+    return `https://gmgn.ai/${chain}/token/${tokenAddress}`;
+}
 
 const USD_DISPLAY_LIMIT = 1e15;
 const usdFormatter = new Intl.NumberFormat('en-US', {
@@ -400,6 +450,20 @@ export default function App() {
 
     // Smart money exit WebSocket notifications
     const [wsNotifications, setWsNotifications] = useState([]);
+    const [isDesktopWebMode, setIsDesktopWebMode] = useState(() => {
+        if (typeof window === 'undefined') return false;
+        return window.matchMedia('(min-width: 1024px)').matches;
+    });
+    const [webWorkbenchWidgets, setWebWorkbenchWidgets] = useState(() => {
+        const saved = storage.get(STORAGE_WEB_WORKBENCH_WIDGETS);
+        if (!saved) return [...DEFAULT_WEB_WORKBENCH_WIDGETS];
+        try {
+            return normalizeWebWorkbenchWidgets(JSON.parse(saved));
+        } catch {
+            return [...DEFAULT_WEB_WORKBENCH_WIDGETS];
+        }
+    });
+    const [webWorkbenchGmgnPool, setWebWorkbenchGmgnPool] = useState(null);
 
     const multiChainEnabled = globalConfig?.multi_chain_enabled ?? true;
     const multiWalletEnabled = globalConfig?.multi_wallet_enabled ?? false;
