@@ -14,15 +14,22 @@ import {
 } from 'lucide-react';
 import {
   checkLoginCode,
+  deleteTask,
   fetchHotPools,
   fetchPoolOHLCV,
   fetchRealtimePositions,
   fetchSmartMoneyOverview,
   generateLoginCode,
+  openPosition as apiOpenPosition,
+  setTaskPaused,
+  stopTask,
+  updateTaskRange,
 } from './api';
 import { WEBAPP_CONFIG } from './config';
 import KlineChart from './components/KlineChart';
 import PanelShell, { EmptyState, MetricCard } from './components/PanelShell';
+import OpenPositionModal from './components/OpenPositionModal';
+import TaskActionMenu from './components/TaskActionMenu';
 import telegramLogo from './img/telegram.svg';
 import {
   DEFAULT_WIDGETS,
@@ -507,6 +514,47 @@ export default function App() {
     });
   }, []);
 
+  const [openPosPool, setOpenPosPool] = useState(null);
+  const [openPosBusy, setOpenPosBusy] = useState(false);
+  const [taskActionPos, setTaskActionPos] = useState(null);
+
+  const handleOpenPosition = useCallback(async (params) => {
+    setOpenPosBusy(true);
+    try {
+      await apiOpenPosition({ apiBaseUrl, initData, ...params });
+      setOpenPosPool(null);
+      loadPositions();
+    } catch (e) {
+      alert(String(e?.message || e));
+    } finally {
+      setOpenPosBusy(false);
+    }
+  }, [apiBaseUrl, initData, loadPositions]);
+
+  const handleTaskPause = useCallback(async (taskId, paused) => {
+    await setTaskPaused({ apiBaseUrl, initData, taskId, paused });
+    loadPositions();
+  }, [apiBaseUrl, initData, loadPositions]);
+
+  const handleTaskStop = useCallback(async (taskId) => {
+    await stopTask({ apiBaseUrl, initData, taskId });
+    loadPositions();
+  }, [apiBaseUrl, initData, loadPositions]);
+
+  const handleTaskDelete = useCallback(async (taskId) => {
+    await deleteTask({ apiBaseUrl, initData, taskId });
+    loadPositions();
+  }, [apiBaseUrl, initData, loadPositions]);
+
+  const handleTaskEditRange = useCallback(async (taskId, rl, ru, amt) => {
+    await updateTaskRange({ apiBaseUrl, initData, taskId, rangeLowerPct: rl, rangeUpperPct: ru, amountUSDT: amt });
+    loadPositions();
+  }, [apiBaseUrl, initData, loadPositions]);
+
+  const copyAddr = useCallback((addr) => {
+    navigator.clipboard?.writeText(addr).catch(() => {});
+  }, []);
+
   const summary = positions?.summary || {};
   const smartSummary = smart?.summary || {};
 
@@ -545,33 +593,69 @@ export default function App() {
               const addr = normalizePoolAddress(pool?.pool_address || '');
               const selected = selectedPoolAddress && addr === selectedPoolAddress;
               const gmgn = buildGmgnUrl({ ...pool, chain }, chain);
+              const feePct = Number(pool?.fee_percentage || 0);
+              const feeRate = Number(pool?.fee_rate || 0);
+              const volume = Number(pool?.total_volume || 0);
+              const totalFees = Number(pool?.total_fees || 0);
+              const tvl = Number(pool?.current_pool_value || 0);
+              const txCount = Number(pool?.transaction_count || 0);
+              const priceDisplay = String(pool?.price_display || '');
+              const factoryName = String(pool?.factory_name || pool?.dex || '');
+              const userPosUsd = Number(pool?.userPositionUsd || 0);
 
               return (
                 <div
                   key={`${pool?.protocol_version || ''}:${addr || idx}`}
-                  className={`data-row clickable ${selected ? 'selected' : ''}`}
+                  className={`pool-card ${selected ? 'selected' : ''}`}
                   onClick={() => selectPool({ ...pool, chain }, chain)}
                 >
-                  <div className="row-main">
-                    <div className="row-title">{pool?.trading_pair || '--'}</div>
-                    <div className="row-subtitle">{shortAddress(addr || pool?.pool_address || '')}</div>
+                  <div className="pool-card-top">
+                    <div className="pool-card-left">
+                      <div className="pool-card-pair">
+                        <span className="pool-pair-name">{pool?.trading_pair || '--'}</span>
+                        {feePct > 0 && <span className="badge badge-fee">{feePct.toFixed(2).replace(/\.?0+$/, '')}%</span>}
+                        {factoryName && <span className="badge badge-dex">{factoryName}</span>}
+                      </div>
+                      <div className="pool-card-addr">
+                        <span>{shortAddress(addr, 6, 4)}</span>
+                        <button type="button" className="icon-btn-tiny" onClick={(e) => { e.stopPropagation(); copyAddr(addr); }} title="复制地址">
+                          <svg viewBox="0 0 24 24" fill="currentColor" width="12" height="12"><path d="M16 1H4a2 2 0 00-2 2v14h2V3h12V1zm3 4H8a2 2 0 00-2 2v14a2 2 0 002 2h11a2 2 0 002-2V7a2 2 0 00-2-2zm0 16H8V7h11v14z"/></svg>
+                        </button>
+                      </div>
+                      <div className="pool-card-stats">
+                        {volume > 0 && <span>交易量: <b>{formatUsdCompact(volume)}</b></span>}
+                        {tvl > 0 && <span>TVL: <b>{formatUsdCompact(tvl)}</b></span>}
+                        {txCount > 0 && <span>笔数: <b>{txCount.toLocaleString()}</b></span>}
+                      </div>
+                    </div>
+                    <div className="pool-card-right">
+                      <div className="pool-card-metric">
+                        {hotSort === 'volume' ? formatUsdCompact(volume) :
+                         hotSort === 'fee_rate' ? (feeRate > 0 ? `${feeRate.toFixed(3)}%` : '--') :
+                         formatUsdCompact(totalFees)}
+                      </div>
+                      {priceDisplay && (
+                        <div className={`pool-card-price ${priceDisplay.includes('↑') || priceDisplay.includes('+') ? 'up' : priceDisplay.includes('↓') || priceDisplay.includes('-') ? 'down' : ''}`}>
+                          {priceDisplay}
+                        </div>
+                      )}
+                      {hotSort !== 'fee_rate' && feeRate > 0 && (
+                        <div className="pool-card-secondary">{feeRate.toFixed(3)}%</div>
+                      )}
+                      {hotSort === 'fee_rate' && totalFees > 0 && (
+                        <div className="pool-card-secondary">{formatUsdCompact(totalFees)}</div>
+                      )}
+                    </div>
                   </div>
-                  <div className="row-metrics">
-                    <span>{formatUsdCompact(pool?.total_fees_24h ?? pool?.total_fees)}</span>
-                    <span>{formatUsdCompact(pool?.total_volume_24h ?? pool?.total_volume)}</span>
-                    <span>{formatPct(pool?.fee_rate, 3)}</span>
+                  <div className="pool-card-bottom">
+                    <div className="pool-card-badges">
+                      {userPosUsd > 0 && <span className="badge badge-pos">持仓 {formatUsdCompact(userPosUsd)}</span>}
+                    </div>
+                    <div className="pool-card-actions">
+                      <button type="button" className="mini-link" disabled={!gmgn} onClick={(e) => { e.stopPropagation(); openExternal(gmgn); }}>GMGN</button>
+                      <button type="button" className="mini-link accent" onClick={(e) => { e.stopPropagation(); setOpenPosPool({ ...pool, chain }); }}>一键开仓</button>
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    className="mini-link"
-                    disabled={!gmgn}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openExternal(gmgn);
-                    }}
-                  >
-                    GMGN
-                  </button>
                 </div>
               );
             })
@@ -668,36 +752,100 @@ export default function App() {
           ) : sortedPositions.length === 0 ? (
             <EmptyState text="暂无仓位数据" />
           ) : (
-            sortedPositions.slice(0, 50).map((p, idx) => (
-              <div
-                key={String(p?.position_id || idx)}
-                className="data-row clickable"
-                onClick={() =>
-                  selectPool(
-                    {
-                      pool_id: p?.pool_id,
-                      pool_address: p?.pool_id,
-                      trading_pair: p?.title,
-                      chain: p?.chain || chain,
-                    },
-                    p?.chain || chain
-                  )
-                }
-              >
-                <div className="row-main">
-                  <div className="row-title">{p?.title || shortAddress(p?.pool_id || '')}</div>
-                  <div className="row-subtitle">
-                    {String(p?.version || '').toUpperCase()} · {p?.in_range ? 'In Range' : 'Out of Range'}
+            sortedPositions.slice(0, 50).map((p, idx) => {
+              const taskId = Number(p?.task_id || 0);
+              const statusLabel = String(p?.status_label || '运行中');
+              const pnl = Number(p?.absolute_pnl_usd || 0);
+              const hasPnl = Boolean(p?.has_pnl) || Number.isFinite(pnl) && pnl !== 0;
+              const totalVal = Number(p?.current_value_usd || p?.totals?.total_usd || 0);
+              const inRange = Boolean(p?.in_range);
+              const token0 = p?.token_rows?.[0];
+              const token1 = p?.token_rows?.[1];
+              const taskRangeLo = Number(p?.task_range_lower_pct);
+              const taskRangeUp = Number(p?.task_range_upper_pct);
+              const taskAmount = Number(p?.task_amount_usdt);
+
+              const statusClass = statusLabel.includes('错误') ? 'st-error' :
+                statusLabel.includes('暂停') || statusLabel.includes('停止') || statusLabel.includes('撤出') ? 'st-warn' :
+                statusLabel.includes('等待') ? 'st-wait' : 'st-ok';
+
+              return (
+                <div key={String(p?.position_id || idx)} className="pos-card">
+                  <div className="pos-card-header">
+                    <div className="pos-card-left"
+                      onClick={() => selectPool({ pool_id: p?.pool_id, pool_address: p?.pool_id, trading_pair: p?.title, chain: p?.chain || chain }, p?.chain || chain)}>
+                      <div className="pos-pair-row">
+                        <span className="pos-pair-name">{p?.title || shortAddress(p?.pool_id || '')}</span>
+                        {p?.tick_spacing && (
+                          <span className="badge badge-fee">{
+                            { 1: '0.01%', 10: '0.05%', 50: '0.25%', 60: '0.30%', 100: '0.50%', 200: '1%' }[Number(p.tick_spacing)] || ''
+                          }</span>
+                        )}
+                      </div>
+                      <div className="pos-status-row">
+                        <span className={`status-pill ${statusClass}`}>
+                          <span className="status-dot" />
+                          {statusLabel}
+                        </span>
+                        {taskId > 0 && <span className="pos-task-id">#{taskId}</span>}
+                        <span className={`range-pill ${inRange ? 'in' : 'out'}`}>{inRange ? 'In Range' : 'Out'}</span>
+                      </div>
+                    </div>
+                    <div className="pos-card-right-block">
+                      <div className="pos-total">{formatUsd(totalVal)}</div>
+                      {hasPnl && (
+                        <div className={`pos-pnl ${pnl >= 0 ? 'positive' : 'negative'}`}>
+                          {pnl >= 0 ? '+' : ''}{formatNumber(pnl, 2)}
+                        </div>
+                      )}
+                      {taskId > 0 && (
+                        <button type="button" className="icon-btn-tiny" onClick={(e) => { e.stopPropagation(); setTaskActionPos(p); }} title="任务操作">
+                          <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4z"/></svg>
+                        </button>
+                      )}
+                    </div>
                   </div>
+
+                  {(token0 || token1) && (
+                    <div className="pos-token-table">
+                      <div className="pos-token-head">
+                        <span>Token</span><span>钱包</span><span>仓位</span><span>手续费</span>
+                      </div>
+                      {[token0, token1].filter(Boolean).map((tk) => (
+                        <div key={tk.address || tk.symbol} className="pos-token-row">
+                          <div className="pos-tk-name">
+                            <div>{tk.symbol}</div>
+                            <div className="pos-tk-price">${Number(tk.price_usd || 0).toFixed(4)}</div>
+                          </div>
+                          <div className="pos-tk-cell">
+                            <div>{tk.wallet_amount ?? '--'}</div>
+                            <div className="pos-tk-usd">{formatUsd(tk.wallet_usd)}</div>
+                          </div>
+                          <div className="pos-tk-cell">
+                            <div>{tk.position_amount ?? '--'}</div>
+                            <div className="pos-tk-usd">{formatUsd(tk.position_usd)}</div>
+                          </div>
+                          <div className="pos-tk-cell fee">
+                            <div>{tk.fee_amount ?? '--'}</div>
+                            <div className="pos-tk-usd">{formatUsd(tk.fee_usd)}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {Number.isFinite(taskRangeLo) && taskRangeLo > 0 && (
+                    <div className="pos-range-info">
+                      <span>范围: {Math.abs(taskRangeLo - taskRangeUp) < 0.01
+                        ? `±${((taskRangeLo + taskRangeUp) / 2).toFixed(2)}%`
+                        : `下 ${taskRangeLo.toFixed(2)}% / 上 ${taskRangeUp.toFixed(2)}%`}
+                      </span>
+                      {Number.isFinite(taskAmount) && taskAmount > 0 && <span> | ${taskAmount.toFixed(2)}</span>}
+                    </div>
+                  )}
                 </div>
-                <div className="row-metrics">
-                  <span>{formatUsdCompact(p?.totals?.total_usd || 0)}</span>
-                  <span className={Number(p?.absolute_pnl_usd || 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}>
-                    {formatUsdCompact(p?.absolute_pnl_usd || 0)}
-                  </span>
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </PanelShell>
@@ -920,6 +1068,27 @@ export default function App() {
           </div>
         ))}
       </main>
+
+      {openPosPool && (
+        <OpenPositionModal
+          pool={openPosPool}
+          chain={openPosPool?.chain || chain}
+          onSubmit={handleOpenPosition}
+          onClose={() => setOpenPosPool(null)}
+          busy={openPosBusy}
+        />
+      )}
+
+      {taskActionPos && (
+        <TaskActionMenu
+          position={taskActionPos}
+          onPause={handleTaskPause}
+          onStop={handleTaskStop}
+          onDelete={handleTaskDelete}
+          onEditRange={handleTaskEditRange}
+          onClose={() => setTaskActionPos(null)}
+        />
+      )}
     </div>
   );
 }

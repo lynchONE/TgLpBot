@@ -16,7 +16,8 @@
       "Bash(npx --yes acorn --ecma2020 --module src/lib/api.js > /dev/null 2>&1 && echo \"api.js: OK\" || echo \"api.js: FAIL\")",
       "Bash(npm install 2>&1 | tail -5)",
       "Bash(npm run build 2>&1 | tail -20)",
-      "Bash(git config --global --add safe.directory /mnt/e/goProject/TgLpBot && git status --short)"
+      "Bash(git config --global --add safe.directory /mnt/e/goProject/TgLpBot && git status --short)",
+      "Bash(npx -y acorn --ecma2022 --module src/App.jsx 2>&1 | tail -5)"
     ]
   }
 }

@@ -152,3 +152,84 @@ export async function checkLoginCode({ apiBaseUrl, code, signal }) {
     signal,
   });
 }
+
+export async function openPosition({
+  apiBaseUrl,
+  initData,
+  chain,
+  poolAddress,
+  poolVersion,
+  amount,
+  rangeLowerPct,
+  rangeUpperPct,
+  slippageTolerance,
+  allowEntrySwap,
+  signal,
+}) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/trading?endpoint=open_position`;
+  const payload = {
+    initData,
+    chain,
+    pool_address: poolAddress,
+    pool_version: poolVersion,
+    amount,
+    range_lower_pct: rangeLowerPct,
+    range_upper_pct: rangeUpperPct,
+    allow_entry_swap: Boolean(allowEntrySwap),
+  };
+  if (Number.isFinite(slippageTolerance)) payload.slippage_tolerance = slippageTolerance;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export async function setTaskPaused({ apiBaseUrl, initData, taskId, paused, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/task_action?action=pause`;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData, taskId, paused: Boolean(paused) }),
+    signal,
+  });
+}
+
+export async function stopTask({ apiBaseUrl, initData, taskId, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/task_action?action=stop`;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData, taskId }),
+    signal,
+  });
+}
+
+export async function deleteTask({ apiBaseUrl, initData, taskId, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/task_action?action=delete`;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData, taskId }),
+    signal,
+  });
+}
+
+export async function updateTaskRange({ apiBaseUrl, initData, taskId, rangeLowerPct, rangeUpperPct, amountUSDT, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/task_action?action=update_range`;
+  const payload = { initData, taskId, range_lower_pct: rangeLowerPct, range_upper_pct: rangeUpperPct };
+  const amt = Number(amountUSDT);
+  if (Number.isFinite(amt) && amt > 0) payload.amount_usdt = amt;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
