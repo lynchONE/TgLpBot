@@ -10,7 +10,6 @@ import {
   LogOut,
   Maximize,
   Minimize,
-  RefreshCw,
   Search,
   SlidersHorizontal,
 } from 'lucide-react';
@@ -884,10 +883,6 @@ export default function App() {
             <Minimize size={14} />
             退出工作模式
           </button>
-          <button type="button" className="primary-btn" onClick={refreshAll} disabled={refreshing || !hasInitData}>
-            <RefreshCw size={14} className={refreshing ? 'spin' : ''} />
-            刷新
-          </button>
         </div>
       ) : (
         <>
@@ -898,11 +893,6 @@ export default function App() {
             </div>
 
             <div className="top-actions">
-              <button type="button" className="primary-btn" onClick={refreshAll} disabled={refreshing || !hasInitData}>
-                <RefreshCw size={14} className={refreshing ? 'spin' : ''} />
-                刷新数据
-              </button>
-
           {loginUser ? (
             <div className="user-chip">
               {loginUser?.photo_url ? (
