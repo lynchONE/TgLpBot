@@ -22,7 +22,6 @@ import {
 import { WEBAPP_CONFIG } from './config';
 import KlineChart from './components/KlineChart';
 import PanelShell, { EmptyState, MetricCard } from './components/PanelShell';
-import telegramLogo from './img/telegram.svg';
 import {
   DEFAULT_WIDGETS,
   WIDGETS,
@@ -52,61 +51,19 @@ const KLINE_PRESETS = [
   { key: '1h', label: '1h', timeframe: 'hour', aggregate: 1, limit: 200 },
 ];
 
-let telegramScriptPromise = null;
+function mountTelegramWidget(containerEl, botUsername, callbackName) {
+  if (!containerEl) return;
+  containerEl.innerHTML = '';
 
-function ensureTelegramScript() {
-  if (typeof window === 'undefined') {
-    return Promise.reject(new Error('浏览器环境不可用'));
-  }
-  if (window.Telegram?.Login?.auth) return Promise.resolve();
-  if (telegramScriptPromise) return telegramScriptPromise;
-
-  telegramScriptPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-tg-login-script="1"]');
-    if (existing) {
-      existing.addEventListener('load', () => resolve(), { once: true });
-      existing.addEventListener('error', () => reject(new Error('加载 Telegram 登录脚本失败')), {
-        once: true,
-      });
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.async = true;
-    script.src = 'https://telegram.org/js/telegram-widget.js?22';
-    script.dataset.tgLoginScript = '1';
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error('加载 Telegram 登录脚本失败'));
-    document.body.appendChild(script);
-  });
-
-  return telegramScriptPromise;
-}
-
-function telegramAuthPopup(botId) {
-  return ensureTelegramScript().then(
-    () =>
-      new Promise((resolve, reject) => {
-        if (!window.Telegram?.Login?.auth) {
-          reject(new Error('当前环境不支持 Telegram 登录，请刷新页面重试'));
-          return;
-        }
-
-        window.Telegram.Login.auth(
-          {
-            bot_id: String(botId),
-            request_access: true,
-          },
-          (data) => {
-            if (!data) {
-              reject(new Error('已取消登录或二维码未确认'));
-              return;
-            }
-            resolve(data);
-          }
-        );
-      })
-  );
+  const script = document.createElement('script');
+  script.async = true;
+  script.src = 'https://telegram.org/js/telegram-widget.js?22';
+  script.setAttribute('data-telegram-login', botUsername);
+  script.setAttribute('data-size', 'large');
+  script.setAttribute('data-radius', '8');
+  script.setAttribute('data-request-access', 'write');
+  script.setAttribute('data-onauth', callbackName);
+  containerEl.appendChild(script);
 }
 
 function storageGet(key) {
@@ -493,24 +450,48 @@ export default function App() {
     [apiBaseUrl]
   );
 
-  const startTelegramLogin = useCallback(async () => {
-    const botId = String(WEBAPP_CONFIG.telegramBotId || '').trim();
-    if (!botId) {
-      setLoginError('缺少 VITE_TELEGRAM_BOT_ID 配置');
+  const tgWidgetRef = React.useRef(null);
+  const tgWidgetMounted = React.useRef(false);
+
+  useEffect(() => {
+    if (hasInitData || loginUser) return;
+
+    const botUsername = String(WEBAPP_CONFIG.telegramBotUsername || '').trim();
+    if (!botUsername) {
+      setLoginError('缺少 VITE_TELEGRAM_BOT_USERNAME 配置');
       return;
     }
 
-    setLoginBusy(true);
-    setLoginError('');
-    try {
-      const authUser = await telegramAuthPopup(botId);
-      await handleLoginAuth(authUser);
-    } catch (e) {
-      setLoginError(String(e?.message || e));
-    } finally {
-      setLoginBusy(false);
-    }
-  }, [handleLoginAuth]);
+    const callbackName = '__tglp_telegram_login_cb';
+    window[callbackName] = async (authUser) => {
+      if (!authUser) {
+        setLoginError('已取消登录或未授权');
+        return;
+      }
+      setLoginBusy(true);
+      setLoginError('');
+      try {
+        await handleLoginAuth(authUser);
+      } catch (e) {
+        setLoginError(String(e?.message || e));
+      } finally {
+        setLoginBusy(false);
+      }
+    };
+
+    const timer = setTimeout(() => {
+      if (tgWidgetRef.current && !tgWidgetMounted.current) {
+        tgWidgetMounted.current = true;
+        mountTelegramWidget(tgWidgetRef.current, botUsername, callbackName);
+      }
+    }, 0);
+
+    return () => {
+      clearTimeout(timer);
+      delete window[callbackName];
+      tgWidgetMounted.current = false;
+    };
+  }, [handleLoginAuth, hasInitData, loginUser]);
 
   const logout = useCallback(() => {
     setInitData('');
@@ -849,16 +830,7 @@ export default function App() {
               </button>
             </div>
           ) : (
-            <button
-              type="button"
-              className="telegram-icon-btn"
-              onClick={startTelegramLogin}
-              disabled={loginBusy}
-              title="Telegram 扫码登录"
-              aria-label="Telegram 扫码登录"
-            >
-              <img src={telegramLogo} alt="Telegram" />
-            </button>
+            <div ref={tgWidgetRef} className="telegram-widget-wrap" />
           )}
         </div>
       </header>

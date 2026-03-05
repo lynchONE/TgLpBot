@@ -116,6 +116,12 @@ body {
   cursor: not-allowed;
 }
 
+.telegram-widget-wrap {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+}
+
 .top-error {
   position: relative;
   z-index: 1;
