@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { createChart } from 'lightweight-charts';
+import { createChart, CandlestickSeries, HistogramSeries } from 'lightweight-charts';
 import { toUnixSeconds } from '../utils';
 
 export default function KlineChart({ candles }) {
@@ -34,7 +34,7 @@ export default function KlineChart({ candles }) {
       },
     });
 
-    const candleSeries = chart.addCandlestickSeries({
+    const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: '#16c784',
       downColor: '#ea3943',
       borderUpColor: '#16c784',
@@ -42,7 +42,7 @@ export default function KlineChart({ candles }) {
       wickUpColor: '#16c784',
       wickDownColor: '#ea3943',
     });
-    const volumeSeries = chart.addHistogramSeries({
+    const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: 'volume' },
       priceScaleId: '',
     });
