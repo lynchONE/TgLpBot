@@ -120,7 +120,7 @@ function openExternal(url) {
 function buildDexScreenerEmbedUrl(poolAddress, chainName) {
   if (!poolAddress) return '';
   const c = String(chainName || 'bsc').toLowerCase() === 'base' ? 'base' : 'bsc';
-  return `https://dexscreener.com/${c}/${poolAddress}?embed=1&theme=dark&trades=1&info=0`;
+  return `https://dexscreener.com/${c}/${poolAddress}?embed=1&theme=dark&trades=1&info=0&interval=1&chartType=price`;
 }
 
 function getDexIcon(factoryName) {
@@ -859,9 +859,8 @@ export default function App() {
 
       <header className="top-bar">
         <div className="title-block">
-          <div className="eyebrow">TGLPBOT WEB TERMINAL</div>
-          <h1>多模块交易工作台</h1>
-          <p>点击右上角 Telegram 图标获取验证码，在 Bot 中发送即可登录。模块支持拖拽重排。</p>
+          <div className="eyebrow">lynchL</div>
+          <h1>LP交易工作台</h1>
         </div>
 
         <div className="top-actions">
