@@ -117,6 +117,12 @@ function openExternal(url) {
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
+function buildDexScreenerEmbedUrl(poolAddress, chainName) {
+  if (!poolAddress) return '';
+  const c = String(chainName || 'bsc').toLowerCase() === 'base' ? 'base' : 'bsc';
+  return `https://dexscreener.com/${c}/${poolAddress}?embed=1&theme=dark&trades=1&info=0`;
+}
+
 function getDexIcon(factoryName) {
   const name = String(factoryName || '').toLowerCase();
   if (name.includes('uniswap')) {
@@ -186,6 +192,10 @@ export default function App() {
     [selectedPool]
   );
   const selectedPoolGmgnUrl = useMemo(() => buildGmgnUrl(selectedPool, chain), [selectedPool, chain]);
+  const selectedPoolEmbedUrl = useMemo(
+    () => buildDexScreenerEmbedUrl(selectedPoolAddress, selectedPool?.chain || chain),
+    [selectedPoolAddress, selectedPool?.chain, chain]
+  );
 
   const filteredHotPools = useMemo(() => {
     const q = String(keyword || '').trim().toLowerCase();
@@ -611,35 +621,34 @@ export default function App() {
 
     gmgn_kline: (
       <PanelShell
-        title="GMGN"
+        title="K线行情"
         subtitle={selectedPool?.trading_pair || '请选择池子'}
         icon={CandlestickChart}
-        actions={
-          <button
-            type="button"
-            className="icon-link"
-            disabled={!selectedPoolGmgnUrl}
-            onClick={() => openExternal(selectedPoolGmgnUrl)}
-            title="在新窗口打开"
-          >
-            <Link2 size={14} />
-          </button>
-        }
       >
-        {!selectedPoolGmgnUrl ? (
-          <EmptyState text="点选池子后自动加载 GMGN 页面" />
+        {!selectedPoolAddress ? (
+          <EmptyState text="点选池子后自动加载 K 线" />
         ) : (
-          <div className="gmgn-frame-wrap">
-            <iframe
-              key={selectedPoolGmgnUrl}
-              src={selectedPoolGmgnUrl}
-              className="gmgn-iframe"
-              title="GMGN"
-              sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-              referrerPolicy="no-referrer"
-              allow="clipboard-write"
-            />
-          </div>
+          <>
+            <div className="dex-embed-wrap">
+              <iframe
+                key={selectedPoolEmbedUrl}
+                src={selectedPoolEmbedUrl}
+                className="dex-embed-iframe"
+                title="DEXScreener Chart"
+                sandbox="allow-scripts allow-same-origin allow-popups"
+                referrerPolicy="no-referrer"
+              />
+            </div>
+
+            <div className="kline-ext-links">
+              {selectedPoolGmgnUrl && (
+                <button type="button" className="kline-ext-btn gmgn" onClick={() => openExternal(selectedPoolGmgnUrl)}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                  GMGN 查看 KOL·活动·交易者
+                </button>
+              )}
+            </div>
+          </>
         )}
       </PanelShell>
     ),

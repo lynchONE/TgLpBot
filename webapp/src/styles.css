@@ -748,21 +748,49 @@ body {
   box-shadow: inset 0 0 0 1px rgba(255, 177, 26, 0.2);
 }
 
-/* GMGN iframe embed */
-.gmgn-frame-wrap {
+/* DEXScreener embed chart */
+.dex-embed-wrap {
   flex: 1;
-  min-height: 500px;
-  border: 1px solid rgba(136, 157, 191, 0.15);
+  min-height: 480px;
+  border: 1px solid rgba(136, 157, 191, 0.12);
   border-radius: 10px;
   overflow: hidden;
-  position: relative;
 }
-.gmgn-iframe {
+.dex-embed-iframe {
   width: 100%;
   height: 100%;
-  min-height: 500px;
+  min-height: 480px;
   border: none;
   background: #0b0e11;
+}
+
+/* External link buttons below chart */
+.kline-ext-links {
+  display: flex;
+  gap: 8px;
+}
+.kline-ext-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms, border-color 150ms;
+  border: 1px solid;
+}
+.kline-ext-btn.gmgn {
+  background: rgba(34, 197, 94, 0.08);
+  border-color: rgba(34, 197, 94, 0.22);
+  color: #4ade80;
+}
+.kline-ext-btn.gmgn:hover {
+  background: rgba(34, 197, 94, 0.16);
+  border-color: rgba(34, 197, 94, 0.4);
 }
 
 .split-list {
