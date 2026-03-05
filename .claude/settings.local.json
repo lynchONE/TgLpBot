@@ -17,7 +17,8 @@
       "Bash(npm install 2>&1 | tail -5)",
       "Bash(npm run build 2>&1 | tail -20)",
       "Bash(git config --global --add safe.directory /mnt/e/goProject/TgLpBot && git status --short)",
-      "Bash(npx -y acorn --ecma2022 --module src/App.jsx 2>&1 | tail -5)"
+      "Bash(npx -y acorn --ecma2022 --module src/App.jsx 2>&1 | tail -5)",
+      "Bash(npm install @number-flow/react 2>&1 | tail -5)"
     ]
   }
 }

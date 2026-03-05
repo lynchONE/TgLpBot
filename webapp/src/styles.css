@@ -17,6 +17,11 @@
   box-sizing: border-box;
 }
 
+number-flow-react {
+  display: inline-flex;
+  align-items: baseline;
+}
+
 html,
 body,
 #root {
@@ -989,6 +994,31 @@ body {
   flex-shrink: 0;
 }
 
+/* Meta accent (Fee/TVL) */
+.meta-accent {
+  color: #a78bfa;
+}
+.meta-accent b {
+  color: #c4b5fd;
+}
+
+/* Copy tiny button */
+.copy-tiny {
+  background: none;
+  border: none;
+  color: #475569;
+  cursor: pointer;
+  padding: 1px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  transition: color 120ms;
+  flex-shrink: 0;
+}
+.copy-tiny:hover {
+  color: #94a3b8;
+}
+
 /* Values block */
 .pool-values {
   text-align: right;
@@ -1012,21 +1042,22 @@ body {
 .pool-sub-val.down { color: #ff5e76; }
 .pool-sub-val.purple { color: #a78bfa; }
 
-/* Buy button — OKX green pill */
+/* Buy button — soft green pill */
 .pool-buy-btn {
   flex-shrink: 0;
   padding: 5px 14px;
   font-size: 12px;
   font-weight: 700;
-  color: #fff;
-  background: #22c55e;
-  border: none;
+  color: #4ade80;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.25);
   border-radius: 6px;
   cursor: pointer;
-  transition: background 120ms;
+  transition: background 120ms, border-color 120ms;
 }
 .pool-buy-btn:hover {
-  background: #16a34a;
+  background: rgba(34, 197, 94, 0.22);
+  border-color: rgba(34, 197, 94, 0.45);
 }
 
 /* Search toggle in sort tabs */

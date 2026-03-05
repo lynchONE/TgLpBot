@@ -30,6 +30,7 @@ import KlineChart from './components/KlineChart';
 import PanelShell, { EmptyState, MetricCard } from './components/PanelShell';
 import OpenPositionModal from './components/OpenPositionModal';
 import TaskActionMenu from './components/TaskActionMenu';
+import NumberFlowValue from './components/NumberFlowValue';
 import telegramLogo from './img/telegram.svg';
 import uniswapLogo from './img/uniswap.svg';
 import pancakeLogo from './img/pancake.svg';
@@ -643,32 +644,37 @@ export default function App() {
                   <div className="pool-info">
                     <div className="pool-name-line">
                       <span className="pool-name">{pair}</span>
-                      {feePct > 0 && <span className="tag tag-blue">{feePct.toFixed(2).replace(/\.?0+$/, '')}%</span>}
+                      <button type="button" className="copy-tiny" onClick={(e) => { e.stopPropagation(); copyAddr(addr); }} title="复制地址">
+                        <svg viewBox="0 0 24 24" fill="currentColor" width="11" height="11"><path d="M16 1H4a2 2 0 00-2 2v14h2V3h12V1zm3 4H8a2 2 0 00-2 2v14a2 2 0 002 2h11a2 2 0 002-2V7a2 2 0 00-2-2zm0 16H8V7h11v14z"/></svg>
+                      </button>
+                      {feePct > 0 && <span className="tag tag-blue"><NumberFlowValue value={feePct} formatter={(v) => `${Number(v).toFixed(2).replace(/\.?0+$/, '')}%`} /></span>}
                       {dex?.label && <span className="tag tag-dex">{dex.label}</span>}
                       {userPosUsd > 0 && <span className="tag tag-purple">持仓</span>}
                     </div>
                     <div className="pool-meta-line">
-                      <span className="pool-addr" onClick={(e) => { e.stopPropagation(); copyAddr(addr); }}>{shortAddress(addr, 6, 4)}</span>
+                      <span className="pool-addr">{shortAddress(addr, 6, 4)}</span>
                       <span className="dot-sep" />
-                      {volume > 0 && <span>Vol <b>{formatUsdCompact(volume)}</b></span>}
-                      {tvl > 0 && <span>TVL <b>{formatUsdCompact(tvl)}</b></span>}
-                      {txCount > 0 && <span>{txCount.toLocaleString()}笔</span>}
+                      <span>Vol <b><NumberFlowValue value={volume} formatter={(v) => formatUsdCompact(v)} /></b></span>
+                      <span>TVL <b><NumberFlowValue value={tvl} formatter={(v) => formatUsdCompact(v)} /></b></span>
+                      <span><NumberFlowValue value={txCount} formatter={(v) => `${Number(v || 0).toLocaleString()}笔`} /></span>
+                      {feeRate > 0 && <span className="meta-accent">Fee/TVL <b><NumberFlowValue value={feeRate} formatter={(v) => `${Number(v).toFixed(3)}%`} /></b></span>}
                     </div>
                   </div>
 
                   {/* Values block */}
                   <div className="pool-values">
                     <div className="pool-main-val">
-                      {hotSort === 'volume' ? formatUsdCompact(volume) :
-                       hotSort === 'fee_rate' ? (feeRate > 0 ? `${feeRate.toFixed(3)}%` : '--') :
-                       formatUsdCompact(totalFees)}
+                      <NumberFlowValue
+                        value={hotSort === 'volume' ? volume : hotSort === 'fee_rate' ? feeRate : totalFees}
+                        formatter={(v) => hotSort === 'fee_rate' ? (Number(v) > 0 ? `${Number(v).toFixed(3)}%` : '--') : formatUsdCompact(v)}
+                      />
                     </div>
                     {priceDisplay ? (
                       <div className={`pool-sub-val ${priceDisplay.includes('↑') || priceDisplay.includes('+') ? 'up' : priceDisplay.includes('↓') || priceDisplay.includes('-') ? 'down' : ''}`}>
-                        {priceDisplay}
+                        <NumberFlowValue value={priceDisplay} formatter={() => priceDisplay} />
                       </div>
                     ) : feeRate > 0 && hotSort !== 'fee_rate' ? (
-                      <div className="pool-sub-val purple">{feeRate.toFixed(3)}%</div>
+                      <div className="pool-sub-val purple"><NumberFlowValue value={feeRate} formatter={(v) => `${Number(v).toFixed(3)}%`} /></div>
                     ) : null}
                   </div>
 
