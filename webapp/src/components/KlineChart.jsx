@@ -211,6 +211,7 @@ export default function KlineChart({
   const prevViewportKeyRef = useRef('');
   const [projectedMarkers, setProjectedMarkers] = useState([]);
   const [hoveredCluster, setHoveredCluster] = useState(null);
+  const updateProjectionRef = useRef(null);
 
   const candleData = useMemo(() => {
     const rows = Array.isArray(candles) ? candles : [];
@@ -304,6 +305,8 @@ export default function KlineChart({
     );
   }, [candleData, candleMap, candleIndexMap, markerClusters]);
 
+  updateProjectionRef.current = updateProjection;
+
   useEffect(() => {
     if (!chartHostRef.current) return;
     const host = chartHostRef.current;
@@ -361,7 +364,7 @@ export default function KlineChart({
     volumeSeriesRef.current = volumeSeries;
 
     const onVisibleChange = () => {
-      window.requestAnimationFrame(updateProjection);
+      window.requestAnimationFrame(() => updateProjectionRef.current?.());
     };
     chart.timeScale().subscribeVisibleTimeRangeChange(onVisibleChange);
 
@@ -372,7 +375,7 @@ export default function KlineChart({
         width: Math.max(260, Math.floor(box.width)),
         height: Math.max(360, Math.floor(box.height)),
       });
-      window.requestAnimationFrame(updateProjection);
+      window.requestAnimationFrame(() => updateProjectionRef.current?.());
     });
     observer.observe(host);
 
@@ -384,7 +387,7 @@ export default function KlineChart({
       candleSeriesRef.current = null;
       volumeSeriesRef.current = null;
     };
-  }, [updateProjection]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
@@ -403,16 +406,16 @@ export default function KlineChart({
     });
     candleSeriesRef.current.setData(candleData);
     volumeSeriesRef.current.setData(volumeData);
-    window.requestAnimationFrame(updateProjection);
-  }, [candleData, updateProjection]);
+    window.requestAnimationFrame(() => updateProjectionRef.current?.());
+  }, [candleData]);
 
   useEffect(() => {
     if (!chartRef.current || !candleData.length) return;
     if (prevViewportKeyRef.current === viewportKey) return;
     prevViewportKeyRef.current = viewportKey;
     chartRef.current.timeScale().fitContent();
-    window.requestAnimationFrame(updateProjection);
-  }, [viewportKey, candleData.length, updateProjection]);
+    window.requestAnimationFrame(() => updateProjectionRef.current?.());
+  }, [viewportKey, candleData.length]);
 
   useEffect(() => {
     window.requestAnimationFrame(updateProjection);
