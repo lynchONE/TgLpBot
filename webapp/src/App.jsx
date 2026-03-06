@@ -23,6 +23,7 @@ import {
   checkLoginCode,
   deleteTask,
   fetchHotPools,
+  fetchPoolOHLCV,
   fetchRealtimePositions,
   fetchSmartMoneyOverview,
   fetchSmartMoneyPoolAdds,
@@ -67,10 +68,10 @@ import {
 } from './utils';
 
 const KLINE_INTERVALS = [
-  { key: '1m', label: '1m', bucketSec: 60, limit: 240 },
-  { key: '5m', label: '5m', bucketSec: 300, limit: 240 },
-  { key: '15m', label: '15m', bucketSec: 900, limit: 240 },
-  { key: '1H', label: '1H', bucketSec: 3600, limit: 240 },
+  { key: '1m', label: '1m', bucketSec: 60, limit: 240, timeframe: 'minute', aggregate: 1, poolLimit: 300 },
+  { key: '5m', label: '5m', bucketSec: 300, limit: 240, timeframe: 'minute', aggregate: 5, poolLimit: 260 },
+  { key: '15m', label: '15m', bucketSec: 900, limit: 240, timeframe: 'minute', aggregate: 15, poolLimit: 220 },
+  { key: '1H', label: '1H', bucketSec: 3600, limit: 240, timeframe: 'hour', aggregate: 1, poolLimit: 200 },
 ];
 const SMART_POOL_WINDOW_HOURS = 2;
 const SMART_PNL_WINDOW_HOURS = 24;
@@ -272,6 +273,7 @@ export default function App() {
   const [klineCandles, setKlineCandles] = useState([]);
   const [klineLoading, setKlineLoading] = useState(false);
   const [klineError, setKlineError] = useState('');
+  const [klineSource, setKlineSource] = useState('');
   const [klineMarkers, setKlineMarkers] = useState([]);
   const [klineMarkersLoading, setKlineMarkersLoading] = useState(false);
   const [klineMarkersError, setKlineMarkersError] = useState('');
@@ -507,11 +509,13 @@ export default function App() {
     async (signal) => {
       if (!hasInitData) {
         setKlineCandles([]);
+        setKlineSource('');
         setKlineError('请先点击右上角 Telegram 图标扫码登录。');
         return;
       }
       if (!klineTokenAddress) {
         setKlineCandles([]);
+        setKlineSource('');
         setKlineError('');
         return;
       }
@@ -519,25 +523,74 @@ export default function App() {
       setKlineLoading(true);
       setKlineError('');
       try {
-        const resp = await fetchTokenCandles({
-          apiBaseUrl,
-          initData,
-          chain: selectedPool?.chain || chain,
-          tokenAddress: klineTokenAddress,
-          bar: klineIntervalMeta.key,
-          limit: klineIntervalMeta.limit,
-          signal,
-        });
+        const activeChain = selectedPool?.chain || chain;
+        let resp;
+
+        if (selectedPoolVersion === 'v4' && selectedPoolAddress) {
+          try {
+            resp = await fetchPoolOHLCV({
+              apiBaseUrl,
+              initData,
+              chain: activeChain,
+              poolAddress: selectedPoolAddress,
+              timeframe: klineIntervalMeta.timeframe,
+              aggregate: klineIntervalMeta.aggregate,
+              token: klineTokenAddress,
+              currency: 'usd',
+              limit: klineIntervalMeta.poolLimit || klineIntervalMeta.limit,
+              signal,
+            });
+            setKlineSource('pool');
+          } catch (poolErr) {
+            if (poolErr?.name === 'AbortError') throw poolErr;
+            resp = await fetchTokenCandles({
+              apiBaseUrl,
+              initData,
+              chain: activeChain,
+              tokenAddress: klineTokenAddress,
+              bar: klineIntervalMeta.key,
+              limit: klineIntervalMeta.limit,
+              signal,
+            });
+            setKlineSource('token-fallback');
+          }
+        } else {
+          resp = await fetchTokenCandles({
+            apiBaseUrl,
+            initData,
+            chain: activeChain,
+            tokenAddress: klineTokenAddress,
+            bar: klineIntervalMeta.key,
+            limit: klineIntervalMeta.limit,
+            signal,
+          });
+          setKlineSource('token');
+        }
         setKlineCandles(Array.isArray(resp?.candles) ? resp.candles : []);
       } catch (e) {
         if (e?.name !== 'AbortError') {
+          setKlineSource('');
           setKlineError(String(e?.message || e));
         }
       } finally {
         setKlineLoading(false);
       }
     },
-    [apiBaseUrl, chain, hasInitData, initData, klineIntervalMeta.key, klineIntervalMeta.limit, klineTokenAddress, selectedPool?.chain]
+    [
+      apiBaseUrl,
+      chain,
+      hasInitData,
+      initData,
+      klineIntervalMeta.aggregate,
+      klineIntervalMeta.key,
+      klineIntervalMeta.limit,
+      klineIntervalMeta.poolLimit,
+      klineIntervalMeta.timeframe,
+      klineTokenAddress,
+      selectedPool?.chain,
+      selectedPoolAddress,
+      selectedPoolVersion,
+    ]
   );
 
   const loadKlineMarkers = useCallback(
@@ -653,6 +706,7 @@ export default function App() {
     setSelectedMarkerCluster(null);
     setKlineMarkers([]);
     setKlineMarkersError('');
+    setKlineSource('');
   }, [selectedPoolAddress]);
 
   useEffect(() => {
@@ -1065,6 +1119,12 @@ export default function App() {
               <div className="kline-summary-item">
                 <span className="label">时区</span>
                 <span className="value">UTC+8</span>
+              </div>
+              <div className="kline-summary-item">
+                <span className="label">价格源</span>
+                <span className="value">
+                  {klineSource === 'pool' ? '池子K线' : klineSource === 'token-fallback' ? '代币K线(回退)' : '代币K线'}
+                </span>
               </div>
               <div className="kline-summary-item">
                 <span className="label">覆盖层</span>

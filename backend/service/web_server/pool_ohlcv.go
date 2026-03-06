@@ -17,6 +17,7 @@ import (
 
 var poolAddressRegex = regexp.MustCompile(`^(0x)?[a-fA-F0-9]{40}$|^(0x)?[a-fA-F0-9]{64}$`)
 var chainSlugRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+var tokenOHLCVAddressRegex = regexp.MustCompile(`^(0x)?[a-fA-F0-9]{40}$`)
 
 type poolOHLCVCandle struct {
 	T int64   `json:"t"`
@@ -132,6 +133,30 @@ func (s *Server) handlePoolOHLCV(w http.ResponseWriter, r *http.Request) {
 		aggregate = 1440
 	}
 
+	currency := strings.ToLower(strings.TrimSpace(query.Get("currency")))
+	switch currency {
+	case "", "usd", "token":
+	default:
+		http.Error(w, "invalid currency", http.StatusBadRequest)
+		return
+	}
+	if currency == "" {
+		currency = "usd"
+	}
+
+	token := strings.ToLower(strings.TrimSpace(query.Get("token")))
+	switch token {
+	case "", "base", "quote":
+	default:
+		if !tokenOHLCVAddressRegex.MatchString(token) {
+			http.Error(w, "invalid token", http.StatusBadRequest)
+			return
+		}
+		if !strings.HasPrefix(token, "0x") {
+			token = "0x" + token
+		}
+	}
+
 	limit := 0
 	if v := strings.TrimSpace(query.Get("limit")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
@@ -165,6 +190,12 @@ func (s *Server) handlePoolOHLCV(w http.ResponseWriter, r *http.Request) {
 	)
 	if beforeTimestamp > 0 {
 		upstream += fmt.Sprintf("&before_timestamp=%d", beforeTimestamp)
+	}
+	if currency != "" {
+		upstream += fmt.Sprintf("&currency=%s", currency)
+	}
+	if token != "" {
+		upstream += fmt.Sprintf("&token=%s", token)
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)

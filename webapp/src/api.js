@@ -54,6 +54,8 @@ export async function fetchPoolOHLCV({
   poolAddress,
   timeframe = 'minute',
   aggregate = 5,
+  currency = 'usd',
+  token,
   limit = 240,
   signal,
 }) {
@@ -64,6 +66,8 @@ export async function fetchPoolOHLCV({
   if (poolAddress) params.set('pool_address', String(poolAddress));
   if (timeframe) params.set('timeframe', String(timeframe));
   if (Number.isFinite(aggregate)) params.set('aggregate', String(aggregate));
+  if (currency) params.set('currency', String(currency));
+  if (token) params.set('token', String(token));
   if (Number.isFinite(limit)) params.set('limit', String(limit));
 
   const qs = params.toString();
