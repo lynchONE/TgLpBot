@@ -59,6 +59,43 @@ function findNearestCandle(candleData, candleMap, targetTime) {
     : { candle: next, time: nextTime };
 }
 
+const SUBSCRIPT_DIGITS = ['₀', '₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉'];
+function toSubscript(n) {
+  return String(n).split('').map((d) => SUBSCRIPT_DIGITS[Number(d)]).join('');
+}
+
+function smartPriceFormatter(price) {
+  if (!Number.isFinite(price) || price === 0) return '0';
+  const abs = Math.abs(price);
+  const sign = price < 0 ? '-' : '';
+
+  if (abs >= 1e4) return sign + abs.toFixed(2);
+  if (abs >= 1) return sign + abs.toFixed(4);
+  if (abs >= 0.001) return sign + abs.toFixed(6);
+
+  // Very small prices: subscript-zero notation
+  // e.g. 0.00000001234 → 0.0₇1234
+  const exp = Math.floor(Math.log10(abs));
+  let zeros = -exp - 1;
+  let sig = Math.round(abs * Math.pow(10, -exp + 3));
+  if (sig >= 10000) {
+    zeros = Math.max(1, zeros - 1);
+    sig = Math.round(sig / 10);
+  }
+  return sign + '0.0' + toSubscript(zeros) + sig;
+}
+
+function computeMinMove(candleData) {
+  let minPrice = Number.POSITIVE_INFINITY;
+  for (const row of candleData) {
+    if (row.low > 0) minPrice = Math.min(minPrice, row.low);
+    if (row.close > 0) minPrice = Math.min(minPrice, row.close);
+  }
+  if (!Number.isFinite(minPrice) || minPrice <= 0) return 0.01;
+  const exp = Math.floor(Math.log10(minPrice)) - 4;
+  return Math.pow(10, Math.min(-2, exp));
+}
+
 function clamp(value, min, max) {
   if (!Number.isFinite(value)) return min;
   return Math.min(Math.max(value, min), max);
@@ -315,6 +352,13 @@ export default function KlineChart({
       color: row.close >= row.open ? 'rgba(22,199,132,0.45)' : 'rgba(234,57,67,0.45)',
     }));
 
+    candleSeriesRef.current.applyOptions({
+      priceFormat: {
+        type: 'custom',
+        formatter: smartPriceFormatter,
+        minMove: computeMinMove(candleData),
+      },
+    });
     candleSeriesRef.current.setData(candleData);
     volumeSeriesRef.current.setData(volumeData);
     window.requestAnimationFrame(updateProjection);
