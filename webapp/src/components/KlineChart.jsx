@@ -18,18 +18,60 @@ function getClusterText(cluster) {
   return shortAddress(item?.wallet_address || '', 2, 2).replace(/\./g, '');
 }
 
-function projectClusters(chart, candleSeries, candleMap, clusters) {
+function findNearestCandle(candleData, candleMap, targetTime) {
+  const target = Number(targetTime || 0);
+  if (!target || !candleData.length) return null;
+
+  const direct = candleMap.get(target);
+  if (direct) {
+    return { candle: direct, time: target };
+  }
+
+  const firstTime = Number(candleData[0]?.time || 0);
+  const lastTime = Number(candleData[candleData.length - 1]?.time || 0);
+  if (!firstTime || !lastTime || target < firstTime || target > lastTime) {
+    return null;
+  }
+
+  let low = 0;
+  let high = candleData.length - 1;
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const midTime = Number(candleData[mid]?.time || 0);
+    if (midTime === target) {
+      return { candle: candleData[mid], time: midTime };
+    }
+    if (midTime < target) low = mid + 1;
+    else high = mid - 1;
+  }
+
+  const prev = high >= 0 ? candleData[high] : null;
+  const next = low < candleData.length ? candleData[low] : null;
+  const prevTime = Number(prev?.time || 0);
+  const nextTime = Number(next?.time || 0);
+
+  if (!prev && !next) return null;
+  if (!prev) return next ? { candle: next, time: nextTime } : null;
+  if (!next) return prev ? { candle: prev, time: prevTime } : null;
+
+  return Math.abs(target - prevTime) <= Math.abs(nextTime - target)
+    ? { candle: prev, time: prevTime }
+    : { candle: next, time: nextTime };
+}
+
+function projectClusters(chart, candleSeries, candleData, candleMap, clusters) {
   if (!chart || !candleSeries || !clusters.length) return [];
   const timeScale = chart.timeScale();
   const projected = [];
   for (const cluster of clusters) {
-    const candle =
-      candleMap.get(cluster.time) ||
-      candleMap.get(cluster.items?.[0]?.bucket_t) ||
-      candleMap.get(cluster.items?.[0]?.t);
-    if (!candle) continue;
+    const located =
+      findNearestCandle(candleData, candleMap, cluster.time) ||
+      findNearestCandle(candleData, candleMap, cluster.items?.[0]?.bucket_t) ||
+      findNearestCandle(candleData, candleMap, cluster.items?.[0]?.t);
+    if (!located?.candle) continue;
+    const candle = located.candle;
 
-    const time = Number(cluster.time || 0);
+    const time = Number(located.time || cluster.time || 0);
     const x = timeScale.timeToCoordinate(time);
     if (!Number.isFinite(x)) continue;
 
@@ -131,9 +173,9 @@ export default function KlineChart({
 
   const updateProjection = useCallback(() => {
     setProjectedMarkers(
-      projectClusters(chartRef.current, candleSeriesRef.current, candleMap, markerClusters)
+      projectClusters(chartRef.current, candleSeriesRef.current, candleData, candleMap, markerClusters)
     );
-  }, [candleMap, markerClusters]);
+  }, [candleData, candleMap, markerClusters]);
 
   useEffect(() => {
     if (!chartHostRef.current) return;
