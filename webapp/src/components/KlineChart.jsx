@@ -1,21 +1,25 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, CandlestickSeries, HistogramSeries } from 'lightweight-charts';
-import { formatUtc8DateTime, formatUtc8TickMark, shortAddress, toUnixSeconds } from '../utils';
+import { formatUtc8DateTime, formatUtc8TickMark, toUnixSeconds } from '../utils';
 
-function getClusterText(cluster) {
+const WALLET_AVATARS = [
+  '🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯',
+  '🦁','🐮','🐷','🐸','🐵','🐔','🐧','🦄','🐙','🦋',
+  '🐢','🐳','🦀','🐠','🦈','🐡','🦉','🦇','🐺','🐗',
+  '🐴','🦎','🐍','🦐','🦑','🐞','🦚','🦜','🦩','🐊',
+];
+
+function walletAvatar(address) {
+  let h = 0;
+  const s = String(address || '').toLowerCase();
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return WALLET_AVATARS[Math.abs(h) % WALLET_AVATARS.length];
+}
+
+function getClusterEmoji(cluster) {
   const items = Array.isArray(cluster?.items) ? cluster.items : [];
-  if (items.length > 1) return String(items.length);
-  const item = items[0];
-  const label = String(item?.wallet_label || '').trim();
-  if (label) {
-    const letters = label
-      .split(/\s+/)
-      .map((part) => part.trim().charAt(0).toUpperCase())
-      .join('')
-      .slice(0, 2);
-    if (letters) return letters;
-  }
-  return shortAddress(item?.wallet_address || '', 2, 2).replace(/\./g, '');
+  const addr = items[0]?.wallet_address || '';
+  return walletAvatar(addr);
 }
 
 function findNearestCandle(candleData, candleMap, targetTime) {
@@ -153,7 +157,7 @@ function projectClusters(chart, candleSeries, candleData, candleMap, candleIndex
       ...cluster,
       x: clamp(x, xPad, Math.max(xPad, width - xPad)),
       y: clamp(y + offset, minY, maxY),
-      label: getClusterText(cluster),
+      label: getClusterEmoji(cluster),
     });
   }
   return projected;
@@ -393,7 +397,10 @@ export default function KlineChart({
             onClick={() => onMarkerClick?.(cluster)}
             title={`${cluster.action === 'remove' ? '减仓' : '加仓'} · ${cluster.items.length} 条活动`}
           >
-            {cluster.label}
+            <span className="kline-marker-emoji">{cluster.label}</span>
+            {cluster.items.length > 1 && (
+              <span className="kline-marker-badge">{cluster.items.length}</span>
+            )}
           </button>
         ))}
       </div>

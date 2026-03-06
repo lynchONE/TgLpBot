@@ -1153,19 +1153,40 @@ body {
 .kline-marker {
   position: absolute;
   transform: translate(-50%, -50%);
-  min-width: 28px;
-  height: 28px;
-  padding: 0 8px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.28);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   pointer-events: auto;
   cursor: pointer;
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
-  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
   z-index: 5;
+  padding: 0;
+}
+
+.kline-marker-emoji {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.kline-marker-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgba(30, 40, 60, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
 }
 
 .kline-marker.add {
