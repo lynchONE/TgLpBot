@@ -1455,12 +1455,6 @@ export default function App() {
             className={`module-slot module-${widget.key} ${
               draggingKey === widget.key ? 'dragging' : ''
             } ${dragOverKey === widget.key ? 'drop-target' : ''}`}
-            draggable
-            onDragStart={(e) => {
-              setDraggingKey(widget.key);
-              e.dataTransfer.effectAllowed = 'move';
-              e.dataTransfer.setData('text/plain', widget.key);
-            }}
             onDragOver={(e) => {
               e.preventDefault();
               e.dataTransfer.dropEffect = 'move';
@@ -1482,7 +1476,20 @@ export default function App() {
               setDragOverKey('');
             }}
           >
-            <div className="drag-hint">
+            <div
+              className="drag-hint"
+              draggable
+              title="按住拖动调整模块顺序"
+              onDragStart={(e) => {
+                setDraggingKey(widget.key);
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', widget.key);
+              }}
+              onDragEnd={() => {
+                setDraggingKey('');
+                setDragOverKey('');
+              }}
+            >
               <GripVertical size={12} />
             </div>
             {panelMap[widget.key]}
