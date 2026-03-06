@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, CandlestickSeries, HistogramSeries } from 'lightweight-charts';
-import { shortAddress, toUnixSeconds } from '../utils';
+import { formatUtc8DateTime, formatUtc8TickMark, shortAddress, toUnixSeconds } from '../utils';
 
 function getClusterText(cluster) {
   const items = Array.isArray(cluster?.items) ? cluster.items : [];
@@ -59,10 +59,25 @@ function findNearestCandle(candleData, candleMap, targetTime) {
     : { candle: next, time: nextTime };
 }
 
-function projectClusters(chart, candleSeries, candleData, candleMap, clusters) {
+function clamp(value, min, max) {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(Math.max(value, min), max);
+}
+
+function projectClusters(chart, candleSeries, candleData, candleMap, candleIndexMap, clusters, hostWidth, hostHeight) {
   if (!chart || !candleSeries || !clusters.length) return [];
   const timeScale = chart.timeScale();
   const projected = [];
+  const width = Math.max(0, Number(hostWidth || 0));
+  const height = Math.max(0, Number(hostHeight || 0));
+  const xPad = 18;
+  const yPad = 18;
+  const priceTop = 12;
+  const priceBottom = height > 0 ? Math.max(priceTop + 32, Math.floor(height * 0.78)) : 0;
+  const minPrice = candleData.reduce((acc, row) => Math.min(acc, Number(row?.low || 0)), Number.POSITIVE_INFINITY);
+  const maxPrice = candleData.reduce((acc, row) => Math.max(acc, Number(row?.high || 0)), 0);
+  const priceSpan = Number.isFinite(maxPrice - minPrice) && maxPrice > minPrice ? (maxPrice - minPrice) : 1;
+
   for (const cluster of clusters) {
     const located =
       findNearestCandle(candleData, candleMap, cluster.time) ||
@@ -72,19 +87,35 @@ function projectClusters(chart, candleSeries, candleData, candleMap, clusters) {
     const candle = located.candle;
 
     const time = Number(located.time || cluster.time || 0);
-    const x = timeScale.timeToCoordinate(time);
+    let x = timeScale.timeToCoordinate(time);
+    if (!Number.isFinite(x) && width > xPad * 2) {
+      const idx = Number(candleIndexMap.get(time));
+      if (Number.isFinite(idx) && candleData.length > 1) {
+        x = xPad + ((width - xPad * 2) * idx) / (candleData.length - 1);
+      } else {
+        x = width / 2;
+      }
+    }
     if (!Number.isFinite(x)) continue;
 
     const anchorPrice = cluster.action === 'remove'
       ? Number(candle?.l ?? candle?.low ?? 0)
       : Number(candle?.h ?? candle?.high ?? 0);
-    const y = candleSeries.priceToCoordinate(anchorPrice);
+    let y = candleSeries.priceToCoordinate(anchorPrice);
+    if (!Number.isFinite(y) && height > 0) {
+      const normalized = (maxPrice - anchorPrice) / priceSpan;
+      y = priceTop + normalized * Math.max(1, priceBottom - priceTop);
+    }
     if (!Number.isFinite(y)) continue;
+
+    const offset = cluster.action === 'remove' ? 18 : -18;
+    const minY = yPad;
+    const maxY = height > 0 ? Math.max(minY, priceBottom - yPad) : Number.POSITIVE_INFINITY;
 
     projected.push({
       ...cluster,
-      x,
-      y: y + (cluster.action === 'remove' ? 18 : -18),
+      x: clamp(x, xPad, Math.max(xPad, width - xPad)),
+      y: clamp(y + offset, minY, maxY),
       label: getClusterText(cluster),
     });
   }
@@ -144,6 +175,12 @@ export default function KlineChart({
     return map;
   }, [candleData]);
 
+  const candleIndexMap = useMemo(() => {
+    const map = new Map();
+    candleData.forEach((row, index) => map.set(row.time, index));
+    return map;
+  }, [candleData]);
+
   const markerClusters = useMemo(() => {
     const rows = Array.isArray(markers) ? markers : [];
     const grouped = new Map();
@@ -172,10 +209,21 @@ export default function KlineChart({
   }, [markers]);
 
   const updateProjection = useCallback(() => {
+    const hostWidth = chartHostRef.current?.clientWidth || wrapRef.current?.clientWidth || 0;
+    const hostHeight = chartHostRef.current?.clientHeight || wrapRef.current?.clientHeight || 0;
     setProjectedMarkers(
-      projectClusters(chartRef.current, candleSeriesRef.current, candleData, candleMap, markerClusters)
+      projectClusters(
+        chartRef.current,
+        candleSeriesRef.current,
+        candleData,
+        candleMap,
+        candleIndexMap,
+        markerClusters,
+        hostWidth,
+        hostHeight
+      )
     );
-  }, [candleData, candleMap, markerClusters]);
+  }, [candleData, candleMap, candleIndexMap, markerClusters]);
 
   useEffect(() => {
     if (!chartHostRef.current) return;
@@ -188,6 +236,10 @@ export default function KlineChart({
         background: { color: '#0b1018' },
         textColor: '#95a0b5',
       },
+      localization: {
+        locale: 'zh-CN',
+        timeFormatter: (time) => formatUtc8DateTime(time),
+      },
       grid: {
         vertLines: { color: 'rgba(122, 142, 173, 0.12)' },
         horzLines: { color: 'rgba(122, 142, 173, 0.12)' },
@@ -197,6 +249,7 @@ export default function KlineChart({
         borderColor: 'rgba(122, 142, 173, 0.22)',
         timeVisible: true,
         secondsVisible: false,
+        tickMarkFormatter: (time, tickMarkType) => formatUtc8TickMark(time, tickMarkType),
       },
       crosshair: {
         vertLine: { color: 'rgba(255, 183, 59, 0.35)' },

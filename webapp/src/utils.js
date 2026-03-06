@@ -243,6 +243,87 @@ export function toUnixSeconds(v) {
   return Math.floor(n);
 }
 
+const UTC8_OFFSET_SECONDS = 8 * 60 * 60;
+
+function pad2(value) {
+  return String(value ?? 0).padStart(2, '0');
+}
+
+function coerceUnixSeconds(value) {
+  if (typeof value === 'number') {
+    return toUnixSeconds(value);
+  }
+
+  if (typeof value === 'string') {
+    const raw = value.trim();
+    if (!raw) return 0;
+    if (/^\d+$/.test(raw)) return toUnixSeconds(Number(raw));
+    const parsed = Date.parse(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed / 1000);
+    }
+    return 0;
+  }
+
+  if (value && typeof value === 'object') {
+    const year = Number(value.year);
+    const month = Number(value.month);
+    const day = Number(value.day);
+    if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) {
+      return Math.floor(Date.UTC(year, month - 1, day) / 1000);
+    }
+  }
+
+  return 0;
+}
+
+function getUtc8DateParts(value) {
+  const ts = coerceUnixSeconds(value);
+  if (!ts) return null;
+  const date = new Date((ts + UTC8_OFFSET_SECONDS) * 1000);
+  return {
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate(),
+    hour: date.getUTCHours(),
+    minute: date.getUTCMinutes(),
+    second: date.getUTCSeconds(),
+  };
+}
+
+export function formatUtc8DateTime(value, withSeconds = false) {
+  const parts = getUtc8DateParts(value);
+  if (!parts) return '--';
+  return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)} ${pad2(parts.hour)}:${pad2(parts.minute)}${
+    withSeconds ? `:${pad2(parts.second)}` : ''
+  }`;
+}
+
+export function formatUtc8Time(value, withSeconds = false) {
+  const parts = getUtc8DateParts(value);
+  if (!parts) return '--';
+  return `${pad2(parts.hour)}:${pad2(parts.minute)}${withSeconds ? `:${pad2(parts.second)}` : ''}`;
+}
+
+export function formatUtc8TickMark(value, tickMarkType) {
+  const parts = getUtc8DateParts(value);
+  if (!parts) return '';
+
+  switch (Number(tickMarkType)) {
+    case 0:
+      return String(parts.year);
+    case 1:
+      return `${parts.year}-${pad2(parts.month)}`;
+    case 2:
+      return `${pad2(parts.month)}-${pad2(parts.day)}`;
+    case 4:
+      return `${pad2(parts.hour)}:${pad2(parts.minute)}:${pad2(parts.second)}`;
+    case 3:
+    default:
+      return `${pad2(parts.hour)}:${pad2(parts.minute)}`;
+  }
+}
+
 const SUBSCRIPT_DIGITS = ['₀', '₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉'];
 export function compactPrice(v) {
   const n = Number(v ?? 0);

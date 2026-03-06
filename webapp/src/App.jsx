@@ -53,6 +53,8 @@ import {
   formatNumber,
   formatPct,
   formatPriceDisplay,
+  formatUtc8DateTime,
+  formatUtc8Time,
   formatUsd,
   formatUsdCompact,
   normalizePoolAddress,
@@ -70,6 +72,9 @@ const KLINE_INTERVALS = [
   { key: '15m', label: '15m', bucketSec: 900, limit: 240 },
   { key: '1H', label: '1H', bucketSec: 3600, limit: 240 },
 ];
+const SMART_POOL_WINDOW_HOURS = 2;
+const SMART_PNL_WINDOW_HOURS = 24;
+const KLINE_MARKER_WINDOW_HOURS = 2;
 
 function getKlineIntervalMeta(bar) {
   return KLINE_INTERVALS.find((item) => item.key === bar) || KLINE_INTERVALS[0];
@@ -128,6 +133,57 @@ function reorderList(list, fromKey, toKey) {
   const [item] = rows.splice(from, 1);
   rows.splice(to, 0, item);
   return rows;
+}
+
+function aggregatePoolAddWallets(rows) {
+  const map = new Map();
+
+  (Array.isArray(rows) ? rows : []).forEach((row, index) => {
+    const rawAddr = String(row?.wallet_address || '').trim();
+    const addr = rawAddr.toLowerCase();
+    const key = addr || `__unknown_${index}`;
+    const totalUsd = Number(row?.total_usd ?? 0);
+    const eventCount = Number(row?.event_count ?? 0);
+    const priceLower = Number(row?.price_lower ?? 0);
+    const priceUpper = Number(row?.price_upper ?? 0);
+    const hasRange =
+      Number.isFinite(priceLower) &&
+      priceLower > 0 &&
+      Number.isFinite(priceUpper) &&
+      priceUpper > 0;
+    const rangeScore = hasRange ? totalUsd : -1;
+
+    if (!map.has(key)) {
+      map.set(key, {
+        ...row,
+        wallet_address: rawAddr,
+        total_usd: totalUsd,
+        event_count: eventCount,
+        _rangeScore: rangeScore,
+      });
+      return;
+    }
+
+    const prev = map.get(key);
+    prev.total_usd = Number(prev.total_usd ?? 0) + totalUsd;
+    prev.event_count = Number(prev.event_count ?? 0) + eventCount;
+
+    if (rangeScore > Number(prev._rangeScore ?? -1)) {
+      prev.price_lower = row?.price_lower;
+      prev.price_upper = row?.price_upper;
+      prev.price_base = row?.price_base;
+      prev.price_quote = row?.price_quote;
+      prev._rangeScore = rangeScore;
+    }
+  });
+
+  return Array.from(map.values())
+    .map(({ _rangeScore, ...row }) => row)
+    .sort((a, b) => (
+      Number(b?.total_usd ?? 0) - Number(a?.total_usd ?? 0) ||
+      Number(b?.event_count ?? 0) - Number(a?.event_count ?? 0) ||
+      String(a?.wallet_address || '').localeCompare(String(b?.wallet_address || ''))
+    ));
 }
 
 function parseLoginUser(raw) {
@@ -302,6 +358,22 @@ export default function App() {
     const rows = Array.isArray(smart?.wallets_24h) ? smart.wallets_24h : [];
     return [...rows].sort((a, b) => Number(b?.pnl_usdt_24h || 0) - Number(a?.pnl_usdt_24h || 0));
   }, [smart]);
+  const klineMarkerWalletCount = useMemo(() => {
+    const seen = new Set();
+    (Array.isArray(klineMarkers) ? klineMarkers : []).forEach((row) => {
+      const addr = String(row?.wallet_address || '').trim().toLowerCase();
+      if (addr) seen.add(addr);
+    });
+    return seen.size;
+  }, [klineMarkers]);
+  const klineMarkerAddCount = useMemo(
+    () => (Array.isArray(klineMarkers) ? klineMarkers : []).filter((row) => String(row?.action || '').toLowerCase() !== 'remove').length,
+    [klineMarkers]
+  );
+  const klineMarkerRemoveCount = useMemo(
+    () => (Array.isArray(klineMarkers) ? klineMarkers : []).filter((row) => String(row?.action || '').toLowerCase() === 'remove').length,
+    [klineMarkers]
+  );
   const klineViewportKey = useMemo(
     () => `${selectedPoolAddress || 'pool'}:${klineTokenAddress || 'token'}:${klineInterval}`,
     [klineInterval, klineTokenAddress, selectedPoolAddress]
@@ -417,8 +489,8 @@ export default function App() {
             chain,
             poolLimit: 24,
             walletLimit: 20,
-            poolsWindowHours: 2,
-            pnlWindowHours: 24,
+            poolsWindowHours: SMART_POOL_WINDOW_HOURS,
+            pnlWindowHours: SMART_PNL_WINDOW_HOURS,
             signal,
           })
         );
@@ -491,7 +563,7 @@ export default function App() {
           poolVersion: selectedPoolVersion,
           poolId: selectedPoolAddress,
           bucketSec: klineIntervalMeta.bucketSec,
-          windowHours: 12,
+          windowHours: KLINE_MARKER_WINDOW_HOURS,
           limit: 300,
           signal,
         });
@@ -741,16 +813,23 @@ export default function App() {
     const toLoad = smartPools.slice(0, 12);
     toLoad.forEach((pool) => {
       const key = `${pool?.pool_version || ''}:${pool?.pool_id || ''}`;
-      // skip if already loaded or loading
-      if (poolAddsMap[key]?.status === 'success' || poolAddsMap[key]?.status === 'loading') return;
-      setPoolAddsMap((prev) => ({ ...prev, [key]: { status: 'loading', wallets: [], totalUsd: 0, error: '' } }));
+      if (poolAddsMap[key]?.status === 'loading') return;
+      setPoolAddsMap((prev) => ({
+        ...prev,
+        [key]: {
+          status: 'loading',
+          wallets: Array.isArray(prev[key]?.wallets) ? prev[key].wallets : [],
+          totalUsd: Number(prev[key]?.totalUsd || 0),
+          error: '',
+        },
+      }));
       fetchSmartMoneyPoolAdds({
         apiBaseUrl,
         initData,
         chain,
         poolVersion: pool?.pool_version,
         poolId: pool?.pool_id,
-        windowHours: 2,
+        windowHours: SMART_POOL_WINDOW_HOURS,
         limit: 20,
         signal: ctrl.signal,
       })
@@ -972,8 +1051,20 @@ export default function App() {
                 <span className="value">{shortAddress(klineTokenAddress, 8, 6)}</span>
               </div>
               <div className="kline-summary-item">
-                <span className="label">Marker</span>
+                <span className="label">事件({KLINE_MARKER_WINDOW_HOURS}h)</span>
                 <span className="value">{klineMarkers.length}</span>
+              </div>
+              <div className="kline-summary-item">
+                <span className="label">钱包</span>
+                <span className="value">{klineMarkerWalletCount}</span>
+              </div>
+              <div className="kline-summary-item">
+                <span className="label">加/减仓</span>
+                <span className="value">{klineMarkerAddCount}/{klineMarkerRemoveCount}</span>
+              </div>
+              <div className="kline-summary-item">
+                <span className="label">时区</span>
+                <span className="value">UTC+8</span>
               </div>
               <div className="kline-summary-item">
                 <span className="label">覆盖层</span>
@@ -1001,7 +1092,7 @@ export default function App() {
                       {selectedMarkerCluster.action === 'remove' ? '减仓活动' : '加仓活动'}
                     </div>
                     <div className="kline-marker-drawer-sub">
-                      {new Date((selectedMarkerCluster.time || 0) * 1000).toLocaleString()} · {selectedMarkerCluster.items?.length || 0} 条
+                      {formatUtc8DateTime(selectedMarkerCluster.time)} UTC+8 · {selectedMarkerCluster.items?.length || 0} 条
                     </div>
                   </div>
                   <button
@@ -1032,7 +1123,7 @@ export default function App() {
                           </div>
                         </div>
                         <div className="kline-marker-event-sub">
-                          <span>{new Date((Number(item?.t || 0)) * 1000).toLocaleTimeString()}</span>
+                          <span>{formatUtc8Time(Number(item?.t || 0))}</span>
                           <span>${formatNumber(amountUSD, amountUSD > 100 ? 0 : 2)}</span>
                           {lower > 0 && upper > 0 ? (
                             <span>{compactPrice(lower)} → {compactPrice(upper)}</span>
@@ -1200,8 +1291,9 @@ export default function App() {
             smartPools.slice(0, 20).map((pool, idx) => {
               const poolKey = `${pool?.pool_version || ''}:${pool?.pool_id || ''}`;
               const adds = poolAddsMap[poolKey];
-              const wallets = adds?.wallets || [];
+              const wallets = aggregatePoolAddWallets(adds?.wallets || []);
               const totalUsd = adds?.totalUsd || Number(pool?.added_liquidity || 0);
+              const walletCount = wallets.length || Number(pool?.wallet_count || 0);
               const version = String(pool?.pool_version || '').toUpperCase();
               const feePct = Number(pool?.fee_pct || 0);
 
@@ -1238,7 +1330,7 @@ export default function App() {
                         <span className="sm-total-usd">${formatNumber(Math.round(totalUsd))}</span>
                       ) : null}
                       <span className="sm-wallet-count">
-                        {formatNumber(pool?.wallet_count || 0)} 钱包
+                        {formatNumber(walletCount)} 钱包
                       </span>
                     </div>
                   </div>
