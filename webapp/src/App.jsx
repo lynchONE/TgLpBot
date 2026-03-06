@@ -87,6 +87,7 @@ const STORAGE = {
   widgets: 'tglp_web_widgets',
   sort: 'tglp_web_hot_pools_sort',
   refreshInterval: 'tglp_web_refresh_interval',
+  klineRefreshInterval: 'tglp_web_kline_refresh_interval',
 };
 
 function storageGet(key) {
@@ -290,6 +291,10 @@ export default function App() {
     const saved = Number(storageGet(STORAGE.refreshInterval));
     return saved >= 10 ? saved : 10;
   });
+  const [klineRefreshInterval, setKlineRefreshInterval] = useState(() => {
+    const saved = Number(storageGet(STORAGE.klineRefreshInterval));
+    return saved >= 10 ? saved : 30;
+  });
   const [draggingKey, setDraggingKey] = useState('');
   const [dragOverKey, setDragOverKey] = useState('');
 
@@ -386,6 +391,7 @@ export default function App() {
     storageSet(STORAGE.widgets, JSON.stringify(widgets));
     storageSet(STORAGE.sort, hotSort);
     storageSet(STORAGE.refreshInterval, String(refreshInterval));
+    storageSet(STORAGE.klineRefreshInterval, String(klineRefreshInterval));
 
     if (loginUser) {
       storageSet(STORAGE.loginUser, JSON.stringify(loginUser));
@@ -631,6 +637,12 @@ export default function App() {
     const timer = window.setInterval(() => loadPositions(), refreshInterval * 1000);
     return () => window.clearInterval(timer);
   }, [hasInitData, loadPositions, refreshInterval]);
+
+  useEffect(() => {
+    if (!hasInitData || !klineTokenAddress) return undefined;
+    const timer = window.setInterval(() => setKlineRefreshNonce((n) => n + 1), klineRefreshInterval * 1000);
+    return () => window.clearInterval(timer);
+  }, [hasInitData, klineTokenAddress, klineRefreshInterval]);
 
   useEffect(() => {
     if (!hasInitData) return undefined;
@@ -1465,6 +1477,23 @@ export default function App() {
                       </div>
                     </div>
                     <div className="settings-hint">最低 10 秒，当前每 {refreshInterval} 秒刷新</div>
+                    <div className="settings-row" style={{ marginTop: 8 }}>
+                      <span className="settings-label">K线刷新间隔</span>
+                      <div className="settings-input-wrap">
+                        <input
+                          type="number"
+                          className="settings-input"
+                          min={10}
+                          value={klineRefreshInterval}
+                          onChange={(e) => {
+                            const v = Math.max(10, Math.round(Number(e.target.value) || 30));
+                            setKlineRefreshInterval(v);
+                          }}
+                        />
+                        <span className="settings-unit">秒</span>
+                      </div>
+                    </div>
+                    <div className="settings-hint">K线数据每 {klineRefreshInterval} 秒自动刷新</div>
                   </div>
                 )}
               </div>

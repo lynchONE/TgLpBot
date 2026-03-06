@@ -1201,6 +1201,47 @@ body {
   box-shadow: 0 0 0 2px rgba(255, 208, 130, 0.45), 0 10px 20px rgba(0, 0, 0, 0.32);
 }
 
+.kline-marker-tooltip {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 22px));
+  background: rgba(12, 18, 30, 0.95);
+  border: 1px solid rgba(136, 157, 191, 0.22);
+  border-radius: 10px;
+  padding: 8px 10px;
+  min-width: 160px;
+  max-width: 260px;
+  pointer-events: none;
+  z-index: 20;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.kline-marker-tooltip.add { border-top: 2px solid rgba(22, 199, 132, 0.7); }
+.kline-marker-tooltip.remove { border-top: 2px solid rgba(234, 57, 67, 0.7); }
+
+.kmt-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 5px;
+}
+.kmt-emoji { font-size: 14px; line-height: 1; }
+.kmt-wallet { font-size: 12px; font-weight: 600; color: #edf3ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kmt-count { font-size: 10px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
+.kmt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.kmt-action { font-weight: 700; }
+.kmt-action.add { color: #4ade80; }
+.kmt-action.remove { color: #fb7185; }
+.kmt-usd { color: #edf3ff; font-weight: 600; }
+.kmt-range { color: var(--text-muted); font-family: 'Space Mono', monospace; font-size: 10px; }
+.kmt-pct { color: var(--accent); font-weight: 600; white-space: nowrap; }
+
 .kline-inline-note {
   font-size: 11px;
   color: #ffcf88;

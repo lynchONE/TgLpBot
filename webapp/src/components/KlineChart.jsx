@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, CandlestickSeries, HistogramSeries } from 'lightweight-charts';
-import { formatUtc8DateTime, formatUtc8TickMark, toUnixSeconds } from '../utils';
+import { formatUtc8DateTime, formatUtc8TickMark, shortAddress, toUnixSeconds } from '../utils';
 
 const WALLET_AVATARS = [
   '🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯',
@@ -20,6 +20,37 @@ function getClusterEmoji(cluster) {
   const items = Array.isArray(cluster?.items) ? cluster.items : [];
   const addr = items[0]?.wallet_address || '';
   return walletAvatar(addr);
+}
+
+function formatUSD(v) {
+  if (!Number.isFinite(v) || v === 0) return '$0';
+  if (v >= 1e6) return '$' + (v / 1e6).toFixed(1) + 'M';
+  if (v >= 1e3) return '$' + (v / 1e3).toFixed(1) + 'K';
+  return '$' + v.toFixed(v >= 100 ? 0 : 2);
+}
+
+function deOverlapMarkers(markers) {
+  const step = 36;
+  const xThreshold = 28;
+  const result = [];
+  for (const m of markers) {
+    let { y } = m;
+    let collision = true;
+    let iter = 0;
+    while (collision && iter < 10) {
+      collision = false;
+      for (const p of result) {
+        if (Math.abs(p.x - m.x) < xThreshold && Math.abs(y - p.y) < step) {
+          y = m.action === 'remove' ? p.y + step : p.y - step;
+          collision = true;
+          break;
+        }
+      }
+      iter++;
+    }
+    result.push({ ...m, y });
+  }
+  return result;
 }
 
 function findNearestCandle(candleData, candleMap, targetTime) {
@@ -177,7 +208,9 @@ export default function KlineChart({
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
   const volumeSeriesRef = useRef(null);
+  const prevViewportKeyRef = useRef('');
   const [projectedMarkers, setProjectedMarkers] = useState([]);
+  const [hoveredCluster, setHoveredCluster] = useState(null);
 
   const candleData = useMemo(() => {
     const rows = Array.isArray(candles) ? candles : [];
@@ -248,6 +281,11 @@ export default function KlineChart({
       }))
       .sort((a, b) => a.time - b.time);
   }, [markers]);
+
+  const displayMarkers = useMemo(
+    () => deOverlapMarkers(projectedMarkers),
+    [projectedMarkers]
+  );
 
   const updateProjection = useCallback(() => {
     const hostWidth = chartHostRef.current?.clientWidth || wrapRef.current?.clientWidth || 0;
@@ -370,6 +408,8 @@ export default function KlineChart({
 
   useEffect(() => {
     if (!chartRef.current || !candleData.length) return;
+    if (prevViewportKeyRef.current === viewportKey) return;
+    prevViewportKeyRef.current = viewportKey;
     chartRef.current.timeScale().fitContent();
     window.requestAnimationFrame(updateProjection);
   }, [viewportKey, candleData.length, updateProjection]);
@@ -380,12 +420,25 @@ export default function KlineChart({
 
   const empty = !loading && !error && candleData.length === 0;
 
+  const tooltipData = useMemo(() => {
+    if (!hoveredCluster) return null;
+    const c = hoveredCluster;
+    const primary = c.items?.[0];
+    if (!primary) return null;
+    const walletName = String(primary.wallet_label || '').trim() || shortAddress(primary.wallet_address || '', 6, 4);
+    const lower = Number(primary.price_lower || 0);
+    const upper = Number(primary.price_upper || 0);
+    const hasRange = lower > 0 && upper > 0;
+    const rangePct = hasRange ? ((upper - lower) / lower * 100).toFixed(1) : '';
+    return { walletName, lower, upper, hasRange, rangePct, totalUSD: c.estimatedUSD, count: c.items.length };
+  }, [hoveredCluster]);
+
   return (
     <div className="kline-native-wrap" ref={wrapRef}>
       <div className="kline-native-stage" ref={chartHostRef} />
 
       <div className="kline-marker-layer">
-        {projectedMarkers.map((cluster) => (
+        {displayMarkers.map((cluster) => (
           <button
             key={cluster.id}
             type="button"
@@ -395,7 +448,8 @@ export default function KlineChart({
               top: `${cluster.y}px`,
             }}
             onClick={() => onMarkerClick?.(cluster)}
-            title={`${cluster.action === 'remove' ? '减仓' : '加仓'} · ${cluster.items.length} 条活动`}
+            onMouseEnter={() => setHoveredCluster(cluster)}
+            onMouseLeave={() => setHoveredCluster(null)}
           >
             <span className="kline-marker-emoji">{cluster.label}</span>
             {cluster.items.length > 1 && (
@@ -403,6 +457,36 @@ export default function KlineChart({
             )}
           </button>
         ))}
+
+        {hoveredCluster && tooltipData && (
+          <div
+            className={`kline-marker-tooltip ${hoveredCluster.action}`}
+            style={{
+              left: `${hoveredCluster.x}px`,
+              top: `${hoveredCluster.y}px`,
+            }}
+          >
+            <div className="kmt-head">
+              <span className="kmt-emoji">{hoveredCluster.label}</span>
+              <span className="kmt-wallet">{tooltipData.walletName}</span>
+              {tooltipData.count > 1 && <span className="kmt-count">等{tooltipData.count}笔</span>}
+            </div>
+            <div className="kmt-row">
+              <span className={`kmt-action ${hoveredCluster.action}`}>
+                {hoveredCluster.action === 'remove' ? '减仓' : '加仓'}
+              </span>
+              <span className="kmt-usd">{formatUSD(tooltipData.totalUSD)}</span>
+            </div>
+            {tooltipData.hasRange && (
+              <div className="kmt-row">
+                <span className="kmt-range">
+                  {smartPriceFormatter(tooltipData.lower)} → {smartPriceFormatter(tooltipData.upper)}
+                </span>
+                <span className="kmt-pct">{tooltipData.rangePct}%</span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {loading ? <div className="kline-state-overlay">加载 K 线中...</div> : null}
