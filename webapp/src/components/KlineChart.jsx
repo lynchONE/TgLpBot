@@ -1,84 +1,73 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, CandlestickSeries, HistogramSeries } from 'lightweight-charts';
-import { toUnixSeconds } from '../utils';
+import { shortAddress, toUnixSeconds } from '../utils';
 
-export default function KlineChart({ candles }) {
-  const containerRef = useRef(null);
+function getClusterText(cluster) {
+  const items = Array.isArray(cluster?.items) ? cluster.items : [];
+  if (items.length > 1) return String(items.length);
+  const item = items[0];
+  const label = String(item?.wallet_label || '').trim();
+  if (label) {
+    const letters = label
+      .split(/\s+/)
+      .map((part) => part.trim().charAt(0).toUpperCase())
+      .join('')
+      .slice(0, 2);
+    if (letters) return letters;
+  }
+  return shortAddress(item?.wallet_address || '', 2, 2).replace(/\./g, '');
+}
+
+function projectClusters(chart, candleSeries, candleMap, clusters) {
+  if (!chart || !candleSeries || !clusters.length) return [];
+  const timeScale = chart.timeScale();
+  const projected = [];
+  for (const cluster of clusters) {
+    const candle =
+      candleMap.get(cluster.time) ||
+      candleMap.get(cluster.items?.[0]?.bucket_t) ||
+      candleMap.get(cluster.items?.[0]?.t);
+    if (!candle) continue;
+
+    const time = Number(cluster.time || 0);
+    const x = timeScale.timeToCoordinate(time);
+    if (!Number.isFinite(x)) continue;
+
+    const anchorPrice = cluster.action === 'remove'
+      ? Number(candle?.l ?? candle?.low ?? 0)
+      : Number(candle?.h ?? candle?.high ?? 0);
+    const y = candleSeries.priceToCoordinate(anchorPrice);
+    if (!Number.isFinite(y)) continue;
+
+    projected.push({
+      ...cluster,
+      x,
+      y: y + (cluster.action === 'remove' ? 18 : -18),
+      label: getClusterText(cluster),
+    });
+  }
+  return projected;
+}
+
+export default function KlineChart({
+  candles,
+  markers,
+  loading = false,
+  error = '',
+  onMarkerClick,
+  activeMarkerId = '',
+  viewportKey = '',
+}) {
+  const wrapRef = useRef(null);
+  const chartHostRef = useRef(null);
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
   const volumeSeriesRef = useRef(null);
+  const [projectedMarkers, setProjectedMarkers] = useState([]);
 
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const host = containerRef.current;
-    const chart = createChart(host, {
-      width: Math.max(260, host.clientWidth),
-      height: Math.max(260, host.clientHeight),
-      layout: {
-        background: { color: '#0b1018' },
-        textColor: '#95a0b5',
-      },
-      grid: {
-        vertLines: { color: 'rgba(122, 142, 173, 0.15)' },
-        horzLines: { color: 'rgba(122, 142, 173, 0.15)' },
-      },
-      rightPriceScale: { borderColor: 'rgba(122, 142, 173, 0.25)' },
-      timeScale: {
-        borderColor: 'rgba(122, 142, 173, 0.25)',
-        timeVisible: true,
-        secondsVisible: false,
-      },
-      crosshair: {
-        vertLine: { color: 'rgba(255, 183, 59, 0.35)' },
-        horzLine: { color: 'rgba(255, 183, 59, 0.35)' },
-      },
-    });
-
-    const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: '#16c784',
-      downColor: '#ea3943',
-      borderUpColor: '#16c784',
-      borderDownColor: '#ea3943',
-      wickUpColor: '#16c784',
-      wickDownColor: '#ea3943',
-    });
-    const volumeSeries = chart.addSeries(HistogramSeries, {
-      priceFormat: { type: 'volume' },
-      priceScaleId: '',
-    });
-    volumeSeries.priceScale().applyOptions({
-      scaleMargins: { top: 0.76, bottom: 0 },
-    });
-
-    chartRef.current = chart;
-    candleSeriesRef.current = candleSeries;
-    volumeSeriesRef.current = volumeSeries;
-
-    const observer = new ResizeObserver((entries) => {
-      const box = entries?.[0]?.contentRect;
-      if (!box) return;
-      chart.applyOptions({
-        width: Math.max(260, Math.floor(box.width)),
-        height: Math.max(260, Math.floor(box.height)),
-      });
-    });
-    observer.observe(host);
-
-    return () => {
-      observer.disconnect();
-      chart.remove();
-      chartRef.current = null;
-      candleSeriesRef.current = null;
-      volumeSeriesRef.current = null;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
-
+  const candleData = useMemo(() => {
     const rows = Array.isArray(candles) ? candles : [];
-    const candleData = [];
-    const volumeData = [];
+    const out = [];
     for (const row of rows) {
       const time = toUnixSeconds(row?.t);
       const open = Number(row?.o);
@@ -95,18 +84,184 @@ export default function KlineChart({ candles }) {
       ) {
         continue;
       }
-      candleData.push({ time, open, high, low, close });
-      volumeData.push({
+      out.push({
         time,
-        value: Number.isFinite(volume) ? volume : 0,
-        color: close >= open ? 'rgba(22,199,132,0.5)' : 'rgba(234,57,67,0.5)',
+        open,
+        high,
+        low,
+        close,
+        volume: Number.isFinite(volume) ? volume : 0,
       });
     }
+    return out;
+  }, [candles]);
+
+  const candleMap = useMemo(() => {
+    const map = new Map();
+    candleData.forEach((row) => map.set(row.time, row));
+    return map;
+  }, [candleData]);
+
+  const markerClusters = useMemo(() => {
+    const rows = Array.isArray(markers) ? markers : [];
+    const grouped = new Map();
+    rows.forEach((row) => {
+      const action = String(row?.action || 'add').toLowerCase() === 'remove' ? 'remove' : 'add';
+      const time = toUnixSeconds(row?.bucket_t || row?.t);
+      if (!time) return;
+      const key = `${time}:${action}`;
+      const prev = grouped.get(key) || {
+        id: key,
+        time,
+        action,
+        items: [],
+        estimatedUSD: 0,
+      };
+      prev.items.push(row);
+      prev.estimatedUSD += Number(row?.estimated_usd || 0);
+      grouped.set(key, prev);
+    });
+    return Array.from(grouped.values())
+      .map((cluster) => ({
+        ...cluster,
+        items: [...cluster.items].sort((a, b) => Number(b?.estimated_usd || 0) - Number(a?.estimated_usd || 0)),
+      }))
+      .sort((a, b) => a.time - b.time);
+  }, [markers]);
+
+  const updateProjection = useCallback(() => {
+    setProjectedMarkers(
+      projectClusters(chartRef.current, candleSeriesRef.current, candleMap, markerClusters)
+    );
+  }, [candleMap, markerClusters]);
+
+  useEffect(() => {
+    if (!chartHostRef.current) return;
+    const host = chartHostRef.current;
+
+    const chart = createChart(host, {
+      width: Math.max(260, host.clientWidth),
+      height: Math.max(360, host.clientHeight || 360),
+      layout: {
+        background: { color: '#0b1018' },
+        textColor: '#95a0b5',
+      },
+      grid: {
+        vertLines: { color: 'rgba(122, 142, 173, 0.12)' },
+        horzLines: { color: 'rgba(122, 142, 173, 0.12)' },
+      },
+      rightPriceScale: { borderColor: 'rgba(122, 142, 173, 0.22)' },
+      timeScale: {
+        borderColor: 'rgba(122, 142, 173, 0.22)',
+        timeVisible: true,
+        secondsVisible: false,
+      },
+      crosshair: {
+        vertLine: { color: 'rgba(255, 183, 59, 0.35)' },
+        horzLine: { color: 'rgba(255, 183, 59, 0.35)' },
+      },
+      handleScroll: true,
+      handleScale: true,
+    });
+
+    const candleSeries = chart.addSeries(CandlestickSeries, {
+      upColor: '#16c784',
+      downColor: '#ea3943',
+      borderUpColor: '#16c784',
+      borderDownColor: '#ea3943',
+      wickUpColor: '#16c784',
+      wickDownColor: '#ea3943',
+      priceLineVisible: true,
+      lastValueVisible: true,
+    });
+    const volumeSeries = chart.addSeries(HistogramSeries, {
+      priceFormat: { type: 'volume' },
+      priceScaleId: '',
+    });
+    volumeSeries.priceScale().applyOptions({
+      scaleMargins: { top: 0.76, bottom: 0 },
+    });
+
+    chartRef.current = chart;
+    candleSeriesRef.current = candleSeries;
+    volumeSeriesRef.current = volumeSeries;
+
+    const onVisibleChange = () => {
+      window.requestAnimationFrame(updateProjection);
+    };
+    chart.timeScale().subscribeVisibleTimeRangeChange(onVisibleChange);
+
+    const observer = new ResizeObserver((entries) => {
+      const box = entries?.[0]?.contentRect;
+      if (!box) return;
+      chart.applyOptions({
+        width: Math.max(260, Math.floor(box.width)),
+        height: Math.max(360, Math.floor(box.height)),
+      });
+      window.requestAnimationFrame(updateProjection);
+    });
+    observer.observe(host);
+
+    return () => {
+      observer.disconnect();
+      chart.timeScale().unsubscribeVisibleTimeRangeChange(onVisibleChange);
+      chart.remove();
+      chartRef.current = null;
+      candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
+    };
+  }, [updateProjection]);
+
+  useEffect(() => {
+    if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
+    const volumeData = candleData.map((row) => ({
+      time: row.time,
+      value: row.volume,
+      color: row.close >= row.open ? 'rgba(22,199,132,0.45)' : 'rgba(234,57,67,0.45)',
+    }));
 
     candleSeriesRef.current.setData(candleData);
     volumeSeriesRef.current.setData(volumeData);
-    if (candleData.length) chartRef.current?.timeScale().fitContent();
-  }, [candles]);
+    window.requestAnimationFrame(updateProjection);
+  }, [candleData, updateProjection]);
 
-  return <div className="kline-chart" ref={containerRef} />;
+  useEffect(() => {
+    if (!chartRef.current || !candleData.length) return;
+    chartRef.current.timeScale().fitContent();
+    window.requestAnimationFrame(updateProjection);
+  }, [viewportKey, candleData.length, updateProjection]);
+
+  useEffect(() => {
+    window.requestAnimationFrame(updateProjection);
+  }, [updateProjection]);
+
+  const empty = !loading && !error && candleData.length === 0;
+
+  return (
+    <div className="kline-native-wrap" ref={wrapRef}>
+      <div className="kline-native-stage" ref={chartHostRef} />
+
+      <div className="kline-marker-layer">
+        {projectedMarkers.map((cluster) => (
+          <button
+            key={cluster.id}
+            type="button"
+            className={`kline-marker ${cluster.action} ${activeMarkerId === cluster.id ? 'active' : ''}`}
+            style={{
+              left: `${cluster.x}px`,
+              top: `${cluster.y}px`,
+            }}
+            onClick={() => onMarkerClick?.(cluster)}
+            title={`${cluster.action === 'remove' ? '减仓' : '加仓'} · ${cluster.items.length} 条活动`}
+          >
+            {cluster.label}
+          </button>
+        ))}
+      </div>
+
+      {loading ? <div className="kline-state-overlay">加载 K 线中...</div> : null}
+      {!loading && error ? <div className="kline-state-overlay error">{error}</div> : null}
+      {empty ? <div className="kline-state-overlay">暂无 K 线数据</div> : null}
+    </div>
+  );
 }

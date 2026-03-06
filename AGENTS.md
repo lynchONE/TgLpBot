@@ -16,3 +16,8 @@ Use `@/openspec/AGENTS.md` to learn:
 Keep this managed block so 'openspec update' can refresh the instructions.
 
 <!-- OPENSPEC:END -->
+
+## 项目约束
+
+- 后续新增或修改 `OpenSpec` 提案时，`proposal.md`、`design.md`、`tasks.md` 以及 spec delta 的正文默认使用中文撰写。
+- 为兼容 `OpenSpec` 校验，固定结构头保持原格式不变，例如 `## ADDED Requirements`、`### Requirement:`、`#### Scenario:`；除这些固定头之外，其余说明、需求正文、场景内容默认写中文。

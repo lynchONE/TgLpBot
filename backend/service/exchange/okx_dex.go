@@ -11,6 +11,8 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -123,6 +125,33 @@ type OKXAPIError struct {
 	Msg      string
 }
 
+type MarketCandlesRequest struct {
+	ChainIndex           string
+	TokenContractAddress string
+	Bar                  string
+	Limit                int
+	Before               string
+	After                string
+}
+
+type MarketCandle struct {
+	TimestampMS int64
+	Open        float64
+	High        float64
+	Low         float64
+	Close       float64
+	Volume      float64
+	VolumeUSD   float64
+	Confirm     bool
+}
+
+type MarketCandlesResponse struct {
+	Code string         `json:"code"`
+	Msg  string         `json:"msg"`
+	Data [][]string     `json:"data"`
+	Rows []MarketCandle `json:"-"`
+}
+
 func (e *OKXAPIError) Error() string {
 	if e == nil {
 		return "OKX API error"
@@ -131,6 +160,26 @@ func (e *OKXAPIError) Error() string {
 		return fmt.Sprintf("OKX API error: %s (code=%s)", e.Msg, e.Code)
 	}
 	return fmt.Sprintf("OKX API error: %s (code=%s endpoint=%s)", e.Msg, e.Code, e.Endpoint)
+}
+
+func (s *OKXDexService) marketAPIURL() string {
+	base := strings.TrimSpace(s.apiURL)
+	if base == "" {
+		return "https://web3.okx.com/api/v6/dex/market"
+	}
+	base = strings.TrimRight(base, "/")
+	replacer := strings.NewReplacer(
+		"/api/v6/dex/aggregator", "/api/v6/dex/market",
+		"/api/v5/dex/aggregator", "/api/v5/dex/market",
+	)
+	next := replacer.Replace(base)
+	if next != base {
+		return next
+	}
+	if strings.Contains(base, "/api/v6/dex/market") || strings.Contains(base, "/api/v5/dex/market") {
+		return base
+	}
+	return "https://web3.okx.com/api/v6/dex/market"
 }
 
 // GetSwapData gets swap transaction data
@@ -189,6 +238,129 @@ func (s *OKXDexService) GetSwapData(req SwapRequest) (*SwapResponse, error) {
 	}
 
 	return &swapResp, nil
+}
+
+func parseOKXFloat(raw string) float64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+func parseOKXInt64(raw string) int64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+func parseOKXBool(raw string) bool {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "1", "true", "yes", "y":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeMarketCandlesRows(rawRows [][]string) []MarketCandle {
+	out := make([]MarketCandle, 0, len(rawRows))
+	for _, row := range rawRows {
+		if len(row) < 8 {
+			continue
+		}
+		ts := parseOKXInt64(row[0])
+		if ts <= 0 {
+			continue
+		}
+		out = append(out, MarketCandle{
+			TimestampMS: ts,
+			Open:        parseOKXFloat(row[1]),
+			High:        parseOKXFloat(row[2]),
+			Low:         parseOKXFloat(row[3]),
+			Close:       parseOKXFloat(row[4]),
+			Volume:      parseOKXFloat(row[5]),
+			VolumeUSD:   parseOKXFloat(row[6]),
+			Confirm:     parseOKXBool(row[7]),
+		})
+	}
+	return out
+}
+
+func (s *OKXDexService) GetMarketCandles(req MarketCandlesRequest) (*MarketCandlesResponse, error) {
+	query := url.Values{}
+	query.Set(s.chainQueryKey(), strings.TrimSpace(req.ChainIndex))
+	query.Set("tokenContractAddress", strings.TrimSpace(req.TokenContractAddress))
+
+	bar := strings.TrimSpace(req.Bar)
+	if bar == "" {
+		bar = "1m"
+	}
+	query.Set("bar", bar)
+
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 240
+	}
+	if limit > 299 {
+		limit = 299
+	}
+	query.Set("limit", strconv.Itoa(limit))
+
+	if before := strings.TrimSpace(req.Before); before != "" {
+		query.Set("before", before)
+	}
+	if after := strings.TrimSpace(req.After); after != "" {
+		query.Set("after", after)
+	}
+
+	endpoint := fmt.Sprintf("%s/candles?%s", s.marketAPIURL(), query.Encode())
+	if config.AppConfig != nil && config.AppConfig.OKXDebug {
+		log.Printf("[OKX Market] request URL: %s", endpoint)
+	}
+
+	httpReq, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	s.addHeaders(httpReq, "", timestamp)
+
+	resp, err := s.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if config.AppConfig != nil && config.AppConfig.OKXDebug {
+		log.Printf("[OKX Market] raw response: %s", string(body))
+	}
+
+	var out MarketCandlesResponse
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+	if out.Code != "0" {
+		return nil, &OKXAPIError{Endpoint: "market/candles", Code: out.Code, Msg: out.Msg}
+	}
+	out.Rows = normalizeMarketCandlesRows(out.Data)
+	return &out, nil
 }
 
 // addHeaders adds authentication headers to the request

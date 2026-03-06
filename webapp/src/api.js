@@ -17,7 +17,9 @@ async function readErrorMessage(resp) {
 async function requestJson(url, options) {
   const resp = await fetch(url, options);
   if (!resp.ok) {
-    throw new Error(await readErrorMessage(resp));
+    const err = new Error(await readErrorMessage(resp));
+    err.status = resp.status;
+    throw err;
   }
   return resp.json();
 }
@@ -66,6 +68,32 @@ export async function fetchPoolOHLCV({
 
   const qs = params.toString();
   const url = `${base}/api/pools?endpoint=pool_ohlcv${qs ? `&${qs}` : ''}`;
+  return requestJson(url, { method: 'GET', signal });
+}
+
+export async function fetchTokenCandles({
+  apiBaseUrl,
+  initData,
+  chain = 'bsc',
+  tokenAddress,
+  bar = '1m',
+  limit = 240,
+  before,
+  after,
+  signal,
+}) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const params = new URLSearchParams();
+  if (initData) params.set('initData', String(initData));
+  if (chain) params.set('chain', String(chain));
+  if (tokenAddress) params.set('token_address', String(tokenAddress));
+  if (bar) params.set('bar', String(bar));
+  if (Number.isFinite(limit)) params.set('limit', String(limit));
+  if (before !== undefined && before !== null && String(before).trim()) params.set('before', String(before).trim());
+  if (after !== undefined && after !== null && String(after).trim()) params.set('after', String(after).trim());
+
+  const qs = params.toString();
+  const url = `${base}/api/token_candles${qs ? `?${qs}` : ''}`;
   return requestJson(url, { method: 'GET', signal });
 }
 
@@ -127,6 +155,32 @@ export async function fetchSmartMoneyPoolAdds({
   if (Number.isFinite(limit)) params.set('limit', String(limit));
   const qs = params.toString();
   const url = `${base}/api/smart_money_pool_adds${qs ? `?${qs}` : ''}`;
+  return requestJson(url, { method: 'GET', signal });
+}
+
+export async function fetchSmartMoneyPoolMarkers({
+  apiBaseUrl,
+  initData,
+  chain,
+  poolVersion,
+  poolId,
+  bucketSec,
+  windowHours,
+  limit,
+  signal,
+}) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const params = new URLSearchParams();
+  if (initData) params.set('initData', String(initData));
+  if (chain) params.set('chain', String(chain));
+  if (poolVersion) params.set('pool_version', String(poolVersion));
+  if (poolId) params.set('pool_id', String(poolId));
+  if (Number.isFinite(bucketSec)) params.set('bucket_sec', String(bucketSec));
+  if (Number.isFinite(windowHours)) params.set('window_hours', String(windowHours));
+  if (Number.isFinite(limit)) params.set('limit', String(limit));
+
+  const qs = params.toString();
+  const url = `${base}/api/smart_money_pool_markers${qs ? `?${qs}` : ''}`;
   return requestJson(url, { method: 'GET', signal });
 }
 

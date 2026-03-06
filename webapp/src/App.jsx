@@ -8,13 +8,16 @@ import {
   Copy,
   Flame,
   GripVertical,
+  Layers3,
   Link2,
   LogOut,
   Maximize,
   Minimize,
+  RefreshCw,
   Search,
   Settings,
   SlidersHorizontal,
+  X,
 } from 'lucide-react';
 import {
   checkLoginCode,
@@ -23,6 +26,8 @@ import {
   fetchRealtimePositions,
   fetchSmartMoneyOverview,
   fetchSmartMoneyPoolAdds,
+  fetchSmartMoneyPoolMarkers,
+  fetchTokenCandles,
   generateLoginCode,
   openPosition as apiOpenPosition,
   setTaskPaused,
@@ -31,6 +36,7 @@ import {
 } from './api';
 import { WEBAPP_CONFIG } from './config';
 import PanelShell, { EmptyState, MetricCard } from './components/PanelShell';
+import KlineChart from './components/KlineChart';
 import OpenPositionModal from './components/OpenPositionModal';
 import TaskActionMenu from './components/TaskActionMenu';
 import NumberFlowValue from './components/NumberFlowValue';
@@ -50,10 +56,24 @@ import {
   formatUsd,
   formatUsdCompact,
   normalizePoolAddress,
+  normalizeHexAddress,
   normalizeWidgetSelection,
   pickNonStableTokenAddress,
+  resolveKlineTokenOptions,
   shortAddress,
+  inferPoolVersion,
 } from './utils';
+
+const KLINE_INTERVALS = [
+  { key: '1m', label: '1m', bucketSec: 60, limit: 240 },
+  { key: '5m', label: '5m', bucketSec: 300, limit: 240 },
+  { key: '15m', label: '15m', bucketSec: 900, limit: 240 },
+  { key: '1H', label: '1H', bucketSec: 3600, limit: 240 },
+];
+
+function getKlineIntervalMeta(bar) {
+  return KLINE_INTERVALS.find((item) => item.key === bar) || KLINE_INTERVALS[0];
+}
 
 const STORAGE = {
   initData: 'tglp_web_init_data',
@@ -191,6 +211,18 @@ export default function App() {
   const [smartError, setSmartError] = useState('');
 
   const [selectedPool, setSelectedPool] = useState(null);
+  const [klineInterval, setKlineInterval] = useState('5m');
+  const [klineTokenSide, setKlineTokenSide] = useState('auto');
+  const [klineCandles, setKlineCandles] = useState([]);
+  const [klineLoading, setKlineLoading] = useState(false);
+  const [klineError, setKlineError] = useState('');
+  const [klineMarkers, setKlineMarkers] = useState([]);
+  const [klineMarkersLoading, setKlineMarkersLoading] = useState(false);
+  const [klineMarkersError, setKlineMarkersError] = useState('');
+  const [klineOverlayEnabled, setKlineOverlayEnabled] = useState(true);
+  const [klineOverlayAvailable, setKlineOverlayAvailable] = useState(true);
+  const [klineRefreshNonce, setKlineRefreshNonce] = useState(0);
+  const [selectedMarkerCluster, setSelectedMarkerCluster] = useState(null);
 
   const [refreshing, setRefreshing] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false);
@@ -216,6 +248,28 @@ export default function App() {
     () => normalizePoolAddress(selectedPool?.pool_address || selectedPool?.pool_id),
     [selectedPool]
   );
+  const selectedPoolVersion = useMemo(() => inferPoolVersion(selectedPool), [selectedPool]);
+  const klineTokenMeta = useMemo(() => resolveKlineTokenOptions(selectedPool), [selectedPool]);
+  const klineTokenOptions = klineTokenMeta.options || [];
+  const klineDefaultTokenSide = klineTokenMeta.defaultKey || '';
+  const klineActiveTokenSide = useMemo(() => {
+    if (!klineTokenOptions.length) return '';
+    if (klineTokenSide && klineTokenSide !== 'auto') {
+      return klineTokenOptions.some((item) => item.key === klineTokenSide)
+        ? klineTokenSide
+        : klineDefaultTokenSide;
+    }
+    return klineDefaultTokenSide;
+  }, [klineDefaultTokenSide, klineTokenOptions, klineTokenSide]);
+  const klineActiveToken = useMemo(
+    () => klineTokenOptions.find((item) => item.key === klineActiveTokenSide) || null,
+    [klineActiveTokenSide, klineTokenOptions]
+  );
+  const klineTokenAddress = useMemo(
+    () => normalizeHexAddress(klineActiveToken?.address),
+    [klineActiveToken]
+  );
+  const klineIntervalMeta = useMemo(() => getKlineIntervalMeta(klineInterval), [klineInterval]);
   const selectedPoolGmgnUrl = useMemo(() => buildGmgnUrl(selectedPool, chain), [selectedPool, chain]);
   const selectedPoolEmbedUrl = useMemo(
     () => buildDexScreenerEmbedUrl(selectedPool, chain),
@@ -248,6 +302,10 @@ export default function App() {
     const rows = Array.isArray(smart?.wallets_24h) ? smart.wallets_24h : [];
     return [...rows].sort((a, b) => Number(b?.pnl_usdt_24h || 0) - Number(a?.pnl_usdt_24h || 0));
   }, [smart]);
+  const klineViewportKey = useMemo(
+    () => `${selectedPoolAddress || 'pool'}:${klineTokenAddress || 'token'}:${klineInterval}`,
+    [klineInterval, klineTokenAddress, selectedPoolAddress]
+  );
 
   useEffect(() => {
     storageSet(STORAGE.initData, initData);
@@ -373,6 +431,89 @@ export default function App() {
     [apiBaseUrl, chain, hasInitData, initData]
   );
 
+  const loadKline = useCallback(
+    async (signal) => {
+      if (!hasInitData) {
+        setKlineCandles([]);
+        setKlineError('请先点击右上角 Telegram 图标扫码登录。');
+        return;
+      }
+      if (!klineTokenAddress) {
+        setKlineCandles([]);
+        setKlineError('');
+        return;
+      }
+
+      setKlineLoading(true);
+      setKlineError('');
+      try {
+        const resp = await fetchTokenCandles({
+          apiBaseUrl,
+          initData,
+          chain: selectedPool?.chain || chain,
+          tokenAddress: klineTokenAddress,
+          bar: klineIntervalMeta.key,
+          limit: klineIntervalMeta.limit,
+          signal,
+        });
+        setKlineCandles(Array.isArray(resp?.candles) ? resp.candles : []);
+      } catch (e) {
+        if (e?.name !== 'AbortError') {
+          setKlineError(String(e?.message || e));
+        }
+      } finally {
+        setKlineLoading(false);
+      }
+    },
+    [apiBaseUrl, chain, hasInitData, initData, klineIntervalMeta.key, klineIntervalMeta.limit, klineTokenAddress, selectedPool?.chain]
+  );
+
+  const loadKlineMarkers = useCallback(
+    async (signal) => {
+      if (!hasInitData || !selectedPoolAddress || !selectedPoolVersion) {
+        setKlineMarkers([]);
+        setKlineMarkersError('');
+        return;
+      }
+      if (!klineOverlayEnabled || !klineOverlayAvailable) {
+        setKlineMarkers([]);
+        setKlineMarkersError('');
+        return;
+      }
+
+      setKlineMarkersLoading(true);
+      setKlineMarkersError('');
+      try {
+        const resp = await fetchSmartMoneyPoolMarkers({
+          apiBaseUrl,
+          initData,
+          chain: selectedPool?.chain || chain,
+          poolVersion: selectedPoolVersion,
+          poolId: selectedPoolAddress,
+          bucketSec: klineIntervalMeta.bucketSec,
+          windowHours: 12,
+          limit: 300,
+          signal,
+        });
+        setKlineOverlayAvailable(true);
+        setKlineMarkers(Array.isArray(resp?.events) ? resp.events : []);
+      } catch (e) {
+        if (e?.name === 'AbortError') return;
+        if (e?.status === 403) {
+          setKlineOverlayAvailable(false);
+          setKlineOverlayEnabled(false);
+          setKlineMarkers([]);
+          setKlineMarkersError('当前账号没有聪明钱权限，已切换为纯 K 线模式。');
+          return;
+        }
+        setKlineMarkersError(String(e?.message || e));
+      } finally {
+        setKlineMarkersLoading(false);
+      }
+    },
+    [apiBaseUrl, chain, hasInitData, initData, klineIntervalMeta.bucketSec, klineOverlayAvailable, klineOverlayEnabled, selectedPool?.chain, selectedPoolAddress, selectedPoolVersion]
+  );
+
   useEffect(() => {
     const ctrl = new AbortController();
     loadHotPools(ctrl.signal);
@@ -380,6 +521,18 @@ export default function App() {
     loadSmart(ctrl.signal);
     return () => ctrl.abort();
   }, [loadHotPools, loadPositions, loadSmart]);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    loadKline(ctrl.signal);
+    return () => ctrl.abort();
+  }, [loadKline, klineRefreshNonce]);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    loadKlineMarkers(ctrl.signal);
+    return () => ctrl.abort();
+  }, [loadKlineMarkers, klineRefreshNonce]);
 
   useEffect(() => {
     if (!hasInitData) return undefined;
@@ -400,6 +553,18 @@ export default function App() {
   }, [hasInitData, loadSmart, refreshInterval]);
 
   useEffect(() => {
+    if (!hasInitData || !klineTokenAddress) return undefined;
+    const timer = window.setInterval(() => loadKline(), 20_000);
+    return () => window.clearInterval(timer);
+  }, [hasInitData, klineTokenAddress, loadKline]);
+
+  useEffect(() => {
+    if (!hasInitData || !selectedPoolAddress || !klineOverlayEnabled || !klineOverlayAvailable) return undefined;
+    const timer = window.setInterval(() => loadKlineMarkers(), 12_000);
+    return () => window.clearInterval(timer);
+  }, [hasInitData, klineOverlayAvailable, klineOverlayEnabled, loadKlineMarkers, selectedPoolAddress]);
+
+  useEffect(() => {
     if (!hotPools.length) return;
     setSelectedPool((prev) => {
       const prevAddr = normalizePoolAddress(prev?.pool_address || prev?.pool_id);
@@ -410,6 +575,23 @@ export default function App() {
       return matched ? { ...matched, chain } : prev;
     });
   }, [chain, hotPools]);
+
+  useEffect(() => {
+    setKlineTokenSide('auto');
+    setSelectedMarkerCluster(null);
+    setKlineMarkers([]);
+    setKlineMarkersError('');
+  }, [selectedPoolAddress]);
+
+  useEffect(() => {
+    if (!klineOverlayEnabled) {
+      setSelectedMarkerCluster(null);
+    }
+  }, [klineOverlayEnabled]);
+
+  useEffect(() => {
+    setKlineOverlayAvailable(true);
+  }, [initData]);
 
   const [loginCode, setLoginCode] = useState('');
   const [loginCodeExpiry, setLoginCodeExpiry] = useState(0);
@@ -488,8 +670,13 @@ export default function App() {
     if (!hasInitData) return;
     setRefreshing(true);
     await Promise.allSettled([loadHotPools(), loadPositions(), loadSmart()]);
+    setKlineRefreshNonce((v) => v + 1);
     setRefreshing(false);
   }, [hasInitData, loadHotPools, loadPositions, loadSmart]);
+
+  const refreshKline = useCallback(() => {
+    setKlineRefreshNonce((v) => v + 1);
+  }, []);
 
   const toggleWidget = useCallback((key) => {
     setWidgets((prev) => {
@@ -712,18 +899,156 @@ export default function App() {
       >
         {!selectedPoolAddress ? (
           <EmptyState text="点选池子后自动加载 K 线" />
+        ) : !klineTokenAddress ? (
+          <EmptyState text="当前池子缺少可用代币地址，暂时无法加载 K 线" />
         ) : (
           <>
-            <div className="dex-embed-wrap">
-              <iframe
-                key={selectedPoolEmbedUrl}
-                src={selectedPoolEmbedUrl}
-                className="dex-embed-iframe"
-                title="DEXScreener Chart"
-                sandbox="allow-scripts allow-same-origin allow-popups"
-                referrerPolicy="no-referrer"
-              />
+            <div className="kline-toolbar">
+              <div className="kline-toolbar-group">
+                {klineTokenOptions.length > 1 ? (
+                  klineTokenOptions.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      className={`ghost-chip ${klineActiveTokenSide === item.key ? 'active' : ''}`}
+                      onClick={() => setKlineTokenSide(item.key)}
+                    >
+                      {item.symbol}
+                    </button>
+                  ))
+                ) : (
+                  <div className="kline-token-pill">
+                    {klineActiveToken?.symbol || 'Token'}
+                  </div>
+                )}
+              </div>
+
+              <div className="kline-toolbar-group">
+                {KLINE_INTERVALS.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className={`ghost-chip ${klineInterval === item.key ? 'active' : ''}`}
+                    onClick={() => setKlineInterval(item.key)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="kline-toolbar-group align-right">
+                <button
+                  type="button"
+                  className={`ghost-chip ${klineOverlayEnabled ? 'active' : ''}`}
+                  onClick={() => {
+                    if (!klineOverlayAvailable) return;
+                    setKlineOverlayEnabled((v) => !v);
+                    setSelectedMarkerCluster(null);
+                  }}
+                  disabled={!klineOverlayAvailable}
+                >
+                  <Layers3 size={12} />
+                  聪明钱
+                </button>
+                <button
+                  type="button"
+                  className="ghost-chip"
+                  onClick={refreshKline}
+                  disabled={klineLoading || klineMarkersLoading}
+                >
+                  <RefreshCw size={12} />
+                  刷新
+                </button>
+              </div>
             </div>
+
+            <div className="kline-summary-row">
+              <div className="kline-summary-item">
+                <span className="label">展示代币</span>
+                <span className="value">{klineActiveToken?.symbol || '--'}</span>
+              </div>
+              <div className="kline-summary-item mono">
+                <span className="label">地址</span>
+                <span className="value">{shortAddress(klineTokenAddress, 8, 6)}</span>
+              </div>
+              <div className="kline-summary-item">
+                <span className="label">Marker</span>
+                <span className="value">{klineMarkers.length}</span>
+              </div>
+              <div className="kline-summary-item">
+                <span className="label">覆盖层</span>
+                <span className="value">{klineOverlayEnabled && klineOverlayAvailable ? '开启' : '关闭'}</span>
+              </div>
+            </div>
+
+            <KlineChart
+              candles={klineCandles}
+              markers={klineOverlayEnabled ? klineMarkers : []}
+              loading={klineLoading}
+              error={klineError}
+              viewportKey={klineViewportKey}
+              activeMarkerId={selectedMarkerCluster?.id || ''}
+              onMarkerClick={(cluster) => setSelectedMarkerCluster(cluster)}
+            />
+
+            {klineMarkersError ? <div className="kline-inline-note">{klineMarkersError}</div> : null}
+
+            {selectedMarkerCluster ? (
+              <div className="kline-marker-drawer">
+                <div className="kline-marker-drawer-head">
+                  <div>
+                    <div className="kline-marker-drawer-title">
+                      {selectedMarkerCluster.action === 'remove' ? '减仓活动' : '加仓活动'}
+                    </div>
+                    <div className="kline-marker-drawer-sub">
+                      {new Date((selectedMarkerCluster.time || 0) * 1000).toLocaleString()} · {selectedMarkerCluster.items?.length || 0} 条
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="icon-link"
+                    onClick={() => setSelectedMarkerCluster(null)}
+                    title="关闭详情"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+
+                <div className="kline-marker-drawer-list">
+                  {(selectedMarkerCluster.items || []).map((item) => {
+                    const txUrl = String(item?.tx_url || '').trim();
+                    const walletLabel = String(item?.wallet_label || '').trim();
+                    const amountUSD = Number(item?.estimated_usd || 0);
+                    const lower = Number(item?.price_lower || 0);
+                    const upper = Number(item?.price_upper || 0);
+                    return (
+                      <div key={item?.event_id || `${item?.wallet_address}:${item?.t}`} className="kline-marker-event">
+                        <div className="kline-marker-event-main">
+                          <div className="kline-marker-wallet">
+                            {walletLabel || shortAddress(item?.wallet_address || '', 6, 4)}
+                          </div>
+                          <div className={`kline-marker-action ${item?.action === 'remove' ? 'remove' : 'add'}`}>
+                            {item?.action === 'remove' ? '减仓' : '加仓'}
+                          </div>
+                        </div>
+                        <div className="kline-marker-event-sub">
+                          <span>{new Date((Number(item?.t || 0)) * 1000).toLocaleTimeString()}</span>
+                          <span>${formatNumber(amountUSD, amountUSD > 100 ? 0 : 2)}</span>
+                          {lower > 0 && upper > 0 ? (
+                            <span>{compactPrice(lower)} → {compactPrice(upper)}</span>
+                          ) : null}
+                          {txUrl ? (
+                            <button type="button" className="mini-link" onClick={() => openExternal(txUrl)}>
+                              Tx
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
 
             <div className="kline-ext-links">
               {selectedPoolGmgnUrl && (

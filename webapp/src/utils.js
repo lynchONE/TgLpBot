@@ -54,6 +54,14 @@ export function shortAddress(value, left = 6, right = 4) {
   return `${raw.slice(0, left)}...${raw.slice(-right)}`;
 }
 
+export function normalizeHexAddress(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const body = raw.startsWith('0x') || raw.startsWith('0X') ? raw.slice(2) : raw;
+  if (!/^[a-fA-F0-9]{40}$/.test(body)) return '';
+  return `0x${body.toLowerCase()}`;
+}
+
 export function normalizePoolAddress(value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -82,8 +90,8 @@ const GMGN_STABLE_SYMBOLS = new Set([
 
 export function pickNonStableTokenAddress(pool) {
   const pair = String(pool?.trading_pair || pool?.pair || '').trim();
-  const token0 = String(pool?.token0_address || pool?.token0 || '').trim();
-  const token1 = String(pool?.token1_address || pool?.token1 || '').trim();
+  const token0 = normalizeHexAddress(pool?.token0_address || pool?.token0);
+  const token1 = normalizeHexAddress(pool?.token1_address || pool?.token1);
   if (!pair) return token0 || token1;
   const symbols = pair.split('/').map((part) => String(part || '').trim().toLowerCase());
   if (symbols.length !== 2) return token0 || token1;
@@ -93,6 +101,57 @@ export function pickNonStableTokenAddress(pool) {
   if (leftStable && !rightStable) return token1 || token0;
   if (rightStable && !leftStable) return token0 || token1;
   return token0 || token1;
+}
+
+export function isStableLikeSymbol(symbol) {
+  return GMGN_STABLE_SYMBOLS.has(String(symbol || '').trim().toLowerCase());
+}
+
+export function inferPoolVersion(pool) {
+  const raw = String(pool?.pool_version || pool?.protocol_version || '').trim().toLowerCase();
+  if (raw === 'v3' || raw === 'v4') return raw;
+  const addr = normalizePoolAddress(pool?.pool_address || pool?.pool_id);
+  if (addr && addr.length === 66) return 'v4';
+  return 'v3';
+}
+
+export function resolveKlineTokenOptions(pool) {
+  const token0Address = normalizeHexAddress(pool?.token0_address || pool?.token0);
+  const token1Address = normalizeHexAddress(pool?.token1_address || pool?.token1);
+  const pair = String(pool?.trading_pair || pool?.pair || '').trim();
+  const pairSymbols = pair.includes('/') ? pair.split('/').map((part) => String(part || '').trim()) : [];
+  const token0Symbol = String(pool?.token0_symbol || pairSymbols[0] || '').trim();
+  const token1Symbol = String(pool?.token1_symbol || pairSymbols[1] || '').trim();
+
+  const options = [
+    token0Address
+      ? {
+          key: 'token0',
+          address: token0Address,
+          symbol: token0Symbol || 'Token0',
+          isStable: isStableLikeSymbol(token0Symbol),
+        }
+      : null,
+    token1Address
+      ? {
+          key: 'token1',
+          address: token1Address,
+          symbol: token1Symbol || 'Token1',
+          isStable: isStableLikeSymbol(token1Symbol),
+        }
+      : null,
+  ].filter(Boolean);
+
+  if (!options.length) return { options: [], defaultKey: '' };
+  if (options.length === 1) return { options, defaultKey: options[0].key };
+
+  const stableCount = options.filter((item) => item.isStable).length;
+  if (stableCount === 1) {
+    const preferred = options.find((item) => !item.isStable) || options[0];
+    return { options, defaultKey: preferred.key };
+  }
+
+  return { options, defaultKey: options[0].key };
 }
 
 export function buildGmgnUrl(pool, fallbackChain = 'bsc') {

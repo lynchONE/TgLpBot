@@ -45,6 +45,7 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/hot_pools", s.handleHotPools)
 	mux.HandleFunc("/api/search_pools", s.handleSearchPools)
 	mux.HandleFunc("/api/pool_ohlcv", s.handlePoolOHLCV)
+	mux.HandleFunc("/api/token_candles", s.handleTokenCandles)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/global_config", s.handleGlobalConfig)
 	mux.HandleFunc("/api/autolp_config", s.handleAutoLPConfig)
@@ -54,6 +55,7 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/smart_money", s.handleSmartMoneyOverview)
 	mux.HandleFunc("/api/smart_money_overview", s.handleSmartMoneyOverview)
 	mux.HandleFunc("/api/smart_money_pool_adds", s.handleSmartMoneyPoolAdds)
+	mux.HandleFunc("/api/smart_money_pool_markers", s.handleSmartMoneyPoolMarkers)
 	mux.HandleFunc("/api/smart_money_wallet_positions", s.handleSmartMoneyWalletPositions)
 	mux.HandleFunc("/api/smart_money_follow_config", s.handleSmartMoneyFollowConfig)
 	mux.HandleFunc("/api/smart_money_follow_configs", s.handleSmartMoneyFollowConfigs)
@@ -154,6 +156,9 @@ func (s *Server) handleGetPools(w http.ResponseWriter, r *http.Request) {
 			return
 		case "pool_ohlcv":
 			s.handlePoolOHLCV(w, r)
+			return
+		case "token_candles":
+			s.handleTokenCandles(w, r)
 			return
 		default:
 			http.Error(w, "invalid endpoint", http.StatusBadRequest)
