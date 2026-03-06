@@ -23,7 +23,6 @@ import {
   checkLoginCode,
   deleteTask,
   fetchHotPools,
-  fetchPoolOHLCV,
   fetchRealtimePositions,
   fetchSmartMoneyOverview,
   fetchSmartMoneyPoolAdds,
@@ -523,49 +522,16 @@ export default function App() {
       setKlineLoading(true);
       setKlineError('');
       try {
-        const activeChain = selectedPool?.chain || chain;
-        let resp;
-
-        if (selectedPoolVersion === 'v4' && selectedPoolAddress) {
-          try {
-            resp = await fetchPoolOHLCV({
-              apiBaseUrl,
-              initData,
-              chain: activeChain,
-              poolAddress: selectedPoolAddress,
-              timeframe: klineIntervalMeta.timeframe,
-              aggregate: klineIntervalMeta.aggregate,
-              token: klineTokenAddress,
-              currency: 'usd',
-              limit: klineIntervalMeta.poolLimit || klineIntervalMeta.limit,
-              signal,
-            });
-            setKlineSource('pool');
-          } catch (poolErr) {
-            if (poolErr?.name === 'AbortError') throw poolErr;
-            resp = await fetchTokenCandles({
-              apiBaseUrl,
-              initData,
-              chain: activeChain,
-              tokenAddress: klineTokenAddress,
-              bar: klineIntervalMeta.key,
-              limit: klineIntervalMeta.limit,
-              signal,
-            });
-            setKlineSource('token-fallback');
-          }
-        } else {
-          resp = await fetchTokenCandles({
-            apiBaseUrl,
-            initData,
-            chain: activeChain,
-            tokenAddress: klineTokenAddress,
-            bar: klineIntervalMeta.key,
-            limit: klineIntervalMeta.limit,
-            signal,
-          });
-          setKlineSource('token');
-        }
+        const resp = await fetchTokenCandles({
+          apiBaseUrl,
+          initData,
+          chain: selectedPool?.chain || chain,
+          tokenAddress: klineTokenAddress,
+          bar: klineIntervalMeta.key,
+          limit: klineIntervalMeta.limit,
+          signal,
+        });
+        setKlineSource('token-usd');
         setKlineCandles(Array.isArray(resp?.candles) ? resp.candles : []);
       } catch (e) {
         if (e?.name !== 'AbortError') {
@@ -581,15 +547,10 @@ export default function App() {
       chain,
       hasInitData,
       initData,
-      klineIntervalMeta.aggregate,
       klineIntervalMeta.key,
       klineIntervalMeta.limit,
-      klineIntervalMeta.poolLimit,
-      klineIntervalMeta.timeframe,
       klineTokenAddress,
       selectedPool?.chain,
-      selectedPoolAddress,
-      selectedPoolVersion,
     ]
   );
 
@@ -1123,7 +1084,7 @@ export default function App() {
               <div className="kline-summary-item">
                 <span className="label">价格源</span>
                 <span className="value">
-                  {klineSource === 'pool' ? '池子K线' : klineSource === 'token-fallback' ? '代币K线(回退)' : '代币K线'}
+                  {klineSource === 'token-usd' ? '代币K线(USD)' : '代币K线'}
                 </span>
               </div>
               <div className="kline-summary-item">
