@@ -198,6 +198,7 @@ function projectClusters(chart, candleSeries, candleData, candleMap, candleIndex
 export default function KlineChart({
   candles,
   markers,
+  realtimeCandle,
   loading = false,
   error = '',
   onMarkerClick,
@@ -414,8 +415,27 @@ export default function KlineChart({
     window.requestAnimationFrame(() => updateProjectionRef.current?.());
   }, [candleData]);
 
+  // Incremental realtime update — bypass full setData for instant visual feedback.
   useEffect(() => {
-    if (!chartRef.current || !candleData.length) return;
+    if (!realtimeCandle || !candleSeriesRef.current || !volumeSeriesRef.current) return;
+    const time = toUnixSeconds(realtimeCandle.t);
+    const open = Number(realtimeCandle.o);
+    const high = Number(realtimeCandle.h);
+    const low = Number(realtimeCandle.l);
+    const close = Number(realtimeCandle.c);
+    const volume = Number(realtimeCandle.v);
+    if (!time || !Number.isFinite(open) || !Number.isFinite(close)) return;
+    candleSeriesRef.current.update({ time, open, high, low, close });
+    if (Number.isFinite(volume)) {
+      volumeSeriesRef.current.update({
+        time,
+        value: volume,
+        color: close >= open ? 'rgba(22,199,132,0.45)' : 'rgba(234,57,67,0.45)',
+      });
+    }
+  }, [realtimeCandle]);
+
+  useEffect(() => {
     if (prevViewportKeyRef.current === viewportKey) return;
     prevViewportKeyRef.current = viewportKey;
     chartRef.current.timeScale().fitContent();

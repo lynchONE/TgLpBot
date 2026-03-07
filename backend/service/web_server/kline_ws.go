@@ -87,15 +87,15 @@ func (f *KlineFeed) HandleClientRemove(client *ws.Client) {
 func pollerInterval(bar string) time.Duration {
 	switch strings.ToLower(bar) {
 	case "1m":
-		return 5 * time.Second
+		return 2 * time.Second
 	case "3m", "5m":
-		return 8 * time.Second
+		return 3 * time.Second
 	case "15m":
-		return 12 * time.Second
+		return 5 * time.Second
 	case "30m":
-		return 15 * time.Second
+		return 8 * time.Second
 	default:
-		return 20 * time.Second
+		return 10 * time.Second
 	}
 }
 

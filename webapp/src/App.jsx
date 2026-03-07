@@ -416,8 +416,17 @@ export default function App() {
     });
   }, [wsKlineUpdate, klineTokenAddress, klineIntervalMeta.key]);
 
+  // Extract the latest candle for incremental series.update() in KlineChart.
+  const realtimeCandle = useMemo(() => {
+    if (!wsKlineUpdate?.candles?.length) return null;
+    const addr = String(wsKlineUpdate.token_address || '').toLowerCase();
+    if (addr !== String(klineTokenAddress || '').toLowerCase()) return null;
+    if (wsKlineUpdate.bar !== klineIntervalMeta.key) return null;
+    const sorted = [...wsKlineUpdate.candles].sort((a, b) => Number(a?.t || 0) - Number(b?.t || 0));
+    return sorted[sorted.length - 1] || null;
+  }, [wsKlineUpdate, klineTokenAddress, klineIntervalMeta.key]);
+
   useEffect(() => {
-    storageSet(STORAGE.initData, initData);
     storageSet(STORAGE.chain, chain);
     storageSet(STORAGE.widgets, JSON.stringify(widgets));
     storageSet(STORAGE.sort, hotSort);
@@ -1155,6 +1164,7 @@ export default function App() {
 
             <KlineChart
               candles={klineCandles}
+              realtimeCandle={realtimeCandle}
               markers={klineOverlayEnabled ? klineMarkers : []}
               loading={klineLoading}
               error={klineError}
