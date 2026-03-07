@@ -1,17 +1,33 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
-export default function TaskActionMenu({ position, onPause, onStop, onDelete, onEditRange, onClose }) {
+export default function TaskActionMenu({ position, onPause, onStop, onDelete, onEditRange, onClose, anchorRef }) {
   const [editMode, setEditMode] = useState(false);
   const [rangeLower, setRangeLower] = useState(String(position?.task_range_lower_pct || '2'));
   const [rangeUpper, setRangeUpper] = useState(String(position?.task_range_upper_pct || '2'));
   const [amountUsdt, setAmountUsdt] = useState(String(position?.task_amount_usdt || ''));
   const [pending, setPending] = useState('');
+  const menuRef = useRef(null);
 
   const taskId = Number(position?.task_id || 0);
   const taskPaused = Boolean(position?.task_paused);
   const statusLabel = String(position?.status_label || '');
   const isStopped = statusLabel.includes('已停止');
   const isStopping = statusLabel.includes('停止中') || statusLabel.includes('撤出中');
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        onClose();
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('touchstart', handler);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('touchstart', handler);
+    };
+  }, [onClose]);
 
   const run = useCallback(async (key, fn) => {
     if (pending) return;
@@ -29,68 +45,64 @@ export default function TaskActionMenu({ position, onPause, onStop, onDelete, on
 
   if (editMode) {
     return (
-      <div className="modal-overlay" onClick={onClose}>
-        <div className="modal-box small" onClick={(e) => e.stopPropagation()}>
-          <div className="modal-header">
-            <h3>修改再平衡参数</h3>
-            <button type="button" className="modal-close" onClick={onClose}>&times;</button>
-          </div>
-          <div className="modal-form">
-            <div className="modal-row">
-              <label className="modal-field">
-                <span>下限 %</span>
-                <input type="number" value={rangeLower} onChange={(e) => setRangeLower(e.target.value)} min="0.1" step="0.5" />
-              </label>
-              <label className="modal-field">
-                <span>上限 %</span>
-                <input type="number" value={rangeUpper} onChange={(e) => setRangeUpper(e.target.value)} min="0.1" step="0.5" />
-              </label>
-            </div>
-            <label className="modal-field">
-              <span>金额 USDT (可选)</span>
-              <input type="number" value={amountUsdt} onChange={(e) => setAmountUsdt(e.target.value)} min="0" step="10" placeholder="留空不变" />
+      <div className="task-popover" ref={menuRef} onClick={(e) => e.stopPropagation()}>
+        <div className="task-popover-header">
+          <span>修改再平衡参数</span>
+          <button type="button" className="task-popover-close" onClick={onClose}>&times;</button>
+        </div>
+        <div className="task-popover-form">
+          <div className="task-popover-row">
+            <label className="task-popover-field">
+              <span>下限 %</span>
+              <input type="number" value={rangeLower} onChange={(e) => setRangeLower(e.target.value)} min="0.1" step="0.5" />
+            </label>
+            <label className="task-popover-field">
+              <span>上限 %</span>
+              <input type="number" value={rangeUpper} onChange={(e) => setRangeUpper(e.target.value)} min="0.1" step="0.5" />
             </label>
           </div>
-          <div className="modal-actions">
-            <button type="button" className="ghost-chip" onClick={() => setEditMode(false)} disabled={!!pending}>返回</button>
-            <button type="button" className="accent-btn" onClick={handleEditSubmit} disabled={!!pending}>
-              {pending === 'range' ? '提交中...' : '确认修改'}
-            </button>
-          </div>
+          <label className="task-popover-field">
+            <span>金额 USDT (可选)</span>
+            <input type="number" value={amountUsdt} onChange={(e) => setAmountUsdt(e.target.value)} min="0" step="10" placeholder="留空不变" />
+          </label>
+        </div>
+        <div className="task-popover-actions">
+          <button type="button" className="ghost-chip" onClick={() => setEditMode(false)} disabled={!!pending}>返回</button>
+          <button type="button" className="accent-btn small" onClick={handleEditSubmit} disabled={!!pending}>
+            {pending === 'range' ? '提交中...' : '确认'}
+          </button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-box small" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h3>任务操作 #{taskId}</h3>
-          <button type="button" className="modal-close" onClick={onClose}>&times;</button>
-        </div>
-        <div className="task-action-list">
-          {onPause && !isStopping && (
-            <button type="button" className="task-action-item" onClick={() => run('pause', () => onPause(taskId, !taskPaused))} disabled={!!pending}>
-              {pending === 'pause' ? '处理中...' : taskPaused ? '恢复任务' : '暂停任务'}
-            </button>
-          )}
-          {onEditRange && !isStopping && (
-            <button type="button" className="task-action-item" onClick={() => setEditMode(true)} disabled={!!pending}>
-              修改再平衡参数
-            </button>
-          )}
-          {onStop && !isStopped && !isStopping && (
-            <button type="button" className="task-action-item warn" onClick={() => run('stop', () => onStop(taskId))} disabled={!!pending}>
-              {pending === 'stop' ? '处理中...' : '停止任务'}
-            </button>
-          )}
-          {onDelete && !isStopping && (
-            <button type="button" className="task-action-item danger" onClick={() => run('delete', () => onDelete(taskId))} disabled={!!pending}>
-              {pending === 'delete' ? '删除中...' : '删除任务'}
-            </button>
-          )}
-        </div>
+    <div className="task-popover" ref={menuRef} onClick={(e) => e.stopPropagation()}>
+      <div className="task-popover-header">
+        <span>任务 #{taskId}</span>
+        <button type="button" className="task-popover-close" onClick={onClose}>&times;</button>
+      </div>
+      <div className="task-action-list">
+        {onPause && !isStopping && (
+          <button type="button" className="task-action-item" onClick={() => run('pause', () => onPause(taskId, !taskPaused))} disabled={!!pending}>
+            {pending === 'pause' ? '处理中...' : taskPaused ? '恢复任务' : '暂停任务'}
+          </button>
+        )}
+        {onEditRange && !isStopping && (
+          <button type="button" className="task-action-item" onClick={() => setEditMode(true)} disabled={!!pending}>
+            修改再平衡参数
+          </button>
+        )}
+        {onStop && !isStopped && !isStopping && (
+          <button type="button" className="task-action-item warn" onClick={() => run('stop', () => onStop(taskId))} disabled={!!pending}>
+            {pending === 'stop' ? '处理中...' : '停止任务'}
+          </button>
+        )}
+        {onDelete && !isStopping && (
+          <button type="button" className="task-action-item danger" onClick={() => run('delete', () => onDelete(taskId))} disabled={!!pending}>
+            {pending === 'delete' ? '删除中...' : '删除任务'}
+          </button>
+        )}
       </div>
     </div>
   );

@@ -1227,6 +1227,21 @@ body {
   box-shadow: 0 0 0 2px rgba(255, 208, 130, 0.45), 0 10px 20px rgba(0, 0, 0, 0.32);
 }
 
+.kline-marker.my-trade {
+  width: 36px;
+  height: 36px;
+  border-width: 3px;
+  box-shadow: 0 0 0 2px rgba(255, 177, 26, 0.5), 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+.kline-marker.my-trade.add {
+  border-color: #16c784;
+  box-shadow: 0 0 0 2px rgba(255, 177, 26, 0.5), 0 0 10px rgba(22, 199, 132, 0.5), 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+.kline-marker.my-trade.remove {
+  border-color: #ea3943;
+  box-shadow: 0 0 0 2px rgba(255, 177, 26, 0.5), 0 0 10px rgba(234, 57, 67, 0.5), 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
 .kline-marker-tooltip {
   position: absolute;
   transform: translate(-50%, calc(-100% - 22px));
@@ -2418,7 +2433,89 @@ body {
 .accent-btn:hover { opacity: 0.85; }
 .accent-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* Task action menu */
+/* Task action menu — inline popover */
+.pos-action-anchor {
+  position: relative;
+  display: inline-flex;
+}
+.task-popover {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  z-index: 30;
+  min-width: 180px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.task-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--line);
+}
+.task-popover-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 2px;
+}
+.task-popover-form {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.task-popover-row {
+  display: flex;
+  gap: 8px;
+}
+.task-popover-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+.task-popover-field span {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.task-popover-field input {
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+  width: 100%;
+}
+.task-popover-field input:focus {
+  border-color: var(--accent);
+}
+.task-popover-actions {
+  padding: 6px 10px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  border-top: 1px solid var(--line);
+}
+.accent-btn.small {
+  padding: 5px 12px;
+  font-size: 11px;
+}
+
 .task-action-list {
   display: flex;
   flex-direction: column;

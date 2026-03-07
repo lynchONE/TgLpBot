@@ -137,7 +137,7 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
-function projectClusters(chart, candleSeries, candleData, candleMap, candleIndexMap, clusters, hostWidth, hostHeight) {
+function projectClusters(chart, candleSeries, candleData, candleMap, candleIndexMap, clusters, hostWidth, hostHeight, userAvatarUrl) {
   if (!chart || !candleSeries || !clusters.length) return [];
   const timeScale = chart.timeScale();
   const projected = [];
@@ -189,7 +189,7 @@ function projectClusters(chart, candleSeries, candleData, candleMap, candleIndex
       ...cluster,
       x: clamp(x, xPad, Math.max(xPad, width - xPad)),
       y: clamp(y + offset, minY, maxY),
-      label: getClusterAvatarUrl(cluster),
+      label: cluster.isMyTrade && userAvatarUrl ? userAvatarUrl : getClusterAvatarUrl(cluster),
     });
   }
   return projected;
@@ -203,6 +203,7 @@ export default function KlineChart({
   onMarkerClick,
   activeMarkerId = '',
   viewportKey = '',
+  userAvatarUrl = '',
 }) {
   const wrapRef = useRef(null);
   const chartHostRef = useRef(null);
@@ -264,13 +265,15 @@ export default function KlineChart({
       const action = String(row?.action || 'add').toLowerCase() === 'remove' ? 'remove' : 'add';
       const time = toUnixSeconds(row?.bucket_t || row?.t);
       if (!time) return;
-      const key = `${time}:${action}`;
+      const isMyTrade = Boolean(row?.is_my_trade);
+      const key = isMyTrade ? `my:${time}:${action}` : `${time}:${action}`;
       const prev = grouped.get(key) || {
         id: key,
         time,
         action,
         items: [],
         estimatedUSD: 0,
+        isMyTrade,
       };
       prev.items.push(row);
       prev.estimatedUSD += Number(row?.estimated_usd || 0);
@@ -301,10 +304,11 @@ export default function KlineChart({
         candleIndexMap,
         markerClusters,
         hostWidth,
-        hostHeight
+        hostHeight,
+        userAvatarUrl
       )
     );
-  }, [candleData, candleMap, candleIndexMap, markerClusters]);
+  }, [candleData, candleMap, candleIndexMap, markerClusters, userAvatarUrl]);
 
   updateProjectionRef.current = updateProjection;
 
@@ -429,12 +433,12 @@ export default function KlineChart({
     const c = hoveredCluster;
     const primary = c.items?.[0];
     if (!primary) return null;
-    const walletName = String(primary.wallet_label || '').trim() || shortAddress(primary.wallet_address || '', 6, 4);
+    const walletName = c.isMyTrade ? '我的交易' : (String(primary.wallet_label || '').trim() || shortAddress(primary.wallet_address || '', 6, 4));
     const lower = Number(primary.price_lower || 0);
     const upper = Number(primary.price_upper || 0);
     const hasRange = lower > 0 && upper > 0;
     const rangePct = hasRange ? ((upper - lower) / lower * 100).toFixed(1) : '';
-    return { walletName, lower, upper, hasRange, rangePct, totalUSD: c.estimatedUSD, count: c.items.length };
+    return { walletName, lower, upper, hasRange, rangePct, totalUSD: c.estimatedUSD, count: c.items.length, isMyTrade: c.isMyTrade };
   }, [hoveredCluster]);
 
   return (
@@ -446,7 +450,7 @@ export default function KlineChart({
           <button
             key={cluster.id}
             type="button"
-            className={`kline-marker ${cluster.action} ${activeMarkerId === cluster.id ? 'active' : ''}`}
+            className={`kline-marker ${cluster.action} ${cluster.isMyTrade ? 'my-trade' : ''} ${activeMarkerId === cluster.id ? 'active' : ''}`}
             style={{
               left: `${cluster.x}px`,
               top: `${cluster.y}px`,

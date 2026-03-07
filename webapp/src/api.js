@@ -314,3 +314,26 @@ export async function updateTaskRange({ apiBaseUrl, initData, taskId, rangeLower
     signal,
   });
 }
+
+export async function fetchMyTradeMarkers({
+  apiBaseUrl,
+  initData,
+  chain = 'bsc',
+  poolId,
+  windowSec = 86400,
+  signal,
+}) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/my_trade_markers`;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      initData,
+      chain,
+      pool_id: poolId,
+      window_sec: windowSec,
+    }),
+    signal,
+  });
+}

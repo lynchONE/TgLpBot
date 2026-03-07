@@ -27,6 +27,7 @@ import {
   fetchSmartMoneyOverview,
   fetchSmartMoneyPoolAdds,
   fetchSmartMoneyPoolMarkers,
+  fetchMyTradeMarkers,
   fetchTokenCandles,
   generateLoginCode,
   openPosition as apiOpenPosition,
@@ -577,28 +578,47 @@ export default function App() {
       setKlineMarkersLoading(true);
       setKlineMarkersError('');
       try {
-        const resp = await fetchSmartMoneyPoolMarkers({
-          apiBaseUrl,
-          initData,
-          chain: selectedPool?.chain || chain,
-          poolVersion: selectedPoolVersion,
-          poolId: selectedPoolAddress,
-          bucketSec: klineIntervalMeta.bucketSec,
-          windowHours: KLINE_MARKER_WINDOW_HOURS,
-          limit: 300,
-          signal,
-        });
+        const [smartResp, myResp] = await Promise.allSettled([
+          fetchSmartMoneyPoolMarkers({
+            apiBaseUrl,
+            initData,
+            chain: selectedPool?.chain || chain,
+            poolVersion: selectedPoolVersion,
+            poolId: selectedPoolAddress,
+            bucketSec: klineIntervalMeta.bucketSec,
+            windowHours: KLINE_MARKER_WINDOW_HOURS,
+            limit: 300,
+            signal,
+          }),
+          fetchMyTradeMarkers({
+            apiBaseUrl,
+            initData,
+            chain: selectedPool?.chain || chain,
+            poolId: selectedPoolAddress,
+            windowSec: KLINE_MARKER_WINDOW_HOURS * 3600,
+            signal,
+          }),
+        ]);
+
+        if (smartResp.status === 'rejected') {
+          const e = smartResp.reason;
+          if (e?.name === 'AbortError') return;
+          if (e?.status === 403) {
+            setKlineOverlayAvailable(false);
+            setKlineOverlayEnabled(false);
+            setKlineMarkers([]);
+            setKlineMarkersError('当前账号没有聪明钱权限，已切换为纯 K 线模式。');
+            return;
+          }
+          setKlineMarkersError(String(e?.message || e));
+        }
+
         setKlineOverlayAvailable(true);
-        setKlineMarkers(Array.isArray(resp?.events) ? resp.events : []);
+        const smartEvents = smartResp.status === 'fulfilled' && Array.isArray(smartResp.value?.events) ? smartResp.value.events : [];
+        const myEvents = myResp.status === 'fulfilled' && Array.isArray(myResp.value?.events) ? myResp.value.events : [];
+        setKlineMarkers([...smartEvents, ...myEvents]);
       } catch (e) {
         if (e?.name === 'AbortError') return;
-        if (e?.status === 403) {
-          setKlineOverlayAvailable(false);
-          setKlineOverlayEnabled(false);
-          setKlineMarkers([]);
-          setKlineMarkersError('当前账号没有聪明钱权限，已切换为纯 K 线模式。');
-          return;
-        }
         setKlineMarkersError(String(e?.message || e));
       } finally {
         setKlineMarkersLoading(false);
@@ -1116,6 +1136,7 @@ export default function App() {
               viewportKey={klineViewportKey}
               activeMarkerId={selectedMarkerCluster?.id || ''}
               onMarkerClick={(cluster) => setSelectedMarkerCluster(cluster)}
+              userAvatarUrl={loginUser?.photo_url || ''}
             />
 
             {klineMarkersError ? <div className="kline-inline-note">{klineMarkersError}</div> : null}
@@ -1259,9 +1280,21 @@ export default function App() {
                         </div>
                       )}
                       {taskId > 0 && (
-                        <button type="button" className="icon-btn-tiny" onClick={(e) => { e.stopPropagation(); setTaskActionPos(p); }} title="任务操作">
-                          <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4z"/></svg>
-                        </button>
+                        <div className="pos-action-anchor">
+                          <button type="button" className="icon-btn-tiny" onClick={(e) => { e.stopPropagation(); setTaskActionPos((prev) => prev?.task_id === p?.task_id ? null : p); }} title="任务操作">
+                            <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4z"/></svg>
+                          </button>
+                          {taskActionPos?.task_id === p?.task_id && (
+                            <TaskActionMenu
+                              position={taskActionPos}
+                              onPause={handleTaskPause}
+                              onStop={handleTaskStop}
+                              onDelete={handleTaskDelete}
+                              onEditRange={handleTaskEditRange}
+                              onClose={() => setTaskActionPos(null)}
+                            />
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -1455,7 +1488,7 @@ export default function App() {
                         chain,
                         smartMoneyWallets: wallets,
                       });
-                    }}>⚡ 快速开单</button>
+                    }}>⚡</button>
                     <button type="button" className="sm-action-btn sm-copy-btn" onClick={(e) => {
                       e.stopPropagation();
                       copyAddr(pool?.pool_id || '');
@@ -1695,17 +1728,6 @@ export default function App() {
           onSubmit={handleOpenPosition}
           onClose={() => setOpenPosPool(null)}
           busy={openPosBusy}
-        />
-      )}
-
-      {taskActionPos && (
-        <TaskActionMenu
-          position={taskActionPos}
-          onPause={handleTaskPause}
-          onStop={handleTaskStop}
-          onDelete={handleTaskDelete}
-          onEditRange={handleTaskEditRange}
-          onClose={() => setTaskActionPos(null)}
         />
       )}
     </div>

@@ -20,7 +20,9 @@
       "Bash(npx -y acorn --ecma2022 --module src/App.jsx 2>&1 | tail -5)",
       "Bash(npm install @number-flow/react 2>&1 | tail -5)",
       "Bash(npx -y acorn --ecma2022 --module src/App.jsx > /dev/null 2>&1 && echo \"OK\" || echo \"SYNTAX ERROR\")",
-      "Bash(cd /mnt/e/goProject/TgLpBot/webapp && npx vite build --logLevel error 2>&1 | tail -20)"
+      "Bash(cd /mnt/e/goProject/TgLpBot/webapp && npx vite build --logLevel error 2>&1 | tail -20)",
+      "Bash(ls /mnt/e/腾讯企业邮箱图文件/*183438*)",
+      "Read(//mnt/e/**)"
     ]
   }
 }
