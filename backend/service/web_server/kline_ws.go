@@ -257,15 +257,15 @@ func resolveChainName(chainIndex string) string {
 func pollerInterval(bar string) time.Duration {
 	switch strings.ToLower(bar) {
 	case "1m":
-		return 2 * time.Second
+		return 1 * time.Second
 	case "3m", "5m":
-		return 3 * time.Second
+		return 1 * time.Second
 	case "15m":
-		return 5 * time.Second
+		return 1 * time.Second
 	case "30m":
-		return 8 * time.Second
+		return 1 * time.Second
 	default:
-		return 10 * time.Second
+		return 1 * time.Second
 	}
 }
 
