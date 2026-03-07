@@ -13,7 +13,7 @@ const (
 	writeWait      = 10 * time.Second
 	pongWait       = 60 * time.Second
 	pingPeriod     = 30 * time.Second
-	maxMessageSize = 512
+	maxMessageSize = 4096
 )
 
 var upgrader = websocket.Upgrader{
@@ -34,11 +34,13 @@ type Client struct {
 
 // Hub manages all active WebSocket clients grouped by userID.
 type Hub struct {
-	mu         sync.RWMutex
-	clients    map[*Client]struct{}
-	userIndex  map[uint]map[*Client]struct{} // userID -> set of clients
-	register   chan *Client
-	unregister chan *Client
+	mu             sync.RWMutex
+	clients        map[*Client]struct{}
+	userIndex      map[uint]map[*Client]struct{} // userID -> set of clients
+	register       chan *Client
+	unregister     chan *Client
+	messageHandler func(*Client, []byte)
+	onClientRemove func(*Client)
 }
 
 // NewHub creates a new Hub instance.
@@ -49,6 +51,16 @@ func NewHub() *Hub {
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 	}
+}
+
+// SetMessageHandler sets a callback invoked when a client sends a message.
+func (h *Hub) SetMessageHandler(fn func(*Client, []byte)) {
+	h.messageHandler = fn
+}
+
+// SetOnClientRemove sets a callback invoked after a client is unregistered.
+func (h *Hub) SetOnClientRemove(fn func(*Client)) {
+	h.onClientRemove = fn
 }
 
 // Run starts the hub's main loop. Call this in a goroutine.
@@ -80,6 +92,9 @@ func (h *Hub) Run() {
 			}
 			h.mu.Unlock()
 			log.Printf("[WS Hub] client disconnected user_id=%d total=%d", client.userID, len(h.clients))
+			if h.onClientRemove != nil {
+				h.onClientRemove(client)
+			}
 		}
 	}
 }
@@ -134,7 +149,17 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, userID uint) {
 	go client.readPump()
 }
 
-// readPump reads messages from the client (mainly for pong handling).
+// Send enqueues a message for delivery to this client. Returns false if the buffer is full.
+func (c *Client) Send(data []byte) bool {
+	select {
+	case c.send <- data:
+		return true
+	default:
+		return false
+	}
+}
+
+// readPump reads messages from the client and dispatches to the hub's messageHandler.
 func (c *Client) readPump() {
 	defer func() {
 		c.hub.unregister <- c
@@ -147,9 +172,12 @@ func (c *Client) readPump() {
 		return nil
 	})
 	for {
-		_, _, err := c.conn.ReadMessage()
+		_, msg, err := c.conn.ReadMessage()
 		if err != nil {
 			break
+		}
+		if c.hub.messageHandler != nil {
+			c.hub.messageHandler(c, msg)
 		}
 	}
 }

@@ -11,6 +11,7 @@ function normalizeChain(value) {
 
 export const WEBAPP_CONFIG = {
   apiBaseUrl: String(import.meta.env.VITE_API_BASE_URL || '').trim() || fallbackApiBaseUrl(),
+  wsBaseUrl: String(import.meta.env.VITE_WS_BASE_URL || '').trim(),
   defaultChain: normalizeChain(import.meta.env.VITE_DEFAULT_CHAIN || 'bsc'),
   telegramBotId: String(import.meta.env.VITE_TELEGRAM_BOT_ID || '').trim(),
   telegramBotUsername: String(import.meta.env.VITE_TELEGRAM_BOT_USERNAME || '').trim(),

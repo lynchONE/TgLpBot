@@ -41,6 +41,7 @@ import KlineChart from './components/KlineChart';
 import OpenPositionModal from './components/OpenPositionModal';
 import TaskActionMenu from './components/TaskActionMenu';
 import NumberFlowValue from './components/NumberFlowValue';
+import useKlineWS from './hooks/useKlineWS';
 import telegramLogo from './img/telegram.svg';
 import uniswapLogo from './img/uniswap.svg';
 import pancakeLogo from './img/pancake.svg';
@@ -89,7 +90,6 @@ const STORAGE = {
   widgets: 'tglp_web_widgets',
   sort: 'tglp_web_hot_pools_sort',
   refreshInterval: 'tglp_web_refresh_interval',
-  klineRefreshInterval: 'tglp_web_kline_refresh_interval',
 };
 
 function storageGet(key) {
@@ -293,10 +293,6 @@ export default function App() {
     const saved = Number(storageGet(STORAGE.refreshInterval));
     return saved >= 10 ? saved : 10;
   });
-  const [klineRefreshInterval, setKlineRefreshInterval] = useState(() => {
-    const saved = Number(storageGet(STORAGE.klineRefreshInterval));
-    return saved >= 10 ? saved : 30;
-  });
   const [draggingKey, setDraggingKey] = useState('');
   const [dragOverKey, setDragOverKey] = useState('');
 
@@ -387,13 +383,44 @@ export default function App() {
     [klineInterval, klineTokenAddress, selectedPoolAddress]
   );
 
+  // --- WebSocket kline subscription ---
+  const { lastUpdate: wsKlineUpdate, connected: wsKlineConnected } = useKlineWS({
+    initData,
+    chain: selectedPool?.chain || chain,
+    tokenAddress: klineTokenAddress,
+    bar: klineIntervalMeta.key,
+    enabled: hasInitData && Boolean(klineTokenAddress),
+  });
+
+  // Merge WS candle updates into klineCandles.
+  useEffect(() => {
+    if (!wsKlineUpdate?.candles?.length) return;
+    const addr = String(wsKlineUpdate.token_address || '').toLowerCase();
+    if (addr !== String(klineTokenAddress || '').toLowerCase()) return;
+    if (wsKlineUpdate.bar !== klineIntervalMeta.key) return;
+
+    setKlineCandles((prev) => {
+      const arr = [...prev];
+      for (const c of wsKlineUpdate.candles) {
+        const t = Number(c?.t || 0);
+        if (!t) continue;
+        const idx = arr.findIndex((x) => x.t === t);
+        if (idx >= 0) {
+          arr[idx] = c;
+        } else if (t > (arr.length ? arr[arr.length - 1].t : 0)) {
+          arr.push(c);
+        }
+      }
+      return arr;
+    });
+  }, [wsKlineUpdate, klineTokenAddress, klineIntervalMeta.key]);
+
   useEffect(() => {
     storageSet(STORAGE.initData, initData);
     storageSet(STORAGE.chain, chain);
     storageSet(STORAGE.widgets, JSON.stringify(widgets));
     storageSet(STORAGE.sort, hotSort);
     storageSet(STORAGE.refreshInterval, String(refreshInterval));
-    storageSet(STORAGE.klineRefreshInterval, String(klineRefreshInterval));
 
     if (loginUser) {
       storageSet(STORAGE.loginUser, JSON.stringify(loginUser));
@@ -661,21 +688,17 @@ export default function App() {
 
   useEffect(() => {
     if (!hasInitData || !klineTokenAddress) return undefined;
-    const timer = window.setInterval(() => setKlineRefreshNonce((n) => n + 1), klineRefreshInterval * 1000);
+    // WS handles live candle updates; nonce drives periodic REST sync + marker refresh.
+    const interval = wsKlineConnected ? 60_000 : 20_000;
+    const timer = window.setInterval(() => setKlineRefreshNonce((n) => n + 1), interval);
     return () => window.clearInterval(timer);
-  }, [hasInitData, klineTokenAddress, klineRefreshInterval]);
+  }, [hasInitData, klineTokenAddress, wsKlineConnected]);
 
   useEffect(() => {
     if (!hasInitData) return undefined;
     const timer = window.setInterval(() => loadSmart(), Math.max(refreshInterval * 1000, 30_000));
     return () => window.clearInterval(timer);
   }, [hasInitData, loadSmart, refreshInterval]);
-
-  useEffect(() => {
-    if (!hasInitData || !klineTokenAddress) return undefined;
-    const timer = window.setInterval(() => loadKline(), 20_000);
-    return () => window.clearInterval(timer);
-  }, [hasInitData, klineTokenAddress, loadKline]);
 
   useEffect(() => {
     if (!hasInitData || !selectedPoolAddress || !klineOverlayEnabled || !klineOverlayAvailable) return undefined;
@@ -1088,6 +1111,7 @@ export default function App() {
                   <RefreshCw size={12} />
                   刷新
                 </button>
+                <span className={`ws-status-dot ${wsKlineConnected ? 'connected' : ''}`} title={wsKlineConnected ? 'WS 实时推送中' : 'WS 未连接'} />
               </div>
             </div>
 
@@ -1559,23 +1583,11 @@ export default function App() {
                       </div>
                     </div>
                     <div className="settings-hint">最低 10 秒，当前每 {refreshInterval} 秒刷新</div>
-                    <div className="settings-row" style={{ marginTop: 8 }}>
-                      <span className="settings-label">K线刷新间隔</span>
-                      <div className="settings-input-wrap">
-                        <input
-                          type="number"
-                          className="settings-input"
-                          min={10}
-                          value={klineRefreshInterval}
-                          onChange={(e) => {
-                            const v = Math.max(10, Math.round(Number(e.target.value) || 30));
-                            setKlineRefreshInterval(v);
-                          }}
-                        />
-                        <span className="settings-unit">秒</span>
-                      </div>
+                    <div className="settings-hint" style={{ marginTop: 6 }}>
+                      {wsKlineConnected
+                        ? 'K线已通过 WebSocket 实时推送'
+                        : 'K线 WebSocket 未连接，使用 REST 轮询'}
                     </div>
-                    <div className="settings-hint">K线数据每 {klineRefreshInterval} 秒自动刷新</div>
                   </div>
                 )}
               </div>

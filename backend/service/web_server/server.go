@@ -21,16 +21,21 @@ type Server struct {
 	Realtime   *realtime.RealtimePositionsService
 	TokenPrice *pricing.TokenPriceService
 	Hub        *ws.Hub
+	KlineFeed  *KlineFeed
 }
 
 func NewServer(ch *clickhouse.ClickHouseService) *Server {
 	hub := ws.NewHub()
+	kf := NewKlineFeed()
+	hub.SetMessageHandler(kf.HandleMessage)
+	hub.SetOnClientRemove(kf.HandleClientRemove)
 	go hub.Run()
 	return &Server{
 		ClickHouse: ch,
 		Realtime:   realtime.NewRealtimePositionsService(),
 		TokenPrice: pricing.NewTokenPriceService(),
 		Hub:        hub,
+		KlineFeed:  kf,
 	}
 }
 
