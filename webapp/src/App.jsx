@@ -987,7 +987,7 @@ export default function App() {
                   </div>
 
                   {/* Action */}
-                  <button type="button" className="pool-buy-btn" onClick={(e) => { e.stopPropagation(); setOpenPosPool({ ...pool, chain }); }}>开仓</button>
+                  <button type="button" className="pool-buy-btn" onClick={(e) => { e.stopPropagation(); setOpenPosPool({ ...pool, chain }); }}>⚡</button>
                 </div>
               );
             })
@@ -1453,8 +1453,9 @@ export default function App() {
                         protocol_version: version,
                         factory_name: pool?.factory_name,
                         chain,
+                        smartMoneyWallets: wallets,
                       });
-                    }}>快速开单</button>
+                    }}>⚡ 快速开单</button>
                     <button type="button" className="sm-action-btn sm-copy-btn" onClick={(e) => {
                       e.stopPropagation();
                       copyAddr(pool?.pool_id || '');

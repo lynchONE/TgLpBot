@@ -728,6 +728,13 @@ body {
 .module-slot.module-hot_pools {
   max-height: 75vh;
 }
+/* Other modules: no height cap */
+.module-slot:not(.module-hot_pools) {
+  max-height: none;
+}
+.module-slot:not(.module-hot_pools) .data-list {
+  overflow: visible;
+}
 
 .module-slot.dragging {
   opacity: 0.55;
@@ -771,7 +778,6 @@ body {
 }
 
 .panel-shell {
-  height: 100%;
   min-height: 0;
   border-radius: var(--radius-lg);
   border: 1px solid var(--line);
@@ -779,6 +785,15 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* Hot pools: cap height so it scrolls internally */
+.module-slot.module-hot_pools .panel-shell {
+  height: 100%;
+}
+/* Other panels: let content flow freely */
+.module-slot:not(.module-hot_pools) .panel-shell {
+  overflow: visible;
 }
 
 .panel-header {
@@ -1857,16 +1872,16 @@ body {
 .pool-sub-val.down { color: #ff5e76; }
 .pool-sub-val.purple { color: #a78bfa; }
 
-/* Buy button — soft green pill */
+/* Buy button — compact lightning emoji */
 .pool-buy-btn {
   flex-shrink: 0;
-  padding: 5px 14px;
-  font-size: 12px;
-  font-weight: 700;
+  padding: 4px 8px;
+  font-size: 15px;
+  line-height: 1;
   color: #4ade80;
   background: rgba(34, 197, 94, 0.12);
   border: 1px solid rgba(34, 197, 94, 0.25);
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
   transition: background 120ms, border-color 120ms;
 }
@@ -2318,6 +2333,70 @@ body {
 }
 .modal-check input[type="checkbox"] {
   accent-color: var(--accent);
+}
+
+/* ── Range quick picks ── */
+.modal-range-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.modal-range-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.modal-range-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.range-chip {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary, #95a0b5);
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms, color 120ms;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.range-chip:hover {
+  background: rgba(255, 177, 26, 0.08);
+  border-color: rgba(255, 177, 26, 0.3);
+}
+.range-chip.active {
+  background: rgba(255, 177, 26, 0.15);
+  border-color: rgba(255, 177, 26, 0.5);
+  color: #ffd18d;
+}
+.range-chip.smart {
+  border-color: rgba(59, 130, 246, 0.25);
+  background: rgba(59, 130, 246, 0.08);
+  color: #7cb3f8;
+}
+.range-chip.smart:hover {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+.range-chip.smart.active {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.6);
+  color: #a5d0ff;
+}
+.range-chip-sub {
+  font-size: 9px;
+  font-weight: 600;
+  opacity: 0.6;
+}
+.modal-range-hint {
+  font-size: 10px;
+  color: rgba(124, 179, 248, 0.5);
 }
 .modal-actions {
   margin-top: 14px;

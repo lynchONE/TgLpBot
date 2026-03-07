@@ -1,16 +1,59 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
+
+const PRESET_RANGES = [1, 2, 3, 5, 10, 20];
+
+function extractSmartMoneyRanges(wallets) {
+  if (!Array.isArray(wallets) || wallets.length === 0) return [];
+  const ranges = [];
+  for (const w of wallets) {
+    const lower = Number(w?.price_lower ?? 0);
+    const upper = Number(w?.price_upper ?? 0);
+    if (!lower || !upper || lower <= 0 || upper <= 0) continue;
+    const mid = (lower + upper) / 2;
+    const pct = ((upper - lower) / mid) * 50; // half-width percent ≈ ±pct
+    if (!Number.isFinite(pct) || pct <= 0) continue;
+    const usd = Number(w?.total_usd ?? 0);
+    const addr = String(w?.wallet_address || '').trim();
+    ranges.push({ pct: Math.round(pct * 100) / 100, usd, addr, lower, upper });
+  }
+  ranges.sort((a, b) => b.usd - a.usd);
+  // deduplicate similar ranges (within 0.3%)
+  const unique = [];
+  for (const r of ranges) {
+    if (unique.some((u) => Math.abs(u.pct - r.pct) < 0.3)) continue;
+    unique.push(r);
+    if (unique.length >= 4) break;
+  }
+  return unique;
+}
+
+function shortAddr(addr) {
+  const s = String(addr || '');
+  if (s.length <= 10) return s || '--';
+  return `${s.slice(0, 6)}..${s.slice(-4)}`;
+}
 
 export default function OpenPositionModal({ pool, chain, onSubmit, onClose, busy }) {
   const [amount, setAmount] = useState('100');
   const [rangeLower, setRangeLower] = useState('2');
   const [rangeUpper, setRangeUpper] = useState('2');
-  const [slippage, setSlippage] = useState('1');
-  const [entrySwap, setEntrySwap] = useState(true);
+  const [slippage, setSlippage] = useState('');
   const [error, setError] = useState('');
 
   const pair = pool?.trading_pair || '--';
   const addr = String(pool?.pool_address || '').trim();
   const version = String(pool?.protocol_version || pool?.factory_name || '').trim();
+
+  const smartRanges = useMemo(
+    () => extractSmartMoneyRanges(pool?.smartMoneyWallets),
+    [pool?.smartMoneyWallets]
+  );
+  const hasSmartRanges = smartRanges.length > 0;
+
+  const applyRange = useCallback((lo, hi) => {
+    setRangeLower(String(lo));
+    setRangeUpper(String(hi));
+  }, []);
 
   const handleSubmit = useCallback(() => {
     const amt = Number(amount);
@@ -30,16 +73,16 @@ export default function OpenPositionModal({ pool, chain, onSubmit, onClose, busy
       amount: amt,
       rangeLowerPct: rl,
       rangeUpperPct: ru,
-      slippageTolerance: Number.isFinite(sl) ? sl : 1,
-      allowEntrySwap: entrySwap,
+      slippageTolerance: Number.isFinite(sl) && sl > 0 ? sl : undefined,
+      allowEntrySwap: true,
     });
-  }, [amount, rangeLower, rangeUpper, slippage, entrySwap, addr, version, chain, onSubmit]);
+  }, [amount, rangeLower, rangeUpper, slippage, addr, version, chain, onSubmit]);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>开仓</h3>
+          <h3>⚡ 开仓</h3>
           <button type="button" className="modal-close" onClick={onClose}>&times;</button>
         </div>
 
@@ -54,6 +97,48 @@ export default function OpenPositionModal({ pool, chain, onSubmit, onClose, busy
             <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} min="1" step="10" />
           </label>
 
+          {/* Range quick picks */}
+          <div className="modal-range-section">
+            <span className="modal-range-label">快捷区间</span>
+            <div className="modal-range-picks">
+              {hasSmartRanges ? (
+                smartRanges.map((sr, i) => {
+                  const pctDisplay = sr.pct.toFixed(sr.pct >= 10 ? 0 : 1);
+                  const isActive = Math.abs(Number(rangeLower) - sr.pct) < 0.05 && Math.abs(Number(rangeUpper) - sr.pct) < 0.05;
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      className={`range-chip smart ${isActive ? 'active' : ''}`}
+                      onClick={() => applyRange(sr.pct, sr.pct)}
+                      title={`${shortAddr(sr.addr)} $${Math.round(sr.usd)}`}
+                    >
+                      ±{pctDisplay}%
+                      <span className="range-chip-sub">${sr.usd >= 1000 ? `${(sr.usd / 1000).toFixed(0)}K` : Math.round(sr.usd)}</span>
+                    </button>
+                  );
+                })
+              ) : (
+                PRESET_RANGES.map((v) => {
+                  const isActive = Math.abs(Number(rangeLower) - v) < 0.05 && Math.abs(Number(rangeUpper) - v) < 0.05;
+                  return (
+                    <button
+                      key={v}
+                      type="button"
+                      className={`range-chip ${isActive ? 'active' : ''}`}
+                      onClick={() => applyRange(v, v)}
+                    >
+                      ±{v}%
+                    </button>
+                  );
+                })
+              )}
+            </div>
+            {hasSmartRanges && (
+              <div className="modal-range-hint">聪明钱区间 · 按金额排序</div>
+            )}
+          </div>
+
           <div className="modal-row">
             <label className="modal-field">
               <span>下限 %</span>
@@ -66,13 +151,8 @@ export default function OpenPositionModal({ pool, chain, onSubmit, onClose, busy
           </div>
 
           <label className="modal-field">
-            <span>滑点 %</span>
-            <input type="number" value={slippage} onChange={(e) => setSlippage(e.target.value)} min="0.1" step="0.1" />
-          </label>
-
-          <label className="modal-check">
-            <input type="checkbox" checked={entrySwap} onChange={(e) => setEntrySwap(e.target.checked)} />
-            <span>允许入场兑换</span>
+            <span>滑点 % (留空则使用全局配置)</span>
+            <input type="number" value={slippage} onChange={(e) => setSlippage(e.target.value)} min="0.1" step="0.1" placeholder="默认全局配置" />
           </label>
         </div>
 
