@@ -1008,7 +1008,7 @@ export default function App() {
                       <span className="meta-cyan">TVL <b><NumberFlowValue value={tvl} formatter={(v) => formatUsdCompact(v)} /></b></span>
                       <span className="dot-sep" />
                       <span className="meta-orange"><NumberFlowValue value={txCount} formatter={(v) => `${Number(v || 0).toLocaleString()}笔`} /></span>
-                      {feeRate > 0 && (<><span className="dot-sep" /><span className="meta-accent">Fee/TVL <b><NumberFlowValue value={feeRate} formatter={(v) => `${Number(v).toFixed(3)}%`} /></b></span></>)}
+                      {feeRate > 0 && (<><span className="dot-sep" /><span className="meta-accent"><b><NumberFlowValue value={feeRate} formatter={(v) => `${Number(v).toFixed(3)}%`} /></b></span></>)}
                     </div>
                   </div>
 
@@ -1363,6 +1363,9 @@ export default function App() {
                         <div className="pos-price-range-bar">
                           <div className="pos-price-range-limit lo" />
                           <div className="pos-price-range-limit hi" />
+                          {priceRange.visibleGridLines?.map((pct, i) => (
+                            <div key={i} className="pos-price-range-grid" style={{ left: `calc(3% + ${pct * 0.94}%)` }} />
+                          ))}
                           <div
                             className={`pos-price-range-cursor ${priceRange.inRange ? 'in' : 'out'}`}
                             style={{ left: `calc(3% + ${priceRange.percent * 0.94}%)` }}
@@ -1373,6 +1376,17 @@ export default function App() {
                         <span className="lo">{compactPrice(priceRange.rangeMin)}</span>
                         <span className="cur">{compactPrice(priceRange.currentPrice)}</span>
                         <span className="hi">{compactPrice(priceRange.rangeMax)}</span>
+                      </div>
+                      <div className={`pos-price-range-status ${priceRange.inRange ? 'in' : 'out'}`}>
+                        <span className="pos-price-range-status-dot" />
+                        <span>当前价 {compactPrice(priceRange.currentPrice)}</span>
+                        {priceRange.outOfRange ? (
+                          <span className="pos-price-range-oor">
+                            {priceRange.outOfRange.direction === 'above' ? '高于上限' : '低于下限'} {priceRange.outOfRange.pct.toFixed(1)}%
+                          </span>
+                        ) : (
+                          <span className="pos-price-range-oor">在范围内</span>
+                        )}
                       </div>
                     </div>
                   )}

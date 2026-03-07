@@ -401,5 +401,25 @@ export function computePriceRange(p) {
     ? ((Math.max(0, (rangeMax / currentPrice) - 1) * 100) + (Math.max(0, 1 - (rangeMin / currentPrice)) * 100)) / 2
     : null;
 
-  return { currentPrice, rangeMin, rangeMax, pairLabel, percent: clamped, inRange: Boolean(p?.in_range), gridCount, deviation };
+  let outOfRange = null;
+  if (currentPrice > rangeMax) {
+    const base = Math.abs(rangeMax) > 0 ? Math.abs(rangeMax) : 1;
+    outOfRange = { direction: 'above', pct: ((currentPrice - rangeMax) / base) * 100 };
+  } else if (currentPrice < rangeMin) {
+    const base = Math.abs(rangeMin) > 0 ? Math.abs(rangeMin) : 1;
+    outOfRange = { direction: 'below', pct: ((rangeMin - currentPrice) / base) * 100 };
+  }
+
+  const visibleGridLines = [];
+  if (gridCount && gridCount >= 2 && gridCount <= 200) {
+    const maxLines = Math.min(gridCount - 1, 40);
+    const step = Math.ceil((gridCount - 1) / maxLines);
+    for (let i = 1; i < gridCount; i++) {
+      if ((gridCount - 1) <= 40 || i % step === 0) {
+        visibleGridLines.push((i / gridCount) * 100);
+      }
+    }
+  }
+
+  return { currentPrice, rangeMin, rangeMax, pairLabel, percent: clamped, inRange: Boolean(p?.in_range), gridCount, deviation, outOfRange, visibleGridLines };
 }

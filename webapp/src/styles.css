@@ -1826,7 +1826,9 @@ body {
   gap: 6px;
   font-size: 11px;
   color: #64748b;
-  flex-wrap: wrap;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .pool-meta-line b {
   color: #94a3b8;
@@ -2214,8 +2216,8 @@ body {
 }
 .pos-price-range-bar {
   position: relative;
-  height: 14px;
-  border-radius: 7px;
+  height: 16px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.06);
   overflow: hidden;
 }
@@ -2261,6 +2263,54 @@ body {
 .pos-price-range-labels .lo { color: #10b981; }
 .pos-price-range-labels .cur { color: var(--text-muted); }
 .pos-price-range-labels .hi { color: #ef4444; }
+
+.pos-price-range-grid {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 1px;
+  transform: translateX(-50%);
+  border-left: 1px dashed rgba(234, 179, 8, 0.35);
+}
+
+.pos-price-range-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.pos-price-range-status.in {
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  color: #6ee7b7;
+}
+.pos-price-range-status.out {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+}
+.pos-price-range-status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.pos-price-range-status.in .pos-price-range-status-dot {
+  background: #10b981;
+  box-shadow: 0 0 4px #10b981;
+}
+.pos-price-range-status.out .pos-price-range-status-dot {
+  background: #ef4444;
+  box-shadow: 0 0 4px #ef4444;
+}
+.pos-price-range-oor {
+  margin-left: auto;
+  font-weight: 700;
+}
 
 /* ═══════════════════════════════════════
    Modal
