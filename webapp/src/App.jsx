@@ -64,6 +64,7 @@ import {
   resolveKlineTokenOptions,
   shortAddress,
   inferPoolVersion,
+  computePriceRange,
 } from './utils';
 
 const KLINE_INTERVALS = [
@@ -934,10 +935,12 @@ export default function App() {
               const pairInitials = pair.split(/[\/\-]/).map((s) => s.trim().charAt(0).toUpperCase()).join('').slice(0, 2);
               const dex = getDexIcon(factoryName);
 
+              const isHighFeeRate = feeRate >= 1;
+
               return (
                 <div
                   key={`${pool?.protocol_version || ''}:${addr || idx}`}
-                  className={`pool-row ${selected ? 'selected' : ''}`}
+                  className={`pool-row ${selected ? 'selected' : ''} ${isHighFeeRate ? 'high-fee' : ''}`}
                   onClick={() => selectPool({ ...pool, chain }, chain)}
                 >
                   {/* Avatar */}
@@ -1220,6 +1223,7 @@ export default function App() {
               const taskRangeLo = Number(p?.task_range_lower_pct);
               const taskRangeUp = Number(p?.task_range_upper_pct);
               const taskAmount = Number(p?.task_amount_usdt);
+              const priceRange = computePriceRange(p);
 
               const statusClass = statusLabel.includes('错误') ? 'st-error' :
                 statusLabel.includes('暂停') || statusLabel.includes('停止') || statusLabel.includes('撤出') ? 'st-warn' :
@@ -1287,6 +1291,32 @@ export default function App() {
                           </div>
                         </div>
                       ))}
+                    </div>
+                  )}
+
+                  {priceRange && (
+                    <div className="pos-price-range">
+                      <div className="pos-price-range-header">
+                        <span className="pos-price-range-label">价格范围 ({priceRange.pairLabel}{priceRange.gridCount ? ` ${priceRange.gridCount}格` : ''})</span>
+                        {Number.isFinite(priceRange.deviation) && priceRange.deviation > 0 && (
+                          <span className="pos-price-range-dev">{priceRange.deviation.toFixed(2)}%</span>
+                        )}
+                      </div>
+                      <div className="pos-price-range-bar-wrap">
+                        <div className="pos-price-range-bar">
+                          <div className="pos-price-range-limit lo" />
+                          <div className="pos-price-range-limit hi" />
+                          <div
+                            className={`pos-price-range-cursor ${priceRange.inRange ? 'in' : 'out'}`}
+                            style={{ left: `calc(3% + ${priceRange.percent * 0.94}%)` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="pos-price-range-labels">
+                        <span className="lo">{compactPrice(priceRange.rangeMin)}</span>
+                        <span className="cur">{compactPrice(priceRange.currentPrice)}</span>
+                        <span className="hi">{compactPrice(priceRange.rangeMax)}</span>
+                      </div>
                     </div>
                   )}
 
@@ -1412,6 +1442,24 @@ export default function App() {
                       })}
                     </div>
                   ) : null}
+
+                  <div className="sm-pool-actions">
+                    <button type="button" className="sm-action-btn sm-open-btn" onClick={(e) => {
+                      e.stopPropagation();
+                      setOpenPosPool({
+                        pool_id: pool?.pool_id,
+                        pool_address: pool?.pool_id,
+                        trading_pair: pool?.pair,
+                        protocol_version: version,
+                        factory_name: pool?.factory_name,
+                        chain,
+                      });
+                    }}>快速开单</button>
+                    <button type="button" className="sm-action-btn sm-copy-btn" onClick={(e) => {
+                      e.stopPropagation();
+                      copyAddr(pool?.pool_id || '');
+                    }}>复制池子ID</button>
+                  </div>
                 </div>
               );
             })

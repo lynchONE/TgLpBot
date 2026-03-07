@@ -1259,7 +1259,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: 240px;
+  max-height: 50vh;
+  overflow: hidden;
 }
 
 .kline-marker-drawer-head {
@@ -1519,6 +1520,33 @@ body {
   gap: 6px;
 }
 
+.sm-pool-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  justify-content: flex-end;
+}
+.sm-action-btn {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: none;
+  transition: background 120ms, opacity 120ms;
+}
+.sm-action-btn:hover { opacity: 0.85; }
+.sm-open-btn {
+  background: rgba(59, 130, 246, 0.18);
+  color: #7cb3f8;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+}
+.sm-copy-btn {
+  background: rgba(255, 177, 26, 0.15);
+  color: #ffb11a;
+  border: 1px solid rgba(255, 177, 26, 0.25);
+}
+
 .empty-state,
 .error-text,
 .panel-footnote {
@@ -1659,6 +1687,15 @@ body {
 }
 .pool-row.selected {
   background: rgba(255, 177, 26, 0.05);
+}
+.pool-row.high-fee {
+  background: rgba(239, 68, 68, 0.08);
+}
+.pool-row.high-fee:hover {
+  background: rgba(239, 68, 68, 0.13);
+}
+.pool-row.high-fee.selected {
+  background: rgba(239, 68, 68, 0.12);
 }
 
 /* Avatar circle */
@@ -2088,6 +2125,86 @@ body {
   border-radius: 8px;
   border: 1px solid var(--line);
 }
+
+/* ── Position Price Range Visualizer ── */
+.pos-price-range {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.pos-price-range-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.pos-price-range-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.pos-price-range-dev {
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: #edf3ff;
+}
+.pos-price-range-bar-wrap {
+  padding: 0 2px;
+}
+.pos-price-range-bar {
+  position: relative;
+  height: 14px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+.pos-price-range-limit {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+}
+.pos-price-range-limit.lo {
+  left: 3%;
+  background: #10b981;
+}
+.pos-price-range-limit.hi {
+  right: 3%;
+  background: #ef4444;
+}
+.pos-price-range-cursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 2px;
+  transform: translateX(-50%);
+  transition: left 300ms;
+}
+.pos-price-range-cursor.in {
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+}
+.pos-price-range-cursor.out {
+  background: #ef4444;
+  box-shadow: 0 0 6px #ef4444;
+}
+.pos-price-range-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+.pos-price-range-labels .lo { color: #10b981; }
+.pos-price-range-labels .cur { color: var(--text-muted); }
+.pos-price-range-labels .hi { color: #ef4444; }
 
 /* ═══════════════════════════════════════
    Modal

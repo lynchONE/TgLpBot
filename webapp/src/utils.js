@@ -345,3 +345,61 @@ export function compactPrice(v) {
   const sub = String(zeroCount).split('').map(d => SUBSCRIPT_DIGITS[Number(d)] || d).join('');
   return `0.0${sub}${sigDigits}`;
 }
+
+const STABLE_SYMBOLS = new Set(['USDT', 'USDC', 'BUSD', 'DAI']);
+
+export function priceFromTick(tick, decimals0 = 18, decimals1 = 18) {
+  const n = Number(tick);
+  if (!Number.isFinite(n)) return null;
+  const dec0 = Number(decimals0);
+  const dec1 = Number(decimals1);
+  if (!Number.isFinite(dec0) || !Number.isFinite(dec1)) return null;
+  const v = Math.pow(1.0001, n);
+  if (!Number.isFinite(v)) return null;
+  const scale = Math.pow(10, dec0 - dec1);
+  const adjusted = v * scale;
+  return Number.isFinite(adjusted) ? adjusted : null;
+}
+
+export function computePriceRange(p) {
+  const token0 = p?.token_rows?.[0];
+  const token1 = p?.token_rows?.[1];
+  const dec0 = Number(token0?.decimals ?? 18);
+  const dec1 = Number(token1?.decimals ?? 18);
+  const sym0 = String(token0?.symbol || '').trim().toUpperCase();
+  const sym1 = String(token1?.symbol || '').trim().toUpperCase();
+  const stableIndex = STABLE_SYMBOLS.has(sym0) ? 0 : STABLE_SYMBOLS.has(sym1) ? 1 : -1;
+  const safeInvert = (v) => (Number.isFinite(v) && v > 0 ? 1 / v : null);
+
+  const currentTick = Number(p?.current_tick);
+  const tickLower = Number(p?.tick_lower);
+  const tickUpper = Number(p?.tick_upper);
+  const tickSpacing = Number(p?.tick_spacing);
+
+  const currentPriceBase = priceFromTick(currentTick, dec0, dec1);
+  const currentPrice = stableIndex === 0 ? safeInvert(currentPriceBase) : currentPriceBase;
+
+  const rangeLowerBase = priceFromTick(tickLower, dec0, dec1);
+  const rangeUpperBase = priceFromTick(tickUpper, dec0, dec1);
+  const rangeLower = stableIndex === 0 ? safeInvert(rangeLowerBase) : rangeLowerBase;
+  const rangeUpper = stableIndex === 0 ? safeInvert(rangeUpperBase) : rangeUpperBase;
+  const rangeReady = Number.isFinite(rangeLower) && Number.isFinite(rangeUpper);
+  const rangeMin = rangeReady ? Math.min(rangeLower, rangeUpper) : null;
+  const rangeMax = rangeReady ? Math.max(rangeLower, rangeUpper) : null;
+
+  if (!rangeReady || !Number.isFinite(currentPrice)) return null;
+
+  const pairLabel = stableIndex === 0 ? `${sym1}/${sym0}` : `${sym0}/${sym1}`;
+  const percent = rangeMax === rangeMin ? 50 : ((currentPrice - rangeMin) / (rangeMax - rangeMin)) * 100;
+  const clamped = Math.max(0, Math.min(100, percent));
+
+  const gridCount = Number.isFinite(tickLower) && Number.isFinite(tickUpper) && tickSpacing > 0
+    ? Math.round(Math.abs(tickUpper - tickLower) / tickSpacing)
+    : null;
+
+  const deviation = currentPrice > 0 && rangeMin !== null && rangeMax !== null
+    ? ((Math.max(0, (rangeMax / currentPrice) - 1) * 100) + (Math.max(0, 1 - (rangeMin / currentPrice)) * 100)) / 2
+    : null;
+
+  return { currentPrice, rangeMin, rangeMax, pairLabel, percent: clamped, inRange: Boolean(p?.in_range), gridCount, deviation };
+}
