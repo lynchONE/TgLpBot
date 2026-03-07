@@ -423,3 +423,18 @@ export function computePriceRange(p) {
 
   return { currentPrice, rangeMin, rangeMax, pairLabel, percent: clamped, inRange: Boolean(p?.in_range), gridCount, deviation, outOfRange, visibleGridLines };
 }
+
+export function formatDuration(isoString) {
+  if (!isoString) return '';
+  const ts = Date.parse(isoString);
+  if (!Number.isFinite(ts)) return '';
+  const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  const min = Math.floor(diffSec / 60);
+  if (min < 60) return `${min}分钟`;
+  const h = Math.floor(min / 60);
+  const remMin = min % 60;
+  if (h < 24) return remMin ? `${h}h${remMin}m` : `${h}h`;
+  const d = Math.floor(h / 24);
+  const remH = h % 24;
+  return remH ? `${d}d${remH}h` : `${d}d`;
+}

@@ -67,6 +67,7 @@ import {
   shortAddress,
   inferPoolVersion,
   computePriceRange,
+  formatDuration,
 } from './utils';
 
 const KLINE_INTERVALS = [
@@ -1293,7 +1294,14 @@ export default function App() {
                           {statusLabel}
                         </span>
                         {taskId > 0 && <span className="pos-task-id">#{taskId}</span>}
-                        <span className={`range-pill ${inRange ? 'in' : 'out'}`}>{inRange ? 'In Range' : 'Out'}</span>
+                        <span className={`range-pill ${inRange ? 'in' : 'out'}`}>
+                          {inRange ? 'In Range' : 'Out'}
+                          {priceRange && <span className="range-pill-price"> {compactPrice(priceRange.currentPrice)}</span>}
+                          {priceRange?.outOfRange && (
+                            <span className="range-pill-oor"> {priceRange.outOfRange.direction === 'above' ? '↑' : '↓'}{priceRange.outOfRange.pct.toFixed(1)}%</span>
+                          )}
+                        </span>
+                        {p?.running_since && <span className="pos-running-dur">{formatDuration(p.running_since)}</span>}
                       </div>
                     </div>
                     <div className="pos-card-right-block">
@@ -1348,6 +1356,12 @@ export default function App() {
                           </div>
                         </div>
                       ))}
+                      <div className="pos-token-foot">
+                        <span>小计</span>
+                        <span>{formatUsd(p?.totals?.wallet_usd)}</span>
+                        <span>{formatUsd(p?.totals?.position_usd)}</span>
+                        <span className="fee">{formatUsd(p?.totals?.fee_usd)}</span>
+                      </div>
                     </div>
                   )}
 
@@ -1376,17 +1390,6 @@ export default function App() {
                         <span className="lo">{compactPrice(priceRange.rangeMin)}</span>
                         <span className="cur">{compactPrice(priceRange.currentPrice)}</span>
                         <span className="hi">{compactPrice(priceRange.rangeMax)}</span>
-                      </div>
-                      <div className={`pos-price-range-status ${priceRange.inRange ? 'in' : 'out'}`}>
-                        <span className="pos-price-range-status-dot" />
-                        <span>当前价 {compactPrice(priceRange.currentPrice)}</span>
-                        {priceRange.outOfRange ? (
-                          <span className="pos-price-range-oor">
-                            {priceRange.outOfRange.direction === 'above' ? '高于上限' : '低于下限'} {priceRange.outOfRange.pct.toFixed(1)}%
-                          </span>
-                        ) : (
-                          <span className="pos-price-range-oor">在范围内</span>
-                        )}
                       </div>
                     </div>
                   )}

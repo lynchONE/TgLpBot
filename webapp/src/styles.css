@@ -2173,6 +2173,19 @@ body {
 .pos-tk-cell.fee .pos-tk-usd {
   color: rgba(34, 211, 138, 0.6);
 }
+.pos-token-foot {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr 1fr;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  border-top: 1px dashed rgba(134, 153, 184, 0.18);
+  font-variant-numeric: tabular-nums;
+}
+.pos-token-foot span:nth-child(n+2) { text-align: right; color: var(--text); }
+.pos-token-foot span.fee { color: var(--positive); }
 
 .pos-range-info {
   margin-top: 8px;
@@ -2273,43 +2286,22 @@ body {
   border-left: 1px dashed rgba(234, 179, 8, 0.35);
 }
 
-.pos-price-range-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 6px;
-  padding: 4px 8px;
-  border-radius: 6px;
+.range-pill-price {
+  font-family: var(--font-mono);
+  opacity: 0.85;
+}
+.range-pill-oor {
+  opacity: 0.75;
+  font-size: 9px;
+}
+.pos-running-dur {
   font-size: 10px;
   font-weight: 600;
-}
-.pos-price-range-status.in {
-  background: rgba(16, 185, 129, 0.08);
-  border: 1px solid rgba(16, 185, 129, 0.2);
-  color: #6ee7b7;
-}
-.pos-price-range-status.out {
-  background: rgba(239, 68, 68, 0.08);
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  color: #fca5a5;
-}
-.pos-price-range-status-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.pos-price-range-status.in .pos-price-range-status-dot {
-  background: #10b981;
-  box-shadow: 0 0 4px #10b981;
-}
-.pos-price-range-status.out .pos-price-range-status-dot {
-  background: #ef4444;
-  box-shadow: 0 0 4px #ef4444;
-}
-.pos-price-range-oor {
-  margin-left: auto;
-  font-weight: 700;
+  color: #94a3b8;
+  background: rgba(148, 163, 184, 0.1);
+  padding: 1px 5px;
+  border-radius: 4px;
+  white-space: nowrap;
 }
 
 /* ═══════════════════════════════════════
