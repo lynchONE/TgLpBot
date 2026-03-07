@@ -1182,10 +1182,10 @@ body {
 .kline-marker {
   position: absolute;
   transform: translate(-50%, -50%);
-  width: 32px;
-  height: 32px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
-  border: 3px solid transparent;
+  border: 2px solid transparent;
   display: flex;
   align-items: center;
   justify-content: center;
