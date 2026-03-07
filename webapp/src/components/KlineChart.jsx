@@ -2,24 +2,25 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createChart, CandlestickSeries, HistogramSeries } from 'lightweight-charts';
 import { formatUtc8DateTime, formatUtc8TickMark, shortAddress, toUnixSeconds } from '../utils';
 
-const WALLET_AVATARS = [
-  '🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯',
-  '🦁','🐮','🐷','🐸','🐵','🐔','🐧','🦄','🐙','🦋',
-  '🐢','🐳','🦀','🐠','🦈','🐡','🦉','🦇','🐺','🐗',
-  '🐴','🦎','🐍','🦐','🦑','🐞','🦚','🦜','🦩','🐊',
-];
+/* ── Wallet avatar images ── */
+const avatarModules = import.meta.glob('../icon/avatar_*.png', { eager: true, import: 'default' });
+const AVATAR_URLS = Object.values(avatarModules);
 
-function walletAvatar(address) {
+function walletAvatarIndex(address) {
   let h = 0;
   const s = String(address || '').toLowerCase();
   for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
-  return WALLET_AVATARS[Math.abs(h) % WALLET_AVATARS.length];
+  return Math.abs(h) % (AVATAR_URLS.length || 1);
 }
 
-function getClusterEmoji(cluster) {
+function walletAvatarUrl(address) {
+  return AVATAR_URLS[walletAvatarIndex(address)] || AVATAR_URLS[0];
+}
+
+function getClusterAvatarUrl(cluster) {
   const items = Array.isArray(cluster?.items) ? cluster.items : [];
   const addr = items[0]?.wallet_address || '';
-  return walletAvatar(addr);
+  return walletAvatarUrl(addr);
 }
 
 function formatUSD(v) {
@@ -188,7 +189,7 @@ function projectClusters(chart, candleSeries, candleData, candleMap, candleIndex
       ...cluster,
       x: clamp(x, xPad, Math.max(xPad, width - xPad)),
       y: clamp(y + offset, minY, maxY),
-      label: getClusterEmoji(cluster),
+      label: getClusterAvatarUrl(cluster),
     });
   }
   return projected;
@@ -454,7 +455,7 @@ export default function KlineChart({
             onMouseEnter={() => setHoveredCluster(cluster)}
             onMouseLeave={() => setHoveredCluster(null)}
           >
-            <span className="kline-marker-emoji">{cluster.label}</span>
+            <img className="kline-marker-avatar" src={cluster.label} alt="" />
             {cluster.items.length > 1 && (
               <span className="kline-marker-badge">{cluster.items.length}</span>
             )}
@@ -470,7 +471,7 @@ export default function KlineChart({
             }}
           >
             <div className="kmt-head">
-              <span className="kmt-emoji">{hoveredCluster.label}</span>
+              <span className="kmt-emoji"><img src={hoveredCluster.label} alt="" /></span>
               <span className="kmt-wallet">{tooltipData.walletName}</span>
               {tooltipData.count > 1 && <span className="kmt-count">等{tooltipData.count}笔</span>}
             </div>

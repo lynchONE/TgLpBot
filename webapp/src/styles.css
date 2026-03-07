@@ -1153,10 +1153,10 @@ body {
 .kline-marker {
   position: absolute;
   transform: translate(-50%, -50%);
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.28);
+  border: 3px solid transparent;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1165,11 +1165,20 @@ body {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
   z-index: 5;
   padding: 0;
+  background: #1a1f2a;
+  overflow: hidden;
+}
+
+.kline-marker-avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
 }
 
 .kline-marker-emoji {
-  font-size: 16px;
-  line-height: 1;
+  display: none;
 }
 
 .kline-marker-badge {
@@ -1190,11 +1199,13 @@ body {
 }
 
 .kline-marker.add {
-  background: rgba(22, 199, 132, 0.86);
+  border-color: #16c784;
+  box-shadow: 0 0 8px rgba(22, 199, 132, 0.4), 0 4px 12px rgba(0, 0, 0, 0.35);
 }
 
 .kline-marker.remove {
-  background: rgba(234, 57, 67, 0.86);
+  border-color: #ea3943;
+  box-shadow: 0 0 8px rgba(234, 57, 67, 0.4), 0 4px 12px rgba(0, 0, 0, 0.35);
 }
 
 .kline-marker.active {
@@ -1224,7 +1235,8 @@ body {
   gap: 5px;
   margin-bottom: 5px;
 }
-.kmt-emoji { font-size: 14px; line-height: 1; }
+.kmt-emoji { width: 18px; height: 18px; flex-shrink: 0; }
+.kmt-emoji img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
 .kmt-wallet { font-size: 12px; font-weight: 600; color: #edf3ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kmt-count { font-size: 10px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
 .kmt-row {
