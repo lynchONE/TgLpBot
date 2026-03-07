@@ -35,10 +35,16 @@ type klineTopic struct {
 	chain        string
 	tokenAddress string
 	bar          string
+	chainIndex   string // resolved from chain config
 }
 
 func (t klineTopic) key() string {
 	return t.chain + ":" + t.tokenAddress + ":" + t.bar
+}
+
+// okxSubKey is the key for OKX WS subscription dedup.
+func (t klineTopic) okxSubKey() string {
+	return t.chainIndex + ":" + t.tokenAddress + ":" + t.bar
 }
 
 type klinePoller struct {
@@ -48,21 +54,34 @@ type klinePoller struct {
 }
 
 // KlineFeed manages real-time kline subscriptions over WebSocket.
-// Each client subscribes to one kline topic at a time.
-// Unique topics are polled against OKX DEX API and results are pushed to subscribers.
+// It uses OKX DEX WebSocket for real-time pushes and falls back to REST polling.
 type KlineFeed struct {
 	mu      sync.Mutex
 	subs    map[*ws.Client]*klineTopic         // client -> current subscription
 	topics  map[string]map[*ws.Client]struct{} // topic key -> set of clients
-	pollers map[string]*klinePoller            // topic key -> active poller
+	pollers map[string]*klinePoller            // topic key -> active poller (fallback only)
+	okxWS   *exchange.OKXDexWS                 // OKX DEX WebSocket client
+	okxSubs map[string]int                     // okxSubKey -> reference count
 }
 
 func NewKlineFeed() *KlineFeed {
-	return &KlineFeed{
+	f := &KlineFeed{
 		subs:    make(map[*ws.Client]*klineTopic),
 		topics:  make(map[string]map[*ws.Client]struct{}),
 		pollers: make(map[string]*klinePoller),
+		okxSubs: make(map[string]int),
 	}
+
+	// Try to start OKX DEX WebSocket.
+	if config.AppConfig.OKXAPIKey != "" && config.AppConfig.OKXSecretKey != "" {
+		f.okxWS = exchange.NewOKXDexWS(f.onOKXCandle)
+		go f.okxWS.Run()
+		log.Printf("[KlineFeed] OKX DEX WebSocket enabled")
+	} else {
+		log.Printf("[KlineFeed] OKX DEX WebSocket disabled (no API keys), using REST polling fallback")
+	}
+
+	return f
 }
 
 // HandleMessage processes an incoming WS message from a client.
@@ -84,21 +103,6 @@ func (f *KlineFeed) HandleClientRemove(client *ws.Client) {
 	f.unsubscribe(client)
 }
 
-func pollerInterval(bar string) time.Duration {
-	switch strings.ToLower(bar) {
-	case "1m":
-		return 2 * time.Second
-	case "3m", "5m":
-		return 3 * time.Second
-	case "15m":
-		return 5 * time.Second
-	case "30m":
-		return 8 * time.Second
-	default:
-		return 10 * time.Second
-	}
-}
-
 func (f *KlineFeed) subscribe(client *ws.Client, chain, tokenAddress, bar string) {
 	chain = config.NormalizeChain(chain)
 	tokenAddress = strings.ToLower(strings.TrimSpace(tokenAddress))
@@ -107,7 +111,13 @@ func (f *KlineFeed) subscribe(client *ws.Client, chain, tokenAddress, bar string
 		return
 	}
 
-	topic := klineTopic{chain: chain, tokenAddress: tokenAddress, bar: bar}
+	cc, ok := config.AppConfig.GetChainConfig(chain)
+	if !ok || cc.ChainID <= 0 {
+		return
+	}
+	chainIndex := strconv.FormatInt(cc.ChainID, 10)
+
+	topic := klineTopic{chain: chain, tokenAddress: tokenAddress, bar: bar, chainIndex: chainIndex}
 	key := topic.key()
 
 	f.mu.Lock()
@@ -128,9 +138,19 @@ func (f *KlineFeed) subscribe(client *ws.Client, chain, tokenAddress, bar string
 	}
 	f.topics[key][client] = struct{}{}
 
-	// Start poller if this is the first subscriber.
-	if _, ok := f.pollers[key]; !ok {
-		f.startPollerLocked(topic)
+	// Subscribe via OKX WS or start poller.
+	if f.okxWS != nil {
+		oKey := topic.okxSubKey()
+		f.okxSubs[oKey]++
+		if f.okxSubs[oKey] == 1 {
+			f.okxWS.Subscribe(chainIndex, tokenAddress, bar)
+			log.Printf("[KlineFeed] OKX WS subscribe %s", oKey)
+		}
+	} else {
+		// Fallback: start poller
+		if _, ok := f.pollers[key]; !ok {
+			f.startPollerLocked(topic)
+		}
 	}
 }
 
@@ -146,13 +166,106 @@ func (f *KlineFeed) unsubscribe(client *ws.Client) {
 }
 
 func (f *KlineFeed) removeClientLocked(client *ws.Client, topicKey string) {
+	topic := f.subs[client]
 	delete(f.subs, client)
 	if clients, ok := f.topics[topicKey]; ok {
 		delete(clients, client)
 		if len(clients) == 0 {
 			delete(f.topics, topicKey)
-			f.stopPollerLocked(topicKey)
+
+			if f.okxWS != nil && topic != nil {
+				oKey := topic.okxSubKey()
+				f.okxSubs[oKey]--
+				if f.okxSubs[oKey] <= 0 {
+					delete(f.okxSubs, oKey)
+					f.okxWS.Unsubscribe(topic.chainIndex, topic.tokenAddress, topic.bar)
+					log.Printf("[KlineFeed] OKX WS unsubscribe %s", oKey)
+				}
+			} else {
+				f.stopPollerLocked(topicKey)
+			}
 		}
+	}
+}
+
+// onOKXCandle is called by the OKX WebSocket client when a candle is received.
+func (f *KlineFeed) onOKXCandle(candle exchange.OKXWSCandle) {
+	bar := exchange.ChannelToBar(candle.Channel)
+	ts := candle.TimestampMS / 1000
+	if ts <= 0 {
+		return
+	}
+
+	tc := tokenCandle{
+		T:       ts,
+		O:       sanitizeFloat(candle.Open),
+		H:       sanitizeFloat(candle.High),
+		L:       sanitizeFloat(candle.Low),
+		C:       sanitizeFloat(candle.Close),
+		V:       sanitizeFloat(candle.Volume),
+		VUSD:    sanitizeFloat(candle.VolumeUSD),
+		Confirm: candle.Confirm,
+	}
+
+	chainName := resolveChainName(candle.ChainIndex)
+
+	// Look up the exact topic key.
+	topicKey := chainName + ":" + candle.TokenContractAddress + ":" + bar
+
+	f.mu.Lock()
+	clients := f.topics[topicKey]
+	targets := make([]*ws.Client, 0, len(clients))
+	for c := range clients {
+		targets = append(targets, c)
+	}
+	f.mu.Unlock()
+
+	if len(targets) == 0 {
+		return
+	}
+
+	msg, err := json.Marshal(wsCandleUpdate{
+		Type:         "kline_update",
+		Chain:        chainName,
+		TokenAddress: candle.TokenContractAddress,
+		Bar:          bar,
+		Candles:      []tokenCandle{tc},
+	})
+	if err != nil {
+		return
+	}
+
+	for _, c := range targets {
+		c.Send(msg)
+	}
+}
+
+// resolveChainName maps a chainIndex back to chain name.
+func resolveChainName(chainIndex string) string {
+	for _, name := range []string{"bsc", "base"} {
+		if cc, ok := config.AppConfig.GetChainConfig(name); ok {
+			if strconv.FormatInt(cc.ChainID, 10) == chainIndex {
+				return name
+			}
+		}
+	}
+	return "bsc"
+}
+
+// --- Fallback REST polling (used when OKX WS is not available) ---
+
+func pollerInterval(bar string) time.Duration {
+	switch strings.ToLower(bar) {
+	case "1m":
+		return 2 * time.Second
+	case "3m", "5m":
+		return 3 * time.Second
+	case "15m":
+		return 5 * time.Second
+	case "30m":
+		return 8 * time.Second
+	default:
+		return 10 * time.Second
 	}
 }
 

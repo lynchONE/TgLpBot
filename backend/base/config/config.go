@@ -113,6 +113,7 @@ type Config struct {
 
 	// OKX DEX API
 	OKXDexAPIURL              string
+	OKXDexWSURL               string
 	OKXAPIKey                 string
 	OKXSecretKey              string
 	OKXPassphrase             string
@@ -396,6 +397,7 @@ func LoadConfig() error {
 
 		// OKX DEX API
 		OKXDexAPIURL:              getEnv("OKX_DEX_API_URL", "https://www.okx.com/api/v6/dex/aggregator"),
+		OKXDexWSURL:               getEnv("OKX_DEX_WS_URL", "wss://wsdexpri.okx.com:443"),
 		OKXAPIKey:                 getEnv("OKX_API_KEY", ""),
 		OKXSecretKey:              getEnv("OKX_SECRET_KEY", ""),
 		OKXPassphrase:             getEnv("OKX_PASSPHRASE", ""),

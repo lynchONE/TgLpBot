@@ -26,7 +26,8 @@
       "WebFetch(domain:www.okx.com)",
       "Bash(ls /mnt/e/goProject/TgLpBot/backend/service/web_server/kline_ws.go 2>/dev/null; echo \"exit: $?\")",
       "Bash(ls /mnt/e/goProject/TgLpBot/webapp/src/hooks/ 2>/dev/null; echo \"exit: $?\")",
-      "Bash(npx -y acorn --ecma2022 --module --allow-import-meta src/hooks/useKlineWS.js 2>&1 | tail -5)"
+      "Bash(npx -y acorn --ecma2022 --module --allow-import-meta src/hooks/useKlineWS.js 2>&1 | tail -5)",
+      "WebFetch(domain:web3.okx.com)"
     ]
   }
 }
