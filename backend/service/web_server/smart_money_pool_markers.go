@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -18,6 +19,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 )
+
+var poolAddressRegex = regexp.MustCompile(`^(0x)?[a-fA-F0-9]{40}$|^(0x)?[a-fA-F0-9]{64}$`)
 
 type smartMoneyPoolMarkerEvent struct {
 	EventID       string  `json:"event_id"`

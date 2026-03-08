@@ -49,7 +49,6 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/trading", s.handleTrading)
 	mux.HandleFunc("/api/hot_pools", s.handleHotPools)
 	mux.HandleFunc("/api/search_pools", s.handleSearchPools)
-	mux.HandleFunc("/api/pool_ohlcv", s.handlePoolOHLCV)
 	mux.HandleFunc("/api/token_candles", s.handleTokenCandles)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/global_config", s.handleGlobalConfig)
@@ -159,9 +158,6 @@ func (s *Server) handleGetPools(w http.ResponseWriter, r *http.Request) {
 			return
 		case "search_pools":
 			s.handleSearchPools(w, r)
-			return
-		case "pool_ohlcv":
-			s.handlePoolOHLCV(w, r)
 			return
 		case "token_candles":
 			s.handleTokenCandles(w, r)

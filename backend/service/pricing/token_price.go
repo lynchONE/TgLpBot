@@ -2,10 +2,14 @@ package pricing
 
 import (
 	"TgLpBot/base/config"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -120,7 +124,7 @@ func (s *TokenPriceService) GetUSDPrices(network string, tokenAddresses []string
 			}
 			out[addr] = 0
 		}
-		return out, &ProviderHTTPError{Provider: "geckoterminal", Status: http.StatusTooManyRequests}
+		return out, &ProviderHTTPError{Provider: "okx/gecko", Status: http.StatusTooManyRequests}
 	}
 
 	fetched, err := s.fetchPrices(network, missing)
@@ -215,16 +219,42 @@ func (s *TokenPriceService) fetchPrices(network string, tokenAddresses []string)
 	key := network + "|" + strings.Join(sorted, ",")
 	v, err, _ := s.fetchGroup.Do(key, func() (any, error) {
 		out := make(map[string]float64, len(addresses))
-		const chunkSize = 25
-		for start := 0; start < len(addresses); start += chunkSize {
-			end := start + chunkSize
-			if end > len(addresses) {
-				end = len(addresses)
+
+		// Primary: OKX DEX market API
+		if okxAvailable() {
+			okxPrices, okxErr := s.fetchOKXTokenPrices(network, addresses)
+			if okxErr != nil {
+				log.Printf("[TokenPrice] OKX fetch failed (chain=%s): %v", network, okxErr)
 			}
-			batch := addresses[start:end]
+			for addr, price := range okxPrices {
+				if price > 0 {
+					out[addr] = price
+				}
+			}
+		}
+
+		// Fallback: GeckoTerminal for any missing tokens
+		var missing []string
+		for _, addr := range addresses {
+			if _, ok := out[addr]; !ok {
+				missing = append(missing, addr)
+			}
+		}
+		if len(missing) == 0 {
+			return out, nil
+		}
+
+		const chunkSize = 25
+		var geckoErr error
+		for start := 0; start < len(missing); start += chunkSize {
+			end := start + chunkSize
+			if end > len(missing) {
+				end = len(missing)
+			}
+			batch := missing[start:end]
 			part, ferr := s.fetchGeckoTokenPrices(network, batch)
 			if ferr != nil {
-				return out, ferr
+				geckoErr = ferr
 			}
 			for addr, price := range part {
 				if price > 0 {
@@ -232,7 +262,7 @@ func (s *TokenPriceService) fetchPrices(network string, tokenAddresses []string)
 				}
 			}
 		}
-		return out, nil
+		return out, geckoErr
 	})
 	if err != nil {
 		if partial, ok := v.(map[string]float64); ok {
@@ -391,4 +421,148 @@ func (s *TokenPriceService) fetchGeckoTokenPrices(network string, tokenAddresses
 	}
 
 	return out, nil
+}
+
+// ── OKX DEX Market current-price ──
+
+func okxAvailable() bool {
+	return config.AppConfig != nil &&
+		strings.TrimSpace(config.AppConfig.OKXAPIKey) != "" &&
+		strings.TrimSpace(config.AppConfig.OKXSecretKey) != ""
+}
+
+func okxMarketBaseURL() string {
+	base := strings.TrimSpace(config.AppConfig.OKXDexAPIURL)
+	if base == "" {
+		return "https://web3.okx.com/api/v6/dex/market"
+	}
+	base = strings.TrimRight(base, "/")
+	replacer := strings.NewReplacer(
+		"/api/v6/dex/aggregator", "/api/v6/dex/market",
+		"/api/v5/dex/aggregator", "/api/v5/dex/market",
+	)
+	next := replacer.Replace(base)
+	if next != base {
+		return next
+	}
+	return "https://web3.okx.com/api/v6/dex/market"
+}
+
+func okxIsV6() bool {
+	base := strings.TrimSpace(config.AppConfig.OKXDexAPIURL)
+	return base == "" || strings.Contains(base, "/v6/")
+}
+
+func okxChainQueryKey() string {
+	if okxIsV6() {
+		return "chainIndex"
+	}
+	return "chainId"
+}
+
+func okxSignRequest(req *http.Request) {
+	apiKey := strings.TrimSpace(config.AppConfig.OKXAPIKey)
+	secretKey := strings.TrimSpace(config.AppConfig.OKXSecretKey)
+	passphrase := strings.TrimSpace(config.AppConfig.OKXPassphrase)
+
+	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	message := timestamp + req.Method + req.URL.RequestURI()
+	mac := hmac.New(sha256.New, []byte(secretKey))
+	mac.Write([]byte(message))
+	signature := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+
+	req.Header.Set("OK-ACCESS-KEY", apiKey)
+	req.Header.Set("OK-ACCESS-SIGN", signature)
+	req.Header.Set("OK-ACCESS-TIMESTAMP", timestamp)
+	req.Header.Set("OK-ACCESS-PASSPHRASE", passphrase)
+	req.Header.Set("Content-Type", "application/json")
+}
+
+type okxCurrentPriceResponse struct {
+	Code string `json:"code"`
+	Data []struct {
+		Price string `json:"price"`
+	} `json:"data"`
+}
+
+func (s *TokenPriceService) fetchOKXTokenPrices(network string, tokenAddresses []string) (map[string]float64, error) {
+	if config.AppConfig == nil {
+		return nil, fmt.Errorf("config not loaded")
+	}
+	cc, ok := config.AppConfig.GetChainConfig(network)
+	if !ok || cc.ChainID == 0 {
+		return nil, fmt.Errorf("unsupported chain for OKX: %s", network)
+	}
+	chainIndex := strconv.FormatInt(cc.ChainID, 10)
+	baseURL := okxMarketBaseURL()
+	chainKey := okxChainQueryKey()
+
+	out := make(map[string]float64, len(tokenAddresses))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	var firstErr error
+
+	for _, addr := range tokenAddresses {
+		wg.Add(1)
+		go func(addr string) {
+			defer wg.Done()
+			price, err := s.fetchOKXSinglePrice(baseURL, chainKey, chainIndex, addr)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+				return
+			}
+			if price > 0 {
+				mu.Lock()
+				out[addr] = price
+				mu.Unlock()
+			}
+		}(addr)
+	}
+	wg.Wait()
+
+	return out, firstErr
+}
+
+func (s *TokenPriceService) fetchOKXSinglePrice(baseURL, chainKey, chainIndex, tokenAddr string) (float64, error) {
+	query := url.Values{}
+	query.Set(chainKey, chainIndex)
+	query.Set("tokenContractAddress", tokenAddr)
+	endpoint := fmt.Sprintf("%s/current-price?%s", baseURL, query.Encode())
+
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return 0, err
+	}
+	okxSignRequest(req)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode != http.StatusOK {
+		return 0, &ProviderHTTPError{Provider: "okx", Status: resp.StatusCode}
+	}
+
+	var parsed okxCurrentPriceResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return 0, err
+	}
+	if parsed.Code != "0" {
+		return 0, fmt.Errorf("okx current-price code=%s", parsed.Code)
+	}
+	if len(parsed.Data) == 0 || strings.TrimSpace(parsed.Data[0].Price) == "" {
+		return 0, nil
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(parsed.Data[0].Price), 64)
+	if err != nil {
+		return 0, nil
+	}
+	return f, nil
 }

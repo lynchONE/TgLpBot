@@ -1444,7 +1444,7 @@ export default function App() {
               const poolKey = `${pool?.pool_version || ''}:${pool?.pool_id || ''}`;
               const adds = poolAddsMap[poolKey];
               const wallets = aggregatePoolAddWallets(adds?.wallets || []);
-              const totalUsd = adds?.totalUsd || Number(pool?.added_liquidity || 0);
+              const totalUsd = adds?.totalUsd || 0;
               const walletCount = wallets.length || Number(pool?.wallet_count || 0);
               const version = String(pool?.pool_version || '').toUpperCase();
               const feePct = Number(pool?.fee_pct || 0);
@@ -1606,10 +1606,8 @@ export default function App() {
                           className="settings-input"
                           min={10}
                           value={refreshInterval}
-                          onChange={(e) => {
-                            const v = Math.max(10, Math.round(Number(e.target.value) || 10));
-                            setRefreshInterval(v);
-                          }}
+                          onChange={(e) => setRefreshInterval(e.target.value === '' ? '' : Number(e.target.value))}
+                          onBlur={() => setRefreshInterval((v) => Math.max(10, Math.round(Number(v) || 10)))}
                         />
                         <span className="settings-unit">秒</span>
                       </div>
