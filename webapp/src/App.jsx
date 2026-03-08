@@ -1400,7 +1400,18 @@ export default function App() {
                 <div key={String(p?.position_id || idx)} className="pos-card">
                   <div className="pos-card-header">
                     <div className="pos-card-left"
-                      onClick={() => selectPool({ pool_id: p?.pool_id, pool_address: p?.pool_id, trading_pair: p?.title, chain: p?.chain || chain }, p?.chain || chain)}>
+                      onClick={() => selectPool({
+                        pool_id: p?.pool_id,
+                        pool_address: p?.pool_id,
+                        trading_pair: p?.title,
+                        protocol_version: p?.version,
+                        factory_name: p?.exchange,
+                        token0_address: token0?.address,
+                        token1_address: token1?.address,
+                        token0_symbol: token0?.symbol,
+                        token1_symbol: token1?.symbol,
+                        chain: p?.chain || chain,
+                      }, p?.chain || chain)}>
                       <div className="pos-pair-row">
                         <span className="pos-pair-name">{p?.title || shortAddress(p?.pool_id || '')}</span>
                         {p?.tick_spacing && (
