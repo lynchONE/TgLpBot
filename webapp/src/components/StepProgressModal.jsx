@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 const OPEN_STEPS = [
   { label: '校验权限与配置', icon: 'shield' },
@@ -103,6 +103,18 @@ export default function StepProgressModal({ operation, progress, onClose }) {
   const [displayStep, setDisplayStep] = useState(0);
   const [displayStatus, setDisplayStatus] = useState('active');
   const [allowClose, setAllowClose] = useState(false);
+  const overlayRef = useRef(null);
+
+  // Lock parent panel height so it doesn't shrink when positions disappear
+  useEffect(() => {
+    const el = overlayRef.current;
+    if (!el) return;
+    const parent = el.parentElement;
+    if (!parent) return;
+    const h = parent.offsetHeight;
+    parent.style.minHeight = `${h}px`;
+    return () => { parent.style.minHeight = ''; };
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => setAllowClose(true), 10000);
@@ -135,7 +147,7 @@ export default function StepProgressModal({ operation, progress, onClose }) {
   const footerState = isDone ? 'done' : isError ? 'error' : allowClose ? 'ghost' : 'hint';
 
   return (
-    <div className="spm-overlay" onClick={canClose ? onClose : undefined}>
+    <div className="spm-overlay" ref={overlayRef} onClick={canClose ? onClose : undefined}>
       <div className="spm-card" onClick={(event) => event.stopPropagation()}>
         <div className="spm-header">
           <div className="spm-title-row">

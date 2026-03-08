@@ -23,7 +23,6 @@ import {
   checkLoginCode,
   deleteTask,
   fetchHotPools,
-  fetchPositionProfitPoster,
   fetchRealtimePositions,
   fetchSmartMoneyOverview,
   fetchSmartMoneyPoolAdds,
@@ -40,7 +39,6 @@ import { WEBAPP_CONFIG } from './config';
 import PanelShell, { EmptyState, MetricCard } from './components/PanelShell';
 import KlineChart from './components/KlineChart';
 import OpenPositionModal from './components/OpenPositionModal';
-import PositionProfitPosterModal from './components/PositionProfitPosterModal';
 import StepProgressModal from './components/StepProgressModal';
 import TaskActionMenu from './components/TaskActionMenu';
 import NumberFlowValue from './components/NumberFlowValue';
@@ -207,13 +205,6 @@ function parseLoginUser(raw) {
 function openExternal(url) {
   if (!url) return;
   window.open(url, '_blank', 'noopener,noreferrer');
-}
-
-function buildMeAvatarUrl(apiBaseUrl, initData) {
-  const base = String(apiBaseUrl || '').trim().replace(/\/$/, '');
-  const auth = String(initData || '').trim();
-  if (!base || !auth) return '';
-  return `${base}/api/me/avatar?initData=${encodeURIComponent(auth)}`;
 }
 
 function buildDexScreenerEmbedUrl(pool, chainName) {
@@ -860,11 +851,6 @@ export default function App() {
   const [openPosBusy, setOpenPosBusy] = useState(false);
   const [taskActionPos, setTaskActionPos] = useState(null);
   const [operationProgress, setOperationProgress] = useState(null);
-  const [posterTask, setPosterTask] = useState(null);
-  const [posterData, setPosterData] = useState(null);
-  const [posterLoading, setPosterLoading] = useState(false);
-  const [posterError, setPosterError] = useState('');
-  const [posterFetchNonce, setPosterFetchNonce] = useState(0);
 
   // WebSocket for real-time operation progress
   const progressWsUrl = useMemo(() => {
@@ -872,10 +858,6 @@ export default function App() {
     const base = String(apiBaseUrl).replace(/\/$/, '').replace(/^http/, 'ws');
     return base + '/api/ws?initData=' + encodeURIComponent(initData);
   }, [apiBaseUrl, initData]);
-
-  const posterUserAvatarUrl = useMemo(() => (
-    buildMeAvatarUrl(apiBaseUrl, initData) || String(loginUser?.photo_url || '').trim()
-  ), [apiBaseUrl, initData, loginUser?.photo_url]);
 
   const handleWsProgressMessage = useCallback((msg) => {
     if (msg && msg.type === 'operation_progress') {
@@ -897,31 +879,6 @@ export default function App() {
   }, []);
 
   useWebSocket({ url: progressWsUrl, onMessage: handleWsProgressMessage, enabled: hasInitData && !!progressWsUrl });
-
-  useEffect(() => {
-    if (!posterTask?.task_id || !apiBaseUrl || !initData) return undefined;
-    const ctrl = new AbortController();
-    setPosterLoading(true);
-    setPosterError('');
-    setPosterData(null);
-
-    fetchPositionProfitPoster({
-      apiBaseUrl,
-      initData,
-      taskId: Number(posterTask.task_id),
-      signal: ctrl.signal,
-    })
-      .then((resp) => setPosterData(resp))
-      .catch((e) => {
-        if (e?.name === 'AbortError') return;
-        setPosterError(String(e?.message || e));
-      })
-      .finally(() => {
-        if (!ctrl.signal.aborted) setPosterLoading(false);
-      });
-
-    return () => ctrl.abort();
-  }, [apiBaseUrl, initData, posterTask, posterFetchNonce]);
 
   const handleOpenPosition = useCallback(async (params) => {
     const panelKey = openPosPool?.panelKey || 'hot_pools';
@@ -1016,21 +973,6 @@ export default function App() {
 
   const copyAddr = useCallback((addr) => {
     navigator.clipboard?.writeText(addr).catch(() => {});
-  }, []);
-
-  const openProfitPoster = useCallback((position) => {
-    if (!position?.task_id) return;
-    setTaskActionPos(null);
-    setPosterError('');
-    setPosterData(null);
-    setPosterTask({ ...position });
-  }, []);
-
-  const closeProfitPoster = useCallback(() => {
-    setPosterTask(null);
-    setPosterData(null);
-    setPosterError('');
-    setPosterLoading(false);
   }, []);
 
   const renderOperationProgress = (panelKey) => {
@@ -1450,7 +1392,6 @@ export default function App() {
               const taskRangeUp = Number(p?.task_range_upper_pct);
               const taskAmount = Number(p?.task_amount_usdt);
               const priceRange = computePriceRange(p);
-              const canGeneratePoster = taskId > 0 && (Boolean(p?.has_liquidity) || totalVal > 0 || hasPnl);
 
               const statusClass = statusLabel.includes('错误') ? 'st-error' :
                 statusLabel.includes('暂停') || statusLabel.includes('停止') || statusLabel.includes('撤出') ? 'st-warn' :
@@ -1505,20 +1446,8 @@ export default function App() {
                           </div>
                         )}
                       </div>
-                      {(canGeneratePoster || taskId > 0) && (
+                      {taskId > 0 && (
                         <div className="pos-card-actions">
-                          {canGeneratePoster && (
-                            <button
-                              type="button"
-                              className="mini-link accent"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openProfitPoster(p);
-                              }}
-                            >
-                              收益图
-                            </button>
-                          )}
                           {taskId > 0 && (
                             <div className="pos-action-anchor">
                               <button type="button" className="icon-btn-tiny" onClick={(e) => { e.stopPropagation(); setTaskActionPos((prev) => prev?.task_id === p?.task_id ? null : p); }} title="任务操作">
@@ -1968,19 +1897,6 @@ export default function App() {
           onSubmit={handleOpenPosition}
           onClose={() => setOpenPosPool(null)}
           busy={openPosBusy}
-        />
-      )}
-
-      {posterTask && (
-        <PositionProfitPosterModal
-          task={posterTask}
-          data={posterData}
-          loading={posterLoading}
-          error={posterError}
-          loginUser={loginUser}
-          userAvatarUrl={posterUserAvatarUrl}
-          onClose={closeProfitPoster}
-          onRetry={() => setPosterFetchNonce((value) => value + 1)}
         />
       )}
     </div>
