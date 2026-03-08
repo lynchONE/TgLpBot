@@ -47,34 +47,6 @@ export async function fetchHotPools({
   return requestJson(url, { method: 'GET', signal });
 }
 
-export async function fetchPoolOHLCV({
-  apiBaseUrl,
-  initData,
-  chain = 'bsc',
-  poolAddress,
-  timeframe = 'minute',
-  aggregate = 5,
-  currency = 'usd',
-  token,
-  limit = 240,
-  signal,
-}) {
-  const base = normalizeBaseUrl(apiBaseUrl);
-  const params = new URLSearchParams();
-  if (initData) params.set('initData', String(initData));
-  if (chain) params.set('chain', String(chain));
-  if (poolAddress) params.set('pool_address', String(poolAddress));
-  if (timeframe) params.set('timeframe', String(timeframe));
-  if (Number.isFinite(aggregate)) params.set('aggregate', String(aggregate));
-  if (currency) params.set('currency', String(currency));
-  if (token) params.set('token', String(token));
-  if (Number.isFinite(limit)) params.set('limit', String(limit));
-
-  const qs = params.toString();
-  const url = `${base}/api/pools?endpoint=pool_ohlcv${qs ? `&${qs}` : ''}`;
-  return requestJson(url, { method: 'GET', signal });
-}
-
 export async function fetchTokenCandles({
   apiBaseUrl,
   initData,
@@ -186,35 +158,6 @@ export async function fetchSmartMoneyPoolMarkers({
   const qs = params.toString();
   const url = `${base}/api/smart_money_pool_markers${qs ? `?${qs}` : ''}`;
   return requestJson(url, { method: 'GET', signal });
-}
-
-export async function exchangeTelegramLogin({
-  apiBaseUrl,
-  id,
-  first_name,
-  last_name,
-  username,
-  photo_url,
-  auth_date,
-  hash,
-  signal,
-}) {
-  const base = normalizeBaseUrl(apiBaseUrl);
-  const url = `${base}/api/web_login?endpoint=telegram_login`;
-  return requestJson(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      id,
-      first_name,
-      last_name,
-      username,
-      photo_url,
-      auth_date,
-      hash,
-    }),
-    signal,
-  });
 }
 
 export async function generateLoginCode({ apiBaseUrl, signal }) {

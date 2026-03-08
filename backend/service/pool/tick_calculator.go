@@ -3,7 +3,6 @@ package pool
 import (
 	"fmt"
 	"math"
-	"math/big"
 )
 
 // TickCalculator provides utilities for tick calculations
@@ -148,26 +147,10 @@ func (tc *TickCalculator) CalculatePercentagesFromTicks(currentTick, tickLower, 
 	return lowerPct, upperPct
 }
 
-// RoundToNearestTickSpacing rounds a tick to the NEAREST valid tick spacing (四舍五入)
-func (tc *TickCalculator) RoundToNearestTickSpacing(tick int, tickSpacing int) int {
-	remainder := tick % tickSpacing
-	if remainder == 0 {
-		return tick
-	}
-
-	// 计算向下取整和向上取整的结果
-	down := tick - remainder
-	up := down + tickSpacing
-	if tick < 0 {
-		down = tick - remainder - tickSpacing
-		up = tick - remainder
-	}
-
-	// 选择更接近的那个
-	if math.Abs(float64(tick-down)) <= math.Abs(float64(tick-up)) {
-		return down
-	}
-	return up
+// CalculatePriceFromTick calculates price from tick
+// price = 1.0001^tick
+func (tc *TickCalculator) CalculatePriceFromTick(tick int) float64 {
+	return math.Pow(1.0001, float64(tick))
 }
 
 // RoundDownToTickSpacing rounds a tick DOWN to the nearest valid tick spacing
@@ -194,50 +177,6 @@ func (tc *TickCalculator) RoundUpToTickSpacing(tick int, tickSpacing int) int {
 		return tick - remainder
 	}
 	return tick - remainder + tickSpacing
-}
-
-// RoundToTickSpacing rounds a tick to the nearest valid tick spacing (向下取整，保留用于兼容)
-func (tc *TickCalculator) RoundToTickSpacing(tick int, tickSpacing int) int {
-	return tc.RoundDownToTickSpacing(tick, tickSpacing)
-}
-
-// CalculatePriceFromTick calculates price from tick
-// price = 1.0001^tick
-func (tc *TickCalculator) CalculatePriceFromTick(tick int) float64 {
-	return math.Pow(1.0001, float64(tick))
-}
-
-// CalculateTickFromPrice calculates tick from price
-// tick = log(price) / log(1.0001)
-func (tc *TickCalculator) CalculateTickFromPrice(price float64) int {
-	if price <= 0 {
-		return 0
-	}
-	return int(math.Log(price) / math.Log(1.0001))
-}
-
-// GetCurrentTickFromSqrtPriceX96 extracts current tick from sqrtPriceX96
-// This is useful when we have slot0 data
-func (tc *TickCalculator) GetCurrentTickFromSqrtPriceX96(sqrtPriceX96 *big.Int) int {
-	// sqrtPriceX96 = sqrt(price) * 2^96
-	// price = (sqrtPriceX96 / 2^96)^2
-	// tick = log(price) / log(1.0001)
-
-	// Convert to float for calculation
-	sqrtPriceFloat := new(big.Float).SetInt(sqrtPriceX96)
-	divisor := new(big.Float).SetInt(new(big.Int).Lsh(big.NewInt(1), 96)) // 2^96
-	sqrtPriceFloat.Quo(sqrtPriceFloat, divisor)
-
-	// Square to get price
-	price := new(big.Float).Mul(sqrtPriceFloat, sqrtPriceFloat)
-	priceFloat64, _ := price.Float64()
-
-	return tc.CalculateTickFromPrice(priceFloat64)
-}
-
-// FormatTickRange formats tick range for display
-func (tc *TickCalculator) FormatTickRange(tickLower, tickUpper int) string {
-	return fmt.Sprintf("%d 到 %d", tickLower, tickUpper)
 }
 
 // ValidateTickRange validates if tick range is valid

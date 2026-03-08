@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
 
 /**
  * 迷你价格走势图组件
@@ -73,80 +73,5 @@ export default function MiniChart({
                 strokeLinejoin="round"
             />
         </svg>
-    );
-}
-
-/**
- * 带数据获取的迷你图表
- */
-export function MiniChartWithData({
-    poolAddress,
-    chain = 'bsc',
-    apiBaseUrl,
-    width = 60,
-    height = 24,
-    limit = 24, // 24个点
-}) {
-    const [data, setData] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(false);
-
-    useEffect(() => {
-        if (!poolAddress || !apiBaseUrl) {
-            setLoading(false);
-            return;
-        }
-
-        let cancelled = false;
-        const controller = new AbortController();
-
-        const fetchData = async () => {
-            try {
-                const base = String(apiBaseUrl || '').replace(/\/$/, '');
-                const params = new URLSearchParams({
-                    chain,
-                    pool_address: poolAddress,
-                    timeframe: '1h',
-                    limit: String(limit),
-                });
-                const url = `${base}/api/pool_ohlcv?${params}`;
-
-                const resp = await fetch(url, { method: 'GET', signal: controller.signal });
-                if (cancelled) return;
-
-                if (!resp.ok) {
-                    setError(true);
-                    setLoading(false);
-                    return;
-                }
-
-                const json = await resp.json();
-                if (cancelled) return;
-
-                setData(json.data || json);
-                setLoading(false);
-            } catch (e) {
-                if (cancelled) return;
-                setError(true);
-                setLoading(false);
-            }
-        };
-
-        fetchData();
-
-        return () => {
-            cancelled = true;
-            controller.abort();
-        };
-    }, [poolAddress, chain, apiBaseUrl, limit]);
-
-    return (
-        <MiniChart
-            data={data}
-            width={width}
-            height={height}
-            loading={loading}
-            error={error}
-        />
     );
 }

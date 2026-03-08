@@ -27,7 +27,19 @@
       "Bash(ls /mnt/e/goProject/TgLpBot/backend/service/web_server/kline_ws.go 2>/dev/null; echo \"exit: $?\")",
       "Bash(ls /mnt/e/goProject/TgLpBot/webapp/src/hooks/ 2>/dev/null; echo \"exit: $?\")",
       "Bash(npx -y acorn --ecma2022 --module --allow-import-meta src/hooks/useKlineWS.js 2>&1 | tail -5)",
-      "WebFetch(domain:web3.okx.com)"
+      "WebFetch(domain:web3.okx.com)",
+      "Bash(for file in backend/base/rpcpool/*.go)",
+      "Bash(do echo \"=== $file ===\")",
+      "Read(//mnt/e/goProject/TgLpBot/backend/**)",
+      "Bash(cd /mnt/e/goProject/TgLpBot/miniapp/src && grep \"^export async function\\\\|^export function\" lib/api.js | sed 's/^export.*function \\\\\\([a-zA-Z]*\\\\\\).*/\\\\1/' | sort > /tmp/miniapp_exports.txt && grep -r \"import.*from.*api\" components/*.jsx App.jsx | grep -o \"{[^}]*}\" | tr ',' '\\\\n' | sed 's/[{}]//g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v \"^$\" | sort | uniq > /tmp/miniapp_imports.txt && comm -23 /tmp/miniapp_exports.txt /tmp/miniapp_imports.txt)",
+      "Bash(for f in backend/service/web_server/*.go)",
+      "Bash(do basename \"$f\")",
+      "Bash(cd /mnt/e/goProject/TgLpBot/miniapp/src && grep -h \"import.*from.*'.*api\" components/*.jsx App.jsx 2>/dev/null | tr '{' '\\\\n' | tr '}' '\\\\n' | grep -E \"^[[:space:]]*[a-z]\" | sed 's/^[[:space:]]*//;s/,.*//' | sort | uniq)",
+      "Bash(for f in components/*.jsx App.jsx)",
+      "Bash(do echo \"=== $f ===\")",
+      "Bash(cd /mnt/e/goProject/TgLpBot && for f in backend/service/liquidity/*.go; do grep -n \"^[[:space:]]*//[^/]\" \"$f\" | head -5 && echo \"---\"; done | head -50)",
+      "Bash(cd /mnt/e/goProject/TgLpBot && echo \"=== Checking all potentially unused functions ===\" && for func in \"RoundToTickSpacing\" \"CalculatePriceFromTick\" \"CalculateTickFromPrice\" \"GetCurrentTickFromSqrtPriceX96\" \"FormatTickRange\"; do echo \"=== $func ===\" && grep -r \"$func\" backend --include=\"*.go\" | grep -v \"tick_calculator.go\" | wc -l; done)",
+      "Bash(cd /mnt/e/goProject/TgLpBot && for func in \"PriceRangeDisplay\" \"RangeAlertLines\"; do echo \"=== $func ===\" && grep -r \"$func\" backend --include=\"*.go\" | wc -l; done)"
     ]
   }
 }

@@ -720,28 +720,6 @@ export async function fetchSearchPools({ apiBaseUrl, initData, q, chain, limit, 
     return resp.json();
 }
 
-export async function fetchPoolOHLCV({ apiBaseUrl, initData, chain, poolAddress, timeframe, aggregate, limit, beforeTimestamp, signal }) {
-    const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const params = new URLSearchParams();
-    if (initData) params.set('initData', String(initData));
-    if (chain) params.set('chain', String(chain));
-    if (poolAddress) params.set('pool_address', String(poolAddress));
-    if (timeframe) params.set('timeframe', String(timeframe));
-    if (Number.isFinite(aggregate)) params.set('aggregate', String(aggregate));
-    if (Number.isFinite(limit)) params.set('limit', String(limit));
-    if (Number.isFinite(beforeTimestamp)) params.set('before_timestamp', String(beforeTimestamp));
-
-    const qs = params.toString();
-    const url = `${base}/api/pools?endpoint=pool_ohlcv${qs ? `&${qs}` : ''}`;
-
-    const resp = await fetch(url, { method: 'GET', signal });
-    if (!resp.ok) {
-        const text = await resp.text().catch(() => '');
-        throw new Error(text || `HTTP ${resp.status}`);
-    }
-    return resp.json();
-}
-
 export async function openPosition({ apiBaseUrl, initData, chain, poolAddress, poolVersion, amount, rangeLowerPct, rangeUpperPct, slippageTolerance, allowEntrySwap, walletId, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/trading?endpoint=open_position`;

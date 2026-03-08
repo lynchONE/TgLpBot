@@ -164,32 +164,6 @@ export function buildGmgnUrl(pool, fallbackChain = 'bsc') {
   return `https://gmgn.ai/${chain}/token/${tokenAddress}`;
 }
 
-export function resolveApiBaseUrl() {
-  const query = new URLSearchParams(window.location.search).get('apiBaseUrl');
-  if (query && query.trim()) return query.trim();
-
-  const envBase = String(import.meta.env.VITE_API_BASE_URL || '').trim();
-  if (envBase) {
-    try {
-      const pageProto = window.location.protocol;
-      const envProto = new URL(envBase).protocol;
-      if (pageProto === 'https:' && envProto === 'http:') return '';
-    } catch {
-      // ignore invalid env URL
-    }
-    return envBase;
-  }
-
-  const host = window.location.hostname;
-  if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:8080';
-  return '';
-}
-
-export function resolveInitDataFromQuery() {
-  const query = new URLSearchParams(window.location.search).get('initData');
-  return query ? query.trim() : '';
-}
-
 export function normalizeWidgetSelection(value) {
   if (!Array.isArray(value)) return [...DEFAULT_WIDGETS];
   const allowed = new Set(DEFAULT_WIDGETS);
