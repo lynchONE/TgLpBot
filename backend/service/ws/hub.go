@@ -22,6 +22,7 @@ func Default() *Hub { return defaultHub }
 func SendProgress(userID uint, operation string, taskID uint, currentStep, totalSteps int, status, errMsg string) {
 	h := defaultHub
 	if h == nil {
+		log.Printf("[WS SendProgress] hub is nil, dropping: user=%d op=%s step=%d/%d status=%s", userID, operation, currentStep, totalSteps, status)
 		return
 	}
 	msg := struct {
@@ -45,7 +46,8 @@ func SendProgress(userID uint, operation string, taskID uint, currentStep, total
 	if err != nil {
 		return
 	}
-	h.SendToUsers([]uint{userID}, data)
+	delivered := h.SendToUsers([]uint{userID}, data)
+	log.Printf("[WS SendProgress] user=%d op=%s task=%d step=%d/%d status=%s delivered=%d", userID, operation, taskID, currentStep, totalSteps, status, delivered)
 }
 
 const (
@@ -139,13 +141,15 @@ func (h *Hub) Run() {
 }
 
 // SendToUsers sends a message to all connected clients of the given user IDs.
-func (h *Hub) SendToUsers(userIDs []uint, message []byte) {
+// Returns the number of clients the message was delivered to.
+func (h *Hub) SendToUsers(userIDs []uint, message []byte) int {
 	if len(userIDs) == 0 || len(message) == 0 {
-		return
+		return 0
 	}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	delivered := 0
 	for _, uid := range userIDs {
 		clients, ok := h.userIndex[uid]
 		if !ok {
@@ -154,11 +158,13 @@ func (h *Hub) SendToUsers(userIDs []uint, message []byte) {
 		for c := range clients {
 			select {
 			case c.send <- message:
+				delivered++
 			default:
-				// Buffer full, skip this message for this client.
+				log.Printf("[WS Hub] send buffer full, dropping message for user=%d", uid)
 			}
 		}
 	}
+	return delivered
 }
 
 // OnlineUserCount returns the number of unique users with active WS connections.

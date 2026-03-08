@@ -2057,6 +2057,25 @@ export default function App() {
         }
     };
 
+    // Polling fallback: detect close completion from positions data
+    useEffect(() => {
+        if (!operationProgress) return;
+        if (operationProgress.operation !== 'close_position') return;
+        if (operationProgress.status === 'done' || operationProgress.status === 'error') return;
+        const taskId = operationProgress.taskId;
+        if (!taskId) return;
+        const positions = data?.positions;
+        if (!positions) return; // data not loaded yet
+        const found = positions.some(p => Number(p?.task_id) === Number(taskId));
+        if (!found) {
+            setOperationProgress(prev => {
+                if (!prev || prev.operation !== 'close_position') return prev;
+                if (prev.status === 'done' || prev.status === 'error') return prev;
+                return { ...prev, currentStep: 3, status: 'done' };
+            });
+        }
+    }, [data, operationProgress]);
+
     const handleDeleteTask = async (taskId) => {
         if (!hasInitData || showAdmin) return;
         const id = Number(taskId);

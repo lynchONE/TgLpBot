@@ -7,6 +7,7 @@ import (
 
 	"TgLpBot/base/models"
 	"TgLpBot/service/strategy"
+	"TgLpBot/service/ws"
 )
 
 type taskStopRequest struct {
@@ -71,6 +72,7 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if task.Status == models.StrategyStatusStopped {
+		ws.SendProgress(user.ID, "close_position", req.TaskID, 3, 4, "done", "")
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(taskStopResponse{
 			OK:      true,
@@ -83,6 +85,7 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if task.Status == models.StrategyStatusStopping {
+		ws.SendProgress(user.ID, "close_position", req.TaskID, 1, 4, "active", "")
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(taskStopResponse{
 			OK:      true,
@@ -118,6 +121,7 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 			s.Realtime.InvalidateUser(user.ID)
 		}
 
+		ws.SendProgress(user.ID, "close_position", req.TaskID, 1, 4, "active", "")
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(taskStopResponse{
 			OK:      true,
@@ -158,6 +162,7 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 			if s != nil && s.Realtime != nil {
 				s.Realtime.InvalidateUser(user.ID)
 			}
+			ws.SendProgress(user.ID, "close_position", req.TaskID, 3, 4, "done", "")
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(taskStopResponse{
 				OK:      true,
@@ -180,6 +185,7 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 			if s != nil && s.Realtime != nil {
 				s.Realtime.InvalidateUser(user.ID)
 			}
+			ws.SendProgress(user.ID, "close_position", req.TaskID, 3, 4, "done", "")
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(taskStopResponse{
 				OK:      true,
@@ -218,6 +224,7 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 		s.Realtime.InvalidateUser(user.ID)
 	}
 
+	ws.SendProgress(user.ID, "close_position", req.TaskID, 1, 4, "active", "")
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(taskStopResponse{
 		OK:      true,

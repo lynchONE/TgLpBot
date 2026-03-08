@@ -771,6 +771,7 @@ body {
 }
 
 .panel-shell {
+  position: relative;
   min-height: 0;
   border-radius: var(--radius-lg);
   border: 1px solid var(--line);
@@ -2587,20 +2588,117 @@ body {
 .task-action-item.danger { color: #f87171; }
 
 /* ═══════════════════════════════════════
-   Step Progress Modal
+   Step Progress Modal — inline panel overlay
 ═══════════════════════════════════════ */
-.step-list {
+.spm-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(7, 11, 17, 0.82);
+  backdrop-filter: blur(6px);
+  border-radius: var(--radius-lg);
+  animation: spm-fade-in 200ms ease;
+}
+@keyframes spm-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.spm-card {
+  width: 280px;
+  animation: spm-scale-in 280ms cubic-bezier(.2,.9,.3,1);
+}
+@keyframes spm-scale-in {
+  from { opacity: 0; transform: scale(0.92) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* Header */
+.spm-header {
+  margin-bottom: 16px;
+}
+.spm-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.spm-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+  letter-spacing: 0.02em;
+}
+.spm-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: none;
+  background: rgba(138, 160, 194, 0.1);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 160ms;
+}
+.spm-close:hover {
+  background: rgba(138, 160, 194, 0.2);
+  color: var(--text);
+}
+
+/* Progress bar */
+.spm-progress-track {
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(138, 160, 194, 0.12);
+  overflow: hidden;
+}
+.spm-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #22d38a, #34eaa0);
+  transition: width 400ms cubic-bezier(.4,0,.2,1);
+  box-shadow: 0 0 8px rgba(34, 211, 138, 0.35);
+}
+.spm-progress-fill--error {
+  background: linear-gradient(90deg, #ff5e76, #ff7e92);
+  box-shadow: 0 0 8px rgba(255, 94, 118, 0.35);
+}
+
+/* Steps */
+.spm-steps {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin: 12px 0 16px;
+  gap: 0;
 }
-.step-row {
+.spm-step {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: 10px;
+  position: relative;
+  padding: 6px 0;
 }
-.step-icon {
+
+/* Connector line between steps */
+.spm-connector {
+  position: absolute;
+  left: 10px;
+  top: 28px;
+  bottom: -6px;
+  width: 1px;
+  background: rgba(138, 160, 194, 0.12);
+  transition: background 300ms;
+}
+.spm-connector--done {
+  background: rgba(34, 211, 138, 0.3);
+}
+
+/* Step indicator (circle) */
+.spm-indicator {
   flex-shrink: 0;
   width: 20px;
   height: 20px;
@@ -2608,90 +2706,141 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin-top: 1px;
+  transition: all 300ms cubic-bezier(.2,.9,.3,1);
+  position: relative;
 }
-.step-icon.done {
+.spm-indicator--done {
   background: var(--positive);
   color: #fff;
-  box-shadow: 0 2px 6px rgba(34, 211, 138, 0.3);
+  box-shadow: 0 0 10px rgba(34, 211, 138, 0.3);
 }
-.step-icon.active {
-  border: 2px solid var(--positive);
-  background: transparent;
+.spm-indicator--active {
+  background: rgba(34, 211, 138, 0.12);
+  color: var(--positive);
 }
-.step-icon.error {
+.spm-indicator-icon {
+  position: relative;
+  z-index: 1;
+  display: flex;
+}
+.spm-ring {
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 1.5px solid var(--positive);
+  animation: spm-ring-pulse 2s ease-in-out infinite;
+}
+@keyframes spm-ring-pulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 0; transform: scale(1.35); }
+}
+.spm-indicator--error {
   background: var(--negative);
   color: #fff;
-  box-shadow: 0 2px 6px rgba(255, 94, 118, 0.3);
+  box-shadow: 0 0 10px rgba(255, 94, 118, 0.3);
 }
-.step-icon.pending {
-  border: 2px solid rgba(134, 153, 184, 0.3);
+.spm-indicator--pending {
   background: transparent;
+  border: 1.5px solid rgba(138, 160, 194, 0.2);
+  color: rgba(138, 160, 194, 0.3);
 }
-.step-pulse {
-  display: block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--positive);
-  animation: step-pulse-anim 1.2s ease-in-out infinite;
-}
-@keyframes step-pulse-anim {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.4; transform: scale(0.7); }
-}
-.step-content {
+
+/* Step body */
+.spm-step-body {
   flex: 1;
   min-width: 0;
+  padding-top: 1px;
 }
-.step-row.done .step-label {
+.spm-step-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  transition: color 300ms;
+}
+.spm-step--done .spm-step-label {
   color: var(--positive);
-  font-size: 13px;
-  font-weight: 600;
 }
-.step-row.active .step-label {
+.spm-step--active .spm-step-label {
   color: var(--text);
-  font-size: 13px;
-  font-weight: 600;
 }
-.step-row.error .step-label {
+.spm-step--error .spm-step-label {
   color: var(--negative);
-  font-size: 13px;
-  font-weight: 600;
 }
-.step-row.pending .step-label {
+.spm-step--pending .spm-step-label {
   color: var(--text-muted);
-  opacity: 0.5;
-  font-size: 13px;
-  font-weight: 600;
+  opacity: 0.4;
 }
-.step-error {
-  margin-top: 4px;
+.spm-step-error {
+  margin-top: 3px;
   font-size: 11px;
   color: var(--negative);
   word-break: break-all;
-  line-height: 1.4;
+  line-height: 1.35;
+  opacity: 0.85;
 }
-.step-footer {
+
+/* Footer */
+.spm-footer {
+  margin-top: 14px;
   padding-top: 12px;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid rgba(138, 160, 194, 0.1);
+}
+.spm-btn {
   display: flex;
+  align-items: center;
   justify-content: center;
-}
-.step-footer .accent-btn,
-.step-footer .ghost-chip {
+  gap: 6px;
   width: 100%;
-  text-align: center;
-  padding: 10px 18px;
+  padding: 8px 16px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  border: none;
+  transition: all 160ms;
 }
-.step-footer .ghost-chip.danger {
+.spm-btn--done {
+  background: linear-gradient(135deg, #22d38a, #1bb876);
+  color: #fff;
+  box-shadow: 0 2px 12px rgba(34, 211, 138, 0.25);
+}
+.spm-btn--done:hover {
+  box-shadow: 0 4px 18px rgba(34, 211, 138, 0.35);
+  transform: translateY(-1px);
+}
+.spm-btn--error {
+  background: rgba(255, 94, 118, 0.1);
   color: var(--negative);
-  border-color: var(--negative);
 }
-.step-hint {
-  font-size: 12px;
+.spm-btn--error:hover {
+  background: rgba(255, 94, 118, 0.18);
+}
+.spm-btn--ghost {
+  background: rgba(138, 160, 194, 0.08);
   color: var(--text-muted);
-  text-align: center;
-  width: 100%;
+  border: 1px solid rgba(138, 160, 194, 0.15);
+}
+.spm-btn--ghost:hover {
+  background: rgba(138, 160, 194, 0.14);
+  color: var(--text);
+}
+.spm-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-muted);
   padding: 6px 0;
+}
+.spm-hint-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--positive);
+  animation: spm-hint-blink 1.4s ease-in-out infinite;
+}
+@keyframes spm-hint-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
 }

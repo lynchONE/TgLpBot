@@ -925,6 +925,25 @@ export default function App() {
     }
   }, [apiBaseUrl, initData, loadPositions]);
 
+  // Polling fallback: detect close completion from positions data
+  useEffect(() => {
+    if (!operationProgress) return;
+    if (operationProgress.operation !== 'close_position') return;
+    if (operationProgress.status === 'done' || operationProgress.status === 'error') return;
+    const taskId = operationProgress.taskId;
+    if (!taskId) return;
+    const rows = Array.isArray(positions?.positions) ? positions.positions : null;
+    if (!rows) return; // data not loaded yet
+    const found = rows.some(p => Number(p?.task_id) === Number(taskId));
+    if (!found) {
+      setOperationProgress(prev => {
+        if (!prev || prev.operation !== 'close_position') return prev;
+        if (prev.status === 'done' || prev.status === 'error') return prev;
+        return { ...prev, currentStep: 3, status: 'done' };
+      });
+    }
+  }, [positions, operationProgress]);
+
   const handleTaskDelete = useCallback(async (taskId) => {
     await deleteTask({ apiBaseUrl, initData, taskId });
     loadPositions();
@@ -1476,6 +1495,19 @@ export default function App() {
             })
           )}
         </div>
+        {operationProgress && (
+          <StepProgressModal
+            operation={operationProgress.operation}
+            progress={operationProgress}
+            onClose={() => {
+              const op = operationProgress;
+              setOperationProgress(null);
+              if (op?.status === 'done' && op?.operation === 'open_position') {
+                setOpenPosPool(null);
+              }
+            }}
+          />
+        )}
       </PanelShell>
     ),
 
@@ -1823,20 +1855,6 @@ export default function App() {
           onSubmit={handleOpenPosition}
           onClose={() => setOpenPosPool(null)}
           busy={openPosBusy}
-        />
-      )}
-
-      {operationProgress && (
-        <StepProgressModal
-          operation={operationProgress.operation}
-          progress={operationProgress}
-          onClose={() => {
-            const op = operationProgress;
-            setOperationProgress(null);
-            if (op?.status === 'done' && op?.operation === 'open_position') {
-              setOpenPosPool(null);
-            }
-          }}
         />
       )}
     </div>
