@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 
 const OPEN_STEPS = [
     '验证权限与配置',
@@ -14,6 +14,8 @@ const CLOSE_STEPS = [
     '兑换为 USDT',
     '完成',
 ];
+
+const STEP_ANIM_MS = 300;
 
 function StepIcon({ status }) {
     if (status === 'done') {
@@ -44,10 +46,48 @@ export default function StepProgressModal({ operation, progress, onClose }) {
     if (!operation) return null;
 
     const steps = operation === 'open_position' ? OPEN_STEPS : CLOSE_STEPS;
-    const { currentStep = 0, status = 'active', error = '' } = progress || {};
-    const isDone = status === 'done';
-    const isError = status === 'error';
-    const canClose = isDone || isError;
+    const targetStep = progress?.currentStep ?? 0;
+    const targetStatus = progress?.status ?? 'active';
+    const error = progress?.error || '';
+
+    // Internal animated state
+    const [displayStep, setDisplayStep] = useState(0);
+    const [displayStatus, setDisplayStatus] = useState('active');
+    // Fallback: allow closing after 10s even if not done
+    const [allowClose, setAllowClose] = useState(false);
+
+    useEffect(() => {
+        const timer = setTimeout(() => setAllowClose(true), 10000);
+        return () => clearTimeout(timer);
+    }, []);
+
+    // Animate step-by-step toward targetStep
+    useEffect(() => {
+        if (targetStatus === 'error') {
+            setDisplayStep(targetStep);
+            setDisplayStatus('error');
+            return;
+        }
+
+        if (displayStep < targetStep) {
+            const timer = setTimeout(() => {
+                setDisplayStep(prev => prev + 1);
+            }, STEP_ANIM_MS);
+            return () => clearTimeout(timer);
+        }
+    }, [displayStep, targetStep, targetStatus]);
+
+    // Sync status once we've caught up
+    useEffect(() => {
+        if (targetStatus === 'error') return;
+        if (displayStep >= targetStep) {
+            setDisplayStatus(targetStatus);
+        }
+    }, [displayStep, targetStep, targetStatus]);
+
+    const isDone = displayStatus === 'done' && displayStep >= targetStep;
+    const isError = displayStatus === 'error';
+    const canClose = isDone || isError || allowClose;
     const title = operation === 'open_position' ? '开仓进度' : '撤仓进度';
 
     return (
@@ -63,8 +103,8 @@ export default function StepProgressModal({ operation, progress, onClose }) {
                 <div className="step-list">
                     {steps.map((label, i) => {
                         let stepStatus;
-                        if (i < currentStep) stepStatus = 'done';
-                        else if (i === currentStep) stepStatus = status;
+                        if (i < displayStep) stepStatus = 'done';
+                        else if (i === displayStep) stepStatus = displayStatus;
                         else stepStatus = 'pending';
 
                         return (
@@ -86,6 +126,8 @@ export default function StepProgressModal({ operation, progress, onClose }) {
                         <button type="button" className="accent-btn" onClick={onClose}>完成</button>
                     ) : isError ? (
                         <button type="button" className="ghost-chip danger" onClick={onClose}>关闭</button>
+                    ) : allowClose ? (
+                        <button type="button" className="ghost-chip" onClick={onClose}>后台继续...</button>
                     ) : (
                         <div className="step-hint">请勿关闭此页面...</div>
                     )}

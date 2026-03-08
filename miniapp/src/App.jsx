@@ -1925,8 +1925,11 @@ export default function App() {
         }
         if (msg && msg.type === 'operation_progress') {
             setOperationProgress(prev => {
-                // Only update if the operation matches or is newer
-                if (prev && prev.operation !== msg.operation) return prev;
+                if (!prev || prev.operation !== msg.operation) return prev;
+                // Never go backwards: don't overwrite a more advanced step
+                if (msg.current_step < prev.currentStep) return prev;
+                // Never overwrite terminal states (done/error)
+                if (prev.status === 'done' || prev.status === 'error') return prev;
                 return {
                     operation: msg.operation,
                     taskId: msg.task_id,
@@ -2023,9 +2026,19 @@ export default function App() {
         setOperationProgress({ operation: 'close_position', taskId: id, currentStep: 0, totalSteps: 4, status: 'active', error: '' });
         try {
             const resp = await stopTask({ apiBaseUrl, initData, taskId: id });
-            // Step 0 done, step 1 active (waiting for backend executor)
-            setOperationProgress(prev => prev?.operation === 'close_position'
-                ? { ...prev, currentStep: 1, status: 'active' } : prev);
+            if (resp?.status === 'stopped' || resp?.pending === false) {
+                // Already stopped or immediate stop — all done
+                setOperationProgress(prev => prev?.operation === 'close_position'
+                    ? { ...prev, currentStep: 3, status: 'done' } : prev);
+            } else {
+                // Async — advance to step 1 only if WS hasn't already gone further
+                setOperationProgress(prev => {
+                    if (!prev || prev.operation !== 'close_position') return prev;
+                    if (prev.status === 'done' || prev.status === 'error') return prev;
+                    if (prev.currentStep > 1) return prev;
+                    return { ...prev, currentStep: 1, status: 'active' };
+                });
+            }
         } catch (e) {
             const msg = String(e?.message || e || '').trim();
             if (msg.includes('task not found')) {

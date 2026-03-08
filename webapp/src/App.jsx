@@ -862,7 +862,9 @@ export default function App() {
   const handleWsProgressMessage = useCallback((msg) => {
     if (msg && msg.type === 'operation_progress') {
       setOperationProgress(prev => {
-        if (prev && prev.operation !== msg.operation) return prev;
+        if (!prev || prev.operation !== msg.operation) return prev;
+        if (msg.current_step < prev.currentStep) return prev;
+        if (prev.status === 'done' || prev.status === 'error') return prev;
         return {
           operation: msg.operation,
           taskId: msg.task_id,
@@ -903,9 +905,18 @@ export default function App() {
   const handleTaskStop = useCallback(async (taskId) => {
     setOperationProgress({ operation: 'close_position', taskId, currentStep: 0, totalSteps: 4, status: 'active', error: '' });
     try {
-      await stopTask({ apiBaseUrl, initData, taskId });
-      setOperationProgress(prev => prev?.operation === 'close_position'
-        ? { ...prev, currentStep: 1, status: 'active' } : prev);
+      const resp = await stopTask({ apiBaseUrl, initData, taskId });
+      if (resp?.status === 'stopped' || resp?.pending === false) {
+        setOperationProgress(prev => prev?.operation === 'close_position'
+          ? { ...prev, currentStep: 3, status: 'done' } : prev);
+      } else {
+        setOperationProgress(prev => {
+          if (!prev || prev.operation !== 'close_position') return prev;
+          if (prev.status === 'done' || prev.status === 'error') return prev;
+          if (prev.currentStep > 1) return prev;
+          return { ...prev, currentStep: 1, status: 'active' };
+        });
+      }
       loadPositions();
     } catch (e) {
       const msg = String(e?.message || e);

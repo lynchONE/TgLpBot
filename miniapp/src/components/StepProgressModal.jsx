@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 
 const OPEN_STEPS = [
     '验证权限与配置',
@@ -15,6 +15,8 @@ const CLOSE_STEPS = [
     '完成',
 ];
 
+const STEP_ANIM_MS = 300;
+
 const CheckIcon = () => (
     <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -30,26 +32,26 @@ const XIcon = () => (
 function StepIcon({ status }) {
     if (status === 'done') {
         return (
-            <div className="h-5 w-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm shadow-emerald-500/30">
+            <div className="h-5 w-5 rounded-full bg-emerald-500 flex items-center justify-center shadow-sm shadow-emerald-500/30 transition-all duration-300">
                 <CheckIcon />
             </div>
         );
     }
     if (status === 'active') {
         return (
-            <div className="h-5 w-5 rounded-full border-2 border-emerald-500 flex items-center justify-center">
+            <div className="h-5 w-5 rounded-full border-2 border-emerald-500 flex items-center justify-center transition-all duration-300">
                 <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
             </div>
         );
     }
     if (status === 'error') {
         return (
-            <div className="h-5 w-5 rounded-full bg-red-500 flex items-center justify-center shadow-sm shadow-red-500/30">
+            <div className="h-5 w-5 rounded-full bg-red-500 flex items-center justify-center shadow-sm shadow-red-500/30 transition-all duration-300">
                 <XIcon />
             </div>
         );
     }
-    return <div className="h-5 w-5 rounded-full border-2 border-zinc-300 dark:border-white/20" />;
+    return <div className="h-5 w-5 rounded-full border-2 border-zinc-300 dark:border-white/20 transition-all duration-300" />;
 }
 
 function stepColor(status) {
@@ -63,10 +65,50 @@ export default function StepProgressModal({ operation, progress, onClose }) {
     if (!operation) return null;
 
     const steps = operation === 'open_position' ? OPEN_STEPS : CLOSE_STEPS;
-    const { currentStep = 0, status = 'active', error = '' } = progress || {};
-    const isDone = status === 'done';
-    const isError = status === 'error';
-    const canClose = isDone || isError;
+    const targetStep = progress?.currentStep ?? 0;
+    const targetStatus = progress?.status ?? 'active';
+    const error = progress?.error || '';
+
+    // Internal animated state
+    const [displayStep, setDisplayStep] = useState(0);
+    const [displayStatus, setDisplayStatus] = useState('active');
+    // Fallback: allow closing after 10s even if not done
+    const [allowClose, setAllowClose] = useState(false);
+
+    useEffect(() => {
+        const timer = setTimeout(() => setAllowClose(true), 10000);
+        return () => clearTimeout(timer);
+    }, []);
+
+    // Animate step-by-step toward targetStep
+    useEffect(() => {
+        // Error: jump immediately
+        if (targetStatus === 'error') {
+            setDisplayStep(targetStep);
+            setDisplayStatus('error');
+            return;
+        }
+
+        // Need to advance one step
+        if (displayStep < targetStep) {
+            const timer = setTimeout(() => {
+                setDisplayStep(prev => prev + 1);
+            }, STEP_ANIM_MS);
+            return () => clearTimeout(timer);
+        }
+    }, [displayStep, targetStep, targetStatus]);
+
+    // Sync status once we've caught up
+    useEffect(() => {
+        if (targetStatus === 'error') return; // handled above
+        if (displayStep >= targetStep) {
+            setDisplayStatus(targetStatus);
+        }
+    }, [displayStep, targetStep, targetStatus]);
+
+    const isDone = displayStatus === 'done' && displayStep >= targetStep;
+    const isError = displayStatus === 'error';
+    const canClose = isDone || isError || allowClose;
     const title = operation === 'open_position' ? '开仓进度' : '撤仓进度';
 
     return (
@@ -94,8 +136,8 @@ export default function StepProgressModal({ operation, progress, onClose }) {
                 <div className="space-y-3">
                     {steps.map((label, i) => {
                         let stepStatus;
-                        if (i < currentStep) stepStatus = 'done';
-                        else if (i === currentStep) stepStatus = status;
+                        if (i < displayStep) stepStatus = 'done';
+                        else if (i === displayStep) stepStatus = displayStatus;
                         else stepStatus = 'pending';
 
                         return (
@@ -104,7 +146,7 @@ export default function StepProgressModal({ operation, progress, onClose }) {
                                     <StepIcon status={stepStatus} />
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <div className={`text-sm font-medium ${stepColor(stepStatus)}`}>
+                                    <div className={`text-sm font-medium transition-colors duration-300 ${stepColor(stepStatus)}`}>
                                         {label}
                                     </div>
                                     {stepStatus === 'error' && error && (
@@ -134,6 +176,14 @@ export default function StepProgressModal({ operation, progress, onClose }) {
                             className="w-full rounded-xl bg-red-500/10 px-4 py-2.5 text-sm font-semibold text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-colors"
                         >
                             关闭
+                        </button>
+                    ) : allowClose ? (
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="w-full rounded-xl border border-zinc-200 dark:border-white/10 px-4 py-2.5 text-sm font-semibold text-zinc-500 dark:text-white/50 hover:bg-zinc-100 dark:hover:bg-white/5 transition-colors"
+                        >
+                            后台继续...
                         </button>
                     ) : (
                         <div className="text-center text-xs text-zinc-400 dark:text-white/40">
