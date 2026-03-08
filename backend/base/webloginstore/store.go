@@ -19,7 +19,7 @@ type Entry struct {
 }
 
 const (
-	CodeTTL    = 5 * time.Minute
+	CodeTTL    = 3 * time.Minute
 	codeLength = 6
 )
 

@@ -78,7 +78,7 @@ const KLINE_INTERVALS = [
 ];
 const SMART_POOL_WINDOW_HOURS = 2;
 const SMART_PNL_WINDOW_HOURS = 24;
-const KLINE_MARKER_WINDOW_HOURS = 2;
+const KLINE_MARKER_WINDOW_HOURS = 24;
 
 function getKlineIntervalMeta(bar) {
   return KLINE_INTERVALS.find((item) => item.key === bar) || KLINE_INTERVALS[0];
@@ -432,6 +432,11 @@ export default function App() {
     storageSet(STORAGE.sort, hotSort);
     storageSet(STORAGE.refreshInterval, String(refreshInterval));
 
+    if (initData) {
+      storageSet(STORAGE.initData, initData);
+    } else {
+      storageRemove(STORAGE.initData);
+    }
     if (loginUser) {
       storageSet(STORAGE.loginUser, JSON.stringify(loginUser));
     } else {

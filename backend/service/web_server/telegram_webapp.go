@@ -89,7 +89,7 @@ func VerifyTelegramWebAppInitData(initData string, botToken string) (*TelegramWe
 	authDateRaw := strings.TrimSpace(values.Get("auth_date"))
 	if authDateRaw != "" {
 		if ts, err := strconv.ParseInt(authDateRaw, 10, 64); err == nil && ts > 0 {
-			if time.Since(time.Unix(ts, 0)) > 24*time.Hour {
+			if time.Since(time.Unix(ts, 0)) > 7*24*time.Hour {
 				return nil, fmt.Errorf("initData expired")
 			}
 		}

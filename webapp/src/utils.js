@@ -1,6 +1,6 @@
 export const WIDGETS = [
   { key: 'hot_pools', label: '热门池子' },
-  { key: 'gmgn_kline', label: 'GMGN K线' },
+  { key: 'gmgn_kline', label: 'K线' },
   { key: 'positions', label: '仓位' },
   { key: 'smart_money', label: '聪明钱' },
 ];

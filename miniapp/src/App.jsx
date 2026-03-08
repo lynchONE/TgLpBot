@@ -138,7 +138,7 @@ const STORAGE_WEB_WORKBENCH_WIDGETS = 'tglp_web_workbench_widgets_v1';
 
 const WEB_WORKBENCH_WIDGETS = [
     { key: 'hot_pools', label: '热门池子' },
-    { key: 'gmgn_kline', label: 'GMGN K线' },
+    { key: 'gmgn_kline', label: 'K线' },
     { key: 'positions', label: '仓位' },
     { key: 'smart_money', label: '聪明钱' },
 ];
