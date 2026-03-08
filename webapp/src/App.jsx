@@ -23,6 +23,7 @@ import {
   checkLoginCode,
   deleteTask,
   fetchHotPools,
+  fetchPositionProfitPoster,
   fetchRealtimePositions,
   fetchSmartMoneyOverview,
   fetchSmartMoneyPoolAdds,
@@ -39,6 +40,7 @@ import { WEBAPP_CONFIG } from './config';
 import PanelShell, { EmptyState, MetricCard } from './components/PanelShell';
 import KlineChart from './components/KlineChart';
 import OpenPositionModal from './components/OpenPositionModal';
+import PositionProfitPosterModal from './components/PositionProfitPosterModal';
 import StepProgressModal from './components/StepProgressModal';
 import TaskActionMenu from './components/TaskActionMenu';
 import NumberFlowValue from './components/NumberFlowValue';
@@ -851,6 +853,11 @@ export default function App() {
   const [openPosBusy, setOpenPosBusy] = useState(false);
   const [taskActionPos, setTaskActionPos] = useState(null);
   const [operationProgress, setOperationProgress] = useState(null);
+  const [posterTask, setPosterTask] = useState(null);
+  const [posterData, setPosterData] = useState(null);
+  const [posterLoading, setPosterLoading] = useState(false);
+  const [posterError, setPosterError] = useState('');
+  const [posterFetchNonce, setPosterFetchNonce] = useState(0);
 
   // WebSocket for real-time operation progress
   const progressWsUrl = useMemo(() => {
@@ -879,6 +886,31 @@ export default function App() {
   }, []);
 
   useWebSocket({ url: progressWsUrl, onMessage: handleWsProgressMessage, enabled: hasInitData && !!progressWsUrl });
+
+  useEffect(() => {
+    if (!posterTask?.task_id || !apiBaseUrl || !initData) return undefined;
+    const ctrl = new AbortController();
+    setPosterLoading(true);
+    setPosterError('');
+    setPosterData(null);
+
+    fetchPositionProfitPoster({
+      apiBaseUrl,
+      initData,
+      taskId: Number(posterTask.task_id),
+      signal: ctrl.signal,
+    })
+      .then((resp) => setPosterData(resp))
+      .catch((e) => {
+        if (e?.name === 'AbortError') return;
+        setPosterError(String(e?.message || e));
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setPosterLoading(false);
+      });
+
+    return () => ctrl.abort();
+  }, [apiBaseUrl, initData, posterTask, posterFetchNonce]);
 
   const handleOpenPosition = useCallback(async (params) => {
     const panelKey = openPosPool?.panelKey || 'hot_pools';
@@ -973,6 +1005,21 @@ export default function App() {
 
   const copyAddr = useCallback((addr) => {
     navigator.clipboard?.writeText(addr).catch(() => {});
+  }, []);
+
+  const openProfitPoster = useCallback((position) => {
+    if (!position?.task_id) return;
+    setTaskActionPos(null);
+    setPosterError('');
+    setPosterData(null);
+    setPosterTask({ ...position });
+  }, []);
+
+  const closeProfitPoster = useCallback(() => {
+    setPosterTask(null);
+    setPosterData(null);
+    setPosterError('');
+    setPosterLoading(false);
   }, []);
 
   const renderOperationProgress = (panelKey) => {
@@ -1392,6 +1439,7 @@ export default function App() {
               const taskRangeUp = Number(p?.task_range_upper_pct);
               const taskAmount = Number(p?.task_amount_usdt);
               const priceRange = computePriceRange(p);
+              const canGeneratePoster = taskId > 0 && (Boolean(p?.has_liquidity) || totalVal > 0 || hasPnl);
 
               const statusClass = statusLabel.includes('错误') ? 'st-error' :
                 statusLabel.includes('暂停') || statusLabel.includes('停止') || statusLabel.includes('撤出') ? 'st-warn' :
@@ -1438,26 +1486,44 @@ export default function App() {
                       </div>
                     </div>
                     <div className="pos-card-right-block">
-                      <div className="pos-total">{formatUsd(totalVal)}</div>
-                      {hasPnl && (
-                        <div className={`pos-pnl ${pnl >= 0 ? 'positive' : 'negative'}`}>
-                          {pnl >= 0 ? '+' : ''}{formatNumber(pnl, 2)}
-                        </div>
-                      )}
-                      {taskId > 0 && (
-                        <div className="pos-action-anchor">
-                          <button type="button" className="icon-btn-tiny" onClick={(e) => { e.stopPropagation(); setTaskActionPos((prev) => prev?.task_id === p?.task_id ? null : p); }} title="任务操作">
-                            <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4z"/></svg>
-                          </button>
-                          {taskActionPos?.task_id === p?.task_id && (
-                            <TaskActionMenu
-                              position={taskActionPos}
-                              onPause={handleTaskPause}
-                              onStop={handleTaskStop}
-                              onDelete={handleTaskDelete}
-                              onEditRange={handleTaskEditRange}
-                              onClose={() => setTaskActionPos(null)}
-                            />
+                      <div className="pos-metrics">
+                        <div className="pos-total">{formatUsd(totalVal)}</div>
+                        {hasPnl && (
+                          <div className={`pos-pnl ${pnl >= 0 ? 'positive' : 'negative'}`}>
+                            {pnl >= 0 ? '+' : ''}{formatNumber(pnl, 2)}
+                          </div>
+                        )}
+                      </div>
+                      {(canGeneratePoster || taskId > 0) && (
+                        <div className="pos-card-actions">
+                          {canGeneratePoster && (
+                            <button
+                              type="button"
+                              className="mini-link accent"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openProfitPoster(p);
+                              }}
+                            >
+                              收益图
+                            </button>
+                          )}
+                          {taskId > 0 && (
+                            <div className="pos-action-anchor">
+                              <button type="button" className="icon-btn-tiny" onClick={(e) => { e.stopPropagation(); setTaskActionPos((prev) => prev?.task_id === p?.task_id ? null : p); }} title="任务操作">
+                                <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4zm0 7a2 2 0 110-4 2 2 0 010 4z"/></svg>
+                              </button>
+                              {taskActionPos?.task_id === p?.task_id && (
+                                <TaskActionMenu
+                                  position={taskActionPos}
+                                  onPause={handleTaskPause}
+                                  onStop={handleTaskStop}
+                                  onDelete={handleTaskDelete}
+                                  onEditRange={handleTaskEditRange}
+                                  onClose={() => setTaskActionPos(null)}
+                                />
+                              )}
+                            </div>
                           )}
                         </div>
                       )}
@@ -1891,6 +1957,18 @@ export default function App() {
           onSubmit={handleOpenPosition}
           onClose={() => setOpenPosPool(null)}
           busy={openPosBusy}
+        />
+      )}
+
+      {posterTask && (
+        <PositionProfitPosterModal
+          task={posterTask}
+          data={posterData}
+          loading={posterLoading}
+          error={posterError}
+          loginUser={loginUser}
+          onClose={closeProfitPoster}
+          onRetry={() => setPosterFetchNonce((value) => value + 1)}
         />
       )}
     </div>

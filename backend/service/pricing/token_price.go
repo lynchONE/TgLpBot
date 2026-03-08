@@ -2,6 +2,7 @@ package pricing
 
 import (
 	"TgLpBot/base/config"
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -423,7 +424,7 @@ func (s *TokenPriceService) fetchGeckoTokenPrices(network string, tokenAddresses
 	return out, nil
 }
 
-// ── OKX DEX Market current-price ──
+// ── OKX DEX Market price ──
 
 func okxAvailable() bool {
 	return config.AppConfig != nil &&
@@ -437,6 +438,7 @@ func okxMarketBaseURL() string {
 		return "https://web3.okx.com/api/v6/dex/market"
 	}
 	base = strings.TrimRight(base, "/")
+	base = strings.Replace(base, "https://www.okx.com/", "https://web3.okx.com/", 1)
 	replacer := strings.NewReplacer(
 		"/api/v6/dex/aggregator", "/api/v6/dex/market",
 		"/api/v5/dex/aggregator", "/api/v5/dex/market",
@@ -453,20 +455,13 @@ func okxIsV6() bool {
 	return base == "" || strings.Contains(base, "/v6/")
 }
 
-func okxChainQueryKey() string {
-	if okxIsV6() {
-		return "chainIndex"
-	}
-	return "chainId"
-}
-
-func okxSignRequest(req *http.Request) {
+func okxSignRequest(req *http.Request, body string) {
 	apiKey := strings.TrimSpace(config.AppConfig.OKXAPIKey)
 	secretKey := strings.TrimSpace(config.AppConfig.OKXSecretKey)
 	passphrase := strings.TrimSpace(config.AppConfig.OKXPassphrase)
 
 	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
-	message := timestamp + req.Method + req.URL.RequestURI()
+	message := timestamp + req.Method + req.URL.RequestURI() + body
 	mac := hmac.New(sha256.New, []byte(secretKey))
 	mac.Write([]byte(message))
 	signature := base64.StdEncoding.EncodeToString(mac.Sum(nil))
@@ -495,7 +490,6 @@ func (s *TokenPriceService) fetchOKXTokenPrices(network string, tokenAddresses [
 	}
 	chainIndex := strconv.FormatInt(cc.ChainID, 10)
 	baseURL := okxMarketBaseURL()
-	chainKey := okxChainQueryKey()
 
 	out := make(map[string]float64, len(tokenAddresses))
 	var mu sync.Mutex
@@ -506,7 +500,7 @@ func (s *TokenPriceService) fetchOKXTokenPrices(network string, tokenAddresses [
 		wg.Add(1)
 		go func(addr string) {
 			defer wg.Done()
-			price, err := s.fetchOKXSinglePrice(baseURL, chainKey, chainIndex, addr)
+			price, err := s.fetchOKXSinglePrice(baseURL, chainIndex, addr)
 			if err != nil {
 				mu.Lock()
 				if firstErr == nil {
@@ -527,17 +521,24 @@ func (s *TokenPriceService) fetchOKXTokenPrices(network string, tokenAddresses [
 	return out, firstErr
 }
 
-func (s *TokenPriceService) fetchOKXSinglePrice(baseURL, chainKey, chainIndex, tokenAddr string) (float64, error) {
-	query := url.Values{}
-	query.Set(chainKey, chainIndex)
-	query.Set("tokenContractAddress", tokenAddr)
-	endpoint := fmt.Sprintf("%s/current-price?%s", baseURL, query.Encode())
-
-	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+func (s *TokenPriceService) fetchOKXSinglePrice(baseURL, chainIndex, tokenAddr string) (float64, error) {
+	payload := []map[string]string{
+		{
+			"chainIndex":           chainIndex,
+			"tokenContractAddress": tokenAddr,
+		},
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return 0, err
 	}
-	okxSignRequest(req)
+	endpoint := fmt.Sprintf("%s/price", baseURL)
+
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	okxSignRequest(req, string(body))
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -545,17 +546,17 @@ func (s *TokenPriceService) fetchOKXSinglePrice(baseURL, chainKey, chainIndex, t
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	if resp.StatusCode != http.StatusOK {
 		return 0, &ProviderHTTPError{Provider: "okx", Status: resp.StatusCode}
 	}
 
 	var parsed okxCurrentPriceResponse
-	if err := json.Unmarshal(body, &parsed); err != nil {
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return 0, err
 	}
 	if parsed.Code != "0" {
-		return 0, fmt.Errorf("okx current-price code=%s", parsed.Code)
+		return 0, fmt.Errorf("okx price code=%s", parsed.Code)
 	}
 	if len(parsed.Data) == 0 || strings.TrimSpace(parsed.Data[0].Price) == "" {
 		return 0, nil

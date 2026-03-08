@@ -84,6 +84,17 @@ export async function fetchRealtimePositions({ apiBaseUrl, initData, signal }) {
   });
 }
 
+export async function fetchPositionProfitPoster({ apiBaseUrl, initData, taskId, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/position_profit_poster`;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData, taskId }),
+    signal,
+  });
+}
+
 export async function fetchSmartMoneyOverview({
   apiBaseUrl,
   initData,

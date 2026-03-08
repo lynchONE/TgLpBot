@@ -18,6 +18,8 @@ func (s *Server) handlePositions(w http.ResponseWriter, r *http.Request) {
 		s.handleAutoMonitor(w, r)
 	case "autolp_pnl_curve":
 		s.handleAutoLPPnLCurve(w, r)
+	case "position_profit_poster":
+		s.handlePositionProfitPoster(w, r)
 	default:
 		http.Error(w, "invalid endpoint", http.StatusBadRequest)
 	}

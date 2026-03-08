@@ -1,0 +1,7 @@
+- [x] 1. Backend：新增仓位收益海报数据接口，按 `task_id` 返回当前仓位摘要、开单时间、主题代币信息和开单以来曲线数据
+- [x] 2. Backend：扩展 OKX Market 客户端，支持 `token/basic-info` 查询，并提供头像/名称降级逻辑
+- [x] 3. WebApp API：在 `webapp/src/api.js` 增加海报数据请求方法
+- [x] 4. WebApp UI：在仓位卡片增加“收益图”入口，仅对运行中的任务展示
+- [x] 5. WebApp UI：新增收益海报预览弹窗与 Canvas 绘制逻辑，支持下载 PNG
+- [x] 6. WebApp UI：处理用户头像、代币头像、曲线缺失等降级场景
+- [x] 7. Validation：补充后端测试并执行 `webapp` 构建验证

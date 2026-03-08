@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"TgLpBot/base/config"
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -134,6 +135,19 @@ type MarketCandlesRequest struct {
 	After                string
 }
 
+type MarketTokenBasicInfoRequest struct {
+	ChainIndex           string `json:"chainIndex"`
+	TokenContractAddress string `json:"tokenContractAddress"`
+}
+
+type MarketTokenBasicInfo struct {
+	ChainIndex           string `json:"chainIndex"`
+	TokenContractAddress string `json:"tokenContractAddress"`
+	TokenSymbol          string `json:"tokenSymbol"`
+	TokenName            string `json:"tokenName"`
+	TokenLogoURL         string `json:"tokenLogoUrl"`
+}
+
 type MarketCandle struct {
 	TimestampMS int64
 	Open        float64
@@ -152,6 +166,12 @@ type MarketCandlesResponse struct {
 	Rows []MarketCandle `json:"-"`
 }
 
+type MarketTokenBasicInfoResponse struct {
+	Code string                 `json:"code"`
+	Msg  string                 `json:"msg"`
+	Data []MarketTokenBasicInfo `json:"data"`
+}
+
 func (e *OKXAPIError) Error() string {
 	if e == nil {
 		return "OKX API error"
@@ -168,6 +188,7 @@ func (s *OKXDexService) marketAPIURL() string {
 		return "https://web3.okx.com/api/v6/dex/market"
 	}
 	base = strings.TrimRight(base, "/")
+	base = strings.Replace(base, "https://www.okx.com/", "https://web3.okx.com/", 1)
 	replacer := strings.NewReplacer(
 		"/api/v6/dex/aggregator", "/api/v6/dex/market",
 		"/api/v5/dex/aggregator", "/api/v5/dex/market",
@@ -360,6 +381,78 @@ func (s *OKXDexService) GetMarketCandles(req MarketCandlesRequest) (*MarketCandl
 		return nil, &OKXAPIError{Endpoint: "market/candles", Code: out.Code, Msg: out.Msg}
 	}
 	out.Rows = normalizeMarketCandlesRows(out.Data)
+	return &out, nil
+}
+
+func (s *OKXDexService) GetMarketTokenBasicInfos(reqs []MarketTokenBasicInfoRequest) (*MarketTokenBasicInfoResponse, error) {
+	if len(reqs) == 0 {
+		return &MarketTokenBasicInfoResponse{
+			Code: "0",
+			Msg:  "",
+			Data: []MarketTokenBasicInfo{},
+		}, nil
+	}
+
+	payload := make([]MarketTokenBasicInfoRequest, 0, len(reqs))
+	for _, req := range reqs {
+		chainIndex := strings.TrimSpace(req.ChainIndex)
+		tokenAddress := strings.TrimSpace(req.TokenContractAddress)
+		if chainIndex == "" || tokenAddress == "" {
+			continue
+		}
+		payload = append(payload, MarketTokenBasicInfoRequest{
+			ChainIndex:           chainIndex,
+			TokenContractAddress: strings.ToLower(tokenAddress),
+		})
+	}
+	if len(payload) == 0 {
+		return &MarketTokenBasicInfoResponse{
+			Code: "0",
+			Msg:  "",
+			Data: []MarketTokenBasicInfo{},
+		}, nil
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	endpoint := fmt.Sprintf("%s/token/basic-info", s.marketAPIURL())
+	if config.AppConfig != nil && config.AppConfig.OKXDebug {
+		log.Printf("[OKX Market] basic-info request URL: %s", endpoint)
+	}
+
+	httpReq, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	s.addHeaders(httpReq, string(body), timestamp)
+
+	resp, err := s.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if config.AppConfig != nil && config.AppConfig.OKXDebug {
+		log.Printf("[OKX Market] basic-info raw response: %s", string(respBody))
+	}
+
+	var out MarketTokenBasicInfoResponse
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+	if out.Code != "0" {
+		return nil, &OKXAPIError{Endpoint: "market/token/basic-info", Code: out.Code, Msg: out.Msg}
+	}
 	return &out, nil
 }
 

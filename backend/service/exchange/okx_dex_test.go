@@ -1,11 +1,25 @@
 package exchange
 
-import "testing"
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+)
+
+type stubTransport struct {
+	fn func(req *http.Request) (*http.Response, error)
+}
+
+func (s stubTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return s.fn(req)
+}
 
 func TestMarketAPIURL_RewritesAggregatorBase(t *testing.T) {
 	svc := &OKXDexService{apiURL: "https://www.okx.com/api/v6/dex/aggregator"}
 	got := svc.marketAPIURL()
-	want := "https://www.okx.com/api/v6/dex/market"
+	want := "https://web3.okx.com/api/v6/dex/market"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
@@ -30,5 +44,58 @@ func TestNormalizeMarketCandlesRows_ParsesOfficialOrder(t *testing.T) {
 	}
 	if !row.Confirm {
 		t.Fatalf("expected confirm=true, got %+v", row)
+	}
+}
+
+func TestGetMarketTokenBasicInfos_UsesOfficialEndpoint(t *testing.T) {
+	svc := &OKXDexService{
+		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
+		apiKey:     "test-key",
+		secretKey:  "test-secret",
+		passphrase: "test-pass",
+		client: &http.Client{Transport: stubTransport{fn: func(req *http.Request) (*http.Response, error) {
+			if req.Method != http.MethodPost {
+				t.Fatalf("expected POST request, got %s", req.Method)
+			}
+			if req.URL.String() != "https://web3.okx.com/api/v6/dex/market/token/basic-info" {
+				t.Fatalf("unexpected request url: %s", req.URL.String())
+			}
+			if req.Header.Get("OK-ACCESS-SIGN") == "" {
+				t.Fatalf("expected OK-ACCESS-SIGN header")
+			}
+			rawBody, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("failed to read request body: %v", err)
+			}
+			var payload []MarketTokenBasicInfoRequest
+			if err := json.Unmarshal(rawBody, &payload); err != nil {
+				t.Fatalf("failed to parse request body: %v", err)
+			}
+			if len(payload) != 1 {
+				t.Fatalf("expected one request item, got %+v", payload)
+			}
+			if payload[0].ChainIndex != "56" || payload[0].TokenContractAddress != "0x1111111111111111111111111111111111111111" {
+				t.Fatalf("unexpected payload: %+v", payload[0])
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"code":"0","data":[{"chainIndex":"56","tokenContractAddress":"0x1111111111111111111111111111111111111111","tokenSymbol":"TEST","tokenName":"Test Token","tokenLogoUrl":"https://img.example/test.png"}]}`)),
+				Header:     make(http.Header),
+			}, nil
+		}}},
+	}
+
+	resp, err := svc.GetMarketTokenBasicInfos([]MarketTokenBasicInfoRequest{{
+		ChainIndex:           "56",
+		TokenContractAddress: "0x1111111111111111111111111111111111111111",
+	}})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if len(resp.Data) != 1 {
+		t.Fatalf("expected one data row, got %+v", resp.Data)
+	}
+	if resp.Data[0].TokenName != "Test Token" || resp.Data[0].TokenLogoURL != "https://img.example/test.png" {
+		t.Fatalf("unexpected response row: %+v", resp.Data[0])
 	}
 }
