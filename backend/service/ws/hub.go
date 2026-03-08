@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"sync"
@@ -8,6 +9,44 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+var defaultHub *Hub
+
+// SetDefault sets the package-level default Hub (called once at startup).
+func SetDefault(h *Hub) { defaultHub = h }
+
+// Default returns the package-level default Hub.
+func Default() *Hub { return defaultHub }
+
+// SendProgress pushes an operation-progress event to a single user via the default Hub.
+func SendProgress(userID uint, operation string, taskID uint, currentStep, totalSteps int, status, errMsg string) {
+	h := defaultHub
+	if h == nil {
+		return
+	}
+	msg := struct {
+		Type        string `json:"type"`
+		Operation   string `json:"operation"`
+		TaskID      uint   `json:"task_id,omitempty"`
+		CurrentStep int    `json:"current_step"`
+		TotalSteps  int    `json:"total_steps"`
+		Status      string `json:"status"`
+		Error       string `json:"error,omitempty"`
+	}{
+		Type:        "operation_progress",
+		Operation:   operation,
+		TaskID:      taskID,
+		CurrentStep: currentStep,
+		TotalSteps:  totalSteps,
+		Status:      status,
+		Error:       errMsg,
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+	h.SendToUsers([]uint{userID}, data)
+}
 
 const (
 	writeWait      = 10 * time.Second

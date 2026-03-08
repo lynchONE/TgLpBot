@@ -9,6 +9,7 @@ import SystemConfigCard from './components/SystemConfigCard.jsx';
 import BottomSheet from './components/BottomSheet.jsx';
 import ModuleHeader from './components/ModuleHeader.jsx';
 import NumberFlowValue from './components/NumberFlowValue.jsx';
+import StepProgressModal from './components/StepProgressModal.jsx';
 import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
 import AdminPage from './components/AdminPage.jsx';
 import { Bot, BarChart2, Filter, Search, Moon, Sun, Settings, X, Check, RotateCcw, AlertTriangle, Flame } from 'lucide-react';
@@ -395,6 +396,7 @@ export default function App() {
     const [openPositionAllowSwap, setOpenPositionAllowSwap] = useState(false);
     const [openPositionError, setOpenPositionError] = useState('');
     const [openPositionLoading, setOpenPositionLoading] = useState(false);
+    const [operationProgress, setOperationProgress] = useState(null);
     const [openPositionSmartWallets, setOpenPositionSmartWallets] = useState([]);
     const [openPositionSmartWalletsLoading, setOpenPositionSmartWalletsLoading] = useState(false);
     const [walletsData, setWalletsData] = useState(null);
@@ -1721,6 +1723,7 @@ export default function App() {
 
         setOpenPositionLoading(true);
         setOpenPositionError('');
+        setOperationProgress({ operation: 'open_position', currentStep: 0, totalSteps: 5, status: 'active', error: '' });
         try {
             const resp = await openPosition({
                 apiBaseUrl,
@@ -1735,11 +1738,16 @@ export default function App() {
                 allowEntrySwap: true,
                 walletId: openPositionWalletId,
             });
+            // Ensure done state even if WS event was missed
+            setOperationProgress(prev => prev?.operation === 'open_position'
+                ? { ...prev, currentStep: 4, status: 'done' } : prev);
             setOpenPositionPool(null);
             resetOpenPositionDraft();
         } catch (e) {
             const msg = String(e?.message || e || '').trim();
             setOpenPositionError(msg || '开仓失败，请稍后重试。');
+            setOperationProgress(prev => prev?.operation === 'open_position'
+                ? { ...prev, status: 'error', error: msg || '开仓失败' } : prev);
         } finally {
             setOpenPositionLoading(false);
         }
@@ -1915,6 +1923,20 @@ export default function App() {
                 setWsNotifications(prev => prev.filter(n => n._id !== id));
             }, 30000);
         }
+        if (msg && msg.type === 'operation_progress') {
+            setOperationProgress(prev => {
+                // Only update if the operation matches or is newer
+                if (prev && prev.operation !== msg.operation) return prev;
+                return {
+                    operation: msg.operation,
+                    taskId: msg.task_id,
+                    currentStep: msg.current_step,
+                    totalSteps: msg.total_steps,
+                    status: msg.status,
+                    error: msg.error || '',
+                };
+            });
+        }
     }, []);
 
     useWebSocket({ url: wsUrl, onMessage: handleWsMessage, enabled: hasInitData && !!wsUrl });
@@ -1998,12 +2020,16 @@ export default function App() {
         });
         if (!ok) return;
 
+        setOperationProgress({ operation: 'close_position', taskId: id, currentStep: 0, totalSteps: 4, status: 'active', error: '' });
         try {
             const resp = await stopTask({ apiBaseUrl, initData, taskId: id });
-            showNotice(resp?.message || '已发起停止，正在撤出并兑换成 USDT', 'success');
+            // Step 0 done, step 1 active (waiting for backend executor)
+            setOperationProgress(prev => prev?.operation === 'close_position'
+                ? { ...prev, currentStep: 1, status: 'active' } : prev);
         } catch (e) {
             const msg = String(e?.message || e || '').trim();
             if (msg.includes('task not found')) {
+                setOperationProgress(null);
                 showNotice(`任务 #${id} 不存在（可能已删除/已停止），已刷新列表。`, 'warning');
                 try {
                     const resp = await fetchRealtimePositions({ apiBaseUrl, initData });
@@ -2013,7 +2039,8 @@ export default function App() {
                 }
                 return;
             }
-            showNotice(msg || '停止失败，请稍后重试。', 'error');
+            setOperationProgress(prev => prev?.operation === 'close_position'
+                ? { ...prev, status: 'error', error: msg || '停止失败' } : prev);
         }
     };
 
@@ -3868,6 +3895,21 @@ export default function App() {
                 pool={klinePool}
                 chain={klinePool?.chain || hotPoolsData?.chain || 'bsc'}
             />
+
+            {operationProgress && (
+                <StepProgressModal
+                    operation={operationProgress.operation}
+                    progress={operationProgress}
+                    onClose={() => {
+                        const op = operationProgress;
+                        setOperationProgress(null);
+                        if (op?.status === 'done' && op?.operation === 'open_position') {
+                            setOpenPositionPool(null);
+                            resetOpenPositionDraft();
+                        }
+                    }}
+                />
+            )}
         </div >
     );
 }

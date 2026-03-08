@@ -26,6 +26,7 @@ type Server struct {
 
 func NewServer(ch *clickhouse.ClickHouseService) *Server {
 	hub := ws.NewHub()
+	ws.SetDefault(hub)
 	kf := NewKlineFeed()
 	hub.SetMessageHandler(kf.HandleMessage)
 	hub.SetOnClientRemove(kf.HandleClientRemove)

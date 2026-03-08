@@ -2585,3 +2585,113 @@ body {
 .task-action-item:disabled { opacity: 0.4; cursor: not-allowed; }
 .task-action-item.warn { color: #fbbf24; }
 .task-action-item.danger { color: #f87171; }
+
+/* ═══════════════════════════════════════
+   Step Progress Modal
+═══════════════════════════════════════ */
+.step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 12px 0 16px;
+}
+.step-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.step-icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+}
+.step-icon.done {
+  background: var(--positive);
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(34, 211, 138, 0.3);
+}
+.step-icon.active {
+  border: 2px solid var(--positive);
+  background: transparent;
+}
+.step-icon.error {
+  background: var(--negative);
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(255, 94, 118, 0.3);
+}
+.step-icon.pending {
+  border: 2px solid rgba(134, 153, 184, 0.3);
+  background: transparent;
+}
+.step-pulse {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--positive);
+  animation: step-pulse-anim 1.2s ease-in-out infinite;
+}
+@keyframes step-pulse-anim {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+.step-content {
+  flex: 1;
+  min-width: 0;
+}
+.step-row.done .step-label {
+  color: var(--positive);
+  font-size: 13px;
+  font-weight: 600;
+}
+.step-row.active .step-label {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.step-row.error .step-label {
+  color: var(--negative);
+  font-size: 13px;
+  font-weight: 600;
+}
+.step-row.pending .step-label {
+  color: var(--text-muted);
+  opacity: 0.5;
+  font-size: 13px;
+  font-weight: 600;
+}
+.step-error {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--negative);
+  word-break: break-all;
+  line-height: 1.4;
+}
+.step-footer {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  justify-content: center;
+}
+.step-footer .accent-btn,
+.step-footer .ghost-chip {
+  width: 100%;
+  text-align: center;
+  padding: 10px 18px;
+}
+.step-footer .ghost-chip.danger {
+  color: var(--negative);
+  border-color: var(--negative);
+}
+.step-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  width: 100%;
+  padding: 6px 0;
+}

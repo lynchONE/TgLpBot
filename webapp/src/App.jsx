@@ -39,9 +39,11 @@ import { WEBAPP_CONFIG } from './config';
 import PanelShell, { EmptyState, MetricCard } from './components/PanelShell';
 import KlineChart from './components/KlineChart';
 import OpenPositionModal from './components/OpenPositionModal';
+import StepProgressModal from './components/StepProgressModal';
 import TaskActionMenu from './components/TaskActionMenu';
 import NumberFlowValue from './components/NumberFlowValue';
 import useKlineWS from './hooks/useKlineWS';
+import { useWebSocket } from './hooks/useWebSocket';
 import telegramLogo from './img/telegram.svg';
 import uniswapLogo from './img/uniswap.svg';
 import pancakeLogo from './img/pancake.svg';
@@ -848,15 +850,46 @@ export default function App() {
   const [openPosPool, setOpenPosPool] = useState(null);
   const [openPosBusy, setOpenPosBusy] = useState(false);
   const [taskActionPos, setTaskActionPos] = useState(null);
+  const [operationProgress, setOperationProgress] = useState(null);
+
+  // WebSocket for real-time operation progress
+  const progressWsUrl = useMemo(() => {
+    if (!apiBaseUrl || !initData) return '';
+    const base = String(apiBaseUrl).replace(/\/$/, '').replace(/^http/, 'ws');
+    return base + '/api/ws?initData=' + encodeURIComponent(initData);
+  }, [apiBaseUrl, initData]);
+
+  const handleWsProgressMessage = useCallback((msg) => {
+    if (msg && msg.type === 'operation_progress') {
+      setOperationProgress(prev => {
+        if (prev && prev.operation !== msg.operation) return prev;
+        return {
+          operation: msg.operation,
+          taskId: msg.task_id,
+          currentStep: msg.current_step,
+          totalSteps: msg.total_steps,
+          status: msg.status,
+          error: msg.error || '',
+        };
+      });
+    }
+  }, []);
+
+  useWebSocket({ url: progressWsUrl, onMessage: handleWsProgressMessage, enabled: hasInitData && !!progressWsUrl });
 
   const handleOpenPosition = useCallback(async (params) => {
     setOpenPosBusy(true);
+    setOperationProgress({ operation: 'open_position', currentStep: 0, totalSteps: 5, status: 'active', error: '' });
     try {
       await apiOpenPosition({ apiBaseUrl, initData, ...params });
+      setOperationProgress(prev => prev?.operation === 'open_position'
+        ? { ...prev, currentStep: 4, status: 'done' } : prev);
       setOpenPosPool(null);
       loadPositions();
     } catch (e) {
-      alert(String(e?.message || e));
+      const msg = String(e?.message || e);
+      setOperationProgress(prev => prev?.operation === 'open_position'
+        ? { ...prev, status: 'error', error: msg } : prev);
     } finally {
       setOpenPosBusy(false);
     }
@@ -868,8 +901,17 @@ export default function App() {
   }, [apiBaseUrl, initData, loadPositions]);
 
   const handleTaskStop = useCallback(async (taskId) => {
-    await stopTask({ apiBaseUrl, initData, taskId });
-    loadPositions();
+    setOperationProgress({ operation: 'close_position', taskId, currentStep: 0, totalSteps: 4, status: 'active', error: '' });
+    try {
+      await stopTask({ apiBaseUrl, initData, taskId });
+      setOperationProgress(prev => prev?.operation === 'close_position'
+        ? { ...prev, currentStep: 1, status: 'active' } : prev);
+      loadPositions();
+    } catch (e) {
+      const msg = String(e?.message || e);
+      setOperationProgress(prev => prev?.operation === 'close_position'
+        ? { ...prev, status: 'error', error: msg } : prev);
+    }
   }, [apiBaseUrl, initData, loadPositions]);
 
   const handleTaskDelete = useCallback(async (taskId) => {
@@ -1770,6 +1812,20 @@ export default function App() {
           onSubmit={handleOpenPosition}
           onClose={() => setOpenPosPool(null)}
           busy={openPosBusy}
+        />
+      )}
+
+      {operationProgress && (
+        <StepProgressModal
+          operation={operationProgress.operation}
+          progress={operationProgress}
+          onClose={() => {
+            const op = operationProgress;
+            setOperationProgress(null);
+            if (op?.status === 'done' && op?.operation === 'open_position') {
+              setOpenPosPool(null);
+            }
+          }}
         />
       )}
     </div>
