@@ -628,7 +628,7 @@ body {
 }
 
 .workbench.layout-4 {
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 /* ── Work Mode ── */
@@ -686,7 +686,6 @@ body {
 
 .workbench.work-mode {
   margin-top: 0;
-  height: calc(100vh - 46px);
   gap: 4px;
   padding: 4px;
 }
@@ -697,17 +696,14 @@ body {
 
 .workbench.layout-work-2 {
   grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr;
 }
 
 .workbench.layout-work-3 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-template-rows: 1fr;
 }
 
 .workbench.layout-work-4 {
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 /* In work mode, remove hot_pools max-height cap — grid controls height */
@@ -1626,8 +1622,9 @@ body {
 }
 
 @media (max-width: 1200px) {
-  .workbench.layout-3 {
-    grid-template-columns: 1fr;
+  .workbench.layout-3,
+  .workbench.layout-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   /* Work mode keeps 2-col on medium screens */
   .workbench.layout-work-3 {
