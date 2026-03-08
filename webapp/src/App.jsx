@@ -209,6 +209,13 @@ function openExternal(url) {
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
+function buildMeAvatarUrl(apiBaseUrl, initData) {
+  const base = String(apiBaseUrl || '').trim().replace(/\/$/, '');
+  const auth = String(initData || '').trim();
+  if (!base || !auth) return '';
+  return `${base}/api/me/avatar?initData=${encodeURIComponent(auth)}`;
+}
+
 function buildDexScreenerEmbedUrl(pool, chainName) {
   if (!pool) return '';
   const c = String(pool?.chain || chainName || 'bsc').toLowerCase() === 'base' ? 'base' : 'bsc';
@@ -865,6 +872,10 @@ export default function App() {
     const base = String(apiBaseUrl).replace(/\/$/, '').replace(/^http/, 'ws');
     return base + '/api/ws?initData=' + encodeURIComponent(initData);
   }, [apiBaseUrl, initData]);
+
+  const posterUserAvatarUrl = useMemo(() => (
+    buildMeAvatarUrl(apiBaseUrl, initData) || String(loginUser?.photo_url || '').trim()
+  ), [apiBaseUrl, initData, loginUser?.photo_url]);
 
   const handleWsProgressMessage = useCallback((msg) => {
     if (msg && msg.type === 'operation_progress') {
@@ -1967,6 +1978,7 @@ export default function App() {
           loading={posterLoading}
           error={posterError}
           loginUser={loginUser}
+          userAvatarUrl={posterUserAvatarUrl}
           onClose={closeProfitPoster}
           onRetry={() => setPosterFetchNonce((value) => value + 1)}
         />

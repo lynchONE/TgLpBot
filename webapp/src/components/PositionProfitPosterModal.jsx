@@ -20,17 +20,6 @@ function formatPctSafe(value) {
   return `${prefix}${number.toFixed(2)}%`;
 }
 
-function formatPosterTime(value) {
-  if (!value) return '--';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '--';
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hour = String(date.getHours()).padStart(2, '0');
-  const minute = String(date.getMinutes()).padStart(2, '0');
-  return `${month}-${day} ${hour}:${minute}`;
-}
-
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -144,21 +133,10 @@ function drawStatCard(ctx, { x, y, width, height, label, value, tone }) {
 
 function drawChart(ctx, series, x, y, width, height) {
   fillRoundRect(ctx, x, y, width, height, 34, 'rgba(15, 23, 42, 0.84)', 'rgba(148, 163, 184, 0.18)');
-
-  ctx.fillStyle = '#F8FAFC';
-  ctx.font = '700 34px Inter, system-ui, sans-serif';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillText('开单以来走势', x + 32, y + 28);
-
-  ctx.fillStyle = 'rgba(226, 232, 240, 0.65)';
-  ctx.font = '500 22px Inter, system-ui, sans-serif';
-  ctx.fillText('基于 OKX 行情的价格收益曲线', x + 32, y + 74);
-
   const plotX = x + 36;
-  const plotY = y + 136;
+  const plotY = y + 32;
   const plotWidth = width - 72;
-  const plotHeight = height - 192;
+  const plotHeight = height - 74;
 
   if (!Array.isArray(series) || series.length < 2) {
     fillRoundRect(ctx, plotX, plotY, plotWidth, plotHeight, 26, 'rgba(15, 23, 42, 0.52)', 'rgba(148, 163, 184, 0.12)');
@@ -277,7 +255,7 @@ function drawChart(ctx, series, x, y, width, height) {
   ctx.fillText('当前', plotX + plotWidth, plotY + plotHeight + 22);
 }
 
-async function renderPoster(canvas, data, loginUser) {
+async function renderPoster(canvas, data, loginUser, userAvatarUrl) {
   if (!canvas || !data) return;
   canvas.width = POSTER_WIDTH;
   canvas.height = POSTER_HEIGHT;
@@ -285,10 +263,7 @@ async function renderPoster(canvas, data, loginUser) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
-  const [userImage, tokenImage] = await Promise.all([
-    loadImage(loginUser?.photo_url || ''),
-    loadImage(data?.theme_token?.logo_url || ''),
-  ]);
+  const userImage = await loadImage(userAvatarUrl || loginUser?.photo_url || '');
 
   ctx.clearRect(0, 0, POSTER_WIDTH, POSTER_HEIGHT);
   const background = ctx.createLinearGradient(0, 0, POSTER_WIDTH, POSTER_HEIGHT);
@@ -313,42 +288,29 @@ async function renderPoster(canvas, data, loginUser) {
   fillRoundRect(ctx, 42, 42, POSTER_WIDTH - 84, POSTER_HEIGHT - 84, 40, 'rgba(7, 15, 28, 0.55)', 'rgba(148, 163, 184, 0.12)');
 
   drawAvatar(ctx, userImage, 84, 84, 92, toDisplayName(loginUser), ['#2563EB', '#9333EA']);
-  drawAvatar(ctx, tokenImage, POSTER_WIDTH - 204, 88, 120, data?.theme_token?.symbol || data?.pair || 'LP', ['#0EA5E9', '#22C55E']);
 
-  ctx.fillStyle = 'rgba(148, 163, 184, 0.85)';
-  ctx.font = '500 24px Inter, system-ui, sans-serif';
+  ctx.fillStyle = '#F8FAFC';
+  ctx.font = '700 44px Inter, system-ui, sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  ctx.fillText('TgLPBot · Profit Poster', 198, 92);
-
-  ctx.fillStyle = '#F8FAFC';
-  ctx.font = '700 40px Inter, system-ui, sans-serif';
-  ctx.fillText(toDisplayName(loginUser), 198, 126);
-
-  ctx.fillStyle = 'rgba(226, 232, 240, 0.72)';
-  ctx.font = '500 26px Inter, system-ui, sans-serif';
-  ctx.fillText(`${String(data?.chain || '--').toUpperCase()} · ${String(data?.exchange || 'LP Position').trim()}`, 198, 176);
-
-  ctx.fillStyle = '#F8FAFC';
-  ctx.font = '800 68px Inter, system-ui, sans-serif';
-  ctx.fillText(String(data?.pair || 'LP Position'), 84, 286);
+  ctx.fillText(toDisplayName(loginUser), 198, 98);
 
   ctx.fillStyle = 'rgba(226, 232, 240, 0.72)';
   ctx.font = '500 28px Inter, system-ui, sans-serif';
-  ctx.fillText(data?.theme_token?.name || data?.theme_token?.symbol || 'Token', 84, 360);
+  ctx.fillText(data?.theme_token?.name || data?.theme_token?.symbol || 'Token', 198, 156);
 
   const profit = Number(data?.profit_usd ?? 0);
   const profitColor = profit >= 0 ? '#4ADE80' : '#FB7185';
   ctx.fillStyle = 'rgba(148, 163, 184, 0.82)';
   ctx.font = '500 28px Inter, system-ui, sans-serif';
-  ctx.fillText('未实现利润', 84, 458);
+  ctx.fillText('未实现利润', 84, 282);
   ctx.fillStyle = profitColor;
   ctx.font = '800 98px Inter, system-ui, sans-serif';
-  ctx.fillText(`${profit >= 0 ? '+' : ''}${formatUsdSafe(profit)}`, 84, 500);
+  ctx.fillText(`${profit >= 0 ? '+' : ''}${formatUsdSafe(profit)}`, 84, 324);
 
   drawStatCard(ctx, {
     x: 84,
-    y: 690,
+    y: 556,
     width: 286,
     height: 156,
     label: '本次投入',
@@ -357,7 +319,7 @@ async function renderPoster(canvas, data, loginUser) {
   });
   drawStatCard(ctx, {
     x: 397,
-    y: 690,
+    y: 556,
     width: 286,
     height: 156,
     label: '当前盈利',
@@ -366,7 +328,7 @@ async function renderPoster(canvas, data, loginUser) {
   });
   drawStatCard(ctx, {
     x: 710,
-    y: 690,
+    y: 556,
     width: 286,
     height: 156,
     label: '收益率',
@@ -374,18 +336,7 @@ async function renderPoster(canvas, data, loginUser) {
     tone: profit >= 0 ? 'positive' : 'negative',
   });
 
-  drawChart(ctx, data?.series, 84, 884, POSTER_WIDTH - 168, 320);
-
-  ctx.fillStyle = 'rgba(226, 232, 240, 0.7)';
-  ctx.font = '500 24px Inter, system-ui, sans-serif';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(`开单时间：${formatPosterTime(data?.opened_at)}`, 84, 1264);
-  ctx.fillText(`生成时间：${formatPosterTime(data?.generated_at)}`, 84, 1300);
-
-  ctx.textAlign = 'right';
-  ctx.fillText(data?.window_label || '开单以来价格收益', POSTER_WIDTH - 84, 1264);
-  ctx.fillText('数据源：OKX Market', POSTER_WIDTH - 84, 1300);
+  drawChart(ctx, data?.series, 84, 770, POSTER_WIDTH - 168, 430);
 }
 
 export default function PositionProfitPosterModal({
@@ -394,6 +345,7 @@ export default function PositionProfitPosterModal({
   loading,
   error,
   loginUser,
+  userAvatarUrl,
   onClose,
   onRetry,
 }) {
@@ -414,7 +366,7 @@ export default function PositionProfitPosterModal({
 
     setRendering(true);
     setRenderError('');
-    renderPoster(canvasRef.current, data, loginUser)
+    renderPoster(canvasRef.current, data, loginUser, userAvatarUrl)
       .catch((err) => {
         if (!alive) return;
         setRenderError(String(err?.message || err));
@@ -426,7 +378,7 @@ export default function PositionProfitPosterModal({
     return () => {
       alive = false;
     };
-  }, [data, loading, loginUser]);
+  }, [data, loading, loginUser, userAvatarUrl]);
 
   const handleDownload = () => {
     const canvas = canvasRef.current;

@@ -57,6 +57,7 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/autolp_pnl_curve", s.handleAutoLPPnLCurve)
 	mux.HandleFunc("/api/position_profit_poster", s.handlePositionProfitPoster)
 	mux.HandleFunc("/api/me", s.handleMe)
+	mux.HandleFunc("/api/me/avatar", s.handleMeAvatar)
 	mux.HandleFunc("/api/realtime_positions", s.handleRealtimePositions)
 	mux.HandleFunc("/api/smart_money", s.handleSmartMoneyOverview)
 	mux.HandleFunc("/api/smart_money_overview", s.handleSmartMoneyOverview)
