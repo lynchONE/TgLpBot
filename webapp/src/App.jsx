@@ -866,6 +866,7 @@ export default function App() {
         if (msg.current_step < prev.currentStep) return prev;
         if (prev.status === 'done' || prev.status === 'error') return prev;
         return {
+          panelKey: prev.panelKey,
           operation: msg.operation,
           taskId: msg.task_id,
           currentStep: msg.current_step,
@@ -881,7 +882,14 @@ export default function App() {
 
   const handleOpenPosition = useCallback(async (params) => {
     setOpenPosBusy(true);
-    setOperationProgress({ operation: 'open_position', currentStep: 0, totalSteps: 5, status: 'active', error: '' });
+    setOperationProgress({
+      panelKey: openPosPool?.panelKey || 'hot_pools',
+      operation: 'open_position',
+      currentStep: 0,
+      totalSteps: 5,
+      status: 'active',
+      error: '',
+    });
     try {
       await apiOpenPosition({ apiBaseUrl, initData, ...params });
       setOperationProgress(prev => prev?.operation === 'open_position'
@@ -895,7 +903,7 @@ export default function App() {
     } finally {
       setOpenPosBusy(false);
     }
-  }, [apiBaseUrl, initData, loadPositions]);
+  }, [apiBaseUrl, initData, loadPositions, openPosPool]);
 
   const handleTaskPause = useCallback(async (taskId, paused) => {
     await setTaskPaused({ apiBaseUrl, initData, taskId, paused });
@@ -903,7 +911,15 @@ export default function App() {
   }, [apiBaseUrl, initData, loadPositions]);
 
   const handleTaskStop = useCallback(async (taskId) => {
-    setOperationProgress({ operation: 'close_position', taskId, currentStep: 0, totalSteps: 4, status: 'active', error: '' });
+    setOperationProgress({
+      panelKey: 'positions',
+      operation: 'close_position',
+      taskId,
+      currentStep: 0,
+      totalSteps: 4,
+      status: 'active',
+      error: '',
+    });
     try {
       const resp = await stopTask({ apiBaseUrl, initData, taskId });
       if (resp?.status === 'stopped' || resp?.pending === false) {
@@ -957,6 +973,23 @@ export default function App() {
   const copyAddr = useCallback((addr) => {
     navigator.clipboard?.writeText(addr).catch(() => {});
   }, []);
+
+  const renderOperationProgress = (panelKey) => {
+    if (!operationProgress || operationProgress.panelKey !== panelKey) return null;
+    return (
+      <StepProgressModal
+        operation={operationProgress.operation}
+        progress={operationProgress}
+        onClose={() => {
+          const op = operationProgress;
+          setOperationProgress(null);
+          if (op?.status === 'done' && op?.operation === 'open_position') {
+            setOpenPosPool(null);
+          }
+        }}
+      />
+    );
+  };
 
   const summary = positions?.summary || {};
   const smartSummary = smart?.summary || {};
@@ -1117,7 +1150,7 @@ export default function App() {
                   </div>
 
                   {/* Action */}
-                  <button type="button" className="pool-buy-btn" onClick={(e) => { e.stopPropagation(); setOpenPosPool({ ...pool, chain }); }}>⚡</button>
+                  <button type="button" className="pool-buy-btn" onClick={(e) => { e.stopPropagation(); setOpenPosPool({ ...pool, chain, panelKey: 'hot_pools' }); }}>⚡</button>
                 </div>
               );
             })
@@ -1127,6 +1160,7 @@ export default function App() {
         <div className="panel-footnote">
           更新时间: {hotPoolsUpdatedAt ? new Date(hotPoolsUpdatedAt).toLocaleTimeString() : '--'}
         </div>
+        {renderOperationProgress('hot_pools')}
       </PanelShell>
     ),
 
@@ -1495,19 +1529,7 @@ export default function App() {
             })
           )}
         </div>
-        {operationProgress && (
-          <StepProgressModal
-            operation={operationProgress.operation}
-            progress={operationProgress}
-            onClose={() => {
-              const op = operationProgress;
-              setOperationProgress(null);
-              if (op?.status === 'done' && op?.operation === 'open_position') {
-                setOpenPosPool(null);
-              }
-            }}
-          />
-        )}
+        {renderOperationProgress('positions')}
       </PanelShell>
     ),
 
@@ -1627,6 +1649,7 @@ export default function App() {
                         protocol_version: version,
                         factory_name: pool?.factory_name,
                         chain,
+                        panelKey: 'smart_money',
                         smartMoneyWallets: wallets,
                       });
                     }}>⚡</button>
@@ -1640,6 +1663,7 @@ export default function App() {
             })
           )}
         </div>
+        {renderOperationProgress('smart_money')}
       </PanelShell>
     ),
   };
