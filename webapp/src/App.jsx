@@ -881,20 +881,21 @@ export default function App() {
   useWebSocket({ url: progressWsUrl, onMessage: handleWsProgressMessage, enabled: hasInitData && !!progressWsUrl });
 
   const handleOpenPosition = useCallback(async (params) => {
+    const panelKey = openPosPool?.panelKey || 'hot_pools';
     setOpenPosBusy(true);
     setOperationProgress({
-      panelKey: openPosPool?.panelKey || 'hot_pools',
+      panelKey,
       operation: 'open_position',
       currentStep: 0,
       totalSteps: 5,
       status: 'active',
       error: '',
     });
+    setOpenPosPool(null);
     try {
       await apiOpenPosition({ apiBaseUrl, initData, ...params });
       setOperationProgress(prev => prev?.operation === 'open_position'
         ? { ...prev, currentStep: 4, status: 'done' } : prev);
-      setOpenPosPool(null);
       loadPositions();
     } catch (e) {
       const msg = String(e?.message || e);

@@ -2649,6 +2649,10 @@ body {
   background: rgba(138, 160, 194, 0.2);
   color: var(--text);
 }
+.spm-close--hidden {
+  opacity: 0;
+  pointer-events: none;
+}
 
 /* Progress bar */
 .spm-progress-track {
@@ -2784,6 +2788,15 @@ body {
   margin-top: 14px;
   padding-top: 12px;
   border-top: 1px solid rgba(138, 160, 194, 0.1);
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+}
+.spm-footer-slot {
+  width: 100%;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
 }
 .spm-btn {
   display: flex;
@@ -2791,12 +2804,14 @@ body {
   justify-content: center;
   gap: 6px;
   width: 100%;
+  min-height: 36px;
   padding: 8px 16px;
   border-radius: 10px;
   font-size: 12.5px;
   font-weight: 700;
   cursor: pointer;
   border: none;
+  box-sizing: border-box;
   transition: all 160ms;
 }
 .spm-btn--done {
@@ -2829,9 +2844,11 @@ body {
   align-items: center;
   justify-content: center;
   gap: 6px;
+  width: 100%;
+  min-height: 36px;
   font-size: 11.5px;
   color: var(--text-muted);
-  padding: 6px 0;
+  padding: 8px 0;
 }
 .spm-hint-dot {
   width: 5px;
