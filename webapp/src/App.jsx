@@ -1527,7 +1527,7 @@ export default function App() {
                       </div>
                       <div className="pos-price-range-labels">
                         <span className="lo">{compactPrice(priceRange.rangeMin)}</span>
-                        <span className="cur">{compactPrice(priceRange.currentPrice)}</span>
+                        <span className="cur">{compactPrice((priceRange.rangeMin + priceRange.rangeMax) / 2)}</span>
                         <span className="hi">{compactPrice(priceRange.rangeMax)}</span>
                       </div>
                     </div>
@@ -1540,6 +1540,7 @@ export default function App() {
                         : `下 ${taskRangeLo.toFixed(2)}% / 上 ${taskRangeUp.toFixed(2)}%`}
                       </span>
                       {Number.isFinite(taskAmount) && taskAmount > 0 && <span> | ${taskAmount.toFixed(2)}</span>}
+                      {priceRange && <span className="pos-range-cur-price">{compactPrice(priceRange.currentPrice)}</span>}
                     </div>
                   )}
                 </div>

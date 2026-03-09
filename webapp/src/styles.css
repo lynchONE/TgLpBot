@@ -2199,6 +2199,14 @@ body {
   background: rgba(255, 255, 255, 0.03);
   border-radius: 8px;
   border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+}
+.pos-range-cur-price {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--text-primary);
 }
 
 /* ── Position Price Range Visualizer ── */
