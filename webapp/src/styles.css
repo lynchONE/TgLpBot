@@ -1236,9 +1236,6 @@ body {
 }
 
 .kline-marker.my-trade {
-  width: 36px;
-  height: 36px;
-  border-width: 3px;
   box-shadow: 0 0 0 2px rgba(255, 177, 26, 0.5), 0 4px 14px rgba(0, 0, 0, 0.4);
 }
 .kline-marker.my-trade.add {
