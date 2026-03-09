@@ -1429,7 +1429,6 @@ export default function App() {
                         {taskId > 0 && <span className="pos-task-id">#{taskId}</span>}
                         <span className={`range-pill ${inRange ? 'in' : 'out'}`}>
                           {inRange ? 'In Range' : 'Out'}
-                          {priceRange && <span className="range-pill-price"> {compactPrice(priceRange.currentPrice)}</span>}
                           {priceRange?.outOfRange && (
                             <span className="range-pill-oor"> {priceRange.outOfRange.direction === 'above' ? '↑' : '↓'}{priceRange.outOfRange.pct.toFixed(1)}%</span>
                           )}
@@ -1540,7 +1539,7 @@ export default function App() {
                         : `下 ${taskRangeLo.toFixed(2)}% / 上 ${taskRangeUp.toFixed(2)}%`}
                       </span>
                       {Number.isFinite(taskAmount) && taskAmount > 0 && <span> | ${taskAmount.toFixed(2)}</span>}
-                      {priceRange && <span className="pos-range-cur-price">{compactPrice(priceRange.currentPrice)}</span>}
+                      {priceRange && <span className="pos-range-cur-price">当前价 {compactPrice(priceRange.currentPrice)}</span>}
                     </div>
                   )}
                 </div>
