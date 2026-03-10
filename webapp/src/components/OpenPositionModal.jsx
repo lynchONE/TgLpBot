@@ -33,7 +33,17 @@ function shortAddr(addr) {
   return `${s.slice(0, 6)}..${s.slice(-4)}`;
 }
 
-export default function OpenPositionModal({ pool, chain, onSubmit, onClose, busy }) {
+export default function OpenPositionModal({
+  pool,
+  chain,
+  wallets,
+  walletsLoading,
+  selectedWalletId,
+  onWalletSelect,
+  onSubmit,
+  onClose,
+  busy,
+}) {
   const [amount, setAmount] = useState('100');
   const [rangeLower, setRangeLower] = useState('2');
   const [rangeUpper, setRangeUpper] = useState('2');
@@ -43,6 +53,15 @@ export default function OpenPositionModal({ pool, chain, onSubmit, onClose, busy
   const pair = pool?.trading_pair || '--';
   const addr = String(pool?.pool_address || '').trim();
   const version = String(pool?.protocol_version || pool?.factory_name || '').trim();
+
+  const showWalletPicker = Array.isArray(wallets) && wallets.length > 1;
+  const resolvedWalletId = useMemo(() => {
+    if (!Array.isArray(wallets) || wallets.length === 0) return 0;
+    if (wallets.length === 1) return wallets[0].id;
+    if (selectedWalletId && wallets.some((w) => w.id === selectedWalletId)) return selectedWalletId;
+    const def = wallets.find((w) => w.is_default);
+    return def ? def.id : wallets[0].id;
+  }, [wallets, selectedWalletId]);
 
   const smartRanges = useMemo(
     () => extractSmartMoneyRanges(pool?.smartMoneyWallets),
@@ -64,6 +83,7 @@ export default function OpenPositionModal({ pool, chain, onSubmit, onClose, busy
     if (!Number.isFinite(amt) || amt <= 0) { setError('请输入有效的金额'); return; }
     if (!Number.isFinite(rl) || rl <= 0) { setError('请输入有效的下限范围'); return; }
     if (!Number.isFinite(ru) || ru <= 0) { setError('请输入有效的上限范围'); return; }
+    if (showWalletPicker && !resolvedWalletId) { setError('请选择钱包'); return; }
 
     setError('');
     onSubmit({
@@ -75,8 +95,9 @@ export default function OpenPositionModal({ pool, chain, onSubmit, onClose, busy
       rangeUpperPct: ru,
       slippageTolerance: Number.isFinite(sl) && sl > 0 ? sl : undefined,
       allowEntrySwap: true,
+      walletId: resolvedWalletId || undefined,
     });
-  }, [amount, rangeLower, rangeUpper, slippage, addr, version, chain, onSubmit]);
+  }, [amount, rangeLower, rangeUpper, slippage, addr, version, chain, onSubmit, showWalletPicker, resolvedWalletId]);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -90,6 +111,39 @@ export default function OpenPositionModal({ pool, chain, onSubmit, onClose, busy
         <div className="modal-addr">{addr ? `${addr.slice(0, 10)}...${addr.slice(-8)}` : '--'}</div>
 
         {error && <div className="error-text">{error}</div>}
+
+        {/* Wallet selector */}
+        {walletsLoading && (
+          <div className="wallet-picker-loading">加载钱包...</div>
+        )}
+        {showWalletPicker && !walletsLoading && (
+          <div className="wallet-picker">
+            <span className="wallet-picker-label">选择钱包</span>
+            <div className="wallet-picker-list">
+              {wallets.map((w) => {
+                const active = w.id === resolvedWalletId;
+                return (
+                  <button
+                    key={w.id}
+                    type="button"
+                    className={`wallet-chip ${active ? 'active' : ''}`}
+                    onClick={() => onWalletSelect(w.id)}
+                  >
+                    <span className="wallet-chip-name">
+                      {w.name || shortAddr(w.address)}
+                      {w.is_default && <span className="wallet-chip-default">默认</span>}
+                    </span>
+                    <span className="wallet-chip-addr">{shortAddr(w.address)}</span>
+                    <span className="wallet-chip-bal">
+                      {w.native_balance !== 'N/A' ? `${w.native_balance}` : ''}{' '}
+                      {w.stable_balance !== 'N/A' ? `/ $${w.stable_balance}` : ''}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div className="modal-form">
           <label className="modal-field">

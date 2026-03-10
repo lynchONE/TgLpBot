@@ -29,6 +29,7 @@ import {
   fetchSmartMoneyPoolMarkers,
   fetchMyTradeMarkers,
   fetchTokenCandles,
+  fetchWallets,
   generateLoginCode,
   openPosition as apiOpenPosition,
   setTaskPaused,
@@ -93,6 +94,7 @@ const STORAGE = {
   widgets: 'tglp_web_widgets',
   sort: 'tglp_web_hot_pools_sort',
   refreshInterval: 'tglp_web_refresh_interval',
+  walletId: 'tglp_web_wallet_id',
 };
 
 function storageGet(key) {
@@ -849,6 +851,12 @@ export default function App() {
 
   const [openPosPool, setOpenPosPool] = useState(null);
   const [openPosBusy, setOpenPosBusy] = useState(false);
+  const [openPosWallets, setOpenPosWallets] = useState(null);
+  const [openPosWalletsLoading, setOpenPosWalletsLoading] = useState(false);
+  const [openPosWalletId, setOpenPosWalletId] = useState(() => {
+    const saved = Number(storageGet(STORAGE.walletId));
+    return Number.isFinite(saved) && saved > 0 ? saved : 0;
+  });
   const [taskActionPos, setTaskActionPos] = useState(null);
   const [operationProgress, setOperationProgress] = useState(null);
 
@@ -879,6 +887,24 @@ export default function App() {
   }, []);
 
   useWebSocket({ url: progressWsUrl, onMessage: handleWsProgressMessage, enabled: hasInitData && !!progressWsUrl });
+
+  const loadWalletsForModal = useCallback(async (posChain) => {
+    if (!hasInitData) return;
+    setOpenPosWalletsLoading(true);
+    try {
+      const resp = await fetchWallets({ apiBaseUrl, initData, chain: posChain || chain });
+      setOpenPosWallets(resp?.wallets || []);
+    } catch {
+      setOpenPosWallets(null);
+    } finally {
+      setOpenPosWalletsLoading(false);
+    }
+  }, [apiBaseUrl, chain, hasInitData, initData]);
+
+  const openPositionModal = useCallback((pool) => {
+    setOpenPosPool(pool);
+    loadWalletsForModal(pool?.chain);
+  }, [loadWalletsForModal]);
 
   const handleOpenPosition = useCallback(async (params) => {
     const panelKey = openPosPool?.panelKey || 'hot_pools';
@@ -1151,7 +1177,7 @@ export default function App() {
                   </div>
 
                   {/* Action */}
-                  <button type="button" className="pool-buy-btn" onClick={(e) => { e.stopPropagation(); setOpenPosPool({ ...pool, chain, panelKey: 'hot_pools' }); }}>⚡</button>
+                  <button type="button" className="pool-buy-btn" onClick={(e) => { e.stopPropagation(); openPositionModal({ ...pool, chain, panelKey: 'hot_pools' }); }}>⚡</button>
                 </div>
               );
             })
@@ -1660,7 +1686,7 @@ export default function App() {
                   <div className="sm-pool-actions">
                     <button type="button" className="sm-action-btn sm-open-btn" onClick={(e) => {
                       e.stopPropagation();
-                      setOpenPosPool({
+                      openPositionModal({
                         pool_id: pool?.pool_id,
                         pool_address: pool?.pool_id,
                         trading_pair: pool?.pair,
@@ -1894,6 +1920,10 @@ export default function App() {
         <OpenPositionModal
           pool={openPosPool}
           chain={openPosPool?.chain || chain}
+          wallets={openPosWallets}
+          walletsLoading={openPosWalletsLoading}
+          selectedWalletId={openPosWalletId}
+          onWalletSelect={(id) => { setOpenPosWalletId(id); storageSet(STORAGE.walletId, String(id)); }}
           onSubmit={handleOpenPosition}
           onClose={() => setOpenPosPool(null)}
           busy={openPosBusy}

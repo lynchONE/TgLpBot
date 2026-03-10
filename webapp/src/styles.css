@@ -2627,6 +2627,78 @@ body {
   font-size: 10px;
   color: rgba(124, 179, 248, 0.5);
 }
+
+/* ── Wallet picker ── */
+.wallet-picker {
+  margin-bottom: 10px;
+}
+.wallet-picker-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  display: block;
+  margin-bottom: 6px;
+}
+.wallet-picker-loading {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+.wallet-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.wallet-chip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted);
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+  transition: background 120ms, border-color 120ms;
+}
+.wallet-chip:hover {
+  background: rgba(255, 177, 26, 0.06);
+  border-color: rgba(255, 177, 26, 0.25);
+}
+.wallet-chip.active {
+  background: rgba(255, 177, 26, 0.12);
+  border-color: rgba(255, 177, 26, 0.45);
+  color: var(--text);
+}
+.wallet-chip-name {
+  font-weight: 600;
+  color: inherit;
+}
+.wallet-chip-default {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(255, 177, 26, 0.2);
+  color: var(--accent);
+  margin-left: 4px;
+}
+.wallet-chip-addr {
+  font-size: 10px;
+  opacity: 0.6;
+  font-family: monospace;
+}
+.wallet-chip-bal {
+  font-size: 10px;
+  opacity: 0.55;
+  margin-left: auto;
+}
+
 .modal-actions {
   margin-top: 14px;
   display: flex;

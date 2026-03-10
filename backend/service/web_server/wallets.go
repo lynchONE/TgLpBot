@@ -138,9 +138,14 @@ func (s *Server) handleWallets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	adminAddr := strings.ToLower(strings.TrimSpace(config.AppConfig.AdminWalletAddress))
+
 	out := make([]walletBalanceRow, 0, len(wallets))
 	for i := range wallets {
 		ww := wallets[i]
+		if adminAddr != "" && strings.EqualFold(strings.TrimSpace(ww.Address), adminAddr) {
+			continue
+		}
 		out = append(out, walletBalanceRow{
 			ID:            ww.ID,
 			Address:       strings.TrimSpace(ww.Address),

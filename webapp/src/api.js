@@ -188,6 +188,19 @@ export async function checkLoginCode({ apiBaseUrl, code, signal }) {
   });
 }
 
+export async function fetchWallets({ apiBaseUrl, initData, chain, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/settings?endpoint=wallets`;
+  const payload = { initData };
+  if (chain) payload.chain = String(chain);
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
 export async function openPosition({
   apiBaseUrl,
   initData,
@@ -199,6 +212,7 @@ export async function openPosition({
   rangeUpperPct,
   slippageTolerance,
   allowEntrySwap,
+  walletId,
   signal,
 }) {
   const base = normalizeBaseUrl(apiBaseUrl);
@@ -214,6 +228,8 @@ export async function openPosition({
     allow_entry_swap: Boolean(allowEntrySwap),
   };
   if (Number.isFinite(slippageTolerance)) payload.slippage_tolerance = slippageTolerance;
+  const wid = Number(walletId);
+  if (Number.isFinite(wid) && wid > 0) payload.wallet_id = wid;
   return requestJson(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
