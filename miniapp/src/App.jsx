@@ -469,6 +469,7 @@ export default function App() {
 
     const multiChainEnabled = globalConfig?.multi_chain_enabled ?? true;
     const multiWalletEnabled = globalConfig?.multi_wallet_enabled ?? false;
+    const [posWalletBalances, setPosWalletBalances] = useState(null);
     const userDefaultChain = useMemo(() => {
         const raw = String(globalConfig?.default_chain || 'bsc').trim().toLowerCase();
         if (raw === 'base' || raw === 'bsc') return raw;
@@ -962,6 +963,24 @@ export default function App() {
             if (pollRef.current) clearInterval(pollRef.current);
         };
     }, [apiBaseUrl, initData, hasInitData, pollIntervalSec]);
+
+    // Fetch per-wallet balances for multi-wallet display
+    useEffect(() => {
+        if (!hasInitData || !multiWalletEnabled) {
+            setPosWalletBalances(null);
+            return;
+        }
+        let aborted = false;
+        const controller = new AbortController();
+        const run = () => {
+            fetchWallets({ apiBaseUrl, initData, chain, signal: controller.signal })
+                .then((resp) => { if (!aborted) setPosWalletBalances(resp || null); })
+                .catch(() => { if (!aborted) setPosWalletBalances(null); });
+        };
+        run();
+        const timer = setInterval(run, Math.max(pollIntervalSec * 1000, 30000));
+        return () => { aborted = true; controller.abort(); clearInterval(timer); };
+    }, [apiBaseUrl, initData, hasInitData, multiWalletEnabled, chain, pollIntervalSec]);
 
     useEffect(() => {
         if (!hasInitData || showAdmin || !isMonitor) return;
@@ -2483,38 +2502,67 @@ export default function App() {
                         )}
                     />
                 ) : showWalletSummaryCard ? (
-                    <div className="mt-3 rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 px-4 shadow-sm dark:border-white/5 dark:bg-[#16181c] dark:shadow-none flex flex-row items-center justify-between gap-2">
-                        <div className="flex flex-col">
-                            <div className="flex items-center gap-2">
-                                <div className="text-[15px] font-bold text-zinc-900 dark:text-white/95">{isMonitor ? '监控概览' : '仓位概览'}</div>
-                                <div className="text-xs text-zinc-500 dark:text-white/40">
-                                    <NumberFlowValue value={bnbBalance} formatter={() => String(bnbBalance ?? '0')} /> BNB
-                                    {typeof bnbUsd === 'number' ? <> ≈ <NumberFlowValue value={bnbUsd} formatter={(v) => formatUsd(v)} /></> : ''}
+                    <div className="mt-3 rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 px-4 shadow-sm dark:border-white/5 dark:bg-[#16181c] dark:shadow-none">
+                        <div className="flex flex-row items-center justify-between gap-2">
+                            <div className="flex flex-col">
+                                <div className="flex items-center gap-2">
+                                    <div className="text-[15px] font-bold text-zinc-900 dark:text-white/95">{isMonitor ? '监控概览' : '仓位概览'}</div>
+                                    {!(Array.isArray(posWalletBalances?.wallets) && posWalletBalances.wallets.length > 1) && (
+                                        <div className="text-xs text-zinc-500 dark:text-white/40">
+                                            <NumberFlowValue value={bnbBalance} formatter={() => String(bnbBalance ?? '0')} /> BNB
+                                            {typeof bnbUsd === 'number' ? <> ≈ <NumberFlowValue value={bnbUsd} formatter={(v) => formatUsd(v)} /></> : ''}
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="mt-1 flex items-baseline gap-2">
+                                    <div className="text-[11px] text-zinc-500 dark:text-white/50">总余额</div>
+                                    <div className="text-xl font-extrabold tabular-nums text-zinc-900 dark:text-emerald-400 tracking-tight">
+                                        <NumberFlowValue value={totalUsd} formatter={(v) => formatUsd(v)} />
+                                    </div>
                                 </div>
                             </div>
-                            <div className="mt-1 flex items-baseline gap-2">
-                                <div className="text-[11px] text-zinc-500 dark:text-white/50">总余额</div>
-                                <div className="text-xl font-extrabold tabular-nums text-zinc-900 dark:text-emerald-400 tracking-tight">
-                                    <NumberFlowValue value={totalUsd} formatter={(v) => formatUsd(v)} />
+                            <div className="flex flex-col items-end gap-1.5 shrink-0">
+                                <div className="text-[10px] text-zinc-500 dark:text-white/40 flex items-center gap-1">
+                                    刷新 <span className="font-semibold text-zinc-700 dark:text-white/70"><NumberFlowValue value={pollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s</span>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={openGlobalConfig}
+                                    disabled={!hasInitData}
+                                    className={`inline-flex rounded-lg px-2.5 py-1 text-[11px] font-semibold ring-1 min-w-[64px] justify-center transition-colors ${hasInitData
+                                        ? 'bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50 dark:bg-white/10 dark:text-white/90 dark:ring-white/10 dark:hover:bg-white/20'
+                                        : 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
+                                        }`}
+                                >
+                                    全局配置
+                                </button>
+                            </div>
+                        </div>
+                        {Array.isArray(posWalletBalances?.wallets) && posWalletBalances.wallets.length > 1 && (
+                            <div className="mt-2 flex flex-col gap-1">
+                                {posWalletBalances.wallets.map((w) => (
+                                    <div key={w.id} className="flex items-center justify-between rounded-lg px-2 py-1.5 bg-zinc-100/60 dark:bg-white/[0.04] text-[11px]">
+                                        <div className="flex items-center gap-1.5 min-w-0">
+                                            <span className="font-semibold text-zinc-700 dark:text-white/80 truncate">{w.name || `${String(w.address || '').slice(0, 6)}..${String(w.address || '').slice(-4)}`}</span>
+                                            {w.is_default && <span className="shrink-0 rounded bg-emerald-500/15 px-1 py-px text-[9px] font-bold text-emerald-600 dark:text-emerald-400">默认</span>}
+                                        </div>
+                                        <div className="flex items-center gap-2 text-zinc-500 dark:text-white/40 tabular-nums shrink-0">
+                                            <span>{w.native_balance !== 'N/A' ? w.native_balance : '--'} {posWalletBalances.native_symbol || 'BNB'}</span>
+                                            <span className="text-zinc-300 dark:text-white/15">/</span>
+                                            <span>${w.stable_balance !== 'N/A' ? w.stable_balance : '--'}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                                <div className="flex items-center justify-between px-2 py-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                                    <span>合计</span>
+                                    <span className="tabular-nums">
+                                        {posWalletBalances.wallets.reduce((s, w) => s + Number(w.native_balance === 'N/A' ? 0 : w.native_balance || 0), 0).toFixed(4)} {posWalletBalances.native_symbol || 'BNB'}
+                                        {' / $'}
+                                        {posWalletBalances.wallets.reduce((s, w) => s + Number(w.stable_balance === 'N/A' ? 0 : w.stable_balance || 0), 0).toFixed(2)}
+                                    </span>
                                 </div>
                             </div>
-                        </div>
-                        <div className="flex flex-col items-end gap-1.5 shrink-0">
-                            <div className="text-[10px] text-zinc-500 dark:text-white/40 flex items-center gap-1">
-                                刷新 <span className="font-semibold text-zinc-700 dark:text-white/70"><NumberFlowValue value={pollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s</span>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={openGlobalConfig}
-                                disabled={!hasInitData}
-                                className={`inline-flex rounded-lg px-2.5 py-1 text-[11px] font-semibold ring-1 min-w-[64px] justify-center transition-colors ${hasInitData
-                                    ? 'bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50 dark:bg-white/10 dark:text-white/90 dark:ring-white/10 dark:hover:bg-white/20'
-                                    : 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
-                                    }`}
-                            >
-                                全局配置
-                            </button>
-                        </div>
+                        )}
                     </div >
                 ) : null
                 }

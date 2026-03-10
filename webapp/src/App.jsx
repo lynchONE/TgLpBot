@@ -270,6 +270,8 @@ export default function App() {
   const [positionsLoading, setPositionsLoading] = useState(false);
   const [positionsError, setPositionsError] = useState('');
 
+  const [walletBalances, setWalletBalances] = useState(null);
+  const [walletBalancesChain, setWalletBalancesChain] = useState('');
   const [smart, setSmart] = useState(null);
   const [smartLoading, setSmartLoading] = useState(false);
   const [smartError, setSmartError] = useState('');
@@ -527,6 +529,20 @@ export default function App() {
     [apiBaseUrl, hasInitData, initData]
   );
 
+  const loadWalletBalances = useCallback(
+    async (signal) => {
+      if (!hasInitData) return;
+      try {
+        const resp = await fetchWallets({ apiBaseUrl, initData, chain, signal });
+        setWalletBalances(resp?.wallets || []);
+        setWalletBalancesChain(resp?.chain || chain);
+      } catch (e) {
+        if (e?.name !== 'AbortError') setWalletBalances(null);
+      }
+    },
+    [apiBaseUrl, chain, hasInitData, initData]
+  );
+
   const loadSmart = useCallback(
     async (signal) => {
       if (!hasInitData) {
@@ -678,8 +694,9 @@ export default function App() {
     loadHotPools(ctrl.signal);
     loadPositions(ctrl.signal);
     loadSmart(ctrl.signal);
+    loadWalletBalances(ctrl.signal);
     return () => ctrl.abort();
-  }, [loadHotPools, loadPositions, loadSmart]);
+  }, [loadHotPools, loadPositions, loadSmart, loadWalletBalances]);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -704,6 +721,12 @@ export default function App() {
     const timer = window.setInterval(() => loadPositions(), refreshInterval * 1000);
     return () => window.clearInterval(timer);
   }, [hasInitData, loadPositions, refreshInterval]);
+
+  useEffect(() => {
+    if (!hasInitData) return undefined;
+    const timer = window.setInterval(() => loadWalletBalances(), Math.max(refreshInterval * 1000, 30_000));
+    return () => window.clearInterval(timer);
+  }, [hasInitData, loadWalletBalances, refreshInterval]);
 
   useEffect(() => {
     if (!hasInitData || !klineTokenAddress) return undefined;
@@ -1387,7 +1410,11 @@ export default function App() {
     positions: (
       <PanelShell
         title="仓位"
-        subtitle={positions?.wallet?.address ? shortAddress(positions.wallet.address, 8, 6) : '钱包未连接'}
+        subtitle={
+          Array.isArray(walletBalances) && walletBalances.length > 1
+            ? `${walletBalances.length} 个钱包`
+            : positions?.wallet?.address ? shortAddress(positions.wallet.address, 8, 6) : '钱包未连接'
+        }
         icon={BriefcaseBusiness}
       >
         {positionsError ? <div className="error-text">{positionsError}</div> : null}
@@ -1398,6 +1425,37 @@ export default function App() {
           <MetricCard label="仓位" value={formatUsd(summary?.position_usd)} />
           <MetricCard label="手续费" value={formatUsd(summary?.fee_usd)} />
         </div>
+
+        {Array.isArray(walletBalances) && walletBalances.length > 1 && (
+          <div className="wallet-balances-section">
+            {walletBalances.map((wb) => {
+              const native = wb.native_balance !== 'N/A' ? wb.native_balance : '--';
+              const stable = wb.stable_balance !== 'N/A' ? wb.stable_balance : '--';
+              return (
+                <div key={wb.id} className="wallet-balance-row">
+                  <div className="wb-left">
+                    <span className="wb-name">{wb.name || shortAddress(wb.address, 6, 4)}</span>
+                    {wb.is_default && <span className="wb-default">默认</span>}
+                    <span className="wb-addr">{shortAddress(wb.address, 6, 4)}</span>
+                  </div>
+                  <div className="wb-right">
+                    <span className="wb-bal">{native} {walletBalancesChain === 'base' ? 'ETH' : 'BNB'}</span>
+                    <span className="wb-divider">/</span>
+                    <span className="wb-bal">${stable}</span>
+                  </div>
+                </div>
+              );
+            })}
+            <div className="wallet-balance-total">
+              <span>合计</span>
+              <span>
+                {walletBalances.reduce((s, w) => s + Number(w.native_balance === 'N/A' ? 0 : w.native_balance || 0), 0).toFixed(4)} {walletBalancesChain === 'base' ? 'ETH' : 'BNB'}
+                {' / $'}
+                {walletBalances.reduce((s, w) => s + Number(w.stable_balance === 'N/A' ? 0 : w.stable_balance || 0), 0).toFixed(2)}
+              </span>
+            </div>
+          </div>
+        )}
 
         <div className="data-list">
           {positionsLoading && sortedPositions.length === 0 ? (
