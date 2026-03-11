@@ -565,13 +565,21 @@ export default function App() {
     }, [positions]);
 
     const totalUsd = useMemo(() => {
+        // Multi-wallet: sum all wallets' stable balance + positions + fees
+        const multiWallets = Array.isArray(posWalletBalances?.wallets) && posWalletBalances.wallets.length > 1;
+        if (multiWallets) {
+            const allWalletsUsd = posWalletBalances.wallets.reduce(
+                (s, w) => s + Number(w.stable_balance === 'N/A' ? 0 : w.stable_balance || 0), 0
+            );
+            return allWalletsUsd + totalsFromPositions.positionUsd + totalsFromPositions.feeUsd;
+        }
         const server = typeof summary?.total_usd === 'number' ? summary.total_usd : null;
         const walletUsd = walletUsdFromTokens + (typeof bnbUsd === 'number' ? bnbUsd : 0);
         const computed = walletUsd + totalsFromPositions.positionUsd + totalsFromPositions.feeUsd;
         if (server !== null && server > 0) return server;
         if (computed > 0) return computed;
         return server ?? computed;
-    }, [summary?.total_usd, walletUsdFromTokens, bnbUsd, totalsFromPositions.positionUsd, totalsFromPositions.feeUsd]);
+    }, [summary?.total_usd, walletUsdFromTokens, bnbUsd, totalsFromPositions.positionUsd, totalsFromPositions.feeUsd, posWalletBalances]);
 
     const visiblePositions = useMemo(() => {
         return positions.filter((p) => {
@@ -2507,18 +2515,12 @@ export default function App() {
                             <div className="flex flex-col">
                                 <div className="flex items-center gap-2">
                                     <div className="text-[15px] font-bold text-zinc-900 dark:text-white/95">{isMonitor ? '监控概览' : '仓位概览'}</div>
-                                    <div className="text-xs text-zinc-500 dark:text-white/40">
-                                        {Array.isArray(posWalletBalances?.wallets) && posWalletBalances.wallets.length > 1 ? (
-                                            <>
-                                                ${posWalletBalances.wallets.reduce((s, w) => s + Number(w.stable_balance === 'N/A' ? 0 : w.stable_balance || 0), 0).toFixed(2)}
-                                            </>
-                                        ) : (
-                                            <>
-                                                <NumberFlowValue value={bnbBalance} formatter={() => String(bnbBalance ?? '0')} /> BNB
-                                                {typeof bnbUsd === 'number' ? <> ≈ <NumberFlowValue value={bnbUsd} formatter={(v) => formatUsd(v)} /></> : ''}
-                                            </>
-                                        )}
-                                    </div>
+                                    {!(Array.isArray(posWalletBalances?.wallets) && posWalletBalances.wallets.length > 1) && (
+                                        <div className="text-xs text-zinc-500 dark:text-white/40">
+                                            <NumberFlowValue value={bnbBalance} formatter={() => String(bnbBalance ?? '0')} /> BNB
+                                            {typeof bnbUsd === 'number' ? <> ≈ <NumberFlowValue value={bnbUsd} formatter={(v) => formatUsd(v)} /></> : ''}
+                                        </div>
+                                    )}
                                 </div>
                                 {Array.isArray(posWalletBalances?.wallets) && posWalletBalances.wallets.length > 1 && (
                                     <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0 text-[10px] text-zinc-400 dark:text-white/30 tabular-nums">

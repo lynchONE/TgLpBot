@@ -1417,26 +1417,37 @@ export default function App() {
       >
         {positionsError ? <div className="error-text">{positionsError}</div> : null}
 
-        <div className="summary-grid">
-          <MetricCard label="总资产" value={formatUsd(summary?.total_usd)} tone="strong" />
-          <MetricCard label="钱包" value={formatUsd(summary?.wallet_usd)} />
-          <MetricCard label="仓位" value={formatUsd(summary?.position_usd)} />
-          <MetricCard label="手续费" value={formatUsd(summary?.fee_usd)} />
-        </div>
-
-        {Array.isArray(walletBalances) && walletBalances.length > 1 && (
-          <div className="wallet-balances-inline">
-            {walletBalances.map((wb) => {
-              const stable = wb.stable_balance !== 'N/A' ? wb.stable_balance : '--';
-              return (
-                <span key={wb.id} className="wb-inline-item">
-                  <span className="wb-inline-name">{wb.name || shortAddress(wb.address, 6, 4)}</span>
-                  {' '}${stable}
-                </span>
-              );
-            })}
-          </div>
-        )}
+        {(() => {
+          const multi = Array.isArray(walletBalances) && walletBalances.length > 1;
+          const allWalletsUsd = multi
+            ? walletBalances.reduce((s, w) => s + Number(w.stable_balance === 'N/A' ? 0 : w.stable_balance || 0), 0)
+            : null;
+          const walletUsd = allWalletsUsd !== null ? allWalletsUsd : (summary?.wallet_usd ?? 0);
+          const totalUsd = walletUsd + Number(summary?.position_usd || 0) + Number(summary?.fee_usd || 0);
+          return (
+            <>
+              <div className="summary-grid">
+                <MetricCard label="总资产" value={formatUsd(totalUsd)} tone="strong" />
+                <MetricCard label="钱包" value={formatUsd(walletUsd)} />
+                <MetricCard label="仓位" value={formatUsd(summary?.position_usd)} />
+                <MetricCard label="手续费" value={formatUsd(summary?.fee_usd)} />
+              </div>
+              {multi && (
+                <div className="wallet-balances-inline">
+                  {walletBalances.map((wb) => {
+                    const stable = wb.stable_balance !== 'N/A' ? wb.stable_balance : '--';
+                    return (
+                      <span key={wb.id} className="wb-inline-item">
+                        <span className="wb-inline-name">{wb.name || shortAddress(wb.address, 6, 4)}</span>
+                        {' '}${stable}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          );
+        })()}
 
         <div className="data-list">
           {positionsLoading && sortedPositions.length === 0 ? (
