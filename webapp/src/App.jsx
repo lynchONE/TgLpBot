@@ -1427,11 +1427,11 @@ export default function App() {
         {Array.isArray(walletBalances) && walletBalances.length > 1 && (
           <div className="wallet-balances-inline">
             {walletBalances.map((wb) => {
-              const native = wb.native_balance !== 'N/A' ? wb.native_balance : '--';
+              const stable = wb.stable_balance !== 'N/A' ? wb.stable_balance : '--';
               return (
                 <span key={wb.id} className="wb-inline-item">
                   <span className="wb-inline-name">{wb.name || shortAddress(wb.address, 6, 4)}</span>
-                  {' '}{native} {walletBalancesChain === 'base' ? 'ETH' : 'BNB'}
+                  {' '}${stable}
                 </span>
               );
             })}

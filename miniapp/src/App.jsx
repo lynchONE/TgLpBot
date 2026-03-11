@@ -2510,7 +2510,7 @@ export default function App() {
                                     <div className="text-xs text-zinc-500 dark:text-white/40">
                                         {Array.isArray(posWalletBalances?.wallets) && posWalletBalances.wallets.length > 1 ? (
                                             <>
-                                                {posWalletBalances.wallets.reduce((s, w) => s + Number(w.native_balance === 'N/A' ? 0 : w.native_balance || 0), 0).toFixed(4)} {posWalletBalances.native_symbol || 'BNB'}
+                                                ${posWalletBalances.wallets.reduce((s, w) => s + Number(w.stable_balance === 'N/A' ? 0 : w.stable_balance || 0), 0).toFixed(2)}
                                             </>
                                         ) : (
                                             <>
@@ -2525,7 +2525,7 @@ export default function App() {
                                         {posWalletBalances.wallets.map((w) => (
                                             <span key={w.id} className="whitespace-nowrap">
                                                 <span className="font-medium text-zinc-500 dark:text-white/45">{w.name || `${String(w.address || '').slice(0, 6)}..${String(w.address || '').slice(-4)}`}</span>
-                                                {' '}{w.native_balance !== 'N/A' ? w.native_balance : '--'}
+                                                {' '}${w.stable_balance !== 'N/A' ? w.stable_balance : '--'}
                                             </span>
                                         ))}
                                     </div>
