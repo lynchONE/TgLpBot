@@ -633,6 +633,7 @@ export default function App() {
     ]), [walletSummaryCards, totalsFromPositions.positionUsd, totalsFromPositions.feeUsd]);
 
     const summaryMetricDense = summaryMetricCards.length >= 5;
+    const totalWalletCount = Array.isArray(posWalletBalances?.wallets) ? posWalletBalances.wallets.length : walletSummaryCards.length;
 
     const visiblePositions = useMemo(() => {
         return positions.filter((p) => {
@@ -2564,36 +2565,27 @@ export default function App() {
                     />
                 ) : showWalletSummaryCard ? (
                     <>
-                        <div className="mt-3 overflow-hidden rounded-[26px] border border-zinc-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_42%),linear-gradient(135deg,_rgba(255,255,255,0.92),_rgba(244,247,255,0.78))] p-3.5 shadow-[0_16px_40px_-24px_rgba(15,23,42,0.38)] dark:border-white/10 dark:bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_38%),linear-gradient(135deg,_rgba(24,27,32,0.98),_rgba(15,17,21,0.94))] dark:shadow-[0_18px_48px_-28px_rgba(0,0,0,0.7)]">
-                            <div className="flex flex-col gap-3">
+                        <div className="mt-3 overflow-hidden rounded-[24px] border border-zinc-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_42%),linear-gradient(135deg,_rgba(255,255,255,0.92),_rgba(244,247,255,0.78))] p-3 shadow-[0_16px_40px_-24px_rgba(15,23,42,0.38)] dark:border-white/10 dark:bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_38%),linear-gradient(135deg,_rgba(24,27,32,0.98),_rgba(15,17,21,0.94))] dark:shadow-[0_18px_48px_-28px_rgba(0,0,0,0.7)]">
+                            <div className="flex flex-col gap-2.5">
                                 <div className="flex items-start justify-between gap-3">
                                     <div className="min-w-0 flex-1">
                                         <div className="inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-300/90">
                                             {isMonitor ? '监控概览' : '仓位总览'}
                                         </div>
 
-                                        <div className="mt-3 text-[11px] font-medium text-zinc-500 dark:text-white/45">总资产</div>
-                                        <div className="mt-1 text-[26px] font-black leading-none tracking-tight text-zinc-950 dark:text-white">
+                                        <div className="mt-2.5 text-[10px] font-medium text-zinc-500 dark:text-white/45">总资产</div>
+                                        <div className="mt-1 text-[24px] font-black leading-none tracking-tight text-zinc-950 dark:text-white">
                                             <NumberFlowValue value={totalUsd} formatter={(v) => formatUsd(v)} />
                                         </div>
 
-                                        <div className="mt-2.5 flex flex-wrap gap-1.5 text-[10px] text-zinc-500 dark:text-white/50">
-                                            <span className="rounded-full border border-white/70 bg-white/70 px-2.5 py-1 dark:border-white/10 dark:bg-white/5">
-                                                刷新 <span className="font-semibold text-zinc-800 dark:text-white/80"><NumberFlowValue value={pollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s</span>
-                                            </span>
-
-                                            {multiWalletSummary ? (
-                                                <span className="rounded-full border border-white/70 bg-white/70 px-2.5 py-1 dark:border-white/10 dark:bg-white/5">
-                                                    {walletSummaryCards.length} 个钱包
-                                                </span>
-                                            ) : (
-                                                <span className="rounded-full border border-white/70 bg-white/70 px-2.5 py-1 font-mono dark:border-white/10 dark:bg-white/5">
+                                        <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-zinc-500 dark:text-white/50">
+                                            {!multiWalletSummary ? (
+                                                <span className="rounded-full border border-white/70 bg-white/70 px-2 py-1 font-mono dark:border-white/10 dark:bg-white/5">
                                                     {walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '未连接'}
                                                 </span>
-                                            )}
-
+                                            ) : null}
                                             {!multiWalletSummary ? (
-                                                <span className="rounded-full border border-white/70 bg-white/70 px-2.5 py-1 dark:border-white/10 dark:bg-white/5">
+                                                <span className="rounded-full border border-white/70 bg-white/70 px-2 py-1 dark:border-white/10 dark:bg-white/5">
                                                     <NumberFlowValue value={bnbBalance} formatter={() => String(bnbBalance ?? '0')} /> BNB
                                                     {typeof bnbUsd === 'number' ? <> · <NumberFlowValue value={bnbUsd} formatter={(v) => formatUsd(v)} /></> : null}
                                                 </span>
@@ -2601,29 +2593,36 @@ export default function App() {
                                         </div>
                                     </div>
 
-                                    <button
-                                        type="button"
-                                        onClick={openGlobalConfig}
-                                        disabled={!hasInitData}
-                                        className={`inline-flex shrink-0 rounded-2xl px-3 py-2 text-[10px] font-semibold ring-1 backdrop-blur-md transition-colors ${hasInitData
-                                            ? 'bg-white/80 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/10 dark:text-white/90 dark:ring-white/10 dark:hover:bg-white/20'
-                                            : 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
-                                            }`}
-                                    >
-                                        全局配置
-                                    </button>
+                                    <div className="flex shrink-0 flex-col items-end gap-1.5">
+                                        <button
+                                            type="button"
+                                            onClick={openGlobalConfig}
+                                            disabled={!hasInitData}
+                                            className={`inline-flex shrink-0 rounded-2xl px-3 py-2 text-[10px] font-semibold ring-1 backdrop-blur-md transition-colors ${hasInitData
+                                                ? 'bg-white/80 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/10 dark:text-white/90 dark:ring-white/10 dark:hover:bg-white/20'
+                                                : 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
+                                                }`}
+                                        >
+                                            全局配置
+                                        </button>
+                                        {multiWalletSummary ? (
+                                            <span className="rounded-full border border-white/70 bg-white/70 px-2 py-1 text-[10px] font-semibold text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-white/65">
+                                                {totalWalletCount} 个钱包
+                                            </span>
+                                        ) : null}
+                                    </div>
                                 </div>
 
-                                <div className={`flex gap-1.5 ${summaryMetricDense ? 'gap-1' : ''}`}>
+                                <div className={`flex gap-1 ${summaryMetricDense ? 'gap-0.5' : ''}`}>
                                     {summaryMetricCards.map((card) => (
                                         <div
                                             key={card.key}
-                                            className={`min-w-0 flex-1 rounded-2xl border border-white/70 bg-white/75 backdrop-blur-md dark:border-white/10 dark:bg-white/5 ${summaryMetricDense ? 'px-1.5 py-1.5' : 'px-2 py-1.5'}`}
+                                            className={`min-w-0 flex-1 rounded-[18px] border border-white/70 bg-white/75 backdrop-blur-md dark:border-white/10 dark:bg-white/5 ${summaryMetricDense ? 'px-1.25 py-1.25' : 'px-1.5 py-1.5'}`}
                                         >
-                                            <div className={`truncate font-semibold uppercase text-zinc-500 dark:text-white/40 ${summaryMetricDense ? 'text-[8px] tracking-[0.06em]' : 'text-[9px] tracking-[0.1em]'}`}>
+                                            <div className={`truncate font-semibold uppercase text-zinc-500 dark:text-white/40 ${summaryMetricDense ? 'text-[7px] tracking-[0.04em]' : 'text-[8px] tracking-[0.08em]'}`}>
                                                 {card.label}
                                             </div>
-                                            <div className={`mt-1 truncate font-bold tabular-nums text-zinc-950 dark:text-white ${summaryMetricDense ? 'text-[11px]' : 'text-[12px]'}`}>
+                                            <div className={`mt-0.5 truncate font-bold tabular-nums text-zinc-950 dark:text-white ${summaryMetricDense ? 'text-[10px]' : 'text-[11px]'}`}>
                                                 {card.value}
                                             </div>
                                         </div>
