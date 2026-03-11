@@ -150,6 +150,11 @@ function projectClusters(chart, candleSeries, candleData, candleMap, candleIndex
   const minPrice = candleData.reduce((acc, row) => Math.min(acc, Number(row?.low || 0)), Number.POSITIVE_INFINITY);
   const maxPrice = candleData.reduce((acc, row) => Math.max(acc, Number(row?.high || 0)), 0);
   const priceSpan = Number.isFinite(maxPrice - minPrice) && maxPrice > minPrice ? (maxPrice - minPrice) : 1;
+  const visibleRange = timeScale.getVisibleRange?.() || null;
+  const visibleFrom = visibleRange ? toUnixSeconds(visibleRange.from) : 0;
+  const visibleTo = visibleRange ? toUnixSeconds(visibleRange.to) : 0;
+  const hasVisibleRange = visibleFrom > 0 && visibleTo > 0;
+  const edgeBuffer = 24;
 
   for (const cluster of clusters) {
     const located =
@@ -160,16 +165,11 @@ function projectClusters(chart, candleSeries, candleData, candleMap, candleIndex
     const candle = located.candle;
 
     const time = Number(located.time || cluster.time || 0);
+    if (hasVisibleRange && (time < visibleFrom || time > visibleTo)) continue;
+
     let x = timeScale.timeToCoordinate(time);
-    if (!Number.isFinite(x) && width > xPad * 2) {
-      const idx = Number(candleIndexMap.get(time));
-      if (Number.isFinite(idx) && candleData.length > 1) {
-        x = xPad + ((width - xPad * 2) * idx) / (candleData.length - 1);
-      } else {
-        x = width / 2;
-      }
-    }
     if (!Number.isFinite(x)) continue;
+    if (width > 0 && (x < -edgeBuffer || x > width + edgeBuffer)) continue;
 
     const anchorPrice = cluster.action === 'remove'
       ? Number(candle?.l ?? candle?.low ?? 0)
@@ -292,6 +292,14 @@ export default function KlineChart({
     () => deOverlapMarkers(projectedMarkers),
     [projectedMarkers]
   );
+
+  useEffect(() => {
+    setHoveredCluster((prev) => {
+      if (!prev) return null;
+      const next = displayMarkers.find((item) => item.id === prev.id);
+      return next || null;
+    });
+  }, [displayMarkers]);
 
   const updateProjection = useCallback(() => {
     const hostWidth = chartHostRef.current?.clientWidth || wrapRef.current?.clientWidth || 0;
