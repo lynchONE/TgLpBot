@@ -591,7 +591,7 @@ export default function App() {
 
     const walletSummaryCards = useMemo(() => {
         if (multiWalletSummary) {
-            return posWalletBalances.wallets.map((w, idx) => ({
+            return posWalletBalances.wallets.slice(0, 3).map((w, idx) => ({
                 key: String(w?.id || w?.address || idx),
                 label: w?.name || `${String(w?.address || '').slice(0, 6)}..${String(w?.address || '').slice(-4)}`,
                 value: w?.stable_balance !== 'N/A' ? formatUsd(w.stable_balance) : '$--',
@@ -631,6 +631,8 @@ export default function App() {
             detail: '',
         },
     ]), [walletSummaryCards, totalsFromPositions.positionUsd, totalsFromPositions.feeUsd]);
+
+    const summaryMetricDense = summaryMetricCards.length >= 5;
 
     const visiblePositions = useMemo(() => {
         return positions.filter((p) => {
@@ -2565,7 +2567,7 @@ export default function App() {
                         <div className="mt-3 overflow-hidden rounded-[26px] border border-zinc-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_42%),linear-gradient(135deg,_rgba(255,255,255,0.92),_rgba(244,247,255,0.78))] p-3.5 shadow-[0_16px_40px_-24px_rgba(15,23,42,0.38)] dark:border-white/10 dark:bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_38%),linear-gradient(135deg,_rgba(24,27,32,0.98),_rgba(15,17,21,0.94))] dark:shadow-[0_18px_48px_-28px_rgba(0,0,0,0.7)]">
                             <div className="flex flex-col gap-3">
                                 <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0">
+                                    <div className="min-w-0 flex-1">
                                         <div className="inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-300/90">
                                             {isMonitor ? '监控概览' : '仓位总览'}
                                         </div>
@@ -2612,23 +2614,17 @@ export default function App() {
                                     </button>
                                 </div>
 
-                                <div
-                                    className="grid gap-2"
-                                    style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(104px, 1fr))' }}
-                                >
+                                <div className={`flex gap-1.5 ${summaryMetricDense ? 'gap-1' : ''}`}>
                                     {summaryMetricCards.map((card) => (
                                         <div
                                             key={card.key}
-                                            className="rounded-2xl border border-white/70 bg-white/75 px-3 py-2.5 backdrop-blur-md dark:border-white/10 dark:bg-white/5"
+                                            className={`min-w-0 flex-1 rounded-2xl border border-white/70 bg-white/75 backdrop-blur-md dark:border-white/10 dark:bg-white/5 ${summaryMetricDense ? 'px-1.5 py-1.5' : 'px-2 py-1.5'}`}
                                         >
-                                            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500 dark:text-white/40">
+                                            <div className={`truncate font-semibold uppercase text-zinc-500 dark:text-white/40 ${summaryMetricDense ? 'text-[8px] tracking-[0.06em]' : 'text-[9px] tracking-[0.1em]'}`}>
                                                 {card.label}
                                             </div>
-                                            <div className="mt-1.5 text-[15px] font-bold tabular-nums text-zinc-950 dark:text-white">
+                                            <div className={`mt-1 truncate font-bold tabular-nums text-zinc-950 dark:text-white ${summaryMetricDense ? 'text-[11px]' : 'text-[12px]'}`}>
                                                 {card.value}
-                                            </div>
-                                            <div className="mt-0.5 truncate text-[10px] text-zinc-400 dark:text-white/35 min-h-[14px]">
-                                                {card.detail || ' '}
                                             </div>
                                         </div>
                                     ))}
