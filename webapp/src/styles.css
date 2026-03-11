@@ -985,21 +985,29 @@ body {
 }
 
 .summary-grid.summary-grid-wallets {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 12px;
-  overflow-x: auto;
-  padding-bottom: 2px;
-  scrollbar-width: thin;
+  gap: 6px;
+  grid-template-columns: repeat(var(--summary-wallet-cols, 4), minmax(0, 1fr));
 }
 
 .summary-grid.summary-grid-wallets .metric-card {
-  flex: 0 0 clamp(148px, 18vw, 188px);
   min-width: 0;
+  border-radius: 8px;
+  padding: 7px 8px;
+}
+
+.summary-grid.summary-grid-wallets .metric-label {
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
+.summary-grid.summary-grid-wallets .metric-value {
+  margin-top: 2px;
+  font-size: 12px;
 }
 
 .summary-grid.summary-grid-wallets .metric-label,
-.summary-grid.summary-grid-wallets .metric-value {
+.summary-grid.summary-grid-wallets .metric-value,
+.summary-grid.summary-grid-wallets .metric-card {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

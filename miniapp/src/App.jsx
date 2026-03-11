@@ -616,6 +616,22 @@ export default function App() {
         ];
     }, [multiWalletSummary, posWalletBalances, singleWalletUsd, walletAddress]);
 
+    const summaryMetricCards = useMemo(() => ([
+        ...walletSummaryCards,
+        {
+            key: 'position',
+            label: '仓位',
+            value: formatUsd(totalsFromPositions.positionUsd),
+            detail: '',
+        },
+        {
+            key: 'fee',
+            label: '手续费',
+            value: formatUsd(totalsFromPositions.feeUsd),
+            detail: '',
+        },
+    ]), [walletSummaryCards, totalsFromPositions.positionUsd, totalsFromPositions.feeUsd]);
+
     const visiblePositions = useMemo(() => {
         return positions.filter((p) => {
             if (p?.has_liquidity !== false) return true;
@@ -2546,8 +2562,8 @@ export default function App() {
                     />
                 ) : showWalletSummaryCard ? (
                     <>
-                        <div className="mt-3 overflow-hidden rounded-[28px] border border-zinc-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_42%),linear-gradient(135deg,_rgba(255,255,255,0.92),_rgba(244,247,255,0.78))] p-4 shadow-[0_16px_40px_-24px_rgba(15,23,42,0.38)] dark:border-white/10 dark:bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_38%),linear-gradient(135deg,_rgba(24,27,32,0.98),_rgba(15,17,21,0.94))] dark:shadow-[0_18px_48px_-28px_rgba(0,0,0,0.7)]">
-                            <div className="flex flex-col gap-4">
+                        <div className="mt-3 overflow-hidden rounded-[26px] border border-zinc-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_42%),linear-gradient(135deg,_rgba(255,255,255,0.92),_rgba(244,247,255,0.78))] p-3.5 shadow-[0_16px_40px_-24px_rgba(15,23,42,0.38)] dark:border-white/10 dark:bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_38%),linear-gradient(135deg,_rgba(24,27,32,0.98),_rgba(15,17,21,0.94))] dark:shadow-[0_18px_48px_-28px_rgba(0,0,0,0.7)]">
+                            <div className="flex flex-col gap-3">
                                 <div className="flex items-start justify-between gap-3">
                                     <div className="min-w-0">
                                         <div className="inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-300/90">
@@ -2555,11 +2571,11 @@ export default function App() {
                                         </div>
 
                                         <div className="mt-3 text-[11px] font-medium text-zinc-500 dark:text-white/45">总资产</div>
-                                        <div className="mt-1 text-[30px] font-black leading-none tracking-tight text-zinc-950 dark:text-white">
+                                        <div className="mt-1 text-[26px] font-black leading-none tracking-tight text-zinc-950 dark:text-white">
                                             <NumberFlowValue value={totalUsd} formatter={(v) => formatUsd(v)} />
                                         </div>
 
-                                        <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-zinc-500 dark:text-white/50">
+                                        <div className="mt-2.5 flex flex-wrap gap-1.5 text-[10px] text-zinc-500 dark:text-white/50">
                                             <span className="rounded-full border border-white/70 bg-white/70 px-2.5 py-1 dark:border-white/10 dark:bg-white/5">
                                                 刷新 <span className="font-semibold text-zinc-800 dark:text-white/80"><NumberFlowValue value={pollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s</span>
                                             </span>
@@ -2587,7 +2603,7 @@ export default function App() {
                                         type="button"
                                         onClick={openGlobalConfig}
                                         disabled={!hasInitData}
-                                        className={`inline-flex shrink-0 rounded-2xl px-3 py-2 text-[11px] font-semibold ring-1 backdrop-blur-md transition-colors ${hasInitData
+                                        className={`inline-flex shrink-0 rounded-2xl px-3 py-2 text-[10px] font-semibold ring-1 backdrop-blur-md transition-colors ${hasInitData
                                             ? 'bg-white/80 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/10 dark:text-white/90 dark:ring-white/10 dark:hover:bg-white/20'
                                             : 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
                                             }`}
@@ -2596,39 +2612,26 @@ export default function App() {
                                     </button>
                                 </div>
 
-                                <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
-                                    {walletSummaryCards.map((card) => (
+                                <div
+                                    className="grid gap-2"
+                                    style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(104px, 1fr))' }}
+                                >
+                                    {summaryMetricCards.map((card) => (
                                         <div
                                             key={card.key}
-                                            className="min-w-[140px] flex-none rounded-2xl border border-white/70 bg-white/75 px-3 py-3 backdrop-blur-md dark:border-white/10 dark:bg-white/5"
+                                            className="rounded-2xl border border-white/70 bg-white/75 px-3 py-2.5 backdrop-blur-md dark:border-white/10 dark:bg-white/5"
                                         >
                                             <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500 dark:text-white/40">
                                                 {card.label}
                                             </div>
-                                            <div className="mt-2 text-base font-bold tabular-nums text-zinc-950 dark:text-white">
+                                            <div className="mt-1.5 text-[15px] font-bold tabular-nums text-zinc-950 dark:text-white">
                                                 {card.value}
                                             </div>
-                                            <div className="mt-1 truncate text-[10px] text-zinc-400 dark:text-white/35">
+                                            <div className="mt-0.5 truncate text-[10px] text-zinc-400 dark:text-white/35 min-h-[14px]">
                                                 {card.detail || ' '}
                                             </div>
                                         </div>
                                     ))}
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-2">
-                                    <div className="rounded-2xl border border-white/70 bg-white/70 px-3 py-3 backdrop-blur-md dark:border-white/10 dark:bg-white/5">
-                                        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500 dark:text-white/40">仓位</div>
-                                        <div className="mt-2 text-lg font-bold tabular-nums text-zinc-900 dark:text-white/90">
-                                            <NumberFlowValue value={totalsFromPositions.positionUsd} formatter={(v) => formatUsd(v)} />
-                                        </div>
-                                    </div>
-
-                                    <div className="rounded-2xl border border-white/70 bg-white/70 px-3 py-3 backdrop-blur-md dark:border-white/10 dark:bg-white/5">
-                                        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500 dark:text-white/40">手续费</div>
-                                        <div className="mt-2 text-lg font-bold tabular-nums text-zinc-900 dark:text-white/90">
-                                            <NumberFlowValue value={totalsFromPositions.feeUsd} formatter={(v) => formatUsd(v)} />
-                                        </div>
-                                    </div>
                                 </div>
                             </div>
                         </div>

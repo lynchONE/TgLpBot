@@ -1437,8 +1437,12 @@ export default function App() {
                   value: formatUsd(walletUsd),
                 },
               ];
+          const summaryMetricCount = walletMetricCards.length + 3;
           return (
-              <div className="summary-grid summary-grid-wallets">
+              <div
+                className="summary-grid summary-grid-wallets"
+                style={{ '--summary-wallet-cols': summaryMetricCount }}
+              >
                 <MetricCard label="总资产" value={formatUsd(totalUsd)} tone="strong" />
                 {walletMetricCards.map((card) => (
                   <MetricCard key={card.key} label={card.label} value={card.value} />
