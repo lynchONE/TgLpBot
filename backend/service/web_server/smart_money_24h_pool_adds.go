@@ -388,34 +388,55 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 			}
 		}
 	}
+	buildWatchedArgs := func() []any {
+		args := make([]any, 0, 1+watchedFilterArgCount)
+		args = append(args, chain)
+		for i := 0; i < watchedFilterArgCount; i++ {
+			args = append(args, chain)
+		}
+		return args
+	}
+	activeNetLiquidityExpr := "sum(if(pool_version = 'v4', toInt256OrZero(liquidity_delta), if(action = 'add', toInt256OrZero(liquidity_delta), -toInt256OrZero(liquidity_delta))))"
+	activePositionsSubquery := fmt.Sprintf(`
+		SELECT
+			pool_version,
+			pool_id,
+			wallet_address,
+			tick_lower,
+			tick_upper,
+			minIf(ts, action = 'add') AS first_add_at,
+			maxIf(ts, action = 'add') AS last_add_at,
+			countIf(action = 'add') AS add_event_count,
+			toString(sumIf(toInt256OrZero(amount0), action = 'add')) AS sum0,
+			toString(sumIf(toInt256OrZero(amount1), action = 'add')) AS sum1
+		FROM smart_lp_events
+		WHERE ts >= now() - INTERVAL %d SECOND
+			AND action IN ('add', 'remove')
+			AND lowerUTF8(chain) = ?
+			%s
+			AND pool_version != '' AND pool_id != ''
+			AND wallet_address != ''
+		GROUP BY pool_version, pool_id, wallet_address, tick_lower, tick_upper
+		HAVING %s > 0
+			AND add_event_count > 0
+	`, windowSec, watchedWalletFilterSQL, activeNetLiquidityExpr)
 
-	// 1. Query top pools by wallet count in window
+	// 1. Query top pools by wallet count in window for positions that still exist.
 	poolQuery := fmt.Sprintf(`
 		SELECT
 			pool_version,
 			pool_id,
-			count() AS event_count,
+			sum(add_event_count) AS event_count,
 			uniqExact(wallet_address) AS wallet_count,
-			min(ts) AS first_add_at,
-			max(ts) AS last_add_at
-		FROM smart_lp_events
-		WHERE ts >= now() - INTERVAL %d SECOND
-			AND action = 'add'
-			AND lowerUTF8(chain) = ?
-			%s
-			AND pool_version != '' AND pool_id != ''
+			min(first_add_at) AS first_add_at,
+			max(last_add_at) AS last_add_at
+		FROM (%s)
 		GROUP BY pool_version, pool_id
 		ORDER BY wallet_count DESC, event_count DESC
 		LIMIT %d
-	`, windowSec, watchedWalletFilterSQL, poolLimit)
+	`, activePositionsSubquery, poolLimit)
 
-	poolArgs := make([]any, 0, 1+watchedFilterArgCount)
-	poolArgs = append(poolArgs, chain)
-	if watchedOnly {
-		for i := 0; i < watchedFilterArgCount; i++ {
-			poolArgs = append(poolArgs, chain)
-		}
-	}
+	poolArgs := buildWatchedArgs()
 	rows, err := s.ClickHouse.Conn.Query(ctx, poolQuery, poolArgs...)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("池子查询失败: %v", err), http.StatusInternalServerError)
@@ -524,13 +545,7 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 
 	// 1.1 Query total added token amounts for selected pools and convert to USD.
 	selectedPlaceholders := make([]string, 0, len(outPools))
-	selectedArgs := make([]any, 0, 1+watchedFilterArgCount+2*len(outPools))
-	selectedArgs = append(selectedArgs, chain)
-	if watchedOnly {
-		for i := 0; i < watchedFilterArgCount; i++ {
-			selectedArgs = append(selectedArgs, chain)
-		}
-	}
+	selectedArgs := buildWatchedArgs()
 	for i := range outPools {
 		selectedPlaceholders = append(selectedPlaceholders, "(?, ?)")
 		selectedArgs = append(selectedArgs, outPools[i].PoolVersion, outPools[i].PoolID)
@@ -542,16 +557,12 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 			SELECT
 				pool_version,
 				pool_id,
-				toString(sum(toInt256OrZero(amount0))) AS sum0,
-				toString(sum(toInt256OrZero(amount1))) AS sum1
-			FROM smart_lp_events
-			WHERE ts >= now() - INTERVAL %d SECOND
-				AND action = 'add'
-				AND lowerUTF8(chain) = ?
-				%s
-				AND (pool_version, pool_id) IN (%s)
+				toString(sum(toInt256OrZero(sum0))) AS sum0,
+				toString(sum(toInt256OrZero(sum1))) AS sum1
+			FROM (%s)
+			WHERE (pool_version, pool_id) IN (%s)
 			GROUP BY pool_version, pool_id
-		`, windowSec, watchedWalletFilterSQL, strings.Join(selectedPlaceholders, ","))
+		`, activePositionsSubquery, strings.Join(selectedPlaceholders, ","))
 
 		amountRows, amountErr := s.ClickHouse.Conn.Query(ctx, poolAmountQuery, selectedArgs...)
 		if amountErr != nil {
@@ -657,19 +668,9 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 	var totalWallets uint64
 	totalWalletsQ := fmt.Sprintf(`
 		SELECT uniqExact(wallet_address)
-		FROM smart_lp_events
-		WHERE ts >= now() - INTERVAL %d SECOND
-			AND action = 'add'
-			AND lowerUTF8(chain) = ?
-			%s
-	`, windowSec, watchedWalletFilterSQL)
-	totalWalletArgs := make([]any, 0, 1+watchedFilterArgCount)
-	totalWalletArgs = append(totalWalletArgs, chain)
-	if watchedOnly {
-		for i := 0; i < watchedFilterArgCount; i++ {
-			totalWalletArgs = append(totalWalletArgs, chain)
-		}
-	}
+		FROM (%s)
+	`, activePositionsSubquery)
+	totalWalletArgs := buildWatchedArgs()
 	if err := s.ClickHouse.Conn.QueryRow(ctx, totalWalletsQ, totalWalletArgs...).Scan(&totalWallets); err != nil {
 		warnings = append(warnings, fmt.Sprintf("总钱包数查询失败: %v", err))
 	}
@@ -677,26 +678,16 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 	// 3. Hourly trend
 	hourlyQ := fmt.Sprintf(`
 		SELECT
-			toStartOfHour(ts) AS hour,
-			count() AS add_count,
+			toStartOfHour(last_add_at) AS hour,
+			sum(add_event_count) AS add_count,
 			uniqExact(wallet_address) AS wallet_count,
 			uniqExact(concat(pool_version, '|', pool_id)) AS distinct_pools
-		FROM smart_lp_events
-		WHERE ts >= now() - INTERVAL %d SECOND
-			AND action = 'add'
-			AND lowerUTF8(chain) = ?
-			%s
+		FROM (%s)
 		GROUP BY hour
 		ORDER BY hour ASC
-	`, windowSec, watchedWalletFilterSQL)
+	`, activePositionsSubquery)
 
-	hourlyArgs := make([]any, 0, 1+watchedFilterArgCount)
-	hourlyArgs = append(hourlyArgs, chain)
-	if watchedOnly {
-		for i := 0; i < watchedFilterArgCount; i++ {
-			hourlyArgs = append(hourlyArgs, chain)
-		}
-	}
+	hourlyArgs := buildWatchedArgs()
 	hRows, err := s.ClickHouse.Conn.Query(ctx, hourlyQ, hourlyArgs...)
 	if err != nil {
 		warnings = append(warnings, fmt.Sprintf("每小时趋势查询失败: %v", err))
@@ -730,23 +721,13 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 				'超宽 (20k+ ticks)'
 			) AS range_label,
 			count() AS cnt
-		FROM smart_lp_events
-		WHERE ts >= now() - INTERVAL %d SECOND
-			AND action = 'add'
-			AND lowerUTF8(chain) = ?
-			%s
-			AND tick_lower != 0 AND tick_upper != 0
+		FROM (%s)
+		WHERE tick_lower != 0 AND tick_upper != 0
 		GROUP BY range_label
 		ORDER BY cnt DESC
-	`, windowSec, watchedWalletFilterSQL)
+	`, activePositionsSubquery)
 
-	tickArgs := make([]any, 0, 1+watchedFilterArgCount)
-	tickArgs = append(tickArgs, chain)
-	if watchedOnly {
-		for i := 0; i < watchedFilterArgCount; i++ {
-			tickArgs = append(tickArgs, chain)
-		}
-	}
+	tickArgs := buildWatchedArgs()
 	tRows, err := s.ClickHouse.Conn.Query(ctx, tickRangeQ, tickArgs...)
 	if err != nil {
 		warnings = append(warnings, fmt.Sprintf("区间分布查询失败: %v", err))
@@ -772,25 +753,14 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 		SELECT
 			wallet_address,
 			uniqExact(concat(pool_version, '|', pool_id)) AS pool_count,
-			count() AS add_count
-		FROM smart_lp_events
-		WHERE ts >= now() - INTERVAL %d SECOND
-			AND action = 'add'
-			AND lowerUTF8(chain) = ?
-			%s
-			AND wallet_address != ''
+			sum(add_event_count) AS add_count
+		FROM (%s)
 		GROUP BY wallet_address
 		ORDER BY pool_count DESC, add_count DESC
 		LIMIT %d
-	`, windowSec, watchedWalletFilterSQL, topWalletLimit)
+	`, activePositionsSubquery, topWalletLimit)
 
-	topWalletArgs := make([]any, 0, 1+watchedFilterArgCount)
-	topWalletArgs = append(topWalletArgs, chain)
-	if watchedOnly {
-		for i := 0; i < watchedFilterArgCount; i++ {
-			topWalletArgs = append(topWalletArgs, chain)
-		}
-	}
+	topWalletArgs := buildWatchedArgs()
 	topWalletRows, topWalletErr := s.ClickHouse.Conn.Query(ctx, topWalletQuery, topWalletArgs...)
 	topWallets := make([]smartMoney24hTopWallet, 0, topWalletLimit)
 	if topWalletErr != nil {
@@ -822,25 +792,16 @@ func (s *Server) handleSmartMoney24hPoolAdds(w http.ResponseWriter, r *http.Requ
 			) AS range_label,
 			count() AS cnt
 		FROM (
-			SELECT uniqExact(concat(pool_version, '|', pool_id)) AS pool_count
-			FROM smart_lp_events
-			WHERE ts >= now() - INTERVAL %d SECOND
-				AND action = 'add'
-				AND lowerUTF8(chain) = ?
-				%s
-				AND wallet_address != ''
+			SELECT
+				wallet_address,
+				uniqExact(concat(pool_version, '|', pool_id)) AS pool_count
+			FROM (%s)
 			GROUP BY wallet_address
 		)
 		GROUP BY range_label
-	`, windowSec, watchedWalletFilterSQL)
+	`, activePositionsSubquery)
 
-	walletDistArgs := make([]any, 0, 1+watchedFilterArgCount)
-	walletDistArgs = append(walletDistArgs, chain)
-	if watchedOnly {
-		for i := 0; i < watchedFilterArgCount; i++ {
-			walletDistArgs = append(walletDistArgs, chain)
-		}
-	}
+	walletDistArgs := buildWatchedArgs()
 	walletDistRows, walletDistErr := s.ClickHouse.Conn.Query(ctx, walletDistQuery, walletDistArgs...)
 	walletDistCount := map[string]int{
 		"1 pool":    0,

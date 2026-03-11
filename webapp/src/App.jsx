@@ -79,7 +79,7 @@ const KLINE_INTERVALS = [
   { key: '15m', label: '15m', bucketSec: 900, limit: 240, timeframe: 'minute', aggregate: 15, poolLimit: 220 },
   { key: '1H', label: '1H', bucketSec: 3600, limit: 240, timeframe: 'hour', aggregate: 1, poolLimit: 200 },
 ];
-const SMART_POOL_WINDOW_HOURS = 2;
+const SMART_POOL_WINDOW_HOURS = 24;
 const SMART_PNL_WINDOW_HOURS = 24;
 const KLINE_MARKER_WINDOW_HOURS = 24;
 
@@ -925,9 +925,74 @@ export default function App() {
   }, [apiBaseUrl, chain, hasInitData, initData]);
 
   const openPositionModal = useCallback((pool) => {
-    setOpenPosPool(pool);
-    loadWalletsForModal(pool?.chain);
-  }, [loadWalletsForModal]);
+    const resolvedChain = normalizeChain(pool?.chain || chain);
+    const resolvedVersion = String(
+      pool?.protocol_version || pool?.pool_version || inferPoolVersion(pool) || ''
+    )
+      .trim()
+      .toLowerCase();
+
+    setOpenPosPool({
+      ...pool,
+      chain: resolvedChain,
+      ...(resolvedVersion ? { protocol_version: resolvedVersion, pool_version: resolvedVersion } : {}),
+    });
+    loadWalletsForModal(resolvedChain);
+  }, [chain, loadWalletsForModal]);
+
+  useEffect(() => {
+    if (!openPosPool || !hasInitData) return undefined;
+
+    const existing = Array.isArray(openPosPool?.smartMoneyWallets)
+      ? openPosPool.smartMoneyWallets
+      : [];
+    if (existing.length > 0) return undefined;
+
+    const poolId = normalizePoolAddress(openPosPool?.pool_address || openPosPool?.pool_id);
+    const poolVersion = String(
+      openPosPool?.protocol_version || openPosPool?.pool_version || inferPoolVersion(openPosPool) || ''
+    )
+      .trim()
+      .toLowerCase();
+    if (!poolId || !poolVersion) return undefined;
+
+    let cancelled = false;
+    const ctrl = new AbortController();
+
+    fetchSmartMoneyPoolAdds({
+      apiBaseUrl,
+      initData,
+      chain: openPosPool?.chain || chain,
+      poolVersion,
+      poolId,
+      windowHours: SMART_POOL_WINDOW_HOURS,
+      limit: 120,
+      signal: ctrl.signal,
+    })
+      .then((res) => {
+        if (cancelled) return;
+        const wallets = Array.isArray(res?.wallets) ? res.wallets : [];
+        setOpenPosPool((prev) => {
+          if (!prev) return prev;
+          const prevId = normalizePoolAddress(prev?.pool_address || prev?.pool_id);
+          const prevVersion = String(
+            prev?.protocol_version || prev?.pool_version || inferPoolVersion(prev) || ''
+          )
+            .trim()
+            .toLowerCase();
+          if (prevId !== poolId || prevVersion !== poolVersion) return prev;
+          return { ...prev, smartMoneyWallets: wallets };
+        });
+      })
+      .catch((e) => {
+        if (cancelled || e?.name === 'AbortError') return;
+      });
+
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+    };
+  }, [apiBaseUrl, chain, hasInitData, initData, openPosPool]);
 
   const handleOpenPosition = useCallback(async (params) => {
     const panelKey = openPosPool?.panelKey || 'hot_pools';
@@ -1634,7 +1699,7 @@ export default function App() {
     smart_money: (
       <PanelShell
         title="聪明钱"
-        subtitle={`${smartPools.length} 个池子被监控钱包加 LP`}
+        subtitle={`24h 内仍有监控钱包仓位的 ${smartPools.length} 个池子`}
         icon={BrainCircuit}
       >
         {smartError ? <div className="error-text">{smartError}</div> : null}
@@ -1710,7 +1775,7 @@ export default function App() {
                           Number.isFinite(priceUpper) &&
                           priceUpper > 0;
                         const rangePct = hasRange
-                          ? (Math.abs(priceUpper - priceLower) / ((priceUpper + priceLower) / 2)) * 100
+                          ? (Math.abs(priceUpper - priceLower) / (priceUpper + priceLower)) * 100
                           : 0;
 
                         return (
@@ -1719,7 +1784,7 @@ export default function App() {
                             <div className="sm-wallet-stats">
                               <span className="sm-wallet-usd">${formatNumber(Math.round(usd))}</span>
                               {hasRange ? (
-                                <span className="sm-wallet-range-pct">{formatPct(rangePct, 1)}</span>
+                                <span className="sm-wallet-range-pct">±{rangePct.toFixed(1)}%</span>
                               ) : null}
                             </div>
                             {hasRange ? (

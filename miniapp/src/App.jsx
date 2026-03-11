@@ -516,7 +516,7 @@ export default function App() {
     const monitorPollSec = Math.max(3, pollIntervalSec);
     const autoPnLCurvePollSec = 15;
     const smartMoneyPollSec = 60;
-    const smartMoneyPoolsWindowHours = 2;
+    const smartMoneyPoolsWindowHours = 24;
     const smartMoneyPnLWindowHours = 24;
 
     const adminSelectedUser = useMemo(() => {
@@ -1565,7 +1565,7 @@ export default function App() {
                 return a.pct - b.pct;
             })
             .map((item) => ({
-                label: `+/-${item.pct.toFixed(item.pct >= 10 ? 0 : 1)}%`,
+                label: `±${item.pct.toFixed(item.pct >= 10 ? 0 : 1)}%`,
                 value: item.pct.toFixed(1),
                 source: 'smart_money',
                 count: item.count,
@@ -1603,9 +1603,14 @@ export default function App() {
         let chain = String(pool?.chain || hotPoolsData?.chain || 'bsc').trim().toLowerCase() || 'bsc';
         if (!multiChainEnabled) chain = userDefaultChain;
         const smartWallets = Array.isArray(pool?.smartMoneyWallets) ? pool.smartMoneyWallets : [];
+        const poolVersion = String(pool?.protocol_version || pool?.pool_version || '').trim().toLowerCase();
         setOpenPositionSmartWallets(smartWallets);
         setOpenPositionSmartWalletsLoading(false);
-        setOpenPositionPool({ ...pool, chain });
+        setOpenPositionPool({
+            ...pool,
+            chain,
+            ...(poolVersion ? { protocol_version: poolVersion, pool_version: poolVersion } : {}),
+        });
         resetOpenPositionDraft();
     };
 

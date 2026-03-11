@@ -243,6 +243,16 @@ func (s *Server) handleWatchedWalletsGet(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "query failed", http.StatusInternalServerError)
 		return
 	}
+	labelMap := loadSmartMoneyWalletLabels(user.ID, chain)
+	for i := range wallets {
+		addr := normalizeSmartMoneyWalletAddress(wallets[i].WalletAddress)
+		if addr == "" {
+			continue
+		}
+		if label, ok := labelMap[addr]; ok {
+			wallets[i].Label = label
+		}
+	}
 
 	userByAddress := make(map[string]*models.SmartMoneyWatchedWallet, len(wallets))
 	for i := range wallets {
@@ -293,11 +303,11 @@ func (s *Server) handleWatchedWalletsGet(w http.ResponseWriter, r *http.Request)
 			ID:            0,
 			Chain:         chain,
 			WalletAddress: addr,
-			Label:         "",
+			Label:         strings.TrimSpace(labelMap[addr]),
 			CreatedAt:     createdAt.Format(time.RFC3339),
 			Source:        row.Source,
 			Removable:     true,
-			EditableLabel: false,
+			EditableLabel: true,
 		})
 		seen[addr] = struct{}{}
 		systemTotal++
@@ -528,6 +538,8 @@ func (s *Server) handleWatchedWalletsRemove(w http.ResponseWriter, r *http.Reque
 	if result.Error == nil {
 		deletedDB = result.RowsAffected
 	}
+	_ = database.DB.Where("user_id = ? AND chain = ? AND wallet_address IN ?",
+		user.ID, chain, normalized).Delete(&models.SmartMoneyWalletLabel{}).Error
 
 	removedFromWatchlist := 0
 	warnings := make([]string, 0, 1)
@@ -616,21 +628,28 @@ func (s *Server) handleWatchedWalletsUpdateLabel(w http.ResponseWriter, r *http.
 	}
 
 	var record models.SmartMoneyWatchedWallet
-	if err := database.DB.Where("user_id = ? AND chain = ? AND wallet_address = ?",
-		user.ID, chain, addr).First(&record).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			http.Error(w, "wallet not found", http.StatusNotFound)
-			return
-		}
+	err = database.DB.Where("user_id = ? AND chain = ? AND wallet_address = ?",
+		user.ID, chain, addr).First(&record).Error
+	if err != nil && err != gorm.ErrRecordNotFound {
 		http.Error(w, "query failed", http.StatusInternalServerError)
 		return
 	}
 
-	database.DB.Model(&record).Update("label", label)
-	record.Label = label
+	if err == nil {
+		database.DB.Model(&record).Update("label", label)
+		record.Label = label
+	}
+	if err := saveSmartMoneyWalletLabel(user.ID, chain, addr, label); err != nil {
+		http.Error(w, "update label failed", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"wallet": walletToJSON(&record),
+		"wallet": map[string]interface{}{
+			"chain":          chain,
+			"wallet_address": addr,
+			"label":          label,
+		},
 	})
 }

@@ -83,6 +83,7 @@ func autoMigrate() error {
 		&models.SmartMoneyGoldenDogConfig{},
 		&models.SmartMoneyGoldenDogAlertState{},
 		&models.SmartMoneyWatchedWallet{},
+		&models.SmartMoneyWalletLabel{},
 	)
 }
 

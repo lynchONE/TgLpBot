@@ -457,7 +457,7 @@ export default function KlineChart({
     const lower = Number(primary.price_lower || 0);
     const upper = Number(primary.price_upper || 0);
     const hasRange = lower > 0 && upper > 0;
-    const rangePct = hasRange ? ((upper - lower) / lower * 100).toFixed(1) : '';
+    const rangePct = hasRange ? `±${(((upper - lower) / (upper + lower)) * 100).toFixed(1)}%` : '';
     return { walletName, lower, upper, hasRange, rangePct, totalUSD: c.estimatedUSD, count: c.items.length, isMyTrade: c.isMyTrade };
   }, [hoveredCluster]);
 
@@ -510,7 +510,7 @@ export default function KlineChart({
                 <span className="kmt-range">
                   {smartPriceFormatter(tooltipData.lower)} → {smartPriceFormatter(tooltipData.upper)}
                 </span>
-                <span className="kmt-pct">{tooltipData.rangePct}%</span>
+                <span className="kmt-pct">{tooltipData.rangePct}</span>
               </div>
             )}
           </div>

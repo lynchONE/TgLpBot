@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"TgLpBot/base/config"
-	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/base/timeutil"
 	"TgLpBot/service/pool"
@@ -87,28 +86,8 @@ func buildMarkerEventID(txHash string, eventSeq uint64, logIndex uint32) string 
 	return fmt.Sprintf("event:%d:%d", eventSeq, logIndex)
 }
 
-func loadUserManagedWalletLabels(userID uint, chain string) map[string]models.SmartMoneyWatchedWallet {
-	out := make(map[string]models.SmartMoneyWatchedWallet)
-	if userID == 0 || database.DB == nil {
-		return out
-	}
-	chain = strings.ToLower(strings.TrimSpace(chain))
-	if chain == "" {
-		chain = "bsc"
-	}
-	var rows []models.SmartMoneyWatchedWallet
-	if err := database.DB.Where("user_id = ? AND chain = ?", userID, chain).Find(&rows).Error; err != nil {
-		return out
-	}
-	for _, row := range rows {
-		addr := strings.ToLower(strings.TrimSpace(row.WalletAddress))
-		if !common.IsHexAddress(addr) {
-			continue
-		}
-		row.WalletAddress = addr
-		out[addr] = row
-	}
-	return out
+func loadUserManagedWalletLabels(userID uint, chain string) map[string]string {
+	return loadSmartMoneyWalletLabels(userID, chain)
 }
 
 func querySmartMoneyPoolMarkerEvents(ctx context.Context, conn smartMoneyClickHouseQueryer, chain string, poolVersion string, poolID string, window time.Duration, limit int) ([]smartMoneyPoolMarkerRow, error) {
@@ -389,9 +368,13 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 			Amount1USD:    usd1,
 			EstimatedUSD:  total,
 		}
-		if watched, ok := userManaged[row.WalletAddress]; ok {
-			ev.WalletLabel = strings.TrimSpace(watched.Label)
-			ev.WalletSource = "user_managed"
+		if label := strings.TrimSpace(userManaged[row.WalletAddress]); label != "" {
+			ev.WalletLabel = label
+			if src := strings.TrimSpace(walletSource[row.WalletAddress]); src != "" {
+				ev.WalletSource = src
+			} else {
+				ev.WalletSource = "user_managed"
+			}
 		} else if src := strings.TrimSpace(walletSource[row.WalletAddress]); src != "" {
 			ev.WalletSource = src
 		} else {

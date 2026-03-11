@@ -232,7 +232,7 @@ function PoolOverviewCard({
                                     </span>
                                     {hasRange ? (
                                         <span className="min-w-[36px] text-right text-[10px] font-semibold tabular-nums text-emerald-600 dark:text-emerald-300">
-                                            {formatPct(Math.abs(priceUpper - priceLower) / (priceUpper + priceLower) * 100, 1)}
+                                            ±{formatPct(Math.abs(priceUpper - priceLower) / (priceUpper + priceLower) * 100, 1)}
                                         </span>
                                     ) : null}
                                 </div>
@@ -313,13 +313,13 @@ function PoolOverviewCard({
 export default function SmartMoneyCard({ overview, loading = false, tick, onNotice, apiBaseUrl, initData, onQuickOpenPool }) {
     const pools = Array.isArray(overview?.pools) ? overview.pools : [];
     const warnings = Array.isArray(overview?.warnings) ? overview.warnings : [];
-    const poolWindowLabel = formatWindowLabel(overview?.pools_window_sec) || '2h';
+    const poolWindowLabel = formatWindowLabel(overview?.pools_window_sec) || '24h';
     const chain = String(overview?.chain || 'bsc').trim() || 'bsc';
     const poolsWindowHours = useMemo(() => {
         const sec = Number(overview?.pools_window_sec ?? 0);
-        if (!Number.isFinite(sec) || sec <= 0) return 2;
+        if (!Number.isFinite(sec) || sec <= 0) return 24;
         const h = sec / 3600;
-        if (h <= 0) return 2;
+        if (h <= 0) return 24;
         return Math.max(1, Math.min(168, Math.round(h)));
     }, [overview?.pools_window_sec]);
     const pnlWindowHours = useMemo(() => {
