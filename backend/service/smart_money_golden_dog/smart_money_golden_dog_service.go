@@ -2,9 +2,12 @@ package smart_money_golden_dog
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -25,9 +28,16 @@ type clickHouseQueryer interface {
 	Query(ctx context.Context, query string, args ...any) (driver.Rows, error)
 }
 
-type goldenDogPoolRow struct {
-	PoolVersion string
-	PoolID      string
+type goldenDogPoolPositionRow struct {
+	PoolVersion   string
+	PoolID        string
+	PositionCount uint64
+}
+
+type goldenDogPairAlert struct {
+	AlertScope  string
+	AlertKey    string
+	PairLabel   string
 	WalletCount uint64
 }
 
@@ -100,7 +110,17 @@ func shortHex(value string, head int, tail int) string {
 	return s[:head] + "..." + s[len(s)-tail:]
 }
 
-func queryGoldenDogPools(ctx context.Context, conn clickHouseQueryer, chain string, windowMinutes int, minWallets int, limit int) ([]goldenDogPoolRow, error) {
+func clampGoldenDogMinWallets(v int) int {
+	if v < 2 {
+		return 2
+	}
+	if v > 100 {
+		return 100
+	}
+	return v
+}
+
+func queryGoldenDogPoolPositions(ctx context.Context, conn clickHouseQueryer, chain string, windowMinutes int, limit int) ([]goldenDogPoolPositionRow, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -114,17 +134,11 @@ func queryGoldenDogPools(ctx context.Context, conn clickHouseQueryer, chain stri
 	if windowMinutes > 180 {
 		windowMinutes = 180
 	}
-	if minWallets < 2 {
-		minWallets = 2
-	}
-	if minWallets > 100 {
-		minWallets = 100
-	}
 	if limit <= 0 {
-		limit = 50
-	}
-	if limit > 200 {
 		limit = 200
+	}
+	if limit > 1000 {
+		limit = 1000
 	}
 
 	startAt := time.Now().Add(-time.Duration(windowMinutes) * time.Minute)
@@ -133,36 +147,55 @@ func queryGoldenDogPools(ctx context.Context, conn clickHouseQueryer, chain stri
 		SELECT
 			pool_version,
 			pool_id,
-			uniqExact(wallet_address) AS wallet_count
-		FROM smart_lp_events
-		WHERE ts >= ?
-			AND lowerUTF8(chain) = ?
-			AND action = 'add'
-			AND pool_version != '' AND pool_id != ''
+			count() AS active_position_count
+		FROM (
+			SELECT
+				pool_version,
+				pool_id,
+				contract_address,
+				token_id,
+				wallet_address,
+				tick_lower,
+				tick_upper,
+				sum(
+					if(
+						pool_version = 'v4',
+						toInt256OrZero(liquidity_delta),
+						if(action = 'add', toInt256OrZero(liquidity_delta), -toInt256OrZero(liquidity_delta))
+					)
+				) AS net_liquidity
+			FROM smart_lp_events
+			WHERE ts >= ?
+				AND lowerUTF8(chain) = ?
+				AND action IN ('add', 'remove')
+				AND pool_version != '' AND pool_id != ''
+				AND wallet_address != ''
+			GROUP BY pool_version, pool_id, contract_address, token_id, wallet_address, tick_lower, tick_upper
+			HAVING net_liquidity > 0
+		)
 		GROUP BY pool_version, pool_id
-		HAVING wallet_count >= ?
-		ORDER BY wallet_count DESC
+		ORDER BY active_position_count DESC, pool_version ASC, pool_id ASC
 		LIMIT ?
 	`
 
-	rows, err := conn.Query(ctx, q, startAt, chain, uint64(minWallets), uint64(limit))
+	rows, err := conn.Query(ctx, q, startAt, chain, uint64(limit))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	out := make([]goldenDogPoolRow, 0, 16)
+	out := make([]goldenDogPoolPositionRow, 0, 32)
 	for rows.Next() {
 		var pv string
 		var pid string
-		var cnt uint64
-		if err := rows.Scan(&pv, &pid, &cnt); err != nil {
+		var positionCount uint64
+		if err := rows.Scan(&pv, &pid, &positionCount); err != nil {
 			return nil, err
 		}
-		out = append(out, goldenDogPoolRow{
-			PoolVersion: strings.ToLower(strings.TrimSpace(pv)),
-			PoolID:      strings.ToLower(strings.TrimSpace(pid)),
-			WalletCount: cnt,
+		out = append(out, goldenDogPoolPositionRow{
+			PoolVersion:   strings.ToLower(strings.TrimSpace(pv)),
+			PoolID:        strings.ToLower(strings.TrimSpace(pid)),
+			PositionCount: positionCount,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -211,24 +244,25 @@ func (s *SmartMoneyGoldenDogService) loadBarkConfig(userID uint) (*notify.BarkCo
 	return cfg, nil
 }
 
-func (s *SmartMoneyGoldenDogService) poolPairLabel(poolVersion string, poolID string) string {
+func (s *SmartMoneyGoldenDogService) loadPoolInfo(chain string, poolVersion string, poolID string) (*pool.PoolInfo, error) {
 	if s == nil || s.poolSvc == nil {
-		return ""
+		return nil, fmt.Errorf("pool service not initialized")
 	}
+	chain = normalizeChain(chain)
 	poolVersion = strings.ToLower(strings.TrimSpace(poolVersion))
 	poolID = strings.ToLower(strings.TrimSpace(poolID))
 	if poolVersion == "" || poolID == "" {
-		return ""
+		return nil, fmt.Errorf("pool not specified")
 	}
 
-	var info *pool.PoolInfo
-	var err error
 	if poolVersion == "v4" {
-		info, err = s.poolSvc.GetV4PoolInfo(poolID)
-	} else {
-		info, err = s.poolSvc.GetPoolInfo(poolID)
+		return s.poolSvc.GetV4PoolInfo(poolID)
 	}
-	if err != nil || info == nil {
+	return s.poolSvc.GetPoolInfoForChain(chain, poolID)
+}
+
+func poolPairLabelFromInfo(info *pool.PoolInfo) string {
+	if info == nil {
 		return ""
 	}
 
@@ -246,14 +280,109 @@ func (s *SmartMoneyGoldenDogService) poolPairLabel(poolVersion string, poolID st
 	return t0 + "/" + t1
 }
 
-func (s *SmartMoneyGoldenDogService) shouldNotify(userID uint, chain string, poolVersion string, poolID string, cooldownMinutes int, now time.Time) (bool, error) {
+func buildGoldenDogPairAlertKey(info *pool.PoolInfo) string {
+	if info == nil {
+		return ""
+	}
+	tokens := []string{
+		strings.ToLower(strings.TrimSpace(info.Token0)),
+		strings.ToLower(strings.TrimSpace(info.Token1)),
+	}
+	if tokens[0] == "" || tokens[1] == "" {
+		return ""
+	}
+	sort.Strings(tokens)
+	sum := sha256.Sum256([]byte(tokens[0] + ":" + tokens[1]))
+	return hex.EncodeToString(sum[:])
+}
+
+func buildGoldenDogFallbackAlertKey(poolVersion string, poolID string) string {
+	poolVersion = strings.ToLower(strings.TrimSpace(poolVersion))
+	poolID = strings.ToLower(strings.TrimSpace(poolID))
+	if poolVersion == "" || poolID == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("pool|" + poolVersion + "|" + poolID))
+	return hex.EncodeToString(sum[:])
+}
+
+func aggregateGoldenDogPairAlerts(
+	chain string,
+	rows []goldenDogPoolPositionRow,
+	minWallets int,
+	resolve func(string, string, string) (*pool.PoolInfo, error),
+) []goldenDogPairAlert {
+	type pairAggregate struct {
+		pairLabel string
+		count     int
+	}
+
+	minWallets = clampGoldenDogMinWallets(minWallets)
+	groups := make(map[string]*pairAggregate)
+	for _, row := range rows {
+		var (
+			pairLabel string
+			alertKey  string
+		)
+
+		if resolve != nil {
+			if info, err := resolve(chain, row.PoolVersion, row.PoolID); err == nil && info != nil {
+				pairLabel = poolPairLabelFromInfo(info)
+				alertKey = buildGoldenDogPairAlertKey(info)
+			}
+		}
+		if alertKey == "" {
+			alertKey = buildGoldenDogFallbackAlertKey(row.PoolVersion, row.PoolID)
+		}
+		if alertKey == "" {
+			continue
+		}
+		if pairLabel == "" {
+			pairLabel = shortHex(row.PoolID, 10, 8)
+		}
+
+		group := groups[alertKey]
+		if group == nil {
+			group = &pairAggregate{
+				pairLabel: pairLabel,
+				count:     0,
+			}
+			groups[alertKey] = group
+		} else if strings.Contains(group.pairLabel, "...") && !strings.Contains(pairLabel, "...") {
+			group.pairLabel = pairLabel
+		}
+		group.count += int(row.PositionCount)
+	}
+
+	out := make([]goldenDogPairAlert, 0, len(groups))
+	for alertKey, group := range groups {
+		if group.count < minWallets {
+			continue
+		}
+		out = append(out, goldenDogPairAlert{
+			AlertScope:  "pair",
+			AlertKey:    alertKey,
+			PairLabel:   group.pairLabel,
+			WalletCount: uint64(group.count),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].WalletCount != out[j].WalletCount {
+			return out[i].WalletCount > out[j].WalletCount
+		}
+		return out[i].PairLabel < out[j].PairLabel
+	})
+	return out
+}
+
+func (s *SmartMoneyGoldenDogService) shouldNotifyAlert(userID uint, chain string, alertScope string, alertKey string, cooldownMinutes int, now time.Time) (bool, error) {
 	if database.DB == nil {
 		return false, fmt.Errorf("db not initialized")
 	}
 	chain = normalizeChain(chain)
-	poolVersion = strings.ToLower(strings.TrimSpace(poolVersion))
-	poolID = strings.ToLower(strings.TrimSpace(poolID))
-	if userID == 0 || poolVersion == "" || poolID == "" {
+	alertScope = strings.ToLower(strings.TrimSpace(alertScope))
+	alertKey = strings.ToLower(strings.TrimSpace(alertKey))
+	if userID == 0 || alertScope == "" || alertKey == "" {
 		return false, nil
 	}
 	if cooldownMinutes < 0 {
@@ -264,7 +393,7 @@ func (s *SmartMoneyGoldenDogService) shouldNotify(userID uint, chain string, poo
 	}
 
 	var state models.SmartMoneyGoldenDogAlertState
-	err := database.DB.Where("user_id = ? AND chain = ? AND pool_version = ? AND pool_id = ?", userID, chain, poolVersion, poolID).First(&state).Error
+	err := database.DB.Where("user_id = ? AND chain = ? AND pool_version = ? AND pool_id = ?", userID, chain, alertScope, alertKey).First(&state).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return true, nil
@@ -280,19 +409,19 @@ func (s *SmartMoneyGoldenDogService) shouldNotify(userID uint, chain string, poo
 	return now.Sub(*state.LastNotifiedAt) >= time.Duration(cooldownMinutes)*time.Minute, nil
 }
 
-func (s *SmartMoneyGoldenDogService) markNotified(userID uint, chain string, poolVersion string, poolID string, pair string, wallets uint64, now time.Time) {
+func (s *SmartMoneyGoldenDogService) markAlertNotified(userID uint, chain string, alertScope string, alertKey string, pair string, wallets uint64, now time.Time) {
 	if database.DB == nil {
 		return
 	}
 	chain = normalizeChain(chain)
-	poolVersion = strings.ToLower(strings.TrimSpace(poolVersion))
-	poolID = strings.ToLower(strings.TrimSpace(poolID))
-	if userID == 0 || poolVersion == "" || poolID == "" {
+	alertScope = strings.ToLower(strings.TrimSpace(alertScope))
+	alertKey = strings.ToLower(strings.TrimSpace(alertKey))
+	if userID == 0 || alertScope == "" || alertKey == "" {
 		return
 	}
 
 	var state models.SmartMoneyGoldenDogAlertState
-	err := database.DB.Where("user_id = ? AND chain = ? AND pool_version = ? AND pool_id = ?", userID, chain, poolVersion, poolID).First(&state).Error
+	err := database.DB.Where("user_id = ? AND chain = ? AND pool_version = ? AND pool_id = ?", userID, chain, alertScope, alertKey).First(&state).Error
 	if err == nil {
 		state.LastNotifiedAt = &now
 		state.LastWallets = int(wallets)
@@ -308,8 +437,8 @@ func (s *SmartMoneyGoldenDogService) markNotified(userID uint, chain string, poo
 	state = models.SmartMoneyGoldenDogAlertState{
 		UserID:         userID,
 		Chain:          chain,
-		PoolVersion:    poolVersion,
-		PoolID:         poolID,
+		PoolVersion:    alertScope,
+		PoolID:         alertKey,
 		LastNotifiedAt: &now,
 		LastWallets:    int(wallets),
 		LastPair:       strings.TrimSpace(pair),
@@ -359,32 +488,48 @@ func (s *SmartMoneyGoldenDogService) runOnce(now time.Time) {
 			continue
 		}
 
-		pools, qerr := queryGoldenDogPools(ctx, s.ch.Conn, cfg.Chain, cfg.WindowMinutes, cfg.MinWallets, 50)
+		poolRows, qerr := queryGoldenDogPoolPositions(ctx, s.ch.Conn, cfg.Chain, cfg.WindowMinutes, 200)
 		if qerr != nil {
 			continue
 		}
-		if len(pools) == 0 {
+		if len(poolRows) == 0 {
 			continue
 		}
 
-		for _, row := range pools {
-			ok, serr := s.shouldNotify(cfg.UserID, cfg.Chain, row.PoolVersion, row.PoolID, cfg.CooldownMinutes, now)
+		type poolInfoResult struct {
+			info *pool.PoolInfo
+			err  error
+		}
+		poolInfoCache := make(map[string]poolInfoResult)
+		resolvePoolInfo := func(chain string, poolVersion string, poolID string) (*pool.PoolInfo, error) {
+			cacheKey := normalizeChain(chain) + "|" + strings.ToLower(strings.TrimSpace(poolVersion)) + "|" + strings.ToLower(strings.TrimSpace(poolID))
+			if cached, ok := poolInfoCache[cacheKey]; ok {
+				return cached.info, cached.err
+			}
+			info, err := s.loadPoolInfo(chain, poolVersion, poolID)
+			poolInfoCache[cacheKey] = poolInfoResult{info: info, err: err}
+			return info, err
+		}
+
+		alerts := aggregateGoldenDogPairAlerts(cfg.Chain, poolRows, cfg.MinWallets, resolvePoolInfo)
+		for _, alert := range alerts {
+			ok, serr := s.shouldNotifyAlert(cfg.UserID, cfg.Chain, alert.AlertScope, alert.AlertKey, cfg.CooldownMinutes, now)
 			if serr != nil || !ok {
 				continue
 			}
 
-			pair := s.poolPairLabel(row.PoolVersion, row.PoolID)
+			pair := strings.TrimSpace(alert.PairLabel)
 			if pair == "" {
-				pair = shortHex(row.PoolID, 10, 8)
+				pair = "未知交易对"
 			}
 
 			title := "金狗通知"
-			body := fmt.Sprintf("%s 已有 %d 个钱包在加LP，建议立即关注", pair, row.WalletCount)
+			body := fmt.Sprintf("%s 当前有 %d 个活跃 LP 仓位，建议立即关注", pair, alert.WalletCount)
 			if err := notify.SendBarkWithConfig(title, body, *barkCfg); err != nil {
 				continue
 			}
 
-			s.markNotified(cfg.UserID, cfg.Chain, row.PoolVersion, row.PoolID, pair, row.WalletCount, now)
+			s.markAlertNotified(cfg.UserID, cfg.Chain, alert.AlertScope, alert.AlertKey, pair, alert.WalletCount, now)
 		}
 	}
 }

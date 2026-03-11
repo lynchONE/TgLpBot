@@ -1059,7 +1059,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
 
                         <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
                             <label className="rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md p-2 dark:border-white/10 dark:bg-white/5">
-                                <div className="text-[10px] text-zinc-500 dark:text-white/40">触发钱包数</div>
+                                <div className="text-[10px] text-zinc-500 dark:text-white/40">触发仓位数</div>
                                 <input
                                     type="number"
                                     inputMode="numeric"
