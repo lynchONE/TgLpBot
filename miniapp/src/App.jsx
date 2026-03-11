@@ -973,14 +973,14 @@ export default function App() {
         let aborted = false;
         const controller = new AbortController();
         const run = () => {
-            fetchWallets({ apiBaseUrl, initData, chain, signal: controller.signal })
+            fetchWallets({ apiBaseUrl, initData, chain: userDefaultChain, signal: controller.signal })
                 .then((resp) => { if (!aborted) setPosWalletBalances(resp || null); })
                 .catch(() => { if (!aborted) setPosWalletBalances(null); });
         };
         run();
         const timer = setInterval(run, Math.max(pollIntervalSec * 1000, 30000));
         return () => { aborted = true; controller.abort(); clearInterval(timer); };
-    }, [apiBaseUrl, initData, hasInitData, multiWalletEnabled, chain, pollIntervalSec]);
+    }, [apiBaseUrl, initData, hasInitData, multiWalletEnabled, userDefaultChain, pollIntervalSec]);
 
     useEffect(() => {
         if (!hasInitData || showAdmin || !isMonitor) return;
