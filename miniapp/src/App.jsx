@@ -2507,13 +2507,29 @@ export default function App() {
                             <div className="flex flex-col">
                                 <div className="flex items-center gap-2">
                                     <div className="text-[15px] font-bold text-zinc-900 dark:text-white/95">{isMonitor ? '监控概览' : '仓位概览'}</div>
-                                    {!(Array.isArray(posWalletBalances?.wallets) && posWalletBalances.wallets.length > 1) && (
-                                        <div className="text-xs text-zinc-500 dark:text-white/40">
-                                            <NumberFlowValue value={bnbBalance} formatter={() => String(bnbBalance ?? '0')} /> BNB
-                                            {typeof bnbUsd === 'number' ? <> ≈ <NumberFlowValue value={bnbUsd} formatter={(v) => formatUsd(v)} /></> : ''}
-                                        </div>
-                                    )}
+                                    <div className="text-xs text-zinc-500 dark:text-white/40">
+                                        {Array.isArray(posWalletBalances?.wallets) && posWalletBalances.wallets.length > 1 ? (
+                                            <>
+                                                {posWalletBalances.wallets.reduce((s, w) => s + Number(w.native_balance === 'N/A' ? 0 : w.native_balance || 0), 0).toFixed(4)} {posWalletBalances.native_symbol || 'BNB'}
+                                            </>
+                                        ) : (
+                                            <>
+                                                <NumberFlowValue value={bnbBalance} formatter={() => String(bnbBalance ?? '0')} /> BNB
+                                                {typeof bnbUsd === 'number' ? <> ≈ <NumberFlowValue value={bnbUsd} formatter={(v) => formatUsd(v)} /></> : ''}
+                                            </>
+                                        )}
+                                    </div>
                                 </div>
+                                {Array.isArray(posWalletBalances?.wallets) && posWalletBalances.wallets.length > 1 && (
+                                    <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0 text-[10px] text-zinc-400 dark:text-white/30 tabular-nums">
+                                        {posWalletBalances.wallets.map((w) => (
+                                            <span key={w.id} className="whitespace-nowrap">
+                                                <span className="font-medium text-zinc-500 dark:text-white/45">{w.name || `${String(w.address || '').slice(0, 6)}..${String(w.address || '').slice(-4)}`}</span>
+                                                {' '}{w.native_balance !== 'N/A' ? w.native_balance : '--'}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
                                 <div className="mt-1 flex items-baseline gap-2">
                                     <div className="text-[11px] text-zinc-500 dark:text-white/50">总余额</div>
                                     <div className="text-xl font-extrabold tabular-nums text-zinc-900 dark:text-emerald-400 tracking-tight">
@@ -2538,31 +2554,6 @@ export default function App() {
                                 </button>
                             </div>
                         </div>
-                        {Array.isArray(posWalletBalances?.wallets) && posWalletBalances.wallets.length > 1 && (
-                            <div className="mt-2 flex flex-col gap-1">
-                                {posWalletBalances.wallets.map((w) => (
-                                    <div key={w.id} className="flex items-center justify-between rounded-lg px-2 py-1.5 bg-zinc-100/60 dark:bg-white/[0.04] text-[11px]">
-                                        <div className="flex items-center gap-1.5 min-w-0">
-                                            <span className="font-semibold text-zinc-700 dark:text-white/80 truncate">{w.name || `${String(w.address || '').slice(0, 6)}..${String(w.address || '').slice(-4)}`}</span>
-                                            {w.is_default && <span className="shrink-0 rounded bg-emerald-500/15 px-1 py-px text-[9px] font-bold text-emerald-600 dark:text-emerald-400">默认</span>}
-                                        </div>
-                                        <div className="flex items-center gap-2 text-zinc-500 dark:text-white/40 tabular-nums shrink-0">
-                                            <span>{w.native_balance !== 'N/A' ? w.native_balance : '--'} {posWalletBalances.native_symbol || 'BNB'}</span>
-                                            <span className="text-zinc-300 dark:text-white/15">/</span>
-                                            <span>${w.stable_balance !== 'N/A' ? w.stable_balance : '--'}</span>
-                                        </div>
-                                    </div>
-                                ))}
-                                <div className="flex items-center justify-between px-2 py-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
-                                    <span>合计</span>
-                                    <span className="tabular-nums">
-                                        {posWalletBalances.wallets.reduce((s, w) => s + Number(w.native_balance === 'N/A' ? 0 : w.native_balance || 0), 0).toFixed(4)} {posWalletBalances.native_symbol || 'BNB'}
-                                        {' / $'}
-                                        {posWalletBalances.wallets.reduce((s, w) => s + Number(w.stable_balance === 'N/A' ? 0 : w.stable_balance || 0), 0).toFixed(2)}
-                                    </span>
-                                </div>
-                            </div>
-                        )}
                     </div >
                 ) : null
                 }

@@ -1411,9 +1411,7 @@ export default function App() {
       <PanelShell
         title="仓位"
         subtitle={
-          Array.isArray(walletBalances) && walletBalances.length > 1
-            ? `${walletBalances.length} 个钱包`
-            : positions?.wallet?.address ? shortAddress(positions.wallet.address, 8, 6) : '钱包未连接'
+          positions?.wallet?.address ? shortAddress(positions.wallet.address, 8, 6) : '钱包未连接'
         }
         icon={BriefcaseBusiness}
       >
@@ -1427,33 +1425,16 @@ export default function App() {
         </div>
 
         {Array.isArray(walletBalances) && walletBalances.length > 1 && (
-          <div className="wallet-balances-section">
+          <div className="wallet-balances-inline">
             {walletBalances.map((wb) => {
               const native = wb.native_balance !== 'N/A' ? wb.native_balance : '--';
-              const stable = wb.stable_balance !== 'N/A' ? wb.stable_balance : '--';
               return (
-                <div key={wb.id} className="wallet-balance-row">
-                  <div className="wb-left">
-                    <span className="wb-name">{wb.name || shortAddress(wb.address, 6, 4)}</span>
-                    {wb.is_default && <span className="wb-default">默认</span>}
-                    <span className="wb-addr">{shortAddress(wb.address, 6, 4)}</span>
-                  </div>
-                  <div className="wb-right">
-                    <span className="wb-bal">{native} {walletBalancesChain === 'base' ? 'ETH' : 'BNB'}</span>
-                    <span className="wb-divider">/</span>
-                    <span className="wb-bal">${stable}</span>
-                  </div>
-                </div>
+                <span key={wb.id} className="wb-inline-item">
+                  <span className="wb-inline-name">{wb.name || shortAddress(wb.address, 6, 4)}</span>
+                  {' '}{native} {walletBalancesChain === 'base' ? 'ETH' : 'BNB'}
+                </span>
               );
             })}
-            <div className="wallet-balance-total">
-              <span>合计</span>
-              <span>
-                {walletBalances.reduce((s, w) => s + Number(w.native_balance === 'N/A' ? 0 : w.native_balance || 0), 0).toFixed(4)} {walletBalancesChain === 'base' ? 'ETH' : 'BNB'}
-                {' / $'}
-                {walletBalances.reduce((s, w) => s + Number(w.stable_balance === 'N/A' ? 0 : w.stable_balance || 0), 0).toFixed(2)}
-              </span>
-            </div>
           </div>
         )}
 
