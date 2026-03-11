@@ -1424,28 +1424,28 @@ export default function App() {
             : null;
           const walletUsd = allWalletsUsd !== null ? allWalletsUsd : (summary?.wallet_usd ?? 0);
           const totalUsd = walletUsd + Number(summary?.position_usd || 0) + Number(summary?.fee_usd || 0);
+          const walletMetricCards = multi
+            ? walletBalances.map((wb, idx) => ({
+                key: String(wb?.id || wb?.address || idx),
+                label: wb?.name || shortAddress(wb?.address || '', 6, 4) || `钱包 ${idx + 1}`,
+                value: wb?.stable_balance !== 'N/A' ? formatUsd(wb.stable_balance) : '$--',
+              }))
+            : [
+                {
+                  key: 'wallet-total',
+                  label: '钱包',
+                  value: formatUsd(walletUsd),
+                },
+              ];
           return (
-            <>
-              <div className="summary-grid">
+              <div className="summary-grid summary-grid-wallets">
                 <MetricCard label="总资产" value={formatUsd(totalUsd)} tone="strong" />
-                <MetricCard label="钱包" value={formatUsd(walletUsd)} />
+                {walletMetricCards.map((card) => (
+                  <MetricCard key={card.key} label={card.label} value={card.value} />
+                ))}
                 <MetricCard label="仓位" value={formatUsd(summary?.position_usd)} />
                 <MetricCard label="手续费" value={formatUsd(summary?.fee_usd)} />
               </div>
-              {multi && (
-                <div className="wallet-balances-inline">
-                  {walletBalances.map((wb) => {
-                    const stable = wb.stable_balance !== 'N/A' ? wb.stable_balance : '--';
-                    return (
-                      <span key={wb.id} className="wb-inline-item">
-                        <span className="wb-inline-name">{wb.name || shortAddress(wb.address, 6, 4)}</span>
-                        {' '}${stable}
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-            </>
           );
         })()}
 

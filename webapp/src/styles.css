@@ -984,6 +984,27 @@ body {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.summary-grid.summary-grid-wallets {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.summary-grid.summary-grid-wallets .metric-card {
+  flex: 0 0 clamp(148px, 18vw, 188px);
+  min-width: 0;
+}
+
+.summary-grid.summary-grid-wallets .metric-label,
+.summary-grid.summary-grid-wallets .metric-value {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .metric-card {
   border: 1px solid rgba(136, 157, 191, 0.22);
   border-radius: 10px;
@@ -1010,24 +1031,6 @@ body {
 }
 
 /* ── Wallet balances inline ── */
-.wallet-balances-inline {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  margin-top: 6px;
-  font-size: 11px;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-.wb-inline-item {
-  white-space: nowrap;
-}
-.wb-inline-name {
-  font-weight: 600;
-  color: var(--text);
-  opacity: 0.7;
-}
-
 /* DEXScreener embed chart */
 .dex-embed-wrap {
   flex: 1;
