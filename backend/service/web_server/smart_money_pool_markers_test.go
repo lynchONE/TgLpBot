@@ -54,6 +54,42 @@ func (r *fakeMarkerRows) Columns() []string                { return nil }
 func (r *fakeMarkerRows) Close() error                     { return nil }
 func (r *fakeMarkerRows) Err() error                       { return r.err }
 
+type fakeMarkerSummaryRows struct {
+	idx  int
+	data []smartMoneyPoolMarkerSummary
+	err  error
+}
+
+func (r *fakeMarkerSummaryRows) Next() bool {
+	if r == nil {
+		return false
+	}
+	if r.idx >= len(r.data) {
+		return false
+	}
+	r.idx++
+	return true
+}
+
+func (r *fakeMarkerSummaryRows) Scan(dest ...any) error {
+	if r == nil || r.idx <= 0 || r.idx > len(r.data) {
+		return nil
+	}
+	row := r.data[r.idx-1]
+	*dest[0].(*uint64) = row.TotalEvents
+	*dest[1].(*uint64) = row.AddCount
+	*dest[2].(*uint64) = row.RemoveCount
+	*dest[3].(*uint64) = row.WalletCount
+	return nil
+}
+
+func (r *fakeMarkerSummaryRows) ScanStruct(dest any) error        { return nil }
+func (r *fakeMarkerSummaryRows) ColumnTypes() []driver.ColumnType { return nil }
+func (r *fakeMarkerSummaryRows) Totals(dest ...any) error         { return nil }
+func (r *fakeMarkerSummaryRows) Columns() []string                { return nil }
+func (r *fakeMarkerSummaryRows) Close() error                     { return nil }
+func (r *fakeMarkerSummaryRows) Err() error                       { return r.err }
+
 func TestQuerySmartMoneyPoolMarkerEvents_UsesPoolAndActionFilters(t *testing.T) {
 	conn := &fakeCHConn{
 		rows: &fakeMarkerRows{
@@ -90,5 +126,37 @@ func TestQuerySmartMoneyPoolMarkerEvents_UsesPoolAndActionFilters(t *testing.T) 
 	}
 	if !strings.Contains(conn.lastQuery, "net_amount0") || !strings.Contains(conn.lastQuery, "net_amount1") {
 		t.Fatalf("expected net amount fallback in query, got query=%s", conn.lastQuery)
+	}
+}
+
+func TestQuerySmartMoneyPoolMarkerSummary_UsesFullWindowCounts(t *testing.T) {
+	conn := &fakeCHConn{
+		rows: &fakeMarkerSummaryRows{
+			data: []smartMoneyPoolMarkerSummary{
+				{
+					TotalEvents: 312,
+					AddCount:    60,
+					RemoveCount: 252,
+					WalletCount: 16,
+				},
+			},
+		},
+	}
+
+	summary, err := querySmartMoneyPoolMarkerSummary(context.Background(), conn, "bsc", "v3", "0xpool", 24*time.Hour)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if summary.TotalEvents != 312 || summary.AddCount != 60 || summary.RemoveCount != 252 || summary.WalletCount != 16 {
+		t.Fatalf("unexpected summary: %#v", summary)
+	}
+	if !strings.Contains(conn.lastQuery, "countIf(action = 'add') AS add_count") {
+		t.Fatalf("expected add count query, got query=%s", conn.lastQuery)
+	}
+	if !strings.Contains(conn.lastQuery, "countIf(action = 'remove') AS remove_count") {
+		t.Fatalf("expected remove count query, got query=%s", conn.lastQuery)
+	}
+	if !strings.Contains(conn.lastQuery, "uniqExact(wallet_address) AS wallet_count") {
+		t.Fatalf("expected wallet count query, got query=%s", conn.lastQuery)
 	}
 }

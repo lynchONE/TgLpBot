@@ -46,13 +46,18 @@ type smartMoneyPoolMarkerEvent struct {
 }
 
 type smartMoneyPoolMarkersResponse struct {
-	Chain     string                      `json:"chain"`
-	BucketSec int                         `json:"bucket_sec"`
-	WindowSec int                         `json:"window_sec"`
-	UpdatedAt time.Time                   `json:"updated_at"`
-	Pool      smartMoneyPoolAddsPool      `json:"pool"`
-	Events    []smartMoneyPoolMarkerEvent `json:"events"`
-	Warnings  []string                    `json:"warnings,omitempty"`
+	Chain       string                      `json:"chain"`
+	BucketSec   int                         `json:"bucket_sec"`
+	WindowSec   int                         `json:"window_sec"`
+	UpdatedAt   time.Time                   `json:"updated_at"`
+	Pool        smartMoneyPoolAddsPool      `json:"pool"`
+	Events      []smartMoneyPoolMarkerEvent `json:"events"`
+	TotalEvents int                         `json:"total_events"`
+	AddCount    int                         `json:"add_count"`
+	RemoveCount int                         `json:"remove_count"`
+	WalletCount int                         `json:"wallet_count"`
+	Truncated   bool                        `json:"truncated,omitempty"`
+	Warnings    []string                    `json:"warnings,omitempty"`
 }
 
 type smartMoneyPoolMarkerRow struct {
@@ -69,6 +74,13 @@ type smartMoneyPoolMarkerRow struct {
 	TxHash        string
 	BlockNumber   uint64
 	LogIndex      uint32
+}
+
+type smartMoneyPoolMarkerSummary struct {
+	TotalEvents uint64
+	AddCount    uint64
+	RemoveCount uint64
+	WalletCount uint64
 }
 
 func absFloat(v float64) float64 {
@@ -115,8 +127,8 @@ func querySmartMoneyPoolMarkerEvents(ctx context.Context, conn smartMoneyClickHo
 	if limit <= 0 {
 		limit = 300
 	}
-	if limit > 500 {
-		limit = 500
+	if limit > 2000 {
+		limit = 2000
 	}
 
 	chain = strings.ToLower(strings.TrimSpace(chain))
@@ -190,6 +202,69 @@ func querySmartMoneyPoolMarkerEvents(ctx context.Context, conn smartMoneyClickHo
 	return out, nil
 }
 
+func querySmartMoneyPoolMarkerSummary(ctx context.Context, conn smartMoneyClickHouseQueryer, chain string, poolVersion string, poolID string, window time.Duration) (smartMoneyPoolMarkerSummary, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if conn == nil {
+		return smartMoneyPoolMarkerSummary{}, fmt.Errorf("clickhouse not initialized")
+	}
+
+	poolVersion = strings.ToLower(strings.TrimSpace(poolVersion))
+	poolID = strings.ToLower(strings.TrimSpace(poolID))
+	if poolVersion == "" || poolID == "" {
+		return smartMoneyPoolMarkerSummary{}, nil
+	}
+
+	if window <= 0 {
+		window = 12 * time.Hour
+	}
+	seconds := int(window.Seconds())
+	if seconds <= 0 {
+		seconds = 43200
+	}
+
+	chain = strings.ToLower(strings.TrimSpace(chain))
+	chainFilter := ""
+	args := make([]any, 0, 3)
+	args = append(args, poolVersion, poolID)
+	if chain != "" {
+		chainFilter = "AND lowerUTF8(chain) = ?"
+		args = append(args, chain)
+	}
+
+	q := fmt.Sprintf(`
+		SELECT
+			count() AS total_events,
+			countIf(action = 'add') AS add_count,
+			countIf(action = 'remove') AS remove_count,
+			uniqExact(wallet_address) AS wallet_count
+		FROM smart_lp_events
+		WHERE ts >= now() - INTERVAL %d SECOND
+			AND action IN ('add', 'remove')
+			AND pool_version = ? AND pool_id = ?
+			AND wallet_address != ''
+			%s
+	`, seconds, chainFilter)
+
+	rows, err := conn.Query(ctx, q, args...)
+	if err != nil {
+		return smartMoneyPoolMarkerSummary{}, err
+	}
+	defer rows.Close()
+
+	var out smartMoneyPoolMarkerSummary
+	if rows.Next() {
+		if err := rows.Scan(&out.TotalEvents, &out.AddCount, &out.RemoveCount, &out.WalletCount); err != nil {
+			return smartMoneyPoolMarkerSummary{}, err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return smartMoneyPoolMarkerSummary{}, err
+	}
+	return out, nil
+}
+
 func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -237,7 +312,7 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 
 	bucketSec := parseIntQuery(query, "bucket_sec", 300, 60, 86400)
 	windowHours := parseIntQuery(query, "window_hours", 12, 1, 48)
-	limit := parseIntQuery(query, "limit", 300, 1, 500)
+	limit := parseIntQuery(query, "limit", 300, 1, 2000)
 
 	ctx, cancel := context.WithTimeout(r.Context(), 18*time.Second)
 	defer cancel()
@@ -247,6 +322,7 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	summary, summaryErr := querySmartMoneyPoolMarkerSummary(ctx, s.ClickHouse.Conn, chain, poolVersion, poolID, time.Duration(windowHours)*time.Hour)
 
 	poolSvc := pool.NewPoolService()
 	var info *pool.PoolInfo
@@ -258,6 +334,9 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 	}
 
 	warnings := make([]string, 0, 4)
+	if summaryErr != nil {
+		warnings = append(warnings, fmt.Sprintf("marker summary failed: %v", summaryErr))
+	}
 	if perr != nil {
 		warnings = append(warnings, fmt.Sprintf("pool info failed: %v", perr))
 	}
@@ -402,13 +481,44 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 		return events[i].T < events[j].T
 	})
 
+	loadedAddCount := 0
+	loadedRemoveCount := 0
+	loadedWallets := make(map[string]struct{}, len(events))
+	for _, ev := range events {
+		if strings.ToLower(strings.TrimSpace(ev.Action)) == "remove" {
+			loadedRemoveCount++
+		} else {
+			loadedAddCount++
+		}
+		addr := strings.ToLower(strings.TrimSpace(ev.WalletAddress))
+		if addr != "" {
+			loadedWallets[addr] = struct{}{}
+		}
+	}
+	totalEvents := int(summary.TotalEvents)
+	addCount := int(summary.AddCount)
+	removeCount := int(summary.RemoveCount)
+	walletCount := int(summary.WalletCount)
+	if summaryErr != nil {
+		totalEvents = len(events)
+		addCount = loadedAddCount
+		removeCount = loadedRemoveCount
+		walletCount = len(loadedWallets)
+	}
+	truncated := summaryErr == nil && totalEvents > len(events)
+
 	writeJSON(w, http.StatusOK, smartMoneyPoolMarkersResponse{
-		Chain:     chain,
-		BucketSec: bucketSec,
-		WindowSec: int(math.Round(float64(windowHours) * 3600)),
-		UpdatedAt: timeutil.Now(),
-		Pool:      outPool,
-		Events:    events,
-		Warnings:  warnings,
+		Chain:       chain,
+		BucketSec:   bucketSec,
+		WindowSec:   int(math.Round(float64(windowHours) * 3600)),
+		UpdatedAt:   timeutil.Now(),
+		Pool:        outPool,
+		Events:      events,
+		TotalEvents: totalEvents,
+		AddCount:    addCount,
+		RemoveCount: removeCount,
+		WalletCount: walletCount,
+		Truncated:   truncated,
+		Warnings:    warnings,
 	})
 }

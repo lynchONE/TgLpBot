@@ -82,6 +82,7 @@ const KLINE_INTERVALS = [
 const SMART_POOL_WINDOW_HOURS = 24;
 const SMART_PNL_WINDOW_HOURS = 24;
 const KLINE_MARKER_WINDOW_HOURS = 24;
+const KLINE_MARKER_FETCH_LIMIT = 1200;
 
 function getKlineIntervalMeta(bar) {
   return KLINE_INTERVALS.find((item) => item.key === bar) || KLINE_INTERVALS[0];
@@ -284,6 +285,14 @@ export default function App() {
   const [klineError, setKlineError] = useState('');
   const [klineSource, setKlineSource] = useState('');
   const [klineMarkers, setKlineMarkers] = useState([]);
+  const [klineMarkerStats, setKlineMarkerStats] = useState({
+    totalEvents: 0,
+    addCount: 0,
+    removeCount: 0,
+    walletCount: 0,
+    truncated: false,
+    loadedEvents: 0,
+  });
   const [klineMarkersLoading, setKlineMarkersLoading] = useState(false);
   const [klineMarkersError, setKlineMarkersError] = useState('');
   const [klineOverlayEnabled, setKlineOverlayEnabled] = useState(true);
@@ -370,21 +379,30 @@ export default function App() {
     return [...rows].sort((a, b) => Number(b?.pnl_usdt_24h || 0) - Number(a?.pnl_usdt_24h || 0));
   }, [smart]);
   const klineMarkerWalletCount = useMemo(() => {
+    const value = Number(klineMarkerStats?.walletCount || 0);
+    if (value > 0) return value;
     const seen = new Set();
     (Array.isArray(klineMarkers) ? klineMarkers : []).forEach((row) => {
       const addr = String(row?.wallet_address || '').trim().toLowerCase();
       if (addr) seen.add(addr);
     });
     return seen.size;
-  }, [klineMarkers]);
-  const klineMarkerAddCount = useMemo(
-    () => (Array.isArray(klineMarkers) ? klineMarkers : []).filter((row) => String(row?.action || '').toLowerCase() !== 'remove').length,
-    [klineMarkers]
-  );
-  const klineMarkerRemoveCount = useMemo(
-    () => (Array.isArray(klineMarkers) ? klineMarkers : []).filter((row) => String(row?.action || '').toLowerCase() === 'remove').length,
-    [klineMarkers]
-  );
+  }, [klineMarkerStats, klineMarkers]);
+  const klineMarkerAddCount = useMemo(() => {
+    const value = Number(klineMarkerStats?.addCount || 0);
+    if (value > 0) return value;
+    return (Array.isArray(klineMarkers) ? klineMarkers : []).filter((row) => String(row?.action || '').toLowerCase() !== 'remove').length;
+  }, [klineMarkerStats, klineMarkers]);
+  const klineMarkerRemoveCount = useMemo(() => {
+    const value = Number(klineMarkerStats?.removeCount || 0);
+    if (value > 0) return value;
+    return (Array.isArray(klineMarkers) ? klineMarkers : []).filter((row) => String(row?.action || '').toLowerCase() === 'remove').length;
+  }, [klineMarkerStats, klineMarkers]);
+  const klineMarkerEventCount = useMemo(() => {
+    const value = Number(klineMarkerStats?.totalEvents || 0);
+    if (value > 0) return value;
+    return klineMarkers.length;
+  }, [klineMarkerStats, klineMarkers.length]);
   const klineViewportKey = useMemo(
     () => `${selectedPoolAddress || 'pool'}:${klineTokenAddress || 'token'}:${klineInterval}`,
     [klineInterval, klineTokenAddress, selectedPoolAddress]
@@ -628,11 +646,13 @@ export default function App() {
     async (signal) => {
       if (!hasInitData || !selectedPoolAddress || !selectedPoolVersion) {
         setKlineMarkers([]);
+        setKlineMarkerStats({ totalEvents: 0, addCount: 0, removeCount: 0, walletCount: 0, truncated: false, loadedEvents: 0 });
         setKlineMarkersError('');
         return;
       }
       if (!klineOverlayEnabled || !klineOverlayAvailable) {
         setKlineMarkers([]);
+        setKlineMarkerStats({ totalEvents: 0, addCount: 0, removeCount: 0, walletCount: 0, truncated: false, loadedEvents: 0 });
         setKlineMarkersError('');
         return;
       }
@@ -649,7 +669,7 @@ export default function App() {
             poolId: selectedPoolAddress,
             bucketSec: klineIntervalMeta.bucketSec,
             windowHours: KLINE_MARKER_WINDOW_HOURS,
-            limit: 300,
+            limit: KLINE_MARKER_FETCH_LIMIT,
             signal,
           }),
           fetchMyTradeMarkers({
@@ -669,6 +689,7 @@ export default function App() {
             setKlineOverlayAvailable(false);
             setKlineOverlayEnabled(false);
             setKlineMarkers([]);
+            setKlineMarkerStats({ totalEvents: 0, addCount: 0, removeCount: 0, walletCount: 0, truncated: false, loadedEvents: 0 });
             setKlineMarkersError('当前账号没有聪明钱权限，已切换为纯 K 线模式。');
             return;
           }
@@ -678,9 +699,19 @@ export default function App() {
         setKlineOverlayAvailable(true);
         const smartEvents = smartResp.status === 'fulfilled' && Array.isArray(smartResp.value?.events) ? smartResp.value.events : [];
         const myEvents = myResp.status === 'fulfilled' && Array.isArray(myResp.value?.events) ? myResp.value.events : [];
+        const smartValue = smartResp.status === 'fulfilled' ? smartResp.value : null;
+        setKlineMarkerStats({
+          totalEvents: Number(smartValue?.total_events || smartEvents.length || 0),
+          addCount: Number(smartValue?.add_count || 0),
+          removeCount: Number(smartValue?.remove_count || 0),
+          walletCount: Number(smartValue?.wallet_count || 0),
+          truncated: Boolean(smartValue?.truncated),
+          loadedEvents: smartEvents.length,
+        });
         setKlineMarkers([...smartEvents, ...myEvents]);
       } catch (e) {
         if (e?.name === 'AbortError') return;
+        setKlineMarkerStats({ totalEvents: 0, addCount: 0, removeCount: 0, walletCount: 0, truncated: false, loadedEvents: 0 });
         setKlineMarkersError(String(e?.message || e));
       } finally {
         setKlineMarkersLoading(false);
@@ -764,6 +795,7 @@ export default function App() {
     setKlineTokenSide('auto');
     setSelectedMarkerCluster(null);
     setKlineMarkers([]);
+    setKlineMarkerStats({ totalEvents: 0, addCount: 0, removeCount: 0, walletCount: 0, truncated: false, loadedEvents: 0 });
     setKlineMarkersError('');
     setKlineSource('');
   }, [selectedPoolAddress]);
@@ -1362,7 +1394,7 @@ export default function App() {
               </div>
               <div className="kline-summary-item">
                 <span className="label">事件({KLINE_MARKER_WINDOW_HOURS}h)</span>
-                <span className="value">{klineMarkers.length}</span>
+                <span className="value">{klineMarkerEventCount}</span>
               </div>
               <div className="kline-summary-item">
                 <span className="label">钱包</span>
@@ -1401,6 +1433,11 @@ export default function App() {
             />
 
             {klineMarkersError ? <div className="kline-inline-note">{klineMarkersError}</div> : null}
+            {!klineMarkersError && klineMarkerStats?.truncated ? (
+              <div className="kline-inline-note">
+                聪明钱事件较多，覆盖层当前加载最近 {formatNumber(klineMarkerStats.loadedEvents)} / {formatNumber(klineMarkerStats.totalEvents)} 条聪明钱事件。
+              </div>
+            ) : null}
 
             {selectedMarkerCluster ? (
               <div className="kline-marker-drawer">
