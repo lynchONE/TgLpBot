@@ -71,6 +71,7 @@ import {
   inferPoolVersion,
   computePriceRange,
   formatDuration,
+  toUnixSeconds,
 } from './utils';
 
 const KLINE_INTERVALS = [
@@ -83,9 +84,23 @@ const SMART_POOL_WINDOW_HOURS = 24;
 const SMART_PNL_WINDOW_HOURS = 24;
 const KLINE_MARKER_WINDOW_HOURS = 24;
 const KLINE_MARKER_FETCH_LIMIT = 1200;
+const KLINE_MARKER_RANGE_DEBOUNCE_MS = 240;
+const KLINE_MARKER_LIVE_REFRESH_MS = 4000;
+const KLINE_MARKER_IDLE_REFRESH_MS = 12000;
 
 function getKlineIntervalMeta(bar) {
   return KLINE_INTERVALS.find((item) => item.key === bar) || KLINE_INTERVALS[0];
+}
+
+function normalizeKlineRange(range) {
+  const from = Number(range?.from || 0);
+  const to = Number(range?.to || 0);
+  if (!from || !to) return null;
+  return from <= to ? { from, to } : { from: to, to: from };
+}
+
+function klineRangesEqual(a, b) {
+  return Number(a?.from || 0) === Number(b?.from || 0) && Number(a?.to || 0) === Number(b?.to || 0);
 }
 
 const STORAGE = {
@@ -298,7 +313,9 @@ export default function App() {
   const [klineOverlayEnabled, setKlineOverlayEnabled] = useState(true);
   const [klineOverlayAvailable, setKlineOverlayAvailable] = useState(true);
   const [klineRefreshNonce, setKlineRefreshNonce] = useState(0);
+  const [klineMarkerRefreshNonce, setKlineMarkerRefreshNonce] = useState(0);
   const [selectedMarkerCluster, setSelectedMarkerCluster] = useState(null);
+  const [klineVisibleRange, setKlineVisibleRange] = useState(null);
 
   const [refreshing, setRefreshing] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false);
@@ -311,6 +328,7 @@ export default function App() {
   });
   const [draggingKey, setDraggingKey] = useState('');
   const [dragOverKey, setDragOverKey] = useState('');
+  const klineVisibleRangeTimerRef = useRef(null);
 
   const hasInitData = Boolean(initData);
   const activeWidgets = useMemo(() => {
@@ -407,6 +425,40 @@ export default function App() {
     () => `${selectedPoolAddress || 'pool'}:${klineTokenAddress || 'token'}:${klineInterval}`,
     [klineInterval, klineTokenAddress, selectedPoolAddress]
   );
+  const klineCandleRange = useMemo(() => {
+    const rows = Array.isArray(klineCandles) ? klineCandles : [];
+    if (!rows.length) return null;
+    const first = toUnixSeconds(rows[0]?.t);
+    const last = toUnixSeconds(rows[rows.length - 1]?.t);
+    if (!first || !last) return null;
+    return first <= last ? { from: first, to: last } : { from: last, to: first };
+  }, [klineCandles]);
+  const klineMarkerQueryRange = useMemo(
+    () => normalizeKlineRange(klineVisibleRange) || normalizeKlineRange(klineCandleRange),
+    [klineCandleRange, klineVisibleRange]
+  );
+  const klineMarkerRangeFrom = Number(klineMarkerQueryRange?.from || 0);
+  const klineMarkerRangeTo = Number(klineMarkerQueryRange?.to || 0);
+  const klineMarkersWatchingLatest = useMemo(() => {
+    if (!klineMarkerRangeTo) return true;
+    const now = Math.floor(Date.now() / 1000);
+    return klineMarkerRangeTo >= now - Math.max(klineIntervalMeta.bucketSec * 2, 120);
+  }, [klineIntervalMeta.bucketSec, klineMarkerRangeTo]);
+  const klineMarkersRefreshMs = useMemo(
+    () => (klineMarkersWatchingLatest ? KLINE_MARKER_LIVE_REFRESH_MS : KLINE_MARKER_IDLE_REFRESH_MS),
+    [klineMarkersWatchingLatest]
+  );
+  const handleKlineVisibleRangeChange = useCallback((nextRange) => {
+    const normalized = normalizeKlineRange(nextRange);
+    if (!normalized) return;
+    if (klineVisibleRangeTimerRef.current) {
+      window.clearTimeout(klineVisibleRangeTimerRef.current);
+    }
+    klineVisibleRangeTimerRef.current = window.setTimeout(() => {
+      setKlineVisibleRange((prev) => (klineRangesEqual(prev, normalized) ? prev : normalized));
+      klineVisibleRangeTimerRef.current = null;
+    }, KLINE_MARKER_RANGE_DEBOUNCE_MS);
+  }, []);
 
   // --- WebSocket kline subscription ---
   const { lastUpdate: wsKlineUpdate, connected: wsKlineConnected } = useKlineWS({
@@ -660,6 +712,12 @@ export default function App() {
       setKlineMarkersLoading(true);
       setKlineMarkersError('');
       try {
+        const startTs = klineMarkerRangeFrom;
+        const endTs = klineMarkerRangeTo;
+        const fallbackWindowSec = KLINE_MARKER_WINDOW_HOURS * 3600;
+        const rangeWindowSec = startTs > 0 && endTs >= startTs
+          ? Math.max(klineIntervalMeta.bucketSec, endTs - startTs)
+          : fallbackWindowSec;
         const [smartResp, myResp] = await Promise.allSettled([
           fetchSmartMoneyPoolMarkers({
             apiBaseUrl,
@@ -669,6 +727,8 @@ export default function App() {
             poolId: selectedPoolAddress,
             bucketSec: klineIntervalMeta.bucketSec,
             windowHours: KLINE_MARKER_WINDOW_HOURS,
+            startTs,
+            endTs,
             limit: KLINE_MARKER_FETCH_LIMIT,
             signal,
           }),
@@ -677,7 +737,10 @@ export default function App() {
             initData,
             chain: selectedPool?.chain || chain,
             poolId: selectedPoolAddress,
-            windowSec: KLINE_MARKER_WINDOW_HOURS * 3600,
+            bucketSec: klineIntervalMeta.bucketSec,
+            startTs,
+            endTs,
+            windowSec: rangeWindowSec,
             signal,
           }),
         ]);
@@ -717,7 +780,20 @@ export default function App() {
         setKlineMarkersLoading(false);
       }
     },
-    [apiBaseUrl, chain, hasInitData, initData, klineIntervalMeta.bucketSec, klineOverlayAvailable, klineOverlayEnabled, selectedPool?.chain, selectedPoolAddress, selectedPoolVersion]
+    [
+      apiBaseUrl,
+      chain,
+      hasInitData,
+      initData,
+      klineIntervalMeta.bucketSec,
+      klineMarkerRangeFrom,
+      klineMarkerRangeTo,
+      klineOverlayAvailable,
+      klineOverlayEnabled,
+      selectedPool?.chain,
+      selectedPoolAddress,
+      selectedPoolVersion,
+    ]
   );
 
   useEffect(() => {
@@ -739,7 +815,7 @@ export default function App() {
     const ctrl = new AbortController();
     loadKlineMarkers(ctrl.signal);
     return () => ctrl.abort();
-  }, [loadKlineMarkers, klineRefreshNonce]);
+  }, [loadKlineMarkers, klineMarkerRefreshNonce, klineRefreshNonce]);
 
   useEffect(() => {
     if (!hasInitData) return undefined;
@@ -775,9 +851,16 @@ export default function App() {
 
   useEffect(() => {
     if (!hasInitData || !selectedPoolAddress || !klineOverlayEnabled || !klineOverlayAvailable) return undefined;
-    const timer = window.setInterval(() => loadKlineMarkers(), 12_000);
+    const timer = window.setInterval(() => setKlineMarkerRefreshNonce((n) => n + 1), klineMarkersRefreshMs);
     return () => window.clearInterval(timer);
-  }, [hasInitData, klineOverlayAvailable, klineOverlayEnabled, loadKlineMarkers, selectedPoolAddress]);
+  }, [hasInitData, klineMarkersRefreshMs, klineOverlayAvailable, klineOverlayEnabled, selectedPoolAddress]);
+
+  useEffect(() => () => {
+    if (klineVisibleRangeTimerRef.current) {
+      window.clearTimeout(klineVisibleRangeTimerRef.current);
+      klineVisibleRangeTimerRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (!hotPools.length) return;
@@ -792,12 +875,21 @@ export default function App() {
   }, [chain, hotPools]);
 
   useEffect(() => {
+    if (klineVisibleRangeTimerRef.current) {
+      window.clearTimeout(klineVisibleRangeTimerRef.current);
+      klineVisibleRangeTimerRef.current = null;
+    }
+    setKlineVisibleRange(null);
+  }, [klineViewportKey]);
+
+  useEffect(() => {
     setKlineTokenSide('auto');
     setSelectedMarkerCluster(null);
     setKlineMarkers([]);
     setKlineMarkerStats({ totalEvents: 0, addCount: 0, removeCount: 0, walletCount: 0, truncated: false, loadedEvents: 0 });
     setKlineMarkersError('');
     setKlineSource('');
+    setKlineMarkerRefreshNonce(0);
   }, [selectedPoolAddress]);
 
   useEffect(() => {
@@ -924,7 +1016,7 @@ export default function App() {
 
   const handleWsProgressMessage = useCallback((msg) => {
     if (msg && msg.type === 'operation_progress') {
-      setOperationProgress(prev => {
+      setOperationProgress((prev) => {
         if (!prev || prev.operation !== msg.operation) return prev;
         if (msg.current_step < prev.currentStep) return prev;
         if (prev.status === 'done' || prev.status === 'error') return prev;
@@ -938,8 +1030,29 @@ export default function App() {
           error: msg.error || '',
         };
       });
+      return;
     }
-  }, []);
+    if (msg?.type === 'smart_money_exit') {
+      const data = msg?.data || {};
+      const messagePoolID = normalizePoolAddress(data?.pool_id);
+      const messagePoolVersion = String(data?.pool_version || '').trim().toLowerCase();
+      const messageChain = normalizeChain(data?.chain || '');
+      const activeChain = normalizeChain(selectedPool?.chain || chain);
+      if (!klineOverlayEnabled || !klineOverlayAvailable || !klineMarkersWatchingLatest) return;
+      if (!messagePoolID || messagePoolID !== selectedPoolAddress) return;
+      if (messagePoolVersion && selectedPoolVersion && messagePoolVersion !== selectedPoolVersion) return;
+      if (messageChain && activeChain && messageChain !== activeChain) return;
+      setKlineMarkerRefreshNonce((v) => v + 1);
+    }
+  }, [
+    chain,
+    klineMarkersWatchingLatest,
+    klineOverlayAvailable,
+    klineOverlayEnabled,
+    selectedPool?.chain,
+    selectedPoolAddress,
+    selectedPoolVersion,
+  ]);
 
   useWebSocket({ url: progressWsUrl, onMessage: handleWsProgressMessage, enabled: hasInitData && !!progressWsUrl });
 
@@ -1426,6 +1539,7 @@ export default function App() {
               markers={klineOverlayEnabled ? klineMarkers : []}
               loading={klineLoading}
               error={klineError}
+              onVisibleRangeChange={handleKlineVisibleRangeChange}
               viewportKey={klineViewportKey}
               activeMarkerId={selectedMarkerCluster?.id || ''}
               onMarkerClick={(cluster) => setSelectedMarkerCluster(cluster)}

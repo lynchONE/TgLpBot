@@ -202,6 +202,7 @@ export default function KlineChart({
   loading = false,
   error = '',
   onMarkerClick,
+  onVisibleRangeChange,
   activeMarkerId = '',
   viewportKey = '',
   userAvatarUrl = '',
@@ -212,9 +213,13 @@ export default function KlineChart({
   const candleSeriesRef = useRef(null);
   const volumeSeriesRef = useRef(null);
   const prevViewportKeyRef = useRef('');
+  const lastVisibleRangeRef = useRef({ from: 0, to: 0 });
   const [projectedMarkers, setProjectedMarkers] = useState([]);
   const [hoveredCluster, setHoveredCluster] = useState(null);
   const updateProjectionRef = useRef(null);
+  const visibleRangeHandlerRef = useRef(onVisibleRangeChange);
+
+  visibleRangeHandlerRef.current = onVisibleRangeChange;
 
   const candleData = useMemo(() => {
     const rows = Array.isArray(candles) ? candles : [];
@@ -321,6 +326,28 @@ export default function KlineChart({
 
   updateProjectionRef.current = updateProjection;
 
+  const emitVisibleRange = useCallback(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const raw = chart.timeScale().getVisibleRange?.() || null;
+    let from = raw ? toUnixSeconds(raw.from) : 0;
+    let to = raw ? toUnixSeconds(raw.to) : 0;
+    if ((!from || !to) && candleData.length) {
+      from = Number(candleData[0]?.time || 0);
+      to = Number(candleData[candleData.length - 1]?.time || 0);
+    }
+    if (!from || !to) return;
+    if (to < from) {
+      const tmp = from;
+      from = to;
+      to = tmp;
+    }
+    const prev = lastVisibleRangeRef.current;
+    if (prev.from === from && prev.to === to) return;
+    lastVisibleRangeRef.current = { from, to };
+    visibleRangeHandlerRef.current?.({ from, to });
+  }, [candleData]);
+
   useEffect(() => {
     if (!chartHostRef.current) return;
     const host = chartHostRef.current;
@@ -378,7 +405,10 @@ export default function KlineChart({
     volumeSeriesRef.current = volumeSeries;
 
     const onVisibleChange = () => {
-      window.requestAnimationFrame(() => updateProjectionRef.current?.());
+      window.requestAnimationFrame(() => {
+        updateProjectionRef.current?.();
+        emitVisibleRange();
+      });
     };
     chart.timeScale().subscribeVisibleTimeRangeChange(onVisibleChange);
 
@@ -420,8 +450,11 @@ export default function KlineChart({
     });
     candleSeriesRef.current.setData(candleData);
     volumeSeriesRef.current.setData(volumeData);
-    window.requestAnimationFrame(() => updateProjectionRef.current?.());
-  }, [candleData]);
+    window.requestAnimationFrame(() => {
+      updateProjectionRef.current?.();
+      emitVisibleRange();
+    });
+  }, [candleData, emitVisibleRange]);
 
   // Incremental realtime update — bypass full setData for instant visual feedback.
   useEffect(() => {
@@ -447,8 +480,12 @@ export default function KlineChart({
     if (prevViewportKeyRef.current === viewportKey) return;
     prevViewportKeyRef.current = viewportKey;
     chartRef.current.timeScale().fitContent();
-    window.requestAnimationFrame(() => updateProjectionRef.current?.());
-  }, [viewportKey, candleData.length]);
+    lastVisibleRangeRef.current = { from: 0, to: 0 };
+    window.requestAnimationFrame(() => {
+      updateProjectionRef.current?.();
+      emitVisibleRange();
+    });
+  }, [viewportKey, candleData.length, emitVisibleRange]);
 
   useEffect(() => {
     window.requestAnimationFrame(updateProjection);

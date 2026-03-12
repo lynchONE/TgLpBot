@@ -111,7 +111,9 @@ func TestQuerySmartMoneyPoolMarkerEvents_UsesPoolAndActionFilters(t *testing.T) 
 		},
 	}
 
-	rows, err := querySmartMoneyPoolMarkerEvents(context.Background(), conn, "bsc", "v3", "0xpool", 12*time.Hour, 10)
+	start := time.Unix(1700000000, 0).UTC()
+	end := start.Add(6 * time.Hour)
+	rows, err := querySmartMoneyPoolMarkerEvents(context.Background(), conn, "bsc", "v3", "0xpool", 300, start, end, 10)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -123,6 +125,12 @@ func TestQuerySmartMoneyPoolMarkerEvents_UsesPoolAndActionFilters(t *testing.T) 
 	}
 	if !strings.Contains(conn.lastQuery, "pool_version = ? AND pool_id = ?") {
 		t.Fatalf("expected pool filter, got query=%s", conn.lastQuery)
+	}
+	if !strings.Contains(conn.lastQuery, "intDiv(toInt64(toUnixTimestamp(ts)), ?) * ? >= ?") {
+		t.Fatalf("expected bucketed start filter, got query=%s", conn.lastQuery)
+	}
+	if !strings.Contains(conn.lastQuery, "intDiv(toInt64(toUnixTimestamp(ts)), ?) * ? <= ?") {
+		t.Fatalf("expected bucketed end filter, got query=%s", conn.lastQuery)
 	}
 	if !strings.Contains(conn.lastQuery, "net_amount0") || !strings.Contains(conn.lastQuery, "net_amount1") {
 		t.Fatalf("expected net amount fallback in query, got query=%s", conn.lastQuery)
@@ -143,7 +151,9 @@ func TestQuerySmartMoneyPoolMarkerSummary_UsesFullWindowCounts(t *testing.T) {
 		},
 	}
 
-	summary, err := querySmartMoneyPoolMarkerSummary(context.Background(), conn, "bsc", "v3", "0xpool", 24*time.Hour)
+	start := time.Unix(1700000000, 0).UTC()
+	end := start.Add(24 * time.Hour)
+	summary, err := querySmartMoneyPoolMarkerSummary(context.Background(), conn, "bsc", "v3", "0xpool", 300, start, end)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -158,5 +168,11 @@ func TestQuerySmartMoneyPoolMarkerSummary_UsesFullWindowCounts(t *testing.T) {
 	}
 	if !strings.Contains(conn.lastQuery, "uniqExact(wallet_address) AS wallet_count") {
 		t.Fatalf("expected wallet count query, got query=%s", conn.lastQuery)
+	}
+	if !strings.Contains(conn.lastQuery, "intDiv(toInt64(toUnixTimestamp(ts)), ?) * ? >= ?") {
+		t.Fatalf("expected bucketed start filter, got query=%s", conn.lastQuery)
+	}
+	if !strings.Contains(conn.lastQuery, "intDiv(toInt64(toUnixTimestamp(ts)), ?) * ? <= ?") {
+		t.Fatalf("expected bucketed end filter, got query=%s", conn.lastQuery)
 	}
 }

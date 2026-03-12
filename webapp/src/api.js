@@ -153,6 +153,8 @@ export async function fetchSmartMoneyPoolMarkers({
   poolId,
   bucketSec,
   windowHours,
+  startTs,
+  endTs,
   limit,
   signal,
 }) {
@@ -164,6 +166,8 @@ export async function fetchSmartMoneyPoolMarkers({
   if (poolId) params.set('pool_id', String(poolId));
   if (Number.isFinite(bucketSec)) params.set('bucket_sec', String(bucketSec));
   if (Number.isFinite(windowHours)) params.set('window_hours', String(windowHours));
+  if (Number.isFinite(startTs) && startTs > 0) params.set('start_ts', String(Math.floor(startTs)));
+  if (Number.isFinite(endTs) && endTs > 0) params.set('end_ts', String(Math.floor(endTs)));
   if (Number.isFinite(limit)) params.set('limit', String(limit));
 
   const qs = params.toString();
@@ -290,6 +294,9 @@ export async function fetchMyTradeMarkers({
   initData,
   chain = 'bsc',
   poolId,
+  bucketSec,
+  startTs,
+  endTs,
   windowSec = 86400,
   signal,
 }) {
@@ -302,6 +309,9 @@ export async function fetchMyTradeMarkers({
       initData,
       chain,
       pool_id: poolId,
+      bucket_sec: bucketSec,
+      start_ts: Number.isFinite(startTs) && startTs > 0 ? Math.floor(startTs) : 0,
+      end_ts: Number.isFinite(endTs) && endTs > 0 ? Math.floor(endTs) : 0,
       window_sec: windowSec,
     }),
     signal,

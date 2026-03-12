@@ -3,6 +3,7 @@ package web_server
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,6 +17,9 @@ type myTradeMarkersRequest struct {
 	Chain     string `json:"chain"`
 	PoolID    string `json:"pool_id"`
 	WindowSec int    `json:"window_sec"`
+	StartTS   int64  `json:"start_ts"`
+	EndTS     int64  `json:"end_ts"`
+	BucketSec int    `json:"bucket_sec"`
 }
 
 type myTradeMarkerEvent struct {
@@ -30,6 +34,17 @@ type myTradeMarkerEvent struct {
 
 type myTradeMarkersResponse struct {
 	Events []myTradeMarkerEvent `json:"events"`
+}
+
+func bucketUnix(ts int64, bucketSec int) int64 {
+	if ts <= 0 {
+		return 0
+	}
+	if bucketSec <= 0 {
+		bucketSec = 300
+	}
+	size := int64(bucketSec)
+	return (ts / size) * size
 }
 
 func (s *Server) handleMyTradeMarkers(w http.ResponseWriter, r *http.Request) {
@@ -62,16 +77,24 @@ func (s *Server) handleMyTradeMarkers(w http.ResponseWriter, r *http.Request) {
 	if windowSec <= 0 || windowSec > 7*24*3600 {
 		windowSec = 24 * 3600
 	}
-	since := time.Now().Add(-time.Duration(windowSec) * time.Second)
+	bucketSec := req.BucketSec
+	if bucketSec < 60 || bucketSec > 86400 {
+		bucketSec = 300
+	}
+	rangeStart, rangeEnd := resolveUnixTimeRange(req.StartTS, req.EndTS, time.Duration(windowSec)*time.Second)
+	queryStart := rangeStart.Add(-time.Duration(bucketSec) * time.Second)
+	queryEnd := rangeEnd.Add(time.Duration(bucketSec) * time.Second)
+	startBucket, endBucket := buildMarkerBucketBounds(rangeStart, rangeEnd, bucketSec)
 
 	var records []models.TradeRecord
 	q := database.DB.
-		Where("user_id = ? AND pool_id = ? AND opened_at >= ?", user.ID, poolID, since).
+		Where("user_id = ? AND pool_id = ?", user.ID, poolID).
+		Where("(opened_at BETWEEN ? AND ?) OR (closed_at IS NOT NULL AND closed_at BETWEEN ? AND ?)", queryStart, queryEnd, queryStart, queryEnd).
 		Order("opened_at ASC")
 	if chain != "" {
 		q = q.Where("chain = ?", chain)
 	}
-	if err := q.Limit(200).Find(&records).Error; err != nil {
+	if err := q.Limit(400).Find(&records).Error; err != nil {
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
@@ -83,16 +106,17 @@ func (s *Server) handleMyTradeMarkers(w http.ResponseWriter, r *http.Request) {
 
 	var events []myTradeMarkerEvent
 	for _, rec := range records {
+		openBucket := bucketUnix(rec.OpenedAt.Unix(), bucketSec)
 		// open event
 		openUSD := parseWeiToFloat(rec.OpenUSDTSpent)
-		if openUSD > 0 {
+		if openUSD > 0 && openBucket >= startBucket && openBucket <= endBucket {
 			txURL := ""
 			if rec.OpenTxHash != "" {
 				txURL = explorerBase + "/tx/" + rec.OpenTxHash
 			}
 			events = append(events, myTradeMarkerEvent{
 				T:            rec.OpenedAt.Unix(),
-				BucketT:      rec.OpenedAt.Unix(),
+				BucketT:      openBucket,
 				Action:       "add",
 				TxHash:       rec.OpenTxHash,
 				TxURL:        txURL,
@@ -103,15 +127,16 @@ func (s *Server) handleMyTradeMarkers(w http.ResponseWriter, r *http.Request) {
 
 		// close event
 		if rec.ClosedAt != nil && rec.Status == models.TradeStatusClosed {
+			closeBucket := bucketUnix(rec.ClosedAt.Unix(), bucketSec)
 			closeUSD := parseWeiToFloat(rec.CloseUSDTReceived)
-			if closeUSD > 0 {
+			if closeUSD > 0 && closeBucket >= startBucket && closeBucket <= endBucket {
 				txURL := ""
 				if rec.CloseTxHash != "" {
 					txURL = explorerBase + "/tx/" + rec.CloseTxHash
 				}
 				events = append(events, myTradeMarkerEvent{
 					T:            rec.ClosedAt.Unix(),
-					BucketT:      rec.ClosedAt.Unix(),
+					BucketT:      closeBucket,
 					Action:       "remove",
 					TxHash:       rec.CloseTxHash,
 					TxURL:        txURL,
@@ -121,6 +146,12 @@ func (s *Server) handleMyTradeMarkers(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	sort.Slice(events, func(i, j int) bool {
+		if events[i].T == events[j].T {
+			return events[i].Action < events[j].Action
+		}
+		return events[i].T < events[j].T
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(myTradeMarkersResponse{Events: events})

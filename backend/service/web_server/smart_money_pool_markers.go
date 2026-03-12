@@ -3,7 +3,6 @@ package web_server
 import (
 	"context"
 	"fmt"
-	"math"
 	"net/http"
 	"regexp"
 	"sort"
@@ -90,6 +89,19 @@ func absFloat(v float64) float64 {
 	return v
 }
 
+func buildMarkerBucketBounds(start time.Time, end time.Time, bucketSec int) (int64, int64) {
+	if bucketSec <= 0 {
+		bucketSec = 300
+	}
+	if end.Before(start) {
+		start, end = end, start
+	}
+	bucketSize := int64(bucketSec)
+	startBucket := (start.Unix() / bucketSize) * bucketSize
+	endBucket := (end.Unix() / bucketSize) * bucketSize
+	return startBucket, endBucket
+}
+
 func buildMarkerEventID(txHash string, eventSeq uint64, logIndex uint32) string {
 	txHash = strings.ToLower(strings.TrimSpace(txHash))
 	if txHash != "" {
@@ -102,7 +114,7 @@ func loadUserManagedWalletLabels(userID uint, chain string) map[string]string {
 	return loadSmartMoneyWalletLabels(userID, chain)
 }
 
-func querySmartMoneyPoolMarkerEvents(ctx context.Context, conn smartMoneyClickHouseQueryer, chain string, poolVersion string, poolID string, window time.Duration, limit int) ([]smartMoneyPoolMarkerRow, error) {
+func querySmartMoneyPoolMarkerEvents(ctx context.Context, conn smartMoneyClickHouseQueryer, chain string, poolVersion string, poolID string, bucketSec int, start time.Time, end time.Time, limit int) ([]smartMoneyPoolMarkerRow, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -116,13 +128,11 @@ func querySmartMoneyPoolMarkerEvents(ctx context.Context, conn smartMoneyClickHo
 		return []smartMoneyPoolMarkerRow{}, nil
 	}
 
-	if window <= 0 {
-		window = 12 * time.Hour
+	if start.IsZero() || end.IsZero() {
+		end = time.Now().UTC()
+		start = end.Add(-12 * time.Hour)
 	}
-	seconds := int(window.Seconds())
-	if seconds <= 0 {
-		seconds = 43200
-	}
+	startBucket, endBucket := buildMarkerBucketBounds(start, end, bucketSec)
 
 	if limit <= 0 {
 		limit = 300
@@ -133,8 +143,8 @@ func querySmartMoneyPoolMarkerEvents(ctx context.Context, conn smartMoneyClickHo
 
 	chain = strings.ToLower(strings.TrimSpace(chain))
 	chainFilter := ""
-	args := make([]any, 0, 3)
-	args = append(args, poolVersion, poolID)
+	args := make([]any, 0, 9)
+	args = append(args, poolVersion, poolID, bucketSec, bucketSec, startBucket, bucketSec, bucketSec, endBucket)
 	if chain != "" {
 		chainFilter = "AND lowerUTF8(chain) = ?"
 		args = append(args, chain)
@@ -156,14 +166,15 @@ func querySmartMoneyPoolMarkerEvents(ctx context.Context, conn smartMoneyClickHo
 			block_number,
 			log_index
 		FROM smart_lp_events
-		WHERE ts >= now() - INTERVAL %d SECOND
-			AND action IN ('add', 'remove')
+		WHERE action IN ('add', 'remove')
 			AND pool_version = ? AND pool_id = ?
 			AND wallet_address != ''
+			AND intDiv(toInt64(toUnixTimestamp(ts)), ?) * ? >= ?
+			AND intDiv(toInt64(toUnixTimestamp(ts)), ?) * ? <= ?
 			%s
 		ORDER BY block_number DESC, log_index DESC
 		LIMIT %d
-	`, seconds, chainFilter, limit)
+	`, chainFilter, limit)
 
 	rows, err := conn.Query(ctx, q, args...)
 	if err != nil {
@@ -202,7 +213,7 @@ func querySmartMoneyPoolMarkerEvents(ctx context.Context, conn smartMoneyClickHo
 	return out, nil
 }
 
-func querySmartMoneyPoolMarkerSummary(ctx context.Context, conn smartMoneyClickHouseQueryer, chain string, poolVersion string, poolID string, window time.Duration) (smartMoneyPoolMarkerSummary, error) {
+func querySmartMoneyPoolMarkerSummary(ctx context.Context, conn smartMoneyClickHouseQueryer, chain string, poolVersion string, poolID string, bucketSec int, start time.Time, end time.Time) (smartMoneyPoolMarkerSummary, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -216,18 +227,16 @@ func querySmartMoneyPoolMarkerSummary(ctx context.Context, conn smartMoneyClickH
 		return smartMoneyPoolMarkerSummary{}, nil
 	}
 
-	if window <= 0 {
-		window = 12 * time.Hour
+	if start.IsZero() || end.IsZero() {
+		end = time.Now().UTC()
+		start = end.Add(-12 * time.Hour)
 	}
-	seconds := int(window.Seconds())
-	if seconds <= 0 {
-		seconds = 43200
-	}
+	startBucket, endBucket := buildMarkerBucketBounds(start, end, bucketSec)
 
 	chain = strings.ToLower(strings.TrimSpace(chain))
 	chainFilter := ""
-	args := make([]any, 0, 3)
-	args = append(args, poolVersion, poolID)
+	args := make([]any, 0, 9)
+	args = append(args, poolVersion, poolID, bucketSec, bucketSec, startBucket, bucketSec, bucketSec, endBucket)
 	if chain != "" {
 		chainFilter = "AND lowerUTF8(chain) = ?"
 		args = append(args, chain)
@@ -240,12 +249,13 @@ func querySmartMoneyPoolMarkerSummary(ctx context.Context, conn smartMoneyClickH
 			countIf(action = 'remove') AS remove_count,
 			uniqExact(wallet_address) AS wallet_count
 		FROM smart_lp_events
-		WHERE ts >= now() - INTERVAL %d SECOND
-			AND action IN ('add', 'remove')
+		WHERE action IN ('add', 'remove')
 			AND pool_version = ? AND pool_id = ?
 			AND wallet_address != ''
+			AND intDiv(toInt64(toUnixTimestamp(ts)), ?) * ? >= ?
+			AND intDiv(toInt64(toUnixTimestamp(ts)), ?) * ? <= ?
 			%s
-	`, seconds, chainFilter)
+	`, chainFilter)
 
 	rows, err := conn.Query(ctx, q, args...)
 	if err != nil {
@@ -313,16 +323,19 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 	bucketSec := parseIntQuery(query, "bucket_sec", 300, 60, 86400)
 	windowHours := parseIntQuery(query, "window_hours", 12, 1, 48)
 	limit := parseIntQuery(query, "limit", 300, 1, 2000)
+	startTS := parseUnixSecondsQuery(query, "start_ts")
+	endTS := parseUnixSecondsQuery(query, "end_ts")
+	rangeStart, rangeEnd := resolveUnixTimeRange(startTS, endTS, time.Duration(windowHours)*time.Hour)
 
 	ctx, cancel := context.WithTimeout(r.Context(), 18*time.Second)
 	defer cancel()
 
-	rows, err := querySmartMoneyPoolMarkerEvents(ctx, s.ClickHouse.Conn, chain, poolVersion, poolID, time.Duration(windowHours)*time.Hour, limit)
+	rows, err := querySmartMoneyPoolMarkerEvents(ctx, s.ClickHouse.Conn, chain, poolVersion, poolID, bucketSec, rangeStart, rangeEnd, limit)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	summary, summaryErr := querySmartMoneyPoolMarkerSummary(ctx, s.ClickHouse.Conn, chain, poolVersion, poolID, time.Duration(windowHours)*time.Hour)
+	summary, summaryErr := querySmartMoneyPoolMarkerSummary(ctx, s.ClickHouse.Conn, chain, poolVersion, poolID, bucketSec, rangeStart, rangeEnd)
 
 	poolSvc := pool.NewPoolService()
 	var info *pool.PoolInfo
@@ -510,7 +523,7 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, smartMoneyPoolMarkersResponse{
 		Chain:       chain,
 		BucketSec:   bucketSec,
-		WindowSec:   int(math.Round(float64(windowHours) * 3600)),
+		WindowSec:   durationSeconds(rangeStart, rangeEnd),
 		UpdatedAt:   timeutil.Now(),
 		Pool:        outPool,
 		Events:      events,
