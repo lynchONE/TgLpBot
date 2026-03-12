@@ -444,8 +444,12 @@ export default function App() {
       const poolId = normalizePoolAddress(row?.pool_id);
       if (poolId) seen.add(poolId);
     });
-    return Array.from(seen);
+    return Array.from(seen).sort();
   }, [positions]);
+  const hotPoolIncludeKey = useMemo(
+    () => hotPoolIncludeAddresses.join(','),
+    [hotPoolIncludeAddresses]
+  );
 
   const sortedPositions = useMemo(() => {
     const rows = Array.isArray(positions?.positions) ? positions.positions : [];
@@ -643,7 +647,7 @@ export default function App() {
           sort: hotSort,
           timeframeMinutes: 5,
           limit: 60,
-          includePools: hotPoolIncludeAddresses,
+          includePools: hotPoolIncludeKey ? hotPoolIncludeKey.split(',') : undefined,
           signal,
         });
         setHotPools(Array.isArray(resp?.data) ? resp.data : []);
@@ -654,7 +658,7 @@ export default function App() {
         setHotPoolsLoading(false);
       }
     },
-    [apiBaseUrl, chain, hasInitData, hotPoolIncludeAddresses, hotSort, initData]
+    [apiBaseUrl, chain, hasInitData, hotPoolIncludeKey, hotSort, initData]
   );
 
   const loadPositions = useCallback(
@@ -877,11 +881,26 @@ export default function App() {
   useEffect(() => {
     const ctrl = new AbortController();
     loadHotPools(ctrl.signal);
+    return () => ctrl.abort();
+  }, [loadHotPools]);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
     loadPositions(ctrl.signal);
+    return () => ctrl.abort();
+  }, [loadPositions]);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
     loadSmart(ctrl.signal);
+    return () => ctrl.abort();
+  }, [loadSmart]);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
     loadWalletBalances(ctrl.signal);
     return () => ctrl.abort();
-  }, [loadHotPools, loadPositions, loadSmart, loadWalletBalances]);
+  }, [loadWalletBalances]);
 
   useEffect(() => {
     const ctrl = new AbortController();
