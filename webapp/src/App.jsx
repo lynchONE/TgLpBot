@@ -1604,7 +1604,7 @@ export default function App() {
               </div>
               <div className="kline-summary-item mono">
                 <span className="label">地址</span>
-                <span className="value">{shortAddress(klineTokenAddress, 8, 6)}</span>
+                <span className="value">{shortAddress(klineTokenAddress, 6, 4)}</span>
               </div>
               <div className="kline-summary-item">
                 <span className="label">事件({KLINE_MARKER_WINDOW_HOURS}h)</span>
@@ -1613,24 +1613,6 @@ export default function App() {
               <div className="kline-summary-item">
                 <span className="label">钱包</span>
                 <span className="value">{klineMarkerWalletCount}</span>
-              </div>
-              <div className="kline-summary-item">
-                <span className="label">加/减仓</span>
-                <span className="value">{klineMarkerAddCount}/{klineMarkerRemoveCount}</span>
-              </div>
-              <div className="kline-summary-item">
-                <span className="label">时区</span>
-                <span className="value">UTC+8</span>
-              </div>
-              <div className="kline-summary-item">
-                <span className="label">价格源</span>
-                <span className="value">
-                  {klineSource === 'token-usd' ? '代币K线(USD)' : '代币K线'}
-                </span>
-              </div>
-              <div className="kline-summary-item">
-                <span className="label">覆盖层</span>
-                <span className="value">{klineOverlayEnabled && klineOverlayAvailable ? '开启' : '关闭'}</span>
               </div>
             </div>
 
