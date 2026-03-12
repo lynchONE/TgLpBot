@@ -1206,16 +1206,16 @@ body {
 .kline-marker {
   position: absolute;
   transform: translate(-50%, -50%);
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
-  border: 1.5px solid transparent;
+  border: 2px solid transparent;
   display: flex;
   align-items: center;
   justify-content: center;
   pointer-events: auto;
   cursor: pointer;
-  box-shadow: 0 3px 9px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
   z-index: 5;
   padding: 0;
   background: #1a1f2a;
@@ -1236,10 +1236,10 @@ body {
 
 .kline-marker-badge {
   position: absolute;
-  top: -3px;
-  right: -3px;
-  min-width: 12px;
-  height: 12px;
+  top: -2px;
+  right: -2px;
+  min-width: 13px;
+  height: 13px;
   padding: 0 3px;
   border-radius: 999px;
   background: rgba(30, 40, 60, 0.92);
@@ -1247,34 +1247,34 @@ body {
   color: #fff;
   font-size: 8px;
   font-weight: 700;
-  line-height: 12px;
+  line-height: 13px;
   text-align: center;
 }
 
 .kline-marker.add {
   border-color: #16c784;
-  box-shadow: 0 0 6px rgba(22, 199, 132, 0.4), 0 3px 9px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 8px rgba(22, 199, 132, 0.4), 0 4px 12px rgba(0, 0, 0, 0.35);
 }
 
 .kline-marker.remove {
   border-color: #ea3943;
-  box-shadow: 0 0 6px rgba(234, 57, 67, 0.4), 0 3px 9px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 8px rgba(234, 57, 67, 0.4), 0 4px 12px rgba(0, 0, 0, 0.35);
 }
 
 .kline-marker.active {
-  box-shadow: 0 0 0 1.5px rgba(255, 208, 130, 0.45), 0 8px 16px rgba(0, 0, 0, 0.32);
+  box-shadow: 0 0 0 2px rgba(255, 208, 130, 0.45), 0 10px 20px rgba(0, 0, 0, 0.32);
 }
 
 .kline-marker.my-trade {
-  box-shadow: 0 0 0 1.5px rgba(255, 177, 26, 0.5), 0 3px 10px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 0 0 2px rgba(255, 177, 26, 0.5), 0 4px 14px rgba(0, 0, 0, 0.4);
 }
 .kline-marker.my-trade.add {
   border-color: #16c784;
-  box-shadow: 0 0 0 1.5px rgba(255, 177, 26, 0.5), 0 0 8px rgba(22, 199, 132, 0.5), 0 3px 10px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 0 0 2px rgba(255, 177, 26, 0.5), 0 0 10px rgba(22, 199, 132, 0.5), 0 4px 14px rgba(0, 0, 0, 0.4);
 }
 .kline-marker.my-trade.remove {
   border-color: #ea3943;
-  box-shadow: 0 0 0 1.5px rgba(255, 177, 26, 0.5), 0 0 8px rgba(234, 57, 67, 0.5), 0 3px 10px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 0 0 2px rgba(255, 177, 26, 0.5), 0 0 10px rgba(234, 57, 67, 0.5), 0 4px 14px rgba(0, 0, 0, 0.4);
 }
 
 .kline-marker-tooltip {

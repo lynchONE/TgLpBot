@@ -31,8 +31,8 @@ function formatUSD(v) {
 }
 
 function deOverlapMarkers(markers) {
-  const step = 30;
-  const xThreshold = 24;
+  const step = 36;
+  const xThreshold = 28;
   const result = [];
   for (const m of markers) {
     let { y } = m;
@@ -143,8 +143,8 @@ function projectClusters(chart, candleSeries, candleData, candleMap, candleIndex
   const projected = [];
   const width = Math.max(0, Number(hostWidth || 0));
   const height = Math.max(0, Number(hostHeight || 0));
-  const xPad = 15;
-  const yPad = 15;
+  const xPad = 18;
+  const yPad = 18;
   const priceTop = 12;
   const priceBottom = height > 0 ? Math.max(priceTop + 32, Math.floor(height * 0.78)) : 0;
   const minPrice = candleData.reduce((acc, row) => Math.min(acc, Number(row?.low || 0)), Number.POSITIVE_INFINITY);
@@ -154,7 +154,7 @@ function projectClusters(chart, candleSeries, candleData, candleMap, candleIndex
   const visibleFrom = visibleRange ? toUnixSeconds(visibleRange.from) : 0;
   const visibleTo = visibleRange ? toUnixSeconds(visibleRange.to) : 0;
   const hasVisibleRange = visibleFrom > 0 && visibleTo > 0;
-  const edgeBuffer = 18;
+  const edgeBuffer = 24;
 
   for (const cluster of clusters) {
     const located =
@@ -181,7 +181,7 @@ function projectClusters(chart, candleSeries, candleData, candleMap, candleIndex
     }
     if (!Number.isFinite(y)) continue;
 
-    const offset = cluster.action === 'remove' ? 14 : -14;
+    const offset = cluster.action === 'remove' ? 18 : -18;
     const minY = yPad;
     const maxY = height > 0 ? Math.max(minY, priceBottom - yPad) : Number.POSITIVE_INFINITY;
 
@@ -525,9 +525,6 @@ export default function KlineChart({
             onMouseLeave={() => setHoveredCluster(null)}
           >
             <img className="kline-marker-avatar" src={cluster.label} alt="" />
-            {cluster.items.length > 1 && (
-              <span className="kline-marker-badge">{cluster.items.length}</span>
-            )}
           </button>
         ))}
 
