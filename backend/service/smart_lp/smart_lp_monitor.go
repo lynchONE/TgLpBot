@@ -110,6 +110,13 @@ type smartLPEvent struct {
 	source          string
 }
 
+func watchedWalletEventSource(action string) string {
+	if strings.ToLower(strings.TrimSpace(action)) == "remove" {
+		return "watch_remove"
+	}
+	return "watch_add"
+}
+
 func NewSmartLPMonitor(ch *clickhouse.ClickHouseService) *SmartLPMonitor {
 	interval := 60 * time.Second
 	if config.AppConfig != nil && config.AppConfig.SmartLPScanIntervalSeconds > 0 {
@@ -627,8 +634,8 @@ func (s *SmartLPMonitor) scanSmartLPBlockWithScanner(ctx context.Context, blockN
 
 		// If this tx was discovered via the monitored contract list, keep all parsed
 		// events and also update the in-memory watchlist on new add-liquidity actions.
-		// If it was discovered via the watchlist, only keep remove-liquidity events to
-		// avoid expanding the tracked "add" surface beyond SmartLP contract activity.
+		// If it was discovered via the watchlist, keep both add/remove events and tag
+		// the source so downstream consumers can distinguish watched-wallet traffic.
 		if isMonitorTx {
 			events = append(events, txEvents...)
 			if watch != nil {
@@ -646,12 +653,13 @@ func (s *SmartLPMonitor) scanSmartLPBlockWithScanner(ctx context.Context, blockN
 			continue
 		}
 
-		// Watched-wallet tx: keep only remove events and label them as watch_remove.
+		// Watched-wallet tx: keep add/remove events and stamp the watched-wallet source.
 		for _, ev := range txEvents {
-			if strings.ToLower(strings.TrimSpace(ev.action)) != "remove" {
+			action := strings.ToLower(strings.TrimSpace(ev.action))
+			if action != "add" && action != "remove" {
 				continue
 			}
-			ev.source = "watch_remove"
+			ev.source = watchedWalletEventSource(action)
 			events = append(events, ev)
 		}
 	}
@@ -1255,7 +1263,7 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 				continue
 			}
 
-			watchOnlyRemove := isWatchedTx && !isMonitorTx
+			watchedWalletTx := isWatchedTx && !isMonitorTx
 
 			for _, lg := range receipt.Logs {
 				if lg == nil || len(lg.Topics) == 0 {
@@ -1276,10 +1284,6 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 						default:
 							continue
 						}
-						if watchOnlyRemove && action != "remove" {
-							continue
-						}
-
 						if len(lg.Topics) < 2 {
 							continue
 						}
@@ -1384,8 +1388,8 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 
 						eventSeq := bn*1_000_000 + uint64(lg.Index)
 						src := "v3_npm"
-						if watchOnlyRemove {
-							src = "watch_remove"
+						if watchedWalletTx {
+							src = watchedWalletEventSource(action)
 						}
 						events = append(events, smartLPEvent{
 							ts:              blockTime,
@@ -1447,10 +1451,6 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 					if liqDelta.Sign() < 0 {
 						action = "remove"
 					}
-					if watchOnlyRemove && action != "remove" {
-						continue
-					}
-
 					poolID := strings.ToLower(lg.Topics[1].Hex())
 
 					amount0 := "0"
@@ -1489,8 +1489,8 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 
 					eventSeq := bn*1_000_000 + uint64(lg.Index)
 					src := "v4_pool_manager"
-					if watchOnlyRemove {
-						src = "watch_remove"
+					if watchedWalletTx {
+						src = watchedWalletEventSource(action)
 					}
 					events = append(events, smartLPEvent{
 						ts:              blockTime,

@@ -372,13 +372,53 @@ export default function App() {
 
   const filteredHotPools = useMemo(() => {
     const q = String(keyword || '').trim().toLowerCase();
-    if (!q) return hotPools;
-    return hotPools.filter((x) => {
-      const pair = String(x?.trading_pair || '').toLowerCase();
-      const addr = String(x?.pool_address || '').toLowerCase();
-      return pair.includes(q) || addr.includes(q);
+    const positionPoolMap = new Map();
+    const positionRows = Array.isArray(positions?.positions) ? positions.positions : [];
+    positionRows.forEach((row) => {
+      const poolId = normalizePoolAddress(row?.pool_id);
+      if (!poolId) return;
+      const totalUsd = Number(row?.totals?.position_usd || 0) + Number(row?.totals?.fee_usd || 0);
+      if (!Number.isFinite(totalUsd) || totalUsd <= 0) return;
+      positionPoolMap.set(poolId, (positionPoolMap.get(poolId) || 0) + totalUsd);
     });
-  }, [hotPools, keyword]);
+
+    const enriched = hotPools
+      .filter((row) => {
+        const addr = normalizePoolAddress(row?.pool_address || row?.pool_id);
+        if (addr && positionPoolMap.has(addr)) return true;
+        if (!q) return true;
+        const pair = String(row?.trading_pair || '').toLowerCase();
+        return pair.includes(q) || String(addr || '').toLowerCase().includes(q);
+      })
+      .map((row, index) => {
+        const addr = normalizePoolAddress(row?.pool_address || row?.pool_id);
+        return {
+          ...row,
+          userPositionUsd: addr ? Number(positionPoolMap.get(addr) || 0) : 0,
+          _listIndex: index,
+        };
+      });
+
+    return enriched
+      .sort((a, b) => {
+        const aPos = Number(a?.userPositionUsd || 0);
+        const bPos = Number(b?.userPositionUsd || 0);
+        if (aPos > 0 && bPos <= 0) return -1;
+        if (bPos > 0 && aPos <= 0) return 1;
+        if (aPos > 0 && bPos > 0 && aPos !== bPos) return bPos - aPos;
+        return Number(a?._listIndex || 0) - Number(b?._listIndex || 0);
+      })
+      .map(({ _listIndex, ...row }) => row);
+  }, [hotPools, keyword, positions]);
+  const hotPoolIncludeAddresses = useMemo(() => {
+    const rows = Array.isArray(positions?.positions) ? positions.positions : [];
+    const seen = new Set();
+    rows.forEach((row) => {
+      const poolId = normalizePoolAddress(row?.pool_id);
+      if (poolId) seen.add(poolId);
+    });
+    return Array.from(seen);
+  }, [positions]);
 
   const sortedPositions = useMemo(() => {
     const rows = Array.isArray(positions?.positions) ? positions.positions : [];
@@ -566,6 +606,7 @@ export default function App() {
           sort: hotSort,
           timeframeMinutes: 5,
           limit: 60,
+          includePools: hotPoolIncludeAddresses,
           signal,
         });
         setHotPools(Array.isArray(resp?.data) ? resp.data : []);
@@ -576,7 +617,7 @@ export default function App() {
         setHotPoolsLoading(false);
       }
     },
-    [apiBaseUrl, chain, hasInitData, hotSort, initData]
+    [apiBaseUrl, chain, hasInitData, hotPoolIncludeAddresses, hotSort, initData]
   );
 
   const loadPositions = useCallback(
@@ -1380,7 +1421,11 @@ export default function App() {
                       </button>
                       {feePct > 0 && <span className="tag tag-blue"><NumberFlowValue value={feePct} formatter={(v) => `${Number(v).toFixed(2).replace(/\.?0+$/, '')}%`} /></span>}
                       {dex?.label && <span className="tag tag-dex">{dex.label}</span>}
-                      {userPosUsd > 0 && <span className="tag tag-purple">持仓</span>}
+                      {userPosUsd > 0 && (
+                        <span className="tag tag-purple">
+                          持仓 <NumberFlowValue value={userPosUsd} formatter={(v) => formatUsdCompact(v)} />
+                        </span>
+                      )}
                     </div>
                     <div className="pool-meta-line">
                       <span className="meta-cyan">Vol <b><NumberFlowValue value={volume} formatter={(v) => formatUsdCompact(v)} /></b></span>

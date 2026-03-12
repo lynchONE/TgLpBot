@@ -588,7 +588,7 @@ func querySmartMoneyWalletRecentV3Positions(ctx context.Context, conn smartMoney
 		FROM smart_lp_events
 		WHERE ts >= now() - INTERVAL %d SECOND
 			AND lowerUTF8(wallet_address) = ?
-			AND source = 'v3_npm'
+			AND source IN ('v3_npm', 'watch_add', 'watch_remove')
 			AND token_id != ''
 			AND action IN ('add', 'remove')
 			%s

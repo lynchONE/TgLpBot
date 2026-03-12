@@ -31,6 +31,7 @@ export async function fetchHotPools({
   sort = 'fees',
   timeframeMinutes = 5,
   limit = 50,
+  includePools,
   signal,
 }) {
   const base = normalizeBaseUrl(apiBaseUrl);
@@ -41,6 +42,9 @@ export async function fetchHotPools({
   if (Number.isFinite(timeframeMinutes))
     params.set('timeframe_minutes', String(timeframeMinutes));
   if (Number.isFinite(limit)) params.set('limit', String(limit));
+  if (Array.isArray(includePools) && includePools.length > 0) {
+    params.set('include_pools', includePools.join(','));
+  }
 
   const qs = params.toString();
   const url = `${base}/api/pools?endpoint=hot_pools${qs ? `&${qs}` : ''}`;
