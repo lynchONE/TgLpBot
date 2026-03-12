@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 type HotPoolResponse struct {
@@ -40,6 +42,14 @@ type hotPoolsEnvelope struct {
 	Chain            string            `json:"chain"`
 	Sort             string            `json:"sort"`
 	Dex              string            `json:"dex,omitempty"`
+}
+
+func normalizeHotPoolTokenAddress(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || !common.IsHexAddress(raw) {
+		return ""
+	}
+	return strings.ToLower(common.HexToAddress(raw).Hex())
 }
 
 func (s *Server) handleHotPools(w http.ResponseWriter, r *http.Request) {
@@ -119,6 +129,11 @@ func (s *Server) handleHotPools(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dex := strings.ToLower(strings.TrimSpace(query.Get("dex")))
+	tokenAddress := normalizeHotPoolTokenAddress(query.Get("token_address"))
+	if strings.TrimSpace(query.Get("token_address")) != "" && tokenAddress == "" {
+		http.Error(w, "invalid token_address", http.StatusBadRequest)
+		return
+	}
 
 	// 解析 include_pools 参数（逗号分隔的池子地址列表）
 	var includePools []string
@@ -150,6 +165,10 @@ func (s *Server) handleHotPools(w http.ResponseWriter, r *http.Request) {
 	if dex != "" {
 		where += " AND lower(dex) = ?"
 		args = append(args, dex)
+	}
+	if tokenAddress != "" {
+		where += " AND (lower(token0_address) = ? OR lower(token1_address) = ?)"
+		args = append(args, tokenAddress, tokenAddress)
 	}
 
 	q := fmt.Sprintf(`
@@ -273,9 +292,16 @@ func (s *Server) handleHotPools(w http.ResponseWriter, r *http.Request) {
 				  AND timeframe_minutes = ?
 				  AND lower(pool_address) IN (?)
 			`
+			extraArgs := []any{chain, uint16(timeframeMinutes), missingPools}
+			if tokenAddress != "" {
+				qExtra += `
+				  AND (lower(token0_address) = ? OR lower(token1_address) = ?)
+				`
+				extraArgs = append(extraArgs, tokenAddress, tokenAddress)
+			}
 
 			var extraRows []HotPoolResponse
-			if err := s.ClickHouse.Conn.Select(ctx, &extraRows, qExtra, chain, uint16(timeframeMinutes), missingPools); err == nil {
+			if err := s.ClickHouse.Conn.Select(ctx, &extraRows, qExtra, extraArgs...); err == nil {
 				// 获取这些额外池子的24小时数据
 				if len(extraRows) > 0 {
 					extraAddrs := make([]string, len(extraRows))

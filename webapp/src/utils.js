@@ -107,6 +107,28 @@ export function isStableLikeSymbol(symbol) {
   return GMGN_STABLE_SYMBOLS.has(String(symbol || '').trim().toLowerCase());
 }
 
+export function resolveHotPoolFilterToken(pool) {
+  const pair = String(pool?.trading_pair || pool?.pair || '').trim();
+  const token0Address = normalizeHexAddress(pool?.token0_address || pool?.token0);
+  const token1Address = normalizeHexAddress(pool?.token1_address || pool?.token1);
+  const pairSymbols = pair.includes('/')
+    ? pair.split('/').map((part) => String(part || '').trim())
+    : [];
+  const token0Symbol = String(pool?.token0_symbol || pairSymbols[0] || '').trim();
+  const token1Symbol = String(pool?.token1_symbol || pairSymbols[1] || '').trim();
+  const token0Stable = isStableLikeSymbol(token0Symbol);
+  const token1Stable = isStableLikeSymbol(token1Symbol);
+
+  if (token0Stable === token1Stable) return null;
+  if (token0Stable && !token1Stable && token1Address) {
+    return { address: token1Address, symbol: token1Symbol || 'Token' };
+  }
+  if (token1Stable && !token0Stable && token0Address) {
+    return { address: token0Address, symbol: token0Symbol || 'Token' };
+  }
+  return null;
+}
+
 export function inferPoolVersion(pool) {
   const raw = String(pool?.pool_version || pool?.protocol_version || '').trim().toLowerCase();
   if (raw === 'v3' || raw === 'v4') return raw;

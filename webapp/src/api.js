@@ -31,6 +31,7 @@ export async function fetchHotPools({
   sort = 'fees',
   timeframeMinutes = 5,
   limit = 50,
+  tokenAddress,
   includePools,
   signal,
 }) {
@@ -42,6 +43,7 @@ export async function fetchHotPools({
   if (Number.isFinite(timeframeMinutes))
     params.set('timeframe_minutes', String(timeframeMinutes));
   if (Number.isFinite(limit)) params.set('limit', String(limit));
+  if (tokenAddress) params.set('token_address', String(tokenAddress));
   if (Array.isArray(includePools) && includePools.length > 0) {
     params.set('include_pools', includePools.join(','));
   }

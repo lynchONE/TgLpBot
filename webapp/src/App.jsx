@@ -66,6 +66,7 @@ import {
   normalizeHexAddress,
   normalizeWidgetSelection,
   pickNonStableTokenAddress,
+  resolveHotPoolFilterToken,
   resolveKlineTokenOptions,
   shortAddress,
   inferPoolVersion,
@@ -308,6 +309,7 @@ export default function App() {
   const [hotPoolsLoading, setHotPoolsLoading] = useState(false);
   const [hotPoolsError, setHotPoolsError] = useState('');
   const [hotPoolsUpdatedAt, setHotPoolsUpdatedAt] = useState('');
+  const [hotTokenFilter, setHotTokenFilter] = useState(null);
 
   const [positions, setPositions] = useState(null);
   const [positionsLoading, setPositionsLoading] = useState(false);
@@ -450,6 +452,7 @@ export default function App() {
     () => hotPoolIncludeAddresses.join(','),
     [hotPoolIncludeAddresses]
   );
+  const hotPoolsLimit = hotTokenFilter?.address ? 200 : 60;
 
   const sortedPositions = useMemo(() => {
     const rows = Array.isArray(positions?.positions) ? positions.positions : [];
@@ -646,8 +649,9 @@ export default function App() {
           chain,
           sort: hotSort,
           timeframeMinutes: 5,
-          limit: 60,
-          includePools: hotPoolIncludeKey ? hotPoolIncludeKey.split(',') : undefined,
+          limit: hotPoolsLimit,
+          tokenAddress: hotTokenFilter?.address || '',
+          includePools: hotTokenFilter?.address ? undefined : (hotPoolIncludeKey ? hotPoolIncludeKey.split(',') : undefined),
           signal,
         });
         setHotPools(Array.isArray(resp?.data) ? resp.data : []);
@@ -658,7 +662,7 @@ export default function App() {
         setHotPoolsLoading(false);
       }
     },
-    [apiBaseUrl, chain, hasInitData, hotPoolIncludeKey, hotSort, initData]
+    [apiBaseUrl, chain, hasInitData, hotPoolIncludeKey, hotPoolsLimit, hotSort, hotTokenFilter?.address, initData]
   );
 
   const loadPositions = useCallback(
@@ -970,6 +974,10 @@ export default function App() {
       return matched ? { ...matched, chain } : prev;
     });
   }, [chain, hotPools]);
+
+  useEffect(() => {
+    setHotTokenFilter(null);
+  }, [chain]);
 
   useEffect(() => {
     if (klineVisibleRangeTimerRef.current) {
@@ -1432,6 +1440,16 @@ export default function App() {
         )}
 
         {hotPoolsError ? <div className="error-text">{hotPoolsError}</div> : null}
+        {hotTokenFilter?.address ? (
+          <div className="hot-token-filter-bar">
+            <span className="hot-token-filter-chip">
+              同币筛选: {hotTokenFilter.symbol || shortAddress(hotTokenFilter.address, 6, 4)}
+            </span>
+            <button type="button" className="mini-link accent" onClick={() => setHotTokenFilter(null)}>
+              清除
+            </button>
+          </div>
+        ) : null}
 
         <div className="data-list">
           {hotPoolsLoading && filteredHotPools.length === 0 ? (
@@ -1439,7 +1457,7 @@ export default function App() {
           ) : filteredHotPools.length === 0 ? (
             <EmptyState text="暂无可展示的池子数据" />
           ) : (
-            filteredHotPools.slice(0, 60).map((pool, idx) => {
+            filteredHotPools.slice(0, hotPoolsLimit).map((pool, idx) => {
               const addr = normalizePoolAddress(pool?.pool_address || '');
               const selected = selectedPoolAddress && addr === selectedPoolAddress;
               const feePct = Number(pool?.fee_percentage || 0);
@@ -1454,6 +1472,8 @@ export default function App() {
               const pair = String(pool?.trading_pair || '--');
               const pairInitials = pair.split(/[\/\-]/).map((s) => s.trim().charAt(0).toUpperCase()).join('').slice(0, 2);
               const dex = getDexIcon(factoryName);
+              const filterToken = resolveHotPoolFilterToken(pool);
+              const avatarFilterActive = filterToken && hotTokenFilter?.address === filterToken.address;
 
               const isHighFeeRate = feeRate >= 1;
 
@@ -1464,9 +1484,21 @@ export default function App() {
                   onClick={() => selectPool({ ...pool, chain }, chain)}
                 >
                   {/* Avatar */}
-                  <div className="pool-avatar" style={dex ? { borderColor: dex.color + '60' } : undefined}>
+                  <button
+                    type="button"
+                    className={`pool-avatar ${filterToken ? 'filterable' : ''} ${avatarFilterActive ? 'active' : ''}`}
+                    style={dex ? { borderColor: dex.color + '60' } : undefined}
+                    title={filterToken ? `筛选 ${filterToken.symbol} 的池子` : '该池子无法按单一非稳定币筛选'}
+                    onClick={(e) => {
+                      if (!filterToken) return;
+                      e.stopPropagation();
+                      setHotTokenFilter((prev) => (
+                        prev?.address === filterToken.address ? null : filterToken
+                      ));
+                    }}
+                  >
                     {dex ? <img src={dex.src} alt="" /> : <span>{pairInitials}</span>}
-                  </div>
+                  </button>
 
                   {/* Info block */}
                   <div className="pool-info">
