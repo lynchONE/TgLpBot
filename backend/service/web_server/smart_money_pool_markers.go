@@ -21,27 +21,30 @@ import (
 var poolAddressRegex = regexp.MustCompile(`^(0x)?[a-fA-F0-9]{40}$|^(0x)?[a-fA-F0-9]{64}$`)
 
 type smartMoneyPoolMarkerEvent struct {
-	EventID       string  `json:"event_id"`
-	T             int64   `json:"t"`
-	BucketT       int64   `json:"bucket_t"`
-	WalletAddress string  `json:"wallet_address"`
-	WalletLabel   string  `json:"wallet_label,omitempty"`
-	WalletSource  string  `json:"wallet_source,omitempty"`
-	Action        string  `json:"action"`
-	TxHash        string  `json:"tx_hash,omitempty"`
-	TxURL         string  `json:"tx_url,omitempty"`
-	TickLower     int     `json:"tick_lower"`
-	TickUpper     int     `json:"tick_upper"`
-	PriceLower    float64 `json:"price_lower,omitempty"`
-	PriceUpper    float64 `json:"price_upper,omitempty"`
-	PriceBase     string  `json:"price_base,omitempty"`
-	PriceQuote    string  `json:"price_quote,omitempty"`
-	AnchorPrice   float64 `json:"anchor_price,omitempty"`
-	Amount0       float64 `json:"amount0"`
-	Amount1       float64 `json:"amount1"`
-	Amount0USD    float64 `json:"amount0_usd"`
-	Amount1USD    float64 `json:"amount1_usd"`
-	EstimatedUSD  float64 `json:"estimated_usd"`
+	EventID        string  `json:"event_id"`
+	T              int64   `json:"t"`
+	BucketT        int64   `json:"bucket_t"`
+	WalletAddress  string  `json:"wallet_address"`
+	WalletLabel    string  `json:"wallet_label,omitempty"`
+	WalletSource   string  `json:"wallet_source,omitempty"`
+	Action         string  `json:"action"`
+	TxHash         string  `json:"tx_hash,omitempty"`
+	TxURL          string  `json:"tx_url,omitempty"`
+	TickLower      int     `json:"tick_lower"`
+	TickUpper      int     `json:"tick_upper"`
+	PriceLower     float64 `json:"price_lower,omitempty"`
+	PriceUpper     float64 `json:"price_upper,omitempty"`
+	PriceBase      string  `json:"price_base,omitempty"`
+	PriceQuote     string  `json:"price_quote,omitempty"`
+	AnchorPrice    float64 `json:"anchor_price,omitempty"`
+	Amount0        float64 `json:"amount0"`
+	Amount1        float64 `json:"amount1"`
+	Amount0USD     float64 `json:"amount0_usd"`
+	Amount1USD     float64 `json:"amount1_usd"`
+	EstimatedUSD   float64 `json:"estimated_usd"`
+	HasPnLEstimate bool    `json:"has_pnl_estimate,omitempty"`
+	CostBasisUSD   float64 `json:"cost_basis_usd,omitempty"`
+	PnLEstimateUSD float64 `json:"pnl_estimate_usd,omitempty"`
 }
 
 type smartMoneyPoolMarkersResponse struct {
@@ -60,19 +63,20 @@ type smartMoneyPoolMarkersResponse struct {
 }
 
 type smartMoneyPoolMarkerRow struct {
-	Ts            time.Time
-	EventSeq      uint64
-	WalletAddress string
-	Action        string
-	TokenID       string
-	ContractAddr  string
-	Amount0       string
-	Amount1       string
-	TickLower     int32
-	TickUpper     int32
-	TxHash        string
-	BlockNumber   uint64
-	LogIndex      uint32
+	Ts             time.Time
+	EventSeq       uint64
+	WalletAddress  string
+	Action         string
+	TokenID        string
+	ContractAddr   string
+	Amount0        string
+	Amount1        string
+	LiquidityDelta string
+	TickLower      int32
+	TickUpper      int32
+	TxHash         string
+	BlockNumber    uint64
+	LogIndex       uint32
 }
 
 type smartMoneyPoolMarkerSummary struct {
@@ -160,6 +164,7 @@ func querySmartMoneyPoolMarkerEvents(ctx context.Context, conn smartMoneyClickHo
 			contract_address,
 			toString(if(net_amount0 != '' AND net_amount0 != '0', net_amount0, amount0)) AS amount0_value,
 			toString(if(net_amount1 != '' AND net_amount1 != '0', net_amount1, amount1)) AS amount1_value,
+			liquidity_delta,
 			tick_lower,
 			tick_upper,
 			tx_hash,
@@ -194,6 +199,7 @@ func querySmartMoneyPoolMarkerEvents(ctx context.Context, conn smartMoneyClickHo
 			&row.ContractAddr,
 			&row.Amount0,
 			&row.Amount1,
+			&row.LiquidityDelta,
 			&row.TickLower,
 			&row.TickUpper,
 			&row.TxHash,
@@ -423,6 +429,14 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 	p0 := prices[t0]
 	p1 := prices[t1]
 
+	pnlEstimates := make(map[string]smartMoneyPoolMarkerPnLEstimate)
+	historyRows, historyErr := querySmartMoneyPoolMarkerHistory(ctx, s.ClickHouse.Conn, chain, poolVersion, poolID, rows, rangeEnd)
+	if historyErr != nil {
+		warnings = append(warnings, fmt.Sprintf("marker pnl replay failed: %v", historyErr))
+	} else if len(historyRows) > 0 {
+		pnlEstimates = applyMarkerPnLEstimates(rows, historyRows, dec0, dec1, p0, p1)
+	}
+
 	task := &models.StrategyTask{
 		PoolId:        poolID,
 		PoolVersion:   poolVersion,
@@ -482,6 +496,11 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 			if ev.PriceLower > 0 && ev.PriceUpper > 0 {
 				ev.AnchorPrice = sanitizeFloat((ev.PriceLower + ev.PriceUpper) / 2)
 			}
+		}
+		if est, ok := pnlEstimates[ev.EventID]; ok && est.HasPnLEstimate {
+			ev.HasPnLEstimate = true
+			ev.CostBasisUSD = sanitizeFloat(est.CostBasisUSD)
+			ev.PnLEstimateUSD = sanitizeFloat(est.PnLEstimateUSD)
 		}
 
 		events = append(events, ev)

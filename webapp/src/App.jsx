@@ -103,6 +103,33 @@ function klineRangesEqual(a, b) {
   return Number(a?.from || 0) === Number(b?.from || 0) && Number(a?.to || 0) === Number(b?.to || 0);
 }
 
+function findNearestCandleClose(rows, targetTs) {
+  const target = Number(targetTs || 0);
+  if (!target || !Array.isArray(rows) || !rows.length) return 0;
+
+  let low = 0;
+  let high = rows.length - 1;
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const midTime = Number(rows[mid]?.t || 0);
+    if (midTime === target) return Number(rows[mid]?.c || 0);
+    if (midTime < target) low = mid + 1;
+    else high = mid - 1;
+  }
+
+  const prev = high >= 0 ? rows[high] : null;
+  const next = low < rows.length ? rows[low] : null;
+  const prevTime = Number(prev?.t || 0);
+  const nextTime = Number(next?.t || 0);
+
+  if (!prev && !next) return 0;
+  if (!prev) return Number(next?.c || 0);
+  if (!next) return Number(prev?.c || 0);
+  return Math.abs(target - prevTime) <= Math.abs(nextTime - target)
+    ? Number(prev?.c || 0)
+    : Number(next?.c || 0);
+}
+
 const STORAGE = {
   initData: 'tglp_web_init_data',
   loginUser: 'tglp_web_login_user',
@@ -476,6 +503,16 @@ export default function App() {
   const klineMarkerQueryRange = useMemo(
     () => normalizeKlineRange(klineVisibleRange) || normalizeKlineRange(klineCandleRange),
     [klineCandleRange, klineVisibleRange]
+  );
+  const klineCandlePriceRows = useMemo(() => (
+    (Array.isArray(klineCandles) ? klineCandles : [])
+      .map((row) => ({ t: toUnixSeconds(row?.t), c: Number(row?.c || 0) }))
+      .filter((row) => row.t > 0 && Number.isFinite(row.c))
+      .sort((a, b) => a.t - b.t)
+  ), [klineCandles]);
+  const resolveMarkerCandleClose = useCallback(
+    (ts) => findNearestCandleClose(klineCandlePriceRows, ts),
+    [klineCandlePriceRows]
   );
   const klineMarkerRangeFrom = Number(klineMarkerQueryRange?.from || 0);
   const klineMarkerRangeTo = Number(klineMarkerQueryRange?.to || 0);
@@ -1626,6 +1663,15 @@ export default function App() {
                     const amountUSD = Number(item?.estimated_usd || 0);
                     const lower = Number(item?.price_lower || 0);
                     const upper = Number(item?.price_upper || 0);
+                    const hasPnLEstimate = Boolean(item?.has_pnl_estimate);
+                    const pnlEstimateUSD = Number(item?.pnl_estimate_usd || 0);
+                    const costBasisUSD = Number(item?.cost_basis_usd || 0);
+                    const markerChartPrice = item?.action === 'remove'
+                      ? resolveMarkerCandleClose(Number(item?.t || 0))
+                      : 0;
+                    const chartPriceLabel = klineActiveToken?.symbol
+                      ? `${klineActiveToken.symbol} K线价`
+                      : 'K线价';
                     return (
                       <div key={item?.event_id || `${item?.wallet_address}:${item?.t}`} className="kline-marker-event">
                         <div className="kline-marker-event-main">
@@ -1648,6 +1694,27 @@ export default function App() {
                             </button>
                           ) : null}
                         </div>
+                        {item?.action === 'remove' ? (
+                          <div className="kline-marker-metrics">
+                            {hasPnLEstimate ? (
+                              <>
+                                <span className="kline-marker-chip neutral">
+                                  估算成本 {formatUsd(costBasisUSD)}
+                                </span>
+                                <span className={`kline-marker-chip ${pnlEstimateUSD >= 0 ? 'positive' : 'negative'}`}>
+                                  估算盈亏 {formatUsd(pnlEstimateUSD)}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="kline-marker-chip warn">历史成本不足，暂不显示估算盈亏</span>
+                            )}
+                            {Number.isFinite(markerChartPrice) && markerChartPrice > 0 ? (
+                              <span className="kline-marker-chip neutral">
+                                {chartPriceLabel} {compactPrice(markerChartPrice)}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
                     );
                   })}

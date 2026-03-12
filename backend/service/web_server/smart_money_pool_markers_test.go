@@ -39,11 +39,12 @@ func (r *fakeMarkerRows) Scan(dest ...any) error {
 	*dest[5].(*string) = row.ContractAddr
 	*dest[6].(*string) = row.Amount0
 	*dest[7].(*string) = row.Amount1
-	*dest[8].(*int32) = row.TickLower
-	*dest[9].(*int32) = row.TickUpper
-	*dest[10].(*string) = row.TxHash
-	*dest[11].(*uint64) = row.BlockNumber
-	*dest[12].(*uint32) = row.LogIndex
+	*dest[8].(*string) = row.LiquidityDelta
+	*dest[9].(*int32) = row.TickLower
+	*dest[10].(*int32) = row.TickUpper
+	*dest[11].(*string) = row.TxHash
+	*dest[12].(*uint64) = row.BlockNumber
+	*dest[13].(*uint32) = row.LogIndex
 	return nil
 }
 
@@ -95,17 +96,18 @@ func TestQuerySmartMoneyPoolMarkerEvents_UsesPoolAndActionFilters(t *testing.T) 
 		rows: &fakeMarkerRows{
 			data: []smartMoneyPoolMarkerRow{
 				{
-					Ts:            time.Unix(1700000000, 0).UTC(),
-					EventSeq:      9,
-					WalletAddress: "0xabc",
-					Action:        "add",
-					Amount0:       "100",
-					Amount1:       "200",
-					TickLower:     -100,
-					TickUpper:     100,
-					TxHash:        "0xtx",
-					BlockNumber:   10,
-					LogIndex:      3,
+					Ts:             time.Unix(1700000000, 0).UTC(),
+					EventSeq:       9,
+					WalletAddress:  "0xabc",
+					Action:         "add",
+					Amount0:        "100",
+					Amount1:        "200",
+					LiquidityDelta: "50",
+					TickLower:      -100,
+					TickUpper:      100,
+					TxHash:         "0xtx",
+					BlockNumber:    10,
+					LogIndex:       3,
 				},
 			},
 		},
@@ -174,5 +176,83 @@ func TestQuerySmartMoneyPoolMarkerSummary_UsesFullWindowCounts(t *testing.T) {
 	}
 	if !strings.Contains(conn.lastQuery, "intDiv(toInt64(toUnixTimestamp(ts)), ?) * ? <= ?") {
 		t.Fatalf("expected bucketed end filter, got query=%s", conn.lastQuery)
+	}
+}
+
+func TestApplyMarkerPnLEstimates_ComputesRemovePnLFromMatchedAdds(t *testing.T) {
+	rows := []smartMoneyPoolMarkerRow{
+		{
+			Ts:             time.Unix(1700000000, 0).UTC(),
+			EventSeq:       10,
+			WalletAddress:  "0xabc",
+			Action:         "add",
+			TokenID:        "1",
+			ContractAddr:   "0xnpm",
+			Amount0:        "50",
+			Amount1:        "50",
+			LiquidityDelta: "100",
+			TickLower:      -120,
+			TickUpper:      120,
+			TxHash:         "0xadd",
+			BlockNumber:    100,
+			LogIndex:       1,
+		},
+		{
+			Ts:             time.Unix(1700000600, 0).UTC(),
+			EventSeq:       11,
+			WalletAddress:  "0xabc",
+			Action:         "remove",
+			TokenID:        "1",
+			ContractAddr:   "0xnpm",
+			Amount0:        "25",
+			Amount1:        "20",
+			LiquidityDelta: "40",
+			TickLower:      -120,
+			TickUpper:      120,
+			TxHash:         "0xremove",
+			BlockNumber:    101,
+			LogIndex:       1,
+		},
+	}
+
+	out := applyMarkerPnLEstimates(rows, rows, 0, 0, 2, 1)
+	est, ok := out[buildMarkerEventID("0xremove", 11, 1)]
+	if !ok {
+		t.Fatalf("expected remove estimate")
+	}
+	if !est.HasPnLEstimate {
+		t.Fatalf("expected has_pnl_estimate=true")
+	}
+	if est.CostBasisUSD != 60 {
+		t.Fatalf("expected cost basis 60, got %v", est.CostBasisUSD)
+	}
+	if est.PnLEstimateUSD != 10 {
+		t.Fatalf("expected pnl 10, got %v", est.PnLEstimateUSD)
+	}
+}
+
+func TestApplyMarkerPnLEstimates_SkipsRemoveWithoutTrackedCost(t *testing.T) {
+	rows := []smartMoneyPoolMarkerRow{
+		{
+			Ts:             time.Unix(1700000600, 0).UTC(),
+			EventSeq:       11,
+			WalletAddress:  "0xabc",
+			Action:         "remove",
+			TokenID:        "",
+			ContractAddr:   "0xpoolmanager",
+			Amount0:        "25",
+			Amount1:        "20",
+			LiquidityDelta: "-40",
+			TickLower:      -120,
+			TickUpper:      120,
+			TxHash:         "0xremove",
+			BlockNumber:    101,
+			LogIndex:       1,
+		},
+	}
+
+	out := applyMarkerPnLEstimates(rows, rows, 0, 0, 2, 1)
+	if _, ok := out[buildMarkerEventID("0xremove", 11, 1)]; ok {
+		t.Fatalf("expected remove without prior add to be skipped")
 	}
 }
