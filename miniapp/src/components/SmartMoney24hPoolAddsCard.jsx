@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, HistogramSeries } from 'lightweight-charts';
 import { fetchSmartMoney24hPoolAdds } from '../lib/api';
 import { copyToClipboard, hapticImpact, hapticNotification } from '../lib/telegram';
-import flashIcon from '../image/flash.svg';
+import FlashIcon from './FlashIcon.jsx';
+import { getBrandTheme } from '../lib/brand';
 
 const usdFormatter = new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -169,7 +170,8 @@ function DistributionBars({ title, items, colorClass = 'bg-emerald-500' }) {
     );
 }
 
-export default function SmartMoney24hPoolAddsCard({ apiBaseUrl, initData, chain, onNotice, onQuickOpenPool }) {
+export default function SmartMoney24hPoolAddsCard({ apiBaseUrl, initData, chain, onNotice, onQuickOpenPool, accentTheme = 'lime' }) {
+    const brand = getBrandTheme(accentTheme);
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -272,7 +274,7 @@ export default function SmartMoney24hPoolAddsCard({ apiBaseUrl, initData, chain,
                             }}
                             className={`rounded-md px-2 py-1 text-[10px] font-semibold transition ${
                                 windowHours === h
-                                    ? 'bg-emerald-500 text-white'
+                                    ? brand.solidButtonClass
                                     : 'text-zinc-600 hover:bg-zinc-200 dark:text-white/70 dark:hover:bg-white/10'
                             }`}
                         >
@@ -305,7 +307,7 @@ export default function SmartMoney24hPoolAddsCard({ apiBaseUrl, initData, chain,
 
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2.5 text-center dark:border-white/10 dark:bg-white/[0.02]">
-                    <div className="text-lg font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+                    <div className={`text-lg font-bold tabular-nums ${brand.textClass}`}>
                         {Number(data?.total_pools ?? pools.length)}
                     </div>
                     <div className="text-[10px] text-zinc-500 dark:text-white/40">池子数</div>
@@ -452,9 +454,9 @@ export default function SmartMoney24hPoolAddsCard({ apiBaseUrl, initData, chain,
                                                         }
                                                     }}
                                                     disabled={!poolId}
-                                                    className="inline-flex items-center gap-1.5 rounded-full border border-black/70 bg-[linear-gradient(180deg,#303811_0%,#252d0d_100%)] px-3 py-1 text-[10px] font-semibold leading-none text-[#bcff2f] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition hover:bg-[linear-gradient(180deg,#353f14_0%,#2a3210_100%)] disabled:cursor-not-allowed disabled:opacity-50"
+                                                    className={brand.actionPillButtonClass}
                                                 >
-                                                    <img src={flashIcon} alt="" aria-hidden="true" className="h-3 w-3 shrink-0 object-contain" />
+                                                    <FlashIcon className="h-3 w-3 shrink-0" />
                                                     快速开仓
                                                 </button>
                                             </div>

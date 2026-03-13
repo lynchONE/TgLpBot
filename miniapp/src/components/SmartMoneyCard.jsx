@@ -14,8 +14,8 @@ import SmartMoneyPoolAddsModal from './SmartMoneyPoolAddsModal.jsx';
 import SmartMoneyWalletPositionsModal from './SmartMoneyWalletPositionsModal.jsx';
 import SmartMoneyWatchedWalletsTab from './SmartMoneyWatchedWalletsTab.jsx';
 import SmartMoney24hPoolAddsCard from './SmartMoney24hPoolAddsCard.jsx';
-import flashIcon from '../image/flash.svg';
-import { brandSoftButtonClass, brandSolidButtonClass } from '../lib/brand';
+import FlashIcon from './FlashIcon.jsx';
+import { getBrandTheme } from '../lib/brand';
 
 const USD_DISPLAY_LIMIT = 1e15;
 const usdFormatter = new Intl.NumberFormat('en-US', {
@@ -127,6 +127,7 @@ function toIntInRange(v, min, max, fallback) {
 
 /** 池子概览卡片 — 重新设计的钱包明细展示 */
 function PoolOverviewCard({
+    brand,
     rank, pair, poolId, version, feePct, walletCount,
     previewStatus, previewWallets, previewError, previewTotalUsd,
     hasNoPreview, defaultShow, needsExpand,
@@ -287,9 +288,9 @@ function PoolOverviewCard({
                         if (onQuickOpen) onQuickOpen(previewWallets);
                     }}
                     disabled={!poolId || !version}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-black/70 bg-[linear-gradient(180deg,#303811_0%,#252d0d_100%)] px-3 py-1 text-[10px] font-bold leading-none text-[#bcff2f] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition hover:bg-[linear-gradient(180deg,#353f14_0%,#2a3210_100%)] disabled:cursor-not-allowed disabled:opacity-40"
+                    className={brand.actionPillButtonClass}
                 >
-                    <img src={flashIcon} alt="" aria-hidden="true" className="h-3 w-3 shrink-0 object-contain" />
+                    <FlashIcon className="h-3 w-3 shrink-0" />
                     快速开单
                 </button>
                 <button
@@ -304,7 +305,7 @@ function PoolOverviewCard({
                     type="button"
                     onClick={onViewDetails}
                     disabled={!poolId || !version}
-                    className="inline-flex items-center rounded-lg bg-emerald-500 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-emerald-600 disabled:opacity-40"
+                    className={`inline-flex items-center rounded-lg px-2.5 py-1 text-[10px] font-semibold ${brand.solidButtonClass} disabled:opacity-40`}
                 >
                     查看明细
                 </button>
@@ -313,7 +314,8 @@ function PoolOverviewCard({
     );
 }
 
-export default function SmartMoneyCard({ overview, loading = false, tick, onNotice, apiBaseUrl, initData, onQuickOpenPool }) {
+export default function SmartMoneyCard({ overview, loading = false, tick, onNotice, apiBaseUrl, initData, onQuickOpenPool, accentTheme = 'lime' }) {
+    const brand = getBrandTheme(accentTheme);
     const pools = Array.isArray(overview?.pools) ? overview.pools : [];
     const warnings = Array.isArray(overview?.warnings) ? overview.warnings : [];
     const poolWindowLabel = formatWindowLabel(overview?.pools_window_sec) || '24h';
@@ -700,7 +702,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                     type="button"
                     onClick={() => setActiveTab('overview')}
                     className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${activeTab === 'overview'
-                        ? brandSolidButtonClass
+                        ? brand.solidButtonClass
                         : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
                         }`}
                 >
@@ -710,7 +712,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                     type="button"
                     onClick={() => setActiveTab('follow')}
                     className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${activeTab === 'follow'
-                        ? brandSolidButtonClass
+                        ? brand.solidButtonClass
                         : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
                         }`}
                 >
@@ -720,7 +722,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                     type="button"
                     onClick={() => setActiveTab('golden')}
                     className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${activeTab === 'golden'
-                        ? brandSolidButtonClass
+                        ? brand.solidButtonClass
                         : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
                         }`}
                 >
@@ -730,7 +732,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                     type="button"
                     onClick={() => setActiveTab('monitor')}
                     className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${activeTab === 'monitor'
-                        ? brandSolidButtonClass
+                        ? brand.solidButtonClass
                         : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
                         }`}
                 >
@@ -740,7 +742,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                     type="button"
                     onClick={() => setActiveTab('24h')}
                     className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${activeTab === '24h'
-                        ? brandSolidButtonClass
+                        ? brand.solidButtonClass
                         : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
                         }`}
                 >
@@ -779,6 +781,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                 return (
                                     <PoolOverviewCard
                                         key={key}
+                                        brand={brand}
                                         rank={rank}
                                         pair={pair}
                                         poolId={poolId}
@@ -931,9 +934,9 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                     setFollowModalAddr(normalized);
                                     setFollowModalOpen(true);
                                 }}
-                                className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-black/70 bg-[linear-gradient(180deg,#303811_0%,#252d0d_100%)] px-3 py-1 text-[10px] font-semibold leading-none text-[#bcff2f] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition hover:bg-[linear-gradient(180deg,#353f14_0%,#2a3210_100%)]"
+                                className={brand.actionPillButtonClass}
                             >
-                                <img src={flashIcon} alt="" aria-hidden="true" className="h-3 w-3 shrink-0 object-contain" />
+                                <FlashIcon className="h-3 w-3 shrink-0" />
                                 跟单设置
                             </button>
                         </div>
@@ -1004,9 +1007,9 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                                         setFollowModalAddr(wallet);
                                                         setFollowModalOpen(true);
                                                     }}
-                                                    className="inline-flex items-center gap-1.5 rounded-full border border-black/70 bg-[linear-gradient(180deg,#303811_0%,#252d0d_100%)] px-3 py-1 text-[10px] font-semibold leading-none text-[#bcff2f] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition hover:bg-[linear-gradient(180deg,#353f14_0%,#2a3210_100%)]"
+                                                    className={brand.actionPillButtonClass}
                                                 >
-                                                    <img src={flashIcon} alt="" aria-hidden="true" className="h-3 w-3 shrink-0 object-contain" />
+                                                    <FlashIcon className="h-3 w-3 shrink-0" />
                                                     设置
                                                 </button>
                                                 <button
@@ -1042,7 +1045,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                     }}
                                     disabled={goldenSaving || goldenLoading}
                                     className={`inline-flex items-center rounded-lg px-2 py-1 text-[10px] font-semibold transition ${goldenEnabled
-                                        ? 'bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15'
+                                        ? brand.softButtonClass
                                         : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
                                         }`}
                                 >
@@ -1128,7 +1131,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                     handleSaveGoldenDog();
                                 }}
                                 disabled={goldenSaving || goldenLoading}
-                                className="inline-flex items-center rounded-lg bg-emerald-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-600 disabled:opacity-60 disabled:hover:bg-emerald-500"
+                                className={`inline-flex items-center rounded-lg px-3 py-1.5 text-[11px] font-semibold ${brand.solidButtonClass} disabled:opacity-60`}
                             >
                                 {goldenSaving ? '保存中…' : goldenLoading ? '加载中…' : '保存'}
                             </button>
@@ -1151,6 +1154,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                     apiBaseUrl={apiBaseUrl}
                     initData={initData}
                     chain={chain}
+                    accentTheme={accentTheme}
                     onNotice={onNotice}
                     onQuickOpenPool={onQuickOpenPool}
                 />

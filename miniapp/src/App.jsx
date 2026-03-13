@@ -44,14 +44,9 @@ import {
 import { getTelegramWebApp, hapticImpact, hapticNotification, hapticSelection } from './lib/telegram';
 import { formatRelativeTime, useTick } from './lib/time';
 import {
-    brandDotClass,
-    brandGradientButtonClass,
-    brandIconChipClass,
-    brandInputFocusClass,
-    brandSelectionClass,
-    brandSoftButtonClass,
-    brandSolidButtonClass,
-    brandTextClass,
+    ACCENT_THEME_OPTIONS,
+    getBrandTheme,
+    normalizeAccentTheme,
 } from './lib/brand';
 
 function resolveApiBaseUrl() {
@@ -141,6 +136,7 @@ const storage = {
 };
 
 const STORAGE_THEME = 'tglp_theme';
+const STORAGE_ACCENT_THEME = 'tglp_accent_theme';
 const STORAGE_POLL_SEC = 'tglp_poll_interval_sec';
 const STORAGE_HOT_POOLS_FILTER = 'tglp_hot_pools_filter_v1';
 const STORAGE_OPEN_POSITION_WALLET_ID = 'tglp_open_position_wallet_id';
@@ -447,6 +443,7 @@ export default function App() {
     const noticeTimerRef = useRef(null);
 
     const [theme, setTheme] = useState('dark');
+    const [accentTheme, setAccentTheme] = useState(() => normalizeAccentTheme(storage.get(STORAGE_ACCENT_THEME)));
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [pollOverrideSec, setPollOverrideSec] = useState(null);
     const [pollDraftSec, setPollDraftSec] = useState('');
@@ -494,6 +491,7 @@ export default function App() {
     const [pollProgress, setPollProgress] = useState(0);
     const pollProgressRef = useRef(null);
     const lastPollTimeRef = useRef(Date.now());
+    const brand = useMemo(() => getBrandTheme(accentTheme), [accentTheme]);
 
     // 批量操作状态
     const [batchMode, setBatchMode] = useState(false);
@@ -921,12 +919,14 @@ export default function App() {
         if (Number.isFinite(savedPoll) && savedPoll >= 5) {
             setPollOverrideSec(Math.floor(savedPoll));
         }
+        setAccentTheme(normalizeAccentTheme(storage.get(STORAGE_ACCENT_THEME)));
     }, []);
 
     useEffect(() => {
         const isDark = theme === 'dark';
         document.documentElement.classList.toggle('dark', isDark);
         storage.set(STORAGE_THEME, isDark ? 'dark' : 'light');
+        storage.set(STORAGE_ACCENT_THEME, accentTheme);
 
         const tg = getTelegramWebApp();
         try {
@@ -935,7 +935,7 @@ export default function App() {
         } catch {
             // ignore
         }
-    }, [theme]);
+    }, [accentTheme, theme]);
 
     useEffect(() => {
         return () => {
@@ -2370,7 +2370,7 @@ export default function App() {
     const noticeClass = notice?.tone === 'error'
         ? 'bg-red-600 text-white'
         : notice?.tone === 'success'
-            ? 'bg-[#bcff2f] text-[#182108]'
+            ? brand.successNoticeClass
             : 'bg-zinc-900 text-white dark:bg-white/10 dark:text-white';
     const globalCfg = globalConfig || {};
     const rebalanceText = Number.isFinite(Number(globalCfg.rebalance_timeout))
@@ -2387,7 +2387,7 @@ export default function App() {
         : '--';
     const confirmButtonClass = confirmState?.tone === 'danger'
         ? 'bg-red-500 text-white hover:bg-red-600 active:bg-red-700'
-        : brandSolidButtonClass;
+        : brand.solidButtonClass;
 
     const activeErrorText = useMemo(() => {
         const msg = String(activeError || '').trim();
@@ -2420,7 +2420,7 @@ export default function App() {
             <header className="mb-4">
                 <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
-                        <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${brandIconChipClass}`}>
+                        <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${brand.iconChipClass}`}>
                             <Icon path={activeModuleMeta.icon} className="h-5 w-5" />
                         </div>
                         <div>
@@ -2472,7 +2472,7 @@ export default function App() {
                         {hasAdminPositions ? (
                             <div>
                                 <div className="text-[11px] text-zinc-500 dark:text-white/40">总余额</div>
-                                <div className={`mt-0.5 text-2xl font-extrabold tabular-nums text-zinc-900 ${brandTextClass}`}>
+                                <div className={`mt-0.5 text-2xl font-extrabold tabular-nums text-zinc-900 ${brand.textClass}`}>
                                     <NumberFlowValue value={totalUsd} formatter={(v) => formatUsd(v)} />
                                 </div>
                                 <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40 tabular-nums">
@@ -2495,7 +2495,7 @@ export default function App() {
                                             onClick={() => setHotPoolsSort(tab.key)}
                                             aria-pressed={hotPoolsSort === tab.key}
                                             className={`relative rounded-lg px-2.5 py-1 text-[12px] font-bold whitespace-nowrap transition-all duration-300 ${hotPoolsSort === tab.key
-                                                ? brandGradientButtonClass
+                                                ? brand.gradientButtonClass
                                                 : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-white/5'
                                                 }`}
                                         >
@@ -2519,7 +2519,7 @@ export default function App() {
                                         setHotPoolsFilterOpen(true);
                                     }}
                                     className={`relative inline-flex h-9 w-9 items-center justify-center rounded-2xl ring-1 transition ${hotPoolsFilterEnabled
-                                        ? brandSoftButtonClass
+                                        ? brand.softButtonClass
                                         : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
                                         }`}
                                     aria-label="Filter"
@@ -2527,7 +2527,7 @@ export default function App() {
                                 >
                                     <Icon path={icons.filter} className="h-3.5 w-3.5" />
                                     {hotPoolsFilterEnabled ? (
-                                        <span className={`absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full ring-2 ring-white dark:ring-[#111318] ${brandDotClass}`} />
+                                        <span className={`absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full ring-2 ring-white dark:ring-[#111318] ${brand.dotClass}`} />
                                     ) : null}
                                 </button>
                             </>
@@ -2851,6 +2851,7 @@ export default function App() {
                                 pool={row}
                                 metric={hotPoolsSort}
                                 previousData={prevData}
+                                accentTheme={accentTheme}
                                 onOpenKline={setKlinePool}
                                 onOpenPosition={openPositionModal}
                                 onBlacklistRequest={openBlacklistPrompt}
@@ -2953,6 +2954,7 @@ export default function App() {
                                     overview={smartMoney}
                                     loading={smartMoneyLoading}
                                     tick={tick}
+                                    accentTheme={accentTheme}
                                     onNotice={showNotice}
                                     apiBaseUrl={apiBaseUrl}
                                     initData={initData}
@@ -3079,7 +3081,7 @@ export default function App() {
                                                 setPoolSearchPerformed(false);
                                             }}
                                             disabled={!multiChainEnabled}
-                                            className="rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90"
+                                            className={`rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90`}
                                         >
                                             <option value="bsc">BSC</option>
                                             <option value="base">Base</option>
@@ -3101,7 +3103,7 @@ export default function App() {
                                                     runPoolSearch();
                                                 }
                                             }}
-                                            className="flex-1 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                            className={`flex-1 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                             placeholder="例如 USDT / WBNB / 0x..."
                                         />
                                         <button
@@ -3110,7 +3112,7 @@ export default function App() {
                                             disabled={!hasInitData || poolSearchLoading}
                                             className={`shrink-0 rounded-xl px-3 py-2 text-sm font-semibold ring-1 transition ${!hasInitData || poolSearchLoading
                                                 ? 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
-                                                : `${brandSolidButtonClass} ring-1 ring-[#bcff2f]/30`
+                                                : `${brand.solidButtonClass} ${brand.solidRingClass}`
                                                 }`}
                                         >
                                             {poolSearchLoading ? '搜索中...' : '搜索'}
@@ -3152,6 +3154,7 @@ export default function App() {
                                                     metric={hotPoolsSort}
                                                     previousData={null}
                                                     rank={idx + 1}
+                                                    accentTheme={accentTheme}
                                                     apiBaseUrl={apiBaseUrl}
                                                     isBlacklisted={isBlacklisted}
                                                     onOpenKline={setKlinePool}
@@ -3200,7 +3203,7 @@ export default function App() {
                                         <input
                                             value={hotPoolsFilterDraft.keyword}
                                             onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, keyword: e.target.value }))}
-                                            className="mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                            className={`mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                             placeholder="例如 USDT"
                                         />
                                     </div>
@@ -3211,7 +3214,7 @@ export default function App() {
                                                 value={hotPoolsFilterDraft.minFees}
                                                 onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFees: e.target.value }))}
                                                 inputMode="decimal"
-                                                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                                className={`mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                                 placeholder={String(defaultHotPoolsFilter.minFees)}
                                             />
                                         </div>
@@ -3221,7 +3224,7 @@ export default function App() {
                                                 value={hotPoolsFilterDraft.minFeeRate}
                                                 onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFeeRate: e.target.value }))}
                                                 inputMode="decimal"
-                                                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                                className={`mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                                 placeholder={String(defaultHotPoolsFilter.minFeeRate)}
                                             />
                                         </div>
@@ -3231,7 +3234,7 @@ export default function App() {
                                                 value={hotPoolsFilterDraft.minTvl}
                                                 onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minTvl: e.target.value }))}
                                                 inputMode="decimal"
-                                                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                                className={`mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                                 placeholder={String(defaultHotPoolsFilter.minTvl)}
                                             />
                                         </div>
@@ -3241,7 +3244,7 @@ export default function App() {
                                                 value={hotPoolsFilterDraft.minVolume}
                                                 onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minVolume: e.target.value }))}
                                                 inputMode="decimal"
-                                                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                                className={`mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                                 placeholder={String(defaultHotPoolsFilter.minVolume)}
                                             />
                                         </div>
@@ -3251,7 +3254,7 @@ export default function App() {
                                         <button
                                             type="button"
                                             onClick={applyHotPoolsFilter}
-                                            className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold shadow-sm ${brandSolidButtonClass}`}
+                                            className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold shadow-sm ${brand.solidButtonClass}`}
                                             aria-label="应用"
                                             title="应用"
                                         >
@@ -3373,8 +3376,8 @@ export default function App() {
                                     onClick={loadGlobalConfig}
                                     disabled={globalConfigLoading}
                                     className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold ring-1 ${globalConfigLoading
-                                        ? 'cursor-not-allowed bg-emerald-500/40 text-white ring-emerald-500/30'
-                                        : 'bg-emerald-500 text-white ring-emerald-500/30 hover:bg-emerald-600'
+                                        ? `cursor-not-allowed ${brand.solidButtonClass} ${brand.solidRingClass} opacity-50`
+                                        : `${brand.solidButtonClass} ${brand.solidRingClass}`
                                         }`}
                                 >
                                     刷新
@@ -3409,6 +3412,29 @@ export default function App() {
 
                             <div className="mt-4 space-y-4">
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">主色</div>
+                                    <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">默认新绿，也可以切回原来的绿色。</div>
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                        {ACCENT_THEME_OPTIONS.map((option) => {
+                                            const active = accentTheme === option.key;
+                                            return (
+                                                <button
+                                                    key={option.key}
+                                                    type="button"
+                                                    onClick={() => setAccentTheme(option.key)}
+                                                    className={`inline-flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 transition ${active
+                                                        ? brand.softButtonClass
+                                                        : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
+                                                        }`}
+                                                >
+                                                    <span className={`h-2.5 w-2.5 rounded-full ${option.key === 'lime' ? 'bg-[#bcff2f]' : 'bg-emerald-500'}`} />
+                                                    {option.label}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">自动刷新</div>
                                     <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
                                         当前：<NumberFlowValue value={settingsPollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s（
@@ -3424,7 +3450,7 @@ export default function App() {
                                                 type="button"
                                                 onClick={() => setQuickPoll(sec)}
                                             className={`rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 ${pollOverrideSec === sec
-                                                    ? brandSoftButtonClass
+                                                    ? brand.softButtonClass
                                                     : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
                                                     }`}
                                             >
@@ -3451,13 +3477,13 @@ export default function App() {
                                                 }
                                             }}
                                             inputMode="numeric"
-                                            className={`w-28 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brandInputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
+                                            className={`w-28 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                             placeholder="1-300"
                                         />
                                         <button
                                             type="button"
                                             onClick={applyPollDraft}
-                                            className={`rounded-xl px-3 py-2 text-sm font-semibold shadow-sm ${brandSolidButtonClass}`}
+                                            className={`rounded-xl px-3 py-2 text-sm font-semibold shadow-sm ${brand.solidButtonClass}`}
                                         >
                                             确定
                                         </button>
@@ -3534,7 +3560,7 @@ export default function App() {
                                                         hapticSelection();
                                                     }}
                                                     className={`w-full rounded-xl border px-3 py-2 text-left transition ${selected
-                                                        ? brandSelectionClass
+                                                        ? brand.selectionClass
                                                         : 'border-zinc-200 bg-white/70 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10'
                                                         }`}
                                                 >
@@ -3578,7 +3604,7 @@ export default function App() {
                                         setOpenPositionError('');
                                     }}
                                     inputMode="decimal"
-                                    className={`mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brandInputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
+                                    className={`mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                     placeholder="例如 100"
                                 />
                             </div>
@@ -3593,7 +3619,7 @@ export default function App() {
                                             setOpenPositionError('');
                                         }}
                                         inputMode="decimal"
-                                        className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brandInputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
+                                        className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                         placeholder="下限 %"
                                     />
                                     <input
@@ -3603,7 +3629,7 @@ export default function App() {
                                             setOpenPositionError('');
                                         }}
                                         inputMode="decimal"
-                                        className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brandInputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
+                                        className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                         placeholder="上限 %"
                                     />
                                 </div>
@@ -3715,7 +3741,7 @@ export default function App() {
                                         setOpenPositionError('');
                                     }}
                                     inputMode="decimal"
-                                    className={`mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brandInputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
+                                    className={`mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                     placeholder="例如 0.5（可选）"
                                 />
                             </div>
@@ -3733,7 +3759,7 @@ export default function App() {
                                 disabled={openPositionLoading}
                                 className={`w-full rounded-xl px-3 py-2 text-sm font-semibold shadow-sm transition ${openPositionLoading
                                     ? 'cursor-not-allowed bg-[#bcff2f]/55 text-[#182108]'
-                                    : brandSolidButtonClass
+                                    : brand.solidButtonClass
                                     }`}
                             >
                                 {openPositionLoading ? '开仓中...' : '确认开仓'}
@@ -3782,7 +3808,7 @@ export default function App() {
                                                 setTaskRangeError('');
                                             }}
                                             inputMode="decimal"
-                                            className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                            className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                             placeholder="下限 %"
                                         />
                                         <input
@@ -3792,7 +3818,7 @@ export default function App() {
                                                 setTaskRangeError('');
                                             }}
                                             inputMode="decimal"
-                                            className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                            className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                             placeholder="上限 %"
                                         />
                                     </div>
@@ -3811,7 +3837,7 @@ export default function App() {
                                                 setTaskRangeError('');
                                             }}
                                             inputMode="decimal"
-                                            className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                            className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                             placeholder="USDT 金额"
                                         />
                                     </div>
@@ -3829,9 +3855,9 @@ export default function App() {
                                     type="button"
                                     onClick={submitTaskRange}
                                     disabled={taskRangeLoading}
-                                    className={`w-full rounded-xl px-3 py-2 text-sm font-semibold text-white shadow-sm transition ${taskRangeLoading
-                                        ? 'cursor-not-allowed bg-emerald-500/60'
-                                        : 'bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700'
+                                    className={`w-full rounded-xl px-3 py-2 text-sm font-semibold shadow-sm transition ${taskRangeLoading
+                                        ? `${brand.solidButtonClass} cursor-not-allowed opacity-60`
+                                        : brand.solidButtonClass
                                         }`}
                                 >
                                     {taskRangeLoading ? '保存中...' : '确认修改'}
@@ -3991,7 +4017,7 @@ export default function App() {
                                 onClick={() => setViewMode(item.key)}
                                 aria-pressed={isActive}
                                 className={`relative flex flex-col items-center justify-center rounded-full px-4 py-1.5 transition-all duration-300 ${isActive
-                                    ? 'bg-[#bcff2f]/12 text-[#6f9616] dark:bg-[#bcff2f]/10 dark:text-[#bcff2f]'
+                                    ? brand.navActiveClass
                                     : 'text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300'
                                     }`}
                             >
