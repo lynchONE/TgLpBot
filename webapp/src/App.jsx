@@ -2035,9 +2035,11 @@ export default function App() {
                           </>
                         ) : <span>{avatarLabel}</span>}
                       </div>
-                      <span className="sm-rank">#{idx + 1}</span>
                       <div className="sm-pool-main">
-                        <span className="sm-pair">{pair}</span>
+                        <div className="sm-title-row">
+                          <span className="sm-pair">{pair}</span>
+                          <span className="sm-rank">#{idx + 1}</span>
+                        </div>
                         <div className="sm-meta-tags">
                           {protocolTagText ? (
                             <span className="tag tag-dex tag-dex-inline">

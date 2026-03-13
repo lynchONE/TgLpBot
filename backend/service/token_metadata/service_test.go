@@ -99,3 +99,24 @@ func TestCacheFromModel_RoundTrip(t *testing.T) {
 		t.Fatalf("round trip mismatch: %#v != %#v", back, meta)
 	}
 }
+
+func TestShouldRefreshMetadata_RequiresLogoBackfill(t *testing.T) {
+	if !shouldRefreshMetadata(models.TokenMetadata{
+		Status: statusOK,
+	}) {
+		t.Fatalf("expected empty-logo ok metadata to require refresh")
+	}
+
+	if shouldRefreshMetadata(models.TokenMetadata{
+		Status:  statusOK,
+		LogoURL: "https://img.example/a.png",
+	}) {
+		t.Fatalf("expected metadata with logo to skip refresh")
+	}
+
+	if shouldRefreshMetadata(models.TokenMetadata{
+		Status: statusNotFound,
+	}) {
+		t.Fatalf("expected negative cache metadata to skip refresh")
+	}
+}

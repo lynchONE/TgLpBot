@@ -115,6 +115,13 @@ func cacheFromModel(meta models.TokenMetadata) cacheEntry {
 	}
 }
 
+func shouldRefreshMetadata(meta models.TokenMetadata) bool {
+	if !strings.EqualFold(strings.TrimSpace(meta.Status), statusOK) {
+		return false
+	}
+	return strings.TrimSpace(meta.LogoURL) == ""
+}
+
 func (s *Service) GetBatch(ctx context.Context, chain string, addresses []string) (map[string]models.TokenMetadata, error) {
 	chain = config.NormalizeChain(chain)
 	list := normalizeAddresses(addresses)
@@ -135,7 +142,9 @@ func (s *Service) GetBatch(ctx context.Context, chain string, addresses []string
 			if strings.EqualFold(meta.Status, statusOK) {
 				out[addr] = meta
 			}
-			delete(pending, addr)
+			if !shouldRefreshMetadata(meta) {
+				delete(pending, addr)
+			}
 		}
 	}
 
@@ -153,7 +162,7 @@ func (s *Service) GetBatch(ctx context.Context, chain string, addresses []string
 				if strings.EqualFold(strings.TrimSpace(row.Status), statusOK) {
 					out[addr] = row
 				}
-				if row.ExpiresAt.After(now) {
+				if row.ExpiresAt.After(now) && !shouldRefreshMetadata(row) {
 					delete(pending, addr)
 					writeCache(chain, row)
 					continue

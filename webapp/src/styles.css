@@ -1583,6 +1583,13 @@ body {
   min-width: 0;
 }
 
+.sm-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .sm-meta-tags {
   display: flex;
   align-items: center;
