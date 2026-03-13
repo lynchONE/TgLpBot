@@ -1462,7 +1462,7 @@ export default function App() {
                     aria-label="开仓"
                     onClick={(e) => { e.stopPropagation(); openPositionModal({ ...pool, chain, panelKey: 'hot_pools' }); }}
                   >
-                    <Zap size={14} strokeWidth={2.3} className="open-lightning-icon" fill="currentColor" />
+                    <Zap size={14} strokeWidth={1.8} className="open-lightning-icon" />
                   </button>
                 </div>
               );
@@ -2035,7 +2035,7 @@ export default function App() {
                         });
                       }}
                     >
-                      <Zap size={14} strokeWidth={2.3} className="open-lightning-icon" fill="currentColor" />
+                      <Zap size={14} strokeWidth={1.8} className="open-lightning-icon" />
                     </button>
                     <button type="button" className="sm-action-btn sm-copy-btn" onClick={(e) => {
                       e.stopPropagation();
