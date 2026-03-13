@@ -17,6 +17,7 @@ import {
   Search,
   Settings,
   SlidersHorizontal,
+  Zap,
   X,
 } from 'lucide-react';
 import {
@@ -81,6 +82,7 @@ const KLINE_INTERVALS = [
 ];
 const SMART_POOL_WINDOW_HOURS = 24;
 const SMART_PNL_WINDOW_HOURS = 24;
+const HOT_POOLS_DISPLAY_LIMIT = 20;
 const KLINE_MARKER_WINDOW_HOURS = 24;
 const KLINE_MARKER_FETCH_LIMIT = 1200;
 const KLINE_MARKER_RANGE_DEBOUNCE_MS = 240;
@@ -1324,7 +1326,7 @@ export default function App() {
     hot_pools: (
       <PanelShell
         title="热门池子"
-        subtitle="支持搜索与排序"
+        subtitle={`支持搜索与排序 · 展示前 ${HOT_POOLS_DISPLAY_LIMIT} 条`}
         icon={Flame}
       >
         <div className="sort-tabs">
@@ -1368,7 +1370,7 @@ export default function App() {
           ) : filteredHotPools.length === 0 ? (
             <EmptyState text="暂无可展示的池子数据" />
           ) : (
-            filteredHotPools.slice(0, hotPoolsLimit).map((pool, idx) => {
+            filteredHotPools.slice(0, HOT_POOLS_DISPLAY_LIMIT).map((pool, idx) => {
               const addr = normalizePoolAddress(pool?.pool_address || '');
               const selected = selectedPoolAddress && addr === selectedPoolAddress;
               const feePct = Number(pool?.fee_percentage || 0);
@@ -1454,7 +1456,14 @@ export default function App() {
                   </div>
 
                   {/* Action */}
-                  <button type="button" className="pool-buy-btn" onClick={(e) => { e.stopPropagation(); openPositionModal({ ...pool, chain, panelKey: 'hot_pools' }); }}>⚡</button>
+                  <button
+                    type="button"
+                    className="pool-buy-btn"
+                    aria-label="开仓"
+                    onClick={(e) => { e.stopPropagation(); openPositionModal({ ...pool, chain, panelKey: 'hot_pools' }); }}
+                  >
+                    <Zap size={14} strokeWidth={2.3} className="open-lightning-icon" fill="currentColor" />
+                  </button>
                 </div>
               );
             })
@@ -2008,19 +2017,26 @@ export default function App() {
                   ) : null}
 
                   <div className="sm-pool-actions">
-                    <button type="button" className="sm-action-btn sm-open-btn" onClick={(e) => {
-                      e.stopPropagation();
-                      openPositionModal({
-                        pool_id: pool?.pool_id,
-                        pool_address: pool?.pool_id,
-                        trading_pair: pool?.pair,
-                        protocol_version: version,
-                        factory_name: pool?.factory_name,
-                        chain,
-                        panelKey: 'smart_money',
-                        smartMoneyWallets: wallets,
-                      });
-                    }}>⚡</button>
+                    <button
+                      type="button"
+                      className="sm-action-btn sm-open-btn"
+                      aria-label="开仓"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openPositionModal({
+                          pool_id: pool?.pool_id,
+                          pool_address: pool?.pool_id,
+                          trading_pair: pool?.pair,
+                          protocol_version: version,
+                          factory_name: pool?.factory_name,
+                          chain,
+                          panelKey: 'smart_money',
+                          smartMoneyWallets: wallets,
+                        });
+                      }}
+                    >
+                      <Zap size={14} strokeWidth={2.3} className="open-lightning-icon" fill="currentColor" />
+                    </button>
                     <button type="button" className="sm-action-btn sm-copy-btn" onClick={(e) => {
                       e.stopPropagation();
                       copyAddr(pool?.pool_id || '');
