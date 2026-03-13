@@ -461,8 +461,13 @@ export default function App() {
 
   const smartPools = useMemo(() => {
     const rows = Array.isArray(smart?.pools) ? smart.pools : [];
-    return [...rows].sort((a, b) => Number(b?.added_liquidity || 0) - Number(a?.added_liquidity || 0));
+    return [...rows].sort((a, b) => (
+      Number(b?.wallet_count || 0) - Number(a?.wallet_count || 0) ||
+      Number(b?.added_liquidity || 0) - Number(a?.added_liquidity || 0) ||
+      String(a?.pool_id || '').localeCompare(String(b?.pool_id || ''))
+    ));
   }, [smart]);
+  const smartDisplayPools = useMemo(() => smartPools.slice(0, 10), [smartPools]);
 
   const smartWallets = useMemo(() => {
     const rows = Array.isArray(smart?.wallets_24h) ? smart.wallets_24h : [];
@@ -1270,9 +1275,9 @@ export default function App() {
 
   // Auto-load pool adds for top pools when smart data changes
   useEffect(() => {
-    if (!smartPools.length || !hasInitData) return;
+    if (!smartDisplayPools.length || !hasInitData) return;
     const ctrl = new AbortController();
-    const toLoad = smartPools.slice(0, 12);
+    const toLoad = smartDisplayPools;
     toLoad.forEach((pool) => {
       const key = `${pool?.pool_version || ''}:${pool?.pool_id || ''}`;
       if (poolAddsMap[key]?.status === 'loading') return;
@@ -1313,7 +1318,7 @@ export default function App() {
     });
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [smartPools, hasInitData, apiBaseUrl, initData, chain]);
+  }, [smartDisplayPools, hasInitData, apiBaseUrl, initData, chain]);
 
   const panelMap = {
     hot_pools: (
@@ -1899,18 +1904,18 @@ export default function App() {
     smart_money: (
       <PanelShell
         title="聪明钱"
-        subtitle={`24h 内仍有监控钱包仓位的 ${smartPools.length} 个池子`}
+        subtitle={`按参与钱包数排序的前 ${smartDisplayPools.length} 个池子`}
         icon={BrainCircuit}
       >
         {smartError ? <div className="error-text">{smartError}</div> : null}
 
         <div className="data-list compact">
-          {smartLoading && smartPools.length === 0 ? (
+          {smartLoading && smartDisplayPools.length === 0 ? (
             <EmptyState text="正在加载聪明钱数据..." />
-          ) : smartPools.length === 0 ? (
+          ) : smartDisplayPools.length === 0 ? (
             <EmptyState text="暂无监控钱包加 LP 数据" />
           ) : (
-            smartPools.slice(0, 20).map((pool, idx) => {
+            smartDisplayPools.map((pool, idx) => {
               const poolKey = `${pool?.pool_version || ''}:${pool?.pool_id || ''}`;
               const adds = poolAddsMap[poolKey];
               const wallets = aggregatePoolAddWallets(adds?.wallets || []);
