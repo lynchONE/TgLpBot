@@ -13,12 +13,14 @@ import (
 	"TgLpBot/base/config"
 	"TgLpBot/service/pricing"
 	"TgLpBot/service/realtime"
+	"TgLpBot/service/token_metadata"
 )
 
 type Server struct {
 	ClickHouse *clickhouse.ClickHouseService
 	Realtime   *realtime.RealtimePositionsService
 	TokenPrice *pricing.TokenPriceService
+	TokenMeta  *token_metadata.Service
 }
 
 func NewServer(ch *clickhouse.ClickHouseService) *Server {
@@ -26,6 +28,7 @@ func NewServer(ch *clickhouse.ClickHouseService) *Server {
 		ClickHouse: ch,
 		Realtime:   realtime.NewRealtimePositionsService(),
 		TokenPrice: pricing.NewTokenPriceService(),
+		TokenMeta:  token_metadata.NewService(),
 	}
 }
 

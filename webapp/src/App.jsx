@@ -1397,7 +1397,13 @@ export default function App() {
               const userPosUsd = Number(pool?.userPositionUsd || 0);
               const pair = String(pool?.trading_pair || '--');
               const pairInitials = pair.split(/[\/\-]/).map((s) => s.trim().charAt(0).toUpperCase()).join('').slice(0, 2);
+              const protocolVersion = String(pool?.protocol_version || '').trim().toUpperCase();
+              const displayTokenLogoUrl = String(pool?.display_token_logo_url || '').trim();
+              const displayTokenSymbol = String(pool?.display_token_symbol || '').trim();
+              const avatarLabel = (displayTokenSymbol || pairInitials || 'LP').slice(0, 4).toUpperCase();
               const dex = getDexIcon(factoryName);
+              const protocolTagText = protocolVersion || dex?.label || '';
+              const avatarSrc = displayTokenLogoUrl || dex?.src || '';
               const filterToken = resolveHotPoolFilterToken(pool);
               const avatarFilterActive = filterToken && hotTokenFilter?.address === filterToken.address;
 
@@ -1423,7 +1429,28 @@ export default function App() {
                       ));
                     }}
                   >
-                    {dex ? <img src={dex.src} alt="" /> : <span>{pairInitials}</span>}
+                    {avatarSrc ? (
+                      <>
+                        <img
+                          src={avatarSrc}
+                          alt=""
+                          data-fallback-to-dex={displayTokenLogoUrl && dex?.src ? '1' : '0'}
+                          data-dex-src={dex?.src || ''}
+                          onError={(e) => {
+                            const nextSrc = e.currentTarget.dataset.dexSrc || '';
+                            if (e.currentTarget.dataset.fallbackToDex === '1' && nextSrc) {
+                              e.currentTarget.dataset.fallbackToDex = '0';
+                              e.currentTarget.src = nextSrc;
+                              return;
+                            }
+                            e.currentTarget.style.display = 'none';
+                            const fallback = e.currentTarget.parentElement?.querySelector('.pool-avatar-fallback');
+                            if (fallback) fallback.style.display = 'flex';
+                          }}
+                        />
+                        <span className="pool-avatar-fallback" style={{ display: 'none' }}>{avatarLabel}</span>
+                      </>
+                    ) : <span>{avatarLabel}</span>}
                   </button>
 
                   {/* Info block */}
@@ -1434,7 +1461,12 @@ export default function App() {
                         <svg viewBox="0 0 24 24" fill="currentColor" width="11" height="11"><path d="M16 1H4a2 2 0 00-2 2v14h2V3h12V1zm3 4H8a2 2 0 00-2 2v14a2 2 0 002 2h11a2 2 0 002-2V7a2 2 0 00-2-2zm0 16H8V7h11v14z"/></svg>
                       </button>
                       {feePct > 0 && <span className="tag tag-blue"><NumberFlowValue value={feePct} formatter={(v) => `${Number(v).toFixed(2).replace(/\.?0+$/, '')}%`} /></span>}
-                      {dex?.label && <span className="tag tag-dex">{dex.label}</span>}
+                      {protocolTagText && (
+                        <span className="tag tag-dex tag-dex-inline">
+                          {dex?.src ? <img src={dex.src} alt="" /> : null}
+                          <span>{protocolTagText}</span>
+                        </span>
+                      )}
                       {userPosUsd > 0 && (
                         <span className="tag tag-purple">
                           持仓 <NumberFlowValue value={userPosUsd} formatter={(v) => formatUsdCompact(v)} />

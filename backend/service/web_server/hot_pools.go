@@ -1,6 +1,7 @@
 package web_server
 
 import (
+	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"context"
 	"crypto/sha1"
@@ -18,22 +19,26 @@ import (
 )
 
 type HotPoolResponse struct {
-	ProtocolVersion  string    `json:"protocol_version" ch:"protocol_version"`
-	PoolAddress      string    `json:"pool_address" ch:"pool_address"`
-	Dex              string    `json:"dex" ch:"dex"`
-	FactoryName      string    `json:"factory_name" ch:"factory_name"`
-	TradingPair      string    `json:"trading_pair" ch:"trading_pair"`
-	FeePercentage    float64   `json:"fee_percentage" ch:"fee_percentage"`
-	TransactionCount uint32    `json:"transaction_count" ch:"transaction_count"`
-	TotalFees        float64   `json:"total_fees" ch:"total_fees"`
-	TotalVolume      float64   `json:"total_volume" ch:"total_volume"`
-	CurrentPoolValue float64   `json:"current_pool_value" ch:"current_pool_value"`
-	FeeRate          float64   `json:"fee_rate" ch:"fee_rate"`
-	PriceDisplay     string    `json:"price_display" ch:"price_display"`
-	UpdatedAt        time.Time `json:"updated_at" ch:"updated_at"`
-	LastSwapAt       time.Time `json:"last_swap_at" ch:"last_swap_at"`
-	Token0Address    string    `json:"token0_address" ch:"token0_address"`
-	Token1Address    string    `json:"token1_address" ch:"token1_address"`
+	ProtocolVersion     string    `json:"protocol_version" ch:"protocol_version"`
+	PoolAddress         string    `json:"pool_address" ch:"pool_address"`
+	Dex                 string    `json:"dex" ch:"dex"`
+	FactoryName         string    `json:"factory_name" ch:"factory_name"`
+	TradingPair         string    `json:"trading_pair" ch:"trading_pair"`
+	FeePercentage       float64   `json:"fee_percentage" ch:"fee_percentage"`
+	TransactionCount    uint32    `json:"transaction_count" ch:"transaction_count"`
+	TotalFees           float64   `json:"total_fees" ch:"total_fees"`
+	TotalVolume         float64   `json:"total_volume" ch:"total_volume"`
+	CurrentPoolValue    float64   `json:"current_pool_value" ch:"current_pool_value"`
+	FeeRate             float64   `json:"fee_rate" ch:"fee_rate"`
+	PriceDisplay        string    `json:"price_display" ch:"price_display"`
+	UpdatedAt           time.Time `json:"updated_at" ch:"updated_at"`
+	LastSwapAt          time.Time `json:"last_swap_at" ch:"last_swap_at"`
+	Token0Address       string    `json:"token0_address" ch:"token0_address"`
+	Token1Address       string    `json:"token1_address" ch:"token1_address"`
+	DisplayTokenAddress string    `json:"display_token_address,omitempty"`
+	DisplayTokenSymbol  string    `json:"display_token_symbol,omitempty"`
+	DisplayTokenName    string    `json:"display_token_name,omitempty"`
+	DisplayTokenLogoURL string    `json:"display_token_logo_url,omitempty"`
 	// 24小时数据
 	TotalFees24h        float64 `json:"total_fees_24h,omitempty"`
 	TotalVolume24h      float64 `json:"total_volume_24h,omitempty"`
@@ -51,6 +56,11 @@ type hotPoolsEnvelope struct {
 
 const hotPoolsCachePrefix = "hot_pools:resp"
 const hotPoolsCacheTTL = 10 * time.Second
+
+var hotPoolBaseLikeSymbols = map[string]struct{}{
+	"USDT": {}, "USDC": {}, "BUSD": {}, "DAI": {}, "FDUSD": {}, "USDD": {}, "FRAX": {},
+	"WBNB": {}, "BNB": {}, "WETH": {}, "ETH": {}, "WBTC": {}, "BTC": {}, "WSOL": {}, "SOL": {},
+}
 
 func normalizeHotPoolTokenAddress(raw string) string {
 	raw = strings.TrimSpace(raw)
@@ -80,7 +90,68 @@ func buildHotPoolsCacheKey(chain string, timeframeMinutes int, limit int, sortKe
 		strings.Join(normPools, ","),
 	)
 	sum := sha1.Sum([]byte(raw))
-	return fmt.Sprintf("%s:v1:%x", hotPoolsCachePrefix, sum)
+	return fmt.Sprintf("%s:v2:%x", hotPoolsCachePrefix, sum)
+}
+
+func splitHotPoolPairSymbols(tradingPair string) (string, string) {
+	parts := strings.Split(strings.TrimSpace(tradingPair), "/")
+	if len(parts) != 2 {
+		return "", ""
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+}
+
+func isHotPoolBaseLikeToken(chain string, symbol string, address string) bool {
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	if symbol != "" {
+		if _, ok := hotPoolBaseLikeSymbols[symbol]; ok {
+			return true
+		}
+	}
+
+	if config.AppConfig == nil {
+		return false
+	}
+	cc, ok := config.AppConfig.GetChainConfig(chain)
+	if !ok {
+		return false
+	}
+	addr := normalizeHotPoolTokenAddress(address)
+	if addr == "" {
+		return false
+	}
+	for _, candidate := range []string{
+		cc.StableAddress,
+		cc.USDTAddress,
+		cc.USDCAddress,
+		cc.BUSDAddress,
+		cc.WrappedNativeAddress,
+	} {
+		if normalizeHotPoolTokenAddress(candidate) == addr {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveHotPoolDisplayToken(chain string, tradingPair string, token0Address string, token1Address string) (string, string) {
+	chain = config.NormalizeChain(chain)
+	token0 := normalizeHotPoolTokenAddress(token0Address)
+	token1 := normalizeHotPoolTokenAddress(token1Address)
+	symbol0, symbol1 := splitHotPoolPairSymbols(tradingPair)
+
+	token0BaseLike := isHotPoolBaseLikeToken(chain, symbol0, token0)
+	token1BaseLike := isHotPoolBaseLikeToken(chain, symbol1, token1)
+	switch {
+	case token0BaseLike && !token1BaseLike:
+		return token1, symbol1
+	case token1BaseLike && !token0BaseLike:
+		return token0, symbol0
+	case token0 != "":
+		return token0, symbol0
+	default:
+		return token1, symbol1
+	}
 }
 
 func readRedisRawCache(key string) ([]byte, bool) {
@@ -106,6 +177,45 @@ func writeRedisRawCache(key string, payload []byte, expiration time.Duration) {
 	}
 	if err := database.SetCache(key, string(payload), expiration); err != nil {
 		log.Printf("[HotPools] warning: redis set failed key=%s err=%v", key, err)
+	}
+}
+
+func (s *Server) enrichHotPoolDisplayTokens(ctx context.Context, chain string, rows []HotPoolResponse) {
+	if s == nil || s.TokenMeta == nil || len(rows) == 0 {
+		return
+	}
+
+	addresses := make([]string, 0, len(rows))
+	for i := range rows {
+		addr, symbol := resolveHotPoolDisplayToken(chain, rows[i].TradingPair, rows[i].Token0Address, rows[i].Token1Address)
+		rows[i].DisplayTokenAddress = addr
+		rows[i].DisplayTokenSymbol = symbol
+		if addr != "" {
+			addresses = append(addresses, addr)
+		}
+	}
+	if len(addresses) == 0 {
+		return
+	}
+
+	metaMap, err := s.TokenMeta.GetBatch(ctx, chain, addresses)
+	if err != nil {
+		log.Printf("[HotPools] warning: token metadata enrich failed chain=%s err=%v", chain, err)
+	}
+	for i := range rows {
+		addr := normalizeHotPoolTokenAddress(rows[i].DisplayTokenAddress)
+		if addr == "" {
+			continue
+		}
+		meta, ok := metaMap[addr]
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(meta.Symbol) != "" {
+			rows[i].DisplayTokenSymbol = strings.TrimSpace(meta.Symbol)
+		}
+		rows[i].DisplayTokenName = strings.TrimSpace(meta.Name)
+		rows[i].DisplayTokenLogoURL = strings.TrimSpace(meta.LogoURL)
 	}
 }
 
@@ -269,6 +379,10 @@ func (s *Server) handleHotPools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	metaCtx, metaCancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer metaCancel()
+	s.enrichHotPoolDisplayTokens(metaCtx, chain, rows)
+
 	// 获取24小时数据
 	if len(rows) > 0 {
 		poolAddresses := make([]string, len(rows))
@@ -369,6 +483,10 @@ func (s *Server) handleHotPools(w http.ResponseWriter, r *http.Request) {
 			if err := s.ClickHouse.Conn.Select(ctx, &extraRows, qExtra, extraArgs...); err == nil {
 				// 获取这些额外池子的24小时数据
 				if len(extraRows) > 0 {
+					extraMetaCtx, extraMetaCancel := context.WithTimeout(r.Context(), 5*time.Second)
+					s.enrichHotPoolDisplayTokens(extraMetaCtx, chain, extraRows)
+					extraMetaCancel()
+
 					extraAddrs := make([]string, len(extraRows))
 					for i, row := range extraRows {
 						extraAddrs[i] = row.PoolAddress
