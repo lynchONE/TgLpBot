@@ -10,10 +10,11 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
     const [defaults, setDefaults] = useState(null);
     const [widthGuardDefaults, setWidthGuardDefaults] = useState(null);
     const [entrySignalDefaults, setEntrySignalDefaults] = useState(null);
+    const [zapSafetyDefaults, setZapSafetyDefaults] = useState(null);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
-    const [expandedSection, setExpandedSection] = useState(null); // 'filter' | 'entry' | 'width' | 'guard' | null
+    const [expandedSection, setExpandedSection] = useState(null); // 'filter' | 'entry' | 'width' | 'guard' | 'zap_safety' | null
 
     // 编辑状态
     const [draft, setDraft] = useState({
@@ -43,6 +44,9 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
         autolp_guard_low_fee_rate_5m: '',
         autolp_guard_volume_drop_percent_low: '',
         autolp_guard_cooldown_seconds: '',
+        // Zap 安全检查
+        zap_price_deviation_max_percent: '',
+        zap_min_pool_liquidity_usd: '',
     });
 
     // 加载配置
@@ -81,6 +85,9 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
                     autolp_guard_low_fee_rate_5m: String(resp.config.autolp_guard_low_fee_rate_5m || ''),
                     autolp_guard_volume_drop_percent_low: String(resp.config.autolp_guard_volume_drop_percent_low || ''),
                     autolp_guard_cooldown_seconds: String(resp.config.autolp_guard_cooldown_seconds || ''),
+                    // Zap 安全检查
+                    zap_price_deviation_max_percent: String(resp.config.zap_price_deviation_max_percent || ''),
+                    zap_min_pool_liquidity_usd: String(resp.config.zap_min_pool_liquidity_usd || ''),
                 });
             }
             if (resp?.defaults) {
@@ -91,6 +98,9 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
             }
             if (resp?.entry_signal_defaults) {
                 setEntrySignalDefaults(resp.entry_signal_defaults);
+            }
+            if (resp?.zap_safety_defaults) {
+                setZapSafetyDefaults(resp.zap_safety_defaults);
             }
         } catch (e) {
             setError(String(e?.message || e));
@@ -147,6 +157,9 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
             updates.autolp_guard_low_fee_rate_5m = parseFloat(draft.autolp_guard_low_fee_rate_5m);
             updates.autolp_guard_volume_drop_percent_low = parseFloat(draft.autolp_guard_volume_drop_percent_low);
             updates.autolp_guard_cooldown_seconds = parseInt(draft.autolp_guard_cooldown_seconds);
+            // Zap 安全检查
+            updates.zap_price_deviation_max_percent = parseFloat(draft.zap_price_deviation_max_percent);
+            updates.zap_min_pool_liquidity_usd = parseFloat(draft.zap_min_pool_liquidity_usd);
 
             const resp = await updateSystemConfig({ apiBaseUrl, initData, config: updates });
             if (resp?.config) {
@@ -174,6 +187,8 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
                     autolp_guard_low_fee_rate_5m: String(resp.config.autolp_guard_low_fee_rate_5m || ''),
                     autolp_guard_volume_drop_percent_low: String(resp.config.autolp_guard_volume_drop_percent_low || ''),
                     autolp_guard_cooldown_seconds: String(resp.config.autolp_guard_cooldown_seconds || ''),
+                    zap_price_deviation_max_percent: String(resp.config.zap_price_deviation_max_percent || ''),
+                    zap_min_pool_liquidity_usd: String(resp.config.zap_min_pool_liquidity_usd || ''),
                 });
             }
             if (onNotice) onNotice('配置已保存', 'success');
@@ -351,6 +366,23 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
                             {renderInput('autolp_guard_low_fee_rate_5m', '低手续费率阈值 (%)', widthGuardDefaults?.guard_low_fee_rate_5m, '0.01')}
                             {renderInput('autolp_guard_volume_drop_percent_low', '低费率时成交量下降阈值', widthGuardDefaults?.guard_volume_drop_percent_low, '0.01')}
                             {renderInput('autolp_guard_cooldown_seconds', '冷却时间 (秒)', widthGuardDefaults?.guard_cooldown_seconds, '1', true)}
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* Zap 安全检查配置 */}
+            <div className="border-t border-zinc-100 dark:border-white/5">
+                <button type="button" onClick={() => toggleSection('zap_safety')} className={sectionButtonClass('zap_safety')}>
+                    <span className="text-xs font-medium text-zinc-700 dark:text-white/80">Zap 安全检查</span>
+                    <span className="text-xs text-zinc-400">{expandedSection === 'zap_safety' ? '收起' : '展开'}</span>
+                </button>
+                {expandedSection === 'zap_safety' && config && (
+                    <div className="py-3 space-y-3">
+                        <div className="text-xs text-zinc-500 dark:text-white/50 mb-2">开仓前检查 OKX 报价与池子价格偏差及池子流动性，值为 0 时使用默认值</div>
+                        <div className="grid grid-cols-1 gap-3">
+                            {renderInput('zap_price_deviation_max_percent', '最大价格偏差 (%)', zapSafetyDefaults?.price_deviation_max_percent, '0.1')}
+                            {renderInput('zap_min_pool_liquidity_usd', '最低池子流动性 (USD)', zapSafetyDefaults?.min_pool_liquidity_usd, '100')}
                         </div>
                     </div>
                 )}
