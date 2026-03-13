@@ -11,7 +11,7 @@ Create isolation between users by ensuring each wallet interacts with its own Za
 - New table (name TBD, e.g. `wallet_chain_contracts`):
   - `wallet_id` (uint, indexed)
   - `chain` (string, indexed)
-  - `contract_kind` (string, default `zap_simple`)
+  - `contract_kind` (string,  default `zap_simple`)
   - `contract_address` (string, 42 chars)
   - `version` (int)
   - `deploy_tx_hash` (string, 66 chars, optional)
