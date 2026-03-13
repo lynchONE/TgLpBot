@@ -17,7 +17,6 @@ import {
   Search,
   Settings,
   SlidersHorizontal,
-  Zap,
   X,
 } from 'lucide-react';
 import {
@@ -49,6 +48,7 @@ import uniswapLogo from './img/uniswap.svg';
 import pancakeLogo from './img/pancake.svg';
 import bnbLogo from './img/bnb.svg';
 import baseLogo from './img/base.svg';
+import flashIcon from './img/flash.svg';
 import {
   DEFAULT_WIDGETS,
   WIDGETS,
@@ -88,6 +88,10 @@ const KLINE_MARKER_FETCH_LIMIT = 1200;
 const KLINE_MARKER_RANGE_DEBOUNCE_MS = 240;
 const KLINE_MARKER_LIVE_REFRESH_MS = 4000;
 const KLINE_MARKER_IDLE_REFRESH_MS = 12000;
+const ACCENT_THEMES = [
+  { key: 'green', label: '绿色' },
+  { key: 'yellow', label: '黄色' },
+];
 
 function getKlineIntervalMeta(bar) {
   return KLINE_INTERVALS.find((item) => item.key === bar) || KLINE_INTERVALS[0];
@@ -138,6 +142,7 @@ const STORAGE = {
   widgets: 'tglp_web_widgets',
   sort: 'tglp_web_hot_pools_sort',
   refreshInterval: 'tglp_web_refresh_interval',
+  accentTheme: 'tglp_web_accent_theme',
   walletId: 'tglp_web_wallet_id',
 };
 
@@ -168,6 +173,10 @@ function storageRemove(key) {
 function normalizeChain(value) {
   const chain = String(value || '').trim().toLowerCase();
   return chain === 'base' ? 'base' : 'bsc';
+}
+
+function normalizeAccentTheme(value) {
+  return String(value || '').trim().toLowerCase() === 'yellow' ? 'yellow' : 'green';
 }
 
 function moduleLayoutClass(count) {
@@ -355,6 +364,9 @@ export default function App() {
     const saved = Number(storageGet(STORAGE.refreshInterval));
     return saved >= 10 ? saved : 10;
   });
+  const [accentTheme, setAccentTheme] = useState(() =>
+    normalizeAccentTheme(storageGet(STORAGE.accentTheme) || 'green')
+  );
   const [draggingKey, setDraggingKey] = useState('');
   const [dragOverKey, setDragOverKey] = useState('');
   const klineVisibleRangeTimerRef = useRef(null);
@@ -554,6 +566,7 @@ export default function App() {
     storageSet(STORAGE.widgets, JSON.stringify(widgets));
     storageSet(STORAGE.sort, hotSort);
     storageSet(STORAGE.refreshInterval, String(refreshInterval));
+    storageSet(STORAGE.accentTheme, accentTheme);
 
     if (initData) {
       storageSet(STORAGE.initData, initData);
@@ -565,7 +578,7 @@ export default function App() {
     } else {
       storageRemove(STORAGE.loginUser);
     }
-  }, [chain, hotSort, initData, loginUser, refreshInterval, widgets]);
+  }, [accentTheme, chain, hotSort, initData, loginUser, refreshInterval, widgets]);
 
   useEffect(() => {
     if (!workMode) return;
@@ -1462,7 +1475,7 @@ export default function App() {
                     aria-label="开仓"
                     onClick={(e) => { e.stopPropagation(); openPositionModal({ ...pool, chain, panelKey: 'hot_pools' }); }}
                   >
-                    <Zap size={12} strokeWidth={1.9} className="open-lightning-icon" />
+                    <img src={flashIcon} alt="" className="open-lightning-icon" aria-hidden="true" />
                     <span className="open-buy-text">买入</span>
                   </button>
                 </div>
@@ -2036,7 +2049,7 @@ export default function App() {
                         });
                       }}
                     >
-                      <Zap size={12} strokeWidth={1.9} className="open-lightning-icon" />
+                      <img src={flashIcon} alt="" className="open-lightning-icon" aria-hidden="true" />
                       <span className="open-buy-text">买入</span>
                     </button>
                     <button type="button" className="sm-action-btn sm-copy-btn" onClick={(e) => {
@@ -2055,7 +2068,7 @@ export default function App() {
   };
 
   return (
-    <div className={`app-shell ${workMode ? 'work-mode-shell' : ''}`}>
+    <div className={`app-shell ${workMode ? 'work-mode-shell' : ''}`} data-accent-theme={accentTheme}>
       <div className="bg-orb orb-a" />
       <div className="bg-orb orb-b" />
       <div className="bg-grid" />
@@ -2107,6 +2120,23 @@ export default function App() {
                         <span className="settings-unit">秒</span>
                       </div>
                     </div>
+                    <div className="settings-row settings-row-stack">
+                      <span className="settings-label">主题色</span>
+                      <div className="settings-theme-group">
+                        {ACCENT_THEMES.map((theme) => (
+                          <button
+                            key={theme.key}
+                            type="button"
+                            className={`settings-theme-btn ${accentTheme === theme.key ? 'active' : ''}`}
+                            onClick={() => setAccentTheme(theme.key)}
+                          >
+                            <span className={`settings-theme-dot theme-dot-${theme.key}`} />
+                            {theme.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="settings-hint">默认绿色，你也可以切回黄色主色。</div>
                     <div className="settings-hint">最低 10 秒，当前每 {refreshInterval} 秒刷新</div>
                     <div className="settings-hint" style={{ marginTop: 6 }}>K线使用 REST 轮询刷新。</div>
                   </div>
