@@ -188,6 +188,13 @@ func (s *Server) handleGetPools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if cached, ok := readRedisRawCache("pools:default:v1"); ok {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(cached)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	var pools []PoolResponse
@@ -221,10 +228,18 @@ func (s *Server) handleGetPools(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	resp := map[string]interface{}{
 		"data": pools,
-	})
+	}
+	b, err := marshalJSONPayload(resp)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeRedisRawCache("pools:default:v1", b, hotPoolsCacheTTL)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(b)
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {

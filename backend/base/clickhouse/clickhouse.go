@@ -351,14 +351,14 @@ func (s *ClickHouseService) Migrate(ctx context.Context) error {
 			ingest_id UUID DEFAULT generateUUIDv4()
 		) ENGINE = ReplacingMergeTree(ts)
 		PARTITION BY toDate(ts)
-		ORDER BY (tx_hash, log_index)
-		TTL ts + INTERVAL 15 DAY
+		ORDER BY (chain, pool_version, pool_id, wallet_address, ts, event_seq, tx_hash, log_index)
+		TTL ts + INTERVAL 2 DAY
 		`,
 		`ALTER TABLE smart_lp_events ADD COLUMN IF NOT EXISTS net_amount0 String DEFAULT '0'`,
 		`ALTER TABLE smart_lp_events ADD COLUMN IF NOT EXISTS net_amount1 String DEFAULT '0'`,
 		`ALTER TABLE smart_lp_events ADD COLUMN IF NOT EXISTS tick_lower Int32 DEFAULT 0`,
 		`ALTER TABLE smart_lp_events ADD COLUMN IF NOT EXISTS tick_upper Int32 DEFAULT 0`,
-		`ALTER TABLE smart_lp_events MODIFY TTL ts + INTERVAL 15 DAY`,
+		`ALTER TABLE smart_lp_events MODIFY TTL ts + INTERVAL 2 DAY`,
 		`
 		CREATE TABLE IF NOT EXISTS smart_lp_scan_state (
 			id UInt8,
@@ -395,6 +395,10 @@ func (s *ClickHouseService) Migrate(ctx context.Context) error {
 		if err := s.Conn.Exec(ctx, q); err != nil {
 			return fmt.Errorf("clickhouse migrate failed: %w", err)
 		}
+	}
+
+	if err := s.ensureSmartLPSchema(ctx); err != nil {
+		return err
 	}
 
 	return nil

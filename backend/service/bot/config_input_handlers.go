@@ -79,6 +79,27 @@ func (b *Bot) handleGlobalResidualToleranceInput(messageChatID int64, user *mode
 	b.sendMessage(messageChatID, fmt.Sprintf("✅ 已更新剩余资产容忍度：%.2f%%", value))
 }
 
+func (b *Bot) handleGlobalZapLossToleranceInput(messageChatID int64, user *models.User, text string) {
+	value, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(text, "%")), 64)
+	if err != nil || value < 0 || value > 50 {
+		b.sendMessage(messageChatID, "数值无效。请输入 0-50 之间的百分比，例如：`0.5` 表示 0.5%，`0` 关闭校验")
+		return
+	}
+	_, err = b.configService.Update(user.ID, map[string]interface{}{
+		"zap_loss_tolerance": value,
+	})
+	if err != nil {
+		b.sendMessage(messageChatID, fmt.Sprintf("❌ 更新配置失败：%v", err))
+		return
+	}
+	database.ClearUserSession(user.TelegramID)
+	if value == 0 {
+		b.sendMessage(messageChatID, "✅ 已关闭开仓亏损校验")
+	} else {
+		b.sendMessage(messageChatID, fmt.Sprintf("✅ 已更新开仓亏损容忍度：%.2f%%", value))
+	}
+}
+
 func normalizeBarkKeyInput(input string) string {
 	s := strings.TrimSpace(input)
 	if s == "" {

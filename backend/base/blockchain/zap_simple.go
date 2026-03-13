@@ -110,7 +110,8 @@ const ZapSimpleABI = `[
             "internalType": "struct ZapSimple.SwapParams",
             "name": "swap",
             "type": "tuple"
-          }
+          },
+          { "internalType": "uint256", "name": "maxSwapLossBps", "type": "uint256" }
         ],
         "internalType": "struct ZapSimple.ZapInV3Params",
         "name": "params",
@@ -191,7 +192,8 @@ const ZapSimpleABI = `[
             "type": "tuple"
           },
           { "internalType": "uint160", "name": "sqrtPriceX96", "type": "uint160" },
-          { "internalType": "uint256", "name": "maxDustBps", "type": "uint256" }
+          { "internalType": "uint256", "name": "maxDustBps", "type": "uint256" },
+          { "internalType": "uint256", "name": "maxSwapLossBps", "type": "uint256" }
         ],
         "internalType": "struct ZapSimple.ZapInV4Params",
         "name": "params",
@@ -252,6 +254,7 @@ type ZapInV3ParamsSimple struct {
 	Amount1In       *big.Int         `abi:"amount1In"`
 	SlippageBps     *big.Int         `abi:"slippageBps"`
 	Swap            SwapParamsSimple `abi:"swap"`
+	MaxSwapLossBps  *big.Int         `abi:"maxSwapLossBps"` // Swap 最大亏损容忍度 (50 = 0.5%, 0 = 不校验)
 }
 
 // ZapInV4ParamsSimple V4 开仓参数 (与合约 ZapInV4Params 匹配)
@@ -266,8 +269,9 @@ type ZapInV4ParamsSimple struct {
 	Amount1In       *big.Int         `abi:"amount1In"`
 	SlippageBps     *big.Int         `abi:"slippageBps"`
 	Swap            SwapParamsSimple `abi:"swap"`
-	SqrtPriceX96    *big.Int         `abi:"sqrtPriceX96"` // uint160 -> *big.Int, 从 Go 传入的当前价格
-	MaxDustBps      *big.Int         `abi:"maxDustBps"`   // 最大 dust 容忍度 (100 = 1%)
+	SqrtPriceX96    *big.Int         `abi:"sqrtPriceX96"`   // uint160 -> *big.Int, 从 Go 传入的当前价格
+	MaxDustBps      *big.Int         `abi:"maxDustBps"`     // 最大 dust 容忍度 (100 = 1%)
+	MaxSwapLossBps  *big.Int         `abi:"maxSwapLossBps"` // Swap 最大亏损容忍度 (50 = 0.5%, 0 = 不校验)
 }
 
 // ZapResultSimple 结果

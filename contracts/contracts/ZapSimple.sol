@@ -224,6 +224,7 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         uint256 amount1In;        // 用户输入的 token1 数量
         uint256 slippageBps;      // 作为 maxDustBps 使用(100=1%, 0=不校验); swap 滑点由 swap.minAmountOut 保护
         SwapParams swap;          // OKX swap 参数
+        uint256 maxSwapLossBps;   // Swap 最大亏损容忍度 (50 = 0.5%, 0 = 不校验)
     }
 
     /// @notice V4 PoolKey (简化版，使用 address)
@@ -250,6 +251,7 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         SwapParams swap;          // OKX swap 参数
         uint160 sqrtPriceX96;     // 当前价格提示 (用于链上价格偏差校验)
         uint256 maxDustBps;       // 最大 dust 容忍度 (100 = 1%, 0 = 不校验)
+        uint256 maxSwapLossBps;   // Swap 最大亏损容忍度 (50 = 0.5%, 0 = 不校验)；用目标池价格校验 swap 前后总价值损失
     }
 
     /// @notice Zap 结果
@@ -456,6 +458,17 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         // 5. 返还剩余代币
         _refundDelta(params.token0, msg.sender, token0BalBefore);
         _refundDelta(params.token1, msg.sender, token1BalBefore);
+
+        // 6. 总价值校验：投入 vs (LP价值 + 退款)，用目标池价格统一计价
+        if (params.maxSwapLossBps > 0) {
+            (uint160 sqrtPriceX96Pool, , , , , , ) = IUniswapV3Pool(params.pool).slot0();
+            uint256 inputValue = _calculateValueInToken1(params.amount0In, params.amount1In, sqrtPriceX96Pool);
+            uint256 outputValue = _calculateValueInToken1(result.amount0Used + result.dust0, result.amount1Used + result.dust1, sqrtPriceX96Pool);
+            if (inputValue > outputValue) {
+                uint256 lossBps = FullMath.mulDiv(inputValue - outputValue, BPS_DENOMINATOR, inputValue);
+                require(lossBps <= params.maxSwapLossBps, "Zap loss exceeds limit");
+            }
+        }
 
         emit ZapInV3(msg.sender, params.pool, result.tokenId, result.amount0Used, result.amount1Used, result.liquidity);
     }
@@ -747,6 +760,7 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         require(params.amount0In > 0 || params.amount1In > 0, "Zero amount");
         require(params.slippageBps <= BPS_DENOMINATOR, "Slippage too high");
         require(params.maxDustBps <= BPS_DENOMINATOR, "MaxDust too high");
+        require(params.maxSwapLossBps <= BPS_DENOMINATOR, "MaxSwapLoss too high");
         require(params.positionManager != address(0), "Invalid PM address");
         require(v4PositionManager != address(0), "V4 PM not set");
         require(params.positionManager == v4PositionManager, "Untrusted PM");
@@ -844,6 +858,16 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         // 8. 退还 dust
         _refundDelta(poolKey.currency0, msg.sender, token0BalBefore);
         _refundDelta(poolKey.currency1, msg.sender, token1BalBefore);
+
+        // 9. 总价值校验：投入 vs (LP价值 + 退款)，用目标池价格统一计价
+        if (params.maxSwapLossBps > 0) {
+            uint256 inputValue = _calculateValueInToken1(params.amount0In, params.amount1In, sqrtPriceX96);
+            uint256 outputValue = _calculateValueInToken1(result.amount0Used + result.dust0, result.amount1Used + result.dust1, sqrtPriceX96);
+            if (inputValue > outputValue) {
+                uint256 lossBps = FullMath.mulDiv(inputValue - outputValue, BPS_DENOMINATOR, inputValue);
+                require(lossBps <= params.maxSwapLossBps, "Zap loss exceeds limit");
+            }
+        }
 
         emit ZapInV4(msg.sender, keccak256(abi.encode(v4PoolKey)), result.tokenId, result.amount0Used, result.amount1Used, result.liquidity);
     }

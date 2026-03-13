@@ -74,7 +74,8 @@ type StrategyTask struct {
 	SlippageTolerance    float64 `gorm:"type:decimal(5,2);default:0.5" json:"slippage_tolerance"`
 	AutoReinvest         bool    `gorm:"default:false" json:"auto_reinvest"`
 	ResidualTolerance    float64 `gorm:"type:decimal(5,2);default:1.0" json:"residual_tolerance"`
-	AllowEntrySwap       bool    `gorm:"default:false" json:"allow_entry_swap"` // Allow swapping USDT to entry token when pool lacks USDT
+	ZapLossTolerance     float64 `gorm:"type:decimal(5,2);default:0.5" json:"zap_loss_tolerance"` // Swap loss tolerance (0 = disabled)
+	AllowEntrySwap       bool    `gorm:"default:false" json:"allow_entry_swap"`                   // Allow swapping USDT to entry token when pool lacks USDT
 	StopLossEnabled      bool    `gorm:"default:false" json:"stop_loss_enabled"`
 	StopLossDelaySeconds int     `gorm:"default:0" json:"stop_loss_delay_seconds"` // Out-of-range seconds before stop-loss triggers (0 = immediately)
 

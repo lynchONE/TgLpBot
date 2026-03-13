@@ -1,15 +1,20 @@
 package web_server
 
 import (
+	"TgLpBot/base/database"
 	"context"
-	"encoding/json"
+	"crypto/sha1"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/go-redis/redis/v8"
 )
 
 type HotPoolResponse struct {
@@ -44,12 +49,64 @@ type hotPoolsEnvelope struct {
 	Dex              string            `json:"dex,omitempty"`
 }
 
+const hotPoolsCachePrefix = "hot_pools:resp"
+const hotPoolsCacheTTL = 10 * time.Second
+
 func normalizeHotPoolTokenAddress(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || !common.IsHexAddress(raw) {
 		return ""
 	}
 	return strings.ToLower(common.HexToAddress(raw).Hex())
+}
+
+func buildHotPoolsCacheKey(chain string, timeframeMinutes int, limit int, sortKey string, dex string, tokenAddress string, includePools []string) string {
+	normPools := make([]string, 0, len(includePools))
+	for _, addr := range includePools {
+		addr = strings.ToLower(strings.TrimSpace(addr))
+		if addr != "" {
+			normPools = append(normPools, addr)
+		}
+	}
+	sort.Strings(normPools)
+	raw := fmt.Sprintf(
+		"chain=%s|timeframe=%d|limit=%d|sort=%s|dex=%s|token=%s|include=%s",
+		strings.ToLower(strings.TrimSpace(chain)),
+		timeframeMinutes,
+		limit,
+		strings.ToLower(strings.TrimSpace(sortKey)),
+		strings.ToLower(strings.TrimSpace(dex)),
+		strings.ToLower(strings.TrimSpace(tokenAddress)),
+		strings.Join(normPools, ","),
+	)
+	sum := sha1.Sum([]byte(raw))
+	return fmt.Sprintf("%s:v1:%x", hotPoolsCachePrefix, sum)
+}
+
+func readRedisRawCache(key string) ([]byte, bool) {
+	if database.RedisClient == nil {
+		return nil, false
+	}
+	raw, err := database.GetCache(key)
+	if err != nil {
+		if !errors.Is(err, redis.Nil) {
+			log.Printf("[HotPools] warning: redis get failed key=%s err=%v", key, err)
+		}
+		return nil, false
+	}
+	if strings.TrimSpace(raw) == "" {
+		return nil, false
+	}
+	return []byte(raw), true
+}
+
+func writeRedisRawCache(key string, payload []byte, expiration time.Duration) {
+	if database.RedisClient == nil || len(payload) == 0 {
+		return
+	}
+	if err := database.SetCache(key, string(payload), expiration); err != nil {
+		log.Printf("[HotPools] warning: redis set failed key=%s err=%v", key, err)
+	}
 }
 
 func (s *Server) handleHotPools(w http.ResponseWriter, r *http.Request) {
@@ -145,6 +202,14 @@ func (s *Server) handleHotPools(w http.ResponseWriter, r *http.Request) {
 				includePools = append(includePools, strings.ToLower(addr))
 			}
 		}
+	}
+
+	cacheKey := buildHotPoolsCacheKey(chain, timeframeMinutes, limit, sort, dex, tokenAddress, includePools)
+	if cached, ok := readRedisRawCache(cacheKey); ok {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(cached)
+		return
 	}
 
 	orderBy := "total_fees"
@@ -362,13 +427,21 @@ func (s *Server) handleHotPools(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(hotPoolsEnvelope{
+	resp := hotPoolsEnvelope{
 		Data:             rows,
 		UpdatedAt:        newest,
 		TimeframeMinutes: timeframeMinutes,
 		Chain:            chain,
 		Sort:             sort,
 		Dex:              dex,
-	})
+	}
+	b, err := marshalJSONPayload(resp)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeRedisRawCache(cacheKey, b, hotPoolsCacheTTL)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(b)
 }

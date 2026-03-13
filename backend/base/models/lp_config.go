@@ -34,6 +34,10 @@ type GlobalConfig struct {
 	// Residual tolerance when adding liquidity (percentage, e.g. 1.0 = 1%)
 	ResidualTolerance float64 `gorm:"type:decimal(5,2);default:1.0" json:"residual_tolerance"`
 
+	// Zap swap loss tolerance (percentage, e.g. 0.5 = 0.5%; 0 = disabled)
+	// When > 0, the Zap contract reverts if cross-pool swap causes value loss exceeding this threshold
+	ZapLossTolerance float64 `gorm:"type:decimal(5,2);default:0.5" json:"zap_loss_tolerance"`
+
 	// Notifications
 	ExtraNotificationsEnabled bool `gorm:"not null;default:true" json:"extra_notifications_enabled"`
 

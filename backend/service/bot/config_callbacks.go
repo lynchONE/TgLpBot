@@ -79,6 +79,12 @@ func (b *Bot) handleConfigResidualTolerance(query *tgbotapi.CallbackQuery, user 
 	b.sendMessage(query.Message.Chat.ID, "🧾 请输入剩余资产容忍度（百分比），例如：`1` 表示最多允许 1% 的剩余资产未投入")
 }
 
+func (b *Bot) handleConfigZapLossTolerance(query *tgbotapi.CallbackQuery, user *models.User) {
+	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
+	database.SetUserSession(user.TelegramID, "state", "awaiting_global_zap_loss_tolerance", 30*time.Minute)
+	b.sendMessage(query.Message.Chat.ID, "💰 请输入开仓亏损容忍度（百分比），例如：`0.5` 表示 Swap 价差亏损超过 0.5% 时交易自动 revert\n\n输入 `0` 关闭此校验")
+}
+
 func (b *Bot) handleConfigExtraNotificationsToggle(query *tgbotapi.CallbackQuery, user *models.User) {
 	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
 	cfg, err := b.configService.GetOrCreate(user.ID)

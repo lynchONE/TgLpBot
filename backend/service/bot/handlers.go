@@ -549,6 +549,8 @@ func (b *Bot) handleText(message *tgbotapi.Message, user *models.User) {
 		b.handleGlobalSlippageInput(message.Chat.ID, user, message.Text)
 	case "awaiting_global_residual_tolerance":
 		b.handleGlobalResidualToleranceInput(message.Chat.ID, user, message.Text)
+	case "awaiting_global_zap_loss_tolerance":
+		b.handleGlobalZapLossToleranceInput(message.Chat.ID, user, message.Text)
 	case "awaiting_global_bark_key":
 		b.handleGlobalBarkKeyInput(message.Chat.ID, user, message.Text)
 	case "awaiting_global_bark_server":

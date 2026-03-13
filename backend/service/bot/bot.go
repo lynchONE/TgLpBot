@@ -616,6 +616,8 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleConfigReinvestToggle(query, user)
 	case query.Data == "config_residual_tolerance":
 		b.handleConfigResidualTolerance(query, user)
+	case query.Data == "config_zap_loss_tolerance":
+		b.handleConfigZapLossTolerance(query, user)
 	case query.Data == "config_bark_toggle":
 		b.handleConfigBarkToggle(query, user)
 	case query.Data == "config_bark_key":

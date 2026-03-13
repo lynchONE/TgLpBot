@@ -10,6 +10,7 @@ import (
 	"TgLpBot/service/exchange"
 	"TgLpBot/service/pool"
 	"TgLpBot/service/trade"
+	userSvc "TgLpBot/service/user"
 	"bytes"
 	"crypto/ecdsa"
 	"encoding/hex"
@@ -750,13 +751,24 @@ func (s *LiquidityService) enterV3FromToken(
 		CallData:      []byte{},
 	}
 	if swapAmount != nil && swapAmount.Sign() > 0 {
-		p, err := s.prepareOKXSwapParams(cc, zapAddr, swapTokenIn, swapTokenOut, swapAmount, task.SlippageTolerance)
+		p, okxExpectedOut, err := s.prepareOKXSwapParams(cc, zapAddr, swapTokenIn, swapTokenOut, swapAmount, task.SlippageTolerance)
 		if err != nil {
 			return nil, err
 		}
 		if p != nil {
 			swapParams = *p
 			log.Printf("[Liquidity] V3 enter: OKX swap target=%s minOut=%s", swapParams.Target.Hex(), swapParams.MinAmountOut.String())
+
+			// Zap 安全检查：价格偏差 + 池子流动性
+			sqrtPrice, _, slot0Err := blockchain.GetV3PoolSlot0WithClient(client, poolAddr)
+			if slot0Err != nil {
+				log.Printf("[Liquidity] V3 enter: read slot0 for safety check failed: %v, skipping", slot0Err)
+			} else if sqrtPrice != nil {
+				if safeErr := s.checkZapSafety(client, sqrtPrice, swapTokenIn, swapTokenOut, swapAmount, okxExpectedOut,
+					token0, token1, tokenIn, cc.StableDecimals, poolAddr); safeErr != nil {
+					return nil, safeErr
+				}
+			}
 		}
 	}
 
@@ -848,6 +860,7 @@ func (s *LiquidityService) enterV3FromToken(
 		Amount1In:       amount1In,
 		SlippageBps:     mintSlippageBps,
 		Swap:            swapParams,
+		MaxSwapLossBps:  percentageToBpsReal(task.ZapLossTolerance),
 	}
 
 	log.Printf("[Liquidity] V3 enter 参数: pool=%s tick=%d..%d mintSlippage(dust)=%s", poolAddr.Hex(), task.TickLower, task.TickUpper, mintSlippageBps.String())
@@ -1171,16 +1184,117 @@ func getSqrtRatioAtTick(tick int) *big.Int {
 	return res
 }
 
+// ZapSafetyError 表示 Zap 安全检查未通过
+type ZapSafetyError struct {
+	Reason string
+}
+
+func (e *ZapSafetyError) Error() string {
+	return e.Reason
+}
+
+// checkZapSafety 在执行 Zap 交易前检查 OKX 报价偏差和池子流动性
+// sqrtPriceX96: 池子当前价格
+// swapTokenIn/swapTokenOut: OKX swap 的输入/输出代币
+// swapAmountIn: OKX swap 的输入数量
+// okxToTokenAmount: OKX 报价的预期输出数量
+// token0/token1: 池子的 token0/token1（已排序）
+// entryToken: 用户入场代币
+// entryDecimals: 入场代币精度
+// poolAddr: V3 池子地址（用于读取余额），V4 传零地址
+func (s *LiquidityService) checkZapSafety(
+	client *ethclient.Client,
+	sqrtPriceX96 *big.Int,
+	swapTokenIn, swapTokenOut common.Address,
+	swapAmountIn *big.Int,
+	okxToTokenAmount *big.Int,
+	token0, token1 common.Address,
+	entryToken common.Address,
+	entryDecimals int,
+	poolAddr common.Address,
+) error {
+	sysConfigService := userSvc.NewSystemConfigService()
+	safety, err := sysConfigService.GetZapSafetyConfig()
+	if err != nil {
+		log.Printf("[Liquidity] Warning: get zap safety config failed: %v, skipping pre-check", err)
+		return nil
+	}
+
+	// 1. 价格偏差检查：比较 OKX 报价与池子价格
+	if safety.PriceDeviationMaxPercent > 0 &&
+		swapAmountIn != nil && swapAmountIn.Sign() > 0 &&
+		okxToTokenAmount != nil && okxToTokenAmount.Sign() > 0 &&
+		sqrtPriceX96 != nil && sqrtPriceX96.Sign() > 0 {
+
+		// 池子价格: price(token1/token0) = (sqrtPriceX96)^2 / 2^192
+		// 用 float64 近似计算即可，只需要判断偏差百分比
+		sqrtF := new(big.Float).SetInt(sqrtPriceX96)
+		q96 := new(big.Float).SetFloat64(math.Pow(2, 96))
+		ratio := new(big.Float).Quo(sqrtF, q96)
+		poolPriceF, _ := new(big.Float).Mul(ratio, ratio).Float64() // token1 per token0
+
+		// OKX 价格：根据 swap 方向计算
+		okxIn := new(big.Float).SetInt(swapAmountIn)
+		okxOut := new(big.Float).SetInt(okxToTokenAmount)
+		var okxPriceF float64
+
+		if swapTokenIn == token0 {
+			// swap token0 -> token1: OKX rate = toTokenAmount / amountIn (token1 per token0)
+			okxPriceF, _ = new(big.Float).Quo(okxOut, okxIn).Float64()
+		} else {
+			// swap token1 -> token0: OKX rate = amountIn / toTokenAmount (token1 per token0)
+			okxPriceF, _ = new(big.Float).Quo(okxIn, okxOut).Float64()
+		}
+
+		if poolPriceF > 0 && okxPriceF > 0 {
+			deviation := math.Abs(okxPriceF-poolPriceF) / poolPriceF * 100
+			log.Printf("[Liquidity] Zap safety: poolPrice=%.8f okxPrice=%.8f deviation=%.2f%% threshold=%.2f%%",
+				poolPriceF, okxPriceF, deviation, safety.PriceDeviationMaxPercent)
+			if deviation > safety.PriceDeviationMaxPercent {
+				return &ZapSafetyError{
+					Reason: fmt.Sprintf("OKX 报价与池子价格偏差 %.2f%% 超过阈值 %.2f%%，取消开仓（池子价格=%.8f, OKX价格=%.8f）",
+						deviation, safety.PriceDeviationMaxPercent, poolPriceF, okxPriceF),
+				}
+			}
+		}
+	}
+
+	// 2. 池子流动性检查（仅 V3，V4 池子 poolAddr 传零地址时跳过）
+	if safety.MinPoolLiquidityUSD > 0 && poolAddr != (common.Address{}) && entryDecimals > 0 {
+		// 读取池子中入场代币余额作为 TVL 近似值（× 2）
+		entryBal, balErr := blockchain.GetTokenBalanceWithClient(client, entryToken, poolAddr)
+		if balErr != nil {
+			log.Printf("[Liquidity] Zap safety: read pool entry token balance failed: %v, skipping liquidity check", balErr)
+		} else if entryBal != nil && entryBal.Sign() > 0 {
+			balF, _ := new(big.Float).SetInt(entryBal).Float64()
+			divisor := math.Pow(10, float64(entryDecimals))
+			balF = balF / divisor
+			estimatedTVL := balF * 2
+			log.Printf("[Liquidity] Zap safety: pool entry token balance=%.2f estimatedTVL=%.2f threshold=%.2f",
+				balF, estimatedTVL, safety.MinPoolLiquidityUSD)
+			if estimatedTVL < safety.MinPoolLiquidityUSD {
+				return &ZapSafetyError{
+					Reason: fmt.Sprintf("池子流动性不足：预估 TVL %.2f USD 低于阈值 %.2f USD，取消开仓",
+						estimatedTVL, safety.MinPoolLiquidityUSD),
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
 // prepareOKXSwapParams helps construct SwapParamsSimple for Zap contracts
+// Returns (swapParams, expectedOutputAmount, error).
 func (s *LiquidityService) prepareOKXSwapParams(
 	cc config.ChainConfig,
 	executorAddr common.Address,
 	tokenIn, tokenOut common.Address,
 	amountIn *big.Int,
 	slippageTolerance float64,
-) (*blockchain.SwapParamsSimple, error) {
+) (*blockchain.SwapParamsSimple, *big.Int, error) {
 	if amountIn == nil || amountIn.Sign() <= 0 {
-		return nil, nil // No swap needed
+		return nil, nil, nil // No swap needed
 	}
 
 	if s.okxService == nil {
@@ -1198,10 +1312,10 @@ func (s *LiquidityService) prepareOKXSwapParams(
 
 	okxData, err := s.okxService.GetSwapData(swapReq)
 	if err != nil {
-		return nil, fmt.Errorf("get OKX swap data failed: %w", err)
+		return nil, nil, fmt.Errorf("get OKX swap data failed: %w", err)
 	}
 	if okxData == nil || len(okxData.Data) == 0 {
-		return nil, fmt.Errorf("OKX returned empty data")
+		return nil, nil, fmt.Errorf("OKX returned empty data")
 	}
 
 	expectedOutText := strings.TrimSpace(okxData.Data[0].RouterResult.ToTokenAmount)
@@ -1266,7 +1380,7 @@ func (s *LiquidityService) prepareOKXSwapParams(
 		AmountIn:      amountIn,
 		MinAmountOut:  minOut,
 		CallData:      callData,
-	}, nil
+	}, baseOut, nil
 }
 
 func (s *LiquidityService) enterV4FromToken(
@@ -1487,11 +1601,17 @@ func (s *LiquidityService) enterV4FromToken(
 	swapParams.CallData = []byte{}
 
 	if swapAmount.Sign() > 0 {
-		sParams, err := s.prepareOKXSwapParams(cc, zapAddr, tokenIn, tokenOut, swapAmount, task.SlippageTolerance)
+		sParams, okxExpectedOut, err := s.prepareOKXSwapParams(cc, zapAddr, tokenIn, tokenOut, swapAmount, task.SlippageTolerance)
 		if err != nil {
 			log.Printf("[Liquidity] Warning: prepare OKX swap failed, trying zero swap: %v", err)
 		} else if sParams != nil {
 			swapParams = *sParams
+
+			// Zap 安全检查：价格偏差（V4 已有 sqrtPriceX96，流动性检查传零地址跳过）
+			if safeErr := s.checkZapSafety(client, sqrtPriceX96, tokenIn, tokenOut, swapAmount, okxExpectedOut,
+				c0, c1, tokenIn, cc.StableDecimals, common.Address{}); safeErr != nil {
+				return nil, safeErr
+			}
 		}
 	}
 
@@ -1530,8 +1650,9 @@ func (s *LiquidityService) enterV4FromToken(
 		Amount1In:       amount1In,
 		SlippageBps:     percentageToBps(task.SlippageTolerance),
 		Swap:            swapParams,
-		SqrtPriceX96:    sqrtPriceX96,                            // 传入从链上获取的价格，避免合约重复调用
-		MaxDustBps:      percentageToBps(task.ResidualTolerance), // 剩余资产容忍度 (dust)
+		SqrtPriceX96:    sqrtPriceX96,                               // 传入从链上获取的价格，避免合约重复调用
+		MaxDustBps:      percentageToBps(task.ResidualTolerance),    // 剩余资产容忍度 (dust)
+		MaxSwapLossBps:  percentageToBpsReal(task.ZapLossTolerance), // Swap 亏损容忍度
 	}
 
 	// 6. Call ZapInV4
@@ -1769,4 +1890,12 @@ func percentageToBps(p float64) *big.Int {
 	// TODO: 优化 swap 计算逻辑后，可以改回用户配置的值
 	return big.NewInt(0) // 禁用 dust 校验
 	// return big.NewInt(int64(p * 100))
+}
+
+// percentageToBpsReal converts float percent (e.g. 0.5) to bps (e.g. 50), 0 = disabled
+func percentageToBpsReal(p float64) *big.Int {
+	if p <= 0 {
+		return big.NewInt(0)
+	}
+	return big.NewInt(int64(p * 100))
 }

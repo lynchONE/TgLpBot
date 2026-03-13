@@ -44,6 +44,10 @@ type adminSystemConfigRequest struct {
 	AutoLPGuardLowFeeRate5m         *float64 `json:"autolp_guard_low_fee_rate_5m,omitempty"`
 	AutoLPGuardVolumeDropPercentLow *float64 `json:"autolp_guard_volume_drop_percent_low,omitempty"`
 	AutoLPGuardCooldownSeconds      *int     `json:"autolp_guard_cooldown_seconds,omitempty"`
+
+	// 可选更新字段 - Zap 安全检查
+	ZapPriceDeviationMaxPercent *float64 `json:"zap_price_deviation_max_percent,omitempty"`
+	ZapMinPoolLiquidityUSD      *float64 `json:"zap_min_pool_liquidity_usd,omitempty"`
 }
 
 type adminSystemConfigResponse struct {
@@ -53,6 +57,7 @@ type adminSystemConfigResponse struct {
 	Defaults            *models.HardFilterConfig  `json:"defaults,omitempty"`
 	WidthGuardDefaults  *models.WidthGuardConfig  `json:"width_guard_defaults,omitempty"`
 	EntrySignalDefaults *models.EntrySignalConfig `json:"entry_signal_defaults,omitempty"`
+	ZapSafetyDefaults   *models.ZapSafetyConfig   `json:"zap_safety_defaults,omitempty"`
 }
 
 func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request) {
@@ -185,6 +190,13 @@ func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request)
 		if req.AutoLPGuardCooldownSeconds != nil {
 			updates["AutoLPGuardCooldownSeconds"] = *req.AutoLPGuardCooldownSeconds
 		}
+		// Zap 安全检查
+		if req.ZapPriceDeviationMaxPercent != nil {
+			updates["ZapPriceDeviationMaxPercent"] = *req.ZapPriceDeviationMaxPercent
+		}
+		if req.ZapMinPoolLiquidityUSD != nil {
+			updates["ZapMinPoolLiquidityUSD"] = *req.ZapMinPoolLiquidityUSD
+		}
 
 		if len(updates) > 0 {
 			sysConfigService := userSvc.NewSystemConfigService()
@@ -197,6 +209,7 @@ func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request)
 			defaults := getEnvDefaults()
 			widthGuardDefaults := getWidthGuardDefaults()
 			entrySignalDefaults := getEntrySignalDefaults()
+			zapSafetyDefaults := getZapSafetyDefaults()
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(adminSystemConfigResponse{
 				OK:                  true,
@@ -204,6 +217,7 @@ func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request)
 				Defaults:            defaults,
 				WidthGuardDefaults:  widthGuardDefaults,
 				EntrySignalDefaults: entrySignalDefaults,
+				ZapSafetyDefaults:   zapSafetyDefaults,
 			})
 			return
 		}
@@ -263,6 +277,7 @@ func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request)
 	defaults := getEnvDefaults()
 	widthGuardDefaults := getWidthGuardDefaults()
 	entrySignalDefaults := getEntrySignalDefaults()
+	zapSafetyDefaults := getZapSafetyDefaults()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(adminSystemConfigResponse{
@@ -271,6 +286,7 @@ func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request)
 		Defaults:            defaults,
 		WidthGuardDefaults:  widthGuardDefaults,
 		EntrySignalDefaults: entrySignalDefaults,
+		ZapSafetyDefaults:   zapSafetyDefaults,
 	})
 }
 
@@ -319,5 +335,12 @@ func getEntrySignalDefaults() *models.EntrySignalConfig {
 		TrendFilterEnabled:     config.AppConfig.AutoLPTrendFilterEnabled,
 		EntryTrendCrossPercent: config.AppConfig.AutoLPEntryTrendCrossPercent,
 		EntryBlockDev5Percent:  config.AppConfig.AutoLPEntryBlockDev5Percent,
+	}
+}
+
+func getZapSafetyDefaults() *models.ZapSafetyConfig {
+	return &models.ZapSafetyConfig{
+		PriceDeviationMaxPercent: 1.0,
+		MinPoolLiquidityUSD:      1000.0,
 	}
 }

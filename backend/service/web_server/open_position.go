@@ -445,6 +445,7 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		SlippageTolerance:    slippage,
 		AutoReinvest:         cfg.AutoReinvest,
 		ResidualTolerance:    cfg.ResidualTolerance,
+		ZapLossTolerance:     cfg.ZapLossTolerance,
 		AllowEntrySwap:       req.AllowEntrySwap,
 		StopLossEnabled:      cfg.StopLossEnabled,
 		StopLossDelaySeconds: cfg.StopLossDelaySeconds,

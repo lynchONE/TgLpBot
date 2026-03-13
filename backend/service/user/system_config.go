@@ -227,3 +227,25 @@ func (s *SystemConfigService) GetEntrySignalConfig() (*models.EntrySignalConfig,
 
 	return out, nil
 }
+
+// GetZapSafetyConfig 获取 Zap 安全检查配置，优先使用数据库配置，回退到默认值
+func (s *SystemConfigService) GetZapSafetyConfig() (*models.ZapSafetyConfig, error) {
+	cfg, err := s.GetOrCreate()
+	if err != nil {
+		return nil, err
+	}
+
+	out := &models.ZapSafetyConfig{
+		PriceDeviationMaxPercent: 1.0,    // 默认 1%
+		MinPoolLiquidityUSD:      1000.0, // 默认 1000 USD
+	}
+
+	if cfg.ZapPriceDeviationMaxPercent > 0 {
+		out.PriceDeviationMaxPercent = cfg.ZapPriceDeviationMaxPercent
+	}
+	if cfg.ZapMinPoolLiquidityUSD > 0 {
+		out.MinPoolLiquidityUSD = cfg.ZapMinPoolLiquidityUSD
+	}
+
+	return out, nil
+}

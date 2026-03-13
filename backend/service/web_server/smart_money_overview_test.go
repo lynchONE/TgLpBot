@@ -191,8 +191,8 @@ func TestQuerySmartMoneyCashflows_ParsesRowsAndUsesNetAmounts(t *testing.T) {
 		t.Fatalf("unexpected row: %+v", rows[0])
 	}
 
-	if !strings.Contains(conn.lastQuery, "net_amount0") || !strings.Contains(conn.lastQuery, "net_amount1") {
-		t.Fatalf("expected query to reference net_amount columns, got: %s", conn.lastQuery)
+	if !strings.Contains(conn.lastQuery, smart_lp.SmartLPRollupTable) || !strings.Contains(conn.lastQuery, "sum(sum0)") {
+		t.Fatalf("expected cashflow query to use rollup table, got: %s", conn.lastQuery)
 	}
 	if len(conn.lastArgs) == 0 {
 		t.Fatalf("expected query args")
@@ -223,7 +223,7 @@ func TestQuerySmartMoneyEventTrend_BuildsHourlyAggregationQuery(t *testing.T) {
 		t.Fatalf("unexpected row: %+v", rows[0])
 	}
 
-	if !strings.Contains(conn.lastQuery, "hours_ago") || !strings.Contains(conn.lastQuery, "sum(if(action='add'") {
+	if !strings.Contains(conn.lastQuery, smart_lp.SmartLPRollupTable) || !strings.Contains(conn.lastQuery, "sum(if(action='add', event_count, 0))") {
 		t.Fatalf("unexpected trend query: %s", conn.lastQuery)
 	}
 }
@@ -261,11 +261,11 @@ func TestQuerySmartMoneyWalletSnapshots_BuildsSnapshotQueryAndParsesRows(t *test
 		t.Fatalf("unexpected row: %+v", rows[0])
 	}
 
-	if !strings.Contains(conn.lastQuery, "sumIf") || !strings.Contains(conn.lastQuery, "ts < ?") {
+	if !strings.Contains(conn.lastQuery, smart_lp.SmartLPRollupTable) || !strings.Contains(conn.lastQuery, "bucket < ?") {
 		t.Fatalf("expected snapshot query to contain day-start snapshot logic, got: %s", conn.lastQuery)
 	}
-	if !strings.Contains(conn.lastQuery, "if(action='add', -toInt256OrZero") {
-		t.Fatalf("expected snapshot query to apply signed net amounts, got: %s", conn.lastQuery)
+	if !strings.Contains(conn.lastQuery, "if(action='add', -sum0, sum0)") {
+		t.Fatalf("expected snapshot query to apply signed rollup amounts, got: %s", conn.lastQuery)
 	}
 }
 

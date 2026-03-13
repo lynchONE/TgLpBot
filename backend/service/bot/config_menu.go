@@ -23,6 +23,9 @@ func globalConfigKeyboard() tgbotapi.InlineKeyboardMarkup {
 			tgbotapi.NewInlineKeyboardButtonData("剩余资产容忍度", "config_residual_tolerance"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("开仓亏损容忍度", "config_zap_loss_tolerance"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("Bark 通知开关", "config_bark_toggle"),
 			tgbotapi.NewInlineKeyboardButtonData("设置 Bark Key", "config_bark_key"),
 		),
@@ -77,6 +80,7 @@ func formatGlobalConfigMenuText(cfg *models.GlobalConfig) string {
 滑点：%.2f%%
 复投：%s
 剩余资产容忍度：%.2f%%
+开仓亏损容忍度：%.2f%%
 Bark 通知：%s（%s）
 Bark Server：%s
 Bark Group：%s
@@ -93,6 +97,7 @@ Bark Group：%s
 		cfg.SlippageTolerance,
 		boolToOnOff(cfg.AutoReinvest),
 		cfg.ResidualTolerance,
+		cfg.ZapLossTolerance,
 		barkStatus,
 		barkKeyStatus,
 		barkServer,

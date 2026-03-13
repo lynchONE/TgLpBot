@@ -378,13 +378,7 @@ func (s *Server) handleSmartMoneyPoolAdds(w http.ResponseWriter, r *http.Request
 	}
 
 	poolSvc := pool.NewPoolService()
-	var info *pool.PoolInfo
-	var perr error
-	if poolVersion == "v4" {
-		info, perr = poolSvc.GetV4PoolInfo(poolID)
-	} else {
-		info, perr = poolSvc.GetPoolInfo(poolID)
-	}
+	info, perr := poolSvc.GetPoolInfoForVersionCached(chain, poolVersion, poolID)
 
 	warnings := make([]string, 0, 4)
 	if perr != nil {

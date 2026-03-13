@@ -207,13 +207,7 @@ func fetchPoolInfoBestEffort(
 	}
 	outCh := make(chan result, 1)
 	go func() {
-		pv := strings.ToLower(strings.TrimSpace(poolVersion))
-		if pv == "v4" {
-			info, err := poolSvc.GetV4PoolInfo(poolID)
-			outCh <- result{info: info, err: err}
-			return
-		}
-		info, err := poolSvc.GetPoolInfoForChain(chain, poolID)
+		info, err := poolSvc.GetPoolInfoForVersionCached(chain, poolVersion, poolID)
 		outCh <- result{info: info, err: err}
 	}()
 

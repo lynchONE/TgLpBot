@@ -5,6 +5,14 @@ import (
 	"net/http"
 )
 
+func marshalJSONPayload(payload any) ([]byte, error) {
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return append(b, '\n'), nil
+}
+
 func writeJSON(w http.ResponseWriter, status int, payload any) {
 	if w == nil {
 		return
@@ -12,12 +20,11 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	if status <= 0 {
 		status = http.StatusOK
 	}
-	b, err := json.Marshal(payload)
+	b, err := marshalJSONPayload(payload)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	b = append(b, '\n')
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_, _ = w.Write(b)

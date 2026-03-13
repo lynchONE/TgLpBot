@@ -26,6 +26,8 @@ type SmartLPWalletRank struct {
 	PoolCount     int
 }
 
+const SmartLPRollupTable = "smart_lp_rollup_5m"
+
 type SmartLPService struct {
 	ch *clickhouse.ClickHouseService
 }
@@ -92,16 +94,10 @@ func (s *SmartLPService) GetTopAddedLiquidityPools(ctx context.Context, chain st
 				pool_version,
 				pool_id,
 				wallet_address,
-				sumIf(toFloat64OrZero(liquidity_delta), action = 'add') AS add_liquidity,
-				sum(
-					if(pool_version = 'v4',
-						toInt256OrZero(liquidity_delta),
-						if(action = 'add', toInt256OrZero(liquidity_delta), -toInt256OrZero(liquidity_delta))
-					)
-				) AS net_liquidity
-			FROM smart_lp_events
-			WHERE ts >= now() - INTERVAL %d SECOND
-				AND action IN ('add', 'remove')
+				sum(add_liquidity) AS add_liquidity,
+				sum(net_liquidity) AS net_liquidity
+			FROM %s
+			WHERE bucket >= now() - INTERVAL %d SECOND
 				AND pool_version != '' AND pool_id != ''
 				%s
 			GROUP BY pool_version, pool_id, wallet_address
@@ -110,7 +106,7 @@ func (s *SmartLPService) GetTopAddedLiquidityPools(ctx context.Context, chain st
 		GROUP BY pool_version, pool_id
 		ORDER BY wallet_count DESC, added_liquidity DESC
 		LIMIT %d
-	`, seconds, chainFilter, limit)
+	`, SmartLPRollupTable, seconds, chainFilter, limit)
 
 	rows, err := s.ch.Conn.Query(ctx, q, args...)
 	if err != nil {
@@ -282,10 +278,10 @@ func (s *SmartLPService) GetTopAddWalletsInPools(ctx context.Context, chain stri
 	q := fmt.Sprintf(`
 		SELECT
 			wallet_address,
-			count() AS event_count,
+			sum(event_count) AS event_count,
 			uniqExact(concat(pool_version, '|', pool_id)) AS pool_count
-		FROM smart_lp_events
-		WHERE ts >= now() - INTERVAL %d SECOND
+		FROM %s
+		WHERE bucket >= now() - INTERVAL %d SECOND
 			AND action = 'add'
 			AND wallet_address != ''
 			AND (pool_version, pool_id) IN (%s)
@@ -293,7 +289,7 @@ func (s *SmartLPService) GetTopAddWalletsInPools(ctx context.Context, chain stri
 		GROUP BY wallet_address
 		ORDER BY event_count DESC, pool_count DESC, wallet_address ASC
 		LIMIT %d
-	`, seconds, strings.Join(placeholders, ","), chainFilter, limit)
+	`, SmartLPRollupTable, seconds, strings.Join(placeholders, ","), chainFilter, limit)
 
 	rows, err := s.ch.Conn.Query(ctx, q, args...)
 	if err != nil {
@@ -350,7 +346,7 @@ func (s *SmartLPService) GetActiveWalletCounts(ctx context.Context, pools []Smar
 		FROM (
 			SELECT pool_version, pool_id, wallet_address, argMax(action, event_seq) AS last_action
 			FROM smart_lp_events
-			WHERE ts >= now() - INTERVAL 15 DAY
+			WHERE ts >= now() - INTERVAL 2 DAY
 				AND (pool_version, pool_id) IN (%s)
 			GROUP BY pool_version, pool_id, wallet_address
 		)
@@ -416,12 +412,12 @@ func (s *SmartLPService) GetRecentAddWalletCounts(ctx context.Context, pools []S
 	// 查询最近lookback时间内有add动作的不同钱包数量
 	q := fmt.Sprintf(`
 		SELECT pool_version, pool_id, uniqExact(wallet_address) AS wallet_count
-		FROM smart_lp_events
-		WHERE ts >= now() - INTERVAL %d SECOND
+		FROM %s
+		WHERE bucket >= now() - INTERVAL %d SECOND
 			AND action = 'add'
 			AND (pool_version, pool_id) IN (%s)
 		GROUP BY pool_version, pool_id
-	`, seconds, strings.Join(placeholders, ","))
+	`, SmartLPRollupTable, seconds, strings.Join(placeholders, ","))
 
 	rows, err := s.ch.Conn.Query(ctx, q, args...)
 	if err != nil {

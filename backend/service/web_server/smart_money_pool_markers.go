@@ -344,13 +344,7 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 	summary, summaryErr := querySmartMoneyPoolMarkerSummary(ctx, s.ClickHouse.Conn, chain, poolVersion, poolID, bucketSec, rangeStart, rangeEnd)
 
 	poolSvc := pool.NewPoolService()
-	var info *pool.PoolInfo
-	var perr error
-	if poolVersion == "v4" {
-		info, perr = poolSvc.GetV4PoolInfo(poolID)
-	} else {
-		info, perr = poolSvc.GetPoolInfo(poolID)
-	}
+	info, perr := poolSvc.GetPoolInfoForVersionCached(chain, poolVersion, poolID)
 
 	warnings := make([]string, 0, 4)
 	if summaryErr != nil {

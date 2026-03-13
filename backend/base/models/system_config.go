@@ -43,6 +43,10 @@ type SystemConfig struct {
 	AutoLPGuardVolumeDropPercentLow float64 `gorm:"type:decimal(10,4);default:0" json:"autolp_guard_volume_drop_percent_low"` // 低费率时成交量下降阈值
 	AutoLPGuardCooldownSeconds      int     `gorm:"default:0" json:"autolp_guard_cooldown_seconds"`                           // 冷却时间（秒；0 表示使用环境变量默认值）
 
+	// Zap 安全检查参数（0 表示使用默认值）
+	ZapPriceDeviationMaxPercent float64 `gorm:"type:decimal(10,4);default:0" json:"zap_price_deviation_max_percent"` // OKX 报价与池子价格最大偏差 (%, 默认 1)
+	ZapMinPoolLiquidityUSD      float64 `gorm:"type:decimal(20,4);default:0" json:"zap_min_pool_liquidity_usd"`      // 池子最低流动性 (USD, 默认 1000)
+
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
@@ -85,4 +89,10 @@ type EntrySignalConfig struct {
 	TrendFilterEnabled     bool    `json:"trend_filter_enabled"`
 	EntryTrendCrossPercent float64 `json:"entry_trend_cross_pct"`
 	EntryBlockDev5Percent  float64 `json:"entry_block_dev5_pct"`
+}
+
+// ZapSafetyConfig Zap 开仓安全检查配置
+type ZapSafetyConfig struct {
+	PriceDeviationMaxPercent float64 `json:"price_deviation_max_percent"` // OKX 报价与池子价格最大偏差 (%)
+	MinPoolLiquidityUSD      float64 `json:"min_pool_liquidity_usd"`      // 池子最低流动性 (USD)
 }

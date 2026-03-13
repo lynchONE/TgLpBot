@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
@@ -200,6 +201,59 @@ func smartMoneyDayStart(now time.Time) time.Time {
 	return time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, loc)
 }
 
+func loadSmartMoneyPoolInfos(ctx context.Context, poolSvc *pool.PoolService, chain string, pools []smart_lp.SmartLPPoolKey) (map[string]*pool.PoolInfo, []string) {
+	out := make(map[string]*pool.PoolInfo, len(pools))
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if poolSvc == nil || len(pools) == 0 {
+		return out, nil
+	}
+
+	unique := make(map[string]smart_lp.SmartLPPoolKey, len(pools))
+	for _, pk := range pools {
+		pv := strings.ToLower(strings.TrimSpace(pk.PoolVersion))
+		pid := strings.ToLower(strings.TrimSpace(pk.PoolID))
+		if pv == "" || pid == "" {
+			continue
+		}
+		unique[pv+"|"+pid] = smart_lp.SmartLPPoolKey{PoolVersion: pv, PoolID: pid}
+	}
+
+	warnings := make([]string, 0, len(unique))
+	sem := make(chan struct{}, 4)
+	var (
+		mu sync.Mutex
+		wg sync.WaitGroup
+	)
+	for key, pk := range unique {
+		if ctx != nil && ctx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		go func(key string, pk smart_lp.SmartLPPoolKey) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			defer func() { <-sem }()
+
+			info, err := poolSvc.GetPoolInfoForVersionCached(chain, pk.PoolVersion, pk.PoolID)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("pool info failed %s %s: %v", pk.PoolVersion, pk.PoolID, err))
+				return
+			}
+			out[key] = info
+		}(key, pk)
+	}
+	wg.Wait()
+	return out, warnings
+}
+
 func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -272,9 +326,6 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 		}
 	}
 	pools := make([]smart_lp.SmartLPPoolKey, 0, len(ranks))
-	outPools := make([]smartMoneyOverviewPool, 0, len(ranks))
-	poolInfoByKey := make(map[string]*pool.PoolInfo, len(ranks))
-
 	for _, rank := range ranks {
 		pv := strings.ToLower(strings.TrimSpace(rank.PoolVersion))
 		pid := strings.ToLower(strings.TrimSpace(rank.PoolID))
@@ -282,21 +333,21 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 			continue
 		}
 		pools = append(pools, smart_lp.SmartLPPoolKey{PoolVersion: pv, PoolID: pid})
+	}
 
-		var info *pool.PoolInfo
-		if pv == "v4" {
-			info, err = poolSvc.GetV4PoolInfo(pid)
-		} else {
-			info, err = poolSvc.GetPoolInfo(pid)
-		}
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("pool info failed %s %s: %v", pv, pid, err))
-			info = nil
-		}
-		if info != nil {
-			poolInfoByKey[pv+"|"+pid] = info
-		}
+	poolInfoByKey, infoWarnings := loadSmartMoneyPoolInfos(ctx, poolSvc, chain, pools)
+	if len(infoWarnings) > 0 {
+		warnings = append(warnings, infoWarnings...)
+	}
 
+	outPools := make([]smartMoneyOverviewPool, 0, len(ranks))
+	for _, rank := range ranks {
+		pv := strings.ToLower(strings.TrimSpace(rank.PoolVersion))
+		pid := strings.ToLower(strings.TrimSpace(rank.PoolID))
+		if pv == "" || pid == "" {
+			continue
+		}
+		info := poolInfoByKey[pv+"|"+pid]
 		p := smartMoneyOverviewPool{
 			PoolVersion:    pv,
 			PoolID:         pid,
@@ -781,24 +832,24 @@ func querySmartMoneyCashflows(ctx context.Context, conn smartMoneyClickHouseQuer
 		args = append(args, chain)
 	}
 
-	// Prefer `net_amount*` when it is non-zero; otherwise fall back to event amounts.
+	// Read per-wallet/pool cashflows from the 5-minute rollup table instead of raw event rows.
 	q := fmt.Sprintf(`
 		SELECT
 			wallet_address,
 			pool_version,
 			pool_id,
 			action,
-			toString(sum(toInt256OrZero(if(net_amount0 != '' AND net_amount0 != '0', net_amount0, amount0)))) AS sum0,
-			toString(sum(toInt256OrZero(if(net_amount1 != '' AND net_amount1 != '0', net_amount1, amount1)))) AS sum1,
-			count() AS event_count
-		FROM smart_lp_events
-		WHERE ts >= now() - INTERVAL %d SECOND
+			toString(sum(sum0)) AS sum0,
+			toString(sum(sum1)) AS sum1,
+			sum(event_count) AS event_count
+		FROM %s
+		WHERE bucket >= now() - INTERVAL %d SECOND
 			AND action IN ('add', 'remove')
 			AND wallet_address IN (?)
 			AND (pool_version, pool_id) IN (%s)
 			%s
 		GROUP BY wallet_address, pool_version, pool_id, action
-	`, seconds, strings.Join(placeholders, ","), chainFilter)
+	`, smart_lp.SmartLPRollupTable, seconds, strings.Join(placeholders, ","), chainFilter)
 
 	rows, err := conn.Query(ctx, q, args...)
 	if err != nil {
@@ -863,17 +914,17 @@ func querySmartMoneyWalletSnapshots(ctx context.Context, conn smartMoneyClickHou
 			wallet_address,
 			pool_version,
 			pool_id,
-			toString(sumIf(if(action='add', -toInt256OrZero(if(net_amount0 != '' AND net_amount0 != '0', net_amount0, amount0)), toInt256OrZero(if(net_amount0 != '' AND net_amount0 != '0', net_amount0, amount0))), ts < ?)) AS start_sum0,
-			toString(sumIf(if(action='add', -toInt256OrZero(if(net_amount1 != '' AND net_amount1 != '0', net_amount1, amount1)), toInt256OrZero(if(net_amount1 != '' AND net_amount1 != '0', net_amount1, amount1))), ts < ?)) AS start_sum1,
-			toString(sum(if(action='add', -toInt256OrZero(if(net_amount0 != '' AND net_amount0 != '0', net_amount0, amount0)), toInt256OrZero(if(net_amount0 != '' AND net_amount0 != '0', net_amount0, amount0))))) AS end_sum0,
-			toString(sum(if(action='add', -toInt256OrZero(if(net_amount1 != '' AND net_amount1 != '0', net_amount1, amount1)), toInt256OrZero(if(net_amount1 != '' AND net_amount1 != '0', net_amount1, amount1))))) AS end_sum1
-		FROM smart_lp_events
+			toString(sumIf(if(action='add', -sum0, sum0), bucket < ?)) AS start_sum0,
+			toString(sumIf(if(action='add', -sum1, sum1), bucket < ?)) AS start_sum1,
+			toString(sum(if(action='add', -sum0, sum0))) AS end_sum0,
+			toString(sum(if(action='add', -sum1, sum1))) AS end_sum1
+		FROM %s
 		WHERE action IN ('add', 'remove')
 			AND wallet_address IN (?)
 			AND (pool_version, pool_id) IN (%s)
 			%s
 		GROUP BY wallet_address, pool_version, pool_id
-	`, strings.Join(placeholders, ","), chainFilter)
+	`, smart_lp.SmartLPRollupTable, strings.Join(placeholders, ","), chainFilter)
 
 	rows, err := conn.Query(ctx, q, args...)
 	if err != nil {
@@ -937,17 +988,17 @@ func querySmartMoneyEventTrend(ctx context.Context, conn smartMoneyClickHouseQue
 
 	q := fmt.Sprintf(`
 		SELECT
-			toInt32(intDiv(dateDiff('second', ts, now()), 3600)) AS hours_ago,
-			sum(if(action='add', 1, 0)) AS add_events,
-			sum(if(action='remove', 1, 0)) AS remove_events,
+			toInt32(intDiv(dateDiff('second', bucket, now()), 3600)) AS hours_ago,
+			sum(if(action='add', event_count, 0)) AS add_events,
+			sum(if(action='remove', event_count, 0)) AS remove_events,
 			uniqExact(wallet_address) AS distinct_wallets
-		FROM smart_lp_events
-		WHERE ts >= now() - INTERVAL %d SECOND
+		FROM %s
+		WHERE bucket >= now() - INTERVAL %d SECOND
 			AND action IN ('add', 'remove')
 			AND (pool_version, pool_id) IN (%s)
 			%s
 		GROUP BY hours_ago
-	`, seconds, strings.Join(placeholders, ","), chainFilter)
+	`, smart_lp.SmartLPRollupTable, seconds, strings.Join(placeholders, ","), chainFilter)
 
 	rows, err := conn.Query(ctx, q, args...)
 	if err != nil {
