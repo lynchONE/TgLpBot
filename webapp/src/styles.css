@@ -1104,19 +1104,6 @@ body {
   align-items: center;
 }
 
-.ws-status-dot {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: rgba(120, 130, 150, 0.5);
-  flex-shrink: 0;
-}
-.ws-status-dot.connected {
-  background: #16c784;
-  box-shadow: 0 0 4px rgba(22, 199, 132, 0.6);
-}
-
 .kline-token-pill {
   padding: 4px 10px;
   border-radius: 999px;

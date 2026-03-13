@@ -61,22 +61,6 @@ func (s *Server) handleGlobalConfig(w http.ResponseWriter, r *http.Request) {
 
 	cfgService := userSvc.NewGlobalConfigService()
 
-	// If request contains updatable fields, apply them.
-	updates := make(map[string]interface{})
-	if v, ok := raw["smart_money_exit_notify_enabled"]; ok {
-		var b bool
-		if err := json.Unmarshal(v, &b); err == nil {
-			updates["smart_money_exit_notify_enabled"] = b
-		}
-	}
-
-	if len(updates) > 0 {
-		if _, err := cfgService.Update(user.ID, updates); err != nil {
-			http.Error(w, "failed to update config", http.StatusInternalServerError)
-			return
-		}
-	}
-
 	cfg, err := cfgService.GetOrCreate(user.ID)
 	if err != nil {
 		http.Error(w, "failed to load config", http.StatusInternalServerError)

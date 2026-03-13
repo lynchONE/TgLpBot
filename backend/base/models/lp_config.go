@@ -47,9 +47,6 @@ type GlobalConfig struct {
 	// Wallet selection mode (per-user UX)
 	MultiWalletEnabled bool `gorm:"not null;default:false" json:"multi_wallet_enabled"`
 
-	// Smart money exit notification (WebSocket push when smart money removes liquidity from a pool the user has a running task on)
-	SmartMoneyExitNotifyEnabled bool `gorm:"not null;default:true" json:"smart_money_exit_notify_enabled"`
-
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`

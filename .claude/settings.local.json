@@ -26,7 +26,6 @@
       "WebFetch(domain:www.okx.com)",
       "Bash(ls /mnt/e/goProject/TgLpBot/backend/service/web_server/kline_ws.go 2>/dev/null; echo \"exit: $?\")",
       "Bash(ls /mnt/e/goProject/TgLpBot/webapp/src/hooks/ 2>/dev/null; echo \"exit: $?\")",
-      "Bash(npx -y acorn --ecma2022 --module --allow-import-meta src/hooks/useKlineWS.js 2>&1 | tail -5)",
       "WebFetch(domain:web3.okx.com)",
       "Bash(for file in backend/base/rpcpool/*.go)",
       "Bash(do echo \"=== $file ===\")",
@@ -39,7 +38,12 @@
       "Bash(do echo \"=== $f ===\")",
       "Bash(cd /mnt/e/goProject/TgLpBot && for f in backend/service/liquidity/*.go; do grep -n \"^[[:space:]]*//[^/]\" \"$f\" | head -5 && echo \"---\"; done | head -50)",
       "Bash(cd /mnt/e/goProject/TgLpBot && echo \"=== Checking all potentially unused functions ===\" && for func in \"RoundToTickSpacing\" \"CalculatePriceFromTick\" \"CalculateTickFromPrice\" \"GetCurrentTickFromSqrtPriceX96\" \"FormatTickRange\"; do echo \"=== $func ===\" && grep -r \"$func\" backend --include=\"*.go\" | grep -v \"tick_calculator.go\" | wc -l; done)",
-      "Bash(cd /mnt/e/goProject/TgLpBot && for func in \"PriceRangeDisplay\" \"RangeAlertLines\"; do echo \"=== $func ===\" && grep -r \"$func\" backend --include=\"*.go\" | wc -l; done)"
+      "Bash(cd /mnt/e/goProject/TgLpBot && for func in \"PriceRangeDisplay\" \"RangeAlertLines\"; do echo \"=== $func ===\" && grep -r \"$func\" backend --include=\"*.go\" | wc -l; done)",
+      "WebFetch(domain:api.bscscan.com)",
+      "WebFetch(domain:bscscan.com)",
+      "WebFetch(domain:api.etherscan.io)",
+      "Bash(curl -s -X POST https://bsc-dataseed.binance.org/ -H \"Content-Type: application/json\" -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_getTransactionByHash\",\"params\":[\"0x2f3e35f6773a9003343a8005055cad6ea08f6ade5be53c8e263f69ff370915ac\"],\"id\":1}' | python3 -m json.tool 2>/dev/null || curl -s -X POST https://bsc-dataseed.binance.org/ -H \"Content-Type: application/json\" -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_getTransactionByHash\",\"params\":[\"0x2f3e35f6773a9003343a8005055cad6ea08f6ade5be53c8e263f69ff370915ac\"],\"id\":1}')",
+      "Bash(curl -s -X POST https://bsc-dataseed.binance.org/ -H \"Content-Type: application/json\" -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_getTransactionReceipt\",\"params\":[\"0x2f3e35f6773a9003343a8005055cad6ea08f6ade5be53c8e263f69ff370915ac\"],\"id\":1}' | python3 -m json.tool 2>/dev/null)"
     ]
   }
 }

@@ -13,30 +13,19 @@ import (
 	"TgLpBot/base/config"
 	"TgLpBot/service/pricing"
 	"TgLpBot/service/realtime"
-	"TgLpBot/service/ws"
 )
 
 type Server struct {
 	ClickHouse *clickhouse.ClickHouseService
 	Realtime   *realtime.RealtimePositionsService
 	TokenPrice *pricing.TokenPriceService
-	Hub        *ws.Hub
-	KlineFeed  *KlineFeed
 }
 
 func NewServer(ch *clickhouse.ClickHouseService) *Server {
-	hub := ws.NewHub()
-	ws.SetDefault(hub)
-	kf := NewKlineFeed()
-	hub.SetMessageHandler(kf.HandleMessage)
-	hub.SetOnClientRemove(kf.HandleClientRemove)
-	go hub.Run()
 	return &Server{
 		ClickHouse: ch,
 		Realtime:   realtime.NewRealtimePositionsService(),
 		TokenPrice: pricing.NewTokenPriceService(),
-		Hub:        hub,
-		KlineFeed:  kf,
 	}
 }
 
@@ -88,7 +77,6 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/blacklist", handleBlacklist)
 	mux.HandleFunc("/api/cooldowns", handleCooldowns)
 	mux.HandleFunc("/api/web_login", s.handleWebLogin)
-	mux.HandleFunc("/api/ws", s.handleWebSocket)
 
 	handler := corsMiddleware(mux)
 

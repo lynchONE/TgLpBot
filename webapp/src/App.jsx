@@ -43,8 +43,6 @@ import OpenPositionModal from './components/OpenPositionModal';
 import StepProgressModal from './components/StepProgressModal';
 import TaskActionMenu from './components/TaskActionMenu';
 import NumberFlowValue from './components/NumberFlowValue';
-import useKlineWS from './hooks/useKlineWS';
-import { useWebSocket } from './hooks/useWebSocket';
 import telegramLogo from './img/telegram.svg';
 import uniswapLogo from './img/uniswap.svg';
 import pancakeLogo from './img/pancake.svg';
@@ -544,48 +542,6 @@ export default function App() {
     }, KLINE_MARKER_RANGE_DEBOUNCE_MS);
   }, []);
 
-  // --- WebSocket kline subscription ---
-  const { lastUpdate: wsKlineUpdate, connected: wsKlineConnected } = useKlineWS({
-    initData,
-    chain: selectedPool?.chain || chain,
-    tokenAddress: klineTokenAddress,
-    bar: klineIntervalMeta.key,
-    enabled: hasInitData && Boolean(klineTokenAddress),
-  });
-
-  // Merge WS candle updates into klineCandles.
-  useEffect(() => {
-    if (!wsKlineUpdate?.candles?.length) return;
-    const addr = String(wsKlineUpdate.token_address || '').toLowerCase();
-    if (addr !== String(klineTokenAddress || '').toLowerCase()) return;
-    if (wsKlineUpdate.bar !== klineIntervalMeta.key) return;
-
-    setKlineCandles((prev) => {
-      const arr = [...prev];
-      for (const c of wsKlineUpdate.candles) {
-        const t = Number(c?.t || 0);
-        if (!t) continue;
-        const idx = arr.findIndex((x) => x.t === t);
-        if (idx >= 0) {
-          arr[idx] = c;
-        } else if (t > (arr.length ? arr[arr.length - 1].t : 0)) {
-          arr.push(c);
-        }
-      }
-      return arr;
-    });
-  }, [wsKlineUpdate, klineTokenAddress, klineIntervalMeta.key]);
-
-  // Extract the latest candle for incremental series.update() in KlineChart.
-  const realtimeCandle = useMemo(() => {
-    if (!wsKlineUpdate?.candles?.length) return null;
-    const addr = String(wsKlineUpdate.token_address || '').toLowerCase();
-    if (addr !== String(klineTokenAddress || '').toLowerCase()) return null;
-    if (wsKlineUpdate.bar !== klineIntervalMeta.key) return null;
-    const sorted = [...wsKlineUpdate.candles].sort((a, b) => Number(a?.t || 0) - Number(b?.t || 0));
-    return sorted[sorted.length - 1] || null;
-  }, [wsKlineUpdate, klineTokenAddress, klineIntervalMeta.key]);
-
   useEffect(() => {
     storageSet(STORAGE.chain, chain);
     storageSet(STORAGE.widgets, JSON.stringify(widgets));
@@ -938,11 +894,10 @@ export default function App() {
 
   useEffect(() => {
     if (!hasInitData || !klineTokenAddress) return undefined;
-    // WS handles live candle updates; nonce drives periodic REST sync + marker refresh.
-    const interval = wsKlineConnected ? 60_000 : 20_000;
+    const interval = 20_000;
     const timer = window.setInterval(() => setKlineRefreshNonce((n) => n + 1), interval);
     return () => window.clearInterval(timer);
-  }, [hasInitData, klineTokenAddress, wsKlineConnected]);
+  }, [hasInitData, klineTokenAddress]);
 
   useEffect(() => {
     if (!hasInitData) return undefined;
@@ -1111,55 +1066,6 @@ export default function App() {
   });
   const [taskActionPos, setTaskActionPos] = useState(null);
   const [operationProgress, setOperationProgress] = useState(null);
-
-  // WebSocket for real-time operation progress
-  const progressWsUrl = useMemo(() => {
-    if (!apiBaseUrl || !initData) return '';
-    const base = String(apiBaseUrl).replace(/\/$/, '').replace(/^http/, 'ws');
-    return base + '/api/ws?initData=' + encodeURIComponent(initData);
-  }, [apiBaseUrl, initData]);
-
-  const handleWsProgressMessage = useCallback((msg) => {
-    if (msg && msg.type === 'operation_progress') {
-      setOperationProgress((prev) => {
-        if (!prev || prev.operation !== msg.operation) return prev;
-        if (msg.current_step < prev.currentStep) return prev;
-        if (prev.status === 'done' || prev.status === 'error') return prev;
-        return {
-          panelKey: prev.panelKey,
-          operation: msg.operation,
-          taskId: msg.task_id,
-          currentStep: msg.current_step,
-          totalSteps: msg.total_steps,
-          status: msg.status,
-          error: msg.error || '',
-        };
-      });
-      return;
-    }
-    if (msg?.type === 'smart_money_exit') {
-      const data = msg?.data || {};
-      const messagePoolID = normalizePoolAddress(data?.pool_id);
-      const messagePoolVersion = String(data?.pool_version || '').trim().toLowerCase();
-      const messageChain = normalizeChain(data?.chain || '');
-      const activeChain = normalizeChain(selectedPool?.chain || chain);
-      if (!klineOverlayEnabled || !klineOverlayAvailable || !klineMarkersWatchingLatest) return;
-      if (!messagePoolID || messagePoolID !== selectedPoolAddress) return;
-      if (messagePoolVersion && selectedPoolVersion && messagePoolVersion !== selectedPoolVersion) return;
-      if (messageChain && activeChain && messageChain !== activeChain) return;
-      setKlineMarkerRefreshNonce((v) => v + 1);
-    }
-  }, [
-    chain,
-    klineMarkersWatchingLatest,
-    klineOverlayAvailable,
-    klineOverlayEnabled,
-    selectedPool?.chain,
-    selectedPoolAddress,
-    selectedPoolVersion,
-  ]);
-
-  useWebSocket({ url: progressWsUrl, onMessage: handleWsProgressMessage, enabled: hasInitData && !!progressWsUrl });
 
   const loadWalletsForModal = useCallback(async (posChain) => {
     if (!hasInitData) return;
@@ -1625,7 +1531,6 @@ export default function App() {
                   <RefreshCw size={12} />
                   刷新
                 </button>
-                <span className={`ws-status-dot ${wsKlineConnected ? 'connected' : ''}`} title={wsKlineConnected ? 'WS 实时推送中' : 'WS 未连接'} />
               </div>
             </div>
 
@@ -1650,7 +1555,6 @@ export default function App() {
 
             <KlineChart
               candles={klineCandles}
-              realtimeCandle={realtimeCandle}
               markers={klineOverlayEnabled ? klineMarkers : []}
               loading={klineLoading}
               error={klineError}
@@ -2181,11 +2085,7 @@ export default function App() {
                       </div>
                     </div>
                     <div className="settings-hint">最低 10 秒，当前每 {refreshInterval} 秒刷新</div>
-                    <div className="settings-hint" style={{ marginTop: 6 }}>
-                      {wsKlineConnected
-                        ? 'K线已通过 WebSocket 实时推送'
-                        : 'K线 WebSocket 未连接，使用 REST 轮询'}
-                    </div>
+                    <div className="settings-hint" style={{ marginTop: 6 }}>K线使用 REST 轮询刷新。</div>
                   </div>
                 )}
               </div>

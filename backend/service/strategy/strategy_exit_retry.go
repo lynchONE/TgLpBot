@@ -9,7 +9,6 @@ import (
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/txexec"
 	userSvc "TgLpBot/service/user"
-	"TgLpBot/service/ws"
 	"context"
 	"errors"
 	"fmt"
@@ -241,30 +240,14 @@ func (s *StrategyService) runExitRetryAttempt(taskID uint, userID uint) {
 		}
 	}
 
-	// Send close-position progress for manual stops
-	closeStep := 1 // "撤出流动性"
-	if task.ExitLiquidityRemoved {
-		closeStep = 2 // "兑换为 USDT"
-	}
-	if action == ExitActionManualStop {
-		ws.SendProgress(task.UserID, "close_position", task.ID, closeStep, 4, "active", "")
-	}
-
 	txHashes, err := s.liquidityService.ExitTaskToUSDTWithOptions(task.UserID, &task, true, liquidity.TxOptions{GasMultiplier: task.ExitGasMultiplier})
 	if err != nil {
-		if action == ExitActionManualStop {
-			ws.SendProgress(task.UserID, "close_position", task.ID, closeStep, 4, "error", err.Error())
-		}
 		s.onExitAttemptFailed(&task, attempt, err, txHashes)
 		return
 	}
 
 	// Success: clear retry state and continue with post-exit action.
 	s.clearExitRetryState(&task)
-
-	if action == ExitActionManualStop {
-		ws.SendProgress(task.UserID, "close_position", task.ID, 3, 4, "done", "")
-	}
 
 	switch action {
 	case ExitActionRebalance:

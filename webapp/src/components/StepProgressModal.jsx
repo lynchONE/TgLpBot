@@ -1,119 +1,249 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
-const OPEN_STEPS = [
-  { label: '校验权限与配置', icon: 'shield' },
-  { label: '查询池子信息', icon: 'search' },
-  { label: '计算区间范围', icon: 'calc' },
-  { label: '创建任务记录', icon: 'file' },
-  { label: '执行链上交易', icon: 'chain' },
-];
-
-const CLOSE_STEPS = [
-  { label: '提交撤仓请求', icon: 'send' },
-  { label: '撤出流动性', icon: 'withdraw' },
-  { label: '兑换为 USDT', icon: 'swap' },
-  { label: '完成', icon: 'check' },
-];
-
-const STEP_ANIM_MS = 300;
-
-function StepSvg({ type, size = 14 }) {
-  const props = {
-    width: size,
-    height: size,
-    viewBox: '0 0 24 24',
-    fill: 'none',
-    stroke: 'currentColor',
-    strokeWidth: 2,
-    strokeLinecap: 'round',
-    strokeLinejoin: 'round',
-  };
-
-  switch (type) {
-    case 'shield':
-      return <svg {...props}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>;
-    case 'search':
-      return <svg {...props}><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>;
-    case 'calc':
-      return <svg {...props}><rect x="4" y="2" width="16" height="20" rx="2" /><path d="M8 6h8M8 10h8M8 14h4" /></svg>;
-    case 'file':
-      return <svg {...props}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6" /></svg>;
-    case 'chain':
-      return <svg {...props}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>;
-    case 'send':
-      return <svg {...props}><path d="m22 2-7 20-4-9-9-4Z" /><path d="m22 2-11 11" /></svg>;
-    case 'withdraw':
-      return <svg {...props}><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" /><path d="M3 5v14a2 2 0 0 0 2 2h16v-5" /><path d="M18 12a2 2 0 0 0 0 4h4v-4Z" /></svg>;
-    case 'swap':
-      return <svg {...props}><path d="m16 3 4 4-4 4" /><path d="M20 7H4" /><path d="m8 21-4-4 4-4" /><path d="M4 17h16" /></svg>;
-    case 'check':
-      return <svg {...props}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><path d="M22 4 12 14.01l-3-3" /></svg>;
-    default:
-      return null;
-  }
-}
-
-function StepIndicator({ status, icon }) {
-  const base = 'spm-indicator';
-
-  if (status === 'done') {
+function StatusIcon({ tone }) {
+  if (tone === 'done') {
     return (
-      <span className={`${base} ${base}--done`}>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+      <span style={styles.iconCircleDone}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
           <path d="M5 13l4 4L19 7" />
         </svg>
       </span>
     );
   }
 
-  if (status === 'active') {
+  if (tone === 'error') {
     return (
-      <span className={`${base} ${base}--active`}>
-        <span className="spm-indicator-icon"><StepSvg type={icon} size={12} /></span>
-        <span className="spm-ring" />
-      </span>
-    );
-  }
-
-  if (status === 'error') {
-    return (
-      <span className={`${base} ${base}--error`}>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M6 18L18 6M6 6l12 12" />
+      <span style={styles.iconCircleError}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M6 6l12 12M18 6 6 18" />
         </svg>
       </span>
     );
   }
 
   return (
-    <span className={`${base} ${base}--pending`}>
-      <StepSvg type={icon} size={12} />
+    <span style={styles.iconCircleActive}>
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{ animation: 'spm-status-spin 1s linear infinite' }}
+      >
+        <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+      </svg>
     </span>
   );
 }
 
+function resolveView(operation, progress) {
+  const tone = progress?.status === 'error' ? 'error' : progress?.status === 'done' ? 'done' : 'active';
+  const currentStep = Number(progress?.currentStep || 0);
+  const error = String(progress?.error || '').trim();
+
+  if (operation === 'open_position') {
+    if (tone === 'done') {
+      return {
+        tone,
+        panelTitle: '开仓状态',
+        badge: '已完成',
+        headline: '开仓成功',
+        summary: '新仓位已经创建完成。',
+        detail: '持仓列表刷新后会显示最新结果。',
+      };
+    }
+
+    if (tone === 'error') {
+      return {
+        tone,
+        panelTitle: '开仓状态',
+        badge: '失败',
+        headline: '开仓失败',
+        summary: error || '开仓请求执行失败。',
+        detail: '请检查参数、钱包余额和链上状态后重试。',
+      };
+    }
+
+    return {
+      tone,
+      panelTitle: '开仓状态',
+      badge: '处理中',
+      headline: '开仓请求已提交',
+      summary: '系统正在校验参数并创建仓位。',
+      detail: '处理完成前请勿重复提交相同请求。',
+    };
+  }
+
+  if (tone === 'done') {
+    return {
+      tone,
+      panelTitle: '撤仓状态',
+      badge: '已完成',
+      headline: '撤仓完成',
+      summary: '仓位已经结束处理。',
+      detail: '如果列表里已经看不到该仓位，说明撤仓已完成。',
+    };
+  }
+
+  if (tone === 'error') {
+    return {
+      tone,
+      panelTitle: '撤仓状态',
+      badge: '失败',
+      headline: '撤仓失败',
+      summary: error || '撤仓请求执行失败。',
+      detail: '请检查链上状态后重试，或稍后刷新持仓列表确认结果。',
+    };
+  }
+
+  if (currentStep > 0) {
+    return {
+      tone,
+      panelTitle: '撤仓状态',
+      badge: '后台处理中',
+      headline: '撤仓请求已提交',
+      summary: '系统正在后台执行撤出流动性和兑换。',
+      detail: '你可以关闭弹窗，等列表刷新后再查看最终结果。',
+    };
+  }
+
+  return {
+    tone,
+    panelTitle: '撤仓状态',
+    badge: '提交中',
+    headline: '正在提交撤仓请求',
+    summary: '系统正在把撤仓请求发送到后端。',
+    detail: '请求接受后会自动转为后台处理状态。',
+  };
+}
+
+const styles = {
+  content: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 16,
+    padding: '4px 0 2px',
+  },
+  headerLeft: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+  },
+  badge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    width: 'fit-content',
+    borderRadius: 999,
+    padding: '4px 10px',
+    fontSize: 12,
+    fontWeight: 700,
+    letterSpacing: '0.01em',
+  },
+  iconWrap: {
+    display: 'flex',
+    justifyContent: 'center',
+  },
+  iconCircleActive: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 56,
+    height: 56,
+    borderRadius: '50%',
+    color: '#f8fafc',
+    background: 'linear-gradient(135deg, #2563eb, #0f766e)',
+    boxShadow: '0 12px 30px rgba(37, 99, 235, 0.28)',
+  },
+  iconCircleDone: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 56,
+    height: 56,
+    borderRadius: '50%',
+    color: '#ffffff',
+    background: 'linear-gradient(135deg, #16a34a, #059669)',
+    boxShadow: '0 12px 30px rgba(22, 163, 74, 0.25)',
+  },
+  iconCircleError: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 56,
+    height: 56,
+    borderRadius: '50%',
+    color: '#ffffff',
+    background: 'linear-gradient(135deg, #dc2626, #f97316)',
+    boxShadow: '0 12px 30px rgba(220, 38, 38, 0.25)',
+  },
+  textBlock: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+    textAlign: 'center',
+  },
+  headline: {
+    margin: 0,
+    fontSize: 22,
+    lineHeight: 1.2,
+    fontWeight: 800,
+    color: '#f8fafc',
+  },
+  summary: {
+    fontSize: 14,
+    lineHeight: 1.6,
+    color: 'rgba(226, 232, 240, 0.92)',
+  },
+  detail: {
+    fontSize: 12,
+    lineHeight: 1.6,
+    color: 'rgba(148, 163, 184, 0.92)',
+  },
+  taskMeta: {
+    display: 'inline-flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    alignSelf: 'center',
+    borderRadius: 999,
+    padding: '6px 10px',
+    fontSize: 12,
+    fontWeight: 600,
+    color: 'rgba(226, 232, 240, 0.92)',
+    background: 'rgba(15, 23, 42, 0.75)',
+    border: '1px solid rgba(148, 163, 184, 0.18)',
+  },
+  note: {
+    borderRadius: 14,
+    padding: '12px 14px',
+    fontSize: 12,
+    lineHeight: 1.6,
+    color: 'rgba(191, 219, 254, 0.94)',
+    background: 'rgba(37, 99, 235, 0.12)',
+    border: '1px solid rgba(96, 165, 250, 0.24)',
+  },
+};
+
 export default function StepProgressModal({ operation, progress, onClose }) {
   if (!operation) return null;
 
-  const stepDefs = operation === 'open_position' ? OPEN_STEPS : CLOSE_STEPS;
-  const targetStep = progress?.currentStep ?? 0;
-  const targetStatus = progress?.status ?? 'active';
-  const error = progress?.error || '';
-
-  const [displayStep, setDisplayStep] = useState(0);
-  const [displayStatus, setDisplayStatus] = useState('active');
   const [allowClose, setAllowClose] = useState(false);
   const overlayRef = useRef(null);
+  const view = useMemo(() => resolveView(operation, progress), [operation, progress]);
 
-  // Lock parent panel height so it doesn't shrink when positions disappear
   useEffect(() => {
     const el = overlayRef.current;
-    if (!el) return;
+    if (!el) return undefined;
     const parent = el.parentElement;
-    if (!parent) return;
-    const h = parent.offsetHeight;
-    parent.style.minHeight = `${h}px`;
-    return () => { parent.style.minHeight = ''; };
+    if (!parent) return undefined;
+    const height = parent.offsetHeight;
+    parent.style.minHeight = `${height}px`;
+    return () => {
+      parent.style.minHeight = '';
+    };
   }, []);
 
   useEffect(() => {
@@ -121,37 +251,28 @@ export default function StepProgressModal({ operation, progress, onClose }) {
     return () => clearTimeout(timer);
   }, []);
 
-  useEffect(() => {
-    if (targetStatus === 'error') {
-      setDisplayStep(targetStep);
-      setDisplayStatus('error');
-      return;
-    }
-    if (displayStep < targetStep) {
-      const timer = setTimeout(() => setDisplayStep((prev) => prev + 1), STEP_ANIM_MS);
-      return () => clearTimeout(timer);
-    }
-    return undefined;
-  }, [displayStep, targetStep, targetStatus]);
-
-  useEffect(() => {
-    if (targetStatus === 'error') return;
-    if (displayStep >= targetStep) setDisplayStatus(targetStatus);
-  }, [displayStep, targetStep, targetStatus]);
-
-  const isDone = displayStatus === 'done' && displayStep >= targetStep;
-  const isError = displayStatus === 'error';
-  const canClose = isDone || isError || allowClose;
-  const title = operation === 'open_position' ? '开仓进度' : '撤仓进度';
-  const doneCount = stepDefs.filter((_, index) => index < displayStep || (index === displayStep && displayStatus === 'done')).length;
-  const footerState = isDone ? 'done' : isError ? 'error' : allowClose ? 'ghost' : 'hint';
+  const isActive = view.tone === 'active';
+  const canClose = !isActive || allowClose;
 
   return (
     <div className="spm-overlay" ref={overlayRef} onClick={canClose ? onClose : undefined}>
       <div className="spm-card" onClick={(event) => event.stopPropagation()}>
         <div className="spm-header">
           <div className="spm-title-row">
-            <h3 className="spm-title">{title}</h3>
+            <div style={styles.headerLeft}>
+              <h3 className="spm-title">{view.panelTitle}</h3>
+              <span
+                style={{
+                  ...styles.badge,
+                  color: view.tone === 'done' ? '#dcfce7' : view.tone === 'error' ? '#fecaca' : '#dbeafe',
+                  background: view.tone === 'done' ? 'rgba(22, 163, 74, 0.18)' : view.tone === 'error' ? 'rgba(220, 38, 38, 0.18)' : 'rgba(37, 99, 235, 0.18)',
+                  border: view.tone === 'done' ? '1px solid rgba(74, 222, 128, 0.24)' : view.tone === 'error' ? '1px solid rgba(248, 113, 113, 0.24)' : '1px solid rgba(96, 165, 250, 0.24)',
+                }}
+              >
+                {view.badge}
+              </span>
+            </div>
+
             <button
               type="button"
               className={`spm-close ${canClose ? '' : 'spm-close--hidden'}`}
@@ -165,59 +286,59 @@ export default function StepProgressModal({ operation, progress, onClose }) {
               </svg>
             </button>
           </div>
-          <div className="spm-progress-track">
-            <div
-              className={`spm-progress-fill ${isError ? 'spm-progress-fill--error' : ''}`}
-              style={{ width: `${(doneCount / stepDefs.length) * 100}%` }}
-            />
-          </div>
         </div>
 
-        <div className="spm-steps">
-          {stepDefs.map((step, index) => {
-            let stepStatus = 'pending';
-            if (index < displayStep) stepStatus = 'done';
-            else if (index === displayStep) stepStatus = displayStatus;
+        <div style={styles.content}>
+          <div style={styles.iconWrap}>
+            <StatusIcon tone={view.tone} />
+          </div>
 
-            return (
-              <div key={index} className={`spm-step spm-step--${stepStatus}`}>
-                <StepIndicator status={stepStatus} icon={step.icon} />
-                <div className="spm-step-body">
-                  <span className="spm-step-label">{step.label}</span>
-                  {stepStatus === 'error' && error ? (
-                    <div className="spm-step-error">{error}</div>
-                  ) : null}
-                </div>
-                {index < stepDefs.length - 1 ? (
-                  <div className={`spm-connector ${index < displayStep ? 'spm-connector--done' : ''}`} />
-                ) : null}
-              </div>
-            );
-          })}
+          <div style={styles.textBlock}>
+            <p style={styles.headline}>{view.headline}</p>
+            <div style={styles.summary}>{view.summary}</div>
+            {view.detail ? <div style={styles.detail}>{view.detail}</div> : null}
+          </div>
+
+          {progress?.taskId ? (
+            <div style={styles.taskMeta}>任务 #{progress.taskId}</div>
+          ) : null}
+
+          {isActive && allowClose ? (
+            <div style={styles.note}>可以先关闭这个弹窗，任务会在后台继续执行。</div>
+          ) : null}
         </div>
 
         <div className="spm-footer">
-          <div className={`spm-footer-slot spm-footer-slot--${footerState}`}>
-            {isDone ? (
-              <button type="button" className="spm-btn spm-btn--done" onClick={onClose}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M5 13l4 4L19 7" />
-                </svg>
-                完成
-              </button>
-            ) : isError ? (
-              <button type="button" className="spm-btn spm-btn--error" onClick={onClose}>关闭</button>
-            ) : allowClose ? (
-              <button type="button" className="spm-btn spm-btn--ghost" onClick={onClose}>后台继续...</button>
-            ) : (
-              <div className="spm-hint">
-                <span className="spm-hint-dot" />
-                处理中，请稍候...
-              </div>
-            )}
-          </div>
+          {view.tone === 'done' ? (
+            <button type="button" className="spm-btn spm-btn--done" onClick={onClose}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 13l4 4L19 7" />
+              </svg>
+              完成
+            </button>
+          ) : view.tone === 'error' ? (
+            <button type="button" className="spm-btn spm-btn--error" onClick={onClose}>
+              关闭
+            </button>
+          ) : allowClose ? (
+            <button type="button" className="spm-btn spm-btn--ghost" onClick={onClose}>
+              后台继续
+            </button>
+          ) : (
+            <div className="spm-hint">
+              <span className="spm-hint-dot" />
+              处理中，请稍候...
+            </div>
+          )}
         </div>
       </div>
+
+      <style>{`
+        @keyframes spm-status-spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }

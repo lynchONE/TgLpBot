@@ -19,7 +19,6 @@ import (
 	"TgLpBot/service/pricing"
 	userSvc "TgLpBot/service/user"
 	"TgLpBot/service/wallet"
-	"TgLpBot/service/ws"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -172,9 +171,6 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 0: validating permissions & config
-	ws.SendProgress(user.ID, "open_position", 0, 0, 5, "active", "")
-
 	check, status, msg, err := requireUserAccess(user.ID)
 	if err != nil {
 		http.Error(w, msg, status)
@@ -301,8 +297,6 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 	poolAddress := normalizeHexPrefixed(req.PoolAddress)
 	poolVersion := req.PoolVersion
 
-	// Step 1: querying pool info
-	ws.SendProgress(user.ID, "open_position", 0, 1, 5, "active", "")
 	if poolVersion == "" {
 		if isV4PoolId(poolAddress) {
 			poolVersion = "v4"
@@ -368,8 +362,6 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		Token1Address: poolInfo.Token1,
 	}
 
-	// Step 2: calculating range
-	ws.SendProgress(user.ID, "open_position", 0, 2, 5, "active", "")
 	tickLowerPctReq, tickUpperPctReq := pricing.TickPercentagesFromStablePercentages(tmpTask, req.RangeLowerPct, req.RangeUpperPct)
 	if tickLowerPctReq <= 0 || tickUpperPctReq <= 0 {
 		http.Error(w, "invalid range", http.StatusBadRequest)
@@ -427,9 +419,6 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		hooksAddr = "0x0000000000000000000000000000000000000000"
 	}
 
-	// Step 3: creating task
-	ws.SendProgress(user.ID, "open_position", 0, 3, 5, "active", "")
-
 	task := &models.StrategyTask{
 		UserID:               user.ID,
 		Chain:                chain,
@@ -464,13 +453,9 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := database.DB.Create(task).Error; err != nil {
-		ws.SendProgress(user.ID, "open_position", 0, 3, 5, "error", "failed to create task")
 		http.Error(w, "failed to create task", http.StatusInternalServerError)
 		return
 	}
-
-	// Step 4: executing on-chain transaction
-	ws.SendProgress(user.ID, "open_position", task.ID, 4, 5, "active", "")
 
 	liquidityService := liquidity.NewLiquidityService()
 	enterRes, err := liquidityService.EnterTaskFromUSDT(user.ID, task)
@@ -481,7 +466,6 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 				"status":        models.StrategyStatusWaiting,
 				"error_message": "entry swap required",
 			}).Error
-			ws.SendProgress(user.ID, "open_position", task.ID, 4, 5, "error", swapErr.Error())
 			w.WriteHeader(http.StatusConflict)
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(openPositionError{
@@ -494,19 +478,14 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 			"status":        models.StrategyStatusError,
 			"error_message": err.Error(),
 		}).Error
-		ws.SendProgress(user.ID, "open_position", task.ID, 4, 5, "error", "open position failed")
 		http.Error(w, "open position failed", http.StatusInternalServerError)
 		return
 	}
 
 	if err := applyEnterResult(task, enterRes); err != nil {
-		ws.SendProgress(user.ID, "open_position", task.ID, 4, 5, "error", "failed to update task")
 		http.Error(w, "failed to update task", http.StatusInternalServerError)
 		return
 	}
-
-	// All steps done
-	ws.SendProgress(user.ID, "open_position", task.ID, 4, 5, "done", "")
 
 	go func() {
 		_ = botSvc.SendTaskCardForUser(user.ID, task.ID)

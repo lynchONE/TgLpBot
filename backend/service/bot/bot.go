@@ -14,7 +14,6 @@ import (
 	"TgLpBot/service/strategy"
 	"TgLpBot/service/user"
 	"TgLpBot/service/wallet"
-	"TgLpBot/service/ws"
 	"log"
 	"strconv"
 	"strings"
@@ -42,7 +41,6 @@ type Bot struct {
 	taskService      *strategy.StrategyTaskService
 	snapshotService  *wallet.BalanceSnapshotService
 	pnlService       *strategy.PnLService
-	wsHub            *ws.Hub
 }
 
 // NewBot creates a new bot instance
@@ -140,16 +138,6 @@ func NewBot(ch *clickhouse.ClickHouseService) (*Bot, error) {
 			msg, err := bot.sendTaskCardMessage(user.TelegramID, bot.formatTaskCardWithRefresh(task), bot.taskKeyboardWithRefresh(task))
 			if err == nil && msg.MessageID != 0 {
 				bot.startTaskAutoRefresh(user.TelegramID, msg.MessageID, task.ID, userID)
-			}
-		})
-	}
-
-	// Set SmartLP remove events callback (broadcasts to miniapp via WebSocket).
-	// The wsHub is injected later via SetWSHub from main.go after both webServer and bot are created.
-	if bot.smartLPMonitor != nil {
-		bot.smartLPMonitor.SetOnRemoveEvents(func(events []smart_lp.SmartLPRemoveEvent) {
-			for _, ev := range events {
-				bot.broadcastSmartMoneyExit(ev)
 			}
 		})
 	}
@@ -644,8 +632,6 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleConfigMultiChainToggle(query, user)
 	case query.Data == "config_multi_wallet_toggle":
 		b.handleConfigMultiWalletToggle(query, user)
-	case query.Data == "config_smart_money_exit_toggle":
-		b.handleConfigSmartMoneyExitToggle(query, user)
 	case query.Data == "config_default_chain":
 		b.handleConfigDefaultChain(query, user)
 	case strings.HasPrefix(query.Data, "config_default_chain_set_") || query.Data == "config_default_chain_cancel":
