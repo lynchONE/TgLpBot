@@ -7,6 +7,7 @@ import (
 	"TgLpBot/service/smart_lp"
 	"context"
 	"fmt"
+	"log"
 	"math"
 	"math/big"
 	"net/http"
@@ -26,13 +27,17 @@ type smartMoneyOverviewPool struct {
 	WalletCount    int     `json:"wallet_count"`
 	AddedLiquidity float64 `json:"added_liquidity"`
 
-	Exchange     string  `json:"exchange,omitempty"`
-	Pair         string  `json:"pair,omitempty"`
-	FeePct       float64 `json:"fee_pct,omitempty"`
-	Token0       string  `json:"token0,omitempty"`
-	Token1       string  `json:"token1,omitempty"`
-	Token0Symbol string  `json:"token0_symbol,omitempty"`
-	Token1Symbol string  `json:"token1_symbol,omitempty"`
+	Exchange            string  `json:"exchange,omitempty"`
+	Pair                string  `json:"pair,omitempty"`
+	FeePct              float64 `json:"fee_pct,omitempty"`
+	Token0              string  `json:"token0,omitempty"`
+	Token1              string  `json:"token1,omitempty"`
+	Token0Symbol        string  `json:"token0_symbol,omitempty"`
+	Token1Symbol        string  `json:"token1_symbol,omitempty"`
+	DisplayTokenAddress string  `json:"display_token_address,omitempty"`
+	DisplayTokenSymbol  string  `json:"display_token_symbol,omitempty"`
+	DisplayTokenName    string  `json:"display_token_name,omitempty"`
+	DisplayTokenLogoURL string  `json:"display_token_logo_url,omitempty"`
 }
 
 type smartMoneyOverviewWallet struct {
@@ -254,6 +259,45 @@ func loadSmartMoneyPoolInfos(ctx context.Context, poolSvc *pool.PoolService, cha
 	return out, warnings
 }
 
+func (s *Server) enrichSmartMoneyDisplayTokens(ctx context.Context, chain string, rows []smartMoneyOverviewPool) {
+	if s == nil || s.TokenMeta == nil || len(rows) == 0 {
+		return
+	}
+
+	addresses := make([]string, 0, len(rows))
+	for i := range rows {
+		addr, symbol := resolveHotPoolDisplayToken(chain, rows[i].Pair, rows[i].Token0, rows[i].Token1)
+		rows[i].DisplayTokenAddress = addr
+		rows[i].DisplayTokenSymbol = symbol
+		if addr != "" {
+			addresses = append(addresses, addr)
+		}
+	}
+	if len(addresses) == 0 {
+		return
+	}
+
+	metaMap, err := s.TokenMeta.GetBatch(ctx, chain, addresses)
+	if err != nil {
+		log.Printf("[SmartMoney] warning: token metadata enrich failed chain=%s err=%v", chain, err)
+	}
+	for i := range rows {
+		addr := normalizeHotPoolTokenAddress(rows[i].DisplayTokenAddress)
+		if addr == "" {
+			continue
+		}
+		meta, ok := metaMap[addr]
+		if !ok {
+			continue
+		}
+		if symbol := strings.TrimSpace(meta.Symbol); symbol != "" {
+			rows[i].DisplayTokenSymbol = symbol
+		}
+		rows[i].DisplayTokenName = strings.TrimSpace(meta.Name)
+		rows[i].DisplayTokenLogoURL = strings.TrimSpace(meta.LogoURL)
+	}
+}
+
 func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -373,6 +417,7 @@ func (s *Server) handleSmartMoneyOverview(w http.ResponseWriter, r *http.Request
 		}
 		outPools = append(outPools, p)
 	}
+	s.enrichSmartMoneyDisplayTokens(ctx, chain, outPools)
 
 	// Wallet participation and PnL are computed over pnlWindow (default 24h),
 	// while pool ranking is computed over poolsWindow (default 2h).

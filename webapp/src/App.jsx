@@ -1978,6 +1978,15 @@ export default function App() {
               const walletCount = wallets.length || Number(pool?.wallet_count || 0);
               const version = String(pool?.pool_version || '').toUpperCase();
               const feePct = Number(pool?.fee_pct || 0);
+              const pair = String(pool?.pair || '').trim() || shortAddress(pool?.pool_id || '');
+              const pairInitials = pair.split(/[\/\-]/).map((s) => s.trim().charAt(0).toUpperCase()).join('').slice(0, 2);
+              const displayTokenLogoUrl = String(pool?.display_token_logo_url || '').trim();
+              const displayTokenSymbol = String(pool?.display_token_symbol || '').trim();
+              const dexName = String(pool?.exchange || pool?.factory_name || '').trim();
+              const dex = getDexIcon(dexName);
+              const protocolTagText = version || dex?.label || '';
+              const avatarLabel = (displayTokenSymbol || pairInitials || 'LP').slice(0, 4).toUpperCase();
+              const avatarSrc = displayTokenLogoUrl || dex?.src || '';
 
               return (
                 <div
@@ -1988,8 +1997,8 @@ export default function App() {
                       {
                         pool_id: pool?.pool_id,
                         pool_address: pool?.pool_id,
-                        trading_pair: pool?.pair,
-                        factory_name: pool?.factory_name,
+                        trading_pair: pair,
+                        factory_name: dexName,
                         token0: pool?.token0,
                         token1: pool?.token1,
                         token0_symbol: pool?.token0_symbol,
@@ -2002,10 +2011,43 @@ export default function App() {
                 >
                   <div className="sm-pool-header">
                     <div className="sm-pool-left">
+                      <div className="sm-avatar" style={dex ? { borderColor: `${dex.color}60` } : undefined}>
+                        {avatarSrc ? (
+                          <>
+                            <img
+                              src={avatarSrc}
+                              alt=""
+                              data-fallback-to-dex={displayTokenLogoUrl && dex?.src ? '1' : '0'}
+                              data-dex-src={dex?.src || ''}
+                              onError={(e) => {
+                                const nextSrc = e.currentTarget.dataset.dexSrc || '';
+                                if (e.currentTarget.dataset.fallbackToDex === '1' && nextSrc) {
+                                  e.currentTarget.dataset.fallbackToDex = '0';
+                                  e.currentTarget.src = nextSrc;
+                                  return;
+                                }
+                                e.currentTarget.style.display = 'none';
+                                const fallback = e.currentTarget.parentElement?.querySelector('.sm-avatar-fallback');
+                                if (fallback) fallback.style.display = 'flex';
+                              }}
+                            />
+                            <span className="sm-avatar-fallback" style={{ display: 'none' }}>{avatarLabel}</span>
+                          </>
+                        ) : <span>{avatarLabel}</span>}
+                      </div>
                       <span className="sm-rank">#{idx + 1}</span>
-                      <span className="sm-pair">{pool?.pair || shortAddress(pool?.pool_id || '')}</span>
-                      {version ? <span className="tag">{version}</span> : null}
-                      {feePct > 0 ? <span className="tag tag-blue">{formatPct(feePct)}</span> : null}
+                      <div className="sm-pool-main">
+                        <span className="sm-pair">{pair}</span>
+                        <div className="sm-meta-tags">
+                          {protocolTagText ? (
+                            <span className="tag tag-dex tag-dex-inline">
+                              {dex?.src ? <img src={dex.src} alt="" /> : null}
+                              <span>{protocolTagText}</span>
+                            </span>
+                          ) : null}
+                          {feePct > 0 ? <span className="tag tag-blue">{formatPct(feePct)}</span> : null}
+                        </div>
+                      </div>
                     </div>
                     <div className="sm-pool-right">
                       {totalUsd > 0 ? (
@@ -2072,9 +2114,9 @@ export default function App() {
                         openPositionModal({
                           pool_id: pool?.pool_id,
                           pool_address: pool?.pool_id,
-                          trading_pair: pool?.pair,
+                          trading_pair: pair,
                           protocol_version: version,
-                          factory_name: pool?.factory_name,
+                          factory_name: dexName,
                           chain,
                           panelKey: 'smart_money',
                           smartMoneyWallets: wallets,
