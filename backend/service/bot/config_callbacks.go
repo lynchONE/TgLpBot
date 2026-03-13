@@ -82,7 +82,7 @@ func (b *Bot) handleConfigResidualTolerance(query *tgbotapi.CallbackQuery, user 
 func (b *Bot) handleConfigZapLossTolerance(query *tgbotapi.CallbackQuery, user *models.User) {
 	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
 	database.SetUserSession(user.TelegramID, "state", "awaiting_global_zap_loss_tolerance", 30*time.Minute)
-	b.sendMessage(query.Message.Chat.ID, "💰 请输入开仓亏损容忍度（百分比），例如：`0.5` 表示 Swap 价差亏损超过 0.5% 时交易自动 revert\n\n输入 `0` 关闭此校验")
+	b.sendMessage(query.Message.Chat.ID, "💰 请输入开仓亏损容忍度（百分比），例如：`0.5` 表示开仓后价差亏损超过 0.5% 时交易自动 revert\n\n输入 `0` 关闭此校验")
 }
 
 func (b *Bot) handleConfigExtraNotificationsToggle(query *tgbotapi.CallbackQuery, user *models.User) {
