@@ -76,6 +76,8 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		s.handleAdminActiveTasks(w, r)
 	case "rpc_pool":
 		s.handleAdminRPCPool(w, r)
+	case "private_zap":
+		s.handleAdminPrivateZap(w, r)
 	default:
 		http.Error(w, "invalid endpoint", http.StatusBadRequest)
 	}

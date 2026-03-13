@@ -37,9 +37,9 @@ type ChainConfig struct {
 	RpcWSURL string
 	ChainID  int64
 
-	// PrivateZapVersion is the currently required private Zap contract version for this chain.
-	// When PrivateZapEnabled=true and a wallet's bound Zap version mismatches this value, the backend
-	// will redeploy and re-bind a new private Zap contract on next usage.
+	// PrivateZapVersion is a legacy compatibility field retained in config/env.
+	// Private Zap invalidation is now admin-triggered by clearing stored bindings,
+	// so runtime resolution no longer compares versions.
 	PrivateZapVersion int
 
 	StableSymbol   string
@@ -130,6 +130,7 @@ type Config struct {
 
 	// Private per-wallet Zap contracts (deploy + bind).
 	PrivateZapEnabled bool
+	// Legacy compatibility field; runtime no longer uses version comparison for invalidation.
 	PrivateZapVersion int
 
 	// ClickHouse
@@ -556,7 +557,7 @@ func LoadConfig() error {
 	log.Printf("   - Zap GasLimit Multiplier: %.4f", AppConfig.ZapGasLimitMultiplier)
 	log.Printf("   - Zap GasLimit Min/Max: %d/%d", AppConfig.ZapGasLimitMin, AppConfig.ZapGasLimitMax)
 	log.Printf("   - Private Zap Enabled: %v", AppConfig.PrivateZapEnabled)
-	log.Printf("   - Private Zap Version: %d", AppConfig.PrivateZapVersion)
+	log.Printf("   - Private Zap Version (legacy/ignored): %d", AppConfig.PrivateZapVersion)
 	log.Printf("   - Pancake V3 NPM: %s", AppConfig.PancakeV3PositionManagerAddress)
 	log.Printf("   - Uniswap V3 NPM: %s", AppConfig.UniswapV3PositionManagerAddress)
 	log.Printf("   - BSC RPC URL: %s", maskURL(AppConfig.BSCRpcURL))

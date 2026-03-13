@@ -869,6 +869,38 @@ export async function enableAdminRPCEndpoint({ apiBaseUrl, initData, endpointId,
     });
 }
 
+async function adminPrivateZapRequest({ apiBaseUrl, payload, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/admin?endpoint=private_zap`;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload || {}),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
+export async function fetchAdminPrivateZap({ apiBaseUrl, initData, signal }) {
+    return adminPrivateZapRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'list' },
+        signal,
+    });
+}
+
+export async function invalidateAdminPrivateZap({ apiBaseUrl, initData, chain, signal }) {
+    return adminPrivateZapRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'invalidate', chain },
+        signal,
+    });
+}
+
 export async function fetchBlacklist({ apiBaseUrl, initData, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/trading?endpoint=blacklist&initData=${encodeURIComponent(initData)}`;

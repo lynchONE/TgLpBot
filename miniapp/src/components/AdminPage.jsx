@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import AdminOnlineUsers from './AdminOnlineUsers.jsx';
 import AdminActiveTasks from './AdminActiveTasks.jsx';
 import AdminRPCPool from './AdminRPCPool.jsx';
+import AdminPrivateZapCard from './AdminPrivateZapCard.jsx';
 import SystemConfigCard from './SystemConfigCard.jsx';
 import PositionCard from './PositionCard.jsx';
 import { SkeletonList, SkeletonPositionCard } from './Skeleton.jsx';
@@ -335,7 +336,15 @@ export default function AdminPage({
 
             {/* 系统配置页面 */}
             {activeTab === 'system_config' && (
-                <SystemConfigCard apiBaseUrl={apiBaseUrl} initData={initData} onNotice={onNotice} />
+                <div className="space-y-4">
+                    <SystemConfigCard apiBaseUrl={apiBaseUrl} initData={initData} onNotice={onNotice} />
+                    <AdminPrivateZapCard
+                        apiBaseUrl={apiBaseUrl}
+                        initData={initData}
+                        hasInitData={hasInitData}
+                        onNotice={onNotice}
+                    />
+                </div>
             )}
 
             {activeTab === 'rpc_pool' && (

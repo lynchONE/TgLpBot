@@ -1,43 +1,60 @@
 package liquidity
 
 import (
-	"TgLpBot/base/config"
+	"TgLpBot/base/models"
 	"testing"
 )
 
-func TestRequiredPrivateZapVersion_DefaultsTo1(t *testing.T) {
-	if got := requiredPrivateZapVersion(config.ChainConfig{}); got != 1 {
-		t.Fatalf("expected default version 1, got %d", got)
-	}
-	if got := requiredPrivateZapVersion(config.ChainConfig{PrivateZapVersion: 0}); got != 1 {
-		t.Fatalf("expected default version 1, got %d", got)
-	}
-	if got := requiredPrivateZapVersion(config.ChainConfig{PrivateZapVersion: -10}); got != 1 {
-		t.Fatalf("expected default version 1, got %d", got)
-	}
-}
-
-func TestRequiredPrivateZapVersion_UsesConfiguredValue(t *testing.T) {
-	if got := requiredPrivateZapVersion(config.ChainConfig{PrivateZapVersion: 2}); got != 2 {
-		t.Fatalf("expected version 2, got %d", got)
-	}
-	if got := requiredPrivateZapVersion(config.ChainConfig{PrivateZapVersion: 100}); got != 100 {
-		t.Fatalf("expected version 100, got %d", got)
-	}
-}
-
-func TestPrivateZapCacheKey_NormalizesChainAndIncludesVersion(t *testing.T) {
-	key := privateZapCacheKey("BASE", 123, 2)
-	want := "private_zap:binding:base:123:zap_simple:v2"
+func TestPrivateZapCacheKey_NormalizesChain(t *testing.T) {
+	key := privateZapCacheKey("BASE", 123)
+	want := "private_zap:binding:base:123:zap_simple"
 	if key != want {
 		t.Fatalf("unexpected cache key: got=%s want=%s", key, want)
 	}
 }
 
-func TestPrivateZapCacheKey_DefaultVersion(t *testing.T) {
-	key := privateZapCacheKey("bsc", 1, 0)
-	want := "private_zap:binding:bsc:1:zap_simple:v1"
-	if key != want {
-		t.Fatalf("unexpected cache key: got=%s want=%s", key, want)
+func TestPrivateZapCacheScanPattern_NormalizesChain(t *testing.T) {
+	pattern := privateZapCacheScanPattern("BSC")
+	want := "private_zap:binding:bsc:*"
+	if pattern != want {
+		t.Fatalf("unexpected cache pattern: got=%s want=%s", pattern, want)
+	}
+}
+
+func TestIsPrivateZapBindingUsable(t *testing.T) {
+	tests := []struct {
+		name    string
+		binding models.WalletChainContract
+		want    bool
+	}{
+		{
+			name: "valid",
+			binding: models.WalletChainContract{
+				ContractAddress: "0x1111111111111111111111111111111111111111",
+			},
+			want: true,
+		},
+		{
+			name: "empty",
+			binding: models.WalletChainContract{
+				ContractAddress: "",
+			},
+			want: false,
+		},
+		{
+			name: "invalid",
+			binding: models.WalletChainContract{
+				ContractAddress: "not-an-address",
+			},
+			want: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isPrivateZapBindingUsable(tc.binding); got != tc.want {
+				t.Fatalf("unexpected usable result: got=%v want=%v", got, tc.want)
+			}
+		})
 	}
 }
