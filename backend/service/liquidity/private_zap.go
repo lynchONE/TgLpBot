@@ -60,10 +60,13 @@ func (s *LiquidityService) resolveZapAddress(
 	chain := exec.Chain()
 
 	if config.AppConfig.PrivateZapEnabled {
+		wantVer := requiredPrivateZapVersion(cc)
+		log.Printf("[PrivateZap] resolveZapAddress: mode=private chain=%s wallet_id=%d usage=%s wantVersion=%d", chain, wallet.ID, usage, wantVer)
 		return s.ensurePrivateZapSimple(exec, wallet, privateKey, walletAddr, opts)
 	}
 
 	// Legacy shared Zap contract
+	log.Printf("[PrivateZap] resolveZapAddress: mode=legacy chain=%s usage=%s (PRIVATE_ZAP_ENABLED=false)", chain, usage)
 	switch usage {
 	case zapUsageV4:
 		if !common.IsHexAddress(cc.ZapV4Address) {
@@ -188,9 +191,11 @@ func (s *LiquidityService) ensurePrivateZapSimple(
 		addrStr := strings.TrimSpace(binding.ContractAddress)
 		if binding.Version == wantVersion && common.IsHexAddress(addrStr) {
 			addr := common.HexToAddress(addrStr)
+			log.Printf("[PrivateZap] using existing binding chain=%s wallet_id=%d address=%s version=%d", chain, wallet.ID, addrStr, wantVersion)
 			writePrivateZapCache(chain, wallet.ID, wantVersion, addr)
 			return addr, nil
 		}
+		log.Printf("[PrivateZap] version mismatch: stored=%d want=%d chain=%s wallet_id=%d → will redeploy", binding.Version, wantVersion, chain, wallet.ID)
 	} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
 		return common.Address{}, findErr
 	}

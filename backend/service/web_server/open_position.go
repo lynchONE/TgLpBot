@@ -479,7 +479,18 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 			"status":        models.StrategyStatusError,
 			"error_message": err.Error(),
 		}).Error
-		http.Error(w, "open position failed", http.StatusInternalServerError)
+
+		errCode := "open_position_failed"
+		var zapSafetyErr *liquidity.ZapSafetyError
+		if errors.As(err, &zapSafetyErr) {
+			errCode = "zap_safety_check_failed"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(openPositionError{
+			Code:    errCode,
+			Message: err.Error(),
+		})
 		return
 	}
 
