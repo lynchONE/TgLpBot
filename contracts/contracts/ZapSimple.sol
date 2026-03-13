@@ -439,36 +439,26 @@ contract ZapSimple is ReentrancyGuard, Ownable {
             recipient: params.recipient
         }));
 
-        // 5. Dust 校验（使用 slippageBps 作为“剩余资产容忍度”/maxDustBps，0 = 不校验）
-        uint256 dust0 = IERC20(params.token0).balanceOf(address(this)) - token0BalBefore;
-        uint256 dust1 = IERC20(params.token1).balanceOf(address(this)) - token1BalBefore;
-        result.dust0 = dust0;
-        result.dust1 = dust1;
-
-        if (params.slippageBps > 0) {
-            (uint160 sqrtPriceX96, , , , , , ) = IUniswapV3Pool(params.pool).slot0();
-            uint256 inputValue = _calculateValueInToken1(bal0, bal1, sqrtPriceX96);
-            uint256 dustValue = _calculateValueInToken1(dust0, dust1, sqrtPriceX96);
-            if (inputValue > 0) {
-                uint256 dustBps = FullMath.mulDiv(dustValue, BPS_DENOMINATOR, inputValue);
-                require(dustBps <= params.slippageBps, "Dust exceeds limit");
-            }
+        // 5. Dust 校验 + 总价值校验
+        {
+            uint256 dust0 = IERC20(params.token0).balanceOf(address(this)) - token0BalBefore;
+            uint256 dust1 = IERC20(params.token1).balanceOf(address(this)) - token1BalBefore;
+            result.dust0 = dust0;
+            result.dust1 = dust1;
         }
 
-        // 5. 返还剩余代币
+        {
+            (uint160 sqrtPriceX96Pool, , , , , , ) = IUniswapV3Pool(params.pool).slot0();
+            _verifyDustAndLoss(
+                bal0, bal1, result, sqrtPriceX96Pool,
+                params.slippageBps, params.maxSwapLossBps,
+                params.amount0In, params.amount1In
+            );
+        }
+
+        // 6. 返还剩余代币
         _refundDelta(params.token0, msg.sender, token0BalBefore);
         _refundDelta(params.token1, msg.sender, token1BalBefore);
-
-        // 6. 总价值校验：投入 vs (LP价值 + 退款)，用目标池价格统一计价
-        if (params.maxSwapLossBps > 0) {
-            (uint160 sqrtPriceX96Pool, , , , , , ) = IUniswapV3Pool(params.pool).slot0();
-            uint256 inputValue = _calculateValueInToken1(params.amount0In, params.amount1In, sqrtPriceX96Pool);
-            uint256 outputValue = _calculateValueInToken1(result.amount0Used + result.dust0, result.amount1Used + result.dust1, sqrtPriceX96Pool);
-            if (inputValue > outputValue) {
-                uint256 lossBps = FullMath.mulDiv(inputValue - outputValue, BPS_DENOMINATOR, inputValue);
-                require(lossBps <= params.maxSwapLossBps, "Zap loss exceeds limit");
-            }
-        }
 
         emit ZapInV3(msg.sender, params.pool, result.tokenId, result.amount0Used, result.amount1Used, result.liquidity);
     }
@@ -771,103 +761,88 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         uint256 token0BalBefore = IERC20(poolKey.currency0).balanceOf(address(this));
         uint256 token1BalBefore = IERC20(poolKey.currency1).balanceOf(address(this));
 
-        // 1. 拉取代币
-        if (params.amount0In > 0) {
-            IERC20(poolKey.currency0).safeTransferFrom(msg.sender, address(this), params.amount0In);
-        }
-        if (params.amount1In > 0) {
-            IERC20(poolKey.currency1).safeTransferFrom(msg.sender, address(this), params.amount1In);
-        }
+        // 1. 拉取代币 + 2. 执行 OKX swap
+        {
+            if (params.amount0In > 0) {
+                IERC20(poolKey.currency0).safeTransferFrom(msg.sender, address(this), params.amount0In);
+            }
+            if (params.amount1In > 0) {
+                IERC20(poolKey.currency1).safeTransferFrom(msg.sender, address(this), params.amount1In);
+            }
 
-        uint256 token0BalAfterPull = IERC20(poolKey.currency0).balanceOf(address(this));
-        uint256 token1BalAfterPull = IERC20(poolKey.currency1).balanceOf(address(this));
-        uint256 token0DeltaAfterPull = token0BalAfterPull - token0BalBefore;
-        uint256 token1DeltaAfterPull = token1BalAfterPull - token1BalBefore;
-
-        // 2. 执行 OKX swap（如果需要）
-        if (params.swap.amountIn > 0 && params.swap.callData.length > 0) {
-            _validateSwapParams(poolKey.currency0, poolKey.currency1, params.swap, token0DeltaAfterPull, token1DeltaAfterPull);
-            _executeSwap(params.swap);
+            if (params.swap.amountIn > 0 && params.swap.callData.length > 0) {
+                uint256 d0 = IERC20(poolKey.currency0).balanceOf(address(this)) - token0BalBefore;
+                uint256 d1 = IERC20(poolKey.currency1).balanceOf(address(this)) - token1BalBefore;
+                _validateSwapParams(poolKey.currency0, poolKey.currency1, params.swap, d0, d1);
+                _executeSwap(params.swap);
+            }
         }
 
         // 3. 获取 swap 后的余额
-        uint256 token0BalAfterSwap = IERC20(poolKey.currency0).balanceOf(address(this));
-        uint256 token1BalAfterSwap = IERC20(poolKey.currency1).balanceOf(address(this));
-        uint256 bal0 = token0BalAfterSwap - token0BalBefore;
-        uint256 bal1 = token1BalAfterSwap - token1BalBefore;
-
+        uint256 bal0 = IERC20(poolKey.currency0).balanceOf(address(this)) - token0BalBefore;
+        uint256 bal1 = IERC20(poolKey.currency1).balanceOf(address(this)) - token1BalBefore;
         require(bal0 > 0 || bal1 > 0, "No tokens after swap");
 
-        // 4. 构建 V4 PoolKey (用于获取 PoolId 和 Mint)
-        PoolKey memory v4PoolKey = PoolKey({
-            currency0: Currency.wrap(poolKey.currency0),
-            currency1: Currency.wrap(poolKey.currency1),
-            fee: poolKey.fee,
-            tickSpacing: poolKey.tickSpacing,
-            hooks: poolKey.hooks
-        });
+        // 4. 构建 V4 PoolKey + 5. 获取实时价格 + 价格校验
+        PoolKey memory v4PoolKey;
+        uint160 sqrtPriceX96;
+        {
+            v4PoolKey = PoolKey({
+                currency0: Currency.wrap(poolKey.currency0),
+                currency1: Currency.wrap(poolKey.currency1),
+                fee: poolKey.fee,
+                tickSpacing: poolKey.tickSpacing,
+                hooks: poolKey.hooks
+            });
+            PoolId poolId = PoolIdLibrary.toId(v4PoolKey);
+            (sqrtPriceX96, , , ) = IStateView(params.stateView).getSlot0(poolId);
+            require(sqrtPriceX96 > 0, "Invalid SqrtPrice");
 
-        // 5. 获取实时价格 (强制使用链上最新价格，避免 Revert)
-        PoolId poolId = PoolIdLibrary.toId(v4PoolKey);
-        (uint160 sqrtPriceX96, , , ) = IStateView(params.stateView).getSlot0(poolId);
-        require(sqrtPriceX96 > 0, "Invalid SqrtPrice");
-
-        // 若传入了价格参数，则校验其与链上价格的偏差
-        if (params.sqrtPriceX96 > 0 && params.slippageBps > 0) {
-            uint256 provided = uint256(params.sqrtPriceX96);
-            uint256 current = uint256(sqrtPriceX96);
-            uint256 diff = provided > current ? provided - current : current - provided;
-            uint256 diffBps = FullMath.mulDiv(diff, BPS_DENOMINATOR, current);
-            require(diffBps <= params.slippageBps, "Price moved");
+            if (params.sqrtPriceX96 > 0 && params.slippageBps > 0) {
+                uint256 diff = uint256(params.sqrtPriceX96) > uint256(sqrtPriceX96)
+                    ? uint256(params.sqrtPriceX96) - uint256(sqrtPriceX96)
+                    : uint256(sqrtPriceX96) - uint256(params.sqrtPriceX96);
+                require(FullMath.mulDiv(diff, BPS_DENOMINATOR, uint256(sqrtPriceX96)) <= params.slippageBps, "Price moved");
+            }
         }
 
         // 6. Mint V4 position
-        (uint256 tokenId, uint128 liquidity) = _mintV4Position(
-            params.positionManager,
-            v4PoolKey,
-            params.tickLower,
-            params.tickUpper,
-            bal0,
-            bal1,
-            params.slippageBps,
-            params.recipient,
-            sqrtPriceX96
+        {
+            (uint256 tokenId, uint128 liquidity) = _mintV4Position(
+                params.positionManager,
+                v4PoolKey,
+                params.tickLower,
+                params.tickUpper,
+                bal0,
+                bal1,
+                params.slippageBps,
+                params.recipient,
+                sqrtPriceX96
+            );
+            result.tokenId = tokenId;
+            result.liquidity = liquidity;
+        }
+
+        // 7. 获取 dust 并设置结果
+        {
+            uint256 dust0 = IERC20(poolKey.currency0).balanceOf(address(this)) - token0BalBefore;
+            uint256 dust1 = IERC20(poolKey.currency1).balanceOf(address(this)) - token1BalBefore;
+            result.dust0 = dust0;
+            result.dust1 = dust1;
+            result.amount0Used = bal0 - dust0;
+            result.amount1Used = bal1 - dust1;
+        }
+
+        // 8. Dust 验证 + 总价值校验
+        _verifyDustAndLoss(
+            bal0, bal1, result, sqrtPriceX96,
+            params.maxDustBps, params.maxSwapLossBps,
+            params.amount0In, params.amount1In
         );
 
-        // 6. 获取 dust 并设置结果
-        uint256 dust0 = IERC20(poolKey.currency0).balanceOf(address(this)) - token0BalBefore;
-        uint256 dust1 = IERC20(poolKey.currency1).balanceOf(address(this)) - token1BalBefore;
-
-        result.tokenId = tokenId;
-        result.liquidity = liquidity;
-        result.dust0 = dust0;
-        result.dust1 = dust1;
-        result.amount0Used = bal0 - dust0;
-        result.amount1Used = bal1 - dust1;
-
-        // 7. Dust 验证
-        if (params.maxDustBps > 0) {
-            uint256 inputValue = _calculateValueInToken1(bal0, bal1, sqrtPriceX96);
-            uint256 dustValue = _calculateValueInToken1(dust0, dust1, sqrtPriceX96);
-            if (inputValue > 0) {
-                uint256 dustBps = FullMath.mulDiv(dustValue, BPS_DENOMINATOR, inputValue);
-                require(dustBps <= params.maxDustBps, "Dust exceeds limit");
-            }
-        }
-
-        // 8. 退还 dust
+        // 9. 退还 dust
         _refundDelta(poolKey.currency0, msg.sender, token0BalBefore);
         _refundDelta(poolKey.currency1, msg.sender, token1BalBefore);
-
-        // 9. 总价值校验：投入 vs (LP价值 + 退款)，用目标池价格统一计价
-        if (params.maxSwapLossBps > 0) {
-            uint256 inputValue = _calculateValueInToken1(params.amount0In, params.amount1In, sqrtPriceX96);
-            uint256 outputValue = _calculateValueInToken1(result.amount0Used + result.dust0, result.amount1Used + result.dust1, sqrtPriceX96);
-            if (inputValue > outputValue) {
-                uint256 lossBps = FullMath.mulDiv(inputValue - outputValue, BPS_DENOMINATOR, inputValue);
-                require(lossBps <= params.maxSwapLossBps, "Zap loss exceeds limit");
-            }
-        }
 
         emit ZapInV4(msg.sender, keccak256(abi.encode(v4PoolKey)), result.tokenId, result.amount0Used, result.amount1Used, result.liquidity);
     }
@@ -1065,6 +1040,39 @@ contract ZapSimple is ReentrancyGuard, Ownable {
             return;
         }
         IERC20(token).forceApprove(PERMIT2, type(uint256).max);
+    }
+
+    /**
+     * @notice 统一校验 dust 和 swap 亏损
+     */
+    function _verifyDustAndLoss(
+        uint256 bal0,
+        uint256 bal1,
+        ZapResult memory result,
+        uint160 sqrtPriceX96,
+        uint256 maxDustBps,
+        uint256 maxSwapLossBps,
+        uint256 amount0In,
+        uint256 amount1In
+    ) internal pure {
+        // Dust 校验
+        if (maxDustBps > 0) {
+            uint256 inputValue = _calculateValueInToken1(bal0, bal1, sqrtPriceX96);
+            uint256 dustValue = _calculateValueInToken1(result.dust0, result.dust1, sqrtPriceX96);
+            if (inputValue > 0) {
+                uint256 dustBps = FullMath.mulDiv(dustValue, BPS_DENOMINATOR, inputValue);
+                require(dustBps <= maxDustBps, "Dust exceeds limit");
+            }
+        }
+        // 总价值校验：投入 vs (LP价值 + 退款)
+        if (maxSwapLossBps > 0) {
+            uint256 inputValue = _calculateValueInToken1(amount0In, amount1In, sqrtPriceX96);
+            uint256 outputValue = _calculateValueInToken1(result.amount0Used + result.dust0, result.amount1Used + result.dust1, sqrtPriceX96);
+            if (inputValue > outputValue) {
+                uint256 lossBps = FullMath.mulDiv(inputValue - outputValue, BPS_DENOMINATOR, inputValue);
+                require(lossBps <= maxSwapLossBps, "Zap loss exceeds limit");
+            }
+        }
     }
 
     /**
