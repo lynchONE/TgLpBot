@@ -14,6 +14,8 @@ import SmartMoneyPoolAddsModal from './SmartMoneyPoolAddsModal.jsx';
 import SmartMoneyWalletPositionsModal from './SmartMoneyWalletPositionsModal.jsx';
 import SmartMoneyWatchedWalletsTab from './SmartMoneyWatchedWalletsTab.jsx';
 import SmartMoney24hPoolAddsCard from './SmartMoney24hPoolAddsCard.jsx';
+import flashIcon from '../image/flash.svg';
+import { brandSoftButtonClass, brandSolidButtonClass } from '../lib/brand';
 
 const USD_DISPLAY_LIMIT = 1e15;
 const usdFormatter = new Intl.NumberFormat('en-US', {
@@ -285,8 +287,9 @@ function PoolOverviewCard({
                         if (onQuickOpen) onQuickOpen(previewWallets);
                     }}
                     disabled={!poolId || !version}
-                    className="inline-flex items-center rounded-lg bg-blue-500/15 px-2.5 py-1 text-[10px] font-bold text-blue-600 ring-1 ring-blue-500/25 hover:bg-blue-500/25 disabled:opacity-40 dark:bg-blue-500/20 dark:text-blue-300 dark:ring-blue-500/30"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-black/70 bg-[linear-gradient(180deg,#303811_0%,#252d0d_100%)] px-3 py-1 text-[10px] font-bold leading-none text-[#bcff2f] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition hover:bg-[linear-gradient(180deg,#353f14_0%,#2a3210_100%)] disabled:cursor-not-allowed disabled:opacity-40"
                 >
+                    <img src={flashIcon} alt="" aria-hidden="true" className="h-3 w-3 shrink-0 object-contain" />
                     快速开单
                 </button>
                 <button
@@ -697,7 +700,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                     type="button"
                     onClick={() => setActiveTab('overview')}
                     className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${activeTab === 'overview'
-                        ? 'bg-emerald-500 text-white'
+                        ? brandSolidButtonClass
                         : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
                         }`}
                 >
@@ -707,7 +710,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                     type="button"
                     onClick={() => setActiveTab('follow')}
                     className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${activeTab === 'follow'
-                        ? 'bg-emerald-500 text-white'
+                        ? brandSolidButtonClass
                         : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
                         }`}
                 >
@@ -717,7 +720,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                     type="button"
                     onClick={() => setActiveTab('golden')}
                     className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${activeTab === 'golden'
-                        ? 'bg-emerald-500 text-white'
+                        ? brandSolidButtonClass
                         : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
                         }`}
                 >
@@ -727,7 +730,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                     type="button"
                     onClick={() => setActiveTab('monitor')}
                     className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${activeTab === 'monitor'
-                        ? 'bg-emerald-500 text-white'
+                        ? brandSolidButtonClass
                         : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
                         }`}
                 >
@@ -737,7 +740,7 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                     type="button"
                     onClick={() => setActiveTab('24h')}
                     className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${activeTab === '24h'
-                        ? 'bg-emerald-500 text-white'
+                        ? brandSolidButtonClass
                         : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/70 dark:hover:bg-white/10'
                         }`}
                 >
@@ -928,8 +931,9 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                     setFollowModalAddr(normalized);
                                     setFollowModalOpen(true);
                                 }}
-                                className="shrink-0 inline-flex items-center rounded-lg bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
+                                className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-black/70 bg-[linear-gradient(180deg,#303811_0%,#252d0d_100%)] px-3 py-1 text-[10px] font-semibold leading-none text-[#bcff2f] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition hover:bg-[linear-gradient(180deg,#353f14_0%,#2a3210_100%)]"
                             >
+                                <img src={flashIcon} alt="" aria-hidden="true" className="h-3 w-3 shrink-0 object-contain" />
                                 跟单设置
                             </button>
                         </div>
@@ -1000,8 +1004,9 @@ export default function SmartMoneyCard({ overview, loading = false, tick, onNoti
                                                         setFollowModalAddr(wallet);
                                                         setFollowModalOpen(true);
                                                     }}
-                                                    className="inline-flex items-center rounded-lg bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
+                                                    className="inline-flex items-center gap-1.5 rounded-full border border-black/70 bg-[linear-gradient(180deg,#303811_0%,#252d0d_100%)] px-3 py-1 text-[10px] font-semibold leading-none text-[#bcff2f] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition hover:bg-[linear-gradient(180deg,#353f14_0%,#2a3210_100%)]"
                                                 >
+                                                    <img src={flashIcon} alt="" aria-hidden="true" className="h-3 w-3 shrink-0 object-contain" />
                                                     设置
                                                 </button>
                                                 <button

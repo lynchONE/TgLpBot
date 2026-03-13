@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, HistogramSeries } from 'lightweight-charts';
 import { fetchSmartMoney24hPoolAdds } from '../lib/api';
 import { copyToClipboard, hapticImpact, hapticNotification } from '../lib/telegram';
+import flashIcon from '../image/flash.svg';
 
 const usdFormatter = new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -451,8 +452,9 @@ export default function SmartMoney24hPoolAddsCard({ apiBaseUrl, initData, chain,
                                                         }
                                                     }}
                                                     disabled={!poolId}
-                                                    className="rounded-lg bg-blue-500/15 px-2 py-1 text-[10px] font-semibold text-blue-600 hover:bg-blue-500/20 disabled:opacity-50 dark:text-blue-300"
+                                                    className="inline-flex items-center gap-1.5 rounded-full border border-black/70 bg-[linear-gradient(180deg,#303811_0%,#252d0d_100%)] px-3 py-1 text-[10px] font-semibold leading-none text-[#bcff2f] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition hover:bg-[linear-gradient(180deg,#353f14_0%,#2a3210_100%)] disabled:cursor-not-allowed disabled:opacity-50"
                                                 >
+                                                    <img src={flashIcon} alt="" aria-hidden="true" className="h-3 w-3 shrink-0 object-contain" />
                                                     快速开仓
                                                 </button>
                                             </div>

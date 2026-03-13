@@ -3,7 +3,9 @@ import { copyToClipboard, hapticNotification, hapticImpact, openLink } from '../
 import uniswapIcon from '../image/uniswap.svg';
 import pancakeIcon from '../image/pancake.svg';
 import gmgnIcon from '../image/gmgn.svg';
+import flashIcon from '../image/flash.svg';
 import NumberFlowValue from './NumberFlowValue.jsx';
+import { brandTextClass } from '../lib/brand';
 
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -471,7 +473,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
 
                 <div className="text-right shrink-0 min-w-[110px]">
                     <div className="flex items-baseline justify-end gap-1 flex-wrap">
-                        <div className="text-base font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums flex items-center">
+                        <div className={`text-base font-extrabold tabular-nums flex items-center ${brandTextClass}`}>
                             {metric === 'volume' ? (
                                 <NumberFlowValue value={pool?.total_volume} formatter={(v) => {
                                     const n = Number(v ?? 0);
@@ -552,8 +554,9 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                     type="button"
                     onClick={() => onOpenPosition?.(pool)}
                     disabled={typeof onOpenPosition !== 'function' || isBlacklisted}
-                    className="inline-flex items-center rounded-lg bg-emerald-500/15 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-500/25 transition hover:bg-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed dark:text-emerald-200"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-black/70 bg-[linear-gradient(180deg,#303811_0%,#252d0d_100%)] px-3 py-1 text-[11px] font-semibold leading-none text-[#bcff2f] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition hover:bg-[linear-gradient(180deg,#353f14_0%,#2a3210_100%)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
+                    <img src={flashIcon} alt="" aria-hidden="true" className="h-3 w-3 shrink-0 object-contain" />
                     {isBlacklisted ? '黑名单' : '一键开仓'}
                 </button>
             </div>

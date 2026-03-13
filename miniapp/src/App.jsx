@@ -43,6 +43,16 @@ import {
 } from './lib/api';
 import { getTelegramWebApp, hapticImpact, hapticNotification, hapticSelection } from './lib/telegram';
 import { formatRelativeTime, useTick } from './lib/time';
+import {
+    brandDotClass,
+    brandGradientButtonClass,
+    brandIconChipClass,
+    brandInputFocusClass,
+    brandSelectionClass,
+    brandSoftButtonClass,
+    brandSolidButtonClass,
+    brandTextClass,
+} from './lib/brand';
 
 function resolveApiBaseUrl() {
     const queryApiBase = new URLSearchParams(window.location.search).get('apiBaseUrl');
@@ -2360,7 +2370,7 @@ export default function App() {
     const noticeClass = notice?.tone === 'error'
         ? 'bg-red-600 text-white'
         : notice?.tone === 'success'
-            ? 'bg-emerald-600 text-white'
+            ? 'bg-[#bcff2f] text-[#182108]'
             : 'bg-zinc-900 text-white dark:bg-white/10 dark:text-white';
     const globalCfg = globalConfig || {};
     const rebalanceText = Number.isFinite(Number(globalCfg.rebalance_timeout))
@@ -2377,7 +2387,7 @@ export default function App() {
         : '--';
     const confirmButtonClass = confirmState?.tone === 'danger'
         ? 'bg-red-500 text-white hover:bg-red-600 active:bg-red-700'
-        : 'bg-emerald-500 text-white hover:bg-emerald-600 active:bg-emerald-700';
+        : brandSolidButtonClass;
 
     const activeErrorText = useMemo(() => {
         const msg = String(activeError || '').trim();
@@ -2410,7 +2420,7 @@ export default function App() {
             <header className="mb-4">
                 <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-700 ring-1 ring-emerald-500/20 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/25">
+                        <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${brandIconChipClass}`}>
                             <Icon path={activeModuleMeta.icon} className="h-5 w-5" />
                         </div>
                         <div>
@@ -2462,7 +2472,7 @@ export default function App() {
                         {hasAdminPositions ? (
                             <div>
                                 <div className="text-[11px] text-zinc-500 dark:text-white/40">总余额</div>
-                                <div className="mt-0.5 text-2xl font-extrabold tabular-nums text-zinc-900 dark:text-emerald-300">
+                                <div className={`mt-0.5 text-2xl font-extrabold tabular-nums text-zinc-900 ${brandTextClass}`}>
                                     <NumberFlowValue value={totalUsd} formatter={(v) => formatUsd(v)} />
                                 </div>
                                 <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40 tabular-nums">
@@ -2485,7 +2495,7 @@ export default function App() {
                                             onClick={() => setHotPoolsSort(tab.key)}
                                             aria-pressed={hotPoolsSort === tab.key}
                                             className={`relative rounded-lg px-2.5 py-1 text-[12px] font-bold whitespace-nowrap transition-all duration-300 ${hotPoolsSort === tab.key
-                                                ? 'bg-gradient-to-r from-emerald-400 to-teal-500 text-white shadow-md shadow-emerald-500/20 dark:from-emerald-500 dark:to-teal-600 dark:text-white dark:shadow-emerald-900/40 ring-1 ring-black/5 dark:ring-white/10'
+                                                ? brandGradientButtonClass
                                                 : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-white/5'
                                                 }`}
                                         >
@@ -2509,7 +2519,7 @@ export default function App() {
                                         setHotPoolsFilterOpen(true);
                                     }}
                                     className={`relative inline-flex h-9 w-9 items-center justify-center rounded-2xl ring-1 transition ${hotPoolsFilterEnabled
-                                        ? 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/25 dark:text-emerald-200'
+                                        ? brandSoftButtonClass
                                         : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
                                         }`}
                                     aria-label="Filter"
@@ -2517,7 +2527,7 @@ export default function App() {
                                 >
                                     <Icon path={icons.filter} className="h-3.5 w-3.5" />
                                     {hotPoolsFilterEnabled ? (
-                                        <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-emerald-400 ring-2 ring-white dark:ring-[#111318]" />
+                                        <span className={`absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full ring-2 ring-white dark:ring-[#111318] ${brandDotClass}`} />
                                     ) : null}
                                 </button>
                             </>
@@ -3100,7 +3110,7 @@ export default function App() {
                                             disabled={!hasInitData || poolSearchLoading}
                                             className={`shrink-0 rounded-xl px-3 py-2 text-sm font-semibold ring-1 transition ${!hasInitData || poolSearchLoading
                                                 ? 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
-                                                : 'bg-emerald-500 text-white ring-emerald-500/30 hover:bg-emerald-600'
+                                                : `${brandSolidButtonClass} ring-1 ring-[#bcff2f]/30`
                                                 }`}
                                         >
                                             {poolSearchLoading ? '搜索中...' : '搜索'}
@@ -3241,7 +3251,7 @@ export default function App() {
                                         <button
                                             type="button"
                                             onClick={applyHotPoolsFilter}
-                                            className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-600 active:bg-emerald-700"
+                                            className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold shadow-sm ${brandSolidButtonClass}`}
                                             aria-label="应用"
                                             title="应用"
                                         >
@@ -3413,8 +3423,8 @@ export default function App() {
                                                 key={sec}
                                                 type="button"
                                                 onClick={() => setQuickPoll(sec)}
-                                                className={`rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 ${pollOverrideSec === sec
-                                                    ? 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/25 dark:text-emerald-300'
+                                            className={`rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 ${pollOverrideSec === sec
+                                                    ? brandSoftButtonClass
                                                     : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
                                                     }`}
                                             >
@@ -3441,13 +3451,13 @@ export default function App() {
                                                 }
                                             }}
                                             inputMode="numeric"
-                                            className="w-28 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                            className={`w-28 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brandInputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                             placeholder="1-300"
                                         />
                                         <button
                                             type="button"
                                             onClick={applyPollDraft}
-                                            className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-600 active:bg-emerald-700"
+                                            className={`rounded-xl px-3 py-2 text-sm font-semibold shadow-sm ${brandSolidButtonClass}`}
                                         >
                                             确定
                                         </button>
@@ -3524,7 +3534,7 @@ export default function App() {
                                                         hapticSelection();
                                                     }}
                                                     className={`w-full rounded-xl border px-3 py-2 text-left transition ${selected
-                                                        ? 'border-emerald-500/40 bg-emerald-500/10 ring-1 ring-emerald-500/20 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:ring-emerald-400/20'
+                                                        ? brandSelectionClass
                                                         : 'border-zinc-200 bg-white/70 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10'
                                                         }`}
                                                 >
@@ -3568,7 +3578,7 @@ export default function App() {
                                         setOpenPositionError('');
                                     }}
                                     inputMode="decimal"
-                                    className="mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                    className={`mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brandInputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                     placeholder="例如 100"
                                 />
                             </div>
@@ -3583,7 +3593,7 @@ export default function App() {
                                             setOpenPositionError('');
                                         }}
                                         inputMode="decimal"
-                                        className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                        className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brandInputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                         placeholder="下限 %"
                                     />
                                     <input
@@ -3593,7 +3603,7 @@ export default function App() {
                                             setOpenPositionError('');
                                         }}
                                         inputMode="decimal"
-                                        className="w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                        className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brandInputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                         placeholder="上限 %"
                                     />
                                 </div>
@@ -3705,7 +3715,7 @@ export default function App() {
                                         setOpenPositionError('');
                                     }}
                                     inputMode="decimal"
-                                    className="mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-400 dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30"
+                                    className={`mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brandInputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                     placeholder="例如 0.5（可选）"
                                 />
                             </div>
@@ -3721,9 +3731,9 @@ export default function App() {
                                 type="button"
                                 onClick={handleOpenPosition}
                                 disabled={openPositionLoading}
-                                className={`w-full rounded-xl px-3 py-2 text-sm font-semibold text-white shadow-sm transition ${openPositionLoading
-                                    ? 'cursor-not-allowed bg-emerald-500/60'
-                                    : 'bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700'
+                                className={`w-full rounded-xl px-3 py-2 text-sm font-semibold shadow-sm transition ${openPositionLoading
+                                    ? 'cursor-not-allowed bg-[#bcff2f]/55 text-[#182108]'
+                                    : brandSolidButtonClass
                                     }`}
                             >
                                 {openPositionLoading ? '开仓中...' : '确认开仓'}
@@ -3981,7 +3991,7 @@ export default function App() {
                                 onClick={() => setViewMode(item.key)}
                                 aria-pressed={isActive}
                                 className={`relative flex flex-col items-center justify-center rounded-full px-4 py-1.5 transition-all duration-300 ${isActive
-                                    ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400'
+                                    ? 'bg-[#bcff2f]/12 text-[#6f9616] dark:bg-[#bcff2f]/10 dark:text-[#bcff2f]'
                                     : 'text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300'
                                     }`}
                             >
