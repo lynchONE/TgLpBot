@@ -3552,7 +3552,7 @@ export default function App() {
                         contentClassName="px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
                         title={
                             <div className="min-w-0">
-                                <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/90">一键开仓</div>
+                                <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/90">买入</div>
                                 <div className="mt-0.5 truncate text-[11px] font-medium text-zinc-500 dark:text-white/40">
                                     {openPositionPool?.trading_pair || '--'}
                                 </div>

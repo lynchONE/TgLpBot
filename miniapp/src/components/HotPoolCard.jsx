@@ -558,7 +558,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                     className={brand.actionPillButtonClass}
                 >
                     <FlashIcon className="h-3 w-3 shrink-0" />
-                    {isBlacklisted ? '黑名单' : '一键开仓'}
+                    {isBlacklisted ? '黑名单' : '买入'}
                 </button>
             </div>
         </div >
