@@ -306,6 +306,7 @@ function projectRangeOverlays(candleSeries, overlays, hostWidth, hostHeight) {
       type: 'mid',
       color: String(overlay?.color || 'blue'),
       label: String(overlay?.label || ''),
+      price,
       y,
       width,
       height,
@@ -805,7 +806,10 @@ export default function KlineChart({
               className={`kline-mid-line ${overlay.color}`}
               style={{ top: `${overlay.y}px` }}
             >
-              <span className="kline-mid-line-label">{tooltipSafeLabel(overlay.label)}</span>
+              <span className="kline-range-price">{smartPriceFormatter(overlay.price)}</span>
+              {overlay.label ? (
+                <span className="kline-mid-line-label">{tooltipSafeLabel(overlay.label)}</span>
+              ) : null}
             </div>
           );
         })}
@@ -848,7 +852,11 @@ export default function KlineChart({
                   type="button"
                   className={`kmt-watch-btn ${tooltipData.watched ? 'active' : ''}`}
                   disabled={tooltipData.watchBusy}
-                  onClick={() => onToggleWatch?.(tooltipData.walletAddress, tooltipData.walletName)}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onToggleWatch?.(tooltipData.walletAddress, tooltipData.walletName, tooltipData.watched);
+                  }}
                   aria-label={tooltipData.watched ? '取消特别关注' : '加入特别关注'}
                   title={tooltipData.watched ? '取消特别关注' : '加入特别关注'}
                 >

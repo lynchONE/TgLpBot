@@ -1212,6 +1212,22 @@ export default function App() {
     setKlineOverlayAvailable(true);
   }, [initData]);
 
+  const syncWatchedWallets = useCallback(async (signal) => {
+    if (!hasInitData) {
+      setWatchedWallets([]);
+      setWatchToggleMap({});
+      return;
+    }
+    const resp = await fetchSmartMoneyWatchedWallets({
+      apiBaseUrl,
+      initData,
+      chain,
+      signal,
+    });
+    const rows = Array.isArray(resp?.wallets) ? resp.wallets : [];
+    setWatchedWallets(rows.filter(isUserManagedWatchedWallet));
+  }, [apiBaseUrl, chain, hasInitData, initData]);
+
   useEffect(() => {
     if (!hasInitData) {
       setWatchedWallets([]);
@@ -1219,22 +1235,13 @@ export default function App() {
       return undefined;
     }
     const ctrl = new AbortController();
-    fetchSmartMoneyWatchedWallets({
-      apiBaseUrl,
-      initData,
-      chain,
-      signal: ctrl.signal,
-    })
-      .then((resp) => {
-        const rows = Array.isArray(resp?.wallets) ? resp.wallets : [];
-        setWatchedWallets(rows.filter(isUserManagedWatchedWallet));
-      })
+    syncWatchedWallets(ctrl.signal)
       .catch((e) => {
         if (e?.name === 'AbortError') return;
         setWatchedWallets([]);
       });
     return () => ctrl.abort();
-  }, [apiBaseUrl, chain, hasInitData, initData]);
+  }, [hasInitData, syncWatchedWallets]);
 
   const [loginCode, setLoginCode] = useState('');
   const [loginCodeExpiry, setLoginCodeExpiry] = useState(0);
@@ -1519,13 +1526,13 @@ export default function App() {
     navigator.clipboard?.writeText(addr).catch(() => {});
   }, []);
 
-  const handleToggleWatchedWallet = useCallback(async (walletAddress, label = '') => {
+  const handleToggleWatchedWallet = useCallback(async (walletAddress, label = '', watchedHint = null) => {
     const address = normalizeWalletAddress(walletAddress);
     if (!address || !hasInitData) return;
     if (watchToggleMap[address]) return;
 
     setWatchToggleMap((prev) => ({ ...prev, [address]: true }));
-    const watched = watchedWalletSet.has(address);
+    const watched = typeof watchedHint === 'boolean' ? watchedHint : watchedWalletSet.has(address);
     const rollback = watchedWallets;
 
     setWatchedWallets((prev) => (
@@ -1552,6 +1559,7 @@ export default function App() {
       }
     } catch (e) {
       setWatchedWallets(rollback);
+      return;
     } finally {
       setWatchToggleMap((prev) => {
         const next = { ...prev };
@@ -1559,7 +1567,12 @@ export default function App() {
         return next;
       });
     }
-  }, [apiBaseUrl, chain, hasInitData, initData, watchToggleMap, watchedWalletSet, watchedWallets]);
+    try {
+      await syncWatchedWallets();
+    } catch {
+      // Keep optimistic state if sync fails after the toggle request succeeded.
+    }
+  }, [apiBaseUrl, chain, hasInitData, initData, syncWatchedWallets, watchToggleMap, watchedWalletSet, watchedWallets]);
 
   const renderOperationProgress = (panelKey) => {
     if (!operationProgress || operationProgress.panelKey !== panelKey) return null;
