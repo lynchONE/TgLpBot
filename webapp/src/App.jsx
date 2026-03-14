@@ -96,6 +96,9 @@ const KLINE_MARKER_FETCH_LIMIT = 1200;
 const KLINE_MARKER_RANGE_DEBOUNCE_MS = 240;
 const KLINE_MARKER_LIVE_REFRESH_MS = 4000;
 const KLINE_MARKER_IDLE_REFRESH_MS = 12000;
+const DEFAULT_KLINE_CHART_HEIGHT = 520;
+const MIN_KLINE_CHART_HEIGHT = 360;
+const MAX_KLINE_CHART_HEIGHT = 1200;
 const ACCENT_THEMES = [
   { key: 'green', label: '绿色' },
   { key: 'yellow', label: '黄色' },
@@ -119,6 +122,12 @@ function normalizeKlineRange(range) {
 
 function klineRangesEqual(a, b) {
   return Number(a?.from || 0) === Number(b?.from || 0) && Number(a?.to || 0) === Number(b?.to || 0);
+}
+
+function clampKlineChartHeight(value) {
+  const numeric = Math.round(Number(value));
+  if (!Number.isFinite(numeric)) return DEFAULT_KLINE_CHART_HEIGHT;
+  return Math.min(MAX_KLINE_CHART_HEIGHT, Math.max(MIN_KLINE_CHART_HEIGHT, numeric));
 }
 
 function findNearestCandleClose(rows, targetTs) {
@@ -157,6 +166,7 @@ const STORAGE = {
   refreshInterval: 'tglp_web_refresh_interval',
   accentTheme: 'tglp_web_accent_theme',
   walletId: 'tglp_web_wallet_id',
+  klineHeight: 'tglp_web_kline_height',
 };
 
 function storageGet(key) {
@@ -411,6 +421,10 @@ export default function App() {
   const [klineDrawTool, setKlineDrawTool] = useState('none');
   const [klineDrawResetNonce, setKlineDrawResetNonce] = useState(0);
   const [klineMarkerFilterOpen, setKlineMarkerFilterOpen] = useState(false);
+  const [klineHeightSettingsOpen, setKlineHeightSettingsOpen] = useState(false);
+  const [klineChartHeight, setKlineChartHeight] = useState(() =>
+    clampKlineChartHeight(storageGet(STORAGE.klineHeight) || DEFAULT_KLINE_CHART_HEIGHT)
+  );
   const [klineMarkerMinUsdInput, setKlineMarkerMinUsdInput] = useState('');
   const [klineMarkerWalletFilter, setKlineMarkerWalletFilter] = useState(null);
 
@@ -429,7 +443,7 @@ export default function App() {
   const [draggingKey, setDraggingKey] = useState('');
   const [dragOverKey, setDragOverKey] = useState('');
   const klineVisibleRangeTimerRef = useRef(null);
-  const klineMarkerFilterRef = useRef(null);
+  const klineToolDockRef = useRef(null);
 
   const hasInitData = Boolean(initData);
   const activeWidgets = useMemo(() => {
@@ -676,6 +690,7 @@ export default function App() {
     });
   }, [klineMarkerMinUsd, klineMarkerWalletFilterSet, klineMarkers]);
   const klineMarkerFilterActive = klineMarkerMinUsd > 0 || klineMarkerWalletFilter !== null;
+  const klineChartHeightCustomized = klineChartHeight !== DEFAULT_KLINE_CHART_HEIGHT;
   const klineMarkerSelectedWalletCount = useMemo(() => {
     if (klineMarkerWalletFilter === null) return klineMarkerWalletAddresses.length;
     return klineMarkerWalletFilter.length;
@@ -761,6 +776,9 @@ export default function App() {
   const clearKlineDrawing = useCallback(() => {
     setKlineDrawResetNonce((prev) => prev + 1);
   }, []);
+  const resetKlineChartHeight = useCallback(() => {
+    setKlineChartHeight(DEFAULT_KLINE_CHART_HEIGHT);
+  }, []);
   const resetKlineMarkerFilter = useCallback(() => {
     setKlineMarkerMinUsdInput('');
     setKlineMarkerWalletFilter(null);
@@ -782,14 +800,15 @@ export default function App() {
   }, [klineMarkerMinUsd, klineMarkerWalletFilter]);
 
   useEffect(() => {
-    if (!klineMarkerFilterOpen) return undefined;
+    if (!klineMarkerFilterOpen && !klineHeightSettingsOpen) return undefined;
     const handlePointerDown = (event) => {
-      if (klineMarkerFilterRef.current?.contains(event.target)) return;
+      if (klineToolDockRef.current?.contains(event.target)) return;
       setKlineMarkerFilterOpen(false);
+      setKlineHeightSettingsOpen(false);
     };
     document.addEventListener('mousedown', handlePointerDown);
     return () => document.removeEventListener('mousedown', handlePointerDown);
-  }, [klineMarkerFilterOpen]);
+  }, [klineHeightSettingsOpen, klineMarkerFilterOpen]);
 
   useEffect(() => {
     storageSet(STORAGE.chain, chain);
@@ -797,6 +816,7 @@ export default function App() {
     storageSet(STORAGE.sort, hotSort);
     storageSet(STORAGE.refreshInterval, String(refreshInterval));
     storageSet(STORAGE.accentTheme, accentTheme);
+    storageSet(STORAGE.klineHeight, String(klineChartHeight));
 
     if (initData) {
       storageSet(STORAGE.initData, initData);
@@ -808,7 +828,7 @@ export default function App() {
     } else {
       storageRemove(STORAGE.loginUser);
     }
-  }, [accentTheme, chain, hotSort, initData, loginUser, refreshInterval, widgets]);
+  }, [accentTheme, chain, hotSort, initData, klineChartHeight, loginUser, refreshInterval, widgets]);
 
   useEffect(() => {
     if (!workMode) return;
@@ -1934,7 +1954,7 @@ export default function App() {
             </div>
 
             <div className="kline-chart-shell">
-              <div className="kline-tool-dock" ref={klineMarkerFilterRef}>
+              <div className="kline-tool-dock" ref={klineToolDockRef}>
                 {KLINE_DRAW_TOOLS.map((tool) => {
                   const Icon = tool.icon;
                   return (
@@ -1954,12 +1974,28 @@ export default function App() {
                 <button
                   type="button"
                   className={`kline-tool-btn ${klineMarkerFilterOpen || klineMarkerFilterActive ? 'active' : ''}`}
-                  onClick={() => setKlineMarkerFilterOpen((prev) => !prev)}
+                  onClick={() => {
+                    setKlineHeightSettingsOpen(false);
+                    setKlineMarkerFilterOpen((prev) => !prev);
+                  }}
                   disabled={!klineOverlayEnabled || !klineMarkers.length}
                   title="Filter"
                   aria-label="Filter"
                 >
                   <SlidersHorizontal size={16} />
+                </button>
+
+                <button
+                  type="button"
+                  className={`kline-tool-btn ${klineHeightSettingsOpen || klineChartHeightCustomized ? 'active' : ''}`}
+                  onClick={() => {
+                    setKlineMarkerFilterOpen(false);
+                    setKlineHeightSettingsOpen((prev) => !prev);
+                  }}
+                  title="Chart Height"
+                  aria-label="Chart Height"
+                >
+                  <Settings size={16} />
                 </button>
 
                 <button
@@ -1972,6 +2008,63 @@ export default function App() {
                 >
                   <X size={16} />
                 </button>
+
+                {klineHeightSettingsOpen ? (
+                  <div className="kline-settings-popover tool-dock">
+                    <div className="kline-filter-popover-head">
+                      <div>
+                        <div className="kline-filter-popover-title">Chart Height</div>
+                        <div className="kline-filter-popover-sub">Saved locally for this browser</div>
+                      </div>
+                      <button
+                        type="button"
+                        className="icon-link"
+                        onClick={() => setKlineHeightSettingsOpen(false)}
+                        title="Close"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+
+                    <div className="kline-height-value">{klineChartHeight}px</div>
+
+                    <input
+                      className="kline-height-slider"
+                      type="range"
+                      min={MIN_KLINE_CHART_HEIGHT}
+                      max={MAX_KLINE_CHART_HEIGHT}
+                      step="20"
+                      value={klineChartHeight}
+                      onChange={(e) => setKlineChartHeight(clampKlineChartHeight(e.target.value))}
+                    />
+
+                    <label className="kline-filter-field">
+                      <span>Height</span>
+                      <div className="kline-height-input-row">
+                        <input
+                          type="number"
+                          min={MIN_KLINE_CHART_HEIGHT}
+                          max={MAX_KLINE_CHART_HEIGHT}
+                          step="20"
+                          inputMode="numeric"
+                          value={klineChartHeight}
+                          onChange={(e) => {
+                            const nextValue = Number(e.target.value);
+                            if (!Number.isFinite(nextValue)) return;
+                            setKlineChartHeight(clampKlineChartHeight(nextValue));
+                          }}
+                        />
+                        <span className="kline-height-unit">px</span>
+                      </div>
+                    </label>
+
+                    <div className="kline-filter-actions">
+                      <button type="button" className="ghost-chip" onClick={resetKlineChartHeight}>
+                        Default
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
 
                 {klineMarkerFilterOpen ? (
                   <div className="kline-filter-popover tool-dock">
@@ -2060,6 +2153,7 @@ export default function App() {
                 onToggleWatch={handleToggleWatchedWallet}
                 drawingTool={klineDrawTool}
                 drawingResetNonce={klineDrawResetNonce}
+                chartHeight={klineChartHeight}
                 userAvatarUrl={loginUser?.photo_url || ''}
               />
             </div>

@@ -360,6 +360,7 @@ export default function KlineChart({
   drawingTool = 'none',
   drawingResetNonce = 0,
   viewportKey = '',
+  chartHeight = 520,
   userAvatarUrl = '',
 }) {
   const wrapRef = useRef(null);
@@ -804,9 +805,14 @@ export default function KlineChart({
     };
   }, [hoveredCluster, watchToggleMap, watchedWalletSet]);
 
+  const chartStageStyle = {
+    height: `${Math.max(320, Number(chartHeight || 0))}px`,
+    minHeight: `${Math.max(320, Number(chartHeight || 0))}px`,
+  };
+
   return (
-    <div className="kline-native-wrap" ref={wrapRef}>
-      <div className="kline-native-stage" ref={chartHostRef} />
+    <div className="kline-native-wrap" ref={wrapRef} style={chartStageStyle}>
+      <div className="kline-native-stage" ref={chartHostRef} style={chartStageStyle} />
 
       <div className="kline-marker-layer">
         {projectedRangeOverlays.map((overlay) => {

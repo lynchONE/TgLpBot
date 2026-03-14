@@ -1268,6 +1268,23 @@ body {
   left: calc(100% + 10px);
 }
 
+.kline-settings-popover {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 10px);
+  width: min(240px, calc(100vw - 48px));
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(136, 157, 191, 0.2);
+  background: rgba(10, 15, 24, 0.96);
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(12px);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .kline-filter-popover-head {
   display: flex;
   align-items: flex-start;
@@ -1314,6 +1331,35 @@ body {
 .kline-filter-field input:focus {
   border-color: rgba(var(--accent-rgb), 0.5);
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
+}
+
+.kline-height-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #edf3ff;
+  line-height: 1;
+}
+
+.kline-height-slider {
+  width: 100%;
+  accent-color: rgba(var(--accent-rgb), 0.92);
+}
+
+.kline-height-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kline-height-input-row input {
+  flex: 1;
+}
+
+.kline-height-unit {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .kline-filter-actions {
