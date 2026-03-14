@@ -279,6 +279,11 @@ function normalizeWalletAddress(value) {
   return `0x${raw.slice(2).toLowerCase()}`;
 }
 
+function walletTailLabel(value) {
+  const address = normalizeWalletAddress(value);
+  return address ? address.slice(-4) : '';
+}
+
 function isUserManagedWatchedWallet(wallet) {
   const source = String(wallet?.source || '').trim().toLowerCase();
   if (source === 'user_managed') return true;
@@ -580,7 +585,7 @@ export default function App() {
       id: `selected:${selectedSmartWalletAddress || 'wallet'}`,
       type: 'range',
       walletAddress: selectedSmartWalletAddress,
-      label: String(selectedSmartWallet?.wallet_label || '').trim() || shortAddress(selectedSmartWalletAddress || '', 6, 4),
+      label: String(selectedSmartWallet?.wallet_label || '').trim() || walletTailLabel(selectedSmartWalletAddress),
       priceLower: Math.min(lower, upper),
       priceUpper: Math.max(lower, upper),
       price: (lower + upper) / 2,
@@ -605,7 +610,7 @@ export default function App() {
       const watchedLabel = String(watchedWalletMap.get(address)?.label || '').trim();
       latestByWallet.set(address, {
         ts,
-        label: watchedLabel || address.slice(-4),
+        label: watchedLabel || walletTailLabel(address),
         price: (lower + upper) / 2,
       });
     });
@@ -638,7 +643,7 @@ export default function App() {
     return Array.from(byWallet.values())
       .map((item) => ({
         ...item,
-        displayLabel: item.label || shortAddress(item.address, 6, 4),
+        displayLabel: item.label || walletTailLabel(item.address),
       }))
       .sort((a, b) => (
         Number(b.totalUSD || 0) - Number(a.totalUSD || 0) ||
@@ -2108,8 +2113,21 @@ export default function App() {
                     return (
                       <div key={item?.event_id || `${item?.wallet_address}:${item?.t}`} className="kline-marker-event">
                         <div className="kline-marker-event-main">
-                          <div className="kline-marker-wallet">
-                            {walletLabel || shortAddress(item?.wallet_address || '', 6, 4)}
+                          <div className="kline-marker-wallet-row">
+                            <div className="kline-marker-wallet">
+                              {walletLabel || walletTailLabel(item?.wallet_address)}
+                            </div>
+                            {item?.wallet_address ? (
+                              <button
+                                type="button"
+                                className="kline-marker-copy-btn"
+                                onClick={() => copyAddr(item?.wallet_address)}
+                                aria-label="复制钱包地址"
+                                title="复制钱包地址"
+                              >
+                                <Copy size={12} />
+                              </button>
+                            ) : null}
                           </div>
                           <div className={`kline-marker-action ${item?.action === 'remove' ? 'remove' : 'add'}`}>
                             {item?.action === 'remove' ? '减仓' : '加仓'}
@@ -2575,7 +2593,7 @@ export default function App() {
                                 <img src={walletAvatarUrl(normalizedWalletAddr)} alt="" />
                               </div>
                               <div className="sm-wallet-meta">
-                                <div className="sm-wallet-addr">{walletLabel || shortAddress(addr, 6, 4)}</div>
+                                <div className="sm-wallet-addr">{walletLabel || walletTailLabel(addr)}</div>
                                 {walletLabel ? <div className="sm-wallet-subaddr">{shortAddress(addr, 6, 4)}</div> : null}
                               </div>
                             </div>

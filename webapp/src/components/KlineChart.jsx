@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, CandlestickSeries, HistogramSeries } from 'lightweight-charts';
+import { Copy } from 'lucide-react';
 import { formatUtc8DateTime, formatUtc8TickMark, shortAddress, toUnixSeconds } from '../utils';
 
 /* ── Wallet avatar images ── */
@@ -27,6 +28,11 @@ function normalizeWalletAddress(value) {
   const raw = String(value || '').trim();
   if (!/^0x[0-9a-fA-F]{40}$/.test(raw)) return '';
   return `0x${raw.slice(2).toLowerCase()}`;
+}
+
+function walletTailLabel(value) {
+  const address = normalizeWalletAddress(value);
+  return address ? address.slice(-4) : '';
 }
 
 function isClusterHighlighted(cluster, walletAddress) {
@@ -462,6 +468,12 @@ export default function KlineChart({
     setProjectedDrawing(null);
   }, []);
 
+  const copyWalletAddress = useCallback((walletAddress) => {
+    const address = normalizeWalletAddress(walletAddress);
+    if (!address) return;
+    navigator.clipboard?.writeText(address).catch(() => {});
+  }, []);
+
   const resolveDrawingAnchor = useCallback((event) => {
     const host = chartHostRef.current;
     const chart = chartRef.current;
@@ -750,7 +762,7 @@ export default function KlineChart({
     const primary = c.items?.[0];
     if (!primary) return null;
     const walletAddress = normalizeWalletAddress(primary.wallet_address || '');
-    const walletName = c.isMyTrade ? '我的交易' : (String(primary.wallet_label || '').trim() || shortAddress(primary.wallet_address || '', 6, 4));
+    const walletName = c.isMyTrade ? '我的交易' : (String(primary.wallet_label || '').trim() || walletTailLabel(walletAddress));
     const lower = Number(primary.price_lower || 0);
     const upper = Number(primary.price_upper || 0);
     const hasRange = lower > 0 && upper > 0;
@@ -846,7 +858,24 @@ export default function KlineChart({
           >
             <div className="kmt-head">
               <span className="kmt-emoji"><img src={hoveredCluster.label} alt="" /></span>
-              <span className="kmt-wallet">{tooltipData.walletName}</span>
+              <span className="kmt-wallet-wrap">
+                <span className="kmt-wallet">{tooltipData.walletName}</span>
+                {tooltipData.walletAddress ? (
+                  <button
+                    type="button"
+                    className="kmt-copy-btn"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      copyWalletAddress(tooltipData.walletAddress);
+                    }}
+                    aria-label="复制钱包地址"
+                    title="复制钱包地址"
+                  >
+                    <Copy size={11} />
+                  </button>
+                ) : null}
+              </span>
               {!tooltipData.isMyTrade && tooltipData.walletAddress ? (
                 <button
                   type="button"

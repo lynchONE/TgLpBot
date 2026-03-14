@@ -1660,6 +1660,7 @@ body {
 
 .kline-mid-line.blue {
   color: #2f8cff;
+  --kline-axis-bg: #2f8cff;
 }
 
 .kline-range-line .kline-range-price {
@@ -1686,7 +1687,7 @@ body {
   padding: 4px 9px;
   border-radius: 4px 0 0 4px;
   color: #f7fbff;
-  background: currentColor;
+  background: var(--kline-axis-bg, #2f8cff);
   font-size: 11px;
   font-weight: 800;
   line-height: 1;
@@ -1698,9 +1699,9 @@ body {
 .kline-mid-line .kline-mid-line-label {
   position: absolute;
   top: 0;
-  right: 90px;
+  right: 92px;
   left: auto;
-  transform: translateY(calc(-100% - 5px));
+  transform: translateY(-50%);
   max-width: 62px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1763,8 +1764,16 @@ body {
 }
 .kmt-emoji { width: 18px; height: 18px; flex-shrink: 0; }
 .kmt-emoji img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
+.kmt-wallet-wrap {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
 .kmt-wallet { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; color: #edf3ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kmt-count { font-size: 10px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
+.kmt-copy-btn,
 .kmt-watch-btn {
   width: 22px;
   height: 22px;
@@ -1781,10 +1790,14 @@ body {
   flex-shrink: 0;
   transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
 }
+.kmt-copy-btn:hover:not(:disabled),
 .kmt-watch-btn:hover:not(:disabled) {
   transform: scale(1.05);
   border-color: rgba(92, 167, 255, 0.46);
   background: rgba(92, 167, 255, 0.14);
+}
+.kmt-copy-btn {
+  color: #8ab9ff;
 }
 .kmt-watch-btn.active {
   border-color: rgba(255, 93, 115, 0.5);
@@ -1877,6 +1890,35 @@ body {
   font-size: 12px;
   font-weight: 600;
   color: #edf3ff;
+}
+
+.kline-marker-wallet-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.kline-marker-copy-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(92, 167, 255, 0.24);
+  background: rgba(92, 167, 255, 0.08);
+  color: #8ab9ff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.kline-marker-copy-btn:hover {
+  transform: scale(1.05);
+  border-color: rgba(92, 167, 255, 0.44);
+  background: rgba(92, 167, 255, 0.14);
 }
 
 .kline-marker-action {
