@@ -513,8 +513,8 @@ body {
 
 .title-logo {
   display: block;
-  height: 38px;
-  width: auto;
+  width: min(170px, 42vw);
+  height: auto;
   object-fit: contain;
 }
 
