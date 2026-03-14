@@ -47,6 +47,7 @@ export default function OpenPositionModal({
   const [amount, setAmount] = useState('100');
   const [rangeLower, setRangeLower] = useState('2');
   const [rangeUpper, setRangeUpper] = useState('2');
+  const [rangeUpperAuto, setRangeUpperAuto] = useState(true);
   const [slippage, setSlippage] = useState('');
   const [error, setError] = useState('');
 
@@ -72,6 +73,21 @@ export default function OpenPositionModal({
   const applyRange = useCallback((lo, hi) => {
     setRangeLower(String(lo));
     setRangeUpper(String(hi));
+    setRangeUpperAuto(true);
+  }, []);
+
+  const handleRangeLowerChange = useCallback((value) => {
+    setRangeLower((prevLower) => {
+      if (rangeUpperAuto || String(rangeUpper || '').trim() === '' || String(rangeUpper) === String(prevLower)) {
+        setRangeUpper(value);
+      }
+      return value;
+    });
+  }, [rangeUpper, rangeUpperAuto]);
+
+  const handleRangeUpperChange = useCallback((value) => {
+    setRangeUpperAuto(false);
+    setRangeUpper(value);
   }, []);
 
   const handleSubmit = useCallback(() => {
@@ -196,11 +212,11 @@ export default function OpenPositionModal({
           <div className="modal-row">
             <label className="modal-field">
               <span>下限 %</span>
-              <input type="number" value={rangeLower} onChange={(e) => setRangeLower(e.target.value)} min="0.1" step="0.5" />
+              <input type="number" value={rangeLower} onChange={(e) => handleRangeLowerChange(e.target.value)} min="0.1" step="0.5" />
             </label>
             <label className="modal-field">
               <span>上限 %</span>
-              <input type="number" value={rangeUpper} onChange={(e) => setRangeUpper(e.target.value)} min="0.1" step="0.5" />
+              <input type="number" value={rangeUpper} onChange={(e) => handleRangeUpperChange(e.target.value)} min="0.1" step="0.5" />
             </label>
           </div>
 

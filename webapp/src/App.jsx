@@ -27,15 +27,19 @@ import {
   fetchSmartMoneyOverview,
   fetchSmartMoneyPoolAdds,
   fetchSmartMoneyPoolMarkers,
+  fetchSmartMoneyWatchedWallets,
   fetchMyTradeMarkers,
   fetchTokenCandles,
   fetchWallets,
   generateLoginCode,
   openPosition as apiOpenPosition,
+  addSmartMoneyWatchedWallets,
+  removeSmartMoneyWatchedWallets,
   setTaskPaused,
   stopTask,
   updateTaskRange,
 } from './api';
+import { walletAvatarUrl } from './avatar';
 import { WEBAPP_CONFIG } from './config';
 import PanelShell, { EmptyState, MetricCard } from './components/PanelShell';
 import KlineChart from './components/KlineChart';
@@ -212,6 +216,7 @@ function aggregatePoolAddWallets(rows) {
       priceLower > 0 &&
       Number.isFinite(priceUpper) &&
       priceUpper > 0;
+    const lastAtMs = Date.parse(String(row?.last_at || '')) || 0;
     const rangeScore = hasRange ? totalUsd : -1;
 
     if (!map.has(key)) {
@@ -221,6 +226,8 @@ function aggregatePoolAddWallets(rows) {
         total_usd: totalUsd,
         event_count: eventCount,
         _rangeScore: rangeScore,
+        _latestAtMs: lastAtMs,
+        latest_open_price: hasRange ? (priceLower + priceUpper) / 2 : 0,
       });
       return;
     }
@@ -229,22 +236,46 @@ function aggregatePoolAddWallets(rows) {
     prev.total_usd = Number(prev.total_usd ?? 0) + totalUsd;
     prev.event_count = Number(prev.event_count ?? 0) + eventCount;
 
-    if (rangeScore > Number(prev._rangeScore ?? -1)) {
+    const prevLatestAtMs = Number(prev._latestAtMs ?? 0);
+    const shouldUseCurrentRange =
+      hasRange &&
+      (lastAtMs > prevLatestAtMs || (lastAtMs === prevLatestAtMs && rangeScore > Number(prev._rangeScore ?? -1)));
+
+    if (shouldUseCurrentRange) {
       prev.price_lower = row?.price_lower;
       prev.price_upper = row?.price_upper;
       prev.price_base = row?.price_base;
       prev.price_quote = row?.price_quote;
       prev._rangeScore = rangeScore;
+      prev.latest_open_price = (priceLower + priceUpper) / 2;
+    }
+
+    if (lastAtMs > prevLatestAtMs) {
+      prev.last_at = row?.last_at;
+      prev._latestAtMs = lastAtMs;
     }
   });
 
   return Array.from(map.values())
-    .map(({ _rangeScore, ...row }) => row)
+    .map(({ _rangeScore, _latestAtMs, ...row }) => row)
     .sort((a, b) => (
       Number(b?.total_usd ?? 0) - Number(a?.total_usd ?? 0) ||
       Number(b?.event_count ?? 0) - Number(a?.event_count ?? 0) ||
       String(a?.wallet_address || '').localeCompare(String(b?.wallet_address || ''))
     ));
+}
+
+function normalizeWalletAddress(value) {
+  const raw = String(value || '').trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(raw)) return '';
+  return `0x${raw.slice(2).toLowerCase()}`;
+}
+
+function buildPoolKey(poolVersion, poolId) {
+  const version = String(poolVersion || '').trim().toLowerCase();
+  const id = normalizePoolAddress(poolId);
+  if (!version || !id) return '';
+  return `${version}:${id}`;
 }
 
 function parseLoginUser(raw) {
@@ -353,7 +384,10 @@ export default function App() {
   const [klineRefreshNonce, setKlineRefreshNonce] = useState(0);
   const [klineMarkerRefreshNonce, setKlineMarkerRefreshNonce] = useState(0);
   const [selectedMarkerCluster, setSelectedMarkerCluster] = useState(null);
+  const [selectedSmartWallet, setSelectedSmartWallet] = useState(null);
   const [klineVisibleRange, setKlineVisibleRange] = useState(null);
+  const [watchedWallets, setWatchedWallets] = useState([]);
+  const [watchToggleMap, setWatchToggleMap] = useState({});
 
   const [refreshing, setRefreshing] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false);
@@ -472,6 +506,18 @@ export default function App() {
       (a, b) => Number(b?.totals?.total_usd || 0) - Number(a?.totals?.total_usd || 0)
     );
   }, [positions]);
+  const walletMetaByKey = useMemo(() => {
+    const map = new Map();
+    (Array.isArray(walletBalances) ? walletBalances : []).forEach((wallet, index) => {
+      const id = Number(wallet?.id || 0);
+      const address = normalizeWalletAddress(wallet?.address);
+      const label = String(wallet?.name || '').trim() || shortAddress(address || `wallet-${index}`, 6, 4);
+      const meta = { id, address, label, isDefault: Boolean(wallet?.is_default) };
+      if (id > 0) map.set(`id:${id}`, meta);
+      if (address) map.set(`addr:${address}`, meta);
+    });
+    return map;
+  }, [walletBalances]);
 
   const smartPools = useMemo(() => {
     const rows = Array.isArray(smart?.pools) ? smart.pools : [];
@@ -487,6 +533,70 @@ export default function App() {
     const rows = Array.isArray(smart?.wallets_24h) ? smart.wallets_24h : [];
     return [...rows].sort((a, b) => Number(b?.pnl_usdt_24h || 0) - Number(a?.pnl_usdt_24h || 0));
   }, [smart]);
+  const watchedWalletMap = useMemo(() => {
+    const map = new Map();
+    (Array.isArray(watchedWallets) ? watchedWallets : []).forEach((wallet) => {
+      const address = normalizeWalletAddress(wallet?.wallet_address);
+      if (!address) return;
+      map.set(address, wallet);
+    });
+    return map;
+  }, [watchedWallets]);
+  const watchedWalletSet = useMemo(() => new Set(watchedWalletMap.keys()), [watchedWalletMap]);
+  const selectedPoolKey = useMemo(
+    () => buildPoolKey(selectedPoolVersion, selectedPoolAddress),
+    [selectedPoolAddress, selectedPoolVersion]
+  );
+  const selectedSmartWalletAddress = useMemo(
+    () => (selectedSmartWallet?.poolKey === selectedPoolKey ? normalizeWalletAddress(selectedSmartWallet?.wallet_address) : ''),
+    [selectedPoolKey, selectedSmartWallet]
+  );
+  const selectedSmartWalletOverlay = useMemo(() => {
+    if (!selectedSmartWallet || selectedSmartWallet.poolKey !== selectedPoolKey) return [];
+    const lower = Number(selectedSmartWallet?.price_lower || 0);
+    const upper = Number(selectedSmartWallet?.price_upper || 0);
+    if (!Number.isFinite(lower) || lower <= 0 || !Number.isFinite(upper) || upper <= 0) return [];
+    return [{
+      id: `selected:${selectedSmartWalletAddress || 'wallet'}`,
+      type: 'range',
+      walletAddress: selectedSmartWalletAddress,
+      label: String(selectedSmartWallet?.wallet_label || '').trim() || shortAddress(selectedSmartWalletAddress || '', 6, 4),
+      priceLower: Math.min(lower, upper),
+      priceUpper: Math.max(lower, upper),
+      price: (lower + upper) / 2,
+      color: 'red',
+      avatarUrl: walletAvatarUrl(selectedSmartWalletAddress),
+    }];
+  }, [selectedPoolKey, selectedSmartWallet, selectedSmartWalletAddress]);
+  const watchedMidlineOverlays = useMemo(() => {
+    if (!selectedPoolKey || !watchedWalletSet.size) return [];
+    const latestByWallet = new Map();
+    (Array.isArray(klineMarkers) ? klineMarkers : []).forEach((row) => {
+      const address = normalizeWalletAddress(row?.wallet_address);
+      if (!address || !watchedWalletSet.has(address)) return;
+      if (address === selectedSmartWalletAddress) return;
+      if (String(row?.action || '').trim().toLowerCase() === 'remove') return;
+      const lower = Number(row?.price_lower || 0);
+      const upper = Number(row?.price_upper || 0);
+      if (!Number.isFinite(lower) || lower <= 0 || !Number.isFinite(upper) || upper <= 0) return;
+      const ts = Number(row?.t || row?.bucket_t || 0);
+      const prev = latestByWallet.get(address);
+      if (prev && prev.ts >= ts) return;
+      latestByWallet.set(address, {
+        ts,
+        label: String(row?.wallet_label || '').trim() || String(watchedWalletMap.get(address)?.label || '').trim() || shortAddress(address, 6, 4),
+        price: (lower + upper) / 2,
+      });
+    });
+    return Array.from(latestByWallet.entries()).map(([address, item]) => ({
+      id: `watched:${address}`,
+      type: 'mid',
+      walletAddress: address,
+      label: item.label,
+      price: item.price,
+      color: 'blue',
+    }));
+  }, [klineMarkers, selectedPoolKey, selectedSmartWalletAddress, watchedWalletMap, watchedWalletSet]);
   const klineMarkerWalletCount = useMemo(() => {
     const value = Number(klineMarkerStats?.walletCount || 0);
     if (value > 0) return value;
@@ -973,6 +1083,12 @@ export default function App() {
   }, [selectedPoolAddress]);
 
   useEffect(() => {
+    if (!selectedSmartWallet) return;
+    if (selectedSmartWallet.poolKey === selectedPoolKey) return;
+    setSelectedSmartWallet(null);
+  }, [selectedPoolKey, selectedSmartWallet]);
+
+  useEffect(() => {
     if (!klineOverlayEnabled) {
       setSelectedMarkerCluster(null);
     }
@@ -981,6 +1097,29 @@ export default function App() {
   useEffect(() => {
     setKlineOverlayAvailable(true);
   }, [initData]);
+
+  useEffect(() => {
+    if (!hasInitData) {
+      setWatchedWallets([]);
+      setWatchToggleMap({});
+      return undefined;
+    }
+    const ctrl = new AbortController();
+    fetchSmartMoneyWatchedWallets({
+      apiBaseUrl,
+      initData,
+      chain,
+      signal: ctrl.signal,
+    })
+      .then((resp) => {
+        setWatchedWallets(Array.isArray(resp?.wallets) ? resp.wallets : []);
+      })
+      .catch((e) => {
+        if (e?.name === 'AbortError') return;
+        setWatchedWallets([]);
+      });
+    return () => ctrl.abort();
+  }, [apiBaseUrl, chain, hasInitData, initData]);
 
   const [loginCode, setLoginCode] = useState('');
   const [loginCodeExpiry, setLoginCodeExpiry] = useState(0);
@@ -1264,6 +1403,48 @@ export default function App() {
   const copyAddr = useCallback((addr) => {
     navigator.clipboard?.writeText(addr).catch(() => {});
   }, []);
+
+  const handleToggleWatchedWallet = useCallback(async (walletAddress, label = '') => {
+    const address = normalizeWalletAddress(walletAddress);
+    if (!address || !hasInitData) return;
+    if (watchToggleMap[address]) return;
+
+    setWatchToggleMap((prev) => ({ ...prev, [address]: true }));
+    const watched = watchedWalletSet.has(address);
+    const rollback = watchedWallets;
+
+    setWatchedWallets((prev) => (
+      watched
+        ? prev.filter((item) => normalizeWalletAddress(item?.wallet_address) !== address)
+        : [...prev, { wallet_address: address, label: String(label || '').trim() }]
+    ));
+
+    try {
+      if (watched) {
+        await removeSmartMoneyWatchedWallets({
+          apiBaseUrl,
+          initData,
+          chain,
+          walletAddresses: [address],
+        });
+      } else {
+        await addSmartMoneyWatchedWallets({
+          apiBaseUrl,
+          initData,
+          chain,
+          wallets: [{ address, label: String(label || '').trim() }],
+        });
+      }
+    } catch (e) {
+      setWatchedWallets(rollback);
+    } finally {
+      setWatchToggleMap((prev) => {
+        const next = { ...prev };
+        delete next[address];
+        return next;
+      });
+    }
+  }, [apiBaseUrl, chain, hasInitData, initData, watchToggleMap, watchedWalletSet, watchedWallets]);
 
   const renderOperationProgress = (panelKey) => {
     if (!operationProgress || operationProgress.panelKey !== panelKey) return null;
@@ -1616,11 +1797,13 @@ export default function App() {
             <KlineChart
               candles={klineCandles}
               markers={klineOverlayEnabled ? klineMarkers : []}
+              rangeOverlays={[...selectedSmartWalletOverlay, ...watchedMidlineOverlays]}
               loading={klineLoading}
               error={klineError}
               onVisibleRangeChange={handleKlineVisibleRangeChange}
               viewportKey={klineViewportKey}
               activeMarkerId={selectedMarkerCluster?.id || ''}
+              highlightWalletAddress={selectedSmartWalletAddress}
               onMarkerClick={(cluster) => setSelectedMarkerCluster(cluster)}
               userAvatarUrl={loginUser?.photo_url || ''}
             />
@@ -1797,6 +1980,11 @@ export default function App() {
               const taskRangeUp = Number(p?.task_range_upper_pct);
               const taskAmount = Number(p?.task_amount_usdt);
               const priceRange = computePriceRange(p);
+              const positionWalletMeta = walletMetaByKey.get(`id:${Number(p?.wallet_id || 0)}`) ||
+                walletMetaByKey.get(`addr:${normalizeWalletAddress(p?.wallet_address)}`);
+              const positionWalletText = positionWalletMeta?.label ||
+                shortAddress(normalizeWalletAddress(p?.wallet_address) || '', 6, 4) ||
+                '默认钱包';
 
               const statusClass = statusLabel.includes('错误') ? 'st-error' :
                 statusLabel.includes('暂停') || statusLabel.includes('停止') || statusLabel.includes('撤出') ? 'st-warn' :
@@ -1831,6 +2019,7 @@ export default function App() {
                           <span className="status-dot" />
                           {statusLabel}
                         </span>
+                        <span className="pos-wallet-chip">钱包 {positionWalletText}</span>
                         {taskId > 0 && <span className="pos-task-id">#{taskId}</span>}
                         <span className={`range-pill ${inRange ? 'in' : 'out'}`}>
                           {inRange ? 'In Range' : 'Out'}
@@ -1971,7 +2160,7 @@ export default function App() {
             <EmptyState text="暂无监控钱包加 LP 数据" />
           ) : (
             smartDisplayPools.map((pool, idx) => {
-              const poolKey = `${pool?.pool_version || ''}:${pool?.pool_id || ''}`;
+              const poolKey = buildPoolKey(pool?.pool_version, pool?.pool_id) || `${pool?.pool_version || ''}:${pool?.pool_id || ''}`;
               const adds = poolAddsMap[poolKey];
               const wallets = aggregatePoolAddWallets(adds?.wallets || []);
               const totalUsd = adds?.totalUsd || 0;
@@ -2069,10 +2258,12 @@ export default function App() {
                     <div className="sm-wallet-list">
                       {wallets.slice(0, 5).map((w, wi) => {
                         const addr = String(w?.wallet_address || '').trim();
+                        const normalizedWalletAddr = normalizeWalletAddress(addr);
                         const usd = Number(w?.total_usd ?? 0);
                         const priceLower = Number(w?.price_lower ?? 0);
                         const priceUpper = Number(w?.price_upper ?? 0);
                         const quote = String(w?.price_quote || '').trim();
+                        const walletLabel = String(w?.label || watchedWalletMap.get(normalizedWalletAddr)?.label || '').trim();
                         const hasRange =
                           Number.isFinite(priceLower) &&
                           priceLower > 0 &&
@@ -2081,10 +2272,74 @@ export default function App() {
                         const rangePct = hasRange
                           ? (Math.abs(priceUpper - priceLower) / (priceUpper + priceLower)) * 100
                           : 0;
+                        const watched = normalizedWalletAddr ? watchedWalletSet.has(normalizedWalletAddr) : false;
+                        const watchBusy = Boolean(watchToggleMap[normalizedWalletAddr]);
+                        const activeWallet = normalizedWalletAddr && selectedSmartWallet?.poolKey === poolKey &&
+                          normalizeWalletAddress(selectedSmartWallet?.wallet_address) === normalizedWalletAddr;
 
                         return (
-                          <div key={addr || wi} className="sm-wallet-row">
-                            <div className="sm-wallet-addr">{shortAddress(addr, 6, 4)}</div>
+                          <div
+                            key={addr || wi}
+                            className={`sm-wallet-row ${activeWallet ? 'active' : ''}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              selectPool(
+                                {
+                                  pool_id: pool?.pool_id,
+                                  pool_address: pool?.pool_id,
+                                  trading_pair: pair,
+                                  protocol_version: pool?.pool_version,
+                                  factory_name: dexName,
+                                  token0_address: pool?.token0,
+                                  token1_address: pool?.token1,
+                                  token0_symbol: pool?.token0_symbol,
+                                  token1_symbol: pool?.token1_symbol,
+                                  chain,
+                                },
+                                chain
+                              );
+                              if (hasRange && normalizedWalletAddr) {
+                                setSelectedSmartWallet({
+                                  poolKey,
+                                  wallet_address: normalizedWalletAddr,
+                                  wallet_label: walletLabel,
+                                  price_lower: priceLower,
+                                  price_upper: priceUpper,
+                                  latest_open_price: Number(w?.latest_open_price || 0),
+                                });
+                              } else {
+                                setSelectedSmartWallet(null);
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key !== 'Enter' && e.key !== ' ') return;
+                              e.preventDefault();
+                              e.currentTarget.click();
+                            }}
+                            role="button"
+                            tabIndex={0}
+                          >
+                            <div className="sm-wallet-main">
+                              <div className={`sm-wallet-avatar ${watched ? 'watched' : ''} ${activeWallet ? 'active' : ''}`}>
+                                <img src={walletAvatarUrl(normalizedWalletAddr)} alt="" />
+                                <button
+                                  type="button"
+                                  className={`sm-wallet-heart ${watched ? 'active' : ''}`}
+                                  disabled={!normalizedWalletAddr || watchBusy}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleToggleWatchedWallet(normalizedWalletAddr, walletLabel);
+                                  }}
+                                  title={watched ? '取消特别关注' : '加入特别关注'}
+                                >
+                                  {watched ? '♥' : '♡'}
+                                </button>
+                              </div>
+                              <div className="sm-wallet-meta">
+                                <div className="sm-wallet-addr">{walletLabel || shortAddress(addr, 6, 4)}</div>
+                                {walletLabel ? <div className="sm-wallet-subaddr">{shortAddress(addr, 6, 4)}</div> : null}
+                              </div>
+                            </div>
                             <div className="sm-wallet-stats">
                               <span className="sm-wallet-usd">${formatNumber(Math.round(usd))}</span>
                               {hasRange ? (

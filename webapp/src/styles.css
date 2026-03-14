@@ -1342,6 +1342,74 @@ body {
   border-color: #ea3943;
   box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.5), 0 0 10px rgba(234, 57, 67, 0.5), 0 4px 14px rgba(0, 0, 0, 0.4);
 }
+.kline-marker.wallet-highlighted {
+  border-color: #ff5d73;
+  box-shadow: 0 0 0 2px rgba(255, 93, 115, 0.4), 0 0 16px rgba(255, 93, 115, 0.45), 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+.kline-range-line,
+.kline-mid-line {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  height: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.kline-range-line::before,
+.kline-mid-line::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-top: 1px dashed currentColor;
+  opacity: 0.92;
+}
+
+.kline-range-line.red,
+.kline-range-avatar.red {
+  color: #ff5d73;
+}
+
+.kline-mid-line.blue {
+  color: #5ca7ff;
+}
+
+.kline-range-line.top .kline-range-label,
+.kline-mid-line .kline-mid-line-label {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  border: 1px solid currentColor;
+  background: rgba(11, 16, 24, 0.92);
+}
+
+.kline-range-avatar {
+  position: absolute;
+  right: 12px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  overflow: hidden;
+  transform: translateY(-50%);
+  border: 2px solid currentColor;
+  box-shadow: 0 0 0 3px rgba(255, 93, 115, 0.18), 0 8px 20px rgba(0, 0, 0, 0.32);
+  z-index: 4;
+  pointer-events: none;
+}
+
+.kline-range-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
 
 .kline-marker-tooltip {
   position: absolute;
@@ -1696,6 +1764,84 @@ body {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.025);
   border: 1px solid rgba(138, 160, 194, 0.08);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.sm-wallet-row:hover,
+.sm-wallet-row.active {
+  border-color: rgba(255, 93, 115, 0.34);
+  background: rgba(255, 93, 115, 0.08);
+}
+
+.sm-wallet-row:focus-visible {
+  outline: 2px solid rgba(255, 93, 115, 0.5);
+  outline-offset: 1px;
+}
+
+.sm-wallet-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sm-wallet-meta {
+  min-width: 0;
+}
+
+.sm-wallet-subaddr {
+  font-size: 10px;
+  color: rgba(138, 160, 194, 0.52);
+  font-family: 'Space Mono', 'Courier New', monospace;
+}
+
+.sm-wallet-avatar {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid rgba(138, 160, 194, 0.22);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.28);
+  flex-shrink: 0;
+}
+
+.sm-wallet-avatar.active {
+  border-color: #ff5d73;
+  box-shadow: 0 0 0 3px rgba(255, 93, 115, 0.16), 0 6px 16px rgba(0, 0, 0, 0.28);
+}
+
+.sm-wallet-avatar.watched {
+  border-color: #5ca7ff;
+}
+
+.sm-wallet-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.sm-wallet-heart {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(11, 16, 24, 0.92);
+  color: #9fb4d0;
+  font-size: 10px;
+  line-height: 16px;
+  padding: 0;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.sm-wallet-heart.active {
+  color: #ff5d73;
 }
 
 .sm-wallet-addr {
@@ -2342,6 +2488,19 @@ body {
 .status-pill.st-error .status-dot { background: #ef4444; }
 .status-pill.st-wait { background: rgba(56, 189, 248, 0.15); color: #7dd3fc; }
 .status-pill.st-wait .status-dot { background: #38bdf8; }
+
+.pos-wallet-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #ffd479;
+  background: rgba(255, 204, 92, 0.12);
+  border: 1px solid rgba(255, 204, 92, 0.18);
+}
 
 .pos-task-id {
   font-size: 10px;

@@ -397,6 +397,7 @@ export default function App() {
     const [openPositionAmount, setOpenPositionAmount] = useState('');
     const [openPositionRangeLower, setOpenPositionRangeLower] = useState('');
     const [openPositionRangeUpper, setOpenPositionRangeUpper] = useState('');
+    const [openPositionRangeUpperAuto, setOpenPositionRangeUpperAuto] = useState(true);
     const [openPositionSlippage, setOpenPositionSlippage] = useState('');
     const [openPositionAllowSwap, setOpenPositionAllowSwap] = useState(false);
     const [openPositionError, setOpenPositionError] = useState('');
@@ -412,6 +413,7 @@ export default function App() {
     const [taskRangeEdit, setTaskRangeEdit] = useState(null);
     const [taskRangeLower, setTaskRangeLower] = useState('');
     const [taskRangeUpper, setTaskRangeUpper] = useState('');
+    const [taskRangeUpperAuto, setTaskRangeUpperAuto] = useState(true);
     const [taskRangeAmount, setTaskRangeAmount] = useState('');
     const [taskRangeError, setTaskRangeError] = useState('');
     const [taskRangeLoading, setTaskRangeLoading] = useState(false);
@@ -1591,10 +1593,51 @@ export default function App() {
         return { lower: Math.abs(lower), upper: Math.abs(upper) };
     };
 
+    const handleOpenPositionRangeLowerChange = useCallback((value) => {
+        setOpenPositionRangeLower((prevLower) => {
+            if (
+                openPositionRangeUpperAuto ||
+                String(openPositionRangeUpper || '').trim() === '' ||
+                String(openPositionRangeUpper) === String(prevLower)
+            ) {
+                setOpenPositionRangeUpper(value);
+            }
+            return value;
+        });
+        setOpenPositionError('');
+    }, [openPositionRangeUpper, openPositionRangeUpperAuto]);
+
+    const handleOpenPositionRangeUpperChange = useCallback((value) => {
+        setOpenPositionRangeUpperAuto(false);
+        setOpenPositionRangeUpper(value);
+        setOpenPositionError('');
+    }, []);
+
+    const handleTaskRangeLowerChange = useCallback((value) => {
+        setTaskRangeLower((prevLower) => {
+            if (
+                taskRangeUpperAuto ||
+                String(taskRangeUpper || '').trim() === '' ||
+                String(taskRangeUpper) === String(prevLower)
+            ) {
+                setTaskRangeUpper(value);
+            }
+            return value;
+        });
+        setTaskRangeError('');
+    }, [taskRangeUpper, taskRangeUpperAuto]);
+
+    const handleTaskRangeUpperChange = useCallback((value) => {
+        setTaskRangeUpperAuto(false);
+        setTaskRangeUpper(value);
+        setTaskRangeError('');
+    }, []);
+
     const resetOpenPositionDraft = () => {
         setOpenPositionAmount('');
         setOpenPositionRangeLower('');
         setOpenPositionRangeUpper('');
+        setOpenPositionRangeUpperAuto(true);
         setOpenPositionSlippage('');
 
         setOpenPositionError('');
@@ -2162,6 +2205,7 @@ export default function App() {
         });
         setTaskRangeLower(Number.isFinite(low) && low > 0 ? String(low) : '');
         setTaskRangeUpper(Number.isFinite(up) && up > 0 ? String(up) : '');
+        setTaskRangeUpperAuto(true);
         setTaskRangeAmount(
             Number.isFinite(amount) && amount > 0
                 ? String(amount)
@@ -2175,6 +2219,7 @@ export default function App() {
         setTaskRangeEdit(null);
         setTaskRangeLower('');
         setTaskRangeUpper('');
+        setTaskRangeUpperAuto(true);
         setTaskRangeAmount('');
         setTaskRangeError('');
     };
@@ -2216,6 +2261,7 @@ export default function App() {
             setTaskRangeEdit(null);
             setTaskRangeLower('');
             setTaskRangeUpper('');
+            setTaskRangeUpperAuto(true);
             setTaskRangeAmount('');
         } catch (e) {
             setTaskRangeError(String(e?.message || e || '修改失败'));
@@ -3614,20 +3660,14 @@ export default function App() {
                                 <div className="mt-2 grid grid-cols-2 gap-2">
                                     <input
                                         value={openPositionRangeLower}
-                                        onChange={(e) => {
-                                            setOpenPositionRangeLower(e.target.value);
-                                            setOpenPositionError('');
-                                        }}
+                                        onChange={(e) => handleOpenPositionRangeLowerChange(e.target.value)}
                                         inputMode="decimal"
                                         className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                         placeholder="下限 %"
                                     />
                                     <input
                                         value={openPositionRangeUpper}
-                                        onChange={(e) => {
-                                            setOpenPositionRangeUpper(e.target.value);
-                                            setOpenPositionError('');
-                                        }}
+                                        onChange={(e) => handleOpenPositionRangeUpperChange(e.target.value)}
                                         inputMode="decimal"
                                         className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                         placeholder="上限 %"
@@ -3648,6 +3688,7 @@ export default function App() {
                                                     setOpenPositionRangeLower(normalized);
                                                     setOpenPositionRangeUpper(normalized);
                                                 }
+                                                setOpenPositionRangeUpperAuto(true);
                                                 setOpenPositionError('');
                                             }}
                                             className="rounded-lg px-2 py-1 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-500/30 bg-gradient-to-r from-amber-50 via-amber-100/60 to-yellow-100/60 hover:from-amber-100 hover:via-amber-200/70 hover:to-yellow-200/70 dark:text-amber-200 dark:ring-amber-400/30 dark:from-amber-500/10 dark:via-amber-400/10 dark:to-yellow-400/10"
@@ -3705,6 +3746,7 @@ export default function App() {
                                                                 onClick={() => {
                                                                     setOpenPositionRangeLower(half.toFixed(2));
                                                                     setOpenPositionRangeUpper(half.toFixed(2));
+                                                                    setOpenPositionRangeUpperAuto(true);
                                                                     hapticSelection();
                                                                 }}
                                                                 className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-white/10 dark:bg-[#1a1c23] dark:text-white/80 dark:hover:bg-white/5 transition-colors"
@@ -3717,6 +3759,7 @@ export default function App() {
                                                             onClick={() => {
                                                                 setOpenPositionRangeLower(pct.toFixed(2));
                                                                 setOpenPositionRangeUpper(pct.toFixed(2));
+                                                                setOpenPositionRangeUpperAuto(true);
                                                                 hapticSelection();
                                                             }}
                                                             className="rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-bold text-blue-700 hover:bg-blue-100 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20 transition-colors"
@@ -3803,20 +3846,14 @@ export default function App() {
                                     <div className="mt-2 grid grid-cols-2 gap-2">
                                         <input
                                             value={taskRangeLower}
-                                            onChange={(e) => {
-                                                setTaskRangeLower(e.target.value);
-                                                setTaskRangeError('');
-                                            }}
+                                            onChange={(e) => handleTaskRangeLowerChange(e.target.value)}
                                             inputMode="decimal"
                                             className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                             placeholder="下限 %"
                                         />
                                         <input
                                             value={taskRangeUpper}
-                                            onChange={(e) => {
-                                                setTaskRangeUpper(e.target.value);
-                                                setTaskRangeError('');
-                                            }}
+                                            onChange={(e) => handleTaskRangeUpperChange(e.target.value)}
                                             inputMode="decimal"
                                             className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                             placeholder="上限 %"

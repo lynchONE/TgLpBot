@@ -323,3 +323,52 @@ export async function fetchMyTradeMarkers({
     signal,
   });
 }
+
+export async function fetchSmartMoneyWatchedWallets({
+  apiBaseUrl,
+  initData,
+  chain = 'bsc',
+  signal,
+}) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const params = new URLSearchParams();
+  if (initData) params.set('initData', String(initData));
+  if (chain) params.set('chain', String(chain));
+  const qs = params.toString();
+  const url = `${base}/api/smart_money_watched_wallets${qs ? `?${qs}` : ''}`;
+  return requestJson(url, { method: 'GET', signal });
+}
+
+export async function addSmartMoneyWatchedWallets({
+  apiBaseUrl,
+  initData,
+  chain = 'bsc',
+  wallets,
+  signal,
+}) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/smart_money_watched_wallets`;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData, chain, wallets }),
+    signal,
+  });
+}
+
+export async function removeSmartMoneyWatchedWallets({
+  apiBaseUrl,
+  initData,
+  chain = 'bsc',
+  walletAddresses,
+  signal,
+}) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/smart_money_watched_wallets`;
+  return requestJson(url, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData, chain, wallet_addresses: walletAddresses }),
+    signal,
+  });
+}

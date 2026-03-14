@@ -203,6 +203,8 @@ type RealtimePosition struct {
 	Title             string     `json:"title"`
 	PoolID            string     `json:"pool_id"`
 	PositionID        string     `json:"position_id"`
+	WalletID          uint       `json:"wallet_id,omitempty"`
+	WalletAddress     string     `json:"wallet_address,omitempty"`
 	TaskID            uint       `json:"task_id,omitempty"`
 	TaskPaused        bool       `json:"task_paused"`
 	TaskIsAuto        bool       `json:"task_is_auto"`
@@ -1227,6 +1229,18 @@ func (s *RealtimePositionsService) buildV3Position(
 		Title:      title,
 		PoolID:     poolID,
 		PositionID: tokenId.String(),
+		WalletID: func() uint {
+			if task != nil {
+				return task.WalletID
+			}
+			return 0
+		}(),
+		WalletAddress: func() string {
+			if task != nil && strings.TrimSpace(task.WalletAddress) != "" {
+				return strings.TrimSpace(task.WalletAddress)
+			}
+			return walletAddr.Hex()
+		}(),
 		TaskID:     taskID,
 		TaskPaused: taskPaused,
 		TaskIsAuto: taskIsAuto,
@@ -1520,12 +1534,19 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 	absolutePnLUSD := pnlMetrics.absolutePnL
 	hasPnL := pnlMetrics.hasPnL
 	return &RealtimePosition{
-		Chain:             chain,
-		Version:           "v4",
-		Exchange:          exchange,
-		Title:             title,
-		PoolID:            strings.TrimSpace(task.PoolId),
-		PositionID:        tokenId,
+		Chain:      chain,
+		Version:    "v4",
+		Exchange:   exchange,
+		Title:      title,
+		PoolID:     strings.TrimSpace(task.PoolId),
+		PositionID: tokenId,
+		WalletID:   task.WalletID,
+		WalletAddress: func() string {
+			if strings.TrimSpace(task.WalletAddress) != "" {
+				return strings.TrimSpace(task.WalletAddress)
+			}
+			return walletAddr.Hex()
+		}(),
 		TaskID:            task.ID,
 		TaskPaused:        task.Paused,
 		TaskIsAuto:        task.IsAuto,
@@ -1756,12 +1777,19 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 	hasPnL := pnlMetrics.hasPnL
 
 	return &RealtimePosition{
-		Chain:             chain,
-		Version:           version,
-		Exchange:          exchange,
-		Title:             title,
-		PoolID:            poolID,
-		PositionID:        fmt.Sprintf("task-%d", task.ID),
+		Chain:      chain,
+		Version:    version,
+		Exchange:   exchange,
+		Title:      title,
+		PoolID:     poolID,
+		PositionID: fmt.Sprintf("task-%d", task.ID),
+		WalletID:   task.WalletID,
+		WalletAddress: func() string {
+			if strings.TrimSpace(task.WalletAddress) != "" {
+				return strings.TrimSpace(task.WalletAddress)
+			}
+			return walletAddr.Hex()
+		}(),
 		TaskID:            task.ID,
 		TaskPaused:        task.Paused,
 		TaskIsAuto:        task.IsAuto,

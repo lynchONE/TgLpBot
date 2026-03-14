@@ -23,6 +23,24 @@ function getClusterAvatarUrl(cluster) {
   return walletAvatarUrl(addr);
 }
 
+function normalizeWalletAddress(value) {
+  const raw = String(value || '').trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(raw)) return '';
+  return `0x${raw.slice(2).toLowerCase()}`;
+}
+
+function isClusterHighlighted(cluster, walletAddress) {
+  const target = normalizeWalletAddress(walletAddress);
+  if (!target) return false;
+  return (Array.isArray(cluster?.items) ? cluster.items : []).some(
+    (item) => normalizeWalletAddress(item?.wallet_address) === target
+  );
+}
+
+function tooltipSafeLabel(value) {
+  return String(value || '').trim() || '--';
+}
+
 function formatUSD(v) {
   if (!Number.isFinite(v) || v === 0) return '$0';
   if (v >= 1e6) return '$' + (v / 1e6).toFixed(1) + 'M';
@@ -195,14 +213,68 @@ function projectClusters(chart, candleSeries, candleData, candleMap, candleIndex
   return projected;
 }
 
+function projectRangeOverlays(candleSeries, overlays, hostWidth, hostHeight) {
+  if (!candleSeries || !Array.isArray(overlays) || overlays.length === 0) return [];
+  const width = Math.max(0, Number(hostWidth || 0));
+  const height = Math.max(0, Number(hostHeight || 0));
+  const out = [];
+
+  overlays.forEach((overlay) => {
+    const type = String(overlay?.type || '').trim().toLowerCase();
+    if (type === 'range') {
+      const lower = Number(overlay?.priceLower || 0);
+      const upper = Number(overlay?.priceUpper || 0);
+      if (!Number.isFinite(lower) || lower <= 0 || !Number.isFinite(upper) || upper <= 0) return;
+      const lowerYRaw = candleSeries.priceToCoordinate(lower);
+      const upperYRaw = candleSeries.priceToCoordinate(upper);
+      if (!Number.isFinite(lowerYRaw) && !Number.isFinite(upperYRaw)) return;
+      const lowerY = Number.isFinite(lowerYRaw) ? lowerYRaw : upperYRaw;
+      const upperY = Number.isFinite(upperYRaw) ? upperYRaw : lowerYRaw;
+      const topY = Math.min(lowerY, upperY);
+      const bottomY = Math.max(lowerY, upperY);
+      out.push({
+        id: overlay.id,
+        type: 'range',
+        color: String(overlay?.color || 'red'),
+        label: String(overlay?.label || ''),
+        avatarUrl: String(overlay?.avatarUrl || ''),
+        topY,
+        bottomY,
+        midY: Number.isFinite(topY) && Number.isFinite(bottomY) ? (topY + bottomY) / 2 : 0,
+        width,
+        height,
+      });
+      return;
+    }
+
+    const price = Number(overlay?.price || 0);
+    if (!Number.isFinite(price) || price <= 0) return;
+    const y = candleSeries.priceToCoordinate(price);
+    if (!Number.isFinite(y)) return;
+    out.push({
+      id: overlay.id,
+      type: 'mid',
+      color: String(overlay?.color || 'blue'),
+      label: String(overlay?.label || ''),
+      y,
+      width,
+      height,
+    });
+  });
+
+  return out;
+}
+
 export default function KlineChart({
   candles,
   markers,
+  rangeOverlays = [],
   loading = false,
   error = '',
   onMarkerClick,
   onVisibleRangeChange,
   activeMarkerId = '',
+  highlightWalletAddress = '',
   viewportKey = '',
   userAvatarUrl = '',
 }) {
@@ -214,6 +286,7 @@ export default function KlineChart({
   const prevViewportKeyRef = useRef('');
   const lastVisibleRangeRef = useRef({ from: 0, to: 0 });
   const [projectedMarkers, setProjectedMarkers] = useState([]);
+  const [projectedRangeOverlays, setProjectedRangeOverlays] = useState([]);
   const [hoveredCluster, setHoveredCluster] = useState(null);
   const updateProjectionRef = useRef(null);
   const visibleRangeHandlerRef = useRef(onVisibleRangeChange);
@@ -321,7 +394,15 @@ export default function KlineChart({
         userAvatarUrl
       )
     );
-  }, [candleData, candleMap, candleIndexMap, markerClusters, userAvatarUrl]);
+    setProjectedRangeOverlays(
+      projectRangeOverlays(
+        candleSeriesRef.current,
+        rangeOverlays,
+        hostWidth,
+        hostHeight
+      )
+    );
+  }, [candleData, candleMap, candleIndexMap, markerClusters, rangeOverlays, userAvatarUrl]);
 
   updateProjectionRef.current = updateProjection;
 
@@ -490,11 +571,45 @@ export default function KlineChart({
       <div className="kline-native-stage" ref={chartHostRef} />
 
       <div className="kline-marker-layer">
+        {projectedRangeOverlays.map((overlay) => {
+          if (overlay.type === 'range') {
+            return (
+              <React.Fragment key={overlay.id}>
+                <div
+                  className={`kline-range-line ${overlay.color} top`}
+                  style={{ top: `${overlay.topY}px` }}
+                >
+                  <span className="kline-range-label">{tooltipSafeLabel(overlay.label)}</span>
+                </div>
+                <div
+                  className={`kline-range-line ${overlay.color} bottom`}
+                  style={{ top: `${overlay.bottomY}px` }}
+                />
+                <div
+                  className={`kline-range-avatar ${overlay.color}`}
+                  style={{ top: `${overlay.midY}px` }}
+                >
+                  {overlay.avatarUrl ? <img src={overlay.avatarUrl} alt="" /> : null}
+                </div>
+              </React.Fragment>
+            );
+          }
+          return (
+            <div
+              key={overlay.id}
+              className={`kline-mid-line ${overlay.color}`}
+              style={{ top: `${overlay.y}px` }}
+            >
+              <span className="kline-mid-line-label">{tooltipSafeLabel(overlay.label)}</span>
+            </div>
+          );
+        })}
+
         {displayMarkers.map((cluster) => (
           <button
             key={cluster.id}
             type="button"
-            className={`kline-marker ${cluster.action} ${cluster.isMyTrade ? 'my-trade' : ''} ${activeMarkerId === cluster.id ? 'active' : ''}`}
+            className={`kline-marker ${cluster.action} ${cluster.isMyTrade ? 'my-trade' : ''} ${activeMarkerId === cluster.id ? 'active' : ''} ${isClusterHighlighted(cluster, highlightWalletAddress) ? 'wallet-highlighted' : ''}`}
             style={{
               left: `${cluster.x}px`,
               top: `${cluster.y}px`,

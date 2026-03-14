@@ -4,6 +4,7 @@ export default function TaskActionMenu({ position, onPause, onStop, onDelete, on
   const [editMode, setEditMode] = useState(false);
   const [rangeLower, setRangeLower] = useState(String(position?.task_range_lower_pct || '2'));
   const [rangeUpper, setRangeUpper] = useState(String(position?.task_range_upper_pct || '2'));
+  const [rangeUpperAuto, setRangeUpperAuto] = useState(true);
   const [amountUsdt, setAmountUsdt] = useState(String(position?.task_amount_usdt || ''));
   const [pending, setPending] = useState('');
   const menuRef = useRef(null);
@@ -35,6 +36,20 @@ export default function TaskActionMenu({ position, onPause, onStop, onDelete, on
     try { await fn(); } finally { setPending(''); onClose(); }
   }, [pending, onClose]);
 
+  const handleRangeLowerChange = useCallback((value) => {
+    setRangeLower((prevLower) => {
+      if (rangeUpperAuto || String(rangeUpper || '').trim() === '' || String(rangeUpper) === String(prevLower)) {
+        setRangeUpper(value);
+      }
+      return value;
+    });
+  }, [rangeUpper, rangeUpperAuto]);
+
+  const handleRangeUpperChange = useCallback((value) => {
+    setRangeUpperAuto(false);
+    setRangeUpper(value);
+  }, []);
+
   const handleEditSubmit = useCallback(() => {
     const rl = Number(rangeLower);
     const ru = Number(rangeUpper);
@@ -54,11 +69,11 @@ export default function TaskActionMenu({ position, onPause, onStop, onDelete, on
           <div className="task-popover-row">
             <label className="task-popover-field">
               <span>下限 %</span>
-              <input type="number" value={rangeLower} onChange={(e) => setRangeLower(e.target.value)} min="0.1" step="0.5" />
+              <input type="number" value={rangeLower} onChange={(e) => handleRangeLowerChange(e.target.value)} min="0.1" step="0.5" />
             </label>
             <label className="task-popover-field">
               <span>上限 %</span>
-              <input type="number" value={rangeUpper} onChange={(e) => setRangeUpper(e.target.value)} min="0.1" step="0.5" />
+              <input type="number" value={rangeUpper} onChange={(e) => handleRangeUpperChange(e.target.value)} min="0.1" step="0.5" />
             </label>
           </div>
           <label className="task-popover-field">
