@@ -238,6 +238,8 @@ function projectRangeOverlays(candleSeries, overlays, hostWidth, hostHeight) {
         color: String(overlay?.color || 'red'),
         label: String(overlay?.label || ''),
         avatarUrl: String(overlay?.avatarUrl || ''),
+        priceLower: Math.min(lower, upper),
+        priceUpper: Math.max(lower, upper),
         topY,
         bottomY,
         midY: Number.isFinite(topY) && Number.isFinite(bottomY) ? (topY + bottomY) / 2 : 0,
@@ -275,6 +277,9 @@ export default function KlineChart({
   onVisibleRangeChange,
   activeMarkerId = '',
   highlightWalletAddress = '',
+  watchedWalletSet = new Set(),
+  watchToggleMap = {},
+  onToggleWatch,
   viewportKey = '',
   userAvatarUrl = '',
 }) {
@@ -290,6 +295,7 @@ export default function KlineChart({
   const [hoveredCluster, setHoveredCluster] = useState(null);
   const updateProjectionRef = useRef(null);
   const visibleRangeHandlerRef = useRef(onVisibleRangeChange);
+  const tooltipHideTimerRef = useRef(null);
 
   visibleRangeHandlerRef.current = onVisibleRangeChange;
 
@@ -377,6 +383,20 @@ export default function KlineChart({
       return next || null;
     });
   }, [displayMarkers]);
+
+  const clearTooltipHideTimer = useCallback(() => {
+    if (!tooltipHideTimerRef.current) return;
+    window.clearTimeout(tooltipHideTimerRef.current);
+    tooltipHideTimerRef.current = null;
+  }, []);
+
+  const scheduleTooltipHide = useCallback(() => {
+    clearTooltipHideTimer();
+    tooltipHideTimerRef.current = window.setTimeout(() => {
+      setHoveredCluster(null);
+      tooltipHideTimerRef.current = null;
+    }, 180);
+  }, [clearTooltipHideTimer]);
 
   const updateProjection = useCallback(() => {
     const hostWidth = chartHostRef.current?.clientWidth || wrapRef.current?.clientWidth || 0;
@@ -504,6 +524,10 @@ export default function KlineChart({
     observer.observe(host);
 
     return () => {
+      if (tooltipHideTimerRef.current) {
+        window.clearTimeout(tooltipHideTimerRef.current);
+        tooltipHideTimerRef.current = null;
+      }
       observer.disconnect();
       chart.timeScale().unsubscribeVisibleTimeRangeChange(onVisibleChange);
       chart.remove();
@@ -558,13 +582,26 @@ export default function KlineChart({
     const c = hoveredCluster;
     const primary = c.items?.[0];
     if (!primary) return null;
+    const walletAddress = normalizeWalletAddress(primary.wallet_address || '');
     const walletName = c.isMyTrade ? '我的交易' : (String(primary.wallet_label || '').trim() || shortAddress(primary.wallet_address || '', 6, 4));
     const lower = Number(primary.price_lower || 0);
     const upper = Number(primary.price_upper || 0);
     const hasRange = lower > 0 && upper > 0;
     const rangePct = hasRange ? `±${(((upper - lower) / (upper + lower)) * 100).toFixed(1)}%` : '';
-    return { walletName, lower, upper, hasRange, rangePct, totalUSD: c.estimatedUSD, count: c.items.length, isMyTrade: c.isMyTrade };
-  }, [hoveredCluster]);
+    return {
+      walletAddress,
+      walletName,
+      lower,
+      upper,
+      hasRange,
+      rangePct,
+      totalUSD: c.estimatedUSD,
+      count: c.items.length,
+      isMyTrade: c.isMyTrade,
+      watched: walletAddress ? watchedWalletSet.has(walletAddress) : false,
+      watchBusy: walletAddress ? Boolean(watchToggleMap[walletAddress]) : false,
+    };
+  }, [hoveredCluster, watchToggleMap, watchedWalletSet]);
 
   return (
     <div className="kline-native-wrap" ref={wrapRef}>
@@ -579,12 +616,14 @@ export default function KlineChart({
                   className={`kline-range-line ${overlay.color} top`}
                   style={{ top: `${overlay.topY}px` }}
                 >
-                  <span className="kline-range-label">{tooltipSafeLabel(overlay.label)}</span>
+                  <span className="kline-range-price">{smartPriceFormatter(overlay.priceUpper)}</span>
                 </div>
                 <div
                   className={`kline-range-line ${overlay.color} bottom`}
                   style={{ top: `${overlay.bottomY}px` }}
-                />
+                >
+                  <span className="kline-range-price">{smartPriceFormatter(overlay.priceLower)}</span>
+                </div>
                 <div
                   className={`kline-range-avatar ${overlay.color}`}
                   style={{ top: `${overlay.midY}px` }}
@@ -615,8 +654,11 @@ export default function KlineChart({
               top: `${cluster.y}px`,
             }}
             onClick={() => onMarkerClick?.(cluster)}
-            onMouseEnter={() => setHoveredCluster(cluster)}
-            onMouseLeave={() => setHoveredCluster(null)}
+            onMouseEnter={() => {
+              clearTooltipHideTimer();
+              setHoveredCluster(cluster);
+            }}
+            onMouseLeave={scheduleTooltipHide}
           >
             <img className="kline-marker-avatar" src={cluster.label} alt="" />
           </button>
@@ -629,10 +671,24 @@ export default function KlineChart({
               left: `${hoveredCluster.x}px`,
               top: `${hoveredCluster.y}px`,
             }}
+            onMouseEnter={clearTooltipHideTimer}
+            onMouseLeave={scheduleTooltipHide}
           >
             <div className="kmt-head">
               <span className="kmt-emoji"><img src={hoveredCluster.label} alt="" /></span>
               <span className="kmt-wallet">{tooltipData.walletName}</span>
+              {!tooltipData.isMyTrade && tooltipData.walletAddress ? (
+                <button
+                  type="button"
+                  className={`kmt-watch-btn ${tooltipData.watched ? 'active' : ''}`}
+                  disabled={tooltipData.watchBusy}
+                  onClick={() => onToggleWatch?.(tooltipData.walletAddress, tooltipData.walletName)}
+                  aria-label={tooltipData.watched ? '取消特别关注' : '加入特别关注'}
+                  title={tooltipData.watched ? '取消特别关注' : '加入特别关注'}
+                >
+                  {tooltipData.watched ? '\u2665' : '\u2661'}
+                </button>
+              ) : null}
               {tooltipData.count > 1 && <span className="kmt-count">等{tooltipData.count}笔</span>}
             </div>
             <div className="kmt-row">

@@ -271,6 +271,12 @@ function normalizeWalletAddress(value) {
   return `0x${raw.slice(2).toLowerCase()}`;
 }
 
+function isUserManagedWatchedWallet(wallet) {
+  const source = String(wallet?.source || '').trim().toLowerCase();
+  if (source === 'user_managed') return true;
+  return Number(wallet?.id || 0) > 0;
+}
+
 function buildPoolKey(poolVersion, poolId) {
   const version = String(poolVersion || '').trim().toLowerCase();
   const id = normalizePoolAddress(poolId);
@@ -582,9 +588,10 @@ export default function App() {
       const ts = Number(row?.t || row?.bucket_t || 0);
       const prev = latestByWallet.get(address);
       if (prev && prev.ts >= ts) return;
+      const watchedLabel = String(watchedWalletMap.get(address)?.label || '').trim();
       latestByWallet.set(address, {
         ts,
-        label: String(row?.wallet_label || '').trim() || String(watchedWalletMap.get(address)?.label || '').trim() || shortAddress(address, 6, 4),
+        label: watchedLabel || address.slice(-4),
         price: (lower + upper) / 2,
       });
     });
@@ -1112,7 +1119,8 @@ export default function App() {
       signal: ctrl.signal,
     })
       .then((resp) => {
-        setWatchedWallets(Array.isArray(resp?.wallets) ? resp.wallets : []);
+        const rows = Array.isArray(resp?.wallets) ? resp.wallets : [];
+        setWatchedWallets(rows.filter(isUserManagedWatchedWallet));
       })
       .catch((e) => {
         if (e?.name === 'AbortError') return;
@@ -1416,7 +1424,7 @@ export default function App() {
     setWatchedWallets((prev) => (
       watched
         ? prev.filter((item) => normalizeWalletAddress(item?.wallet_address) !== address)
-        : [...prev, { wallet_address: address, label: String(label || '').trim() }]
+        : [...prev, { wallet_address: address, label: String(label || '').trim(), source: 'user_managed' }]
     ));
 
     try {
@@ -1805,6 +1813,9 @@ export default function App() {
               activeMarkerId={selectedMarkerCluster?.id || ''}
               highlightWalletAddress={selectedSmartWalletAddress}
               onMarkerClick={(cluster) => setSelectedMarkerCluster(cluster)}
+              watchedWalletSet={watchedWalletSet}
+              watchToggleMap={watchToggleMap}
+              onToggleWatch={handleToggleWatchedWallet}
               userAvatarUrl={loginUser?.photo_url || ''}
             />
 
@@ -2272,8 +2283,6 @@ export default function App() {
                         const rangePct = hasRange
                           ? (Math.abs(priceUpper - priceLower) / (priceUpper + priceLower)) * 100
                           : 0;
-                        const watched = normalizedWalletAddr ? watchedWalletSet.has(normalizedWalletAddr) : false;
-                        const watchBusy = Boolean(watchToggleMap[normalizedWalletAddr]);
                         const activeWallet = normalizedWalletAddr && selectedSmartWallet?.poolKey === poolKey &&
                           normalizeWalletAddress(selectedSmartWallet?.wallet_address) === normalizedWalletAddr;
 
@@ -2320,20 +2329,8 @@ export default function App() {
                             tabIndex={0}
                           >
                             <div className="sm-wallet-main">
-                              <div className={`sm-wallet-avatar ${watched ? 'watched' : ''} ${activeWallet ? 'active' : ''}`}>
+                              <div className={`sm-wallet-avatar ${activeWallet ? 'active' : ''}`}>
                                 <img src={walletAvatarUrl(normalizedWalletAddr)} alt="" />
-                                <button
-                                  type="button"
-                                  className={`sm-wallet-heart ${watched ? 'active' : ''}`}
-                                  disabled={!normalizedWalletAddr || watchBusy}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleToggleWatchedWallet(normalizedWalletAddr, walletLabel);
-                                  }}
-                                  title={watched ? '取消特别关注' : '加入特别关注'}
-                                >
-                                  {watched ? '♥' : '♡'}
-                                </button>
                               </div>
                               <div className="sm-wallet-meta">
                                 <div className="sm-wallet-addr">{walletLabel || shortAddress(addr, 6, 4)}</div>

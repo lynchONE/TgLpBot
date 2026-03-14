@@ -1350,8 +1350,8 @@ body {
 .kline-range-line,
 .kline-mid-line {
   position: absolute;
-  left: 10px;
-  right: 10px;
+  right: 52px;
+  width: 108px;
   height: 0;
   pointer-events: none;
   z-index: 3;
@@ -1375,10 +1375,11 @@ body {
   color: #5ca7ff;
 }
 
-.kline-range-line.top .kline-range-label,
+.kline-range-line .kline-range-price,
 .kline-mid-line .kline-mid-line-label {
   position: absolute;
-  right: 0;
+  top: 0;
+  right: calc(100% + 6px);
   transform: translateY(-50%);
   padding: 2px 6px;
   border-radius: 999px;
@@ -1420,7 +1421,7 @@ body {
   padding: 8px 10px;
   min-width: 160px;
   max-width: 260px;
-  pointer-events: none;
+  pointer-events: auto;
   z-index: 20;
   backdrop-filter: blur(8px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
@@ -1432,12 +1433,43 @@ body {
   display: flex;
   align-items: center;
   gap: 5px;
+  justify-content: space-between;
   margin-bottom: 5px;
 }
 .kmt-emoji { width: 18px; height: 18px; flex-shrink: 0; }
 .kmt-emoji img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
-.kmt-wallet { font-size: 12px; font-weight: 600; color: #edf3ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kmt-wallet { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; color: #edf3ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kmt-count { font-size: 10px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
+.kmt-watch-btn {
+  width: 22px;
+  height: 22px;
+  border: 1px solid rgba(92, 167, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(92, 167, 255, 0.08);
+  color: #8ab9ff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+.kmt-watch-btn:hover:not(:disabled) {
+  transform: scale(1.05);
+  border-color: rgba(92, 167, 255, 0.46);
+  background: rgba(92, 167, 255, 0.14);
+}
+.kmt-watch-btn.active {
+  border-color: rgba(255, 93, 115, 0.5);
+  background: rgba(255, 93, 115, 0.14);
+  color: #ff5d73;
+}
+.kmt-watch-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
 .kmt-row {
   display: flex;
   align-items: center;
