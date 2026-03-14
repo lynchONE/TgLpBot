@@ -1617,8 +1617,8 @@ body {
   box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.5), 0 0 10px rgba(234, 57, 67, 0.5), 0 4px 14px rgba(0, 0, 0, 0.4);
 }
 .kline-marker.wallet-highlighted {
-  border-color: #ff5d73;
-  box-shadow: 0 0 0 2px rgba(255, 93, 115, 0.4), 0 0 16px rgba(255, 93, 115, 0.45), 0 4px 14px rgba(0, 0, 0, 0.4);
+  border-color: #f6c544;
+  box-shadow: 0 0 0 2px rgba(246, 197, 68, 0.42), 0 0 16px rgba(246, 197, 68, 0.38), 0 4px 14px rgba(0, 0, 0, 0.4);
 }
 
 .kline-range-line,
@@ -1660,6 +1660,12 @@ body {
   --kline-axis-bg: #ff5d73;
 }
 
+.kline-range-line.yellow,
+.kline-range-avatar.yellow {
+  color: #f6c544;
+  --kline-axis-bg: #f6c544;
+}
+
 .kline-mid-line.blue {
   color: #2f8cff;
   --kline-axis-bg: #2f8cff;
@@ -1684,6 +1690,10 @@ body {
   box-shadow: 0 8px 18px rgba(17, 37, 68, 0.32);
 }
 
+.kline-range-line.yellow .kline-axis-price {
+  color: #1a1d22;
+}
+
 .kline-range-line .kline-range-label,
 .kline-mid-line .kline-mid-line-label {
   position: absolute;
@@ -1704,6 +1714,11 @@ body {
   border: 1px solid currentColor;
   background: rgba(10, 20, 35, 0.96);
   opacity: 0.92;
+}
+
+.kline-range-line .kline-range-label {
+  max-width: 76px;
+  z-index: 1;
 }
 
 .kline-range-avatar {

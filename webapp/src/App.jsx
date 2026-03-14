@@ -589,7 +589,7 @@ export default function App() {
       priceLower: Math.min(lower, upper),
       priceUpper: Math.max(lower, upper),
       price: (lower + upper) / 2,
-      color: 'red',
+      color: 'yellow',
       showAvatar: false,
       avatarUrl: walletAvatarUrl(selectedSmartWalletAddress),
     }];
