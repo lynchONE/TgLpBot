@@ -87,8 +87,8 @@ const KLINE_INTERVALS = [
   { key: '15m', label: '15m', bucketSec: 900, limit: 240, timeframe: 'minute', aggregate: 15, poolLimit: 220 },
   { key: '1H', label: '1H', bucketSec: 3600, limit: 240, timeframe: 'hour', aggregate: 1, poolLimit: 200 },
 ];
-const SMART_POOL_WINDOW_HOURS = 24;
-const SMART_PNL_WINDOW_HOURS = 24;
+const SMART_POOL_WINDOW_HOURS = 2;
+const SMART_PNL_WINDOW_HOURS = 2;
 const HOT_POOLS_DISPLAY_LIMIT = 20;
 const KLINE_MARKER_WINDOW_HOURS = 24;
 const KLINE_MARKER_FETCH_LIMIT = 1200;
@@ -2420,7 +2420,7 @@ export default function App() {
     smart_money: (
       <PanelShell
         title="聪明钱"
-        subtitle={`按参与钱包数排序的前 ${smartDisplayPools.length} 个池子`}
+        subtitle={`最近 ${SMART_POOL_WINDOW_HOURS}h 按参与钱包数排序的前 ${smartDisplayPools.length} 个池子`}
         icon={BrainCircuit}
       >
         {smartError ? <div className="error-text">{smartError}</div> : null}

@@ -108,7 +108,7 @@ export async function fetchSmartMoneyOverview({
   poolLimit = 20,
   walletLimit = 20,
   poolsWindowHours = 2,
-  pnlWindowHours = 24,
+  pnlWindowHours = 2,
   signal,
 }) {
   const base = normalizeBaseUrl(apiBaseUrl);

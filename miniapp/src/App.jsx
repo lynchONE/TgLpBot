@@ -523,8 +523,8 @@ export default function App() {
     const monitorPollSec = Math.max(3, pollIntervalSec);
     const autoPnLCurvePollSec = 15;
     const smartMoneyPollSec = 60;
-    const smartMoneyPoolsWindowHours = 24;
-    const smartMoneyPnLWindowHours = 24;
+    const smartMoneyPoolsWindowHours = 2;
+    const smartMoneyPnLWindowHours = 2;
 
     const adminSelectedUser = useMemo(() => {
         if (!adminSelectedUserId) return null;
@@ -1727,7 +1727,7 @@ export default function App() {
             chain,
             poolVersion,
             poolId,
-            windowHours: 24,
+            windowHours: 2,
             limit: 120,
             feesLimit: 0,
             signal: controller.signal,

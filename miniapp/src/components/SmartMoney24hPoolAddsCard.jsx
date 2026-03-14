@@ -176,13 +176,13 @@ export default function SmartMoney24hPoolAddsCard({ apiBaseUrl, initData, chain,
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [refreshTick, setRefreshTick] = useState(0);
-    const [windowHours, setWindowHours] = useState(24);
+    const [windowHours, setWindowHours] = useState(2);
     const [poolLimit, setPoolLimit] = useState(30);
 
     useEffect(() => {
         if (!initData) {
             setLoading(false);
-            setError('缺少 initData，无法加载 24h 加池数据');
+            setError('缺少 initData，无法加载 2h 加池数据');
             return;
         }
         let cancelled = false;
@@ -264,7 +264,7 @@ export default function SmartMoney24hPoolAddsCard({ apiBaseUrl, initData, chain,
         <div className="mt-3 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="inline-flex items-center gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-white/5">
-                    {[12, 24, 48, 72].map((h) => (
+                    {[2, 12, 24, 48, 72].map((h) => (
                         <button
                             key={h}
                             type="button"
