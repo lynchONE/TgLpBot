@@ -96,6 +96,11 @@ const ACCENT_THEMES = [
   { key: 'green', label: '绿色' },
   { key: 'yellow', label: '黄色' },
 ];
+const KLINE_DRAW_TOOLS = [
+  { key: 'none', label: '游标' },
+  { key: 'line', label: '线段' },
+  { key: 'rect', label: '矩形' },
+];
 
 function getKlineIntervalMeta(bar) {
   return KLINE_INTERVALS.find((item) => item.key === bar) || KLINE_INTERVALS[0];
@@ -394,6 +399,11 @@ export default function App() {
   const [klineVisibleRange, setKlineVisibleRange] = useState(null);
   const [watchedWallets, setWatchedWallets] = useState([]);
   const [watchToggleMap, setWatchToggleMap] = useState({});
+  const [klineDrawTool, setKlineDrawTool] = useState('none');
+  const [klineDrawResetNonce, setKlineDrawResetNonce] = useState(0);
+  const [klineMarkerFilterOpen, setKlineMarkerFilterOpen] = useState(false);
+  const [klineMarkerMinUsdInput, setKlineMarkerMinUsdInput] = useState('');
+  const [klineMarkerWalletFilter, setKlineMarkerWalletFilter] = useState(null);
 
   const [refreshing, setRefreshing] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false);
@@ -410,6 +420,7 @@ export default function App() {
   const [draggingKey, setDraggingKey] = useState('');
   const [dragOverKey, setDragOverKey] = useState('');
   const klineVisibleRangeTimerRef = useRef(null);
+  const klineMarkerFilterRef = useRef(null);
 
   const hasInitData = Boolean(initData);
   const activeWidgets = useMemo(() => {
@@ -604,31 +615,77 @@ export default function App() {
       color: 'blue',
     }));
   }, [klineMarkers, selectedPoolKey, selectedSmartWalletAddress, watchedWalletMap, watchedWalletSet]);
-  const klineMarkerWalletCount = useMemo(() => {
-    const value = Number(klineMarkerStats?.walletCount || 0);
-    if (value > 0) return value;
-    const seen = new Set();
+  const klineMarkerWalletOptions = useMemo(() => {
+    const byWallet = new Map();
     (Array.isArray(klineMarkers) ? klineMarkers : []).forEach((row) => {
-      const addr = String(row?.wallet_address || '').trim().toLowerCase();
+      const address = normalizeWalletAddress(row?.wallet_address);
+      if (!address) return;
+      const prev = byWallet.get(address) || {
+        address,
+        label: '',
+        totalUSD: 0,
+        count: 0,
+      };
+      const label = String(row?.wallet_label || watchedWalletMap.get(address)?.label || '').trim();
+      prev.label = prev.label || label;
+      prev.totalUSD += Number(row?.estimated_usd || 0);
+      prev.count += 1;
+      byWallet.set(address, prev);
+    });
+    return Array.from(byWallet.values())
+      .map((item) => ({
+        ...item,
+        displayLabel: item.label || shortAddress(item.address, 6, 4),
+      }))
+      .sort((a, b) => (
+        Number(b.totalUSD || 0) - Number(a.totalUSD || 0) ||
+        Number(b.count || 0) - Number(a.count || 0) ||
+        String(a.address || '').localeCompare(String(b.address || ''))
+      ));
+  }, [klineMarkers, watchedWalletMap]);
+  const klineMarkerWalletAddresses = useMemo(
+    () => klineMarkerWalletOptions.map((item) => item.address),
+    [klineMarkerWalletOptions]
+  );
+  const klineMarkerMinUsd = useMemo(() => {
+    const value = Number(String(klineMarkerMinUsdInput || '').trim());
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  }, [klineMarkerMinUsdInput]);
+  const klineMarkerWalletFilterSet = useMemo(() => {
+    if (klineMarkerWalletFilter === null) return null;
+    return new Set(klineMarkerWalletFilter);
+  }, [klineMarkerWalletFilter]);
+  const filteredKlineMarkers = useMemo(() => {
+    return (Array.isArray(klineMarkers) ? klineMarkers : []).filter((row) => {
+      const amountUSD = Number(row?.estimated_usd || 0);
+      const address = normalizeWalletAddress(row?.wallet_address);
+      if (klineMarkerMinUsd > 0 && (!Number.isFinite(amountUSD) || amountUSD < klineMarkerMinUsd)) return false;
+      if (klineMarkerWalletFilterSet && (!address || !klineMarkerWalletFilterSet.has(address))) return false;
+      return true;
+    });
+  }, [klineMarkerMinUsd, klineMarkerWalletFilterSet, klineMarkers]);
+  const klineMarkerFilterActive = klineMarkerMinUsd > 0 || klineMarkerWalletFilter !== null;
+  const klineMarkerSelectedWalletCount = useMemo(() => {
+    if (klineMarkerWalletFilter === null) return klineMarkerWalletAddresses.length;
+    return klineMarkerWalletFilter.length;
+  }, [klineMarkerWalletAddresses.length, klineMarkerWalletFilter]);
+  const klineMarkerWalletCount = useMemo(() => {
+    const seen = new Set();
+    filteredKlineMarkers.forEach((row) => {
+      const addr = normalizeWalletAddress(row?.wallet_address);
       if (addr) seen.add(addr);
     });
     return seen.size;
-  }, [klineMarkerStats, klineMarkers]);
-  const klineMarkerAddCount = useMemo(() => {
-    const value = Number(klineMarkerStats?.addCount || 0);
-    if (value > 0) return value;
-    return (Array.isArray(klineMarkers) ? klineMarkers : []).filter((row) => String(row?.action || '').toLowerCase() !== 'remove').length;
-  }, [klineMarkerStats, klineMarkers]);
-  const klineMarkerRemoveCount = useMemo(() => {
-    const value = Number(klineMarkerStats?.removeCount || 0);
-    if (value > 0) return value;
-    return (Array.isArray(klineMarkers) ? klineMarkers : []).filter((row) => String(row?.action || '').toLowerCase() === 'remove').length;
-  }, [klineMarkerStats, klineMarkers]);
-  const klineMarkerEventCount = useMemo(() => {
-    const value = Number(klineMarkerStats?.totalEvents || 0);
-    if (value > 0) return value;
-    return klineMarkers.length;
-  }, [klineMarkerStats, klineMarkers.length]);
+  }, [filteredKlineMarkers]);
+  const klineMarkerAddCount = useMemo(
+    () => filteredKlineMarkers.filter((row) => String(row?.action || '').toLowerCase() !== 'remove').length,
+    [filteredKlineMarkers]
+  );
+  const klineMarkerRemoveCount = useMemo(
+    () => filteredKlineMarkers.filter((row) => String(row?.action || '').toLowerCase() === 'remove').length,
+    [filteredKlineMarkers]
+  );
+  const klineMarkerEventCount = filteredKlineMarkers.length;
   const klineViewportKey = useMemo(
     () => `${selectedPoolAddress || 'pool'}:${klineTokenAddress || 'token'}:${klineInterval}`,
     [klineInterval, klineTokenAddress, selectedPoolAddress]
@@ -677,6 +734,51 @@ export default function App() {
       klineVisibleRangeTimerRef.current = null;
     }, KLINE_MARKER_RANGE_DEBOUNCE_MS);
   }, []);
+  const toggleKlineMarkerWalletFilter = useCallback((walletAddress) => {
+    const address = normalizeWalletAddress(walletAddress);
+    if (!address) return;
+    setKlineMarkerWalletFilter((prev) => {
+      const base = prev === null ? [...klineMarkerWalletAddresses] : prev.filter((item) => klineMarkerWalletAddresses.includes(item));
+      const exists = base.includes(address);
+      const next = exists
+        ? base.filter((item) => item !== address)
+        : [...base, address];
+      if (next.length === klineMarkerWalletAddresses.length) return null;
+      return next;
+    });
+  }, [klineMarkerWalletAddresses]);
+  const clearKlineDrawing = useCallback(() => {
+    setKlineDrawResetNonce((prev) => prev + 1);
+  }, []);
+  const resetKlineMarkerFilter = useCallback(() => {
+    setKlineMarkerMinUsdInput('');
+    setKlineMarkerWalletFilter(null);
+  }, []);
+
+  useEffect(() => {
+    if (!klineMarkerWalletAddresses.length) {
+      setKlineMarkerWalletFilter(null);
+      return;
+    }
+    setKlineMarkerWalletFilter((prev) => {
+      if (prev === null) return prev;
+      return prev.filter((item) => klineMarkerWalletAddresses.includes(item));
+    });
+  }, [klineMarkerWalletAddresses]);
+
+  useEffect(() => {
+    setSelectedMarkerCluster(null);
+  }, [klineMarkerMinUsd, klineMarkerWalletFilter]);
+
+  useEffect(() => {
+    if (!klineMarkerFilterOpen) return undefined;
+    const handlePointerDown = (event) => {
+      if (klineMarkerFilterRef.current?.contains(event.target)) return;
+      setKlineMarkerFilterOpen(false);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [klineMarkerFilterOpen]);
 
   useEffect(() => {
     storageSet(STORAGE.chain, chain);
@@ -1077,6 +1179,8 @@ export default function App() {
       klineVisibleRangeTimerRef.current = null;
     }
     setKlineVisibleRange(null);
+    setKlineDrawTool('none');
+    setKlineDrawResetNonce((prev) => prev + 1);
   }, [klineViewportKey]);
 
   useEffect(() => {
@@ -1087,6 +1191,8 @@ export default function App() {
     setKlineMarkersError('');
     setKlineSource('');
     setKlineMarkerRefreshNonce(0);
+    setKlineMarkerFilterOpen(false);
+    setKlineMarkerWalletFilter(null);
   }, [selectedPoolAddress]);
 
   useEffect(() => {
@@ -1098,6 +1204,7 @@ export default function App() {
   useEffect(() => {
     if (!klineOverlayEnabled) {
       setSelectedMarkerCluster(null);
+      setKlineMarkerFilterOpen(false);
     }
   }, [klineOverlayEnabled]);
 
@@ -1726,6 +1833,112 @@ export default function App() {
           <>
             <div className="kline-toolbar">
               <div className="kline-toolbar-group">
+                {KLINE_DRAW_TOOLS.map((tool) => (
+                  <button
+                    key={tool.key}
+                    type="button"
+                    className={`ghost-chip ${klineDrawTool === tool.key ? 'active' : ''}`}
+                    onClick={() => setKlineDrawTool(tool.key)}
+                  >
+                    {tool.label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="ghost-chip"
+                  onClick={clearKlineDrawing}
+                  disabled={!klineCandles.length}
+                >
+                  清除测量
+                </button>
+              </div>
+
+              <div className="kline-toolbar-group">
+                <div className="kline-filter-shell" ref={klineMarkerFilterRef}>
+                  <button
+                    type="button"
+                    className={`ghost-chip ${klineMarkerFilterOpen || klineMarkerFilterActive ? 'active' : ''}`}
+                    onClick={() => setKlineMarkerFilterOpen((prev) => !prev)}
+                    disabled={!klineOverlayEnabled || !klineMarkers.length}
+                  >
+                    <SlidersHorizontal size={12} />
+                    气泡筛选
+                    {klineMarkerFilterActive ? ` ${klineMarkerSelectedWalletCount}/${klineMarkerWalletAddresses.length || 0}` : ''}
+                  </button>
+
+                  {klineMarkerFilterOpen ? (
+                    <div className="kline-filter-popover">
+                      <div className="kline-filter-popover-head">
+                        <div>
+                          <div className="kline-filter-popover-title">钱包气泡筛选</div>
+                          <div className="kline-filter-popover-sub">基于当前已加载的聪明钱气泡</div>
+                        </div>
+                        <button
+                          type="button"
+                          className="icon-link"
+                          onClick={() => setKlineMarkerFilterOpen(false)}
+                          title="关闭筛选"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+
+                      <label className="kline-filter-field">
+                        <span>最小开单金额 (USD)</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="100"
+                          inputMode="decimal"
+                          placeholder="例如 1000"
+                          value={klineMarkerMinUsdInput}
+                          onChange={(e) => setKlineMarkerMinUsdInput(e.target.value)}
+                        />
+                      </label>
+
+                      <div className="kline-filter-actions">
+                        <button type="button" className="ghost-chip" onClick={() => setKlineMarkerWalletFilter(null)}>
+                          全选
+                        </button>
+                        <button type="button" className="ghost-chip" onClick={() => setKlineMarkerWalletFilter([])}>
+                          清空
+                        </button>
+                        <button type="button" className="ghost-chip" onClick={resetKlineMarkerFilter}>
+                          重置
+                        </button>
+                      </div>
+
+                      <div className="kline-filter-wallets">
+                        {klineMarkerWalletOptions.length ? (
+                          klineMarkerWalletOptions.map((wallet) => {
+                            const checked = klineMarkerWalletFilter === null || klineMarkerWalletFilter.includes(wallet.address);
+                            return (
+                              <label key={wallet.address} className="kline-filter-wallet-option">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleKlineMarkerWalletFilter(wallet.address)}
+                                />
+                                <span className="kline-filter-wallet-main">
+                                  <span className="kline-filter-wallet-name">{wallet.displayLabel}</span>
+                                  <span className="kline-filter-wallet-meta">
+                                    {formatNumber(wallet.count)} 笔 · {formatUsdCompact(wallet.totalUSD)}
+                                  </span>
+                                </span>
+                                {checked ? <Check size={14} /> : null}
+                              </label>
+                            );
+                          })
+                        ) : (
+                          <div className="kline-filter-empty">当前没有可筛选的钱包气泡</div>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="kline-toolbar-group">
                 {klineTokenOptions.length > 1 ? (
                   klineTokenOptions.map((item) => (
                     <button
@@ -1793,18 +2006,18 @@ export default function App() {
                 <span className="value">{shortAddress(klineTokenAddress, 6, 4)}</span>
               </div>
               <div className="kline-summary-item">
-                <span className="label">事件({KLINE_MARKER_WINDOW_HOURS}h)</span>
+                <span className="label">{klineMarkerFilterActive ? '事件(筛选后)' : `事件(${KLINE_MARKER_WINDOW_HOURS}h)`}</span>
                 <span className="value">{klineMarkerEventCount}</span>
               </div>
               <div className="kline-summary-item">
-                <span className="label">钱包</span>
+                <span className="label">{klineMarkerFilterActive ? '钱包(筛选后)' : '钱包'}</span>
                 <span className="value">{klineMarkerWalletCount}</span>
               </div>
             </div>
 
             <KlineChart
               candles={klineCandles}
-              markers={klineOverlayEnabled ? klineMarkers : []}
+              markers={klineOverlayEnabled ? filteredKlineMarkers : []}
               rangeOverlays={[...selectedSmartWalletOverlay, ...watchedMidlineOverlays]}
               loading={klineLoading}
               error={klineError}
@@ -1816,9 +2029,16 @@ export default function App() {
               watchedWalletSet={watchedWalletSet}
               watchToggleMap={watchToggleMap}
               onToggleWatch={handleToggleWatchedWallet}
+              drawingTool={klineDrawTool}
+              drawingResetNonce={klineDrawResetNonce}
               userAvatarUrl={loginUser?.photo_url || ''}
             />
 
+            {klineMarkerFilterActive && !filteredKlineMarkers.length && klineMarkers.length ? (
+              <div className="kline-inline-note">
+                当前筛选条件下没有匹配的聪明钱气泡，点击“重置”可恢复全部显示。
+              </div>
+            ) : null}
             {klineMarkersError ? <div className="kline-inline-note">{klineMarkersError}</div> : null}
             {!klineMarkersError && klineMarkerStats?.truncated ? (
               <div className="kline-inline-note">

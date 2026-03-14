@@ -155,6 +155,54 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
+function formatMeasurementPercent(percent) {
+  if (!Number.isFinite(percent)) return '--';
+  const sign = percent > 0 ? '+' : '';
+  const digits = Math.abs(percent) >= 100 ? 1 : 2;
+  return `${sign}${percent.toFixed(digits)}%`;
+}
+
+function projectDrawing(chart, candleSeries, drawing, hostWidth, hostHeight) {
+  if (!chart || !candleSeries || !drawing?.start || !drawing?.end) return null;
+  const timeScale = chart.timeScale();
+  const rawX1 = timeScale.logicalToCoordinate?.(drawing.start.logical);
+  const rawX2 = timeScale.logicalToCoordinate?.(drawing.end.logical);
+  const rawY1 = candleSeries.priceToCoordinate(drawing.start.price);
+  const rawY2 = candleSeries.priceToCoordinate(drawing.end.price);
+  if (![rawX1, rawX2, rawY1, rawY2].every((value) => Number.isFinite(value))) return null;
+  const x1 = Number(rawX1);
+  const x2 = Number(rawX2);
+  const y1 = Number(rawY1);
+  const y2 = Number(rawY2);
+  const startPrice = Number(drawing.start.price || 0);
+  const endPrice = Number(drawing.end.price || 0);
+  const percent = startPrice > 0 && Number.isFinite(endPrice)
+    ? ((endPrice - startPrice) / startPrice) * 100
+    : 0;
+  const width = Math.max(0, Number(hostWidth || 0));
+  const height = Math.max(0, Number(hostHeight || 0));
+  const labelX = drawing.type === 'rect' ? (Math.min(x1, x2) + Math.max(x1, x2)) / 2 : (x1 + x2) / 2;
+  const labelY = drawing.type === 'rect'
+    ? Math.min(y1, y2) - 10
+    : ((y1 + y2) / 2) - 10;
+  return {
+    type: drawing.type,
+    x1,
+    y1,
+    x2,
+    y2,
+    left: Math.min(x1, x2),
+    top: Math.min(y1, y2),
+    width: Math.abs(x2 - x1),
+    height: Math.abs(y2 - y1),
+    label: formatMeasurementPercent(percent),
+    labelX: clamp(labelX, 20, Math.max(20, width - 20)),
+    labelY: clamp(labelY, 20, Math.max(20, height - 20)),
+    positive: percent >= 0,
+    draft: !drawing.complete,
+  };
+}
+
 function projectClusters(chart, candleSeries, candleData, candleMap, candleIndexMap, clusters, hostWidth, hostHeight, userAvatarUrl) {
   if (!chart || !candleSeries || !clusters.length) return [];
   const timeScale = chart.timeScale();
@@ -280,6 +328,8 @@ export default function KlineChart({
   watchedWalletSet = new Set(),
   watchToggleMap = {},
   onToggleWatch,
+  drawingTool = 'none',
+  drawingResetNonce = 0,
   viewportKey = '',
   userAvatarUrl = '',
 }) {
@@ -292,10 +342,15 @@ export default function KlineChart({
   const lastVisibleRangeRef = useRef({ from: 0, to: 0 });
   const [projectedMarkers, setProjectedMarkers] = useState([]);
   const [projectedRangeOverlays, setProjectedRangeOverlays] = useState([]);
+  const [projectedDrawing, setProjectedDrawing] = useState(null);
   const [hoveredCluster, setHoveredCluster] = useState(null);
+  const [completedDrawing, setCompletedDrawing] = useState(null);
+  const [draftDrawing, setDraftDrawing] = useState(null);
   const updateProjectionRef = useRef(null);
   const visibleRangeHandlerRef = useRef(onVisibleRangeChange);
   const tooltipHideTimerRef = useRef(null);
+  const drawingStartRef = useRef(null);
+  const rectDrawingRef = useRef(false);
 
   visibleRangeHandlerRef.current = onVisibleRangeChange;
 
@@ -398,6 +453,108 @@ export default function KlineChart({
     }, 180);
   }, [clearTooltipHideTimer]);
 
+  const clearDrawingState = useCallback(() => {
+    drawingStartRef.current = null;
+    rectDrawingRef.current = false;
+    setCompletedDrawing(null);
+    setDraftDrawing(null);
+    setProjectedDrawing(null);
+  }, []);
+
+  const resolveDrawingAnchor = useCallback((event) => {
+    const host = chartHostRef.current;
+    const chart = chartRef.current;
+    const candleSeries = candleSeriesRef.current;
+    if (!host || !chart || !candleSeries) return null;
+    const rect = host.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const x = clamp(event.clientX - rect.left, 0, rect.width);
+    const y = clamp(event.clientY - rect.top, 0, rect.height);
+    const timeScale = chart.timeScale();
+    const rawLogical = timeScale.coordinateToLogical?.(x);
+    let logical = Number.isFinite(rawLogical) ? Number(rawLogical) : Number.NaN;
+    if (!Number.isFinite(logical)) {
+      const visibleLogicalRange = timeScale.getVisibleLogicalRange?.();
+      if (visibleLogicalRange) {
+        logical = x <= rect.width / 2 ? Number(visibleLogicalRange.from) : Number(visibleLogicalRange.to);
+      }
+    }
+    const rawPrice = candleSeries.coordinateToPrice(y);
+    const price = Number(rawPrice);
+    if (!Number.isFinite(logical) || !Number.isFinite(price) || price <= 0) return null;
+    return { logical, price };
+  }, []);
+
+  const handleDrawingClick = useCallback((event) => {
+    if (drawingTool !== 'line') return;
+    const anchor = resolveDrawingAnchor(event);
+    if (!anchor) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const start = drawingStartRef.current;
+    if (!start) {
+      drawingStartRef.current = anchor;
+      setCompletedDrawing(null);
+      setDraftDrawing(null);
+      return;
+    }
+    setCompletedDrawing({ type: 'line', start, end: anchor, complete: true });
+    setDraftDrawing(null);
+    drawingStartRef.current = null;
+  }, [drawingTool, resolveDrawingAnchor]);
+
+  const handleDrawingPointerDown = useCallback((event) => {
+    if (drawingTool !== 'rect') return;
+    const anchor = resolveDrawingAnchor(event);
+    if (!anchor) return;
+    event.preventDefault();
+    event.stopPropagation();
+    drawingStartRef.current = anchor;
+    rectDrawingRef.current = true;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setCompletedDrawing(null);
+    setDraftDrawing({ type: 'rect', start: anchor, end: anchor, complete: false });
+  }, [drawingTool, resolveDrawingAnchor]);
+
+  const handleDrawingPointerMove = useCallback((event) => {
+    const anchor = resolveDrawingAnchor(event);
+    if (!anchor) return;
+    if (drawingTool === 'line' && drawingStartRef.current) {
+      setDraftDrawing({ type: 'line', start: drawingStartRef.current, end: anchor, complete: false });
+      return;
+    }
+    if (drawingTool === 'rect' && rectDrawingRef.current && drawingStartRef.current) {
+      setDraftDrawing({ type: 'rect', start: drawingStartRef.current, end: anchor, complete: false });
+    }
+  }, [drawingTool, resolveDrawingAnchor]);
+
+  const handleDrawingPointerUp = useCallback((event) => {
+    if (drawingTool !== 'rect' || !rectDrawingRef.current || !drawingStartRef.current) return;
+    const anchor = resolveDrawingAnchor(event);
+    if (!anchor) {
+      clearDrawingState();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    setCompletedDrawing({ type: 'rect', start: drawingStartRef.current, end: anchor, complete: true });
+    setDraftDrawing(null);
+    drawingStartRef.current = null;
+    rectDrawingRef.current = false;
+  }, [clearDrawingState, drawingTool, resolveDrawingAnchor]);
+
+  useEffect(() => {
+    clearDrawingState();
+  }, [clearDrawingState, drawingResetNonce, drawingTool, viewportKey]);
+
+  useEffect(() => {
+    if (drawingTool !== 'none') {
+      clearTooltipHideTimer();
+      setHoveredCluster(null);
+    }
+  }, [clearTooltipHideTimer, drawingTool]);
+
   const updateProjection = useCallback(() => {
     const hostWidth = chartHostRef.current?.clientWidth || wrapRef.current?.clientWidth || 0;
     const hostHeight = chartHostRef.current?.clientHeight || wrapRef.current?.clientHeight || 0;
@@ -422,7 +579,16 @@ export default function KlineChart({
         hostHeight
       )
     );
-  }, [candleData, candleMap, candleIndexMap, markerClusters, rangeOverlays, userAvatarUrl]);
+    setProjectedDrawing(
+      projectDrawing(
+        chartRef.current,
+        candleSeriesRef.current,
+        draftDrawing || completedDrawing,
+        hostWidth,
+        hostHeight
+      )
+    );
+  }, [candleData, candleMap, candleIndexMap, completedDrawing, draftDrawing, markerClusters, rangeOverlays, userAvatarUrl]);
 
   updateProjectionRef.current = updateProjection;
 
@@ -707,6 +873,51 @@ export default function KlineChart({
             )}
           </div>
         )}
+      </div>
+
+      <div
+        className={`kline-drawing-layer ${drawingTool !== 'none' ? `interactive ${drawingTool}` : ''}`}
+        onClick={handleDrawingClick}
+        onPointerDown={handleDrawingPointerDown}
+        onPointerMove={handleDrawingPointerMove}
+        onPointerUp={handleDrawingPointerUp}
+      >
+        {projectedDrawing ? (
+          <>
+            <svg
+              className="kline-drawing-svg"
+              viewBox={`0 0 ${Math.max(1, chartHostRef.current?.clientWidth || 1)} ${Math.max(1, chartHostRef.current?.clientHeight || 1)}`}
+              preserveAspectRatio="none"
+            >
+              {projectedDrawing.type === 'line' ? (
+                <line
+                  x1={projectedDrawing.x1}
+                  y1={projectedDrawing.y1}
+                  x2={projectedDrawing.x2}
+                  y2={projectedDrawing.y2}
+                  className={`kline-drawing-line ${projectedDrawing.positive ? 'positive' : 'negative'} ${projectedDrawing.draft ? 'draft' : ''}`}
+                />
+              ) : (
+                <rect
+                  x={projectedDrawing.left}
+                  y={projectedDrawing.top}
+                  width={Math.max(1, projectedDrawing.width)}
+                  height={Math.max(1, projectedDrawing.height)}
+                  className={`kline-drawing-rect ${projectedDrawing.positive ? 'positive' : 'negative'} ${projectedDrawing.draft ? 'draft' : ''}`}
+                />
+              )}
+            </svg>
+            <div
+              className={`kline-drawing-label ${projectedDrawing.positive ? 'positive' : 'negative'} ${projectedDrawing.draft ? 'draft' : ''}`}
+              style={{
+                left: `${projectedDrawing.labelX}px`,
+                top: `${projectedDrawing.labelY}px`,
+              }}
+            >
+              {projectedDrawing.label}
+            </div>
+          </>
+        ) : null}
       </div>
 
       {loading ? <div className="kline-state-overlay">加载 K 线中...</div> : null}
