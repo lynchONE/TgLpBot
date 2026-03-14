@@ -511,6 +511,13 @@ body {
   letter-spacing: -0.02em;
 }
 
+.title-logo {
+  display: block;
+  height: 38px;
+  width: auto;
+  object-fit: contain;
+}
+
 .title-block p {
   margin: 0;
   color: var(--text-muted);
@@ -1692,16 +1699,15 @@ body {
 
 .kline-range-line.yellow .kline-axis-price {
   color: #1a1d22;
+  background: #f6c544;
+  box-shadow: 0 8px 18px rgba(246, 197, 68, 0.28);
 }
 
 .kline-range-line .kline-range-label,
 .kline-mid-line .kline-mid-line-label {
   position: absolute;
   top: 0;
-  right: 92px;
-  left: auto;
   transform: translateY(-50%);
-  max-width: 62px;
   overflow: hidden;
   text-overflow: ellipsis;
   padding: 2px 6px;
@@ -1717,8 +1723,16 @@ body {
 }
 
 .kline-range-line .kline-range-label {
-  max-width: 76px;
+  right: calc(100% + 8px);
+  left: auto;
+  max-width: 88px;
   z-index: 1;
+}
+
+.kline-mid-line .kline-mid-line-label {
+  right: 92px;
+  left: auto;
+  max-width: 62px;
 }
 
 .kline-range-avatar {

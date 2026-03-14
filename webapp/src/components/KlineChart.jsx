@@ -284,8 +284,28 @@ function projectRangeOverlays(candleSeries, overlays, hostWidth, hostHeight) {
       if (!Number.isFinite(lowerYRaw) && !Number.isFinite(upperYRaw)) return;
       const lowerY = Number.isFinite(lowerYRaw) ? lowerYRaw : upperYRaw;
       const upperY = Number.isFinite(upperYRaw) ? upperYRaw : lowerYRaw;
-      const topY = Math.min(lowerY, upperY);
-      const bottomY = Math.max(lowerY, upperY);
+      let topY = Math.min(lowerY, upperY);
+      let bottomY = Math.max(lowerY, upperY);
+      const minPixelGap = Math.max(0, Number(overlay?.minPixelGap || 0));
+      if (minPixelGap > 0 && Number.isFinite(topY) && Number.isFinite(bottomY) && (bottomY - topY) < minPixelGap) {
+        const midY = (topY + bottomY) / 2;
+        topY = midY - minPixelGap / 2;
+        bottomY = midY + minPixelGap / 2;
+        if (height > 0) {
+          const minY = 12;
+          const maxY = Math.max(minY + minPixelGap, height - 12);
+          if (topY < minY) {
+            const offset = minY - topY;
+            topY += offset;
+            bottomY += offset;
+          }
+          if (bottomY > maxY) {
+            const offset = bottomY - maxY;
+            topY -= offset;
+            bottomY -= offset;
+          }
+        }
+      }
       out.push({
         id: overlay.id,
         type: 'range',
@@ -293,6 +313,7 @@ function projectRangeOverlays(candleSeries, overlays, hostWidth, hostHeight) {
         label: String(overlay?.label || ''),
         avatarUrl: String(overlay?.avatarUrl || ''),
         showAvatar: overlay?.showAvatar !== false,
+        minPixelGap,
         priceLower: Math.min(lower, upper),
         priceUpper: Math.max(lower, upper),
         topY,

@@ -56,6 +56,7 @@ import pancakeLogo from './img/pancake.svg';
 import bnbLogo from './img/bnb.svg';
 import baseLogo from './img/base.svg';
 import flashIcon from './img/flash.svg';
+import siteLogo from './img/logo.png';
 import {
   DEFAULT_WIDGETS,
   WIDGETS,
@@ -590,6 +591,7 @@ export default function App() {
       priceUpper: Math.max(lower, upper),
       price: (lower + upper) / 2,
       color: 'yellow',
+      minPixelGap: 26,
       showAvatar: false,
       avatarUrl: walletAvatarUrl(selectedSmartWalletAddress),
     }];
@@ -2678,7 +2680,9 @@ export default function App() {
           <header className="top-bar">
             <div className="title-block">
               <div className="eyebrow">lynchL</div>
-              <h1>LP交易工作台</h1>
+              <h1>
+                <img src={siteLogo} alt="lynchL" className="title-logo" />
+              </h1>
             </div>
 
             <div className="top-actions">
