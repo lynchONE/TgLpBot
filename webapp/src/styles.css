@@ -1638,12 +1638,12 @@ body {
 
 .kline-range-line {
   right: 0;
-  width: 154px;
+  width: 132px;
 }
 
 .kline-mid-line {
   right: 0;
-  width: 154px;
+  width: 132px;
 }
 
 .kline-range-line::before,
@@ -1658,7 +1658,7 @@ body {
 .kline-range-line::before,
 .kline-mid-line::before {
   left: 0;
-  right: 84px;
+  right: 82px;
 }
 
 .kline-range-line.red,
@@ -1730,9 +1730,10 @@ body {
 }
 
 .kline-mid-line .kline-mid-line-label {
-  right: 92px;
+  right: calc(100% + 8px);
   left: auto;
-  max-width: 62px;
+  max-width: 88px;
+  z-index: 1;
 }
 
 .kline-range-avatar {
