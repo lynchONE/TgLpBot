@@ -292,6 +292,7 @@ function projectRangeOverlays(candleSeries, overlays, hostWidth, hostHeight) {
         color: String(overlay?.color || 'red'),
         label: String(overlay?.label || ''),
         avatarUrl: String(overlay?.avatarUrl || ''),
+        showAvatar: overlay?.showAvatar !== false,
         priceLower: Math.min(lower, upper),
         priceUpper: Math.max(lower, upper),
         topY,
@@ -795,20 +796,25 @@ export default function KlineChart({
                   className={`kline-range-line ${overlay.color} top`}
                   style={{ top: `${overlay.topY}px` }}
                 >
-                  <span className="kline-range-price">{smartPriceFormatter(overlay.priceUpper)}</span>
+                  {overlay.label ? (
+                    <span className="kline-range-label">{tooltipSafeLabel(overlay.label)}</span>
+                  ) : null}
+                  <span className="kline-axis-price">{smartPriceFormatter(overlay.priceUpper)}</span>
                 </div>
                 <div
                   className={`kline-range-line ${overlay.color} bottom`}
                   style={{ top: `${overlay.bottomY}px` }}
                 >
-                  <span className="kline-range-price">{smartPriceFormatter(overlay.priceLower)}</span>
+                  <span className="kline-axis-price">{smartPriceFormatter(overlay.priceLower)}</span>
                 </div>
-                <div
-                  className={`kline-range-avatar ${overlay.color}`}
-                  style={{ top: `${overlay.midY}px` }}
-                >
-                  {overlay.avatarUrl ? <img src={overlay.avatarUrl} alt="" /> : null}
-                </div>
+                {overlay.showAvatar && overlay.avatarUrl ? (
+                  <div
+                    className={`kline-range-avatar ${overlay.color}`}
+                    style={{ top: `${overlay.midY}px` }}
+                  >
+                    <img src={overlay.avatarUrl} alt="" />
+                  </div>
+                ) : null}
               </React.Fragment>
             );
           }

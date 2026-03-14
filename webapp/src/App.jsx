@@ -590,6 +590,7 @@ export default function App() {
       priceUpper: Math.max(lower, upper),
       price: (lower + upper) / 2,
       color: 'red',
+      showAvatar: false,
       avatarUrl: walletAvatarUrl(selectedSmartWalletAddress),
     }];
   }, [selectedPoolKey, selectedSmartWallet, selectedSmartWalletAddress]);
@@ -2568,6 +2569,10 @@ export default function App() {
                                 chain
                               );
                               if (hasRange && normalizedWalletAddr) {
+                                if (activeWallet) {
+                                  setSelectedSmartWallet(null);
+                                  return;
+                                }
                                 setSelectedSmartWallet({
                                   poolKey,
                                   wallet_address: normalizedWalletAddr,

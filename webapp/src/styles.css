@@ -1630,8 +1630,8 @@ body {
 }
 
 .kline-range-line {
-  right: 52px;
-  width: 108px;
+  right: 0;
+  width: 154px;
 }
 
 .kline-mid-line {
@@ -1648,6 +1648,7 @@ body {
   opacity: 0.92;
 }
 
+.kline-range-line::before,
 .kline-mid-line::before {
   left: 0;
   right: 84px;
@@ -1656,6 +1657,7 @@ body {
 .kline-range-line.red,
 .kline-range-avatar.red {
   color: #ff5d73;
+  --kline-axis-bg: #ff5d73;
 }
 
 .kline-mid-line.blue {
@@ -1663,21 +1665,7 @@ body {
   --kline-axis-bg: #2f8cff;
 }
 
-.kline-range-line .kline-range-price {
-  position: absolute;
-  top: 0;
-  right: calc(100% + 6px);
-  transform: translateY(-50%);
-  padding: 2px 6px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
-  white-space: nowrap;
-  border: 1px solid currentColor;
-  background: rgba(11, 16, 24, 0.92);
-}
-
+.kline-range-line .kline-axis-price,
 .kline-mid-line .kline-axis-price {
   position: absolute;
   top: 0;
@@ -1687,7 +1675,7 @@ body {
   padding: 4px 9px;
   border-radius: 4px 0 0 4px;
   color: #f7fbff;
-  background: var(--kline-axis-bg, #2f8cff);
+  background: var(--kline-axis-bg, currentColor);
   font-size: 11px;
   font-weight: 800;
   line-height: 1;
@@ -1696,6 +1684,7 @@ body {
   box-shadow: 0 8px 18px rgba(17, 37, 68, 0.32);
 }
 
+.kline-range-line .kline-range-label,
 .kline-mid-line .kline-mid-line-label {
   position: absolute;
   top: 0;
@@ -1712,7 +1701,7 @@ body {
   line-height: 1;
   white-space: nowrap;
   color: currentColor;
-  border: 1px solid rgba(47, 140, 255, 0.45);
+  border: 1px solid currentColor;
   background: rgba(10, 20, 35, 0.96);
   opacity: 0.92;
 }
