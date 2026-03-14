@@ -1183,6 +1183,58 @@ body {
   align-items: center;
 }
 
+.kline-chart-shell {
+  position: relative;
+}
+
+.kline-tool-dock {
+  position: absolute;
+  left: 10px;
+  top: 12px;
+  z-index: 35;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 6px;
+  border-radius: 14px;
+  border: 1px solid rgba(136, 157, 191, 0.16);
+  background: rgba(10, 15, 24, 0.9);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(10px);
+}
+
+.kline-tool-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid rgba(136, 157, 191, 0.12);
+  background: rgba(20, 28, 42, 0.9);
+  color: #d6e0f2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
+}
+
+.kline-tool-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(136, 157, 191, 0.28);
+  background: rgba(28, 39, 58, 0.96);
+}
+
+.kline-tool-btn.active {
+  color: var(--accent-text);
+  border-color: rgba(var(--accent-rgb), 0.38);
+  background: rgba(var(--accent-rgb), 0.16);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.18);
+}
+
+.kline-tool-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .kline-filter-shell {
   position: relative;
 }
@@ -1202,6 +1254,11 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.kline-filter-popover.tool-dock {
+  top: 0;
+  left: calc(100% + 10px);
 }
 
 .kline-filter-popover-head {
@@ -1567,11 +1624,19 @@ body {
 .kline-range-line,
 .kline-mid-line {
   position: absolute;
-  right: 52px;
-  width: 108px;
   height: 0;
   pointer-events: none;
   z-index: 3;
+}
+
+.kline-range-line {
+  right: 52px;
+  width: 108px;
+}
+
+.kline-mid-line {
+  right: 0;
+  width: 154px;
 }
 
 .kline-range-line::before,
@@ -1583,17 +1648,21 @@ body {
   opacity: 0.92;
 }
 
+.kline-mid-line::before {
+  left: 0;
+  right: 84px;
+}
+
 .kline-range-line.red,
 .kline-range-avatar.red {
   color: #ff5d73;
 }
 
 .kline-mid-line.blue {
-  color: #5ca7ff;
+  color: #2f8cff;
 }
 
-.kline-range-line .kline-range-price,
-.kline-mid-line .kline-range-price {
+.kline-range-line .kline-range-price {
   position: absolute;
   top: 0;
   right: calc(100% + 6px);
@@ -1608,19 +1677,42 @@ body {
   background: rgba(11, 16, 24, 0.92);
 }
 
+.kline-mid-line .kline-axis-price {
+  position: absolute;
+  top: 0;
+  right: 0;
+  transform: translateY(-50%);
+  min-width: 76px;
+  padding: 4px 9px;
+  border-radius: 4px 0 0 4px;
+  color: #f7fbff;
+  background: currentColor;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+  box-shadow: 0 8px 18px rgba(17, 37, 68, 0.32);
+}
+
 .kline-mid-line .kline-mid-line-label {
   position: absolute;
   top: 0;
-  left: 6px;
-  transform: translateY(calc(-100% - 4px));
-  padding: 1px 5px;
+  right: 90px;
+  left: auto;
+  transform: translateY(calc(-100% - 5px));
+  max-width: 62px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 2px 6px;
   border-radius: 999px;
   font-size: 9px;
   font-weight: 700;
   line-height: 1;
   white-space: nowrap;
-  border: 1px solid currentColor;
-  background: rgba(11, 16, 24, 0.88);
+  color: currentColor;
+  border: 1px solid rgba(47, 140, 255, 0.45);
+  background: rgba(10, 20, 35, 0.96);
   opacity: 0.92;
 }
 

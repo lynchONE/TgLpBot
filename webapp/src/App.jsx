@@ -13,10 +13,13 @@ import {
   LogOut,
   Maximize,
   Minimize,
+  MousePointer2,
   RefreshCw,
   Search,
   Settings,
+  Slash,
   SlidersHorizontal,
+  Square,
   X,
 } from 'lucide-react';
 import {
@@ -97,9 +100,9 @@ const ACCENT_THEMES = [
   { key: 'yellow', label: '黄色' },
 ];
 const KLINE_DRAW_TOOLS = [
-  { key: 'none', label: '游标' },
-  { key: 'line', label: '线段' },
-  { key: 'rect', label: '矩形' },
+  { key: 'none', title: 'Cursor', icon: MousePointer2 },
+  { key: 'line', title: 'Line', icon: Slash },
+  { key: 'rect', title: 'Rect', icon: Square },
 ];
 
 function getKlineIntervalMeta(bar) {
@@ -1846,112 +1849,6 @@ export default function App() {
           <>
             <div className="kline-toolbar">
               <div className="kline-toolbar-group">
-                {KLINE_DRAW_TOOLS.map((tool) => (
-                  <button
-                    key={tool.key}
-                    type="button"
-                    className={`ghost-chip ${klineDrawTool === tool.key ? 'active' : ''}`}
-                    onClick={() => setKlineDrawTool(tool.key)}
-                  >
-                    {tool.label}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  className="ghost-chip"
-                  onClick={clearKlineDrawing}
-                  disabled={!klineCandles.length}
-                >
-                  清除测量
-                </button>
-              </div>
-
-              <div className="kline-toolbar-group">
-                <div className="kline-filter-shell" ref={klineMarkerFilterRef}>
-                  <button
-                    type="button"
-                    className={`ghost-chip ${klineMarkerFilterOpen || klineMarkerFilterActive ? 'active' : ''}`}
-                    onClick={() => setKlineMarkerFilterOpen((prev) => !prev)}
-                    disabled={!klineOverlayEnabled || !klineMarkers.length}
-                  >
-                    <SlidersHorizontal size={12} />
-                    气泡筛选
-                    {klineMarkerFilterActive ? ` ${klineMarkerSelectedWalletCount}/${klineMarkerWalletAddresses.length || 0}` : ''}
-                  </button>
-
-                  {klineMarkerFilterOpen ? (
-                    <div className="kline-filter-popover">
-                      <div className="kline-filter-popover-head">
-                        <div>
-                          <div className="kline-filter-popover-title">钱包气泡筛选</div>
-                          <div className="kline-filter-popover-sub">基于当前已加载的聪明钱气泡</div>
-                        </div>
-                        <button
-                          type="button"
-                          className="icon-link"
-                          onClick={() => setKlineMarkerFilterOpen(false)}
-                          title="关闭筛选"
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-
-                      <label className="kline-filter-field">
-                        <span>最小开单金额 (USD)</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="100"
-                          inputMode="decimal"
-                          placeholder="例如 1000"
-                          value={klineMarkerMinUsdInput}
-                          onChange={(e) => setKlineMarkerMinUsdInput(e.target.value)}
-                        />
-                      </label>
-
-                      <div className="kline-filter-actions">
-                        <button type="button" className="ghost-chip" onClick={() => setKlineMarkerWalletFilter(null)}>
-                          全选
-                        </button>
-                        <button type="button" className="ghost-chip" onClick={() => setKlineMarkerWalletFilter([])}>
-                          清空
-                        </button>
-                        <button type="button" className="ghost-chip" onClick={resetKlineMarkerFilter}>
-                          重置
-                        </button>
-                      </div>
-
-                      <div className="kline-filter-wallets">
-                        {klineMarkerWalletOptions.length ? (
-                          klineMarkerWalletOptions.map((wallet) => {
-                            const checked = klineMarkerWalletFilter === null || klineMarkerWalletFilter.includes(wallet.address);
-                            return (
-                              <label key={wallet.address} className="kline-filter-wallet-option">
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  onChange={() => toggleKlineMarkerWalletFilter(wallet.address)}
-                                />
-                                <span className="kline-filter-wallet-main">
-                                  <span className="kline-filter-wallet-name">{wallet.displayLabel}</span>
-                                  <span className="kline-filter-wallet-meta">
-                                    {formatNumber(wallet.count)} 笔 · {formatUsdCompact(wallet.totalUSD)}
-                                  </span>
-                                </span>
-                                {checked ? <Check size={14} /> : null}
-                              </label>
-                            );
-                          })
-                        ) : (
-                          <div className="kline-filter-empty">当前没有可筛选的钱包气泡</div>
-                        )}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="kline-toolbar-group">
                 {klineTokenOptions.length > 1 ? (
                   klineTokenOptions.map((item) => (
                     <button
@@ -2028,24 +1925,136 @@ export default function App() {
               </div>
             </div>
 
-            <KlineChart
-              candles={klineCandles}
-              markers={klineOverlayEnabled ? filteredKlineMarkers : []}
-              rangeOverlays={[...selectedSmartWalletOverlay, ...watchedMidlineOverlays]}
-              loading={klineLoading}
-              error={klineError}
-              onVisibleRangeChange={handleKlineVisibleRangeChange}
-              viewportKey={klineViewportKey}
-              activeMarkerId={selectedMarkerCluster?.id || ''}
-              highlightWalletAddress={selectedSmartWalletAddress}
-              onMarkerClick={(cluster) => setSelectedMarkerCluster(cluster)}
-              watchedWalletSet={watchedWalletSet}
-              watchToggleMap={watchToggleMap}
-              onToggleWatch={handleToggleWatchedWallet}
-              drawingTool={klineDrawTool}
-              drawingResetNonce={klineDrawResetNonce}
-              userAvatarUrl={loginUser?.photo_url || ''}
-            />
+            <div className="kline-chart-shell">
+              <div className="kline-tool-dock" ref={klineMarkerFilterRef}>
+                {KLINE_DRAW_TOOLS.map((tool) => {
+                  const Icon = tool.icon;
+                  return (
+                    <button
+                      key={tool.key}
+                      type="button"
+                      className={`kline-tool-btn ${klineDrawTool === tool.key ? 'active' : ''}`}
+                      onClick={() => setKlineDrawTool(tool.key)}
+                      title={tool.title}
+                      aria-label={tool.title}
+                    >
+                      <Icon size={16} />
+                    </button>
+                  );
+                })}
+
+                <button
+                  type="button"
+                  className={`kline-tool-btn ${klineMarkerFilterOpen || klineMarkerFilterActive ? 'active' : ''}`}
+                  onClick={() => setKlineMarkerFilterOpen((prev) => !prev)}
+                  disabled={!klineOverlayEnabled || !klineMarkers.length}
+                  title="Filter"
+                  aria-label="Filter"
+                >
+                  <SlidersHorizontal size={16} />
+                </button>
+
+                <button
+                  type="button"
+                  className="kline-tool-btn"
+                  onClick={clearKlineDrawing}
+                  disabled={!klineCandles.length}
+                  title="Clear"
+                  aria-label="Clear"
+                >
+                  <X size={16} />
+                </button>
+
+                {klineMarkerFilterOpen ? (
+                  <div className="kline-filter-popover tool-dock">
+                    <div className="kline-filter-popover-head">
+                      <div>
+                        <div className="kline-filter-popover-title">Bubble Filter</div>
+                        <div className="kline-filter-popover-sub">Current loaded smart-money bubbles</div>
+                      </div>
+                      <button
+                        type="button"
+                        className="icon-link"
+                        onClick={() => setKlineMarkerFilterOpen(false)}
+                        title="Close"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+
+                    <label className="kline-filter-field">
+                      <span>Min USD</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="100"
+                        inputMode="decimal"
+                        placeholder="1000"
+                        value={klineMarkerMinUsdInput}
+                        onChange={(e) => setKlineMarkerMinUsdInput(e.target.value)}
+                      />
+                    </label>
+
+                    <div className="kline-filter-actions">
+                      <button type="button" className="ghost-chip" onClick={() => setKlineMarkerWalletFilter(null)}>
+                        All
+                      </button>
+                      <button type="button" className="ghost-chip" onClick={() => setKlineMarkerWalletFilter([])}>
+                        None
+                      </button>
+                      <button type="button" className="ghost-chip" onClick={resetKlineMarkerFilter}>
+                        Reset
+                      </button>
+                    </div>
+
+                    <div className="kline-filter-wallets">
+                      {klineMarkerWalletOptions.length ? (
+                        klineMarkerWalletOptions.map((wallet) => {
+                          const checked = klineMarkerWalletFilter === null || klineMarkerWalletFilter.includes(wallet.address);
+                          return (
+                            <label key={wallet.address} className="kline-filter-wallet-option">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleKlineMarkerWalletFilter(wallet.address)}
+                              />
+                              <span className="kline-filter-wallet-main">
+                                <span className="kline-filter-wallet-name">{wallet.displayLabel}</span>
+                                <span className="kline-filter-wallet-meta">
+                                  {formatNumber(wallet.count)} tx · {formatUsdCompact(wallet.totalUSD)}
+                                </span>
+                              </span>
+                              {checked ? <Check size={14} /> : null}
+                            </label>
+                          );
+                        })
+                      ) : (
+                        <div className="kline-filter-empty">No wallets available</div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <KlineChart
+                candles={klineCandles}
+                markers={klineOverlayEnabled ? filteredKlineMarkers : []}
+                rangeOverlays={[...selectedSmartWalletOverlay, ...watchedMidlineOverlays]}
+                loading={klineLoading}
+                error={klineError}
+                onVisibleRangeChange={handleKlineVisibleRangeChange}
+                viewportKey={klineViewportKey}
+                activeMarkerId={selectedMarkerCluster?.id || ''}
+                highlightWalletAddress={selectedSmartWalletAddress}
+                onMarkerClick={(cluster) => setSelectedMarkerCluster(cluster)}
+                watchedWalletSet={watchedWalletSet}
+                watchToggleMap={watchToggleMap}
+                onToggleWatch={handleToggleWatchedWallet}
+                drawingTool={klineDrawTool}
+                drawingResetNonce={klineDrawResetNonce}
+                userAvatarUrl={loginUser?.photo_url || ''}
+              />
+            </div>
 
             {klineMarkerFilterActive && !filteredKlineMarkers.length && klineMarkers.length ? (
               <div className="kline-inline-note">

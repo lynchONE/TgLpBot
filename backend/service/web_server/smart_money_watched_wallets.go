@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strings"
@@ -473,9 +474,28 @@ type removeWatchedWalletsRequest struct {
 	WalletAddresses []string `json:"wallet_addresses"`
 }
 
+func watchedWalletAddressesFromQuery(r *http.Request) []string {
+	query := r.URL.Query()
+	out := make([]string, 0, len(query["wallet_addresses"])+1)
+	appendValue := func(value string) {
+		for _, item := range strings.Split(value, ",") {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			out = append(out, item)
+		}
+	}
+	for _, value := range query["wallet_addresses"] {
+		appendValue(value)
+	}
+	appendValue(query.Get("wallet_address"))
+	return out
+}
+
 func (s *Server) handleWatchedWalletsRemove(w http.ResponseWriter, r *http.Request) {
 	var req removeWatchedWalletsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -503,11 +523,17 @@ func (s *Server) handleWatchedWalletsRemove(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	if strings.TrimSpace(req.Chain) == "" {
+		req.Chain = r.URL.Query().Get("chain")
+	}
 	chain := strings.ToLower(strings.TrimSpace(req.Chain))
 	if chain == "" {
 		chain = "bsc"
 	}
 
+	if len(req.WalletAddresses) == 0 {
+		req.WalletAddresses = watchedWalletAddressesFromQuery(r)
+	}
 	if len(req.WalletAddresses) == 0 {
 		http.Error(w, "no wallet addresses provided", http.StatusBadRequest)
 		return

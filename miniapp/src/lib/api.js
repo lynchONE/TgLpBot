@@ -1059,11 +1059,21 @@ export async function addSmartMoneyWatchedWallets({ apiBaseUrl, initData, chain,
 
 export async function removeSmartMoneyWatchedWallets({ apiBaseUrl, initData, chain, walletAddresses, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/smart_money_watched_wallets`;
+    const params = new URLSearchParams();
+    if (initData) params.set('initData', String(initData));
+    if (chain) params.set('chain', String(chain));
+    const normalizedWalletAddresses = Array.isArray(walletAddresses)
+        ? walletAddresses.map((item) => String(item || '').trim()).filter(Boolean)
+        : [];
+    if (normalizedWalletAddresses.length > 0) {
+        params.set('wallet_addresses', normalizedWalletAddresses.join(','));
+    }
+    const qs = params.toString();
+    const url = `${base}/api/smart_money_watched_wallets${qs ? `?${qs}` : ''}`;
     const resp = await fetch(url, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initData, chain, wallet_addresses: walletAddresses }),
+        body: JSON.stringify({ initData, chain, wallet_addresses: normalizedWalletAddresses }),
         signal,
     });
     if (!resp.ok) {

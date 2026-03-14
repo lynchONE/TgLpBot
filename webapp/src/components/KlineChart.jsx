@@ -806,10 +806,10 @@ export default function KlineChart({
               className={`kline-mid-line ${overlay.color}`}
               style={{ top: `${overlay.y}px` }}
             >
-              <span className="kline-range-price">{smartPriceFormatter(overlay.price)}</span>
               {overlay.label ? (
                 <span className="kline-mid-line-label">{tooltipSafeLabel(overlay.label)}</span>
               ) : null}
+              <span className="kline-axis-price">{smartPriceFormatter(overlay.price)}</span>
             </div>
           );
         })}
