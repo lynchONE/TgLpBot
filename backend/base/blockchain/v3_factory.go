@@ -25,6 +25,17 @@ const v3FactoryABI = `[
     ],
     "stateMutability": "view",
     "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "uint24", "name": "fee", "type": "uint24" }
+    ],
+    "name": "feeAmountTickSpacing",
+    "outputs": [
+      { "internalType": "int24", "name": "", "type": "int24" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
   }
 ]`
 
@@ -78,6 +89,37 @@ func GetV3PoolFromFactoryCtxWithClient(client *ethclient.Client, ctx context.Con
 		return common.BytesToAddress(b[:]), nil
 	}
 	return common.Address{}, fmt.Errorf("unexpected getPool return type: %T", out[0])
+}
+
+func GetV3FeeAmountTickSpacingWithClient(client *ethclient.Client, factory common.Address, fee uint64) (int, error) {
+	if client == nil {
+		return 0, fmt.Errorf("blockchain client not initialized")
+	}
+	parsed, err := abi.JSON(strings.NewReader(v3FactoryABI))
+	if err != nil {
+		return 0, err
+	}
+	data, err := parsed.Pack("feeAmountTickSpacing", new(big.Int).SetUint64(fee))
+	if err != nil {
+		return 0, err
+	}
+	msg := ethereum.CallMsg{To: &factory, Data: data}
+	raw, err := client.CallContract(context.Background(), msg, nil)
+	if err != nil {
+		return 0, err
+	}
+	out, err := parsed.Unpack("feeAmountTickSpacing", raw)
+	if err != nil {
+		return 0, err
+	}
+	if len(out) != 1 {
+		return 0, fmt.Errorf("unexpected feeAmountTickSpacing return length: %d", len(out))
+	}
+	v, ok := out[0].(*big.Int)
+	if !ok || v == nil {
+		return 0, fmt.Errorf("unexpected feeAmountTickSpacing return type: %T", out[0])
+	}
+	return int(v.Int64()), nil
 }
 
 // GetV3PoolFactory returns the factory address of a V3 pool by calling pool.factory()

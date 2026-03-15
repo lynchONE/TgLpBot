@@ -183,6 +183,10 @@ func computeUniswapV4PoolID(currency0, currency1 common.Address, fee uint64, tic
 	return common.BytesToHash(crypto.Keccak256(encoded)), nil
 }
 
+func ComputeUniswapV4PoolID(currency0, currency1 common.Address, fee uint64, tickSpacing int, hooks common.Address) (common.Hash, error) {
+	return computeUniswapV4PoolID(currency0, currency1, fee, tickSpacing, hooks)
+}
+
 func isEthGetLogsRangeLimited(err error) bool {
 	if err == nil {
 		return false

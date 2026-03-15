@@ -17,12 +17,40 @@ import (
 const v4PositionManagerABI = `[
   {
     "inputs": [
+      {
+        "components": [
+          { "internalType": "address", "name": "currency0", "type": "address" },
+          { "internalType": "address", "name": "currency1", "type": "address" },
+          { "internalType": "uint24", "name": "fee", "type": "uint24" },
+          { "internalType": "int24", "name": "tickSpacing", "type": "int24" },
+          { "internalType": "address", "name": "hooks", "type": "address" }
+        ],
+        "internalType": "struct PoolKey",
+        "name": "key",
+        "type": "tuple"
+      },
+      { "internalType": "uint160", "name": "sqrtPriceX96", "type": "uint160" }
+    ],
+    "name": "initializePool",
+    "outputs": [{ "internalType": "int24", "name": "", "type": "int24" }],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
       { "internalType": "bytes", "name": "unlockData", "type": "bytes" },
       { "internalType": "uint256", "name": "deadline", "type": "uint256" }
     ],
     "name": "modifyLiquidities",
     "outputs": [],
     "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "nextTokenId",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -59,6 +87,14 @@ type V4PositionManager struct {
 	address  common.Address
 }
 
+type V4PoolKey struct {
+	Currency0   common.Address `abi:"currency0"`
+	Currency1   common.Address `abi:"currency1"`
+	Fee         *big.Int       `abi:"fee"`
+	TickSpacing *big.Int       `abi:"tickSpacing"`
+	Hooks       common.Address `abi:"hooks"`
+}
+
 type V4PositionInfo struct {
 	Token0                   common.Address
 	Token1                   common.Address
@@ -87,6 +123,25 @@ func NewV4PositionManager(address common.Address, client *ethclient.Client) (*V4
 
 func (m *V4PositionManager) ModifyLiquidities(opts *bind.TransactOpts, unlockData []byte, deadline *big.Int) (*types.Transaction, error) {
 	return m.contract.Transact(opts, "modifyLiquidities", unlockData, deadline)
+}
+
+func (m *V4PositionManager) InitializePool(opts *bind.TransactOpts, key V4PoolKey, sqrtPriceX96 *big.Int) (*types.Transaction, error) {
+	return m.contract.Transact(opts, "initializePool", key, sqrtPriceX96)
+}
+
+func (m *V4PositionManager) NextTokenID(opts *bind.CallOpts) (*big.Int, error) {
+	var result []interface{}
+	if err := m.contract.Call(opts, &result, "nextTokenId"); err != nil {
+		return nil, err
+	}
+	if len(result) < 1 {
+		return nil, fmt.Errorf("unexpected nextTokenId return length: %d", len(result))
+	}
+	v, ok := result[0].(*big.Int)
+	if !ok || v == nil {
+		return nil, fmt.Errorf("unexpected nextTokenId return type: %T", result[0])
+	}
+	return v, nil
 }
 
 func (m *V4PositionManager) Positions(opts *bind.CallOpts, tokenId *big.Int) (*V4PositionInfo, error) {

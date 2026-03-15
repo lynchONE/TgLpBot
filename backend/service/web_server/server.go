@@ -67,6 +67,8 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/task_delete", s.handleTaskDelete)
 	mux.HandleFunc("/api/task_update_range", s.handleTaskUpdateRange)
 	mux.HandleFunc("/api/open_position", s.handleOpenPosition)
+	mux.HandleFunc("/api/create_pool_preview", s.handleCreatePoolPreview)
+	mux.HandleFunc("/api/create_pool_execute", s.handleCreatePoolExecute)
 	mux.HandleFunc("/api/my_trade_markers", s.handleMyTradeMarkers)
 	mux.HandleFunc("/api/admin/realtime_users", s.handleAdminRealtimeUsers)
 	mux.HandleFunc("/api/admin/realtime_positions", s.handleAdminRealtimePositions)

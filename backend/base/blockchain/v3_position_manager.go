@@ -123,6 +123,51 @@ const v3PositionManagerABI = `[
   },
   {
     "inputs": [
+      { "internalType": "address", "name": "token0", "type": "address" },
+      { "internalType": "address", "name": "token1", "type": "address" },
+      { "internalType": "uint24", "name": "fee", "type": "uint24" },
+      { "internalType": "uint160", "name": "sqrtPriceX96", "type": "uint160" }
+    ],
+    "name": "createAndInitializePoolIfNecessary",
+    "outputs": [
+      { "internalType": "address", "name": "pool", "type": "address" }
+    ],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "components": [
+          { "internalType": "address", "name": "token0", "type": "address" },
+          { "internalType": "address", "name": "token1", "type": "address" },
+          { "internalType": "uint24", "name": "fee", "type": "uint24" },
+          { "internalType": "int24", "name": "tickLower", "type": "int24" },
+          { "internalType": "int24", "name": "tickUpper", "type": "int24" },
+          { "internalType": "uint256", "name": "amount0Desired", "type": "uint256" },
+          { "internalType": "uint256", "name": "amount1Desired", "type": "uint256" },
+          { "internalType": "uint256", "name": "amount0Min", "type": "uint256" },
+          { "internalType": "uint256", "name": "amount1Min", "type": "uint256" },
+          { "internalType": "address", "name": "recipient", "type": "address" },
+          { "internalType": "uint256", "name": "deadline", "type": "uint256" }
+        ],
+        "internalType": "struct INonfungiblePositionManager.MintParams",
+        "name": "params",
+        "type": "tuple"
+      }
+    ],
+    "name": "mint",
+    "outputs": [
+      { "internalType": "uint256", "name": "tokenId", "type": "uint256" },
+      { "internalType": "uint128", "name": "liquidity", "type": "uint128" },
+      { "internalType": "uint256", "name": "amount0", "type": "uint256" },
+      { "internalType": "uint256", "name": "amount1", "type": "uint256" }
+    ],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
       { "internalType": "uint256", "name": "tokenId", "type": "uint256" }
     ],
     "name": "positions",
@@ -178,6 +223,20 @@ type V3CollectParams struct {
 	Recipient  common.Address `abi:"recipient"`
 	Amount0Max *big.Int       `abi:"amount0Max"` // uint128
 	Amount1Max *big.Int       `abi:"amount1Max"` // uint128
+}
+
+type V3MintParams struct {
+	Token0         common.Address `abi:"token0"`
+	Token1         common.Address `abi:"token1"`
+	Fee            *big.Int       `abi:"fee"`
+	TickLower      *big.Int       `abi:"tickLower"`
+	TickUpper      *big.Int       `abi:"tickUpper"`
+	Amount0Desired *big.Int       `abi:"amount0Desired"`
+	Amount1Desired *big.Int       `abi:"amount1Desired"`
+	Amount0Min     *big.Int       `abi:"amount0Min"`
+	Amount1Min     *big.Int       `abi:"amount1Min"`
+	Recipient      common.Address `abi:"recipient"`
+	Deadline       *big.Int       `abi:"deadline"`
 }
 
 func NewV3PositionManager(address common.Address, client *ethclient.Client) (*V3PositionManager, error) {
@@ -280,6 +339,23 @@ func (m *V3PositionManager) Collect(
 	params V3CollectParams,
 ) (*types.Transaction, error) {
 	return m.contract.Transact(opts, "collect", params)
+}
+
+func (m *V3PositionManager) CreateAndInitializePoolIfNecessary(
+	opts *bind.TransactOpts,
+	token0 common.Address,
+	token1 common.Address,
+	fee *big.Int,
+	sqrtPriceX96 *big.Int,
+) (*types.Transaction, error) {
+	return m.contract.Transact(opts, "createAndInitializePoolIfNecessary", token0, token1, fee, sqrtPriceX96)
+}
+
+func (m *V3PositionManager) Mint(
+	opts *bind.TransactOpts,
+	params V3MintParams,
+) (*types.Transaction, error) {
+	return m.contract.Transact(opts, "mint", params)
 }
 
 func (m *V3PositionManager) Burn(opts *bind.TransactOpts, tokenId *big.Int) (*types.Transaction, error) {

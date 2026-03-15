@@ -269,6 +269,104 @@ export async function openPosition({
   });
 }
 
+export async function previewCreatePool({
+  apiBaseUrl,
+  initData,
+  chain = 'bsc',
+  protocol,
+  walletId,
+  tokenAAddress,
+  tokenBAddress,
+  feeTier,
+  initialPrice,
+  mode = 'create_and_seed',
+  rangeMode = 'full_range',
+  amountA,
+  amountB,
+  slippageTolerance,
+  signal,
+}) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/trading?endpoint=create_pool_preview`;
+  const payload = {
+    initData,
+    chain,
+    protocol,
+    token_a_address: tokenAAddress,
+    token_b_address: tokenBAddress,
+    fee_tier: feeTier,
+    mode,
+    range_mode: rangeMode,
+  };
+  const wid = Number(walletId);
+  if (Number.isFinite(wid) && wid > 0) payload.wallet_id = wid;
+  if (initialPrice !== undefined && initialPrice !== null && String(initialPrice).trim()) {
+    payload.initial_price = String(initialPrice).trim();
+  }
+  if (amountA !== undefined && amountA !== null && String(amountA).trim()) {
+    payload.amount_a = String(amountA).trim();
+  }
+  if (amountB !== undefined && amountB !== null && String(amountB).trim()) {
+    payload.amount_b = String(amountB).trim();
+  }
+  if (Number.isFinite(slippageTolerance)) payload.slippage_tolerance = slippageTolerance;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export async function executeCreatePool({
+  apiBaseUrl,
+  initData,
+  chain = 'bsc',
+  protocol,
+  walletId,
+  tokenAAddress,
+  tokenBAddress,
+  feeTier,
+  initialPrice,
+  mode = 'create_and_seed',
+  rangeMode = 'full_range',
+  amountA,
+  amountB,
+  slippageTolerance,
+  signal,
+}) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/trading?endpoint=create_pool_execute`;
+  const payload = {
+    initData,
+    chain,
+    protocol,
+    token_a_address: tokenAAddress,
+    token_b_address: tokenBAddress,
+    fee_tier: feeTier,
+    mode,
+    range_mode: rangeMode,
+  };
+  const wid = Number(walletId);
+  if (Number.isFinite(wid) && wid > 0) payload.wallet_id = wid;
+  if (initialPrice !== undefined && initialPrice !== null && String(initialPrice).trim()) {
+    payload.initial_price = String(initialPrice).trim();
+  }
+  if (amountA !== undefined && amountA !== null && String(amountA).trim()) {
+    payload.amount_a = String(amountA).trim();
+  }
+  if (amountB !== undefined && amountB !== null && String(amountB).trim()) {
+    payload.amount_b = String(amountB).trim();
+  }
+  if (Number.isFinite(slippageTolerance)) payload.slippage_tolerance = slippageTolerance;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
 export async function setTaskPaused({ apiBaseUrl, initData, taskId, paused, signal }) {
   const base = normalizeBaseUrl(apiBaseUrl);
   const url = `${base}/api/task_action?action=pause`;

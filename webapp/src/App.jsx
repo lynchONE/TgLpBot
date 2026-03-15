@@ -47,6 +47,7 @@ import { walletAvatarUrl } from './avatar';
 import { WEBAPP_CONFIG } from './config';
 import PanelShell, { EmptyState, MetricCard } from './components/PanelShell';
 import KlineChart from './components/KlineChart';
+import CreatePoolPanel from './components/CreatePoolPanel';
 import OpenPositionModal from './components/OpenPositionModal';
 import StepProgressModal from './components/StepProgressModal';
 import TaskActionMenu from './components/TaskActionMenu';
@@ -1897,6 +1898,13 @@ export default function App() {
   }, [apiBaseUrl, chain, hasInitData, initData, smartWalletDetailMap]);
 
   const panelMap = {
+    create_pool: (
+      <CreatePoolPanel
+        apiBaseUrl={apiBaseUrl}
+        initData={initData}
+        hasInitData={hasInitData}
+      />
+    ),
     hot_pools: (
       <PanelShell
         title="热门池子"

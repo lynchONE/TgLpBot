@@ -88,6 +88,10 @@ func (s *Server) handleTrading(w http.ResponseWriter, r *http.Request) {
 	switch endpoint {
 	case "open_position":
 		s.handleOpenPosition(w, r)
+	case "create_pool_preview":
+		s.handleCreatePoolPreview(w, r)
+	case "create_pool_execute":
+		s.handleCreatePoolExecute(w, r)
 	case "blacklist":
 		handleBlacklist(w, r)
 	case "cooldowns":

@@ -1,4 +1,5 @@
 export const WIDGETS = [
+  { key: 'create_pool', label: '创建池子' },
   { key: 'hot_pools', label: '热门池子' },
   { key: 'gmgn_kline', label: 'K线' },
   { key: 'positions', label: '仓位' },
