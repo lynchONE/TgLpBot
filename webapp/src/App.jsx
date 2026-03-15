@@ -29,6 +29,7 @@ import {
   fetchRealtimePositions,
   fetchSmartMoneyOverview,
   fetchSmartMoneyPoolAdds,
+  fetchSmartMoneyWalletPositions,
   fetchSmartMoneyPoolMarkers,
   fetchSmartMoneyWatchedWallets,
   fetchMyTradeMarkers,
@@ -282,6 +283,150 @@ function aggregatePoolAddWallets(rows) {
       Number(b?.event_count ?? 0) - Number(a?.event_count ?? 0) ||
       String(a?.wallet_address || '').localeCompare(String(b?.wallet_address || ''))
     ));
+}
+
+function buildSmartWalletDetailKey(poolKey, row, index) {
+  return [
+    String(poolKey || '').trim().toLowerCase(),
+    normalizeWalletAddress(row?.wallet_address),
+    String(row?.token_id || '').trim(),
+    Number(row?.tick_lower ?? 0),
+    Number(row?.tick_upper ?? 0),
+    index,
+  ].join('|');
+}
+
+function matchSmartMoneyWalletPositions(positions, row, poolVersion, poolId) {
+  const version = String(poolVersion || '').trim().toLowerCase();
+  const normalizedPoolId = String(poolId || '').trim().toLowerCase();
+  const tokenId = String(row?.token_id || '').trim();
+  const tickLower = Number(row?.tick_lower ?? 0);
+  const tickUpper = Number(row?.tick_upper ?? 0);
+
+  const samePool = (Array.isArray(positions) ? positions : []).filter((item) => (
+    String(item?.pool_version || '').trim().toLowerCase() === version &&
+    String(item?.pool_id || '').trim().toLowerCase() === normalizedPoolId
+  ));
+  if (!samePool.length) return [];
+
+  if (tokenId) {
+    const exact = samePool.filter((item) => String(item?.position_id || '').trim() === tokenId);
+    if (exact.length) return exact;
+  }
+
+  const sameTicks = samePool.filter((item) => (
+    Number(item?.tick_lower ?? 0) === tickLower &&
+    Number(item?.tick_upper ?? 0) === tickUpper
+  ));
+  if (sameTicks.length) return sameTicks;
+
+  return samePool;
+}
+
+function formatSmartTokenAmount(value) {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n)) return '--';
+  const abs = Math.abs(n);
+  if (abs === 0) return '0';
+  if (abs >= 1000) return formatNumber(n, 2);
+  if (abs >= 1) return n.toFixed(4).replace(/\.?0+$/, '');
+  return n.toPrecision(4);
+}
+
+function SmartMoneyPositionCard({ position }) {
+  const version = String(position?.pool_version || '').trim().toUpperCase() || '--';
+  const poolId = String(position?.pool_id || '').trim();
+  const positionId = String(position?.position_id || '').trim();
+  const exchange = String(position?.exchange || '').trim();
+  const pair = String(position?.pair || '').trim() || shortAddress(poolId || '', 8, 6) || '--';
+  const feePct = Number(position?.fee_pct || 0);
+  const inRange = Boolean(position?.in_range);
+  const tickLower = Number(position?.tick_lower ?? 0);
+  const tickUpper = Number(position?.tick_upper ?? 0);
+  const currentTick = Number(position?.current_tick ?? 0);
+  const claimableFeeUsd = Number(position?.claimable_fees_usd ?? 0);
+  const claimableFee0 = Number(position?.claimable_fee0 ?? 0);
+  const claimableFee1 = Number(position?.claimable_fee1 ?? 0);
+  const feeStatus = String(position?.fee_status || '').trim();
+  const feeError = String(position?.fee_error || '').trim();
+  const sym0 = String(position?.token0_symbol || '').trim() || 'T0';
+  const sym1 = String(position?.token1_symbol || '').trim() || 'T1';
+
+  return (
+    <div className="pos-card sm-position-card">
+      <div className="pos-card-header sm-position-card-header">
+        <div className="pos-card-left sm-position-card-left">
+          <div className="pos-pair-row">
+            <span className="pos-pair-name">{pair}</span>
+            <span className="badge badge-fee">{version}</span>
+            {exchange ? <span className="badge badge-dex">{exchange}</span> : null}
+            {feePct > 0 ? <span className="badge badge-fee">{formatPct(feePct)}</span> : null}
+            <span className={`range-pill ${inRange ? 'in' : 'out'}`}>{inRange ? 'In Range' : 'Out'}</span>
+          </div>
+          <div className="sm-position-meta-row">
+            <span className="sm-position-meta mono">{shortAddress(poolId || '', 10, 8) || '--'}</span>
+            <span className="sm-position-meta">#{positionId || '--'}</span>
+            <span className="sm-position-meta">Tick {Number.isFinite(currentTick) ? currentTick : '--'}</span>
+          </div>
+        </div>
+        <div className="pos-card-right-block">
+          <div className="pos-metrics">
+            <div className="pos-total">{formatUsd(position?.position_usd)}</div>
+            <div className={`pos-pnl ${claimableFeeUsd >= 0 ? 'positive' : 'negative'}`}>
+              手续费 {feeStatus === 'ok' ? formatUsd(claimableFeeUsd) : '--'}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="pos-token-table">
+        <div className="pos-token-head">
+          <span>Token</span><span>仓位</span><span>估值</span><span>手续费</span>
+        </div>
+        {[
+          {
+            key: '0',
+            symbol: sym0,
+            amount: position?.amount0,
+            usd: position?.amount0_usd,
+            fee: feeStatus === 'ok' ? claimableFee0 : '--',
+          },
+          {
+            key: '1',
+            symbol: sym1,
+            amount: position?.amount1,
+            usd: position?.amount1_usd,
+            fee: feeStatus === 'ok' ? claimableFee1 : '--',
+          },
+        ].map((token) => (
+          <div key={token.key} className="pos-token-row">
+            <div className="pos-tk-name">
+              <div>{token.symbol}</div>
+            </div>
+            <div className="pos-tk-cell">
+              <div>{formatSmartTokenAmount(token.amount)}</div>
+            </div>
+            <div className="pos-tk-cell">
+              <div>{formatUsd(token.usd)}</div>
+            </div>
+            <div className="pos-tk-cell fee">
+              <div>{typeof token.fee === 'string' ? token.fee : formatSmartTokenAmount(token.fee)}</div>
+            </div>
+          </div>
+        ))}
+        <div className="pos-token-foot">
+          <span>区间</span>
+          <span>{Number.isFinite(tickLower) ? tickLower : '--'}</span>
+          <span>{Number.isFinite(tickUpper) ? tickUpper : '--'}</span>
+          <span className="fee">{feeStatus || '--'}</span>
+        </div>
+      </div>
+
+      {feeStatus === 'error' && feeError ? (
+        <div className="sm-position-error">{feeError}</div>
+      ) : null}
+    </div>
+  );
 }
 
 function normalizeWalletAddress(value) {
@@ -1627,6 +1772,11 @@ export default function App() {
 
   // Pool adds preview data: { "v3:0x1234": { status, wallets, totalUsd, error } }
   const [poolAddsMap, setPoolAddsMap] = useState({});
+  const [smartWalletDetailMap, setSmartWalletDetailMap] = useState({});
+
+  useEffect(() => {
+    setSmartWalletDetailMap({});
+  }, [chain, initData]);
 
   // Auto-load pool adds for top pools when smart data changes
   useEffect(() => {
@@ -1674,6 +1824,77 @@ export default function App() {
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [smartDisplayPools, hasInitData, apiBaseUrl, initData, chain]);
+
+  const toggleSmartWalletDetail = useCallback(async ({
+    poolKey,
+    poolVersion,
+    poolId,
+    row,
+    rowIndex,
+  }) => {
+    const detailKey = buildSmartWalletDetailKey(poolKey, row, rowIndex);
+    const current = smartWalletDetailMap[detailKey];
+    if (current?.open) {
+      setSmartWalletDetailMap((prev) => ({
+        ...(prev || {}),
+        [detailKey]: { ...(prev?.[detailKey] || {}), open: false },
+      }));
+      return;
+    }
+
+    setSmartWalletDetailMap((prev) => ({
+      ...(prev || {}),
+      [detailKey]: { ...(prev?.[detailKey] || {}), open: true },
+    }));
+
+    if (!hasInitData) return;
+    if (current?.status === 'loading' || current?.status === 'success') return;
+
+    setSmartWalletDetailMap((prev) => ({
+      ...(prev || {}),
+      [detailKey]: {
+        ...(prev?.[detailKey] || {}),
+        open: true,
+        status: 'loading',
+        error: '',
+        positions: [],
+        warnings: [],
+      },
+    }));
+
+    try {
+      const resp = await fetchSmartMoneyWalletPositions({
+        apiBaseUrl,
+        initData,
+        chain,
+        walletAddress: row?.wallet_address,
+        windowHours: SMART_PNL_WINDOW_HOURS,
+        limit: 80,
+      });
+      const positions = matchSmartMoneyWalletPositions(resp?.positions, row, poolVersion, poolId);
+      setSmartWalletDetailMap((prev) => ({
+        ...(prev || {}),
+        [detailKey]: {
+          open: true,
+          status: 'success',
+          error: '',
+          positions,
+          warnings: Array.isArray(resp?.warnings) ? resp.warnings : [],
+        },
+      }));
+    } catch (e) {
+      setSmartWalletDetailMap((prev) => ({
+        ...(prev || {}),
+        [detailKey]: {
+          open: true,
+          status: 'error',
+          error: String(e?.message || e),
+          positions: [],
+          warnings: [],
+        },
+      }));
+    }
+  }, [apiBaseUrl, chain, hasInitData, initData, smartWalletDetailMap]);
 
   const panelMap = {
     hot_pools: (
@@ -2627,6 +2848,9 @@ export default function App() {
                       {wallets.slice(0, 5).map((w, wi) => {
                         const addr = String(w?.wallet_address || '').trim();
                         const normalizedWalletAddr = normalizeWalletAddress(addr);
+                        const detailKey = buildSmartWalletDetailKey(poolKey, w, wi);
+                        const detailState = smartWalletDetailMap[detailKey] || {};
+                        const detailOpen = Boolean(detailState?.open);
                         const usd = Number(w?.total_usd ?? 0);
                         const priceLower = Number(w?.price_lower ?? 0);
                         const priceUpper = Number(w?.price_upper ?? 0);
@@ -2644,73 +2868,119 @@ export default function App() {
                           normalizeWalletAddress(selectedSmartWallet?.wallet_address) === normalizedWalletAddr;
 
                         return (
-                          <div
-                            key={addr || wi}
-                            className={`sm-wallet-row ${activeWallet ? 'active' : ''}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              selectPool(
-                                {
-                                  pool_id: pool?.pool_id,
-                                  pool_address: pool?.pool_id,
-                                  trading_pair: pair,
-                                  protocol_version: pool?.pool_version,
-                                  factory_name: dexName,
-                                  token0_address: pool?.token0,
-                                  token1_address: pool?.token1,
-                                  token0_symbol: pool?.token0_symbol,
-                                  token1_symbol: pool?.token1_symbol,
-                                  chain,
-                                },
-                                chain
-                              );
-                              if (hasRange && normalizedWalletAddr) {
-                                if (activeWallet) {
+                          <div key={addr || wi} className="sm-wallet-item">
+                            <div
+                              className={`sm-wallet-row ${activeWallet ? 'active' : ''}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                selectPool(
+                                  {
+                                    pool_id: pool?.pool_id,
+                                    pool_address: pool?.pool_id,
+                                    trading_pair: pair,
+                                    protocol_version: pool?.pool_version,
+                                    factory_name: dexName,
+                                    token0_address: pool?.token0,
+                                    token1_address: pool?.token1,
+                                    token0_symbol: pool?.token0_symbol,
+                                    token1_symbol: pool?.token1_symbol,
+                                    chain,
+                                  },
+                                  chain
+                                );
+                                if (hasRange && normalizedWalletAddr) {
+                                  if (activeWallet) {
+                                    setSelectedSmartWallet(null);
+                                    return;
+                                  }
+                                  setSelectedSmartWallet({
+                                    poolKey,
+                                    wallet_address: normalizedWalletAddr,
+                                    wallet_label: walletLabel,
+                                    price_lower: priceLower,
+                                    price_upper: priceUpper,
+                                    latest_open_price: Number(w?.latest_open_price || 0),
+                                  });
+                                } else {
                                   setSelectedSmartWallet(null);
-                                  return;
                                 }
-                                setSelectedSmartWallet({
-                                  poolKey,
-                                  wallet_address: normalizedWalletAddr,
-                                  wallet_label: walletLabel,
-                                  price_lower: priceLower,
-                                  price_upper: priceUpper,
-                                  latest_open_price: Number(w?.latest_open_price || 0),
-                                });
-                              } else {
-                                setSelectedSmartWallet(null);
-                              }
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key !== 'Enter' && e.key !== ' ') return;
-                              e.preventDefault();
-                              e.currentTarget.click();
-                            }}
-                            role="button"
-                            tabIndex={0}
-                          >
-                            <div className="sm-wallet-main">
-                              <div className={`sm-wallet-avatar ${activeWallet ? 'active' : ''}`}>
-                                <img src={walletAvatarUrl(normalizedWalletAddr)} alt="" />
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key !== 'Enter' && e.key !== ' ') return;
+                                e.preventDefault();
+                                e.currentTarget.click();
+                              }}
+                              role="button"
+                              tabIndex={0}
+                            >
+                              <div className="sm-wallet-main">
+                                <div className={`sm-wallet-avatar ${activeWallet ? 'active' : ''}`}>
+                                  <img src={walletAvatarUrl(normalizedWalletAddr)} alt="" />
+                                </div>
+                                <div className="sm-wallet-meta">
+                                  <div className="sm-wallet-addr">{walletLabel || walletTailLabel(addr)}</div>
+                                  {walletLabel ? <div className="sm-wallet-subaddr">{shortAddress(addr, 6, 4)}</div> : null}
+                                </div>
                               </div>
-                              <div className="sm-wallet-meta">
-                                <div className="sm-wallet-addr">{walletLabel || walletTailLabel(addr)}</div>
-                                {walletLabel ? <div className="sm-wallet-subaddr">{shortAddress(addr, 6, 4)}</div> : null}
+                              <div className="sm-wallet-stats">
+                                <span className="sm-wallet-usd">${formatNumber(Math.round(usd))}</span>
+                                {hasRange ? (
+                                  <span className="sm-wallet-range-pct">±{rangePct.toFixed(1)}%</span>
+                                ) : null}
                               </div>
-                            </div>
-                            <div className="sm-wallet-stats">
-                              <span className="sm-wallet-usd">${formatNumber(Math.round(usd))}</span>
+                              <div className="sm-wallet-inline-actions">
+                                <button
+                                  type="button"
+                                  className={`sm-wallet-detail-btn ${detailOpen ? 'open' : ''}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleSmartWalletDetail({
+                                      poolKey,
+                                      poolVersion: pool?.pool_version,
+                                      poolId: pool?.pool_id,
+                                      row: w,
+                                      rowIndex: wi,
+                                    });
+                                  }}
+                                >
+                                  {detailOpen ? '收起' : '详细'}
+                                </button>
+                              </div>
                               {hasRange ? (
-                                <span className="sm-wallet-range-pct">±{rangePct.toFixed(1)}%</span>
+                                <div className="sm-wallet-range">
+                                  <span className="sm-range-label">区间</span>
+                                  <span className="sm-range-val">{compactPrice(priceLower)}</span>
+                                  <span className="sm-range-arrow">&rarr;</span>
+                                  <span className="sm-range-val">{compactPrice(priceUpper)}</span>
+                                  {quote ? <span className="sm-range-quote">{quote}</span> : null}
+                                </div>
                               ) : null}
                             </div>
-                            {hasRange ? (
-                              <div className="sm-wallet-range">
-                                <span className="sm-range-label">区间</span>
-                                <span className="sm-range-val">{compactPrice(priceLower)}</span>
-                                <span className="sm-range-arrow">&rarr;</span>
-                                <span className="sm-range-val">{compactPrice(priceUpper)}</span>
-                                {quote ? <span className="sm-range-quote">{quote}</span> : null}
+
+                            {detailOpen ? (
+                              <div className="sm-wallet-detail-panel">
+                                {detailState?.status === 'loading' ? (
+                                  <div className="sm-wallet-detail-hint">正在加载仓位详情...</div>
+                                ) : null}
+                                {detailState?.status === 'error' ? (
+                                  <div className="sm-wallet-detail-error">{detailState?.error || '仓位详情加载失败'}</div>
+                                ) : null}
+                                {detailState?.status === 'success' && Array.isArray(detailState?.warnings) && detailState.warnings.length ? (
+                                  <div className="sm-wallet-detail-warn">{String(detailState.warnings[0])}</div>
+                                ) : null}
+                                {detailState?.status === 'success' && (!Array.isArray(detailState?.positions) || detailState.positions.length === 0) ? (
+                                  <div className="sm-wallet-detail-hint">当前没有匹配到该池子的活跃仓位。</div>
+                                ) : null}
+                                {detailState?.status === 'success' && Array.isArray(detailState?.positions) && detailState.positions.length > 0 ? (
+                                  <div className="sm-wallet-detail-cards">
+                                    {detailState.positions.map((position, posIndex) => (
+                                      <SmartMoneyPositionCard
+                                        key={`${String(position?.pool_id || '').trim()}:${String(position?.position_id || posIndex).trim()}`}
+                                        position={position}
+                                      />
+                                    ))}
+                                  </div>
+                                ) : null}
                               </div>
                             ) : null}
                           </div>

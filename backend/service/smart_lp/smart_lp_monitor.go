@@ -110,6 +110,31 @@ type smartLPEvent struct {
 	source          string
 }
 
+func smartLPTokenIDFromV4Salt(raw interface{}) string {
+	switch v := raw.(type) {
+	case [32]byte:
+		tokenID := new(big.Int).SetBytes(v[:])
+		if tokenID.Sign() > 0 {
+			return tokenID.String()
+		}
+	case common.Hash:
+		tokenID := new(big.Int).SetBytes(v.Bytes())
+		if tokenID.Sign() > 0 {
+			return tokenID.String()
+		}
+	case []byte:
+		tokenID := new(big.Int).SetBytes(v)
+		if tokenID.Sign() > 0 {
+			return tokenID.String()
+		}
+	case *big.Int:
+		if v != nil && v.Sign() > 0 {
+			return v.String()
+		}
+	}
+	return ""
+}
+
 func watchedWalletEventSource(action string) string {
 	if strings.ToLower(strings.TrimSpace(action)) == "remove" {
 		return "watch_remove"
@@ -1435,6 +1460,7 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 					tickLowerBI, _ := decoded[0].(*big.Int)
 					tickUpperBI, _ := decoded[1].(*big.Int)
 					liqDelta, _ := decoded[2].(*big.Int)
+					tokenID := smartLPTokenIDFromV4Salt(decoded[3])
 					if liqDelta == nil || liqDelta.Sign() == 0 {
 						continue
 					}
@@ -1500,7 +1526,7 @@ func (s *SmartLPMonitor) scanBlocks(ctx context.Context, from, to uint64, monito
 						poolID:          poolID,
 						walletAddress:   strings.ToLower(fromAddr.Hex()),
 						action:          action,
-						tokenID:         "",
+						tokenID:         tokenID,
 						amount0:         amount0,
 						amount1:         amount1,
 						netAmount0:      amount0,
@@ -1776,6 +1802,7 @@ func (sc *smartLPReceiptScanner) scanReceipt(ctx context.Context, receipt *types
 			tickLowerBI, _ := decoded[0].(*big.Int)
 			tickUpperBI, _ := decoded[1].(*big.Int)
 			liqDelta, _ := decoded[2].(*big.Int)
+			tokenID := smartLPTokenIDFromV4Salt(decoded[3])
 			if liqDelta == nil || liqDelta.Sign() == 0 {
 				continue
 			}
@@ -1839,7 +1866,7 @@ func (sc *smartLPReceiptScanner) scanReceipt(ctx context.Context, receipt *types
 				poolID:          poolID,
 				walletAddress:   fromStr,
 				action:          action,
-				tokenID:         "",
+				tokenID:         tokenID,
 				amount0:         amount0,
 				amount1:         amount1,
 				netAmount0:      amount0,

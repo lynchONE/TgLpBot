@@ -1,24 +1,17 @@
 package web_server
 
 import (
-	"TgLpBot/base/blockchain"
 	"TgLpBot/base/models"
 	"TgLpBot/service/pool"
 	"TgLpBot/service/pricing"
 	"context"
 	"fmt"
-	"math/big"
 	"net/http"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/accounts/abi"
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	"golang.org/x/sync/errgroup"
 )
 
 type smartMoneyPoolAddsPool struct {
@@ -37,7 +30,7 @@ type smartMoneyPoolAddsPool struct {
 type smartMoneyPoolAddsWalletRow struct {
 	WalletAddress string `json:"wallet_address"`
 
-	// V3-only identifiers (used for fee simulation).
+	// Current position reference when SmartLP can resolve the LP NFT.
 	TokenID    string `json:"token_id,omitempty"`
 	NPMAddress string `json:"npm_address,omitempty"`
 
@@ -209,90 +202,6 @@ func querySmartMoneyPoolAdds(ctx context.Context, conn smartMoneyClickHouseQuery
 		return nil, err
 	}
 	return out, nil
-}
-
-const v3CollectMinABI = `[
-  {
-    "inputs": [
-      {
-        "components": [
-          { "internalType": "uint256", "name": "tokenId", "type": "uint256" },
-          { "internalType": "address", "name": "recipient", "type": "address" },
-          { "internalType": "uint128", "name": "amount0Max", "type": "uint128" },
-          { "internalType": "uint128", "name": "amount1Max", "type": "uint128" }
-        ],
-        "internalType": "struct INonfungiblePositionManager.CollectParams",
-        "name": "params",
-        "type": "tuple"
-      }
-    ],
-    "name": "collect",
-    "outputs": [
-      { "internalType": "uint256", "name": "amount0", "type": "uint256" },
-      { "internalType": "uint256", "name": "amount1", "type": "uint256" }
-    ],
-    "stateMutability": "payable",
-    "type": "function"
-  }
-]`
-
-type v3CollectParams struct {
-	TokenId    *big.Int       `abi:"tokenId"`
-	Recipient  common.Address `abi:"recipient"`
-	Amount0Max *big.Int       `abi:"amount0Max"`
-	Amount1Max *big.Int       `abi:"amount1Max"`
-}
-
-var maxUint128 = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 128), big.NewInt(1))
-
-func simulateV3Collect(ctx context.Context, npm common.Address, from common.Address, tokenID *big.Int) (*big.Int, *big.Int, error) {
-	if blockchain.Client == nil {
-		return nil, nil, fmt.Errorf("blockchain client not initialized")
-	}
-	if (npm == common.Address{}) || (from == common.Address{}) || tokenID == nil || tokenID.Sign() <= 0 {
-		return nil, nil, fmt.Errorf("invalid collect args")
-	}
-	parsedABI, err := abi.JSON(strings.NewReader(v3CollectMinABI))
-	if err != nil {
-		return nil, nil, err
-	}
-	data, err := parsedABI.Pack("collect", v3CollectParams{
-		TokenId:    tokenID,
-		Recipient:  from,
-		Amount0Max: maxUint128,
-		Amount1Max: maxUint128,
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	msg := ethereum.CallMsg{
-		From:  from,
-		To:    &npm,
-		Data:  data,
-		Value: big.NewInt(0),
-		Gas:   1_000_000,
-	}
-	callCtx := ctx
-	if callCtx == nil {
-		callCtx = context.Background()
-	}
-	raw, err := blockchain.Client.CallContract(callCtx, msg, nil)
-	if err != nil {
-		return nil, nil, err
-	}
-	out, err := parsedABI.Unpack("collect", raw)
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(out) < 2 {
-		return nil, nil, fmt.Errorf("unexpected collect return length: %d", len(out))
-	}
-	amt0, ok0 := out[0].(*big.Int)
-	amt1, ok1 := out[1].(*big.Int)
-	if !ok0 || amt0 == nil || !ok1 || amt1 == nil {
-		return nil, nil, fmt.Errorf("unexpected collect return types: %T %T", out[0], out[1])
-	}
-	return amt0, amt1, nil
 }
 
 func (s *Server) handleSmartMoneyPoolAdds(w http.ResponseWriter, r *http.Request) {
@@ -480,98 +389,83 @@ func (s *Server) handleSmartMoneyPoolAdds(w http.ResponseWriter, r *http.Request
 		wallets = append(wallets, item)
 	}
 
-	// Attempt V3 claimable fee simulation for top rows.
-	feeCandidates := make([]int, 0, len(wallets))
-	for i := range wallets {
-		if poolVersion != "v3" {
-			break
-		}
-		if strings.TrimSpace(wallets[i].TokenID) == "" {
-			continue
-		}
-		if !common.IsHexAddress(wallets[i].NPMAddress) {
-			continue
-		}
-		feeCandidates = append(feeCandidates, i)
-	}
+	if feesLimit > 0 {
+		resolver, resolverWarnings := newSmartMoneyPositionResolver(newSmartMoneyTokenMetaCache())
+		warnings = append(warnings, resolverWarnings...)
 
-	if poolVersion == "v3" && feesLimit > 0 && len(feeCandidates) > 0 {
-		if blockchain.Client == nil {
-			warnings = append(warnings, "blockchain client not initialized; cannot compute claimable fees")
-		} else {
-			if feesLimit < len(feeCandidates) {
-				warnings = append(warnings, fmt.Sprintf("claimable fee simulation limited: computed %d/%d positions", feesLimit, len(feeCandidates)))
-				feeCandidates = feeCandidates[:feesLimit]
+		candidates := make([]int, 0, len(wallets))
+		for i := range wallets {
+			if strings.TrimSpace(wallets[i].TokenID) != "" || poolVersion == "v4" {
+				candidates = append(candidates, i)
+			}
+		}
+
+		if feesLimit < len(candidates) {
+			warnings = append(warnings, fmt.Sprintf("claimable fee estimation limited: computed %d/%d positions", feesLimit, len(candidates)))
+			candidates = candidates[:feesLimit]
+		}
+
+		fallbackCache := make(map[string][]smartMoneyPositionRef)
+		legacyMatched := 0
+
+		for _, idx := range candidates {
+			ref := smartMoneyPositionRef{
+				WalletAddress:   wallets[idx].WalletAddress,
+				PoolVersion:     poolVersion,
+				PoolID:          poolID,
+				ContractAddress: wallets[idx].NPMAddress,
+				TokenID:         wallets[idx].TokenID,
+				TickLower:       wallets[idx].TickLower,
+				TickUpper:       wallets[idx].TickUpper,
 			}
 
-			pmCache := make(map[common.Address]*blockchain.V3PositionManager)
-			var pmMu sync.Mutex
-
-			g, gctx := errgroup.WithContext(ctx)
-			g.SetLimit(6)
-
-			for _, idx := range feeCandidates {
-				idx := idx
-				g.Go(func() error {
-					if gctx.Err() != nil {
-						return gctx.Err()
-					}
-					npmAddr := common.HexToAddress(wallets[idx].NPMAddress)
-					tokenBI, ok := new(big.Int).SetString(strings.TrimSpace(wallets[idx].TokenID), 10)
-					if !ok || tokenBI == nil || tokenBI.Sign() <= 0 {
-						return nil
-					}
-
-					pmMu.Lock()
-					pm := pmCache[npmAddr]
-					pmMu.Unlock()
-					if pm == nil {
-						newPM, err := blockchain.NewV3PositionManager(npmAddr, blockchain.Client)
-						if err != nil {
-							pmMu.Lock()
-							pmCache[npmAddr] = nil
-							pmMu.Unlock()
-							return nil
-						}
-						pmMu.Lock()
-						pmCache[npmAddr] = newPM
-						pmMu.Unlock()
-						pm = newPM
-					}
-					if pm == nil {
-						return nil
-					}
-
-					callCtx, cancel := context.WithTimeout(gctx, 7*time.Second)
-					owner, ownerErr := pm.OwnerOf(&bind.CallOpts{Context: callCtx}, tokenBI)
-					cancel()
-					if ownerErr != nil || owner == (common.Address{}) {
+			if ref.TokenID == "" && poolVersion == "v4" {
+				cacheKey := strings.ToLower(strings.TrimSpace(wallets[idx].WalletAddress)) + "|" + poolID
+				legacyRefs, ok := fallbackCache[cacheKey]
+				if !ok {
+					scanned, scanErr := scanSmartMoneyV4FallbackRefs(ctx, wallets[idx].WalletAddress, []smartMoneyWalletV4PoolRef{{PoolID: poolID}}, 20)
+					if scanErr != nil {
 						wallets[idx].FeeStatus = "error"
-						wallets[idx].FeeError = "ownerOf failed"
-						return nil
+						wallets[idx].FeeError = truncateErr(scanErr, 120)
+						fallbackCache[cacheKey] = []smartMoneyPositionRef{}
+						continue
 					}
-
-					collectCtx, cancel2 := context.WithTimeout(gctx, 8*time.Second)
-					amt0, amt1, cerr := simulateV3Collect(collectCtx, npmAddr, owner, tokenBI)
-					cancel2()
-					if cerr != nil {
-						wallets[idx].FeeStatus = "error"
-						wallets[idx].FeeError = truncateErr(cerr, 80)
-						return nil
-					}
-
-					fee0 := amountToFloat(amt0.String(), dec0)
-					fee1 := amountToFloat(amt1.String(), dec1)
-					feeUsd := sanitizeFloat(fee0*p0 + fee1*p1)
-
-					wallets[idx].ClaimableFee0 = sanitizeFloat(fee0)
-					wallets[idx].ClaimableFee1 = sanitizeFloat(fee1)
-					wallets[idx].ClaimableFeesUSD = feeUsd
-					wallets[idx].FeeStatus = "ok"
-					return nil
-				})
+					fallbackCache[cacheKey] = scanned
+					legacyRefs = scanned
+				}
+				match, found := findSmartMoneyV4FallbackRef(legacyRefs, poolID, wallets[idx].TickLower, wallets[idx].TickUpper)
+				if !found {
+					wallets[idx].FeeStatus = "skipped"
+					wallets[idx].FeeError = "token_id missing"
+					continue
+				}
+				ref = match
+				wallets[idx].TokenID = match.TokenID
+				legacyMatched++
 			}
-			_ = g.Wait()
+
+			resolved, resolveErr := resolver.Resolve(ctx, ref)
+			if resolveErr != nil || resolved == nil {
+				if strings.TrimSpace(ref.TokenID) != "" {
+					wallets[idx].FeeStatus = "error"
+					wallets[idx].FeeError = truncateErr(resolveErr, 120)
+				}
+				continue
+			}
+
+			wallets[idx].TokenID = resolved.PositionID
+			if poolVersion == "v3" && resolved.ContractAddress != "" {
+				wallets[idx].NPMAddress = resolved.ContractAddress
+			}
+			wallets[idx].ClaimableFee0 = resolved.ClaimableFee0
+			wallets[idx].ClaimableFee1 = resolved.ClaimableFee1
+			wallets[idx].ClaimableFeesUSD = sanitizeFloat(resolved.ClaimableFee0*p0 + resolved.ClaimableFee1*p1)
+			wallets[idx].FeeStatus = resolved.FeeStatus
+			wallets[idx].FeeError = resolved.FeeError
+		}
+
+		if legacyMatched > 0 {
+			warnings = append(warnings, fmt.Sprintf("used legacy V4 NFT fallback for %d pool rows", legacyMatched))
 		}
 	}
 

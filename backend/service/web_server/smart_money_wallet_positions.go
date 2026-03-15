@@ -62,6 +62,12 @@ type smartMoneyWalletLPPosition struct {
 	Amount0USD  float64 `json:"amount0_usd"`
 	Amount1USD  float64 `json:"amount1_usd"`
 	PositionUSD float64 `json:"position_usd"`
+
+	ClaimableFee0    float64 `json:"claimable_fee0,omitempty"`
+	ClaimableFee1    float64 `json:"claimable_fee1,omitempty"`
+	ClaimableFeesUSD float64 `json:"claimable_fees_usd,omitempty"`
+	FeeStatus        string  `json:"fee_status,omitempty"`
+	FeeError         string  `json:"fee_error,omitempty"`
 }
 
 type smartMoneyWalletV3TokenRef struct {
@@ -138,28 +144,25 @@ func (s *Server) handleSmartMoneyWalletPositions(w http.ResponseWriter, r *http.
 
 	window := time.Duration(windowHours) * time.Hour
 
-	refs, err := querySmartMoneyWalletRecentV3Positions(ctx, s.ClickHouse.Conn, chain, walletAddr, window, limit*4)
+	refs, err := querySmartMoneyWalletRecentPositionRefs(ctx, s.ClickHouse.Conn, chain, walletAddr, window, limit*4)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	v4Pools, _ := querySmartMoneyWalletRecentV4Pools(ctx, s.ClickHouse.Conn, chain, walletAddr, window, 200)
+	legacyV4Pools, _ := querySmartMoneyWalletLegacyV4Pools(ctx, s.ClickHouse.Conn, chain, walletAddr, window, 200)
 
-	warnings := make([]string, 0, 4)
+	warnings := make([]string, 0, 6)
 
-	// Dedupe refs defensively: older SmartLP ingestions used non-NPM contract_address values,
-	// which can lead to duplicate (token_id, pool_id) groups.
 	if len(refs) > 0 {
 		seen := make(map[string]struct{}, len(refs))
-		uniq := make([]smartMoneyWalletV3TokenRef, 0, len(refs))
+		uniq := make([]smartMoneyPositionRef, 0, len(refs))
 		for _, ref := range refs {
 			tok := strings.TrimSpace(ref.TokenID)
-			pid := strings.ToLower(strings.TrimSpace(ref.PoolID))
 			if tok == "" {
 				continue
 			}
-			key := tok + "|" + pid
+			key := strings.ToLower(strings.TrimSpace(ref.PoolVersion)) + "|" + strings.ToLower(strings.TrimSpace(ref.PoolID)) + "|" + tok
 			if _, ok := seen[key]; ok {
 				continue
 			}
@@ -172,35 +175,11 @@ func (s *Server) handleSmartMoneyWalletPositions(w http.ResponseWriter, r *http.
 	out := make([]smartMoneyWalletLPPosition, 0, len(refs))
 
 	metaCache := newSmartMoneyTokenMetaCache()
+	resolver, resolverWarnings := newSmartMoneyPositionResolver(metaCache)
+	warnings = append(warnings, resolverWarnings...)
 
 	priceTokensSet := make(map[string]struct{})
 	priceTokens := make([]string, 0, 2*len(refs))
-
-	// V3 position managers (used to materialize current positions).
-	v3Managers := make([]common.Address, 0, 2)
-	if common.IsHexAddress(config.AppConfig.PancakeV3PositionManagerAddress) {
-		v3Managers = append(v3Managers, common.HexToAddress(config.AppConfig.PancakeV3PositionManagerAddress))
-	}
-	if common.IsHexAddress(config.AppConfig.UniswapV3PositionManagerAddress) {
-		v3Managers = append(v3Managers, common.HexToAddress(config.AppConfig.UniswapV3PositionManagerAddress))
-	}
-	pmCache := make(map[common.Address]*blockchain.V3PositionManager, len(v3Managers))
-	if blockchain.Client == nil {
-		warnings = append(warnings, "blockchain client not initialized; cannot load wallet positions")
-	} else {
-		for _, npmAddr := range v3Managers {
-			if pm, pmErr := blockchain.NewV3PositionManager(npmAddr, blockchain.Client); pmErr == nil {
-				pmCache[npmAddr] = pm
-			} else {
-				warnings = append(warnings, fmt.Sprintf("init V3 position manager failed: %s", npmAddr.Hex()))
-			}
-		}
-	}
-
-	// Fetch and compute V3 positions.
-	type v3Computed struct {
-		pos smartMoneyWalletLPPosition
-	}
 	var mu sync.Mutex
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(6)
@@ -211,129 +190,50 @@ func (s *Server) handleSmartMoneyWalletPositions(w http.ResponseWriter, r *http.
 			if gctx.Err() != nil {
 				return gctx.Err()
 			}
-			tokenID, ok := new(big.Int).SetString(strings.TrimSpace(ref.TokenID), 10)
-			if !ok || tokenID == nil || tokenID.Sign() <= 0 {
+			resolved, resolveErr := resolver.Resolve(gctx, ref)
+			if resolveErr != nil || resolved == nil || strings.TrimSpace(resolved.PositionID) == "" {
 				return nil
-			}
-
-			// Prefer the event-provided contract address if it is a known NPM; otherwise try all configured NPMs.
-			npmOrder := make([]common.Address, 0, len(pmCache))
-			npmHint := strings.ToLower(strings.TrimSpace(ref.NPMAddress))
-			if common.IsHexAddress(npmHint) {
-				h := common.HexToAddress(npmHint)
-				if _, ok := pmCache[h]; ok {
-					npmOrder = append(npmOrder, h)
-				}
-			}
-			for _, a := range v3Managers {
-				if len(npmOrder) > 0 && a == npmOrder[0] {
-					continue
-				}
-				if _, ok := pmCache[a]; ok {
-					npmOrder = append(npmOrder, a)
-				}
-			}
-			if len(npmOrder) == 0 {
-				return nil
-			}
-
-			var info *blockchain.V3PositionInfo
-			usedNPM := common.Address{}
-			for _, npmAddr := range npmOrder {
-				pm := pmCache[npmAddr]
-				if pm == nil {
-					continue
-				}
-				var pErr error
-				info, pErr = pm.Positions(&bind.CallOpts{Context: gctx}, tokenID)
-				if pErr != nil || info == nil {
-					continue
-				}
-				if info.Liquidity == nil || info.Liquidity.Sign() == 0 {
-					continue
-				}
-				usedNPM = npmAddr
-				break
-			}
-			if usedNPM == (common.Address{}) || info == nil || info.Liquidity == nil || info.Liquidity.Sign() == 0 {
-				return nil
-			}
-
-			poolID := strings.ToLower(strings.TrimSpace(ref.PoolID))
-			if !common.IsHexAddress(poolID) {
-				poolID = ""
-			}
-
-			currentTick := 0
-			sqrtP := big.NewInt(0)
-			if poolID != "" {
-				sp, t, slotErr := getV3Slot0WithTimeout(gctx, common.HexToAddress(poolID))
-				if slotErr == nil && sp != nil {
-					sqrtP = sp
-					currentTick = t
-				}
-			}
-
-			t0 := strings.ToLower(strings.TrimSpace(info.Token0.Hex()))
-			t1 := strings.ToLower(strings.TrimSpace(info.Token1.Hex()))
-			dec0 := metaCache.Decimals(t0)
-			dec1 := metaCache.Decimals(t1)
-			sym0 := metaCache.Symbol(t0)
-			sym1 := metaCache.Symbol(t1)
-
-			sqrtA, _ := pool.SqrtRatioAtTick(int32(info.TickLower))
-			sqrtB, _ := pool.SqrtRatioAtTick(int32(info.TickUpper))
-			amt0Raw, amt1Raw := pool.AmountsForLiquidity(sqrtP, sqrtA, sqrtB, info.Liquidity)
-
-			amt0 := amountToFloat(amountToString(amt0Raw), dec0)
-			amt1 := amountToFloat(amountToString(amt1Raw), dec1)
-
-			inRange := currentTick >= info.TickLower && currentTick <= info.TickUpper
-			exchange := v3ExchangeLabel(usedNPM)
-			feePct := 0.0
-			if info.Fee > 0 {
-				feePct = float64(info.Fee) / 10000.0
-			}
-
-			pair := strings.TrimSpace(sym0 + "/" + sym1)
-			if pair == "/" {
-				pair = ""
 			}
 
 			computed := smartMoneyWalletLPPosition{
-				PoolVersion:  "v3",
-				PoolID:       poolID,
-				PositionID:   tokenID.String(),
-				Exchange:     exchange,
-				Pair:         pair,
-				FeePct:       feePct,
-				CurrentTick:  currentTick,
-				TickLower:    info.TickLower,
-				TickUpper:    info.TickUpper,
-				InRange:      inRange,
-				Liquidity:    info.Liquidity.String(),
-				Token0:       t0,
-				Token1:       t1,
-				Token0Symbol: sym0,
-				Token1Symbol: sym1,
-				Token0Dec:    dec0,
-				Token1Dec:    dec1,
-				Amount0:      amt0,
-				Amount1:      amt1,
+				PoolVersion:      resolved.PoolVersion,
+				PoolID:           resolved.PoolID,
+				PositionID:       resolved.PositionID,
+				Exchange:         resolved.Exchange,
+				Pair:             resolved.Pair,
+				FeePct:           resolved.FeePct,
+				CurrentTick:      resolved.CurrentTick,
+				TickLower:        resolved.TickLower,
+				TickUpper:        resolved.TickUpper,
+				InRange:          resolved.InRange,
+				Liquidity:        resolved.Liquidity,
+				Token0:           resolved.Token0,
+				Token1:           resolved.Token1,
+				Token0Symbol:     resolved.Token0Symbol,
+				Token1Symbol:     resolved.Token1Symbol,
+				Token0Dec:        resolved.Token0Dec,
+				Token1Dec:        resolved.Token1Dec,
+				Amount0:          resolved.Amount0,
+				Amount1:          resolved.Amount1,
+				ClaimableFee0:    resolved.ClaimableFee0,
+				ClaimableFee1:    resolved.ClaimableFee1,
+				ClaimableFeesUSD: resolved.ClaimableFeesUSD,
+				FeeStatus:        resolved.FeeStatus,
+				FeeError:         resolved.FeeError,
 			}
 
 			mu.Lock()
 			out = append(out, computed)
-			if common.IsHexAddress(t0) {
-				if _, ok := priceTokensSet[t0]; !ok {
-					priceTokensSet[t0] = struct{}{}
-					priceTokens = append(priceTokens, t0)
+			if common.IsHexAddress(resolved.Token0) {
+				if _, ok := priceTokensSet[resolved.Token0]; !ok {
+					priceTokensSet[resolved.Token0] = struct{}{}
+					priceTokens = append(priceTokens, resolved.Token0)
 				}
 			}
-			if common.IsHexAddress(t1) {
-				if _, ok := priceTokensSet[t1]; !ok {
-					priceTokensSet[t1] = struct{}{}
-					priceTokens = append(priceTokens, t1)
+			if common.IsHexAddress(resolved.Token1) {
+				if _, ok := priceTokensSet[resolved.Token1]; !ok {
+					priceTokensSet[resolved.Token1] = struct{}{}
+					priceTokens = append(priceTokens, resolved.Token1)
 				}
 			}
 			mu.Unlock()
@@ -342,17 +242,87 @@ func (s *Server) handleSmartMoneyWalletPositions(w http.ResponseWriter, r *http.
 	}
 	_ = g.Wait()
 
-	// Best-effort V4 support: only when configured and the wallet has recent v4 pool activity in the same window.
-	if len(v4Pools) > 0 {
-		v4Warns, v4Pos, v4Tokens := s.loadV4WalletPositions(ctx, chain, walletAddr, v4Pools, limit*2, metaCache)
-		if len(v4Warns) > 0 {
-			warnings = append(warnings, v4Warns...)
-		}
-		out = append(out, v4Pos...)
-		for _, t := range v4Tokens {
-			if _, ok := priceTokensSet[t]; !ok {
-				priceTokensSet[t] = struct{}{}
-				priceTokens = append(priceTokens, t)
+	if len(legacyV4Pools) > 0 {
+		legacyRefs, legacyErr := scanSmartMoneyV4FallbackRefs(ctx, walletAddr, legacyV4Pools, limit*2)
+		if legacyErr != nil {
+			warnings = append(warnings, fmt.Sprintf("scan v4 position NFTs failed: %v", legacyErr))
+		} else {
+			seenLegacy := make(map[string]struct{}, len(out))
+			for _, item := range out {
+				if item.PoolVersion != "v4" {
+					continue
+				}
+				seenLegacy[strings.ToLower(strings.TrimSpace(item.PoolID))+"|"+strings.TrimSpace(item.PositionID)] = struct{}{}
+			}
+
+			legacyUsed := 0
+			lg, lgctx := errgroup.WithContext(ctx)
+			lg.SetLimit(4)
+
+			for _, ref := range legacyRefs {
+				ref := ref
+				lg.Go(func() error {
+					if lgctx.Err() != nil {
+						return lgctx.Err()
+					}
+					resolved, resolveErr := resolver.Resolve(lgctx, ref)
+					if resolveErr != nil || resolved == nil || strings.TrimSpace(resolved.PositionID) == "" {
+						return nil
+					}
+
+					key := strings.ToLower(strings.TrimSpace(resolved.PoolID)) + "|" + strings.TrimSpace(resolved.PositionID)
+					mu.Lock()
+					if _, ok := seenLegacy[key]; ok {
+						mu.Unlock()
+						return nil
+					}
+					seenLegacy[key] = struct{}{}
+					legacyUsed++
+					out = append(out, smartMoneyWalletLPPosition{
+						PoolVersion:      resolved.PoolVersion,
+						PoolID:           resolved.PoolID,
+						PositionID:       resolved.PositionID,
+						Exchange:         resolved.Exchange,
+						Pair:             resolved.Pair,
+						FeePct:           resolved.FeePct,
+						CurrentTick:      resolved.CurrentTick,
+						TickLower:        resolved.TickLower,
+						TickUpper:        resolved.TickUpper,
+						InRange:          resolved.InRange,
+						Liquidity:        resolved.Liquidity,
+						Token0:           resolved.Token0,
+						Token1:           resolved.Token1,
+						Token0Symbol:     resolved.Token0Symbol,
+						Token1Symbol:     resolved.Token1Symbol,
+						Token0Dec:        resolved.Token0Dec,
+						Token1Dec:        resolved.Token1Dec,
+						Amount0:          resolved.Amount0,
+						Amount1:          resolved.Amount1,
+						ClaimableFee0:    resolved.ClaimableFee0,
+						ClaimableFee1:    resolved.ClaimableFee1,
+						ClaimableFeesUSD: resolved.ClaimableFeesUSD,
+						FeeStatus:        resolved.FeeStatus,
+						FeeError:         resolved.FeeError,
+					})
+					if common.IsHexAddress(resolved.Token0) {
+						if _, ok := priceTokensSet[resolved.Token0]; !ok {
+							priceTokensSet[resolved.Token0] = struct{}{}
+							priceTokens = append(priceTokens, resolved.Token0)
+						}
+					}
+					if common.IsHexAddress(resolved.Token1) {
+						if _, ok := priceTokensSet[resolved.Token1]; !ok {
+							priceTokensSet[resolved.Token1] = struct{}{}
+							priceTokens = append(priceTokens, resolved.Token1)
+						}
+					}
+					mu.Unlock()
+					return nil
+				})
+			}
+			_ = lg.Wait()
+			if legacyUsed > 0 {
+				warnings = append(warnings, fmt.Sprintf("used legacy V4 NFT fallback for %d positions", legacyUsed))
 			}
 		}
 	}
@@ -374,6 +344,7 @@ func (s *Server) handleSmartMoneyWalletPositions(w http.ResponseWriter, r *http.
 		out[i].Amount0USD = sanitizeFloat(out[i].Amount0 * p0)
 		out[i].Amount1USD = sanitizeFloat(out[i].Amount1 * p1)
 		out[i].PositionUSD = sanitizeFloat(out[i].Amount0USD + out[i].Amount1USD)
+		out[i].ClaimableFeesUSD = sanitizeFloat(out[i].ClaimableFee0*p0 + out[i].ClaimableFee1*p1)
 	}
 
 	sort.Slice(out, func(i, j int) bool {

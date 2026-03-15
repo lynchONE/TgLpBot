@@ -151,6 +151,27 @@ export async function fetchSmartMoneyPoolAdds({
   return requestJson(url, { method: 'GET', signal });
 }
 
+export async function fetchSmartMoneyWalletPositions({
+  apiBaseUrl,
+  initData,
+  chain,
+  walletAddress,
+  windowHours,
+  limit,
+  signal,
+}) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const params = new URLSearchParams();
+  if (initData) params.set('initData', String(initData));
+  if (chain) params.set('chain', String(chain));
+  if (walletAddress) params.set('wallet_address', String(walletAddress));
+  if (Number.isFinite(windowHours)) params.set('window_hours', String(windowHours));
+  if (Number.isFinite(limit)) params.set('limit', String(limit));
+  const qs = params.toString();
+  const url = `${base}/api/smart_money_wallet_positions${qs ? `?${qs}` : ''}`;
+  return requestJson(url, { method: 'GET', signal });
+}
+
 export async function fetchSmartMoneyPoolMarkers({
   apiBaseUrl,
   initData,

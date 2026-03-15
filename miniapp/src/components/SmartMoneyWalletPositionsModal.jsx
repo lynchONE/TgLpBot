@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import BottomSheet from './BottomSheet.jsx';
 import NumberFlowValue from './NumberFlowValue.jsx';
+import SmartMoneyPositionCard from './SmartMoneyPositionCard.jsx';
 import { fetchSmartMoneyWalletPositions } from '../lib/api';
 import { copyToClipboard, hapticImpact, hapticNotification } from '../lib/telegram';
 
@@ -11,7 +12,6 @@ const Icon = ({ path, className = '' }) => (
 );
 
 const icons = {
-    close: 'M6 18L18 6M6 6l12 12',
     refresh: 'M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6',
 };
 
@@ -22,31 +22,10 @@ const usdFormatter = new Intl.NumberFormat('en-US', {
     maximumFractionDigits: 2,
 });
 
-const compactNumberFormatter = new Intl.NumberFormat('en-US', {
-    notation: 'compact',
-    maximumFractionDigits: 2,
-});
-
 function formatUsd(v) {
     const n = Number(v ?? 0);
     if (!Number.isFinite(n) || Math.abs(n) > USD_DISPLAY_LIMIT) return '$--';
     return usdFormatter.format(n);
-}
-
-function formatTokenAmount(v) {
-    const n = Number(v ?? 0);
-    if (!Number.isFinite(n) || Math.abs(n) > USD_DISPLAY_LIMIT) return '--';
-    const abs = Math.abs(n);
-    if (abs === 0) return '0';
-    if (abs >= 1000) return compactNumberFormatter.format(n);
-    if (abs >= 1) return n.toFixed(4).replace(/\.?0+$/, '');
-    return n.toPrecision(4);
-}
-
-function formatPct(v, digits = 2) {
-    const n = Number(v);
-    if (!Number.isFinite(n)) return '--';
-    return `${n.toFixed(digits)}%`;
 }
 
 function shortHex(value, head = 8, tail = 6) {
@@ -65,7 +44,7 @@ async function safeCopy(value, onNotice) {
         if (typeof onNotice === 'function') onNotice('已复制', 'success');
     } catch (e) {
         hapticNotification('error');
-        if (typeof onNotice === 'function') onNotice(`复制失败：${String(e?.message || e)}`, 'error');
+        if (typeof onNotice === 'function') onNotice(`复制失败: ${String(e?.message || e)}`, 'error');
     }
 }
 
@@ -169,7 +148,7 @@ export default function SmartMoneyWalletPositionsModal({
                         {windowLabel ? (
                             <>
                                 <span className="shrink-0">·</span>
-                                <span className="shrink-0">最近<NumberFlowValue value={windowLabel} formatter={() => windowLabel} /></span>
+                                <span className="shrink-0">最近 <NumberFlowValue value={windowLabel} formatter={() => windowLabel} /></span>
                             </>
                         ) : null}
                     </div>
@@ -244,135 +223,13 @@ export default function SmartMoneyWalletPositionsModal({
 
             {positions.length ? (
                 <div className="mt-3 space-y-2">
-                    {positions.map((p) => {
-                        const version = String(p?.pool_version || '').trim().toUpperCase() || '--';
-                        const poolId = String(p?.pool_id || '').trim();
-                        const positionId = String(p?.position_id || '').trim();
-                        const exchange = String(p?.exchange || '').trim();
-                        const pair = String(p?.pair || '').trim() || '--';
-                        const feePct = Number(p?.fee_pct);
-                        const inRange = Boolean(p?.in_range);
-                        const tickLower = Number(p?.tick_lower ?? 0);
-                        const tickUpper = Number(p?.tick_upper ?? 0);
-                        const currentTick = Number(p?.current_tick ?? 0);
-                        const sym0 = String(p?.token0_symbol || '').trim();
-                        const sym1 = String(p?.token1_symbol || '').trim();
-                        const amount0 = Number(p?.amount0 ?? 0);
-                        const amount1 = Number(p?.amount1 ?? 0);
-                        const usd0 = Number(p?.amount0_usd ?? 0);
-                        const usd1 = Number(p?.amount1_usd ?? 0);
-                        const posUsd = Number(p?.position_usd ?? 0);
-
-                        return (
-                            <div key={`${version}:${poolId}:${positionId}`} className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 dark:border-white/10 dark:bg-white/5">
-                                <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0">
-                                        <div className="flex items-center gap-2">
-                                            <div className="truncate text-sm font-extrabold text-zinc-900 dark:text-white/90">{pair}</div>
-                                            <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-700 dark:bg-white/10 dark:text-white/70">
-                                                {version}
-                                            </span>
-                                            {exchange ? (
-                                                <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-700 dark:bg-white/10 dark:text-white/70">
-                                                    {exchange}
-                                                </span>
-                                            ) : null}
-                                            {Number.isFinite(feePct) && feePct > 0 ? (
-                                                <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-700 dark:bg-white/10 dark:text-white/70">
-                                                    <NumberFlowValue value={feePct} formatter={(v) => formatPct(v)} />
-                                                </span>
-                                            ) : null}
-                                            <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold ${inRange ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-200' : 'bg-zinc-500/10 text-zinc-700 dark:text-white/60'}`}>
-                                                {inRange ? 'In Range' : 'Out Range'}
-                                            </span>
-                                        </div>
-                                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-zinc-500 dark:text-white/40">
-                                            <span className="font-mono">{shortHex(poolId, 10, 8) || '--'}</span>
-                                            <span>·</span>
-                                            <span className="font-mono">#<NumberFlowValue value={positionId || '--'} formatter={() => (positionId || '--')} /></span>
-                                        </div>
-                                    </div>
-                                    <div className="shrink-0 text-right">
-                                        <div className="text-[10px] text-zinc-500 dark:text-white/40">仓位估值</div>
-                                        <div className={`mt-0.5 text-sm font-extrabold tabular-nums ${kpiTone(posUsd)}`}>
-                                            <NumberFlowValue value={posUsd} formatter={(v) => formatUsd(v)} />
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
-                                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
-                                        <div className="text-[10px] text-zinc-500 dark:text-white/40">区间</div>
-                                        <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">
-                                            <NumberFlowValue
-                                                value={Number.isFinite(tickLower) ? tickLower : '--'}
-                                                formatter={() => (Number.isFinite(tickLower) ? String(tickLower) : '--')}
-                                            />
-                                            {' '}→{' '}
-                                            <NumberFlowValue
-                                                value={Number.isFinite(tickUpper) ? tickUpper : '--'}
-                                                formatter={() => (Number.isFinite(tickUpper) ? String(tickUpper) : '--')}
-                                            />
-                                        </div>
-                                        <div className="text-[10px] text-zinc-500 dark:text-white/40">
-                                            当前{' '}
-                                            <NumberFlowValue
-                                                value={Number.isFinite(currentTick) ? currentTick : '--'}
-                                                formatter={() => (Number.isFinite(currentTick) ? String(currentTick) : '--')}
-                                            />
-                                        </div>
-                                    </div>
-                                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
-                                        <div className="text-[10px] text-zinc-500 dark:text-white/40">Token Amount</div>
-                                        <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">
-                                            <NumberFlowValue value={amount0} formatter={(v) => formatTokenAmount(v)} /> {sym0 || 'T0'}
-                                        </div>
-                                        <div className="text-[10px] text-zinc-500 dark:text-white/40">
-                                            <NumberFlowValue value={amount1} formatter={(v) => formatTokenAmount(v)} /> {sym1 || 'T1'}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
-                                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
-                                        <div className="text-[10px] text-zinc-500 dark:text-white/40">{sym0 || 'Token0'} 估值</div>
-                                        <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">
-                                            <NumberFlowValue value={usd0} formatter={(v) => formatUsd(v)} />
-                                        </div>
-                                    </div>
-                                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
-                                        <div className="text-[10px] text-zinc-500 dark:text-white/40">{sym1 || 'Token1'} 估值</div>
-                                        <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">
-                                            <NumberFlowValue value={usd1} formatter={(v) => formatUsd(v)} />
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="mt-3 flex items-center justify-end gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            hapticImpact('light');
-                                            safeCopy(poolId, onNotice);
-                                        }}
-                                        className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
-                                    >
-                                        复制 PoolID
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            hapticImpact('light');
-                                            safeCopy(positionId, onNotice);
-                                        }}
-                                        className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
-                                    >
-                                        复制 PositionID
-                                    </button>
-                                </div>
-                            </div>
-                        );
-                    })}
+                    {positions.map((p, idx) => (
+                        <SmartMoneyPositionCard
+                            key={`${String(p?.pool_version || '').trim()}:${String(p?.pool_id || '').trim()}:${String(p?.position_id || idx).trim()}`}
+                            position={p}
+                            onNotice={onNotice}
+                        />
+                    ))}
                 </div>
             ) : null}
         </BottomSheet>

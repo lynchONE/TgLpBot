@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import BottomSheet from './BottomSheet.jsx';
 import NumberFlowValue from './NumberFlowValue.jsx';
-import { fetchSmartMoneyPoolAdds } from '../lib/api';
+import SmartMoneyPositionCard from './SmartMoneyPositionCard.jsx';
+import { fetchSmartMoneyPoolAdds, fetchSmartMoneyWalletPositions } from '../lib/api';
 import { copyToClipboard, hapticImpact, hapticNotification } from '../lib/telegram';
 
 const Icon = ({ path, className = '' }) => (
@@ -11,7 +12,6 @@ const Icon = ({ path, className = '' }) => (
 );
 
 const icons = {
-    close: 'M6 18L18 6M6 6l12 12',
     refresh: 'M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6',
 };
 
@@ -79,6 +79,43 @@ function kpiTone(value) {
     return 'text-zinc-700 dark:text-white/80';
 }
 
+function buildRowDetailKey(row, index) {
+    return [
+        String(row?.wallet_address || '').trim().toLowerCase(),
+        String(row?.token_id || '').trim(),
+        Number(row?.tick_lower ?? 0),
+        Number(row?.tick_upper ?? 0),
+        index,
+    ].join('|');
+}
+
+function matchPositionsForPoolRow(positions, row, poolVersion, poolId) {
+    const version = String(poolVersion || '').trim().toLowerCase();
+    const pid = String(poolId || '').trim().toLowerCase();
+    const tokenID = String(row?.token_id || '').trim();
+    const tickLower = Number(row?.tick_lower ?? 0);
+    const tickUpper = Number(row?.tick_upper ?? 0);
+
+    const samePool = (Array.isArray(positions) ? positions : []).filter((item) =>
+        String(item?.pool_version || '').trim().toLowerCase() === version &&
+        String(item?.pool_id || '').trim().toLowerCase() === pid
+    );
+    if (!samePool.length) return [];
+
+    if (tokenID) {
+        const exact = samePool.filter((item) => String(item?.position_id || '').trim() === tokenID);
+        if (exact.length) return exact;
+    }
+
+    const sameTicks = samePool.filter((item) =>
+        Number(item?.tick_lower ?? 0) === tickLower &&
+        Number(item?.tick_upper ?? 0) === tickUpper
+    );
+    if (sameTicks.length) return sameTicks;
+
+    return samePool;
+}
+
 export default function SmartMoneyPoolAddsModal({
     open,
     onClose,
@@ -98,6 +135,8 @@ export default function SmartMoneyPoolAddsModal({
     const [error, setError] = useState('');
     const [data, setData] = useState(null);
     const [nonce, setNonce] = useState(0);
+    const [expandedDetailKey, setExpandedDetailKey] = useState('');
+    const [detailMap, setDetailMap] = useState({});
 
     const pv = String(poolVersion || '').trim().toLowerCase();
     const pid = String(poolId || '').trim();
@@ -111,7 +150,7 @@ export default function SmartMoneyPoolAddsModal({
         const pair = String(pool?.pair || '').trim();
         const version = String(pool?.pool_version || pv || '').trim().toUpperCase();
         const feePct = Number(pool?.fee_pct ?? 0);
-        const feeText = Number.isFinite(feePct) && feePct > 0 ? ` · ${(feePct * 1).toFixed(2)}%` : '';
+        const feeText = Number.isFinite(feePct) && feePct > 0 ? ` · ${feePct.toFixed(2)}%` : '';
         if (pair) return `${pair} (${version}${feeText})`;
         return `${version || 'POOL'} ${shortHex(pid, 10, 6) || '--'}`;
     }, [pool?.pair, pool?.pool_version, pool?.fee_pct, pv, pid]);
@@ -121,6 +160,8 @@ export default function SmartMoneyPoolAddsModal({
             setLoading(false);
             setError('');
             setData(null);
+            setExpandedDetailKey('');
+            setDetailMap({});
             return;
         }
         if (!pv || !pid) {
@@ -164,6 +205,77 @@ export default function SmartMoneyPoolAddsModal({
         };
     }, [open, apiBaseUrl, initData, chainLabel, pv, pid, windowHours, limit, feesLimit, nonce]);
 
+    async function toggleDetails(row, index) {
+        const key = buildRowDetailKey(row, index);
+        if (expandedDetailKey === key) {
+            setExpandedDetailKey('');
+            return;
+        }
+
+        setExpandedDetailKey(key);
+
+        const cached = detailMap[key];
+        if (cached?.status === 'loading' || cached?.status === 'success') {
+            return;
+        }
+
+        const walletAddr = String(row?.wallet_address || '').trim();
+        if (!walletAddr) {
+            setDetailMap((prev) => ({
+                ...(prev || {}),
+                [key]: {
+                    status: 'error',
+                    error: 'wallet_address 为空',
+                    positions: [],
+                    warnings: [],
+                },
+            }));
+            return;
+        }
+
+        setDetailMap((prev) => ({
+            ...(prev || {}),
+            [key]: {
+                ...(prev?.[key] || {}),
+                status: 'loading',
+                error: '',
+                positions: [],
+                warnings: [],
+            },
+        }));
+
+        try {
+            const resp = await fetchSmartMoneyWalletPositions({
+                apiBaseUrl,
+                initData,
+                chain: chainLabel,
+                walletAddress: walletAddr,
+                windowHours,
+                limit: 80,
+            });
+            const matched = matchPositionsForPoolRow(resp?.positions, row, pv, pid);
+            setDetailMap((prev) => ({
+                ...(prev || {}),
+                [key]: {
+                    status: 'success',
+                    error: '',
+                    positions: matched,
+                    warnings: Array.isArray(resp?.warnings) ? resp.warnings : [],
+                },
+            }));
+        } catch (e) {
+            setDetailMap((prev) => ({
+                ...(prev || {}),
+                [key]: {
+                    status: 'error',
+                    error: String(e?.message || e),
+                    positions: [],
+                    warnings: [],
+                },
+            }));
+        }
+    }
+
     if (!open) return null;
 
     return (
@@ -187,9 +299,9 @@ export default function SmartMoneyPoolAddsModal({
                         ) : null}
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-500 dark:text-white/40">
-                        <span>最近 <NumberFlowValue value={Number(windowHours) || 2} formatOptions={{ maximumFractionDigits: 0 }} />h 加池子</span>
+                        <span>最近 <NumberFlowValue value={Number(windowHours) || 2} formatOptions={{ maximumFractionDigits: 0 }} />h 加池</span>
                         <span>· <NumberFlowValue value={wallets.length} formatOptions={{ maximumFractionDigits: 0 }} /> 条</span>
-                        <span>· 手续费为链上可领取估算</span>
+                        <span>· 详情默认收起，点击“详细”展开仓位卡片</span>
                     </div>
                 </div>
             }
@@ -208,7 +320,6 @@ export default function SmartMoneyPoolAddsModal({
                 </button>
             }
         >
-
             {warnings.length ? (
                 <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-200">
                     <div className="font-semibold">提示</div>
@@ -228,13 +339,16 @@ export default function SmartMoneyPoolAddsModal({
 
             {!error && !loading && wallets.length === 0 ? (
                 <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-[11px] text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                    暂无加池子记录
+                    暂无加池记录
                 </div>
             ) : null}
 
             {wallets.length ? (
                 <div className="mt-3 space-y-2">
                     {wallets.map((row, index) => {
+                        const rowKey = buildRowDetailKey(row, index);
+                        const detail = detailMap[rowKey] || null;
+                        const detailOpen = expandedDetailKey === rowKey;
                         const addr = String(row?.wallet_address || '').trim();
                         const tickLower = Number(row?.tick_lower);
                         const tickUpper = Number(row?.tick_upper);
@@ -266,6 +380,11 @@ export default function SmartMoneyPoolAddsModal({
                                             <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-700 dark:bg-white/5 dark:text-white/60">
                                                 #<NumberFlowValue value={index + 1} formatOptions={{ maximumFractionDigits: 0 }} />
                                             </span>
+                                            {String(row?.token_id || '').trim() ? (
+                                                <span className="rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
+                                                    NFT #{String(row?.token_id || '').trim()}
+                                                </span>
+                                            ) : null}
                                         </div>
                                         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-500 dark:text-white/40">
                                             <span>
@@ -284,7 +403,7 @@ export default function SmartMoneyPoolAddsModal({
                                             {priceBase ? <span className="opacity-70">({priceBase}/{priceQuote || '--'})</span> : null}
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex flex-wrap items-center justify-end gap-2">
                                         <button
                                             type="button"
                                             onClick={() => {
@@ -294,6 +413,16 @@ export default function SmartMoneyPoolAddsModal({
                                             className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
                                         >
                                             复制
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                hapticImpact('light');
+                                                toggleDetails(row, index);
+                                            }}
+                                            className={`inline-flex items-center rounded-lg px-2 py-1 text-[10px] font-semibold ${detailOpen ? 'bg-emerald-500/15 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200' : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'}`}
+                                        >
+                                            {detailOpen ? '收起详细' : '详细'}
                                         </button>
                                         <button
                                             type="button"
@@ -317,14 +446,14 @@ export default function SmartMoneyPoolAddsModal({
                                             }}
                                             className="inline-flex items-center rounded-lg bg-zinc-100 px-2 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
                                         >
-                                            仓位
+                                            全部仓位
                                         </button>
                                     </div>
                                 </div>
 
                                 <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
                                     <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
-                                        <div className="text-[10px] text-zinc-500 dark:text-white/40">加池子金额</div>
+                                        <div className="text-[10px] text-zinc-500 dark:text-white/40">加池金额</div>
                                         <div className="mt-0.5 font-semibold tabular-nums text-zinc-900 dark:text-white/80">
                                             <NumberFlowValue value={totalUsd} formatter={(v) => formatUsd(v)} />
                                         </div>
@@ -339,7 +468,7 @@ export default function SmartMoneyPoolAddsModal({
                                         </div>
                                     </div>
                                     <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-[#0f1116]">
-                                        <div className="text-[10px] text-zinc-500 dark:text-white/40">可领取手续费 (估算)</div>
+                                        <div className="text-[10px] text-zinc-500 dark:text-white/40">可领取手续费</div>
                                         <div className={`mt-0.5 font-semibold tabular-nums ${feeTone}`}>
                                             {feeStatus === 'ok'
                                                 ? <NumberFlowValue value={feeUsd} formatter={(v) => formatUsd(v)} />
@@ -348,10 +477,62 @@ export default function SmartMoneyPoolAddsModal({
                                         {feeStatus === 'error' && feeErr ? (
                                             <div className="mt-0.5 text-[10px] text-red-600 dark:text-red-300">{feeErr}</div>
                                         ) : (
-                                            <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">{feeStatus ? `状态: ${feeStatus}` : ''}</div>
+                                            <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">{feeStatus ? `状态 ${feeStatus}` : ''}</div>
                                         )}
                                     </div>
                                 </div>
+
+                                {detailOpen ? (
+                                    <div className="mt-3 rounded-2xl border border-zinc-200/80 bg-zinc-50/60 p-3 dark:border-white/10 dark:bg-[#0d1118]">
+                                        <div className="mb-2 flex items-center justify-between gap-2">
+                                            <div className="text-[11px] font-semibold text-zinc-800 dark:text-white/80">当前仓位详情</div>
+                                            {detail?.status === 'success' ? (
+                                                <div className="text-[10px] text-zinc-500 dark:text-white/40">
+                                                    <NumberFlowValue value={Array.isArray(detail?.positions) ? detail.positions.length : 0} formatOptions={{ maximumFractionDigits: 0 }} /> 个匹配仓位
+                                                </div>
+                                            ) : null}
+                                        </div>
+
+                                        {detail?.status === 'loading' ? (
+                                            <div className="rounded-xl border border-dashed border-zinc-300/70 px-3 py-3 text-[11px] text-zinc-500 dark:border-white/10 dark:text-white/50">
+                                                正在加载仓位卡片...
+                                            </div>
+                                        ) : null}
+
+                                        {detail?.status === 'error' ? (
+                                            <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] text-red-700 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-200">
+                                                {detail?.error || '仓位详情加载失败'}
+                                            </div>
+                                        ) : null}
+
+                                        {detail?.status === 'success' && Array.isArray(detail?.warnings) && detail.warnings.length ? (
+                                            <div className="mb-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/5 dark:text-amber-200">
+                                                {String(detail.warnings[0])}
+                                            </div>
+                                        ) : null}
+
+                                        {detail?.status === 'success' && (!Array.isArray(detail?.positions) || detail.positions.length === 0) ? (
+                                            <div className="rounded-xl border border-zinc-200 bg-white/50 px-3 py-3 text-[11px] text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/50">
+                                                当前没有匹配到该池子的活跃仓位，可能已经平仓，或历史行缺少精确 token_id。
+                                            </div>
+                                        ) : null}
+
+                                        {detail?.status === 'success' && Array.isArray(detail?.positions) && detail.positions.length ? (
+                                            <div className="space-y-2">
+                                                {detail.positions.map((position, posIndex) => (
+                                                    <SmartMoneyPositionCard
+                                                        key={`${String(position?.pool_version || '').trim()}:${String(position?.pool_id || '').trim()}:${String(position?.position_id || posIndex).trim()}`}
+                                                        position={position}
+                                                        compact
+                                                        walletAddress={addr}
+                                                        showWalletAddress={false}
+                                                        onNotice={onNotice}
+                                                    />
+                                                ))}
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                ) : null}
                             </div>
                         );
                     })}
