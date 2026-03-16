@@ -2,6 +2,7 @@ package web_server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -180,5 +181,205 @@ func TestQuerySmartMoneyPoolAdds_UsesNetLiquidityFilterV4(t *testing.T) {
 	// V4 uses signed liquidity_delta aggregation.
 	if !strings.Contains(conn.lastQuery, "sum(toInt256OrZero(liquidity_delta))") {
 		t.Fatalf("expected v4 net liquidity expression, got query=%s", conn.lastQuery)
+	}
+}
+
+func TestQuerySmartMoneyPoolAddsStable_UsesDedupAndTokenKeyV3(t *testing.T) {
+	conn := &fakeCHConn{
+		rows: &fakePoolAddsRows{
+			data: []smartMoneyPoolAddRow{
+				{
+					WalletAddress: "0xabc",
+					ContractAddr:  "0xpm",
+					TokenID:       "1",
+					TickLower:     -100,
+					TickUpper:     100,
+					Sum0:          "100",
+					Sum1:          "200",
+					EventCount:    1,
+					LastAt:        time.Unix(1, 0).UTC(),
+				},
+			},
+		},
+	}
+
+	rows, err := querySmartMoneyPoolAddsStable(context.Background(), conn, "bsc", "v3", "0xpool", 2*time.Hour, 10)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if !strings.Contains(conn.lastQuery, "GROUP BY tx_hash, log_index") {
+		t.Fatalf("expected event dedup grouping, got query=%s", conn.lastQuery)
+	}
+	if !strings.Contains(conn.lastQuery, "concat('token:', token_id)") {
+		t.Fatalf("expected token-first position key, got query=%s", conn.lastQuery)
+	}
+	if !strings.Contains(conn.lastQuery, "ANY INNER JOIN") {
+		t.Fatalf("expected active-state join, got query=%s", conn.lastQuery)
+	}
+}
+
+func TestQuerySmartMoneyPoolAddsStable_UsesSignedLiquidityV4(t *testing.T) {
+	conn := &fakeCHConn{
+		rows: &fakePoolAddsRows{
+			data: []smartMoneyPoolAddRow{
+				{
+					WalletAddress: "0xabc",
+					ContractAddr:  "0xpm",
+					TokenID:       "",
+					TickLower:     -100,
+					TickUpper:     100,
+					Sum0:          "0",
+					Sum1:          "0",
+					EventCount:    1,
+					LastAt:        time.Unix(1, 0).UTC(),
+				},
+			},
+		},
+	}
+
+	_, err := querySmartMoneyPoolAddsStable(context.Background(), conn, "bsc", "v4", "0xpool", 2*time.Hour, 10)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if !strings.Contains(conn.lastQuery, "sum(toInt256OrZero(liquidity_delta))") {
+		t.Fatalf("expected v4 signed liquidity expression, got query=%s", conn.lastQuery)
+	}
+}
+
+type fakePoolAddResolver struct {
+	positions map[string]*smartMoneyResolvedPosition
+}
+
+func (r *fakePoolAddResolver) Resolve(_ context.Context, ref smartMoneyPositionRef) (*smartMoneyResolvedPosition, error) {
+	if r == nil {
+		return nil, nil
+	}
+	key := strings.ToLower(strings.TrimSpace(ref.PoolVersion)) + "|" +
+		strings.ToLower(strings.TrimSpace(ref.PoolID)) + "|" +
+		strings.ToLower(strings.TrimSpace(ref.WalletAddress)) + "|" +
+		strings.TrimSpace(ref.TokenID) + "|" +
+		fmt.Sprintf("%d", ref.TickLower) + "|" +
+		fmt.Sprintf("%d", ref.TickUpper)
+	return r.positions[key], nil
+}
+
+func TestResolveActiveSmartMoneyPoolAddRows_FiltersClosedRows(t *testing.T) {
+	resolver := &fakePoolAddResolver{
+		positions: map[string]*smartMoneyResolvedPosition{
+			"v3|0xpool|0xwallet1|101|-120|120": {
+				PoolVersion:     "v3",
+				PoolID:          "0xpool",
+				PositionID:      "101",
+				ContractAddress: "0xpm-live",
+			},
+		},
+	}
+
+	rows := []smartMoneyPoolAddsWalletRow{
+		{
+			WalletAddress: "0xwallet1",
+			TokenID:       "101",
+			NPMAddress:    "0xpm-old",
+			TickLower:     -120,
+			TickUpper:     120,
+		},
+		{
+			WalletAddress: "0xwallet2",
+			TokenID:       "202",
+			NPMAddress:    "0xpm-old",
+			TickLower:     -200,
+			TickUpper:     200,
+		},
+	}
+
+	active, resolved, warnings := resolveActiveSmartMoneyPoolAddRows(
+		context.Background(),
+		"v3",
+		"0xpool",
+		rows,
+		resolver,
+		nil,
+	)
+	if len(active) != 1 {
+		t.Fatalf("expected 1 active row, got %d", len(active))
+	}
+	if len(resolved) != 1 || resolved[0] == nil || resolved[0].PositionID != "101" {
+		t.Fatalf("unexpected resolved positions: %#v", resolved)
+	}
+	if active[0].WalletAddress != "0xwallet1" {
+		t.Fatalf("expected wallet1 to remain, got %#v", active[0])
+	}
+	if active[0].NPMAddress != "0xpm-live" {
+		t.Fatalf("expected live contract address to overwrite row, got %s", active[0].NPMAddress)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "filtered 1 stale rows") {
+		t.Fatalf("expected stale-row warning, got %#v", warnings)
+	}
+}
+
+func TestResolveActiveSmartMoneyPoolAddRows_UsesV4FallbackTokenID(t *testing.T) {
+	resolver := &fakePoolAddResolver{
+		positions: map[string]*smartMoneyResolvedPosition{
+			"v4|0xpool|0xwallet1|909|-300|300": {
+				PoolVersion: "v4",
+				PoolID:      "0xpool",
+				PositionID:  "909",
+			},
+		},
+	}
+
+	rows := []smartMoneyPoolAddsWalletRow{
+		{
+			WalletAddress: "0xwallet1",
+			TokenID:       "",
+			TickLower:     -300,
+			TickUpper:     300,
+		},
+	}
+
+	fallbackLoader := func(_ context.Context, walletAddr string, pools []smartMoneyWalletV4PoolRef, limit int) ([]smartMoneyPositionRef, error) {
+		if walletAddr != "0xwallet1" {
+			t.Fatalf("unexpected wallet: %s", walletAddr)
+		}
+		if len(pools) != 1 || pools[0].PoolID != "0xpool" {
+			t.Fatalf("unexpected pools: %#v", pools)
+		}
+		if limit != 20 {
+			t.Fatalf("unexpected limit: %d", limit)
+		}
+		return []smartMoneyPositionRef{
+			{
+				WalletAddress: "0xwallet1",
+				PoolVersion:   "v4",
+				PoolID:        "0xpool",
+				TokenID:       "909",
+				TickLower:     -300,
+				TickUpper:     300,
+			},
+		}, nil
+	}
+
+	active, resolved, warnings := resolveActiveSmartMoneyPoolAddRows(
+		context.Background(),
+		"v4",
+		"0xpool",
+		rows,
+		resolver,
+		fallbackLoader,
+	)
+	if len(active) != 1 {
+		t.Fatalf("expected 1 active row, got %d", len(active))
+	}
+	if active[0].TokenID != "909" {
+		t.Fatalf("expected token_id to be backfilled, got %#v", active[0])
+	}
+	if len(resolved) != 1 || resolved[0] == nil || resolved[0].PositionID != "909" {
+		t.Fatalf("unexpected resolved positions: %#v", resolved)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings, got %#v", warnings)
 	}
 }

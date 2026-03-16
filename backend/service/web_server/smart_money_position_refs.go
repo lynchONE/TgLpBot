@@ -317,7 +317,7 @@ func (r *smartMoneyPositionResolver) resolveV4(ctx context.Context, ref smartMon
 	out.Token1Symbol = r.metaCache.Symbol(out.Token1)
 	out.Pair = smartMoneyPairLabel(out.Token0Symbol, out.Token1Symbol)
 
-	sqrtP, currentTick, slotErr := blockchain.GetUniswapV4PoolSlot0(r.v4PoolManger, out.PoolID)
+	sqrtP, currentTick, slotErr := loadSmartMoneyV4Slot0(r.v4PoolManger, out.PoolID)
 	if slotErr != nil {
 		out.FeeStatus = "error"
 		out.FeeError = truncateErr(slotErr, 120)

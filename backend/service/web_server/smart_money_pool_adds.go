@@ -204,6 +204,258 @@ func querySmartMoneyPoolAdds(ctx context.Context, conn smartMoneyClickHouseQuery
 	return out, nil
 }
 
+func querySmartMoneyPoolAddsStable(ctx context.Context, conn smartMoneyClickHouseQueryer, chain string, poolVersion string, poolID string, window time.Duration, limit int) ([]smartMoneyPoolAddRow, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if conn == nil {
+		return nil, fmt.Errorf("clickhouse not initialized")
+	}
+	poolVersion = strings.ToLower(strings.TrimSpace(poolVersion))
+	poolID = strings.ToLower(strings.TrimSpace(poolID))
+	if poolVersion == "" || poolID == "" {
+		return []smartMoneyPoolAddRow{}, nil
+	}
+	if window <= 0 {
+		window = 2 * time.Hour
+	}
+	seconds := int(window.Seconds())
+	if seconds <= 0 {
+		seconds = 7200
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 5000 {
+		limit = 5000
+	}
+
+	stateSeconds := seconds
+	if stateSeconds < 48*3600 {
+		stateSeconds = 48 * 3600
+	}
+
+	chain = strings.ToLower(strings.TrimSpace(chain))
+	chainFilter := ""
+	args := make([]any, 0, 6)
+	args = append(args, poolVersion, poolID)
+	if chain != "" {
+		chainFilter = "AND lowerUTF8(chain) = ?"
+		args = append(args, chain)
+	}
+
+	positionKeyExpr := "if(token_id != '', concat('token:', token_id), concat('legacy:', lowerUTF8(contract_address), ':', toString(tick_lower), ':', toString(tick_upper)))"
+	netLiqExpr := "sum(if(action='add', toInt256OrZero(liquidity_delta), -toInt256OrZero(liquidity_delta)))"
+	if poolVersion == "v4" {
+		netLiqExpr = "sum(toInt256OrZero(liquidity_delta))"
+	}
+
+	dedupRecentEvents := fmt.Sprintf(`
+		SELECT
+			argMax(wallet_address, event_seq) AS wallet_address,
+			argMax(contract_address, event_seq) AS contract_address,
+			argMax(token_id, event_seq) AS token_id,
+			argMax(tick_lower, event_seq) AS tick_lower,
+			argMax(tick_upper, event_seq) AS tick_upper,
+			argMax(amount0, event_seq) AS amount0,
+			argMax(amount1, event_seq) AS amount1,
+			argMax(liquidity_delta, event_seq) AS liquidity_delta,
+			argMax(action, event_seq) AS action,
+			max(ts) AS ts,
+			max(event_seq) AS event_seq
+		FROM smart_lp_events
+		WHERE ts >= now() - INTERVAL %d SECOND
+			AND action IN ('add', 'remove')
+			AND pool_version = ? AND pool_id = ?
+			AND wallet_address != ''
+			%s
+		GROUP BY tx_hash, log_index
+	`, seconds, chainFilter)
+
+	dedupStateEvents := fmt.Sprintf(`
+		SELECT
+			argMax(wallet_address, event_seq) AS wallet_address,
+			argMax(contract_address, event_seq) AS contract_address,
+			argMax(token_id, event_seq) AS token_id,
+			argMax(tick_lower, event_seq) AS tick_lower,
+			argMax(tick_upper, event_seq) AS tick_upper,
+			argMax(liquidity_delta, event_seq) AS liquidity_delta,
+			argMax(action, event_seq) AS action,
+			max(event_seq) AS event_seq
+		FROM smart_lp_events
+		WHERE ts >= now() - INTERVAL %d SECOND
+			AND action IN ('add', 'remove')
+			AND pool_version = ? AND pool_id = ?
+			AND wallet_address != ''
+			%s
+		GROUP BY tx_hash, log_index
+	`, stateSeconds, chainFilter)
+
+	args = append(args, poolVersion, poolID)
+	if chain != "" {
+		args = append(args, chain)
+	}
+
+	q := fmt.Sprintf(`
+		SELECT
+			recent.wallet_address,
+			recent.contract_address,
+			recent.token_id,
+			recent.tick_lower,
+			recent.tick_upper,
+			recent.sum0,
+			recent.sum1,
+			recent.event_count,
+			recent.last_at
+		FROM (
+			SELECT
+				wallet_address,
+				position_key,
+				argMax(contract_address, event_seq) AS contract_address,
+				argMax(token_id, event_seq) AS token_id,
+				argMax(tick_lower, event_seq) AS tick_lower,
+				argMax(tick_upper, event_seq) AS tick_upper,
+				toString(sum(toInt256OrZero(amount0))) AS sum0,
+				toString(sum(toInt256OrZero(amount1))) AS sum1,
+				count() AS event_count,
+				max(ts) AS last_at
+			FROM (
+				SELECT
+					*,
+					%s AS position_key
+				FROM (%s)
+			)
+			WHERE action = 'add'
+			GROUP BY wallet_address, position_key
+		) AS recent
+		ANY INNER JOIN (
+			SELECT
+				wallet_address,
+				position_key
+			FROM (
+				SELECT
+					*,
+					%s AS position_key
+				FROM (%s)
+			)
+			GROUP BY wallet_address, position_key
+			HAVING %s > 0
+		) AS active
+			ON recent.wallet_address = active.wallet_address
+			AND recent.position_key = active.position_key
+		ORDER BY recent.last_at DESC, recent.event_count DESC, recent.wallet_address ASC
+		LIMIT %d
+	`, positionKeyExpr, dedupRecentEvents, positionKeyExpr, dedupStateEvents, netLiqExpr, limit)
+
+	rows, err := conn.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]smartMoneyPoolAddRow, 0, limit)
+	for rows.Next() {
+		var r smartMoneyPoolAddRow
+		var tickL int32
+		var tickU int32
+		if err := rows.Scan(&r.WalletAddress, &r.ContractAddr, &r.TokenID, &tickL, &tickU, &r.Sum0, &r.Sum1, &r.EventCount, &r.LastAt); err != nil {
+			return nil, err
+		}
+		r.WalletAddress = strings.ToLower(strings.TrimSpace(r.WalletAddress))
+		r.ContractAddr = strings.ToLower(strings.TrimSpace(r.ContractAddr))
+		r.TokenID = strings.TrimSpace(r.TokenID)
+		r.TickLower = tickL
+		r.TickUpper = tickU
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+type smartMoneyPoolAddLiveResolver interface {
+	Resolve(ctx context.Context, ref smartMoneyPositionRef) (*smartMoneyResolvedPosition, error)
+}
+
+type smartMoneyPoolAddV4FallbackLoader func(ctx context.Context, walletAddr string, pools []smartMoneyWalletV4PoolRef, limit int) ([]smartMoneyPositionRef, error)
+
+func resolveActiveSmartMoneyPoolAddRows(
+	ctx context.Context,
+	poolVersion string,
+	poolID string,
+	wallets []smartMoneyPoolAddsWalletRow,
+	resolver smartMoneyPoolAddLiveResolver,
+	loadV4Fallback smartMoneyPoolAddV4FallbackLoader,
+) ([]smartMoneyPoolAddsWalletRow, []*smartMoneyResolvedPosition, []string) {
+	if resolver == nil || len(wallets) == 0 {
+		return wallets, nil, nil
+	}
+
+	poolVersion = strings.ToLower(strings.TrimSpace(poolVersion))
+	poolID = strings.ToLower(strings.TrimSpace(poolID))
+
+	active := make([]smartMoneyPoolAddsWalletRow, 0, len(wallets))
+	resolved := make([]*smartMoneyResolvedPosition, 0, len(wallets))
+	filtered := 0
+	fallbackCache := make(map[string][]smartMoneyPositionRef)
+
+	for _, row := range wallets {
+		ref := smartMoneyPositionRef{
+			WalletAddress:   strings.ToLower(strings.TrimSpace(row.WalletAddress)),
+			PoolVersion:     poolVersion,
+			PoolID:          poolID,
+			ContractAddress: strings.ToLower(strings.TrimSpace(row.NPMAddress)),
+			TokenID:         strings.TrimSpace(row.TokenID),
+			TickLower:       row.TickLower,
+			TickUpper:       row.TickUpper,
+		}
+
+		if ref.TokenID == "" && poolVersion == "v4" && loadV4Fallback != nil {
+			cacheKey := ref.WalletAddress + "|" + poolID
+			legacyRefs, ok := fallbackCache[cacheKey]
+			if !ok {
+				scanned, err := loadV4Fallback(ctx, ref.WalletAddress, []smartMoneyWalletV4PoolRef{{PoolID: poolID}}, 20)
+				if err != nil {
+					scanned = []smartMoneyPositionRef{}
+				}
+				fallbackCache[cacheKey] = scanned
+				legacyRefs = scanned
+			}
+			match, found := findSmartMoneyV4FallbackRef(legacyRefs, poolID, ref.TickLower, ref.TickUpper)
+			if !found {
+				filtered++
+				continue
+			}
+			ref = match
+			row.TokenID = match.TokenID
+		}
+
+		position, _ := resolver.Resolve(ctx, ref)
+		if position == nil {
+			filtered++
+			continue
+		}
+
+		if strings.TrimSpace(position.PositionID) != "" {
+			row.TokenID = strings.TrimSpace(position.PositionID)
+		}
+		if poolVersion == "v3" && strings.TrimSpace(position.ContractAddress) != "" {
+			row.NPMAddress = strings.ToLower(strings.TrimSpace(position.ContractAddress))
+		}
+
+		active = append(active, row)
+		resolved = append(resolved, position)
+	}
+
+	warnings := make([]string, 0, 1)
+	if filtered > 0 {
+		warnings = append(warnings, fmt.Sprintf("filtered %d stale rows without active live positions", filtered))
+	}
+
+	return active, resolved, warnings
+}
+
 func (s *Server) handleSmartMoneyPoolAdds(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -280,7 +532,7 @@ func (s *Server) handleSmartMoneyPoolAdds(w http.ResponseWriter, r *http.Request
 
 	window := time.Duration(windowHours) * time.Hour
 
-	rows, qerr := querySmartMoneyPoolAdds(ctx, s.ClickHouse.Conn, chain, poolVersion, poolID, window, limit)
+	rows, qerr := querySmartMoneyPoolAddsStable(ctx, s.ClickHouse.Conn, chain, poolVersion, poolID, window, limit)
 	if qerr != nil {
 		http.Error(w, qerr.Error(), http.StatusInternalServerError)
 		return

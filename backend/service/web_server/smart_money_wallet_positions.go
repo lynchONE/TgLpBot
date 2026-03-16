@@ -823,7 +823,7 @@ func (s *Server) loadV4WalletPositions(ctx context.Context, chain string, wallet
 				return nil
 			}
 
-			sqrtP, currentTick, slotErr := blockchain.GetUniswapV4PoolSlot0(poolManager, c.poolID)
+			sqrtP, currentTick, slotErr := loadSmartMoneyV4Slot0(poolManager, c.poolID)
 			if slotErr != nil || sqrtP == nil {
 				return nil
 			}
