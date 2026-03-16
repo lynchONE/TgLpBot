@@ -219,6 +219,12 @@ func TestQuerySmartMoneyPoolAddsStable_UsesDedupAndTokenKeyV3(t *testing.T) {
 	if !strings.Contains(conn.lastQuery, "ANY INNER JOIN") {
 		t.Fatalf("expected active-state join, got query=%s", conn.lastQuery)
 	}
+	if strings.Contains(conn.lastQuery, "max(ts) AS ts") {
+		t.Fatalf("expected dedup timestamp alias to avoid WHERE conflicts, got query=%s", conn.lastQuery)
+	}
+	if !strings.Contains(conn.lastQuery, "max(ts) AS event_ts") {
+		t.Fatalf("expected dedup timestamp alias event_ts, got query=%s", conn.lastQuery)
+	}
 }
 
 func TestQuerySmartMoneyPoolAddsStable_UsesSignedLiquidityV4(t *testing.T) {

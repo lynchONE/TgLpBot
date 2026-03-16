@@ -261,8 +261,8 @@ func querySmartMoneyPoolAddsStable(ctx context.Context, conn smartMoneyClickHous
 			argMax(amount1, event_seq) AS amount1,
 			argMax(liquidity_delta, event_seq) AS liquidity_delta,
 			argMax(action, event_seq) AS action,
-			max(ts) AS ts,
-			max(event_seq) AS event_seq
+			max(ts) AS event_ts,
+			max(event_seq) AS dedup_event_seq
 		FROM smart_lp_events
 		WHERE ts >= now() - INTERVAL %d SECOND
 			AND action IN ('add', 'remove')
@@ -281,7 +281,7 @@ func querySmartMoneyPoolAddsStable(ctx context.Context, conn smartMoneyClickHous
 			argMax(tick_upper, event_seq) AS tick_upper,
 			argMax(liquidity_delta, event_seq) AS liquidity_delta,
 			argMax(action, event_seq) AS action,
-			max(event_seq) AS event_seq
+			max(event_seq) AS dedup_event_seq
 		FROM smart_lp_events
 		WHERE ts >= now() - INTERVAL %d SECOND
 			AND action IN ('add', 'remove')
@@ -311,14 +311,14 @@ func querySmartMoneyPoolAddsStable(ctx context.Context, conn smartMoneyClickHous
 			SELECT
 				wallet_address,
 				position_key,
-				argMax(contract_address, event_seq) AS contract_address,
-				argMax(token_id, event_seq) AS token_id,
-				argMax(tick_lower, event_seq) AS tick_lower,
-				argMax(tick_upper, event_seq) AS tick_upper,
+				argMax(contract_address, dedup_event_seq) AS contract_address,
+				argMax(token_id, dedup_event_seq) AS token_id,
+				argMax(tick_lower, dedup_event_seq) AS tick_lower,
+				argMax(tick_upper, dedup_event_seq) AS tick_upper,
 				toString(sum(toInt256OrZero(amount0))) AS sum0,
 				toString(sum(toInt256OrZero(amount1))) AS sum1,
 				count() AS event_count,
-				max(ts) AS last_at
+				max(event_ts) AS last_at
 			FROM (
 				SELECT
 					*,
