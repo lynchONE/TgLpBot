@@ -245,14 +245,14 @@ func querySmartMoneyPoolAddsStable(ctx context.Context, conn smartMoneyClickHous
 	}
 
 	positionKeyExpr := "if(token_id != '', concat('token:', token_id), concat('legacy:', lowerUTF8(contract_address), ':', toString(tick_lower), ':', toString(tick_upper)))"
-	netLiqExpr := "sum(if(action='add', toInt256OrZero(liquidity_delta), -toInt256OrZero(liquidity_delta)))"
+	netLiqExpr := "sum(if(dedup_action='add', toInt256OrZero(liquidity_delta), -toInt256OrZero(liquidity_delta)))"
 	if poolVersion == "v4" {
 		netLiqExpr = "sum(toInt256OrZero(liquidity_delta))"
 	}
 
 	dedupRecentEvents := fmt.Sprintf(`
 		SELECT
-			argMax(wallet_address, event_seq) AS wallet_address,
+			argMax(wallet_address, event_seq) AS dedup_wallet_address,
 			argMax(contract_address, event_seq) AS contract_address,
 			argMax(token_id, event_seq) AS token_id,
 			argMax(tick_lower, event_seq) AS tick_lower,
@@ -260,7 +260,7 @@ func querySmartMoneyPoolAddsStable(ctx context.Context, conn smartMoneyClickHous
 			argMax(amount0, event_seq) AS amount0,
 			argMax(amount1, event_seq) AS amount1,
 			argMax(liquidity_delta, event_seq) AS liquidity_delta,
-			argMax(action, event_seq) AS action,
+			argMax(action, event_seq) AS dedup_action,
 			max(ts) AS event_ts,
 			max(event_seq) AS dedup_event_seq
 		FROM smart_lp_events
@@ -274,13 +274,13 @@ func querySmartMoneyPoolAddsStable(ctx context.Context, conn smartMoneyClickHous
 
 	dedupStateEvents := fmt.Sprintf(`
 		SELECT
-			argMax(wallet_address, event_seq) AS wallet_address,
+			argMax(wallet_address, event_seq) AS dedup_wallet_address,
 			argMax(contract_address, event_seq) AS contract_address,
 			argMax(token_id, event_seq) AS token_id,
 			argMax(tick_lower, event_seq) AS tick_lower,
 			argMax(tick_upper, event_seq) AS tick_upper,
 			argMax(liquidity_delta, event_seq) AS liquidity_delta,
-			argMax(action, event_seq) AS action,
+			argMax(action, event_seq) AS dedup_action,
 			max(event_seq) AS dedup_event_seq
 		FROM smart_lp_events
 		WHERE ts >= now() - INTERVAL %d SECOND
@@ -315,18 +315,27 @@ func querySmartMoneyPoolAddsStable(ctx context.Context, conn smartMoneyClickHous
 				argMax(token_id, dedup_event_seq) AS token_id,
 				argMax(tick_lower, dedup_event_seq) AS tick_lower,
 				argMax(tick_upper, dedup_event_seq) AS tick_upper,
-				toString(sum(toInt256OrZero(amount0))) AS sum0,
-				toString(sum(toInt256OrZero(amount1))) AS sum1,
-				count() AS event_count,
-				max(event_ts) AS last_at
+				toString(sumIf(toInt256OrZero(amount0), dedup_action = 'add')) AS sum0,
+				toString(sumIf(toInt256OrZero(amount1), dedup_action = 'add')) AS sum1,
+				countIf(dedup_action = 'add') AS event_count,
+				maxIf(event_ts, dedup_action = 'add') AS last_at
 			FROM (
 				SELECT
-					*,
+					dedup_wallet_address AS wallet_address,
+					contract_address,
+					token_id,
+					tick_lower,
+					tick_upper,
+					amount0,
+					amount1,
+					dedup_action,
+					event_ts,
+					dedup_event_seq,
 					%s AS position_key
 				FROM (%s)
 			)
-			WHERE action = 'add'
 			GROUP BY wallet_address, position_key
+			HAVING countIf(dedup_action = 'add') > 0
 		) AS recent
 		ANY INNER JOIN (
 			SELECT
@@ -334,7 +343,13 @@ func querySmartMoneyPoolAddsStable(ctx context.Context, conn smartMoneyClickHous
 				position_key
 			FROM (
 				SELECT
-					*,
+					dedup_wallet_address AS wallet_address,
+					contract_address,
+					token_id,
+					tick_lower,
+					tick_upper,
+					liquidity_delta,
+					dedup_action,
 					%s AS position_key
 				FROM (%s)
 			)

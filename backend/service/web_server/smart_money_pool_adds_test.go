@@ -225,6 +225,27 @@ func TestQuerySmartMoneyPoolAddsStable_UsesDedupAndTokenKeyV3(t *testing.T) {
 	if !strings.Contains(conn.lastQuery, "max(ts) AS event_ts") {
 		t.Fatalf("expected dedup timestamp alias event_ts, got query=%s", conn.lastQuery)
 	}
+	if strings.Contains(conn.lastQuery, "argMax(action, event_seq) AS action") {
+		t.Fatalf("expected dedup action alias to avoid WHERE conflicts, got query=%s", conn.lastQuery)
+	}
+	if !strings.Contains(conn.lastQuery, "argMax(action, event_seq) AS dedup_action") {
+		t.Fatalf("expected dedup action alias, got query=%s", conn.lastQuery)
+	}
+	if strings.Contains(conn.lastQuery, "argMax(wallet_address, event_seq) AS wallet_address") {
+		t.Fatalf("expected dedup wallet alias to avoid WHERE conflicts, got query=%s", conn.lastQuery)
+	}
+	if !strings.Contains(conn.lastQuery, "argMax(wallet_address, event_seq) AS dedup_wallet_address") {
+		t.Fatalf("expected dedup wallet alias, got query=%s", conn.lastQuery)
+	}
+	if strings.Contains(conn.lastQuery, "WHERE action = 'add'") {
+		t.Fatalf("expected recent adds to use sumIf/countIf instead of WHERE action filter, got query=%s", conn.lastQuery)
+	}
+	if !strings.Contains(conn.lastQuery, "countIf(dedup_action = 'add') > 0") {
+		t.Fatalf("expected recent adds HAVING countIf filter, got query=%s", conn.lastQuery)
+	}
+	if !strings.Contains(conn.lastQuery, "sumIf(toInt256OrZero(amount0), dedup_action = 'add')") {
+		t.Fatalf("expected sumIf with dedup_action, got query=%s", conn.lastQuery)
+	}
 }
 
 func TestQuerySmartMoneyPoolAddsStable_UsesSignedLiquidityV4(t *testing.T) {
