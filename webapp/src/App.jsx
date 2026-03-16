@@ -1962,6 +1962,8 @@ export default function App() {
               const tvl = Number(pool?.current_pool_value || 0);
               const txCount = Number(pool?.transaction_count || 0);
               const priceDisplay = String(pool?.price_display || '');
+              const feeRateAvailable = Number.isFinite(tvl) && tvl > 0 && Number.isFinite(feeRate);
+              const feeRateText = feeRateAvailable ? `${feeRate.toFixed(3)}%` : '--';
               const factoryName = String(pool?.factory_name || pool?.dex || '');
               const userPosUsd = Number(pool?.userPositionUsd || 0);
               const pair = String(pool?.trading_pair || '--');
@@ -2048,7 +2050,14 @@ export default function App() {
                       <span className="meta-cyan">TVL <b><NumberFlowValue value={tvl} formatter={(v) => formatUsdCompact(v)} /></b></span>
                       <span className="dot-sep" />
                       <span className="meta-orange"><NumberFlowValue value={txCount} formatter={(v) => `${Number(v || 0).toLocaleString()}笔`} /></span>
-                      {feeRate > 0 && (<><span className="dot-sep" /><span className="meta-accent"><b><NumberFlowValue value={feeRate} formatter={(v) => `${Number(v).toFixed(3)}%`} /></b></span></>)}
+                      <span className="dot-sep" />
+                      <span className={`meta-accent ${feeRateAvailable ? '' : 'muted'}`}>
+                        <b>
+                          {feeRateAvailable ? (
+                            <NumberFlowValue value={feeRate} formatter={(v) => `${Number(v).toFixed(3)}%`} />
+                          ) : '--'}
+                        </b>
+                      </span>
                     </div>
                   </div>
 
@@ -2064,8 +2073,12 @@ export default function App() {
                       <div className={`pool-sub-val ${priceDisplay.includes('↑') || priceDisplay.includes('+') ? 'up' : priceDisplay.includes('↓') || priceDisplay.includes('-') ? 'down' : ''}`} title={priceDisplay}>
                         <NumberFlowValue value={priceDisplay} formatter={() => formatPriceDisplay(priceDisplay)} />
                       </div>
-                    ) : feeRate > 0 && hotSort !== 'fee_rate' ? (
-                      <div className="pool-sub-val purple"><NumberFlowValue value={feeRate} formatter={(v) => `${Number(v).toFixed(3)}%`} /></div>
+                    ) : hotSort !== 'fee_rate' ? (
+                      <div className={`pool-sub-val purple ${feeRateAvailable ? '' : 'muted'}`}>
+                        {feeRateAvailable ? (
+                          <NumberFlowValue value={feeRate} formatter={() => feeRateText} />
+                        ) : feeRateText}
+                      </div>
                     ) : null}
                   </div>
 

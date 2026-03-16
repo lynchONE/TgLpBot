@@ -369,14 +369,14 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
     const totalFeesValue = useMemo(() => Number(pool?.total_fees ?? 0), [pool?.total_fees]);
     const showVolume = useMemo(() => Number.isFinite(volumeValue) && volumeValue > 0, [volumeValue]);
     const showTVL = useMemo(() => Number.isFinite(tvlValue) && tvlValue > 0, [tvlValue]);
-    const showFeeRate = useMemo(() => Number.isFinite(feeRateValue) && feeRateValue > 0, [feeRateValue]);
+    const feeRateAvailable = useMemo(() => Number.isFinite(tvlValue) && tvlValue > 0 && Number.isFinite(feeRateValue), [tvlValue, feeRateValue]);
     const showTotalFees = useMemo(() => Number.isFinite(totalFeesValue) && totalFeesValue > 0, [totalFeesValue]);
     const secondaryMetricText = useMemo(() => {
         if (metric === 'fee_rate') {
             return showTotalFees ? formatUsd(totalFeesValue) : '';
         }
-        return showFeeRate ? formatRatePct(feeRateValue) : '';
-    }, [metric, showFeeRate, showTotalFees, feeRateValue, totalFeesValue]);
+        return feeRateAvailable ? formatRatePct(feeRateValue) : '--';
+    }, [metric, feeRateAvailable, showTotalFees, feeRateValue, totalFeesValue]);
 
     const copyAddr = async () => {
         if (!addr) return;
@@ -507,7 +507,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                         </div>
                     ) : null}
                     {secondaryMetricText ? (
-                        <div className="mt-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-300 tabular-nums">
+                        <div className={`mt-0.5 text-[10px] font-semibold tabular-nums ${feeRateAvailable ? 'text-violet-600 dark:text-violet-300' : 'text-zinc-400 dark:text-white/35'}`}>
                             <NumberFlowValue value={secondaryMetricText} formatter={() => secondaryMetricText} />
                         </div>
                     ) : null}

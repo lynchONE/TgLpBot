@@ -2814,6 +2814,10 @@ body {
 .meta-accent b {
   color: #c4b5fd;
 }
+.meta-accent.muted,
+.meta-accent.muted b {
+  color: var(--text-muted);
+}
 .meta-cyan {
   color: #67e8f9;
 }
@@ -2867,6 +2871,7 @@ body {
 .pool-sub-val.up { color: #22d38a; }
 .pool-sub-val.down { color: #ff5e76; }
 .pool-sub-val.purple { color: #a78bfa; }
+.pool-sub-val.muted { color: var(--text-muted); }
 
 .pool-buy-btn {
   flex-shrink: 0;
