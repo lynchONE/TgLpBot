@@ -1,100 +1,75 @@
 ## Context
-- 当前代码里的开仓主路径围绕 `open_position` 与 `StrategyTask` 展开，默认假设目标池已经存在，且主要以稳定币入场、后端代做换币与注流动性为核心。
-- WebApp 已经具备「热门池子」「聪明钱」两类池子数据，并在前端状态里持有 token 地址、symbol、pool version、pool id/address 等基础信息，具备天然的预填来源。
-- 现有链上绑定仍偏向读操作和已有仓位管理：
-  - V3 PositionManager 还没有 `createAndInitializePoolIfNecessary`、`mint`
-  - V4 PositionManager 目前只有 `modifyLiquidities`/读仓位等最小面，缺少建池初始化和多调用封装
-- 该功能直接影响真实资金和授权，因此需要把参数推导、池子是否已存在、协议限制检查放在后端统一收口，而不是让前端自由拼装链上参数。
+- 当前 `create_pool` 已经具备独立的 `preview / execute` 接口，但 `range_mode` 只有 `full_range`，`create_and_seed` 只接受双币输入。
+- `Uniswap V3` / `PancakeSwap V3` 当前通过 factory 的 `feeAmountTickSpacing` 校验 fee，天然适合固定档位能力。
+- `Uniswap V4` 当前仅支持 `100/500/3000/10000` 四档费率，并通过 `StandardTickSpacingFromFee` 推导 `tickSpacing`；这无法覆盖任意静态费率。
+- 代码里已经具备 `ZapInV3` / `ZapInV4` ABI 与 OKX swap calldata 组装能力，可以复用到“单币自动换币后建池”的执行链路。
 
 ## Goals / Non-Goals
 - Goals:
-  - 在 BSC 上支持 `Uniswap V3`、`Uniswap V4`、`PancakeSwap V3` 的新池创建
-  - 提供独立于现有开仓任务的建池与首注交易流
-- 让用户可以在建池模块中选择「热门池子」「聪明钱」池子作为基础数据来源并预填 token 基础信息
-  - 默认最小化输入，只暴露协议、价格、费率预设、模式、首注数量等必要参数
-  - 在成功态返回 `pool address/poolId`、`tokenId`、`tx hash`
+  - 统一 `Uniswap V3`、`PancakeSwap V3` 固定费率与 `Uniswap V4` 任意静态费率的校验口径
+  - 支持 `full_range` 与 `custom_range`
+  - 支持输入单侧金额后返回另一侧镜像金额估算
+  - 支持 `create_and_seed` 的单币自动换币配比建池
+  - 保留来源池预填与 `preview + execute` 两段式交互
 - Non-Goals:
-  - 一期不支持 V4 自定义 hooks、动态费率、Pancake Infinity
-  - 一期不自动把新池或首仓仓位导入监控、策略任务或聪明钱追踪
-  - 一期不支持单币输入后自动换币打首仓
-  - 一期不扩展到 Base 等其他链
+  - 不支持 `Uniswap V4` 动态费率和非零 hooks
+  - 不支持把建池后的仓位自动导入监控或策略任务
+  - 不支持原生 BNB 直充；仍以 ERC20 输入为前提
 
 ## Decisions
-### Decision: 建池走独立交易流，不复用 open_position
-- 建池接口与执行逻辑独立于 `open_position`、`StrategyTask`、`EnterTaskFromUSDTWithOptions`。
-- 执行时仍复用现有每钱包串行交易执行器与授权能力，避免并发交易冲突。
-- 返回值以「建池结果」为中心，而不是任务对象。
+### Decision: 保留 preview + execute，两段都必须理解“区间 + 金额模式”
+- `preview` 统一负责 token 顺序归一化、fee / tickSpacing 校验、价格推导、区间归一化、金额估算和池子存在性校验。
+- `execute` 在执行前重新做关键校验，避免 preview 之后价格漂移、报价失效或池子被他人抢先初始化。
 - Alternatives considered:
-  - 复用 `open_position`：会把“已有池开仓”和“新池创建+首仓”混在一套任务模型里，导致参数语义、成功态、后续持仓归属都变得不清晰，因此不采用。
+  - 只在前端做镜像金额推导：会造成前端展示、后端真实执行和 OKX 报价口径分裂，因此不采用。
 
-### Decision: 使用 preview + execute 两段式接口
-- 新增 `preview` 接口，用于统一完成以下派生与校验：
-  - token metadata 读取与 token0/token1 自动排序
-  - 池子是否已存在检查
-  - 初始价格到 `sqrtPriceX96` 的换算
-  - V3 tickSpacing / V4 fee+ticks 预设解析
-  - 默认首仓范围推导
-  - 授权与余额风险提示
-- 新增 `execute` 接口，基于确认后的参数执行链上交易，并在执行前重新做关键校验。
+### Decision: V3 / Pancake V3 固定费率，V4 任意静态费率必须显式处理 tickSpacing
+- `Uniswap V3` 仅接受 `100/500/3000/10000`。
+- `PancakeSwap V3` 仅接受 `100/500/2500/10000`。
+- `Uniswap V4` 接受任意静态 `fee_tier`，但由于 fee 与 `tickSpacing` 不再是一一映射，接口需要新增 `tick_spacing`。
+- `tick_spacing` 的来源规则：
+  - 来源池预填时，优先直接带入来源池的 `tickSpacing`
+  - 手动创建 `Uniswap V4` 池子时，前端展示推荐值并允许改写，后端只接受合法的正整数 `tick_spacing`
 - Alternatives considered:
-  - 只保留单一 execute 接口：输入错误会直接在链上阶段暴露，用户难以理解失败原因，也不利于做“池子已存在”与参数摘要展示，因此不采用。
+  - 继续通过固定 `fee -> tickSpacing` 映射支持 V4 任意费率：会生成错误的 `PoolKey`，因此不采用。
 
-### Decision: WebApp 默认最小表单，进阶参数折叠
-- 默认可见参数：
-  - 钱包
-  - 目标协议
-  - Token A / Token B
-  - 初始价格
-  - 费率或预设模板
-  - 模式（仅建池 / 建池并首注）
-  - 首注数量（仅 `create_and_seed`）
-- 默认隐藏在“高级选项”中的参数：
-  - 自定义价格区间
-  - deadline
-  - slippage
-  - V4 的 tickSpacing 明细（通过模板驱动，而不是直接裸露输入）
-- 首仓默认使用 `full_range`，降低首次输入负担；高级选项可切换到自定义区间。
-
-### Decision: 预填来源在建池模块内选择
-- 用户进入建池模块后，可以从「热门池子」或「聪明钱」池子数据集中选择一个来源，前端把以下信息带入表单：
-  - token 地址、symbol、decimals（若已有）
-  - 参考价格
-  - 来源池协议与费率提示
-  - 来源池标识，用于在 UI 上说明“本次建池基础信息来自哪个池子”
-- 用户仍可在建池模块内切换目标协议，不把来源池协议锁死。
-- 手工入口依然保留，允许用户跳过来源选择并直接输入 token 地址进行建池。
-
-### Decision: 协议执行采用分协议封装
-- `Uniswap V3` / `PancakeSwap V3`
-  - 使用各自 factory 检查同 pair + fee 的池子是否已存在
-  - 通过 PositionManager `createAndInitializePoolIfNecessary` 创建并初始化池子
-  - 在 `create_and_seed` 模式下先完成 token 授权，再调用 `mint` 打首仓
-  - 返回 pool address、NFT tokenId、tx hash
-- `Uniswap V4`
-  - 一期仅允许 `zero hooks + static fee`
-  - `create_only` 负责构造 `PoolKey` 并初始化池子，返回 poolId
-  - `create_and_seed` 需要在初始化后继续执行首仓动作，并返回 tokenId
-  - poolId 使用后端统一计算与校验，不让前端自己拼接
-
-### Decision: 首仓不做自动换币，要求双币余额充足
-- `create_and_seed` 由用户直接输入两侧 token 数量。
-- 后端只负责余额校验、授权与 mint/modify liquidity，不引入路由换币。
+### Decision: 自定义区间以“价格区间输入，后端归一化为 ticks”为主
+- API 新增 `range_mode=custom_range` 以及 `min_price` / `max_price`，价格语义统一为 `1 TokenA = X TokenB`。
+- 后端根据归一化后的 `token0/token1`、`tick_spacing` 和价格方向，把区间转换为按 `tick_spacing` 对齐的 `tickLower` / `tickUpper`。
+- preview 返回最终 `tickLower` / `tickUpper` 和归一化后的价格摘要，前端只展示，不自行拼装 ticks。
 - Alternatives considered:
-  - 允许单边输入并自动 swap：会把路由、滑点和 MEV 风险引入建池首仓场景，一期复杂度与资金风险都过高，因此不采用。
+  - 直接让前端提交 ticks：普通用户理解成本高，也容易产生未按 `tickSpacing` 对齐的无效输入，因此不采用。
+
+### Decision: 金额模式拆成“双币精确输入”和“单币自动换币”
+- API 新增 `amount_mode`：
+  - `dual_exact`: 用户显式提供 `amount_a` 与 `amount_b`
+  - `single_auto_swap`: 用户只提供一侧 token 和数量，由后端基于当前价格、目标区间和 OKX 路由生成换币与建池参数
+- preview 阶段允许用户只输入一侧金额，此时后端返回镜像金额估算；只有当用户显式选择 `single_auto_swap` 时，execute 才允许自动换币。
+- Alternatives considered:
+  - 只做单侧金额展示，不支持执行：不能满足“单币直接自己兑换组成比例建池”，因此不采用。
+
+### Decision: 单币自动换币尽量复用现有 zap 与 OKX 路由
+- `Uniswap V3` / `PancakeSwap V3` 的单币首仓复用 `ZapInV3` 能力；新池初始化后，通过 `createAndInitializePoolIfNecessary + zapInV3` 完成首仓。
+- `Uniswap V4` 的单币首仓复用 `ZapInV4` 能力；新池初始化后，通过 `initializePool + zapInV4` 完成首仓。
+- 双币输入时：
+  - V3 / Pancake V3 继续使用 `mint` 直打
+  - V4 继续使用 `zapInV4`，但 swap 参数为空
+- Alternatives considered:
+  - 所有协议统一切到 zap：可行，但会放大现有双币链路的改动面；当前优先补单币 path，同时保留双币 path 的稳定性。
 
 ## Risks / Trade-offs
-- V4 参数面天然大于 V3，若不限制 hooks 和 fee/tickSpacing 组合，会显著抬高实现与测试成本。
-  - Mitigation: 一期只开放零 hooks 和有限模板。
-- 用户输入的初始价格如果方向理解错误，会直接导致错误初始化价格。
-  - Mitigation: preview 返回归一化后的 token 顺序、价格摘要和结果卡片，要求用户确认后再执行。
-- 建池与首仓一旦成功，后续是否纳入监控仍需要额外动作。
-  - Mitigation: 成功态先明确返回识别信息，后续再单独规划“导入监控/导入策略”。
+- 单币自动换币依赖 OKX 报价，报价过期或链上价格快速变化时，execute 可能失败。
+  - Mitigation: preview 返回风险提示；execute 重新拉取 swap calldata，并对 `minAmountOut`、`maxSwapLossBps` 做保护。
+- `Uniswap V4` 任意 fee 需要用户理解 `tickSpacing`，否则容易创建出与预期不符的池子。
+  - Mitigation: 默认优先从来源池预填；手动模式只在高级设置中暴露 `tick_spacing`，并给出推荐值与说明。
+- 自定义区间与单币换币叠加后，preview 估算值与最终落地值可能存在偏差。
+  - Mitigation: UI 明确区分“估算展示”和“最终执行”，并在 execute 前强制再次校验。
 
 ## Migration Plan
-1. 后端先补齐协议绑定、参数推导与 preview/execute API。
-2. WebApp 增加独立的「创建池子」模块与成功结果卡。
-3. 在建池模块中接入「热门池子」「聪明钱」来源选择器。
-4. 仅当链为 `bsc` 且目标协议部署地址配置完整时，前端才展示对应协议选项。
+1. 扩展后端 `create_pool` 请求/响应结构，补齐 `tick_spacing`、`amount_mode`、`min_price`、`max_price` 等字段。
+2. 完成后端 fee / range / 单币 quote 与执行链路，并补齐单元测试。
+3. 更新 WebApp 创建池子面板与 API 调用，加入 V4 任意 fee、自定义区间、单币镜像金额与自动换币选项。
+4. 完成 `webapp` 构建验证，并在 BSC 环境手工验证三类协议的双币 / 单币建池流程。
 
 ## Open Questions
-- 无。该提案默认以 `create_and_seed` 为推荐模式，但保留 `create_only` 以兼容只想抢先初始化池子的用户。
+- 暂无。当前变更默认把 `single_auto_swap` 作为 `create_and_seed` 的可选模式，而不是默认模式。

@@ -278,9 +278,13 @@ export async function previewCreatePool({
   tokenAAddress,
   tokenBAddress,
   feeTier,
+  tickSpacing,
   initialPrice,
   mode = 'create_and_seed',
   rangeMode = 'full_range',
+  amountMode = 'dual_exact',
+  minPrice,
+  maxPrice,
   amountA,
   amountB,
   slippageTolerance,
@@ -297,11 +301,20 @@ export async function previewCreatePool({
     fee_tier: feeTier,
     mode,
     range_mode: rangeMode,
+    amount_mode: amountMode,
   };
   const wid = Number(walletId);
   if (Number.isFinite(wid) && wid > 0) payload.wallet_id = wid;
+  const spacing = Number(tickSpacing);
+  if (Number.isFinite(spacing) && spacing > 0) payload.tick_spacing = spacing;
   if (initialPrice !== undefined && initialPrice !== null && String(initialPrice).trim()) {
     payload.initial_price = String(initialPrice).trim();
+  }
+  if (minPrice !== undefined && minPrice !== null && String(minPrice).trim()) {
+    payload.min_price = String(minPrice).trim();
+  }
+  if (maxPrice !== undefined && maxPrice !== null && String(maxPrice).trim()) {
+    payload.max_price = String(maxPrice).trim();
   }
   if (amountA !== undefined && amountA !== null && String(amountA).trim()) {
     payload.amount_a = String(amountA).trim();
@@ -327,9 +340,13 @@ export async function executeCreatePool({
   tokenAAddress,
   tokenBAddress,
   feeTier,
+  tickSpacing,
   initialPrice,
   mode = 'create_and_seed',
   rangeMode = 'full_range',
+  amountMode = 'dual_exact',
+  minPrice,
+  maxPrice,
   amountA,
   amountB,
   slippageTolerance,
@@ -346,11 +363,20 @@ export async function executeCreatePool({
     fee_tier: feeTier,
     mode,
     range_mode: rangeMode,
+    amount_mode: amountMode,
   };
   const wid = Number(walletId);
   if (Number.isFinite(wid) && wid > 0) payload.wallet_id = wid;
+  const spacing = Number(tickSpacing);
+  if (Number.isFinite(spacing) && spacing > 0) payload.tick_spacing = spacing;
   if (initialPrice !== undefined && initialPrice !== null && String(initialPrice).trim()) {
     payload.initial_price = String(initialPrice).trim();
+  }
+  if (minPrice !== undefined && minPrice !== null && String(minPrice).trim()) {
+    payload.min_price = String(minPrice).trim();
+  }
+  if (maxPrice !== undefined && maxPrice !== null && String(maxPrice).trim()) {
+    payload.max_price = String(maxPrice).trim();
   }
   if (amountA !== undefined && amountA !== null && String(amountA).trim()) {
     payload.amount_a = String(amountA).trim();

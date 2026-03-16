@@ -4386,6 +4386,14 @@ body {
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.1);
 }
 
+.cp-input--readonly,
+.cp-input[readonly] {
+  background: rgba(12, 20, 32, 0.92);
+  color: rgba(222, 231, 245, 0.82);
+  border-style: dashed;
+  cursor: default;
+}
+
 .cp-select-wrap {
   position: relative;
 }

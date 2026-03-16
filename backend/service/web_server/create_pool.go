@@ -34,6 +34,9 @@ const (
 	createPoolModeCreateOnly    = "create_only"
 	createPoolModeCreateAndSeed = "create_and_seed"
 	createPoolRangeModeFull     = "full_range"
+	createPoolRangeModeCustom   = "custom_range"
+	createPoolAmountModeDual    = "dual_exact"
+	createPoolAmountModeSingle  = "single_auto_swap"
 )
 
 type createPoolRequest struct {
@@ -44,9 +47,13 @@ type createPoolRequest struct {
 	TokenAAddress string   `json:"token_a_address"`
 	TokenBAddress string   `json:"token_b_address"`
 	FeeTier       uint64   `json:"fee_tier"`
+	TickSpacing   int      `json:"tick_spacing,omitempty"`
 	InitialPrice  string   `json:"initial_price,omitempty"`
 	Mode          string   `json:"mode,omitempty"`
 	RangeMode     string   `json:"range_mode,omitempty"`
+	AmountMode    string   `json:"amount_mode,omitempty"`
+	MinPrice      string   `json:"min_price,omitempty"`
+	MaxPrice      string   `json:"max_price,omitempty"`
 	AmountA       string   `json:"amount_a,omitempty"`
 	AmountB       string   `json:"amount_b,omitempty"`
 	Slippage      *float64 `json:"slippage_tolerance,omitempty"`
@@ -67,6 +74,7 @@ type createPoolPreviewResponse struct {
 	Protocol                 string                  `json:"protocol"`
 	Mode                     string                  `json:"mode"`
 	RangeMode                string                  `json:"range_mode"`
+	AmountMode               string                  `json:"amount_mode,omitempty"`
 	WalletAddress            string                  `json:"wallet_address"`
 	TokenA                   createPoolTokenResponse `json:"token_a"`
 	TokenB                   createPoolTokenResponse `json:"token_b"`
@@ -78,6 +86,8 @@ type createPoolPreviewResponse struct {
 	InitialPriceSource       string                  `json:"initial_price_source,omitempty"`
 	SuggestedInitialPrice    string                  `json:"suggested_initial_price,omitempty"`
 	CanonicalPriceToken1Per0 string                  `json:"canonical_price_token1_per_token0,omitempty"`
+	MinPrice                 string                  `json:"min_price,omitempty"`
+	MaxPrice                 string                  `json:"max_price,omitempty"`
 	SqrtPriceX96             string                  `json:"sqrt_price_x96,omitempty"`
 	TickLower                int                     `json:"tick_lower,omitempty"`
 	TickUpper                int                     `json:"tick_upper,omitempty"`
@@ -85,6 +95,15 @@ type createPoolPreviewResponse struct {
 	AmountB                  string                  `json:"amount_b,omitempty"`
 	Amount0Desired           string                  `json:"amount0_desired,omitempty"`
 	Amount1Desired           string                  `json:"amount1_desired,omitempty"`
+	MirrorAmountA            string                  `json:"mirror_amount_a,omitempty"`
+	MirrorAmountB            string                  `json:"mirror_amount_b,omitempty"`
+	MirrorAmountSource       string                  `json:"mirror_amount_source,omitempty"`
+	SingleSidedInput         string                  `json:"single_sided_input,omitempty"`
+	EstimatedSwapDirection   string                  `json:"estimated_swap_direction,omitempty"`
+	EstimatedSwapAmount      string                  `json:"estimated_swap_amount,omitempty"`
+	EstimatedSwapAmountRaw   string                  `json:"estimated_swap_amount_raw,omitempty"`
+	EstimatedSwapTokenIn     string                  `json:"estimated_swap_token_in,omitempty"`
+	EstimatedSwapTokenOut    string                  `json:"estimated_swap_token_out,omitempty"`
 	EstimatedLiquidity       string                  `json:"estimated_liquidity,omitempty"`
 	PoolExists               bool                    `json:"pool_exists"`
 	ExistingPoolAddress      string                  `json:"existing_pool_address,omitempty"`
@@ -134,6 +153,7 @@ type createPoolPlan struct {
 	protocol                 string
 	mode                     string
 	rangeMode                string
+	amountMode               string
 	slippagePct              float64
 	tokenA                   createPoolTokenMeta
 	tokenB                   createPoolTokenMeta
@@ -147,15 +167,32 @@ type createPoolPlan struct {
 	initialPriceSource       string
 	canonicalPriceToken1Per0 *big.Float
 	canonicalPriceText       string
+	currentTick              int
 	sqrtPriceX96             *big.Int
 	tickLower                int
 	tickUpper                int
+	minPriceABText           string
+	maxPriceABText           string
 	amountAInput             string
 	amountBInput             string
 	amountAUnits             *big.Int
 	amountBUnits             *big.Int
 	amount0Desired           *big.Int
 	amount1Desired           *big.Int
+	mirrorAmountAUnits       *big.Int
+	mirrorAmountBUnits       *big.Int
+	mirrorAmountA            string
+	mirrorAmountB            string
+	mirrorAmountSource       string
+	singleSidedInput         string
+	singleInputToken         common.Address
+	singleInputAmount        *big.Int
+	singleInputAmountText    string
+	estimatedSwapDirection   string
+	estimatedSwapAmount      *big.Int
+	estimatedSwapAmountText  string
+	estimatedSwapTokenIn     common.Address
+	estimatedSwapTokenOut    common.Address
 	estimatedLiquidity       *big.Int
 	poolExists               bool
 	existingPoolAddress      common.Address
@@ -194,6 +231,19 @@ func normalizeCreatePoolRangeMode(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "", createPoolRangeModeFull:
 		return createPoolRangeModeFull
+	case createPoolRangeModeCustom:
+		return createPoolRangeModeCustom
+	default:
+		return ""
+	}
+}
+
+func normalizeCreatePoolAmountMode(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", createPoolAmountModeDual:
+		return createPoolAmountModeDual
+	case createPoolAmountModeSingle:
+		return createPoolAmountModeSingle
 	default:
 		return ""
 	}
@@ -508,7 +558,7 @@ func (s *Server) resolveCreatePoolPrice(plan *createPoolPlan, raw string) (*big.
 	return value, text, "usd_ratio", nil, nil
 }
 
-func (s *Server) prepareCreatePoolPlan(req *createPoolRequest, requireAmounts bool) (*createPoolPlan, *createPoolPreviewResponse, error) {
+func (s *Server) prepareCreatePoolPlanLegacy(req *createPoolRequest, requireAmounts bool) (*createPoolPlan, *createPoolPreviewResponse, error) {
 	ctx, err := s.resolveCreatePoolContext(req)
 	if err != nil {
 		return nil, nil, err
@@ -794,7 +844,7 @@ func (s *Server) prepareCreatePoolPlan(req *createPoolRequest, requireAmounts bo
 	return plan, resp, nil
 }
 
-func (s *Server) executeCreatePoolPlan(plan *createPoolPlan) (*createPoolExecuteResponse, error) {
+func (s *Server) executeCreatePoolPlanLegacy(plan *createPoolPlan) (*createPoolExecuteResponse, error) {
 	if plan == nil || plan.ctx == nil {
 		return nil, fmt.Errorf("create pool plan is nil")
 	}

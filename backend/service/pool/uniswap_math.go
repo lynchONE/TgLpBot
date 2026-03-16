@@ -119,6 +119,16 @@ func liquidityForAmount1(sqrtA, sqrtB, amount1 *big.Int) *big.Int {
 	return mulDivFloor(amount1, q96, new(big.Int).Sub(sqrtB, sqrtA))
 }
 
+// LiquidityForAmount0 returns the maximum liquidity for a token0-only amount across a price range.
+func LiquidityForAmount0(sqrtA, sqrtB, amount0 *big.Int) *big.Int {
+	return liquidityForAmount0(sqrtA, sqrtB, amount0)
+}
+
+// LiquidityForAmount1 returns the maximum liquidity for a token1-only amount across a price range.
+func LiquidityForAmount1(sqrtA, sqrtB, amount1 *big.Int) *big.Int {
+	return liquidityForAmount1(sqrtA, sqrtB, amount1)
+}
+
 func amount0ForLiquidity(sqrtA, sqrtB, liquidity *big.Int) *big.Int {
 	if sqrtA.Cmp(sqrtB) > 0 {
 		sqrtA, sqrtB = sqrtB, sqrtA

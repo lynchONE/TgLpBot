@@ -53,6 +53,22 @@ func floorDiv(a, b int) int {
 	return (a / b) - 1
 }
 
+// AlignTickDown rounds a tick down to the nearest valid tickSpacing boundary.
+func AlignTickDown(tick, tickSpacing int) (int, error) {
+	if tickSpacing <= 0 {
+		return 0, fmt.Errorf("invalid tick spacing: %d", tickSpacing)
+	}
+	return floorDiv(tick, tickSpacing) * tickSpacing, nil
+}
+
+// AlignTickUp rounds a tick up to the nearest valid tickSpacing boundary.
+func AlignTickUp(tick, tickSpacing int) (int, error) {
+	if tickSpacing <= 0 {
+		return 0, fmt.Errorf("invalid tick spacing: %d", tickSpacing)
+	}
+	return ceilDiv(tick, tickSpacing) * tickSpacing, nil
+}
+
 // FullRangeTicks returns the valid full-range ticks for a given tick spacing.
 func FullRangeTicks(tickSpacing int) (int, int, error) {
 	if tickSpacing <= 0 {
