@@ -538,7 +538,7 @@ export default function App() {
   const [smartError, setSmartError] = useState('');
 
   const [selectedPool, setSelectedPool] = useState(null);
-  const [klineInterval, setKlineInterval] = useState('5m');
+  const [klineInterval, setKlineInterval] = useState('1m');
   const [klineTokenSide, setKlineTokenSide] = useState('auto');
   const [klineCandles, setKlineCandles] = useState([]);
   const [klineLoading, setKlineLoading] = useState(false);
@@ -1516,6 +1516,7 @@ export default function App() {
 
   const [openPosPool, setOpenPosPool] = useState(null);
   const [openPosBusy, setOpenPosBusy] = useState(false);
+  const [openPosSubmitError, setOpenPosSubmitError] = useState('');
   const [openPosWallets, setOpenPosWallets] = useState(null);
   const [openPosWalletsLoading, setOpenPosWalletsLoading] = useState(false);
   const [openPosWalletId, setOpenPosWalletId] = useState(() => {
@@ -1546,6 +1547,7 @@ export default function App() {
       .trim()
       .toLowerCase();
 
+    setOpenPosSubmitError('');
     setOpenPosPool({
       ...pool,
       chain: resolvedChain,
@@ -1611,6 +1613,7 @@ export default function App() {
   const handleOpenPosition = useCallback(async (params) => {
     const panelKey = openPosPool?.panelKey || 'hot_pools';
     setOpenPosBusy(true);
+    setOpenPosSubmitError('');
     setOperationProgress({
       panelKey,
       operation: 'open_position',
@@ -1619,16 +1622,17 @@ export default function App() {
       status: 'active',
       error: '',
     });
-    setOpenPosPool(null);
     try {
       await apiOpenPosition({ apiBaseUrl, initData, ...params });
       setOperationProgress(prev => prev?.operation === 'open_position'
         ? { ...prev, currentStep: 4, status: 'done' } : prev);
+      setOpenPosSubmitError('');
+      setOpenPosPool(null);
       loadPositions();
     } catch (e) {
       const msg = String(e?.message || e);
-      setOperationProgress(prev => prev?.operation === 'open_position'
-        ? { ...prev, status: 'error', error: msg } : prev);
+      setOperationProgress((prev) => (prev?.operation === 'open_position' ? null : prev));
+      setOpenPosSubmitError(msg);
     } finally {
       setOpenPosBusy(false);
     }
@@ -3295,9 +3299,18 @@ export default function App() {
           wallets={openPosWallets}
           walletsLoading={openPosWalletsLoading}
           selectedWalletId={openPosWalletId}
-          onWalletSelect={(id) => { setOpenPosWalletId(id); storageSet(STORAGE.walletId, String(id)); }}
+          submitError={openPosSubmitError}
+          onClearSubmitError={() => setOpenPosSubmitError('')}
+          onWalletSelect={(id) => {
+            setOpenPosSubmitError('');
+            setOpenPosWalletId(id);
+            storageSet(STORAGE.walletId, String(id));
+          }}
           onSubmit={handleOpenPosition}
-          onClose={() => setOpenPosPool(null)}
+          onClose={() => {
+            setOpenPosSubmitError('');
+            setOpenPosPool(null);
+          }}
           busy={openPosBusy}
         />
       )}

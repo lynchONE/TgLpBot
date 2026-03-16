@@ -22,18 +22,20 @@ import {
   fetchWallets,
   previewCreatePool,
 } from '../api';
+import pancakeLogo from '../img/pancake.svg';
+import uniswapLogo from '../img/uniswap.svg';
 import PanelShell, { EmptyState } from './PanelShell';
 import { normalizeHexAddress, shortAddress } from '../utils';
 
 const PROTOCOL_OPTIONS = [
-  { key: 'univ3', label: 'Uniswap V3', icon: 'U3' },
-  { key: 'univ4', label: 'Uniswap V4', icon: 'U4' },
-  { key: 'pcsv3', label: 'Pancake V3', icon: 'P3' },
+  { key: 'univ3', label: 'Uniswap V3', badge: 'V3', logoSrc: uniswapLogo, accent: '#ff007a' },
+  { key: 'univ4', label: 'Uniswap V4', badge: 'V4', logoSrc: uniswapLogo, accent: '#ff007a' },
+  { key: 'pcsv3', label: 'Pancake V3', badge: 'V3', logoSrc: pancakeLogo, accent: '#d1884f' },
 ];
 
 const MODE_OPTIONS = [
-  { key: 'create_and_seed', label: '建池+首注', desc: '创建池子并立即注入初始流动性' },
-  { key: 'create_only', label: '仅建池', desc: '只初始化池子价格，稍后手动首注' },
+  { key: 'create_and_seed', label: '建池并首注', desc: '创建池子后立即注入首笔流动性' },
+  { key: 'create_only', label: '仅建池', desc: '只初始化池子价格，后续再手动首注' },
 ];
 
 const SOURCE_TABS = [
@@ -82,6 +84,10 @@ function supportsFeeTier(protocol, feeTier) {
   return supportedFeeTiers(protocol).includes(Number(feeTier || 0));
 }
 
+function supportsCustomFeeTier(protocol) {
+  return protocol === 'univ3' || protocol === 'pcsv3';
+}
+
 function defaultFeeTier(protocol) {
   return supportedFeeTiers(protocol)[1] || supportedFeeTiers(protocol)[0] || 500;
 }
@@ -89,7 +95,39 @@ function defaultFeeTier(protocol) {
 function formatFeeTier(feeTier) {
   const n = Number(feeTier || 0);
   if (!Number.isFinite(n) || n <= 0) return '--';
-  return `${(n / 10000).toFixed(n >= 10000 ? 2 : 2).replace(/\.?0+$/, '')}%`;
+  const pct = n / 10000;
+  const digits = pct < 0.01 ? 4 : pct < 0.1 ? 3 : 2;
+  return `${pct.toFixed(digits).replace(/\.?0+$/, '')}%`;
+}
+
+function getProtocolOption(protocol) {
+  return PROTOCOL_OPTIONS.find((item) => item.key === protocol) || null;
+}
+
+function inferProtocolKey(exchangeName, versionText) {
+  const exchange = String(exchangeName || '').trim().toLowerCase();
+  const version = String(versionText || '').trim().toLowerCase();
+  const merged = `${exchange} ${version}`;
+  if (merged.includes('pancake') || merged.includes('pcs')) return 'pcsv3';
+  if (merged.includes('uniswap') && merged.includes('v4')) return 'univ4';
+  if (merged.includes('uniswap')) return 'univ3';
+  if (version === 'v4') return 'univ4';
+  if (version === 'v3') return exchange.includes('pancake') || exchange.includes('pcs') ? 'pcsv3' : 'univ3';
+  return '';
+}
+
+function buildSourceProtocolMeta(exchangeName, versionText) {
+  const protocol = inferProtocolKey(exchangeName, versionText);
+  const option = getProtocolOption(protocol);
+  const version = String(versionText || '').trim().toUpperCase();
+  const fallbackLabel = `${String(exchangeName || '').trim()} ${version}`.trim();
+  return {
+    protocol,
+    label: option?.label || fallbackLabel || '--',
+    badge: option?.badge || version || '',
+    logoSrc: option?.logoSrc || '',
+    accent: option?.accent || '',
+  };
 }
 
 function buildSourcePricePrefill(token0Symbol, token1Symbol, priceDisplay) {
@@ -118,18 +156,20 @@ function buildHotSources(rows) {
       const [pair0, pair1] = parsePairSymbols(row?.trading_pair);
       const token0Symbol = String(row?.token0_symbol || pair0 || '').trim();
       const token1Symbol = String(row?.token1_symbol || pair1 || '').trim();
-      const feeTier = feeTierFromPct(row?.fee_percentage);
+      const exchangeName = String(row?.factory_name || row?.dex || '热门池子').trim();
+      const protocolMeta = buildSourceProtocolMeta(exchangeName, row?.protocol_version);
       return {
         key: `hot:${normalizeHexAddress(row?.pool_address) || index}`,
         label: String(row?.trading_pair || `${token0Symbol}/${token1Symbol}` || '--').trim(),
-        subtitle: String(row?.factory_name || row?.dex || '热门池子').trim(),
         token0Address,
         token1Address,
         token0Symbol,
         token1Symbol,
-        feeTier,
+        feeTier: feeTierFromPct(row?.fee_percentage),
         priceHint: String(row?.price_display || '').trim(),
         pricePrefill: buildSourcePricePrefill(token0Symbol, token1Symbol, row?.price_display),
+        protocol: protocolMeta.protocol,
+        protocolMeta,
       };
     })
     .filter(Boolean)
@@ -143,10 +183,11 @@ function buildSmartSources(rows) {
       const token1Address = normalizeHexAddress(row?.token1);
       if (!token0Address || !token1Address) return null;
       const [pair0, pair1] = parsePairSymbols(row?.pair);
+      const exchangeName = String(row?.exchange || 'Smart Money').trim();
+      const protocolMeta = buildSourceProtocolMeta(exchangeName, row?.pool_version);
       return {
         key: `smart:${normalizeHexAddress(row?.pool_id) || index}`,
         label: String(row?.pair || '--').trim(),
-        subtitle: `${String(row?.exchange || 'Smart Money').trim()} ${String(row?.pool_version || '').trim().toUpperCase()}`.trim(),
         token0Address,
         token1Address,
         token0Symbol: String(row?.token0_symbol || pair0 || '').trim(),
@@ -154,19 +195,30 @@ function buildSmartSources(rows) {
         feeTier: feeTierFromPct(row?.fee_pct),
         priceHint: '可作为币对与费率参考来源',
         pricePrefill: '',
+        protocol: protocolMeta.protocol,
+        protocolMeta,
       };
     })
     .filter(Boolean)
     .slice(0, 10);
 }
 
-function fieldErrorText(resp) {
-  if (!resp) return '';
-  if (Array.isArray(resp?.warnings) && resp.warnings.length > 0) return String(resp.warnings[0]);
-  return '';
+function ProtocolMark({ protocol, meta, compact = false }) {
+  const resolvedMeta = meta || getProtocolOption(protocol);
+  if (!resolvedMeta) return null;
+  return (
+    <span
+      className={`cp-protocol-pill${compact ? ' compact' : ''}`}
+      title={resolvedMeta.label || ''}
+      style={resolvedMeta.accent ? { '--cp-protocol-accent': resolvedMeta.accent } : undefined}
+    >
+      {resolvedMeta.logoSrc ? <img src={resolvedMeta.logoSrc} alt="" className="cp-protocol-logo" /> : null}
+      {resolvedMeta.badge ? <span className="cp-protocol-version">{resolvedMeta.badge}</span> : null}
+      {!resolvedMeta.logoSrc && resolvedMeta.label ? <span>{resolvedMeta.label}</span> : null}
+    </span>
+  );
 }
 
-/* ---------- Section wrapper with step indicator ---------- */
 function StepSection({ step, title, subtitle, children, accent }) {
   return (
     <div className={`cp-section${accent ? ' cp-section--accent' : ''}`}>
@@ -199,6 +251,7 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
   const [tokenAAddress, setTokenAAddress] = useState('');
   const [tokenBAddress, setTokenBAddress] = useState('');
   const [feeTier, setFeeTier] = useState(defaultFeeTier('univ3'));
+  const [customFeeTierInput, setCustomFeeTierInput] = useState('');
   const [initialPrice, setInitialPrice] = useState('');
   const [amountA, setAmountA] = useState('');
   const [amountB, setAmountB] = useState('');
@@ -208,17 +261,18 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
 
-  const sourceOptions = useMemo(() => ({
-    hot: hotSources,
-    smart: smartSources,
-  }), [hotSources, smartSources]);
-
+  const sourceOptions = useMemo(() => ({ hot: hotSources, smart: smartSources }), [hotSources, smartSources]);
   const selectedSource = useMemo(() => {
     const list = sourceOptions[sourceTab] || [];
     return list.find((item) => item.key === selectedSourceKey) || null;
   }, [selectedSourceKey, sourceOptions, sourceTab]);
-
   const protocolFees = useMemo(() => supportedFeeTiers(protocol), [protocol]);
+  const protocolMeta = useMemo(() => getProtocolOption(protocol), [protocol]);
+  const allowCustomFeeTier = useMemo(() => supportsCustomFeeTier(protocol), [protocol]);
+  const isCustomFeeTier = useMemo(() => {
+    const numeric = Number(feeTier || 0);
+    return allowCustomFeeTier && numeric > 0 && !supportsFeeTier(protocol, numeric);
+  }, [allowCustomFeeTier, feeTier, protocol]);
   const selectedWalletId = useMemo(() => {
     const numeric = Number(walletId || 0);
     if (Number.isFinite(numeric) && numeric > 0 && wallets.some((item) => Number(item?.id || 0) === numeric)) {
@@ -229,9 +283,20 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
   }, [walletId, wallets]);
 
   useEffect(() => {
-    if (supportsFeeTier(protocol, feeTier)) return;
+    const numeric = Number(feeTier || 0);
+    if (supportsFeeTier(protocol, numeric)) return;
+    if (allowCustomFeeTier && numeric > 0) return;
     setFeeTier(defaultFeeTier(protocol));
-  }, [feeTier, protocol]);
+  }, [allowCustomFeeTier, feeTier, protocol]);
+
+  useEffect(() => {
+    const numeric = Number(feeTier || 0);
+    if (allowCustomFeeTier && numeric > 0 && !supportsFeeTier(protocol, numeric)) {
+      setCustomFeeTierInput(String(numeric));
+      return;
+    }
+    setCustomFeeTierInput('');
+  }, [allowCustomFeeTier, feeTier, protocol]);
 
   useEffect(() => {
     if (!hasInitData) {
@@ -240,7 +305,6 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
       setSmartSources([]);
       return undefined;
     }
-
     const controller = new AbortController();
     setWalletsLoading(true);
     setWalletsError('');
@@ -258,12 +322,11 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
         }
       })
       .finally(() => setWalletsLoading(false));
-
     return () => controller.abort();
   }, [apiBaseUrl, hasInitData, initData]);
 
   const reloadSources = useCallback(() => {
-    if (!hasInitData) return;
+    if (!hasInitData) return undefined;
     const controller = new AbortController();
     setSourcesLoading(true);
     setSourcesError('');
@@ -308,18 +371,22 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
 
   const applySource = useCallback((source, tabKey) => {
     if (!source) return;
+    const nextProtocol = source.protocol || protocol;
     setSourceTab(tabKey);
     setSelectedSourceKey(source.key);
+    setProtocol(nextProtocol);
     setTokenAAddress(source.token0Address || '');
     setTokenBAddress(source.token1Address || '');
-    if (supportsFeeTier(protocol, source.feeTier)) {
-      setFeeTier(source.feeTier);
+    if (Number(source.feeTier || 0) > 0) {
+      setFeeTier(Number(source.feeTier));
+    } else if (!supportsFeeTier(nextProtocol, feeTier) && !supportsCustomFeeTier(nextProtocol)) {
+      setFeeTier(defaultFeeTier(nextProtocol));
     }
     setInitialPrice(source.pricePrefill || '');
     setPreview(null);
     setResult(null);
     setError('');
-  }, [protocol]);
+  }, [feeTier, protocol]);
 
   const createPayload = useCallback(() => ({
     apiBaseUrl,
@@ -378,21 +445,28 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
     }
   }, [createPayload, hasInitData]);
 
+  const handlePresetFeeTier = useCallback((nextFeeTier) => {
+    setFeeTier(Number(nextFeeTier || 0));
+    setCustomFeeTierInput('');
+  }, []);
+
+  const handleCustomFeeTierChange = useCallback((value) => {
+    const sanitized = String(value || '').replace(/[^\d]/g, '').slice(0, 6);
+    setCustomFeeTierInput(sanitized);
+    const numeric = Number(sanitized);
+    setFeeTier(Number.isFinite(numeric) && numeric > 0 ? numeric : 0);
+  }, []);
+
   const activeSources = sourceOptions[sourceTab] || [];
-  const selectedWallet = wallets.find((w) => Number(w?.id || 0) === selectedWalletId);
+  const selectedWallet = wallets.find((item) => Number(item?.id || 0) === selectedWalletId);
 
   return (
     <PanelShell
       title="创建池子"
-      subtitle="BSC · Uniswap V3 / V4 / Pancake V3"
+      subtitle="BSC · Uniswap / Pancake"
       icon={Factory}
       actions={(
-        <button
-          type="button"
-          className="ghost-chip"
-          onClick={reloadSources}
-          disabled={!hasInitData || sourcesLoading}
-        >
+        <button type="button" className="ghost-chip" onClick={reloadSources} disabled={!hasInitData || sourcesLoading}>
           <RefreshCw size={13} className={sourcesLoading ? 'spin' : ''} />
           刷新来源
         </button>
@@ -402,7 +476,6 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
         <EmptyState text="请先完成 Telegram 登录后再创建池子。" />
       ) : (
         <div className="cp-root">
-          {/* ===== Step 1: Protocol & Mode ===== */}
           <StepSection step="1" title="选择协议与模式">
             <div className="cp-segmented-row">
               <div className="cp-segmented">
@@ -410,23 +483,21 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
                   <button
                     key={item.key}
                     type="button"
+                    title={item.label}
                     className={`cp-seg-btn${protocol === item.key ? ' active' : ''}`}
                     onClick={() => setProtocol(item.key)}
                   >
-                    <span className="cp-seg-icon">{item.icon}</span>
-                    <span className="cp-seg-label">{item.label}</span>
+                    <span className="cp-seg-icon" style={item.accent ? { '--cp-protocol-accent': item.accent } : undefined}>
+                      <img src={item.logoSrc} alt="" className="cp-protocol-logo" />
+                    </span>
+                    <span className="cp-seg-label">{item.badge}</span>
                   </button>
                 ))}
               </div>
             </div>
             <div className="cp-mode-cards">
               {MODE_OPTIONS.map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  className={`cp-mode-card${mode === item.key ? ' active' : ''}`}
-                  onClick={() => setMode(item.key)}
-                >
+                <button key={item.key} type="button" className={`cp-mode-card${mode === item.key ? ' active' : ''}`} onClick={() => setMode(item.key)}>
                   <span className="cp-mode-radio">
                     {mode === item.key ? <CircleDot size={16} /> : <span className="cp-mode-radio-empty" />}
                   </span>
@@ -439,34 +510,27 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
             </div>
           </StepSection>
 
-          {/* ===== Step 2: Source ===== */}
-          <StepSection step="2" title="数据来源" subtitle="选择热门池子或聪明钱快速填充参数">
+          <StepSection step="2" title="数据来源" subtitle="选择参考池子，自动带入币对、协议和费率">
             <div className="cp-source-tabs">
               {SOURCE_TABS.map((tab) => {
                 const Icon = tab.icon;
                 return (
-                  <button
-                    key={tab.key}
-                    type="button"
-                    className={`cp-source-tab${sourceTab === tab.key ? ' active' : ''}`}
-                    onClick={() => setSourceTab(tab.key)}
-                  >
+                  <button key={tab.key} type="button" className={`cp-source-tab${sourceTab === tab.key ? ' active' : ''}`} onClick={() => setSourceTab(tab.key)}>
                     <Icon size={14} />
                     <span>{tab.label}</span>
                   </button>
                 );
               })}
             </div>
-
             {sourceTab === 'manual' ? (
               <div className="cp-source-empty">
                 <Search size={20} className="cp-source-empty-icon" />
-                <span>手动模式 - 直接在下方输入币对地址</span>
+                <span>手动模式，直接在下面输入 Token 地址和费率。</span>
               </div>
             ) : sourcesLoading && activeSources.length === 0 ? (
               <div className="cp-source-empty">
                 <RefreshCw size={16} className="spin" />
-                <span>正在加载 BSC 来源池子...</span>
+                <span>正在加载来源池子...</span>
               </div>
             ) : activeSources.length === 0 ? (
               <div className="cp-source-empty">
@@ -475,42 +539,35 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
             ) : (
               <div className="cp-source-grid">
                 {activeSources.map((source) => (
-                  <button
-                    key={source.key}
-                    type="button"
-                    className={`cp-source-card${selectedSourceKey === source.key ? ' active' : ''}`}
-                    onClick={() => applySource(source, sourceTab)}
-                  >
+                  <button key={source.key} type="button" className={`cp-source-card${selectedSourceKey === source.key ? ' active' : ''}`} onClick={() => applySource(source, sourceTab)}>
                     <div className="cp-source-top">
                       <span className="cp-source-pair">{source.label}</span>
                       <span className="cp-source-fee">{formatFeeTier(source.feeTier)}</span>
                     </div>
                     <div className="cp-source-bottom">
-                      <span className="cp-source-dex">{source.subtitle}</span>
+                      <ProtocolMark protocol={source.protocol} meta={source.protocolMeta} compact />
                     </div>
-                    {selectedSourceKey === source.key && (
-                      <span className="cp-source-check"><CheckCircle2 size={14} /></span>
-                    )}
+                    {selectedSourceKey === source.key ? <span className="cp-source-check"><CheckCircle2 size={14} /></span> : null}
                   </button>
                 ))}
               </div>
             )}
-
             {selectedSource ? (
               <div className="cp-source-hint-bar">
                 <Zap size={13} />
-                <span>
-                  已选: <strong>{selectedSource.label}</strong> · {selectedSource.subtitle}
-                  {selectedSource.priceHint ? ` · ${selectedSource.priceHint}` : ''}
-                </span>
+                <div className="cp-source-hint-content">
+                  <span>已选 <strong>{selectedSource.label}</strong></span>
+                  <div className="cp-source-hint-meta">
+                    <ProtocolMark protocol={selectedSource.protocol} meta={selectedSource.protocolMeta} compact />
+                    {selectedSource.priceHint ? <span>{selectedSource.priceHint}</span> : null}
+                  </div>
+                </div>
               </div>
             ) : null}
           </StepSection>
 
-          {/* ===== Step 3: Parameters ===== */}
           <StepSection step="3" title="配置参数">
             <div className="cp-form-grid">
-              {/* Wallet */}
               <div className="cp-field">
                 <label className="cp-field-label">
                   <Wallet size={13} />
@@ -526,11 +583,10 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
                   </select>
                   <ChevronDown size={14} className="cp-select-arrow" />
                 </div>
-                {walletsLoading ? <small className="cp-field-hint">正在读取 BSC 钱包...</small> : null}
+                {walletsLoading ? <small className="cp-field-hint">正在读取钱包列表...</small> : null}
                 {walletsError ? <small className="cp-field-error">{walletsError}</small> : null}
               </div>
 
-              {/* Fee tier */}
               <div className="cp-field">
                 <label className="cp-field-label">
                   <Layers size={13} />
@@ -538,49 +594,47 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
                 </label>
                 <div className="cp-fee-chips">
                   {protocolFees.map((item) => (
-                    <button
-                      key={item}
-                      type="button"
-                      className={`cp-fee-chip${feeTier === item ? ' active' : ''}`}
-                      onClick={() => setFeeTier(item)}
-                    >
+                    <button key={item} type="button" className={`cp-fee-chip${Number(feeTier || 0) === item ? ' active' : ''}`} onClick={() => handlePresetFeeTier(item)}>
                       {formatFeeTier(item)}
                     </button>
                   ))}
                 </div>
+                {allowCustomFeeTier ? (
+                  <div className="cp-fee-custom">
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      className="cp-fee-custom-input"
+                      value={customFeeTierInput}
+                      onChange={(e) => handleCustomFeeTierChange(e.target.value)}
+                      placeholder="自定义 fee tier，例如 750"
+                    />
+                    <span className="cp-fee-custom-note">
+                      {isCustomFeeTier ? `当前 ${formatFeeTier(feeTier)} · fee tier ${feeTier}` : 'V3 支持自定义 fee tier，后端会按链上 factory 校验'}
+                    </span>
+                  </div>
+                ) : (
+                  <small className="cp-field-hint">Uniswap V4 当前仅支持静态费率档位。</small>
+                )}
               </div>
 
-              {/* Token A */}
               <div className="cp-field">
                 <label className="cp-field-label">
                   <Coins size={13} />
                   <span>Token A 地址</span>
                 </label>
-                <input
-                  type="text"
-                  className="cp-input"
-                  value={tokenAAddress}
-                  onChange={(e) => setTokenAAddress(e.target.value)}
-                  placeholder="0x..."
-                />
+                <input type="text" className="cp-input" value={tokenAAddress} onChange={(e) => setTokenAAddress(e.target.value)} placeholder="0x..." />
               </div>
 
-              {/* Token B */}
               <div className="cp-field">
                 <label className="cp-field-label">
                   <ArrowRightLeft size={13} />
                   <span>Token B 地址</span>
                 </label>
-                <input
-                  type="text"
-                  className="cp-input"
-                  value={tokenBAddress}
-                  onChange={(e) => setTokenBAddress(e.target.value)}
-                  placeholder="0x..."
-                />
+                <input type="text" className="cp-input" value={tokenBAddress} onChange={(e) => setTokenBAddress(e.target.value)} placeholder="0x..." />
               </div>
 
-              {/* Initial Price */}
               <div className="cp-field cp-field--full">
                 <label className="cp-field-label">
                   <span>初始价格</span>
@@ -590,47 +644,33 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
                   className="cp-input"
                   value={initialPrice}
                   onChange={(e) => setInitialPrice(e.target.value)}
-                  placeholder="1 TokenA = X TokenB (留空则自动推导)"
+                  placeholder="1 TokenA = X TokenB，留空则自动推导"
                 />
-                <small className="cp-field-hint">如果留空，后端会先尝试用两边 token 的 USD 价格自动推导</small>
+                <small className="cp-field-hint">如果留空，后端会尝试用两边 token 的 USD 价格自动推导。</small>
               </div>
 
-              {/* Amounts (only in seed mode) */}
               {mode === 'create_and_seed' ? (
                 <>
                   <div className="cp-field">
                     <label className="cp-field-label"><span>Token A 数量</span></label>
-                    <input
-                      type="text"
-                      className="cp-input"
-                      value={amountA}
-                      onChange={(e) => setAmountA(e.target.value)}
-                      placeholder="例如 1000"
-                    />
+                    <input type="text" className="cp-input" value={amountA} onChange={(e) => setAmountA(e.target.value)} placeholder="例如 1000" />
                   </div>
                   <div className="cp-field">
                     <label className="cp-field-label"><span>Token B 数量</span></label>
-                    <input
-                      type="text"
-                      className="cp-input"
-                      value={amountB}
-                      onChange={(e) => setAmountB(e.target.value)}
-                      placeholder="例如 0.5"
-                    />
+                    <input type="text" className="cp-input" value={amountB} onChange={(e) => setAmountB(e.target.value)} placeholder="例如 0.5" />
                   </div>
                 </>
               ) : (
                 <div className="cp-field cp-field--full">
                   <div className="cp-mode-notice">
                     <Zap size={14} />
-                    <span>当前模式为仅建池，只会初始化池子价格，不会立刻打首仓</span>
+                    <span>当前模式为仅建池，只会初始化池子价格，不会立即打首仓。</span>
                   </div>
                 </div>
               )}
             </div>
           </StepSection>
 
-          {/* ===== Summary strip ===== */}
           <div className="cp-summary-strip">
             <div className="cp-summary-item">
               <span>范围模式</span>
@@ -649,50 +689,35 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
             <div className="cp-summary-divider" />
             <div className="cp-summary-item">
               <span>协议</span>
-              <strong>{PROTOCOL_OPTIONS.find((p) => p.key === protocol)?.label || '--'}</strong>
+              <strong className="cp-summary-protocol">
+                <ProtocolMark protocol={protocol} meta={protocolMeta} compact />
+              </strong>
             </div>
           </div>
 
-          {/* ===== Error ===== */}
           {error ? (
             <div className="cp-error-bar">
               <span>{error}</span>
             </div>
           ) : null}
 
-          {/* ===== Actions ===== */}
           <div className="cp-actions">
-            <button
-              type="button"
-              className="cp-btn cp-btn--ghost"
-              onClick={handlePreview}
-              disabled={previewLoading || executeLoading}
-            >
+            <button type="button" className="cp-btn cp-btn--ghost" onClick={handlePreview} disabled={previewLoading || executeLoading}>
               {previewLoading ? <RefreshCw size={14} className="spin" /> : <Search size={14} />}
               {previewLoading ? '预览中...' : '预览参数'}
             </button>
-            <button
-              type="button"
-              className="cp-btn cp-btn--primary"
-              onClick={handleExecute}
-              disabled={executeLoading || previewLoading}
-            >
+            <button type="button" className="cp-btn cp-btn--primary" onClick={handleExecute} disabled={executeLoading || previewLoading}>
               {executeLoading ? <RefreshCw size={14} className="spin" /> : <Rocket size={14} />}
-              {executeLoading ? '执行中...' : mode === 'create_only' ? '创建池子' : '一键创建并首注'}
+              {executeLoading ? '执行中...' : mode === 'create_only' ? '创建池子' : '一键建池并首注'}
             </button>
           </div>
 
-          {/* ===== Preview ===== */}
           {preview ? (
             <div className={`cp-result-card${preview.ready_to_execute ? ' cp-result-card--ready' : ''}`}>
               <div className="cp-result-header">
                 <span className="cp-result-title">预览结果</span>
                 <span className={`cp-result-status${preview.ready_to_execute ? ' ready' : ''}`}>
-                  {preview.pool_exists
-                    ? '目标协议下已存在同币对同费率池子'
-                    : preview.ready_to_execute
-                      ? '参数已满足执行条件'
-                      : '仍有参数需要补齐'}
+                  {preview.pool_exists ? '目标协议下已存在同币对同费率池子' : preview.ready_to_execute ? '参数已满足执行条件' : '仍有参数需要补齐'}
                 </span>
               </div>
               <div className="cp-result-grid">
@@ -713,7 +738,6 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
             </div>
           ) : null}
 
-          {/* ===== Result ===== */}
           {result ? (
             <div className="cp-result-card cp-result-card--success">
               <div className="cp-result-header">

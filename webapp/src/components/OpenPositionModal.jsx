@@ -10,27 +10,27 @@ function extractSmartMoneyRanges(wallets) {
     const upper = Number(w?.price_upper ?? 0);
     if (!lower || !upper || lower <= 0 || upper <= 0) continue;
     const mid = (lower + upper) / 2;
-    const pct = ((upper - lower) / mid) * 50; // half-width percent ≈ ±pct
+    const pct = ((upper - lower) / mid) * 50;
     if (!Number.isFinite(pct) || pct <= 0) continue;
     const usd = Number(w?.total_usd ?? 0);
     const addr = String(w?.wallet_address || '').trim();
-    ranges.push({ pct: Math.round(pct * 100) / 100, usd, addr, lower, upper });
+    ranges.push({ pct: Math.round(pct * 100) / 100, usd, addr });
   }
   ranges.sort((a, b) => b.usd - a.usd);
-  // deduplicate similar ranges (within 0.3%)
+
   const unique = [];
-  for (const r of ranges) {
-    if (unique.some((u) => Math.abs(u.pct - r.pct) < 0.3)) continue;
-    unique.push(r);
+  for (const item of ranges) {
+    if (unique.some((row) => Math.abs(row.pct - item.pct) < 0.3)) continue;
+    unique.push(item);
     if (unique.length >= 4) break;
   }
   return unique;
 }
 
 function shortAddr(addr) {
-  const s = String(addr || '');
-  if (s.length <= 10) return s || '--';
-  return `${s.slice(0, 6)}..${s.slice(-4)}`;
+  const value = String(addr || '').trim();
+  if (value.length <= 10) return value || '--';
+  return `${value.slice(0, 6)}..${value.slice(-4)}`;
 }
 
 export default function OpenPositionModal({
@@ -39,6 +39,8 @@ export default function OpenPositionModal({
   wallets,
   walletsLoading,
   selectedWalletId,
+  submitError,
+  onClearSubmitError,
   onWalletSelect,
   onSubmit,
   onClose,
@@ -69,26 +71,35 @@ export default function OpenPositionModal({
     [pool?.smartMoneyWallets]
   );
   const hasSmartRanges = smartRanges.length > 0;
+  const visibleError = error || String(submitError || '').trim();
+
+  const clearErrors = useCallback(() => {
+    if (error) setError('');
+    if (typeof onClearSubmitError === 'function') onClearSubmitError();
+  }, [error, onClearSubmitError]);
 
   const applyRange = useCallback((lo, hi) => {
+    clearErrors();
     setRangeLower(String(lo));
     setRangeUpper(String(hi));
     setRangeUpperAuto(true);
-  }, []);
+  }, [clearErrors]);
 
   const handleRangeLowerChange = useCallback((value) => {
+    clearErrors();
     setRangeLower((prevLower) => {
       if (rangeUpperAuto || String(rangeUpper || '').trim() === '' || String(rangeUpper) === String(prevLower)) {
         setRangeUpper(value);
       }
       return value;
     });
-  }, [rangeUpper, rangeUpperAuto]);
+  }, [clearErrors, rangeUpper, rangeUpperAuto]);
 
   const handleRangeUpperChange = useCallback((value) => {
+    clearErrors();
     setRangeUpperAuto(false);
     setRangeUpper(value);
-  }, []);
+  }, [clearErrors]);
 
   const handleSubmit = useCallback(() => {
     const amt = Number(amount);
@@ -96,10 +107,22 @@ export default function OpenPositionModal({
     const ru = Number(rangeUpper);
     const sl = Number(slippage);
 
-    if (!Number.isFinite(amt) || amt <= 0) { setError('请输入有效的金额'); return; }
-    if (!Number.isFinite(rl) || rl <= 0) { setError('请输入有效的下限范围'); return; }
-    if (!Number.isFinite(ru) || ru <= 0) { setError('请输入有效的上限范围'); return; }
-    if (showWalletPicker && !resolvedWalletId) { setError('请选择钱包'); return; }
+    if (!Number.isFinite(amt) || amt <= 0) {
+      setError('请输入有效的开仓金额');
+      return;
+    }
+    if (!Number.isFinite(rl) || rl <= 0) {
+      setError('请输入有效的下限范围');
+      return;
+    }
+    if (!Number.isFinite(ru) || ru <= 0) {
+      setError('请输入有效的上限范围');
+      return;
+    }
+    if (showWalletPicker && !resolvedWalletId) {
+      setError('请选择钱包');
+      return;
+    }
 
     setError('');
     onSubmit({
@@ -113,123 +136,162 @@ export default function OpenPositionModal({
       allowEntrySwap: true,
       walletId: resolvedWalletId || undefined,
     });
-  }, [amount, rangeLower, rangeUpper, slippage, addr, version, chain, onSubmit, showWalletPicker, resolvedWalletId]);
+  }, [amount, rangeLower, rangeUpper, slippage, showWalletPicker, resolvedWalletId, onSubmit, addr, version, chain]);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>⚡ 开仓</h3>
-          <button type="button" className="modal-close" onClick={onClose}>&times;</button>
+          <h3>开仓</h3>
+          <button type="button" className="modal-close" onClick={onClose} disabled={busy}>&times;</button>
         </div>
 
         <div className="modal-pair">{pair}</div>
         <div className="modal-addr">{addr ? `${addr.slice(0, 10)}...${addr.slice(-8)}` : '--'}</div>
 
-        {error && <div className="error-text">{error}</div>}
+        {visibleError ? <div className="error-text">{visibleError}</div> : null}
 
-        {/* Wallet selector */}
-        {walletsLoading && (
-          <div className="wallet-picker-loading">加载钱包...</div>
-        )}
-        {showWalletPicker && !walletsLoading && (
+        {walletsLoading ? (
+          <div className="wallet-picker-loading">加载钱包中...</div>
+        ) : null}
+
+        {showWalletPicker && !walletsLoading ? (
           <div className="wallet-picker">
             <span className="wallet-picker-label">选择钱包</span>
             <div className="wallet-picker-list">
-              {wallets.map((w) => {
-                const active = w.id === resolvedWalletId;
+              {wallets.map((wallet) => {
+                const active = wallet.id === resolvedWalletId;
                 return (
                   <button
-                    key={w.id}
+                    key={wallet.id}
                     type="button"
                     className={`wallet-chip ${active ? 'active' : ''}`}
-                    onClick={() => onWalletSelect(w.id)}
+                    onClick={() => {
+                      clearErrors();
+                      onWalletSelect(wallet.id);
+                    }}
                   >
                     <span className="wallet-chip-name">
-                      {w.name || shortAddr(w.address)}
-                      {w.is_default && <span className="wallet-chip-default">默认</span>}
+                      {wallet.name || shortAddr(wallet.address)}
+                      {wallet.is_default ? <span className="wallet-chip-default">默认</span> : null}
                     </span>
-                    <span className="wallet-chip-addr">{shortAddr(w.address)}</span>
+                    <span className="wallet-chip-addr">{shortAddr(wallet.address)}</span>
                     <span className="wallet-chip-bal">
-                      {w.native_balance !== 'N/A' ? `${w.native_balance}` : ''}{' '}
-                      {w.stable_balance !== 'N/A' ? `/ $${w.stable_balance}` : ''}
+                      {wallet.native_balance !== 'N/A' ? `${wallet.native_balance}` : ''}
+                      {wallet.stable_balance !== 'N/A' ? ` / $${wallet.stable_balance}` : ''}
                     </span>
                   </button>
                 );
               })}
             </div>
           </div>
-        )}
+        ) : null}
 
         <div className="modal-form">
           <label className="modal-field">
             <span>金额 (USDT)</span>
-            <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} min="1" step="10" />
+            <input
+              type="number"
+              value={amount}
+              onChange={(e) => {
+                clearErrors();
+                setAmount(e.target.value);
+              }}
+              min="1"
+              step="10"
+            />
           </label>
 
-          {/* Range quick picks */}
           <div className="modal-range-section">
             <span className="modal-range-label">快捷区间</span>
             <div className="modal-range-picks">
               {hasSmartRanges ? (
-                smartRanges.map((sr, i) => {
-                  const pctDisplay = sr.pct.toFixed(sr.pct >= 10 ? 0 : 1);
-                  const isActive = Math.abs(Number(rangeLower) - sr.pct) < 0.05 && Math.abs(Number(rangeUpper) - sr.pct) < 0.05;
+                smartRanges.map((item, index) => {
+                  const pctDisplay = item.pct.toFixed(item.pct >= 10 ? 0 : 1);
+                  const isActive =
+                    Math.abs(Number(rangeLower) - item.pct) < 0.05 &&
+                    Math.abs(Number(rangeUpper) - item.pct) < 0.05;
                   return (
                     <button
-                      key={i}
+                      key={`${item.addr}:${index}`}
                       type="button"
                       className={`range-chip smart ${isActive ? 'active' : ''}`}
-                      onClick={() => applyRange(sr.pct, sr.pct)}
-                      title={`${shortAddr(sr.addr)} $${Math.round(sr.usd)}`}
+                      onClick={() => applyRange(item.pct, item.pct)}
+                      title={`${shortAddr(item.addr)} $${Math.round(item.usd)}`}
                     >
                       ±{pctDisplay}%
-                      <span className="range-chip-sub">${sr.usd >= 1000 ? `${(sr.usd / 1000).toFixed(0)}K` : Math.round(sr.usd)}</span>
+                      <span className="range-chip-sub">
+                        ${item.usd >= 1000 ? `${(item.usd / 1000).toFixed(0)}K` : Math.round(item.usd)}
+                      </span>
                     </button>
                   );
                 })
               ) : (
-                PRESET_RANGES.map((v) => {
-                  const isActive = Math.abs(Number(rangeLower) - v) < 0.05 && Math.abs(Number(rangeUpper) - v) < 0.05;
+                PRESET_RANGES.map((item) => {
+                  const isActive =
+                    Math.abs(Number(rangeLower) - item) < 0.05 &&
+                    Math.abs(Number(rangeUpper) - item) < 0.05;
                   return (
                     <button
-                      key={v}
+                      key={item}
                       type="button"
                       className={`range-chip ${isActive ? 'active' : ''}`}
-                      onClick={() => applyRange(v, v)}
+                      onClick={() => applyRange(item, item)}
                     >
-                      ±{v}%
+                      ±{item}%
                     </button>
                   );
                 })
               )}
             </div>
-            {hasSmartRanges && (
-              <div className="modal-range-hint">聪明钱区间 · 按金额排序</div>
-            )}
+            {hasSmartRanges ? (
+              <div className="modal-range-hint">聪明钱区间，按仓位金额排序</div>
+            ) : null}
           </div>
 
           <div className="modal-row">
             <label className="modal-field">
               <span>下限 %</span>
-              <input type="number" value={rangeLower} onChange={(e) => handleRangeLowerChange(e.target.value)} min="0.1" step="0.5" />
+              <input
+                type="number"
+                value={rangeLower}
+                onChange={(e) => handleRangeLowerChange(e.target.value)}
+                min="0.1"
+                step="0.5"
+              />
             </label>
             <label className="modal-field">
               <span>上限 %</span>
-              <input type="number" value={rangeUpper} onChange={(e) => handleRangeUpperChange(e.target.value)} min="0.1" step="0.5" />
+              <input
+                type="number"
+                value={rangeUpper}
+                onChange={(e) => handleRangeUpperChange(e.target.value)}
+                min="0.1"
+                step="0.5"
+              />
             </label>
           </div>
 
           <label className="modal-field">
-            <span>滑点 % (留空则使用全局配置)</span>
-            <input type="number" value={slippage} onChange={(e) => setSlippage(e.target.value)} min="0.1" step="0.1" placeholder="默认全局配置" />
+            <span>滑点 %</span>
+            <input
+              type="number"
+              value={slippage}
+              onChange={(e) => {
+                clearErrors();
+                setSlippage(e.target.value);
+              }}
+              min="0.1"
+              step="0.1"
+              placeholder="留空则使用全局配置"
+            />
           </label>
         </div>
 
         <div className="modal-actions">
           <button type="button" className="ghost-chip" onClick={onClose} disabled={busy}>取消</button>
           <button type="button" className="accent-btn" onClick={handleSubmit} disabled={busy}>
-            {busy ? '提交中...' : '确认开仓'}
+            {busy ? '提交中...' : visibleError ? '重试开仓' : '确认开仓'}
           </button>
         </div>
       </div>
