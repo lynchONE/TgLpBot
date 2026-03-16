@@ -1781,7 +1781,8 @@ export default function App() {
 
   const smartVisiblePools = useMemo(() => (
     smartDisplayPools.filter((pool) => {
-      const key = `${pool?.pool_version || ''}:${pool?.pool_id || ''}`;
+      const key = buildPoolKey(pool?.pool_version, pool?.pool_id)
+        || `${pool?.pool_version || ''}:${pool?.pool_id || ''}`;
       const adds = poolAddsMap[key];
       if (adds?.status !== 'success') return true;
       const wallets = aggregatePoolAddWallets(adds?.wallets || []);
@@ -1795,7 +1796,8 @@ export default function App() {
     const ctrl = new AbortController();
     const toLoad = smartDisplayPools;
     toLoad.forEach((pool) => {
-      const key = `${pool?.pool_version || ''}:${pool?.pool_id || ''}`;
+      const key = buildPoolKey(pool?.pool_version, pool?.pool_id)
+        || `${pool?.pool_version || ''}:${pool?.pool_id || ''}`;
       if (poolAddsMap[key]?.status === 'loading') return;
       setPoolAddsMap((prev) => ({
         ...prev,
@@ -2100,7 +2102,7 @@ export default function App() {
                     onClick={(e) => { e.stopPropagation(); openPositionModal({ ...pool, chain, panelKey: 'hot_pools' }); }}
                   >
                     <img src={flashIcon} alt="" className="open-lightning-icon" aria-hidden="true" />
-                    <span className="open-buy-text">买入</span>
+                    <span className="open-buy-text">开仓</span>
                   </button>
                 </div>
               );
@@ -3050,7 +3052,7 @@ export default function App() {
                       }}
                     >
                       <img src={flashIcon} alt="" className="open-lightning-icon" aria-hidden="true" />
-                      <span className="open-buy-text">买入</span>
+                      <span className="open-buy-text">开仓</span>
                     </button>
                     <button type="button" className="sm-action-btn sm-copy-btn" onClick={(e) => {
                       e.stopPropagation();
