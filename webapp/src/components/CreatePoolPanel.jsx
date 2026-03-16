@@ -1,5 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { BrainCircuit, Factory, Flame, RefreshCw } from 'lucide-react';
+import {
+  ArrowRightLeft,
+  BrainCircuit,
+  CheckCircle2,
+  ChevronDown,
+  CircleDot,
+  Coins,
+  Factory,
+  Flame,
+  Layers,
+  RefreshCw,
+  Rocket,
+  Search,
+  Wallet,
+  Zap,
+} from 'lucide-react';
 import {
   executeCreatePool,
   fetchHotPools,
@@ -11,20 +26,20 @@ import PanelShell, { EmptyState } from './PanelShell';
 import { normalizeHexAddress, shortAddress } from '../utils';
 
 const PROTOCOL_OPTIONS = [
-  { key: 'univ3', label: 'Uniswap V3' },
-  { key: 'univ4', label: 'Uniswap V4' },
-  { key: 'pcsv3', label: 'Pancake V3' },
+  { key: 'univ3', label: 'Uniswap V3', icon: 'U3' },
+  { key: 'univ4', label: 'Uniswap V4', icon: 'U4' },
+  { key: 'pcsv3', label: 'Pancake V3', icon: 'P3' },
 ];
 
 const MODE_OPTIONS = [
-  { key: 'create_and_seed', label: '建池+首注' },
-  { key: 'create_only', label: '仅建池' },
+  { key: 'create_and_seed', label: '建池+首注', desc: '创建池子并立即注入初始流动性' },
+  { key: 'create_only', label: '仅建池', desc: '只初始化池子价格，稍后手动首注' },
 ];
 
 const SOURCE_TABS = [
-  { key: 'manual', label: '手动' },
-  { key: 'hot', label: '热门池子' },
-  { key: 'smart', label: '聪明钱' },
+  { key: 'manual', label: '手动输入', icon: Search },
+  { key: 'hot', label: '热门池子', icon: Flame },
+  { key: 'smart', label: '聪明钱', icon: BrainCircuit },
 ];
 
 const STABLE_SYMBOLS = new Set(['USDT', 'USDC', 'BUSD', 'DAI', 'FDUSD', 'USD']);
@@ -149,6 +164,22 @@ function fieldErrorText(resp) {
   if (!resp) return '';
   if (Array.isArray(resp?.warnings) && resp.warnings.length > 0) return String(resp.warnings[0]);
   return '';
+}
+
+/* ---------- Section wrapper with step indicator ---------- */
+function StepSection({ step, title, subtitle, children, accent }) {
+  return (
+    <div className={`cp-section${accent ? ' cp-section--accent' : ''}`}>
+      <div className="cp-section-header">
+        <span className="cp-step-badge">{step}</span>
+        <div className="cp-section-title-wrap">
+          <span className="cp-section-title">{title}</span>
+          {subtitle ? <span className="cp-section-subtitle">{subtitle}</span> : null}
+        </div>
+      </div>
+      <div className="cp-section-body">{children}</div>
+    </div>
+  );
 }
 
 export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
@@ -348,11 +379,12 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
   }, [createPayload, hasInitData]);
 
   const activeSources = sourceOptions[sourceTab] || [];
+  const selectedWallet = wallets.find((w) => Number(w?.id || 0) === selectedWalletId);
 
   return (
     <PanelShell
       title="创建池子"
-      subtitle="BSC · Uniswap V3 / V4 / Pancake V3 · 可选择热门池子或聪明钱作为基础数据来源"
+      subtitle="BSC · Uniswap V3 / V4 / Pancake V3"
       icon={Factory}
       actions={(
         <button
@@ -369,266 +401,338 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
       {!hasInitData ? (
         <EmptyState text="请先完成 Telegram 登录后再创建池子。" />
       ) : (
-        <div className="create-pool-panel">
-          <div className="create-pool-toolbar">
-            <div className="create-pool-chip-group">
-              {PROTOCOL_OPTIONS.map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  className={`create-pool-chip ${protocol === item.key ? 'active' : ''}`}
-                  onClick={() => setProtocol(item.key)}
-                >
-                  {item.label}
-                </button>
-              ))}
+        <div className="cp-root">
+          {/* ===== Step 1: Protocol & Mode ===== */}
+          <StepSection step="1" title="选择协议与模式">
+            <div className="cp-segmented-row">
+              <div className="cp-segmented">
+                {PROTOCOL_OPTIONS.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className={`cp-seg-btn${protocol === item.key ? ' active' : ''}`}
+                    onClick={() => setProtocol(item.key)}
+                  >
+                    <span className="cp-seg-icon">{item.icon}</span>
+                    <span className="cp-seg-label">{item.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="create-pool-chip-group">
+            <div className="cp-mode-cards">
               {MODE_OPTIONS.map((item) => (
                 <button
                   key={item.key}
                   type="button"
-                  className={`create-pool-chip ${mode === item.key ? 'active' : ''}`}
+                  className={`cp-mode-card${mode === item.key ? ' active' : ''}`}
                   onClick={() => setMode(item.key)}
                 >
-                  {item.label}
+                  <span className="cp-mode-radio">
+                    {mode === item.key ? <CircleDot size={16} /> : <span className="cp-mode-radio-empty" />}
+                  </span>
+                  <span className="cp-mode-text">
+                    <strong>{item.label}</strong>
+                    <small>{item.desc}</small>
+                  </span>
                 </button>
               ))}
             </div>
-          </div>
+          </StepSection>
 
-          <div className="create-pool-source-card">
-            <div className="create-pool-section-head">
-              <span>基础数据来源</span>
-              <span className="create-pool-section-sub">只做预填，不在热门池子/聪明钱列表里新增入口</span>
-            </div>
-            <div className="create-pool-chip-group">
-              {SOURCE_TABS.map((tab) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  className={`create-pool-chip ${sourceTab === tab.key ? 'active' : ''}`}
-                  onClick={() => setSourceTab(tab.key)}
-                >
-                  {tab.key === 'hot' ? <Flame size={13} /> : null}
-                  {tab.key === 'smart' ? <BrainCircuit size={13} /> : null}
-                  {tab.label}
-                </button>
-              ))}
+          {/* ===== Step 2: Source ===== */}
+          <StepSection step="2" title="数据来源" subtitle="选择热门池子或聪明钱快速填充参数">
+            <div className="cp-source-tabs">
+              {SOURCE_TABS.map((tab) => {
+                const Icon = tab.icon;
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    className={`cp-source-tab${sourceTab === tab.key ? ' active' : ''}`}
+                    onClick={() => setSourceTab(tab.key)}
+                  >
+                    <Icon size={14} />
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
             </div>
 
             {sourceTab === 'manual' ? (
-              <div className="create-pool-source-empty">手动模式下你可以直接输入目标币对地址。</div>
+              <div className="cp-source-empty">
+                <Search size={20} className="cp-source-empty-icon" />
+                <span>手动模式 - 直接在下方输入币对地址</span>
+              </div>
             ) : sourcesLoading && activeSources.length === 0 ? (
-              <div className="create-pool-source-empty">正在加载 BSC 来源池子...</div>
+              <div className="cp-source-empty">
+                <RefreshCw size={16} className="spin" />
+                <span>正在加载 BSC 来源池子...</span>
+              </div>
             ) : activeSources.length === 0 ? (
-              <div className="create-pool-source-empty">{sourcesError || '暂无可用来源数据'}</div>
+              <div className="cp-source-empty">
+                <span>{sourcesError || '暂无可用来源数据'}</span>
+              </div>
             ) : (
-              <div className="create-pool-source-list">
+              <div className="cp-source-grid">
                 {activeSources.map((source) => (
                   <button
                     key={source.key}
                     type="button"
-                    className={`create-pool-source-item ${selectedSourceKey === source.key ? 'active' : ''}`}
+                    className={`cp-source-card${selectedSourceKey === source.key ? ' active' : ''}`}
                     onClick={() => applySource(source, sourceTab)}
                   >
-                    <div className="create-pool-source-main">
-                      <div className="create-pool-source-title">{source.label}</div>
-                      <div className="create-pool-source-subtitle">{source.subtitle}</div>
+                    <div className="cp-source-top">
+                      <span className="cp-source-pair">{source.label}</span>
+                      <span className="cp-source-fee">{formatFeeTier(source.feeTier)}</span>
                     </div>
-                    <div className="create-pool-source-side">
-                      <span className="create-pool-badge">{formatFeeTier(source.feeTier)}</span>
+                    <div className="cp-source-bottom">
+                      <span className="cp-source-dex">{source.subtitle}</span>
                     </div>
+                    {selectedSourceKey === source.key && (
+                      <span className="cp-source-check"><CheckCircle2 size={14} /></span>
+                    )}
                   </button>
                 ))}
               </div>
             )}
 
             {selectedSource ? (
-              <div className="create-pool-source-hint">
-                来源提示: {selectedSource.label} · {selectedSource.subtitle}
-                {selectedSource.priceHint ? ` · ${selectedSource.priceHint}` : ''}
+              <div className="cp-source-hint-bar">
+                <Zap size={13} />
+                <span>
+                  已选: <strong>{selectedSource.label}</strong> · {selectedSource.subtitle}
+                  {selectedSource.priceHint ? ` · ${selectedSource.priceHint}` : ''}
+                </span>
               </div>
             ) : null}
-          </div>
+          </StepSection>
 
-          <div className="create-pool-grid">
-            <label className="modal-field">
-              <span>钱包</span>
-              <select value={selectedWalletId || ''} onChange={(e) => setWalletId(Number(e.target.value || 0))}>
-                {wallets.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {(item.name || shortAddress(item.address, 6, 4))} · {shortAddress(item.address, 6, 4)}
-                  </option>
-                ))}
-              </select>
-              {walletsLoading ? <small className="create-pool-inline-hint">正在读取 BSC 钱包...</small> : null}
-              {walletsError ? <small className="error-text">{walletsError}</small> : null}
-            </label>
-
-            <label className="modal-field">
-              <span>费率档位</span>
-              <select value={feeTier} onChange={(e) => setFeeTier(Number(e.target.value || 0))}>
-                {protocolFees.map((item) => (
-                  <option key={item} value={item}>
-                    {formatFeeTier(item)} ({item})
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="modal-field">
-              <span>Token A 地址</span>
-              <input
-                type="text"
-                value={tokenAAddress}
-                onChange={(e) => setTokenAAddress(e.target.value)}
-                placeholder="0x..."
-              />
-            </label>
-
-            <label className="modal-field">
-              <span>Token B 地址</span>
-              <input
-                type="text"
-                value={tokenBAddress}
-                onChange={(e) => setTokenBAddress(e.target.value)}
-                placeholder="0x..."
-              />
-            </label>
-
-            <label className="modal-field create-pool-span-2">
-              <span>初始价格</span>
-              <input
-                type="text"
-                value={initialPrice}
-                onChange={(e) => setInitialPrice(e.target.value)}
-                placeholder="1 TokenA = X TokenB"
-              />
-              <small className="create-pool-inline-hint">
-                如果留空，后端会先尝试用两边 token 的 USD 价格自动推导。
-              </small>
-            </label>
-
-            {mode === 'create_and_seed' ? (
-              <>
-                <label className="modal-field">
-                  <span>Token A 数量</span>
-                  <input type="text" value={amountA} onChange={(e) => setAmountA(e.target.value)} placeholder="例如 1000" />
+          {/* ===== Step 3: Parameters ===== */}
+          <StepSection step="3" title="配置参数">
+            <div className="cp-form-grid">
+              {/* Wallet */}
+              <div className="cp-field">
+                <label className="cp-field-label">
+                  <Wallet size={13} />
+                  <span>执行钱包</span>
                 </label>
-                <label className="modal-field">
-                  <span>Token B 数量</span>
-                  <input type="text" value={amountB} onChange={(e) => setAmountB(e.target.value)} placeholder="例如 0.5" />
-                </label>
-              </>
-            ) : (
-              <div className="create-pool-mode-note create-pool-span-2">
-                当前模式为仅建池，只会初始化池子价格，不会立刻打首仓。
+                <div className="cp-select-wrap">
+                  <select value={selectedWalletId || ''} onChange={(e) => setWalletId(Number(e.target.value || 0))}>
+                    {wallets.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {(item.name || shortAddress(item.address, 6, 4))} · {shortAddress(item.address, 6, 4)}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={14} className="cp-select-arrow" />
+                </div>
+                {walletsLoading ? <small className="cp-field-hint">正在读取 BSC 钱包...</small> : null}
+                {walletsError ? <small className="cp-field-error">{walletsError}</small> : null}
               </div>
-            )}
-          </div>
 
-          <div className="create-pool-summary">
-            <div className="create-pool-summary-item">
+              {/* Fee tier */}
+              <div className="cp-field">
+                <label className="cp-field-label">
+                  <Layers size={13} />
+                  <span>费率档位</span>
+                </label>
+                <div className="cp-fee-chips">
+                  {protocolFees.map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      className={`cp-fee-chip${feeTier === item ? ' active' : ''}`}
+                      onClick={() => setFeeTier(item)}
+                    >
+                      {formatFeeTier(item)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Token A */}
+              <div className="cp-field">
+                <label className="cp-field-label">
+                  <Coins size={13} />
+                  <span>Token A 地址</span>
+                </label>
+                <input
+                  type="text"
+                  className="cp-input"
+                  value={tokenAAddress}
+                  onChange={(e) => setTokenAAddress(e.target.value)}
+                  placeholder="0x..."
+                />
+              </div>
+
+              {/* Token B */}
+              <div className="cp-field">
+                <label className="cp-field-label">
+                  <ArrowRightLeft size={13} />
+                  <span>Token B 地址</span>
+                </label>
+                <input
+                  type="text"
+                  className="cp-input"
+                  value={tokenBAddress}
+                  onChange={(e) => setTokenBAddress(e.target.value)}
+                  placeholder="0x..."
+                />
+              </div>
+
+              {/* Initial Price */}
+              <div className="cp-field cp-field--full">
+                <label className="cp-field-label">
+                  <span>初始价格</span>
+                </label>
+                <input
+                  type="text"
+                  className="cp-input"
+                  value={initialPrice}
+                  onChange={(e) => setInitialPrice(e.target.value)}
+                  placeholder="1 TokenA = X TokenB (留空则自动推导)"
+                />
+                <small className="cp-field-hint">如果留空，后端会先尝试用两边 token 的 USD 价格自动推导</small>
+              </div>
+
+              {/* Amounts (only in seed mode) */}
+              {mode === 'create_and_seed' ? (
+                <>
+                  <div className="cp-field">
+                    <label className="cp-field-label"><span>Token A 数量</span></label>
+                    <input
+                      type="text"
+                      className="cp-input"
+                      value={amountA}
+                      onChange={(e) => setAmountA(e.target.value)}
+                      placeholder="例如 1000"
+                    />
+                  </div>
+                  <div className="cp-field">
+                    <label className="cp-field-label"><span>Token B 数量</span></label>
+                    <input
+                      type="text"
+                      className="cp-input"
+                      value={amountB}
+                      onChange={(e) => setAmountB(e.target.value)}
+                      placeholder="例如 0.5"
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="cp-field cp-field--full">
+                  <div className="cp-mode-notice">
+                    <Zap size={14} />
+                    <span>当前模式为仅建池，只会初始化池子价格，不会立刻打首仓</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </StepSection>
+
+          {/* ===== Summary strip ===== */}
+          <div className="cp-summary-strip">
+            <div className="cp-summary-item">
               <span>范围模式</span>
               <strong>Full Range</strong>
             </div>
-            <div className="create-pool-summary-item">
+            <div className="cp-summary-divider" />
+            <div className="cp-summary-item">
               <span>目标链</span>
               <strong>BSC</strong>
             </div>
-            <div className="create-pool-summary-item">
-              <span>执行钱包</span>
-              <strong>{selectedWalletId ? `#${selectedWalletId}` : '--'}</strong>
+            <div className="cp-summary-divider" />
+            <div className="cp-summary-item">
+              <span>钱包</span>
+              <strong>{selectedWallet ? (selectedWallet.name || shortAddress(selectedWallet.address, 4, 4)) : '--'}</strong>
+            </div>
+            <div className="cp-summary-divider" />
+            <div className="cp-summary-item">
+              <span>协议</span>
+              <strong>{PROTOCOL_OPTIONS.find((p) => p.key === protocol)?.label || '--'}</strong>
             </div>
           </div>
 
-          {error ? <div className="error-text">{error}</div> : null}
+          {/* ===== Error ===== */}
+          {error ? (
+            <div className="cp-error-bar">
+              <span>{error}</span>
+            </div>
+          ) : null}
 
-          <div className="modal-actions create-pool-actions">
-            <button type="button" className="ghost-chip" onClick={handlePreview} disabled={previewLoading || executeLoading}>
+          {/* ===== Actions ===== */}
+          <div className="cp-actions">
+            <button
+              type="button"
+              className="cp-btn cp-btn--ghost"
+              onClick={handlePreview}
+              disabled={previewLoading || executeLoading}
+            >
+              {previewLoading ? <RefreshCw size={14} className="spin" /> : <Search size={14} />}
               {previewLoading ? '预览中...' : '预览参数'}
             </button>
-            <button type="button" className="accent-btn" onClick={handleExecute} disabled={executeLoading || previewLoading}>
+            <button
+              type="button"
+              className="cp-btn cp-btn--primary"
+              onClick={handleExecute}
+              disabled={executeLoading || previewLoading}
+            >
+              {executeLoading ? <RefreshCw size={14} className="spin" /> : <Rocket size={14} />}
               {executeLoading ? '执行中...' : mode === 'create_only' ? '创建池子' : '一键创建并首注'}
             </button>
           </div>
 
+          {/* ===== Preview ===== */}
           {preview ? (
-            <div className={`create-pool-preview ${preview.ready_to_execute ? 'ready' : ''}`}>
-              <div className="create-pool-section-head">
-                <span>预览结果</span>
-                <span className="create-pool-section-sub">
-                  {preview.pool_exists ? '目标协议下已存在同币对同费率池子' : preview.ready_to_execute ? '参数已满足执行条件' : '仍有参数需要补齐'}
+            <div className={`cp-result-card${preview.ready_to_execute ? ' cp-result-card--ready' : ''}`}>
+              <div className="cp-result-header">
+                <span className="cp-result-title">预览结果</span>
+                <span className={`cp-result-status${preview.ready_to_execute ? ' ready' : ''}`}>
+                  {preview.pool_exists
+                    ? '目标协议下已存在同币对同费率池子'
+                    : preview.ready_to_execute
+                      ? '参数已满足执行条件'
+                      : '仍有参数需要补齐'}
                 </span>
               </div>
-              <div className="create-pool-preview-grid">
-                <div className="create-pool-preview-item">
-                  <span>Token 排序</span>
-                  <strong>{preview.token0?.symbol || '--'} / {preview.token1?.symbol || '--'}</strong>
-                </div>
-                <div className="create-pool-preview-item">
-                  <span>初始价格</span>
-                  <strong>{preview.initial_price || '--'}</strong>
-                </div>
-                <div className="create-pool-preview-item">
-                  <span>Tick 区间</span>
-                  <strong>{preview.tick_lower} / {preview.tick_upper}</strong>
-                </div>
-                <div className="create-pool-preview-item">
-                  <span>TickSpacing</span>
-                  <strong>{preview.tick_spacing || '--'}</strong>
-                </div>
-                <div className="create-pool-preview-item">
-                  <span>预测 PoolId</span>
-                  <strong>{preview.predicted_pool_id ? shortAddress(preview.predicted_pool_id, 10, 8) : '--'}</strong>
-                </div>
-                <div className="create-pool-preview-item">
-                  <span>估算流动性</span>
-                  <strong>{preview.estimated_liquidity || '--'}</strong>
-                </div>
+              <div className="cp-result-grid">
+                <div className="cp-kv"><span>Token 排序</span><strong>{preview.token0?.symbol || '--'} / {preview.token1?.symbol || '--'}</strong></div>
+                <div className="cp-kv"><span>初始价格</span><strong>{preview.initial_price || '--'}</strong></div>
+                <div className="cp-kv"><span>Tick 区间</span><strong>{preview.tick_lower} / {preview.tick_upper}</strong></div>
+                <div className="cp-kv"><span>TickSpacing</span><strong>{preview.tick_spacing || '--'}</strong></div>
+                <div className="cp-kv"><span>预测 PoolId</span><strong>{preview.predicted_pool_id ? shortAddress(preview.predicted_pool_id, 10, 8) : '--'}</strong></div>
+                <div className="cp-kv"><span>估算流动性</span><strong>{preview.estimated_liquidity || '--'}</strong></div>
               </div>
-              {fieldErrorText(preview) ? <div className="create-pool-inline-hint">{fieldErrorText(preview)}</div> : null}
               {Array.isArray(preview?.warnings) && preview.warnings.length > 0 ? (
-                <div className="create-pool-warnings">
+                <div className="cp-warnings">
                   {preview.warnings.map((item, index) => (
-                    <div key={`${item}-${index}`} className="create-pool-warning">
-                      {item}
-                    </div>
+                    <div key={`${item}-${index}`} className="cp-warning-item">{item}</div>
                   ))}
                 </div>
               ) : null}
             </div>
           ) : null}
 
+          {/* ===== Result ===== */}
           {result ? (
-            <div className="create-pool-result">
-              <div className="create-pool-section-head">
-                <span>执行结果</span>
-                <span className="create-pool-section-sub">{result.status || 'ok'}</span>
+            <div className="cp-result-card cp-result-card--success">
+              <div className="cp-result-header">
+                <span className="cp-result-title">
+                  <CheckCircle2 size={15} />
+                  执行完成
+                </span>
+                <span className="cp-result-status ready">{result.status || 'ok'}</span>
               </div>
-              <div className="create-pool-preview-grid">
-                <div className="create-pool-preview-item">
-                  <span>Pool</span>
-                  <strong>{result.pool_address ? shortAddress(result.pool_address, 10, 8) : shortAddress(result.pool_id, 10, 8)}</strong>
-                </div>
-                <div className="create-pool-preview-item">
-                  <span>TokenId</span>
-                  <strong>{result.token_id || '--'}</strong>
-                </div>
-                <div className="create-pool-preview-item">
-                  <span>Liquidity</span>
-                  <strong>{result.liquidity || '--'}</strong>
-                </div>
-                <div className="create-pool-preview-item">
-                  <span>主交易</span>
-                  <strong>{shortAddress(result.tx_hash, 10, 8)}</strong>
-                </div>
+              <div className="cp-result-grid">
+                <div className="cp-kv"><span>Pool</span><strong>{result.pool_address ? shortAddress(result.pool_address, 10, 8) : shortAddress(result.pool_id, 10, 8)}</strong></div>
+                <div className="cp-kv"><span>TokenId</span><strong>{result.token_id || '--'}</strong></div>
+                <div className="cp-kv"><span>Liquidity</span><strong>{result.liquidity || '--'}</strong></div>
+                <div className="cp-kv"><span>主交易</span><strong>{shortAddress(result.tx_hash, 10, 8)}</strong></div>
               </div>
               {Array.isArray(result?.explorer_urls) && result.explorer_urls.length > 0 ? (
-                <div className="create-pool-links">
+                <div className="cp-explorer-links">
                   {result.explorer_urls.map((item, index) => (
-                    <a key={`${item}-${index}`} href={item} target="_blank" rel="noreferrer" className="create-pool-link">
+                    <a key={`${item}-${index}`} href={item} target="_blank" rel="noreferrer" className="cp-explorer-link">
                       查看交易 #{index + 1}
                     </a>
                   ))}
