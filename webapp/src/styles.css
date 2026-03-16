@@ -2212,6 +2212,27 @@ body {
   opacity: 0.6;
 }
 
+.sm-wallet-empty,
+.sm-wallet-error {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.sm-wallet-empty {
+  color: var(--text-muted);
+  border: 1px dashed rgba(138, 160, 194, 0.18);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.sm-wallet-error {
+  color: #ff9aa9;
+  border: 1px solid rgba(255, 93, 115, 0.22);
+  background: rgba(255, 93, 115, 0.08);
+}
+
 .sm-wallet-list {
   display: flex;
   flex-direction: column;

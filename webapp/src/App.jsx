@@ -1779,6 +1779,16 @@ export default function App() {
     setSmartWalletDetailMap({});
   }, [chain, initData]);
 
+  const smartVisiblePools = useMemo(() => (
+    smartDisplayPools.filter((pool) => {
+      const key = `${pool?.pool_version || ''}:${pool?.pool_id || ''}`;
+      const adds = poolAddsMap[key];
+      if (adds?.status !== 'success') return true;
+      const wallets = aggregatePoolAddWallets(adds?.wallets || []);
+      return wallets.length > 0;
+    })
+  ), [poolAddsMap, smartDisplayPools]);
+
   // Auto-load pool adds for top pools when smart data changes
   useEffect(() => {
     if (!smartDisplayPools.length || !hasInitData) return;
@@ -2758,23 +2768,25 @@ export default function App() {
     smart_money: (
       <PanelShell
         title="聪明钱"
-        subtitle={`最近 ${SMART_POOL_WINDOW_HOURS}h 按参与钱包数排序的前 ${smartDisplayPools.length} 个池子`}
+        subtitle={`最近 ${SMART_POOL_WINDOW_HOURS}h 按参与钱包数排序的前 ${smartVisiblePools.length} 个池子`}
         icon={BrainCircuit}
       >
         {smartError ? <div className="error-text">{smartError}</div> : null}
 
         <div className="data-list compact">
-          {smartLoading && smartDisplayPools.length === 0 ? (
+          {smartLoading && smartVisiblePools.length === 0 ? (
             <EmptyState text="正在加载聪明钱数据..." />
-          ) : smartDisplayPools.length === 0 ? (
+          ) : smartVisiblePools.length === 0 ? (
             <EmptyState text="暂无监控钱包加 LP 数据" />
           ) : (
-            smartDisplayPools.map((pool, idx) => {
+            smartVisiblePools.map((pool, idx) => {
               const poolKey = buildPoolKey(pool?.pool_version, pool?.pool_id) || `${pool?.pool_version || ''}:${pool?.pool_id || ''}`;
               const adds = poolAddsMap[poolKey];
               const wallets = aggregatePoolAddWallets(adds?.wallets || []);
               const totalUsd = adds?.totalUsd || 0;
-              const walletCount = wallets.length || Number(pool?.wallet_count || 0);
+              const walletCount = adds?.status === 'success'
+                ? wallets.length
+                : Number(pool?.wallet_count || 0);
               const version = String(pool?.pool_version || '').toUpperCase();
               const feePct = Number(pool?.fee_pct || 0);
               const pair = String(pool?.pair || '').trim() || shortAddress(pool?.pool_id || '');
@@ -2862,6 +2874,14 @@ export default function App() {
 
                   {adds?.status === 'loading' && wallets.length === 0 ? (
                     <div className="sm-wallet-loading">加载钱包明细...</div>
+                  ) : null}
+
+                  {adds?.status === 'error' && wallets.length === 0 ? (
+                    <div className="sm-wallet-error">{String(adds?.error || '钱包明细加载失败')}</div>
+                  ) : null}
+
+                  {adds?.status === 'success' && wallets.length === 0 ? (
+                    <div className="sm-wallet-empty">当前池子没有可展示的钱包明细</div>
                   ) : null}
 
                   {wallets.length > 0 ? (
