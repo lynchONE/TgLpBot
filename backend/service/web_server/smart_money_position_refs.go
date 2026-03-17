@@ -192,18 +192,18 @@ func (r *smartMoneyPositionResolver) resolveV3(ctx context.Context, ref smartMon
 	useSnapshot := snapshotErr == nil && snapshotBlock > 0
 
 	npmOrder := make([]common.Address, 0, len(r.v3Managers)+1)
-	seen := make(map[common.Address]struct{}, len(r.v3Managers)+1)
 	if common.IsHexAddress(ref.ContractAddress) {
 		addr := common.HexToAddress(ref.ContractAddress)
 		npmOrder = append(npmOrder, addr)
-		seen[addr] = struct{}{}
-	}
-	for _, addr := range r.v3Managers {
-		if _, ok := seen[addr]; ok {
-			continue
+	} else {
+		seen := make(map[common.Address]struct{}, len(r.v3Managers))
+		for _, addr := range r.v3Managers {
+			if _, ok := seen[addr]; ok {
+				continue
+			}
+			npmOrder = append(npmOrder, addr)
+			seen[addr] = struct{}{}
 		}
-		npmOrder = append(npmOrder, addr)
-		seen[addr] = struct{}{}
 	}
 	if len(npmOrder) == 0 {
 		return nil, fmt.Errorf("no V3 position manager available")
@@ -233,6 +233,10 @@ func (r *smartMoneyPositionResolver) resolveV3(ctx context.Context, ref smartMon
 		if pos == nil || pos.Liquidity == nil || pos.Liquidity.Sign() <= 0 {
 			continue
 		}
+		if poolErr := validateSmartMoneyV3PositionPool(ref.PoolID, pos); poolErr != nil {
+			lastErr = poolErr
+			continue
+		}
 		info = pos
 		usedNPM = npmAddr
 		break
@@ -245,6 +249,39 @@ func (r *smartMoneyPositionResolver) resolveV3(ctx context.Context, ref smartMon
 		snapshotBlock = 0
 	}
 	return r.buildV3ResolvedPosition(ctx, ref, usedNPM, tokenID.String(), info, snapshotBlock)
+}
+
+func validateSmartMoneyV3PositionPool(poolID string, pos *blockchain.V3PositionInfo) error {
+	if pos == nil {
+		return fmt.Errorf("position info missing")
+	}
+	if !common.IsHexAddress(poolID) {
+		return nil
+	}
+
+	poolAddr := common.HexToAddress(poolID)
+	poolToken0, poolToken1, err := blockchain.GetV3PoolTokens(poolAddr)
+	if err != nil {
+		return fmt.Errorf("read V3 pool tokens failed: %w", err)
+	}
+	poolFee, err := blockchain.GetV3PoolFee(poolAddr)
+	if err != nil {
+		return fmt.Errorf("read V3 pool fee failed: %w", err)
+	}
+
+	if poolToken0 != pos.Token0 || poolToken1 != pos.Token1 || uint64(poolFee) != pos.Fee {
+		return fmt.Errorf(
+			"V3 tokenId/pool mismatch: pool=%s poolToken0=%s poolToken1=%s poolFee=%d posToken0=%s posToken1=%s posFee=%d",
+			poolAddr.Hex(),
+			poolToken0.Hex(),
+			poolToken1.Hex(),
+			poolFee,
+			pos.Token0.Hex(),
+			pos.Token1.Hex(),
+			pos.Fee,
+		)
+	}
+	return nil
 }
 
 func (r *smartMoneyPositionResolver) buildV3ResolvedPosition(ctx context.Context, ref smartMoneyPositionRef, npm common.Address, positionID string, info *blockchain.V3PositionInfo, snapshotBlock uint64) (*smartMoneyResolvedPosition, error) {
