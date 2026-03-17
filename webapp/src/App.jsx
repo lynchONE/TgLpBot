@@ -1898,6 +1898,29 @@ export default function App() {
   // Pool adds preview data: { "v3:0x1234": { status, wallets, totalUsd, error } }
   const [poolAddsMap, setPoolAddsMap] = useState({});
   const [smartWalletDetailMap, setSmartWalletDetailMap] = useState({});
+  const smartWalletDetailMapRef = useRef({});
+  const openSmartWalletRequestsRef = useRef([]);
+
+  useEffect(() => {
+    smartWalletDetailMapRef.current = smartWalletDetailMap || {};
+  }, [smartWalletDetailMap]);
+
+  const openSmartWalletRequests = useMemo(() => (
+    Object.values(smartWalletDetailMap || {})
+      .filter((entry) => entry?.open && entry?.request)
+      .map((entry) => entry.request)
+  ), [smartWalletDetailMap]);
+
+  const openSmartWalletRequestSignature = useMemo(() => (
+    openSmartWalletRequests
+      .map((request) => buildSmartWalletDetailKey(request?.poolKey, request?.row, request?.rowIndex))
+      .sort()
+      .join('||')
+  ), [openSmartWalletRequests]);
+
+  useEffect(() => {
+    openSmartWalletRequestsRef.current = openSmartWalletRequests;
+  }, [openSmartWalletRequests]);
 
   useEffect(() => {
     setSmartWalletDetailMap({});
@@ -1962,42 +1985,41 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [smartDisplayPools, hasInitData, apiBaseUrl, initData, chain]);
 
-  const toggleSmartWalletDetail = useCallback(async ({
+  const loadSmartWalletDetail = useCallback(async ({
     poolKey,
     poolVersion,
     poolId,
     row,
     rowIndex,
+    signal,
+    silent = false,
   }) => {
     const detailKey = buildSmartWalletDetailKey(poolKey, row, rowIndex);
-    const current = smartWalletDetailMap[detailKey];
-    if (current?.open) {
-      setSmartWalletDetailMap((prev) => ({
-        ...(prev || {}),
-        [detailKey]: { ...(prev?.[detailKey] || {}), open: false },
-      }));
-      return;
-    }
-
-    setSmartWalletDetailMap((prev) => ({
-      ...(prev || {}),
-      [detailKey]: { ...(prev?.[detailKey] || {}), open: true },
-    }));
+    const request = { poolKey, poolVersion, poolId, row, rowIndex };
+    const current = smartWalletDetailMapRef.current?.[detailKey] || {};
+    const existingPositions = Array.isArray(current?.positions) ? current.positions : [];
+    const existingWarnings = Array.isArray(current?.warnings) ? current.warnings : [];
 
     if (!hasInitData) return;
-    if (current?.status === 'loading' || current?.status === 'success') return;
 
-    setSmartWalletDetailMap((prev) => ({
-      ...(prev || {}),
-      [detailKey]: {
-        ...(prev?.[detailKey] || {}),
-        open: true,
-        status: 'loading',
-        error: '',
-        positions: [],
-        warnings: [],
-      },
-    }));
+    setSmartWalletDetailMap((prev) => {
+      const existing = prev?.[detailKey] || {};
+      const cachedPositions = Array.isArray(existing?.positions) ? existing.positions : existingPositions;
+      const cachedWarnings = Array.isArray(existing?.warnings) ? existing.warnings : existingWarnings;
+      return {
+        ...(prev || {}),
+        [detailKey]: {
+          ...existing,
+          request,
+          open: true,
+          status: silent && cachedPositions.length > 0 ? 'success' : 'loading',
+          error: silent && cachedPositions.length > 0 ? String(existing?.error || '') : '',
+          positions: cachedPositions,
+          warnings: cachedWarnings,
+          refreshing: true,
+        },
+      };
+    });
 
     try {
       const resp = await fetchSmartMoneyWalletPositions({
@@ -2007,10 +2029,12 @@ export default function App() {
         walletAddress: row?.wallet_address,
         windowHours: SMART_PNL_WINDOW_HOURS,
         limit: 80,
+        signal,
       });
       const positions = matchSmartMoneyWalletPositions(resp?.positions, row, poolVersion, poolId);
+      const normalizedWalletAddr = normalizeWalletAddress(row?.wallet_address);
+
       if (positions.length === 0) {
-        const normalizedWalletAddr = normalizeWalletAddress(row?.wallet_address);
         setPoolAddsMap((prev) => {
           const currentPool = prev?.[poolKey];
           if (!currentPool || !Array.isArray(currentPool.wallets)) return prev;
@@ -2034,29 +2058,112 @@ export default function App() {
             : prev
         ));
       }
+
       setSmartWalletDetailMap((prev) => ({
         ...(prev || {}),
         [detailKey]: {
-          open: true,
+          ...(prev?.[detailKey] || {}),
+          request,
+          open: positions.length > 0,
           status: 'success',
           error: '',
           positions,
           warnings: Array.isArray(resp?.warnings) ? resp.warnings : [],
+          refreshing: false,
+          lastLoadedAt: Date.now(),
         },
       }));
     } catch (e) {
+      if (e?.name === 'AbortError') return;
+      setSmartWalletDetailMap((prev) => {
+        const existing = prev?.[detailKey] || {};
+        const cachedPositions = Array.isArray(existing?.positions) ? existing.positions : [];
+        if (silent && cachedPositions.length > 0) {
+          return {
+            ...(prev || {}),
+            [detailKey]: {
+              ...existing,
+              request,
+              status: 'success',
+              refreshing: false,
+            },
+          };
+        }
+        return {
+          ...(prev || {}),
+          [detailKey]: {
+            ...existing,
+            request,
+            open: true,
+            status: 'error',
+            error: String(e?.message || e),
+            positions: cachedPositions,
+            warnings: Array.isArray(existing?.warnings) ? existing.warnings : [],
+            refreshing: false,
+          },
+        };
+      });
+    }
+  }, [apiBaseUrl, chain, hasInitData, initData]);
+
+  const toggleSmartWalletDetail = useCallback(async ({
+    poolKey,
+    poolVersion,
+    poolId,
+    row,
+    rowIndex,
+  }) => {
+    const detailKey = buildSmartWalletDetailKey(poolKey, row, rowIndex);
+    const current = smartWalletDetailMap[detailKey];
+    if (current?.open) {
       setSmartWalletDetailMap((prev) => ({
         ...(prev || {}),
-        [detailKey]: {
-          open: true,
-          status: 'error',
-          error: String(e?.message || e),
-          positions: [],
-          warnings: [],
-        },
+        [detailKey]: { ...(prev?.[detailKey] || {}), open: false },
       }));
+      return;
     }
-  }, [apiBaseUrl, chain, hasInitData, initData, smartWalletDetailMap]);
+
+    setSmartWalletDetailMap((prev) => ({
+      ...(prev || {}),
+      [detailKey]: {
+        ...(prev?.[detailKey] || {}),
+        open: true,
+        request: { poolKey, poolVersion, poolId, row, rowIndex },
+      },
+    }));
+
+    if (!hasInitData) return;
+    if (current?.status === 'loading' || current?.refreshing) return;
+
+    await loadSmartWalletDetail({
+      poolKey,
+      poolVersion,
+      poolId,
+      row,
+      rowIndex,
+      silent: Boolean(Array.isArray(current?.positions) && current.positions.length > 0),
+    });
+  }, [hasInitData, loadSmartWalletDetail, smartWalletDetailMap]);
+
+  useEffect(() => {
+    if (!hasInitData) return undefined;
+    if (!openSmartWalletRequestSignature) return undefined;
+    const timer = window.setInterval(() => {
+      openSmartWalletRequestsRef.current.forEach((request) => {
+        const detailKey = buildSmartWalletDetailKey(request?.poolKey, request?.row, request?.rowIndex);
+        const current = smartWalletDetailMapRef.current?.[detailKey];
+        if (!current?.open || current?.refreshing || current?.status === 'loading') return;
+        loadSmartWalletDetail({
+          ...request,
+          silent: true,
+        });
+      });
+    }, 10_000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [hasInitData, loadSmartWalletDetail, openSmartWalletRequestSignature]);
 
   const panelMap = {
     create_pool: (

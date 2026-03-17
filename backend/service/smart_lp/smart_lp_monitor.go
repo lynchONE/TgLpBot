@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -154,7 +155,7 @@ func NewSmartLPMonitor(ch *clickhouse.ClickHouseService) *SmartLPMonitor {
 	if removeInterval < 5*time.Minute {
 		removeInterval = 5 * time.Minute
 	}
-	reconcileInterval := 30 * time.Minute
+	reconcileInterval := time.Minute
 	return &SmartLPMonitor{
 		ch:                ch,
 		stopChan:          make(chan struct{}),
@@ -1040,11 +1041,248 @@ func (s *SmartLPMonitor) runActiveStateReconcileOnce() {
 	affected, err := s.ch.ReconcileSmartLPActivePositionsFromRecentEvents(ctx, 48*time.Hour)
 	if err != nil {
 		log.Printf("[SmartLP] active-state reconcile failed: %v", err)
-		return
 	}
-	if config.AppConfig != nil && config.AppConfig.SmartLPDebug && affected > 0 {
-		log.Printf("[SmartLP] active-state reconcile upserted rows=%d", affected)
+
+	verified, deactivated, verifyErr := s.verifyActivePositionsOnce(ctx)
+	if verifyErr != nil {
+		log.Printf("[SmartLP] active-state verify failed: %v", verifyErr)
 	}
+	if config.AppConfig != nil && config.AppConfig.SmartLPDebug && (affected > 0 || verified > 0 || deactivated > 0) {
+		log.Printf("[SmartLP] active-state reconcile upserted rows=%d verified=%d deactivated=%d", affected, verified, deactivated)
+	}
+}
+
+func mergeWatchedWalletSet(dst map[string]struct{}, blocked map[string]struct{}, wallets []string) int {
+	if dst == nil {
+		dst = make(map[string]struct{})
+	}
+	added := 0
+	for _, wallet := range wallets {
+		wallet = strings.ToLower(strings.TrimSpace(wallet))
+		if !common.IsHexAddress(wallet) {
+			continue
+		}
+		if _, blockedWallet := blocked[wallet]; blockedWallet {
+			continue
+		}
+		if _, exists := dst[wallet]; exists {
+			continue
+		}
+		dst[wallet] = struct{}{}
+		added++
+	}
+	return added
+}
+
+func smartLPPositionLookupNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(msg, "invalid token id"):
+		return true
+	case strings.Contains(msg, "nonexistent token"):
+		return true
+	case strings.Contains(msg, "owner query for nonexistent token"):
+		return true
+	case strings.Contains(msg, "erc721: invalid token"):
+		return true
+	case strings.Contains(msg, "token doesn't exist"):
+		return true
+	case strings.Contains(msg, "token does not exist"):
+		return true
+	case strings.Contains(msg, "execution reverted: invalid token"):
+		return true
+	case strings.Contains(msg, "execution reverted: erc721"):
+		return true
+	case strings.Contains(msg, "execution reverted: position doesn't exist"):
+		return true
+	case strings.Contains(msg, "execution reverted: invalid token id"):
+		return true
+	case strings.Contains(msg, "abi: attempting to unmarshall an empty string"):
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *SmartLPMonitor) verifyActivePositionsOnce(ctx context.Context) (int, int, error) {
+	if s == nil || s.ch == nil || s.ch.Conn == nil {
+		return 0, 0, nil
+	}
+	if config.AppConfig == nil {
+		return 0, 0, fmt.Errorf("config not loaded")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	chain := strings.ToLower(strings.TrimSpace(config.AppConfig.AutoLPChain))
+	if chain == "" {
+		chain = "bsc"
+	}
+
+	client, _, err := blockchain.GetEVMClient(chain)
+	if err != nil {
+		return 0, 0, err
+	}
+	cc, ok := config.AppConfig.GetChainConfig(chain)
+	if !ok {
+		return 0, 0, fmt.Errorf("chain config not found: %s", chain)
+	}
+
+	snapshots, err := s.ch.ListSmartLPActivePositionsForVerification(ctx, chain, 2*time.Hour, 200)
+	if err != nil {
+		return 0, 0, err
+	}
+	if len(snapshots) == 0 {
+		return 0, 0, nil
+	}
+
+	v4PM := common.Address{}
+	if common.IsHexAddress(cc.UniswapV4PositionManagerAddress) {
+		v4PM = common.HexToAddress(cc.UniswapV4PositionManagerAddress)
+	}
+
+	var (
+		mu          sync.Mutex
+		wg          sync.WaitGroup
+		jobs        = make(chan clickhouse.SmartLPActivePositionSnapshot)
+		updates     = make([]clickhouse.SmartLPActivePositionVerification, 0, len(snapshots))
+		verified    int
+		deactivated int
+	)
+
+	verifyOne := func(snapshot clickhouse.SmartLPActivePositionSnapshot) (*clickhouse.SmartLPActivePositionVerification, bool, bool) {
+		tokenID := strings.TrimSpace(snapshot.TokenID)
+		if tokenID == "" {
+			return nil, false, false
+		}
+		tokenBI, ok := new(big.Int).SetString(tokenID, 10)
+		if !ok || tokenBI == nil || tokenBI.Sign() <= 0 {
+			return nil, false, false
+		}
+
+		callTimeout := 8 * time.Second
+		if config.AppConfig != nil && config.AppConfig.SmartLPRPCTimeoutSeconds > 0 {
+			if configured := time.Duration(config.AppConfig.SmartLPRPCTimeoutSeconds) * time.Second; configured > 0 && configured < callTimeout {
+				callTimeout = configured
+			}
+		}
+		callCtx, cancel := context.WithTimeout(ctx, callTimeout)
+		defer cancel()
+
+		switch strings.ToLower(strings.TrimSpace(snapshot.PoolVersion)) {
+		case "v3":
+			if !common.IsHexAddress(snapshot.ContractAddress) {
+				return nil, false, false
+			}
+			pm, err := blockchain.NewV3PositionManager(common.HexToAddress(snapshot.ContractAddress), client)
+			if err != nil {
+				return nil, false, false
+			}
+			pos, err := pm.Positions(&bind.CallOpts{Context: callCtx}, tokenBI)
+			if err != nil {
+				if smartLPPositionLookupNotFound(err) {
+					return &clickhouse.SmartLPActivePositionVerification{
+						PositionKey: snapshot.PositionKey,
+						IsActive:    false,
+						VerifiedAt:  time.Now().UTC(),
+						Source:      "verify_chain",
+					}, true, true
+				}
+				return nil, false, true
+			}
+			isActive := pos != nil && pos.Liquidity != nil && pos.Liquidity.Sign() > 0
+			currentLiquidity := "0"
+			if isActive {
+				currentLiquidity = pos.Liquidity.String()
+			}
+			return &clickhouse.SmartLPActivePositionVerification{
+				PositionKey:      snapshot.PositionKey,
+				IsActive:         isActive,
+				CurrentLiquidity: currentLiquidity,
+				VerifiedAt:       time.Now().UTC(),
+				Source:           "verify_chain",
+			}, !isActive, true
+		case "v4":
+			if v4PM == (common.Address{}) {
+				return nil, false, false
+			}
+			pm, err := blockchain.NewV4PositionManager(v4PM, client)
+			if err != nil {
+				return nil, false, false
+			}
+			pos, err := pm.Positions(&bind.CallOpts{Context: callCtx}, tokenBI)
+			if err != nil {
+				if _, infoErr := pm.PositionInfoPacked(&bind.CallOpts{Context: callCtx}, tokenBI); infoErr != nil {
+					if smartLPPositionLookupNotFound(err) || smartLPPositionLookupNotFound(infoErr) {
+						return &clickhouse.SmartLPActivePositionVerification{
+							PositionKey: snapshot.PositionKey,
+							IsActive:    false,
+							VerifiedAt:  time.Now().UTC(),
+							Source:      "verify_chain",
+						}, true, true
+					}
+				}
+				return nil, false, true
+			}
+			isActive := pos != nil && pos.Liquidity != nil && pos.Liquidity.Sign() > 0
+			currentLiquidity := "0"
+			if isActive {
+				currentLiquidity = pos.Liquidity.String()
+			}
+			return &clickhouse.SmartLPActivePositionVerification{
+				PositionKey:      snapshot.PositionKey,
+				IsActive:         isActive,
+				CurrentLiquidity: currentLiquidity,
+				VerifiedAt:       time.Now().UTC(),
+				Source:           "verify_chain",
+			}, !isActive, true
+		default:
+			return nil, false, false
+		}
+	}
+
+	workers := 4
+	if workers > len(snapshots) {
+		workers = len(snapshots)
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for snapshot := range jobs {
+				update, closed, attempted := verifyOne(snapshot)
+				if !attempted || update == nil {
+					continue
+				}
+				mu.Lock()
+				verified++
+				updates = append(updates, *update)
+				if closed {
+					deactivated++
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	for _, snapshot := range snapshots {
+		jobs <- snapshot
+	}
+	close(jobs)
+	wg.Wait()
+
+	if len(updates) == 0 {
+		return verified, deactivated, nil
+	}
+	if _, err := s.ch.ApplySmartLPActivePositionVerifications(ctx, updates); err != nil {
+		return verified, deactivated, err
+	}
+	return verified, deactivated, nil
 }
 
 // fireRemoveCallback extracts remove events from the list and calls the onRemoveEvents callback.
@@ -2179,6 +2417,7 @@ func (s *SmartLPMonitor) upsertWatchedWallets(ctx context.Context, events []smar
 
 func (s *SmartLPMonitor) loadWatchedWallets(ctx context.Context, chain string) (map[string]struct{}, error) {
 	out := make(map[string]struct{})
+	blocked := make(map[string]struct{})
 	if s == nil || s.ch == nil || s.ch.Conn == nil {
 		return out, fmt.Errorf("clickhouse not initialized")
 	}
@@ -2236,7 +2475,16 @@ func (s *SmartLPMonitor) loadWatchedWallets(ctx context.Context, chain string) (
 	if err != nil {
 		// Fallback for older ClickHouse schemas or when the watchlist table is empty/unavailable:
 		// derive the watchlist from recent add-liquidity events.
-		return loadFromEvents()
+		out, fallbackErr := loadFromEvents()
+		if fallbackErr != nil {
+			return out, fallbackErr
+		}
+		if activeWallets, activeErr := s.ch.ListSmartLPActiveWallets(ctx, chain); activeErr == nil {
+			mergeWatchedWalletSet(out, blocked, activeWallets)
+		} else if config.AppConfig != nil && config.AppConfig.SmartLPDebug {
+			log.Printf("[SmartLP] load active wallets fallback failed: %v", activeErr)
+		}
+		return out, nil
 	}
 	defer rows.Close()
 
@@ -2252,6 +2500,7 @@ func (s *SmartLPMonitor) loadWatchedWallets(ctx context.Context, chain string) (
 		latestSource = strings.ToLower(strings.TrimSpace(latestSource))
 		if common.IsHexAddress(wallet) {
 			if latestSource == "user_removed" {
+				blocked[wallet] = struct{}{}
 				continue
 			}
 			out[wallet] = struct{}{}
@@ -2260,6 +2509,12 @@ func (s *SmartLPMonitor) loadWatchedWallets(ctx context.Context, chain string) (
 	if err := rows.Err(); err != nil {
 		return out, err
 	}
+	if activeWallets, activeErr := s.ch.ListSmartLPActiveWallets(ctx, chain); activeErr == nil {
+		mergeWatchedWalletSet(out, blocked, activeWallets)
+	} else if config.AppConfig != nil && config.AppConfig.SmartLPDebug {
+		log.Printf("[SmartLP] load active wallets failed: %v", activeErr)
+	}
+
 	if len(out) > 0 {
 		return out, nil
 	}
@@ -2271,7 +2526,16 @@ func (s *SmartLPMonitor) loadWatchedWallets(ctx context.Context, chain string) (
 
 	// Backfill path: existing deployments may have smart_lp_events but an empty watchlist table.
 	// Without a watchlist, the remove watcher will never record remove events.
-	return loadFromEvents()
+	out, err = loadFromEvents()
+	if err != nil {
+		return out, err
+	}
+	if activeWallets, activeErr := s.ch.ListSmartLPActiveWallets(ctx, chain); activeErr == nil {
+		mergeWatchedWalletSet(out, blocked, activeWallets)
+	} else if config.AppConfig != nil && config.AppConfig.SmartLPDebug {
+		log.Printf("[SmartLP] load active wallets fallback failed: %v", activeErr)
+	}
+	return out, nil
 }
 
 func (s *SmartLPMonitor) loadRemoveLastScannedBlock(ctx context.Context) (uint64, bool, error) {

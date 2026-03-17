@@ -53,6 +53,34 @@ type smartLPActivePositionState struct {
 	UpdatedAt        time.Time
 }
 
+type SmartLPActivePositionSnapshot struct {
+	PositionKey      string
+	Chain            string
+	PoolVersion      string
+	PoolID           string
+	WalletAddress    string
+	ContractAddress  string
+	TokenID          string
+	TickLower        int32
+	TickUpper        int32
+	CurrentLiquidity *big.Int
+	OpenedAt         time.Time
+	LastAddAt        time.Time
+	LastRemoveAt     time.Time
+	LastEventSeq     uint64
+	LastEventBlock   uint64
+	LastEventTs      time.Time
+	UpdatedAt        time.Time
+}
+
+type SmartLPActivePositionVerification struct {
+	PositionKey      string
+	IsActive         bool
+	CurrentLiquidity string
+	VerifiedAt       time.Time
+	Source           string
+}
+
 func smartLPActivePositionCreateTableSQL() string {
 	return fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
@@ -202,6 +230,45 @@ func applySmartLPActivePositionEvent(state smartLPActivePositionState, ev SmartL
 		LastEventTs:      ev.Ts,
 		Source:           ev.Source,
 		UpdatedAt:        now,
+	}
+	return next, true
+}
+
+func applySmartLPActivePositionVerification(state smartLPActivePositionState, verification SmartLPActivePositionVerification) (smartLPActivePositionState, bool) {
+	key := strings.TrimSpace(verification.PositionKey)
+	if key == "" || state.PositionKey == "" || key != state.PositionKey {
+		return state, false
+	}
+
+	verifiedAt := verification.VerifiedAt
+	if verifiedAt.IsZero() {
+		verifiedAt = time.Now().UTC()
+	} else {
+		verifiedAt = verifiedAt.UTC()
+	}
+
+	next := state
+	next.UpdatedAt = verifiedAt
+
+	source := strings.TrimSpace(verification.Source)
+	if source == "" {
+		source = "verify_chain"
+	}
+	next.Source = source
+
+	if verification.IsActive {
+		next.IsActive = true
+		if parsed, ok := new(big.Int).SetString(strings.TrimSpace(verification.CurrentLiquidity), 10); ok && parsed != nil && parsed.Sign() > 0 {
+			next.CurrentLiquidity = parsed
+		}
+		return next, true
+	}
+
+	next.IsActive = false
+	next.CurrentLiquidity = big.NewInt(0)
+	next.OpenedAt = smartLPActiveZeroTime
+	if !next.LastRemoveAt.After(verifiedAt) {
+		next.LastRemoveAt = verifiedAt
 	}
 	return next, true
 }
@@ -359,6 +426,191 @@ func (s *ClickHouseService) loadSmartLPActivePositionStates(ctx context.Context,
 	return out, nil
 }
 
+func (s *ClickHouseService) ListSmartLPActiveWallets(ctx context.Context, chain string) ([]string, error) {
+	out := make([]string, 0)
+	if s == nil || s.Conn == nil {
+		return out, fmt.Errorf("clickhouse not initialized")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	chain = strings.ToLower(strings.TrimSpace(chain))
+	chainFilter := ""
+	args := make([]any, 0, 1)
+	if chain != "" {
+		chainFilter = "WHERE lowerUTF8(chain) = ?"
+		args = append(args, chain)
+	}
+
+	q := fmt.Sprintf(`
+		SELECT wallet_address
+		FROM (
+			SELECT
+				argMax(wallet_address, tuple(last_event_seq, updated_at)) AS wallet_address,
+				argMax(is_active, tuple(last_event_seq, updated_at)) AS is_active
+			FROM %s
+			%s
+			GROUP BY position_key
+		)
+		WHERE is_active = 1
+			AND wallet_address != ''
+		GROUP BY wallet_address
+		ORDER BY wallet_address ASC
+	`, smartLPActivePositionsTable, chainFilter)
+
+	rows, err := s.Conn.Query(ctx, q, args...)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var wallet string
+		if err := rows.Scan(&wallet); err != nil {
+			return out, err
+		}
+		wallet = strings.ToLower(strings.TrimSpace(wallet))
+		if wallet != "" {
+			out = append(out, wallet)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+func (s *ClickHouseService) ListSmartLPActivePositionsForVerification(ctx context.Context, chain string, lookback time.Duration, limit int) ([]SmartLPActivePositionSnapshot, error) {
+	out := make([]SmartLPActivePositionSnapshot, 0)
+	if s == nil || s.Conn == nil {
+		return out, fmt.Errorf("clickhouse not initialized")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if lookback <= 0 {
+		lookback = 10 * 24 * time.Hour
+	}
+	if limit <= 0 {
+		limit = 40
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	seconds := int(lookback.Seconds())
+	if seconds <= 0 {
+		seconds = 10 * 24 * 3600
+	}
+
+	chain = strings.ToLower(strings.TrimSpace(chain))
+	chainFilter := ""
+	args := make([]any, 0, 3)
+	if chain != "" {
+		chainFilter = "AND lowerUTF8(chain) = ?"
+		args = append(args, chain)
+	}
+	args = append(args, seconds, limit)
+
+	q := fmt.Sprintf(`
+		SELECT
+			position_key,
+			latest_chain,
+			latest_pool_version,
+			latest_pool_id,
+			latest_wallet_address,
+			latest_contract_address,
+			latest_token_id,
+			latest_tick_lower,
+			latest_tick_upper,
+			latest_current_liquidity,
+			latest_opened_at,
+			latest_last_add_at,
+			latest_last_remove_at,
+			latest_last_event_seq,
+			latest_last_event_block,
+			latest_last_event_ts,
+			latest_updated_at
+		FROM (
+			SELECT
+				position_key,
+				argMax(chain, tuple(last_event_seq, updated_at)) AS latest_chain,
+				argMax(pool_version, tuple(last_event_seq, updated_at)) AS latest_pool_version,
+				argMax(pool_id, tuple(last_event_seq, updated_at)) AS latest_pool_id,
+				argMax(wallet_address, tuple(last_event_seq, updated_at)) AS latest_wallet_address,
+				argMax(contract_address, tuple(last_event_seq, updated_at)) AS latest_contract_address,
+				argMax(token_id, tuple(last_event_seq, updated_at)) AS latest_token_id,
+				argMax(tick_lower, tuple(last_event_seq, updated_at)) AS latest_tick_lower,
+				argMax(tick_upper, tuple(last_event_seq, updated_at)) AS latest_tick_upper,
+				argMax(current_liquidity, tuple(last_event_seq, updated_at)) AS latest_current_liquidity,
+				argMax(is_active, tuple(last_event_seq, updated_at)) AS latest_is_active,
+				argMax(opened_at, tuple(last_event_seq, updated_at)) AS latest_opened_at,
+				argMax(last_add_at, tuple(last_event_seq, updated_at)) AS latest_last_add_at,
+				argMax(last_remove_at, tuple(last_event_seq, updated_at)) AS latest_last_remove_at,
+				max(last_event_seq) AS latest_last_event_seq,
+				argMax(last_event_block, tuple(last_event_seq, updated_at)) AS latest_last_event_block,
+				argMax(last_event_ts, tuple(last_event_seq, updated_at)) AS latest_last_event_ts,
+				argMax(updated_at, tuple(last_event_seq, updated_at)) AS latest_updated_at
+			FROM %s
+			WHERE last_add_at >= now() - INTERVAL ? SECOND
+				%s
+			GROUP BY position_key
+		)
+		WHERE latest_is_active = 1
+		ORDER BY latest_updated_at ASC, latest_last_add_at DESC, position_key ASC
+		LIMIT ?
+	`, smartLPActivePositionsTable, chainFilter)
+
+	rows, err := s.Conn.Query(ctx, q, args...)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			item             SmartLPActivePositionSnapshot
+			currentLiquidity string
+		)
+		if err := rows.Scan(
+			&item.PositionKey,
+			&item.Chain,
+			&item.PoolVersion,
+			&item.PoolID,
+			&item.WalletAddress,
+			&item.ContractAddress,
+			&item.TokenID,
+			&item.TickLower,
+			&item.TickUpper,
+			&currentLiquidity,
+			&item.OpenedAt,
+			&item.LastAddAt,
+			&item.LastRemoveAt,
+			&item.LastEventSeq,
+			&item.LastEventBlock,
+			&item.LastEventTs,
+			&item.UpdatedAt,
+		); err != nil {
+			return out, err
+		}
+		item.Chain = strings.ToLower(strings.TrimSpace(item.Chain))
+		item.PoolVersion = strings.ToLower(strings.TrimSpace(item.PoolVersion))
+		item.PoolID = strings.ToLower(strings.TrimSpace(item.PoolID))
+		item.WalletAddress = strings.ToLower(strings.TrimSpace(item.WalletAddress))
+		item.ContractAddress = strings.ToLower(strings.TrimSpace(item.ContractAddress))
+		item.TokenID = strings.TrimSpace(item.TokenID)
+		item.CurrentLiquidity = big.NewInt(0)
+		if parsed, ok := new(big.Int).SetString(strings.TrimSpace(currentLiquidity), 10); ok && parsed != nil {
+			item.CurrentLiquidity = parsed
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
 func (s *ClickHouseService) insertSmartLPActivePositionStates(ctx context.Context, states []smartLPActivePositionState) error {
 	if s == nil || s.Conn == nil || len(states) == 0 {
 		return nil
@@ -411,6 +663,74 @@ func (s *ClickHouseService) insertSmartLPActivePositionStates(ctx context.Contex
 		}
 	}
 	return batch.Send()
+}
+
+func (s *ClickHouseService) ApplySmartLPActivePositionVerifications(ctx context.Context, verifications []SmartLPActivePositionVerification) (int, error) {
+	if s == nil || s.Conn == nil {
+		return 0, fmt.Errorf("clickhouse not initialized")
+	}
+	if len(verifications) == 0 {
+		return 0, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	s.smartLPStateMu.Lock()
+	defer s.smartLPStateMu.Unlock()
+
+	keys := make([]string, 0, len(verifications))
+	seen := make(map[string]struct{}, len(verifications))
+	for _, verification := range verifications {
+		key := strings.TrimSpace(verification.PositionKey)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	if len(keys) == 0 {
+		return 0, nil
+	}
+
+	states, err := s.loadSmartLPActivePositionStates(ctx, keys)
+	if err != nil {
+		return 0, fmt.Errorf("load smart_lp_active_positions state for verification failed: %w", err)
+	}
+
+	updates := make([]smartLPActivePositionState, 0, len(verifications))
+	for _, verification := range verifications {
+		state, ok := states[strings.TrimSpace(verification.PositionKey)]
+		if !ok {
+			continue
+		}
+		next, changed := applySmartLPActivePositionVerification(state, verification)
+		if !changed {
+			continue
+		}
+		updates = append(updates, next)
+	}
+	if len(updates) == 0 {
+		return 0, nil
+	}
+
+	sort.Slice(updates, func(i, j int) bool {
+		if updates[i].LastEventSeq == updates[j].LastEventSeq {
+			if updates[i].UpdatedAt.Equal(updates[j].UpdatedAt) {
+				return updates[i].PositionKey < updates[j].PositionKey
+			}
+			return updates[i].UpdatedAt.Before(updates[j].UpdatedAt)
+		}
+		return updates[i].LastEventSeq < updates[j].LastEventSeq
+	})
+
+	if err := s.insertSmartLPActivePositionStates(ctx, updates); err != nil {
+		return 0, fmt.Errorf("insert smart_lp_active_positions verification states failed: %w", err)
+	}
+	return len(updates), nil
 }
 
 func (s *ClickHouseService) UpsertSmartLPActivePositionsFromEvents(ctx context.Context, events []SmartLPActivePositionEvent) error {

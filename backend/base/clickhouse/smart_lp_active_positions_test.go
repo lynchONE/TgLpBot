@@ -164,3 +164,79 @@ func TestApplySmartLPActivePositionEvent_ClampsUnderflowAndSkipsOlderEvents(t *t
 		t.Fatalf("expected state to remain unchanged on older event, got seq=%d", next.LastEventSeq)
 	}
 }
+
+func TestApplySmartLPActivePositionVerification_DeactivatesStalePosition(t *testing.T) {
+	state := smartLPActivePositionState{
+		PositionKey:      buildSmartLPActivePositionKey("bsc", "v3", "0xpool", "0xwallet", "0xnpm", "11", -10, 10),
+		Chain:            "bsc",
+		PoolVersion:      "v3",
+		PoolID:           "0xpool",
+		WalletAddress:    "0xwallet",
+		ContractAddress:  "0xnpm",
+		TokenID:          "11",
+		TickLower:        -10,
+		TickUpper:        10,
+		CurrentLiquidity: big.NewInt(123),
+		IsActive:         true,
+		OpenedAt:         time.Unix(100, 0).UTC(),
+		LastAddAt:        time.Unix(100, 0).UTC(),
+		LastEventSeq:     99,
+		UpdatedAt:        time.Unix(120, 0).UTC(),
+	}
+
+	verifiedAt := time.Unix(200, 0).UTC()
+	next, changed := applySmartLPActivePositionVerification(state, SmartLPActivePositionVerification{
+		PositionKey: state.PositionKey,
+		IsActive:    false,
+		VerifiedAt:  verifiedAt,
+		Source:      "verify_chain",
+	})
+	if !changed {
+		t.Fatal("expected verification to update state")
+	}
+	if next.IsActive {
+		t.Fatal("expected state to become inactive")
+	}
+	if next.CurrentLiquidity == nil || next.CurrentLiquidity.Sign() != 0 {
+		t.Fatalf("expected liquidity to reset to zero, got %v", next.CurrentLiquidity)
+	}
+	if !next.LastRemoveAt.Equal(verifiedAt) {
+		t.Fatalf("expected last_remove_at to move to verify time, got %v", next.LastRemoveAt)
+	}
+	if !next.OpenedAt.Equal(smartLPActiveZeroTime) {
+		t.Fatalf("expected opened_at reset after deactivation, got %v", next.OpenedAt)
+	}
+}
+
+func TestApplySmartLPActivePositionVerification_RefreshesActiveLiquidity(t *testing.T) {
+	state := smartLPActivePositionState{
+		PositionKey:      buildSmartLPActivePositionKey("bsc", "v4", "0xpool", "0xwallet", "0xpm", "22", -20, 20),
+		CurrentLiquidity: big.NewInt(50),
+		IsActive:         true,
+		LastEventSeq:     101,
+		UpdatedAt:        time.Unix(120, 0).UTC(),
+	}
+
+	verifiedAt := time.Unix(240, 0).UTC()
+	next, changed := applySmartLPActivePositionVerification(state, SmartLPActivePositionVerification{
+		PositionKey:      state.PositionKey,
+		IsActive:         true,
+		CurrentLiquidity: "80",
+		VerifiedAt:       verifiedAt,
+	})
+	if !changed {
+		t.Fatal("expected verification to update active state")
+	}
+	if !next.IsActive {
+		t.Fatal("expected state to remain active")
+	}
+	if next.CurrentLiquidity == nil || next.CurrentLiquidity.Cmp(big.NewInt(80)) != 0 {
+		t.Fatalf("expected liquidity refresh to 80, got %v", next.CurrentLiquidity)
+	}
+	if !next.UpdatedAt.Equal(verifiedAt) {
+		t.Fatalf("expected updated_at to move to verify time, got %v", next.UpdatedAt)
+	}
+	if next.Source != "verify_chain" {
+		t.Fatalf("expected verify_chain source, got %s", next.Source)
+	}
+}
