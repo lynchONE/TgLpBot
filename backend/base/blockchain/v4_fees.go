@@ -12,7 +12,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-// V4 StateView ABI for feeGrowth queries
 const uniswapV4StateViewFeeGrowthABI = `[
   {
     "inputs": [
@@ -56,12 +55,23 @@ const uniswapV4StateViewFeeGrowthABI = `[
   }
 ]`
 
-// GetV4PoolFeeGrowthGlobals 获取 V4 池子的全局手续费增长
 func GetV4PoolFeeGrowthGlobals(stateView, poolManager common.Address, poolID string) (*big.Int, *big.Int, error) {
+	return getV4PoolFeeGrowthGlobalsAtBlock(stateView, poolManager, poolID, nil)
+}
+
+func GetV4PoolFeeGrowthGlobalsAtBlock(stateView, poolManager common.Address, poolID string, blockNumber uint64) (*big.Int, *big.Int, error) {
+	if blockNumber == 0 {
+		return nil, nil, fmt.Errorf("block number not set")
+	}
+	block := new(big.Int).SetUint64(blockNumber)
+	return getV4PoolFeeGrowthGlobalsAtBlock(stateView, poolManager, poolID, block)
+}
+
+func getV4PoolFeeGrowthGlobalsAtBlock(stateView, poolManager common.Address, poolID string, block *big.Int) (*big.Int, *big.Int, error) {
 	if Client == nil {
 		return nil, nil, fmt.Errorf("blockchain client not initialized")
 	}
-	if (stateView == common.Address{}) {
+	if stateView == (common.Address{}) {
 		return nil, nil, fmt.Errorf("stateView address not set")
 	}
 
@@ -75,7 +85,6 @@ func GetV4PoolFeeGrowthGlobals(stateView, poolManager common.Address, poolID str
 		return nil, nil, fmt.Errorf("parse StateView ABI failed: %w", err)
 	}
 
-	// 首先尝试 getFeeGrowthGlobals 方法
 	data, err := parsedABI.Pack("getFeeGrowthGlobals", id)
 	if err != nil {
 		return nil, nil, fmt.Errorf("pack getFeeGrowthGlobals failed: %w", err)
@@ -84,9 +93,14 @@ func GetV4PoolFeeGrowthGlobals(stateView, poolManager common.Address, poolID str
 	msg := ethereum.CallMsg{To: &stateView, Data: data}
 	callCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	raw, err := callContractWithRetry(Client, callCtx, msg)
+
+	var raw []byte
+	if block != nil {
+		raw, err = callContractWithRetryAtBlock(Client, callCtx, msg, block)
+	} else {
+		raw, err = callContractWithRetry(Client, callCtx, msg)
+	}
 	if err != nil {
-		// We need feeGrowthGlobal to compute fees; bubble up the error so callers can fallback/cached-read.
 		v4Debugf("getFeeGrowthGlobals failed: %v", err)
 		return nil, nil, fmt.Errorf("call getFeeGrowthGlobals failed: %w", err)
 	}
@@ -107,16 +121,26 @@ func GetV4PoolFeeGrowthGlobals(stateView, poolManager common.Address, poolID str
 	if !ok1 || fg1 == nil {
 		fg1 = big.NewInt(0)
 	}
-
 	return fg0, fg1, nil
 }
 
-// GetV4TickFeeGrowthOutside 获取 V4 指定 tick 的 feeGrowthOutside
 func GetV4TickFeeGrowthOutside(stateView, poolManager common.Address, poolID string, tick int) (*big.Int, *big.Int, error) {
+	return getV4TickFeeGrowthOutsideAtBlock(stateView, poolManager, poolID, tick, nil)
+}
+
+func GetV4TickFeeGrowthOutsideAtBlock(stateView, poolManager common.Address, poolID string, tick int, blockNumber uint64) (*big.Int, *big.Int, error) {
+	if blockNumber == 0 {
+		return nil, nil, fmt.Errorf("block number not set")
+	}
+	block := new(big.Int).SetUint64(blockNumber)
+	return getV4TickFeeGrowthOutsideAtBlock(stateView, poolManager, poolID, tick, block)
+}
+
+func getV4TickFeeGrowthOutsideAtBlock(stateView, poolManager common.Address, poolID string, tick int, block *big.Int) (*big.Int, *big.Int, error) {
 	if Client == nil {
 		return nil, nil, fmt.Errorf("blockchain client not initialized")
 	}
-	if (stateView == common.Address{}) {
+	if stateView == (common.Address{}) {
 		return nil, nil, fmt.Errorf("stateView address not set")
 	}
 
@@ -130,12 +154,17 @@ func GetV4TickFeeGrowthOutside(stateView, poolManager common.Address, poolID str
 		return nil, nil, fmt.Errorf("parse StateView ABI failed: %w", err)
 	}
 
-	// 首先尝试 getTickFeeGrowthOutside 方法
 	data, err := parsedABI.Pack("getTickFeeGrowthOutside", id, big.NewInt(int64(tick)))
 	if err == nil {
 		msg := ethereum.CallMsg{To: &stateView, Data: data}
 		callCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-		raw, callErr := callContractWithRetry(Client, callCtx, msg)
+		var raw []byte
+		var callErr error
+		if block != nil {
+			raw, callErr = callContractWithRetryAtBlock(Client, callCtx, msg, block)
+		} else {
+			raw, callErr = callContractWithRetry(Client, callCtx, msg)
+		}
 		cancel()
 		if callErr == nil {
 			out, unpackErr := parsedABI.Unpack("getTickFeeGrowthOutside", raw)
@@ -153,7 +182,6 @@ func GetV4TickFeeGrowthOutside(stateView, poolManager common.Address, poolID str
 		}
 	}
 
-	// 如果 getTickFeeGrowthOutside 不可用，尝试 getTickInfo
 	data, err = parsedABI.Pack("getTickInfo", id, big.NewInt(int64(tick)))
 	if err != nil {
 		return nil, nil, fmt.Errorf("pack getTickInfo failed: %w", err)
@@ -162,10 +190,14 @@ func GetV4TickFeeGrowthOutside(stateView, poolManager common.Address, poolID str
 	msg := ethereum.CallMsg{To: &stateView, Data: data}
 	callCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	raw, err := callContractWithRetry(Client, callCtx, msg)
+
+	var raw []byte
+	if block != nil {
+		raw, err = callContractWithRetryAtBlock(Client, callCtx, msg, block)
+	} else {
+		raw, err = callContractWithRetry(Client, callCtx, msg)
+	}
 	if err != nil {
-		// Some implementations revert for uninitialized ticks; treat that as 0.
-		// For other errors (e.g., RPC rate limit), bubble up the error so callers can fallback/cached-read.
 		errMsg := strings.ToLower(err.Error())
 		if strings.Contains(errMsg, "revert") {
 			v4Debugf("getTickInfo reverted for tick %d: %v, returning zeros", tick, err)
@@ -183,7 +215,6 @@ func GetV4TickFeeGrowthOutside(stateView, poolManager common.Address, poolID str
 		return nil, nil, fmt.Errorf("unexpected getTickInfo return length: %d", len(out))
 	}
 
-	// getTickInfo 返回: liquidityGross, liquidityNet, feeGrowthOutside0X128, feeGrowthOutside1X128
 	fg0, ok0 := out[2].(*big.Int)
 	fg1, ok1 := out[3].(*big.Int)
 	if !ok0 || fg0 == nil {
@@ -192,6 +223,5 @@ func GetV4TickFeeGrowthOutside(stateView, poolManager common.Address, poolID str
 	if !ok1 || fg1 == nil {
 		fg1 = big.NewInt(0)
 	}
-
 	return fg0, fg1, nil
 }

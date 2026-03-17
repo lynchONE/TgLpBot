@@ -71,6 +71,10 @@ type smartMoneyPositionResolver struct {
 
 	v4PMAddr     common.Address
 	v4PoolManger common.Address
+
+	snapshotOnce  sync.Once
+	snapshotBlock uint64
+	snapshotErr   error
 }
 
 func newSmartMoneyPositionResolver(metaCache *smartMoneyTokenMetaCache) (*smartMoneyPositionResolver, []string) {
@@ -150,6 +154,28 @@ func (r *smartMoneyPositionResolver) Resolve(ctx context.Context, ref smartMoney
 	default:
 		return nil, fmt.Errorf("unsupported pool version: %s", ref.PoolVersion)
 	}
+}
+
+func (r *smartMoneyPositionResolver) getSnapshotBlock(ctx context.Context) (uint64, error) {
+	if r == nil {
+		return 0, fmt.Errorf("resolver not initialized")
+	}
+	if blockchain.Client == nil {
+		return 0, fmt.Errorf("blockchain client not initialized")
+	}
+
+	r.snapshotOnce.Do(func() {
+		callCtx := ctx
+		if callCtx == nil {
+			callCtx = context.Background()
+		}
+		callCtx, cancel := context.WithTimeout(callCtx, 8*time.Second)
+		defer cancel()
+
+		r.snapshotBlock, r.snapshotErr = blockchain.Client.BlockNumber(callCtx)
+	})
+
+	return r.snapshotBlock, r.snapshotErr
 }
 
 func (r *smartMoneyPositionResolver) resolveV3(ctx context.Context, ref smartMoneyPositionRef) (*smartMoneyResolvedPosition, error) {
@@ -285,7 +311,23 @@ func (r *smartMoneyPositionResolver) resolveV4(ctx context.Context, ref smartMon
 		return nil, fmt.Errorf("invalid token_id")
 	}
 
-	pos, posErr := blockchain.GetV4PositionInfo(r.v4PMAddr, r.v4PoolManger, ref.PoolID, tokenID)
+	stateView := common.Address{}
+	if config.AppConfig != nil && common.IsHexAddress(config.AppConfig.UniswapV4StateViewAddress) {
+		stateView = common.HexToAddress(config.AppConfig.UniswapV4StateViewAddress)
+	}
+
+	snapshotBlock, snapshotErr := r.getSnapshotBlock(ctx)
+	useSnapshot := snapshotErr == nil && snapshotBlock > 0 && stateView != (common.Address{})
+
+	var (
+		pos    *blockchain.V4PositionInfo
+		posErr error
+	)
+	if useSnapshot {
+		pos, posErr = blockchain.GetV4PositionInfoAtBlock(r.v4PMAddr, r.v4PoolManger, ref.PoolID, tokenID, snapshotBlock)
+	} else {
+		pos, posErr = blockchain.GetV4PositionInfo(r.v4PMAddr, r.v4PoolManger, ref.PoolID, tokenID)
+	}
 	if pos == nil {
 		return nil, posErr
 	}
@@ -317,7 +359,16 @@ func (r *smartMoneyPositionResolver) resolveV4(ctx context.Context, ref smartMon
 	out.Token1Symbol = r.metaCache.Symbol(out.Token1)
 	out.Pair = smartMoneyPairLabel(out.Token0Symbol, out.Token1Symbol)
 
-	sqrtP, currentTick, slotErr := loadSmartMoneyV4Slot0(r.v4PoolManger, out.PoolID)
+	var (
+		sqrtP       *big.Int
+		currentTick int
+		slotErr     error
+	)
+	if useSnapshot {
+		sqrtP, currentTick, slotErr = blockchain.GetUniswapV4PoolSlot0ViaStateViewAtBlock(stateView, r.v4PoolManger, out.PoolID, snapshotBlock)
+	} else {
+		sqrtP, currentTick, slotErr = loadSmartMoneyV4Slot0(r.v4PoolManger, out.PoolID)
+	}
 	if slotErr != nil {
 		out.FeeStatus = "error"
 		out.FeeError = truncateErr(slotErr, 120)
@@ -338,7 +389,13 @@ func (r *smartMoneyPositionResolver) resolveV4(ctx context.Context, ref smartMon
 		out.Amount1 = sanitizeFloat(amountToFloat(amountToString(amt1Raw), out.Token1Dec))
 	}
 
-	fee0, fee1, feeErr := pool.CalcV4UnclaimedFees(out.PoolID, currentTick, pos)
+	var fee0, fee1 *big.Int
+	var feeErr error
+	if useSnapshot {
+		fee0, fee1, feeErr = pool.CalcV4UnclaimedFeesAtBlock(stateView, r.v4PoolManger, out.PoolID, currentTick, pos, snapshotBlock)
+	} else {
+		fee0, fee1, feeErr = pool.CalcV4UnclaimedFees(out.PoolID, currentTick, pos)
+	}
 	if feeErr != nil {
 		out.FeeStatus = "error"
 		out.FeeError = truncateErr(feeErr, 120)

@@ -135,6 +135,91 @@ func GetV4PositionInfo(positionManager common.Address, poolManager common.Addres
 	return pos, nil
 }
 
+func GetV4PositionInfoAtBlock(positionManager common.Address, poolManager common.Address, poolID string, tokenId *big.Int, blockNumber uint64) (*V4PositionInfo, error) {
+	if Client == nil {
+		return nil, fmt.Errorf("blockchain client not initialized")
+	}
+	if tokenId == nil || tokenId.Sign() <= 0 {
+		return nil, fmt.Errorf("invalid tokenId")
+	}
+	if positionManager == (common.Address{}) {
+		return nil, fmt.Errorf("positionManager missing")
+	}
+	if blockNumber == 0 {
+		return nil, fmt.Errorf("block number not set")
+	}
+
+	pm, err := NewV4PositionManager(positionManager, Client)
+	if err != nil {
+		return nil, err
+	}
+
+	opts := &bind.CallOpts{BlockNumber: new(big.Int).SetUint64(blockNumber)}
+	pos, posErr := pm.Positions(opts, tokenId)
+	if posErr == nil && pos != nil {
+		return pos, nil
+	}
+
+	raw, infoErr := pm.PositionInfoPacked(opts, tokenId)
+	if infoErr != nil {
+		if posErr != nil {
+			return nil, fmt.Errorf("positions failed: %v; positionInfo failed: %w", posErr, infoErr)
+		}
+		return nil, infoErr
+	}
+
+	packed, err := decodeV4PackedPositionInfo(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	pos = &V4PositionInfo{
+		TickLower:     packed.TickLower,
+		TickUpper:     packed.TickUpper,
+		Liquidity:     big.NewInt(0),
+		TokensOwed0:   big.NewInt(0),
+		TokensOwed1:   big.NewInt(0),
+		PoolId25:      hex.EncodeToString(packed.PoolId25),
+		HasSubscriber: packed.HasSubscriber,
+		PositionRaw:   []interface{}{raw},
+	}
+
+	if poolID != "" {
+		if c0, c1, fee, _, _, keyErr := GetUniswapV4PoolKeyFromPositionManager(positionManager, poolID); keyErr == nil {
+			pos.Token0 = c0
+			pos.Token1 = c1
+			pos.Fee = fee
+		}
+	}
+
+	if posErr != nil {
+		log.Printf("[V4PM] positions() failed for tokenId=%s at block=%d: %v; using positionInfo+extsload", tokenId.String(), blockNumber, posErr)
+	}
+
+	if poolID == "" || poolManager == (common.Address{}) {
+		return pos, fmt.Errorf("poolId/poolManager missing for V4 position state")
+	}
+
+	fullPoolID, perr := parsePoolID(poolID)
+	if perr != nil {
+		return pos, perr
+	}
+	if len(packed.PoolId25) == 25 {
+		if !bytes.Equal(fullPoolID.Bytes()[:25], packed.PoolId25) {
+			log.Printf("[V4PM] poolId mismatch at block=%d: poolId=%s packed25=%s", blockNumber, fullPoolID.Hex(), hex.EncodeToString(packed.PoolId25))
+		}
+	}
+
+	state, stErr := getV4PositionStateViaExtsloadAtBlock(poolManager, fullPoolID, positionManager, packed.TickLower, packed.TickUpper, tokenId, blockNumber)
+	if stErr != nil {
+		return pos, stErr
+	}
+	pos.Liquidity = state.Liquidity
+	pos.FeeGrowthInside0LastX128 = state.FeeGrowthInside0LastX128
+	pos.FeeGrowthInside1LastX128 = state.FeeGrowthInside1LastX128
+	return pos, nil
+}
+
 func decodeV4PackedPositionInfo(raw *big.Int) (*v4PackedPositionInfo, error) {
 	if raw == nil {
 		return nil, fmt.Errorf("positionInfo missing")
@@ -193,6 +278,45 @@ func getV4PositionStateViaExtsload(poolManager common.Address, poolID common.Has
 	positionSlot := crypto.Keccak256Hash(positionKey.Bytes(), positionMappingSlot.Bytes())
 
 	slots, err := v4ExtsloadSlots(poolManager, positionSlot, 3)
+	if err != nil {
+		return nil, err
+	}
+	if len(slots) < 3 {
+		return nil, fmt.Errorf("extsload returned %d slots, expected 3", len(slots))
+	}
+
+	liquidity := new(big.Int).SetBytes(slots[0].Bytes())
+	fee0 := new(big.Int).SetBytes(slots[1].Bytes())
+	fee1 := new(big.Int).SetBytes(slots[2].Bytes())
+
+	return &V4PositionState{
+		Liquidity:                liquidity,
+		FeeGrowthInside0LastX128: fee0,
+		FeeGrowthInside1LastX128: fee1,
+	}, nil
+}
+
+func getV4PositionStateViaExtsloadAtBlock(poolManager common.Address, poolID common.Hash, owner common.Address, tickLower, tickUpper int, tokenId *big.Int, blockNumber uint64) (*V4PositionState, error) {
+	if poolManager == (common.Address{}) {
+		return nil, fmt.Errorf("poolManager missing")
+	}
+	if tokenId == nil || tokenId.Sign() <= 0 {
+		return nil, fmt.Errorf("invalid tokenId")
+	}
+	if blockNumber == 0 {
+		return nil, fmt.Errorf("block number not set")
+	}
+
+	positionKey, err := buildV4PositionKey(owner, tickLower, tickUpper, tokenId)
+	if err != nil {
+		return nil, err
+	}
+
+	stateSlot := v4PoolStateSlot(poolID)
+	positionMappingSlot := addUint256ToHash(stateSlot, v4PositionsOffset)
+	positionSlot := crypto.Keccak256Hash(positionKey.Bytes(), positionMappingSlot.Bytes())
+
+	slots, err := v4ExtsloadSlotsAtBlock(poolManager, positionSlot, 3, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -273,6 +397,40 @@ func v4ExtsloadSlots(poolManager common.Address, startSlot common.Hash, nSlots u
 	}
 	var result []interface{}
 	if err := contract.Call(nil, &result, "extsload", startSlot, new(big.Int).SetUint64(nSlots)); err != nil {
+		return nil, err
+	}
+	if len(result) < 1 {
+		return nil, fmt.Errorf("extsload returned empty result")
+	}
+
+	switch v := result[0].(type) {
+	case []common.Hash:
+		return v, nil
+	case [][32]byte:
+		hashes := make([]common.Hash, len(v))
+		for i := range v {
+			hashes[i] = common.BytesToHash(v[i][:])
+		}
+		return hashes, nil
+	default:
+		return nil, fmt.Errorf("unexpected extsload return type: %T", result[0])
+	}
+}
+
+func v4ExtsloadSlotsAtBlock(poolManager common.Address, startSlot common.Hash, nSlots uint64, blockNumber uint64) ([]common.Hash, error) {
+	if Client == nil {
+		return nil, fmt.Errorf("blockchain client not initialized")
+	}
+	if blockNumber == 0 {
+		return nil, fmt.Errorf("block number not set")
+	}
+	contract, err := v4ExtsloadContract(poolManager, Client)
+	if err != nil {
+		return nil, err
+	}
+	var result []interface{}
+	opts := &bind.CallOpts{BlockNumber: new(big.Int).SetUint64(blockNumber)}
+	if err := contract.Call(opts, &result, "extsload", startSlot, new(big.Int).SetUint64(nSlots)); err != nil {
 		return nil, err
 	}
 	if len(result) < 1 {

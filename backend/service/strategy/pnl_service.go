@@ -8,6 +8,7 @@ import (
 	"TgLpBot/base/models"
 	"TgLpBot/service/pool"
 	"TgLpBot/service/pricing"
+	"context"
 	"fmt"
 	"log"
 	"math"
@@ -385,16 +386,31 @@ func (s *PnLService) getV4CurrentValue(task *models.StrategyTask) (totalVal, fee
 	fees1 := big.NewInt(0)
 
 	var v4pos *blockchain.V4PositionInfo
+	snapshotBlock := uint64(0)
 
 	if common.IsHexAddress(config.AppConfig.UniswapV4PositionManagerAddress) {
 		tokenId, parseErr := convert.ParseBigInt(task.V4TokenID)
 		if parseErr == nil && tokenId.Sign() > 0 {
+			blockCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			latestBlock, blockErr := blockchain.Client.BlockNumber(blockCtx)
+			cancel()
+			if blockErr != nil {
+				log.Printf("[PnL] V4 snapshot block read failed: tokenId=%s err=%v", task.V4TokenID, blockErr)
+			} else {
+				snapshotBlock = latestBlock
+			}
 			v4pmAddr := common.HexToAddress(config.AppConfig.UniswapV4PositionManagerAddress)
 			poolMgr := common.Address{}
 			if common.IsHexAddress(config.AppConfig.UniswapV4PoolManagerAddress) {
 				poolMgr = common.HexToAddress(config.AppConfig.UniswapV4PoolManagerAddress)
 			}
-			pos, posErr := blockchain.GetV4PositionInfo(v4pmAddr, poolMgr, task.PoolId, tokenId)
+			var pos *blockchain.V4PositionInfo
+			var posErr error
+			if snapshotBlock > 0 {
+				pos, posErr = blockchain.GetV4PositionInfoAtBlock(v4pmAddr, poolMgr, task.PoolId, tokenId, snapshotBlock)
+			} else {
+				pos, posErr = blockchain.GetV4PositionInfo(v4pmAddr, poolMgr, task.PoolId, tokenId)
+			}
 			if posErr != nil {
 				log.Printf("[PnL] V4 position info read failed: tokenId=%s err=%v", task.V4TokenID, posErr)
 			}
@@ -419,15 +435,29 @@ func (s *PnLService) getV4CurrentValue(task *models.StrategyTask) (totalVal, fee
 	}
 	stateView := common.HexToAddress(config.AppConfig.UniswapV4StateViewAddress)
 	poolManager := common.HexToAddress(config.AppConfig.UniswapV4PoolManagerAddress)
+	currentTick := 0
 
-	sqrtPriceX96, currentTick, err := blockchain.GetUniswapV4PoolSlot0ViaStateView(stateView, poolManager, task.PoolId)
+	if snapshotBlock > 0 {
+		sqrtPriceX96, currentTick, err = blockchain.GetUniswapV4PoolSlot0ViaStateViewAtBlock(stateView, poolManager, task.PoolId, snapshotBlock)
+	} else {
+		sqrtPriceX96, currentTick, err = blockchain.GetUniswapV4PoolSlot0ViaStateView(stateView, poolManager, task.PoolId)
+	}
 	if err != nil {
 		return 0, 0, 0, nil, fmt.Errorf("get V4 slot0 failed: %w", err)
 	}
 
 	// 尝试计算实时手续费（如果有仓位信息）
 	if v4pos != nil && v4pos.Liquidity != nil && v4pos.Liquidity.Sign() > 0 {
-		if realFees0, realFees1, usedStale, age, feeErr := s.calcV4UnclaimedFeesCached(stateView, poolManager, task.PoolId, currentTick, v4pos); realFees0 != nil && realFees1 != nil {
+		if snapshotBlock > 0 {
+			realFees0, realFees1, feeErr := pool.CalcV4UnclaimedFeesAtBlock(stateView, poolManager, task.PoolId, currentTick, v4pos, snapshotBlock)
+			if feeErr == nil && realFees0 != nil && realFees1 != nil {
+				fees0 = realFees0
+				fees1 = realFees1
+				log.Printf("[PnL] V4 consistent snapshot fees tokenId=%s fees0=%s fees1=%s block=%d", task.V4TokenID, fees0.String(), fees1.String(), snapshotBlock)
+			} else if feeErr != nil {
+				log.Printf("[PnL] V4 consistent snapshot fee calc failed, fallback to TokensOwed: tokenId=%s err=%v", task.V4TokenID, feeErr)
+			}
+		} else if realFees0, realFees1, usedStale, age, feeErr := s.calcV4UnclaimedFeesCachedUnified(stateView, poolManager, task.PoolId, currentTick, v4pos); realFees0 != nil && realFees1 != nil {
 			fees0 = realFees0
 			fees1 = realFees1
 			if feeErr == nil {
@@ -996,6 +1026,64 @@ func (s *PnLService) calcV4UnclaimedFeesCached(stateView, poolManager common.Add
 		}
 	}
 	return owed0, owed1, usedStale, age, err
+}
+
+func (s *PnLService) calcV4UnclaimedFeesCachedUnified(stateView, poolManager common.Address, poolID string, currentTick int, pos *blockchain.V4PositionInfo) (*big.Int, *big.Int, bool, time.Duration, error) {
+	if pos == nil {
+		return nil, nil, false, 0, fmt.Errorf("position info missing")
+	}
+
+	owed0 := cloneBig(pos.TokensOwed0)
+	owed1 := cloneBig(pos.TokensOwed1)
+
+	if pos.Liquidity == nil || pos.Liquidity.Sign() == 0 {
+		return owed0, owed1, false, 0, nil
+	}
+	if pos.FeeGrowthInside0LastX128 == nil || pos.FeeGrowthInside1LastX128 == nil {
+		return owed0, owed1, false, 0, fmt.Errorf("position feeGrowthInside last missing")
+	}
+
+	global0, global1, staleG, ageG, errG := s.getV4FeeGrowthGlobalsCached(stateView, poolManager, poolID)
+	if errG != nil && (global0 == nil || global1 == nil) {
+		return owed0, owed1, false, 0, fmt.Errorf("read V4 feeGrowthGlobal failed: %w", errG)
+	}
+	lower0, lower1, staleL, ageL, errL := s.getV4TickFeeGrowthOutsideCached(stateView, poolManager, poolID, pos.TickLower)
+	if errL != nil && (lower0 == nil || lower1 == nil) {
+		return owed0, owed1, false, 0, fmt.Errorf("read V4 tickLower feeGrowthOutside failed: %w", errL)
+	}
+	upper0, upper1, staleU, ageU, errU := s.getV4TickFeeGrowthOutsideCached(stateView, poolManager, poolID, pos.TickUpper)
+	if errU != nil && (upper0 == nil || upper1 == nil) {
+		return owed0, owed1, false, 0, fmt.Errorf("read V4 tickUpper feeGrowthOutside failed: %w", errU)
+	}
+
+	usedStale := staleG || staleL || staleU
+	age := time.Duration(0)
+	if staleG && ageG > age {
+		age = ageG
+	}
+	if staleL && ageL > age {
+		age = ageL
+	}
+	if staleU && ageU > age {
+		age = ageU
+	}
+
+	fees0, fees1, calcErr := pool.CalcV4UnclaimedFeesFromGrowths(currentTick, pos, global0, global1, lower0, lower1, upper0, upper1)
+	if calcErr != nil {
+		return owed0, owed1, usedStale, age, calcErr
+	}
+
+	var err error
+	if usedStale {
+		if errG != nil {
+			err = errG
+		} else if errL != nil {
+			err = errL
+		} else if errU != nil {
+			err = errU
+		}
+	}
+	return fees0, fees1, usedStale, age, err
 }
 
 func mulDivFloor(a, b, denom *big.Int) *big.Int {
