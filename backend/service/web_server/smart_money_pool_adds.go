@@ -130,18 +130,28 @@ func smartMoneyPoolAddActivePositionsSQL(chainFilter string) string {
 	return fmt.Sprintf(`
 		SELECT
 			position_key,
-			argMax(wallet_address, tuple(last_event_seq, updated_at)) AS wallet_address,
-			argMax(contract_address, tuple(last_event_seq, updated_at)) AS contract_address,
-			argMax(token_id, tuple(last_event_seq, updated_at)) AS token_id,
-			argMax(tick_lower, tuple(last_event_seq, updated_at)) AS tick_lower,
-			argMax(tick_upper, tuple(last_event_seq, updated_at)) AS tick_upper,
-			argMax(last_add_at, tuple(last_event_seq, updated_at)) AS last_add_at,
-			argMax(is_active, tuple(last_event_seq, updated_at)) AS is_active,
-			max(last_event_seq) AS last_event_seq
-		FROM smart_lp_active_positions
-		WHERE pool_version = ? AND pool_id = ?
-			%s
-		GROUP BY position_key
+			latest_wallet_address AS wallet_address,
+			latest_contract_address AS contract_address,
+			latest_token_id AS token_id,
+			latest_tick_lower AS tick_lower,
+			latest_tick_upper AS tick_upper,
+			latest_last_add_at AS last_add_at,
+			latest_is_active AS is_active
+		FROM (
+			SELECT
+				position_key,
+				argMax(wallet_address, tuple(last_event_seq, updated_at)) AS latest_wallet_address,
+				argMax(contract_address, tuple(last_event_seq, updated_at)) AS latest_contract_address,
+				argMax(token_id, tuple(last_event_seq, updated_at)) AS latest_token_id,
+				argMax(tick_lower, tuple(last_event_seq, updated_at)) AS latest_tick_lower,
+				argMax(tick_upper, tuple(last_event_seq, updated_at)) AS latest_tick_upper,
+				argMax(last_add_at, tuple(last_event_seq, updated_at)) AS latest_last_add_at,
+				argMax(is_active, tuple(last_event_seq, updated_at)) AS latest_is_active
+			FROM smart_lp_active_positions
+			WHERE pool_version = ? AND pool_id = ?
+				%s
+			GROUP BY position_key
+		)
 	`, chainFilter)
 }
 

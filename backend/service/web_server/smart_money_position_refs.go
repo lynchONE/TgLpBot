@@ -516,21 +516,35 @@ func querySmartMoneyWalletRecentPositionRefs(ctx context.Context, conn smartMone
 		FROM (
 			SELECT
 				position_key,
-				argMax(pool_version, tuple(last_event_seq, updated_at)) AS pool_version,
-				argMax(pool_id, tuple(last_event_seq, updated_at)) AS pool_id,
-				argMax(contract_address, tuple(last_event_seq, updated_at)) AS contract_address,
-				argMax(token_id, tuple(last_event_seq, updated_at)) AS token_id,
-				argMax(tick_lower, tuple(last_event_seq, updated_at)) AS tick_lower,
-				argMax(tick_upper, tuple(last_event_seq, updated_at)) AS tick_upper,
-				argMax(opened_at, tuple(last_event_seq, updated_at)) AS opened_at,
-				argMax(last_add_at, tuple(last_event_seq, updated_at)) AS last_add_at,
-				argMax(is_active, tuple(last_event_seq, updated_at)) AS is_active,
-				max(last_event_seq) AS last_event_seq
-			FROM smart_lp_active_positions
-			WHERE lowerUTF8(wallet_address) = ?
-				AND last_add_at >= now() - INTERVAL %d SECOND
-				%s
-			GROUP BY position_key
+				latest_pool_version AS pool_version,
+				latest_pool_id AS pool_id,
+				latest_contract_address AS contract_address,
+				latest_token_id AS token_id,
+				latest_tick_lower AS tick_lower,
+				latest_tick_upper AS tick_upper,
+				latest_opened_at AS opened_at,
+				latest_last_add_at AS last_add_at,
+				latest_is_active AS is_active,
+				latest_last_event_seq AS last_event_seq
+			FROM (
+				SELECT
+					position_key,
+					argMax(pool_version, tuple(last_event_seq, updated_at)) AS latest_pool_version,
+					argMax(pool_id, tuple(last_event_seq, updated_at)) AS latest_pool_id,
+					argMax(contract_address, tuple(last_event_seq, updated_at)) AS latest_contract_address,
+					argMax(token_id, tuple(last_event_seq, updated_at)) AS latest_token_id,
+					argMax(tick_lower, tuple(last_event_seq, updated_at)) AS latest_tick_lower,
+					argMax(tick_upper, tuple(last_event_seq, updated_at)) AS latest_tick_upper,
+					argMax(opened_at, tuple(last_event_seq, updated_at)) AS latest_opened_at,
+					argMax(last_add_at, tuple(last_event_seq, updated_at)) AS latest_last_add_at,
+					argMax(is_active, tuple(last_event_seq, updated_at)) AS latest_is_active,
+					max(last_event_seq) AS latest_last_event_seq
+				FROM smart_lp_active_positions
+				WHERE lowerUTF8(wallet_address) = ?
+					AND last_add_at >= now() - INTERVAL %d SECOND
+					%s
+				GROUP BY position_key
+			)
 		)
 		WHERE is_active = 1
 			AND token_id != ''
@@ -621,16 +635,24 @@ func querySmartMoneyWalletLegacyV4Pools(ctx context.Context, conn smartMoneyClic
 		FROM (
 			SELECT
 				position_key,
-				argMax(pool_id, tuple(last_event_seq, updated_at)) AS pool_id,
-				argMax(token_id, tuple(last_event_seq, updated_at)) AS token_id,
-				argMax(last_add_at, tuple(last_event_seq, updated_at)) AS last_add_at,
-				argMax(is_active, tuple(last_event_seq, updated_at)) AS is_active
-			FROM smart_lp_active_positions
-			WHERE lowerUTF8(wallet_address) = ?
-				AND pool_version = 'v4'
-				AND last_add_at >= now() - INTERVAL %d SECOND
-				%s
-			GROUP BY position_key
+				latest_pool_id AS pool_id,
+				latest_token_id AS token_id,
+				latest_last_add_at AS last_add_at,
+				latest_is_active AS is_active
+			FROM (
+				SELECT
+					position_key,
+					argMax(pool_id, tuple(last_event_seq, updated_at)) AS latest_pool_id,
+					argMax(token_id, tuple(last_event_seq, updated_at)) AS latest_token_id,
+					argMax(last_add_at, tuple(last_event_seq, updated_at)) AS latest_last_add_at,
+					argMax(is_active, tuple(last_event_seq, updated_at)) AS latest_is_active
+				FROM smart_lp_active_positions
+				WHERE lowerUTF8(wallet_address) = ?
+					AND pool_version = 'v4'
+					AND last_add_at >= now() - INTERVAL %d SECOND
+					%s
+				GROUP BY position_key
+			)
 		)
 		WHERE is_active = 1
 			AND token_id = ''
