@@ -39,6 +39,8 @@ type smartMoneyWalletLPPosition struct {
 	PoolID      string `json:"pool_id"`
 	PositionID  string `json:"position_id"`
 
+	ContractAddress string `json:"-"`
+
 	Exchange string  `json:"exchange,omitempty"`
 	Pair     string  `json:"pair,omitempty"`
 	FeePct   float64 `json:"fee_pct,omitempty"`
@@ -57,11 +59,16 @@ type smartMoneyWalletLPPosition struct {
 	Token0Dec    int    `json:"token0_decimals,omitempty"`
 	Token1Dec    int    `json:"token1_decimals,omitempty"`
 
-	Amount0     float64 `json:"amount0"`
-	Amount1     float64 `json:"amount1"`
-	Amount0USD  float64 `json:"amount0_usd"`
-	Amount1USD  float64 `json:"amount1_usd"`
-	PositionUSD float64 `json:"position_usd"`
+	Amount0         float64    `json:"amount0"`
+	Amount1         float64    `json:"amount1"`
+	Amount0USD      float64    `json:"amount0_usd"`
+	Amount1USD      float64    `json:"amount1_usd"`
+	PositionUSD     float64    `json:"position_usd"`
+	CostBasisUSD    float64    `json:"cost_basis_usd,omitempty"`
+	CurrentValueUSD float64    `json:"current_value_usd,omitempty"`
+	AbsolutePnLUSD  float64    `json:"absolute_pnl_usd,omitempty"`
+	HasPnL          bool       `json:"has_pnl,omitempty"`
+	RunningSince    *time.Time `json:"running_since,omitempty"`
 
 	ClaimableFee0    float64 `json:"claimable_fee0,omitempty"`
 	ClaimableFee1    float64 `json:"claimable_fee1,omitempty"`
@@ -199,6 +206,7 @@ func (s *Server) handleSmartMoneyWalletPositions(w http.ResponseWriter, r *http.
 				PoolVersion:      resolved.PoolVersion,
 				PoolID:           resolved.PoolID,
 				PositionID:       resolved.PositionID,
+				ContractAddress:  resolved.ContractAddress,
 				Exchange:         resolved.Exchange,
 				Pair:             resolved.Pair,
 				FeePct:           resolved.FeePct,
@@ -282,6 +290,7 @@ func (s *Server) handleSmartMoneyWalletPositions(w http.ResponseWriter, r *http.
 						PoolVersion:      resolved.PoolVersion,
 						PoolID:           resolved.PoolID,
 						PositionID:       resolved.PositionID,
+						ContractAddress:  resolved.ContractAddress,
 						Exchange:         resolved.Exchange,
 						Pair:             resolved.Pair,
 						FeePct:           resolved.FeePct,
@@ -363,6 +372,15 @@ func (s *Server) handleSmartMoneyWalletPositions(w http.ResponseWriter, r *http.
 	// Keep response bounded.
 	if len(out) > limit {
 		out = out[:limit]
+	}
+
+	if len(out) > 0 {
+		historyRows, histErr := querySmartMoneyWalletPositionHistory(ctx, s.ClickHouse.Conn, chain, walletAddr, out, time.Now().UTC())
+		if histErr != nil {
+			warnings = append(warnings, fmt.Sprintf("smart money position pnl replay failed: %v", histErr))
+		} else {
+			applySmartMoneyWalletPositionPnLEstimates(out, historyRows, prices)
+		}
 	}
 
 	resp := smartMoneyWalletPositionsResponse{
@@ -852,25 +870,26 @@ func (s *Server) loadV4WalletPositions(ctx context.Context, chain string, wallet
 			}
 
 			item := smartMoneyWalletLPPosition{
-				PoolVersion:  "v4",
-				PoolID:       strings.ToLower(strings.TrimSpace(c.poolID)),
-				PositionID:   c.tokenId,
-				Exchange:     "Uniswap V4",
-				Pair:         pair,
-				FeePct:       feePct,
-				CurrentTick:  currentTick,
-				TickLower:    pos.TickLower,
-				TickUpper:    pos.TickUpper,
-				InRange:      inRange,
-				Liquidity:    pos.Liquidity.String(),
-				Token0:       t0,
-				Token1:       t1,
-				Token0Symbol: sym0,
-				Token1Symbol: sym1,
-				Token0Dec:    dec0,
-				Token1Dec:    dec1,
-				Amount0:      amt0,
-				Amount1:      amt1,
+				PoolVersion:     "v4",
+				PoolID:          strings.ToLower(strings.TrimSpace(c.poolID)),
+				PositionID:      c.tokenId,
+				ContractAddress: strings.ToLower(poolManager.Hex()),
+				Exchange:        "Uniswap V4",
+				Pair:            pair,
+				FeePct:          feePct,
+				CurrentTick:     currentTick,
+				TickLower:       pos.TickLower,
+				TickUpper:       pos.TickUpper,
+				InRange:         inRange,
+				Liquidity:       pos.Liquidity.String(),
+				Token0:          t0,
+				Token1:          t1,
+				Token0Symbol:    sym0,
+				Token1Symbol:    sym1,
+				Token0Dec:       dec0,
+				Token1Dec:       dec1,
+				Amount0:         amt0,
+				Amount1:         amt1,
 			}
 
 			mu.Lock()

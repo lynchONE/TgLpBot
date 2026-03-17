@@ -364,9 +364,12 @@ function SmartMoneyPositionCard({ position, walletLabel, walletAddress, onSelect
   const tickUpper = Number(position?.tick_upper ?? 0);
   const currentTick = Number(position?.current_tick ?? 0);
   const positionUsd = Number(position?.position_usd ?? (Number(position?.amount0_usd || 0) + Number(position?.amount1_usd || 0)));
+  const currentValueUsd = Number(position?.current_value_usd ?? (positionUsd + Number(position?.claimable_fees_usd || 0)));
   const claimableFeeUsd = Number(position?.claimable_fees_usd ?? 0);
   const claimableFee0 = Number(position?.claimable_fee0 ?? 0);
   const claimableFee1 = Number(position?.claimable_fee1 ?? 0);
+  const pnl = Number(position?.absolute_pnl_usd ?? 0);
+  const hasPnl = Boolean(position?.has_pnl) || (Number.isFinite(pnl) && pnl !== 0);
   const feeStatus = String(position?.fee_status || '').trim();
   const feeError = String(position?.fee_error || '').trim();
   const sym0 = String(position?.token0_symbol || '').trim() || 'T0';
@@ -445,11 +448,17 @@ function SmartMoneyPositionCard({ position, walletLabel, walletAddress, onSelect
             {version && version !== '--' ? <span className="pos-task-id">{version}</span> : null}
             {exchange ? <span className="pos-task-id">{exchange}</span> : null}
             <span className={`range-pill ${inRange ? 'in' : 'out'}`}>{inRange ? 'In Range' : 'Out'}</span>
+            {position?.running_since ? <span className="pos-running-dur">{formatDuration(position.running_since)}</span> : null}
           </div>
         </div>
         <div className="pos-card-right-block">
           <div className="pos-metrics">
-            <div className="pos-total">{formatOptionalUsd(positionUsd)}</div>
+            <div className="pos-total">{formatOptionalUsd(currentValueUsd)}</div>
+            {hasPnl ? (
+              <div className={`pos-pnl ${pnl >= 0 ? 'positive' : 'negative'}`}>
+                {pnl >= 0 ? '+' : ''}{formatNumber(pnl, 2)}
+              </div>
+            ) : null}
             <div className={`pos-pnl ${feePnlClass}`}>
               手续费 {feeStatus === 'ok' ? formatUsd(claimableFeeUsd) : '--'}
             </div>
