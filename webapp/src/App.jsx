@@ -357,6 +357,9 @@ function SmartMoneyPositionCard({ position, walletLabel, walletAddress, onSelect
   const poolId = String(position?.pool_id || '').trim();
   const positionId = String(position?.position_id || '').trim();
   const exchange = String(position?.exchange || '').trim();
+  const dex = getDexIcon(exchange || version);
+  const protocolTagText = String(dex?.label || (version && version !== '--' ? version : '')).trim();
+  const exchangeText = !dex ? exchange : '';
   const pair = String(position?.pair || '').trim() || shortAddress(poolId || '', 8, 6) || '--';
   const feePct = Number(position?.fee_pct || 0);
   const inRange = Boolean(position?.in_range);
@@ -418,10 +421,10 @@ function SmartMoneyPositionCard({ position, walletLabel, walletAddress, onSelect
   ];
 
   return (
-    <div className="pos-card">
-      <div className="pos-card-header">
+    <div className="pos-card sm-position-card">
+      <div className="pos-card-header sm-position-card-header">
         <div
-          className="pos-card-left"
+          className="pos-card-left sm-position-card-left"
           onClick={() => onSelectPool?.({
             pool_id: poolId,
             pool_address: poolId,
@@ -445,8 +448,13 @@ function SmartMoneyPositionCard({ position, walletLabel, walletAddress, onSelect
             </span>
             <span className="pos-wallet-chip">钱包 {walletText}</span>
             {positionId ? <span className="pos-task-id">#{positionId}</span> : null}
-            {version && version !== '--' ? <span className="pos-task-id">{version}</span> : null}
-            {exchange ? <span className="pos-task-id">{exchange}</span> : null}
+            {protocolTagText ? (
+              <span className="tag tag-dex tag-dex-inline pos-dex-tag">
+                {dex?.src ? <img src={dex.src} alt="" /> : null}
+                <span>{protocolTagText}</span>
+              </span>
+            ) : null}
+            {exchangeText && exchangeText.toUpperCase() !== version ? <span className="pos-task-id">{exchangeText}</span> : null}
             <span className={`range-pill ${inRange ? 'in' : 'out'}`}>{inRange ? 'In Range' : 'Out'}</span>
             {position?.running_since ? <span className="pos-running-dur">{formatDuration(position.running_since)}</span> : null}
           </div>
