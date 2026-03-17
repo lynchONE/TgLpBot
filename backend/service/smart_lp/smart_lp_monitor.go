@@ -174,8 +174,15 @@ func (s *SmartLPMonitor) SetOnRemoveEvents(fn func(events []SmartLPRemoveEvent))
 }
 
 func (s *SmartLPMonitor) Start() {
-	if config.AppConfig == nil || !config.AppConfig.SmartLPEnabled {
-		log.Println("[SmartLP] disabled (SMART_LP_ENABLED=0)")
+	if config.AppConfig == nil {
+		log.Println("[SmartLP] config not loaded")
+		return
+	}
+	if !config.AppConfig.SmartLPEnabled {
+		log.Println("[SmartLP] event monitor disabled (SMART_LP_ENABLED=0); active-state cleanup remains enabled")
+		if s.reconcileTicker != nil {
+			go s.runActiveStateReconcileLoop()
+		}
 		return
 	}
 	if err := s.resetScanStateToHead(); err != nil {
@@ -1107,30 +1114,7 @@ func smartLPPositionLookupNotFound(err error) bool {
 	}
 }
 
-func (s *SmartLPMonitor) verifyActivePositionsOnce(ctx context.Context) (int, int, error) {
-	if s == nil || s.ch == nil || s.ch.Conn == nil {
-		return 0, 0, nil
-	}
-	if config.AppConfig == nil {
-		return 0, 0, fmt.Errorf("config not loaded")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	chain := strings.ToLower(strings.TrimSpace(config.AppConfig.AutoLPChain))
-	if chain == "" {
-		chain = "bsc"
-	}
-
-	client, _, err := blockchain.GetEVMClient(chain)
-	if err != nil {
-		return 0, 0, err
-	}
-	cc, ok := config.AppConfig.GetChainConfig(chain)
-	if !ok {
-		return 0, 0, fmt.Errorf("chain config not found: %s", chain)
-	}
-
+func (s *SmartLPMonitor) verifyChainActivePositions(ctx context.Context, chain string, client *ethclient.Client, cc config.ChainConfig) (int, int, error) {
 	snapshots, err := s.ch.ListSmartLPActivePositionsForVerification(ctx, chain, 2*time.Hour, 200)
 	if err != nil {
 		return 0, 0, err
@@ -1283,6 +1267,54 @@ func (s *SmartLPMonitor) verifyActivePositionsOnce(ctx context.Context) (int, in
 		return verified, deactivated, err
 	}
 	return verified, deactivated, nil
+}
+
+func (s *SmartLPMonitor) verifyActivePositionsOnce(ctx context.Context) (int, int, error) {
+	if s == nil || s.ch == nil || s.ch.Conn == nil {
+		return 0, 0, nil
+	}
+	if config.AppConfig == nil {
+		return 0, 0, fmt.Errorf("config not loaded")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	chains := config.EnabledChainsNormalized()
+	if len(chains) == 0 {
+		chains = []string{config.NormalizeChain(config.AppConfig.AutoLPChain)}
+	}
+	totalVerified := 0
+	totalDeactivated := 0
+	var errs []string
+
+	for _, chain := range chains {
+		chain = config.NormalizeChain(chain)
+		if chain == "" {
+			continue
+		}
+		client, _, err := blockchain.GetEVMClient(chain)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s client: %v", chain, err))
+			continue
+		}
+		cc, ok := config.AppConfig.GetChainConfig(chain)
+		if !ok {
+			errs = append(errs, fmt.Sprintf("%s config missing", chain))
+			continue
+		}
+		verified, deactivated, err := s.verifyChainActivePositions(ctx, chain, client, cc)
+		totalVerified += verified
+		totalDeactivated += deactivated
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s verify: %v", chain, err))
+		}
+	}
+
+	if len(errs) > 0 {
+		return totalVerified, totalDeactivated, fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return totalVerified, totalDeactivated, nil
 }
 
 // fireRemoveCallback extracts remove events from the list and calls the onRemoveEvents callback.

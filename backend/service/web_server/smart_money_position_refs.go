@@ -16,6 +16,7 @@ import (
 )
 
 type smartMoneyPositionRef struct {
+	PositionKey     string
 	WalletAddress   string
 	PoolVersion     string
 	PoolID          string
@@ -505,6 +506,7 @@ func querySmartMoneyWalletRecentPositionRefs(ctx context.Context, conn smartMone
 
 	q := fmt.Sprintf(`
 		SELECT
+			position_key,
 			pool_version,
 			pool_id,
 			contract_address,
@@ -561,6 +563,7 @@ func querySmartMoneyWalletRecentPositionRefs(ctx context.Context, conn smartMone
 	out := make([]smartMoneyPositionRef, 0, limit)
 	for rows.Next() {
 		var (
+			positionKey string
 			poolVersion string
 			poolID      string
 			contract    string
@@ -570,7 +573,7 @@ func querySmartMoneyWalletRecentPositionRefs(ctx context.Context, conn smartMone
 			openedAt    time.Time
 			last        uint64
 		)
-		if err := rows.Scan(&poolVersion, &poolID, &contract, &tokenID, &tickLower, &tickUpper, &openedAt, &last); err != nil {
+		if err := rows.Scan(&positionKey, &poolVersion, &poolID, &contract, &tokenID, &tickLower, &tickUpper, &openedAt, &last); err != nil {
 			return nil, err
 		}
 		var openedAtPtr *time.Time
@@ -579,6 +582,7 @@ func querySmartMoneyWalletRecentPositionRefs(ctx context.Context, conn smartMone
 			openedAtPtr = &open
 		}
 		out = append(out, smartMoneyPositionRef{
+			PositionKey:     strings.TrimSpace(positionKey),
 			WalletAddress:   wallet,
 			PoolVersion:     strings.ToLower(strings.TrimSpace(poolVersion)),
 			PoolID:          strings.ToLower(strings.TrimSpace(poolID)),
@@ -631,12 +635,18 @@ func querySmartMoneyWalletLegacyV4Pools(ctx context.Context, conn smartMoneyClic
 	}
 
 	q := fmt.Sprintf(`
-		SELECT DISTINCT pool_id
+		SELECT
+			position_key,
+			pool_id,
+			tick_lower,
+			tick_upper
 		FROM (
 			SELECT
 				position_key,
 				latest_pool_id AS pool_id,
 				latest_token_id AS token_id,
+				latest_tick_lower AS tick_lower,
+				latest_tick_upper AS tick_upper,
 				latest_last_add_at AS last_add_at,
 				latest_is_active AS is_active
 			FROM (
@@ -644,6 +654,8 @@ func querySmartMoneyWalletLegacyV4Pools(ctx context.Context, conn smartMoneyClic
 					position_key,
 					argMax(pool_id, tuple(last_event_seq, updated_at)) AS latest_pool_id,
 					argMax(token_id, tuple(last_event_seq, updated_at)) AS latest_token_id,
+					argMax(tick_lower, tuple(last_event_seq, updated_at)) AS latest_tick_lower,
+					argMax(tick_upper, tuple(last_event_seq, updated_at)) AS latest_tick_upper,
 					argMax(last_add_at, tuple(last_event_seq, updated_at)) AS latest_last_add_at,
 					argMax(is_active, tuple(last_event_seq, updated_at)) AS latest_is_active
 				FROM smart_lp_active_positions
@@ -668,11 +680,21 @@ func querySmartMoneyWalletLegacyV4Pools(ctx context.Context, conn smartMoneyClic
 
 	out := make([]smartMoneyWalletV4PoolRef, 0, limit)
 	for rows.Next() {
-		var poolID string
-		if err := rows.Scan(&poolID); err != nil {
+		var (
+			positionKey string
+			poolID      string
+			tickLower   int32
+			tickUpper   int32
+		)
+		if err := rows.Scan(&positionKey, &poolID, &tickLower, &tickUpper); err != nil {
 			return nil, err
 		}
-		out = append(out, smartMoneyWalletV4PoolRef{PoolID: strings.ToLower(strings.TrimSpace(poolID))})
+		out = append(out, smartMoneyWalletV4PoolRef{
+			PositionKey: strings.TrimSpace(positionKey),
+			PoolID:      strings.ToLower(strings.TrimSpace(poolID)),
+			TickLower:   int(tickLower),
+			TickUpper:   int(tickUpper),
+		})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

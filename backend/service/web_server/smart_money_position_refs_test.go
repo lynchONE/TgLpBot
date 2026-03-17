@@ -28,18 +28,19 @@ func (r *fakePositionRefRows) Scan(dest ...any) error {
 		return nil
 	}
 	row := r.data[r.idx-1]
-	*dest[0].(*string) = row.PoolVersion
-	*dest[1].(*string) = row.PoolID
-	*dest[2].(*string) = row.ContractAddress
-	*dest[3].(*string) = row.TokenID
-	*dest[4].(*int32) = int32(row.TickLower)
-	*dest[5].(*int32) = int32(row.TickUpper)
+	*dest[0].(*string) = row.PositionKey
+	*dest[1].(*string) = row.PoolVersion
+	*dest[2].(*string) = row.PoolID
+	*dest[3].(*string) = row.ContractAddress
+	*dest[4].(*string) = row.TokenID
+	*dest[5].(*int32) = int32(row.TickLower)
+	*dest[6].(*int32) = int32(row.TickUpper)
 	if row.OpenedAt != nil {
-		*dest[6].(*time.Time) = row.OpenedAt.UTC()
+		*dest[7].(*time.Time) = row.OpenedAt.UTC()
 	} else {
-		*dest[6].(*time.Time) = time.Unix(0, 0).UTC()
+		*dest[7].(*time.Time) = time.Unix(0, 0).UTC()
 	}
-	*dest[7].(*uint64) = row.LastEventSeq
+	*dest[8].(*uint64) = row.LastEventSeq
 	return nil
 }
 
@@ -52,7 +53,7 @@ func (r *fakePositionRefRows) Err() error                       { return r.err }
 
 type fakeV4PoolRows struct {
 	idx  int
-	data []string
+	data []smartMoneyWalletV4PoolRef
 	err  error
 }
 
@@ -68,7 +69,11 @@ func (r *fakeV4PoolRows) Scan(dest ...any) error {
 	if r == nil || r.idx <= 0 || r.idx > len(r.data) {
 		return nil
 	}
-	*dest[0].(*string) = r.data[r.idx-1]
+	row := r.data[r.idx-1]
+	*dest[0].(*string) = row.PositionKey
+	*dest[1].(*string) = row.PoolID
+	*dest[2].(*int32) = int32(row.TickLower)
+	*dest[3].(*int32) = int32(row.TickUpper)
 	return nil
 }
 
@@ -85,6 +90,7 @@ func TestQuerySmartMoneyWalletRecentPositionRefs_IncludesUnifiedTokenRefs(t *tes
 		rows: &fakePositionRefRows{
 			data: []smartMoneyPositionRef{
 				{
+					PositionKey:     "k1",
 					PoolVersion:     "v3",
 					PoolID:          "0xpoolv3",
 					ContractAddress: "0xnpm",
@@ -95,6 +101,7 @@ func TestQuerySmartMoneyWalletRecentPositionRefs_IncludesUnifiedTokenRefs(t *tes
 					OpenedAt:        &startedAt,
 				},
 				{
+					PositionKey:     "k2",
 					PoolVersion:     "v4",
 					PoolID:          "0xpoolv4",
 					ContractAddress: "0xpoolmanager",
@@ -134,7 +141,7 @@ func TestQuerySmartMoneyWalletRecentPositionRefs_IncludesUnifiedTokenRefs(t *tes
 func TestQuerySmartMoneyWalletLegacyV4Pools_FiltersEmptyTokenID(t *testing.T) {
 	conn := &fakeCHConn{
 		rows: &fakeV4PoolRows{
-			data: []string{"0xpool1"},
+			data: []smartMoneyWalletV4PoolRef{{PositionKey: "k3", PoolID: "0xpool1", TickLower: -10, TickUpper: 10}},
 		},
 	}
 
@@ -142,7 +149,7 @@ func TestQuerySmartMoneyWalletLegacyV4Pools_FiltersEmptyTokenID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
-	if len(pools) != 1 || pools[0].PoolID != "0xpool1" {
+	if len(pools) != 1 || pools[0].PoolID != "0xpool1" || pools[0].PositionKey != "k3" {
 		t.Fatalf("unexpected pools: %#v", pools)
 	}
 	if !strings.Contains(conn.lastQuery, "FROM smart_lp_active_positions") || !strings.Contains(conn.lastQuery, "pool_version = 'v4'") || !strings.Contains(conn.lastQuery, "token_id = ''") {

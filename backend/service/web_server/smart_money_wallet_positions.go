@@ -2,6 +2,7 @@ package web_server
 
 import (
 	"TgLpBot/base/blockchain"
+	"TgLpBot/base/clickhouse"
 	"TgLpBot/base/config"
 	"TgLpBot/service/pool"
 	"TgLpBot/service/pricing"
@@ -24,6 +25,63 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"golang.org/x/sync/errgroup"
 )
+
+func shouldDeactivateSmartMoneyRef(err error) bool {
+	if err == nil {
+		return true
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(msg, "invalid token_id"):
+		return true
+	case strings.Contains(msg, "invalid token id"):
+		return true
+	case strings.Contains(msg, "erc721: invalid token"):
+		return true
+	case strings.Contains(msg, "owner query for nonexistent token"):
+		return true
+	case strings.Contains(msg, "nonexistent token"):
+		return true
+	case strings.Contains(msg, "position doesn't exist"):
+		return true
+	case strings.Contains(msg, "position info missing"):
+		return true
+	case strings.Contains(msg, "token doesn't exist"):
+		return true
+	case strings.Contains(msg, "token does not exist"):
+		return true
+	case strings.Contains(msg, "mismatch"):
+		return true
+	default:
+		return false
+	}
+}
+
+func applySmartMoneyInactivePositionKeys(ctx context.Context, ch *clickhouse.ClickHouseService, keys []string) (int, error) {
+	if ch == nil || len(keys) == 0 {
+		return 0, nil
+	}
+	uniq := make([]clickhouse.SmartLPActivePositionVerification, 0, len(keys))
+	seen := make(map[string]struct{}, len(keys))
+	now := time.Now().UTC()
+	for _, key := range keys {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		uniq = append(uniq, clickhouse.SmartLPActivePositionVerification{
+			PositionKey: key,
+			IsActive:    false,
+			VerifiedAt:  now,
+			Source:      "wallet_detail_refresh",
+		})
+	}
+	return ch.ApplySmartLPActivePositionVerifications(ctx, uniq)
+}
 
 type smartMoneyWalletPositionsResponse struct {
 	Chain         string                       `json:"chain"`
@@ -86,7 +144,10 @@ type smartMoneyWalletV3TokenRef struct {
 }
 
 type smartMoneyWalletV4PoolRef struct {
-	PoolID string
+	PositionKey string
+	PoolID      string
+	TickLower   int
+	TickUpper   int
 }
 
 func (s *Server) handleSmartMoneyWalletPositions(w http.ResponseWriter, r *http.Request) {
@@ -180,6 +241,7 @@ func (s *Server) handleSmartMoneyWalletPositions(w http.ResponseWriter, r *http.
 	}
 
 	out := make([]smartMoneyWalletLPPosition, 0, len(refs))
+	stalePositionKeys := make([]string, 0, len(refs))
 
 	metaCache := newSmartMoneyTokenMetaCache()
 	resolver, resolverWarnings := newSmartMoneyPositionResolver(metaCache)
@@ -199,6 +261,11 @@ func (s *Server) handleSmartMoneyWalletPositions(w http.ResponseWriter, r *http.
 			}
 			resolved, resolveErr := resolver.Resolve(gctx, ref)
 			if resolveErr != nil || resolved == nil || strings.TrimSpace(resolved.PositionID) == "" {
+				if shouldDeactivateSmartMoneyRef(resolveErr) && strings.TrimSpace(ref.PositionKey) != "" {
+					mu.Lock()
+					stalePositionKeys = append(stalePositionKeys, ref.PositionKey)
+					mu.Unlock()
+				}
 				return nil
 			}
 
@@ -256,6 +323,22 @@ func (s *Server) handleSmartMoneyWalletPositions(w http.ResponseWriter, r *http.
 		if legacyErr != nil {
 			warnings = append(warnings, fmt.Sprintf("scan v4 position NFTs failed: %v", legacyErr))
 		} else {
+			for _, legacyPool := range legacyV4Pools {
+				matched := false
+				for _, scanned := range legacyRefs {
+					if strings.ToLower(strings.TrimSpace(scanned.PoolID)) != strings.ToLower(strings.TrimSpace(legacyPool.PoolID)) {
+						continue
+					}
+					if scanned.TickLower == legacyPool.TickLower && scanned.TickUpper == legacyPool.TickUpper {
+						matched = true
+						break
+					}
+				}
+				if !matched && strings.TrimSpace(legacyPool.PositionKey) != "" {
+					stalePositionKeys = append(stalePositionKeys, legacyPool.PositionKey)
+				}
+			}
+
 			seenLegacy := make(map[string]struct{}, len(out))
 			for _, item := range out {
 				if item.PoolVersion != "v4" {
@@ -335,6 +418,12 @@ func (s *Server) handleSmartMoneyWalletPositions(w http.ResponseWriter, r *http.
 				warnings = append(warnings, fmt.Sprintf("used legacy V4 NFT fallback for %d positions", legacyUsed))
 			}
 		}
+	}
+
+	if updated, updateErr := applySmartMoneyInactivePositionKeys(ctx, s.ClickHouse, stalePositionKeys); updateErr != nil {
+		warnings = append(warnings, fmt.Sprintf("persist stale position cleanup failed: %v", updateErr))
+	} else if updated > 0 {
+		warnings = append(warnings, fmt.Sprintf("removed %d stale active refs from cache", updated))
 	}
 
 	// Fetch prices and compute USD valuation.
