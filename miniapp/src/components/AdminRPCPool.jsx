@@ -1,6 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     addAdminRPCEndpoint,
+    checkAdminRPCEndpoint,
+    deleteAdminRPCEndpoint,
     disableAdminRPCEndpointNextMonth,
     enableAdminRPCEndpoint,
     fetchAdminRPCPool,
@@ -8,148 +10,7 @@ import {
     switchAdminRPCEndpoint,
 } from '../lib/api';
 
-function FancySelect({ value, onChange, options, placeholder = '请选择', disabled = false }) {
-    const rootRef = useRef(null);
-    const buttonRef = useRef(null);
-    const [open, setOpen] = useState(false);
-    const [highlightIndex, setHighlightIndex] = useState(0);
-
-    const selectedIndex = useMemo(() => options.findIndex((o) => o.value === value), [options, value]);
-    const selected = useMemo(() => {
-        if (selectedIndex < 0) return null;
-        return options[selectedIndex] || null;
-    }, [options, selectedIndex]);
-
-    const close = useCallback(() => {
-        setOpen(false);
-    }, []);
-
-    const openMenu = useCallback(() => {
-        if (disabled) return;
-        setOpen(true);
-        setHighlightIndex(Math.max(0, selectedIndex >= 0 ? selectedIndex : 0));
-    }, [disabled, selectedIndex]);
-
-    const toggle = useCallback(() => {
-        if (disabled) return;
-        setOpen((v) => {
-            const next = !v;
-            if (next) setHighlightIndex(Math.max(0, selectedIndex >= 0 ? selectedIndex : 0));
-            return next;
-        });
-    }, [disabled, selectedIndex]);
-
-    const commit = useCallback((idx) => {
-        const opt = options[idx];
-        if (!opt) return;
-        onChange?.(opt.value);
-        close();
-        setTimeout(() => buttonRef.current?.focus?.(), 0);
-    }, [options, onChange, close]);
-
-    useEffect(() => {
-        if (!open) return;
-        const onPointerDown = (e) => {
-            if (rootRef.current && rootRef.current.contains(e.target)) return;
-            close();
-        };
-        document.addEventListener('pointerdown', onPointerDown);
-        return () => document.removeEventListener('pointerdown', onPointerDown);
-    }, [open, close]);
-
-    return (
-        <div ref={rootRef} className="relative">
-            <button
-                ref={buttonRef}
-                type="button"
-                disabled={disabled}
-                aria-haspopup="listbox"
-                aria-expanded={open ? 'true' : 'false'}
-                onClick={toggle}
-                onKeyDown={(e) => {
-                    if (disabled) return;
-                    if (!open) {
-                        if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            openMenu();
-                        }
-                        return;
-                    }
-
-                    if (e.key === 'Escape') {
-                        e.preventDefault();
-                        close();
-                        return;
-                    }
-                    if (e.key === 'ArrowDown') {
-                        e.preventDefault();
-                        setHighlightIndex((i) => Math.min(options.length - 1, i + 1));
-                        return;
-                    }
-                    if (e.key === 'ArrowUp') {
-                        e.preventDefault();
-                        setHighlightIndex((i) => Math.max(0, i - 1));
-                        return;
-                    }
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        commit(highlightIndex);
-                    }
-                }}
-                className={`w-full rounded-xl border px-3 py-2 text-sm shadow-sm outline-none ring-1 ring-transparent transition flex items-center justify-between gap-2 ${disabled
-                    ? 'cursor-not-allowed border-zinc-200 bg-zinc-200/60 text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/30'
-                    : 'border-zinc-200 bg-white/60 text-zinc-900 hover:bg-white/80 focus:ring-emerald-500/40 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10'
-                    }`}
-            >
-                <span className="min-w-0 truncate">{selected?.label || placeholder}</span>
-                <span className={`shrink-0 transition ${open ? 'rotate-180' : ''}`} aria-hidden="true">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                        <path
-                            d="M7 10l5 5 5-5"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                        />
-                    </svg>
-                </span>
-            </button>
-
-            {open && (
-                <div
-                    role="listbox"
-                    className="absolute z-50 mt-1 w-full overflow-hidden rounded-xl border border-zinc-200 bg-white/95 shadow-lg backdrop-blur-md dark:border-white/10 dark:bg-zinc-950/90"
-                >
-                    {(options || []).map((opt, idx) => {
-                        const selectedNow = opt.value === value;
-                        const highlighted = idx === highlightIndex;
-                        return (
-                            <button
-                                key={String(opt.value)}
-                                type="button"
-                                role="option"
-                                aria-selected={selectedNow ? 'true' : 'false'}
-                                onMouseEnter={() => setHighlightIndex(idx)}
-                                onClick={() => commit(idx)}
-                                className={`w-full px-3 py-2 text-left text-sm flex items-center justify-between gap-2 transition ${highlighted
-                                    ? 'bg-zinc-100 text-zinc-900 dark:bg-white/10 dark:text-white'
-                                    : 'bg-transparent text-zinc-800 hover:bg-zinc-100 dark:text-white/80 dark:hover:bg-white/10'
-                                    }`}
-                            >
-                                <span className="min-w-0 truncate">{opt.label}</span>
-                                {selectedNow && (
-                                    <span className="shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true">
-                                        ✓
-                                    </span>
-                                )}
-                            </button>
-                        );
-                    })}
-                </div>
-            )}
-        </div>
-    );
-}
+/* ── helpers ── */
 
 function formatTime(ts) {
     if (!ts) return '--';
@@ -168,14 +29,13 @@ function formatChain(chain) {
 function formatTransport(transport) {
     const v = String(transport || '').toLowerCase();
     if (v === 'http') return 'HTTP';
-    if (v === 'ws') return 'WebSocket';
+    if (v === 'ws') return 'WS';
     return String(transport || '--');
 }
 
 function formatSource(source) {
     const v = String(source || '').toLowerCase();
-    if (v === 'db') return '节点池';
-    if (v === 'pool') return '节点池';
+    if (v === 'db' || v === 'pool') return '节点池';
     if (v === 'env') return '环境变量';
     if (v === 'none') return '无';
     return String(source || '--');
@@ -191,8 +51,8 @@ function formatDisabledReason(reason) {
     return raw;
 }
 
-function isUnavailable(endpoint) {
-    return String(endpoint?.status || '') === 'unavailable';
+function isUnavailable(ep) {
+    return String(ep?.status || '') === 'unavailable';
 }
 
 function maskUrl(url, fallbackMasked) {
@@ -205,8 +65,7 @@ function deriveNameFromUrl(raw) {
     const s = String(raw || '').trim();
     if (!s) return '';
     try {
-        const u = new URL(s);
-        return String(u.host || '').trim();
+        return String(new URL(s).host || '').trim();
     } catch {
         return '';
     }
@@ -221,152 +80,31 @@ function endpointDisplayName(ep) {
     return '--';
 }
 
-function EndpointCard({ ep, onSwitch, onDisableNextMonth, onEnable, onRename }) {
-    const [detailsOpen, setDetailsOpen] = useState(false);
-    const [nameDraft, setNameDraft] = useState(() => String(ep?.name || '').trim() || deriveNameFromUrl(ep?.url) || '');
-    const [renaming, setRenaming] = useState(false);
-    const [renameError, setRenameError] = useState('');
+/* ── status badge ── */
 
-    useEffect(() => {
-        setNameDraft(String(ep?.name || '').trim() || deriveNameFromUrl(ep?.url) || '');
-    }, [ep?.id, ep?.name, ep?.url]);
-
-    const displayName = endpointDisplayName(ep);
-    const unnamed = !String(ep?.name || '').trim();
-
+function StatusDot({ available }) {
     return (
-        <div className="rounded-2xl border border-zinc-200 bg-white/60 p-3 shadow-sm dark:border-white/10 dark:bg-white/5">
-            <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/90 truncate">
-                            {displayName}
-                        </div>
-                        <div className="text-[11px] text-zinc-400 dark:text-white/30">#{ep?.id || '--'}</div>
-                        {unnamed && (
-                            <span className="rounded-lg bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-500/25 dark:text-amber-200">
-                                未命名
-                            </span>
-                        )}
-                        {ep?.is_current && (
-                            <span className="rounded-lg bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-500/25 dark:text-emerald-300">
-                                当前
-                            </span>
-                        )}
-                        {isUnavailable(ep) ? (
-                            <span className="rounded-lg bg-red-500/10 px-2 py-0.5 text-[11px] font-semibold text-red-700 ring-1 ring-red-500/25 dark:text-red-200">
-                                不可用
-                            </span>
-                        ) : (
-                            <span className="rounded-lg bg-zinc-500/10 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 ring-1 ring-zinc-500/25 dark:text-white/70">
-                                可用
-                            </span>
-                        )}
-                    </div>
-                    <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40 truncate">
-                        {maskUrl(ep?.url, ep?.url_masked)}
-                    </div>
+        <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${available ? 'bg-emerald-500' : 'bg-red-500'}`} />
+    );
+}
 
-                    {detailsOpen && (
-                        <div className="mt-2 rounded-xl border border-zinc-200 bg-white/50 p-3 text-[11px] text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-white/50">
-                            <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-                                <div>延迟：{Number(ep?.last_latency_ms || 0)} ms</div>
-                                <div>连续失败：{Number(ep?.consecutive_failures || 0)}</div>
-                                <div>最近检测：{formatTime(ep?.last_checked_at)}</div>
-                                <div>最近成功：{formatTime(ep?.last_success_at)}</div>
-                                {ep?.disabled_until && (
-                                    <div className="col-span-2">
-                                        禁用至：{formatTime(ep?.disabled_until)} {ep?.disabled_reason ? `(${formatDisabledReason(ep.disabled_reason)})` : ''}
-                                    </div>
-                                )}
-                                {ep?.last_error && (
-                                    <div className="col-span-2 text-red-700/80 dark:text-red-200/80">
-                                        最近错误：{String(ep.last_error)}
-                                    </div>
-                                )}
-                            </div>
+/* ── confirm dialog ── */
 
-                            <div className="mt-3">
-                                <div className="text-[11px] font-semibold text-zinc-700 dark:text-white/70">名称</div>
-                                <div className="mt-1 flex items-center gap-2">
-                                    <input
-                                        value={nameDraft}
-                                        onChange={(e) => setNameDraft(e.target.value)}
-                                        placeholder="例如：备用1 / xxx-provider"
-                                        className="flex-1 min-w-0 rounded-xl border border-zinc-200 bg-white/60 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none focus:border-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={async () => {
-                                            const nextName = String(nameDraft || '').trim();
-                                            if (!nextName) {
-                                                setRenameError('请填写名称');
-                                                return;
-                                            }
-                                            setRenaming(true);
-                                            setRenameError('');
-                                            try {
-                                                await onRename?.(ep?.id, nextName);
-                                            } catch (e) {
-                                                setRenameError(String(e?.message || e));
-                                            } finally {
-                                                setRenaming(false);
-                                            }
-                                        }}
-                                        disabled={renaming}
-                                        className={`shrink-0 rounded-xl px-3 py-2 text-xs font-semibold ring-1 transition ${renaming
-                                            ? 'cursor-not-allowed bg-zinc-200 text-zinc-500 ring-zinc-200 dark:bg-white/10 dark:text-white/30 dark:ring-white/10'
-                                            : 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 hover:bg-emerald-500/15 dark:text-emerald-200'
-                                            }`}
-                                    >
-                                        {renaming ? '保存中...' : '保存'}
-                                    </button>
-                                </div>
-                                <div className="mt-1 text-[10px] text-zinc-400 dark:text-white/30">最多 64 字，用于区分节点</div>
-                                {renameError && (
-                                    <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-[11px] text-red-700 dark:text-red-200">
-                                        {renameError}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                <div className="shrink-0 flex flex-col gap-2">
-                    <button
-                        type="button"
-                        onClick={() => onSwitch?.(ep?.id)}
-                        disabled={isUnavailable(ep)}
-                        className={`rounded-xl px-3 py-2 text-xs font-semibold ring-1 transition ${isUnavailable(ep)
-                            ? 'cursor-not-allowed bg-zinc-200 text-zinc-500 ring-zinc-200 dark:bg-white/10 dark:text-white/30 dark:ring-white/10'
-                            : 'bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-100 dark:bg-white/5 dark:text-white/80 dark:ring-white/10 dark:hover:bg-white/10'
-                            }`}
-                    >
-                        切换
+function ConfirmDialog({ open, title, message, onConfirm, onCancel, danger }) {
+    if (!open) return null;
+    return (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onCancel}>
+            <div className="mx-4 w-full max-w-sm rounded-2xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-white/10 dark:bg-zinc-900" onClick={e => e.stopPropagation()}>
+                <div className="text-sm font-semibold text-zinc-900 dark:text-white">{title}</div>
+                <div className="mt-2 text-xs text-zinc-600 dark:text-white/60">{message}</div>
+                <div className="mt-4 flex justify-end gap-2">
+                    <button type="button" onClick={onCancel}
+                        className="rounded-xl px-4 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-100 dark:text-white/60 dark:hover:bg-white/10 transition">
+                        取消
                     </button>
-                    <button
-                        type="button"
-                        onClick={() => onDisableNextMonth?.(ep?.id)}
-                        className="rounded-xl px-3 py-2 text-xs font-semibold ring-1 bg-red-500/10 text-red-700 ring-red-500/20 hover:bg-red-500/15 dark:text-red-200"
-                    >
-                        禁用到下月
-                    </button>
-                    {isUnavailable(ep) && (
-                        <button
-                            type="button"
-                            onClick={() => onEnable?.(ep?.id)}
-                            className="rounded-xl px-3 py-2 text-xs font-semibold ring-1 bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 hover:bg-emerald-500/15 dark:text-emerald-200"
-                        >
-                            启用
-                        </button>
-                    )}
-                    <button
-                        type="button"
-                        onClick={() => setDetailsOpen((v) => !v)}
-                        className="rounded-xl px-3 py-2 text-xs font-semibold ring-1 bg-zinc-100 text-zinc-700 ring-zinc-200 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/80 dark:ring-white/10 dark:hover:bg-white/10"
-                    >
-                        {detailsOpen ? '收起详情' : '详情'}
+                    <button type="button" onClick={onConfirm}
+                        className={`rounded-xl px-4 py-2 text-xs font-semibold text-white transition ${danger ? 'bg-red-600 hover:bg-red-500' : 'bg-emerald-600 hover:bg-emerald-500'}`}>
+                        确认
                     </button>
                 </div>
             </div>
@@ -374,78 +112,238 @@ function EndpointCard({ ep, onSwitch, onDisableNextMonth, onEnable, onRename }) 
     );
 }
 
-function TransportSection({ group, transport, onSwitch, onDisableNextMonth, onEnable, onRename }) {
-    const [open, setOpen] = useState(false);
+/* ── icon buttons ── */
 
-    const endpoints = group?.endpoints || [];
-    const unavailableCount = endpoints.filter((ep) => isUnavailable(ep)).length;
-    const availableCount = Math.max(0, endpoints.length - unavailableCount);
+function IconBtn({ onClick, disabled, title, className, children }) {
+    return (
+        <button type="button" onClick={onClick} disabled={disabled} title={title}
+            className={`inline-flex items-center justify-center w-8 h-8 rounded-lg transition ${disabled ? 'opacity-30 cursor-not-allowed' : 'hover:bg-zinc-100 dark:hover:bg-white/10 active:scale-95'} ${className || ''}`}>
+            {children}
+        </button>
+    );
+}
 
-    const effID = Number(group?.effective_endpoint_id || 0);
-    const effEndpoint = effID ? endpoints.find((ep) => Number(ep?.id || 0) === effID) : null;
-    const effName = effEndpoint ? endpointDisplayName(effEndpoint) : '';
-    const effURL = maskUrl(group?.effective_url, group?.effective_url_masked);
-    const effectiveLabel = effName || (effURL && effURL !== '--' ? effURL : '未配置');
+/* ── endpoint row ── */
+
+function EndpointRow({ ep, onSwitch, onDisableNextMonth, onEnable, onRename, onDelete, onCheck }) {
+    const [expanded, setExpanded] = useState(false);
+    const [nameDraft, setNameDraft] = useState('');
+    const [renaming, setRenaming] = useState(false);
+    const [checking, setChecking] = useState(false);
+    const [confirmDelete, setConfirmDelete] = useState(false);
+
+    const available = !isUnavailable(ep);
+    const displayName = endpointDisplayName(ep);
+    const latency = Number(ep?.last_latency_ms || 0);
+
+    useEffect(() => {
+        setNameDraft(String(ep?.name || '').trim() || deriveNameFromUrl(ep?.url) || '');
+    }, [ep?.id, ep?.name, ep?.url]);
+
+    const handleRename = async () => {
+        const n = String(nameDraft || '').trim();
+        if (!n) return;
+        setRenaming(true);
+        try { await onRename?.(ep?.id, n); } catch { }
+        setRenaming(false);
+    };
+
+    const handleCheck = async () => {
+        setChecking(true);
+        try { await onCheck?.(ep?.id); } catch { }
+        setChecking(false);
+    };
 
     return (
-        <div className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none">
-            <button
-                type="button"
-                onClick={() => setOpen((v) => !v)}
-                className="w-full flex items-start justify-between gap-3 text-left"
-            >
-                <div className="min-w-0">
-                    <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">{formatTransport(transport)}</div>
-                    <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40 truncate">
-                        当前：{effectiveLabel}（{formatSource(group?.effective_source)}）
-                    </div>
-                    {effName && effURL && effURL !== '--' && (
-                        <div className="mt-0.5 text-[11px] text-zinc-400 dark:text-white/30 truncate">
-                            {effURL}
+        <>
+            <div className="group relative rounded-xl border border-zinc-100 bg-white/80 dark:border-white/5 dark:bg-white/[0.03] transition hover:border-zinc-200 dark:hover:border-white/10">
+                {/* main row */}
+                <div className="flex items-center gap-3 px-3 py-2.5 cursor-pointer" onClick={() => setExpanded(v => !v)}>
+                    <StatusDot available={available} />
+                    <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                            <span className="text-[13px] font-medium text-zinc-900 dark:text-white/90 truncate">{displayName}</span>
+                            {ep?.is_current && (
+                                <span className="rounded bg-emerald-500/15 px-1.5 py-px text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                                    IN USE
+                                </span>
+                            )}
                         </div>
-                    )}
+                        <div className="text-[11px] text-zinc-400 dark:text-white/30 truncate mt-0.5">
+                            {maskUrl(ep?.url, ep?.url_masked)}
+                        </div>
+                    </div>
+                    <div className="shrink-0 flex items-center gap-1.5">
+                        {latency > 0 && (
+                            <span className={`text-[11px] font-mono tabular-nums ${latency < 300 ? 'text-emerald-600 dark:text-emerald-400' : latency < 1000 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'}`}>
+                                {latency}ms
+                            </span>
+                        )}
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                            className={`text-zinc-400 dark:text-white/30 transition-transform ${expanded ? 'rotate-180' : ''}`}>
+                            <path d="M7 10l5 5 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                    </div>
                 </div>
 
-                <div className="shrink-0 flex items-center gap-2">
-                    <div className="text-[11px] font-semibold text-zinc-600 dark:text-white/50">
-                        可用 {availableCount} / 不可用 {unavailableCount}
-                    </div>
-                    <span className={`shrink-0 transition ${open ? 'rotate-180' : ''}`} aria-hidden="true">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                            <path
-                                d="M7 10l5 5 5-5"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
+                {/* expanded detail */}
+                {expanded && (
+                    <div className="border-t border-zinc-100 dark:border-white/5 px-3 py-3 space-y-3">
+                        {/* meta grid */}
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
+                            <div className="text-zinc-500 dark:text-white/40">
+                                状态
+                                <span className={`ml-1.5 font-medium ${available ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                                    {available ? '可用' : '不可用'}
+                                </span>
+                            </div>
+                            <div className="text-zinc-500 dark:text-white/40">
+                                连续失败 <span className="font-mono ml-1">{Number(ep?.consecutive_failures || 0)}</span>
+                            </div>
+                            <div className="text-zinc-500 dark:text-white/40">
+                                最近检测 <span className="ml-1 text-zinc-700 dark:text-white/60">{formatTime(ep?.last_checked_at)}</span>
+                            </div>
+                            <div className="text-zinc-500 dark:text-white/40">
+                                最近成功 <span className="ml-1 text-zinc-700 dark:text-white/60">{formatTime(ep?.last_success_at)}</span>
+                            </div>
+                            {ep?.disabled_until && (
+                                <div className="col-span-2 text-zinc-500 dark:text-white/40">
+                                    禁用至 <span className="ml-1 text-red-600 dark:text-red-400">{formatTime(ep.disabled_until)}</span>
+                                    {ep?.disabled_reason && (
+                                        <span className="ml-1.5 text-zinc-400">({formatDisabledReason(ep.disabled_reason)})</span>
+                                    )}
+                                </div>
+                            )}
+                            {ep?.last_error && (
+                                <div className="col-span-2 text-red-600/80 dark:text-red-300/80 break-all">
+                                    {String(ep.last_error)}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* rename */}
+                        <div className="flex items-center gap-2">
+                            <input
+                                value={nameDraft}
+                                onChange={e => setNameDraft(e.target.value)}
+                                placeholder="节点名称"
+                                onKeyDown={e => { if (e.key === 'Enter') handleRename(); }}
+                                className="flex-1 min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-xs text-zinc-900 outline-none focus:border-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
                             />
-                        </svg>
+                            <button type="button" onClick={handleRename} disabled={renaming}
+                                className="shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-medium bg-zinc-100 text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10 transition disabled:opacity-40">
+                                {renaming ? '...' : '改名'}
+                            </button>
+                        </div>
+
+                        {/* action bar */}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                            <button type="button" onClick={handleCheck} disabled={checking}
+                                className="rounded-lg px-3 py-1.5 text-[11px] font-medium border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 dark:border-blue-500/20 dark:text-blue-300 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 transition disabled:opacity-40">
+                                {checking ? (
+                                    <span className="inline-flex items-center gap-1">
+                                        <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                        </svg>
+                                        检测中
+                                    </span>
+                                ) : '探活检测'}
+                            </button>
+                            <button type="button"
+                                onClick={() => onSwitch?.(ep?.id)}
+                                disabled={!available || ep?.is_current}
+                                className="rounded-lg px-3 py-1.5 text-[11px] font-medium border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:border-emerald-500/20 dark:text-emerald-300 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 transition disabled:opacity-40">
+                                切换使用
+                            </button>
+                            {isUnavailable(ep) && (
+                                <button type="button" onClick={() => onEnable?.(ep?.id)}
+                                    className="rounded-lg px-3 py-1.5 text-[11px] font-medium border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:border-emerald-500/20 dark:text-emerald-300 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 transition">
+                                    启用
+                                </button>
+                            )}
+                            {available && (
+                                <button type="button" onClick={() => onDisableNextMonth?.(ep?.id)}
+                                    className="rounded-lg px-3 py-1.5 text-[11px] font-medium border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 dark:border-amber-500/20 dark:text-amber-300 dark:bg-amber-500/10 dark:hover:bg-amber-500/20 transition">
+                                    禁用到下月
+                                </button>
+                            )}
+                            <button type="button" onClick={() => setConfirmDelete(true)}
+                                className="rounded-lg px-3 py-1.5 text-[11px] font-medium border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 dark:border-red-500/20 dark:text-red-400 dark:bg-red-500/10 dark:hover:bg-red-500/20 transition">
+                                删除
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            <ConfirmDialog
+                open={confirmDelete}
+                title="删除 RPC 节点"
+                message={`确定要删除 "${displayName}" 吗？此操作不可撤销。`}
+                danger
+                onConfirm={() => { setConfirmDelete(false); onDelete?.(ep?.id); }}
+                onCancel={() => setConfirmDelete(false)}
+            />
+        </>
+    );
+}
+
+/* ── transport group ── */
+
+function TransportGroup({ group, transport, onSwitch, onDisableNextMonth, onEnable, onRename, onDelete, onCheck }) {
+    const endpoints = group?.endpoints || [];
+    const unavailableCount = endpoints.filter(ep => isUnavailable(ep)).length;
+    const availableCount = endpoints.length - unavailableCount;
+
+    const effID = Number(group?.effective_endpoint_id || 0);
+    const effEndpoint = effID ? endpoints.find(ep => Number(ep?.id) === effID) : null;
+    const effName = effEndpoint ? endpointDisplayName(effEndpoint) : '';
+    const effURL = maskUrl(group?.effective_url, group?.effective_url_masked);
+    const effectiveLabel = effName || (effURL !== '--' ? effURL : '未配置');
+
+    return (
+        <div className="space-y-2">
+            {/* header */}
+            <div className="flex items-center justify-between px-1">
+                <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-zinc-700 dark:text-white/80 uppercase tracking-wider">
+                        {formatTransport(transport)}
+                    </span>
+                    <span className="text-[11px] text-zinc-400 dark:text-white/30">
+                        {availableCount}可用 / {unavailableCount}不可用
                     </span>
                 </div>
-            </button>
+                <div className="text-[11px] text-zinc-500 dark:text-white/40 truncate max-w-[60%] text-right">
+                    当前: {effectiveLabel}
+                    <span className="ml-1 text-zinc-400 dark:text-white/25">({formatSource(group?.effective_source)})</span>
+                </div>
+            </div>
 
-            {open && (
-                <div className="mt-3 space-y-2">
-                    {group?.env_url && (
-                        <div className="rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 text-[11px] text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/40">
-                            环境变量兜底：{maskUrl(group.env_url, group.env_url_masked)}
-                        </div>
-                    )}
+            {/* env fallback hint */}
+            {group?.env_url && (
+                <div className="rounded-lg bg-zinc-50 dark:bg-white/[0.02] px-3 py-1.5 text-[11px] text-zinc-400 dark:text-white/30 truncate">
+                    ENV 兜底: {maskUrl(group.env_url, group.env_url_masked)}
+                </div>
+            )}
 
-                    {endpoints.length === 0 && (
-                        <div className="rounded-xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                            节点池为空（如配置了环境变量，会使用环境变量兜底）
-                        </div>
-                    )}
-
-                    {endpoints.map((ep) => (
-                        <EndpointCard
+            {/* endpoint list */}
+            {endpoints.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-zinc-200 dark:border-white/10 py-6 text-center text-xs text-zinc-400 dark:text-white/30">
+                    暂无节点
+                </div>
+            ) : (
+                <div className="space-y-1.5">
+                    {endpoints.map(ep => (
+                        <EndpointRow
                             key={ep.id}
                             ep={ep}
                             onSwitch={onSwitch}
                             onDisableNextMonth={onDisableNextMonth}
                             onEnable={onEnable}
                             onRename={onRename}
+                            onDelete={onDelete}
+                            onCheck={onCheck}
                         />
                     ))}
                 </div>
@@ -454,20 +352,107 @@ function TransportSection({ group, transport, onSwitch, onDisableNextMonth, onEn
     );
 }
 
+/* ── add form ── */
+
+function AddForm({ onAdd, adding, addError }) {
+    const [open, setOpen] = useState(false);
+    const [draft, setDraft] = useState({
+        chain: 'bsc', transport: 'http', name: '', url: '', setCurrent: false,
+    });
+
+    const handleSubmit = () => {
+        onAdd?.(draft);
+        setDraft(prev => ({ ...prev, name: '', url: '', setCurrent: false }));
+    };
+
+    return (
+        <div className="rounded-2xl border border-zinc-200 bg-white/60 dark:border-white/10 dark:bg-white/[0.03] overflow-hidden">
+            <button type="button" onClick={() => setOpen(v => !v)}
+                className="w-full flex items-center justify-between px-4 py-3 text-left">
+                <span className="text-sm font-semibold text-zinc-900 dark:text-white/90">
+                    添加节点
+                </span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                    className={`text-zinc-400 dark:text-white/30 transition-transform ${open ? 'rotate-180' : ''}`}>
+                    <path d="M7 10l5 5 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+            </button>
+
+            {open && (
+                <div className="border-t border-zinc-100 dark:border-white/5 px-4 py-3 space-y-3">
+                    <div className="grid grid-cols-2 gap-2">
+                        <label className="space-y-1">
+                            <div className="text-[11px] font-medium text-zinc-500 dark:text-white/50">链</div>
+                            <select value={draft.chain} onChange={e => setDraft(p => ({ ...p, chain: e.target.value }))}
+                                className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs text-zinc-900 outline-none focus:border-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-white">
+                                <option value="bsc">BSC</option>
+                                <option value="base">Base</option>
+                            </select>
+                        </label>
+                        <label className="space-y-1">
+                            <div className="text-[11px] font-medium text-zinc-500 dark:text-white/50">类型</div>
+                            <select value={draft.transport} onChange={e => setDraft(p => ({ ...p, transport: e.target.value }))}
+                                className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs text-zinc-900 outline-none focus:border-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-white">
+                                <option value="http">HTTP</option>
+                                <option value="ws">WebSocket</option>
+                            </select>
+                        </label>
+                    </div>
+                    <label className="block space-y-1">
+                        <div className="text-[11px] font-medium text-zinc-500 dark:text-white/50">URL</div>
+                        <input value={draft.url}
+                            onChange={e => setDraft(p => {
+                                const nextUrl = e.target.value;
+                                const keepName = String(p.name || '').trim();
+                                const derived = deriveNameFromUrl(nextUrl);
+                                return { ...p, url: nextUrl, name: keepName ? p.name : (derived || p.name) };
+                            })}
+                            placeholder={draft.transport === 'ws' ? 'wss://...' : 'https://...'}
+                            className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs text-zinc-900 outline-none focus:border-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
+                        />
+                    </label>
+                    <label className="block space-y-1">
+                        <div className="text-[11px] font-medium text-zinc-500 dark:text-white/50">名称 <span className="text-zinc-400">(留空自动使用域名)</span></div>
+                        <input value={draft.name} onChange={e => setDraft(p => ({ ...p, name: e.target.value }))}
+                            placeholder="例如：主用 / 备用1"
+                            className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs text-zinc-900 outline-none focus:border-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
+                        />
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-white/60">
+                        <input type="checkbox" checked={Boolean(draft.setCurrent)}
+                            onChange={e => setDraft(p => ({ ...p, setCurrent: e.target.checked }))}
+                            className="rounded"
+                        />
+                        添加后设为当前节点
+                    </label>
+
+                    {addError && (
+                        <div className="rounded-lg bg-red-50 dark:bg-red-500/10 px-3 py-2 text-[11px] text-red-700 dark:text-red-300">
+                            {addError}
+                        </div>
+                    )}
+
+                    <button type="button" onClick={handleSubmit} disabled={adding || !String(draft.url || '').trim()}
+                        className={`w-full rounded-xl py-2.5 text-xs font-semibold transition ${adding || !String(draft.url || '').trim()
+                            ? 'bg-zinc-200 text-zinc-500 dark:bg-white/10 dark:text-white/30 cursor-not-allowed'
+                            : 'bg-emerald-600 text-white hover:bg-emerald-500 active:scale-[0.98]'
+                            }`}>
+                        {adding ? '添加中...' : '添加节点'}
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
+
+/* ── main component ── */
+
 export default function AdminRPCPool({ apiBaseUrl, initData, hasInitData, pollIntervalSec = 15, onNotice }) {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
-
     const [adding, setAdding] = useState(false);
     const [addError, setAddError] = useState('');
-    const [draft, setDraft] = useState({
-        chain: 'bsc',
-        transport: 'http',
-        name: '',
-        url: '',
-        setCurrent: false,
-    });
 
     const groups = useMemo(() => data?.groups || [], [data]);
     const groupMap = useMemo(() => {
@@ -475,23 +460,18 @@ export default function AdminRPCPool({ apiBaseUrl, initData, hasInitData, pollIn
         for (const g of groups) {
             const chain = String(g?.chain || '').toLowerCase();
             const transport = String(g?.transport || '').toLowerCase();
-            if (!chain || !transport) continue;
-            out[`${chain}:${transport}`] = g;
+            if (chain && transport) out[`${chain}:${transport}`] = g;
         }
         return out;
     }, [groups]);
+
     const chains = useMemo(() => {
-        const found = new Set(groups.map((g) => String(g?.chain || '').toLowerCase()).filter(Boolean));
+        const found = new Set(groups.map(g => String(g?.chain || '').toLowerCase()).filter(Boolean));
         const ordered = [];
         for (const k of ['bsc', 'base']) {
-            if (found.has(k)) {
-                ordered.push(k);
-                found.delete(k);
-            }
+            if (found.has(k)) { ordered.push(k); found.delete(k); }
         }
-        for (const rest of Array.from(found).sort()) {
-            ordered.push(rest);
-        }
+        for (const rest of Array.from(found).sort()) ordered.push(rest);
         return ordered;
     }, [groups]);
 
@@ -500,8 +480,7 @@ export default function AdminRPCPool({ apiBaseUrl, initData, hasInitData, pollIn
         setLoading(true);
         setError('');
         try {
-            const resp = await fetchAdminRPCPool({ apiBaseUrl, initData });
-            setData(resp);
+            setData(await fetchAdminRPCPool({ apiBaseUrl, initData }));
         } catch (e) {
             setError(String(e?.message || e));
         } finally {
@@ -509,39 +488,27 @@ export default function AdminRPCPool({ apiBaseUrl, initData, hasInitData, pollIn
         }
     }, [apiBaseUrl, initData, hasInitData]);
 
-    useEffect(() => {
-        load();
-    }, [load]);
+    useEffect(() => { load(); }, [load]);
 
     useEffect(() => {
         if (!hasInitData) return;
-        const t = setInterval(() => {
-            load();
-        }, Math.max(3, Number(pollIntervalSec) || 15) * 1000);
+        const t = setInterval(load, Math.max(3, Number(pollIntervalSec) || 15) * 1000);
         return () => clearInterval(t);
     }, [hasInitData, pollIntervalSec, load]);
 
-    const handleAdd = useCallback(async () => {
+    const handleAdd = useCallback(async (draft) => {
         if (!hasInitData) return;
-        const name = String(draft.name || '').trim();
         const url = String(draft.url || '').trim();
-        if (!url) {
-            setAddError('请填写 URL');
-            return;
-        }
+        if (!url) { setAddError('请填写 URL'); return; }
         setAdding(true);
         setAddError('');
         try {
             await addAdminRPCEndpoint({
-                apiBaseUrl,
-                initData,
-                chain: draft.chain,
-                transport: draft.transport,
-                name,
-                url,
+                apiBaseUrl, initData,
+                chain: draft.chain, transport: draft.transport,
+                name: String(draft.name || '').trim(), url,
                 setCurrent: Boolean(draft.setCurrent),
             });
-            setDraft((prev) => ({ ...prev, name: '', url: '', setCurrent: false }));
             onNotice?.('已添加 RPC 节点');
             load();
         } catch (e) {
@@ -549,206 +516,118 @@ export default function AdminRPCPool({ apiBaseUrl, initData, hasInitData, pollIn
         } finally {
             setAdding(false);
         }
-    }, [apiBaseUrl, initData, hasInitData, draft, onNotice, load]);
+    }, [apiBaseUrl, initData, hasInitData, onNotice, load]);
 
-    const handleSwitch = useCallback(async (endpointId) => {
+    const wrap = (fn, successMsg) => async (...args) => {
         if (!hasInitData) return;
         try {
-            await switchAdminRPCEndpoint({ apiBaseUrl, initData, endpointId });
-            onNotice?.('已切换当前节点');
+            await fn(...args);
+            if (successMsg) onNotice?.(successMsg);
             load();
         } catch (e) {
             onNotice?.(String(e?.message || e));
         }
-    }, [apiBaseUrl, initData, hasInitData, onNotice, load]);
+    };
 
-    const handleDisableNextMonth = useCallback(async (endpointId) => {
-        if (!hasInitData) return;
-        try {
-            await disableAdminRPCEndpointNextMonth({ apiBaseUrl, initData, endpointId });
-            onNotice?.('已禁用到下月');
-            load();
-        } catch (e) {
-            onNotice?.(String(e?.message || e));
-        }
-    }, [apiBaseUrl, initData, hasInitData, onNotice, load]);
+    const handleSwitch = useCallback(wrap(
+        (id) => switchAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: id }),
+        '已切换当前节点'
+    ), [apiBaseUrl, initData, hasInitData, onNotice, load]);
 
-    const handleEnable = useCallback(async (endpointId) => {
-        if (!hasInitData) return;
-        try {
-            await enableAdminRPCEndpoint({ apiBaseUrl, initData, endpointId });
-            onNotice?.('节点已启用');
-            load();
-        } catch (e) {
-            onNotice?.(String(e?.message || e));
-        }
-    }, [apiBaseUrl, initData, hasInitData, onNotice, load]);
+    const handleDisableNextMonth = useCallback(wrap(
+        (id) => disableAdminRPCEndpointNextMonth({ apiBaseUrl, initData, endpointId: id }),
+        '已禁用到下月'
+    ), [apiBaseUrl, initData, hasInitData, onNotice, load]);
+
+    const handleEnable = useCallback(wrap(
+        (id) => enableAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: id }),
+        '节点已启用'
+    ), [apiBaseUrl, initData, hasInitData, onNotice, load]);
 
     const handleRename = useCallback(async (endpointId, name) => {
         if (!hasInitData) return;
-        const id = Number(endpointId || 0);
-        if (!id) throw new Error('缺少 endpointId');
-        const nextName = String(name || '').trim();
-        if (!nextName) throw new Error('请填写名称');
-        await renameAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: id, name: nextName });
+        await renameAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: Number(endpointId), name: String(name).trim() });
         onNotice?.('名称已更新');
         load();
     }, [apiBaseUrl, initData, hasInitData, onNotice, load]);
 
+    const handleDelete = useCallback(wrap(
+        (id) => deleteAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: id }),
+        '节点已删除'
+    ), [apiBaseUrl, initData, hasInitData, onNotice, load]);
+
+    const handleCheck = useCallback(wrap(
+        (id) => checkAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: id }),
+        '探活完成'
+    ), [apiBaseUrl, initData, hasInitData, onNotice, load]);
+
+    /* total stats */
+    const totalEndpoints = groups.reduce((s, g) => s + (g?.endpoints?.length || 0), 0);
+    const totalAvailable = groups.reduce((s, g) => s + (g?.endpoints || []).filter(ep => !isUnavailable(ep)).length, 0);
+
     return (
-        <div className="space-y-4">
-            <div className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none">
-                <div className="flex items-start justify-between gap-3">
-                    <div>
-                        <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">RPC 节点池</div>
-                        <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
-                            当触发额度/频控时自动切换（cu limit exceeded / quota exceeded / HTTP 429）
-                        </div>
-                    </div>
-                    <button
-                        type="button"
-                        onClick={load}
-                        disabled={loading}
-                        className={`shrink-0 rounded-xl px-3 py-2 text-xs font-semibold ring-1 transition ${loading
-                            ? 'cursor-not-allowed bg-zinc-200 text-zinc-500 ring-zinc-200 dark:bg-white/10 dark:text-white/30 dark:ring-white/10'
-                            : 'bg-zinc-100 text-zinc-700 ring-zinc-200 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/80 dark:ring-white/10 dark:hover:bg-white/10'
-                            }`}
-                    >
-                        {loading ? '加载中...' : '刷新'}
-                    </button>
-                </div>
-
-                {error && (
-                    <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
-                        {error}
-                    </div>
-                )}
-            </div>
-
-            <div className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none">
-                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90 mb-3">添加节点</div>
-                <div className="grid grid-cols-1 gap-3">
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <label className="space-y-1">
-                            <div className="text-[11px] font-semibold text-zinc-600 dark:text-white/60">链</div>
-                            <FancySelect
-                                value={draft.chain}
-                                onChange={(v) => setDraft((p) => ({ ...p, chain: v }))}
-                                options={[
-                                    { value: 'bsc', label: 'BSC' },
-                                    { value: 'base', label: 'Base' },
-                                ]}
-                            />
-                        </label>
-                        <label className="space-y-1">
-                            <div className="text-[11px] font-semibold text-zinc-600 dark:text-white/60">类型</div>
-                            <FancySelect
-                                value={draft.transport}
-                                onChange={(v) => setDraft((p) => ({ ...p, transport: v }))}
-                                options={[
-                                    { value: 'http', label: 'HTTP' },
-                                    { value: 'ws', label: 'WebSocket' },
-                                ]}
-                            />
-                        </label>
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <label className="space-y-1">
-                            <div className="text-[11px] font-semibold text-zinc-600 dark:text-white/60">名称</div>
-                            <input
-                                value={draft.name}
-                                onChange={(e) => setDraft((p) => ({ ...p, name: e.target.value }))}
-                                placeholder="例如：主用 / 备用1"
-                                className="w-full rounded-xl border border-zinc-200 bg-white/60 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none focus:border-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
-                            />
-                            <div className="text-[10px] text-zinc-400 dark:text-white/30">最多 64 字；留空会自动使用域名</div>
-                        </label>
-                        <label className="space-y-1">
-                            <div className="text-[11px] font-semibold text-zinc-600 dark:text-white/60">URL</div>
-                            <input
-                                value={draft.url}
-                                onChange={(e) =>
-                                    setDraft((p) => {
-                                        const nextUrl = e.target.value;
-                                        const keepName = String(p.name || '').trim();
-                                        const derived = deriveNameFromUrl(nextUrl);
-                                        return { ...p, url: nextUrl, name: keepName ? p.name : (derived || p.name) };
-                                    })}
-                                placeholder={draft.transport === 'ws' ? 'wss://...' : 'https://...'}
-                                className="w-full rounded-xl border border-zinc-200 bg-white/60 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none focus:border-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
-                            />
-                        </label>
-                    </div>
-                    <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-white/60">
-                        <input
-                            type="checkbox"
-                            checked={Boolean(draft.setCurrent)}
-                            onChange={(e) => setDraft((p) => ({ ...p, setCurrent: e.target.checked }))}
-                        />
-                        设为当前
-                    </label>
-
-                    {addError && (
-                        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
-                            {addError}
-                        </div>
-                    )}
-
-                    <div className="flex justify-end">
-                        <button
-                            type="button"
-                            onClick={handleAdd}
-                            disabled={adding}
-                            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${adding
-                                ? 'cursor-not-allowed bg-zinc-300 text-zinc-500 dark:bg-white/10 dark:text-white/30'
-                                : 'bg-emerald-600 text-white hover:bg-emerald-500 dark:bg-emerald-500 dark:hover:bg-emerald-400'
-                                }`}
-                        >
-                            {adding ? '添加中...' : '添加'}
-                        </button>
+        <div className="space-y-3">
+            {/* header */}
+            <div className="flex items-center justify-between">
+                <div>
+                    <div className="text-base font-bold text-zinc-900 dark:text-white">RPC 节点池</div>
+                    <div className="text-[11px] text-zinc-400 dark:text-white/30 mt-0.5">
+                        {totalEndpoints > 0 ? (
+                            <>{totalAvailable}<span className="text-emerald-600 dark:text-emerald-400"> 可用</span> / {totalEndpoints} 总计</>
+                        ) : '额度/频控触发时自动切换'}
                     </div>
                 </div>
+                <button type="button" onClick={load} disabled={loading}
+                    className={`rounded-xl px-3 py-1.5 text-xs font-medium ring-1 ring-zinc-200 dark:ring-white/10 transition ${loading ? 'opacity-40 cursor-not-allowed' : 'hover:bg-zinc-100 dark:hover:bg-white/10 active:scale-95'}`}>
+                    {loading ? (
+                        <span className="inline-flex items-center gap-1">
+                            <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                            </svg>
+                            刷新中
+                        </span>
+                    ) : '刷新'}
+                </button>
             </div>
 
-            {chains.map((chain) => (
-                <div
-                    key={chain}
-                    className="rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none"
-                >
-                    <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                            <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">{formatChain(chain)}</div>
-                            <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
-                                HTTP / WebSocket 分开展示，默认折叠；点开后可查看节点详情/重命名/手动切换
-                            </div>
-                        </div>
+            {error && (
+                <div className="rounded-xl bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 px-3 py-2 text-xs text-red-700 dark:text-red-300">
+                    {error}
+                </div>
+            )}
+
+            {/* add form */}
+            <AddForm onAdd={handleAdd} adding={adding} addError={addError} />
+
+            {/* chain sections */}
+            {chains.map(chain => (
+                <div key={chain} className="rounded-2xl border border-zinc-200 bg-white/60 dark:border-white/10 dark:bg-white/[0.03] p-4 space-y-4">
+                    <div className="text-sm font-bold text-zinc-900 dark:text-white/90">
+                        {formatChain(chain)}
                     </div>
 
-                    <div className="mt-3 space-y-3">
-                        {['http', 'ws'].map((transport) => {
-                            const key = `${chain}:${transport}`;
-                            const g = groupMap[key] || {
-                                chain,
-                                transport,
-                                effective_source: 'none',
-                                effective_url: '',
-                                effective_url_masked: '',
-                                endpoints: [],
-                            };
-                            return (
-                                <TransportSection
-                                    key={key}
-                                    group={g}
-                                    transport={transport}
-                                    onSwitch={handleSwitch}
-                                    onDisableNextMonth={handleDisableNextMonth}
-                                    onEnable={handleEnable}
-                                    onRename={handleRename}
-                                />
-                            );
-                        })}
-                    </div>
+                    {['http', 'ws'].map(transport => {
+                        const key = `${chain}:${transport}`;
+                        const g = groupMap[key] || {
+                            chain, transport,
+                            effective_source: 'none', effective_url: '', effective_url_masked: '',
+                            endpoints: [],
+                        };
+                        return (
+                            <TransportGroup
+                                key={key}
+                                group={g}
+                                transport={transport}
+                                onSwitch={handleSwitch}
+                                onDisableNextMonth={handleDisableNextMonth}
+                                onEnable={handleEnable}
+                                onRename={handleRename}
+                                onDelete={handleDelete}
+                                onCheck={handleCheck}
+                            />
+                        );
+                    })}
                 </div>
             ))}
         </div>

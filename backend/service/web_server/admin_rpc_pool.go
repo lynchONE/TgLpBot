@@ -15,7 +15,7 @@ import (
 
 type adminRPCPoolRequest struct {
 	InitData string `json:"initData"`
-	Action   string `json:"action"` // list | add | rename | switch | disable | enable
+	Action   string `json:"action"` // list | add | rename | switch | disable | enable | delete | check
 
 	EndpointID uint   `json:"endpoint_id,omitempty"`
 	Chain      string `json:"chain,omitempty"`
@@ -221,6 +221,25 @@ func (s *Server) handleAdminRPCPool(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		writeRPCPoolList(w, ctx)
+		return
+	case "delete":
+		if req.EndpointID == 0 {
+			http.Error(w, "endpoint_id required", http.StatusBadRequest)
+			return
+		}
+		if err := mgr.DeleteEndpoint(ctx, req.EndpointID); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeRPCPoolList(w, ctx)
+		return
+	case "check":
+		if req.EndpointID == 0 {
+			http.Error(w, "endpoint_id required", http.StatusBadRequest)
+			return
+		}
+		_ = mgr.CheckOne(ctx, req.EndpointID)
 		writeRPCPoolList(w, ctx)
 		return
 	default:

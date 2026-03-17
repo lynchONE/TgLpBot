@@ -41,6 +41,7 @@ type Store interface {
 	GetByID(ctx context.Context, id uint) (*models.RpcEndpoint, error)
 	Create(ctx context.Context, ep *models.RpcEndpoint) error
 	UpdateByID(ctx context.Context, id uint, updates map[string]interface{}) error
+	DeleteByID(ctx context.Context, id uint) error
 	SetCurrent(ctx context.Context, chain string, transport string, id uint) error
 	UnsetCurrent(ctx context.Context, chain string, transport string) error
 }
@@ -325,6 +326,82 @@ func (m *Manager) EnableEndpoint(ctx context.Context, endpointID uint) error {
 	}
 	_, _ = m.EffectiveURL(ctx, ep.Chain, ep.Transport)
 	return nil
+}
+
+func (m *Manager) DeleteEndpoint(ctx context.Context, endpointID uint) error {
+	if m == nil || m.store == nil {
+		return fmt.Errorf("rpcpool store not available")
+	}
+	ep, err := m.store.GetByID(ctx, endpointID)
+	if err != nil {
+		return err
+	}
+	if ep == nil {
+		return fmt.Errorf("rpc endpoint not found")
+	}
+	wasCurrent := ep.IsCurrent
+	chain, transport := ep.Chain, ep.Transport
+	if err := m.store.DeleteByID(ctx, endpointID); err != nil {
+		return err
+	}
+	if wasCurrent {
+		_, _ = m.EffectiveURL(ctx, chain, transport)
+	}
+	return nil
+}
+
+// CheckOne probes a single endpoint and returns updated status.
+func (m *Manager) CheckOne(ctx context.Context, endpointID uint) error {
+	if m == nil || m.store == nil || m.prober == nil {
+		return fmt.Errorf("rpcpool not ready")
+	}
+	ep, err := m.store.GetByID(ctx, endpointID)
+	if err != nil {
+		return err
+	}
+	if ep == nil {
+		return fmt.Errorf("rpc endpoint not found")
+	}
+
+	now := m.now()
+	chain := config.NormalizeChain(ep.Chain)
+	transport := NormalizeTransport(ep.Transport)
+
+	start := time.Now()
+	probeCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	latency, probeErr := m.prober.Probe(probeCtx, strings.TrimSpace(ep.URL), transport)
+	cancel()
+	if latency <= 0 {
+		latency = time.Since(start)
+	}
+
+	updates := map[string]interface{}{
+		"LastCheckedAt": &now,
+		"LastLatencyMs": latency.Milliseconds(),
+	}
+
+	if probeErr == nil {
+		updates["LastSuccessAt"] = &now
+		updates["ConsecutiveFailures"] = 0
+		updates["LastError"] = ""
+		if ep.DisabledReason == ReasonHealthFail {
+			updates["DisabledUntil"] = nil
+			updates["DisabledReason"] = ""
+		}
+	} else {
+		errStr := truncateString(strings.TrimSpace(probeErr.Error()), m.maxLastErrorLength)
+		updates["LastError"] = errStr
+		updates["ConsecutiveFailures"] = ep.ConsecutiveFailures + 1
+	}
+
+	if err := m.store.UpdateByID(ctx, ep.ID, updates); err != nil {
+		return err
+	}
+
+	if probeErr != nil && ep.IsCurrent && ep.ConsecutiveFailures+1 >= m.failureThreshold {
+		_, _ = m.EffectiveURL(ctx, chain, transport)
+	}
+	return probeErr
 }
 
 // CheckAllOnce probes all available endpoints and updates status fields.

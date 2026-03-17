@@ -869,6 +869,22 @@ export async function enableAdminRPCEndpoint({ apiBaseUrl, initData, endpointId,
     });
 }
 
+export async function deleteAdminRPCEndpoint({ apiBaseUrl, initData, endpointId, signal }) {
+    return adminRPCPoolRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'delete', endpoint_id: Number(endpointId) },
+        signal,
+    });
+}
+
+export async function checkAdminRPCEndpoint({ apiBaseUrl, initData, endpointId, signal }) {
+    return adminRPCPoolRequest({
+        apiBaseUrl,
+        payload: { initData, action: 'check', endpoint_id: Number(endpointId) },
+        signal,
+    });
+}
+
 async function adminPrivateZapRequest({ apiBaseUrl, payload, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/admin?endpoint=private_zap`;

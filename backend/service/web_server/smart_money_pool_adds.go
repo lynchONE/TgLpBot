@@ -1,6 +1,7 @@
 package web_server
 
 import (
+	"TgLpBot/base/blockchain"
 	"TgLpBot/base/models"
 	"TgLpBot/service/pool"
 	"TgLpBot/service/pricing"
@@ -389,11 +390,79 @@ func querySmartMoneyPoolAddsStable(ctx context.Context, conn smartMoneyClickHous
 	return out, nil
 }
 
+func isClickHouseMemoryLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	if msg == "" {
+		return false
+	}
+	return strings.Contains(msg, "memory_limit_exceeded") ||
+		strings.Contains(msg, "memory limit exceeded") ||
+		strings.Contains(msg, "overcommittracker")
+}
+
+func querySmartMoneyPoolAddsBestEffort(ctx context.Context, conn smartMoneyClickHouseQueryer, chain string, poolVersion string, poolID string, window time.Duration, limit int) ([]smartMoneyPoolAddRow, bool, []string, error) {
+	rows, err := querySmartMoneyPoolAddsStable(ctx, conn, chain, poolVersion, poolID, window, limit)
+	if err == nil {
+		return rows, false, nil, nil
+	}
+	if !isClickHouseMemoryLimitError(err) {
+		return nil, false, nil, err
+	}
+
+	fallbackRows, fallbackErr := querySmartMoneyPoolAdds(ctx, conn, chain, poolVersion, poolID, window, limit)
+	if fallbackErr != nil {
+		return nil, false, nil, fmt.Errorf("stable query failed: %w; fallback query failed: %v", err, fallbackErr)
+	}
+
+	warnings := []string{
+		"pool adds query exceeded ClickHouse memory and fell back to lightweight aggregation",
+	}
+	return fallbackRows, true, warnings, nil
+}
+
 type smartMoneyPoolAddLiveResolver interface {
 	Resolve(ctx context.Context, ref smartMoneyPositionRef) (*smartMoneyResolvedPosition, error)
 }
 
 type smartMoneyPoolAddV4FallbackLoader func(ctx context.Context, walletAddr string, pools []smartMoneyWalletV4PoolRef, limit int) ([]smartMoneyPositionRef, error)
+
+func (r *smartMoneyPositionResolver) canResolvePoolVersion(poolVersion string) bool {
+	if r == nil || blockchain.Client == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(poolVersion)) {
+	case "v3":
+		return len(r.v3Managers) > 0
+	case "v4":
+		return r.canResolveV4()
+	default:
+		return false
+	}
+}
+
+func smartMoneyPositionRefKey(ref smartMoneyPositionRef) string {
+	return strings.ToLower(strings.TrimSpace(ref.PoolVersion)) + "|" +
+		strings.ToLower(strings.TrimSpace(ref.PoolID)) + "|" +
+		strings.ToLower(strings.TrimSpace(ref.WalletAddress)) + "|" +
+		strings.TrimSpace(ref.TokenID) + "|" +
+		fmt.Sprintf("%d", ref.TickLower) + "|" +
+		fmt.Sprintf("%d", ref.TickUpper)
+}
+
+func smartMoneyPoolAddsWalletKey(poolVersion string, poolID string, row smartMoneyPoolAddsWalletRow) string {
+	return smartMoneyPositionRefKey(smartMoneyPositionRef{
+		PoolVersion:     poolVersion,
+		PoolID:          poolID,
+		WalletAddress:   row.WalletAddress,
+		TokenID:         row.TokenID,
+		ContractAddress: row.NPMAddress,
+		TickLower:       row.TickLower,
+		TickUpper:       row.TickUpper,
+	})
+}
 
 func resolveActiveSmartMoneyPoolAddRows(
 	ctx context.Context,
@@ -547,7 +616,7 @@ func (s *Server) handleSmartMoneyPoolAdds(w http.ResponseWriter, r *http.Request
 
 	window := time.Duration(windowHours) * time.Hour
 
-	rows, qerr := querySmartMoneyPoolAddsStable(ctx, s.ClickHouse.Conn, chain, poolVersion, poolID, window, limit)
+	rows, usedFallbackQuery, queryWarnings, qerr := querySmartMoneyPoolAddsBestEffort(ctx, s.ClickHouse.Conn, chain, poolVersion, poolID, window, limit)
 	if qerr != nil {
 		http.Error(w, qerr.Error(), http.StatusInternalServerError)
 		return
@@ -556,7 +625,8 @@ func (s *Server) handleSmartMoneyPoolAdds(w http.ResponseWriter, r *http.Request
 	poolSvc := pool.NewPoolService()
 	info, perr := poolSvc.GetPoolInfoForVersionCached(chain, poolVersion, poolID)
 
-	warnings := make([]string, 0, 4)
+	warnings := make([]string, 0, 4+len(queryWarnings))
+	warnings = append(warnings, queryWarnings...)
 	if perr != nil {
 		warnings = append(warnings, fmt.Sprintf("pool info failed: %v", perr))
 	}
@@ -656,9 +726,47 @@ func (s *Server) handleSmartMoneyPoolAdds(w http.ResponseWriter, r *http.Request
 		wallets = append(wallets, item)
 	}
 
-	if feesLimit > 0 {
+	var (
+		resolver       *smartMoneyPositionResolver
+		resolvedByKey  map[string]*smartMoneyResolvedPosition
+		resolverInited bool
+	)
+	needResolver := usedFallbackQuery || feesLimit > 0
+	if needResolver {
 		resolver, resolverWarnings := newSmartMoneyPositionResolver(newSmartMoneyTokenMetaCache())
 		warnings = append(warnings, resolverWarnings...)
+		resolverInited = true
+		resolvedByKey = make(map[string]*smartMoneyResolvedPosition, len(wallets))
+
+		if usedFallbackQuery {
+			if resolver.canResolvePoolVersion(poolVersion) {
+				activeWallets, activeResolved, activeWarnings := resolveActiveSmartMoneyPoolAddRows(
+					ctx,
+					poolVersion,
+					poolID,
+					wallets,
+					resolver,
+					scanSmartMoneyV4FallbackRefs,
+				)
+				warnings = append(warnings, activeWarnings...)
+				wallets = activeWallets
+				for i := range wallets {
+					if i < len(activeResolved) && activeResolved[i] != nil {
+						resolvedByKey[smartMoneyPoolAddsWalletKey(poolVersion, poolID, wallets[i])] = activeResolved[i]
+					}
+				}
+			} else {
+				warnings = append(warnings, "live active-position filter unavailable after fallback query; preview rows may still include stale positions")
+			}
+		}
+	}
+
+	if feesLimit > 0 {
+		if !resolverInited {
+			resolver, _ = newSmartMoneyPositionResolver(newSmartMoneyTokenMetaCache())
+			resolvedByKey = make(map[string]*smartMoneyResolvedPosition, len(wallets))
+			resolverInited = true
+		}
 
 		candidates := make([]int, 0, len(wallets))
 		for i := range wallets {
@@ -711,7 +819,15 @@ func (s *Server) handleSmartMoneyPoolAdds(w http.ResponseWriter, r *http.Request
 				legacyMatched++
 			}
 
-			resolved, resolveErr := resolver.Resolve(ctx, ref)
+			key := smartMoneyPositionRefKey(ref)
+			resolved := resolvedByKey[key]
+			var resolveErr error
+			if resolved == nil {
+				resolved, resolveErr = resolver.Resolve(ctx, ref)
+				if resolved != nil {
+					resolvedByKey[key] = resolved
+				}
+			}
 			if resolveErr != nil || resolved == nil {
 				if strings.TrimSpace(ref.TokenID) != "" {
 					wallets[idx].FeeStatus = "error"

@@ -130,6 +130,18 @@ func (s *memStore) SetCurrent(ctx context.Context, chain string, transport strin
 	return nil
 }
 
+func (s *memStore) DeleteByID(ctx context.Context, id uint) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.eps {
+		if s.eps[i].ID == id {
+			s.eps = append(s.eps[:i], s.eps[i+1:]...)
+			return nil
+		}
+	}
+	return errors.New("endpoint not found")
+}
+
 func (s *memStore) UnsetCurrent(ctx context.Context, chain string, transport string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

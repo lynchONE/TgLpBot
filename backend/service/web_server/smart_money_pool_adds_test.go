@@ -116,6 +116,27 @@ func (r *fakePoolAddsRows) Columns() []string                { return nil }
 func (r *fakePoolAddsRows) Close() error                     { return nil }
 func (r *fakePoolAddsRows) Err() error                       { return r.err }
 
+type fakeSequentialPoolAddsConn struct {
+	queryIdx int
+	queries  []string
+	args     [][]any
+	results  []struct {
+		rows driver.Rows
+		err  error
+	}
+}
+
+func (c *fakeSequentialPoolAddsConn) Query(ctx context.Context, query string, args ...any) (driver.Rows, error) {
+	c.queries = append(c.queries, query)
+	c.args = append(c.args, args)
+	if c.queryIdx >= len(c.results) {
+		return nil, fmt.Errorf("unexpected query #%d", c.queryIdx+1)
+	}
+	res := c.results[c.queryIdx]
+	c.queryIdx++
+	return res.rows, res.err
+}
+
 func TestQuerySmartMoneyPoolAdds_UsesNetLiquidityFilterV3(t *testing.T) {
 	conn := &fakeCHConn{
 		rows: &fakePoolAddsRows{
@@ -273,6 +294,62 @@ func TestQuerySmartMoneyPoolAddsStable_UsesSignedLiquidityV4(t *testing.T) {
 	}
 	if !strings.Contains(conn.lastQuery, "sum(toInt256OrZero(liquidity_delta))") {
 		t.Fatalf("expected v4 signed liquidity expression, got query=%s", conn.lastQuery)
+	}
+}
+
+func TestQuerySmartMoneyPoolAddsBestEffort_FallsBackOnMemoryLimit(t *testing.T) {
+	conn := &fakeSequentialPoolAddsConn{
+		results: []struct {
+			rows driver.Rows
+			err  error
+		}{
+			{
+				err: fmt.Errorf("Code: 241. DB::Exception: MEMORY_LIMIT_EXCEEDED: memory limit exceeded"),
+			},
+			{
+				rows: &fakePoolAddsRows{
+					data: []smartMoneyPoolAddRow{
+						{
+							WalletAddress: "0xabc",
+							ContractAddr:  "0xpm",
+							TokenID:       "1",
+							TickLower:     -100,
+							TickUpper:     100,
+							Sum0:          "100",
+							Sum1:          "200",
+							EventCount:    1,
+							LastAt:        time.Unix(1, 0).UTC(),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	rows, usedFallback, warnings, err := querySmartMoneyPoolAddsBestEffort(context.Background(), conn, "bsc", "v3", "0xpool", 2*time.Hour, 10)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if !usedFallback {
+		t.Fatalf("expected fallback flag to be true")
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "fell back to lightweight aggregation") {
+		t.Fatalf("expected fallback warning, got %#v", warnings)
+	}
+	if len(conn.queries) != 2 {
+		t.Fatalf("expected 2 queries, got %d", len(conn.queries))
+	}
+	if !strings.Contains(conn.queries[0], "ANY INNER JOIN") {
+		t.Fatalf("expected first query to be stable, got %s", conn.queries[0])
+	}
+	if strings.Contains(conn.queries[1], "ANY INNER JOIN") {
+		t.Fatalf("expected second query to be fallback, got %s", conn.queries[1])
+	}
+	if !strings.Contains(conn.queries[1], "GROUP BY wallet_address, contract_address, token_id, tick_lower, tick_upper") {
+		t.Fatalf("expected fallback aggregation query, got %s", conn.queries[1])
 	}
 }
 

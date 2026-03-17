@@ -130,6 +130,25 @@ func (s *GormStore) SetCurrent(ctx context.Context, chain string, transport stri
 	})
 }
 
+func (s *GormStore) DeleteByID(ctx context.Context, id uint) error {
+	db, err := s.db()
+	if err != nil {
+		return err
+	}
+	q := db
+	if ctx != nil {
+		q = q.WithContext(ctx)
+	}
+	result := q.Delete(&models.RpcEndpoint{}, id)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("endpoint not found")
+	}
+	return nil
+}
+
 func (s *GormStore) UnsetCurrent(ctx context.Context, chain string, transport string) error {
 	db, err := s.db()
 	if err != nil {
