@@ -440,23 +440,25 @@ function SmartMoneyPositionCard({ position, walletLabel, walletAddress, onSelect
           <div className="pos-pair-row">
             <span className="pos-pair-name">{pair}</span>
             {feePct > 0 ? <span className="badge badge-fee">{formatPct(feePct)}</span> : null}
-          </div>
-          <div className="pos-status-row">
-            <span className="status-pill st-ok">
-              <span className="status-dot" />
-              当前仓位
-            </span>
-            <span className="pos-wallet-chip">钱包 {walletText}</span>
-            {positionId ? <span className="pos-task-id">#{positionId}</span> : null}
             {protocolTagText ? (
               <span className="tag tag-dex tag-dex-inline pos-dex-tag">
                 {dex?.src ? <img src={dex.src} alt="" /> : null}
                 <span>{protocolTagText}</span>
               </span>
             ) : null}
-            {exchangeText && exchangeText.toUpperCase() !== version ? <span className="pos-task-id">{exchangeText}</span> : null}
+          </div>
+          <div className="pos-status-row">
+            <span className="status-pill st-ok">
+              <span className="status-dot" />
+              当前仓位
+            </span>
             <span className={`range-pill ${inRange ? 'in' : 'out'}`}>{inRange ? 'In Range' : 'Out'}</span>
             {position?.running_since ? <span className="pos-running-dur">{formatDuration(position.running_since)}</span> : null}
+          </div>
+          <div className="sm-position-meta-row">
+            <span className="pos-wallet-chip">钱包 {walletText}</span>
+            {positionId ? <span className="sm-position-meta mono">#{positionId}</span> : null}
+            {exchangeText && exchangeText.toUpperCase() !== version ? <span className="sm-position-meta">{exchangeText}</span> : null}
           </div>
         </div>
         <div className="pos-card-right-block">

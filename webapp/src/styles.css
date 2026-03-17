@@ -3055,6 +3055,7 @@ body {
 
 .sm-position-card .pos-status-row {
   row-gap: 6px;
+  margin-top: 6px;
 }
 
 .sm-position-card .pos-dex-tag {
@@ -3065,6 +3066,10 @@ body {
 .sm-position-card .pos-dex-tag img {
   width: 12px;
   height: 12px;
+}
+
+.sm-position-card .sm-position-meta-row {
+  margin-top: 8px;
 }
 
 .sm-position-meta-row {
