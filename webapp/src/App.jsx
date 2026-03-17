@@ -334,8 +334,26 @@ function formatSmartTokenAmount(value) {
   return n.toPrecision(4);
 }
 
-function SmartMoneyPositionCard({ position }) {
+function formatOptionalUsd(value) {
+  if (value === null || value === undefined || value === '') return '$--';
+  const n = Number(value);
+  return Number.isFinite(n) ? formatUsd(n) : '$--';
+}
+
+function estimateTokenUsd(amount, usd, targetAmount) {
+  const amountNum = Number(amount);
+  const usdNum = Number(usd);
+  const targetNum = Number(targetAmount);
+  if (!Number.isFinite(amountNum) || !Number.isFinite(usdNum) || !Number.isFinite(targetNum)) return null;
+  if (Math.abs(amountNum) < 1e-12) return null;
+  const price = usdNum / amountNum;
+  if (!Number.isFinite(price)) return null;
+  return price * targetNum;
+}
+
+function SmartMoneyPositionCard({ position, walletLabel, walletAddress, onSelectPool }) {
   const version = String(position?.pool_version || '').trim().toUpperCase() || '--';
+  const protocolVersion = String(position?.pool_version || '').trim().toLowerCase();
   const poolId = String(position?.pool_id || '').trim();
   const positionId = String(position?.position_id || '').trim();
   const exchange = String(position?.exchange || '').trim();
@@ -345,6 +363,7 @@ function SmartMoneyPositionCard({ position }) {
   const tickLower = Number(position?.tick_lower ?? 0);
   const tickUpper = Number(position?.tick_upper ?? 0);
   const currentTick = Number(position?.current_tick ?? 0);
+  const positionUsd = Number(position?.position_usd ?? (Number(position?.amount0_usd || 0) + Number(position?.amount1_usd || 0)));
   const claimableFeeUsd = Number(position?.claimable_fees_usd ?? 0);
   const claimableFee0 = Number(position?.claimable_fee0 ?? 0);
   const claimableFee1 = Number(position?.claimable_fee1 ?? 0);
@@ -352,28 +371,90 @@ function SmartMoneyPositionCard({ position }) {
   const feeError = String(position?.fee_error || '').trim();
   const sym0 = String(position?.token0_symbol || '').trim() || 'T0';
   const sym1 = String(position?.token1_symbol || '').trim() || 'T1';
+  const token0 = normalizeHexAddress(position?.token0);
+  const token1 = normalizeHexAddress(position?.token1);
+  const walletText = String(walletLabel || '').trim()
+    || shortAddress(normalizeWalletAddress(walletAddress), 6, 4)
+    || '当前钱包';
+  const feePnlClass = feeStatus === 'error' ? 'negative' : 'positive';
+  const priceRange = computePriceRange({
+    token_rows: [
+      {
+        symbol: sym0,
+        decimals: position?.token0_decimals,
+      },
+      {
+        symbol: sym1,
+        decimals: position?.token1_decimals,
+      },
+    ],
+    current_tick: position?.current_tick,
+    tick_lower: position?.tick_lower,
+    tick_upper: position?.tick_upper,
+    in_range: position?.in_range,
+  });
+  const tokenRows = [
+    {
+      key: '0',
+      symbol: sym0,
+      priceUsd: estimateTokenUsd(position?.amount0, position?.amount0_usd, 1),
+      walletAmount: '--',
+      walletUsd: null,
+      positionAmount: position?.amount0,
+      positionUsd: position?.amount0_usd,
+      feeAmount: feeStatus === 'ok' ? claimableFee0 : '--',
+      feeUsd: feeStatus === 'ok' ? estimateTokenUsd(position?.amount0, position?.amount0_usd, claimableFee0) : null,
+    },
+    {
+      key: '1',
+      symbol: sym1,
+      priceUsd: estimateTokenUsd(position?.amount1, position?.amount1_usd, 1),
+      walletAmount: '--',
+      walletUsd: null,
+      positionAmount: position?.amount1,
+      positionUsd: position?.amount1_usd,
+      feeAmount: feeStatus === 'ok' ? claimableFee1 : '--',
+      feeUsd: feeStatus === 'ok' ? estimateTokenUsd(position?.amount1, position?.amount1_usd, claimableFee1) : null,
+    },
+  ];
 
   return (
-    <div className="pos-card sm-position-card">
-      <div className="pos-card-header sm-position-card-header">
-        <div className="pos-card-left sm-position-card-left">
+    <div className="pos-card">
+      <div className="pos-card-header">
+        <div
+          className="pos-card-left"
+          onClick={() => onSelectPool?.({
+            pool_id: poolId,
+            pool_address: poolId,
+            trading_pair: pair,
+            protocol_version: protocolVersion,
+            factory_name: exchange,
+            token0_address: token0,
+            token1_address: token1,
+            token0_symbol: sym0,
+            token1_symbol: sym1,
+          })}
+        >
           <div className="pos-pair-row">
             <span className="pos-pair-name">{pair}</span>
-            <span className="badge badge-fee">{version}</span>
-            {exchange ? <span className="badge badge-dex">{exchange}</span> : null}
             {feePct > 0 ? <span className="badge badge-fee">{formatPct(feePct)}</span> : null}
-            <span className={`range-pill ${inRange ? 'in' : 'out'}`}>{inRange ? 'In Range' : 'Out'}</span>
           </div>
-          <div className="sm-position-meta-row">
-            <span className="sm-position-meta mono">{shortAddress(poolId || '', 10, 8) || '--'}</span>
-            <span className="sm-position-meta">#{positionId || '--'}</span>
-            <span className="sm-position-meta">Tick {Number.isFinite(currentTick) ? currentTick : '--'}</span>
+          <div className="pos-status-row">
+            <span className="status-pill st-ok">
+              <span className="status-dot" />
+              当前仓位
+            </span>
+            <span className="pos-wallet-chip">钱包 {walletText}</span>
+            {positionId ? <span className="pos-task-id">#{positionId}</span> : null}
+            {version && version !== '--' ? <span className="pos-task-id">{version}</span> : null}
+            {exchange ? <span className="pos-task-id">{exchange}</span> : null}
+            <span className={`range-pill ${inRange ? 'in' : 'out'}`}>{inRange ? 'In Range' : 'Out'}</span>
           </div>
         </div>
         <div className="pos-card-right-block">
           <div className="pos-metrics">
-            <div className="pos-total">{formatUsd(position?.position_usd)}</div>
-            <div className={`pos-pnl ${claimableFeeUsd >= 0 ? 'positive' : 'negative'}`}>
+            <div className="pos-total">{formatOptionalUsd(positionUsd)}</div>
+            <div className={`pos-pnl ${feePnlClass}`}>
               手续费 {feeStatus === 'ok' ? formatUsd(claimableFeeUsd) : '--'}
             </div>
           </div>
@@ -382,46 +463,75 @@ function SmartMoneyPositionCard({ position }) {
 
       <div className="pos-token-table">
         <div className="pos-token-head">
-          <span>Token</span><span>仓位</span><span>估值</span><span>手续费</span>
+          <span>Token</span><span>钱包</span><span>仓位</span><span>手续费</span>
         </div>
-        {[
-          {
-            key: '0',
-            symbol: sym0,
-            amount: position?.amount0,
-            usd: position?.amount0_usd,
-            fee: feeStatus === 'ok' ? claimableFee0 : '--',
-          },
-          {
-            key: '1',
-            symbol: sym1,
-            amount: position?.amount1,
-            usd: position?.amount1_usd,
-            fee: feeStatus === 'ok' ? claimableFee1 : '--',
-          },
-        ].map((token) => (
+        {tokenRows.map((token) => (
           <div key={token.key} className="pos-token-row">
             <div className="pos-tk-name">
               <div>{token.symbol}</div>
+              {Number.isFinite(token.priceUsd) ? (
+                <div className="pos-tk-price">${Number(token.priceUsd).toFixed(4)}</div>
+              ) : null}
             </div>
             <div className="pos-tk-cell">
-              <div>{formatSmartTokenAmount(token.amount)}</div>
+              <div>{token.walletAmount}</div>
+              <div className="pos-tk-usd">{formatOptionalUsd(token.walletUsd)}</div>
             </div>
             <div className="pos-tk-cell">
-              <div>{formatUsd(token.usd)}</div>
+              <div>{formatSmartTokenAmount(token.positionAmount)}</div>
+              <div className="pos-tk-usd">{formatOptionalUsd(token.positionUsd)}</div>
             </div>
             <div className="pos-tk-cell fee">
-              <div>{typeof token.fee === 'string' ? token.fee : formatSmartTokenAmount(token.fee)}</div>
+              <div>{typeof token.feeAmount === 'string' ? token.feeAmount : formatSmartTokenAmount(token.feeAmount)}</div>
+              <div className="pos-tk-usd">{formatOptionalUsd(token.feeUsd)}</div>
             </div>
           </div>
         ))}
         <div className="pos-token-foot">
-          <span>区间</span>
-          <span>{Number.isFinite(tickLower) ? tickLower : '--'}</span>
-          <span>{Number.isFinite(tickUpper) ? tickUpper : '--'}</span>
-          <span className="fee">{feeStatus || '--'}</span>
+          <span>小计</span>
+          <span>$--</span>
+          <span>{formatOptionalUsd(positionUsd)}</span>
+          <span className="fee">{feeStatus === 'ok' ? formatUsd(claimableFeeUsd) : '$--'}</span>
         </div>
       </div>
+
+      {priceRange && (
+        <div className="pos-price-range">
+          <div className="pos-price-range-header">
+            <span className="pos-price-range-label">价格范围 ({priceRange.pairLabel}{priceRange.gridCount ? ` ${priceRange.gridCount}格` : ''})</span>
+            {Number.isFinite(priceRange.deviation) && priceRange.deviation > 0 && (
+              <span className="pos-price-range-dev">{priceRange.deviation.toFixed(2)}%</span>
+            )}
+          </div>
+          <div className="pos-price-range-bar-wrap">
+            <div className="pos-price-range-bar">
+              <div className="pos-price-range-limit lo" />
+              <div className="pos-price-range-limit hi" />
+              {priceRange.visibleGridLines?.map((pct, index) => (
+                <div key={index} className="pos-price-range-grid" style={{ left: `calc(3% + ${pct * 0.94}%)` }} />
+              ))}
+              <div
+                className={`pos-price-range-cursor ${priceRange.inRange ? 'in' : 'out'}`}
+                style={{ left: `calc(3% + ${priceRange.percent * 0.94}%)` }}
+              />
+            </div>
+          </div>
+          <div className="pos-price-range-labels">
+            <span className="lo">{compactPrice(priceRange.rangeMin)}</span>
+            <span className="cur">{compactPrice((priceRange.rangeMin + priceRange.rangeMax) / 2)}</span>
+            <span className="hi">{compactPrice(priceRange.rangeMax)}</span>
+          </div>
+        </div>
+      )}
+
+      {(Number.isFinite(tickLower) || Number.isFinite(tickUpper) || Number.isFinite(currentTick)) && (
+        <div className="pos-range-info">
+          <span>
+            Tick {Number.isFinite(tickLower) ? tickLower : '--'} / {Number.isFinite(currentTick) ? currentTick : '--'} / {Number.isFinite(tickUpper) ? tickUpper : '--'}
+          </span>
+          {priceRange && <span className="pos-range-cur-price">当前价 {compactPrice(priceRange.currentPrice)}</span>}
+        </div>
+      )}
 
       {feeStatus === 'error' && feeError ? (
         <div className="sm-position-error">{feeError}</div>
@@ -3024,6 +3134,9 @@ export default function App() {
                                       <SmartMoneyPositionCard
                                         key={`${String(position?.pool_id || '').trim()}:${String(position?.position_id || posIndex).trim()}`}
                                         position={position}
+                                        walletLabel={walletLabel}
+                                        walletAddress={normalizedWalletAddr}
+                                        onSelectPool={(nextPool) => selectPool({ ...nextPool, chain }, chain)}
                                       />
                                     ))}
                                   </div>

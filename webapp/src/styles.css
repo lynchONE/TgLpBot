@@ -2620,17 +2620,20 @@ body {
     margin-left: 0;
   }
 
-  .sm-position-card .pos-card-header {
+  .sm-position-card .pos-card-header,
+  .sm-wallet-detail-panel .pos-card-header {
     flex-direction: column;
   }
 
-  .sm-position-card .pos-card-right-block {
+  .sm-position-card .pos-card-right-block,
+  .sm-wallet-detail-panel .pos-card-right-block {
     width: 100%;
     align-items: flex-start;
     text-align: left;
   }
 
-  .sm-position-card .pos-metrics {
+  .sm-position-card .pos-metrics,
+  .sm-wallet-detail-panel .pos-metrics {
     justify-content: flex-start;
   }
 }
