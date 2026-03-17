@@ -24,6 +24,7 @@ type smartMoneyPositionRef struct {
 	TickLower       int
 	TickUpper       int
 	LastEventSeq    uint64
+	OpenedAt        *time.Time
 }
 
 type smartMoneyResolvedPosition struct {
@@ -508,15 +509,32 @@ func querySmartMoneyWalletRecentPositionRefs(ctx context.Context, conn smartMone
 			pool_id,
 			contract_address,
 			token_id,
-			max(event_seq) AS last_event_seq
-		FROM smart_lp_events
-		WHERE ts >= now() - INTERVAL %d SECOND
-			AND lowerUTF8(wallet_address) = ?
-			AND action IN ('add', 'remove')
+			tick_lower,
+			tick_upper,
+			opened_at,
+			last_event_seq
+		FROM (
+			SELECT
+				position_key,
+				argMax(pool_version, tuple(last_event_seq, updated_at)) AS pool_version,
+				argMax(pool_id, tuple(last_event_seq, updated_at)) AS pool_id,
+				argMax(contract_address, tuple(last_event_seq, updated_at)) AS contract_address,
+				argMax(token_id, tuple(last_event_seq, updated_at)) AS token_id,
+				argMax(tick_lower, tuple(last_event_seq, updated_at)) AS tick_lower,
+				argMax(tick_upper, tuple(last_event_seq, updated_at)) AS tick_upper,
+				argMax(opened_at, tuple(last_event_seq, updated_at)) AS opened_at,
+				argMax(last_add_at, tuple(last_event_seq, updated_at)) AS last_add_at,
+				argMax(is_active, tuple(last_event_seq, updated_at)) AS is_active,
+				max(last_event_seq) AS last_event_seq
+			FROM smart_lp_active_positions
+			WHERE lowerUTF8(wallet_address) = ?
+				AND last_add_at >= now() - INTERVAL %d SECOND
+				%s
+			GROUP BY position_key
+		)
+		WHERE is_active = 1
 			AND token_id != ''
-			%s
-		GROUP BY pool_version, pool_id, contract_address, token_id
-		ORDER BY last_event_seq DESC
+		ORDER BY last_add_at DESC, last_event_seq DESC
 		LIMIT %d
 	`, seconds, chainFilter, limit)
 
@@ -533,10 +551,18 @@ func querySmartMoneyWalletRecentPositionRefs(ctx context.Context, conn smartMone
 			poolID      string
 			contract    string
 			tokenID     string
+			tickLower   int32
+			tickUpper   int32
+			openedAt    time.Time
 			last        uint64
 		)
-		if err := rows.Scan(&poolVersion, &poolID, &contract, &tokenID, &last); err != nil {
+		if err := rows.Scan(&poolVersion, &poolID, &contract, &tokenID, &tickLower, &tickUpper, &openedAt, &last); err != nil {
 			return nil, err
+		}
+		var openedAtPtr *time.Time
+		if openedAt.After(time.Unix(0, 0).UTC()) {
+			open := openedAt.UTC()
+			openedAtPtr = &open
 		}
 		out = append(out, smartMoneyPositionRef{
 			WalletAddress:   wallet,
@@ -544,7 +570,10 @@ func querySmartMoneyWalletRecentPositionRefs(ctx context.Context, conn smartMone
 			PoolID:          strings.ToLower(strings.TrimSpace(poolID)),
 			ContractAddress: strings.ToLower(strings.TrimSpace(contract)),
 			TokenID:         strings.TrimSpace(tokenID),
+			TickLower:       int(tickLower),
+			TickUpper:       int(tickUpper),
 			LastEventSeq:    last,
+			OpenedAt:        openedAtPtr,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -589,12 +618,23 @@ func querySmartMoneyWalletLegacyV4Pools(ctx context.Context, conn smartMoneyClic
 
 	q := fmt.Sprintf(`
 		SELECT DISTINCT pool_id
-		FROM smart_lp_events
-		WHERE ts >= now() - INTERVAL %d SECOND
-			AND lowerUTF8(wallet_address) = ?
-			AND pool_version = 'v4'
+		FROM (
+			SELECT
+				position_key,
+				argMax(pool_id, tuple(last_event_seq, updated_at)) AS pool_id,
+				argMax(token_id, tuple(last_event_seq, updated_at)) AS token_id,
+				argMax(last_add_at, tuple(last_event_seq, updated_at)) AS last_add_at,
+				argMax(is_active, tuple(last_event_seq, updated_at)) AS is_active
+			FROM smart_lp_active_positions
+			WHERE lowerUTF8(wallet_address) = ?
+				AND pool_version = 'v4'
+				AND last_add_at >= now() - INTERVAL %d SECOND
+				%s
+			GROUP BY position_key
+		)
+		WHERE is_active = 1
 			AND token_id = ''
-			%s
+		ORDER BY last_add_at DESC
 		LIMIT %d
 	`, seconds, chainFilter, limit)
 

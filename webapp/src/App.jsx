@@ -1999,6 +1999,31 @@ export default function App() {
         limit: 80,
       });
       const positions = matchSmartMoneyWalletPositions(resp?.positions, row, poolVersion, poolId);
+      if (positions.length === 0) {
+        const normalizedWalletAddr = normalizeWalletAddress(row?.wallet_address);
+        setPoolAddsMap((prev) => {
+          const currentPool = prev?.[poolKey];
+          if (!currentPool || !Array.isArray(currentPool.wallets)) return prev;
+          const nextWallets = currentPool.wallets.filter((item) => (
+            normalizeWalletAddress(item?.wallet_address) !== normalizedWalletAddr
+          ));
+          if (nextWallets.length === currentPool.wallets.length) return prev;
+          const totalUsd = nextWallets.reduce((sum, item) => sum + Number(item?.total_usd || 0), 0);
+          return {
+            ...prev,
+            [poolKey]: {
+              ...currentPool,
+              wallets: nextWallets,
+              totalUsd,
+            },
+          };
+        });
+        setSelectedSmartWallet((prev) => (
+          prev?.poolKey === poolKey && normalizeWalletAddress(prev?.wallet_address) === normalizedWalletAddr
+            ? null
+            : prev
+        ));
+      }
       setSmartWalletDetailMap((prev) => ({
         ...(prev || {}),
         [detailKey]: {

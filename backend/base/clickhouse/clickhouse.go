@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -18,7 +19,8 @@ import (
 )
 
 type ClickHouseService struct {
-	Conn driver.Conn
+	Conn           driver.Conn
+	smartLPStateMu sync.Mutex
 }
 
 func inferClickHouseProtocol(addr string) clickhouse.Protocol {

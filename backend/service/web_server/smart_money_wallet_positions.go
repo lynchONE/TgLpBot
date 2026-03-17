@@ -223,6 +223,7 @@ func (s *Server) handleSmartMoneyWalletPositions(w http.ResponseWriter, r *http.
 				Token1Dec:        resolved.Token1Dec,
 				Amount0:          resolved.Amount0,
 				Amount1:          resolved.Amount1,
+				RunningSince:     cloneUTCTimePtr(ref.OpenedAt),
 				ClaimableFee0:    resolved.ClaimableFee0,
 				ClaimableFee1:    resolved.ClaimableFee1,
 				ClaimableFeesUSD: resolved.ClaimableFeesUSD,
@@ -399,6 +400,14 @@ func sanitizeFloat(v float64) float64 {
 		return 0
 	}
 	return v
+}
+
+func cloneUTCTimePtr(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	out := t.UTC()
+	return &out
 }
 
 func amountToString(v *big.Int) string {

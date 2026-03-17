@@ -137,7 +137,7 @@ func (c *fakeSequentialPoolAddsConn) Query(ctx context.Context, query string, ar
 	return res.rows, res.err
 }
 
-func TestQuerySmartMoneyPoolAdds_UsesNetLiquidityFilterV3(t *testing.T) {
+func TestQuerySmartMoneyPoolAdds_UsesActiveStateJoinV3(t *testing.T) {
 	conn := &fakeCHConn{
 		rows: &fakePoolAddsRows{
 			data: []smartMoneyPoolAddRow{
@@ -167,15 +167,21 @@ func TestQuerySmartMoneyPoolAdds_UsesNetLiquidityFilterV3(t *testing.T) {
 	if !strings.Contains(conn.lastQuery, "action IN ('add', 'remove')") {
 		t.Fatalf("expected add/remove filter, got query=%s", conn.lastQuery)
 	}
-	if !strings.Contains(conn.lastQuery, "liquidity_delta") || !strings.Contains(strings.ToLower(conn.lastQuery), "having") {
-		t.Fatalf("expected liquidity HAVING filter, got query=%s", conn.lastQuery)
+	if !strings.Contains(conn.lastQuery, "FROM smart_lp_active_positions") {
+		t.Fatalf("expected active state source, got query=%s", conn.lastQuery)
+	}
+	if !strings.Contains(conn.lastQuery, "LEFT JOIN") {
+		t.Fatalf("expected active-state join query, got query=%s", conn.lastQuery)
+	}
+	if !strings.Contains(conn.lastQuery, "active.is_active = 1") || !strings.Contains(conn.lastQuery, "active.last_add_at") {
+		t.Fatalf("expected active position filters, got query=%s", conn.lastQuery)
 	}
 	if !strings.Contains(conn.lastQuery, "toInt256OrZero(amount0)") || !strings.Contains(conn.lastQuery, "toInt256OrZero(amount1)") {
 		t.Fatalf("expected amount0/amount1 aggregation, got query=%s", conn.lastQuery)
 	}
 }
 
-func TestQuerySmartMoneyPoolAdds_UsesNetLiquidityFilterV4(t *testing.T) {
+func TestQuerySmartMoneyPoolAdds_UsesActiveStateJoinV4(t *testing.T) {
 	conn := &fakeCHConn{
 		rows: &fakePoolAddsRows{
 			data: []smartMoneyPoolAddRow{
@@ -198,14 +204,15 @@ func TestQuerySmartMoneyPoolAdds_UsesNetLiquidityFilterV4(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
-
-	// V4 uses signed liquidity_delta aggregation.
-	if !strings.Contains(conn.lastQuery, "sum(toInt256OrZero(liquidity_delta))") {
-		t.Fatalf("expected v4 net liquidity expression, got query=%s", conn.lastQuery)
+	if !strings.Contains(conn.lastQuery, "FROM smart_lp_active_positions") {
+		t.Fatalf("expected active state source, got query=%s", conn.lastQuery)
+	}
+	if !strings.Contains(conn.lastQuery, "active.position_key = recent.position_key") {
+		t.Fatalf("expected active/recent position join, got query=%s", conn.lastQuery)
 	}
 }
 
-func TestQuerySmartMoneyPoolAddsStable_UsesDedupAndTokenKeyV3(t *testing.T) {
+func TestQuerySmartMoneyPoolAddsStable_UsesActiveStateAndDedupV3(t *testing.T) {
 	conn := &fakeCHConn{
 		rows: &fakePoolAddsRows{
 			data: []smartMoneyPoolAddRow{
@@ -234,10 +241,10 @@ func TestQuerySmartMoneyPoolAddsStable_UsesDedupAndTokenKeyV3(t *testing.T) {
 	if !strings.Contains(conn.lastQuery, "GROUP BY tx_hash, log_index") {
 		t.Fatalf("expected event dedup grouping, got query=%s", conn.lastQuery)
 	}
-	if !strings.Contains(conn.lastQuery, "concat('token:', token_id)") {
-		t.Fatalf("expected token-first position key, got query=%s", conn.lastQuery)
+	if !strings.Contains(conn.lastQuery, "concat(lowerUTF8(chain), '|', lowerUTF8(pool_version)") {
+		t.Fatalf("expected unified active-state position key, got query=%s", conn.lastQuery)
 	}
-	if !strings.Contains(conn.lastQuery, "ANY INNER JOIN") {
+	if !strings.Contains(conn.lastQuery, "FROM smart_lp_active_positions") || !strings.Contains(conn.lastQuery, "LEFT JOIN") {
 		t.Fatalf("expected active-state join, got query=%s", conn.lastQuery)
 	}
 	if strings.Contains(conn.lastQuery, "max(ts) AS ts") {
@@ -258,6 +265,9 @@ func TestQuerySmartMoneyPoolAddsStable_UsesDedupAndTokenKeyV3(t *testing.T) {
 	if !strings.Contains(conn.lastQuery, "argMax(wallet_address, event_seq) AS dedup_wallet_address") {
 		t.Fatalf("expected dedup wallet alias, got query=%s", conn.lastQuery)
 	}
+	if !strings.Contains(conn.lastQuery, "argMax(chain, event_seq) AS dedup_chain") {
+		t.Fatalf("expected dedup chain alias for active-state key, got query=%s", conn.lastQuery)
+	}
 	if strings.Contains(conn.lastQuery, "WHERE action = 'add'") {
 		t.Fatalf("expected recent adds to use sumIf/countIf instead of WHERE action filter, got query=%s", conn.lastQuery)
 	}
@@ -269,7 +279,7 @@ func TestQuerySmartMoneyPoolAddsStable_UsesDedupAndTokenKeyV3(t *testing.T) {
 	}
 }
 
-func TestQuerySmartMoneyPoolAddsStable_UsesSignedLiquidityV4(t *testing.T) {
+func TestQuerySmartMoneyPoolAddsStable_UsesActiveStateV4(t *testing.T) {
 	conn := &fakeCHConn{
 		rows: &fakePoolAddsRows{
 			data: []smartMoneyPoolAddRow{
@@ -292,8 +302,11 @@ func TestQuerySmartMoneyPoolAddsStable_UsesSignedLiquidityV4(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
-	if !strings.Contains(conn.lastQuery, "sum(toInt256OrZero(liquidity_delta))") {
-		t.Fatalf("expected v4 signed liquidity expression, got query=%s", conn.lastQuery)
+	if !strings.Contains(conn.lastQuery, "FROM smart_lp_active_positions") {
+		t.Fatalf("expected active state source, got query=%s", conn.lastQuery)
+	}
+	if !strings.Contains(conn.lastQuery, "dedup_tick_lower") || !strings.Contains(conn.lastQuery, "dedup_tick_upper") {
+		t.Fatalf("expected dedup tick aliases for v4 keying, got query=%s", conn.lastQuery)
 	}
 }
 
@@ -342,14 +355,14 @@ func TestQuerySmartMoneyPoolAddsBestEffort_FallsBackOnMemoryLimit(t *testing.T) 
 	if len(conn.queries) != 2 {
 		t.Fatalf("expected 2 queries, got %d", len(conn.queries))
 	}
-	if !strings.Contains(conn.queries[0], "ANY INNER JOIN") {
+	if !strings.Contains(conn.queries[0], "FROM smart_lp_active_positions") || !strings.Contains(conn.queries[0], "LEFT JOIN") {
 		t.Fatalf("expected first query to be stable, got %s", conn.queries[0])
 	}
-	if strings.Contains(conn.queries[1], "ANY INNER JOIN") {
-		t.Fatalf("expected second query to be fallback, got %s", conn.queries[1])
+	if !strings.Contains(conn.queries[1], "FROM smart_lp_active_positions") {
+		t.Fatalf("expected second query to keep active state source, got %s", conn.queries[1])
 	}
-	if !strings.Contains(conn.queries[1], "GROUP BY wallet_address, contract_address, token_id, tick_lower, tick_upper") {
-		t.Fatalf("expected fallback aggregation query, got %s", conn.queries[1])
+	if !strings.Contains(conn.queries[1], "GROUP BY position_key") {
+		t.Fatalf("expected fallback aggregation query keyed by position_key, got %s", conn.queries[1])
 	}
 }
 

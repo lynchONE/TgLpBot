@@ -112,6 +112,39 @@ func isHex(s string) bool {
 	return true
 }
 
+func smartMoneyPositionKeyExprSQL(chainExpr string, poolVersionExpr string, poolIDExpr string, walletExpr string, contractExpr string, tokenExpr string, tickLowerExpr string, tickUpperExpr string) string {
+	return fmt.Sprintf(
+		"concat(lowerUTF8(%s), '|', lowerUTF8(%s), '|', lowerUTF8(%s), '|', lowerUTF8(%s), '|', lowerUTF8(%s), '|', %s, '|', toString(%s), '|', toString(%s))",
+		chainExpr,
+		poolVersionExpr,
+		poolIDExpr,
+		walletExpr,
+		contractExpr,
+		tokenExpr,
+		tickLowerExpr,
+		tickUpperExpr,
+	)
+}
+
+func smartMoneyPoolAddActivePositionsSQL(chainFilter string) string {
+	return fmt.Sprintf(`
+		SELECT
+			position_key,
+			argMax(wallet_address, tuple(last_event_seq, updated_at)) AS wallet_address,
+			argMax(contract_address, tuple(last_event_seq, updated_at)) AS contract_address,
+			argMax(token_id, tuple(last_event_seq, updated_at)) AS token_id,
+			argMax(tick_lower, tuple(last_event_seq, updated_at)) AS tick_lower,
+			argMax(tick_upper, tuple(last_event_seq, updated_at)) AS tick_upper,
+			argMax(last_add_at, tuple(last_event_seq, updated_at)) AS last_add_at,
+			argMax(is_active, tuple(last_event_seq, updated_at)) AS is_active,
+			max(last_event_seq) AS last_event_seq
+		FROM smart_lp_active_positions
+		WHERE pool_version = ? AND pool_id = ?
+			%s
+		GROUP BY position_key
+	`, chainFilter)
+}
+
 func querySmartMoneyPoolAdds(ctx context.Context, conn smartMoneyClickHouseQueryer, chain string, poolVersion string, poolID string, window time.Duration, limit int) ([]smartMoneyPoolAddRow, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -140,43 +173,70 @@ func querySmartMoneyPoolAdds(ctx context.Context, conn smartMoneyClickHouseQuery
 
 	chain = strings.ToLower(strings.TrimSpace(chain))
 	chainFilter := ""
-	args := make([]any, 0, 3)
+	args := make([]any, 0, 6)
 	args = append(args, poolVersion, poolID)
 	if chain != "" {
 		chainFilter = "AND lowerUTF8(chain) = ?"
 		args = append(args, chain)
 	}
 
-	// Aggregate per-wallet/position add+remove events for the time window.
-	// We keep only positions that have a positive net liquidity delta (i.e., added more than removed),
-	// so "add then fully撤销" will not show up in the results.
-	netLiqExpr := "sum(if(action='add', toInt256OrZero(liquidity_delta), -toInt256OrZero(liquidity_delta)))"
-	if poolVersion == "v4" {
-		// V4 `liquidity_delta` is already signed (ModifyLiquidity int256).
-		netLiqExpr = "sum(toInt256OrZero(liquidity_delta))"
+	positionKeyExpr := smartMoneyPositionKeyExprSQL("chain", "pool_version", "pool_id", "wallet_address", "contract_address", "token_id", "tick_lower", "tick_upper")
+	activePositions := smartMoneyPoolAddActivePositionsSQL(chainFilter)
+	args = append(args, poolVersion, poolID)
+	if chain != "" {
+		args = append(args, chain)
 	}
+
 	q := fmt.Sprintf(`
 		SELECT
-			wallet_address,
-			contract_address,
-			token_id,
-			tick_lower,
-			tick_upper,
-			toString(sumIf(toInt256OrZero(amount0), action = 'add')) AS sum0,
-			toString(sumIf(toInt256OrZero(amount1), action = 'add')) AS sum1,
-			countIf(action='add') AS event_count,
-			maxIf(ts, action='add') AS last_at
-		FROM smart_lp_events
-		WHERE ts >= now() - INTERVAL %d SECOND
-			AND action IN ('add', 'remove')
-			AND pool_version = ? AND pool_id = ?
-			AND wallet_address != ''
-			%s
-		GROUP BY wallet_address, contract_address, token_id, tick_lower, tick_upper
-		HAVING %s > 0
-		ORDER BY last_at DESC, event_count DESC, wallet_address ASC
+			active.wallet_address,
+			active.contract_address,
+			active.token_id,
+			active.tick_lower,
+			active.tick_upper,
+			ifNull(recent.sum0, '0') AS sum0,
+			ifNull(recent.sum1, '0') AS sum1,
+			ifNull(recent.event_count, toUInt64(0)) AS event_count,
+			ifNull(recent.last_at, active.last_add_at) AS last_at
+		FROM (%s) AS active
+		LEFT JOIN (
+			SELECT
+				position_key,
+				toString(sumIf(toInt256OrZero(amount0), action = 'add')) AS sum0,
+				toString(sumIf(toInt256OrZero(amount1), action = 'add')) AS sum1,
+				countIf(action = 'add') AS event_count,
+				maxIf(ts, action = 'add') AS last_at
+			FROM (
+				SELECT
+					chain,
+					pool_version,
+					pool_id,
+					wallet_address,
+					contract_address,
+					token_id,
+					tick_lower,
+					tick_upper,
+					action,
+					amount0,
+					amount1,
+					ts,
+					%s AS position_key
+				FROM smart_lp_events
+				WHERE ts >= now() - INTERVAL %d SECOND
+					AND action IN ('add', 'remove')
+					AND pool_version = ? AND pool_id = ?
+					AND wallet_address != ''
+					%s
+			)
+			GROUP BY position_key
+			HAVING countIf(action = 'add') > 0
+		) AS recent
+			ON active.position_key = recent.position_key
+		WHERE active.is_active = 1
+			AND active.last_add_at >= now() - INTERVAL %d SECOND
+		ORDER BY ifNull(recent.last_at, active.last_add_at) DESC, ifNull(recent.event_count, toUInt64(0)) DESC, active.wallet_address ASC
 		LIMIT %d
-	`, seconds, chainFilter, netLiqExpr, limit)
+	`, activePositions, positionKeyExpr, seconds, chainFilter, seconds, limit)
 
 	rows, err := conn.Query(ctx, q, args...)
 	if err != nil {
@@ -231,11 +291,6 @@ func querySmartMoneyPoolAddsStable(ctx context.Context, conn smartMoneyClickHous
 		limit = 5000
 	}
 
-	stateSeconds := seconds
-	if stateSeconds < 48*3600 {
-		stateSeconds = 48 * 3600
-	}
-
 	chain = strings.ToLower(strings.TrimSpace(chain))
 	chainFilter := ""
 	args := make([]any, 0, 6)
@@ -245,22 +300,20 @@ func querySmartMoneyPoolAddsStable(ctx context.Context, conn smartMoneyClickHous
 		args = append(args, chain)
 	}
 
-	positionKeyExpr := "if(token_id != '', concat('token:', token_id), concat('legacy:', lowerUTF8(contract_address), ':', toString(tick_lower), ':', toString(tick_upper)))"
-	netLiqExpr := "sum(if(dedup_action='add', toInt256OrZero(liquidity_delta), -toInt256OrZero(liquidity_delta)))"
-	if poolVersion == "v4" {
-		netLiqExpr = "sum(toInt256OrZero(liquidity_delta))"
-	}
-
+	positionKeyExpr := smartMoneyPositionKeyExprSQL("chain", "pool_version", "pool_id", "wallet_address", "contract_address", "token_id", "tick_lower", "tick_upper")
+	activePositions := smartMoneyPoolAddActivePositionsSQL(chainFilter)
 	dedupRecentEvents := fmt.Sprintf(`
 		SELECT
+			argMax(chain, event_seq) AS dedup_chain,
+			argMax(pool_version, event_seq) AS dedup_pool_version,
+			argMax(pool_id, event_seq) AS dedup_pool_id,
 			argMax(wallet_address, event_seq) AS dedup_wallet_address,
-			argMax(contract_address, event_seq) AS contract_address,
-			argMax(token_id, event_seq) AS token_id,
-			argMax(tick_lower, event_seq) AS tick_lower,
-			argMax(tick_upper, event_seq) AS tick_upper,
-			argMax(amount0, event_seq) AS amount0,
-			argMax(amount1, event_seq) AS amount1,
-			argMax(liquidity_delta, event_seq) AS liquidity_delta,
+			argMax(contract_address, event_seq) AS dedup_contract_address,
+			argMax(token_id, event_seq) AS dedup_token_id,
+			argMax(tick_lower, event_seq) AS dedup_tick_lower,
+			argMax(tick_upper, event_seq) AS dedup_tick_upper,
+			argMax(amount0, event_seq) AS dedup_amount0,
+			argMax(amount1, event_seq) AS dedup_amount1,
 			argMax(action, event_seq) AS dedup_action,
 			max(ts) AS event_ts,
 			max(event_seq) AS dedup_event_seq
@@ -273,25 +326,6 @@ func querySmartMoneyPoolAddsStable(ctx context.Context, conn smartMoneyClickHous
 		GROUP BY tx_hash, log_index
 	`, seconds, chainFilter)
 
-	dedupStateEvents := fmt.Sprintf(`
-		SELECT
-			argMax(wallet_address, event_seq) AS dedup_wallet_address,
-			argMax(contract_address, event_seq) AS contract_address,
-			argMax(token_id, event_seq) AS token_id,
-			argMax(tick_lower, event_seq) AS tick_lower,
-			argMax(tick_upper, event_seq) AS tick_upper,
-			argMax(liquidity_delta, event_seq) AS liquidity_delta,
-			argMax(action, event_seq) AS dedup_action,
-			max(event_seq) AS dedup_event_seq
-		FROM smart_lp_events
-		WHERE ts >= now() - INTERVAL %d SECOND
-			AND action IN ('add', 'remove')
-			AND pool_version = ? AND pool_id = ?
-			AND wallet_address != ''
-			%s
-		GROUP BY tx_hash, log_index
-	`, stateSeconds, chainFilter)
-
 	args = append(args, poolVersion, poolID)
 	if chain != "" {
 		args = append(args, chain)
@@ -299,69 +333,49 @@ func querySmartMoneyPoolAddsStable(ctx context.Context, conn smartMoneyClickHous
 
 	q := fmt.Sprintf(`
 		SELECT
-			recent.wallet_address,
-			recent.contract_address,
-			recent.token_id,
-			recent.tick_lower,
-			recent.tick_upper,
-			recent.sum0,
-			recent.sum1,
-			recent.event_count,
-			recent.last_at
-		FROM (
+			active.wallet_address,
+			active.contract_address,
+			active.token_id,
+			active.tick_lower,
+			active.tick_upper,
+			ifNull(recent.sum0, '0') AS sum0,
+			ifNull(recent.sum1, '0') AS sum1,
+			ifNull(recent.event_count, toUInt64(0)) AS event_count,
+			ifNull(recent.last_at, active.last_add_at) AS last_at
+		FROM (%s) AS active
+		LEFT JOIN (
 			SELECT
-				wallet_address,
 				position_key,
-				argMax(contract_address, dedup_event_seq) AS contract_address,
-				argMax(token_id, dedup_event_seq) AS token_id,
-				argMax(tick_lower, dedup_event_seq) AS tick_lower,
-				argMax(tick_upper, dedup_event_seq) AS tick_upper,
 				toString(sumIf(toInt256OrZero(amount0), dedup_action = 'add')) AS sum0,
 				toString(sumIf(toInt256OrZero(amount1), dedup_action = 'add')) AS sum1,
 				countIf(dedup_action = 'add') AS event_count,
 				maxIf(event_ts, dedup_action = 'add') AS last_at
 			FROM (
 				SELECT
+					dedup_chain AS chain,
+					dedup_pool_version AS pool_version,
+					dedup_pool_id AS pool_id,
 					dedup_wallet_address AS wallet_address,
-					contract_address,
-					token_id,
-					tick_lower,
-					tick_upper,
-					amount0,
-					amount1,
+					dedup_contract_address AS contract_address,
+					dedup_token_id AS token_id,
+					dedup_tick_lower AS tick_lower,
+					dedup_tick_upper AS tick_upper,
+					dedup_amount0 AS amount0,
+					dedup_amount1 AS amount1,
 					dedup_action,
 					event_ts,
-					dedup_event_seq,
 					%s AS position_key
 				FROM (%s)
 			)
-			GROUP BY wallet_address, position_key
+			GROUP BY position_key
 			HAVING countIf(dedup_action = 'add') > 0
 		) AS recent
-		ANY INNER JOIN (
-			SELECT
-				wallet_address,
-				position_key
-			FROM (
-				SELECT
-					dedup_wallet_address AS wallet_address,
-					contract_address,
-					token_id,
-					tick_lower,
-					tick_upper,
-					liquidity_delta,
-					dedup_action,
-					%s AS position_key
-				FROM (%s)
-			)
-			GROUP BY wallet_address, position_key
-			HAVING %s > 0
-		) AS active
-			ON recent.wallet_address = active.wallet_address
-			AND recent.position_key = active.position_key
-		ORDER BY recent.last_at DESC, recent.event_count DESC, recent.wallet_address ASC
+			ON active.position_key = recent.position_key
+		WHERE active.is_active = 1
+			AND active.last_add_at >= now() - INTERVAL %d SECOND
+		ORDER BY ifNull(recent.last_at, active.last_add_at) DESC, ifNull(recent.event_count, toUInt64(0)) DESC, active.wallet_address ASC
 		LIMIT %d
-	`, positionKeyExpr, dedupRecentEvents, positionKeyExpr, dedupStateEvents, netLiqExpr, limit)
+	`, activePositions, positionKeyExpr, dedupRecentEvents, seconds, limit)
 
 	rows, err := conn.Query(ctx, q, args...)
 	if err != nil {
@@ -616,7 +630,7 @@ func (s *Server) handleSmartMoneyPoolAdds(w http.ResponseWriter, r *http.Request
 
 	window := time.Duration(windowHours) * time.Hour
 
-	rows, usedFallbackQuery, queryWarnings, qerr := querySmartMoneyPoolAddsBestEffort(ctx, s.ClickHouse.Conn, chain, poolVersion, poolID, window, limit)
+	rows, _, queryWarnings, qerr := querySmartMoneyPoolAddsBestEffort(ctx, s.ClickHouse.Conn, chain, poolVersion, poolID, window, limit)
 	if qerr != nil {
 		http.Error(w, qerr.Error(), http.StatusInternalServerError)
 		return
@@ -731,37 +745,19 @@ func (s *Server) handleSmartMoneyPoolAdds(w http.ResponseWriter, r *http.Request
 		resolvedByKey  map[string]*smartMoneyResolvedPosition
 		resolverInited bool
 	)
-	needResolver := usedFallbackQuery || feesLimit > 0
-	if needResolver {
+	canResolveLive := false
+	if feesLimit > 0 && len(wallets) > 0 {
 		resolver, resolverWarnings := newSmartMoneyPositionResolver(newSmartMoneyTokenMetaCache())
 		warnings = append(warnings, resolverWarnings...)
 		resolverInited = true
 		resolvedByKey = make(map[string]*smartMoneyResolvedPosition, len(wallets))
-
-		if usedFallbackQuery {
-			if resolver.canResolvePoolVersion(poolVersion) {
-				activeWallets, activeResolved, activeWarnings := resolveActiveSmartMoneyPoolAddRows(
-					ctx,
-					poolVersion,
-					poolID,
-					wallets,
-					resolver,
-					scanSmartMoneyV4FallbackRefs,
-				)
-				warnings = append(warnings, activeWarnings...)
-				wallets = activeWallets
-				for i := range wallets {
-					if i < len(activeResolved) && activeResolved[i] != nil {
-						resolvedByKey[smartMoneyPoolAddsWalletKey(poolVersion, poolID, wallets[i])] = activeResolved[i]
-					}
-				}
-			} else {
-				warnings = append(warnings, "live active-position filter unavailable after fallback query; preview rows may still include stale positions")
-			}
+		canResolveLive = resolver.canResolvePoolVersion(poolVersion)
+		if !canResolveLive {
+			warnings = append(warnings, "claimable fee estimation unavailable for this pool version")
 		}
 	}
 
-	if feesLimit > 0 {
+	if feesLimit > 0 && canResolveLive {
 		if !resolverInited {
 			resolver, _ = newSmartMoneyPositionResolver(newSmartMoneyTokenMetaCache())
 			resolvedByKey = make(map[string]*smartMoneyResolvedPosition, len(wallets))

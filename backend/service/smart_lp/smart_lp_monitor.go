@@ -35,6 +35,9 @@ type SmartLPMonitor struct {
 	removeTicker   *time.Ticker
 	removeInterval time.Duration
 
+	reconcileTicker   *time.Ticker
+	reconcileInterval time.Duration
+
 	onRemoveEvents func(events []SmartLPRemoveEvent)
 }
 
@@ -148,13 +151,19 @@ func NewSmartLPMonitor(ch *clickhouse.ClickHouseService) *SmartLPMonitor {
 		interval = time.Duration(config.AppConfig.SmartLPScanIntervalSeconds) * time.Second
 	}
 	removeInterval := interval
+	if removeInterval < 5*time.Minute {
+		removeInterval = 5 * time.Minute
+	}
+	reconcileInterval := 30 * time.Minute
 	return &SmartLPMonitor{
-		ch:             ch,
-		stopChan:       make(chan struct{}),
-		ticker:         time.NewTicker(interval),
-		interval:       interval,
-		removeTicker:   time.NewTicker(removeInterval),
-		removeInterval: removeInterval,
+		ch:                ch,
+		stopChan:          make(chan struct{}),
+		ticker:            time.NewTicker(interval),
+		interval:          interval,
+		removeTicker:      time.NewTicker(removeInterval),
+		removeInterval:    removeInterval,
+		reconcileTicker:   time.NewTicker(reconcileInterval),
+		reconcileInterval: reconcileInterval,
 	}
 }
 
@@ -170,6 +179,12 @@ func (s *SmartLPMonitor) Start() {
 	}
 	if err := s.resetScanStateToHead(); err != nil {
 		log.Printf("[SmartLP] reset scan state to head failed: %v", err)
+	}
+	if s.removeTicker != nil {
+		go s.runRemoveWatcherLoop()
+	}
+	if s.reconcileTicker != nil {
+		go s.runActiveStateReconcileLoop()
 	}
 
 	if wsURL := smartLPWebsocketURL(); wsURL != "" {
@@ -206,6 +221,9 @@ func (s *SmartLPMonitor) Stop() {
 	}
 	if s.removeTicker != nil {
 		s.removeTicker.Stop()
+	}
+	if s.reconcileTicker != nil {
+		s.reconcileTicker.Stop()
 	}
 }
 
@@ -519,6 +537,9 @@ func (s *SmartLPMonitor) smartLPWebsocketBlockWorker(blockQueue <-chan uint64, m
 			log.Printf("[SmartLP] insert events failed: %v", err)
 			continue
 		}
+		if err := s.syncActiveStateFromEvents(context.Background(), events); err != nil {
+			log.Printf("[SmartLP] sync active state failed: %v", err)
+		}
 		s.fireRemoveCallback(events)
 		if err := s.upsertWatchedWallets(context.Background(), events, "scan_add"); err != nil {
 			log.Printf("[SmartLP] upsert watched wallets failed: %v", err)
@@ -802,6 +823,9 @@ func (s *SmartLPMonitor) runOnce() {
 				log.Printf("[SmartLP] insert events failed: %v", err)
 				return
 			}
+			if err := s.syncActiveStateFromEvents(ctx, events); err != nil {
+				log.Printf("[SmartLP] sync active state failed: %v", err)
+			}
 			s.fireRemoveCallback(events)
 			if err := s.upsertWatchedWallets(ctx, events, "scan_add"); err != nil {
 				log.Printf("[SmartLP] upsert watched wallets failed: %v", err)
@@ -822,6 +846,9 @@ func (s *SmartLPMonitor) runOnce() {
 		if err := s.insertEvents(ctx, events); err != nil {
 			log.Printf("[SmartLP] insert events failed: %v", err)
 			return
+		}
+		if err := s.syncActiveStateFromEvents(ctx, events); err != nil {
+			log.Printf("[SmartLP] sync active state failed: %v", err)
 		}
 		s.fireRemoveCallback(events)
 		if err := s.upsertWatchedWallets(ctx, events, "scan_add"); err != nil {
@@ -954,6 +981,70 @@ func (s *SmartLPMonitor) insertEvents(ctx context.Context, events []smartLPEvent
 	}
 
 	return batch.Send()
+}
+
+func (s *SmartLPMonitor) syncActiveStateFromEvents(ctx context.Context, events []smartLPEvent) error {
+	if s == nil || s.ch == nil || s.ch.Conn == nil || len(events) == 0 {
+		return nil
+	}
+	activeEvents := make([]clickhouse.SmartLPActivePositionEvent, 0, len(events))
+	for _, ev := range events {
+		activeEvents = append(activeEvents, clickhouse.SmartLPActivePositionEvent{
+			Ts:              ev.ts,
+			EventSeq:        ev.eventSeq,
+			Chain:           ev.chain,
+			PoolVersion:     ev.poolVersion,
+			PoolID:          ev.poolID,
+			WalletAddress:   ev.walletAddress,
+			Action:          ev.action,
+			TokenID:         ev.tokenID,
+			LiquidityDelta:  ev.liquidityDelta,
+			TickLower:       int32(ev.tickLower),
+			TickUpper:       int32(ev.tickUpper),
+			BlockNumber:     ev.blockNumber,
+			ContractAddress: ev.contractAddress,
+			Source:          ev.source,
+		})
+	}
+	return s.ch.UpsertSmartLPActivePositionsFromEvents(ctx, activeEvents)
+}
+
+func (s *SmartLPMonitor) runActiveStateReconcileLoop() {
+	if s == nil || s.reconcileTicker == nil {
+		return
+	}
+	if config.AppConfig != nil && config.AppConfig.SmartLPDebug {
+		log.Printf("[SmartLP] active-state reconcile started interval=%s", s.reconcileInterval)
+	}
+	s.runActiveStateReconcileOnce()
+	for {
+		select {
+		case <-s.reconcileTicker.C:
+			s.runActiveStateReconcileOnce()
+		case <-s.stopChan:
+			if config.AppConfig != nil && config.AppConfig.SmartLPDebug {
+				log.Printf("[SmartLP] active-state reconcile stopped")
+			}
+			return
+		}
+	}
+}
+
+func (s *SmartLPMonitor) runActiveStateReconcileOnce() {
+	if s == nil || s.ch == nil || s.ch.Conn == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	affected, err := s.ch.ReconcileSmartLPActivePositionsFromRecentEvents(ctx, 48*time.Hour)
+	if err != nil {
+		log.Printf("[SmartLP] active-state reconcile failed: %v", err)
+		return
+	}
+	if config.AppConfig != nil && config.AppConfig.SmartLPDebug && affected > 0 {
+		log.Printf("[SmartLP] active-state reconcile upserted rows=%d", affected)
+	}
 }
 
 // fireRemoveCallback extracts remove events from the list and calls the onRemoveEvents callback.
@@ -2567,6 +2658,9 @@ func (s *SmartLPMonitor) runRemoveWatcherOnce() {
 		if err := s.insertEvents(ctx, filtered); err != nil {
 			log.Printf("[SmartLP] remove watcher insert failed: %v", err)
 			return
+		}
+		if err := s.syncActiveStateFromEvents(ctx, filtered); err != nil {
+			log.Printf("[SmartLP] remove watcher sync active state failed: %v", err)
 		}
 		s.fireRemoveCallback(filtered)
 		log.Printf("[SmartLP] remove watcher inserted events: %d", len(filtered))

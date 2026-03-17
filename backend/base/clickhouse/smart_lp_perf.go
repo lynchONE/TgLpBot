@@ -149,6 +149,9 @@ func (s *ClickHouseService) ensureSmartLPSchema(ctx context.Context) error {
 	if err := s.ensureSmartLPRollup(ctx); err != nil {
 		return err
 	}
+	if err := s.ensureSmartLPActivePositions(ctx); err != nil {
+		return err
+	}
 	return nil
 }
 

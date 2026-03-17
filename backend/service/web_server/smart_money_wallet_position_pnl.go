@@ -216,29 +216,48 @@ func querySmartMoneyWalletPositionHistory(ctx context.Context, conn smartMoneyCl
 			log_index
 		FROM (
 			SELECT
-				argMax(ts, event_seq) AS ts,
-				max(event_seq) AS event_seq,
-				argMax(pool_version, event_seq) AS pool_version,
-				argMax(pool_id, event_seq) AS pool_id,
-				argMax(wallet_address, event_seq) AS wallet_address,
-				argMax(action, event_seq) AS action,
-				argMax(token_id, event_seq) AS token_id,
-				argMax(contract_address, event_seq) AS contract_address,
-				argMax(if(net_amount0 != '' AND net_amount0 != '0', net_amount0, amount0), event_seq) AS amount0_value,
-				argMax(if(net_amount1 != '' AND net_amount1 != '0', net_amount1, amount1), event_seq) AS amount1_value,
-				argMax(liquidity_delta, event_seq) AS liquidity_delta,
-				argMax(tick_lower, event_seq) AS tick_lower,
-				argMax(tick_upper, event_seq) AS tick_upper,
+				dedup_ts AS ts,
+				dedup_event_seq AS event_seq,
+				dedup_pool_version AS pool_version,
+				dedup_pool_id AS pool_id,
+				dedup_wallet_address AS wallet_address,
+				dedup_action AS action,
+				dedup_token_id AS token_id,
+				dedup_contract_address AS contract_address,
+				dedup_amount0_value AS amount0_value,
+				dedup_amount1_value AS amount1_value,
+				dedup_liquidity_delta AS liquidity_delta,
+				dedup_tick_lower AS tick_lower,
+				dedup_tick_upper AS tick_upper,
 				tx_hash,
-				argMax(block_number, event_seq) AS block_number,
+				dedup_block_number AS block_number,
 				log_index
-			FROM smart_lp_events
-			WHERE lowerUTF8(wallet_address) = ?
-				AND ts <= ?
-				AND action IN ('add', 'remove')
-				%s
-				AND %s IN (%s)
-			GROUP BY tx_hash, log_index
+			FROM (
+				SELECT
+					argMax(ts, event_seq) AS dedup_ts,
+					max(event_seq) AS dedup_event_seq,
+					argMax(pool_version, event_seq) AS dedup_pool_version,
+					argMax(pool_id, event_seq) AS dedup_pool_id,
+					argMax(wallet_address, event_seq) AS dedup_wallet_address,
+					argMax(action, event_seq) AS dedup_action,
+					argMax(token_id, event_seq) AS dedup_token_id,
+					argMax(contract_address, event_seq) AS dedup_contract_address,
+					argMax(if(net_amount0 != '' AND net_amount0 != '0', net_amount0, amount0), event_seq) AS dedup_amount0_value,
+					argMax(if(net_amount1 != '' AND net_amount1 != '0', net_amount1, amount1), event_seq) AS dedup_amount1_value,
+					argMax(liquidity_delta, event_seq) AS dedup_liquidity_delta,
+					argMax(tick_lower, event_seq) AS dedup_tick_lower,
+					argMax(tick_upper, event_seq) AS dedup_tick_upper,
+					tx_hash,
+					argMax(block_number, event_seq) AS dedup_block_number,
+					log_index
+				FROM smart_lp_events
+				WHERE lowerUTF8(wallet_address) = ?
+					AND ts <= ?
+					AND action IN ('add', 'remove')
+					%s
+					AND %s IN (%s)
+				GROUP BY tx_hash, log_index
+			)
 		)
 		ORDER BY block_number ASC, log_index ASC, event_seq ASC
 	`, chainFilter, positionKeyExpr, strings.Join(placeholders, ","))
@@ -301,7 +320,7 @@ func applySmartMoneyWalletPositionPnLEstimates(positions []smartMoneyWalletLPPos
 		positions[i].HasPnL = false
 		positions[i].AbsolutePnLUSD = 0
 		positions[i].CostBasisUSD = 0
-		positions[i].RunningSince = nil
+		positions[i].RunningSince = cloneUTCTimePtr(positions[i].RunningSince)
 	}
 
 	if len(positions) == 0 || len(historyRows) == 0 {
