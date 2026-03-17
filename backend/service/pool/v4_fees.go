@@ -66,22 +66,15 @@ func CalcV4UnclaimedFees(poolID string, currentTick int, pos *blockchain.V4Posit
 	// 计算 feeGrowthInside
 	inside0 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global0, lower0, upper0)
 	inside1 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global1, lower1, upper1)
-	if inside0.Cmp(global0) > 0 || inside1.Cmp(global1) > 0 {
-		return owed0, owed1, fmt.Errorf("invalid feeGrowthInside (pool_id=%s)", poolID)
-	}
 
 	// 计算增量
 	last0 := cloneBig(pos.FeeGrowthInside0LastX128)
 	last1 := cloneBig(pos.FeeGrowthInside1LastX128)
 
-	delta0 := new(big.Int).Sub(inside0, last0)
-	if delta0.Sign() < 0 {
-		delta0 = big.NewInt(0)
-	}
-	delta1 := new(big.Int).Sub(inside1, last1)
-	if delta1.Sign() < 0 {
-		delta1 = big.NewInt(0)
-	}
+	// 注意：fee growth 是 uint256 模运算值，inside 可能因为环绕或多次 RPC 读取时序差异而“看起来”大于当前 global。
+	// 这里与 realtime_positions 逻辑对齐，不再把这种情况当成致命错误，而是直接按 uint256 差值计算增量。
+	delta0 := subMod256(inside0, last0)
+	delta1 := subMod256(inside1, last1)
 
 	// 计算实际手续费：delta * liquidity / 2^128
 	extra0 := mulDivFloor(delta0, pos.Liquidity, q128)

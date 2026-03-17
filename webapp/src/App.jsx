@@ -398,8 +398,6 @@ function SmartMoneyPositionCard({ position, walletLabel, walletAddress, onSelect
       key: '0',
       symbol: sym0,
       priceUsd: estimateTokenUsd(position?.amount0, position?.amount0_usd, 1),
-      walletAmount: '--',
-      walletUsd: null,
       positionAmount: position?.amount0,
       positionUsd: position?.amount0_usd,
       feeAmount: feeStatus === 'ok' ? claimableFee0 : '--',
@@ -409,8 +407,6 @@ function SmartMoneyPositionCard({ position, walletLabel, walletAddress, onSelect
       key: '1',
       symbol: sym1,
       priceUsd: estimateTokenUsd(position?.amount1, position?.amount1_usd, 1),
-      walletAmount: '--',
-      walletUsd: null,
       positionAmount: position?.amount1,
       positionUsd: position?.amount1_usd,
       feeAmount: feeStatus === 'ok' ? claimableFee1 : '--',
@@ -462,20 +458,16 @@ function SmartMoneyPositionCard({ position, walletLabel, walletAddress, onSelect
       </div>
 
       <div className="pos-token-table">
-        <div className="pos-token-head">
-          <span>Token</span><span>钱包</span><span>仓位</span><span>手续费</span>
+        <div className="pos-token-head" style={{ gridTemplateColumns: '1.5fr 1fr 1fr' }}>
+          <span>Token</span><span>仓位</span><span>手续费</span>
         </div>
         {tokenRows.map((token) => (
-          <div key={token.key} className="pos-token-row">
+          <div key={token.key} className="pos-token-row" style={{ gridTemplateColumns: '1.5fr 1fr 1fr' }}>
             <div className="pos-tk-name">
               <div>{token.symbol}</div>
               {Number.isFinite(token.priceUsd) ? (
                 <div className="pos-tk-price">${Number(token.priceUsd).toFixed(4)}</div>
               ) : null}
-            </div>
-            <div className="pos-tk-cell">
-              <div>{token.walletAmount}</div>
-              <div className="pos-tk-usd">{formatOptionalUsd(token.walletUsd)}</div>
             </div>
             <div className="pos-tk-cell">
               <div>{formatSmartTokenAmount(token.positionAmount)}</div>
@@ -487,9 +479,8 @@ function SmartMoneyPositionCard({ position, walletLabel, walletAddress, onSelect
             </div>
           </div>
         ))}
-        <div className="pos-token-foot">
+        <div className="pos-token-foot" style={{ gridTemplateColumns: '1.5fr 1fr 1fr' }}>
           <span>小计</span>
-          <span>$--</span>
           <span>{formatOptionalUsd(positionUsd)}</span>
           <span className="fee">{feeStatus === 'ok' ? formatUsd(claimableFeeUsd) : '$--'}</span>
         </div>
