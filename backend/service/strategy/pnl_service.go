@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -305,7 +306,22 @@ func (s *PnLService) getV3CurrentValue(task *models.StrategyTask) (totalVal, fee
 		return 0, 0, 0, nil, fmt.Errorf("init V3 PM failed: %w", err)
 	}
 
-	pos, err := pm.Positions(nil, tokenId)
+	snapshotBlock := uint64(0)
+	blockCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	latestBlock, blockErr := client.BlockNumber(blockCtx)
+	cancel()
+	if blockErr != nil {
+		log.Printf("[PnL] V3 snapshot block read failed: tokenId=%s err=%v", task.V3TokenID, blockErr)
+	} else {
+		snapshotBlock = latestBlock
+	}
+
+	var pos *blockchain.V3PositionInfo
+	if snapshotBlock > 0 {
+		pos, err = pm.Positions(&bind.CallOpts{BlockNumber: new(big.Int).SetUint64(snapshotBlock)}, tokenId)
+	} else {
+		pos, err = pm.Positions(nil, tokenId)
+	}
 	if err != nil {
 		// Check ownerOf to see if it exists/burned
 		return 0, 0, 0, nil, fmt.Errorf("read positions failed: %w", err)
@@ -325,7 +341,11 @@ func (s *PnLService) getV3CurrentValue(task *models.StrategyTask) (totalVal, fee
 
 	// 3. Get Current Price (Slot0)
 	currentTick := 0
-	sqrtPriceX96, currentTick, err = blockchain.GetV3PoolSlot0WithClient(client, poolAddr)
+	if snapshotBlock > 0 {
+		sqrtPriceX96, currentTick, err = blockchain.GetV3PoolSlot0AtBlockWithClient(client, poolAddr, snapshotBlock)
+	} else {
+		sqrtPriceX96, currentTick, err = blockchain.GetV3PoolSlot0WithClient(client, poolAddr)
+	}
 	if err != nil {
 		return 0, 0, 0, nil, fmt.Errorf("get slot0 failed: %w", err)
 	}
@@ -338,7 +358,15 @@ func (s *PnLService) getV3CurrentValue(task *models.StrategyTask) (totalVal, fee
 
 	fees0 := cloneBig(pos.TokensOwed0)
 	fees1 := cloneBig(pos.TokensOwed1)
-	if fee0, fee1, usedStale, age, feeErr := s.calcV3UnclaimedFeesCached(chain, poolAddr, currentTick, pos); fee0 != nil && fee1 != nil {
+	if snapshotBlock > 0 {
+		if fee0, fee1, feeErr := pool.CalcV3UnclaimedFeesAtBlock(poolAddr, currentTick, pos, snapshotBlock); feeErr == nil && fee0 != nil && fee1 != nil {
+			fees0 = fee0
+			fees1 = fee1
+			log.Printf("[PnL] V3 consistent snapshot fees tokenId=%s fees0=%s fees1=%s block=%d", task.V3TokenID, fees0.String(), fees1.String(), snapshotBlock)
+		} else if feeErr != nil {
+			log.Printf("[PnL] V3 consistent snapshot fee calc failed, fallback to TokensOwed: tokenId=%s err=%v", task.V3TokenID, feeErr)
+		}
+	} else if fee0, fee1, usedStale, age, feeErr := s.calcV3UnclaimedFeesCached(chain, poolAddr, currentTick, pos); fee0 != nil && fee1 != nil {
 		fees0 = fee0
 		fees1 = fee1
 		if feeErr != nil {
@@ -818,6 +846,23 @@ func (s *PnLService) calcV3UnclaimedFeesCached(chain string, poolAddr common.Add
 	if staleU && ageU > age {
 		age = ageU
 	}
+
+	fees0, fees1, calcErr := pool.CalcV3UnclaimedFeesFromGrowths(currentTick, pos, global0, global1, lower0, lower1, upper0, upper1)
+	if calcErr != nil {
+		return owed0, owed1, usedStale, age, calcErr
+	}
+
+	var errOut error
+	if usedStale {
+		if errG != nil {
+			errOut = errG
+		} else if errL != nil {
+			errOut = errL
+		} else if errU != nil {
+			errOut = errU
+		}
+	}
+	return fees0, fees1, usedStale, age, errOut
 
 	inside0 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global0, lower0, upper0)
 	inside1 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global1, lower1, upper1)

@@ -1013,7 +1013,6 @@ func (s *RealtimePositionsService) buildV3Position(
 		chain = "bsc"
 	}
 	var warn string
-
 	info, err := pm.Positions(nil, tokenId)
 	if err != nil || info == nil {
 		if err != nil {
@@ -2234,6 +2233,24 @@ func (s *RealtimePositionsService) calcV3UnclaimedFeesCached(chain string, poolA
 	if staleU && ageU > age {
 		age = ageU
 	}
+
+	fees0, fees1, calcErr := pool.CalcV3UnclaimedFeesFromGrowths(currentTick, pos, global0, global1, lower0, lower1, upper0, upper1)
+	if calcErr != nil {
+		return owed0, owed1, usedStale, age, calcErr
+	}
+
+	// When using cache fallback, bubble up the last RPC error for optional UI warnings.
+	var errOut error
+	if usedStale {
+		if errG != nil {
+			errOut = errG
+		} else if errL != nil {
+			errOut = errL
+		} else if errU != nil {
+			errOut = errU
+		}
+	}
+	return fees0, fees1, usedStale, age, errOut
 
 	inside0 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global0, lower0, upper0)
 	inside1 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global1, lower1, upper1)

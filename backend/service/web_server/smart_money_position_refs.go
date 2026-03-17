@@ -188,6 +188,9 @@ func (r *smartMoneyPositionResolver) resolveV3(ctx context.Context, ref smartMon
 		return nil, fmt.Errorf("invalid token_id")
 	}
 
+	snapshotBlock, snapshotErr := r.getSnapshotBlock(ctx)
+	useSnapshot := snapshotErr == nil && snapshotBlock > 0
+
 	npmOrder := make([]common.Address, 0, len(r.v3Managers)+1)
 	seen := make(map[common.Address]struct{}, len(r.v3Managers)+1)
 	if common.IsHexAddress(ref.ContractAddress) {
@@ -217,7 +220,11 @@ func (r *smartMoneyPositionResolver) resolveV3(ctx context.Context, ref smartMon
 			continue
 		}
 		callCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
-		pos, err := pm.Positions(&bind.CallOpts{Context: callCtx}, tokenID)
+		opts := &bind.CallOpts{Context: callCtx}
+		if useSnapshot {
+			opts.BlockNumber = new(big.Int).SetUint64(snapshotBlock)
+		}
+		pos, err := pm.Positions(opts, tokenID)
 		cancel()
 		if err != nil {
 			lastErr = err
@@ -234,10 +241,13 @@ func (r *smartMoneyPositionResolver) resolveV3(ctx context.Context, ref smartMon
 		return nil, lastErr
 	}
 
-	return r.buildV3ResolvedPosition(ctx, ref, usedNPM, tokenID.String(), info)
+	if !useSnapshot {
+		snapshotBlock = 0
+	}
+	return r.buildV3ResolvedPosition(ctx, ref, usedNPM, tokenID.String(), info, snapshotBlock)
 }
 
-func (r *smartMoneyPositionResolver) buildV3ResolvedPosition(ctx context.Context, ref smartMoneyPositionRef, npm common.Address, positionID string, info *blockchain.V3PositionInfo) (*smartMoneyResolvedPosition, error) {
+func (r *smartMoneyPositionResolver) buildV3ResolvedPosition(ctx context.Context, ref smartMoneyPositionRef, npm common.Address, positionID string, info *blockchain.V3PositionInfo, snapshotBlock uint64) (*smartMoneyResolvedPosition, error) {
 	if info == nil {
 		return nil, fmt.Errorf("position info missing")
 	}
@@ -267,9 +277,19 @@ func (r *smartMoneyPositionResolver) buildV3ResolvedPosition(ctx context.Context
 	out.Pair = smartMoneyPairLabel(out.Token0Symbol, out.Token1Symbol)
 
 	if common.IsHexAddress(out.PoolID) {
-		slotCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
-		sqrtP, currentTick, slotErr := getV3Slot0WithTimeout(slotCtx, common.HexToAddress(out.PoolID))
-		cancel()
+		poolAddr := common.HexToAddress(out.PoolID)
+		var (
+			sqrtP       *big.Int
+			currentTick int
+			slotErr     error
+		)
+		if snapshotBlock > 0 {
+			sqrtP, currentTick, slotErr = blockchain.GetV3PoolSlot0AtBlock(poolAddr, snapshotBlock)
+		} else {
+			slotCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+			sqrtP, currentTick, slotErr = getV3Slot0WithTimeout(slotCtx, poolAddr)
+			cancel()
+		}
 		if slotErr != nil {
 			out.FeeStatus = "error"
 			out.FeeError = truncateErr(slotErr, 120)
@@ -287,7 +307,13 @@ func (r *smartMoneyPositionResolver) buildV3ResolvedPosition(ctx context.Context
 			out.Amount1 = sanitizeFloat(amountToFloat(amountToString(amt1Raw), out.Token1Dec))
 		}
 
-		fee0, fee1, feeErr := pool.CalcV3UnclaimedFees(common.HexToAddress(out.PoolID), currentTick, info)
+		var fee0, fee1 *big.Int
+		var feeErr error
+		if snapshotBlock > 0 {
+			fee0, fee1, feeErr = pool.CalcV3UnclaimedFeesAtBlock(poolAddr, currentTick, info, snapshotBlock)
+		} else {
+			fee0, fee1, feeErr = pool.CalcV3UnclaimedFees(poolAddr, currentTick, info)
+		}
 		if feeErr != nil {
 			out.FeeStatus = "error"
 			out.FeeError = truncateErr(feeErr, 120)
