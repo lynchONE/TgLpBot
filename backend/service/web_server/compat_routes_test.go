@@ -7,7 +7,7 @@ import (
 )
 
 func TestHandlePositions_InvalidEndpoint(t *testing.T) {
-	srv := NewServer(nil)
+	srv := NewServer()
 	req := httptest.NewRequest(http.MethodGet, "/api/positions?endpoint=bad", nil)
 	rr := httptest.NewRecorder()
 
@@ -19,7 +19,7 @@ func TestHandlePositions_InvalidEndpoint(t *testing.T) {
 }
 
 func TestHandleTaskAction_InvalidAction(t *testing.T) {
-	srv := NewServer(nil)
+	srv := NewServer()
 	req := httptest.NewRequest(http.MethodPost, "/api/task_action?action=bad", nil)
 	rr := httptest.NewRecorder()
 
@@ -31,7 +31,7 @@ func TestHandleTaskAction_InvalidAction(t *testing.T) {
 }
 
 func TestHandleGetPools_InvalidEndpoint(t *testing.T) {
-	srv := NewServer(nil)
+	srv := NewServer()
 	req := httptest.NewRequest(http.MethodGet, "/api/pools?endpoint=bad", nil)
 	rr := httptest.NewRecorder()
 

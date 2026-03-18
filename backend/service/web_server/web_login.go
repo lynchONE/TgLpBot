@@ -47,12 +47,10 @@ type webLoginUser struct {
 }
 
 type webLoginAccess struct {
-	Allowed           bool   `json:"allowed"`
-	IsAdmin           bool   `json:"is_admin"`
-	MiniAppEnabled    bool   `json:"mini_app_enabled"`
-	AutoModeEnabled   bool   `json:"auto_mode_enabled"`
-	SmartMoneyEnabled bool   `json:"smart_money_enabled"`
-	Reason            string `json:"reason,omitempty"`
+	Allowed        bool   `json:"allowed"`
+	IsAdmin        bool   `json:"is_admin"`
+	MiniAppEnabled bool   `json:"mini_app_enabled"`
+	Reason         string `json:"reason,omitempty"`
 }
 
 type webLoginMeta struct {
@@ -146,12 +144,10 @@ func (s *Server) handleTelegramLogin(w http.ResponseWriter, r *http.Request) {
 			PhotoURL:  payload.PhotoURL,
 		},
 		Access: &webLoginAccess{
-			Allowed:           true,
-			IsAdmin:           check.IsAdmin,
-			MiniAppEnabled:    check.IsAdmin || (check.Access != nil && check.Access.MiniAppEnabled),
-			AutoModeEnabled:   check.IsAdmin || (check.Access != nil && check.Access.AutoModeEnabled),
-			SmartMoneyEnabled: check.IsAdmin || (check.Access != nil && check.Access.SmartMoneyEnabled),
-			Reason:            strings.TrimSpace(check.Reason),
+			Allowed:        true,
+			IsAdmin:        check.IsAdmin,
+			MiniAppEnabled: check.IsAdmin || (check.Access != nil && check.Access.MiniAppEnabled),
+			Reason:         strings.TrimSpace(check.Reason),
 		},
 		Meta: &webLoginMeta{
 			AuthenticatedAt: time.Now(),

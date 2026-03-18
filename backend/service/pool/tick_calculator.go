@@ -56,7 +56,7 @@ func (tc *TickCalculator) CalculateTickFromPercentages(currentTick int, lowerPct
 }
 
 // CalculateTickFromPercentagesBestFit chooses the closest valid ticks to the target percentages.
-// This minimizes distortion when currentTick isn't aligned to tickSpacing (useful for AutoLP).
+// This minimizes distortion when currentTick isn't aligned to tickSpacing.
 func (tc *TickCalculator) CalculateTickFromPercentagesBestFit(currentTick int, lowerPct float64, upperPct float64, tickSpacing int) (int, int) {
 	if tickSpacing <= 0 || lowerPct <= 0 || upperPct <= 0 {
 		return tc.CalculateTickFromPercentages(currentTick, lowerPct, upperPct, tickSpacing)

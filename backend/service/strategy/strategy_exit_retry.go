@@ -8,8 +8,6 @@ import (
 	"TgLpBot/base/security"
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/txexec"
-	userSvc "TgLpBot/service/user"
-	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -22,7 +20,6 @@ const (
 	ExitActionStopLoss   = "stoploss"
 	ExitActionRebalance  = "rebalance"
 	ExitActionSwitch     = "switch"
-	ExitActionCooldown   = "cooldown"
 
 	exitMaxAttempts = 3
 )
@@ -256,8 +253,6 @@ func (s *StrategyService) runExitRetryAttempt(taskID uint, userID uint) {
 		s.finishStopAfterExit(&task, now, reason, txHashes)
 	case ExitActionSwitch:
 		s.executeSwitchAfterExit(&task, now, reason)
-	case ExitActionCooldown:
-		s.finishCooldownAfterExit(&task, now, reason, txHashes)
 	case ExitActionManualStop:
 		title := "🛑 手动停止"
 		if pendingReason != "" {
@@ -417,54 +412,6 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 
 	switching := strings.TrimSpace(task.SwitchTargetPoolId) != "" && strings.TrimSpace(task.SwitchTargetPoolVersion) != ""
 
-	// Auto任务再平衡前检查硬筛条件（需求6：如果不符合硬筛条件就不开仓）
-	if task.IsAuto && !switching {
-		hardFilterChecker := GetHardFilterChecker()
-		if hardFilterChecker != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			checkResult, checkErr := hardFilterChecker(ctx, task.PoolId, task.PoolVersion)
-			cancel()
-
-			if checkErr != nil {
-				log.Printf("[Strategy] 任务 #%d 再平衡硬筛检查失败: %v", task.ID, checkErr)
-				// 检查失败时继续执行，不阻止开仓
-			} else if checkResult != nil && !checkResult.Passed {
-				log.Printf("[Strategy] 任务 #%d 再平衡时池子不符合硬筛条件，不开仓: %s", task.ID, checkResult.FailReason)
-
-				failReason := strings.TrimSpace(checkResult.FailReason)
-				if failReason == "" {
-					failReason = "硬筛条件不满足"
-				}
-
-				// 不满足硬筛：不再开仓，直接停止任务（避免进入重试流程）
-				updates := map[string]interface{}{
-					"status":                  models.StrategyStatusStopped,
-					"last_exit_time":          &now,
-					"rebalance_pending":       false,
-					"rebalance_retry_count":   0,
-					"rebalance_next_retry_at": nil,
-					"rebalance_last_error":    "硬筛条件不满足: " + failReason,
-					"error_message":           "",
-				}
-				_ = database.DB.Model(task).Updates(updates).Error
-
-				task.Status = models.StrategyStatusStopped
-				task.LastExitTime = &now
-				task.RebalancePending = false
-				task.RebalanceRetryCount = 0
-				task.RebalanceNextRetryAt = nil
-				task.RebalanceLastError = "硬筛条件不满足: " + failReason
-
-				tradingPair := strings.TrimSpace(checkResult.Metrics.TradingPair)
-				if tradingPair == "" {
-					tradingPair = fmt.Sprintf("%s/%s", strings.TrimSpace(task.Token0Symbol), strings.TrimSpace(task.Token1Symbol))
-				}
-				s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 再平衡时池子不符合硬筛条件，已停止任务\n原因: %s\n交易对: %s", task.ID, failReason, tradingPair))
-				return nil
-			}
-		}
-	}
-
 	if task.TickSpacing <= 0 || strings.TrimSpace(task.Token0Address) == "" || strings.TrimSpace(task.Token1Address) == "" {
 		if err := s.refreshTaskPoolMeta(task); err != nil {
 			return fmt.Errorf("load pool info failed: %w", err)
@@ -477,11 +424,7 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 		return fmt.Errorf("rebalance tick query failed: %w", err)
 	}
 
-	mult := task.NextRangeMultiplier
-	if mult <= 0 {
-		mult = 1.0
-	}
-	tickLower, tickUpper, err := s.calculateRangeFromPercentageWithMultiplier(task, currentTick, mult)
+	tickLower, tickUpper, err := s.calculateRangeFromPercentage(task, currentTick)
 	if err != nil {
 		log.Printf("[Strategy] 任务 #%d 计算新 tick 范围失败: %v", task.ID, err)
 		return fmt.Errorf("rebalance range calc failed: %w", err)
@@ -509,9 +452,6 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 		"last_exit_time":              &now,
 		"current_liquidity":           enterRes.CurrentLiquidity,
 		"exit_liquidity_removed":      false,
-		"next_range_multiplier":       1.0,
-		"cooldown_until":              nil,
-		"cooldown_reason":             "",
 		"v3_position_manager_address": enterRes.V3PositionManagerAddress,
 		"v3_token_id":                 enterRes.V3TokenID,
 		"v4_token_id":                 enterRes.V4TokenID,
@@ -521,26 +461,6 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 		"rebalance_next_retry_at":     nil,
 		"rebalance_last_error":        "",
 		"error_message":               "",
-	}
-	if task.IsAuto {
-		updates["GuardOpenVolume5m"] = 0
-		updates["GuardOpenPrice"] = 0
-		updates["GuardOpenTxCount5m"] = 0
-		updates["GuardOpenFeePercentage"] = 0
-		updates["GuardOpenFeeRate5mPct"] = 0
-		updates["GuardOpenTotalFees5m"] = 0
-		updates["GuardOpenTVLUSD"] = 0
-		updates["GuardOpenMetricsAt"] = nil
-		updates["GuardPeakFeePercentage"] = 0
-		updates["GuardPeakFeeRate5mPct"] = 0
-		updates["GuardPeakTotalFees5m"] = 0
-		updates["GuardPeakVolume5m"] = 0
-		updates["GuardPeakTVLUSD"] = 0
-		updates["GuardPeakPrice"] = 0
-		updates["GuardPeakTxCount5m"] = 0
-		updates["GuardVolumeDropArmed"] = false
-		updates["GuardVolumeDropLastVolume5m"] = 0
-		updates["GuardPriceTxDropArmed"] = false
 	}
 
 	// 调试日志：记录即将保存的TokenID
@@ -560,9 +480,6 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 			"last_exit_time":              &now,
 			"current_liquidity":           enterRes.CurrentLiquidity,
 			"exit_liquidity_removed":      false,
-			"next_range_multiplier":       1.0,
-			"cooldown_until":              nil,
-			"cooldown_reason":             "",
 			"v3_position_manager_address": enterRes.V3PositionManagerAddress,
 			"v3_token_id":                 enterRes.V3TokenID,
 			"v4_token_id":                 enterRes.V4TokenID,
@@ -585,9 +502,6 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 	task.LastExitTime = &now
 	task.CurrentLiquidity = enterRes.CurrentLiquidity
 	task.ExitLiquidityRemoved = false
-	task.NextRangeMultiplier = 1.0
-	task.CooldownUntil = nil
-	task.CooldownReason = ""
 	task.V3PositionManagerAddress = enterRes.V3PositionManagerAddress
 	task.V3TokenID = enterRes.V3TokenID
 	task.V4TokenID = enterRes.V4TokenID
@@ -597,34 +511,6 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 	task.RebalanceNextRetryAt = nil
 	task.RebalanceLastError = ""
 	task.ErrorMessage = ""
-	if task.IsAuto {
-		task.GuardOpenVolume5m = 0
-		task.GuardOpenPrice = 0
-		task.GuardOpenTxCount5m = 0
-		task.GuardOpenFeePercentage = 0
-		task.GuardOpenFeeRate5mPct = 0
-		task.GuardOpenTotalFees5m = 0
-		task.GuardOpenTVLUSD = 0
-		task.GuardOpenMetricsAt = nil
-		task.GuardPeakFeePercentage = 0
-		task.GuardPeakFeeRate5mPct = 0
-		task.GuardPeakTotalFees5m = 0
-		task.GuardPeakVolume5m = 0
-		task.GuardPeakTVLUSD = 0
-		task.GuardPeakPrice = 0
-		task.GuardPeakTxCount5m = 0
-		task.GuardVolumeDropArmed = false
-		task.GuardVolumeDropLastVolume5m = 0
-		task.GuardPriceTxDropArmed = false
-	}
-
-	if task.IsAuto {
-		eventType := models.AutoLPEventRebalance
-		if switching {
-			eventType = models.AutoLPEventSwitch
-		}
-		_ = NewAutoLPEventService().Record(task, eventType, "")
-	}
 
 	if switching {
 		_ = database.DB.Model(task).Updates(map[string]interface{}{
@@ -960,9 +846,6 @@ func (s *StrategyService) executeSwitchAfterExit(task *models.StrategyTask, now 
 		"rebalance_retry_count":       0,
 		"rebalance_next_retry_at":     func() *time.Time { t := now.Add(5 * time.Minute); return &t }(), // 防止竞态条件导致重复触发
 		"rebalance_last_error":        "",
-		"next_range_multiplier":       1.0,
-		"cooldown_until":              nil,
-		"cooldown_reason":             "",
 		"error_message":               "",
 	}
 	_ = database.DB.Model(task).Updates(updates).Error
@@ -980,9 +863,6 @@ func (s *StrategyService) executeSwitchAfterExit(task *models.StrategyTask, now 
 	switchNextRetryAt := now.Add(5 * time.Minute)
 	task.RebalanceNextRetryAt = &switchNextRetryAt
 	task.RebalanceLastError = ""
-	task.NextRangeMultiplier = 1.0
-	task.CooldownUntil = nil
-	task.CooldownReason = ""
 	task.ErrorMessage = ""
 
 	msg := "🔁 切换撤出已完成，正在按新池子重新开仓..."
@@ -1038,113 +918,4 @@ func (s *StrategyService) finishStopAfterExit(task *models.StrategyTask, now tim
 		}
 	}
 	s.notify(task.UserID, msg)
-}
-
-func (s *StrategyService) finishCooldownAfterExit(task *models.StrategyTask, now time.Time, title string, txHashes []string) {
-	if task == nil {
-		return
-	}
-
-	// 对于 auto 模式任务，连续跌破后直接结束任务，不进入冷却等待重新开仓
-	// 因为 auto 模式下池子连续跌破表示该池子不再适合开仓
-	if task.IsAuto {
-		reason := strings.TrimSpace(title)
-		if reason == "" {
-			reason = "连续跌破区间，已撤出"
-		}
-		s.finishStopAfterExit(task, now, reason, txHashes)
-		return
-	}
-
-	// 从配置读取冷却时间，默认30分钟
-	cooldownDuration := autoModeCooldownDurationDefault
-	cooldownSeconds := 0
-	if database.DB != nil {
-		if cfg, err := userSvc.NewSystemConfigService().GetOrCreate(); err == nil && cfg != nil && cfg.AutoLPGuardCooldownSeconds > 0 {
-			cooldownSeconds = cfg.AutoLPGuardCooldownSeconds
-		}
-	}
-	if cooldownSeconds <= 0 && config.AppConfig != nil && config.AppConfig.AutoLPGuardCooldownSeconds > 0 {
-		cooldownSeconds = config.AppConfig.AutoLPGuardCooldownSeconds
-	}
-	if cooldownSeconds > 0 {
-		cooldownDuration = time.Duration(cooldownSeconds) * time.Second
-	}
-	cooldownUntil := now.Add(cooldownDuration)
-	cooldownMinutes := int(cooldownDuration.Minutes())
-
-	reason := strings.TrimSpace(title)
-	if reason == "" {
-		reason = "进入冷却"
-	}
-
-	updates := map[string]interface{}{
-		"status":                      models.StrategyStatusWaiting,
-		"last_exit_time":              &now,
-		"last_rebalance_at":           nil,
-		"current_liquidity":           "0",
-		"v3_position_manager_address": "",
-		"v3_token_id":                 "",
-		"v4_token_id":                 "",
-		"out_of_range_since":          nil,
-		"rebalance_pending":           false,
-		"rebalance_retry_count":       0,
-		"rebalance_next_retry_at":     nil,
-		"rebalance_last_error":        "",
-		"exit_liquidity_removed":      false,
-		"cooldown_until":              &cooldownUntil,
-		"cooldown_reason":             reason,
-		"range_break_up_streak":       0,
-		"range_break_down_streak":     0,
-		"next_range_multiplier":       1.0,
-		"error_message":               "",
-	}
-	_ = database.DB.Model(task).Updates(updates).Error
-
-	task.Status = models.StrategyStatusWaiting
-	task.LastExitTime = &now
-	task.LastRebalanceAt = nil
-	task.CurrentLiquidity = "0"
-	task.V3PositionManagerAddress = ""
-	task.V3TokenID = ""
-	task.V4TokenID = ""
-	task.OutOfRangeSince = nil
-	task.RebalancePending = false
-	task.RebalanceRetryCount = 0
-	task.RebalanceNextRetryAt = nil
-	task.RebalanceLastError = ""
-	task.ExitLiquidityRemoved = false
-	task.CooldownUntil = &cooldownUntil
-	task.CooldownReason = reason
-	task.RangeBreakUpStreak = 0
-	task.RangeBreakDownStreak = 0
-	task.NextRangeMultiplier = 1.0
-	task.ErrorMessage = ""
-
-	msg := fmt.Sprintf("⏸️ %s 完成，已撤出并兑换为 USDT。\n该池子进入冷却 %d 分钟（至 %s），期间不再开仓。", reason, cooldownMinutes, cooldownUntil.Format("15:04:05"))
-	if len(txHashes) > 0 {
-		msg += "\n📝 *交易记录：*\n"
-		hasSwapTx := false
-		for i, txInfo := range txHashes {
-			parts := strings.Split(txInfo, "|")
-			if len(parts) == 2 {
-				desc := parts[0]
-				txHash := parts[1]
-				msg += fmt.Sprintf("%d. **%s**\n   [查看交易](%s)\n", i+1, desc, explorerTxURL(task.Chain, txHash))
-				if strings.Contains(desc, "→USDT") || strings.Contains(desc, "->USDT") {
-					hasSwapTx = true
-				}
-			} else {
-				msg += fmt.Sprintf("%d. [查看交易](%s)\n", i+1, explorerTxURL(task.Chain, txInfo))
-				if strings.Contains(txInfo, "→USDT") || strings.Contains(txInfo, "->USDT") {
-					hasSwapTx = true
-				}
-			}
-		}
-		if !hasSwapTx {
-			msg += "\nℹ️ 本次未产生兑换交易：钱包中该池子的非 USDT 代币余额为 0，或均为小额（<1 USDT）已跳过兑换。"
-		}
-	}
-	s.notify(task.UserID, msg)
-	s.notifyTaskCard(task.UserID, task.ID)
 }

@@ -5,18 +5,17 @@
 - 热门池子
 - K线
 - 仓位
-- 聪明钱
 
 ## 特性
 
-- 4 模块可自由开关组合
+- 3 模块可自由开关组合
 - 支持模块拖拽重排（按拖拽后的顺序展示）
 - 布局规则：
   - 4 模块：2x2
   - 3 模块：三列
   - 2 模块：上下两行
   - 1 模块：单模块全屏
-- 接入现有后端 API：`hot_pools / pool_ohlcv / realtime_positions / smart_money`
+- 接入现有后端 API：`hot_pools / pool_ohlcv / realtime_positions`
 - 右上角 Telegram 登录：后端鉴权权限并换取 `initData + 用户资料`
 - 偏 OKX 风格暗色高对比设计
 

@@ -117,7 +117,7 @@ type Config struct {
 	OKXSecretKey              string
 	OKXPassphrase             string
 	OKXSwapRouter             string
-	OKXTokenApproveAddress    string // OKX DEX 的 TokenApprove 合约地址
+	OKXTokenApproveAddress    string // OKX DEX 鐨?TokenApprove 鍚堢害鍦板潃
 	OKXDebug                  bool
 	OKXSwapGasLimitMultiplier float64
 	OKXSwapGasLimitMin        uint64
@@ -132,18 +132,6 @@ type Config struct {
 	PrivateZapEnabled bool
 	// Legacy compatibility field; runtime no longer uses version comparison for invalidation.
 	PrivateZapVersion int
-
-	// ClickHouse
-	ClickHouseAddr               string
-	ClickHouseDB                 string
-	ClickHouseUser               string
-	ClickHousePassword           string
-	ClickHouseProtocol           string // native|http (optional; auto-detected when empty)
-	ClickHouseDebug              bool
-	ClickHouseResetAll           bool
-	ClickHouseDialTimeoutSeconds int
-	ClickHouseMaxOpenConns       int
-	ClickHouseMaxIdleConns       int
 
 	// Contracts
 	ZapV3Address string
@@ -161,7 +149,7 @@ type Config struct {
 	ExitTokenSyncPollMillis     int
 
 	// Workers / Concurrency
-	WorkerMaxParallelUsers int // max concurrent per-user jobs (strategy monitor, AutoLP user eval)
+	WorkerMaxParallelUsers int // max concurrent per-user jobs (strategy monitor)
 	WalletTxMaxParallel    int // max concurrent wallets doing on-chain tx (per-wallet is still serialized)
 
 	// Token Addresses
@@ -172,7 +160,7 @@ type Config struct {
 	PancakeRouterV2  string
 	PancakeFactoryV2 string
 
-	// V3 Swap Router (链上 swap 用)
+	// V3 Swap Router (閾句笂 swap 鐢?
 	PancakeV3SwapRouter string
 	UniswapV3SwapRouter string
 
@@ -181,56 +169,14 @@ type Config struct {
 	RealtimeV3NFTScan    bool
 	RealtimeV3NFTScanMax int
 
-	// Auto LP (PoolM scanner + optional executor)
-	AutoLPEnabled                   bool
-	AutoLPExecuteEnabled            bool
-	AutoLPNotifyTopCandidate        bool
-	AutoLPDebug                     bool
-	AutoLPPoolMBaseURL              string
-	AutoLPChain                     string
-	AutoLPProtocols                 string
-	AutoLPTimeframeShortMinutes     int
-	AutoLPTimeframeLongMinutes      int
-	AutoLPScanIntervalSeconds       int
-	AutoLPFetchDelayMillis          int
-	AutoLPUserID                    int
-	AutoLPAmountUSDT                float64
-	AutoLPBaseWidthPercentage       float64
-	AutoLPMaxActiveTasks            int
-	AutoLPMinPoolValueUSD           float64
-	AutoLPMinFeePercentage          float64
-	AutoLPMaxFeePercentage          float64
-	AutoLPMinFeeRate5m              float64
-	AutoLPMinTotalFees5m            float64
-	AutoLPMinTotalVolume5m          float64
-	AutoLPMinTx5m                   int
-	AutoLPMinTx60m                  int
-	AutoLPMinFeeApr5m               float64
-	AutoLPMinFeeApr60m              float64
-	AutoLPRequireStableSymbol       string
-	AutoLPMaxSurgeRatio             float64
-	AutoLPMaxCandidates             int
-	AutoLPResonanceMinFeeRate5m     float64
-	AutoLPResonanceMinTotalVolume5m float64
-	AutoLPResonanceMinAbsZ60        float64
-	AutoLPTrendFilterEnabled        bool
-	AutoLPEntryTrendCrossPercent    float64
-	AutoLPEntryBlockDev5Percent     float64
-	AutoLPAllowEntrySwap            bool
-	AutoLPGuardWindowSeconds        int
-	AutoLPGuardVolumeDropPercent    float64
-	AutoLPGuardVolumeDropPercentLow float64
-	AutoLPGuardPriceTxDropPercent   float64
-	AutoLPGuardPriceDropPercent     float64 // 价格单独跌幅阈值，默认5%
-	AutoLPGuardTxDropPercent        float64 // tx单独跌幅阈值，默认40%
-	AutoLPGuardNoExitMinFeeRate5m   float64
-	AutoLPGuardLowFeeRate5m         float64
-	AutoLPGuardCooldownSeconds      int // 连续跌破冷却时间（秒），默认1800（30分钟）
-	AutoLPEmergencyGasMultiplier    float64
-	AutoLPWidthSidewaysPercent      float64
-	AutoLPWidthMildUptrendPercent   float64
-	AutoLPWidthRapidPumpPercent     float64
-	AutoLPFilterChineseTokens       bool
+	// Pools sync
+	PoolsSyncEnabled          bool
+	PoolsSyncPoolMBaseURL     string
+	PoolsSyncChain            string
+	PoolsSyncDexes            string
+	PoolsSyncIntervalSeconds  int
+	PoolsSyncFetchDelayMillis int
+	PoolsRetentionHours       int
 
 	// Smart LP (monitor external contract -> NPM events)
 	SmartLPEnabled             bool
@@ -238,7 +184,7 @@ type Config struct {
 	SmartLPContractAddress     string
 	SmartLPScorePerWallet      float64
 	SmartLPMinWallets          int
-	SmartLPRecentWindowMinutes int // 自动开单所需的时间窗口（分钟），默认10分钟
+	SmartLPRecentWindowMinutes int // 鑷姩寮€鍗曟墍闇€鐨勬椂闂寸獥鍙ｏ紙鍒嗛挓锛夛紝榛樿10鍒嗛挓
 	SmartLPScanIntervalSeconds int
 	SmartLPMaxBlocksPerScan    int
 	SmartLPRPCTimeoutSeconds   int
@@ -253,78 +199,23 @@ var AppConfig *Config
 
 func LoadConfig() error {
 	log.Println("========================================")
-	log.Println("📋 开始加载配置...")
+	log.Println("项目启动中..")
 	log.Println("========================================")
 
 	// Load .env file
 	if err := godotenv.Load(); err != nil {
-		log.Println("⚠️  警告: .env 文件未找到，使用环境变量")
+		log.Println("env加载失败")
 	} else {
-		log.Println("✅ .env 文件加载成功")
+		log.Println("env加载成功")
 	}
 
 	chainID, _ := strconv.ParseInt(getEnv("BSC_CHAIN_ID", "56"), 10, 64)
 	redisDB, _ := strconv.Atoi(getEnv("REDIS_DB", "0"))
 	v4NFTScanFromBlock, _ := strconv.ParseUint(strings.TrimSpace(getEnv("V4_NFT_SCAN_FROM_BLOCK", "0")), 10, 64)
 	realtimeV3NFTScanMax, _ := strconv.Atoi(strings.TrimSpace(getEnv("REALTIME_V3_NFT_SCAN_MAX", "20")))
-	autoLPShortTF, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_TIMEFRAME_SHORT_MINUTES", "5")))
-	autoLPLongTF, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_TIMEFRAME_LONG_MINUTES", "60")))
-	autoLPScanInterval, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_SCAN_INTERVAL_SECONDS", "60")))
-	autoLPFetchDelayMillis, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_FETCH_DELAY_MILLIS", "250")))
-	autoLPUserID, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_USER_ID", "0")))
-	autoLPAmountUSDT, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_AMOUNT_USDT", "0")), 64)
-	autoLPBaseWidthPct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_BASE_WIDTH_PERCENT", "5")), 64)
-	autoLPMaxActiveTasks, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_MAX_ACTIVE_TASKS", "1")))
-	autoLPMinPoolValueUSD, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_POOL_VALUE_USD", "50000")), 64)
-	autoLPMinFeePct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_FEE_PERCENTAGE", "0.2")), 64)
-	autoLPMaxFeePct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MAX_FEE_PERCENTAGE", "0")), 64)
-	autoLPMinFeeRate5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_FEE_RATE_5M", "0")), 64)
-	autoLPMinTotalFees5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_TOTAL_FEES_5M", "100")), 64)
-	autoLPMinTotalVolume5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_TOTAL_VOLUME_5M", "5000")), 64)
-	autoLPResMinFeeRate5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_RESONANCE_MIN_FEE_RATE_5M", "0")), 64)
-	autoLPResMinTotalVolume5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_RESONANCE_MIN_TOTAL_VOLUME_5M", "0")), 64)
-	autoLPResMinAbsZ60, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_RESONANCE_MIN_ABS_Z60", "0")), 64)
-	autoLPTrendFilterEnabled := getEnvBool("AUTO_LP_TREND_FILTER_ENABLED", true)
-	autoLPEntryTrendCrossPct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_ENTRY_TREND_CROSS_PCT", "0.3")), 64)
-	autoLPEntryBlockDev5Pct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_ENTRY_BLOCK_DEV5_PCT", "0.5")), 64)
-	autoLPMinTx5m, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_MIN_TX_5M", "0")))
-	autoLPMinTx60m, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_MIN_TX_60M", "0")))
-	autoLPMinFeeApr5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_FEE_APR_5M", "0")), 64)
-	autoLPMinFeeApr60m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MIN_FEE_APR_60M", "0")), 64)
-	autoLPMaxSurgeRatio, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_MAX_SURGE_RATIO", "0")), 64)
-	autoLPMaxCandidates, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_MAX_CANDIDATES", "20")))
-	autoLPGuardWindowSeconds, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_GUARD_WINDOW_SECONDS", "120")))
-	autoLPGuardVolumeDropPct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_VOLUME_DROP_PERCENT", "0.30")), 64)
-	autoLPGuardVolumeDropPctLow, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_VOLUME_DROP_PERCENT_LOW_FEE", "0")), 64)
-	autoLPGuardPriceTxDropPct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_PRICE_TX_DROP_PERCENT", "0.10")), 64)
-	autoLPGuardPriceDropPct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_PRICE_DROP_PERCENT", "0.05")), 64)
-	autoLPGuardTxDropPct, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_TX_DROP_PERCENT", "0.40")), 64)
-	autoLPGuardNoExitMinFeeRate5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_NO_EXIT_MIN_FEE_RATE_5M", "0")), 64)
-	autoLPGuardLowFeeRate5m, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_GUARD_LOW_FEE_RATE_5M", "0")), 64)
-	autoLPGuardCooldownSeconds, _ := strconv.Atoi(strings.TrimSpace(getEnv("AUTO_LP_GUARD_COOLDOWN_SECONDS", "1800")))
-	autoLPEmergencyGasMult, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_EMERGENCY_GAS_MULTIPLIER", "2.0")), 64)
-	okxSwapGasLimitMult, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("OKX_SWAP_GAS_LIMIT_MULTIPLIER", "1.30")), 64)
-	okxSwapGasLimitMin, _ := strconv.ParseUint(strings.TrimSpace(getEnv("OKX_SWAP_GAS_LIMIT_MIN", "250000")), 10, 64)
-	okxSwapGasLimitMax, _ := strconv.ParseUint(strings.TrimSpace(getEnv("OKX_SWAP_GAS_LIMIT_MAX", "10000000")), 10, 64)
-	zapGasLimitMult, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("ZAP_GAS_LIMIT_MULTIPLIER", "1.30")), 64)
-	zapGasLimitMin, _ := strconv.ParseUint(strings.TrimSpace(getEnv("ZAP_GAS_LIMIT_MIN", "0")), 10, 64)
-	zapGasLimitMax, _ := strconv.ParseUint(strings.TrimSpace(getEnv("ZAP_GAS_LIMIT_MAX", "0")), 10, 64)
-	clickhouseDialTimeoutSeconds, _ := strconv.Atoi(strings.TrimSpace(getEnv("CLICKHOUSE_DIAL_TIMEOUT_SECONDS", "60")))
-	clickhouseMaxOpenConns, _ := strconv.Atoi(strings.TrimSpace(getEnv("CLICKHOUSE_MAX_OPEN_CONNS", "50")))
-	clickhouseMaxIdleConns, _ := strconv.Atoi(strings.TrimSpace(getEnv("CLICKHOUSE_MAX_IDLE_CONNS", "10")))
-	autoLPDebug := getEnvBool("AUTO_LP_DEBUG", false)
-	autoLPFilterChineseTokens := getEnvBool("AUTO_LP_FILTER_CHINESE_TOKENS", false)
-	autoLPWidthSideways, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_SIDEWAYS_PERCENT", "2.0")), 64)
-	autoLPWidthMildUp, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_MILD_UPTREND_PERCENT", "5.0")), 64)
-	autoLPWidthRapidPump, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("AUTO_LP_WIDTH_RAPID_PUMP_PERCENT", "15.0")), 64)
-
-	if autoLPEntryTrendCrossPct <= 0 || autoLPEntryTrendCrossPct >= 100 {
-		autoLPEntryTrendCrossPct = 0.3
-	}
-	if autoLPEntryBlockDev5Pct <= 0 || autoLPEntryBlockDev5Pct >= 100 {
-		autoLPEntryBlockDev5Pct = 0.5
-	}
-
+	poolsSyncIntervalSeconds, _ := strconv.Atoi(strings.TrimSpace(getEnv("POOLS_SYNC_INTERVAL_SECONDS", "60")))
+	poolsSyncFetchDelayMillis, _ := strconv.Atoi(strings.TrimSpace(getEnv("POOLS_SYNC_FETCH_DELAY_MILLIS", "250")))
+	poolsRetentionHours, _ := strconv.Atoi(strings.TrimSpace(getEnv("POOLS_RETENTION_HOURS", "24")))
 	smartLPDebug := getEnvBool("SMART_LP_DEBUG", false)
 	smartLPScorePerWallet, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("SMART_LP_SCORE_PER_WALLET", "100")), 64)
 	smartLPMinWallets, _ := strconv.Atoi(strings.TrimSpace(getEnv("SMART_LP_MIN_WALLETS", "3")))
@@ -335,6 +226,12 @@ func LoadConfig() error {
 	smartLPScanTimeoutSeconds, _ := strconv.Atoi(strings.TrimSpace(getEnv("SMART_LP_SCAN_TIMEOUT_SECONDS", "600")))
 	exitTokenSyncTimeoutSeconds, _ := strconv.Atoi(strings.TrimSpace(getEnv("EXIT_TOKEN_SYNC_TIMEOUT_SECONDS", "30")))
 	exitTokenSyncPollMillis, _ := strconv.Atoi(strings.TrimSpace(getEnv("EXIT_TOKEN_SYNC_POLL_MILLIS", "500")))
+	okxSwapGasLimitMult, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("OKX_SWAP_GAS_LIMIT_MULTIPLIER", "1.30")), 64)
+	okxSwapGasLimitMin, _ := strconv.ParseUint(strings.TrimSpace(getEnv("OKX_SWAP_GAS_LIMIT_MIN", "0")), 10, 64)
+	okxSwapGasLimitMax, _ := strconv.ParseUint(strings.TrimSpace(getEnv("OKX_SWAP_GAS_LIMIT_MAX", "0")), 10, 64)
+	zapGasLimitMult, _ := strconv.ParseFloat(strings.TrimSpace(getEnv("ZAP_GAS_LIMIT_MULTIPLIER", "1.30")), 64)
+	zapGasLimitMin, _ := strconv.ParseUint(strings.TrimSpace(getEnv("ZAP_GAS_LIMIT_MIN", "0")), 10, 64)
+	zapGasLimitMax, _ := strconv.ParseUint(strings.TrimSpace(getEnv("ZAP_GAS_LIMIT_MAX", "0")), 10, 64)
 	workerMaxParallelUsers, _ := strconv.Atoi(strings.TrimSpace(getEnv("WORKER_MAX_PARALLEL_USERS", "16")))
 	walletTxMaxParallel, _ := strconv.Atoi(strings.TrimSpace(getEnv("WALLET_TX_MAX_PARALLEL", "8")))
 	webAppDebugUserID, _ := strconv.ParseInt(strings.TrimSpace(getEnv("TELEGRAM_WEBAPP_DEBUG_USER_ID", "0")), 10, 64)
@@ -346,19 +243,15 @@ func LoadConfig() error {
 	if walletTxMaxParallel <= 0 {
 		walletTxMaxParallel = 1
 	}
-	if clickhouseDialTimeoutSeconds <= 0 {
-		clickhouseDialTimeoutSeconds = 60
+	if poolsSyncIntervalSeconds <= 0 {
+		poolsSyncIntervalSeconds = 60
 	}
-	if clickhouseMaxIdleConns <= 0 {
-		clickhouseMaxIdleConns = 10
+	if poolsSyncFetchDelayMillis < 0 {
+		poolsSyncFetchDelayMillis = 250
 	}
-	if clickhouseMaxOpenConns <= 0 {
-		clickhouseMaxOpenConns = clickhouseMaxIdleConns + 10
+	if poolsRetentionHours <= 0 {
+		poolsRetentionHours = 24
 	}
-	if clickhouseMaxOpenConns < clickhouseMaxIdleConns {
-		clickhouseMaxOpenConns = clickhouseMaxIdleConns
-	}
-
 	AppConfig = &Config{
 		// Telegram
 		TelegramBotToken:                 getEnv("TELEGRAM_BOT_TOKEN", ""),
@@ -416,18 +309,6 @@ func LoadConfig() error {
 		PrivateZapEnabled: getEnvBool("PRIVATE_ZAP_ENABLED", false),
 		PrivateZapVersion: getEnvInt("PRIVATE_ZAP_VERSION", 1),
 
-		// ClickHouse
-		ClickHouseAddr:               getEnv("CLICKHOUSE_ADDR", "localhost:9000"),
-		ClickHouseDB:                 getEnv("CLICKHOUSE_DB", "default"),
-		ClickHouseUser:               getEnv("CLICKHOUSE_USER", "default"),
-		ClickHousePassword:           getEnv("CLICKHOUSE_PASSWORD", ""),
-		ClickHouseProtocol:           strings.ToLower(strings.TrimSpace(getEnv("CLICKHOUSE_PROTOCOL", ""))),
-		ClickHouseDebug:              getEnvBool("CLICKHOUSE_DEBUG", false),
-		ClickHouseResetAll:           getEnvBool("CLICKHOUSE_RESET_ALL", false),
-		ClickHouseDialTimeoutSeconds: clickhouseDialTimeoutSeconds,
-		ClickHouseMaxOpenConns:       clickhouseMaxOpenConns,
-		ClickHouseMaxIdleConns:       clickhouseMaxIdleConns,
-
 		// Contracts
 		ZapV3Address: getEnv("ZAP_V3_ADDRESS", ""),
 		ZapV4Address: getEnv("ZAP_V4_ADDRESS", ""),
@@ -459,61 +340,16 @@ func LoadConfig() error {
 		UniswapV3SwapRouter: getEnv("UNISWAP_V3_SWAP_ROUTER", "0xB971eF87ede563556b2ED4b1C0b0019111Dd85d2"),
 
 		// Mini App / Realtime positions
-		V4NFTScanFromBlock:   v4NFTScanFromBlock,
-		RealtimeV3NFTScan:    getEnvBool("REALTIME_V3_NFT_SCAN", false),
-		RealtimeV3NFTScanMax: realtimeV3NFTScanMax,
-
-		// Auto LP (PoolM scanner + optional executor)
-		AutoLPEnabled:                   getEnvBool("AUTO_LP_ENABLED", false),
-		AutoLPExecuteEnabled:            getEnvBool("AUTO_LP_EXECUTE_ENABLED", false),
-		AutoLPNotifyTopCandidate:        getEnvBool("AUTO_LP_NOTIFY_TOP_CANDIDATE", false),
-		AutoLPDebug:                     autoLPDebug,
-		AutoLPPoolMBaseURL:              strings.TrimSpace(getEnv("AUTO_LP_POOLM_BASE_URL", "")),
-		AutoLPChain:                     strings.TrimSpace(getEnv("AUTO_LP_CHAIN", "bsc")),
-		AutoLPProtocols:                 strings.TrimSpace(getEnv("AUTO_LP_PROTOCOLS", "pcsv3,univ3,univ4")),
-		AutoLPTimeframeShortMinutes:     autoLPShortTF,
-		AutoLPTimeframeLongMinutes:      autoLPLongTF,
-		AutoLPScanIntervalSeconds:       autoLPScanInterval,
-		AutoLPFetchDelayMillis:          autoLPFetchDelayMillis,
-		AutoLPUserID:                    autoLPUserID,
-		AutoLPAmountUSDT:                autoLPAmountUSDT,
-		AutoLPBaseWidthPercentage:       autoLPBaseWidthPct,
-		AutoLPMaxActiveTasks:            autoLPMaxActiveTasks,
-		AutoLPMinPoolValueUSD:           autoLPMinPoolValueUSD,
-		AutoLPMinFeePercentage:          autoLPMinFeePct,
-		AutoLPMaxFeePercentage:          autoLPMaxFeePct,
-		AutoLPMinFeeRate5m:              autoLPMinFeeRate5m,
-		AutoLPMinTotalFees5m:            autoLPMinTotalFees5m,
-		AutoLPMinTotalVolume5m:          autoLPMinTotalVolume5m,
-		AutoLPMinTx5m:                   autoLPMinTx5m,
-		AutoLPMinTx60m:                  autoLPMinTx60m,
-		AutoLPMinFeeApr5m:               autoLPMinFeeApr5m,
-		AutoLPMinFeeApr60m:              autoLPMinFeeApr60m,
-		AutoLPRequireStableSymbol:       strings.TrimSpace(getEnv("AUTO_LP_REQUIRE_STABLE_SYMBOL", "USDT")),
-		AutoLPMaxSurgeRatio:             autoLPMaxSurgeRatio,
-		AutoLPMaxCandidates:             autoLPMaxCandidates,
-		AutoLPResonanceMinFeeRate5m:     autoLPResMinFeeRate5m,
-		AutoLPResonanceMinTotalVolume5m: autoLPResMinTotalVolume5m,
-		AutoLPResonanceMinAbsZ60:        autoLPResMinAbsZ60,
-		AutoLPTrendFilterEnabled:        autoLPTrendFilterEnabled,
-		AutoLPEntryTrendCrossPercent:    autoLPEntryTrendCrossPct,
-		AutoLPEntryBlockDev5Percent:     autoLPEntryBlockDev5Pct,
-		AutoLPAllowEntrySwap:            getEnvBool("AUTO_LP_ALLOW_ENTRY_SWAP", true),
-		AutoLPGuardWindowSeconds:        autoLPGuardWindowSeconds,
-		AutoLPGuardVolumeDropPercent:    autoLPGuardVolumeDropPct,
-		AutoLPGuardVolumeDropPercentLow: autoLPGuardVolumeDropPctLow,
-		AutoLPGuardPriceTxDropPercent:   autoLPGuardPriceTxDropPct,
-		AutoLPGuardPriceDropPercent:     autoLPGuardPriceDropPct,
-		AutoLPGuardTxDropPercent:        autoLPGuardTxDropPct,
-		AutoLPGuardNoExitMinFeeRate5m:   autoLPGuardNoExitMinFeeRate5m,
-		AutoLPGuardLowFeeRate5m:         autoLPGuardLowFeeRate5m,
-		AutoLPGuardCooldownSeconds:      autoLPGuardCooldownSeconds,
-		AutoLPEmergencyGasMultiplier:    autoLPEmergencyGasMult,
-		AutoLPWidthSidewaysPercent:      autoLPWidthSideways,
-		AutoLPWidthMildUptrendPercent:   autoLPWidthMildUp,
-		AutoLPWidthRapidPumpPercent:     autoLPWidthRapidPump,
-		AutoLPFilterChineseTokens:       autoLPFilterChineseTokens,
-
+		V4NFTScanFromBlock:         v4NFTScanFromBlock,
+		RealtimeV3NFTScan:          getEnvBool("REALTIME_V3_NFT_SCAN", false),
+		RealtimeV3NFTScanMax:       realtimeV3NFTScanMax,
+		PoolsSyncEnabled:           getEnvBool("POOLS_SYNC_ENABLED", true),
+		PoolsSyncPoolMBaseURL:      strings.TrimSpace(getEnv("POOLS_SYNC_POOLM_BASE_URL", "")),
+		PoolsSyncChain:             strings.TrimSpace(getEnv("POOLS_SYNC_CHAIN", "bsc")),
+		PoolsSyncDexes:             strings.TrimSpace(getEnv("POOLS_SYNC_DEXES", "pcsv3,univ3,univ4")),
+		PoolsSyncIntervalSeconds:   poolsSyncIntervalSeconds,
+		PoolsSyncFetchDelayMillis:  poolsSyncFetchDelayMillis,
+		PoolsRetentionHours:        poolsRetentionHours,
 		SmartLPEnabled:             getEnvBool("SMART_LP_ENABLED", false),
 		SmartLPDebug:               smartLPDebug,
 		SmartLPContractAddress:     strings.TrimSpace(getEnv("SMART_LP_CONTRACT_ADDRESS", "0x17ef7601103792929E01832c0DC3901a55Cf7922 0xd40318d99952680c2aBD7B634710bE8226EcABa4")),
@@ -534,8 +370,8 @@ func LoadConfig() error {
 		return fmt.Errorf("invalid ENCRYPTION_KEY: %w", err)
 	}
 
-	// 打印关键配置信息（隐藏敏感信息）
-	log.Println("📝 配置信息:")
+	// 鎵撳嵃鍏抽敭閰嶇疆淇℃伅锛堥殣钘忔晱鎰熶俊鎭級
+	log.Println("配置如下")
 	log.Printf("   - Telegram Bot Token: %s", maskString(AppConfig.TelegramBotToken))
 	log.Printf("   - Telegram WebApp URL: %s", AppConfig.TelegramWebAppURL)
 	log.Printf("   - Telegram Menu Button Mode: %s", AppConfig.TelegramMenuButtonMode)
@@ -576,27 +412,14 @@ func LoadConfig() error {
 	}
 	log.Printf("   - MySQL: %s@%s:%s/%s", AppConfig.MySQLUser, AppConfig.MySQLHost, AppConfig.MySQLPort, AppConfig.MySQLDatabase)
 	log.Printf("   - Redis: %s:%s (DB: %d)", AppConfig.RedisHost, AppConfig.RedisPort, AppConfig.RedisDB)
-	log.Printf("   - ClickHouse: %s db=%s proto=%s debug=%v", AppConfig.ClickHouseAddr, AppConfig.ClickHouseDB, AppConfig.ClickHouseProtocol, AppConfig.ClickHouseDebug)
-	log.Printf("   - ClickHouse Pool: maxOpen=%d maxIdle=%d dialTimeout=%ds", AppConfig.ClickHouseMaxOpenConns, AppConfig.ClickHouseMaxIdleConns, AppConfig.ClickHouseDialTimeoutSeconds)
 	log.Printf("   - V4 NFT Scan From Block: %d", AppConfig.V4NFTScanFromBlock)
 	log.Printf("   - Realtime V3 NFT Scan: %v", AppConfig.RealtimeV3NFTScan)
 	log.Printf("   - Realtime V3 NFT Scan Max: %d", AppConfig.RealtimeV3NFTScanMax)
-	log.Printf("   - AutoLP Enabled: %v", AppConfig.AutoLPEnabled)
-	log.Printf("   - AutoLP Execute Enabled: %v", AppConfig.AutoLPExecuteEnabled)
-	log.Printf("   - AutoLP Debug: %v", AppConfig.AutoLPDebug)
-	log.Printf("   - AutoLP UserID: %d", AppConfig.AutoLPUserID)
-	log.Printf("   - AutoLP Chain: %s", AppConfig.AutoLPChain)
-	log.Printf("   - AutoLP DEXes: %s", AppConfig.AutoLPProtocols)
-	log.Printf("   - AutoLP Timeframes: %d/%d minutes", AppConfig.AutoLPTimeframeShortMinutes, AppConfig.AutoLPTimeframeLongMinutes)
-	log.Printf("   - AutoLP Scan Interval: %d seconds", AppConfig.AutoLPScanIntervalSeconds)
-	log.Printf("   - AutoLP Fetch Delay: %d ms", AppConfig.AutoLPFetchDelayMillis)
-	log.Printf("   - AutoLP Amount USDT: %.2f", AppConfig.AutoLPAmountUSDT)
-	log.Printf("   - AutoLP Base Width Percentage: %.4f", AppConfig.AutoLPBaseWidthPercentage)
-	log.Printf("   - AutoLP Width Sideways Percentage: %.4f", AppConfig.AutoLPWidthSidewaysPercent)
-	log.Printf("   - AutoLP Width MildUptrend Percentage: %.4f", AppConfig.AutoLPWidthMildUptrendPercent)
-	log.Printf("   - AutoLP Width RapidPump Percentage: %.4f", AppConfig.AutoLPWidthRapidPumpPercent)
-	log.Printf("   - AutoLP Max Active Tasks: %d", AppConfig.AutoLPMaxActiveTasks)
-	log.Printf("   - AutoLP Require Stable (已不用于筛选): %s", AppConfig.AutoLPRequireStableSymbol)
+	log.Printf("   - Pools Sync Enabled: %v", AppConfig.PoolsSyncEnabled)
+	log.Printf("   - Pools Sync Chain: %s", AppConfig.PoolsSyncChain)
+	log.Printf("   - Pools Sync Dexes: %s", AppConfig.PoolsSyncDexes)
+	log.Printf("   - Pools Sync Interval: %d seconds", AppConfig.PoolsSyncIntervalSeconds)
+	log.Printf("   - Pools Retention: %d hours", AppConfig.PoolsRetentionHours)
 	log.Printf("   - SmartLP Enabled: %v", AppConfig.SmartLPEnabled)
 	log.Printf("   - SmartLP Debug: %v", AppConfig.SmartLPDebug)
 	log.Printf("   - SmartLP Contract Address: %s", AppConfig.SmartLPContractAddress)
@@ -604,7 +427,7 @@ func LoadConfig() error {
 	log.Printf("   - SmartLP Max Blocks Per Scan: %d", AppConfig.SmartLPMaxBlocksPerScan)
 	log.Printf("   - SmartLP RPC Timeout: %d seconds", AppConfig.SmartLPRPCTimeoutSeconds)
 	log.Printf("   - SmartLP Scan Timeout: %d seconds", AppConfig.SmartLPScanTimeoutSeconds)
-	log.Println("✅ 配置加载完成")
+	log.Println("鉁?閰嶇疆鍔犺浇瀹屾垚")
 	log.Println("========================================")
 
 	return nil
@@ -908,7 +731,7 @@ func normalizeTelegramMenuButtonMode(v string) string {
 	case "":
 		return "commands"
 	default:
-		log.Printf("⚠️  Unknown TELEGRAM_MENU_BUTTON_MODE=%q; fallback to \"commands\"", v)
+		log.Printf("鈿狅笍  Unknown TELEGRAM_MENU_BUTTON_MODE=%q; fallback to \"commands\"", v)
 		return "commands"
 	}
 }
@@ -916,7 +739,7 @@ func normalizeTelegramMenuButtonMode(v string) string {
 // maskString masks sensitive string for logging
 func maskString(s string) string {
 	if s == "" {
-		return "<未设置>"
+		return "<鏈缃?"
 	}
 	if len(s) <= 8 {
 		return "***"
@@ -927,13 +750,13 @@ func maskString(s string) string {
 func maskURL(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return "<未设置>"
+		return "<鏈缃?"
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return "***"
 	}
-	return fmt.Sprintf("%s://%s/…", u.Scheme, u.Host)
+	return fmt.Sprintf("%s://%s/...", u.Scheme, u.Host)
 }
 
 func getEnv(key, defaultValue string) string {

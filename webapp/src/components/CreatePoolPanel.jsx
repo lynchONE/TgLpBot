@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowRightLeft,
-  BrainCircuit,
   CheckCircle2,
   ChevronDown,
   CircleDot,
@@ -19,7 +18,6 @@ import {
 import {
   executeCreatePool,
   fetchHotPools,
-  fetchSmartMoneyOverview,
   fetchWallets,
   previewCreatePool,
 } from '../api';
@@ -47,7 +45,6 @@ const AMOUNT_MODE_OPTIONS = [
 const SOURCE_TABS = [
   { key: 'manual', label: '手动输入', icon: Search },
   { key: 'hot', label: '热门池子', icon: Flame },
-  { key: 'smart', label: '聪明钱', icon: BrainCircuit },
 ];
 
 const FIXED_FEE_TIERS = {
@@ -252,7 +249,6 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
   const [walletsLoading, setWalletsLoading] = useState(false);
   const [walletsError, setWalletsError] = useState('');
   const [hotSources, setHotSources] = useState([]);
-  const [smartSources, setSmartSources] = useState([]);
   const [sourcesLoading, setSourcesLoading] = useState(false);
   const [sourcesError, setSourcesError] = useState('');
 
@@ -280,8 +276,7 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
 
-  const sourceOptions = useMemo(() => ({ hot: hotSources, smart: smartSources }), [hotSources, smartSources]);
-  const activeSources = useMemo(() => sourceOptions[sourceTab] || [], [sourceOptions, sourceTab]);
+  const activeSources = useMemo(() => (sourceTab === 'hot' ? hotSources : []), [hotSources, sourceTab]);
   const selectedSource = useMemo(
     () => activeSources.find((item) => item.key === selectedSourceKey) || null,
     [activeSources, selectedSourceKey],
@@ -409,7 +404,6 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
     if (!hasInitData) {
       setWallets([]);
       setHotSources([]);
-      setSmartSources([]);
       return undefined;
     }
 
@@ -454,20 +448,9 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
         limit: 24,
         signal: controller.signal,
       }),
-      fetchSmartMoneyOverview({
-        apiBaseUrl,
-        initData,
-        chain: 'bsc',
-        poolLimit: 16,
-        walletLimit: 8,
-        poolsWindowHours: 2,
-        pnlWindowHours: 2,
-        signal: controller.signal,
-      }),
     ])
-      .then(([hotResp, smartResp]) => {
+      .then(([hotResp]) => {
         setHotSources(buildSources(hotResp?.data, 'hot'));
-        setSmartSources(buildSources(smartResp?.pools, 'smart'));
       })
       .catch((err) => {
         if (err?.name !== 'AbortError') {

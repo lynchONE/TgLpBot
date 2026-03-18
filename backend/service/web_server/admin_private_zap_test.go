@@ -9,7 +9,7 @@ import (
 )
 
 func TestHandleAdminPrivateZap_InvalidJSON(t *testing.T) {
-	srv := NewServer(nil)
+	srv := NewServer()
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/private_zap", strings.NewReader("{"))
 	rr := httptest.NewRecorder()
 
@@ -25,7 +25,7 @@ func TestHandleAdminPrivateZap_ConfigNotLoaded(t *testing.T) {
 	config.AppConfig = nil
 	defer func() { config.AppConfig = old }()
 
-	srv := NewServer(nil)
+	srv := NewServer()
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/private_zap", strings.NewReader(`{"initData":"x","action":"list"}`))
 	rr := httptest.NewRecorder()
 
@@ -43,7 +43,7 @@ func TestHandleAdminPrivateZap_MissingInitData(t *testing.T) {
 	}
 	defer func() { config.AppConfig = old }()
 
-	srv := NewServer(nil)
+	srv := NewServer()
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/private_zap", strings.NewReader(`{"action":"list"}`))
 	rr := httptest.NewRecorder()
 

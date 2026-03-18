@@ -1,5 +1,5 @@
-// 合并的热门池子 API: hot_pools, pool_ohlcv
-// 通过 query 参数 endpoint 来区分端点
+// Pools API proxy.
+// 通过 query 参数 endpoint 区分兼容端点，默认透传到 /api/pools。
 function normalizeBaseUrl(value) {
     const trimmed = String(value || '').trim();
     if (!trimmed) return '';
@@ -42,14 +42,13 @@ export default async function handler(req, res) {
         return;
     }
 
-    // 从 query 参数获取 endpoint
     const endpoint = String(req.query?.endpoint || '').trim();
-    const validEndpoints = ['hot_pools', 'pool_ohlcv', 'search_pools'];
+    const validEndpoints = ['', 'pool_ohlcv', 'search_pools'];
 
     if (!validEndpoints.includes(endpoint)) {
         res.statusCode = 400;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.end(JSON.stringify({ error: '无效的端点，有效值: hot_pools, pool_ohlcv, search_pools' }));
+        res.end(JSON.stringify({ error: '无效的端点，有效值: pool_ohlcv, search_pools' }));
         return;
     }
 
@@ -60,7 +59,8 @@ export default async function handler(req, res) {
         return;
     }
 
-    const url = `${backendBaseUrl}/api/${endpoint}${buildQueryString(req.query)}`;
+    const path = endpoint ? `/api/${endpoint}` : '/api/pools';
+    const url = `${backendBaseUrl}${path}${buildQueryString(req.query)}`;
 
     try {
         const upstream = await fetch(url);

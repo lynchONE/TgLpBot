@@ -2,31 +2,6 @@ import React, { useCallback, useMemo, useState } from 'react';
 
 const PRESET_RANGES = [1, 2, 3, 5, 10, 20];
 
-function extractSmartMoneyRanges(wallets) {
-  if (!Array.isArray(wallets) || wallets.length === 0) return [];
-  const ranges = [];
-  for (const w of wallets) {
-    const lower = Number(w?.price_lower ?? 0);
-    const upper = Number(w?.price_upper ?? 0);
-    if (!lower || !upper || lower <= 0 || upper <= 0) continue;
-    const mid = (lower + upper) / 2;
-    const pct = ((upper - lower) / mid) * 50;
-    if (!Number.isFinite(pct) || pct <= 0) continue;
-    const usd = Number(w?.total_usd ?? 0);
-    const addr = String(w?.wallet_address || '').trim();
-    ranges.push({ pct: Math.round(pct * 100) / 100, usd, addr });
-  }
-  ranges.sort((a, b) => b.usd - a.usd);
-
-  const unique = [];
-  for (const item of ranges) {
-    if (unique.some((row) => Math.abs(row.pct - item.pct) < 0.3)) continue;
-    unique.push(item);
-    if (unique.length >= 4) break;
-  }
-  return unique;
-}
-
 function shortAddr(addr) {
   const value = String(addr || '').trim();
   if (value.length <= 10) return value || '--';
@@ -66,11 +41,6 @@ export default function OpenPositionModal({
     return def ? def.id : wallets[0].id;
   }, [wallets, selectedWalletId]);
 
-  const smartRanges = useMemo(
-    () => extractSmartMoneyRanges(pool?.smartMoneyWallets),
-    [pool?.smartMoneyWallets]
-  );
-  const hasSmartRanges = smartRanges.length > 0;
   const visibleError = error || String(submitError || '').trim();
 
   const clearErrors = useCallback(() => {
@@ -203,52 +173,25 @@ export default function OpenPositionModal({
           </label>
 
           <div className="modal-range-section">
-            <span className="modal-range-label">快捷区间</span>
+            <span className="modal-range-label">蹇嵎鍖洪棿</span>
             <div className="modal-range-picks">
-              {hasSmartRanges ? (
-                smartRanges.map((item, index) => {
-                  const pctDisplay = item.pct.toFixed(item.pct >= 10 ? 0 : 1);
-                  const isActive =
-                    Math.abs(Number(rangeLower) - item.pct) < 0.05 &&
-                    Math.abs(Number(rangeUpper) - item.pct) < 0.05;
-                  return (
-                    <button
-                      key={`${item.addr}:${index}`}
-                      type="button"
-                      className={`range-chip smart ${isActive ? 'active' : ''}`}
-                      onClick={() => applyRange(item.pct, item.pct)}
-                      title={`${shortAddr(item.addr)} $${Math.round(item.usd)}`}
-                    >
-                      ±{pctDisplay}%
-                      <span className="range-chip-sub">
-                        ${item.usd >= 1000 ? `${(item.usd / 1000).toFixed(0)}K` : Math.round(item.usd)}
-                      </span>
-                    </button>
-                  );
-                })
-              ) : (
-                PRESET_RANGES.map((item) => {
-                  const isActive =
-                    Math.abs(Number(rangeLower) - item) < 0.05 &&
-                    Math.abs(Number(rangeUpper) - item) < 0.05;
-                  return (
-                    <button
-                      key={item}
-                      type="button"
-                      className={`range-chip ${isActive ? 'active' : ''}`}
-                      onClick={() => applyRange(item, item)}
-                    >
-                      ±{item}%
-                    </button>
-                  );
-                })
-              )}
+              {PRESET_RANGES.map((item) => {
+                const isActive =
+                  Math.abs(Number(rangeLower) - item) < 0.05 &&
+                  Math.abs(Number(rangeUpper) - item) < 0.05;
+                return (
+                  <button
+                    key={item}
+                    type="button"
+                    className={`range-chip ${isActive ? 'active' : ''}`}
+                    onClick={() => applyRange(item, item)}
+                  >
+                    卤{item}%
+                  </button>
+                );
+              })}
             </div>
-            {hasSmartRanges ? (
-              <div className="modal-range-hint">聪明钱区间，按仓位金额排序</div>
-            ) : null}
           </div>
-
           <div className="modal-row">
             <label className="modal-field">
               <span>下限 %</span>

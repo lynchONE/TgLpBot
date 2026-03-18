@@ -49,7 +49,7 @@ export async function fetchHotPools({
   }
 
   const qs = params.toString();
-  const url = `${base}/api/pools?endpoint=hot_pools${qs ? `&${qs}` : ''}`;
+  const url = `${base}/api/pools${qs ? `?${qs}` : ''}`;
   return requestJson(url, { method: 'GET', signal });
 }
 
@@ -99,107 +99,6 @@ export async function fetchPositionProfitPoster({ apiBaseUrl, initData, taskId, 
     body: JSON.stringify({ initData, taskId }),
     signal,
   });
-}
-
-export async function fetchSmartMoneyOverview({
-  apiBaseUrl,
-  initData,
-  chain = 'bsc',
-  poolLimit = 20,
-  walletLimit = 20,
-  poolsWindowHours = 2,
-  pnlWindowHours = 2,
-  signal,
-}) {
-  const base = normalizeBaseUrl(apiBaseUrl);
-  const params = new URLSearchParams();
-  if (initData) params.set('initData', String(initData));
-  if (chain) params.set('chain', String(chain));
-  if (Number.isFinite(poolLimit)) params.set('pool_limit', String(poolLimit));
-  if (Number.isFinite(walletLimit))
-    params.set('wallet_limit', String(walletLimit));
-  if (Number.isFinite(poolsWindowHours))
-    params.set('pools_window_hours', String(poolsWindowHours));
-  if (Number.isFinite(pnlWindowHours))
-    params.set('pnl_window_hours', String(pnlWindowHours));
-
-  const qs = params.toString();
-  const url = `${base}/api/smart_money${qs ? `?${qs}` : ''}`;
-  return requestJson(url, { method: 'GET', signal });
-}
-
-export async function fetchSmartMoneyPoolAdds({
-  apiBaseUrl,
-  initData,
-  chain,
-  poolVersion,
-  poolId,
-  windowHours,
-  limit,
-  signal,
-}) {
-  const base = normalizeBaseUrl(apiBaseUrl);
-  const params = new URLSearchParams();
-  if (initData) params.set('initData', String(initData));
-  if (chain) params.set('chain', String(chain));
-  if (poolVersion) params.set('pool_version', String(poolVersion));
-  if (poolId) params.set('pool_id', String(poolId));
-  if (Number.isFinite(windowHours)) params.set('window_hours', String(windowHours));
-  if (Number.isFinite(limit)) params.set('limit', String(limit));
-  const qs = params.toString();
-  const url = `${base}/api/smart_money_pool_adds${qs ? `?${qs}` : ''}`;
-  return requestJson(url, { method: 'GET', signal });
-}
-
-export async function fetchSmartMoneyWalletPositions({
-  apiBaseUrl,
-  initData,
-  chain,
-  walletAddress,
-  windowHours,
-  limit,
-  signal,
-}) {
-  const base = normalizeBaseUrl(apiBaseUrl);
-  const params = new URLSearchParams();
-  if (initData) params.set('initData', String(initData));
-  if (chain) params.set('chain', String(chain));
-  if (walletAddress) params.set('wallet_address', String(walletAddress));
-  if (Number.isFinite(windowHours)) params.set('window_hours', String(windowHours));
-  if (Number.isFinite(limit)) params.set('limit', String(limit));
-  const qs = params.toString();
-  const url = `${base}/api/smart_money_wallet_positions${qs ? `?${qs}` : ''}`;
-  return requestJson(url, { method: 'GET', signal });
-}
-
-export async function fetchSmartMoneyPoolMarkers({
-  apiBaseUrl,
-  initData,
-  chain,
-  poolVersion,
-  poolId,
-  bucketSec,
-  windowHours,
-  startTs,
-  endTs,
-  limit,
-  signal,
-}) {
-  const base = normalizeBaseUrl(apiBaseUrl);
-  const params = new URLSearchParams();
-  if (initData) params.set('initData', String(initData));
-  if (chain) params.set('chain', String(chain));
-  if (poolVersion) params.set('pool_version', String(poolVersion));
-  if (poolId) params.set('pool_id', String(poolId));
-  if (Number.isFinite(bucketSec)) params.set('bucket_sec', String(bucketSec));
-  if (Number.isFinite(windowHours)) params.set('window_hours', String(windowHours));
-  if (Number.isFinite(startTs) && startTs > 0) params.set('start_ts', String(Math.floor(startTs)));
-  if (Number.isFinite(endTs) && endTs > 0) params.set('end_ts', String(Math.floor(endTs)));
-  if (Number.isFinite(limit)) params.set('limit', String(limit));
-
-  const qs = params.toString();
-  const url = `${base}/api/smart_money_pool_markers${qs ? `?${qs}` : ''}`;
-  return requestJson(url, { method: 'GET', signal });
 }
 
 export async function generateLoginCode({ apiBaseUrl, signal }) {
@@ -465,65 +364,6 @@ export async function fetchMyTradeMarkers({
       end_ts: Number.isFinite(endTs) && endTs > 0 ? Math.floor(endTs) : 0,
       window_sec: windowSec,
     }),
-    signal,
-  });
-}
-
-export async function fetchSmartMoneyWatchedWallets({
-  apiBaseUrl,
-  initData,
-  chain = 'bsc',
-  signal,
-}) {
-  const base = normalizeBaseUrl(apiBaseUrl);
-  const params = new URLSearchParams();
-  if (initData) params.set('initData', String(initData));
-  if (chain) params.set('chain', String(chain));
-  const qs = params.toString();
-  const url = `${base}/api/smart_money_watched_wallets${qs ? `?${qs}` : ''}`;
-  return requestJson(url, { method: 'GET', signal });
-}
-
-export async function addSmartMoneyWatchedWallets({
-  apiBaseUrl,
-  initData,
-  chain = 'bsc',
-  wallets,
-  signal,
-}) {
-  const base = normalizeBaseUrl(apiBaseUrl);
-  const url = `${base}/api/smart_money_watched_wallets`;
-  return requestJson(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ initData, chain, wallets }),
-    signal,
-  });
-}
-
-export async function removeSmartMoneyWatchedWallets({
-  apiBaseUrl,
-  initData,
-  chain = 'bsc',
-  walletAddresses,
-  signal,
-}) {
-  const base = normalizeBaseUrl(apiBaseUrl);
-  const params = new URLSearchParams();
-  if (initData) params.set('initData', String(initData));
-  if (chain) params.set('chain', String(chain));
-  const normalizedWalletAddresses = Array.isArray(walletAddresses)
-    ? walletAddresses.map((item) => String(item || '').trim()).filter(Boolean)
-    : [];
-  if (normalizedWalletAddresses.length > 0) {
-    params.set('wallet_addresses', normalizedWalletAddresses.join(','));
-  }
-  const qs = params.toString();
-  const url = `${base}/api/smart_money_watched_wallets${qs ? `?${qs}` : ''}`;
-  return requestJson(url, {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ initData, chain, wallet_addresses: normalizedWalletAddresses }),
     signal,
   });
 }

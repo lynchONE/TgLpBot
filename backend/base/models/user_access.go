@@ -19,12 +19,9 @@ type UserAccess struct {
 	ActiveFrom *time.Time `gorm:"index" json:"active_from"`
 	ActiveTo   *time.Time `gorm:"index" json:"active_to"`
 
-	MaxWallets     int `gorm:"default:1" json:"max_wallets"`
-	MaxActiveTasks int `gorm:"default:1" json:"max_active_tasks"`
-
-	AutoModeEnabled   bool `gorm:"default:false" json:"auto_mode_enabled"`   // 是否有 Auto 模式权限
-	MiniAppEnabled    bool `gorm:"default:false" json:"mini_app_enabled"`    // 是否有 Mini App 权限
-	SmartMoneyEnabled bool `gorm:"default:false" json:"smart_money_enabled"` // 是否有 Smart Money(聪明钱) 权限
+	MaxWallets     int  `gorm:"default:1" json:"max_wallets"`
+	MaxActiveTasks int  `gorm:"default:1" json:"max_active_tasks"`
+	MiniAppEnabled bool `gorm:"default:false" json:"mini_app_enabled"`
 
 	RevokedAt       *time.Time `gorm:"index" json:"revoked_at"`
 	RevokedByUserID *uint      `gorm:"index" json:"revoked_by_user_id"`

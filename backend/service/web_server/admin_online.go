@@ -22,7 +22,7 @@ type adminActiveTasksResponse struct {
 	Total int                        `json:"total"`
 }
 
-// handleAdminOnlineUsers 获取所有有活跃任务的用户（包括 Auto 和手动）
+// handleAdminOnlineUsers 获取所有有活跃任务的用户
 func (s *Server) handleAdminOnlineUsers(w http.ResponseWriter, r *http.Request) {
 	initData := ""
 	limit := 0
@@ -108,7 +108,7 @@ func (s *Server) handleAdminOnlineUsers(w http.ResponseWriter, r *http.Request) 
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// handleAdminActiveTasks 获取所有活跃任务（包括 Auto 和手动）
+// handleAdminActiveTasks 获取所有活跃任务
 func (s *Server) handleAdminActiveTasks(w http.ResponseWriter, r *http.Request) {
 	initData := ""
 	limit := 0

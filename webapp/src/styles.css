@@ -3120,60 +3120,6 @@ body {
   line-height: 1.45;
 }
 
-.workbench.layout-4 .module-smart_money .sm-position-card-header,
-.workbench.layout-work-4 .module-smart_money .sm-position-card-header {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 10px;
-}
-
-.workbench.layout-4 .module-smart_money .sm-position-card .pos-card-right-block,
-.workbench.layout-work-4 .module-smart_money .sm-position-card .pos-card-right-block {
-  width: 100%;
-  min-width: 0;
-  align-items: flex-start;
-  text-align: left;
-}
-
-.workbench.layout-4 .module-smart_money .sm-position-card .pos-metrics,
-.workbench.layout-work-4 .module-smart_money .sm-position-card .pos-metrics {
-  justify-content: flex-start;
-  gap: 5px;
-}
-
-.workbench.layout-4 .module-smart_money .sm-position-card .pos-pair-row,
-.workbench.layout-4 .module-smart_money .sm-position-card .pos-status-row,
-.workbench.layout-4 .module-smart_money .sm-position-card .sm-position-meta-row,
-.workbench.layout-work-4 .module-smart_money .sm-position-card .pos-pair-row,
-.workbench.layout-work-4 .module-smart_money .sm-position-card .pos-status-row,
-.workbench.layout-work-4 .module-smart_money .sm-position-card .sm-position-meta-row {
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.workbench.layout-4 .module-smart_money .sm-position-card .pos-pair-row::-webkit-scrollbar,
-.workbench.layout-4 .module-smart_money .sm-position-card .pos-status-row::-webkit-scrollbar,
-.workbench.layout-4 .module-smart_money .sm-position-card .sm-position-meta-row::-webkit-scrollbar,
-.workbench.layout-work-4 .module-smart_money .sm-position-card .pos-pair-row::-webkit-scrollbar,
-.workbench.layout-work-4 .module-smart_money .sm-position-card .pos-status-row::-webkit-scrollbar,
-.workbench.layout-work-4 .module-smart_money .sm-position-card .sm-position-meta-row::-webkit-scrollbar {
-  display: none;
-}
-
-.workbench.layout-4 .module-smart_money .sm-position-card .pos-pair-name,
-.workbench.layout-work-4 .module-smart_money .sm-position-card .pos-pair-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workbench.layout-4 .module-smart_money .sm-position-card .pos-total,
-.workbench.layout-work-4 .module-smart_money .sm-position-card .pos-total {
-  font-size: 18px;
-}
-
 /* Sort toggle tabs */
 .sort-tabs {
   display: flex;

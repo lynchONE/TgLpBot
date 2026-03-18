@@ -29,9 +29,6 @@ type StrategyTask struct {
 	WalletID      uint   `gorm:"not null;default:0;index" json:"wallet_id"`
 	WalletAddress string `gorm:"size:42;not null;default:'';index" json:"wallet_address"`
 
-	// IsAuto marks tasks created by the AutoLP system (manual tasks are false).
-	IsAuto bool `gorm:"default:false;index" json:"is_auto"`
-
 	// IsFollow marks tasks created by Smart Money wallet follow (copy-trading).
 	// Follow tasks keep the tick range consistent with the target wallet; they should not auto-rebalance.
 	IsFollow bool `gorm:"default:false;index" json:"is_follow"`
@@ -89,33 +86,8 @@ type StrategyTask struct {
 	LastCheckTime   time.Time      `json:"last_check_time"`
 	ErrorMessage    string         `gorm:"type:text" json:"error_message"`
 
-	// Auto-mode guard state (persisted per task/pool)
-	GuardOpenVolume5m           float64    `gorm:"type:decimal(20,8);default:0" json:"guard_open_volume_5m"`
-	GuardOpenPrice              float64    `gorm:"type:decimal(30,12);default:0" json:"guard_open_price"`
-	GuardOpenTxCount5m          int64      `gorm:"default:0" json:"guard_open_tx_count_5m"`
-	GuardOpenFeePercentage      float64    `gorm:"type:decimal(10,4);default:0" json:"guard_open_fee_percentage"`
-	GuardOpenFeeRate5mPct       float64    `gorm:"type:decimal(10,6);default:0" json:"guard_open_fee_rate_5m_pct"`
-	GuardOpenTotalFees5m        float64    `gorm:"type:decimal(20,8);default:0" json:"guard_open_total_fees_5m"`
-	GuardOpenTVLUSD             float64    `gorm:"type:decimal(20,8);default:0" json:"guard_open_tvl_usd"`
-	GuardOpenMetricsAt          *time.Time `json:"guard_open_metrics_at"`
-	GuardPeakFeePercentage      float64    `gorm:"type:decimal(10,4);default:0" json:"guard_peak_fee_percentage"`
-	GuardPeakFeeRate5mPct       float64    `gorm:"type:decimal(10,6);default:0" json:"guard_peak_fee_rate_5m_pct"`
-	GuardPeakTotalFees5m        float64    `gorm:"type:decimal(20,8);default:0" json:"guard_peak_total_fees_5m"`
-	GuardPeakVolume5m           float64    `gorm:"type:decimal(20,8);default:0" json:"guard_peak_volume_5m"`
-	GuardPeakTVLUSD             float64    `gorm:"type:decimal(20,8);default:0" json:"guard_peak_tvl_usd"`
-	GuardPeakPrice              float64    `gorm:"type:decimal(30,12);default:0" json:"guard_peak_price"`
-	GuardPeakTxCount5m          int64      `gorm:"default:0" json:"guard_peak_tx_count_5m"`
-	GuardVolumeDropArmed        bool       `gorm:"default:false" json:"guard_volume_drop_armed"`
-	GuardVolumeDropLastVolume5m float64    `gorm:"type:decimal(20,8);default:0" json:"guard_volume_drop_last_volume_5m"`
-	GuardPriceTxDropArmed       bool       `gorm:"default:false" json:"guard_price_tx_drop_armed"`
-	RangeBreakUpStreak          int        `gorm:"default:0" json:"range_break_up_streak"`
-	RangeBreakDownStreak        int        `gorm:"default:0" json:"range_break_down_streak"`
-	NextRangeMultiplier         float64    `gorm:"type:decimal(6,2);default:1.0" json:"next_range_multiplier"`
-	CooldownUntil               *time.Time `json:"cooldown_until"`
-	CooldownReason              string     `gorm:"type:text" json:"cooldown_reason"`
-
 	// Exit retry state (keep task Status as running when exit fails).
-	ExitPendingAction string     `gorm:"size:20;default:''" json:"exit_pending_action"` // manual_stop | stoploss | rebalance | switch | cooldown
+	ExitPendingAction string     `gorm:"size:20;default:''" json:"exit_pending_action"` // manual_stop | stoploss | rebalance | switch
 	ExitPendingReason string     `gorm:"type:text" json:"exit_pending_reason"`
 	ExitGasMultiplier float64    `gorm:"type:decimal(6,2);default:1.0" json:"exit_gas_multiplier"` // Gas multiplier for the next exit attempt (auto strategy may set to 2.0)
 	ExitRetryCount    int        `gorm:"default:0" json:"exit_retry_count"`                        // number of failed attempts

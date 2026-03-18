@@ -396,9 +396,6 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	entryToken := usdtAddr
 	entryAmount := usdtAmount
 	allowEntrySwap := task.AllowEntrySwap
-	if !allowEntrySwap && task.IsAuto && config.AppConfig != nil && config.AppConfig.AutoLPAllowEntrySwap {
-		allowEntrySwap = true
-	}
 	if plan.RequiresSwap {
 		// 如果用户账户里已经有足够的入场代币（典型场景：上次 swap 成功但 bot 误判返回 0），直接用余额开仓，避免重复提示/重复兑换。
 		// 目前仅对 USDC 做“USDT 金额≈USDC 数量”的安全处理；WBNB 等非稳定币不适用该等价关系。

@@ -107,12 +107,10 @@ func (s *Server) handleCheckLoginCode(w http.ResponseWriter, r *http.Request) {
 			PhotoURL:  entry.PhotoURL,
 		},
 		Access: &webLoginAccess{
-			Allowed:           true,
-			IsAdmin:           check.IsAdmin,
-			MiniAppEnabled:    check.IsAdmin || (check.Access != nil && check.Access.MiniAppEnabled),
-			AutoModeEnabled:   check.IsAdmin || (check.Access != nil && check.Access.AutoModeEnabled),
-			SmartMoneyEnabled: check.IsAdmin || (check.Access != nil && check.Access.SmartMoneyEnabled),
-			Reason:            strings.TrimSpace(check.Reason),
+			Allowed:        true,
+			IsAdmin:        check.IsAdmin,
+			MiniAppEnabled: check.IsAdmin || (check.Access != nil && check.Access.MiniAppEnabled),
+			Reason:         strings.TrimSpace(check.Reason),
 		},
 		Meta: &webLoginMeta{
 			AuthenticatedAt: time.Now(),

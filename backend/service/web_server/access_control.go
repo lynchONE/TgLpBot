@@ -71,36 +71,10 @@ func requireMiniAppPermission(check userSvc.AccessCheck) (int, string) {
 		return 0, ""
 	}
 	if check.Access == nil {
-		return http.StatusForbidden, "未授权"
+		return http.StatusForbidden, "鏈巿鏉?"
 	}
 	if !check.Access.MiniAppEnabled {
-		return http.StatusForbidden, "未开通 MiniApp 权限"
-	}
-	return 0, ""
-}
-
-func requireAutoModePermission(check userSvc.AccessCheck) (int, string) {
-	if check.IsAdmin {
-		return 0, ""
-	}
-	if check.Access == nil {
-		return http.StatusForbidden, "未授权"
-	}
-	if !check.Access.AutoModeEnabled {
-		return http.StatusForbidden, "未开通 Auto 模式权限"
-	}
-	return 0, ""
-}
-
-func requireSmartMoneyPermission(check userSvc.AccessCheck) (int, string) {
-	if check.IsAdmin {
-		return 0, ""
-	}
-	if check.Access == nil {
-		return http.StatusForbidden, "未授权"
-	}
-	if !check.Access.SmartMoneyEnabled {
-		return http.StatusForbidden, "未开通 Smart Money 权限"
+		return http.StatusForbidden, "鏈紑閫?MiniApp 鏉冮檺"
 	}
 	return 0, ""
 }

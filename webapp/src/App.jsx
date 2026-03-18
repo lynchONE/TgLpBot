@@ -1,15 +1,12 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
-  BrainCircuit,
   BriefcaseBusiness,
   CandlestickChart,
   Check,
   Copy,
   Flame,
   GripVertical,
-  Layers3,
-  Link2,
   LogOut,
   Maximize,
   Minimize,
@@ -27,23 +24,14 @@ import {
   deleteTask,
   fetchHotPools,
   fetchRealtimePositions,
-  fetchSmartMoneyOverview,
-  fetchSmartMoneyPoolAdds,
-  fetchSmartMoneyWalletPositions,
-  fetchSmartMoneyPoolMarkers,
-  fetchSmartMoneyWatchedWallets,
-  fetchMyTradeMarkers,
   fetchTokenCandles,
   fetchWallets,
   generateLoginCode,
   openPosition as apiOpenPosition,
-  addSmartMoneyWatchedWallets,
-  removeSmartMoneyWatchedWallets,
   setTaskPaused,
   stopTask,
   updateTaskRange,
 } from './api';
-import { walletAvatarUrl } from './avatar';
 import { WEBAPP_CONFIG } from './config';
 import PanelShell, { EmptyState, MetricCard } from './components/PanelShell';
 import KlineChart from './components/KlineChart';
@@ -67,8 +55,6 @@ import {
   formatNumber,
   formatPct,
   formatPriceDisplay,
-  formatUtc8DateTime,
-  formatUtc8Time,
   formatUsd,
   formatUsdCompact,
   normalizePoolAddress,
@@ -81,7 +67,6 @@ import {
   inferPoolVersion,
   computePriceRange,
   formatDuration,
-  toUnixSeconds,
 } from './utils';
 
 const KLINE_INTERVALS = [
@@ -90,14 +75,7 @@ const KLINE_INTERVALS = [
   { key: '15m', label: '15m', bucketSec: 900, limit: 240, timeframe: 'minute', aggregate: 15, poolLimit: 220 },
   { key: '1H', label: '1H', bucketSec: 3600, limit: 240, timeframe: 'hour', aggregate: 1, poolLimit: 200 },
 ];
-const SMART_POOL_WINDOW_HOURS = 2;
-const SMART_PNL_WINDOW_HOURS = 2;
 const HOT_POOLS_DISPLAY_LIMIT = 20;
-const KLINE_MARKER_WINDOW_HOURS = 24;
-const KLINE_MARKER_FETCH_LIMIT = 1200;
-const KLINE_MARKER_RANGE_DEBOUNCE_MS = 240;
-const KLINE_MARKER_LIVE_REFRESH_MS = 4000;
-const KLINE_MARKER_IDLE_REFRESH_MS = 12000;
 const DEFAULT_KLINE_CHART_HEIGHT = 520;
 const MIN_KLINE_CHART_HEIGHT = 360;
 const MAX_KLINE_CHART_HEIGHT = 1200;
@@ -221,357 +199,10 @@ function reorderList(list, fromKey, toKey) {
   return rows;
 }
 
-function aggregatePoolAddWallets(rows) {
-  const map = new Map();
-
-  (Array.isArray(rows) ? rows : []).forEach((row, index) => {
-    const rawAddr = String(row?.wallet_address || '').trim();
-    const addr = rawAddr.toLowerCase();
-    const key = addr || `__unknown_${index}`;
-    const totalUsd = Number(row?.total_usd ?? 0);
-    const eventCount = Number(row?.event_count ?? 0);
-    const priceLower = Number(row?.price_lower ?? 0);
-    const priceUpper = Number(row?.price_upper ?? 0);
-    const hasRange =
-      Number.isFinite(priceLower) &&
-      priceLower > 0 &&
-      Number.isFinite(priceUpper) &&
-      priceUpper > 0;
-    const lastAtMs = Date.parse(String(row?.last_at || '')) || 0;
-    const rangeScore = hasRange ? totalUsd : -1;
-
-    if (!map.has(key)) {
-      map.set(key, {
-        ...row,
-        wallet_address: rawAddr,
-        total_usd: totalUsd,
-        event_count: eventCount,
-        _rangeScore: rangeScore,
-        _latestAtMs: lastAtMs,
-        latest_open_price: hasRange ? (priceLower + priceUpper) / 2 : 0,
-      });
-      return;
-    }
-
-    const prev = map.get(key);
-    prev.total_usd = Number(prev.total_usd ?? 0) + totalUsd;
-    prev.event_count = Number(prev.event_count ?? 0) + eventCount;
-
-    const prevLatestAtMs = Number(prev._latestAtMs ?? 0);
-    const shouldUseCurrentRange =
-      hasRange &&
-      (lastAtMs > prevLatestAtMs || (lastAtMs === prevLatestAtMs && rangeScore > Number(prev._rangeScore ?? -1)));
-
-    if (shouldUseCurrentRange) {
-      prev.price_lower = row?.price_lower;
-      prev.price_upper = row?.price_upper;
-      prev.price_base = row?.price_base;
-      prev.price_quote = row?.price_quote;
-      prev._rangeScore = rangeScore;
-      prev.latest_open_price = (priceLower + priceUpper) / 2;
-    }
-
-    if (lastAtMs > prevLatestAtMs) {
-      prev.last_at = row?.last_at;
-      prev._latestAtMs = lastAtMs;
-    }
-  });
-
-  return Array.from(map.values())
-    .map(({ _rangeScore, _latestAtMs, ...row }) => row)
-    .sort((a, b) => (
-      Number(b?.total_usd ?? 0) - Number(a?.total_usd ?? 0) ||
-      Number(b?.event_count ?? 0) - Number(a?.event_count ?? 0) ||
-      String(a?.wallet_address || '').localeCompare(String(b?.wallet_address || ''))
-    ));
-}
-
-function buildSmartWalletDetailKey(poolKey, row, index) {
-  return [
-    String(poolKey || '').trim().toLowerCase(),
-    normalizeWalletAddress(row?.wallet_address),
-    String(row?.token_id || '').trim(),
-    Number(row?.tick_lower ?? 0),
-    Number(row?.tick_upper ?? 0),
-    index,
-  ].join('|');
-}
-
-function matchSmartMoneyWalletPositions(positions, row, poolVersion, poolId) {
-  const version = String(poolVersion || '').trim().toLowerCase();
-  const normalizedPoolId = String(poolId || '').trim().toLowerCase();
-  const tokenId = String(row?.token_id || '').trim();
-  const tickLower = Number(row?.tick_lower ?? 0);
-  const tickUpper = Number(row?.tick_upper ?? 0);
-
-  const samePool = (Array.isArray(positions) ? positions : []).filter((item) => (
-    String(item?.pool_version || '').trim().toLowerCase() === version &&
-    String(item?.pool_id || '').trim().toLowerCase() === normalizedPoolId
-  ));
-  if (!samePool.length) return [];
-
-  if (tokenId) {
-    const exact = samePool.filter((item) => String(item?.position_id || '').trim() === tokenId);
-    if (exact.length) return exact;
-  }
-
-  const sameTicks = samePool.filter((item) => (
-    Number(item?.tick_lower ?? 0) === tickLower &&
-    Number(item?.tick_upper ?? 0) === tickUpper
-  ));
-  if (sameTicks.length) return sameTicks;
-
-  return samePool;
-}
-
-function formatSmartTokenAmount(value) {
-  const n = Number(value ?? 0);
-  if (!Number.isFinite(n)) return '--';
-  const abs = Math.abs(n);
-  if (abs === 0) return '0';
-  if (abs >= 1000) return formatNumber(n, 2);
-  if (abs >= 1) return n.toFixed(4).replace(/\.?0+$/, '');
-  return n.toPrecision(4);
-}
-
-function formatOptionalUsd(value) {
-  if (value === null || value === undefined || value === '') return '$--';
-  const n = Number(value);
-  return Number.isFinite(n) ? formatUsd(n) : '$--';
-}
-
-function estimateTokenUsd(amount, usd, targetAmount) {
-  const amountNum = Number(amount);
-  const usdNum = Number(usd);
-  const targetNum = Number(targetAmount);
-  if (!Number.isFinite(amountNum) || !Number.isFinite(usdNum) || !Number.isFinite(targetNum)) return null;
-  if (Math.abs(amountNum) < 1e-12) return null;
-  const price = usdNum / amountNum;
-  if (!Number.isFinite(price)) return null;
-  return price * targetNum;
-}
-
-function SmartMoneyPositionCard({ position, walletLabel, walletAddress, onSelectPool }) {
-  const version = String(position?.pool_version || '').trim().toUpperCase() || '--';
-  const protocolVersion = String(position?.pool_version || '').trim().toLowerCase();
-  const poolId = String(position?.pool_id || '').trim();
-  const positionId = String(position?.position_id || '').trim();
-  const exchange = String(position?.exchange || '').trim();
-  const dex = getDexIcon(exchange || version);
-  const protocolTagText = String(dex?.label || (version && version !== '--' ? version : '')).trim();
-  const exchangeText = !dex ? exchange : '';
-  const pair = String(position?.pair || '').trim() || shortAddress(poolId || '', 8, 6) || '--';
-  const feePct = Number(position?.fee_pct || 0);
-  const inRange = Boolean(position?.in_range);
-  const tickLower = Number(position?.tick_lower ?? 0);
-  const tickUpper = Number(position?.tick_upper ?? 0);
-  const currentTick = Number(position?.current_tick ?? 0);
-  const positionUsd = Number(position?.position_usd ?? (Number(position?.amount0_usd || 0) + Number(position?.amount1_usd || 0)));
-  const currentValueUsd = Number(position?.current_value_usd ?? (positionUsd + Number(position?.claimable_fees_usd || 0)));
-  const claimableFeeUsd = Number(position?.claimable_fees_usd ?? 0);
-  const claimableFee0 = Number(position?.claimable_fee0 ?? 0);
-  const claimableFee1 = Number(position?.claimable_fee1 ?? 0);
-  const pnl = Number(position?.absolute_pnl_usd ?? 0);
-  const hasPnl = Boolean(position?.has_pnl) || (Number.isFinite(pnl) && pnl !== 0);
-  const feeStatus = String(position?.fee_status || '').trim();
-  const feeError = String(position?.fee_error || '').trim();
-  const sym0 = String(position?.token0_symbol || '').trim() || 'T0';
-  const sym1 = String(position?.token1_symbol || '').trim() || 'T1';
-  const token0 = normalizeHexAddress(position?.token0);
-  const token1 = normalizeHexAddress(position?.token1);
-  const walletText = String(walletLabel || '').trim()
-    || shortAddress(normalizeWalletAddress(walletAddress), 6, 4)
-    || '当前钱包';
-  const feePnlClass = feeStatus === 'error' ? 'negative' : 'positive';
-  const priceRange = computePriceRange({
-    token_rows: [
-      {
-        symbol: sym0,
-        decimals: position?.token0_decimals,
-      },
-      {
-        symbol: sym1,
-        decimals: position?.token1_decimals,
-      },
-    ],
-    current_tick: position?.current_tick,
-    tick_lower: position?.tick_lower,
-    tick_upper: position?.tick_upper,
-    in_range: position?.in_range,
-  });
-  const tokenRows = [
-    {
-      key: '0',
-      symbol: sym0,
-      priceUsd: estimateTokenUsd(position?.amount0, position?.amount0_usd, 1),
-      positionAmount: position?.amount0,
-      positionUsd: position?.amount0_usd,
-      feeAmount: feeStatus === 'ok' ? claimableFee0 : '--',
-      feeUsd: feeStatus === 'ok' ? estimateTokenUsd(position?.amount0, position?.amount0_usd, claimableFee0) : null,
-    },
-    {
-      key: '1',
-      symbol: sym1,
-      priceUsd: estimateTokenUsd(position?.amount1, position?.amount1_usd, 1),
-      positionAmount: position?.amount1,
-      positionUsd: position?.amount1_usd,
-      feeAmount: feeStatus === 'ok' ? claimableFee1 : '--',
-      feeUsd: feeStatus === 'ok' ? estimateTokenUsd(position?.amount1, position?.amount1_usd, claimableFee1) : null,
-    },
-  ];
-
-  return (
-    <div className="pos-card sm-position-card">
-      <div className="pos-card-header sm-position-card-header">
-        <div
-          className="pos-card-left sm-position-card-left"
-          onClick={() => onSelectPool?.({
-            pool_id: poolId,
-            pool_address: poolId,
-            trading_pair: pair,
-            protocol_version: protocolVersion,
-            factory_name: exchange,
-            token0_address: token0,
-            token1_address: token1,
-            token0_symbol: sym0,
-            token1_symbol: sym1,
-          })}
-        >
-          <div className="pos-pair-row">
-            <span className="pos-pair-name">{pair}</span>
-            {feePct > 0 ? <span className="badge badge-fee">{formatPct(feePct)}</span> : null}
-            {protocolTagText ? (
-              <span className="tag tag-dex tag-dex-inline pos-dex-tag">
-                {dex?.src ? <img src={dex.src} alt="" /> : null}
-                <span>{protocolTagText}</span>
-              </span>
-            ) : null}
-          </div>
-          <div className="pos-status-row">
-            <span className="status-pill st-ok">
-              <span className="status-dot" />
-              当前仓位
-            </span>
-            <span className={`range-pill ${inRange ? 'in' : 'out'}`}>{inRange ? 'In Range' : 'Out'}</span>
-            {position?.running_since ? <span className="pos-running-dur">{formatDuration(position.running_since)}</span> : null}
-          </div>
-          <div className="sm-position-meta-row">
-            <span className="pos-wallet-chip">钱包 {walletText}</span>
-            {positionId ? <span className="sm-position-meta mono">#{positionId}</span> : null}
-            {exchangeText && exchangeText.toUpperCase() !== version ? <span className="sm-position-meta">{exchangeText}</span> : null}
-          </div>
-        </div>
-        <div className="pos-card-right-block">
-          <div className="pos-metrics">
-            <div className="pos-total">{formatOptionalUsd(currentValueUsd)}</div>
-            {hasPnl ? (
-              <div className={`pos-pnl ${pnl >= 0 ? 'positive' : 'negative'}`}>
-                {pnl >= 0 ? '+' : ''}{formatNumber(pnl, 2)}
-              </div>
-            ) : null}
-            <div className={`pos-pnl ${feePnlClass}`}>
-              手续费 {feeStatus === 'ok' ? formatUsd(claimableFeeUsd) : '--'}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="pos-token-table">
-        <div className="pos-token-head" style={{ gridTemplateColumns: '1.5fr 1fr 1fr' }}>
-          <span>Token</span><span>仓位</span><span>手续费</span>
-        </div>
-        {tokenRows.map((token) => (
-          <div key={token.key} className="pos-token-row" style={{ gridTemplateColumns: '1.5fr 1fr 1fr' }}>
-            <div className="pos-tk-name">
-              <div>{token.symbol}</div>
-              {Number.isFinite(token.priceUsd) ? (
-                <div className="pos-tk-price">${Number(token.priceUsd).toFixed(4)}</div>
-              ) : null}
-            </div>
-            <div className="pos-tk-cell">
-              <div>{formatSmartTokenAmount(token.positionAmount)}</div>
-              <div className="pos-tk-usd">{formatOptionalUsd(token.positionUsd)}</div>
-            </div>
-            <div className="pos-tk-cell fee">
-              <div>{typeof token.feeAmount === 'string' ? token.feeAmount : formatSmartTokenAmount(token.feeAmount)}</div>
-              <div className="pos-tk-usd">{formatOptionalUsd(token.feeUsd)}</div>
-            </div>
-          </div>
-        ))}
-        <div className="pos-token-foot" style={{ gridTemplateColumns: '1.5fr 1fr 1fr' }}>
-          <span>小计</span>
-          <span>{formatOptionalUsd(positionUsd)}</span>
-          <span className="fee">{feeStatus === 'ok' ? formatUsd(claimableFeeUsd) : '$--'}</span>
-        </div>
-      </div>
-
-      {priceRange && (
-        <div className="pos-price-range">
-          <div className="pos-price-range-header">
-            <span className="pos-price-range-label">价格范围 ({priceRange.pairLabel}{priceRange.gridCount ? ` ${priceRange.gridCount}格` : ''})</span>
-            {Number.isFinite(priceRange.deviation) && priceRange.deviation > 0 && (
-              <span className="pos-price-range-dev">{priceRange.deviation.toFixed(2)}%</span>
-            )}
-          </div>
-          <div className="pos-price-range-bar-wrap">
-            <div className="pos-price-range-bar">
-              <div className="pos-price-range-limit lo" />
-              <div className="pos-price-range-limit hi" />
-              {priceRange.visibleGridLines?.map((pct, index) => (
-                <div key={index} className="pos-price-range-grid" style={{ left: `calc(3% + ${pct * 0.94}%)` }} />
-              ))}
-              <div
-                className={`pos-price-range-cursor ${priceRange.inRange ? 'in' : 'out'}`}
-                style={{ left: `calc(3% + ${priceRange.percent * 0.94}%)` }}
-              />
-            </div>
-          </div>
-          <div className="pos-price-range-labels">
-            <span className="lo">{compactPrice(priceRange.rangeMin)}</span>
-            <span className="cur">{compactPrice((priceRange.rangeMin + priceRange.rangeMax) / 2)}</span>
-            <span className="hi">{compactPrice(priceRange.rangeMax)}</span>
-          </div>
-        </div>
-      )}
-
-      {(Number.isFinite(tickLower) || Number.isFinite(tickUpper) || Number.isFinite(currentTick)) && (
-        <div className="pos-range-info">
-          <span>
-            Tick {Number.isFinite(tickLower) ? tickLower : '--'} / {Number.isFinite(currentTick) ? currentTick : '--'} / {Number.isFinite(tickUpper) ? tickUpper : '--'}
-          </span>
-          {priceRange && <span className="pos-range-cur-price">当前价 {compactPrice(priceRange.currentPrice)}</span>}
-        </div>
-      )}
-
-      {feeStatus === 'error' && feeError ? (
-        <div className="sm-position-error">{feeError}</div>
-      ) : null}
-    </div>
-  );
-}
-
 function normalizeWalletAddress(value) {
   const raw = String(value || '').trim();
   if (!/^0x[0-9a-fA-F]{40}$/.test(raw)) return '';
   return `0x${raw.slice(2).toLowerCase()}`;
-}
-
-function walletTailLabel(value) {
-  const address = normalizeWalletAddress(value);
-  return address ? address.slice(-4) : '';
-}
-
-function isUserManagedWatchedWallet(wallet) {
-  const source = String(wallet?.source || '').trim().toLowerCase();
-  if (source === 'user_managed') return true;
-  return Number(wallet?.id || 0) > 0;
-}
-
-function buildPoolKey(poolVersion, poolId) {
-  const version = String(poolVersion || '').trim().toLowerCase();
-  const id = normalizePoolAddress(poolId);
-  if (!version || !id) return '';
-  return `${version}:${id}`;
 }
 
 function parseLoginUser(raw) {
@@ -653,9 +284,6 @@ export default function App() {
 
   const [walletBalances, setWalletBalances] = useState(null);
   const [walletBalancesChain, setWalletBalancesChain] = useState('');
-  const [smart, setSmart] = useState(null);
-  const [smartLoading, setSmartLoading] = useState(false);
-  const [smartError, setSmartError] = useState('');
 
   const [selectedPool, setSelectedPool] = useState(null);
   const [klineInterval, setKlineInterval] = useState('1m');
@@ -664,35 +292,13 @@ export default function App() {
   const [klineLoading, setKlineLoading] = useState(false);
   const [klineError, setKlineError] = useState('');
   const [klineSource, setKlineSource] = useState('');
-  const [klineMarkers, setKlineMarkers] = useState([]);
-  const [klineMarkerStats, setKlineMarkerStats] = useState({
-    totalEvents: 0,
-    addCount: 0,
-    removeCount: 0,
-    walletCount: 0,
-    truncated: false,
-    loadedEvents: 0,
-  });
-  const [klineMarkersLoading, setKlineMarkersLoading] = useState(false);
-  const [klineMarkersError, setKlineMarkersError] = useState('');
-  const [klineOverlayEnabled, setKlineOverlayEnabled] = useState(true);
-  const [klineOverlayAvailable, setKlineOverlayAvailable] = useState(true);
   const [klineRefreshNonce, setKlineRefreshNonce] = useState(0);
-  const [klineMarkerRefreshNonce, setKlineMarkerRefreshNonce] = useState(0);
-  const [selectedMarkerCluster, setSelectedMarkerCluster] = useState(null);
-  const [selectedSmartWallet, setSelectedSmartWallet] = useState(null);
-  const [klineVisibleRange, setKlineVisibleRange] = useState(null);
-  const [watchedWallets, setWatchedWallets] = useState([]);
-  const [watchToggleMap, setWatchToggleMap] = useState({});
   const [klineDrawTool, setKlineDrawTool] = useState('none');
   const [klineDrawResetNonce, setKlineDrawResetNonce] = useState(0);
-  const [klineMarkerFilterOpen, setKlineMarkerFilterOpen] = useState(false);
   const [klineHeightSettingsOpen, setKlineHeightSettingsOpen] = useState(false);
   const [klineChartHeight, setKlineChartHeight] = useState(() =>
     clampKlineChartHeight(storageGet(STORAGE.klineHeight) || DEFAULT_KLINE_CHART_HEIGHT)
   );
-  const [klineMarkerMinUsdInput, setKlineMarkerMinUsdInput] = useState('');
-  const [klineMarkerWalletFilter, setKlineMarkerWalletFilter] = useState(null);
 
   const [refreshing, setRefreshing] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false);
@@ -708,7 +314,6 @@ export default function App() {
   );
   const [draggingKey, setDraggingKey] = useState('');
   const [dragOverKey, setDragOverKey] = useState('');
-  const klineVisibleRangeTimerRef = useRef(null);
   const klineToolDockRef = useRef(null);
 
   const hasInitData = Boolean(initData);
@@ -746,11 +351,6 @@ export default function App() {
   );
   const klineIntervalMeta = useMemo(() => getKlineIntervalMeta(klineInterval), [klineInterval]);
   const selectedPoolGmgnUrl = useMemo(() => buildGmgnUrl(selectedPool, chain), [selectedPool, chain]);
-  const selectedPoolEmbedUrl = useMemo(
-    () => buildDexScreenerEmbedUrl(selectedPool, chain),
-    [selectedPool, chain]
-  );
-
   const filteredHotPools = useMemo(() => {
     const q = String(keyword || '').trim().toLowerCase();
     const positionPoolMap = new Map();
@@ -825,256 +425,27 @@ export default function App() {
     return map;
   }, [walletBalances]);
 
-  const smartPools = useMemo(() => {
-    const rows = Array.isArray(smart?.pools) ? smart.pools : [];
-    return [...rows].sort((a, b) => (
-      Number(b?.wallet_count || 0) - Number(a?.wallet_count || 0) ||
-      Number(b?.added_liquidity || 0) - Number(a?.added_liquidity || 0) ||
-      String(a?.pool_id || '').localeCompare(String(b?.pool_id || ''))
-    ));
-  }, [smart]);
-  const smartDisplayPools = useMemo(() => smartPools.slice(0, 10), [smartPools]);
-
-  const smartWallets = useMemo(() => {
-    const rows = Array.isArray(smart?.wallets_24h) ? smart.wallets_24h : [];
-    return [...rows].sort((a, b) => Number(b?.pnl_usdt_24h || 0) - Number(a?.pnl_usdt_24h || 0));
-  }, [smart]);
-  const watchedWalletMap = useMemo(() => {
-    const map = new Map();
-    (Array.isArray(watchedWallets) ? watchedWallets : []).forEach((wallet) => {
-      const address = normalizeWalletAddress(wallet?.wallet_address);
-      if (!address) return;
-      map.set(address, wallet);
-    });
-    return map;
-  }, [watchedWallets]);
-  const watchedWalletSet = useMemo(() => new Set(watchedWalletMap.keys()), [watchedWalletMap]);
-  const selectedPoolKey = useMemo(
-    () => buildPoolKey(selectedPoolVersion, selectedPoolAddress),
-    [selectedPoolAddress, selectedPoolVersion]
-  );
-  const selectedSmartWalletAddress = useMemo(
-    () => (selectedSmartWallet?.poolKey === selectedPoolKey ? normalizeWalletAddress(selectedSmartWallet?.wallet_address) : ''),
-    [selectedPoolKey, selectedSmartWallet]
-  );
-  const selectedSmartWalletOverlay = useMemo(() => {
-    if (!selectedSmartWallet || selectedSmartWallet.poolKey !== selectedPoolKey) return [];
-    const lower = Number(selectedSmartWallet?.price_lower || 0);
-    const upper = Number(selectedSmartWallet?.price_upper || 0);
-    if (!Number.isFinite(lower) || lower <= 0 || !Number.isFinite(upper) || upper <= 0) return [];
-    return [{
-      id: `selected:${selectedSmartWalletAddress || 'wallet'}`,
-      type: 'range',
-      walletAddress: selectedSmartWalletAddress,
-      label: String(selectedSmartWallet?.wallet_label || '').trim() || walletTailLabel(selectedSmartWalletAddress),
-      priceLower: Math.min(lower, upper),
-      priceUpper: Math.max(lower, upper),
-      price: (lower + upper) / 2,
-      color: 'yellow',
-      minPixelGap: 26,
-      showAvatar: false,
-      avatarUrl: walletAvatarUrl(selectedSmartWalletAddress),
-    }];
-  }, [selectedPoolKey, selectedSmartWallet, selectedSmartWalletAddress]);
-  const watchedMidlineOverlays = useMemo(() => {
-    if (!selectedPoolKey || !watchedWalletSet.size) return [];
-    const latestByWallet = new Map();
-    (Array.isArray(klineMarkers) ? klineMarkers : []).forEach((row) => {
-      const address = normalizeWalletAddress(row?.wallet_address);
-      if (!address || !watchedWalletSet.has(address)) return;
-      if (address === selectedSmartWalletAddress) return;
-      if (String(row?.action || '').trim().toLowerCase() === 'remove') return;
-      const lower = Number(row?.price_lower || 0);
-      const upper = Number(row?.price_upper || 0);
-      if (!Number.isFinite(lower) || lower <= 0 || !Number.isFinite(upper) || upper <= 0) return;
-      const ts = Number(row?.t || row?.bucket_t || 0);
-      const prev = latestByWallet.get(address);
-      if (prev && prev.ts >= ts) return;
-      const watchedLabel = String(watchedWalletMap.get(address)?.label || '').trim();
-      latestByWallet.set(address, {
-        ts,
-        label: watchedLabel || walletTailLabel(address),
-        price: (lower + upper) / 2,
-      });
-    });
-    return Array.from(latestByWallet.entries()).map(([address, item]) => ({
-      id: `watched:${address}`,
-      type: 'mid',
-      walletAddress: address,
-      label: item.label,
-      price: item.price,
-      color: 'blue',
-    }));
-  }, [klineMarkers, selectedPoolKey, selectedSmartWalletAddress, watchedWalletMap, watchedWalletSet]);
-  const klineMarkerWalletOptions = useMemo(() => {
-    const byWallet = new Map();
-    (Array.isArray(klineMarkers) ? klineMarkers : []).forEach((row) => {
-      const address = normalizeWalletAddress(row?.wallet_address);
-      if (!address) return;
-      const prev = byWallet.get(address) || {
-        address,
-        label: '',
-        totalUSD: 0,
-        count: 0,
-      };
-      const label = String(row?.wallet_label || watchedWalletMap.get(address)?.label || '').trim();
-      prev.label = prev.label || label;
-      prev.totalUSD += Number(row?.estimated_usd || 0);
-      prev.count += 1;
-      byWallet.set(address, prev);
-    });
-    return Array.from(byWallet.values())
-      .map((item) => ({
-        ...item,
-        displayLabel: item.label || walletTailLabel(item.address),
-      }))
-      .sort((a, b) => (
-        Number(b.totalUSD || 0) - Number(a.totalUSD || 0) ||
-        Number(b.count || 0) - Number(a.count || 0) ||
-        String(a.address || '').localeCompare(String(b.address || ''))
-      ));
-  }, [klineMarkers, watchedWalletMap]);
-  const klineMarkerWalletAddresses = useMemo(
-    () => klineMarkerWalletOptions.map((item) => item.address),
-    [klineMarkerWalletOptions]
-  );
-  const klineMarkerMinUsd = useMemo(() => {
-    const value = Number(String(klineMarkerMinUsdInput || '').trim());
-    return Number.isFinite(value) && value > 0 ? value : 0;
-  }, [klineMarkerMinUsdInput]);
-  const klineMarkerWalletFilterSet = useMemo(() => {
-    if (klineMarkerWalletFilter === null) return null;
-    return new Set(klineMarkerWalletFilter);
-  }, [klineMarkerWalletFilter]);
-  const filteredKlineMarkers = useMemo(() => {
-    return (Array.isArray(klineMarkers) ? klineMarkers : []).filter((row) => {
-      const amountUSD = Number(row?.estimated_usd || 0);
-      const address = normalizeWalletAddress(row?.wallet_address);
-      if (klineMarkerMinUsd > 0 && (!Number.isFinite(amountUSD) || amountUSD < klineMarkerMinUsd)) return false;
-      if (klineMarkerWalletFilterSet && (!address || !klineMarkerWalletFilterSet.has(address))) return false;
-      return true;
-    });
-  }, [klineMarkerMinUsd, klineMarkerWalletFilterSet, klineMarkers]);
-  const klineMarkerFilterActive = klineMarkerMinUsd > 0 || klineMarkerWalletFilter !== null;
   const klineChartHeightCustomized = klineChartHeight !== DEFAULT_KLINE_CHART_HEIGHT;
-  const klineMarkerSelectedWalletCount = useMemo(() => {
-    if (klineMarkerWalletFilter === null) return klineMarkerWalletAddresses.length;
-    return klineMarkerWalletFilter.length;
-  }, [klineMarkerWalletAddresses.length, klineMarkerWalletFilter]);
-  const klineMarkerWalletCount = useMemo(() => {
-    const seen = new Set();
-    filteredKlineMarkers.forEach((row) => {
-      const addr = normalizeWalletAddress(row?.wallet_address);
-      if (addr) seen.add(addr);
-    });
-    return seen.size;
-  }, [filteredKlineMarkers]);
-  const klineMarkerAddCount = useMemo(
-    () => filteredKlineMarkers.filter((row) => String(row?.action || '').toLowerCase() !== 'remove').length,
-    [filteredKlineMarkers]
-  );
-  const klineMarkerRemoveCount = useMemo(
-    () => filteredKlineMarkers.filter((row) => String(row?.action || '').toLowerCase() === 'remove').length,
-    [filteredKlineMarkers]
-  );
-  const klineMarkerEventCount = filteredKlineMarkers.length;
   const klineViewportKey = useMemo(
     () => `${selectedPoolAddress || 'pool'}:${klineTokenAddress || 'token'}:${klineInterval}`,
     [klineInterval, klineTokenAddress, selectedPoolAddress]
   );
-  const klineCandleRange = useMemo(() => {
-    const rows = Array.isArray(klineCandles) ? klineCandles : [];
-    if (!rows.length) return null;
-    const first = toUnixSeconds(rows[0]?.t);
-    const last = toUnixSeconds(rows[rows.length - 1]?.t);
-    if (!first || !last) return null;
-    return first <= last ? { from: first, to: last } : { from: last, to: first };
-  }, [klineCandles]);
-  const klineMarkerQueryRange = useMemo(
-    () => normalizeKlineRange(klineVisibleRange) || normalizeKlineRange(klineCandleRange),
-    [klineCandleRange, klineVisibleRange]
-  );
-  const klineCandlePriceRows = useMemo(() => (
-    (Array.isArray(klineCandles) ? klineCandles : [])
-      .map((row) => ({ t: toUnixSeconds(row?.t), c: Number(row?.c || 0) }))
-      .filter((row) => row.t > 0 && Number.isFinite(row.c))
-      .sort((a, b) => a.t - b.t)
-  ), [klineCandles]);
-  const resolveMarkerCandleClose = useCallback(
-    (ts) => findNearestCandleClose(klineCandlePriceRows, ts),
-    [klineCandlePriceRows]
-  );
-  const klineMarkerRangeFrom = Number(klineMarkerQueryRange?.from || 0);
-  const klineMarkerRangeTo = Number(klineMarkerQueryRange?.to || 0);
-  const klineMarkersWatchingLatest = useMemo(() => {
-    if (!klineMarkerRangeTo) return true;
-    const now = Math.floor(Date.now() / 1000);
-    return klineMarkerRangeTo >= now - Math.max(klineIntervalMeta.bucketSec * 2, 120);
-  }, [klineIntervalMeta.bucketSec, klineMarkerRangeTo]);
-  const klineMarkersRefreshMs = useMemo(
-    () => (klineMarkersWatchingLatest ? KLINE_MARKER_LIVE_REFRESH_MS : KLINE_MARKER_IDLE_REFRESH_MS),
-    [klineMarkersWatchingLatest]
-  );
-  const handleKlineVisibleRangeChange = useCallback((nextRange) => {
-    const normalized = normalizeKlineRange(nextRange);
-    if (!normalized) return;
-    if (klineVisibleRangeTimerRef.current) {
-      window.clearTimeout(klineVisibleRangeTimerRef.current);
-    }
-    klineVisibleRangeTimerRef.current = window.setTimeout(() => {
-      setKlineVisibleRange((prev) => (klineRangesEqual(prev, normalized) ? prev : normalized));
-      klineVisibleRangeTimerRef.current = null;
-    }, KLINE_MARKER_RANGE_DEBOUNCE_MS);
-  }, []);
-  const toggleKlineMarkerWalletFilter = useCallback((walletAddress) => {
-    const address = normalizeWalletAddress(walletAddress);
-    if (!address) return;
-    setKlineMarkerWalletFilter((prev) => {
-      const base = prev === null ? [...klineMarkerWalletAddresses] : prev.filter((item) => klineMarkerWalletAddresses.includes(item));
-      const exists = base.includes(address);
-      const next = exists
-        ? base.filter((item) => item !== address)
-        : [...base, address];
-      if (next.length === klineMarkerWalletAddresses.length) return null;
-      return next;
-    });
-  }, [klineMarkerWalletAddresses]);
   const clearKlineDrawing = useCallback(() => {
     setKlineDrawResetNonce((prev) => prev + 1);
   }, []);
   const resetKlineChartHeight = useCallback(() => {
     setKlineChartHeight(DEFAULT_KLINE_CHART_HEIGHT);
   }, []);
-  const resetKlineMarkerFilter = useCallback(() => {
-    setKlineMarkerMinUsdInput('');
-    setKlineMarkerWalletFilter(null);
-  }, []);
 
   useEffect(() => {
-    if (!klineMarkerWalletAddresses.length) {
-      setKlineMarkerWalletFilter(null);
-      return;
-    }
-    setKlineMarkerWalletFilter((prev) => {
-      if (prev === null) return prev;
-      return prev.filter((item) => klineMarkerWalletAddresses.includes(item));
-    });
-  }, [klineMarkerWalletAddresses]);
-
-  useEffect(() => {
-    setSelectedMarkerCluster(null);
-  }, [klineMarkerMinUsd, klineMarkerWalletFilter]);
-
-  useEffect(() => {
-    if (!klineMarkerFilterOpen && !klineHeightSettingsOpen) return undefined;
+    if (!klineHeightSettingsOpen) return undefined;
     const handlePointerDown = (event) => {
       if (klineToolDockRef.current?.contains(event.target)) return;
-      setKlineMarkerFilterOpen(false);
       setKlineHeightSettingsOpen(false);
     };
     document.addEventListener('mousedown', handlePointerDown);
     return () => document.removeEventListener('mousedown', handlePointerDown);
-  }, [klineHeightSettingsOpen, klineMarkerFilterOpen]);
+  }, [klineHeightSettingsOpen]);
 
   useEffect(() => {
     storageSet(STORAGE.chain, chain);
@@ -1191,37 +562,6 @@ export default function App() {
     [apiBaseUrl, chain, hasInitData, initData]
   );
 
-  const loadSmart = useCallback(
-    async (signal) => {
-      if (!hasInitData) {
-        setSmart(null);
-        setSmartError('请先点击右上角 Telegram 图标扫码登录。');
-        return;
-      }
-      setSmartLoading(true);
-      setSmartError('');
-      try {
-        setSmart(
-          await fetchSmartMoneyOverview({
-            apiBaseUrl,
-            initData,
-            chain,
-            poolLimit: 24,
-            walletLimit: 20,
-            poolsWindowHours: SMART_POOL_WINDOW_HOURS,
-            pnlWindowHours: SMART_PNL_WINDOW_HOURS,
-            signal,
-          })
-        );
-      } catch (e) {
-        if (e?.name !== 'AbortError') setSmartError(String(e?.message || e));
-      } finally {
-        setSmartLoading(false);
-      }
-    },
-    [apiBaseUrl, chain, hasInitData, initData]
-  );
-
   const loadKline = useCallback(
     async (signal) => {
       if (!hasInitData) {
@@ -1272,108 +612,6 @@ export default function App() {
     ]
   );
 
-  const loadKlineMarkers = useCallback(
-    async (signal) => {
-      if (!hasInitData || !selectedPoolAddress || !selectedPoolVersion) {
-        setKlineMarkers([]);
-        setKlineMarkerStats({ totalEvents: 0, addCount: 0, removeCount: 0, walletCount: 0, truncated: false, loadedEvents: 0 });
-        setKlineMarkersError('');
-        return;
-      }
-      if (!klineOverlayEnabled || !klineOverlayAvailable) {
-        setKlineMarkers([]);
-        setKlineMarkerStats({ totalEvents: 0, addCount: 0, removeCount: 0, walletCount: 0, truncated: false, loadedEvents: 0 });
-        setKlineMarkersError('');
-        return;
-      }
-
-      setKlineMarkersLoading(true);
-      setKlineMarkersError('');
-      try {
-        const startTs = klineMarkerRangeFrom;
-        const endTs = klineMarkerRangeTo;
-        const fallbackWindowSec = KLINE_MARKER_WINDOW_HOURS * 3600;
-        const rangeWindowSec = startTs > 0 && endTs >= startTs
-          ? Math.max(klineIntervalMeta.bucketSec, endTs - startTs)
-          : fallbackWindowSec;
-        const [smartResp, myResp] = await Promise.allSettled([
-          fetchSmartMoneyPoolMarkers({
-            apiBaseUrl,
-            initData,
-            chain: selectedPool?.chain || chain,
-            poolVersion: selectedPoolVersion,
-            poolId: selectedPoolAddress,
-            bucketSec: klineIntervalMeta.bucketSec,
-            windowHours: KLINE_MARKER_WINDOW_HOURS,
-            startTs,
-            endTs,
-            limit: KLINE_MARKER_FETCH_LIMIT,
-            signal,
-          }),
-          fetchMyTradeMarkers({
-            apiBaseUrl,
-            initData,
-            chain: selectedPool?.chain || chain,
-            poolId: selectedPoolAddress,
-            bucketSec: klineIntervalMeta.bucketSec,
-            startTs,
-            endTs,
-            windowSec: rangeWindowSec,
-            signal,
-          }),
-        ]);
-
-        if (smartResp.status === 'rejected') {
-          const e = smartResp.reason;
-          if (e?.name === 'AbortError') return;
-          if (e?.status === 403) {
-            setKlineOverlayAvailable(false);
-            setKlineOverlayEnabled(false);
-            setKlineMarkers([]);
-            setKlineMarkerStats({ totalEvents: 0, addCount: 0, removeCount: 0, walletCount: 0, truncated: false, loadedEvents: 0 });
-            setKlineMarkersError('当前账号没有聪明钱权限，已切换为纯 K 线模式。');
-            return;
-          }
-          setKlineMarkersError(String(e?.message || e));
-        }
-
-        setKlineOverlayAvailable(true);
-        const smartEvents = smartResp.status === 'fulfilled' && Array.isArray(smartResp.value?.events) ? smartResp.value.events : [];
-        const myEvents = myResp.status === 'fulfilled' && Array.isArray(myResp.value?.events) ? myResp.value.events : [];
-        const smartValue = smartResp.status === 'fulfilled' ? smartResp.value : null;
-        setKlineMarkerStats({
-          totalEvents: Number(smartValue?.total_events || smartEvents.length || 0),
-          addCount: Number(smartValue?.add_count || 0),
-          removeCount: Number(smartValue?.remove_count || 0),
-          walletCount: Number(smartValue?.wallet_count || 0),
-          truncated: Boolean(smartValue?.truncated),
-          loadedEvents: smartEvents.length,
-        });
-        setKlineMarkers([...smartEvents, ...myEvents]);
-      } catch (e) {
-        if (e?.name === 'AbortError') return;
-        setKlineMarkerStats({ totalEvents: 0, addCount: 0, removeCount: 0, walletCount: 0, truncated: false, loadedEvents: 0 });
-        setKlineMarkersError(String(e?.message || e));
-      } finally {
-        setKlineMarkersLoading(false);
-      }
-    },
-    [
-      apiBaseUrl,
-      chain,
-      hasInitData,
-      initData,
-      klineIntervalMeta.bucketSec,
-      klineMarkerRangeFrom,
-      klineMarkerRangeTo,
-      klineOverlayAvailable,
-      klineOverlayEnabled,
-      selectedPool?.chain,
-      selectedPoolAddress,
-      selectedPoolVersion,
-    ]
-  );
-
   useEffect(() => {
     const ctrl = new AbortController();
     loadHotPools(ctrl.signal);
@@ -1388,12 +626,6 @@ export default function App() {
 
   useEffect(() => {
     const ctrl = new AbortController();
-    loadSmart(ctrl.signal);
-    return () => ctrl.abort();
-  }, [loadSmart]);
-
-  useEffect(() => {
-    const ctrl = new AbortController();
     loadWalletBalances(ctrl.signal);
     return () => ctrl.abort();
   }, [loadWalletBalances]);
@@ -1403,12 +635,6 @@ export default function App() {
     loadKline(ctrl.signal);
     return () => ctrl.abort();
   }, [loadKline, klineRefreshNonce]);
-
-  useEffect(() => {
-    const ctrl = new AbortController();
-    loadKlineMarkers(ctrl.signal);
-    return () => ctrl.abort();
-  }, [loadKlineMarkers, klineMarkerRefreshNonce, klineRefreshNonce]);
 
   useEffect(() => {
     if (!hasInitData) return undefined;
@@ -1436,25 +662,6 @@ export default function App() {
   }, [hasInitData, klineTokenAddress]);
 
   useEffect(() => {
-    if (!hasInitData) return undefined;
-    const timer = window.setInterval(() => loadSmart(), Math.max(refreshInterval * 1000, 30_000));
-    return () => window.clearInterval(timer);
-  }, [hasInitData, loadSmart, refreshInterval]);
-
-  useEffect(() => {
-    if (!hasInitData || !selectedPoolAddress || !klineOverlayEnabled || !klineOverlayAvailable) return undefined;
-    const timer = window.setInterval(() => setKlineMarkerRefreshNonce((n) => n + 1), klineMarkersRefreshMs);
-    return () => window.clearInterval(timer);
-  }, [hasInitData, klineMarkersRefreshMs, klineOverlayAvailable, klineOverlayEnabled, selectedPoolAddress]);
-
-  useEffect(() => () => {
-    if (klineVisibleRangeTimerRef.current) {
-      window.clearTimeout(klineVisibleRangeTimerRef.current);
-      klineVisibleRangeTimerRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => {
     if (!hotPools.length) return;
     setSelectedPool((prev) => {
       const prevAddr = normalizePoolAddress(prev?.pool_address || prev?.pool_id);
@@ -1471,74 +678,16 @@ export default function App() {
   }, [chain]);
 
   useEffect(() => {
-    if (klineVisibleRangeTimerRef.current) {
-      window.clearTimeout(klineVisibleRangeTimerRef.current);
-      klineVisibleRangeTimerRef.current = null;
-    }
-    setKlineVisibleRange(null);
     setKlineDrawTool('none');
     setKlineDrawResetNonce((prev) => prev + 1);
   }, [klineViewportKey]);
 
   useEffect(() => {
     setKlineTokenSide('auto');
-    setSelectedMarkerCluster(null);
-    setKlineMarkers([]);
-    setKlineMarkerStats({ totalEvents: 0, addCount: 0, removeCount: 0, walletCount: 0, truncated: false, loadedEvents: 0 });
-    setKlineMarkersError('');
     setKlineSource('');
-    setKlineMarkerRefreshNonce(0);
-    setKlineMarkerFilterOpen(false);
-    setKlineMarkerWalletFilter(null);
+    setKlineDrawTool('none');
+    setKlineDrawResetNonce((prev) => prev + 1);
   }, [selectedPoolAddress]);
-
-  useEffect(() => {
-    if (!selectedSmartWallet) return;
-    if (selectedSmartWallet.poolKey === selectedPoolKey) return;
-    setSelectedSmartWallet(null);
-  }, [selectedPoolKey, selectedSmartWallet]);
-
-  useEffect(() => {
-    if (!klineOverlayEnabled) {
-      setSelectedMarkerCluster(null);
-      setKlineMarkerFilterOpen(false);
-    }
-  }, [klineOverlayEnabled]);
-
-  useEffect(() => {
-    setKlineOverlayAvailable(true);
-  }, [initData]);
-
-  const syncWatchedWallets = useCallback(async (signal) => {
-    if (!hasInitData) {
-      setWatchedWallets([]);
-      setWatchToggleMap({});
-      return;
-    }
-    const resp = await fetchSmartMoneyWatchedWallets({
-      apiBaseUrl,
-      initData,
-      chain,
-      signal,
-    });
-    const rows = Array.isArray(resp?.wallets) ? resp.wallets : [];
-    setWatchedWallets(rows.filter(isUserManagedWatchedWallet));
-  }, [apiBaseUrl, chain, hasInitData, initData]);
-
-  useEffect(() => {
-    if (!hasInitData) {
-      setWatchedWallets([]);
-      setWatchToggleMap({});
-      return undefined;
-    }
-    const ctrl = new AbortController();
-    syncWatchedWallets(ctrl.signal)
-      .catch((e) => {
-        if (e?.name === 'AbortError') return;
-        setWatchedWallets([]);
-      });
-    return () => ctrl.abort();
-  }, [hasInitData, syncWatchedWallets]);
 
   const [loginCode, setLoginCode] = useState('');
   const [loginCodeExpiry, setLoginCodeExpiry] = useState(0);
@@ -1610,16 +759,15 @@ export default function App() {
     storageRemove(STORAGE.loginUser);
     setHotPools([]);
     setPositions(null);
-    setSmart(null);
   }, []);
 
   const refreshAll = useCallback(async () => {
     if (!hasInitData) return;
     setRefreshing(true);
-    await Promise.allSettled([loadHotPools(), loadPositions(), loadSmart()]);
+    await Promise.allSettled([loadHotPools(), loadPositions()]);
     setKlineRefreshNonce((v) => v + 1);
     setRefreshing(false);
-  }, [hasInitData, loadHotPools, loadPositions, loadSmart]);
+  }, [hasInitData, loadHotPools, loadPositions]);
 
   const refreshKline = useCallback(() => {
     setKlineRefreshNonce((v) => v + 1);
@@ -1675,60 +823,6 @@ export default function App() {
     });
     loadWalletsForModal(resolvedChain);
   }, [chain, loadWalletsForModal]);
-
-  useEffect(() => {
-    if (!openPosPool || !hasInitData) return undefined;
-
-    const existing = Array.isArray(openPosPool?.smartMoneyWallets)
-      ? openPosPool.smartMoneyWallets
-      : [];
-    if (existing.length > 0) return undefined;
-
-    const poolId = normalizePoolAddress(openPosPool?.pool_address || openPosPool?.pool_id);
-    const poolVersion = String(
-      openPosPool?.protocol_version || openPosPool?.pool_version || inferPoolVersion(openPosPool) || ''
-    )
-      .trim()
-      .toLowerCase();
-    if (!poolId || !poolVersion) return undefined;
-
-    let cancelled = false;
-    const ctrl = new AbortController();
-
-    fetchSmartMoneyPoolAdds({
-      apiBaseUrl,
-      initData,
-      chain: openPosPool?.chain || chain,
-      poolVersion,
-      poolId,
-      windowHours: SMART_POOL_WINDOW_HOURS,
-      limit: 120,
-      signal: ctrl.signal,
-    })
-      .then((res) => {
-        if (cancelled) return;
-        const wallets = Array.isArray(res?.wallets) ? res.wallets : [];
-        setOpenPosPool((prev) => {
-          if (!prev) return prev;
-          const prevId = normalizePoolAddress(prev?.pool_address || prev?.pool_id);
-          const prevVersion = String(
-            prev?.protocol_version || prev?.pool_version || inferPoolVersion(prev) || ''
-          )
-            .trim()
-            .toLowerCase();
-          if (prevId !== poolId || prevVersion !== poolVersion) return prev;
-          return { ...prev, smartMoneyWallets: wallets };
-        });
-      })
-      .catch((e) => {
-        if (cancelled || e?.name === 'AbortError') return;
-      });
-
-    return () => {
-      cancelled = true;
-      ctrl.abort();
-    };
-  }, [apiBaseUrl, chain, hasInitData, initData, openPosPool]);
 
   const handleOpenPosition = useCallback(async (params) => {
     const panelKey = openPosPool?.panelKey || 'hot_pools';
@@ -1827,54 +921,6 @@ export default function App() {
     navigator.clipboard?.writeText(addr).catch(() => {});
   }, []);
 
-  const handleToggleWatchedWallet = useCallback(async (walletAddress, label = '', watchedHint = null) => {
-    const address = normalizeWalletAddress(walletAddress);
-    if (!address || !hasInitData) return;
-    if (watchToggleMap[address]) return;
-
-    setWatchToggleMap((prev) => ({ ...prev, [address]: true }));
-    const watched = typeof watchedHint === 'boolean' ? watchedHint : watchedWalletSet.has(address);
-    const rollback = watchedWallets;
-
-    setWatchedWallets((prev) => (
-      watched
-        ? prev.filter((item) => normalizeWalletAddress(item?.wallet_address) !== address)
-        : [...prev, { wallet_address: address, label: String(label || '').trim(), source: 'user_managed' }]
-    ));
-
-    try {
-      if (watched) {
-        await removeSmartMoneyWatchedWallets({
-          apiBaseUrl,
-          initData,
-          chain,
-          walletAddresses: [address],
-        });
-      } else {
-        await addSmartMoneyWatchedWallets({
-          apiBaseUrl,
-          initData,
-          chain,
-          wallets: [{ address, label: String(label || '').trim() }],
-        });
-      }
-    } catch (e) {
-      setWatchedWallets(rollback);
-      return;
-    } finally {
-      setWatchToggleMap((prev) => {
-        const next = { ...prev };
-        delete next[address];
-        return next;
-      });
-    }
-    try {
-      await syncWatchedWallets();
-    } catch {
-      // Keep optimistic state if sync fails after the toggle request succeeded.
-    }
-  }, [apiBaseUrl, chain, hasInitData, initData, syncWatchedWallets, watchToggleMap, watchedWalletSet, watchedWallets]);
-
   const renderOperationProgress = (panelKey) => {
     if (!operationProgress || operationProgress.panelKey !== panelKey) return null;
     return (
@@ -1893,278 +939,6 @@ export default function App() {
   };
 
   const summary = positions?.summary || {};
-  const smartSummary = smart?.summary || {};
-
-  // Pool adds preview data: { "v3:0x1234": { status, wallets, totalUsd, error } }
-  const [poolAddsMap, setPoolAddsMap] = useState({});
-  const [smartWalletDetailMap, setSmartWalletDetailMap] = useState({});
-  const smartWalletDetailMapRef = useRef({});
-  const openSmartWalletRequestsRef = useRef([]);
-
-  useEffect(() => {
-    smartWalletDetailMapRef.current = smartWalletDetailMap || {};
-  }, [smartWalletDetailMap]);
-
-  const openSmartWalletRequests = useMemo(() => (
-    Object.values(smartWalletDetailMap || {})
-      .filter((entry) => entry?.open && entry?.request)
-      .map((entry) => entry.request)
-  ), [smartWalletDetailMap]);
-
-  const openSmartWalletRequestSignature = useMemo(() => (
-    openSmartWalletRequests
-      .map((request) => buildSmartWalletDetailKey(request?.poolKey, request?.row, request?.rowIndex))
-      .sort()
-      .join('||')
-  ), [openSmartWalletRequests]);
-
-  useEffect(() => {
-    openSmartWalletRequestsRef.current = openSmartWalletRequests;
-  }, [openSmartWalletRequests]);
-
-  useEffect(() => {
-    setSmartWalletDetailMap({});
-  }, [chain, initData]);
-
-  const smartVisiblePools = useMemo(() => (
-    smartDisplayPools.filter((pool) => {
-      const key = buildPoolKey(pool?.pool_version, pool?.pool_id)
-        || `${pool?.pool_version || ''}:${pool?.pool_id || ''}`;
-      const adds = poolAddsMap[key];
-      if (adds?.status !== 'success') return true;
-      const wallets = aggregatePoolAddWallets(adds?.wallets || []);
-      return wallets.length > 0;
-    })
-  ), [poolAddsMap, smartDisplayPools]);
-
-  // Auto-load pool adds for top pools when smart data changes
-  useEffect(() => {
-    if (!smartDisplayPools.length || !hasInitData) return;
-    const ctrl = new AbortController();
-    const toLoad = smartDisplayPools;
-    toLoad.forEach((pool) => {
-      const key = buildPoolKey(pool?.pool_version, pool?.pool_id)
-        || `${pool?.pool_version || ''}:${pool?.pool_id || ''}`;
-      if (poolAddsMap[key]?.status === 'loading') return;
-      setPoolAddsMap((prev) => ({
-        ...prev,
-        [key]: {
-          status: 'loading',
-          wallets: Array.isArray(prev[key]?.wallets) ? prev[key].wallets : [],
-          totalUsd: Number(prev[key]?.totalUsd || 0),
-          error: '',
-        },
-      }));
-      fetchSmartMoneyPoolAdds({
-        apiBaseUrl,
-        initData,
-        chain,
-        poolVersion: pool?.pool_version,
-        poolId: pool?.pool_id,
-        windowHours: SMART_POOL_WINDOW_HOURS,
-        limit: 20,
-        signal: ctrl.signal,
-      })
-        .then((res) => {
-          const wallets = Array.isArray(res?.wallets) ? res.wallets : [];
-          const totalUsd = wallets.reduce((s, w) => s + Number(w?.total_usd || 0), 0);
-          setPoolAddsMap((prev) => ({
-            ...prev,
-            [key]: { status: 'success', wallets, totalUsd, error: '' },
-          }));
-        })
-        .catch((e) => {
-          if (e?.name === 'AbortError') return;
-          setPoolAddsMap((prev) => ({
-            ...prev,
-            [key]: { status: 'error', wallets: [], totalUsd: 0, error: String(e?.message || e) },
-          }));
-        });
-    });
-    return () => ctrl.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [smartDisplayPools, hasInitData, apiBaseUrl, initData, chain]);
-
-  const loadSmartWalletDetail = useCallback(async ({
-    poolKey,
-    poolVersion,
-    poolId,
-    row,
-    rowIndex,
-    signal,
-    silent = false,
-  }) => {
-    const detailKey = buildSmartWalletDetailKey(poolKey, row, rowIndex);
-    const request = { poolKey, poolVersion, poolId, row, rowIndex };
-    const current = smartWalletDetailMapRef.current?.[detailKey] || {};
-    const existingPositions = Array.isArray(current?.positions) ? current.positions : [];
-    const existingWarnings = Array.isArray(current?.warnings) ? current.warnings : [];
-
-    if (!hasInitData) return;
-
-    setSmartWalletDetailMap((prev) => {
-      const existing = prev?.[detailKey] || {};
-      const cachedPositions = Array.isArray(existing?.positions) ? existing.positions : existingPositions;
-      const cachedWarnings = Array.isArray(existing?.warnings) ? existing.warnings : existingWarnings;
-      return {
-        ...(prev || {}),
-        [detailKey]: {
-          ...existing,
-          request,
-          open: true,
-          status: silent && cachedPositions.length > 0 ? 'success' : 'loading',
-          error: silent && cachedPositions.length > 0 ? String(existing?.error || '') : '',
-          positions: cachedPositions,
-          warnings: cachedWarnings,
-          refreshing: true,
-        },
-      };
-    });
-
-    try {
-      const resp = await fetchSmartMoneyWalletPositions({
-        apiBaseUrl,
-        initData,
-        chain,
-        walletAddress: row?.wallet_address,
-        windowHours: SMART_PNL_WINDOW_HOURS,
-        limit: 80,
-        signal,
-      });
-      const positions = matchSmartMoneyWalletPositions(resp?.positions, row, poolVersion, poolId);
-      const normalizedWalletAddr = normalizeWalletAddress(row?.wallet_address);
-
-      if (positions.length === 0) {
-        setPoolAddsMap((prev) => {
-          const currentPool = prev?.[poolKey];
-          if (!currentPool || !Array.isArray(currentPool.wallets)) return prev;
-          const nextWallets = currentPool.wallets.filter((item) => (
-            normalizeWalletAddress(item?.wallet_address) !== normalizedWalletAddr
-          ));
-          if (nextWallets.length === currentPool.wallets.length) return prev;
-          const totalUsd = nextWallets.reduce((sum, item) => sum + Number(item?.total_usd || 0), 0);
-          return {
-            ...prev,
-            [poolKey]: {
-              ...currentPool,
-              wallets: nextWallets,
-              totalUsd,
-            },
-          };
-        });
-        setSelectedSmartWallet((prev) => (
-          prev?.poolKey === poolKey && normalizeWalletAddress(prev?.wallet_address) === normalizedWalletAddr
-            ? null
-            : prev
-        ));
-      }
-
-      setSmartWalletDetailMap((prev) => ({
-        ...(prev || {}),
-        [detailKey]: {
-          ...(prev?.[detailKey] || {}),
-          request,
-          open: positions.length > 0,
-          status: 'success',
-          error: '',
-          positions,
-          warnings: Array.isArray(resp?.warnings) ? resp.warnings : [],
-          refreshing: false,
-          lastLoadedAt: Date.now(),
-        },
-      }));
-    } catch (e) {
-      if (e?.name === 'AbortError') return;
-      setSmartWalletDetailMap((prev) => {
-        const existing = prev?.[detailKey] || {};
-        const cachedPositions = Array.isArray(existing?.positions) ? existing.positions : [];
-        if (silent && cachedPositions.length > 0) {
-          return {
-            ...(prev || {}),
-            [detailKey]: {
-              ...existing,
-              request,
-              status: 'success',
-              refreshing: false,
-            },
-          };
-        }
-        return {
-          ...(prev || {}),
-          [detailKey]: {
-            ...existing,
-            request,
-            open: true,
-            status: 'error',
-            error: String(e?.message || e),
-            positions: cachedPositions,
-            warnings: Array.isArray(existing?.warnings) ? existing.warnings : [],
-            refreshing: false,
-          },
-        };
-      });
-    }
-  }, [apiBaseUrl, chain, hasInitData, initData]);
-
-  const toggleSmartWalletDetail = useCallback(async ({
-    poolKey,
-    poolVersion,
-    poolId,
-    row,
-    rowIndex,
-  }) => {
-    const detailKey = buildSmartWalletDetailKey(poolKey, row, rowIndex);
-    const current = smartWalletDetailMap[detailKey];
-    if (current?.open) {
-      setSmartWalletDetailMap((prev) => ({
-        ...(prev || {}),
-        [detailKey]: { ...(prev?.[detailKey] || {}), open: false },
-      }));
-      return;
-    }
-
-    setSmartWalletDetailMap((prev) => ({
-      ...(prev || {}),
-      [detailKey]: {
-        ...(prev?.[detailKey] || {}),
-        open: true,
-        request: { poolKey, poolVersion, poolId, row, rowIndex },
-      },
-    }));
-
-    if (!hasInitData) return;
-    if (current?.status === 'loading' || current?.refreshing) return;
-
-    await loadSmartWalletDetail({
-      poolKey,
-      poolVersion,
-      poolId,
-      row,
-      rowIndex,
-      silent: Boolean(Array.isArray(current?.positions) && current.positions.length > 0),
-    });
-  }, [hasInitData, loadSmartWalletDetail, smartWalletDetailMap]);
-
-  useEffect(() => {
-    if (!hasInitData) return undefined;
-    if (!openSmartWalletRequestSignature) return undefined;
-    const timer = window.setInterval(() => {
-      openSmartWalletRequestsRef.current.forEach((request) => {
-        const detailKey = buildSmartWalletDetailKey(request?.poolKey, request?.row, request?.rowIndex);
-        const current = smartWalletDetailMapRef.current?.[detailKey];
-        if (!current?.open || current?.refreshing || current?.status === 'loading') return;
-        loadSmartWalletDetail({
-          ...request,
-          silent: true,
-        });
-      });
-    }, 10_000);
-
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [hasInitData, loadSmartWalletDetail, openSmartWalletRequestSignature]);
-
   const panelMap = {
     create_pool: (
       <CreatePoolPanel
@@ -2421,22 +1195,9 @@ export default function App() {
               <div className="kline-toolbar-group align-right">
                 <button
                   type="button"
-                  className={`ghost-chip ${klineOverlayEnabled ? 'active' : ''}`}
-                  onClick={() => {
-                    if (!klineOverlayAvailable) return;
-                    setKlineOverlayEnabled((v) => !v);
-                    setSelectedMarkerCluster(null);
-                  }}
-                  disabled={!klineOverlayAvailable}
-                >
-                  <Layers3 size={12} />
-                  聪明钱
-                </button>
-                <button
-                  type="button"
                   className="ghost-chip"
                   onClick={refreshKline}
-                  disabled={klineLoading || klineMarkersLoading}
+                  disabled={klineLoading}
                 >
                   <RefreshCw size={12} />
                   刷新
@@ -2452,14 +1213,6 @@ export default function App() {
               <div className="kline-summary-item mono">
                 <span className="label">地址</span>
                 <span className="value">{shortAddress(klineTokenAddress, 6, 4)}</span>
-              </div>
-              <div className="kline-summary-item">
-                <span className="label">{klineMarkerFilterActive ? '事件(筛选后)' : `事件(${KLINE_MARKER_WINDOW_HOURS}h)`}</span>
-                <span className="value">{klineMarkerEventCount}</span>
-              </div>
-              <div className="kline-summary-item">
-                <span className="label">{klineMarkerFilterActive ? '钱包(筛选后)' : '钱包'}</span>
-                <span className="value">{klineMarkerWalletCount}</span>
               </div>
             </div>
 
@@ -2483,25 +1236,8 @@ export default function App() {
 
                 <button
                   type="button"
-                  className={`kline-tool-btn ${klineMarkerFilterOpen || klineMarkerFilterActive ? 'active' : ''}`}
-                  onClick={() => {
-                    setKlineHeightSettingsOpen(false);
-                    setKlineMarkerFilterOpen((prev) => !prev);
-                  }}
-                  disabled={!klineOverlayEnabled || !klineMarkers.length}
-                  title="Filter"
-                  aria-label="Filter"
-                >
-                  <SlidersHorizontal size={16} />
-                </button>
-
-                <button
-                  type="button"
                   className={`kline-tool-btn ${klineHeightSettingsOpen || klineChartHeightCustomized ? 'active' : ''}`}
-                  onClick={() => {
-                    setKlineMarkerFilterOpen(false);
-                    setKlineHeightSettingsOpen((prev) => !prev);
-                  }}
+                  onClick={() => setKlineHeightSettingsOpen((prev) => !prev)}
                   title="Chart Height"
                   aria-label="Chart Height"
                 >
@@ -2575,210 +1311,19 @@ export default function App() {
                     </div>
                   </div>
                 ) : null}
-
-                {klineMarkerFilterOpen ? (
-                  <div className="kline-filter-popover tool-dock">
-                    <div className="kline-filter-popover-head">
-                      <div>
-                        <div className="kline-filter-popover-title">Bubble Filter</div>
-                        <div className="kline-filter-popover-sub">Current loaded smart-money bubbles</div>
-                      </div>
-                      <button
-                        type="button"
-                        className="icon-link"
-                        onClick={() => setKlineMarkerFilterOpen(false)}
-                        title="Close"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-
-                    <label className="kline-filter-field">
-                      <span>Min USD</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="100"
-                        inputMode="decimal"
-                        placeholder="1000"
-                        value={klineMarkerMinUsdInput}
-                        onChange={(e) => setKlineMarkerMinUsdInput(e.target.value)}
-                      />
-                    </label>
-
-                    <div className="kline-filter-actions">
-                      <button type="button" className="ghost-chip" onClick={() => setKlineMarkerWalletFilter(null)}>
-                        All
-                      </button>
-                      <button type="button" className="ghost-chip" onClick={() => setKlineMarkerWalletFilter([])}>
-                        None
-                      </button>
-                      <button type="button" className="ghost-chip" onClick={resetKlineMarkerFilter}>
-                        Reset
-                      </button>
-                    </div>
-
-                    <div className="kline-filter-wallets">
-                      {klineMarkerWalletOptions.length ? (
-                        klineMarkerWalletOptions.map((wallet) => {
-                          const checked = klineMarkerWalletFilter === null || klineMarkerWalletFilter.includes(wallet.address);
-                          return (
-                            <label key={wallet.address} className="kline-filter-wallet-option">
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => toggleKlineMarkerWalletFilter(wallet.address)}
-                              />
-                              <span className="kline-filter-wallet-main">
-                                <span className="kline-filter-wallet-name">{wallet.displayLabel}</span>
-                                <span className="kline-filter-wallet-meta">
-                                  {formatNumber(wallet.count)} tx · {formatUsdCompact(wallet.totalUSD)}
-                                </span>
-                              </span>
-                              {checked ? <Check size={14} /> : null}
-                            </label>
-                          );
-                        })
-                      ) : (
-                        <div className="kline-filter-empty">No wallets available</div>
-                      )}
-                    </div>
-                  </div>
-                ) : null}
               </div>
 
               <KlineChart
                 candles={klineCandles}
-                markers={klineOverlayEnabled ? filteredKlineMarkers : []}
-                rangeOverlays={[...selectedSmartWalletOverlay, ...watchedMidlineOverlays]}
                 loading={klineLoading}
                 error={klineError}
-                onVisibleRangeChange={handleKlineVisibleRangeChange}
                 viewportKey={klineViewportKey}
-                activeMarkerId={selectedMarkerCluster?.id || ''}
-                highlightWalletAddress={selectedSmartWalletAddress}
-                onMarkerClick={(cluster) => setSelectedMarkerCluster(cluster)}
-                watchedWalletSet={watchedWalletSet}
-                watchToggleMap={watchToggleMap}
-                onToggleWatch={handleToggleWatchedWallet}
                 drawingTool={klineDrawTool}
                 drawingResetNonce={klineDrawResetNonce}
                 chartHeight={klineChartHeight}
                 userAvatarUrl={loginUser?.photo_url || ''}
               />
             </div>
-
-            {klineMarkerFilterActive && !filteredKlineMarkers.length && klineMarkers.length ? (
-              <div className="kline-inline-note">
-                当前筛选条件下没有匹配的聪明钱气泡，点击“重置”可恢复全部显示。
-              </div>
-            ) : null}
-            {klineMarkersError ? <div className="kline-inline-note">{klineMarkersError}</div> : null}
-            {!klineMarkersError && klineMarkerStats?.truncated ? (
-              <div className="kline-inline-note">
-                聪明钱事件较多，覆盖层当前加载最近 {formatNumber(klineMarkerStats.loadedEvents)} / {formatNumber(klineMarkerStats.totalEvents)} 条聪明钱事件。
-              </div>
-            ) : null}
-
-            {selectedMarkerCluster ? (
-              <div className="kline-marker-drawer">
-                <div className="kline-marker-drawer-head">
-                  <div>
-                    <div className="kline-marker-drawer-title">
-                      {selectedMarkerCluster.action === 'remove' ? '减仓活动' : '加仓活动'}
-                    </div>
-                    <div className="kline-marker-drawer-sub">
-                      {formatUtc8DateTime(selectedMarkerCluster.time)} UTC+8 · {selectedMarkerCluster.items?.length || 0} 条
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="icon-link"
-                    onClick={() => setSelectedMarkerCluster(null)}
-                    title="关闭详情"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-
-                <div className="kline-marker-drawer-list">
-                  {(selectedMarkerCluster.items || []).map((item) => {
-                    const txUrl = String(item?.tx_url || '').trim();
-                    const walletLabel = String(item?.wallet_label || '').trim();
-                    const amountUSD = Number(item?.estimated_usd || 0);
-                    const lower = Number(item?.price_lower || 0);
-                    const upper = Number(item?.price_upper || 0);
-                    const hasPnLEstimate = Boolean(item?.has_pnl_estimate);
-                    const pnlEstimateUSD = Number(item?.pnl_estimate_usd || 0);
-                    const costBasisUSD = Number(item?.cost_basis_usd || 0);
-                    const markerChartPrice = item?.action === 'remove'
-                      ? resolveMarkerCandleClose(Number(item?.t || 0))
-                      : 0;
-                    const chartPriceLabel = klineActiveToken?.symbol
-                      ? `${klineActiveToken.symbol} K线价`
-                      : 'K线价';
-                    return (
-                      <div key={item?.event_id || `${item?.wallet_address}:${item?.t}`} className="kline-marker-event">
-                        <div className="kline-marker-event-main">
-                          <div className="kline-marker-wallet-row">
-                            <div className="kline-marker-wallet">
-                              {walletLabel || walletTailLabel(item?.wallet_address)}
-                            </div>
-                            {item?.wallet_address ? (
-                              <button
-                                type="button"
-                                className="kline-marker-copy-btn"
-                                onClick={() => copyAddr(item?.wallet_address)}
-                                aria-label="复制钱包地址"
-                                title="复制钱包地址"
-                              >
-                                <Copy size={12} />
-                              </button>
-                            ) : null}
-                          </div>
-                          <div className={`kline-marker-action ${item?.action === 'remove' ? 'remove' : 'add'}`}>
-                            {item?.action === 'remove' ? '减仓' : '加仓'}
-                          </div>
-                        </div>
-                        <div className="kline-marker-event-sub">
-                          <span>{formatUtc8Time(Number(item?.t || 0))}</span>
-                          <span>${formatNumber(amountUSD, amountUSD > 100 ? 0 : 2)}</span>
-                          {lower > 0 && upper > 0 ? (
-                            <span>{compactPrice(lower)} → {compactPrice(upper)}</span>
-                          ) : null}
-                          {txUrl ? (
-                            <button type="button" className="mini-link" onClick={() => openExternal(txUrl)}>
-                              Tx
-                            </button>
-                          ) : null}
-                        </div>
-                        {item?.action === 'remove' ? (
-                          <div className="kline-marker-metrics">
-                            {hasPnLEstimate ? (
-                              <>
-                                <span className="kline-marker-chip neutral">
-                                  估算成本 {formatUsd(costBasisUSD)}
-                                </span>
-                                <span className={`kline-marker-chip ${pnlEstimateUSD >= 0 ? 'positive' : 'negative'}`}>
-                                  估算盈亏 {formatUsd(pnlEstimateUSD)}
-                                </span>
-                              </>
-                            ) : (
-                              <span className="kline-marker-chip warn">历史成本不足，暂不显示估算盈亏</span>
-                            )}
-                            {Number.isFinite(markerChartPrice) && markerChartPrice > 0 ? (
-                              <span className="kline-marker-chip neutral">
-                                {chartPriceLabel} {compactPrice(markerChartPrice)}
-                              </span>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : null}
 
             <div className="kline-ext-links">
               {selectedPoolGmgnUrl && (
@@ -3023,309 +1568,6 @@ export default function App() {
       </PanelShell>
     ),
 
-    smart_money: (
-      <PanelShell
-        title="聪明钱"
-        subtitle={`最近 ${SMART_POOL_WINDOW_HOURS}h 按参与钱包数排序的前 ${smartVisiblePools.length} 个池子`}
-        icon={BrainCircuit}
-      >
-        {smartError ? <div className="error-text">{smartError}</div> : null}
-
-        <div className="data-list compact">
-          {smartLoading && smartVisiblePools.length === 0 ? (
-            <EmptyState text="正在加载聪明钱数据..." />
-          ) : smartVisiblePools.length === 0 ? (
-            <EmptyState text="暂无监控钱包加 LP 数据" />
-          ) : (
-            smartVisiblePools.map((pool, idx) => {
-              const poolKey = buildPoolKey(pool?.pool_version, pool?.pool_id) || `${pool?.pool_version || ''}:${pool?.pool_id || ''}`;
-              const adds = poolAddsMap[poolKey];
-              const wallets = aggregatePoolAddWallets(adds?.wallets || []);
-              const totalUsd = adds?.totalUsd || 0;
-              const walletCount = adds?.status === 'success'
-                ? wallets.length
-                : Number(pool?.wallet_count || 0);
-              const version = String(pool?.pool_version || '').toUpperCase();
-              const feePct = Number(pool?.fee_pct || 0);
-              const pair = String(pool?.pair || '').trim() || shortAddress(pool?.pool_id || '');
-              const pairInitials = pair.split(/[\/\-]/).map((s) => s.trim().charAt(0).toUpperCase()).join('').slice(0, 2);
-              const displayTokenLogoUrl = String(pool?.display_token_logo_url || '').trim();
-              const displayTokenSymbol = String(pool?.display_token_symbol || '').trim();
-              const dexName = String(pool?.exchange || pool?.factory_name || '').trim();
-              const dex = getDexIcon(dexName);
-              const protocolTagText = version || dex?.label || '';
-              const avatarLabel = (displayTokenSymbol || pairInitials || 'LP').slice(0, 4).toUpperCase();
-              const avatarSrc = displayTokenLogoUrl || dex?.src || '';
-
-              return (
-                <div
-                  key={poolKey || idx}
-                  className="sm-pool-card"
-                  onClick={() =>
-                    selectPool(
-                      {
-                        pool_id: pool?.pool_id,
-                        pool_address: pool?.pool_id,
-                        trading_pair: pair,
-                        factory_name: dexName,
-                        token0: pool?.token0,
-                        token1: pool?.token1,
-                        token0_symbol: pool?.token0_symbol,
-                        token1_symbol: pool?.token1_symbol,
-                        chain,
-                      },
-                      chain
-                    )
-                  }
-                >
-                  <div className="sm-pool-header">
-                    <div className="sm-pool-left">
-                      <div className="sm-avatar" style={dex ? { borderColor: `${dex.color}60` } : undefined}>
-                        {avatarSrc ? (
-                          <>
-                            <img
-                              src={avatarSrc}
-                              alt=""
-                              data-fallback-to-dex={displayTokenLogoUrl && dex?.src ? '1' : '0'}
-                              data-dex-src={dex?.src || ''}
-                              onError={(e) => {
-                                const nextSrc = e.currentTarget.dataset.dexSrc || '';
-                                if (e.currentTarget.dataset.fallbackToDex === '1' && nextSrc) {
-                                  e.currentTarget.dataset.fallbackToDex = '0';
-                                  e.currentTarget.src = nextSrc;
-                                  return;
-                                }
-                                e.currentTarget.style.display = 'none';
-                                const fallback = e.currentTarget.parentElement?.querySelector('.sm-avatar-fallback');
-                                if (fallback) fallback.style.display = 'flex';
-                              }}
-                            />
-                            <span className="sm-avatar-fallback" style={{ display: 'none' }}>{avatarLabel}</span>
-                          </>
-                        ) : <span>{avatarLabel}</span>}
-                      </div>
-                      <div className="sm-pool-main">
-                        <div className="sm-title-row">
-                          <span className="sm-pair">{pair}</span>
-                          <span className="sm-rank">#{idx + 1}</span>
-                        </div>
-                        <div className="sm-meta-tags">
-                          {protocolTagText ? (
-                            <span className="tag tag-dex tag-dex-inline">
-                              {dex?.src ? <img src={dex.src} alt="" /> : null}
-                              <span>{protocolTagText}</span>
-                            </span>
-                          ) : null}
-                          {feePct > 0 ? <span className="tag tag-blue">{formatPct(feePct)}</span> : null}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="sm-pool-right">
-                      {totalUsd > 0 ? (
-                        <span className="sm-total-usd">${formatNumber(Math.round(totalUsd))}</span>
-                      ) : null}
-                      <span className="sm-wallet-count">
-                        {formatNumber(walletCount)} 钱包
-                      </span>
-                    </div>
-                  </div>
-
-                  {adds?.status === 'loading' && wallets.length === 0 ? (
-                    <div className="sm-wallet-loading">加载钱包明细...</div>
-                  ) : null}
-
-                  {adds?.status === 'error' && wallets.length === 0 ? (
-                    <div className="sm-wallet-error">{String(adds?.error || '钱包明细加载失败')}</div>
-                  ) : null}
-
-                  {adds?.status === 'success' && wallets.length === 0 ? (
-                    <div className="sm-wallet-empty">当前池子没有可展示的钱包明细</div>
-                  ) : null}
-
-                  {wallets.length > 0 ? (
-                    <div className="sm-wallet-list">
-                      {wallets.slice(0, 5).map((w, wi) => {
-                        const addr = String(w?.wallet_address || '').trim();
-                        const normalizedWalletAddr = normalizeWalletAddress(addr);
-                        const detailKey = buildSmartWalletDetailKey(poolKey, w, wi);
-                        const detailState = smartWalletDetailMap[detailKey] || {};
-                        const detailOpen = Boolean(detailState?.open);
-                        const usd = Number(w?.total_usd ?? 0);
-                        const priceLower = Number(w?.price_lower ?? 0);
-                        const priceUpper = Number(w?.price_upper ?? 0);
-                        const quote = String(w?.price_quote || '').trim();
-                        const walletLabel = String(w?.label || watchedWalletMap.get(normalizedWalletAddr)?.label || '').trim();
-                        const hasRange =
-                          Number.isFinite(priceLower) &&
-                          priceLower > 0 &&
-                          Number.isFinite(priceUpper) &&
-                          priceUpper > 0;
-                        const rangePct = hasRange
-                          ? (Math.abs(priceUpper - priceLower) / (priceUpper + priceLower)) * 100
-                          : 0;
-                        const activeWallet = normalizedWalletAddr && selectedSmartWallet?.poolKey === poolKey &&
-                          normalizeWalletAddress(selectedSmartWallet?.wallet_address) === normalizedWalletAddr;
-
-                        return (
-                          <div key={addr || wi} className="sm-wallet-item">
-                            <div
-                              className={`sm-wallet-row ${activeWallet ? 'active' : ''}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                selectPool(
-                                  {
-                                    pool_id: pool?.pool_id,
-                                    pool_address: pool?.pool_id,
-                                    trading_pair: pair,
-                                    protocol_version: pool?.pool_version,
-                                    factory_name: dexName,
-                                    token0_address: pool?.token0,
-                                    token1_address: pool?.token1,
-                                    token0_symbol: pool?.token0_symbol,
-                                    token1_symbol: pool?.token1_symbol,
-                                    chain,
-                                  },
-                                  chain
-                                );
-                                if (hasRange && normalizedWalletAddr) {
-                                  if (activeWallet) {
-                                    setSelectedSmartWallet(null);
-                                    return;
-                                  }
-                                  setSelectedSmartWallet({
-                                    poolKey,
-                                    wallet_address: normalizedWalletAddr,
-                                    wallet_label: walletLabel,
-                                    price_lower: priceLower,
-                                    price_upper: priceUpper,
-                                    latest_open_price: Number(w?.latest_open_price || 0),
-                                  });
-                                } else {
-                                  setSelectedSmartWallet(null);
-                                }
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key !== 'Enter' && e.key !== ' ') return;
-                                e.preventDefault();
-                                e.currentTarget.click();
-                              }}
-                              role="button"
-                              tabIndex={0}
-                            >
-                              <div className="sm-wallet-main">
-                                <div className={`sm-wallet-avatar ${activeWallet ? 'active' : ''}`}>
-                                  <img src={walletAvatarUrl(normalizedWalletAddr)} alt="" />
-                                </div>
-                                <div className="sm-wallet-meta">
-                                  <div className="sm-wallet-addr">{walletLabel || walletTailLabel(addr)}</div>
-                                  {walletLabel ? <div className="sm-wallet-subaddr">{shortAddress(addr, 6, 4)}</div> : null}
-                                </div>
-                              </div>
-                              <div className="sm-wallet-stats">
-                                <span className="sm-wallet-usd">${formatNumber(Math.round(usd))}</span>
-                                {hasRange ? (
-                                  <span className="sm-wallet-range-pct">±{rangePct.toFixed(1)}%</span>
-                                ) : null}
-                              </div>
-                              <div className="sm-wallet-inline-actions">
-                                <button
-                                  type="button"
-                                  className={`sm-wallet-detail-btn ${detailOpen ? 'open' : ''}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    toggleSmartWalletDetail({
-                                      poolKey,
-                                      poolVersion: pool?.pool_version,
-                                      poolId: pool?.pool_id,
-                                      row: w,
-                                      rowIndex: wi,
-                                    });
-                                  }}
-                                >
-                                  {detailOpen ? '收起' : '详细'}
-                                </button>
-                              </div>
-                              {hasRange ? (
-                                <div className="sm-wallet-range">
-                                  <span className="sm-range-label">区间</span>
-                                  <span className="sm-range-val">{compactPrice(priceLower)}</span>
-                                  <span className="sm-range-arrow">&rarr;</span>
-                                  <span className="sm-range-val">{compactPrice(priceUpper)}</span>
-                                  {quote ? <span className="sm-range-quote">{quote}</span> : null}
-                                </div>
-                              ) : null}
-                            </div>
-
-                            {detailOpen ? (
-                              <div className="sm-wallet-detail-panel">
-                                {detailState?.status === 'loading' ? (
-                                  <div className="sm-wallet-detail-hint">正在加载仓位详情...</div>
-                                ) : null}
-                                {detailState?.status === 'error' ? (
-                                  <div className="sm-wallet-detail-error">{detailState?.error || '仓位详情加载失败'}</div>
-                                ) : null}
-                                {detailState?.status === 'success' && Array.isArray(detailState?.warnings) && detailState.warnings.length ? (
-                                  <div className="sm-wallet-detail-warn">{String(detailState.warnings[0])}</div>
-                                ) : null}
-                                {detailState?.status === 'success' && (!Array.isArray(detailState?.positions) || detailState.positions.length === 0) ? (
-                                  <div className="sm-wallet-detail-hint">当前没有匹配到该池子的活跃仓位。</div>
-                                ) : null}
-                                {detailState?.status === 'success' && Array.isArray(detailState?.positions) && detailState.positions.length > 0 ? (
-                                  <div className="sm-wallet-detail-cards">
-                                    {detailState.positions.map((position, posIndex) => (
-                                      <SmartMoneyPositionCard
-                                        key={`${String(position?.pool_id || '').trim()}:${String(position?.position_id || posIndex).trim()}`}
-                                        position={position}
-                                        walletLabel={walletLabel}
-                                        walletAddress={normalizedWalletAddr}
-                                        onSelectPool={(nextPool) => selectPool({ ...nextPool, chain }, chain)}
-                                      />
-                                    ))}
-                                  </div>
-                                ) : null}
-                              </div>
-                            ) : null}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-
-                  <div className="sm-pool-actions">
-                    <button
-                      type="button"
-                      className="sm-action-btn sm-open-btn"
-                      aria-label="开仓"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openPositionModal({
-                          pool_id: pool?.pool_id,
-                          pool_address: pool?.pool_id,
-                          trading_pair: pair,
-                          protocol_version: version,
-                          factory_name: dexName,
-                          chain,
-                          panelKey: 'smart_money',
-                          smartMoneyWallets: wallets,
-                        });
-                      }}
-                    >
-                      <img src={flashIcon} alt="" className="open-lightning-icon" aria-hidden="true" />
-                      <span className="open-buy-text">开仓</span>
-                    </button>
-                    <button type="button" className="sm-action-btn sm-copy-btn" onClick={(e) => {
-                      e.stopPropagation();
-                      copyAddr(pool?.pool_id || '');
-                    }}>复制池子ID</button>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-        {renderOperationProgress('smart_money')}
-      </PanelShell>
-    ),
   };
 
   return (

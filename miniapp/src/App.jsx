@@ -1,10 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import HotPoolCard from './components/HotPoolCard.jsx';
 import KlineModal from './components/KlineModal.jsx';
-import AutoMonitorCard from './components/AutoMonitorCard.jsx';
 import PositionCard from './components/PositionCard.jsx';
-import AutoPnLCurveCard from './components/AutoPnLCurveCard.jsx';
-import SmartMoneyCard from './components/SmartMoneyCard.jsx';
 import SystemConfigCard from './components/SystemConfigCard.jsx';
 import BottomSheet from './components/BottomSheet.jsx';
 import ModuleHeader from './components/ModuleHeader.jsx';
@@ -15,10 +12,6 @@ import AdminPage from './components/AdminPage.jsx';
 import { Bot, BarChart2, Filter, Search, Moon, Sun, Settings, X, Check, RotateCcw, AlertTriangle, Flame } from 'lucide-react';
 import {
     deleteTask,
-    disableAdminAutoLP,
-    fetchAutoMonitor,
-    fetchAutoLPPnLCurve,
-    fetchAdminAutoLPStats,
     fetchAdminRealtimePositions,
     fetchAdminRealtimeUsers,
     fetchGlobalConfig,
@@ -26,12 +19,9 @@ import {
     fetchHotPools,
     fetchSearchPools,
     fetchMe,
-    fetchSmartMoneyOverview,
-    fetchSmartMoneyPoolAdds,
     fetchRealtimePositions,
     openPosition,
     updateTaskRange,
-    setAutoLPGuardCompareToPeak,
     setTaskPaused,
     stopTask,
     addToBlacklist,
@@ -111,6 +101,21 @@ function useInitData() {
     return initData;
 }
 
+function localizeWebAppError(message, allowEmptyInitData = false) {
+    const text = String(message || '').trim();
+    if (!text) return '';
+    if (text.includes('missing initData')) {
+        if (allowEmptyInitData) {
+            return '缺少 Telegram initData。本地浏览器调试时，请在 backend/.env 中设置 TELEGRAM_WEBAPP_ALLOW_EMPTY_INITDATA=1，并重启后端。';
+        }
+        return '缺少 Telegram initData，请从 Telegram 内打开 Mini App。';
+    }
+    if (text.includes('invalid initData')) {
+        return 'Telegram initData 校验失败，请检查 TELEGRAM_BOT_TOKEN 是否正确。';
+    }
+    return text;
+}
+
 const storage = {
     get(key) {
         try {
@@ -146,9 +151,7 @@ const WEB_WORKBENCH_WIDGETS = [
     { key: 'hot_pools', label: '热门池子' },
     { key: 'gmgn_kline', label: 'K线' },
     { key: 'positions', label: '仓位' },
-    { key: 'smart_money', label: '聪明钱' },
-];
-const DEFAULT_WEB_WORKBENCH_WIDGETS = WEB_WORKBENCH_WIDGETS.map((item) => item.key);
+];const DEFAULT_WEB_WORKBENCH_WIDGETS = WEB_WORKBENCH_WIDGETS.map((item) => item.key);
 
 const GMGN_STABLE_SYMBOLS = new Set(['usdc', 'usdt', 'busd', 'dai', 'frax', 'usdd', 'fdusd', 'wbnb', 'weth', 'wsol', 'bnb', 'eth', 'sol']);
 
@@ -288,7 +291,6 @@ function formatUserLabel(user) {
 function formatOnOff(value) {
     return value ? '开启' : '关闭';
 }
-
 const icons = {
     bot: Bot,
     chart: BarChart2,
@@ -309,53 +311,28 @@ const Icon = ({ path: IconCmp, className = '' }) => {
     return <IconCmp className={className} strokeWidth={2} />;
 };
 
-function buildTopNavItems({ isAdmin, smartMoneyEnabled }) {
+function buildTopNavItems({ isAdmin }) {
     const items = [
         { key: 'hot_pools', label: '热门池子' },
-        { key: 'positions', label: '实时仓位' },
-        { key: 'monitor', label: '监控' },
+        { key: 'positions', label: '仓位' },
     ];
-    if (smartMoneyEnabled) items.push({ key: 'smart_money', label: '聪明钱' });
     if (isAdmin) items.push({ key: 'admin', label: '管理' });
     return items;
 }
-
 const HOT_POOL_SORT_TABS = [
-    { key: 'fees', label: '费用' },
-    { key: 'fee_rate', label: '费用率' },
+    { key: 'fees', label: '手续费' },
+    { key: 'fee_rate', label: '费率' },
     { key: 'volume', label: '交易量' },
 ];
-
-const POSITION_TASK_TABS = [
-    { key: 'all', label: '全部' },
-    { key: 'manual', label: '手动任务' },
-    { key: 'auto', label: 'Auto任务' },
-];
-
 export default function App() {
     const initData = useInitData();
-    const tick = useTick(); // 实时时钟，每秒更新一次
+    const tick = useTick(); // 闁诲骸婀遍崑鐐差渻閸岀偛绫嶉柛顐ｆ礃鐎殿參鏌ㄥ☉妯绘拱闁伙讣绱曠划鏃堝箳閹惧鍑介梺鍝勫€块。锔剧博閺夋垟鏋?
     const [me, setMe] = useState(null);
     const [data, setData] = useState(null);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const pollRef = useRef(null);
     const [viewMode, setViewMode] = useState('hot_pools');
-    const [positionsTaskTab, setPositionsTaskTab] = useState('all'); // all | manual | auto
-    const [autoMonitor, setAutoMonitor] = useState(null);
-    const [autoMonitorError, setAutoMonitorError] = useState('');
-    const [autoMonitorLoading, setAutoMonitorLoading] = useState(false);
-    const autoMonitorPollRef = useRef(null);
-    const [smartMoney, setSmartMoney] = useState(null);
-    const [smartMoneyError, setSmartMoneyError] = useState('');
-    const [smartMoneyLoading, setSmartMoneyLoading] = useState(false);
-    const smartMoneyPollRef = useRef(null);
-    const [autoGuardBaselineUpdating, setAutoGuardBaselineUpdating] = useState(false);
-
-    const [autoPnLCurve, setAutoPnLCurve] = useState(null);
-    const [autoPnLCurveError, setAutoPnLCurveError] = useState('');
-    const [autoPnLCurveLoading, setAutoPnLCurveLoading] = useState(false);
-    const autoPnLCurvePollRef = useRef(null);
 
     const [hotPoolsSort, setHotPoolsSort] = useState('fees');
     const [hotPoolsData, setHotPoolsData] = useState(null);
@@ -390,7 +367,7 @@ export default function App() {
     const [poolSearchLoading, setPoolSearchLoading] = useState(false);
     const poolSearchInputRef = useRef(null);
     const poolSearchControllerRef = useRef(null);
-    // 保存上一次热门池子数据，用于计算变化
+    // 婵烇絽娲︾换鍌炴偤閵婏妇鈻斿┑鐘辫兌椤忚鲸绻涢崱顓犵？闁稿骸缍婂濠氬Ω閿旂偓寤洪柣搴㈢⊕閸旀牠寮抽悢鐓庣妞ゆ洖妫涚粈澶愭煟椤剙濡虹紒顭戝墰閹峰鏁嶉崟顓熸瘓闂佸憡鐟﹂敋閻?
     const previousHotPoolsDataRef = useRef({});
     const [klinePool, setKlinePool] = useState(null);
     const [openPositionPool, setOpenPositionPool] = useState(null);
@@ -403,8 +380,6 @@ export default function App() {
     const [openPositionError, setOpenPositionError] = useState('');
     const [openPositionLoading, setOpenPositionLoading] = useState(false);
     const [operationProgress, setOperationProgress] = useState(null);
-    const [openPositionSmartWallets, setOpenPositionSmartWallets] = useState([]);
-    const [openPositionSmartWalletsLoading, setOpenPositionSmartWalletsLoading] = useState(false);
     const [walletsData, setWalletsData] = useState(null);
     const [walletsError, setWalletsError] = useState('');
     const [walletsLoading, setWalletsLoading] = useState(false);
@@ -418,9 +393,9 @@ export default function App() {
     const [taskRangeError, setTaskRangeError] = useState('');
     const [taskRangeLoading, setTaskRangeLoading] = useState(false);
 
-    // 黑名单状态
+    // 婵帗绋掗崹鐢稿箖閺囥垹纭€闁哄洨濮寸瑧闂?
     const [blacklist, setBlacklist] = useState(new Set());
-    // 冷却列表状态
+    // 闂佸憡鍔曢崲鎻掔暤閸儱绀嗘俊銈呭閳ь剙鍟撮幃鈺呮嚋绾版ê浜?
     const [cooldowns, setCooldowns] = useState([]);
     const [cooldownRemovingPair, setCooldownRemovingPair] = useState('');
 
@@ -431,15 +406,8 @@ export default function App() {
     const [adminPositions, setAdminPositions] = useState(null);
     const [adminPositionsError, setAdminPositionsError] = useState('');
     const [adminPositionsLoading, setAdminPositionsLoading] = useState(false);
-    const [adminAutoStats, setAdminAutoStats] = useState(null);
-    const [adminAutoStatsError, setAdminAutoStatsError] = useState('');
-    const [adminAutoStatsLoading, setAdminAutoStatsLoading] = useState(false);
-    const [adminDisableError, setAdminDisableError] = useState('');
-    const [adminDisableLoading, setAdminDisableLoading] = useState(false);
-    const [adminDisableResult, setAdminDisableResult] = useState(null);
     const adminUsersPollRef = useRef(null);
     const adminPositionsPollRef = useRef(null);
-    const adminAutoStatsPollRef = useRef(null);
     const adminSelectedRef = useRef(null);
     const confirmResolveRef = useRef(null);
     const noticeTimerRef = useRef(null);
@@ -489,13 +457,13 @@ export default function App() {
         }
     }, [multiChainEnabled, userDefaultChain]);
 
-    // 加载进度状态
+    // 闂佸憡姊绘慨鎯归崶銊︿氦婵炴垶锚椤斿﹪鏌ｅΟ鍨厫闁?
     const [pollProgress, setPollProgress] = useState(0);
     const pollProgressRef = useRef(null);
     const lastPollTimeRef = useRef(Date.now());
     const brand = useMemo(() => getBrandTheme(accentTheme), [accentTheme]);
 
-    // 批量操作状态
+    // 闂佸綊娼х紞濠囧闯濞差亜绠肩€广儱瀚粙濠囨煟濡灝鐓愰柍?
     const [batchMode, setBatchMode] = useState(false);
     const [selectedTaskIds, setSelectedTaskIds] = useState(new Set());
     const [batchLoading, setBatchLoading] = useState(false);
@@ -503,28 +471,19 @@ export default function App() {
     const serverPollIntervalSec = Math.max(1, Number(data?.poll_interval_sec || adminPositions?.poll_interval_sec || 1));
     const pollIntervalSec = Math.max(1, Number(pollOverrideSec || serverPollIntervalSec || 1));
     const adminListPollSec = Math.max(3, pollIntervalSec);
-    const adminStatsPollSec = Math.max(5, pollIntervalSec * 2);
     const isAdmin = Boolean(me?.is_admin || data?.is_admin || adminPositions?.is_admin);
-    const smartMoneyEnabled = Boolean(me?.smart_money_enabled || data?.smart_money_enabled || isAdmin);
     const showAdmin = isAdmin && viewMode === 'admin';
     const isHotPools = viewMode === 'hot_pools';
-    const isMonitor = viewMode === 'monitor';
     const isPositions = viewMode === 'positions';
-    const isSmartMoney = viewMode === 'smart_money';
     const topNavItems = useMemo(
-        () => buildTopNavItems({ isAdmin, smartMoneyEnabled }),
-        [isAdmin, smartMoneyEnabled],
+        () => buildTopNavItems({ isAdmin }),
+        [isAdmin],
     );
-    const showWalletSummaryCard = !showAdmin && !isHotPools && !isSmartMoney;
+    const showWalletSummaryCard = !showAdmin && !isHotPools;
     const hotPoolsDefaultPollSec = 10;
     const hotPoolsPollIntervalSec = Math.max(5, Number(pollOverrideSec || hotPoolsDefaultPollSec));
     const settingsPollIntervalSec = isHotPools ? hotPoolsPollIntervalSec : pollIntervalSec;
     const settingsServerPollIntervalSec = isHotPools ? hotPoolsDefaultPollSec : serverPollIntervalSec;
-    const monitorPollSec = Math.max(3, pollIntervalSec);
-    const autoPnLCurvePollSec = 15;
-    const smartMoneyPollSec = 60;
-    const smartMoneyPoolsWindowHours = 2;
-    const smartMoneyPnLWindowHours = 2;
 
     const adminSelectedUser = useMemo(() => {
         if (!adminSelectedUserId) return null;
@@ -622,7 +581,6 @@ export default function App() {
             },
         ];
     }, [multiWalletSummary, posWalletBalances, singleWalletUsd, walletAddress]);
-
     const summaryMetricCards = useMemo(() => ([
         ...walletSummaryCards,
         {
@@ -638,7 +596,6 @@ export default function App() {
             detail: '',
         },
     ]), [walletSummaryCards, totalsFromPositions.positionUsd, totalsFromPositions.feeUsd]);
-
     const summaryMetricDense = summaryMetricCards.length >= 5;
     const totalWalletCount = Array.isArray(posWalletBalances?.wallets) ? posWalletBalances.wallets.length : walletSummaryCards.length;
 
@@ -647,84 +604,13 @@ export default function App() {
             if (p?.has_liquidity !== false) return true;
             const taskId = Number(p?.task_id || 0);
             if (!Number.isFinite(taskId) || taskId <= 0) return false;
-            const label = String(p?.status_label || '');
-            return (
-                label.includes('再平衡') ||
-                label.includes('撤出') ||
-                label.includes('停止中') ||
-                label.includes('止损') ||
-                label.includes('等待')
-            );
+            return true;
         });
     }, [positions]);
 
-    const visibleTaskPositions = useMemo(() => {
-        if (positionsTaskTab === 'all') return visiblePositions;
-        const wantAuto = positionsTaskTab === 'auto';
-        return visiblePositions.filter((p) => {
-            const taskId = Number(p?.task_id || 0);
-            if (!Number.isFinite(taskId) || taskId <= 0) return false;
-            const isAuto = Boolean(p?.task_is_auto);
-            return wantAuto ? isAuto : !isAuto;
-        });
-    }, [positionsTaskTab, visiblePositions]);
+    const visibleTaskPositions = visiblePositions;
 
-    // 智能切换实时仓位Tab：根据当前任务类型自动选择
-    const hasAutoTasks = useMemo(() => {
-        return visiblePositions.some((p) => {
-            const taskId = Number(p?.task_id || 0);
-            return Number.isFinite(taskId) && taskId > 0 && Boolean(p?.task_is_auto);
-        });
-    }, [visiblePositions]);
-
-    const hasManualTasks = useMemo(() => {
-        return visiblePositions.some((p) => {
-            const taskId = Number(p?.task_id || 0);
-            return Number.isFinite(taskId) && taskId > 0 && !Boolean(p?.task_is_auto);
-        });
-    }, [visiblePositions]);
-
-    const positionsTabTouchedRef = useRef(false);
-    useEffect(() => {
-        if (!isPositions || showAdmin) return;
-        positionsTabTouchedRef.current = false;
-    }, [isPositions, showAdmin]);
-
-    // 智能设置实时仓位 Tab：默认按任务类型自动选择（用户手动切换后不强制覆盖）
-    useEffect(() => {
-        if (!isPositions || showAdmin) return;
-        if (visiblePositions.length === 0) return;
-
-        const desiredTab = hasAutoTasks && hasManualTasks
-            ? 'all'
-            : hasAutoTasks
-                ? 'auto'
-                : hasManualTasks
-                    ? 'manual'
-                    : 'all';
-
-        if (!positionsTabTouchedRef.current) {
-            if (positionsTaskTab !== desiredTab) {
-                setPositionsTaskTab(desiredTab);
-                setSelectedTaskIds(new Set());
-                setBatchMode(false);
-            }
-            return;
-        }
-
-        // 用户已手动选择 Tab：仅在当前 Tab 已无任务时自动兜底跳转，避免空页面。
-        if (positionsTaskTab === 'auto' && !hasAutoTasks && hasManualTasks) {
-            setPositionsTaskTab('manual');
-            setSelectedTaskIds(new Set());
-            setBatchMode(false);
-        } else if (positionsTaskTab === 'manual' && !hasManualTasks && hasAutoTasks) {
-            setPositionsTaskTab('auto');
-            setSelectedTaskIds(new Set());
-            setBatchMode(false);
-        }
-    }, [isPositions, showAdmin, visiblePositions.length, hasAutoTasks, hasManualTasks, positionsTaskTab]);
-
-    // 从仓位构建 pool_address -> position_usd 映射（用于在热门池子上显示持仓标签）
+    // 婵炲濮寸花鑲╁垝閵婏附濯寸€广儱妫涢埀顒夊灠椤?pool_address -> position_usd 闂佸搫瀚慨鎾儍閻樼粯鏅柛顐犲灪閺嗗繐霉濠婂啴顎楁繝鈧鍫熷€绘い鎾卞灪閿涘本鎱ㄩ崷顓炐㈤柣鈩冪懄缁嬪绻濋崘鈹炬灃缂備讲鍋撻柣鎴灻惁顔济归悩铏鞍闁绘牭绲跨划鐢稿箻閸涱垳顦?
     const positionsPoolMap = useMemo(() => {
         const map = new Map();
         for (const p of positions) {
@@ -737,7 +623,7 @@ export default function App() {
         return map;
     }, [positions]);
 
-    // 获取用户仓位中的池子地址列表（用于传给 hot_pools API）
+    // 闂佸吋鍎抽崲鑼躲亹閸ヮ剚鍋ㄩ柕濠忕畱閻撴洖霉閻樿櫕灏紓宥呮噺缁嬪顢橀悩宕囨殸濠殿喖婀辨慨鎾偤濞嗘挸鎹堕柡澶嬪缁插鏌涢幒鎿冩畽闁靛棗鍟撮弫宥夊醇閵忊剝娈㈡繛瀛樼矊缁ㄨ偐妲愰崜浣虹＜?hot_pools API闂?
     const positionsPoolAddresses = useMemo(() => {
         return Array.from(positionsPoolMap.keys());
     }, [positionsPoolMap]);
@@ -754,7 +640,7 @@ export default function App() {
     }, [hotPoolsFilter]);
 
     const hotPoolsVisibleRows = useMemo(() => {
-        // 1. 先进行现有筛选
+        // 1. 闂佺绻愰悧鎰崲濡吋鍋樼€光偓閳ь剟鐛崶顒€瀚夊璺虹灱閹斤綁姊?
         let filtered = hotPoolsRows;
         if (hotPoolsFilterEnabled) {
             const minFees = hotPoolsFilter.minFees;
@@ -767,7 +653,7 @@ export default function App() {
                 const feeRate = parseMetricNumber(row?.fee_rate);
                 const tvl = parseMetricNumber(row?.current_pool_value);
                 const volume = parseMetricNumber(row?.total_volume);
-                // 如果用户有仓位在这个池子，跳过筛选（始终显示）
+                // 婵犵鈧啿鈧綊鎮樻径鎰仺闁靛绠戦悡鏇㈡煛閸繍妲风紒顔哄妽閹峰懎顓奸崨顔垮惈闁哄鏅滈悷銈夋煂濠婂唭褔鎮╅懠顒佹啢闂佹寧绋戦惌渚€鎮滈敂鑺ヤ氦闁搞儮鏅濋幗锝夋⒑椤愩埄妾х紒杈ㄧ懄閹便劎鈧綆鍓涢惌鎺楁煛閸曨偄鈷旈柕鍥ㄥ哺閺?
                 const poolAddr = String(row?.pool_address || '').toLowerCase();
                 if (positionsPoolMap.has(poolAddr)) return true;
                 if (keyword) {
@@ -786,7 +672,7 @@ export default function App() {
             });
         }
 
-        // 2. 为每个池子添加 userPositionUsd 字段
+        // 2. 婵炴垶鎸鹃崕銈夋儊閳╁啰鈻旀い蹇撴噽濞笺劑鎮楀☉娆忓闁秆冿躬瀹?userPositionUsd 闁诲孩绋掗〃鍡涱敊?
         const enriched = filtered.map(pool => {
             const addr = String(pool?.pool_address || '').toLowerCase();
             return {
@@ -795,18 +681,18 @@ export default function App() {
             };
         });
 
-        // 3. 排序：有仓位的置顶，按仓位金额降序；其余保持原顺序
+        // 3. 闂佸湱鍎ょ敮鎺旇姳椤撱垺鏅慨姗嗗幗缁犳帒霉閻樿櫕灏紓宥呮嚇閹啴宕熼鐘崇€俊鐐€涢鎰濠靛绠板璺侯槺濞夈垹霉閿濆懐效闁革絿鍋撻敍鎰攽鐎ｎ偒鈧牠骞栭弶鎴︾崪缂侀亶浜跺畷妤呭嫉閻㈢數鈻忔繛锝呮处缁诲啰鈧灚妫冨畷銏ゆ偄缁楄　鍋撴惔銏″劅?
         return enriched.sort((a, b) => {
             if (a.userPositionUsd > 0 && b.userPositionUsd <= 0) return -1;
             if (b.userPositionUsd > 0 && a.userPositionUsd <= 0) return 1;
             if (a.userPositionUsd > 0 && b.userPositionUsd > 0) {
                 return b.userPositionUsd - a.userPositionUsd;
             }
-            return 0; // 保持原顺序
+            return 0; // 婵烇絽娲︾换鍐偓鍨瀹曘垽鎮㈢粭琛″亾鎼淬垺鍎?
         });
     }, [hotPoolsFilter, hotPoolsFilterEnabled, hotPoolsRows, positionsPoolMap]);
 
-    // 构建热门池子的历史数据映射 (protocol_version:pool_address -> previous data)
+    // 闂佸搫顑呯€氼剛绱撻幘缁樺€绘い鎾卞灪閿涘本鎱ㄩ崷顓炐㈤柣鈩冪懇閹啴宕熼銏犳綉闂佸憡鐟ュ鍫曞汲閻旂厧绠叉い鏃囧Г琛奸柣?(protocol_version:pool_address -> previous data)
     const previousHotPoolsMap = useMemo(() => {
         return previousHotPoolsDataRef.current;
     }, [hotPoolsRows]);
@@ -841,44 +727,6 @@ export default function App() {
         noticeTimerRef.current = setTimeout(() => setNotice(null), 3200);
     };
 
-    const guardCompareToPeak = autoMonitor?.config?.guard_compare_to_peak !== false;
-    const toggleAutoGuardBaseline = async () => {
-        if (!hasInitData) {
-            showNotice('未获取到 initData，无法修改对比基准。', 'error');
-            return;
-        }
-        if (autoGuardBaselineUpdating) return;
-        const next = !guardCompareToPeak;
-        setAutoGuardBaselineUpdating(true);
-        try {
-            await setAutoLPGuardCompareToPeak({ apiBaseUrl, initData, guardCompareToPeak: next });
-            hapticSelection();
-            showNotice(`撤退对比基准已切换：${next ? '最高点' : '开仓时'}`, 'success');
-            try {
-                const resp = await fetchAutoMonitor({ apiBaseUrl, initData });
-                setAutoMonitor(resp);
-            } catch {
-                // ignore; polling will update soon
-                setAutoMonitor((prev) =>
-                    prev
-                        ? {
-                            ...prev,
-                            config: {
-                                ...(prev?.config || {}),
-                                guard_compare_to_peak: next,
-                            },
-                        }
-                        : prev,
-                );
-            }
-        } catch (e) {
-            hapticNotification('error');
-            showNotice(`切换失败：${String(e?.message || e)}`, 'error');
-        } finally {
-            setAutoGuardBaselineUpdating(false);
-        }
-    };
-
     useEffect(() => {
         if (!hasInitData) return;
         let aborted = false;
@@ -904,8 +752,7 @@ export default function App() {
 
     useEffect(() => {
         if (!isAdmin && viewMode === 'admin') setViewMode('positions');
-        if (!smartMoneyEnabled && viewMode === 'smart_money') setViewMode('hot_pools');
-    }, [isAdmin, smartMoneyEnabled, viewMode]);
+    }, [isAdmin, viewMode]);
 
     useEffect(() => {
         const tg = getTelegramWebApp();
@@ -913,7 +760,7 @@ export default function App() {
         if (savedTheme === 'light' || savedTheme === 'dark') {
             setTheme(savedTheme);
         } else {
-            // 默认使用暗色主题
+            // 婵帗绋掗…鍫ヮ敇缂佹ɑ濯撮悹鎭掑妽閺嗗繘鏌￠崱姗嗘畽濠㈢懓锕ョ粙澶嬬節濮樺吋姣?
             setTheme('dark');
         }
 
@@ -945,7 +792,7 @@ export default function App() {
         };
     }, []);
 
-    // 进度条计时器 - 显示轮询倒计时
+    // 闁哄鏅滅粙鎴犫偓瑙勫▕瀵爼妾辨い鎾存倐瀵喚鎹勯悜妯煎綔 - 闂佸搫瀚晶浠嬪Φ濮橆厽濮滄い鏃€顑欓崵鍕煕婵犲啫绗╂い鎾存倐瀵?
     useEffect(() => {
         const currentPollSec = isHotPools ? hotPoolsPollIntervalSec : pollIntervalSec;
 
@@ -955,10 +802,10 @@ export default function App() {
             setPollProgress(progress);
         };
 
-        // 立即更新一次
+        // 缂備焦鏌ㄩ鍛暤閸℃稑鍗抽悗娑櫳戦悡鈧繛鎴炴尨閸嬫挻绻?
         updateProgress();
 
-        // 每100ms更新进度
+        // 濠?00ms闂佸搫娲ら悺銊╁蓟婵犲啯浜ゆ繛鎴灻?
         pollProgressRef.current = setInterval(updateProgress, 100);
 
         return () => {
@@ -966,15 +813,15 @@ export default function App() {
         };
     }, [isHotPools, hotPoolsPollIntervalSec, pollIntervalSec]);
 
-    // 轮询完成时重置进度
+    // 闁哄鍎愰崰娑㈩敋濡ゅ啠鍋撻悷鐗堟拱闁搞劍宀稿顕€宕奸弴鐐搭仧缂傚倸鍠氶崰娑氭崲濡粯鍎?
     const lastUpdatedAtRef = useRef(null);
     useEffect(() => {
-        // 使用 updatedAt 来判断数据是否真正更新了
+        // 婵炶揪缍€濞夋洟寮?updatedAt 闂佸搫顦崕閬嶅垂娴犲妫樻い鎾跺枑濞堝爼鏌熺拠鈥虫灍婵″弶鎮傚畷銉╂晜閻愵剙鐒稿┑顔界箰缁叉儳煤閸ф妫樺Λ棰佽兌閸?
         const currentUpdatedAt = data?.updated_at || hotPoolsData?.updated_at;
         if (currentUpdatedAt && currentUpdatedAt !== lastUpdatedAtRef.current) {
             lastPollTimeRef.current = Date.now();
             setPollProgress(0);
-            // 只在真正有新数据时触发触觉反馈
+            // 闂佸憡鐟禍婊冿耿椤忓牊鍎戦柣鏂垮閸斺偓闂佸搫鐗嗛ˇ浼村蓟婵犲洤鏋侀柣妤€鐗嗙粊锕傛煛閸愨晛鍔剁悮婵嬫煕濞嗘劕鐏辩悮婵嬫偡濞嗗浚妲哥€殿喛濮ら敍?
             if (lastUpdatedAtRef.current !== null) {
                 hapticSelection();
             }
@@ -1054,78 +901,6 @@ export default function App() {
     }, [apiBaseUrl, initData, hasInitData, multiWalletEnabled, userDefaultChain, pollIntervalSec]);
 
     useEffect(() => {
-        if (!hasInitData || showAdmin || !isMonitor) return;
-        let aborted = false;
-        const controller = new AbortController();
-        let inFlight = false;
-
-        const run = async () => {
-            if (inFlight) return;
-            inFlight = true;
-            setAutoMonitorLoading(true);
-            setAutoMonitorError('');
-            try {
-                const resp = await fetchAutoMonitor({ apiBaseUrl, initData, signal: controller.signal });
-                if (aborted) return;
-                setAutoMonitor(resp);
-            } catch (e) {
-                if (aborted) return;
-                setAutoMonitorError(String(e?.message || e));
-            } finally {
-                inFlight = false;
-                if (!aborted) setAutoMonitorLoading(false);
-            }
-        };
-
-        run();
-
-        if (autoMonitorPollRef.current) clearInterval(autoMonitorPollRef.current);
-        autoMonitorPollRef.current = setInterval(run, monitorPollSec * 1000);
-
-        return () => {
-            aborted = true;
-            controller.abort();
-            if (autoMonitorPollRef.current) clearInterval(autoMonitorPollRef.current);
-        };
-    }, [apiBaseUrl, initData, hasInitData, showAdmin, isMonitor, monitorPollSec]);
-
-    useEffect(() => {
-        if (!hasInitData || showAdmin || !isPositions || positionsTaskTab !== 'auto') return;
-        let aborted = false;
-        const controller = new AbortController();
-        let inFlight = false;
-
-        const run = async () => {
-            if (inFlight) return;
-            inFlight = true;
-            setAutoPnLCurveLoading(true);
-            setAutoPnLCurveError('');
-            try {
-                const resp = await fetchAutoLPPnLCurve({ apiBaseUrl, initData, signal: controller.signal });
-                if (aborted) return;
-                setAutoPnLCurve(resp);
-            } catch (e) {
-                if (aborted) return;
-                setAutoPnLCurveError(String(e?.message || e));
-            } finally {
-                inFlight = false;
-                if (!aborted) setAutoPnLCurveLoading(false);
-            }
-        };
-
-        run();
-
-        if (autoPnLCurvePollRef.current) clearInterval(autoPnLCurvePollRef.current);
-        autoPnLCurvePollRef.current = setInterval(run, autoPnLCurvePollSec * 1000);
-
-        return () => {
-            aborted = true;
-            controller.abort();
-            if (autoPnLCurvePollRef.current) clearInterval(autoPnLCurvePollRef.current);
-        };
-    }, [apiBaseUrl, initData, hasInitData, showAdmin, isPositions, positionsTaskTab, autoPnLCurvePollSec]);
-
-    useEffect(() => {
         if (!hasInitData || !showAdmin) return;
         let aborted = false;
         const controller = new AbortController();
@@ -1172,7 +947,6 @@ export default function App() {
         if (adminSelectedUserId) return;
         if (!adminUsers.length) {
             setAdminPositions(null);
-            setAdminAutoStats(null);
             return;
         }
         setAdminSelectedUserId(adminUsers[0].user_id);
@@ -1189,10 +963,6 @@ export default function App() {
         if (selectedChanged) {
             setAdminPositions(null);
             setAdminPositionsError('');
-            setAdminAutoStats(null);
-            setAdminAutoStatsError('');
-            setAdminDisableError('');
-            setAdminDisableResult(null);
         }
 
         const run = async () => {
@@ -1230,48 +1000,7 @@ export default function App() {
         };
     }, [apiBaseUrl, initData, hasInitData, showAdmin, adminSelectedUserId, pollIntervalSec]);
 
-    useEffect(() => {
-        if (!hasInitData || !showAdmin || !adminSelectedUserId) return;
-        let aborted = false;
-        const controller = new AbortController();
-        let inFlight = false;
-
-        const run = async () => {
-            if (inFlight) return;
-            inFlight = true;
-            setAdminAutoStatsLoading(true);
-            setAdminAutoStatsError('');
-            try {
-                const resp = await fetchAdminAutoLPStats({
-                    apiBaseUrl,
-                    initData,
-                    userId: adminSelectedUserId,
-                    signal: controller.signal,
-                });
-                if (aborted) return;
-                setAdminAutoStats(resp);
-            } catch (e) {
-                if (aborted) return;
-                setAdminAutoStatsError(String(e?.message || e));
-            } finally {
-                inFlight = false;
-                if (!aborted) setAdminAutoStatsLoading(false);
-            }
-        };
-
-        run();
-
-        if (adminAutoStatsPollRef.current) clearInterval(adminAutoStatsPollRef.current);
-        adminAutoStatsPollRef.current = setInterval(run, adminStatsPollSec * 1000);
-
-        return () => {
-            aborted = true;
-            controller.abort();
-            if (adminAutoStatsPollRef.current) clearInterval(adminAutoStatsPollRef.current);
-        };
-    }, [apiBaseUrl, initData, hasInitData, showAdmin, adminSelectedUserId, adminStatsPollSec]);
-
-    // 热门池子数据始终加载（预加载）
+    // 闂佺粯鍩堥崣鍐ㄎ涢鈧晥闁绘灏欓幗宥夋煛娴ｅ搫顣肩€规挷鐒﹂幈銊р偓锝庡墰閻帡鏌涢弮鍌毿繛鏉戞喘閺佸秹宕奸妷顔芥闂佸憡姊绘慨鎯归崶顒佹櫖?
     useEffect(() => {
         let aborted = false;
         const controller = new AbortController();
@@ -1299,7 +1028,7 @@ export default function App() {
                     signal: controller.signal,
                 });
                 if (aborted) return;
-                // 在更新数据之前，保存当前数据作为历史数据（使用 setState 回调避免闭包拿到旧数据）
+                // 闂侀潻璐熼崝宥吤洪崸妤€妫橀柣妤€鐗婂▓鍫曟煙鐠団€虫灆缂佺媴缍佸畷婊冾吋韫囨洜顦繛锝呮处缁诲倿鎮洪妸銊ｄ汗闁规儳鍟块·鍛存煛娴ｅ搫顣肩€规挷鐒﹂幏鍛煥閳ь剛鎷归悢鐓庡偍闁糕剝顨呴拺澶愭煛娴ｅ搫顣肩€规挷绶氶弫宥夊醇濠婂啠鏋忛梺?setState 闂佹悶鍎抽崑鐘绘儍閻斿吋鐒奸柛顭戝枛鐢娊姊婚崒銈呭箹閻庡灚锕㈤獮蹇涘垂椤旇偐鍘掗梺鍝勫敳閸曨剚顔嶉梺纭咁嚃閸ｎ垳妲?
                 setHotPoolsData((prev) => {
                     if (prev?.data) {
                         const prevMap = {};
@@ -1334,63 +1063,6 @@ export default function App() {
             if (hotPoolsPollRef.current) clearInterval(hotPoolsPollRef.current);
         };
     }, [apiBaseUrl, initData, hasInitData, isHotPools, hotPoolsSort, hotPoolsPollIntervalSec, positionsPoolAddresses.join(','), multiChainEnabled, userDefaultChain]);
-
-    useEffect(() => {
-        if (!hasInitData || !isSmartMoney || !smartMoneyEnabled) {
-            if (smartMoneyPollRef.current) clearInterval(smartMoneyPollRef.current);
-            return;
-        }
-        let aborted = false;
-        const controller = new AbortController();
-        let inFlight = false;
-
-        const run = async () => {
-            if (inFlight) return;
-            inFlight = true;
-            setSmartMoneyLoading(true);
-            setSmartMoneyError('');
-            try {
-                const resp = await fetchSmartMoneyOverview({
-                    apiBaseUrl,
-                    initData,
-                    chain: 'bsc',
-                    poolLimit: 10,
-                    walletLimit: 50,
-                    poolsWindowHours: smartMoneyPoolsWindowHours,
-                    pnlWindowHours: smartMoneyPnLWindowHours,
-                    signal: controller.signal,
-                });
-                if (aborted) return;
-                setSmartMoney(resp);
-            } catch (e) {
-                if (aborted) return;
-                setSmartMoneyError(String(e?.message || e));
-            } finally {
-                inFlight = false;
-                if (!aborted) setSmartMoneyLoading(false);
-            }
-        };
-
-        run();
-
-        if (smartMoneyPollRef.current) clearInterval(smartMoneyPollRef.current);
-        smartMoneyPollRef.current = setInterval(run, smartMoneyPollSec * 1000);
-
-        return () => {
-            aborted = true;
-            controller.abort();
-            if (smartMoneyPollRef.current) clearInterval(smartMoneyPollRef.current);
-        };
-    }, [
-        apiBaseUrl,
-        initData,
-        hasInitData,
-        isSmartMoney,
-        smartMoneyEnabled,
-        smartMoneyPollSec,
-        smartMoneyPoolsWindowHours,
-        smartMoneyPnLWindowHours,
-    ]);
 
     const applyPollDraft = () => {
         const raw = String(pollDraftSec || '').trim();
@@ -1481,13 +1153,13 @@ export default function App() {
         if (poolSearchLoading) return;
         const keyword = String(poolSearchQuery || '').trim();
         if (!keyword) {
-            setPoolSearchError('请输入池子ID或代币名称。');
+            setPoolSearchError('请输入池子地址或关键词。');
             setPoolSearchResults([]);
             setPoolSearchPerformed(false);
             return;
         }
         if (!hasInitData) {
-            setPoolSearchError('未获取到 Telegram initData，请从机器人入口打开页面。');
+            setPoolSearchError('缺少 Telegram initData。本地浏览器调试时，请在 backend/.env 中设置 TELEGRAM_WEBAPP_ALLOW_EMPTY_INITDATA=1。');
             return;
         }
 
@@ -1536,55 +1208,14 @@ export default function App() {
     const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
 
     const quickRangeOptions = [
-        { label: '±1%', value: '±1' },
-        { label: '±3%', value: '±3' },
-        { label: '±5%', value: '±5' },
-        { label: '±10%', value: '±10' },
-        { label: '±20%', value: '±20' },
-        { label: '±30%', value: '±30' },
+        { label: '闁?%', value: '闁?' },
+        { label: '闁?%', value: '闁?' },
+        { label: '闁?%', value: '闁?' },
+        { label: '闁?0%', value: '闁?0' },
+        { label: '闁?0%', value: '闁?0' },
+        { label: '闁?0%', value: '闁?0' },
     ];
-    const smartMoneyQuickRangeOptions = useMemo(() => {
-        const wallets = Array.isArray(openPositionSmartWallets) ? openPositionSmartWallets : [];
-        if (!wallets.length) return [];
-
-        const byRange = new Map();
-        wallets.forEach((w) => {
-            const lower = Number(w?.price_lower ?? 0);
-            const upper = Number(w?.price_upper ?? 0);
-            if (!Number.isFinite(lower) || !Number.isFinite(upper) || lower <= 0 || upper <= 0) return;
-
-            const denom = Math.abs(lower) + Math.abs(upper);
-            if (!Number.isFinite(denom) || denom <= 0) return;
-
-            const pct = (Math.abs(upper - lower) / denom) * 100;
-            if (!Number.isFinite(pct) || pct <= 0) return;
-
-            const key = pct.toFixed(1);
-            const prev = byRange.get(key);
-            if (prev) {
-                prev.count += 1;
-                return;
-            }
-            byRange.set(key, { pct: Number(key), count: 1 });
-        });
-
-        return Array.from(byRange.values())
-            .sort((a, b) => {
-                if (a.count !== b.count) return b.count - a.count;
-                return a.pct - b.pct;
-            })
-            .map((item) => ({
-                label: `±${item.pct.toFixed(item.pct >= 10 ? 0 : 1)}%`,
-                value: item.pct.toFixed(1),
-                source: 'smart_money',
-                count: item.count,
-            }));
-    }, [openPositionSmartWallets]);
-
-    const effectiveQuickRangeOptions = useMemo(() => {
-        if (smartMoneyQuickRangeOptions.length > 0) return smartMoneyQuickRangeOptions.slice(0, 6);
-        return quickRangeOptions.slice(0, 6);
-    }, [quickRangeOptions, smartMoneyQuickRangeOptions]);
+    const effectiveQuickRangeOptions = useMemo(() => quickRangeOptions.slice(0, 6), []);
 
     const parseRangeInput = (lowerRaw, upperRaw) => {
         const lower = Number(String(lowerRaw || '').trim());
@@ -1647,15 +1278,12 @@ export default function App() {
         const addr = String(pool?.pool_address || '').trim().toLowerCase();
         if (addr && blacklist.has(addr)) {
             hapticNotification('error');
-            showNotice('该池子已加入黑名单，不能开仓。', 'error');
+            showNotice('This pool is already blacklisted.', 'error');
             return;
         }
         let chain = String(pool?.chain || hotPoolsData?.chain || 'bsc').trim().toLowerCase() || 'bsc';
         if (!multiChainEnabled) chain = userDefaultChain;
-        const smartWallets = Array.isArray(pool?.smartMoneyWallets) ? pool.smartMoneyWallets : [];
         const poolVersion = String(pool?.protocol_version || pool?.pool_version || '').trim().toLowerCase();
-        setOpenPositionSmartWallets(smartWallets);
-        setOpenPositionSmartWalletsLoading(false);
         setOpenPositionPool({
             ...pool,
             chain,
@@ -1666,8 +1294,6 @@ export default function App() {
 
     const closeOpenPosition = () => {
         if (openPositionLoading) return;
-        setOpenPositionSmartWallets([]);
-        setOpenPositionSmartWalletsLoading(false);
         setOpenPositionPool(null);
     };
 
@@ -1692,64 +1318,6 @@ export default function App() {
             controller.abort();
         };
     }, [apiBaseUrl, initData, hasInitData, openPositionPool]);
-
-    useEffect(() => {
-        if (!openPositionPool || !hasInitData) return;
-
-        const existing = Array.isArray(openPositionPool?.smartMoneyWallets)
-            ? openPositionPool.smartMoneyWallets
-            : [];
-        if (existing.length > 0) {
-            setOpenPositionSmartWallets(existing);
-            setOpenPositionSmartWalletsLoading(false);
-            return;
-        }
-
-        const poolId = String(openPositionPool?.pool_id || openPositionPool?.pool_address || '').trim();
-        const poolVersion = String(openPositionPool?.protocol_version || openPositionPool?.pool_version || '')
-            .trim()
-            .toLowerCase();
-        const chain = String(openPositionPool?.chain || hotPoolsData?.chain || 'bsc').trim().toLowerCase() || 'bsc';
-
-        if (!poolId || !poolVersion) {
-            setOpenPositionSmartWallets([]);
-            setOpenPositionSmartWalletsLoading(false);
-            return;
-        }
-
-        let aborted = false;
-        const controller = new AbortController();
-
-        setOpenPositionSmartWalletsLoading(true);
-        fetchSmartMoneyPoolAdds({
-            apiBaseUrl,
-            initData,
-            chain,
-            poolVersion,
-            poolId,
-            windowHours: 2,
-            limit: 120,
-            feesLimit: 0,
-            signal: controller.signal,
-        })
-            .then((resp) => {
-                if (aborted) return;
-                const wallets = Array.isArray(resp?.wallets) ? resp.wallets : [];
-                setOpenPositionSmartWallets(wallets);
-            })
-            .catch(() => {
-                if (aborted) return;
-                setOpenPositionSmartWallets([]);
-            })
-            .finally(() => {
-                if (!aborted) setOpenPositionSmartWalletsLoading(false);
-            });
-
-        return () => {
-            aborted = true;
-            controller.abort();
-        };
-    }, [apiBaseUrl, initData, hasInitData, hotPoolsData?.chain, openPositionPool]);
 
     useEffect(() => {
         if (!openPositionPool || !hasInitData || !multiWalletEnabled) return;
@@ -1798,22 +1366,22 @@ export default function App() {
     const handleOpenPosition = async () => {
         if (!openPositionPool) return;
         if (!hasInitData) {
-            setOpenPositionError('未获取到 Telegram initData，请从机器人入口打开页面。');
+            setOpenPositionError('Telegram initData is required.');
             return;
         }
         const poolAddr = String(openPositionPool?.pool_address || '').trim().toLowerCase();
         if (poolAddr && blacklist.has(poolAddr)) {
-            setOpenPositionError('该池子已加入黑名单，不能开仓。');
+            setOpenPositionError('This pool is blacklisted.');
             return;
         }
         const amount = Number(String(openPositionAmount || '').trim());
         if (!Number.isFinite(amount) || amount <= 0) {
-            setOpenPositionError('请输入有效的金额。');
+            setOpenPositionError('Enter a valid amount.');
             return;
         }
         const range = parseRangeInput(openPositionRangeLower, openPositionRangeUpper);
         if (!range || range.lower <= 0 || range.upper <= 0 || range.lower >= 100 || range.upper >= 100) {
-            setOpenPositionError('区间无效，请输入 0-100 之间的百分比。');
+            setOpenPositionError('Range must be between 0 and 100.');
             return;
         }
 
@@ -1822,7 +1390,7 @@ export default function App() {
         if (slippageRaw) {
             const v = Number(slippageRaw);
             if (!Number.isFinite(v) || v < 0 || v > 100) {
-                setOpenPositionError('滑点无效，请输入 0-100 之间的百分比（不填则使用全局滑点）。');
+                setOpenPositionError('Slippage must be between 0 and 100.');
                 return;
             }
             slippage = v;
@@ -1830,7 +1398,7 @@ export default function App() {
 
         if (multiWalletEnabled) {
             if (walletsLoading) {
-                setOpenPositionError('钱包加载中，请稍后再试。');
+                setOpenPositionError('钱包列表仍在加载，请稍后再试。');
                 return;
             }
             if (walletsError) {
@@ -1839,13 +1407,13 @@ export default function App() {
             }
             const list = Array.isArray(walletsData?.wallets) ? walletsData.wallets : [];
             if (list.length === 0) {
-                setOpenPositionError('未找到可用的钱包。');
+                setOpenPositionError('No available wallet found.');
                 return;
             }
             if (list.length > 1) {
                 const wid = Number(openPositionWalletId);
                 if (!Number.isFinite(wid) || wid <= 0) {
-                    setOpenPositionError('请选择钱包。');
+                    setOpenPositionError('Select a wallet.');
                     return;
                 }
             } else {
@@ -1881,15 +1449,15 @@ export default function App() {
             resetOpenPositionDraft();
         } catch (e) {
             const msg = String(e?.message || e || '').trim();
-            setOpenPositionError(msg || '开仓失败，请稍后重试。');
+            setOpenPositionError(msg || 'Open position failed.');
             setOperationProgress(prev => prev?.operation === 'open_position'
-                ? { ...prev, status: 'error', error: msg || '开仓失败' } : prev);
+                ? { ...prev, status: 'error', error: msg || 'Open position failed.' } : prev);
         } finally {
             setOpenPositionLoading(false);
         }
     };
 
-    // 黑名单操作处理
+    // 婵帗绋掗崹鐢稿箖閺囥垹纭€闁哄洨鍠愰幆娆徝归敐鍡欑煀妞わ腹鏅犻幃?
     const handleBlacklist = useCallback(async (pool, add) => {
         if (!hasInitData || !pool?.pool_address) return;
         const addr = String(pool.pool_address).trim().toLowerCase();
@@ -1898,7 +1466,7 @@ export default function App() {
                 await addToBlacklist({ apiBaseUrl, initData, poolAddress: addr });
                 setBlacklist(prev => new Set(prev).add(addr));
                 hapticNotification('success');
-                showNotice(`已将 ${pool?.trading_pair || addr} 加入黑名单`, 'warning');
+                showNotice(`Added ${pool?.trading_pair || addr} to blacklist.`, 'warning');
             } else {
                 await removeFromBlacklist({ apiBaseUrl, initData, poolAddress: addr });
                 setBlacklist(prev => {
@@ -1907,11 +1475,11 @@ export default function App() {
                     return next;
                 });
                 hapticNotification('success');
-                showNotice(`已将 ${pool?.trading_pair || addr} 移出黑名单`, 'info');
+                showNotice(`Removed ${pool?.trading_pair || addr} from blacklist.`, 'info');
             }
         } catch (e) {
             hapticNotification('error');
-            showNotice(`黑名单操作失败: ${e?.message || e}`, 'error');
+            showNotice(`婵帗绋掗崹鐢稿箖閺囥垹纭€闁哄洨鍠愰幆娆徝归敐鍡欑煀闁靛洦鍨归幏? ${e?.message || e}`, 'error');
         }
     }, [apiBaseUrl, initData, hasInitData]);
 
@@ -1919,11 +1487,11 @@ export default function App() {
         const addr = String(pool?.pool_address || '').trim().toLowerCase();
         if (!addr) return;
         if (!hasInitData) {
-            showNotice('未获取到 Telegram initData，请从机器人入口打开页面。', 'error');
+            showNotice('Telegram initData is required.', 'error');
             return;
         }
         if (blacklist.has(addr)) {
-            showNotice('该池子已在黑名单中。', 'info');
+            showNotice('This pool is already blacklisted.', 'info');
             return;
         }
         setBlacklistPrompt({ pool, addr });
@@ -1945,7 +1513,7 @@ export default function App() {
         }
     }, [blacklistPrompt, handleBlacklist]);
 
-    // 加载黑名单列表
+    // 闂佸憡姊绘慨鎯归崶顭戞付闁瑰瓨绻冮崐鎶芥煕濡や焦绀€闁割煈浜為幃?
     const loadBlacklist = useCallback(async () => {
         if (!hasInitData) return;
         try {
@@ -1958,7 +1526,7 @@ export default function App() {
         }
     }, [apiBaseUrl, initData, hasInitData]);
 
-    // 加载冷却列表
+    // 闂佸憡姊绘慨鎯归崶顒€绀冪€瑰嫭婢樼粊閬嶆煕閹烘搩娈欓柕?
     const loadCooldowns = useCallback(async () => {
         if (!hasInitData) return;
         try {
@@ -1976,9 +1544,9 @@ export default function App() {
         if (!hasInitData || !pair || cooldownRemovingPair) return;
 
         const ok = await requestConfirm({
-            title: '解除冷却',
-            message: `确认解除 ${pair} 的冷却？\n解除后该代币相关池子可再次开仓。`,
-            confirmText: '确认解除',
+            title: 'Remove cooldown',
+            message: `Remove cooldown for ${pair}?\nThis action cannot be undone.`,
+            confirmText: 'Remove',
             tone: 'danger',
         });
         if (!ok) return;
@@ -1986,16 +1554,16 @@ export default function App() {
         setCooldownRemovingPair(pair);
         try {
             const resp = await removeCooldown({ apiBaseUrl, initData, tradingPair: pair });
-            showNotice(resp?.message || `已解除冷却: ${pair}`, 'success');
+            showNotice(resp?.message || `閻庤鐡曠亸顏囶暰闂傚倸瀚ㄩ崐鏇㈠窗鎼淬劌纭€? ${pair}`, 'success');
             loadCooldowns();
         } catch (e) {
-            showNotice(`解除冷却失败: ${String(e?.message || e)}`, 'error');
+            showNotice(`闁荤喐鐟辩紞浣糕枍鎼淬劌绀冪€瑰嫭婢樼粊鍗烆熆閹壆绨块悷? ${String(e?.message || e)}`, 'error');
         } finally {
             setCooldownRemovingPair('');
         }
     }, [apiBaseUrl, initData, hasInitData, cooldownRemovingPair, loadCooldowns, requestConfirm]);
 
-    // 初始化时加载黑名单和冷却列表
+    // 闂佸憡甯楃换鍌烇綖閹版澘绀岄柡宥冨妽椤ρ囨煕閺冨倸鞋婵炴潙娲﹂—鈧柟瀛樼箖閸婃娊鏌涘Δ浣圭闁硅渹鍗冲畷妯虹暋閺夎法銈遍梺鍛婂笚椤ㄥ濡?
     useEffect(() => {
         if (hasInitData) {
             loadBlacklist();
@@ -2005,7 +1573,7 @@ export default function App() {
 
     const loadGlobalConfig = async () => {
         if (!hasInitData) {
-            setGlobalConfigError('未获取到 Telegram initData，请从机器人入口打开页面。');
+            setGlobalConfigError('Telegram initData is required.');
             return;
         }
         setGlobalConfigLoading(true);
@@ -2047,40 +1615,6 @@ export default function App() {
         loadGlobalConfig();
     };
 
-    const handleAdminDisableAuto = async () => {
-        if (!hasInitData || !showAdmin || !adminSelectedUserId || adminDisableLoading) return;
-
-        const label = adminSelectedUser
-            ? formatUserLabel(adminSelectedUser)
-            : `用户 ${String(adminSelectedUserId)}`;
-
-        const ok = await requestConfirm({
-            title: '关闭 Auto',
-            message: `确认关闭 ${label} 的 Auto？\n将撤出自动仓位并兑换成稳定币。`,
-            confirmText: '确认关闭',
-            tone: 'danger',
-        });
-        if (!ok) return;
-
-        setAdminDisableLoading(true);
-        setAdminDisableError('');
-        setAdminDisableResult(null);
-
-        try {
-            const resp = await disableAdminAutoLP({
-                apiBaseUrl,
-                initData,
-                userId: adminSelectedUserId,
-                reason: '🛑 管理员已关闭 AutoLP',
-            });
-            setAdminDisableResult(resp);
-        } catch (e) {
-            setAdminDisableError(String(e?.message || e));
-        } finally {
-            setAdminDisableLoading(false);
-        }
-    };
-
     const handleSetTaskPaused = async (taskId, paused) => {
         if (!hasInitData || showAdmin) return;
         const id = Number(taskId);
@@ -2088,17 +1622,17 @@ export default function App() {
 
         const wantPaused = Boolean(paused);
         const ok = await requestConfirm({
-            title: wantPaused ? '暂停任务' : '恢复任务',
+            title: wantPaused ? 'Pause task' : 'Resume task',
             message: wantPaused
-                ? '确认暂停该任务？\n暂停后将不再自动执行再平衡/止损等操作。'
-                : '确认恢复该任务？\n恢复后将继续自动执行再平衡/止损等操作。',
-            confirmText: wantPaused ? '确认暂停' : '确认恢复',
+                ? 'Pause this task?\nIt will stop creating new orders.'
+                : 'Resume this task?\nIt will continue creating new orders.',
+            confirmText: wantPaused ? 'Pause' : 'Resume',
         });
         if (!ok) return;
 
         try {
             await setTaskPaused({ apiBaseUrl, initData, taskId: id, paused: wantPaused });
-            showNotice(wantPaused ? '任务已暂停' : '任务已恢复', 'success');
+            showNotice(wantPaused ? 'Task paused.' : 'Task resumed.', 'success');
         } catch (e) {
             showNotice(String(e?.message || e), 'error');
         }
@@ -2110,9 +1644,9 @@ export default function App() {
         if (!Number.isFinite(id) || id <= 0) return;
 
         const ok = await requestConfirm({
-            title: '停止任务',
-            message: '确认停止该任务？\n停止后将撤出流动性并兑换成 USDT，可能需要几十秒。',
-            confirmText: '确认停止',
+            title: 'Stop position',
+            message: 'Stop this position?\nIt will close the related task and settle outstanding value in USDT.',
+            confirmText: 'Stop',
             tone: 'danger',
         });
         if (!ok) return;
@@ -2121,11 +1655,11 @@ export default function App() {
         try {
             const resp = await stopTask({ apiBaseUrl, initData, taskId: id });
             if (resp?.status === 'stopped' || resp?.pending === false) {
-                // Already stopped or immediate stop — all done
+                // Already stopped or immediate stop 闂?all done
                 setOperationProgress(prev => prev?.operation === 'close_position'
                     ? { ...prev, currentStep: 3, status: 'done' } : prev);
             } else {
-                // Async — advance to step 1 only if WS hasn't already gone further
+                // Async 闂?advance to step 1 only if WS hasn't already gone further
                 setOperationProgress(prev => {
                     if (!prev || prev.operation !== 'close_position') return prev;
                     if (prev.status === 'done' || prev.status === 'error') return prev;
@@ -2137,7 +1671,7 @@ export default function App() {
             const msg = String(e?.message || e || '').trim();
             if (msg.includes('task not found')) {
                 setOperationProgress(null);
-                showNotice(`任务 #${id} 不存在（可能已删除/已停止），已刷新列表。`, 'warning');
+                showNotice(`Task #${id} was not found. It may have already been closed or deleted.`, 'warning');
                 try {
                     const resp = await fetchRealtimePositions({ apiBaseUrl, initData });
                     setData(resp);
@@ -2147,7 +1681,7 @@ export default function App() {
                 return;
             }
             setOperationProgress(prev => prev?.operation === 'close_position'
-                ? { ...prev, status: 'error', error: msg || '停止失败' } : prev);
+                ? { ...prev, status: 'error', error: msg || 'Stop position failed.' } : prev);
         }
     };
 
@@ -2176,16 +1710,16 @@ export default function App() {
         if (!Number.isFinite(id) || id <= 0) return;
 
         const ok = await requestConfirm({
-            title: '删除任务',
-            message: '确认删除该任务？\n删除只会从列表移除，不会撤出流动性/兑换 USDT。',
-            confirmText: '确认删除',
+            title: 'Delete task',
+            message: 'Delete this task?\nThis action cannot be undone and will remove its configuration.',
+            confirmText: 'Delete',
             tone: 'danger',
         });
         if (!ok) return;
 
         try {
             const resp = await deleteTask({ apiBaseUrl, initData, taskId: id });
-            showNotice(resp?.message || '任务已删除', 'success');
+            showNotice(resp?.message || 'Task deleted.', 'success');
         } catch (e) {
             showNotice(String(e?.message || e), 'error');
         }
@@ -2201,7 +1735,7 @@ export default function App() {
         const fallbackAmount = Number(position?.net_invested_usd ?? position?.initial_cost_usd);
         setTaskRangeEdit({
             taskId: id,
-            title: String(position?.title || '').trim() || `任务 #${id}`,
+            title: String(position?.title || '').trim() || `婵炲濮鹃褎鎱?#${id}`,
         });
         setTaskRangeLower(Number.isFinite(low) && low > 0 ? String(low) : '');
         setTaskRangeUpper(Number.isFinite(up) && up > 0 ? String(up) : '');
@@ -2231,18 +1765,18 @@ export default function App() {
         const range = parseRangeInput(taskRangeLower, taskRangeUpper);
         const amount = Number(String(taskRangeAmount || '').trim());
         if (!Number.isFinite(amount) || amount <= 0) {
-            setTaskRangeError('金额无效，请输入大于 0 的 USDT 数值。');
+            setTaskRangeError('Amount must be greater than 0 USDT.');
             return;
         }
         if (!range || range.lower <= 0 || range.upper <= 0 || range.lower >= 100 || range.upper >= 100) {
-            setTaskRangeError('区间无效，请输入 0-100 之间的百分比。');
+            setTaskRangeError('Range must be between 0 and 100.');
             return;
         }
 
         const ok = await requestConfirm({
-            title: '修改再平衡参数',
-            message: '确认修改？\n修改后的区间和金额都将在【下次再平衡时】生效。\n注意：本次修改不会直接改变当前的持仓。',
-            confirmText: '确认修改',
+            title: 'Update task range',
+            message: 'Update the task range?\nThe bot will use the new range and amount after confirmation.',
+            confirmText: 'Update',
         });
         if (!ok) return;
 
@@ -2257,20 +1791,20 @@ export default function App() {
                 rangeUpperPct: range.upper,
                 amountUSDT: amount,
             });
-            showNotice('区间已更新（下次再平衡生效）', 'success');
+            showNotice('任务区间已更新。', 'success');
             setTaskRangeEdit(null);
             setTaskRangeLower('');
             setTaskRangeUpper('');
             setTaskRangeUpperAuto(true);
             setTaskRangeAmount('');
         } catch (e) {
-            setTaskRangeError(String(e?.message || e || '修改失败'));
+            setTaskRangeError(String(e?.message || e || 'Update failed.'));
         } finally {
             setTaskRangeLoading(false);
         }
     };
 
-    // 批量操作函数
+    // 闂佸綊娼х紞濠囧闯濞差亜绠肩€广儱瀚粙濠囨煕閹达絽袚闁?
     const toggleTaskSelection = (taskId) => {
         const newSet = new Set(selectedTaskIds);
         if (newSet.has(taskId)) {
@@ -2316,12 +1850,12 @@ export default function App() {
         setBatchMode(false);
         hapticNotification(failCount === 0 ? 'success' : 'warning');
         showNotice(
-            `批量${paused ? '暂停' : '恢复'}完成：成功 ${successCount}，失败 ${failCount}`,
+            `闂佸綊娼х紞濠囧闯?{paused ? '闂佸搫妫楅崐鍛婄? : '闂佽鍘归崹褰捤?}闁诲海鎳撻張顒勫垂濮樿埖鏅慨姗嗗幖閻忓洭鏌?${successCount}闂佹寧绋戦懟顖炲Φ閹寸姵瀚?${failCount}`,
             failCount === 0 ? 'success' : 'warning'
         );
     };
 
-    // 计算本地刷新后经过的秒数
+    // 闁荤姳绶ょ槐鏇㈡偩婵犳艾瀚夋い鎺嗗亾婵犫偓閹绢喖绀嗛梺鍨儐閻撯偓闂佸憡鑹惧ù椋庡垝閳╁啯浜ら柛銉㈡櫆閻ｈ京绱掓径瀣瑲闁?
     const localUpdateSecAgo = useMemo(() => {
         const elapsed = tick - lastPollTimeRef.current;
         return Math.max(0, Math.floor(elapsed / 1000));
@@ -2330,47 +1864,33 @@ export default function App() {
     const moduleMetaByMode = useMemo(() => ({
         hot_pools: {
             title: '热门池子',
-            icon: icons.fire, // Changed to fire icon
-            subtitle: `5m · ${hotPoolsData ? `更新：${localUpdateSecAgo}秒前` : hotPoolsLoading ? '加载中...' : '暂无数据'} · 自动刷新 ${hotPoolsPollIntervalSec}s`,
+            icon: icons.fire,
+            subtitle: `5 分钟 | ${hotPoolsData ? `${localUpdateSecAgo} 秒前更新` : hotPoolsLoading ? '加载中...' : '未加载'} | 轮询 ${hotPoolsPollIntervalSec}s`,
         },
         positions: {
-            title: '实时仓位',
+            title: '仓位',
             icon: icons.bot,
-            subtitle: walletAddress ? `钱包：${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '加载钱包中...',
-        },
-        monitor: {
-            title: '自动任务监控',
-            icon: icons.chart, // Changed to chart icon
-            subtitle: `Auto任务：${Array.isArray(autoMonitor?.tasks) ? autoMonitor.tasks.length : 0} · 更新：${formatRelativeTime(autoMonitor?.updated_at, tick) || '--'}`,
-        },
-        smart_money: {
-            title: '聪明钱',
-            icon: icons.search,
-            subtitle: `最近2h池子 ${Array.isArray(smartMoney?.pools) ? smartMoney.pools.length : 0} · 更新 ${formatRelativeTime(smartMoney?.updated_at, tick) || '--'}`,
+            subtitle: walletAddress ? `钱包 ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '钱包未连接',
         },
         admin: {
-            title: '管理面板',
-            icon: icons.gear, // Changed to gear icon
+            title: '管理',
+            icon: icons.gear,
             subtitle: adminSelectedUser
-                ? `用户：${formatUserLabel(adminSelectedUser)}`
+                ? `闂佹椿娼块崝宥夊春濞戙垺鏅?{formatUserLabel(adminSelectedUser)}`
                 : adminUsersLoading && adminUsers.length === 0
-                    ? '加载用户中...'
+                    ? '闂佸憡姊绘慨鎯归崶顒佸仺闁靛绠戦悡鏇炩槈?..'
                     : adminUsers.length
-                        ? `开启Auto用户：${adminUsers.length}`
-                        : '暂无开启Auto用户',
+                        ? `闂侀潻璐熼崝搴ㄥ吹鎼淬劍鍋ㄩ柕濠忕畱閻撴洟鏌?{adminUsers.length}`
+                        : '暂无可管理用户',
         },
     }), [
         adminSelectedUser,
         adminUsers,
         adminUsersLoading,
-        autoMonitor,
         hotPoolsData,
         hotPoolsLoading,
         hotPoolsPollIntervalSec,
         localUpdateSecAgo,
-        monitorPollSec,
-        smartMoney,
-        smartMoneyPollSec,
         tick,
         walletAddress,
     ]);
@@ -2379,12 +1899,10 @@ export default function App() {
     const hasAdminPositions = Boolean(adminPositions);
     const adminSummaryPlaceholder = adminSelectedUserId
         ? adminPositionsLoading
-            ? '加载用户仓位中...'
-            : '用户仓位暂不可用'
-        : '请选择用户查看实时仓位';
+            ? '闂佸憡姊绘慨鎯归崶顒佸仺闁靛绠戦悡鏇灻归悩铏矮缂傚秴鎳忕粙?..'
+            : '该用户暂无仓位数据'
+        : '请先选择一个管理员用户';
     const showEmptyPositions = isPositions && Boolean(activeData) && visiblePositions.length === 0;
-    const showEmptyTaskTab = isPositions && Boolean(activeData) && !showEmptyPositions && positionsTaskTab !== 'all' && visibleTaskPositions.length === 0;
-    const monitorTasks = useMemo(() => (Array.isArray(autoMonitor?.tasks) ? autoMonitor.tasks : []), [autoMonitor]);
     const blacklistList = useMemo(() => Array.from(blacklist).sort(), [blacklist]);
     const hotPoolsPairMap = useMemo(() => {
         const m = new Map();
@@ -2395,22 +1913,12 @@ export default function App() {
         }
         return m;
     }, [hotPoolsRows]);
-    const monitorPoolTitleMap = useMemo(() => {
-        const m = new Map();
-        for (const t of monitorTasks) {
-            const addr = String(t?.pool_id || '').trim().toLowerCase();
-            const title = String(t?.title || '').trim();
-            if (addr && title && !m.has(addr)) m.set(addr, title);
-        }
-        return m;
-    }, [monitorTasks]);
     const blacklistPromptPool = blacklistPrompt?.pool || null;
     const blacklistPromptPair = String(blacklistPromptPool?.trading_pair || '').trim();
     const blacklistPromptAddr = String(blacklistPromptPool?.pool_address || '').trim().toLowerCase();
     const blacklistPromptAddrShort = blacklistPromptAddr.length > 12
         ? `${blacklistPromptAddr.slice(0, 6)}...${blacklistPromptAddr.slice(-4)}`
         : blacklistPromptAddr;
-    const showEmptyAutoTasks = isMonitor && Boolean(autoMonitor) && monitorTasks.length === 0 && !autoMonitorLoading && !autoMonitorError;
 
     const initDataMissing = viewMode !== 'hot_pools' && !hasInitData;
     const noticeClass = notice?.tone === 'error'
@@ -2420,10 +1928,10 @@ export default function App() {
             : 'bg-zinc-900 text-white dark:bg-white/10 dark:text-white';
     const globalCfg = globalConfig || {};
     const rebalanceText = Number.isFinite(Number(globalCfg.rebalance_timeout))
-        ? `${Number(globalCfg.rebalance_timeout)} 秒`
+        ? `${Number(globalCfg.rebalance_timeout)} s`
         : '--';
     const stopLossDelayText = Number.isFinite(Number(globalCfg.stop_loss_delay_seconds))
-        ? `${Number(globalCfg.stop_loss_delay_seconds)} 秒`
+        ? `${Number(globalCfg.stop_loss_delay_seconds)} s`
         : '--';
     const slippageText = Number.isFinite(Number(globalCfg.slippage_tolerance))
         ? `${Number(globalCfg.slippage_tolerance).toFixed(2)}%`
@@ -2435,17 +1943,14 @@ export default function App() {
         ? 'bg-red-500 text-white hover:bg-red-600 active:bg-red-700'
         : brand.solidButtonClass;
 
-    const activeErrorText = useMemo(() => {
-        const msg = String(activeError || '').trim();
-        if (!msg) return '';
-        if (msg.includes('missing initData')) {
-            return '未获取到 Telegram WebApp 的 initData：请从机器人里的“实时仓位”按钮打开。';
-        }
-        if (msg.includes('invalid initData')) {
-            return 'initData 校验失败：请检查后端 TELEGRAM_BOT_TOKEN 是否正确，或 initData 是否过期。';
-        }
-        return msg;
-    }, [activeError]);
+    const hotPoolsErrorText = useMemo(
+        () => localizeWebAppError(hotPoolsError, allowEmptyInitData),
+        [hotPoolsError, allowEmptyInitData],
+    );
+    const activeErrorText = useMemo(
+        () => localizeWebAppError(activeError, allowEmptyInitData),
+        [activeError, allowEmptyInitData],
+    );
 
     return (
         <div className={`min-h-screen max-w-[720px] px-4 py-4 mx-auto ${isPositions ? 'pb-[calc(96px+env(safe-area-inset-bottom))]' : 'pb-[calc(80px+env(safe-area-inset-bottom))]'}`}>
@@ -2456,7 +1961,7 @@ export default function App() {
                     </div>
                 </div>
             ) : null}
-            {/* 顶部加载进度条 */}
+            {/* 婵＄偑鍊曢悥濂稿磿閹绢喖绀夐柣妯煎劋缁佷即寮堕埡鍌溾槈閻庤濞婂?*/}
             <div className="progress-bar-container">
                 <div
                     className={`progress-bar ${loading || hotPoolsLoading ? 'loading' : ''}`}
@@ -2482,7 +1987,7 @@ export default function App() {
                             type="button"
                             onClick={toggleTheme}
                             className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border shadow-sm ${theme === 'dark' ? 'border-white/20 bg-white/10 text-white hover:bg-white/20' : 'border-zinc-300 bg-zinc-100 text-zinc-900 hover:bg-zinc-200'}`}
-                            aria-label="切换主题"
+                            aria-label="Toggle theme"
                         >
                             <Icon path={theme === 'dark' ? icons.moon : icons.sun} className="h-5 w-5" />
                         </button>
@@ -2490,7 +1995,7 @@ export default function App() {
                             type="button"
                             onClick={() => setSettingsOpen(true)}
                             className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 shadow-sm hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                            aria-label="设置"
+                            aria-label="打开设置"
                         >
                             <Icon path={icons.gear} className="h-5 w-5" />
                         </button>
@@ -2500,10 +2005,10 @@ export default function App() {
 
                 {showAdmin ? (
                     <ModuleHeader
-                        title="管理概览"
+                        title="管理面板"
                         subtitle={hasAdminPositions
                             ? adminSelectedUser
-                                ? `用户：${formatUserLabel(adminSelectedUser)}`
+                                ? `用户 ${formatUserLabel(adminSelectedUser)}`
                                 : ''
                             : adminSummaryPlaceholder}
                         actions={hasAdminPositions ? (
@@ -2517,20 +2022,20 @@ export default function App() {
                     >
                         {hasAdminPositions ? (
                             <div>
-                                <div className="text-[11px] text-zinc-500 dark:text-white/40">总余额</div>
+                                <div className="text-[11px] text-zinc-500 dark:text-white/40">总资产</div>
                                 <div className={`mt-0.5 text-2xl font-extrabold tabular-nums text-zinc-900 ${brand.textClass}`}>
                                     <NumberFlowValue value={totalUsd} formatter={(v) => formatUsd(v)} />
                                 </div>
                                 <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40 tabular-nums">
                                     <NumberFlowValue value={bnbBalance} formatter={() => String(bnbBalance ?? '0')} /> BNB
-                                    {typeof bnbUsd === 'number' ? <> ≈ <NumberFlowValue value={bnbUsd} formatter={(v) => formatUsd(v)} /></> : ''}
+                                    {typeof bnbUsd === 'number' ? <> | <NumberFlowValue value={bnbUsd} formatter={(v) => formatUsd(v)} /></> : ''}
                                 </div>
                             </div>
                         ) : null}
                     </ModuleHeader>
                 ) : isHotPools ? (
                     <ModuleHeader
-                        title={hotPoolsSort === 'fee_rate' ? '费用率排行' : hotPoolsSort === 'volume' ? '交易量排行' : '费用排行'}
+                        title={hotPoolsSort === 'fee_rate' ? '费率排行' : hotPoolsSort === 'volume' ? '交易量排行' : '手续费排行'}
                         actions={(
                             <>
                                 <div className="flex shrink-0 p-0.5 bg-zinc-100/80 rounded-xl dark:bg-[#16181d] shadow-inner ring-1 ring-zinc-200/50 dark:ring-black/20">
@@ -2553,7 +2058,7 @@ export default function App() {
                                     type="button"
                                     onClick={openPoolSearch}
                                     className="inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-white/70 text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
-                                    aria-label="Search"
+                                    aria-label="搜索池子"
                                     title="搜索池子"
                                 >
                                     <Icon path={icons.search} className="h-4 w-4" />
@@ -2568,8 +2073,8 @@ export default function App() {
                                         ? brand.softButtonClass
                                         : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
                                         }`}
-                                    aria-label="Filter"
-                                    title="Filter"
+                                    aria-label="筛选"
+                                    title="筛选"
                                 >
                                     <Icon path={icons.filter} className="h-3.5 w-3.5" />
                                     {hotPoolsFilterEnabled ? (
@@ -2580,131 +2085,75 @@ export default function App() {
                         )}
                     />
                 ) : showWalletSummaryCard ? (
-                    <>
-                        <div className="mt-3 overflow-hidden rounded-[24px] border border-zinc-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_42%),linear-gradient(135deg,_rgba(255,255,255,0.92),_rgba(244,247,255,0.78))] p-3 shadow-[0_16px_40px_-24px_rgba(15,23,42,0.38)] dark:border-white/10 dark:bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_38%),linear-gradient(135deg,_rgba(24,27,32,0.98),_rgba(15,17,21,0.94))] dark:shadow-[0_18px_48px_-28px_rgba(0,0,0,0.7)]">
-                            <div className="flex flex-col gap-2.5">
-                                <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0 flex-1">
-                                        <div className="inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-300/90">
-                                            {isMonitor ? '监控概览' : '仓位总览'}
-                                        </div>
-
-                                        <div className="mt-2.5 text-[10px] font-medium text-zinc-500 dark:text-white/45">总资产</div>
-                                        <div className="mt-1 text-[24px] font-black leading-none tracking-tight text-zinc-950 dark:text-white">
-                                            <NumberFlowValue value={totalUsd} formatter={(v) => formatUsd(v)} />
-                                        </div>
-
-                                        <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-zinc-500 dark:text-white/50">
-                                            {!multiWalletSummary ? (
-                                                <span className="rounded-full border border-white/70 bg-white/70 px-2 py-1 font-mono dark:border-white/10 dark:bg-white/5">
-                                                    {walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '未连接'}
-                                                </span>
-                                            ) : null}
-                                            {!multiWalletSummary ? (
-                                                <span className="rounded-full border border-white/70 bg-white/70 px-2 py-1 dark:border-white/10 dark:bg-white/5">
-                                                    <NumberFlowValue value={bnbBalance} formatter={() => String(bnbBalance ?? '0')} /> BNB
-                                                    {typeof bnbUsd === 'number' ? <> · <NumberFlowValue value={bnbUsd} formatter={(v) => formatUsd(v)} /></> : null}
-                                                </span>
-                                            ) : null}
-                                        </div>
+                    <div className="mt-3 overflow-hidden rounded-[24px] border border-zinc-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_42%),linear-gradient(135deg,_rgba(255,255,255,0.92),_rgba(244,247,255,0.78))] p-3 shadow-[0_16px_40px_-24px_rgba(15,23,42,0.38)] dark:border-white/10 dark:bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_38%),linear-gradient(135deg,_rgba(24,27,32,0.98),_rgba(15,17,21,0.94))] dark:shadow-[0_18px_48px_-28px_rgba(0,0,0,0.7)]">
+                        <div className="flex flex-col gap-2.5">
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                    <div className="inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-300/90">
+                                        仓位总览
                                     </div>
-
-                                    <div className="flex shrink-0 flex-col items-end gap-1.5">
-                                        <button
-                                            type="button"
-                                            onClick={openGlobalConfig}
-                                            disabled={!hasInitData}
-                                            className={`inline-flex shrink-0 rounded-2xl px-3 py-2 text-[10px] font-semibold ring-1 backdrop-blur-md transition-colors ${hasInitData
-                                                ? 'bg-white/80 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/10 dark:text-white/90 dark:ring-white/10 dark:hover:bg-white/20'
-                                                : 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
-                                                }`}
-                                        >
-                                            全局配置
-                                        </button>
-                                        {multiWalletSummary ? (
-                                            <span className="rounded-full border border-white/70 bg-white/70 px-2 py-1 text-[10px] font-semibold text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-white/65">
-                                                {totalWalletCount} 个钱包
+                                    <div className="mt-2.5 text-[10px] font-medium text-zinc-500 dark:text-white/45">总资产</div>
+                                    <div className="mt-1 text-[24px] font-black leading-none tracking-tight text-zinc-950 dark:text-white">
+                                        <NumberFlowValue value={totalUsd} formatter={(v) => formatUsd(v)} />
+                                    </div>
+                                    <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-zinc-500 dark:text-white/50">
+                                        {!multiWalletSummary ? (
+                                            <span className="rounded-full border border-white/70 bg-white/70 px-2 py-1 font-mono dark:border-white/10 dark:bg-white/5">
+                                                {walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '未连接'}
+                                            </span>
+                                        ) : null}
+                                        {!multiWalletSummary ? (
+                                            <span className="rounded-full border border-white/70 bg-white/70 px-2 py-1 dark:border-white/10 dark:bg-white/5">
+                                                <NumberFlowValue value={bnbBalance} formatter={() => String(bnbBalance ?? '0')} /> BNB
+                                                {typeof bnbUsd === 'number' ? <> | <NumberFlowValue value={bnbUsd} formatter={(v) => formatUsd(v)} /></> : null}
                                             </span>
                                         ) : null}
                                     </div>
                                 </div>
-
-                                <div className={`flex gap-1 ${summaryMetricDense ? 'gap-0.5' : ''}`}>
-                                    {summaryMetricCards.map((card) => (
-                                        <div
-                                            key={card.key}
-                                            className={`min-w-0 flex-1 rounded-[18px] border border-white/70 bg-white/75 backdrop-blur-md dark:border-white/10 dark:bg-white/5 ${summaryMetricDense ? 'px-1.25 py-1.25' : 'px-1.5 py-1.5'}`}
-                                        >
-                                            <div className={`truncate font-semibold uppercase text-zinc-500 dark:text-white/40 ${summaryMetricDense ? 'text-[7px] tracking-[0.04em]' : 'text-[8px] tracking-[0.08em]'}`}>
-                                                {card.label}
-                                            </div>
-                                            <div className={`mt-0.5 truncate font-bold tabular-nums text-zinc-950 dark:text-white ${summaryMetricDense ? 'text-[10px]' : 'text-[11px]'}`}>
-                                                {card.value}
-                                            </div>
-                                        </div>
-                                    ))}
+                                <div className="flex shrink-0 flex-col items-end gap-1.5">
+                                    <button
+                                        type="button"
+                                        onClick={openGlobalConfig}
+                                        disabled={!hasInitData}
+                                        className={`inline-flex shrink-0 rounded-2xl px-3 py-2 text-[10px] font-semibold ring-1 backdrop-blur-md transition-colors ${hasInitData
+                                            ? 'bg-white/80 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/10 dark:text-white/90 dark:ring-white/10 dark:hover:bg-white/20'
+                                            : 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
+                                            }`}
+                                    >
+                                        全局配置
+                                    </button>
+                                    {multiWalletSummary ? (
+                                        <span className="rounded-full border border-white/70 bg-white/70 px-2 py-1 text-[10px] font-semibold text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-white/65">
+                                            {totalWalletCount} 个钱包
+                                        </span>
+                                    ) : null}
                                 </div>
+                            </div>
+                            <div className={`flex gap-1 ${summaryMetricDense ? 'gap-0.5' : ''}`}>
+                                {summaryMetricCards.map((card) => (
+                                    <div
+                                        key={card.key}
+                                        className={`min-w-0 flex-1 rounded-[18px] border border-white/70 bg-white/75 backdrop-blur-md dark:border-white/10 dark:bg-white/5 ${summaryMetricDense ? 'px-1.25 py-1.25' : 'px-1.5 py-1.5'}`}
+                                    >
+                                        <div className={`truncate font-semibold uppercase text-zinc-500 dark:text-white/40 ${summaryMetricDense ? 'text-[7px] tracking-[0.04em]' : 'text-[8px] tracking-[0.08em]'}`}>
+                                            {card.label}
+                                        </div>
+                                        <div className={`mt-0.5 truncate font-bold tabular-nums text-zinc-950 dark:text-white ${summaryMetricDense ? 'text-[10px]' : 'text-[11px]'}`}>
+                                            {card.value}
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
                         </div>
-                        {false && (
-                    <div className="mt-3 rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-3 px-4 shadow-sm dark:border-white/5 dark:bg-[#16181c] dark:shadow-none">
-                        <div className="flex flex-row items-center justify-between gap-2">
-                            <div className="flex flex-col">
-                                <div className="flex items-center gap-2">
-                                    <div className="text-[15px] font-bold text-zinc-900 dark:text-white/95">{isMonitor ? '监控概览' : '仓位概览'}</div>
-                                    {!(Array.isArray(posWalletBalances?.wallets) && posWalletBalances.wallets.length > 1) && (
-                                        <div className="text-xs text-zinc-500 dark:text-white/40">
-                                            <NumberFlowValue value={bnbBalance} formatter={() => String(bnbBalance ?? '0')} /> BNB
-                                            {typeof bnbUsd === 'number' ? <> ≈ <NumberFlowValue value={bnbUsd} formatter={(v) => formatUsd(v)} /></> : ''}
-                                        </div>
-                                    )}
-                                </div>
-                                {Array.isArray(posWalletBalances?.wallets) && posWalletBalances.wallets.length > 1 && (
-                                    <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0 text-[10px] text-zinc-400 dark:text-white/30 tabular-nums">
-                                        {posWalletBalances.wallets.map((w) => (
-                                            <span key={w.id} className="whitespace-nowrap">
-                                                <span className="font-medium text-zinc-500 dark:text-white/45">{w.name || `${String(w.address || '').slice(0, 6)}..${String(w.address || '').slice(-4)}`}</span>
-                                                {' '}${w.stable_balance !== 'N/A' ? w.stable_balance : '--'}
-                                            </span>
-                                        ))}
-                                    </div>
-                                )}
-                                <div className="mt-1 flex items-baseline gap-2">
-                                    <div className="text-[11px] text-zinc-500 dark:text-white/50">总余额</div>
-                                    <div className="text-xl font-extrabold tabular-nums text-zinc-900 dark:text-emerald-400 tracking-tight">
-                                        <NumberFlowValue value={totalUsd} formatter={(v) => formatUsd(v)} />
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="flex flex-col items-end gap-1.5 shrink-0">
-                                <div className="text-[10px] text-zinc-500 dark:text-white/40 flex items-center gap-1">
-                                    刷新 <span className="font-semibold text-zinc-700 dark:text-white/70"><NumberFlowValue value={pollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s</span>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={openGlobalConfig}
-                                    disabled={!hasInitData}
-                                    className={`inline-flex rounded-lg px-2.5 py-1 text-[11px] font-semibold ring-1 min-w-[64px] justify-center transition-colors ${hasInitData
-                                        ? 'bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50 dark:bg-white/10 dark:text-white/90 dark:ring-white/10 dark:hover:bg-white/20'
-                                        : 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
-                                        }`}
-                                >
-                                    全局配置
-                                </button>
-                            </div>
-                        </div>
-                    </div >
-                        )}
-                    </>
-                ) : null
-                }
+                    </div>
+                ) : null}
 
-            </header >
+            </header>
 
             {
-                isHotPools && hotPoolsError ? (
+                isHotPools && hotPoolsErrorText ? (
                     <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-200">
-                        {hotPoolsError}
+                        {hotPoolsErrorText}
                     </div>
                 ) : null
             }
@@ -2718,7 +2167,7 @@ export default function App() {
             {
                 isHotPools && !hotPoolsLoading && !hotPoolsError && hotPoolsData && hotPoolsRows.length === 0 ? (
                     <div className="mb-4 rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                        暂无热门池子数据。
+                        闂佸搫妫楅崐鐟拔涢妶澶嬪€绘い鎾卞灪閿涘本鎱ㄩ崷顓炐㈤柣鈩冪懇瀵偊鎮ч崼婵堛偊闂?
                     </div>
                 ) : null
             }
@@ -2726,7 +2175,7 @@ export default function App() {
             {
                 isHotPools && !hotPoolsLoading && !hotPoolsError && hotPoolsData && hotPoolsRows.length > 0 && hotPoolsFilterEnabled && hotPoolsVisibleRows.length === 0 ? (
                     <div className="mb-4 rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                        筛选后暂无热门池子数据。
+                        缂備焦绋掗惄顖炲焵椤掆偓椤︻垶骞冨Δ鍛辈闁稿本绋掗敓銉╂煟閹搭厼寮俊顐墮鏁堥柣妯垮皺閹藉秹鏌℃担鍝勵暭鐎规挷绶氭俊?
                     </div>
                 ) : null
             }
@@ -2747,7 +2196,7 @@ export default function App() {
             {
                 !isHotPools && initDataMissing ? (
                     <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-200">
-                        请从 Telegram 机器人里的"实时仓位"按钮打开页面（否则无法读取你的仓位）。
+                        闁荤姴娲╁〒鍦垝?Telegram 闂佸搫鐗嗛幖顐⑩枍閹烘挾顩叉繛宸簻濞咃繝鏌?闁诲骸婀遍崑鐐差渻閸屾稓顩烽柟鎹愬皺缁?闂佸湱顭堥ˇ鐢稿箰閹惰棄绠ラ柟鎯х－绾捐顪冮妶鍥ㄦ毈婵為棿鍗抽弫宥夊醇濠靛洤鍓ㄩ梺鍛婂笚閻燂箑螞閵堝應鏋栭柡鍥ｆ閸ゃ垽鏌涘▎鎰ⅶ缂傚秵锕㈤幆鍐礋椤忓棙灏濇繛杈剧到缁嬪嫮妲愬璺何?
                     </div>
                 ) : null
             }
@@ -2760,76 +2209,7 @@ export default function App() {
                 ) : null
             }
 
-            {
-                isMonitor && autoMonitorError ? (
-                    <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-200">
-                        {autoMonitorError}
-                    </div>
-                ) : null
-            }
-
-            {
-                isSmartMoney && smartMoneyError ? (
-                    <div className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-200">
-                        {smartMoneyError}
-                    </div>
-                ) : null
-            }
-
-            {
-                isPositions && activeLoading && !activeData ? (
-                    <SkeletonList count={2} Card={SkeletonPositionCard} />
-                ) : null
-            }
-
-            {
-                isMonitor && autoMonitorLoading && !autoMonitor ? (
-                    <SkeletonList count={2} Card={SkeletonPositionCard} />
-                ) : null
-            }
-
-            {
-                isSmartMoney && smartMoneyLoading && !smartMoney ? (
-                    <SkeletonList count={2} Card={SkeletonPositionCard} />
-                ) : null
-            }
-
-            {
-                isMonitor && !showAdmin ? (
-                    <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-zinc-200/50 bg-zinc-50 px-3 py-2 dark:border-white/6 dark:bg-[#0b0f14]">
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs font-medium text-zinc-500 dark:text-white/50">对比基准</span>
-                            <button
-                                type="button"
-                                onClick={toggleAutoGuardBaseline}
-                                disabled={!hasInitData || autoGuardBaselineUpdating}
-                                className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all ${!hasInitData || autoGuardBaselineUpdating
-                                    ? 'cursor-not-allowed bg-zinc-100 text-zinc-400 dark:bg-white/5 dark:text-white/25'
-                                    : guardCompareToPeak
-                                        ? 'bg-amber-500/10 text-amber-600 ring-1 ring-amber-500/20 hover:bg-amber-500/15 hover:ring-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-amber-500/20 dark:hover:bg-amber-500/15'
-                                        : 'bg-sky-500/10 text-sky-600 ring-1 ring-sky-500/20 hover:bg-sky-500/15 hover:ring-sky-500/30 dark:bg-sky-500/10 dark:text-sky-400 dark:ring-sky-500/20 dark:hover:bg-sky-500/15'
-                                    }`}
-                            >
-                                {guardCompareToPeak ? (
-                                    <>
-                                        <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2l2 4h4l-3.5 3 1.5 5L8 11l-4 3 1.5-5L2 6h4l2-4z" /></svg>
-                                        最高点
-                                    </>
-                                ) : (
-                                    <>
-                                        <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor"><path d="M8 14A6 6 0 108 2a6 6 0 000 12zm0-2a4 4 0 110-8 4 4 0 010 8zm0-3a1 1 0 100-2 1 1 0 000 2z" /></svg>
-                                        开仓时
-                                    </>
-                                )}
-                                {autoGuardBaselineUpdating && <span className="ml-0.5 animate-pulse">…</span>}
-                            </button>
-                        </div>
-                        <span className="text-[10px] text-zinc-400 dark:text-white/30">点击切换</span>
-                    </div>
-                ) : null
-            }
-
-            {/* 批量操作工具栏 */}
+            {/* 闂佸綊娼х紞濠囧闯濞差亜绠肩€广儱瀚粙濠勨偓瑙勬偠閸庨亶宕ｉ崸妤€鍐€?*/}
             {
                 isPositions && !showAdmin && visiblePositions.length > 1 && (
                     <div className="mb-4 flex items-center justify-between gap-2">
@@ -2845,7 +2225,7 @@ export default function App() {
                                 : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
                                 }`}
                         >
-                            {batchMode ? '退出多选' : '批量操作'}
+                            {batchMode ? '退出批量模式' : '批量模式'}
                         </button>
 
                         {batchMode && (
@@ -2866,7 +2246,7 @@ export default function App() {
                                     disabled={selectedTaskIds.size === 0 || batchLoading}
                                     className="inline-flex items-center rounded-xl bg-amber-500/15 px-2 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-500/25 disabled:opacity-50 dark:text-amber-200"
                                 >
-                                    {batchLoading ? '处理中...' : '批量暂停'}
+                                    {batchLoading ? '处理中...' : '暂停所选'}
                                 </button>
                                 <button
                                     type="button"
@@ -2874,7 +2254,7 @@ export default function App() {
                                     disabled={selectedTaskIds.size === 0 || batchLoading}
                                     className="inline-flex items-center rounded-xl bg-emerald-500/15 px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-500/25 disabled:opacity-50 dark:text-emerald-200"
                                 >
-                                    批量恢复
+                                    闂佸綊娼х紞濠囧闯濞差亜绠掗柕蹇曞濡?
                                 </button>
                             </div>
                         )}
@@ -2882,7 +2262,7 @@ export default function App() {
                 )
             }
 
-            {/* 移除了"暂无自动任务"提示 */}
+            {/* 缂備礁顦…宄扳枍鎼淬垻顩?闂佸搫妫楅崐鐟拔涢妶澶嬪殜妞ゅ繐瀚婵炲濮鹃褎鎱?闂佸湱绮崝妤呭Φ?*/}
 
             <div className="space-y-4 animate-fade-in-up">
                 {isHotPools
@@ -2908,135 +2288,9 @@ export default function App() {
                             />
                         );
                     })
-                    : isMonitor
-                        ? (
-                            <>
-                                {monitorTasks.map((t) => (
-                                    <AutoMonitorCard
-                                        key={String(t?.task_id)}
-                                        task={t}
-                                        tick={tick}
-                                        isBlacklisted={blacklist.has(String(t?.pool_id || '').trim().toLowerCase())}
-                                    />
-                                ))}
-                                {/* 黑名单池子展示 */}
-                                {!showAdmin && blacklistList.length > 0 ? (
-                                    <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 dark:border-red-500/20 dark:bg-red-500/5">
-                                        <div className="flex items-center gap-2 text-sm font-semibold text-red-700 dark:text-red-300">
-                                            <span>🚫</span>
-                                            <span>黑名单池子</span>
-                                            <span className="ml-auto text-[11px] font-normal text-red-600 dark:text-red-400">
-                                                这些池子禁止开仓
-                                            </span>
-                                        </div>
-                                        <div className="mt-2 space-y-2">
-                                            {blacklistList.map((addr) => {
-                                                const label = hotPoolsPairMap.get(addr) || monitorPoolTitleMap.get(addr) || '';
-                                                const shortAddr = addr.length > 12 ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : addr;
-                                                return (
-                                                    <div key={addr} className="flex items-center justify-between gap-3 rounded-xl bg-red-500/10 px-3 py-2 text-[11px] dark:bg-red-500/10">
-                                                        <div className="min-w-0">
-                                                            <div className="font-semibold text-red-800 dark:text-red-200 truncate">
-                                                                {label || shortAddr}
-                                                            </div>
-                                                            {label ? (
-                                                                <div className="mt-0.5 text-[10px] text-red-700/70 dark:text-red-200/60 truncate">
-                                                                    {shortAddr}
-                                                                </div>
-                                                            ) : null}
-                                                        </div>
-                                                        <button
-                                                            type="button"
-                                                            disabled={!hasInitData}
-                                                            onClick={() => handleBlacklist({ pool_address: addr, trading_pair: label || addr }, false)}
-                                                            className="shrink-0 inline-flex items-center rounded-lg bg-white/60 px-2 py-1 text-[11px] font-semibold text-red-700 ring-1 ring-red-500/20 hover:bg-white/80 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-white/10 dark:text-red-200 dark:ring-red-500/25 dark:hover:bg-white/15"
-                                                        >
-                                                            移除
-                                                        </button>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                ) : null}
-                                {/* 冷却中的交易对展示（移到底部） */}
-                                {cooldowns.length > 0 ? (
-                                    <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 dark:border-amber-500/20 dark:bg-amber-500/5">
-                                        <div className="flex items-center gap-2 text-sm font-semibold text-amber-700 dark:text-amber-300">
-                                            <span>⏸️</span>
-                                            <span>冷却中的代币</span>
-                                            <span className="ml-auto text-[11px] font-normal text-amber-600 dark:text-amber-400">
-                                                该代币相关池子禁止开仓
-                                            </span>
-                                        </div>
-                                        <div className="mt-2 space-y-2">
-                                            {cooldowns.map((cd, idx) => (
-                                                <div key={cd.trading_pair + idx} className="flex items-center justify-between rounded-xl bg-amber-500/10 px-3 py-2 text-[11px] dark:bg-amber-500/10">
-                                                    <div className="font-semibold text-amber-800 dark:text-amber-200">{cd.trading_pair}</div>
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
-                                                            <span>{cd.remaining_minutes}分钟后解除</span>
-                                                            <span className="text-[10px]">({cd.expires_at})</span>
-                                                        </div>
-                                                        <button
-                                                            type="button"
-                                                            disabled={!hasInitData || Boolean(cooldownRemovingPair)}
-                                                            onClick={() => handleRemoveCooldown(cd.trading_pair)}
-                                                            className="shrink-0 inline-flex items-center rounded-lg bg-white/60 px-2 py-1 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-500/20 hover:bg-white/80 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-white/10 dark:text-amber-200 dark:ring-amber-500/25 dark:hover:bg-white/15"
-                                                        >
-                                                            {cooldownRemovingPair === String(cd.trading_pair || '').trim() ? '解除中...' : '解除'}
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ) : null}
-                            </>
-                        )
-                        : isSmartMoney
-                            ? (
-                                <SmartMoneyCard
-                                    overview={smartMoney}
-                                    loading={smartMoneyLoading}
-                                    tick={tick}
-                                    accentTheme={accentTheme}
-                                    onNotice={showNotice}
-                                    apiBaseUrl={apiBaseUrl}
-                                    initData={initData}
-                                    theme={theme}
-                                    onQuickOpenPool={openPositionModal}
-                                />
-                            )
-                            : !showAdmin && activeData
+                        : !showAdmin && activeData
                                 ? (
                                     <>
-                                        {isPositions ? (
-                                            <div
-                                                className="grid grid-cols-3 gap-1 p-0.5 bg-zinc-100/80 rounded-xl dark:bg-[#16181d] shadow-inner ring-1 ring-zinc-200/50 dark:ring-black/20"
-                                            >
-                                                {POSITION_TASK_TABS.map((tab) => (
-                                                    <button
-                                                        key={tab.key}
-                                                        type="button"
-                                                        onClick={() => {
-                                                            positionsTabTouchedRef.current = true;
-                                                            setPositionsTaskTab(tab.key);
-                                                            setSelectedTaskIds(new Set());
-                                                            setBatchMode(false);
-                                                        }}
-                                                        aria-pressed={positionsTaskTab === tab.key}
-                                                        className={`relative rounded-lg px-2.5 py-1 text-[12px] font-bold transition-all duration-300 ${positionsTaskTab === tab.key
-                                                            ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white shadow-md shadow-blue-500/20 dark:from-blue-600 dark:to-indigo-600 dark:text-white dark:shadow-blue-900/40 ring-1 ring-black/5 dark:ring-white/10'
-                                                            : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-white/5'
-                                                            }`}
-                                                    >
-                                                        {tab.label}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        ) : null}
-
                                         {visibleTaskPositions.map((p) => (
                                             <PositionCard
                                                 key={[
@@ -3062,15 +2316,6 @@ export default function App() {
                                                 onToggleSelect={() => toggleTaskSelection(p.task_id)}
                                             />
                                         ))}
-
-                                        {isPositions && positionsTaskTab === 'auto' ? (
-                                            <AutoPnLCurveCard
-                                                data={autoPnLCurve}
-                                                loading={autoPnLCurveLoading}
-                                                error={autoPnLCurveError}
-                                                theme={theme}
-                                            />
-                                        ) : null}
                                     </>
                                 )
                                 : null}
@@ -3096,7 +2341,7 @@ export default function App() {
                             type="button"
                             className="absolute inset-0 cursor-default bg-black/40"
                             onClick={closePoolSearch}
-                            aria-label="Close search"
+                            aria-label="关闭搜索"
                         />
                         <div className="absolute inset-x-0 bottom-0 max-h-[85vh] overflow-y-auto rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
                             <div className="flex items-center justify-between">
@@ -3107,7 +2352,7 @@ export default function App() {
                                     type="button"
                                     onClick={closePoolSearch}
                                     className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                    aria-label="Close"
+                                    aria-label="关闭搜索"
                                 >
                                     <Icon path={icons.close} className="h-5 w-5" />
                                 </button>
@@ -3115,9 +2360,9 @@ export default function App() {
 
                             <div className="mt-4 space-y-3 pb-20">
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="text-[11px] text-zinc-500 dark:text-white/40">搜索池子 (池子ID/代币名称)</div>
+                                    <div className="text-[11px] text-zinc-500 dark:text-white/40">闂佺懓鍚嬬划搴ㄥ磼閵娿儛褔鎮╅懠顒佹啢 (濠殿喖婀辨慨鎾偤濮楊湂/婵炲濯寸徊鐣岀博閻㈢瑙︾€广儱娉?</div>
                                     <div className="mt-2 flex items-center gap-2">
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">Chain</div>
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">链</div>
                                         <select
                                             value={poolSearchChain}
                                             onChange={(e) => {
@@ -3150,7 +2395,7 @@ export default function App() {
                                                 }
                                             }}
                                             className={`flex-1 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                            placeholder="例如 USDT / WBNB / 0x..."
+                                            placeholder="婵炴挻鑹鹃鍛淬€?USDT / WBNB / 0x..."
                                         />
                                         <button
                                             type="button"
@@ -3165,13 +2410,13 @@ export default function App() {
                                         </button>
                                     </div>
                                     <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                        支持按池子ID和代币名称搜索，结果按 TVL 倒序，最多 10 条
+                                        闂佽　鍋撴い鏍ㄧ☉閻︻噣鏌熺粙娆炬Ч闁活偅绮庨埀顒佺⊕閳ь剚顑忛梺鍛婄矊婵傛棃宕鍌涙殰濞达絽鎲￠崐宕囩磼婢跺苯顣奸柟顔肩－濡叉劙锝為鍓ь槷缂傚倷鐒﹂幐濠氭倶婢舵劕绠?TVL 闂佺锕ョ敮鎺旇姳椤撱垺鏅悘鐐靛亾娴犳ê顭?10 闂?
                                     </div>
                                 </div>
 
                                 {!hasInitData ? (
                                     <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-200">
-                                        未获取到 Telegram initData，请从机器人入口打开页面。
+                                        闂佸搫鐗滄禍锝夌嵁韫囨稑鐭楅柡宓啰鍘?Telegram initData闂佹寧绋戦惌渚€顢氶浣侯浄閹兼番鍨虹花姘舵煕閿濆啫濡烘慨鐟邦樀瀹曟濡烽妷銉х▔闂佺懓鐏氶幐鍝ユ閹寸偑浜滈柣銏犳啞濡椼劑鏌?
                                     </div>
                                 ) : null}
 
@@ -3183,7 +2428,7 @@ export default function App() {
 
                                 {poolSearchPerformed && !poolSearchLoading && !poolSearchError && poolSearchResults.length === 0 ? (
                                     <div className="rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                                        未找到相关池子。
+                                        闂佸搫鐗滄禍婵囩珶濮椻偓瀹曟岸骞嶉鐣屻偛闂佺绻楀▍鏇㈡儓濠婂應鍋撳☉娆忓闁?
                                     </div>
                                 ) : null}
 
@@ -3225,7 +2470,7 @@ export default function App() {
                             type="button"
                             className="absolute inset-0 cursor-default bg-black/40"
                             onClick={() => setHotPoolsFilterOpen(false)}
-                            aria-label="Close filter"
+                            aria-label="关闭筛选"
                         />
                         <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
                             <div className="flex items-center justify-between">
@@ -3236,7 +2481,7 @@ export default function App() {
                                     type="button"
                                     onClick={() => setHotPoolsFilterOpen(false)}
                                     className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                    aria-label="Close"
+                                    aria-label="关闭筛选"
                                 >
                                     <Icon path={icons.close} className="h-5 w-5" />
                                 </button>
@@ -3245,17 +2490,17 @@ export default function App() {
                             <div className="mt-4 space-y-4 pb-20">
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="mt-1">
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">搜索 (交易对/地址)</div>
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">闂佺懓鍚嬬划搴ㄥ磼?(婵炲瓨鍤庨崐鏍ｅΔ鍐ｅ亾?闂侀潻闄勫妯侯焽?</div>
                                         <input
                                             value={hotPoolsFilterDraft.keyword}
                                             onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, keyword: e.target.value }))}
                                             className={`mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                            placeholder="例如 USDT"
+                                            placeholder="婵炴挻鑹鹃鍛淬€?USDT"
                                         />
                                     </div>
                                     <div className="mt-3 grid grid-cols-2 gap-3">
                                         <div>
-                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">手续费 ≥ (USD)</div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">闂佸綊娼ч鍥偨閼姐倖瀚?闂?(USD)</div>
                                             <input
                                                 value={hotPoolsFilterDraft.minFees}
                                                 onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFees: e.target.value }))}
@@ -3265,7 +2510,7 @@ export default function App() {
                                             />
                                         </div>
                                         <div>
-                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">费用率 ≥ (%)</div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">闁荤姵鍔曞﹢閬嶅极閵堝鍋?闂?(%)</div>
                                             <input
                                                 value={hotPoolsFilterDraft.minFeeRate}
                                                 onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFeeRate: e.target.value }))}
@@ -3275,7 +2520,7 @@ export default function App() {
                                             />
                                         </div>
                                         <div>
-                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">TVL ≥ (USD)</div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">TVL 闂?(USD)</div>
                                             <input
                                                 value={hotPoolsFilterDraft.minTvl}
                                                 onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minTvl: e.target.value }))}
@@ -3285,7 +2530,7 @@ export default function App() {
                                             />
                                         </div>
                                         <div>
-                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">交易量 ≥ (USD)</div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">婵炲瓨鍤庨崐鏍ｅΔ鍛厒?闂?(USD)</div>
                                             <input
                                                 value={hotPoolsFilterDraft.minVolume}
                                                 onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minVolume: e.target.value }))}
@@ -3301,31 +2546,31 @@ export default function App() {
                                             type="button"
                                             onClick={applyHotPoolsFilter}
                                             className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold shadow-sm ${brand.solidButtonClass}`}
-                                            aria-label="应用"
-                                            title="应用"
+                                            aria-label="应用筛选"
+                                            title="应用筛选"
                                         >
                                             <Icon path={icons.check} className="h-4 w-4" />
-                                            应用
+                                            闁圭厧鐡ㄥ濠氬极?
                                         </button>
                                         <button
                                             type="button"
                                             onClick={resetHotPoolsFilter}
                                             className="inline-flex items-center gap-2 rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
-                                            aria-label="默认"
-                                            title="默认"
+                                            aria-label="恢复默认筛选"
+                                            title="恢复默认筛选"
                                         >
                                             <Icon path={icons.reset} className="h-4 w-4" />
-                                            默认
+                                            婵帗绋掗…鍫ヮ敇?
                                         </button>
                                         <button
                                             type="button"
                                             onClick={clearHotPoolsFilter}
                                             className="inline-flex items-center gap-2 rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
-                                            aria-label="清空条件"
-                                            title="清空条件"
+                                            aria-label="清空筛选条件"
+                                            title="清空筛选条件"
                                         >
                                             <Icon path={icons.close} className="h-4 w-4" />
-                                            清空条件
+                                            濠电偞鎸搁幊鎰板煘閺嶎厼绾ч柍銉ュ级椤?
                                         </button>
                                     </div>
                                 </div>
@@ -3351,7 +2596,7 @@ export default function App() {
                                     type="button"
                                     onClick={() => setGlobalConfigOpen(false)}
                                     className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                    aria-label="关闭"
+                                    aria-label="关闭全局配置"
                                 >
                                     <Icon path={icons.close} className="h-5 w-5" />
                                 </button>
@@ -3365,50 +2610,50 @@ export default function App() {
                                 ) : null}
                                 {globalConfigLoading && !globalConfig ? (
                                     <div className="rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                                        加载中...
+                                        闂佸憡姊绘慨鎯归崶銊р枖?..
                                     </div>
                                 ) : null}
                                 {globalConfig ? (
                                     <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                         <div className="grid grid-cols-2 gap-3 text-xs text-zinc-500 dark:text-white/50">
                                             <div>
-                                                <div>再平衡超时</div>
+                                                <div>Rebalance Timeout</div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">
                                                     <NumberFlowValue value={rebalanceText} formatter={() => rebalanceText} />
                                                 </div>
                                             </div>
                                             <div>
-                                                <div>滑点</div>
+                                                <div>Slippage</div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">
                                                     <NumberFlowValue value={slippageText} formatter={() => slippageText} />
                                                 </div>
                                             </div>
                                             <div>
-                                                <div>秒止损</div>
+                                                <div>Stop Loss</div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.stop_loss_enabled)}</div>
                                             </div>
                                             <div>
-                                                <div>秒止损阈值</div>
+                                                <div>Stop Loss Delay</div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">
                                                     <NumberFlowValue value={stopLossDelayText} formatter={() => stopLossDelayText} />
                                                 </div>
                                             </div>
                                             <div>
-                                                <div>复投</div>
+                                                <div>Auto Reinvest</div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.auto_reinvest)}</div>
                                             </div>
                                             <div>
-                                                <div>剩余资产容忍度</div>
+                                                <div>Residual Tolerance</div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">
                                                     <NumberFlowValue value={residualText} formatter={() => residualText} />
                                                 </div>
                                             </div>
                                             <div>
-                                                <div>日志通知</div>
+                                                <div>闂佸搫鍟ㄩ崕杈╂崲閺冨牊鐒绘慨妯夸含閸欌偓</div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.extra_notifications_enabled)}</div>
                                             </div>
                                             <div>
-                                                <div>过滤中文代币</div>
+                                                <div>中文代币过滤</div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.filter_chinese_tokens)}</div>
                                             </div>
                                         </div>
@@ -3426,7 +2671,7 @@ export default function App() {
                                         : `${brand.solidButtonClass} ${brand.solidRingClass}`
                                         }`}
                                 >
-                                    刷新
+                                    闂佸憡甯￠弨閬嶅蓟?
                                 </button>
                             </div>
                         </div>
@@ -3445,12 +2690,12 @@ export default function App() {
                         />
                         <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
                             <div className="flex items-center justify-between">
-                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">设置</div>
+                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">Settings</div>
                                 <button
                                     type="button"
                                     onClick={() => setSettingsOpen(false)}
                                     className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                    aria-label="关闭"
+                                    aria-label="关闭设置"
                                 >
                                     <Icon path={icons.close} className="h-5 w-5" />
                                 </button>
@@ -3458,8 +2703,8 @@ export default function App() {
 
                             <div className="mt-4 space-y-4">
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">主色</div>
-                                    <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">默认新绿，也可以切回原来的绿色。</div>
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">Accent Theme</div>
+                                    <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">Choose the color theme for the miniapp interface.</div>
                                     <div className="mt-3 flex flex-wrap gap-2">
                                         {ACCENT_THEME_OPTIONS.map((option) => {
                                             const active = accentTheme === option.key;
@@ -3481,13 +2726,13 @@ export default function App() {
                                     </div>
                                 </div>
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">自动刷新</div>
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">闂佺厧顨庢禍婊勬叏閳哄懎绀嗛梺鍨儐閻撯偓</div>
                                     <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
-                                        当前：<NumberFlowValue value={settingsPollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s（
+                                        Default interval <NumberFlowValue value={settingsPollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s
                                         {pollOverrideSec
-                                            ? '自定义'
-                                            : <>默认 <NumberFlowValue value={settingsServerPollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s</>}
-                                        ）
+                                            ? 'Override enabled.'
+                                            : <>Server default <NumberFlowValue value={settingsServerPollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s</>}
+                                        .
                                     </div>
                                     <div className="mt-3 flex flex-wrap gap-2">
                                         {[5, 10, 15, 30, 60].map((sec) => (
@@ -3508,7 +2753,7 @@ export default function App() {
                                             onClick={clearPollOverride}
                                             className="rounded-xl bg-white/70 px-3 py-1.5 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
                                         >
-                                            跟随默认
+                                            闁荤姾娅ｉ崰鏍р枔閵忊槅娓舵俊顖涱儥閸?
                                         </button>
                                     </div>
 
@@ -3531,7 +2776,7 @@ export default function App() {
                                             onClick={applyPollDraft}
                                             className={`rounded-xl px-3 py-2 text-sm font-semibold shadow-sm ${brand.solidButtonClass}`}
                                         >
-                                            确定
+                                            缂佺虎鍙庨崰鏍偩?
                                         </button>
                                     </div>
                                 </div>
@@ -3552,7 +2797,7 @@ export default function App() {
                         contentClassName="px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
                         title={
                             <div className="min-w-0">
-                                <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/90">买入</div>
+                                <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/90">Open Position</div>
                                 <div className="mt-0.5 truncate text-[11px] font-medium text-zinc-500 dark:text-white/40">
                                     {openPositionPool?.trading_pair || '--'}
                                 </div>
@@ -3563,16 +2808,16 @@ export default function App() {
                             {multiWalletEnabled ? (
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="flex items-center justify-between gap-2">
-                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">选择钱包</div>
+                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">钱包</div>
                                         <div className="text-[11px] text-zinc-500 dark:text-white/40">
                                             {walletsLoading
-                                                ? '加载中...'
+                                                ? 'Loading...'
                                                 : [
                                                     String(walletsData?.chain || '').toUpperCase(),
                                                     walletsData?.native_symbol && walletsData?.stable_symbol
                                                         ? `${walletsData.native_symbol}/${walletsData.stable_symbol}`
                                                         : '',
-                                                ].filter(Boolean).join(' · ')}
+                                                ].filter(Boolean).join(' | ')}
                                         </div>
                                     </div>
 
@@ -3583,7 +2828,7 @@ export default function App() {
                                     ) : null}
 
                                     {!walletsLoading && !walletsError && Array.isArray(walletsData?.wallets) && walletsData.wallets.length === 0 ? (
-                                        <div className="mt-2 text-xs text-zinc-500 dark:text-white/50">未找到钱包</div>
+                                        <div className="mt-2 text-xs text-zinc-500 dark:text-white/50">No wallet found.</div>
                                     ) : null}
 
                                     <div className="mt-2 max-h-56 overflow-y-auto overscroll-contain space-y-2 pr-1">
@@ -3614,11 +2859,11 @@ export default function App() {
                                                         <div className="min-w-0">
                                                             <div className="flex items-center gap-2">
                                                                 <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/85">
-                                                                    {name || shortAddr || `Wallet ${id}`}
+                                                                    {name || shortAddr || `钱包 ${id}`}
                                                                 </div>
                                                                 {w?.is_default ? (
                                                                     <span className="shrink-0 rounded-full bg-zinc-500/10 px-2 py-0.5 text-[10px] font-semibold text-zinc-600 dark:text-white/60">
-                                                                        默认
+                                                                        Default
                                                                     </span>
                                                                 ) : null}
                                                             </div>
@@ -3641,8 +2886,9 @@ export default function App() {
                                     </div>
                                 </div>
                             ) : null}
+
                             <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">投入金额 (USDT)</div>
+                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">Amount (USDT)</div>
                                 <input
                                     value={openPositionAmount}
                                     onChange={(e) => {
@@ -3651,26 +2897,26 @@ export default function App() {
                                     }}
                                     inputMode="decimal"
                                     className={`mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                    placeholder="例如 100"
+                                    placeholder="e.g. 100"
                                 />
                             </div>
 
                             <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">自定义区间 (%)</div>
+                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">Custom Range (%)</div>
                                 <div className="mt-2 grid grid-cols-2 gap-2">
                                     <input
                                         value={openPositionRangeLower}
                                         onChange={(e) => handleOpenPositionRangeLowerChange(e.target.value)}
                                         inputMode="decimal"
                                         className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                        placeholder="下限 %"
+                                        placeholder="Lower %"
                                     />
                                     <input
                                         value={openPositionRangeUpper}
                                         onChange={(e) => handleOpenPositionRangeUpperChange(e.target.value)}
                                         inputMode="decimal"
                                         className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                        placeholder="上限 %"
+                                        placeholder="Upper %"
                                     />
                                 </div>
                                 <div className="mt-2 flex flex-wrap gap-1.5">
@@ -3698,85 +2944,13 @@ export default function App() {
                                     ))}
                                 </div>
                                 <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                    请输入下限与上限百分比（如 1 / 3 表示下 1% 上 3%）。
+                                    Enter lower and upper percentages. For example, 1 / 3 means down 1% and up 3%.
                                 </div>
                             </div>
 
-                            {/* Smart Money Quick Ranges */}
-                            {(() => {
-                                const wallets = [];
-                                if (!wallets.length) return null;
-
-                                const rangeMap = new Map();
-                                wallets.forEach(w => {
-                                    const lower = Number(w?.price_lower ?? 0);
-                                    const upper = Number(w?.price_upper ?? 0);
-                                    if (Number.isFinite(lower) && lower > 0 && Number.isFinite(upper) && upper > 0) {
-                                        const pct = ((Math.abs(upper - lower) / (upper + lower)) * 100);
-                                        // key up to 1 decimal point to group similar ranges together
-                                        const key = pct.toFixed(1);
-                                        if (!rangeMap.has(key)) {
-                                            rangeMap.set(key, pct);
-                                        }
-                                    }
-                                });
-
-                                const uniqueRanges = Array.from(rangeMap.values()).sort((a, b) => a - b);
-                                if (!uniqueRanges.length) return null;
-
-                                return (
-                                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                        <div className="flex items-center justify-between">
-                                            <div className="text-xs font-semibold text-zinc-900 dark:text-white/80 flex items-center gap-1.5">
-                                                <span className="flex h-4 w-4 items-center justify-center rounded-sm bg-blue-500/20 text-blue-600 dark:text-blue-300">
-                                                    <Icon path={icons.layer} className="h-3 w-3" />
-                                                </span>
-                                                聪明钱区间快捷开单
-                                            </div>
-                                        </div>
-                                        <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">一键填充该池子中热门聪明钱开仓的具体区间：</div>
-                                        <div className="mt-2.5 flex flex-wrap gap-2">
-                                            {uniqueRanges.slice(0, 5).map(pct => {
-                                                const half = pct / 2;
-                                                return (
-                                                    <React.Fragment key={pct}>
-                                                        {pct >= 1.0 ? (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    setOpenPositionRangeLower(half.toFixed(2));
-                                                                    setOpenPositionRangeUpper(half.toFixed(2));
-                                                                    setOpenPositionRangeUpperAuto(true);
-                                                                    hapticSelection();
-                                                                }}
-                                                                className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-white/10 dark:bg-[#1a1c23] dark:text-white/80 dark:hover:bg-white/5 transition-colors"
-                                                            >
-                                                                ±{half.toFixed(2)}%
-                                                            </button>
-                                                        ) : null}
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => {
-                                                                setOpenPositionRangeLower(pct.toFixed(2));
-                                                                setOpenPositionRangeUpper(pct.toFixed(2));
-                                                                setOpenPositionRangeUpperAuto(true);
-                                                                hapticSelection();
-                                                            }}
-                                                            className="rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-bold text-blue-700 hover:bg-blue-100 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20 transition-colors"
-                                                        >
-                                                            ±{pct.toFixed(2)}%
-                                                        </button>
-                                                    </React.Fragment>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                );
-                            })()}
-
                             <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">滑点 (%)</div>
-                                <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">不填则使用全局滑点，仅对本次开仓与后续再平衡生效。</div>
+                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">Slippage (%)</div>
+                                <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">Leave empty to use the global slippage setting.</div>
                                 <input
                                     value={openPositionSlippage}
                                     onChange={(e) => {
@@ -3785,11 +2959,9 @@ export default function App() {
                                     }}
                                     inputMode="decimal"
                                     className={`mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                    placeholder="例如 0.5（可选）"
+                                    placeholder="e.g. 0.5 (optional)"
                                 />
                             </div>
-
-
 
                             {openPositionError ? (
                                 <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
@@ -3805,7 +2977,7 @@ export default function App() {
                                     : brand.solidButtonClass
                                     }`}
                             >
-                                {openPositionLoading ? '开仓中...' : '确认开仓'}
+                                {openPositionLoading ? '提交中...' : '确认开仓'}
                             </button>
                         </div>
                     </BottomSheet>
@@ -3819,12 +2991,12 @@ export default function App() {
                             type="button"
                             className="absolute inset-0 bg-black/40"
                             onClick={closeTaskRangeModal}
-                            aria-label="关闭修改区间"
+                            aria-label="Close update range"
                         />
                         <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
                             <div className="flex items-center justify-between gap-2">
                                 <div className="min-w-0">
-                                    <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">修改再平衡参数</div>
+                                    <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">修改任务区间</div>
                                     <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40 truncate">
                                         {taskRangeEdit?.title || '--'}
                                     </div>
@@ -3833,7 +3005,7 @@ export default function App() {
                                     type="button"
                                     onClick={closeTaskRangeModal}
                                     className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                    aria-label="关闭"
+                                    aria-label="Close update range"
                                     disabled={taskRangeLoading}
                                 >
                                     <Icon path={icons.close} className="h-5 w-5" />
@@ -3842,30 +3014,30 @@ export default function App() {
 
                             <div className="mt-4 space-y-4">
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">新区间 (%)</div>
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">闂佸搫鍊瑰妯间焊椤栫偞鈷?(%)</div>
                                     <div className="mt-2 grid grid-cols-2 gap-2">
                                         <input
                                             value={taskRangeLower}
                                             onChange={(e) => handleTaskRangeLowerChange(e.target.value)}
                                             inputMode="decimal"
                                             className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                            placeholder="下限 %"
+                                            placeholder="婵炴垶鎸搁澶婎瀶?%"
                                         />
                                         <input
                                             value={taskRangeUpper}
                                             onChange={(e) => handleTaskRangeUpperChange(e.target.value)}
                                             inputMode="decimal"
                                             className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                            placeholder="上限 %"
+                                            placeholder="婵炴垶鎸搁敃顏勵瀶?%"
                                         />
                                     </div>
                                     <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                        修改后的区间将在【下次再平衡时】生效。
+                                        婵烇絽娴傞崰妤呭极婵傜瑙﹂幖杈剧稻閻ｉ亶鏌涢弽銊︺仢婵☆偉娉曟禍鎼佸幢濡や浇鍚梺闈涙閸旀帞绮崨顓涙瀻闁炽儱鍟块弲娆愵殽閻愯尙鏋冮柕鍡忓亾闂佸搫鍟崇紙浼村焵椤掍礁鐏╅柡浣规崌瀵偊宕煎☉鎺戜壕?
                                     </div>
                                 </div>
 
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">下次重平衡金额 (USDT)</div>
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">婵炴垶鎸搁鍡涱敃婵傚憡鐓傜€广儱鎳橀幐顒勬偠濞戝磭绡€闁革絿鍋撻敍?(USDT)</div>
                                     <div className="mt-2">
                                         <input
                                             value={taskRangeAmount}
@@ -3875,11 +3047,11 @@ export default function App() {
                                             }}
                                             inputMode="decimal"
                                             className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                            placeholder="USDT 金额"
+                                            placeholder="USDT amount"
                                         />
                                     </div>
                                     <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                        当前持仓不会直接变动，金额和区间都将在【下次再平衡时】生效。
+                                        閻熸粎澧楅幐鍛婃櫠閻樿绠板ù锝夘棑濞夈垹鈽夐幘宕囆＄紒鍙樺嵆閹嫮鈧稒锚婢跺秹鏌涘▎鎯奉亝鎱ㄩ埡鍛櫖鐎光偓閸曨偅顏ユ俊顐ゅ缁诲倿骞忔导鏉戠婵炲樊浜濋敍鐔兼⒑椤旀寧顥夐柣銊ｅ灲瀹曠兘濡搁敐鍌氫壕闁归偊浜為悷鎾寸箾閸″繆鍋撻崘鍙夋珒濡ょ姷鍋涢悿鍥Υ閳ь剟鏌￠崘顓犲牚闁逞屽墯閸ㄥ綊寮幘璇叉瀬闁割偅绋堥崑?
                                     </div>
                                 </div>
 
@@ -3912,7 +3084,7 @@ export default function App() {
                             type="button"
                             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                             onClick={closeBlacklistPrompt}
-                            aria-label="取消"
+                            aria-label="取消拉黑"
                         />
                         <div className="relative w-full max-w-md overflow-hidden rounded-t-2xl sm:rounded-2xl border border-red-500/20 bg-white p-4 shadow-2xl dark:border-red-500/20 dark:bg-[#111318]">
                             <div className="flex items-start gap-3">
@@ -3922,14 +3094,14 @@ export default function App() {
                                 <div className="min-w-0">
                                     <div className="text-base font-extrabold text-zinc-900 dark:text-white/90">加入黑名单</div>
                                     <div className="mt-1 text-xs text-zinc-500 dark:text-white/50">
-                                        将池子加入黑名单后会阻止相关池子开仓
+                                        闁诲繐绻愬Λ娆撴儓濠婂應鍋撳☉娆忓濠殿喚鍋ゅ畷妤呭Ψ閳哄啯瀚ч梺鍛婅壘缁夋潙鐣烽悢鐓庤Е閹煎瓨绻勭粣妤呮⒒閸愵亞甯涙い鎺撶洴閹嫮绮欓崹顔肩稑濠殿喖婀辨慨鎾偤濞嗗浚鍤曢柍褜鍓氱粋?
                                     </div>
                                 </div>
                                 <button
                                     type="button"
                                     onClick={closeBlacklistPrompt}
                                     className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                    aria-label="关闭"
+                                    aria-label="关闭黑名单确认"
                                 >
                                     <Icon path={icons.close} className="h-4 w-4" />
                                 </button>
@@ -3946,7 +3118,7 @@ export default function App() {
                                         </div>
                                     </div>
                                     <div className="shrink-0 rounded-lg bg-red-500/15 px-2 py-1 text-[10px] font-semibold text-red-700 dark:text-red-200">
-                                        长按触发
+                                        待确认
                                     </div>
                                 </div>
                             </div>
@@ -3954,11 +3126,11 @@ export default function App() {
                             <div className="mt-3 space-y-2 text-xs text-zinc-600 dark:text-white/60">
                                 <div className="flex items-start gap-2">
                                     <span className="mt-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-red-500/15 text-red-600 dark:text-red-200">1</span>
-                                    <span>包含当前代币的所有池子将被禁止开仓。</span>
+                                    <span>加入黑名单后，将阻止该池子的后续开仓。</span>
                                 </div>
                                 <div className="flex items-start gap-2">
                                     <span className="mt-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-zinc-500/15 text-zinc-600 dark:text-white/60">2</span>
-                                    <span>解除黑名单请前往「监控」页面。</span>
+                                    <span>后续可在黑名单列表中移除。</span>
                                 </div>
                             </div>
 
@@ -3995,7 +3167,7 @@ export default function App() {
                             type="button"
                             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                             onClick={() => closeConfirm(false)}
-                            aria-label="取消"
+                            aria-label="取消确认"
                         />
                         <div className="relative w-full max-w-md overflow-hidden rounded-t-2xl sm:rounded-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318]">
                             <div className="flex items-center justify-between gap-2">
@@ -4004,7 +3176,7 @@ export default function App() {
                                     type="button"
                                     onClick={() => closeConfirm(false)}
                                     className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                    aria-label="关闭"
+                                    aria-label="关闭确认弹窗"
                                 >
                                     <Icon path={icons.close} className="h-4 w-4" />
                                 </button>
@@ -4043,8 +3215,6 @@ export default function App() {
                         let iconPath = icons.bot;
                         if (item.key === 'hot_pools') iconPath = icons.fire;
                         if (item.key === 'positions') iconPath = icons.chart;
-                        if (item.key === 'monitor') iconPath = icons.alert;
-                        if (item.key === 'smart_money') iconPath = icons.bot;
                         if (item.key === 'admin') iconPath = icons.gear;
 
                         return (
@@ -4089,6 +3259,6 @@ export default function App() {
                     }}
                 />
             )}
-        </div >
+        </div>
     );
 }

@@ -101,9 +101,9 @@ func (b *Bot) handleConfigExtraNotificationsToggle(query *tgbotapi.CallbackQuery
 		return
 	}
 	if newValue {
-		b.sendMessage(query.Message.Chat.ID, "✅ 已开启日志通知（涨破/跌破/AutoLP候选池）")
+		b.sendMessage(query.Message.Chat.ID, "✅ 已开启日志通知（涨破/跌破/候选池）")
 	} else {
-		b.sendMessage(query.Message.Chat.ID, "✅ 已关闭日志通知（涨破/跌破/AutoLP候选池）")
+		b.sendMessage(query.Message.Chat.ID, "✅ 已关闭日志通知（涨破/跌破/候选池）")
 	}
 }
 

@@ -83,11 +83,6 @@ func handleCooldownsGet(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(CooldownsResponse{Success: false, Message: msg})
 		return
 	}
-	if status, msg := requireAutoModePermission(check); status != 0 {
-		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(CooldownsResponse{Success: false, Message: msg})
-		return
-	}
 
 	svc := blacklist.NewCooldownService()
 	cooldowns, err := svc.GetAll(user.ID)
@@ -154,11 +149,6 @@ func handleCooldownsDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if status, msg := requireMiniAppPermission(check); status != 0 {
-		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(CooldownsResponse{Success: false, Message: msg})
-		return
-	}
-	if status, msg := requireAutoModePermission(check); status != 0 {
 		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(CooldownsResponse{Success: false, Message: msg})
 		return

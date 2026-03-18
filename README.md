@@ -121,13 +121,14 @@ MYSQL_DATABASE=tglpbot
 REDIS_HOST=localhost
 REDIS_PORT=6379
 
-# ClickHouse (optional; used by /api/pools etc.)
-CLICKHOUSE_ADDR=localhost:9000
-CLICKHOUSE_PROTOCOL=  # native|http (optional; empty = auto-detect by port)
-CLICKHOUSE_DB=default
-CLICKHOUSE_USER=default
-CLICKHOUSE_PASSWORD=
-CLICKHOUSE_DEBUG=0  # set to 1 to enable verbose ClickHouse driver logs
+# Pools sync
+POOLS_SYNC_ENABLED=1
+POOLS_SYNC_POOLM_BASE_URL=https://mapi.poolm.xyz
+POOLS_SYNC_CHAIN=bsc
+POOLS_SYNC_DEXES=pcsv3,univ3,univ4
+POOLS_SYNC_INTERVAL_SECONDS=60
+POOLS_SYNC_FETCH_DELAY_MILLIS=250
+POOLS_RETENTION_HOURS=24
 
 # BSC Network
 BSC_RPC_URL=https://bsc-dataseed1.binance.org/

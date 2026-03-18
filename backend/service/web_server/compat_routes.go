@@ -14,10 +14,6 @@ func (s *Server) handlePositions(w http.ResponseWriter, r *http.Request) {
 		s.handleRealtimePositions(w, r)
 	case "me":
 		s.handleMe(w, r)
-	case "auto_monitor":
-		s.handleAutoMonitor(w, r)
-	case "autolp_pnl_curve":
-		s.handleAutoLPPnLCurve(w, r)
 	case "position_profit_poster":
 		s.handlePositionProfitPoster(w, r)
 	default:
@@ -32,8 +28,6 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		s.handleConfig(w, r)
 	case "global_config":
 		s.handleGlobalConfig(w, r)
-	case "autolp_config":
-		s.handleAutoLPConfig(w, r)
 	case "wallets":
 		s.handleWallets(w, r)
 	default:
@@ -64,10 +58,6 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		s.handleAdminRealtimeUsers(w, r)
 	case "realtime_positions":
 		s.handleAdminRealtimePositions(w, r)
-	case "autolp_stats":
-		s.handleAdminAutoLPStats(w, r)
-	case "autolp_disable":
-		s.handleAdminAutoLPDisable(w, r)
 	case "system_config":
 		s.handleAdminSystemConfig(w, r)
 	case "online_users":

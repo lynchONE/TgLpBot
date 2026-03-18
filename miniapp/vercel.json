@@ -9,39 +9,5 @@
         }
       ]
     }
-  ],
-  "rewrites": [
-    {
-      "source": "/api/smart_money",
-      "destination": "/api/smart_money_api?endpoint=smart_money"
-    },
-    {
-      "source": "/api/smart_money_pool_adds",
-      "destination": "/api/smart_money_api?endpoint=smart_money_pool_adds"
-    },
-    {
-      "source": "/api/smart_money_wallet_positions",
-      "destination": "/api/smart_money_api?endpoint=smart_money_wallet_positions"
-    },
-    {
-      "source": "/api/smart_money_follow_config",
-      "destination": "/api/smart_money_api?endpoint=smart_money_follow_config"
-    },
-    {
-      "source": "/api/smart_money_follow_configs",
-      "destination": "/api/smart_money_api?endpoint=smart_money_follow_configs"
-    },
-    {
-      "source": "/api/smart_money_golden_dog_config",
-      "destination": "/api/smart_money_api?endpoint=smart_money_golden_dog_config"
-    },
-    {
-      "source": "/api/smart_money_watched_wallets",
-      "destination": "/api/smart_money_api?endpoint=smart_money_watched_wallets"
-    },
-    {
-      "source": "/api/smart_money_24h_pool_adds",
-      "destination": "/api/smart_money_api?endpoint=smart_money_24h_pool_adds"
-    }
   ]
 }

@@ -13,8 +13,8 @@ import (
 
 // handleAdminUserAccess handles:
 //
-//	GET  /api/admin/user_access?initData=...&userId=123  – fetch a user's access record
-//	POST /api/admin/user_access                          – update fields (e.g. smartMoneyEnabled)
+//	GET  /api/admin/user_access?initData=...&userId=123  - fetch a user's access record
+//	POST /api/admin/user_access                          - update fields (e.g. miniAppEnabled)
 func (s *Server) handleAdminUserAccess(w http.ResponseWriter, r *http.Request) {
 	if config.AppConfig == nil {
 		http.Error(w, "config not loaded", http.StatusInternalServerError)
@@ -23,7 +23,7 @@ func (s *Server) handleAdminUserAccess(w http.ResponseWriter, r *http.Request) {
 
 	var initData string
 	var targetUserID uint
-	var smartMoneyEnabled *bool
+	var miniAppEnabled *bool
 
 	switch r.Method {
 	case http.MethodGet:
@@ -44,9 +44,9 @@ func (s *Server) handleAdminUserAccess(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		r.Body = http.MaxBytesReader(w, r.Body, 8*1024)
 		var req struct {
-			InitData          string `json:"initData"`
-			UserID            uint   `json:"userId"`
-			SmartMoneyEnabled *bool  `json:"smartMoneyEnabled"`
+			InitData       string `json:"initData"`
+			UserID         uint   `json:"userId"`
+			MiniAppEnabled *bool  `json:"miniAppEnabled"`
 		}
 		dec := json.NewDecoder(r.Body)
 		if err := dec.Decode(&req); err != nil {
@@ -55,7 +55,7 @@ func (s *Server) handleAdminUserAccess(w http.ResponseWriter, r *http.Request) {
 		}
 		initData = strings.TrimSpace(req.InitData)
 		targetUserID = req.UserID
-		smartMoneyEnabled = req.SmartMoneyEnabled
+		miniAppEnabled = req.MiniAppEnabled
 
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -107,14 +107,13 @@ func (s *Server) handleAdminUserAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// POST: apply updates
-	if smartMoneyEnabled == nil {
+	if miniAppEnabled == nil {
 		http.Error(w, "no fields to update", http.StatusBadRequest)
 		return
 	}
 
 	access, err := accessService.UpdateUserAccess(callerUser.ID, targetUserID, userSvc.UpdateUserAccessInput{
-		SmartMoneyEnabled: smartMoneyEnabled,
+		MiniAppEnabled: miniAppEnabled,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

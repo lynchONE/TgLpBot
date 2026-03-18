@@ -13,9 +13,8 @@ type meRequest struct {
 }
 
 type meResponse struct {
-	UserID            uint `json:"user_id"`
-	IsAdmin           bool `json:"is_admin"`
-	SmartMoneyEnabled bool `json:"smart_money_enabled"`
+	UserID  uint `json:"user_id"`
+	IsAdmin bool `json:"is_admin"`
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -62,16 +61,9 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	accessService := userSvc.NewAccessService()
-	smartMoneyEnabled := false
-	if check.IsAdmin {
-		smartMoneyEnabled = true
-	} else if check.Access != nil {
-		smartMoneyEnabled = check.Access.SmartMoneyEnabled
-	}
 	resp := meResponse{
-		UserID:            user.ID,
-		IsAdmin:           accessService.IsAdminUser(user.ID),
-		SmartMoneyEnabled: smartMoneyEnabled,
+		UserID:  user.ID,
+		IsAdmin: accessService.IsAdminUser(user.ID),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

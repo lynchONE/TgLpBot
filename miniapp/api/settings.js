@@ -1,5 +1,3 @@
-// 合并的配置 API: config, autolp_config, global_config
-// 通过 query 参数 endpoint 来区分端点
 function normalizeBaseUrl(value) {
     const trimmed = String(value || '').trim();
     if (!trimmed) return '';
@@ -24,20 +22,18 @@ export default async function handler(req, res) {
         return;
     }
 
-    // 从 query 参数获取 endpoint
     const endpoint = String(req.query?.endpoint || '').trim();
-    const validEndpoints = ['config', 'autolp_config', 'global_config', 'wallets'];
+    const validEndpoints = ['config', 'global_config', 'wallets'];
 
     if (!validEndpoints.includes(endpoint)) {
         res.statusCode = 400;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.end(JSON.stringify({ error: '无效的端点，有效值: config, autolp_config, global_config, wallets' }));
+        res.end(JSON.stringify({ error: 'invalid endpoint' }));
         return;
     }
 
     const method = String(req.method || 'GET').toUpperCase();
 
-    // config 端点只支持 GET，其他端点只支持 POST
     if (endpoint === 'config') {
         if (method !== 'GET') {
             res.statusCode = 405;
@@ -63,7 +59,6 @@ export default async function handler(req, res) {
         return;
     }
 
-    // autolp_config / global_config / wallets 只支持 POST
     if (method !== 'POST') {
         res.statusCode = 405;
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');

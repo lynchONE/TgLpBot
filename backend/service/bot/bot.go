@@ -1,16 +1,11 @@
 package bot
 
 import (
-	"TgLpBot/base/clickhouse"
 	"TgLpBot/base/config"
 	"TgLpBot/base/models"
-	"TgLpBot/service/auto_lp"
 	"TgLpBot/service/exchange"
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/pool"
-	"TgLpBot/service/smart_lp"
-	"TgLpBot/service/smart_money_follow"
-	"TgLpBot/service/smart_money_golden_dog"
 	"TgLpBot/service/strategy"
 	"TgLpBot/service/user"
 	"TgLpBot/service/wallet"
@@ -21,7 +16,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-// Bot represents the Telegram bot
+// Bot represents the Telegram bot.
 type Bot struct {
 	api              *tgbotapi.BotAPI
 	accessService    *user.AccessService
@@ -31,20 +26,14 @@ type Bot struct {
 	okxService       *exchange.OKXDexService
 	poolService      *pool.PoolService
 	strategyService  *strategy.StrategyService
-	autoLPService    *auto_lp.AutoLPService
-	smartLPMonitor   *smart_lp.SmartLPMonitor
-	smartLPService   *smart_lp.SmartLPService
-	smartMoneyFollow *smart_money_follow.SmartMoneyFollowService
-	goldenDog        *smart_money_golden_dog.SmartMoneyGoldenDogService
-	autoLPCfgService *auto_lp.AutoLPUserConfigService
 	configService    *user.GlobalConfigService
 	taskService      *strategy.StrategyTaskService
 	snapshotService  *wallet.BalanceSnapshotService
 	pnlService       *strategy.PnLService
 }
 
-// NewBot creates a new bot instance
-func NewBot(ch *clickhouse.ClickHouseService) (*Bot, error) {
+// NewBot creates a new bot instance.
+func NewBot() (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(config.AppConfig.TelegramBotToken)
 	if err != nil {
 		return nil, err
@@ -62,19 +51,12 @@ func NewBot(ch *clickhouse.ClickHouseService) (*Bot, error) {
 		okxService:       exchange.NewOKXDexService(),
 		poolService:      pool.NewPoolService(),
 		strategyService:  strategy.NewStrategyService(),
-		autoLPService:    auto_lp.NewAutoLPService(ch),
-		smartLPMonitor:   smart_lp.NewSmartLPMonitor(ch),
-		smartLPService:   smart_lp.NewSmartLPService(ch),
-		smartMoneyFollow: smart_money_follow.NewSmartMoneyFollowService(ch),
-		goldenDog:        smart_money_golden_dog.NewSmartMoneyGoldenDogService(ch),
-		autoLPCfgService: auto_lp.NewAutoLPUserConfigService(),
 		configService:    user.NewGlobalConfigService(),
 		taskService:      strategy.NewStrategyTaskService(),
 		snapshotService:  wallet.NewBalanceSnapshotService(),
 		pnlService:       strategy.NewPnLService(),
 	}
 
-	// Set Strategy Notifier
 	bot.strategyService.SetNotifier(func(userID uint, message string) {
 		user, err := bot.userService.GetUserByID(userID)
 		if err == nil {
@@ -101,48 +83,6 @@ func NewBot(ch *clickhouse.ClickHouseService) (*Bot, error) {
 		}
 	})
 
-	// Set AutoLP Notifier (reuse the same user->telegram mapping)
-	if bot.autoLPService != nil {
-		bot.autoLPService.SetNotifier(func(userID uint, message string) {
-			user, err := bot.userService.GetUserByID(userID)
-			if err == nil {
-				bot.sendMessage(user.TelegramID, message)
-			} else {
-				log.Printf("Failed to notify user %d: %v", userID, err)
-			}
-		})
-	}
-
-	// Set Smart Money follow notifier (reuse the same user->telegram mapping)
-	if bot.smartMoneyFollow != nil {
-		bot.smartMoneyFollow.SetNotifier(func(userID uint, message string) {
-			user, err := bot.userService.GetUserByID(userID)
-			if err == nil {
-				bot.sendMessage(user.TelegramID, message)
-			} else {
-				log.Printf("Failed to notify user %d: %v", userID, err)
-			}
-		})
-		bot.smartMoneyFollow.SetTaskCardNotifier(func(userID uint, taskID uint) {
-			user, err := bot.userService.GetUserByID(userID)
-			if err != nil {
-				log.Printf("Failed to notify task card user %d: %v", userID, err)
-				return
-			}
-			task, err := bot.taskService.GetByID(userID, taskID)
-			if err != nil {
-				log.Printf("Failed to notify task card user %d task #%d: %v", userID, taskID, err)
-				return
-			}
-
-			msg, err := bot.sendTaskCardMessage(user.TelegramID, bot.formatTaskCardWithRefresh(task), bot.taskKeyboardWithRefresh(task))
-			if err == nil && msg.MessageID != 0 {
-				bot.startTaskAutoRefresh(user.TelegramID, msg.MessageID, task.ID, userID)
-			}
-		})
-	}
-
-	// Set bot commands
 	if err := bot.setCommands(); err != nil {
 		log.Printf("Warning: Failed to set bot commands: %v", err)
 	}
@@ -153,53 +93,20 @@ func NewBot(ch *clickhouse.ClickHouseService) (*Bot, error) {
 	return bot, nil
 }
 
-// setCommands sets the bot command menu
 func (b *Bot) setCommands() error {
 	if err := b.clearCommands(); err != nil {
 		log.Printf("Warning: Failed to clear bot commands: %v", err)
 	}
 
 	commands := []tgbotapi.BotCommand{
-		{
-			Command:     "start",
-			Description: "开始使用机器人",
-		},
-		{
-			Command:     "auto",
-			Description: "全自动托管模式",
-		},
-		{
-			Command:     "positions",
-			Description: "查看我的仓位",
-		},
-		{
-			Command:     "miniapp",
-			Description: "打开小程序",
-		},
-		{
-			Command:     "config",
-			Description: "全局配置",
-		},
-		{
-			Command:     "profit",
-			Description: "余额走势",
-		},
-		{
-			Command:     "wallet",
-			Description: "管理钱包",
-		},
-		{
-			Command:     "swap",
-			Description: "零钱兑换",
-		},
-		{
-			Command:     "transactions",
-			Description: "查看交易历史",
-		},
-		{
-			Command:     "smart_money",
-			Description: "聪明钱",
-		},
+		{Command: "start", Description: "开始使用机器人"},
+		{Command: "positions", Description: "查看我的仓位"},
+		{Command: "miniapp", Description: "打开小程序"},
+		{Command: "config", Description: "全局配置"},
+		{Command: "profit", Description: "余额走势"},
+		{Command: "wallet", Description: "管理钱包"},
+		{Command: "swap", Description: "零钱兑换"},
+		{Command: "transactions", Description: "查看交易历史"},
 	}
 
 	cfg := tgbotapi.NewSetMyCommands(commands...)
@@ -213,7 +120,6 @@ func (b *Bot) setCommands() error {
 }
 
 func (b *Bot) clearCommands() error {
-	// 只清除默认 scope 的命令
 	cfg := tgbotapi.NewDeleteMyCommandsWithScope(tgbotapi.NewBotCommandScopeDefault())
 	_, err := b.api.Request(cfg)
 	return err
@@ -266,22 +172,9 @@ func (b *Bot) setMenuButton() error {
 	return err
 }
 
-// Start starts the bot
+// Start starts the bot.
 func (b *Bot) Start() {
-	// Start strategy service
 	b.strategyService.Start()
-	if b.autoLPService != nil {
-		b.autoLPService.Start()
-	}
-	if b.smartLPMonitor != nil {
-		b.smartLPMonitor.Start()
-	}
-	if b.smartMoneyFollow != nil {
-		b.smartMoneyFollow.Start()
-	}
-	if b.goldenDog != nil {
-		b.goldenDog.Start()
-	}
 	if b.snapshotService != nil {
 		b.snapshotService.Start()
 	}
@@ -290,7 +183,6 @@ func (b *Bot) Start() {
 	u.Timeout = 60
 
 	updates := b.api.GetUpdatesChan(u)
-
 	for update := range updates {
 		if update.Message != nil {
 			b.handleMessage(update.Message)
@@ -300,9 +192,7 @@ func (b *Bot) Start() {
 	}
 }
 
-// handleMessage handles incoming messages
 func (b *Bot) handleMessage(message *tgbotapi.Message) {
-	// Get or create user
 	user, err := b.userService.GetOrCreateUser(
 		message.From.ID,
 		message.From.UserName,
@@ -316,17 +206,14 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 		return
 	}
 
-	// Handle commands
 	if message.IsCommand() {
 		b.handleCommand(message, user)
 		return
 	}
 
-	// Handle text messages based on user state
 	b.handleText(message, user)
 }
 
-// handleCommand handles bot commands
 func (b *Bot) handleCommand(message *tgbotapi.Message, user *models.User) {
 	cmd := message.Command()
 	if cmd != "start" && cmd != "help" && cmd != "cancel" && cmd != "weblogin" {
@@ -338,8 +225,6 @@ func (b *Bot) handleCommand(message *tgbotapi.Message, user *models.User) {
 	switch cmd {
 	case "start":
 		b.handleStart(message, user)
-	case "auto":
-		b.handleAuto(message, user)
 	case "help":
 		b.handleHelp(message, user)
 	case "clean":
@@ -366,8 +251,6 @@ func (b *Bot) handleCommand(message *tgbotapi.Message, user *models.User) {
 		b.handleCancel(message, user)
 	case "admin":
 		b.handleAdmin(message, user)
-	case "smart_money":
-		b.handleSmartMoney(message, user)
 	case "weblogin":
 		b.handleWebLogin(message, user)
 	default:
@@ -375,21 +258,14 @@ func (b *Bot) handleCommand(message *tgbotapi.Message, user *models.User) {
 	}
 }
 
-// sendMessage sends a text message
-// sendMessage sends a text message
 func (b *Bot) sendMessage(chatID int64, text string) (tgbotapi.Message, error) {
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = "Markdown"
-	// msg.DisableWebPagePreview = true // 保持一致性，如果之前没有这里也不加，或者加上。原代码没有 disable preview
 	if sentMsg, err := b.api.Send(msg); err != nil {
-		// Fallback: if markdown entities are invalid, resend as plain text to avoid losing notifications.
 		if strings.Contains(err.Error(), "can't parse entities") {
 			msg.ParseMode = ""
 			if sentMsg2, err2 := b.api.Send(msg); err2 == nil {
 				return sentMsg2, nil
-			} else {
-				log.Printf("Error sending message (Markdown): %v; fallback plain text failed: %v", err, err2)
-				return tgbotapi.Message{}, err2
 			}
 		}
 		log.Printf("Error sending message: %v", err)
@@ -399,7 +275,6 @@ func (b *Bot) sendMessage(chatID int64, text string) (tgbotapi.Message, error) {
 	}
 }
 
-// sendMessageWithKeyboard sends a message with inline keyboard
 func (b *Bot) sendMessageWithKeyboard(chatID int64, text string, replyMarkup any) {
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = "Markdown"
@@ -409,16 +284,12 @@ func (b *Bot) sendMessageWithKeyboard(chatID int64, text string, replyMarkup any
 			msg.ParseMode = ""
 			if _, err2 := b.api.Send(msg); err2 == nil {
 				return
-			} else {
-				log.Printf("Error sending message (Markdown): %v; fallback plain text failed: %v", err, err2)
-				return
 			}
 		}
 		log.Printf("Error sending message: %v", err)
 	}
 }
 
-// sendMessageWithKeyboardRet sends a message with inline keyboard and returns the sent message.
 func (b *Bot) sendMessageWithKeyboardRet(chatID int64, text string, replyMarkup any) (tgbotapi.Message, error) {
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = "Markdown"
@@ -446,11 +317,9 @@ func (b *Bot) editMessageText(chatID int64, messageID int, text string) error {
 	editMsg.DisableWebPagePreview = true
 
 	if _, err := b.api.Send(editMsg); err != nil {
-		// Ignore no-op edits.
 		if strings.Contains(err.Error(), "message is not modified") {
 			return nil
 		}
-		// Fallback: if markdown entities are invalid, resend as plain text.
 		if strings.Contains(err.Error(), "can't parse entities") {
 			editMsg.ParseMode = ""
 			if _, err2 := b.api.Send(editMsg); err2 == nil {
@@ -476,9 +345,7 @@ func (b *Bot) editMessageReplyMarkup(chatID int64, messageID int, replyMarkup an
 	return err
 }
 
-// handleCallbackQuery handles callback queries from inline keyboards
 func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
-	// Get user
 	user, err := b.userService.GetUserByTelegramID(query.From.ID)
 	if err != nil {
 		log.Printf("Error getting user: %v", err)
@@ -490,15 +357,12 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		chatID = query.Message.Chat.ID
 	}
 	if !b.checkUserAuthorized(chatID, user) {
-		// Answer callback to remove loading state
 		callback := tgbotapi.NewCallback(query.ID, "")
 		_, _ = b.api.Request(callback)
 		return
 	}
 
-	// Handle different callback actions
 	switch {
-	// Admin callbacks
 	case query.Data == "admin_auth_codes":
 		b.handleAdminAuthCodes(query, user)
 	case query.Data == "admin_create_code":
@@ -538,17 +402,14 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleAdminCodeEnable(query, user)
 	case strings.HasPrefix(query.Data, "admin_code_"):
 		b.handleAdminCodeDetail(query, user)
-	// Wallet callbacks
 	case query.Data == "create_wallet":
 		b.handleCreateWallet(query, user)
 	case query.Data == "import_wallet":
 		b.handleImportWallet(query, user)
 	case query.Data == "view_wallets":
 		b.handleViewWallets(query, user)
-	// New position chain selection (multi-chain)
 	case strings.HasPrefix(query.Data, "newpos_chain_"):
 		b.handleNewPositionChainSelect(query, user)
-	// New position wallet selection (multi-wallet)
 	case strings.HasPrefix(query.Data, "newpos_wallet_"):
 		b.handleNewPositionWalletSelect(query, user)
 	case strings.HasPrefix(query.Data, "set_wallet_"):
@@ -569,7 +430,6 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleWalletSwapToUSDTConfirm(query, user)
 	case query.Data == "wallet_swap_to_usdt_cancel":
 		b.handleWalletSwapToUSDTCancel(query, user)
-	// Position confirmation callbacks
 	case query.Data == "confirm_position":
 		b.handleConfirmPosition(query, user)
 	case query.Data == "cancel_position":
@@ -580,30 +440,6 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleEntrySwapAllow(query, user)
 	case strings.HasPrefix(query.Data, "entry_swap_cancel_"):
 		b.handleEntrySwapCancel(query, user)
-	// AutoLP config callbacks
-	case query.Data == "auto_cfg_toggle":
-		b.handleAutoConfigToggle(query, user)
-	case query.Data == "auto_cfg_refresh":
-		b.handleAutoConfigRefresh(query, user)
-	case query.Data == "auto_cfg_set_total":
-		b.handleAutoConfigSetTotal(query, user)
-	case query.Data == "auto_cfg_set_max_tasks":
-		b.handleAutoConfigSetMaxTasks(query, user)
-	case query.Data == "auto_cfg_set_take_profit":
-		b.handleAutoConfigSetTakeProfit(query, user)
-	case query.Data == "auto_cfg_set_stop_loss":
-		b.handleAutoConfigSetStopLoss(query, user)
-	case query.Data == "auto_cfg_set_switch_min_improvement":
-		b.handleAutoConfigSetSwitchMinImprovement(query, user)
-	case query.Data == "auto_cfg_set_switch_cooldown":
-		b.handleAutoConfigSetSwitchCooldown(query, user)
-	case query.Data == "auto_cfg_cancel_input":
-		b.handleAutoCancelInput(query, user)
-	case query.Data == "auto_view_strategy":
-		b.handleAutoViewStrategy(query, user)
-	case query.Data == "auto_view_config":
-		b.handleAutoViewConfig(query, user)
-	// Global config callbacks
 	case query.Data == "config_rebalance_timeout":
 		b.handleConfigRebalanceTimeout(query, user)
 	case query.Data == "config_stop_loss_toggle":
@@ -640,7 +476,6 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleConfigDefaultChainSelect(query, user)
 	case query.Data == "view_config":
 		b.handleViewConfig(query, user)
-	// Task management callbacks
 	case strings.HasPrefix(query.Data, "task_view_"):
 		b.handleTaskView(query, user)
 	case strings.HasPrefix(query.Data, "task_stop_refresh_"):
@@ -671,29 +506,17 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleTaskSetStopLossDelay(query, user)
 	case strings.HasPrefix(query.Data, "task_set_residual_"):
 		b.handleTaskSetResidualTolerance(query, user)
-	case strings.HasPrefix(query.Data, "smartmoney_"):
-		b.handleSmartMoneyCallback(query, user)
 	case query.Data == "view_profit":
 		b.handleViewProfit(query, user)
 	default:
-		// Answer callback to remove loading state
 		callback := tgbotapi.NewCallback(query.ID, "")
 		b.api.Send(callback)
 	}
 }
 
-// Stop stops the bot
+// Stop stops the bot.
 func (b *Bot) Stop() {
 	b.strategyService.Stop()
-	if b.autoLPService != nil {
-		b.autoLPService.Stop()
-	}
-	if b.smartLPMonitor != nil {
-		b.smartLPMonitor.Stop()
-	}
-	if b.smartMoneyFollow != nil {
-		b.smartMoneyFollow.Stop()
-	}
 	if b.snapshotService != nil {
 		b.snapshotService.Stop()
 	}

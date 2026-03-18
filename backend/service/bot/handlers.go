@@ -63,8 +63,6 @@ func (b *Bot) handleHelp(message *tgbotapi.Message, user *models.User) {
 *信息查询：*
 /profit - 余额走势
 /transactions - 查看交易历史
-/auto - AutoLP 自动开仓配置
-/smart_money - Smart Money 加LP榜
 /miniapp - 打开小程序
 /help - 显示此帮助信息
 
@@ -557,19 +555,6 @@ func (b *Bot) handleText(message *tgbotapi.Message, user *models.User) {
 		b.handleGlobalBarkServerInput(message.Chat.ID, user, message.Text)
 	case "awaiting_global_bark_group":
 		b.handleGlobalBarkGroupInput(message.Chat.ID, user, message.Text)
-	// AutoLP config inputs
-	case "awaiting_auto_total_amount":
-		b.handleAutoTotalAmountInput(message.Chat.ID, user, message.Text)
-	case "awaiting_auto_max_tasks":
-		b.handleAutoMaxTasksInput(message.Chat.ID, user, message.Text)
-	case "awaiting_auto_take_profit":
-		b.handleAutoTakeProfitInput(message.Chat.ID, user, message.Text)
-	case "awaiting_auto_stop_loss":
-		b.handleAutoStopLossInput(message.Chat.ID, user, message.Text)
-	case "awaiting_auto_switch_min_improvement_pct":
-		b.handleAutoSwitchMinImprovementInput(message.Chat.ID, user, message.Text)
-	case "awaiting_auto_switch_cooldown_seconds":
-		b.handleAutoSwitchCooldownInput(message.Chat.ID, user, message.Text)
 	// Task config inputs
 	case "awaiting_task_slippage":
 		b.handleTaskSlippageInput(message.Chat.ID, user, message.Text)

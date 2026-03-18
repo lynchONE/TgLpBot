@@ -6,7 +6,6 @@ import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
-	"TgLpBot/service/blacklist"
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/pool"
 	"TgLpBot/service/pricing"
@@ -20,13 +19,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-)
-
-const (
-	autoModeConsecutiveDownBreakCooldownThreshold = 2
-	autoModeConsecutiveUpBreakExpandThreshold     = 2
-	autoModeExpandRangeMultiplier                 = 2.0
-	autoModeCooldownDurationDefault               = 30 * time.Minute // 默认30分钟，可通过配置覆盖
 )
 
 // StrategyService handles background monitoring and strategy execution
@@ -318,11 +310,6 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 		// Threshold: ReopenDelaySeconds (Rebalance Timeout)
 		threshold := time.Duration(task.ReopenDelaySeconds) * time.Second
 		if duration >= threshold {
-			if task.IsAuto {
-				if s.handleAutoModeRangeBreakExit(task, "up", now, currentTick, "📈 涨破区间触发再平衡") {
-					return
-				}
-			}
 			s.executeRebalance(task, currentTick, now, "📈 涨破区间触发再平衡")
 		}
 		return
@@ -375,11 +362,6 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 			// Threshold: ReopenDelaySeconds
 			threshold := time.Duration(task.ReopenDelaySeconds) * time.Second
 			if duration >= threshold {
-				if task.IsAuto {
-					if s.handleAutoModeRangeBreakExit(task, "down", now, currentTick, "📉 跌破区间触发再平衡") {
-						return
-					}
-				}
 				s.executeRebalance(task, currentTick, now, "📉 跌破区间触发再平衡")
 			}
 		}
@@ -419,121 +401,9 @@ func (s *StrategyService) notifyTaskCard(userID uint, taskID uint) {
 	}
 }
 
-// handleAutoModeRangeBreakExit applies Auto mode streak rules and triggers exit.
-// Returns true if an exit action was requested (rebalance or cooldown), and caller should stop further processing.
-func (s *StrategyService) handleAutoModeRangeBreakExit(task *models.StrategyTask, direction string, now time.Time, currentTick int, reason string) bool {
-	if task == nil || !task.IsAuto {
-		return false
-	}
-
-	// Don't change behavior during exit/re-entry retries.
-	if task.ExitGiveUpAt != nil {
-		return false
-	}
-	if strings.TrimSpace(task.ExitPendingAction) != "" || task.RebalancePending {
-		return false
-	}
-
-	upStreak := task.RangeBreakUpStreak
-	downStreak := task.RangeBreakDownStreak
-	nextMult := 1.0
-
-	switch strings.ToLower(strings.TrimSpace(direction)) {
-	case "up":
-		downStreak = 0
-		upStreak++
-		if upStreak >= autoModeConsecutiveUpBreakExpandThreshold {
-			// 2 consecutive "up" breaks -> widen the next computed range.
-			nextMult = autoModeExpandRangeMultiplier
-			upStreak = 0
-		}
-	case "down":
-		upStreak = 0
-		downStreak++
-		if downStreak >= autoModeConsecutiveDownBreakCooldownThreshold {
-			// 2 consecutive "down" breaks -> exit to USDT and cooldown this trading pair
-			cooldownDuration := autoModeCooldownDurationDefault
-			cooldownSeconds := 0
-			if database.DB != nil {
-				if cfg, err := user.NewSystemConfigService().GetOrCreate(); err == nil && cfg != nil && cfg.AutoLPGuardCooldownSeconds > 0 {
-					cooldownSeconds = cfg.AutoLPGuardCooldownSeconds
-				}
-			}
-			if cooldownSeconds <= 0 && config.AppConfig != nil && config.AppConfig.AutoLPGuardCooldownSeconds > 0 {
-				cooldownSeconds = config.AppConfig.AutoLPGuardCooldownSeconds
-			}
-			if cooldownSeconds > 0 {
-				cooldownDuration = time.Duration(cooldownSeconds) * time.Second
-			}
-			cooldownLabel := fmt.Sprintf("%d 分钟", int(cooldownDuration.Minutes()))
-			if cooldownDuration < time.Minute {
-				cooldownLabel = fmt.Sprintf("%d 秒", int(cooldownDuration.Seconds()))
-			}
-			cooldownReason := fmt.Sprintf("📉 连续 %d 次跌破区间，撤出并冷却 %s", autoModeConsecutiveDownBreakCooldownThreshold, cooldownLabel)
-			updates := map[string]interface{}{
-				"range_break_up_streak":   0,
-				"range_break_down_streak": 0,
-				"next_range_multiplier":   1.0,
-			}
-			_ = database.DB.Model(task).Updates(updates).Error
-			task.RangeBreakUpStreak = 0
-			task.RangeBreakDownStreak = 0
-			task.NextRangeMultiplier = 1.0
-
-			log.Printf("[Strategy] 任务 #%d 连续跌破 %d 次，触发冷却退出", task.ID, autoModeConsecutiveDownBreakCooldownThreshold)
-
-			// 同交易对冷却：暂停该用户同交易对的其他任务
-			s.cooldownSameTradingPairTasks(task, cooldownDuration, cooldownReason)
-
-			s.requestExitToUSDT(task, ExitActionCooldown, cooldownReason)
-			return true
-		}
-	default:
-		return false
-	}
-
-	updates := map[string]interface{}{
-		"range_break_up_streak":   upStreak,
-		"range_break_down_streak": downStreak,
-		"next_range_multiplier":   nextMult,
-	}
-	_ = database.DB.Model(task).Updates(updates).Error
-	task.RangeBreakUpStreak = upStreak
-	task.RangeBreakDownStreak = downStreak
-	task.NextRangeMultiplier = nextMult
-
-	if nextMult != 1.0 {
-		log.Printf("[Strategy] 任务 #%d 连续涨破达到阈值，下次开仓区间扩大 x%.2f", task.ID, nextMult)
-	}
-
-	s.executeRebalance(task, currentTick, now, strings.TrimSpace(reason))
-	return true
-}
-
 // handleWaitingTask checks if it's time to reopen (Keep for compatibility)
 func (s *StrategyService) handleWaitingTask(task *models.StrategyTask) {
 	now := time.Now()
-
-	// Auto-mode cooldown: temporarily ignore this pool, then re-enter after cooldown expires.
-	if task.CooldownUntil != nil {
-		if now.Before(*task.CooldownUntil) {
-			return
-		}
-
-		log.Printf("[Strategy] 任务 #%d 冷却结束，准备重新开仓...", task.ID)
-		exec := txexec.Default()
-		if exec == nil {
-			return
-		}
-		if ok, err := exec.TryRunTask(task.UserID, task.WalletID, task.WalletAddress, func(_ string) {
-			s.runCooldownReopen(task.ID, task.UserID)
-		}); err != nil {
-			log.Printf("[Strategy] schedule cooldown reopen failed: task_id=%d user_id=%d err=%v", task.ID, task.UserID, err)
-		} else if !ok {
-			// Wallet is busy; retry next cycle.
-		}
-		return
-	}
 
 	if task.LastExitTime == nil {
 		return
@@ -564,118 +434,6 @@ func (s *StrategyService) handleWaitingTask(task *models.StrategyTask) {
 		// Log occasionally or just debug
 		// fmt.Printf("[Strategy] Task #%d waiting... %v remaining\n", task.ID, remaining)
 	}
-}
-
-func (s *StrategyService) runCooldownReopen(taskID uint, userID uint) {
-	if taskID == 0 || userID == 0 {
-		return
-	}
-
-	var task models.StrategyTask
-	if err := database.DB.Where("id = ? AND user_id = ?", taskID, userID).First(&task).Error; err != nil {
-		log.Printf("[Strategy] load task for cooldown reopen failed: task_id=%d user_id=%d err=%v", taskID, userID, err)
-		return
-	}
-	if task.Status != models.StrategyStatusWaiting || task.CooldownUntil == nil {
-		return
-	}
-
-	now := time.Now()
-	if now.Before(*task.CooldownUntil) {
-		return
-	}
-
-	currentTick, err := s.getCurrentTick(&task)
-	if err != nil {
-		log.Printf("[Strategy] 任务 #%d 冷却结束后获取当前 tick 失败: %v", task.ID, err)
-		return
-	}
-
-	tickLower, tickUpper, rErr := s.calculateRangeFromPercentage(&task, currentTick)
-	if rErr != nil {
-		log.Printf("[Strategy] 任务 #%d 冷却结束后计算新 tick 范围失败: %v", task.ID, rErr)
-		return
-	}
-
-	task.TickLower = tickLower
-	task.TickUpper = tickUpper
-	_ = database.DB.Model(&task).Updates(map[string]interface{}{
-		"tick_lower": tickLower,
-		"tick_upper": tickUpper,
-	}).Error
-
-	enterRes, err := s.liquidityService.EnterTaskFromUSDT(task.UserID, &task)
-	if err != nil {
-		log.Printf("[Strategy] 任务 #%d 冷却结束后开仓失败: %v", task.ID, err)
-		_ = database.DB.Model(&task).Updates(map[string]interface{}{
-			"status":          models.StrategyStatusError,
-			"error_message":   fmt.Sprintf("enter failed after cooldown: %v", err),
-			"cooldown_until":  nil,
-			"cooldown_reason": "",
-		}).Error
-		return
-	}
-
-	updates := map[string]interface{}{
-		"status":                      models.StrategyStatusRunning,
-		"current_liquidity":           enterRes.CurrentLiquidity,
-		"exit_liquidity_removed":      false,
-		"v3_position_manager_address": enterRes.V3PositionManagerAddress,
-		"v3_token_id":                 enterRes.V3TokenID,
-		"v4_token_id":                 enterRes.V4TokenID,
-		"tick_lower":                  task.TickLower,
-		"tick_upper":                  task.TickUpper,
-		"out_of_range_since":          nil,
-		"cooldown_until":              nil,
-		"cooldown_reason":             "",
-		"next_range_multiplier":       1.0,
-		"error_message":               "",
-	}
-	if task.IsAuto {
-		updates["GuardOpenVolume5m"] = 0
-		updates["GuardOpenPrice"] = 0
-		updates["GuardOpenTxCount5m"] = 0
-		updates["GuardOpenFeePercentage"] = 0
-		updates["GuardOpenFeeRate5mPct"] = 0
-		updates["GuardOpenTotalFees5m"] = 0
-		updates["GuardOpenTVLUSD"] = 0
-		updates["GuardOpenMetricsAt"] = nil
-		updates["GuardPeakFeePercentage"] = 0
-		updates["GuardPeakFeeRate5mPct"] = 0
-		updates["GuardPeakTotalFees5m"] = 0
-		updates["GuardPeakVolume5m"] = 0
-		updates["GuardPeakTVLUSD"] = 0
-		updates["GuardPeakPrice"] = 0
-		updates["GuardPeakTxCount5m"] = 0
-		updates["GuardVolumeDropArmed"] = false
-		updates["GuardVolumeDropLastVolume5m"] = 0
-		updates["GuardPriceTxDropArmed"] = false
-	}
-	if dbErr := database.DB.Model(&task).Updates(updates).Error; dbErr != nil {
-		log.Printf("[Strategy] ⚠️ 任务 #%d 保存开仓结果失败 (链上交易已成功): %v", task.ID, dbErr)
-		// 兜底：关键字段优先写入，避免任务被误判为未开仓而重复开仓。
-		criticalUpdates := map[string]interface{}{
-			"status":                      models.StrategyStatusRunning,
-			"current_liquidity":           enterRes.CurrentLiquidity,
-			"exit_liquidity_removed":      false,
-			"v3_position_manager_address": enterRes.V3PositionManagerAddress,
-			"v3_token_id":                 enterRes.V3TokenID,
-			"v4_token_id":                 enterRes.V4TokenID,
-			"tick_lower":                  task.TickLower,
-			"tick_upper":                  task.TickUpper,
-			"out_of_range_since":          nil,
-			"cooldown_until":              nil,
-			"cooldown_reason":             "",
-			"next_range_multiplier":       1.0,
-			"error_message":               "",
-		}
-		if cErr := database.DB.Model(&task).Updates(criticalUpdates).Error; cErr != nil {
-			log.Printf("[Strategy] ⚠️ 任务 #%d 兜底写入关键字段仍失败: %v", task.ID, cErr)
-		}
-	}
-
-	s.notify(task.UserID, fmt.Sprintf("✅ 冷却结束，已重新开仓（Tick %d）。\n新 Tick 范围: %d - %d\n交易哈希: `%s`", currentTick, tickLower, tickUpper, enterRes.TxHash))
-	s.notifyTaskCard(task.UserID, task.ID)
 }
 
 func (s *StrategyService) runWaitingReopen(taskID uint, userID uint) {
@@ -733,26 +491,6 @@ func (s *StrategyService) runWaitingReopen(taskID uint, userID uint) {
 		"out_of_range_since":          nil,
 		"error_message":               "",
 	}
-	if task.IsAuto {
-		updates["GuardOpenVolume5m"] = 0
-		updates["GuardOpenPrice"] = 0
-		updates["GuardOpenTxCount5m"] = 0
-		updates["GuardOpenFeePercentage"] = 0
-		updates["GuardOpenFeeRate5mPct"] = 0
-		updates["GuardOpenTotalFees5m"] = 0
-		updates["GuardOpenTVLUSD"] = 0
-		updates["GuardOpenMetricsAt"] = nil
-		updates["GuardPeakFeePercentage"] = 0
-		updates["GuardPeakFeeRate5mPct"] = 0
-		updates["GuardPeakTotalFees5m"] = 0
-		updates["GuardPeakVolume5m"] = 0
-		updates["GuardPeakTVLUSD"] = 0
-		updates["GuardPeakPrice"] = 0
-		updates["GuardPeakTxCount5m"] = 0
-		updates["GuardVolumeDropArmed"] = false
-		updates["GuardVolumeDropLastVolume5m"] = 0
-		updates["GuardPriceTxDropArmed"] = false
-	}
 	if dbErr := database.DB.Model(&task).Updates(updates).Error; dbErr != nil {
 		log.Printf("[Strategy] ⚠️ 任务 #%d 保存开仓结果失败 (链上交易已成功): %v", task.ID, dbErr)
 		criticalUpdates := map[string]interface{}{
@@ -765,7 +503,6 @@ func (s *StrategyService) runWaitingReopen(taskID uint, userID uint) {
 			"tick_lower":                  task.TickLower,
 			"tick_upper":                  task.TickUpper,
 			"out_of_range_since":          nil,
-			"next_range_multiplier":       1.0,
 			"error_message":               "",
 		}
 		if cErr := database.DB.Model(&task).Updates(criticalUpdates).Error; cErr != nil {
@@ -928,10 +665,6 @@ func (s *StrategyService) getCurrentTick(task *models.StrategyTask) (int, error)
 }
 
 func (s *StrategyService) calculateRangeFromPercentage(task *models.StrategyTask, currentTick int) (int, int, error) {
-	return s.calculateRangeFromPercentageWithMultiplier(task, currentTick, 1.0)
-}
-
-func (s *StrategyService) calculateRangeFromPercentageWithMultiplier(task *models.StrategyTask, currentTick int, multiplier float64) (int, int, error) {
 	if task.TickSpacing <= 0 {
 		return 0, 0, fmt.Errorf("tick spacing not set")
 	}
@@ -950,14 +683,6 @@ func (s *StrategyService) calculateRangeFromPercentageWithMultiplier(task *model
 			lowerPct = effLower
 			upperPct = effUpper
 		}
-	}
-
-	if multiplier <= 0 {
-		multiplier = 1.0
-	}
-	if multiplier != 1.0 {
-		lowerPct = lowerPct * multiplier
-		upperPct = upperPct * multiplier
 	}
 
 	// Hard cap at <100 to satisfy tick calculation constraints.
@@ -997,113 +722,4 @@ func (s *StrategyService) executeRebalance(task *models.StrategyTask, currentTic
 
 	log.Printf("[Strategy] 任务 #%d %s，执行再平衡", task.ID, reason)
 	s.requestExitToUSDT(task, ExitActionRebalance, reason)
-}
-
-func isStableCoin(s string) bool {
-	switch strings.ToUpper(strings.TrimSpace(s)) {
-	case "USDT", "USDC", "DAI", "FDUSD", "TUSD", "BUSD":
-		return true
-	}
-	return false
-}
-
-// cooldownSameTradingPairTasks 将同交易对的其他活跃任务也设置为冷却状态
-// 交易对匹配逻辑：Token0Symbol和Token1Symbol相同（忽略顺序）
-func (s *StrategyService) cooldownSameTradingPairTasks(task *models.StrategyTask, cooldownDuration time.Duration, reason string) {
-	if task == nil || task.UserID == 0 {
-		return
-	}
-
-	if cooldownDuration <= 0 {
-		cooldownDuration = autoModeCooldownDurationDefault
-	}
-
-	// 获取交易对符号
-	sym0 := strings.ToUpper(strings.TrimSpace(task.Token0Symbol))
-	sym1 := strings.ToUpper(strings.TrimSpace(task.Token1Symbol))
-	if sym0 == "" || sym1 == "" {
-		return
-	}
-
-	// 计算冷却结束时间
-	cooldownUntil := time.Now().Add(cooldownDuration)
-	cooldownLabel := fmt.Sprintf("%d 分钟", int(cooldownDuration.Minutes()))
-	if cooldownDuration < time.Minute {
-		cooldownLabel = fmt.Sprintf("%d 秒", int(cooldownDuration.Seconds()))
-	}
-
-	// 识别冷却目标（非稳定币代币 或 交易对）
-	// 用户要求：包含稳定币以外的那个代币的池子都要被禁止开仓
-	// 因此，我们尝试提取非稳定币作为冷却 Key
-	cooldownKey := fmt.Sprintf("%s/%s", sym0, sym1)
-	if isStableCoin(sym0) && !isStableCoin(sym1) {
-		cooldownKey = sym1
-	} else if !isStableCoin(sym0) && isStableCoin(sym1) {
-		cooldownKey = sym0
-	}
-
-	// 写入 Redis 冷却
-	cooldownSvc := blacklist.NewCooldownService()
-	if err := cooldownSvc.Add(task.UserID, cooldownKey, reason, cooldownDuration); err != nil {
-		log.Printf("[Strategy] 写入 Redis 冷却失败: user_id=%d key=%s err=%v", task.UserID, cooldownKey, err)
-	} else {
-		log.Printf("[Strategy] 目标 %s 已写入 Redis 冷却 %s", cooldownKey, cooldownLabel)
-	}
-
-	// 查找该用户同交易对的其他活跃任务
-	var otherTasks []models.StrategyTask
-	if err := database.DB.Where(
-		"user_id = ? AND id != ? AND is_auto = ? AND status IN ?",
-		task.UserID, task.ID, true, []models.StrategyStatus{
-			models.StrategyStatusRunning,
-			models.StrategyStatusWaiting,
-		},
-	).Find(&otherTasks).Error; err != nil {
-		log.Printf("[Strategy] 查询同交易对任务失败: %v", err)
-		return
-	}
-
-	cooldownCount := 0
-	for _, otherTask := range otherTasks {
-		otherSym0 := strings.ToUpper(strings.TrimSpace(otherTask.Token0Symbol))
-		otherSym1 := strings.ToUpper(strings.TrimSpace(otherTask.Token1Symbol))
-
-		// 检查是否同交易对（忽略顺序）
-		sameSymbols := (sym0 == otherSym0 && sym1 == otherSym1) || (sym0 == otherSym1 && sym1 == otherSym0)
-		if !sameSymbols {
-			continue
-		}
-
-		// 设置冷却
-		updates := map[string]interface{}{
-			"status":                  models.StrategyStatusWaiting,
-			"cooldown_until":          &cooldownUntil,
-			"cooldown_reason":         fmt.Sprintf("📉 同交易对 %s/%s 触发冷却", sym0, sym1),
-			"range_break_up_streak":   0,
-			"range_break_down_streak": 0,
-			"next_range_multiplier":   1.0,
-			"out_of_range_since":      nil,
-			"rebalance_pending":       false,
-			"rebalance_retry_count":   0,
-			"rebalance_next_retry_at": nil,
-			"rebalance_last_error":    "",
-			"exit_pending_action":     "",
-			"exit_pending_reason":     "",
-			"exit_retry_count":        0,
-			"exit_next_retry_at":      nil,
-			"exit_last_error":         "",
-			"exit_give_up_at":         nil,
-		}
-		if err := database.DB.Model(&otherTask).Updates(updates).Error; err != nil {
-			log.Printf("[Strategy] 设置任务 #%d 冷却失败: %v", otherTask.ID, err)
-			continue
-		}
-
-		cooldownCount++
-		log.Printf("[Strategy] 任务 #%d 同交易对 %s/%s 触发冷却 %s", otherTask.ID, sym0, sym1, cooldownLabel)
-	}
-
-	if cooldownCount > 0 {
-		s.notify(task.UserID, fmt.Sprintf("⚠️ 交易对 %s/%s 连续跌破，同交易对共 %d 个任务进入冷却 %s", sym0, sym1, cooldownCount+1, cooldownLabel))
-	}
 }

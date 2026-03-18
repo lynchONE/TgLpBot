@@ -171,14 +171,13 @@ func (s *RealtimePositionsService) InvalidateUser(userID uint) {
 }
 
 type RealtimePositionsResponse struct {
-	Wallet            RealtimeWallet     `json:"wallet"`
-	Summary           RealtimeSummary    `json:"summary"`
-	Positions         []RealtimePosition `json:"positions"`
-	PollIntervalSec   int                `json:"poll_interval_sec"`
-	IsAdmin           bool               `json:"is_admin"`
-	SmartMoneyEnabled bool               `json:"smart_money_enabled"`
-	UpdatedAt         time.Time          `json:"updated_at"`
-	Warnings          []string           `json:"warnings,omitempty"`
+	Wallet          RealtimeWallet     `json:"wallet"`
+	Summary         RealtimeSummary    `json:"summary"`
+	Positions       []RealtimePosition `json:"positions"`
+	PollIntervalSec int                `json:"poll_interval_sec"`
+	IsAdmin         bool               `json:"is_admin"`
+	UpdatedAt       time.Time          `json:"updated_at"`
+	Warnings        []string           `json:"warnings,omitempty"`
 }
 
 type RealtimeWallet struct {
@@ -207,7 +206,6 @@ type RealtimePosition struct {
 	WalletAddress     string     `json:"wallet_address,omitempty"`
 	TaskID            uint       `json:"task_id,omitempty"`
 	TaskPaused        bool       `json:"task_paused"`
-	TaskIsAuto        bool       `json:"task_is_auto"`
 	TaskAmountUSDT    float64    `json:"task_amount_usdt,omitempty"`
 	StatusLabel       string     `json:"status_label"`
 	InRange           bool       `json:"in_range"`
@@ -216,7 +214,6 @@ type RealtimePosition struct {
 	TickUpper         int        `json:"tick_upper"`
 	TickSpacing       int        `json:"tick_spacing,omitempty"` // 费率对应的 tick 间距，用于前端计算格数
 	RangePercent      float64    `json:"range_percent"`
-	OpenPrice         float64    `json:"open_price,omitempty"`
 	TaskRangeLowerPct float64    `json:"task_range_lower_pct,omitempty"`
 	TaskRangeUpperPct float64    `json:"task_range_upper_pct,omitempty"`
 	OutOfRange        string     `json:"out_of_range"`
@@ -1057,8 +1054,6 @@ func (s *RealtimePositionsService) buildV3Position(
 	outOfRangeText := "0/0"
 	var runningSince *time.Time
 	statusLabel := "运行中"
-	openPrice := 0.0
-
 	if task != nil {
 		poolID = strings.TrimSpace(task.PoolId)
 		exchange = strings.TrimSpace(task.Exchange)
@@ -1069,9 +1064,6 @@ func (s *RealtimePositionsService) buildV3Position(
 		}
 		runningSince = &task.CreatedAt
 		statusLabel = statusLabelFromTask(task)
-		if task.GuardOpenPrice > 0 {
-			openPrice = task.GuardOpenPrice
-		}
 	}
 
 	// Resolve the V3 pool address from factory to avoid mismatches / stale DB pool IDs.
@@ -1183,7 +1175,6 @@ func (s *RealtimePositionsService) buildV3Position(
 	hasLiquidity := liq != nil && liq.Sign() > 0
 	taskID := uint(0)
 	taskPaused := false
-	taskIsAuto := false
 	initialCostUSD := 0.0
 	netInvestedUSD := 0.0
 	currentValueUSD := 0.0
@@ -1194,7 +1185,6 @@ func (s *RealtimePositionsService) buildV3Position(
 	if task != nil {
 		taskID = task.ID
 		taskPaused = task.Paused
-		taskIsAuto = task.IsAuto
 		pnlMetrics := s.getTaskPnLViewMetrics(task)
 		initialCostUSD = pnlMetrics.initialCost
 		netInvestedUSD = pnlMetrics.netInvested
@@ -1242,7 +1232,6 @@ func (s *RealtimePositionsService) buildV3Position(
 		}(),
 		TaskID:     taskID,
 		TaskPaused: taskPaused,
-		TaskIsAuto: taskIsAuto,
 		TaskAmountUSDT: func() float64 {
 			if task == nil || task.AmountUSDT <= 0 {
 				return 0
@@ -1261,7 +1250,6 @@ func (s *RealtimePositionsService) buildV3Position(
 			return tickSpacingFromFee(info.Fee)
 		}(),
 		RangePercent:      rangePct,
-		OpenPrice:         openPrice,
 		TaskRangeLowerPct: taskRangeLowerPct,
 		TaskRangeUpperPct: taskRangeUpperPct,
 		OutOfRange:        outOfRangeText,
@@ -1587,7 +1575,6 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		}(),
 		TaskID:            task.ID,
 		TaskPaused:        task.Paused,
-		TaskIsAuto:        task.IsAuto,
 		TaskAmountUSDT:    task.AmountUSDT,
 		StatusLabel:       statusLabelFromTask(task),
 		InRange:           inRange,
@@ -1596,7 +1583,6 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		TickUpper:         tickUpper,
 		TickSpacing:       task.TickSpacing,
 		RangePercent:      rangePct,
-		OpenPrice:         task.GuardOpenPrice,
 		TaskRangeLowerPct: taskRangeLowerPct,
 		TaskRangeUpperPct: taskRangeUpperPct,
 		OutOfRange:        formatOutOfRange(task, tickLower, tickUpper, currentTick),
@@ -1830,7 +1816,6 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 		}(),
 		TaskID:            task.ID,
 		TaskPaused:        task.Paused,
-		TaskIsAuto:        task.IsAuto,
 		TaskAmountUSDT:    task.AmountUSDT,
 		StatusLabel:       statusLabelFromTask(task),
 		InRange:           inRange,

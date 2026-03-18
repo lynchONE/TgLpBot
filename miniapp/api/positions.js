@@ -1,5 +1,3 @@
-// 合并的仓位 API: realtime_positions, me, auto_monitor, autolp_pnl_curve
-// 通过 query 参数 endpoint 来区分端点
 function normalizeBaseUrl(value) {
     const trimmed = String(value || '').trim();
     if (!trimmed) return '';
@@ -24,14 +22,13 @@ export default async function handler(req, res) {
         return;
     }
 
-    // 从 query 参数获取 endpoint
     const endpoint = String(req.query?.endpoint || '').trim();
-    const validEndpoints = ['realtime_positions', 'me', 'auto_monitor', 'autolp_pnl_curve'];
+    const validEndpoints = ['realtime_positions', 'me'];
 
     if (!validEndpoints.includes(endpoint)) {
         res.statusCode = 400;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.end(JSON.stringify({ error: '无效的端点，有效值: realtime_positions, me, auto_monitor, autolp_pnl_curve' }));
+        res.end(JSON.stringify({ error: 'invalid endpoint' }));
         return;
     }
 

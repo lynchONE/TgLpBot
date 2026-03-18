@@ -84,10 +84,6 @@ func (b *Bot) handleTaskDelete(query *tgbotapi.CallbackQuery, user *models.User)
 	stableSym, _, _ := stableSymbolForChain(task.Chain)
 
 	text := fmt.Sprintf("⚠️ *确认删除任务 #%d？*\n\n删除后将从列表中移除（不可恢复）。\n\n注意：删除不会撤出链上流动性/兑换 %s；如需撤仓请先点击“停止任务”，或自行在钱包里撤仓。", task.ID, stableSym)
-	if task.IsAuto {
-		text += "\n\n🤖 该任务由 AutoLP 创建，删除不会关闭 AutoLP；如要停止自动开仓请在 /auto 中关闭。"
-	}
-
 	if messageID != 0 {
 		_ = b.editMessageText(chatID, messageID, text)
 		_ = b.editMessageReplyMarkup(chatID, messageID, taskDeleteConfirmKeyboard(task.ID))

@@ -1,5 +1,3 @@
-// 合并的 admin API: autolp_disable, autolp_stats, realtime_positions, realtime_users
-// 通过 query 参数 endpoint 来区分端点
 function normalizeBaseUrl(value) {
     const trimmed = String(value || '').trim();
     if (!trimmed) return '';
@@ -24,14 +22,22 @@ export default async function handler(req, res) {
         return;
     }
 
-    // 从 query 参数获取 endpoint
     const endpoint = String(req.query?.endpoint || '').trim();
-    const validEndpoints = ['autolp_disable', 'autolp_stats', 'realtime_positions', 'realtime_users', 'system_config', 'online_users', 'active_tasks', 'user_access', 'rpc_pool', 'private_zap'];
+    const validEndpoints = [
+        'realtime_positions',
+        'realtime_users',
+        'system_config',
+        'online_users',
+        'active_tasks',
+        'user_access',
+        'rpc_pool',
+        'private_zap',
+    ];
 
     if (!validEndpoints.includes(endpoint)) {
         res.statusCode = 400;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.end(JSON.stringify({ error: '无效的端点' }));
+        res.end(JSON.stringify({ error: 'invalid endpoint' }));
         return;
     }
 
@@ -41,7 +47,6 @@ export default async function handler(req, res) {
     const headers = {};
 
     if (method === 'GET') {
-        // 收集所有查询参数（排除 endpoint）
         const params = [];
         for (const [key, value] of Object.entries(req.query || {})) {
             if (key === 'endpoint') continue;

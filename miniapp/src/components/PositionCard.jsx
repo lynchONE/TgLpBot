@@ -258,12 +258,6 @@ export default function PositionCard({
         return null;
     }, [tickLowerRaw, tickUpperRaw, tickSpacingRaw]);
 
-    const openPrice = useMemo(() => {
-        if (stableIndex < 0) return null;
-        const n = Number(position?.open_price);
-        return Number.isFinite(n) && n > 0 ? n : null;
-    }, [position?.open_price, stableIndex]);
-
     const rangeLowerBase = useMemo(() => priceFromTick(position?.tick_lower, decimals0, decimals1), [position?.tick_lower, decimals0, decimals1]);
     const rangeUpperBase = useMemo(() => priceFromTick(position?.tick_upper, decimals0, decimals1), [position?.tick_upper, decimals0, decimals1]);
     const rangeLower = stableIndex === 0 ? safeInvert(rangeLowerBase) : rangeLowerBase;
