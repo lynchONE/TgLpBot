@@ -190,6 +190,10 @@ type Config struct {
 	SmartLPRPCTimeoutSeconds   int
 	SmartLPScanTimeoutSeconds  int
 
+	// Smart Money monitoring
+	SmartMoneyEnabled      bool
+	SmartMoneyPollInterval int
+
 	// Multi-chain (single instance). Chains are keyed by lower-case chain slug (e.g. "bsc", "base").
 	EnabledChains []string
 	Chains        map[string]ChainConfig
@@ -236,6 +240,9 @@ func LoadConfig() error {
 	walletTxMaxParallel, _ := strconv.Atoi(strings.TrimSpace(getEnv("WALLET_TX_MAX_PARALLEL", "8")))
 	webAppDebugUserID, _ := strconv.ParseInt(strings.TrimSpace(getEnv("TELEGRAM_WEBAPP_DEBUG_USER_ID", "0")), 10, 64)
 	webAppDebugUsername := strings.TrimSpace(getEnv("TELEGRAM_WEBAPP_DEBUG_USERNAME", "local_debug"))
+	bscRPCURL := strings.TrimSpace(getEnv("BSC_RPC_URL", "https://bsc-dataseed1.binance.org/"))
+	bscRPCWSURL := strings.TrimSpace(getEnv("BSC_RPC_WS_URL", ""))
+	smartMoneyPollInterval := getEnvInt("SMART_MONEY_POLL_INTERVAL_SEC", getEnvInt("SMART_MONEY_RECONNECT_INTERVAL_SEC", 2))
 
 	if workerMaxParallelUsers <= 0 {
 		workerMaxParallelUsers = 1
@@ -271,8 +278,8 @@ func LoadConfig() error {
 		UniswapV4Debug:                  getEnvBool("UNISWAP_V4_DEBUG", false),
 
 		// BSC Network
-		BSCRpcURL:   getEnv("BSC_RPC_URL", "https://bsc-dataseed1.binance.org/"),
-		BSCRpcWSURL: strings.TrimSpace(getEnv("BSC_RPC_WS_URL", "")),
+		BSCRpcURL:   bscRPCURL,
+		BSCRpcWSURL: bscRPCWSURL,
 		BSCChainID:  chainID,
 
 		// Database
@@ -360,6 +367,10 @@ func LoadConfig() error {
 		SmartLPMaxBlocksPerScan:    smartLPMaxBlocksPerScan,
 		SmartLPRPCTimeoutSeconds:   smartLPRPCTimeoutSeconds,
 		SmartLPScanTimeoutSeconds:  smartLPScanTimeoutSeconds,
+
+		// Smart Money monitoring
+		SmartMoneyEnabled:      getEnvBool("SMART_MONEY_ENABLED", false),
+		SmartMoneyPollInterval: smartMoneyPollInterval,
 	}
 
 	// Build per-chain configs (single-instance multi-chain).
@@ -427,6 +438,9 @@ func LoadConfig() error {
 	log.Printf("   - SmartLP Max Blocks Per Scan: %d", AppConfig.SmartLPMaxBlocksPerScan)
 	log.Printf("   - SmartLP RPC Timeout: %d seconds", AppConfig.SmartLPRPCTimeoutSeconds)
 	log.Printf("   - SmartLP Scan Timeout: %d seconds", AppConfig.SmartLPScanTimeoutSeconds)
+	log.Printf("   - SmartMoney Enabled: %v", AppConfig.SmartMoneyEnabled)
+	log.Printf("   - SmartMoney BSC HTTP RPC: %s", maskURL(AppConfig.BSCRpcURL))
+	log.Printf("   - SmartMoney Poll Interval: %d seconds", AppConfig.SmartMoneyPollInterval)
 	log.Println("鉁?閰嶇疆鍔犺浇瀹屾垚")
 	log.Println("========================================")
 

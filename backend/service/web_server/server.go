@@ -29,6 +29,8 @@ func NewServer() *Server {
 }
 
 func (s *Server) Start(port string) {
+	initSmartMoney()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/pools", s.handleGetPools)
 	mux.HandleFunc("/api/positions", s.handlePositions)
@@ -64,6 +66,9 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/cooldowns", handleCooldowns)
 	mux.HandleFunc("/api/web_login", s.handleWebLogin)
 
+	// Smart Money routes
+	s.registerSmartMoneyRoutes(mux)
+
 	handler := corsMiddleware(mux)
 
 	server := &http.Server{
@@ -86,7 +91,7 @@ func (s *Server) Start(port string) {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
 		if r.Method == "OPTIONS" {

@@ -36,6 +36,7 @@ import { WEBAPP_CONFIG } from './config';
 import PanelShell, { EmptyState, MetricCard } from './components/PanelShell';
 import KlineChart from './components/KlineChart';
 import CreatePoolPanel from './components/CreatePoolPanel';
+import SmartMoneyDashboard from './components/SmartMoneyDashboard';
 import OpenPositionModal from './components/OpenPositionModal';
 import StepProgressModal from './components/StepProgressModal';
 import TaskActionMenu from './components/TaskActionMenu';
@@ -1568,6 +1569,7 @@ export default function App() {
       </PanelShell>
     ),
 
+    smart_money: <SmartMoneyDashboard apiBaseUrl={apiBaseUrl} />,
   };
 
   return (

@@ -522,6 +522,13 @@ func isAvailable(ep models.RpcEndpoint, now time.Time) bool {
 	if ep.DisabledUntil != nil && now.Before(*ep.DisabledUntil) {
 		return false
 	}
+	if ep.DisabledReason == ReasonHealthFail && ep.DisabledUntil != nil && !now.Before(*ep.DisabledUntil) {
+		// A health-failed endpoint should not become eligible again just because
+		// the cooldown window elapsed. It must pass a later health check first.
+		if ep.LastSuccessAt == nil || !ep.LastSuccessAt.After(*ep.DisabledUntil) {
+			return false
+		}
+	}
 	return strings.TrimSpace(ep.URL) != ""
 }
 

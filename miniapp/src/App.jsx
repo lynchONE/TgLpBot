@@ -9,7 +9,8 @@ import NumberFlowValue from './components/NumberFlowValue.jsx';
 import StepProgressModal from './components/StepProgressModal.jsx';
 import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
 import AdminPage from './components/AdminPage.jsx';
-import { Bot, BarChart2, Filter, Search, Moon, Sun, Settings, X, Check, RotateCcw, AlertTriangle, Flame } from 'lucide-react';
+import SmartMoneyPage from './components/SmartMoneyPage.jsx';
+import { Bot, BarChart2, Filter, Search, Moon, Sun, Settings, X, Check, RotateCcw, AlertTriangle, Flame, Eye } from 'lucide-react';
 import {
     deleteTask,
     fetchAdminRealtimePositions,
@@ -304,6 +305,7 @@ const icons = {
     reset: RotateCcw,
     alert: AlertTriangle,
     fire: Flame,
+    eye: Eye,
 };
 
 const Icon = ({ path: IconCmp, className = '' }) => {
@@ -315,6 +317,7 @@ function buildTopNavItems({ isAdmin }) {
     const items = [
         { key: 'hot_pools', label: '热门池子' },
         { key: 'positions', label: '仓位' },
+        { key: 'smart_money', label: '聪明钱' },
     ];
     if (isAdmin) items.push({ key: 'admin', label: '管理' });
     return items;
@@ -475,6 +478,7 @@ export default function App() {
     const showAdmin = isAdmin && viewMode === 'admin';
     const isHotPools = viewMode === 'hot_pools';
     const isPositions = viewMode === 'positions';
+    const isSmartMoney = viewMode === 'smart_money';
     const topNavItems = useMemo(
         () => buildTopNavItems({ isAdmin }),
         [isAdmin],
@@ -1381,7 +1385,7 @@ export default function App() {
         }
         const range = parseRangeInput(openPositionRangeLower, openPositionRangeUpper);
         if (!range || range.lower <= 0 || range.upper <= 0 || range.lower >= 100 || range.upper >= 100) {
-            setOpenPositionError('Range must be between 0 and 100.');
+            setOpenPositionError('区间必须在 0 到 100 之间。');
             return;
         }
 
@@ -1390,7 +1394,7 @@ export default function App() {
         if (slippageRaw) {
             const v = Number(slippageRaw);
             if (!Number.isFinite(v) || v < 0 || v > 100) {
-                setOpenPositionError('Slippage must be between 0 and 100.');
+                setOpenPositionError('滑点必须在 0 到 100 之间。');
                 return;
             }
             slippage = v;
@@ -1407,13 +1411,13 @@ export default function App() {
             }
             const list = Array.isArray(walletsData?.wallets) ? walletsData.wallets : [];
             if (list.length === 0) {
-                setOpenPositionError('No available wallet found.');
+                setOpenPositionError('未找到可用钱包。');
                 return;
             }
             if (list.length > 1) {
                 const wid = Number(openPositionWalletId);
                 if (!Number.isFinite(wid) || wid <= 0) {
-                    setOpenPositionError('Select a wallet.');
+                    setOpenPositionError('请选择钱包。');
                     return;
                 }
             } else {
@@ -1449,9 +1453,9 @@ export default function App() {
             resetOpenPositionDraft();
         } catch (e) {
             const msg = String(e?.message || e || '').trim();
-            setOpenPositionError(msg || 'Open position failed.');
+            setOpenPositionError(msg || '开仓失败。');
             setOperationProgress(prev => prev?.operation === 'open_position'
-                ? { ...prev, status: 'error', error: msg || 'Open position failed.' } : prev);
+                ? { ...prev, status: 'error', error: msg || '开仓失败。' } : prev);
         } finally {
             setOpenPositionLoading(false);
         }
@@ -1479,7 +1483,7 @@ export default function App() {
             }
         } catch (e) {
             hapticNotification('error');
-            showNotice(`婵帗绋掗崹鐢稿箖閺囥垹纭€闁哄洨鍠愰幆娆徝归敐鍡欑煀闁靛洦鍨归幏? ${e?.message || e}`, 'error');
+            showNotice(`黑名单操作失败: ${e?.message || e}`, 'error');
         }
     }, [apiBaseUrl, initData, hasInitData]);
 
@@ -1554,10 +1558,10 @@ export default function App() {
         setCooldownRemovingPair(pair);
         try {
             const resp = await removeCooldown({ apiBaseUrl, initData, tradingPair: pair });
-            showNotice(resp?.message || `閻庤鐡曠亸顏囶暰闂傚倸瀚ㄩ崐鏇㈠窗鎼淬劌纭€? ${pair}`, 'success');
+            showNotice(resp?.message || `已解除冷却: ${pair}`, 'success');
             loadCooldowns();
         } catch (e) {
-            showNotice(`闁荤喐鐟辩紞浣糕枍鎼淬劌绀冪€瑰嫭婢樼粊鍗烆熆閹壆绨块悷? ${String(e?.message || e)}`, 'error');
+            showNotice(`解除冷却失败: ${String(e?.message || e)}`, 'error');
         } finally {
             setCooldownRemovingPair('');
         }
@@ -1735,7 +1739,7 @@ export default function App() {
         const fallbackAmount = Number(position?.net_invested_usd ?? position?.initial_cost_usd);
         setTaskRangeEdit({
             taskId: id,
-            title: String(position?.title || '').trim() || `婵炲濮鹃褎鎱?#${id}`,
+            title: String(position?.title || '').trim() || `任务 #${id}`,
         });
         setTaskRangeLower(Number.isFinite(low) && low > 0 ? String(low) : '');
         setTaskRangeUpper(Number.isFinite(up) && up > 0 ? String(up) : '');
@@ -1769,7 +1773,7 @@ export default function App() {
             return;
         }
         if (!range || range.lower <= 0 || range.upper <= 0 || range.lower >= 100 || range.upper >= 100) {
-            setTaskRangeError('Range must be between 0 and 100.');
+            setTaskRangeError('区间必须在 0 到 100 之间。');
             return;
         }
 
@@ -1850,7 +1854,7 @@ export default function App() {
         setBatchMode(false);
         hapticNotification(failCount === 0 ? 'success' : 'warning');
         showNotice(
-            `闂佸綊娼х紞濠囧闯?{paused ? '闂佸搫妫楅崐鍛婄? : '闂佽鍘归崹褰捤?}闁诲海鎳撻張顒勫垂濮樿埖鏅慨姗嗗幖閻忓洭鏌?${successCount}闂佹寧绋戦懟顖炲Φ閹寸姵瀚?${failCount}`,
+            `批量${paused ? '暂停' : '恢复'}完成：成功 ${successCount}，失败 ${failCount}`,
             failCount === 0 ? 'success' : 'warning'
         );
     };
@@ -1872,15 +1876,20 @@ export default function App() {
             icon: icons.bot,
             subtitle: walletAddress ? `钱包 ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '钱包未连接',
         },
+        smart_money: {
+            title: '聪明钱',
+            icon: icons.eye,
+            subtitle: '聪明钱监控',
+        },
         admin: {
             title: '管理',
             icon: icons.gear,
             subtitle: adminSelectedUser
-                ? `闂佹椿娼块崝宥夊春濞戙垺鏅?{formatUserLabel(adminSelectedUser)}`
+                ? `用户：${formatUserLabel(adminSelectedUser)}`
                 : adminUsersLoading && adminUsers.length === 0
-                    ? '闂佸憡姊绘慨鎯归崶顒佸仺闁靛绠戦悡鏇炩槈?..'
+                    ? '加载用户中...'
                     : adminUsers.length
-                        ? `闂侀潻璐熼崝搴ㄥ吹鎼淬劍鍋ㄩ柕濠忕畱閻撴洟鏌?{adminUsers.length}`
+                        ? `开启Auto用户：${adminUsers.length}`
                         : '暂无可管理用户',
         },
     }), [
@@ -1899,7 +1908,7 @@ export default function App() {
     const hasAdminPositions = Boolean(adminPositions);
     const adminSummaryPlaceholder = adminSelectedUserId
         ? adminPositionsLoading
-            ? '闂佸憡姊绘慨鎯归崶顒佸仺闁靛绠戦悡鏇灻归悩铏矮缂傚秴鎳忕粙?..'
+            ? '加载用户仓位中...'
             : '该用户暂无仓位数据'
         : '请先选择一个管理员用户';
     const showEmptyPositions = isPositions && Boolean(activeData) && visiblePositions.length === 0;
@@ -2033,6 +2042,10 @@ export default function App() {
                             </div>
                         ) : null}
                     </ModuleHeader>
+                ) : isSmartMoney ? (
+                    <div className="mb-2">
+                        <SmartMoneyPage apiBaseUrl={apiBaseUrl} accentTheme={accentTheme} />
+                    </div>
                 ) : isHotPools ? (
                     <ModuleHeader
                         title={hotPoolsSort === 'fee_rate' ? '费率排行' : hotPoolsSort === 'volume' ? '交易量排行' : '手续费排行'}
@@ -2167,7 +2180,7 @@ export default function App() {
             {
                 isHotPools && !hotPoolsLoading && !hotPoolsError && hotPoolsData && hotPoolsRows.length === 0 ? (
                     <div className="mb-4 rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                        闂佸搫妫楅崐鐟拔涢妶澶嬪€绘い鎾卞灪閿涘本鎱ㄩ崷顓炐㈤柣鈩冪懇瀵偊鎮ч崼婵堛偊闂?
+                        暂无热门池子数据。
                     </div>
                 ) : null
             }
@@ -2175,7 +2188,7 @@ export default function App() {
             {
                 isHotPools && !hotPoolsLoading && !hotPoolsError && hotPoolsData && hotPoolsRows.length > 0 && hotPoolsFilterEnabled && hotPoolsVisibleRows.length === 0 ? (
                     <div className="mb-4 rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                        缂備焦绋掗惄顖炲焵椤掆偓椤︻垶骞冨Δ鍛辈闁稿本绋掗敓銉╂煟閹搭厼寮俊顐墮鏁堥柣妯垮皺閹藉秹鏌℃担鍝勵暭鐎规挷绶氭俊?
+                        筛选后暂无热门池子数据。
                     </div>
                 ) : null
             }
@@ -2188,6 +2201,7 @@ export default function App() {
                         hasInitData={hasInitData}
                         tick={tick}
                         pollIntervalSec={pollIntervalSec}
+                        accentTheme={accentTheme}
                         onNotice={showNotice}
                     />
                 ) : null
@@ -2196,7 +2210,7 @@ export default function App() {
             {
                 !isHotPools && initDataMissing ? (
                     <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-200">
-                        闁荤姴娲╁〒鍦垝?Telegram 闂佸搫鐗嗛幖顐⑩枍閹烘挾顩叉繛宸簻濞咃繝鏌?闁诲骸婀遍崑鐐差渻閸屾稓顩烽柟鎹愬皺缁?闂佸湱顭堥ˇ鐢稿箰閹惰棄绠ラ柟鎯х－绾捐顪冮妶鍥ㄦ毈婵為棿鍗抽弫宥夊醇濠靛洤鍓ㄩ梺鍛婂笚閻燂箑螞閵堝應鏋栭柡鍥ｆ閸ゃ垽鏌涘▎鎰ⅶ缂傚秵锕㈤幆鍐礋椤忓棙灏濇繛杈剧到缁嬪嫮妲愬璺何?
+                        未获取到 Telegram initData，请从机器人入口打开页面。
                     </div>
                 ) : null
             }
@@ -2254,7 +2268,7 @@ export default function App() {
                                     disabled={selectedTaskIds.size === 0 || batchLoading}
                                     className="inline-flex items-center rounded-xl bg-emerald-500/15 px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-500/25 disabled:opacity-50 dark:text-emerald-200"
                                 >
-                                    闂佸綊娼х紞濠囧闯濞差亜绠掗柕蹇曞濡?
+                                    恢复所选
                                 </button>
                             </div>
                         )}
@@ -2360,7 +2374,7 @@ export default function App() {
 
                             <div className="mt-4 space-y-3 pb-20">
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="text-[11px] text-zinc-500 dark:text-white/40">闂佺懓鍚嬬划搴ㄥ磼閵娿儛褔鎮╅懠顒佹啢 (濠殿喖婀辨慨鎾偤濮楊湂/婵炲濯寸徊鐣岀博閻㈢瑙︾€广儱娉?</div>
+                                    <div className="text-[11px] text-zinc-500 dark:text-white/40">搜索池子 (池子ID/代币名称)</div>
                                     <div className="mt-2 flex items-center gap-2">
                                         <div className="text-[11px] text-zinc-500 dark:text-white/40">链</div>
                                         <select
@@ -2395,7 +2409,7 @@ export default function App() {
                                                 }
                                             }}
                                             className={`flex-1 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                            placeholder="婵炴挻鑹鹃鍛淬€?USDT / WBNB / 0x..."
+                                            placeholder="例如 USDT / WBNB / 0x..."
                                         />
                                         <button
                                             type="button"
@@ -2410,13 +2424,13 @@ export default function App() {
                                         </button>
                                     </div>
                                     <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                        闂佽　鍋撴い鏍ㄧ☉閻︻噣鏌熺粙娆炬Ч闁活偅绮庨埀顒佺⊕閳ь剚顑忛梺鍛婄矊婵傛棃宕鍌涙殰濞达絽鎲￠崐宕囩磼婢跺苯顣奸柟顔肩－濡叉劙锝為鍓ь槷缂傚倷鐒﹂幐濠氭倶婢舵劕绠?TVL 闂佺锕ョ敮鎺旇姳椤撱垺鏅悘鐐靛亾娴犳ê顭?10 闂?
+                                        支持按池子ID和代币名称搜索，结果按 TVL 倒序，最多 10 条
                                     </div>
                                 </div>
 
                                 {!hasInitData ? (
                                     <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-200">
-                                        闂佸搫鐗滄禍锝夌嵁韫囨稑鐭楅柡宓啰鍘?Telegram initData闂佹寧绋戦惌渚€顢氶浣侯浄閹兼番鍨虹花姘舵煕閿濆啫濡烘慨鐟邦樀瀹曟濡烽妷銉х▔闂佺懓鐏氶幐鍝ユ閹寸偑浜滈柣銏犳啞濡椼劑鏌?
+                                        未获取到 Telegram initData，请从机器人入口打开页面。
                                     </div>
                                 ) : null}
 
@@ -2428,7 +2442,7 @@ export default function App() {
 
                                 {poolSearchPerformed && !poolSearchLoading && !poolSearchError && poolSearchResults.length === 0 ? (
                                     <div className="rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                                        闂佸搫鐗滄禍婵囩珶濮椻偓瀹曟岸骞嶉鐣屻偛闂佺绻楀▍鏇㈡儓濠婂應鍋撳☉娆忓闁?
+                                        未找到相关池子。
                                     </div>
                                 ) : null}
 
@@ -2490,17 +2504,17 @@ export default function App() {
                             <div className="mt-4 space-y-4 pb-20">
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="mt-1">
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">闂佺懓鍚嬬划搴ㄥ磼?(婵炲瓨鍤庨崐鏍ｅΔ鍐ｅ亾?闂侀潻闄勫妯侯焽?</div>
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">搜索 (交易对/地址)</div>
                                         <input
                                             value={hotPoolsFilterDraft.keyword}
                                             onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, keyword: e.target.value }))}
                                             className={`mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                            placeholder="婵炴挻鑹鹃鍛淬€?USDT"
+                                            placeholder="例如 USDT"
                                         />
                                     </div>
                                     <div className="mt-3 grid grid-cols-2 gap-3">
                                         <div>
-                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">闂佸綊娼ч鍥偨閼姐倖瀚?闂?(USD)</div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">手续费 ≥ (USD)</div>
                                             <input
                                                 value={hotPoolsFilterDraft.minFees}
                                                 onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFees: e.target.value }))}
@@ -2510,7 +2524,7 @@ export default function App() {
                                             />
                                         </div>
                                         <div>
-                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">闁荤姵鍔曞﹢閬嶅极閵堝鍋?闂?(%)</div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">费用率 ≥ (%)</div>
                                             <input
                                                 value={hotPoolsFilterDraft.minFeeRate}
                                                 onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFeeRate: e.target.value }))}
@@ -2520,7 +2534,7 @@ export default function App() {
                                             />
                                         </div>
                                         <div>
-                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">TVL 闂?(USD)</div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">TVL ≥ (USD)</div>
                                             <input
                                                 value={hotPoolsFilterDraft.minTvl}
                                                 onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minTvl: e.target.value }))}
@@ -2530,7 +2544,7 @@ export default function App() {
                                             />
                                         </div>
                                         <div>
-                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">婵炲瓨鍤庨崐鏍ｅΔ鍛厒?闂?(USD)</div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">交易量 ≥ (USD)</div>
                                             <input
                                                 value={hotPoolsFilterDraft.minVolume}
                                                 onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minVolume: e.target.value }))}
@@ -2550,7 +2564,7 @@ export default function App() {
                                             title="应用筛选"
                                         >
                                             <Icon path={icons.check} className="h-4 w-4" />
-                                            闁圭厧鐡ㄥ濠氬极?
+                                            应用
                                         </button>
                                         <button
                                             type="button"
@@ -2560,7 +2574,7 @@ export default function App() {
                                             title="恢复默认筛选"
                                         >
                                             <Icon path={icons.reset} className="h-4 w-4" />
-                                            婵帗绋掗…鍫ヮ敇?
+                                            默认
                                         </button>
                                         <button
                                             type="button"
@@ -2570,7 +2584,7 @@ export default function App() {
                                             title="清空筛选条件"
                                         >
                                             <Icon path={icons.close} className="h-4 w-4" />
-                                            濠电偞鎸搁幊鎰板煘閺嶎厼绾ч柍銉ュ级椤?
+                                            清空条件
                                         </button>
                                     </div>
                                 </div>
@@ -2610,50 +2624,50 @@ export default function App() {
                                 ) : null}
                                 {globalConfigLoading && !globalConfig ? (
                                     <div className="rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                                        闂佸憡姊绘慨鎯归崶銊р枖?..
+                                        加载中...
                                     </div>
                                 ) : null}
                                 {globalConfig ? (
                                     <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                         <div className="grid grid-cols-2 gap-3 text-xs text-zinc-500 dark:text-white/50">
                                             <div>
-                                                <div>Rebalance Timeout</div>
+                                                <div>再平衡超时</div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">
                                                     <NumberFlowValue value={rebalanceText} formatter={() => rebalanceText} />
                                                 </div>
                                             </div>
                                             <div>
-                                                <div>Slippage</div>
+                                                <div>滑点</div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">
                                                     <NumberFlowValue value={slippageText} formatter={() => slippageText} />
                                                 </div>
                                             </div>
                                             <div>
-                                                <div>Stop Loss</div>
+                                                <div>秒止损</div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.stop_loss_enabled)}</div>
                                             </div>
                                             <div>
-                                                <div>Stop Loss Delay</div>
+                                                <div>秒止损阈值</div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">
                                                     <NumberFlowValue value={stopLossDelayText} formatter={() => stopLossDelayText} />
                                                 </div>
                                             </div>
                                             <div>
-                                                <div>Auto Reinvest</div>
+                                                <div>复投</div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.auto_reinvest)}</div>
                                             </div>
                                             <div>
-                                                <div>Residual Tolerance</div>
+                                                <div>剩余资产容忍度</div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">
                                                     <NumberFlowValue value={residualText} formatter={() => residualText} />
                                                 </div>
                                             </div>
                                             <div>
-                                                <div>闂佸搫鍟ㄩ崕杈╂崲閺冨牊鐒绘慨妯夸含閸欌偓</div>
+                                                <div>日志通知</div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.extra_notifications_enabled)}</div>
                                             </div>
                                             <div>
-                                                <div>中文代币过滤</div>
+                                                <div>过滤中文代币</div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.filter_chinese_tokens)}</div>
                                             </div>
                                         </div>
@@ -2671,7 +2685,7 @@ export default function App() {
                                         : `${brand.solidButtonClass} ${brand.solidRingClass}`
                                         }`}
                                 >
-                                    闂佸憡甯￠弨閬嶅蓟?
+                                    刷新
                                 </button>
                             </div>
                         </div>
@@ -2690,7 +2704,7 @@ export default function App() {
                         />
                         <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
                             <div className="flex items-center justify-between">
-                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">Settings</div>
+                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">设置</div>
                                 <button
                                     type="button"
                                     onClick={() => setSettingsOpen(false)}
@@ -2703,8 +2717,8 @@ export default function App() {
 
                             <div className="mt-4 space-y-4">
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">Accent Theme</div>
-                                    <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">Choose the color theme for the miniapp interface.</div>
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">主色</div>
+                                    <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">默认新绿，也可以切回原来的绿色。</div>
                                     <div className="mt-3 flex flex-wrap gap-2">
                                         {ACCENT_THEME_OPTIONS.map((option) => {
                                             const active = accentTheme === option.key;
@@ -2726,13 +2740,13 @@ export default function App() {
                                     </div>
                                 </div>
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">闂佺厧顨庢禍婊勬叏閳哄懎绀嗛梺鍨儐閻撯偓</div>
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">自动刷新</div>
                                     <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
-                                        Default interval <NumberFlowValue value={settingsPollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s
+                                        默认间隔 <NumberFlowValue value={settingsPollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s
                                         {pollOverrideSec
-                                            ? 'Override enabled.'
-                                            : <>Server default <NumberFlowValue value={settingsServerPollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s</>}
-                                        .
+                                            ? '已启用自定义。'
+                                            : <>服务器默认 <NumberFlowValue value={settingsServerPollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s</>}
+                                        。
                                     </div>
                                     <div className="mt-3 flex flex-wrap gap-2">
                                         {[5, 10, 15, 30, 60].map((sec) => (
@@ -2753,7 +2767,7 @@ export default function App() {
                                             onClick={clearPollOverride}
                                             className="rounded-xl bg-white/70 px-3 py-1.5 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
                                         >
-                                            闁荤姾娅ｉ崰鏍р枔閵忊槅娓舵俊顖涱儥閸?
+                                            跟随默认
                                         </button>
                                     </div>
 
@@ -2776,7 +2790,7 @@ export default function App() {
                                             onClick={applyPollDraft}
                                             className={`rounded-xl px-3 py-2 text-sm font-semibold shadow-sm ${brand.solidButtonClass}`}
                                         >
-                                            缂佺虎鍙庨崰鏍偩?
+                                            确定
                                         </button>
                                     </div>
                                 </div>
@@ -2797,7 +2811,7 @@ export default function App() {
                         contentClassName="px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
                         title={
                             <div className="min-w-0">
-                                <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/90">Open Position</div>
+                                <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/90">买入</div>
                                 <div className="mt-0.5 truncate text-[11px] font-medium text-zinc-500 dark:text-white/40">
                                     {openPositionPool?.trading_pair || '--'}
                                 </div>
@@ -2808,10 +2822,10 @@ export default function App() {
                             {multiWalletEnabled ? (
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="flex items-center justify-between gap-2">
-                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">钱包</div>
+                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">选择钱包</div>
                                         <div className="text-[11px] text-zinc-500 dark:text-white/40">
                                             {walletsLoading
-                                                ? 'Loading...'
+                                                ? '加载中...'
                                                 : [
                                                     String(walletsData?.chain || '').toUpperCase(),
                                                     walletsData?.native_symbol && walletsData?.stable_symbol
@@ -2828,7 +2842,7 @@ export default function App() {
                                     ) : null}
 
                                     {!walletsLoading && !walletsError && Array.isArray(walletsData?.wallets) && walletsData.wallets.length === 0 ? (
-                                        <div className="mt-2 text-xs text-zinc-500 dark:text-white/50">No wallet found.</div>
+                                        <div className="mt-2 text-xs text-zinc-500 dark:text-white/50">未找到钱包</div>
                                     ) : null}
 
                                     <div className="mt-2 max-h-56 overflow-y-auto overscroll-contain space-y-2 pr-1">
@@ -2897,26 +2911,26 @@ export default function App() {
                                     }}
                                     inputMode="decimal"
                                     className={`mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                    placeholder="e.g. 100"
+                                    placeholder="例如 100"
                                 />
                             </div>
 
                             <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">Custom Range (%)</div>
+                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">自定义区间 (%)</div>
                                 <div className="mt-2 grid grid-cols-2 gap-2">
                                     <input
                                         value={openPositionRangeLower}
                                         onChange={(e) => handleOpenPositionRangeLowerChange(e.target.value)}
                                         inputMode="decimal"
                                         className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                        placeholder="Lower %"
+                                        placeholder="下限 %"
                                     />
                                     <input
                                         value={openPositionRangeUpper}
                                         onChange={(e) => handleOpenPositionRangeUpperChange(e.target.value)}
                                         inputMode="decimal"
                                         className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                        placeholder="Upper %"
+                                        placeholder="上限 %"
                                     />
                                 </div>
                                 <div className="mt-2 flex flex-wrap gap-1.5">
@@ -2944,13 +2958,13 @@ export default function App() {
                                     ))}
                                 </div>
                                 <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                    Enter lower and upper percentages. For example, 1 / 3 means down 1% and up 3%.
+                                    输入下限和上限百分比。例如 1 / 3 表示下跌 1%、上涨 3%。
                                 </div>
                             </div>
 
                             <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">Slippage (%)</div>
-                                <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">Leave empty to use the global slippage setting.</div>
+                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">滑点 (%)</div>
+                                <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">留空则使用全局滑点设置。</div>
                                 <input
                                     value={openPositionSlippage}
                                     onChange={(e) => {
@@ -2959,7 +2973,7 @@ export default function App() {
                                     }}
                                     inputMode="decimal"
                                     className={`mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                    placeholder="e.g. 0.5 (optional)"
+                                    placeholder="例如 0.5（可选）"
                                 />
                             </div>
 
@@ -3014,30 +3028,30 @@ export default function App() {
 
                             <div className="mt-4 space-y-4">
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">闂佸搫鍊瑰妯间焊椤栫偞鈷?(%)</div>
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">新区间 (%)</div>
                                     <div className="mt-2 grid grid-cols-2 gap-2">
                                         <input
                                             value={taskRangeLower}
                                             onChange={(e) => handleTaskRangeLowerChange(e.target.value)}
                                             inputMode="decimal"
                                             className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                            placeholder="婵炴垶鎸搁澶婎瀶?%"
+                                            placeholder="下限 %"
                                         />
                                         <input
                                             value={taskRangeUpper}
                                             onChange={(e) => handleTaskRangeUpperChange(e.target.value)}
                                             inputMode="decimal"
                                             className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                            placeholder="婵炴垶鎸搁敃顏勵瀶?%"
+                                            placeholder="上限 %"
                                         />
                                     </div>
                                     <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                        婵烇絽娴傞崰妤呭极婵傜瑙﹂幖杈剧稻閻ｉ亶鏌涢弽銊︺仢婵☆偉娉曟禍鎼佸幢濡や浇鍚梺闈涙閸旀帞绮崨顓涙瀻闁炽儱鍟块弲娆愵殽閻愯尙鏋冮柕鍡忓亾闂佸搫鍟崇紙浼村焵椤掍礁鐏╅柡浣规崌瀵偊宕煎☉鎺戜壕?
+                                        修改后的区间将在【下次再平衡时】生效。
                                     </div>
                                 </div>
 
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">婵炴垶鎸搁鍡涱敃婵傚憡鐓傜€广儱鎳橀幐顒勬偠濞戝磭绡€闁革絿鍋撻敍?(USDT)</div>
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">下次重平衡金额 (USDT)</div>
                                     <div className="mt-2">
                                         <input
                                             value={taskRangeAmount}
@@ -3051,7 +3065,7 @@ export default function App() {
                                         />
                                     </div>
                                     <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                        閻熸粎澧楅幐鍛婃櫠閻樿绠板ù锝夘棑濞夈垹鈽夐幘宕囆＄紒鍙樺嵆閹嫮鈧稒锚婢跺秹鏌涘▎鎯奉亝鎱ㄩ埡鍛櫖鐎光偓閸曨偅顏ユ俊顐ゅ缁诲倿骞忔导鏉戠婵炲樊浜濋敍鐔兼⒑椤旀寧顥夐柣銊ｅ灲瀹曠兘濡搁敐鍌氫壕闁归偊浜為悷鎾寸箾閸″繆鍋撻崘鍙夋珒濡ょ姷鍋涢悿鍥Υ閳ь剟鏌￠崘顓犲牚闁逞屽墯閸ㄥ綊寮幘璇叉瀬闁割偅绋堥崑?
+                                        当前持仓不会直接变动，金额和区间都将在【下次再平衡时】生效。
                                     </div>
                                 </div>
 
@@ -3094,7 +3108,7 @@ export default function App() {
                                 <div className="min-w-0">
                                     <div className="text-base font-extrabold text-zinc-900 dark:text-white/90">加入黑名单</div>
                                     <div className="mt-1 text-xs text-zinc-500 dark:text-white/50">
-                                        闁诲繐绻愬Λ娆撴儓濠婂應鍋撳☉娆忓濠殿喚鍋ゅ畷妤呭Ψ閳哄啯瀚ч梺鍛婅壘缁夋潙鐣烽悢鐓庤Е閹煎瓨绻勭粣妤呮⒒閸愵亞甯涙い鎺撶洴閹嫮绮欓崹顔肩稑濠殿喖婀辨慨鎾偤濞嗗浚鍤曢柍褜鍓氱粋?
+                                        将池子加入黑名单后会阻止相关池子开仓
                                     </div>
                                 </div>
                                 <button
@@ -3215,6 +3229,7 @@ export default function App() {
                         let iconPath = icons.bot;
                         if (item.key === 'hot_pools') iconPath = icons.fire;
                         if (item.key === 'positions') iconPath = icons.chart;
+                        if (item.key === 'smart_money') iconPath = icons.eye;
                         if (item.key === 'admin') iconPath = icons.gear;
 
                         return (
@@ -3249,6 +3264,7 @@ export default function App() {
                 <StepProgressModal
                     operation={operationProgress.operation}
                     progress={operationProgress}
+                    accentTheme={accentTheme}
                     onClose={() => {
                         const op = operationProgress;
                         setOperationProgress(null);

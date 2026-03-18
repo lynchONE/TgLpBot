@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { getBrandTheme } from '../lib/brand';
 
-function StatusIcon({ tone }) {
+function StatusIcon({ tone, brand }) {
     if (tone === 'done') {
         return (
             <span className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-[0_12px_32px_rgba(16,185,129,0.28)]">
@@ -21,8 +22,12 @@ function StatusIcon({ tone }) {
         );
     }
 
+    const activeIconClass = brand?.key === 'emerald'
+        ? 'bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-[0_12px_32px_rgba(16,185,129,0.28)]'
+        : 'bg-gradient-to-br from-[#bcff2f] to-[#8fda21] text-[#182108] shadow-[0_12px_32px_rgba(188,255,47,0.22)]';
+
     return (
-        <span className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-teal-600 text-white shadow-[0_12px_32px_rgba(59,130,246,0.28)]">
+        <span className={`inline-flex h-14 w-14 items-center justify-center rounded-full ${activeIconClass}`}>
             <svg
                 width="20"
                 height="20"
@@ -121,10 +126,11 @@ function resolveView(operation, progress) {
     };
 }
 
-export default function StepProgressModal({ operation, progress, onClose }) {
+export default function StepProgressModal({ operation, progress, accentTheme = 'lime', onClose }) {
     if (!operation) return null;
 
     const [allowClose, setAllowClose] = useState(false);
+    const brand = useMemo(() => getBrandTheme(accentTheme), [accentTheme]);
     const view = useMemo(() => resolveView(operation, progress), [operation, progress]);
 
     useEffect(() => {
@@ -134,11 +140,18 @@ export default function StepProgressModal({ operation, progress, onClose }) {
 
     const isActive = view.tone === 'active';
     const canClose = !isActive || allowClose;
+    const activeBadgeClass = brand.key === 'emerald'
+        ? 'border border-emerald-500/25 bg-emerald-500/12 text-emerald-600 dark:text-emerald-300'
+        : 'border border-[#bcff2f]/30 bg-[#bcff2f]/12 text-[#6f9616] dark:text-[#e3ffa0]';
+    const activeHintClass = brand.key === 'emerald'
+        ? 'rounded-2xl border border-emerald-500/20 bg-emerald-500/8 px-4 py-3 text-[12px] leading-5 text-emerald-700 dark:text-emerald-200'
+        : 'rounded-2xl border border-[#bcff2f]/25 bg-[#bcff2f]/8 px-4 py-3 text-[12px] leading-5 text-[#6f9616] dark:text-[#e3ffa0]';
+    const activeDotClass = brand.key === 'emerald' ? 'bg-emerald-500' : 'bg-[#bcff2f]';
     const badgeClass = view.tone === 'done'
         ? 'border border-emerald-500/25 bg-emerald-500/12 text-emerald-600 dark:text-emerald-300'
         : view.tone === 'error'
             ? 'border border-red-500/25 bg-red-500/12 text-red-600 dark:text-red-300'
-            : 'border border-blue-500/25 bg-blue-500/12 text-blue-600 dark:text-blue-300';
+            : activeBadgeClass;
 
     return (
         <div
@@ -177,7 +190,7 @@ export default function StepProgressModal({ operation, progress, onClose }) {
 
                     <div className="flex flex-col gap-4 py-1">
                         <div className="flex justify-center">
-                            <StatusIcon tone={view.tone} />
+                            <StatusIcon tone={view.tone} brand={brand} />
                         </div>
 
                         <div className="flex flex-col gap-2 text-center">
@@ -201,7 +214,7 @@ export default function StepProgressModal({ operation, progress, onClose }) {
                         ) : null}
 
                         {isActive && allowClose ? (
-                            <div className="rounded-2xl border border-blue-500/20 bg-blue-500/8 px-4 py-3 text-[12px] leading-5 text-blue-700 dark:text-blue-200">
+                            <div className={activeHintClass}>
                                 可以先关闭这个弹窗，任务会在后台继续执行。
                             </div>
                         ) : null}
@@ -234,7 +247,7 @@ export default function StepProgressModal({ operation, progress, onClose }) {
                             </button>
                         ) : (
                             <div className="flex items-center justify-center gap-1.5 py-1.5 text-[12px] text-zinc-400 dark:text-white/30">
-                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                <span className={`h-1.5 w-1.5 rounded-full animate-pulse ${activeDotClass}`} />
                                 处理中，请稍候...
                             </div>
                         )}

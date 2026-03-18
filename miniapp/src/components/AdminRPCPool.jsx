@@ -9,6 +9,7 @@ import {
     renameAdminRPCEndpoint,
     switchAdminRPCEndpoint,
 } from '../lib/api';
+import { getBrandTheme } from '../lib/brand';
 
 /* ── helpers ── */
 
@@ -80,6 +81,28 @@ function endpointDisplayName(ep) {
     return '--';
 }
 
+function getBrandChipClass(brand) {
+    return brand?.key === 'emerald'
+        ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+        : 'bg-[#bcff2f]/12 text-[#6f9616] dark:text-[#e3ffa0]';
+}
+
+function getBrandToneClass(brand) {
+    return brand?.key === 'emerald'
+        ? 'text-emerald-600 dark:text-emerald-400'
+        : 'text-[#6f9616] dark:text-[#bcff2f]';
+}
+
+function getBrandOutlineButtonClass(brand) {
+    return brand?.key === 'emerald'
+        ? 'border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:border-emerald-500/20 dark:text-emerald-300 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20'
+        : 'border border-[#bcff2f]/35 text-[#6f9616] bg-[#bcff2f]/10 hover:bg-[#bcff2f]/18 dark:border-[#bcff2f]/25 dark:text-[#e3ffa0] dark:bg-[#bcff2f]/10 dark:hover:bg-[#bcff2f]/16';
+}
+
+function getBrandFocusBorderClass(brand) {
+    return brand?.key === 'emerald' ? 'focus:border-emerald-500' : 'focus:border-[#bcff2f]';
+}
+
 /* ── status badge ── */
 
 function StatusDot({ available }) {
@@ -90,7 +113,7 @@ function StatusDot({ available }) {
 
 /* ── confirm dialog ── */
 
-function ConfirmDialog({ open, title, message, onConfirm, onCancel, danger }) {
+function ConfirmDialog({ open, title, message, onConfirm, onCancel, danger, brand }) {
     if (!open) return null;
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onCancel}>
@@ -103,7 +126,7 @@ function ConfirmDialog({ open, title, message, onConfirm, onCancel, danger }) {
                         取消
                     </button>
                     <button type="button" onClick={onConfirm}
-                        className={`rounded-xl px-4 py-2 text-xs font-semibold text-white transition ${danger ? 'bg-red-600 hover:bg-red-500' : 'bg-emerald-600 hover:bg-emerald-500'}`}>
+                        className={`rounded-xl px-4 py-2 text-xs font-semibold text-white transition ${danger ? 'bg-red-600 hover:bg-red-500' : brand.solidButtonClass}`}>
                         确认
                     </button>
                 </div>
@@ -125,7 +148,7 @@ function IconBtn({ onClick, disabled, title, className, children }) {
 
 /* ── endpoint row ── */
 
-function EndpointRow({ ep, onSwitch, onDisableNextMonth, onEnable, onRename, onDelete, onCheck }) {
+function EndpointRow({ ep, onSwitch, onDisableNextMonth, onEnable, onRename, onDelete, onCheck, brand }) {
     const [expanded, setExpanded] = useState(false);
     const [nameDraft, setNameDraft] = useState('');
     const [renaming, setRenaming] = useState(false);
@@ -164,7 +187,7 @@ function EndpointRow({ ep, onSwitch, onDisableNextMonth, onEnable, onRename, onD
                         <div className="flex items-center gap-2">
                             <span className="text-[13px] font-medium text-zinc-900 dark:text-white/90 truncate">{displayName}</span>
                             {ep?.is_current && (
-                                <span className="rounded bg-emerald-500/15 px-1.5 py-px text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                                <span className={`rounded px-1.5 py-px text-[10px] font-bold ${getBrandChipClass(brand)}`}>
                                     IN USE
                                 </span>
                             )}
@@ -193,7 +216,7 @@ function EndpointRow({ ep, onSwitch, onDisableNextMonth, onEnable, onRename, onD
                         <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
                             <div className="text-zinc-500 dark:text-white/40">
                                 状态
-                                <span className={`ml-1.5 font-medium ${available ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                                <span className={`ml-1.5 font-medium ${available ? getBrandToneClass(brand) : 'text-red-600 dark:text-red-400'}`}>
                                     {available ? '可用' : '不可用'}
                                 </span>
                             </div>
@@ -228,7 +251,7 @@ function EndpointRow({ ep, onSwitch, onDisableNextMonth, onEnable, onRename, onD
                                 onChange={e => setNameDraft(e.target.value)}
                                 placeholder="节点名称"
                                 onKeyDown={e => { if (e.key === 'Enter') handleRename(); }}
-                                className="flex-1 min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-xs text-zinc-900 outline-none focus:border-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
+                                className={`flex-1 min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-xs text-zinc-900 outline-none ${getBrandFocusBorderClass(brand)} dark:border-white/10 dark:bg-white/5 dark:text-white`}
                             />
                             <button type="button" onClick={handleRename} disabled={renaming}
                                 className="shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-medium bg-zinc-100 text-zinc-700 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10 transition disabled:opacity-40">
@@ -239,7 +262,7 @@ function EndpointRow({ ep, onSwitch, onDisableNextMonth, onEnable, onRename, onD
                         {/* action bar */}
                         <div className="flex items-center gap-1.5 flex-wrap">
                             <button type="button" onClick={handleCheck} disabled={checking}
-                                className="rounded-lg px-3 py-1.5 text-[11px] font-medium border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 dark:border-blue-500/20 dark:text-blue-300 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 transition disabled:opacity-40">
+                                className={`rounded-lg px-3 py-1.5 text-[11px] font-medium transition disabled:opacity-40 ${getBrandOutlineButtonClass(brand)}`}>
                                 {checking ? (
                                     <span className="inline-flex items-center gap-1">
                                         <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
@@ -253,12 +276,12 @@ function EndpointRow({ ep, onSwitch, onDisableNextMonth, onEnable, onRename, onD
                             <button type="button"
                                 onClick={() => onSwitch?.(ep?.id)}
                                 disabled={!available || ep?.is_current}
-                                className="rounded-lg px-3 py-1.5 text-[11px] font-medium border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:border-emerald-500/20 dark:text-emerald-300 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 transition disabled:opacity-40">
+                                className={`rounded-lg px-3 py-1.5 text-[11px] font-medium transition disabled:opacity-40 ${getBrandOutlineButtonClass(brand)}`}>
                                 切换使用
                             </button>
                             {isUnavailable(ep) && (
                                 <button type="button" onClick={() => onEnable?.(ep?.id)}
-                                    className="rounded-lg px-3 py-1.5 text-[11px] font-medium border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:border-emerald-500/20 dark:text-emerald-300 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 transition">
+                                    className={`rounded-lg px-3 py-1.5 text-[11px] font-medium transition ${getBrandOutlineButtonClass(brand)}`}>
                                     启用
                                 </button>
                             )}
@@ -282,6 +305,7 @@ function EndpointRow({ ep, onSwitch, onDisableNextMonth, onEnable, onRename, onD
                 title="删除 RPC 节点"
                 message={`确定要删除 "${displayName}" 吗？此操作不可撤销。`}
                 danger
+                brand={brand}
                 onConfirm={() => { setConfirmDelete(false); onDelete?.(ep?.id); }}
                 onCancel={() => setConfirmDelete(false)}
             />
@@ -291,7 +315,7 @@ function EndpointRow({ ep, onSwitch, onDisableNextMonth, onEnable, onRename, onD
 
 /* ── transport group ── */
 
-function TransportGroup({ group, transport, onSwitch, onDisableNextMonth, onEnable, onRename, onDelete, onCheck }) {
+function TransportGroup({ group, transport, onSwitch, onDisableNextMonth, onEnable, onRename, onDelete, onCheck, brand }) {
     const endpoints = group?.endpoints || [];
     const unavailableCount = endpoints.filter(ep => isUnavailable(ep)).length;
     const availableCount = endpoints.length - unavailableCount;
@@ -344,6 +368,7 @@ function TransportGroup({ group, transport, onSwitch, onDisableNextMonth, onEnab
                             onRename={onRename}
                             onDelete={onDelete}
                             onCheck={onCheck}
+                            brand={brand}
                         />
                     ))}
                 </div>
@@ -354,7 +379,7 @@ function TransportGroup({ group, transport, onSwitch, onDisableNextMonth, onEnab
 
 /* ── add form ── */
 
-function AddForm({ onAdd, adding, addError }) {
+function AddForm({ onAdd, adding, addError, brand }) {
     const [open, setOpen] = useState(false);
     const [draft, setDraft] = useState({
         chain: 'bsc', transport: 'http', name: '', url: '', setCurrent: false,
@@ -384,7 +409,7 @@ function AddForm({ onAdd, adding, addError }) {
                         <label className="space-y-1">
                             <div className="text-[11px] font-medium text-zinc-500 dark:text-white/50">链</div>
                             <select value={draft.chain} onChange={e => setDraft(p => ({ ...p, chain: e.target.value }))}
-                                className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs text-zinc-900 outline-none focus:border-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-white">
+                                className={`w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs text-zinc-900 outline-none ${getBrandFocusBorderClass(brand)} dark:border-white/10 dark:bg-white/5 dark:text-white`}>
                                 <option value="bsc">BSC</option>
                                 <option value="base">Base</option>
                             </select>
@@ -392,7 +417,7 @@ function AddForm({ onAdd, adding, addError }) {
                         <label className="space-y-1">
                             <div className="text-[11px] font-medium text-zinc-500 dark:text-white/50">类型</div>
                             <select value={draft.transport} onChange={e => setDraft(p => ({ ...p, transport: e.target.value }))}
-                                className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs text-zinc-900 outline-none focus:border-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-white">
+                                className={`w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs text-zinc-900 outline-none ${getBrandFocusBorderClass(brand)} dark:border-white/10 dark:bg-white/5 dark:text-white`}>
                                 <option value="http">HTTP</option>
                                 <option value="ws">WebSocket</option>
                             </select>
@@ -408,14 +433,14 @@ function AddForm({ onAdd, adding, addError }) {
                                 return { ...p, url: nextUrl, name: keepName ? p.name : (derived || p.name) };
                             })}
                             placeholder={draft.transport === 'ws' ? 'wss://...' : 'https://...'}
-                            className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs text-zinc-900 outline-none focus:border-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
+                            className={`w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs text-zinc-900 outline-none ${getBrandFocusBorderClass(brand)} dark:border-white/10 dark:bg-white/5 dark:text-white`}
                         />
                     </label>
                     <label className="block space-y-1">
                         <div className="text-[11px] font-medium text-zinc-500 dark:text-white/50">名称 <span className="text-zinc-400">(留空自动使用域名)</span></div>
                         <input value={draft.name} onChange={e => setDraft(p => ({ ...p, name: e.target.value }))}
                             placeholder="例如：主用 / 备用1"
-                            className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs text-zinc-900 outline-none focus:border-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
+                            className={`w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-xs text-zinc-900 outline-none ${getBrandFocusBorderClass(brand)} dark:border-white/10 dark:bg-white/5 dark:text-white`}
                         />
                     </label>
                     <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-white/60">
@@ -435,7 +460,7 @@ function AddForm({ onAdd, adding, addError }) {
                     <button type="button" onClick={handleSubmit} disabled={adding || !String(draft.url || '').trim()}
                         className={`w-full rounded-xl py-2.5 text-xs font-semibold transition ${adding || !String(draft.url || '').trim()
                             ? 'bg-zinc-200 text-zinc-500 dark:bg-white/10 dark:text-white/30 cursor-not-allowed'
-                            : 'bg-emerald-600 text-white hover:bg-emerald-500 active:scale-[0.98]'
+                            : `${brand.solidButtonClass} active:scale-[0.98]`
                             }`}>
                         {adding ? '添加中...' : '添加节点'}
                     </button>
@@ -447,7 +472,8 @@ function AddForm({ onAdd, adding, addError }) {
 
 /* ── main component ── */
 
-export default function AdminRPCPool({ apiBaseUrl, initData, hasInitData, pollIntervalSec = 15, onNotice }) {
+export default function AdminRPCPool({ apiBaseUrl, initData, hasInitData, pollIntervalSec = 15, accentTheme = 'lime', onNotice }) {
+    const brand = useMemo(() => getBrandTheme(accentTheme), [accentTheme]);
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -573,7 +599,7 @@ export default function AdminRPCPool({ apiBaseUrl, initData, hasInitData, pollIn
                     <div className="text-base font-bold text-zinc-900 dark:text-white">RPC 节点池</div>
                     <div className="text-[11px] text-zinc-400 dark:text-white/30 mt-0.5">
                         {totalEndpoints > 0 ? (
-                            <>{totalAvailable}<span className="text-emerald-600 dark:text-emerald-400"> 可用</span> / {totalEndpoints} 总计</>
+                            <>{totalAvailable}<span className={getBrandToneClass(brand)}> 可用</span> / {totalEndpoints} 总计</>
                         ) : '额度/频控触发时自动切换'}
                     </div>
                 </div>
@@ -598,7 +624,7 @@ export default function AdminRPCPool({ apiBaseUrl, initData, hasInitData, pollIn
             )}
 
             {/* add form */}
-            <AddForm onAdd={handleAdd} adding={adding} addError={addError} />
+            <AddForm onAdd={handleAdd} adding={adding} addError={addError} brand={brand} />
 
             {/* chain sections */}
             {chains.map(chain => (
@@ -625,6 +651,7 @@ export default function AdminRPCPool({ apiBaseUrl, initData, hasInitData, pollIn
                                 onRename={handleRename}
                                 onDelete={handleDelete}
                                 onCheck={handleCheck}
+                                brand={brand}
                             />
                         );
                     })}

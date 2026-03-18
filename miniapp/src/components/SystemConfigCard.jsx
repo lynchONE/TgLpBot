@@ -1,14 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { fetchSystemConfig, updateSystemConfig } from '../lib/api';
-
-const inputClass = 'w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-white/10 dark:bg-white/5 dark:text-white/90';
+import { getBrandTheme } from '../lib/brand';
 
 function toDraftValue(value) {
     if (!Number.isFinite(Number(value)) || Number(value) <= 0) return '';
     return String(value);
 }
 
-export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
+export default function SystemConfigCard({ apiBaseUrl, initData, accentTheme = 'lime', onNotice }) {
+    const brand = getBrandTheme(accentTheme);
+    const inputClass = `w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:outline-none focus:ring-1 ${brand.inputFocusClass} ${brand.key === 'emerald' ? 'focus:ring-emerald-500' : 'focus:ring-[#bcff2f]'} dark:border-white/10 dark:bg-white/5 dark:text-white/90`;
     const [config, setConfig] = useState(null);
     const [defaults, setDefaults] = useState(null);
     const [draft, setDraft] = useState({
@@ -154,7 +155,7 @@ export default function SystemConfigCard({ apiBaseUrl, initData, onNotice }) {
                     className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
                         saving
                             ? 'cursor-not-allowed bg-zinc-300 text-zinc-500 dark:bg-white/10 dark:text-white/30'
-                            : 'bg-emerald-600 text-white hover:bg-emerald-500 dark:bg-emerald-500 dark:hover:bg-emerald-400'
+                            : brand.solidButtonClass
                     }`}
                 >
                     {saving ? '保存中...' : '保存配置'}

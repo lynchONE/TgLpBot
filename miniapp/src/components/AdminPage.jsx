@@ -5,6 +5,7 @@ import AdminRPCPool from './AdminRPCPool.jsx';
 import AdminPrivateZapCard from './AdminPrivateZapCard.jsx';
 import SystemConfigCard from './SystemConfigCard.jsx';
 import PositionCard from './PositionCard.jsx';
+import { getBrandTheme } from '../lib/brand';
 import {
     fetchAdminActiveTasks,
     fetchAdminOnlineUsers,
@@ -38,8 +39,10 @@ export default function AdminPage({
     hasInitData,
     tick,
     pollIntervalSec = 15,
+    accentTheme = 'lime',
     onNotice,
 }) {
+    const brand = useMemo(() => getBrandTheme(accentTheme), [accentTheme]);
     const [activeTab, setActiveTab] = useState('online_users');
 
     const [onlineUsers, setOnlineUsers] = useState([]);
@@ -171,7 +174,7 @@ export default function AdminPage({
                         onClick={() => setActiveTab(tab.key)}
                         className={`rounded-xl px-2 py-2 text-[11px] font-semibold transition ${
                             activeTab === tab.key
-                                ? 'bg-emerald-600 text-white shadow-sm dark:bg-emerald-500'
+                                ? `${brand.navActiveClass} shadow-sm`
                                 : 'text-zinc-600 hover:bg-zinc-100 dark:text-white/65 dark:hover:bg-white/10'
                         }`}
                     >
@@ -186,6 +189,7 @@ export default function AdminPage({
                     loading={onlineUsersLoading}
                     error={onlineUsersError}
                     tick={tick}
+                    accentTheme={accentTheme}
                     onSelectUser={handleSelectUser}
                     selectedUserId={selectedUser?.user_id}
                 />
@@ -259,13 +263,13 @@ export default function AdminPage({
 
             {activeTab === 'system_config' && (
                 <div className="space-y-3">
-                    <SystemConfigCard apiBaseUrl={apiBaseUrl} initData={initData} onNotice={onNotice} />
+                    <SystemConfigCard apiBaseUrl={apiBaseUrl} initData={initData} accentTheme={accentTheme} onNotice={onNotice} />
                     <AdminPrivateZapCard apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} onNotice={onNotice} />
                 </div>
             )}
 
             {activeTab === 'rpc_pool' && (
-                <AdminRPCPool apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} onNotice={onNotice} />
+                <AdminRPCPool apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} accentTheme={accentTheme} onNotice={onNotice} />
             )}
         </div>
     );

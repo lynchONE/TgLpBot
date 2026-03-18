@@ -96,6 +96,30 @@ func nextMonthStart(now time.Time) time.Time {
 	return thisMonth.AddDate(0, 1, 0)
 }
 
+func IsRateLimitedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "too many requests") {
+		return true
+	}
+	if strings.Contains(msg, "request too fast") {
+		return true
+	}
+	if strings.Contains(msg, "rate limit") || strings.Contains(msg, "ratelimit") {
+		return true
+	}
+	if strings.Contains(msg, "-32003") {
+		return true
+	}
+	// Some providers only expose the HTTP status in the error string.
+	if strings.Contains(msg, "429") {
+		return true
+	}
+	return false
+}
+
 func IsQuotaExhaustedError(err error) bool {
 	if err == nil {
 		return false
@@ -110,11 +134,11 @@ func IsQuotaExhaustedError(err error) bool {
 	if strings.Contains(msg, "monthly quota") {
 		return true
 	}
-	// Some providers only expose HTTP status in the error string.
-	if strings.Contains(msg, "429") {
+	if strings.Contains(msg, "daily quota") || strings.Contains(msg, "daily limit") {
 		return true
 	}
-	if strings.Contains(msg, "too many requests") {
+	// Some providers only expose the HTTP status with an explicit quota message.
+	if strings.Contains(msg, "429") && (strings.Contains(msg, "quota") || strings.Contains(msg, "credit")) {
 		return true
 	}
 	return false

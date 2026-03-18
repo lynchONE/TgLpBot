@@ -1,6 +1,9 @@
 package rpcpool
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestValidateURLForTransport(t *testing.T) {
 	cases := []struct {
@@ -25,5 +28,23 @@ func TestValidateURLForTransport(t *testing.T) {
 				t.Fatalf("expected no error, got %v", err)
 			}
 		})
+	}
+}
+
+func TestRateLimitAndQuotaErrorsAreSeparated(t *testing.T) {
+	rateLimitErr := errors.New("429 too many requests")
+	if !IsRateLimitedError(rateLimitErr) {
+		t.Fatalf("expected rate limit error to be detected")
+	}
+	if IsQuotaExhaustedError(rateLimitErr) {
+		t.Fatalf("temporary 429 should not be treated as quota exhausted")
+	}
+
+	quotaErr := errors.New("monthly quota exceeded")
+	if !IsQuotaExhaustedError(quotaErr) {
+		t.Fatalf("expected quota exhaustion to be detected")
+	}
+	if IsRateLimitedError(quotaErr) {
+		t.Fatalf("quota exhaustion should stay on the hard-quota path")
 	}
 }
