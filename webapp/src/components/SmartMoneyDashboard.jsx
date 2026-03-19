@@ -10,10 +10,6 @@ import {
 } from '../smartMoneyApi';
 import uniswapLogo from '../img/uniswap.svg';
 import pancakeLogo from '../img/pancake.svg';
-import bnbIcon from '../img/bnb.svg';
-import baseIcon from '../img/base.svg';
-import flashIcon from '../img/flash.svg';
-import telegramIcon from '../img/telegram.svg';
 
 const PROTOCOL_MAP = {
     pancake_v3: { version: 'V3', icon: pancakeLogo, color: '#d1884f' },
@@ -22,9 +18,14 @@ const PROTOCOL_MAP = {
 };
 const PROTOCOL_LABELS = Object.fromEntries(Object.entries(PROTOCOL_MAP).map(([k, v]) => [k, v.version]));
 
-const WALLET_AVATAR_ICONS = [bnbIcon, baseIcon, flashIcon, telegramIcon, pancakeLogo, uniswapLogo];
+const WALLET_AVATAR_ICONS = Object.entries(
+    import.meta.glob('../icon/avatar_*.png', { eager: true, import: 'default' })
+)
+    .sort(([pathA], [pathB]) => pathA.localeCompare(pathB, undefined, { numeric: true }))
+    .map(([, src]) => src);
+
 function walletAvatarIdx(addr) {
-    if (!addr || addr.length < 6) return 0;
+    if (!WALLET_AVATAR_ICONS.length || !addr || addr.length < 6) return 0;
     return parseInt(addr.slice(-4), 16) % WALLET_AVATAR_ICONS.length;
 }
 
@@ -136,7 +137,7 @@ function CopyTinyBtn({ text }) {
 }
 
 function WalletAvatar({ address, color, size = 18 }) {
-    const iconSrc = WALLET_AVATAR_ICONS[walletAvatarIdx(address)];
+    const iconSrc = WALLET_AVATAR_ICONS[walletAvatarIdx(address)] || WALLET_AVATAR_ICONS[0];
     return (
         <span className="smd-wallet-avatar" style={{ borderColor: color, width: size, height: size }}>
             <img src={iconSrc} alt="" className="smd-wallet-avatar-icon" />
@@ -238,15 +239,23 @@ function PriceRangeChart({ positions, currentPrice }) {
     minP = Math.max(0, minP - pad);
     maxP += pad;
     const pct = p => Math.max(0, Math.min(100, ((p - minP) / (maxP - minP)) * 100));
-    const curPct = currentPrice ? pct(parseFloat(currentPrice)) : null;
+    const parsedCurrentPrice = Number.parseFloat(currentPrice);
+    const curPct = Number.isFinite(parsedCurrentPrice) ? pct(parsedCurrentPrice) : null;
     const walletIdx = {};
+    const currentLabelStyle = curPct === null
+        ? null
+        : curPct >= 92
+            ? { right: 0 }
+            : curPct <= 8
+                ? { left: 0 }
+                : { left: `${curPct}%`, transform: 'translateX(-50%)' };
 
     return (
         <div className="smd-price-chart">
-            <div className="smd-price-chart-area" style={{ minHeight: valid.length * 14 + 30 }}>
+            <div className="smd-price-chart-area" style={{ minHeight: valid.length * 14 + 50 }}>
                 {curPct !== null && (
                     <div className="smd-price-cur" style={{ left: `${curPct}%` }}>
-                        <div className="smd-price-cur-label">{currentPrice}</div>
+                        <div className="smd-price-cur-label" style={currentLabelStyle || undefined}>{currentPrice}</div>
                     </div>
                 )}
                 {valid.map((p, i) => {
@@ -259,14 +268,14 @@ function PriceRangeChart({ positions, currentPrice }) {
                     const inRange = currentPrice && parseFloat(p.price_lower) <= parseFloat(currentPrice) && parseFloat(currentPrice) <= parseFloat(p.price_upper);
                     return (
                         <div key={p.id || i} className="smd-price-bar" style={{
-                            left: `${l}%`, width: `${w}%`, top: i * 14,
+                            left: `${l}%`, width: `${w}%`, top: i * 14 + 20,
                             backgroundColor: color, opacity: inRange ? op : 0.35,
                         }} title={`${shortAddr(p.wallet_address)}: ${p.price_lower} - ${p.price_upper}`} />
                     );
                 })}
                 <div className="smd-price-axis">
-                    {Array.from({ length: 6 }, (_, i) => (
-                        <span key={i}>{(minP + ((maxP - minP) / 5) * i).toPrecision(4)}</span>
+                    {Array.from({ length: 5 }, (_, i) => (
+                        <span key={i}>{(minP + ((maxP - minP) / 4) * i).toPrecision(4)}</span>
                     ))}
                 </div>
             </div>
@@ -424,12 +433,28 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet }) {
                 <ChevronLeft size={14} />
                 <span>返回池子列表</span>
             </button>
-            <div className="smd-detail-header">
-                <PairAvatar item={pool} size="lg" />
-                <h3 className="smd-detail-title">{getPairLabel(pool)}</h3>
-                <ProtocolBadge protocol={pool.protocol} />
-                {pool.fee_tier && <Badge cls="fee">{formatFeeTier(pool.fee_tier)}</Badge>}
-                <CompactIdentifier value={poolIdentifier} />
+            <div className="smd-detail-card">
+                <div className="smd-detail-header">
+                    <PairAvatar item={pool} size="lg" />
+                    <div className="smd-detail-copy">
+                        <div className="smd-detail-headline">
+                            <h3 className="smd-detail-title">{getPairLabel(pool)}</h3>
+                            <ProtocolBadge protocol={pool.protocol} />
+                            {pool.fee_tier && <Badge cls="fee">{formatFeeTier(pool.fee_tier)}</Badge>}
+                        </div>
+                        <div className="smd-detail-meta">
+                            <CompactIdentifier value={poolIdentifier} label={getPoolIdentifierLabel(poolIdentifier)} />
+                            <a
+                                href={`https://bscscan.com/address/${pool.pool_address}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="smd-link"
+                            >
+                                鏌ョ湅姹犲瓙 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
+                            </a>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             {stats && (
@@ -465,15 +490,34 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet }) {
                                     address={pos.wallet_address}
                                     color={pos.wallet_color}
                                     label={pos.wallet_label || pos.wallet_address}
+                                    size={28}
                                     onClick={() => onSelectWallet(pos.wallet_address)}
                                 />
-                                <span className="smd-pos-card-amount">{formatUSDCompact(pos.position_amount_usd)}</span>
+                                <div className="smd-pos-card-top-right">
+                                    <span className="smd-pos-card-amount">{formatUSDCompact(pos.position_amount_usd)}</span>
+                                    <Badge cls={pos.status === 'open' ? 'status-open' : 'status-closed'}>
+                                        {pos.status === 'open' ? '持仓中' : '已关闭'}
+                                    </Badge>
+                                </div>
                             </div>
-                            <div className="smd-pos-card-range">
+                            <div className="smd-pos-card-range smd-pos-card-range--detail">
                                 <span className={`smd-pos-card-prices${pos.status === 'closed' ? ' is-closed' : ''}`}>
                                     {pos.price_lower && pos.price_upper ? `${pos.price_lower} – ${pos.price_upper}` : '—'}
                                 </span>
-                                {pos.range_percent > 0 && <span className="smd-pos-card-pct">{formatRangePercent(pos.range_percent)}</span>}
+                                <div className="smd-pos-card-meta">
+                                    <span>NFT #{pos.nft_token_id || '--'}</span>
+                                    {pos.range_percent > 0 && <span>{formatRangePercent(pos.range_percent)}</span>}
+                                </div>
+                                {pos.bscscan_url ? (
+                                    <a
+                                        href={pos.bscscan_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="smd-link smd-pos-card-link"
+                                    >
+                                        鏌ョ湅浜ゆ槗 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
+                                    </a>
+                                ) : null}
                             </div>
                         </div>
                     ))}
@@ -650,10 +694,10 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool }) {
                 <span>返回钱包列表</span>
             </button>
             {info && (
-                <div style={{ marginBottom: 16 }}>
+                <div className="smd-detail-card" style={{ marginBottom: 16 }}>
                     <div className="smd-detail-header">
-                        <WalletAvatar address={addr} color={info.color || '#7F77DD'} size={36} />
-                        <div>
+                        <WalletAvatar address={addr} color={info.color || '#7F77DD'} size={72} />
+                        <div className="smd-detail-copy">
                             <h3 className="smd-detail-title">{info.label || `钱包 ${tailAddr(addr)}`}</h3>
                             <CompactIdentifier value={addr} label="钱包" />
                         </div>

@@ -5484,10 +5484,27 @@ body {
 .smd-badge.fee { background: rgba(18, 26, 40, 0.6); color: var(--text-muted); }
 .smd-badge.source-manual { background: var(--accent-soft); color: var(--accent-text); }
 .smd-badge.source-contract { background: rgba(18, 26, 40, 0.85); color: var(--text-muted); }
+.smd-badge.status-open {
+  background: rgba(74, 222, 128, 0.12);
+  color: #86efac;
+  border: 1px solid rgba(74, 222, 128, 0.18);
+}
+.smd-badge.status-closed {
+  background: rgba(18, 26, 40, 0.85);
+  color: var(--text-muted);
+  border: 1px solid rgba(136, 157, 191, 0.18);
+}
 .smd-status-dot { font-size: 10px; font-weight: 600; }
 .smd-status-dot.green { color: var(--positive); }
 .smd-status-dot.muted { color: var(--text-muted); }
 .smd-status-dot.red { color: var(--negative); }
+.smd-detail-card {
+  border: 1px solid rgba(136, 157, 191, 0.18);
+  border-radius: 16px;
+  background: rgba(18, 26, 40, 0.42);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
 .smd-back-btn {
   display: inline-flex;
   align-items: center;
@@ -5514,9 +5531,31 @@ body {
 }
 .smd-detail-header {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  align-items: flex-start;
+  gap: 12px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.smd-detail-card .smd-detail-header {
+  margin-bottom: 0;
+}
+.smd-detail-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+.smd-detail-headline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.smd-detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex-wrap: wrap;
 }
 .smd-detail-title {
@@ -5538,6 +5577,11 @@ body {
   text-decoration: none;
 }
 .smd-link:hover { color: var(--accent-strong); }
+.smd-section-subtitle {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
 .smd-section-header {
   display: flex;
   align-items: center;
@@ -5741,13 +5785,17 @@ body {
 }
 .smd-price-chart {
   background: rgba(18, 26, 40, 0.3);
-  border-radius: 10px;
+  border-radius: 16px;
   padding: 16px;
   margin-bottom: 16px;
+  overflow: hidden;
 }
 .smd-price-chart-area {
   position: relative;
   min-width: 0;
+  width: 100%;
+  overflow: hidden;
+  padding-top: 20px;
 }
 .smd-price-bar {
   position: absolute;
@@ -5767,7 +5815,7 @@ body {
 }
 .smd-price-cur {
   position: absolute;
-  top: 0;
+  top: 20px;
   bottom: 24px;
   width: 1px;
   background: rgba(250, 204, 21, 0.6);
@@ -5776,8 +5824,6 @@ body {
 .smd-price-cur-label {
   position: absolute;
   top: -16px;
-  left: 50%;
-  transform: translateX(-50%);
   font-size: 9px;
   color: #facc15;
   white-space: nowrap;
@@ -6081,9 +6127,9 @@ body {
   border: 2px solid;
 }
 .smd-wallet-avatar-icon {
-  width: 68%;
-  height: 68%;
-  object-fit: contain;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 /* -- Position cards -- */
@@ -6114,6 +6160,13 @@ body {
   justify-content: space-between;
   gap: 8px;
 }
+.smd-pos-card-top-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
 .smd-pos-card-amount {
   font-weight: 700;
   font-size: 13px;
@@ -6125,6 +6178,22 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.smd-pos-card-range--detail {
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+.smd-pos-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.smd-pos-card-link {
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .smd-pos-card-prices {
   font-size: 11px;

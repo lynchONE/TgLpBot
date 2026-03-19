@@ -401,6 +401,11 @@ func (s *Server) handleSMPositions(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	poolsByAddress, err := smartMoneyLoadPoolsByAddress(ctx, positions)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	// Enrich with wallet color, label, price_lower, price_upper
 	type posResp struct {
@@ -433,6 +438,12 @@ func (s *Server) handleSMPositions(w http.ResponseWriter, r *http.Request) {
 			WalletColor:          sm.WalletColor(p.WalletAddress),
 			BscscanURL:           "https://bscscan.com/tx/" + p.OpenTxHash,
 		}
+		resp.DisplayTokenAddress, resp.DisplayTokenSymbol = smartMoneyPickDisplayToken(
+			p.Token0Address,
+			p.Token1Address,
+			p.Token0Symbol,
+			p.Token1Symbol,
+		)
 
 		// Wallet label
 		if w, ok := walletCache[p.WalletAddress]; ok {
@@ -447,24 +458,26 @@ func (s *Server) handleSMPositions(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Tick to price (assuming 18 decimals for both tokens as default)
-		if p.TickLower != nil {
-			resp.PriceLower = fmt.Sprintf("%.6g", sm.TickToPrice(*p.TickLower, 18, 18))
-		}
-		if p.TickUpper != nil {
-			resp.PriceUpper = fmt.Sprintf("%.6g", sm.TickToPrice(*p.TickUpper, 18, 18))
-		}
+		poolMeta := poolsByAddress[strings.ToLower(strings.TrimSpace(p.PoolAddress))]
+		resp.PriceLower, resp.PriceUpper = smartMoneyFormatPositionPriceBounds(
+			p.TickLower,
+			p.TickUpper,
+			poolMeta.Token0Decimals,
+			poolMeta.Token1Decimals,
+			smartMoneyDisplayTokenUsesToken1(
+				resp.DisplayTokenAddress,
+				resp.DisplayTokenSymbol,
+				p.Token0Address,
+				p.Token1Address,
+				p.Token0Symbol,
+				p.Token1Symbol,
+			),
+		)
 		resp.RangePercent = smartMoneyRangePercentFromTicks(p.TickLower, p.TickUpper)
 		if byNFT, ok := amountsByChain[p.ChainID]; ok {
 			resp.PositionAmountUSD = byNFT[p.NftTokenID]
 		}
 		resp.TradingPair = buildSmartMoneyTradingPair(p.Token0Symbol, p.Token1Symbol)
-		resp.DisplayTokenAddress, resp.DisplayTokenSymbol = smartMoneyPickDisplayToken(
-			p.Token0Address,
-			p.Token1Address,
-			p.Token0Symbol,
-			p.Token1Symbol,
-		)
 		if resp.DisplayTokenAddress != "" {
 			chain := smartMoneyChainSlug(p.ChainID)
 			addressesByChain[chain] = append(addressesByChain[chain], resp.DisplayTokenAddress)
@@ -712,6 +725,108 @@ func smartMoneyPickDisplayToken(token0Address string, token1Address string, toke
 	default:
 		return firstSmartMoneyDisplayToken(token0Address, token0Symbol, token1Address, token1Symbol)
 	}
+}
+
+func smartMoneyLoadPoolsByAddress(ctx context.Context, positions []models.SmartMoneyLPPosition) (map[string]models.Pool, error) {
+	out := make(map[string]models.Pool)
+	if len(positions) == 0 {
+		return out, nil
+	}
+
+	seen := make(map[string]struct{}, len(positions))
+	addresses := make([]string, 0, len(positions))
+	for _, pos := range positions {
+		addr := strings.ToLower(strings.TrimSpace(pos.PoolAddress))
+		if addr == "" {
+			continue
+		}
+		if _, ok := seen[addr]; ok {
+			continue
+		}
+		seen[addr] = struct{}{}
+		addresses = append(addresses, addr)
+	}
+	if len(addresses) == 0 {
+		return out, nil
+	}
+
+	var pools []models.Pool
+	if err := database.DB.WithContext(ctx).
+		Model(&models.Pool{}).
+		Where("LOWER(address) IN ?", addresses).
+		Find(&pools).Error; err != nil {
+		return nil, err
+	}
+
+	for _, pool := range pools {
+		addr := strings.ToLower(strings.TrimSpace(pool.Address))
+		if addr == "" {
+			continue
+		}
+		out[addr] = pool
+	}
+	return out, nil
+}
+
+func smartMoneyTokenDecimalsOrDefault(decimals int) int {
+	if decimals > 0 {
+		return decimals
+	}
+	return 18
+}
+
+func smartMoneyFormatPositionPriceBounds(tickLower *int, tickUpper *int, token0Decimals int, token1Decimals int, invert bool) (string, string) {
+	if tickLower == nil && tickUpper == nil {
+		return "", ""
+	}
+
+	dec0 := smartMoneyTokenDecimalsOrDefault(token0Decimals)
+	dec1 := smartMoneyTokenDecimalsOrDefault(token1Decimals)
+
+	formatTick := func(tick *int) string {
+		if tick == nil {
+			return ""
+		}
+		price := sm.TickToPrice(*tick, dec0, dec1)
+		if invert {
+			if price <= 0 || math.IsNaN(price) || math.IsInf(price, 0) {
+				return ""
+			}
+			price = 1 / price
+		}
+		if price <= 0 || math.IsNaN(price) || math.IsInf(price, 0) {
+			return ""
+		}
+		return fmt.Sprintf("%.6g", price)
+	}
+
+	if invert && tickLower != nil && tickUpper != nil {
+		lower := sm.TickToPrice(*tickLower, dec0, dec1)
+		upper := sm.TickToPrice(*tickUpper, dec0, dec1)
+		if lower <= 0 || upper <= 0 || math.IsNaN(lower) || math.IsNaN(upper) || math.IsInf(lower, 0) || math.IsInf(upper, 0) {
+			return "", ""
+		}
+		return fmt.Sprintf("%.6g", 1/upper), fmt.Sprintf("%.6g", 1/lower)
+	}
+
+	return formatTick(tickLower), formatTick(tickUpper)
+}
+
+func smartMoneyDisplayTokenUsesToken1(displayTokenAddress string, displayTokenSymbol string, token0Address string, token1Address string, token0Symbol string, token1Symbol string) bool {
+	displayAddr := smartMoneyNormalizeTokenAddress(displayTokenAddress)
+	token0Addr := smartMoneyNormalizeTokenAddress(token0Address)
+	token1Addr := smartMoneyNormalizeTokenAddress(token1Address)
+	if displayAddr != "" {
+		return displayAddr == token1Addr && displayAddr != token0Addr
+	}
+
+	displayTokenSymbol = strings.TrimSpace(displayTokenSymbol)
+	token0Symbol = strings.TrimSpace(token0Symbol)
+	token1Symbol = strings.TrimSpace(token1Symbol)
+	return displayTokenSymbol != "" &&
+		token1Symbol != "" &&
+		strings.EqualFold(displayTokenSymbol, token1Symbol) &&
+		!strings.EqualFold(token0Symbol, token1Symbol)
 }
 
 func firstSmartMoneyDisplayToken(primaryAddress string, primarySymbol string, fallbackAddress string, fallbackSymbol string) (string, string) {

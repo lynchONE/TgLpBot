@@ -494,23 +494,24 @@ func (r *Repository) ListPoolsWithPositions(ctx context.Context) ([]PoolAggRow, 
 }
 
 type PoolStats struct {
-	PoolAddress         string  `json:"pool_address"`
-	Token0Symbol        string  `json:"token0_symbol"`
-	Token1Symbol        string  `json:"token1_symbol"`
-	Token0Address       string  `json:"token0_address"`
-	Token1Address       string  `json:"token1_address"`
-	FeeTier             *int    `json:"fee_tier"`
-	Protocol            string  `json:"protocol"`
-	ChainID             int     `json:"chain_id"`
-	OpenPositionCount   int     `json:"open_position_count"`
-	WalletCount         int     `json:"wallet_count"`
-	ClosedTodayCount    int     `json:"closed_today_count"`
-	TradingPair         string  `json:"trading_pair"`
-	CurrentPrice        string  `json:"current_price"`
-	PriceChange24h      float64 `json:"price_change_24h"`
-	DisplayTokenAddress string  `json:"display_token_address,omitempty"`
-	DisplayTokenSymbol  string  `json:"display_token_symbol,omitempty"`
-	DisplayTokenLogoURL string  `json:"display_token_logo_url,omitempty"`
+	PoolAddress            string  `json:"pool_address"`
+	Token0Symbol           string  `json:"token0_symbol"`
+	Token1Symbol           string  `json:"token1_symbol"`
+	Token0Address          string  `json:"token0_address"`
+	Token1Address          string  `json:"token1_address"`
+	FeeTier                *int    `json:"fee_tier"`
+	Protocol               string  `json:"protocol"`
+	ChainID                int     `json:"chain_id"`
+	OpenPositionCount      int     `json:"open_position_count"`
+	WalletCount            int     `json:"wallet_count"`
+	ClosedTodayCount       int     `json:"closed_today_count"`
+	TotalPositionAmountUSD float64 `json:"total_position_amount_usd"`
+	TradingPair            string  `json:"trading_pair"`
+	CurrentPrice           string  `json:"current_price"`
+	PriceChange24h         float64 `json:"price_change_24h"`
+	DisplayTokenAddress    string  `json:"display_token_address,omitempty"`
+	DisplayTokenSymbol     string  `json:"display_token_symbol,omitempty"`
+	DisplayTokenLogoURL    string  `json:"display_token_logo_url,omitempty"`
 }
 
 func (r *Repository) GetPoolStats(ctx context.Context, poolAddress string) (*PoolStats, error) {
@@ -530,11 +531,19 @@ func (r *Repository) GetPoolStats(ctx context.Context, poolAddress string) (*Poo
 			MAX(chain_id) AS chain_id,
 			SUM(CASE WHEN status='open' AND opened_at >= ? THEN 1 ELSE 0 END) AS open_position_count,
 			COUNT(DISTINCT CASE WHEN status='open' AND opened_at >= ? THEN wallet_address END) AS wallet_count,
-			SUM(CASE WHEN status='closed' AND closed_at >= ? THEN 1 ELSE 0 END) AS closed_today_count
-		FROM sm_lp_positions
-		WHERE pool_address = ?
+			SUM(CASE WHEN status='closed' AND closed_at >= ? THEN 1 ELSE 0 END) AS closed_today_count,
+			COALESCE(SUM(CASE WHEN status='open' AND opened_at >= ? THEN COALESCE(e_agg.position_amount_usd, 0) ELSE 0 END), 0) AS total_position_amount_usd
+		FROM sm_lp_positions p
+		LEFT JOIN (
+			SELECT chain_id, nft_token_id,
+				MAX(COALESCE(total_usd, COALESCE(token0_amount_usd, 0) + COALESCE(token1_amount_usd, 0), 0)) AS position_amount_usd
+			FROM sm_lp_events
+			WHERE event_type = 'add'
+			GROUP BY chain_id, nft_token_id
+		) e_agg ON e_agg.chain_id = p.chain_id AND e_agg.nft_token_id = p.nft_token_id
+		WHERE p.pool_address = ?
 		GROUP BY pool_address
-	`, recentCutoff, recentCutoff, today, poolAddress).Scan(&stats).Error
+	`, recentCutoff, recentCutoff, today, recentCutoff, poolAddress).Scan(&stats).Error
 	if err != nil {
 		return nil, err
 	}
