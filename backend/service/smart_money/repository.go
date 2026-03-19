@@ -101,6 +101,21 @@ func (r *Repository) SoftDeleteMonitoredWallet(ctx context.Context, address stri
 		Update("is_active", false).Error
 }
 
+// --- Scan State ---
+
+func (r *Repository) UpsertLPScanState(ctx context.Context, chainID int, blockNum uint64) error {
+	state := &models.SmartMoneyScanState{
+		ChainID:          chainID,
+		LastScannedBlock: blockNum,
+	}
+	return database.DB.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "chain_id"}},
+			DoUpdates: clause.Assignments(map[string]interface{}{"last_scanned_block": blockNum}),
+		}).
+		Create(state).Error
+}
+
 // --- WatchContract ---
 
 func (r *Repository) ListWatchContracts(ctx context.Context) ([]models.WatchContract, error) {
@@ -224,8 +239,12 @@ func (r *Repository) WithTx(ctx context.Context, fn func(tx *gorm.DB) error) err
 
 func (r *Repository) ListPositions(ctx context.Context, status, wallet, pool, protocol string, page, size int, orderBy string) ([]models.SmartMoneyLPPosition, int64, error) {
 	db := database.DB.WithContext(ctx).Model(&models.SmartMoneyLPPosition{})
+	recentCutoff := time.Now().Add(-2 * time.Hour)
 	if status != "" && status != "all" {
 		db = db.Where("status = ?", status)
+		if status == "open" {
+			db = db.Where("opened_at >= ?", recentCutoff)
+		}
 	}
 	if wallet != "" {
 		db = db.Where("wallet_address = ?", strings.ToLower(wallet))
@@ -253,6 +272,70 @@ func (r *Repository) ListPositions(ctx context.Context, status, wallet, pool, pr
 	return positions, total, err
 }
 
+func (r *Repository) ListAllPositions(ctx context.Context, status, wallet, pool, protocol string, orderBy string) ([]models.SmartMoneyLPPosition, error) {
+	db := database.DB.WithContext(ctx).Model(&models.SmartMoneyLPPosition{})
+	recentCutoff := time.Now().Add(-2 * time.Hour)
+	if status != "" && status != "all" {
+		db = db.Where("status = ?", status)
+		if status == "open" {
+			db = db.Where("opened_at >= ?", recentCutoff)
+		}
+	}
+	if wallet != "" {
+		db = db.Where("wallet_address = ?", strings.ToLower(wallet))
+	}
+	if pool != "" {
+		db = db.Where("pool_address = ?", strings.ToLower(pool))
+	}
+	if protocol != "" {
+		db = db.Where("protocol = ?", protocol)
+	}
+
+	switch orderBy {
+	case "opened_at_asc":
+		db = db.Order("opened_at ASC")
+	default:
+		db = db.Order("opened_at DESC")
+	}
+
+	var positions []models.SmartMoneyLPPosition
+	err := db.Find(&positions).Error
+	return positions, err
+}
+
+func (r *Repository) UpdateLPPositionMetadata(ctx context.Context, id uint, updates map[string]interface{}) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	return database.DB.WithContext(ctx).Model(&models.SmartMoneyLPPosition{}).
+		Where("id = ?", id).
+		Updates(updates).Error
+}
+
+func (r *Repository) ListPositionsNeedingMetadataRepair(ctx context.Context, poolIdentifiers []string) ([]models.SmartMoneyLPPosition, error) {
+	db := database.DB.WithContext(ctx).Model(&models.SmartMoneyLPPosition{})
+
+	conditions := []string{
+		"COALESCE(token0_symbol, '') = ''",
+		"COALESCE(token1_symbol, '') = ''",
+		"fee_tier IS NULL",
+		"tick_lower IS NULL",
+		"tick_upper IS NULL",
+	}
+	args := make([]interface{}, 0, 1)
+	if len(poolIdentifiers) > 0 {
+		conditions = append(conditions, "LOWER(pool_address) IN ?")
+		args = append(args, poolIdentifiers)
+	}
+
+	var positions []models.SmartMoneyLPPosition
+	err := db.
+		Where(strings.Join(conditions, " OR "), args...).
+		Order("opened_at DESC").
+		Find(&positions).Error
+	return positions, err
+}
+
 func (r *Repository) GetPositionByID(ctx context.Context, id uint) (*models.SmartMoneyLPPosition, error) {
 	var p models.SmartMoneyLPPosition
 	err := database.DB.WithContext(ctx).First(&p, id).Error
@@ -262,24 +345,133 @@ func (r *Repository) GetPositionByID(ctx context.Context, id uint) (*models.Smar
 	return &p, err
 }
 
+type PositionOpenAmountRow struct {
+	ChainID           int     `json:"chain_id"`
+	NftTokenID        uint64  `json:"nft_token_id"`
+	PositionAmountUSD float64 `json:"position_amount_usd"`
+}
+
+func (r *Repository) GetPositionOpenAmountsUSD(ctx context.Context, positions []models.SmartMoneyLPPosition) (map[int]map[uint64]float64, error) {
+	out := make(map[int]map[uint64]float64)
+	if len(positions) == 0 {
+		return out, nil
+	}
+
+	chainSeen := make(map[int]struct{}, len(positions))
+	nftSeen := make(map[uint64]struct{}, len(positions))
+	txSeen := make(map[string]struct{}, len(positions))
+
+	chainIDs := make([]int, 0, len(positions))
+	nftIDs := make([]uint64, 0, len(positions))
+	txHashes := make([]string, 0, len(positions))
+
+	for _, pos := range positions {
+		txHash := strings.ToLower(strings.TrimSpace(pos.OpenTxHash))
+		if pos.NftTokenID == 0 || txHash == "" {
+			continue
+		}
+		if _, ok := chainSeen[pos.ChainID]; !ok {
+			chainSeen[pos.ChainID] = struct{}{}
+			chainIDs = append(chainIDs, pos.ChainID)
+		}
+		if _, ok := nftSeen[pos.NftTokenID]; !ok {
+			nftSeen[pos.NftTokenID] = struct{}{}
+			nftIDs = append(nftIDs, pos.NftTokenID)
+		}
+		if _, ok := txSeen[txHash]; !ok {
+			txSeen[txHash] = struct{}{}
+			txHashes = append(txHashes, txHash)
+		}
+	}
+
+	if len(chainIDs) == 0 || len(nftIDs) == 0 || len(txHashes) == 0 {
+		return out, nil
+	}
+
+	var rows []PositionOpenAmountRow
+	err := database.DB.WithContext(ctx).
+		Table("sm_lp_events").
+		Select(`
+			chain_id,
+			nft_token_id,
+			MAX(COALESCE(total_usd, COALESCE(token0_amount_usd, 0) + COALESCE(token1_amount_usd, 0), 0)) AS position_amount_usd
+		`).
+		Where("event_type = ? AND chain_id IN ? AND nft_token_id IN ? AND LOWER(tx_hash) IN ?", "add", chainIDs, nftIDs, txHashes).
+		Group("chain_id, nft_token_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+
+	for _, row := range rows {
+		if _, ok := out[row.ChainID]; !ok {
+			out[row.ChainID] = make(map[uint64]float64)
+		}
+		out[row.ChainID][row.NftTokenID] = row.PositionAmountUSD
+	}
+
+	return out, nil
+}
+
+// --- Pool-level total amounts ---
+
+type PoolAmountRow struct {
+	PoolAddress    string  `json:"pool_address"`
+	TotalAmountUSD float64 `json:"total_amount_usd"`
+}
+
+func (r *Repository) GetPoolTotalAmountsUSD(ctx context.Context) (map[string]float64, error) {
+	recentCutoff := time.Now().Add(-2 * time.Hour)
+	var rows []PoolAmountRow
+	err := database.DB.WithContext(ctx).Raw(`
+		SELECT
+			p.pool_address,
+			COALESCE(SUM(e_agg.position_amount_usd), 0) AS total_amount_usd
+		FROM sm_lp_positions p
+		LEFT JOIN (
+			SELECT chain_id, nft_token_id,
+				MAX(COALESCE(total_usd, COALESCE(token0_amount_usd, 0) + COALESCE(token1_amount_usd, 0), 0)) AS position_amount_usd
+			FROM sm_lp_events
+			WHERE event_type = 'add'
+			GROUP BY chain_id, nft_token_id
+		) e_agg ON e_agg.chain_id = p.chain_id AND e_agg.nft_token_id = p.nft_token_id
+		WHERE p.status = 'open' AND p.opened_at >= ?
+		GROUP BY p.pool_address
+	`, recentCutoff).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]float64, len(rows))
+	for _, row := range rows {
+		out[strings.ToLower(row.PoolAddress)] = row.TotalAmountUSD
+	}
+	return out, nil
+}
+
 // --- Aggregate queries ---
 
 type PoolAggRow struct {
-	PoolAddress       string    `json:"pool_address"`
-	Token0Symbol      string    `json:"token0_symbol"`
-	Token1Symbol      string    `json:"token1_symbol"`
-	Token0Address     string    `json:"token0_address"`
-	Token1Address     string    `json:"token1_address"`
-	FeeTier           *int      `json:"fee_tier"`
-	Protocol          string    `json:"protocol"`
-	ChainID           int       `json:"chain_id"`
-	OpenPositionCount int       `json:"open_position_count"`
-	WalletCount       int       `json:"wallet_count"`
-	LatestEventAt     time.Time `json:"latest_event_at"`
+	PoolAddress            string    `json:"pool_address"`
+	Token0Symbol           string    `json:"token0_symbol"`
+	Token1Symbol           string    `json:"token1_symbol"`
+	Token0Address          string    `json:"token0_address"`
+	Token1Address          string    `json:"token1_address"`
+	FeeTier                *int      `json:"fee_tier"`
+	Protocol               string    `json:"protocol"`
+	ChainID                int       `json:"chain_id"`
+	OpenPositionCount      int       `json:"open_position_count"`
+	WalletCount            int       `json:"wallet_count"`
+	LatestEventAt          time.Time `json:"latest_event_at"`
+	TradingPair            string    `json:"trading_pair"`
+	DisplayTokenAddress    string    `json:"display_token_address,omitempty"`
+	DisplayTokenSymbol     string    `json:"display_token_symbol,omitempty"`
+	DisplayTokenLogoURL    string    `json:"display_token_logo_url,omitempty"`
+	TotalPositionAmountUSD float64   `json:"total_position_amount_usd"`
 }
 
 func (r *Repository) ListPoolsWithPositions(ctx context.Context) ([]PoolAggRow, error) {
 	var rows []PoolAggRow
+	cutoff := time.Now().Add(-2 * time.Hour)
 	err := database.DB.WithContext(ctx).Raw(`
 		SELECT
 			p.pool_address,
@@ -290,46 +482,59 @@ func (r *Repository) ListPoolsWithPositions(ctx context.Context) ([]PoolAggRow, 
 			p.fee_tier,
 			p.protocol,
 			p.chain_id,
-			SUM(CASE WHEN p.status='open' THEN 1 ELSE 0 END) AS open_position_count,
-			COUNT(DISTINCT CASE WHEN p.status='open' THEN p.wallet_address END) AS wallet_count,
-			MAX(p.opened_at) AS latest_event_at
+			SUM(CASE WHEN p.status='open' AND p.opened_at >= ? THEN 1 ELSE 0 END) AS open_position_count,
+			COUNT(DISTINCT CASE WHEN p.status='open' AND p.opened_at >= ? THEN p.wallet_address END) AS wallet_count,
+			MAX(CASE WHEN p.status='open' AND p.opened_at >= ? THEN p.opened_at END) AS latest_event_at
 		FROM sm_lp_positions p
 		GROUP BY p.pool_address, p.token0_symbol, p.token1_symbol, p.token0_address, p.token1_address, p.fee_tier, p.protocol, p.chain_id
 		HAVING open_position_count > 0
 		ORDER BY latest_event_at DESC
-	`).Scan(&rows).Error
+	`, cutoff, cutoff, cutoff).Scan(&rows).Error
 	return rows, err
 }
 
 type PoolStats struct {
-	PoolAddress       string `json:"pool_address"`
-	Token0Symbol      string `json:"token0_symbol"`
-	Token1Symbol      string `json:"token1_symbol"`
-	FeeTier           *int   `json:"fee_tier"`
-	Protocol          string `json:"protocol"`
-	OpenPositionCount int    `json:"open_position_count"`
-	WalletCount       int    `json:"wallet_count"`
-	ClosedTodayCount  int    `json:"closed_today_count"`
+	PoolAddress         string  `json:"pool_address"`
+	Token0Symbol        string  `json:"token0_symbol"`
+	Token1Symbol        string  `json:"token1_symbol"`
+	Token0Address       string  `json:"token0_address"`
+	Token1Address       string  `json:"token1_address"`
+	FeeTier             *int    `json:"fee_tier"`
+	Protocol            string  `json:"protocol"`
+	ChainID             int     `json:"chain_id"`
+	OpenPositionCount   int     `json:"open_position_count"`
+	WalletCount         int     `json:"wallet_count"`
+	ClosedTodayCount    int     `json:"closed_today_count"`
+	TradingPair         string  `json:"trading_pair"`
+	CurrentPrice        string  `json:"current_price"`
+	PriceChange24h      float64 `json:"price_change_24h"`
+	DisplayTokenAddress string  `json:"display_token_address,omitempty"`
+	DisplayTokenSymbol  string  `json:"display_token_symbol,omitempty"`
+	DisplayTokenLogoURL string  `json:"display_token_logo_url,omitempty"`
 }
 
 func (r *Repository) GetPoolStats(ctx context.Context, poolAddress string) (*PoolStats, error) {
 	poolAddress = strings.ToLower(poolAddress)
 	var stats PoolStats
 	today := time.Now().Truncate(24 * time.Hour)
+	recentCutoff := time.Now().Add(-2 * time.Hour)
 	err := database.DB.WithContext(ctx).Raw(`
 		SELECT
 			pool_address,
 			MAX(token0_symbol) AS token0_symbol,
 			MAX(token1_symbol) AS token1_symbol,
+			MAX(token0_address) AS token0_address,
+			MAX(token1_address) AS token1_address,
 			MAX(fee_tier) AS fee_tier,
 			MAX(protocol) AS protocol,
-			SUM(CASE WHEN status='open' THEN 1 ELSE 0 END) AS open_position_count,
-			COUNT(DISTINCT CASE WHEN status='open' THEN wallet_address END) AS wallet_count,
+			MAX(chain_id) AS chain_id,
+			SUM(CASE WHEN status='open' AND opened_at >= ? THEN 1 ELSE 0 END) AS open_position_count,
+			COUNT(DISTINCT CASE WHEN status='open' AND opened_at >= ? THEN wallet_address END) AS wallet_count,
 			SUM(CASE WHEN status='closed' AND closed_at >= ? THEN 1 ELSE 0 END) AS closed_today_count
 		FROM sm_lp_positions
 		WHERE pool_address = ?
 		GROUP BY pool_address
-	`, today, poolAddress).Scan(&stats).Error
+	`, recentCutoff, recentCutoff, today, poolAddress).Scan(&stats).Error
 	if err != nil {
 		return nil, err
 	}
@@ -350,6 +555,7 @@ type GlobalStats struct {
 func (r *Repository) GetGlobalStats(ctx context.Context) (*GlobalStats, error) {
 	var stats GlobalStats
 	today := time.Now().Truncate(24 * time.Hour)
+	recentCutoff := time.Now().Add(-2 * time.Hour)
 
 	database.DB.WithContext(ctx).Model(&models.MonitoredWallet{}).
 		Where("is_active = 1").Count(new(int64))
@@ -361,7 +567,7 @@ func (r *Repository) GetGlobalStats(ctx context.Context) (*GlobalStats, error) {
 
 	var openCount int64
 	database.DB.WithContext(ctx).Model(&models.SmartMoneyLPPosition{}).
-		Where("status = 'open'").Count(&openCount)
+		Where("status = 'open' AND opened_at >= ?", recentCutoff).Count(&openCount)
 	stats.OpenPositionCount = int(openCount)
 
 	var closedToday int64
@@ -371,7 +577,7 @@ func (r *Repository) GetGlobalStats(ctx context.Context) (*GlobalStats, error) {
 
 	var poolCount int64
 	database.DB.WithContext(ctx).Model(&models.SmartMoneyLPPosition{}).
-		Where("status = 'open'").
+		Where("status = 'open' AND opened_at >= ?", recentCutoff).
 		Distinct("pool_address").Count(&poolCount)
 	stats.ActivePoolCount = int(poolCount)
 
@@ -403,6 +609,7 @@ func (r *Repository) ListWalletsWithStats(ctx context.Context, page, size int, k
 	if err != nil {
 		return nil, 0, err
 	}
+	recentCutoff := time.Now().Add(-2 * time.Hour)
 
 	rows := make([]WalletStatsRow, 0, len(wallets))
 	for _, w := range wallets {
@@ -420,12 +627,12 @@ func (r *Repository) ListWalletsWithStats(ctx context.Context, page, size int, k
 
 		var openCount int64
 		database.DB.WithContext(ctx).Model(&models.SmartMoneyLPPosition{}).
-			Where("wallet_address = ? AND status = 'open'", addr).Count(&openCount)
+			Where("wallet_address = ? AND status = 'open' AND opened_at >= ?", addr, recentCutoff).Count(&openCount)
 		row.OpenPositionCount = int(openCount)
 
 		var poolCount int64
 		database.DB.WithContext(ctx).Model(&models.SmartMoneyLPPosition{}).
-			Where("wallet_address = ? AND status = 'open'", addr).
+			Where("wallet_address = ? AND status = 'open' AND opened_at >= ?", addr, recentCutoff).
 			Distinct("pool_address").Count(&poolCount)
 		row.ActivePoolCount = int(poolCount)
 

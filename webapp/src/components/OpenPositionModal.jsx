@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+﻿import React, { useCallback, useMemo, useState } from 'react';
 
 const PRESET_RANGES = [1, 2, 3, 5, 10, 20];
 
@@ -173,7 +173,7 @@ export default function OpenPositionModal({
           </label>
 
           <div className="modal-range-section">
-            <span className="modal-range-label">蹇嵎鍖洪棿</span>
+            <span className="modal-range-label">快捷区间</span>
             <div className="modal-range-picks">
               {PRESET_RANGES.map((item) => {
                 const isActive =
@@ -186,7 +186,7 @@ export default function OpenPositionModal({
                     className={`range-chip ${isActive ? 'active' : ''}`}
                     onClick={() => applyRange(item, item)}
                   >
-                    卤{item}%
+                    {item}%
                   </button>
                 );
               })}

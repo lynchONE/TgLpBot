@@ -216,6 +216,7 @@ func buildSearchPoolResponse(pair dexScreenerPair, poolInfo *pool.PoolInfo, pool
 		FactoryName:      factoryName,
 		TradingPair:      tradingPair,
 		FeePercentage:    feePct,
+		FeeTier:          0,
 		TransactionCount: uint32(txCount),
 		TotalFees:        totalFees,
 		TotalVolume:      volume24h,
@@ -223,9 +224,12 @@ func buildSearchPoolResponse(pair dexScreenerPair, poolInfo *pool.PoolInfo, pool
 		FeeRate:          feeRate,
 		PriceDisplay:     priceDisplay,
 		UpdatedAt:        time.Now(),
-		LastSwapAt:       time.Time{},
 		Token0Address:    token0Addr,
 		Token1Address:    token1Addr,
+		Token0Symbol:     strings.TrimSpace(pair.BaseToken.Symbol),
+		Token1Symbol:     strings.TrimSpace(pair.QuoteToken.Symbol),
+		Token0Name:       strings.TrimSpace(pair.BaseToken.Name),
+		Token1Name:       strings.TrimSpace(pair.QuoteToken.Name),
 	}
 }
 
@@ -356,7 +360,11 @@ func (s *Server) handleSearchPools(w http.ResponseWriter, r *http.Request) {
 		switch pv {
 		case "v4":
 			if strings.EqualFold(chain, "bsc") {
-				poolInfo, infoErr = poolService.GetV4PoolInfo(poolAddr)
+				// Generic keyword search already has token/dex metadata from DexScreener.
+				// Avoid spending RPC on every V4 row unless the user is explicitly querying a pool id/address.
+				if isPoolIdOrAddress {
+					poolInfo, infoErr = poolService.GetPoolInfoForVersionCached(chain, "v4", poolAddr)
+				}
 			} else {
 				continue
 			}
@@ -364,9 +372,12 @@ func (s *Server) handleSearchPools(w http.ResponseWriter, r *http.Request) {
 			if !common.IsHexAddress(poolAddr) {
 				continue
 			}
-			poolInfo, infoErr = poolService.GetPoolInfoForChain(chain, poolAddr)
+			poolInfo, infoErr = poolService.GetPoolInfoForVersionCached(chain, "v3", poolAddr)
 		}
-		if infoErr != nil || poolInfo == nil {
+		if infoErr != nil {
+			continue
+		}
+		if pv != "v4" && poolInfo == nil {
 			continue
 		}
 
@@ -384,7 +395,7 @@ func (s *Server) handleSearchPools(w http.ResponseWriter, r *http.Request) {
 		if isV4PoolId(poolAddr) {
 			version = "v4"
 			if strings.EqualFold(chain, "bsc") {
-				poolInfo, infoErr = poolService.GetV4PoolInfo(poolAddr)
+				poolInfo, infoErr = poolService.GetPoolInfoForVersionCached(chain, "v4", poolAddr)
 			} else {
 				infoErr = fmt.Errorf("v4 not supported on chain=%s", chain)
 			}
@@ -394,7 +405,7 @@ func (s *Server) handleSearchPools(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "invalid pool address", http.StatusBadRequest)
 				return
 			}
-			poolInfo, infoErr = poolService.GetPoolInfoForChain(chain, poolAddr)
+			poolInfo, infoErr = poolService.GetPoolInfoForVersionCached(chain, "v3", poolAddr)
 		}
 		if infoErr == nil && poolInfo != nil {
 			minimal := dexScreenerPair{

@@ -313,9 +313,9 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "V4 not supported on this chain yet", http.StatusBadRequest)
 			return
 		}
-		poolInfo, err = poolService.GetV4PoolInfo(poolAddress)
+		poolInfo, err = poolService.GetPoolInfoForVersionCached(chain, "v4", poolAddress)
 	default:
-		poolInfo, err = poolService.GetPoolInfoForChain(chain, poolAddress)
+		poolInfo, err = poolService.GetPoolInfoForVersionCached(chain, "v3", poolAddress)
 	}
 	if err != nil || poolInfo == nil {
 		w.WriteHeader(http.StatusInternalServerError)

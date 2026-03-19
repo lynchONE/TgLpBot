@@ -47,7 +47,10 @@
       "Bash(curl -s -X POST https://bsc-dataseed.binance.org/ -H \"Content-Type: application/json\" -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_call\",\"params\":[{\"to\":\"0x97693439ea2f0ecdeb9135881e49f354656a911c\",\"data\":\"0x95d89b41\"},\"latest\"],\"id\":1}' | python3 -c \"\nimport sys, json\ndata = json.load\\(sys.stdin\\)['result']\nhex_str = data[2:]\nif len\\(hex_str\\) >= 128:\n    length = int\\(hex_str[64:128], 16\\)\n    symbol = bytes.fromhex\\(hex_str[128:128+length*2]\\).decode\\('utf-8', errors='replace'\\)\n    print\\('Symbol:', symbol\\)\n\")",
       "Bash(npx hardhat compile 2>&1)",
       "Bash(cat /mnt/e/goProject/TgLpBot/contracts/artifacts/contracts/ZapSimple.sol/ZapSimple.json | python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d['bytecode'][2:]\\)\" > /mnt/e/goProject/TgLpBot/backend/base/blockchain/bytecode/zap_simple_bytecode.hex 2>&1 && wc -c /mnt/e/goProject/TgLpBot/backend/base/blockchain/bytecode/zap_simple_bytecode.hex)",
-      "Bash(ls -d /mnt/e/goProject/TgLpBot/backend/base/*/ | head -20)"
+      "Bash(ls -d /mnt/e/goProject/TgLpBot/backend/base/*/ | head -20)",
+      "Bash(find /mnt/e/goProject/TgLpBot/webapp -type d \\\\\\(-name icon* -o -name img -o -name image* -o -name asset* -o -name public \\\\\\))",
+      "Bash(curl -s \"https://api.bscscan.com/v2/api?chainid=56&module=proxy&action=eth_getTransactionReceipt&txhash=0xe9c347294e26b4e1d22313f78a42f3bccee32c0a4ac34a29f793b1ab2b40cba6\")",
+      "Bash(python3 -m json.tool)"
     ]
   }
 }

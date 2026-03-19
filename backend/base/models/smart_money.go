@@ -29,6 +29,15 @@ type WatchContract struct {
 
 func (WatchContract) TableName() string { return "watch_contracts" }
 
+type SmartMoneyScanState struct {
+	ID               uint      `gorm:"primaryKey" json:"id"`
+	ChainID          int       `gorm:"not null;default:56;uniqueIndex:uq_sm_scan_chain" json:"chain_id"`
+	LastScannedBlock uint64    `gorm:"not null;default:0" json:"last_scanned_block"`
+	UpdatedAt        time.Time `gorm:"not null;autoUpdateTime" json:"updated_at"`
+}
+
+func (SmartMoneyScanState) TableName() string { return "sm_scan_states" }
+
 type SmartMoneyLPEvent struct {
 	ID              uint      `gorm:"primaryKey" json:"id"`
 	WalletAddress   string    `gorm:"size:42;not null;index:idx_sm_evt_wallet_chain" json:"wallet_address"`
@@ -39,12 +48,12 @@ type SmartMoneyLPEvent struct {
 	Token1Address   string    `gorm:"size:42;not null" json:"token1_address"`
 	Token0Symbol    string    `gorm:"size:20" json:"token0_symbol"`
 	Token1Symbol    string    `gorm:"size:20" json:"token1_symbol"`
-	Token0Amount    string    `gorm:"type:decimal(36,18);not null;default:0" json:"token0_amount"`
-	Token1Amount    string    `gorm:"type:decimal(36,18);not null;default:0" json:"token1_amount"`
+	Token0Amount    string    `gorm:"type:decimal(65,0);not null;default:0" json:"token0_amount"`
+	Token1Amount    string    `gorm:"type:decimal(65,0);not null;default:0" json:"token1_amount"`
 	Token0AmountUSD *string   `gorm:"type:decimal(20,4)" json:"token0_amount_usd"`
 	Token1AmountUSD *string   `gorm:"type:decimal(20,4)" json:"token1_amount_usd"`
 	TotalUSD        *string   `gorm:"type:decimal(20,4)" json:"total_usd"`
-	PoolAddress     string    `gorm:"size:42;not null" json:"pool_address"`
+	PoolAddress     string    `gorm:"size:66;not null" json:"pool_address"`
 	FeeTier         *int      `json:"fee_tier"`
 	TickLower       *int      `json:"tick_lower"`
 	TickUpper       *int      `json:"tick_upper"`
@@ -64,7 +73,7 @@ type SmartMoneyLPPosition struct {
 	ChainID       int        `gorm:"not null;default:56" json:"chain_id"`
 	Protocol      string     `gorm:"size:20;not null" json:"protocol"`
 	NftTokenID    uint64     `gorm:"not null;uniqueIndex:uq_sm_nft_chain" json:"nft_token_id"`
-	PoolAddress   string     `gorm:"size:42;not null;index:idx_sm_pos_pool_status" json:"pool_address"`
+	PoolAddress   string     `gorm:"size:66;not null;index:idx_sm_pos_pool_status" json:"pool_address"`
 	Token0Address string     `gorm:"size:42;not null" json:"token0_address"`
 	Token1Address string     `gorm:"size:42;not null" json:"token1_address"`
 	Token0Symbol  string     `gorm:"size:20" json:"token0_symbol"`

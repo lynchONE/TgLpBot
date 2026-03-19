@@ -14,10 +14,7 @@ import (
 	"time"
 )
 
-const (
-	defaultPoolMBaseURL       = "https://mapi.poolm.xyz"
-	defaultDexScreenerBaseURL = "https://api.dexscreener.com"
-)
+const defaultPoolMBaseURL = "https://mapi.poolm.xyz"
 
 type PoolMClient struct {
 	baseURL    string
@@ -60,14 +57,17 @@ type poolMRateLimitBody struct {
 }
 
 type PoolMTopFeesResponse struct {
-	Success           bool            `json:"success"`
-	Timeframe         string          `json:"timeframe"`
-	RequestedProtocol PoolMStringList `json:"requested_protocol"`
-	RequestedDex      PoolMStringList `json:"requested_dex"`
-	RequestedChain    string          `json:"requested_chain"`
-	TotalPools        int             `json:"total_pools"`
-	Data              []PoolMFeePool  `json:"data"`
-	Error             string          `json:"error"`
+	Success             bool            `json:"success"`
+	Timeframe           string          `json:"timeframe"`
+	RequestedLimit      int             `json:"requested_limit"`
+	RequestedProtocol   PoolMStringList `json:"requested_protocol"`
+	RequestedDex        PoolMStringList `json:"requested_dex"`
+	RequestedChain      string          `json:"requested_chain"`
+	TotalPools          int             `json:"total_pools"`
+	MetricTrendsIndex   json.RawMessage `json:"metricTrendsIndex"`
+	LiquidityTicksIndex json.RawMessage `json:"liquidityTicksIndex"`
+	Data                []PoolMFeePool  `json:"data"`
+	Error               string          `json:"error"`
 }
 
 type PoolMFeePool struct {
@@ -90,16 +90,36 @@ type PoolMFeePool struct {
 	StableCoinSymbol string  `json:"stable_coin_symbol"`
 	FeeRate          int     `json:"fee_rate"`
 	FeePercentage    float64 `json:"fee_percentage"`
+	HookAddress      string  `json:"hook_address"`
 
-	TransactionCount     int     `json:"transaction_count"`
-	TotalFees            float64 `json:"total_fees"`
-	TotalVolume          float64 `json:"total_volume"`
-	CurrentPoolValue     float64 `json:"current_pool_value"`
-	CurrentToken0Balance float64 `json:"current_token0_balance"`
-	CurrentToken1Balance float64 `json:"current_token1_balance"`
-	CurrentTokenPrice    float64 `json:"current_token_price"`
-	PriceDisplay         string  `json:"price_display"`
-	LastSwapAt           string  `json:"last_swap_at"`
+	TransactionCount        int             `json:"transaction_count"`
+	TotalFees               float64         `json:"total_fees"`
+	TotalVolume             float64         `json:"total_volume"`
+	CurrentPoolValue        float64         `json:"current_pool_value"`
+	CurrentToken0Balance    float64         `json:"current_token0_balance"`
+	CurrentToken1Balance    float64         `json:"current_token1_balance"`
+	CurrentTokenPrice       float64         `json:"current_token_price"`
+	PricedTokenAddress      string          `json:"priced_token_address"`
+	CurrentTokenTotalSupply float64         `json:"current_token_total_supply"`
+	CurrentTokenFDVUSD      float64         `json:"current_token_fdv_usd"`
+	TokenSupplyUpdatedAt    string          `json:"token_supply_updated_at"`
+	PriceDisplay            string          `json:"price_display"`
+	LastSwapAt              string          `json:"last_swap_at"`
+	TickSpacing             *int            `json:"tick_spacing"`
+	CurrentTick             int             `json:"current_tick"`
+	CurrentSqrtPriceX96     string          `json:"current_sqrt_price_x96"`
+	CurrentLiquidity        string          `json:"current_liquidity"`
+	StableCoinPosition      string          `json:"stable_coin_position"`
+	MetricTrends            json.RawMessage `json:"metricTrends"`
+	UniqueWallets           int             `json:"unique_wallets"`
+	TopWalletVolPct         float64         `json:"top_wallet_vol_pct"`
+	ActiveTickCount         int             `json:"activeTickCount"`
+	ActiveLiquidityUSD      float64         `json:"activeLiquidityUSD"`
+	ActiveLiquidityRatio    float64         `json:"activeLiquidityRatio"`
+	LiquidityTicks          json.RawMessage `json:"liquidityTicks"`
+	LiquidityCurrentTick    int             `json:"liquidityCurrentTick"`
+	LiquidityTickSpacing    int             `json:"liquidityTickSpacing"`
+	Badges                  json.RawMessage `json:"badges"`
 }
 
 func NewPoolMClient(baseURL string) *PoolMClient {
@@ -156,7 +176,7 @@ func (c *PoolMClient) TopFees(ctx context.Context, timeframeMinutes int, chain s
 			return nil, err
 		}
 
-		body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 		_ = resp.Body.Close()
 		if err != nil {
 			return nil, err
@@ -231,132 +251,6 @@ func poolMRetryAfter(resp *http.Response, body []byte) time.Duration {
 		}
 	}
 	return 10 * time.Second
-}
-
-type DexScreenerClient struct {
-	baseURL    string
-	httpClient *http.Client
-}
-
-type dexScreenerToken struct {
-	Address string `json:"address"`
-	Name    string `json:"name"`
-	Symbol  string `json:"symbol"`
-}
-
-type dexScreenerTxnsBucket struct {
-	Buys    int `json:"buys"`
-	Sells   int `json:"sells"`
-	Buyers  int `json:"buyers"`
-	Sellers int `json:"sellers"`
-}
-
-type dexScreenerTxns struct {
-	M5  dexScreenerTxnsBucket `json:"m5"`
-	H1  dexScreenerTxnsBucket `json:"h1"`
-	H6  dexScreenerTxnsBucket `json:"h6"`
-	H24 dexScreenerTxnsBucket `json:"h24"`
-}
-
-type dexScreenerVolume struct {
-	M5  float64 `json:"m5"`
-	H1  float64 `json:"h1"`
-	H6  float64 `json:"h6"`
-	H24 float64 `json:"h24"`
-}
-
-type dexScreenerPriceChange struct {
-	M5  float64 `json:"m5"`
-	H1  float64 `json:"h1"`
-	H6  float64 `json:"h6"`
-	H24 float64 `json:"h24"`
-}
-
-type dexScreenerLiquidity struct {
-	USD   float64 `json:"usd"`
-	Base  float64 `json:"base"`
-	Quote float64 `json:"quote"`
-}
-
-type DexScreenerPair struct {
-	ChainID       string                 `json:"chainId"`
-	DexID         string                 `json:"dexId"`
-	PairAddress   string                 `json:"pairAddress"`
-	Labels        []string               `json:"labels"`
-	BaseToken     dexScreenerToken       `json:"baseToken"`
-	QuoteToken    dexScreenerToken       `json:"quoteToken"`
-	PriceUSD      string                 `json:"priceUsd"`
-	PriceNative   string                 `json:"priceNative"`
-	Txns          dexScreenerTxns        `json:"txns"`
-	Volume        dexScreenerVolume      `json:"volume"`
-	PriceChange   dexScreenerPriceChange `json:"priceChange"`
-	Liquidity     dexScreenerLiquidity   `json:"liquidity"`
-	FDV           float64                `json:"fdv"`
-	MarketCap     float64                `json:"marketCap"`
-	PairCreatedAt int64                  `json:"pairCreatedAt"`
-}
-
-type dexScreenerPairsResponse struct {
-	Pairs []DexScreenerPair `json:"pairs"`
-}
-
-func NewDexScreenerClient(baseURL string) *DexScreenerClient {
-	baseURL = strings.TrimSpace(baseURL)
-	if baseURL == "" {
-		baseURL = defaultDexScreenerBaseURL
-	}
-	baseURL = strings.TrimRight(baseURL, "/")
-	return &DexScreenerClient{
-		baseURL:    baseURL,
-		httpClient: &http.Client{Timeout: 15 * time.Second},
-	}
-}
-
-func (c *DexScreenerClient) GetPair(ctx context.Context, chain string, pairAddress string) (*DexScreenerPair, error) {
-	chain = strings.ToLower(strings.TrimSpace(chain))
-	pairAddress = normalizePairAddress(pairAddress)
-	if chain == "" {
-		return nil, fmt.Errorf("chain is required")
-	}
-	if pairAddress == "" {
-		return nil, fmt.Errorf("pair address is required")
-	}
-
-	endpoint := fmt.Sprintf("%s/latest/dex/pairs/%s/%s", c.baseURL, url.PathEscape(chain), url.PathEscape(pairAddress))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("dexscreener http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-
-	var parsed dexScreenerPairsResponse
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return nil, err
-	}
-	for i := range parsed.Pairs {
-		p := parsed.Pairs[i]
-		if normalizePairAddress(p.PairAddress) == pairAddress {
-			return &p, nil
-		}
-	}
-	if len(parsed.Pairs) > 0 {
-		return &parsed.Pairs[0], nil
-	}
-	return nil, nil
 }
 
 func normalizePairAddress(raw string) string {

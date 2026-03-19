@@ -4,7 +4,9 @@ import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"context"
+	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -45,6 +47,9 @@ func parsePoolCatalogOptions(r *http.Request) poolCatalogOptions {
 			timeframe = n
 		}
 	}
+	if timeframe != 5 {
+		timeframe = 5
+	}
 
 	limit := 50
 	if raw := strings.TrimSpace(query.Get("limit")); raw != "" {
@@ -72,7 +77,7 @@ func buildPoolCatalogCacheKey(opts poolCatalogOptions) string {
 		return ""
 	}
 	return fmt.Sprintf(
-		"pools:catalog:v3:chain=%s:sort=%s:tf=%d:limit=%d",
+		"pools:catalog:v5:chain=%s:sort=%s:tf=%d:limit=%d",
 		opts.Chain,
 		opts.Sort,
 		opts.TimeframeMinutes,
@@ -83,9 +88,6 @@ func buildPoolCatalogCacheKey(opts poolCatalogOptions) string {
 func loadPoolCatalogRows(ctx context.Context, opts poolCatalogOptions) ([]models.Pool, error) {
 	if database.DB == nil {
 		return nil, fmt.Errorf("database not initialized")
-	}
-	if opts.Chain != "" && opts.Chain != "bsc" {
-		return nil, nil
 	}
 
 	topLimit := opts.Limit * 5
@@ -127,7 +129,7 @@ func loadPoolCatalogRows(ctx context.Context, opts poolCatalogOptions) ([]models
 	if len(opts.IncludePools) > 0 {
 		includedRows := make([]models.Pool, 0, len(opts.IncludePools))
 		if err := buildPoolCatalogBaseQuery(ctx, opts).
-			Where("LOWER(address) IN ?", opts.IncludePools).
+			Where("address IN ?", opts.IncludePools).
 			Find(&includedRows).Error; err != nil {
 			return nil, err
 		}
@@ -139,29 +141,77 @@ func loadPoolCatalogRows(ctx context.Context, opts poolCatalogOptions) ([]models
 
 func buildPoolCatalogBaseQuery(ctx context.Context, opts poolCatalogOptions) *gorm.DB {
 	query := database.DB.WithContext(ctx).Model(&models.Pool{})
+	if opts.Chain != "" {
+		query = query.Where("chain = ?", opts.Chain)
+	}
 	if opts.TokenAddress != "" {
 		query = query.Where(
-			"LOWER(base_token_id) = ? OR LOWER(quote_token_id) = ?",
+			"base_token_id = ? OR quote_token_id = ?",
 			opts.TokenAddress,
 			opts.TokenAddress,
 		)
 	}
 	if len(opts.Dexes) > 0 {
-		query = query.Where("LOWER(dex_id) IN ?", opts.Dexes)
+		query = query.Where("(LOWER(factory_name) IN ? OR LOWER(dex_id) IN ?)", opts.Dexes, opts.Dexes)
 	}
 	return query
 }
 
-func buildPoolCatalogResponse(rows []models.Pool, opts poolCatalogOptions) ([]HotPoolResponse, time.Time) {
+type poolCatalogEnvelope struct {
+	Success             bool              `json:"success"`
+	Chain               string            `json:"chain,omitempty"`
+	Sort                string            `json:"sort,omitempty"`
+	Timeframe           string            `json:"timeframe"`
+	TimeframeMinutes    int               `json:"timeframe_minutes"`
+	RequestedLimit      int               `json:"requested_limit"`
+	RequestedProtocol   json.RawMessage   `json:"requested_protocol"`
+	RequestedChain      string            `json:"requested_chain"`
+	RequestedDex        json.RawMessage   `json:"requested_dex"`
+	TotalPools          int               `json:"total_pools"`
+	MetricTrendsIndex   json.RawMessage   `json:"metricTrendsIndex"`
+	LiquidityTicksIndex json.RawMessage   `json:"liquidityTicksIndex"`
+	UpdatedAt           time.Time         `json:"updated_at"`
+	Data                []HotPoolResponse `json:"data"`
+}
+
+func buildPoolCatalogResponse(rows []models.Pool, opts poolCatalogOptions) poolCatalogEnvelope {
 	items := make([]HotPoolResponse, 0, len(rows))
 	var updatedAt time.Time
+	meta := poolCatalogEnvelope{
+		Success:             true,
+		Chain:               opts.Chain,
+		Sort:                opts.Sort,
+		Timeframe:           "5 minutes",
+		TimeframeMinutes:    5,
+		RequestedLimit:      opts.Limit,
+		RequestedProtocol:   rawJSONFromString("", "[]"),
+		RequestedChain:      opts.Chain,
+		RequestedDex:        rawJSONFromString("", "[]"),
+		TotalPools:          0,
+		MetricTrendsIndex:   rawJSONFromString("", "[]"),
+		LiquidityTicksIndex: rawJSONFromString("", "[]"),
+		Data:                []HotPoolResponse{},
+	}
 	for _, row := range rows {
+		if row.UpdatedAt.After(updatedAt) {
+			updatedAt = row.UpdatedAt
+			meta.Timeframe = strings.TrimSpace(row.SourceTimeframe)
+			if meta.Timeframe == "" {
+				meta.Timeframe = "5 minutes"
+			}
+			if row.SourceRequestedLimit > 0 {
+				meta.RequestedLimit = row.SourceRequestedLimit
+			}
+			meta.RequestedProtocol = rawJSONFromString(row.SourceRequestedProtocolJSON, "[]")
+			meta.RequestedChain = strings.TrimSpace(firstNonEmpty(row.SourceRequestedChain, row.Chain, opts.Chain))
+			meta.RequestedDex = rawJSONFromString(row.SourceRequestedDexJSON, "[]")
+			meta.TotalPools = row.SourceTotalPools
+			meta.MetricTrendsIndex = rawJSONFromString(row.MetricTrendsIndexJSON, "[]")
+			meta.LiquidityTicksIndex = rawJSONFromString(row.LiquidityTicksIndexJSON, "[]")
+		}
 		item := buildPoolCatalogItem(row, opts)
 		if item.PoolAddress == "" {
 			continue
-		}
-		if item.UpdatedAt.After(updatedAt) {
-			updatedAt = item.UpdatedAt
 		}
 		items = append(items, item)
 	}
@@ -195,55 +245,238 @@ func buildPoolCatalogResponse(rows []models.Pool, opts poolCatalogOptions) ([]Ho
 	if updatedAt.IsZero() {
 		updatedAt = time.Now()
 	}
-	return items, updatedAt
+	meta.UpdatedAt = updatedAt
+	meta.Data = items
+	return meta
 }
 
 func buildPoolCatalogItem(row models.Pool, opts poolCatalogOptions) HotPoolResponse {
 	totalFees, totalVolume := poolCatalogWindowMetrics(row, opts.TimeframeMinutes)
-	currentPoolValue := sanitizeFloat(row.ReserveInUSD)
+	currentPoolValue := sanitizeFloat(row.CurrentPoolValue)
+	if currentPoolValue <= 0 {
+		currentPoolValue = sanitizeFloat(row.ReserveInUSD)
+	}
 	feeRate := 0.0
 	if currentPoolValue > 0 && totalFees > 0 {
 		feeRate = totalFees / currentPoolValue * 100.0
 	}
 
-	txCount := int(row.TransactionsH24Buys) + int(row.TransactionsH24Sells)
+	txCount := int(row.TransactionCount)
+	if txCount <= 0 {
+		txCount = int(row.TransactionsH24Buys) + int(row.TransactionsH24Sells)
+	}
 	if txCount < 0 {
 		txCount = 0
 	}
 
 	protocolVersion := inferPoolCatalogProtocolVersion(row)
+	priceDisplay := strings.TrimSpace(row.PriceDisplay)
+	if priceDisplay == "" {
+		priceDisplay = formatPoolCatalogPrice(firstPositiveFloat(row.CurrentTokenPrice, row.BaseTokenPriceUSD))
+	}
+	fees24h := sanitizeFloat(row.FeeUSDH24)
+	volume24h := sanitizeFloat(row.VolumeH24)
+	txCount24h := uint32(int(row.TransactionsH24Buys) + int(row.TransactionsH24Sells))
 
 	return HotPoolResponse{
-		ProtocolVersion:  protocolVersion,
-		PoolAddress:      normalizeCatalogHex(row.Address),
-		Dex:              strings.TrimSpace(row.DexID),
-		FactoryName:      inferPoolCatalogFactoryName(row, protocolVersion),
-		TradingPair:      sanitizePoolCatalogName(row.Name),
-		FeePercentage:    sanitizeFloat(row.PoolFeePercentage),
-		TransactionCount: uint32(txCount),
-		TotalFees:        sanitizeFloat(totalFees),
-		TotalVolume:      sanitizeFloat(totalVolume),
-		CurrentPoolValue: currentPoolValue,
-		FeeRate:          sanitizeFloat(feeRate),
-		PriceDisplay:     formatPoolCatalogPrice(row.BaseTokenPriceUSD),
-		UpdatedAt:        row.UpdatedAt,
-		LastSwapAt:       time.Time{},
-		Token0Address:    normalizeCatalogHex(row.BaseTokenID),
-		Token1Address:    normalizeCatalogHex(row.QuoteTokenID),
+		Chain:                   normalizeCatalogLower(firstNonEmpty(row.Chain, opts.Chain)),
+		ProtocolVersion:         protocolVersion,
+		PoolAddress:             normalizeCatalogHex(row.Address),
+		Dex:                     strings.TrimSpace(firstNonEmpty(row.DexID, row.FactoryName)),
+		FactoryName:             inferPoolCatalogFactoryName(row, protocolVersion),
+		FactoryAddress:          normalizeCatalogHex(row.FactoryAddress),
+		TradingPair:             sanitizePoolCatalogName(row.Name),
+		FeePercentage:           sanitizeFloat(row.PoolFeePercentage),
+		FeeRate:                 sanitizeFloat(feeRate),
+		FeeTier:                 row.PoolMFeeRate,
+		TransactionCount:        uint32(txCount),
+		TotalFees:               sanitizeFloat(totalFees),
+		TotalVolume:             sanitizeFloat(totalVolume),
+		CurrentPoolValue:        currentPoolValue,
+		PriceDisplay:            priceDisplay,
+		UpdatedAt:               row.UpdatedAt,
+		LastSwapAt:              row.LastSwapAt,
+		Token0Address:           normalizeCatalogHex(row.BaseTokenID),
+		Token1Address:           normalizeCatalogHex(row.QuoteTokenID),
+		Token0Symbol:            strings.TrimSpace(row.Token0Symbol),
+		Token1Symbol:            strings.TrimSpace(row.Token1Symbol),
+		Token0Name:              strings.TrimSpace(row.Token0Name),
+		Token1Name:              strings.TrimSpace(row.Token1Name),
+		Token0Decimals:          row.Token0Decimals,
+		Token1Decimals:          row.Token1Decimals,
+		StableCoinSymbol:        strings.TrimSpace(row.StableCoinSymbol),
+		HookAddress:             normalizeCatalogHex(row.HookAddress),
+		CurrentToken0Balance:    sanitizeFloat(row.CurrentToken0Balance),
+		CurrentToken1Balance:    sanitizeFloat(row.CurrentToken1Balance),
+		CurrentTokenPrice:       sanitizeFloat(firstPositiveFloat(row.CurrentTokenPrice, row.BaseTokenPriceUSD)),
+		PricedTokenAddress:      normalizeCatalogHex(row.PricedTokenAddress),
+		CurrentTokenTotalSupply: sanitizeFloat(row.CurrentTokenTotalSupply),
+		CurrentTokenFDVUSD:      sanitizeFloat(firstPositiveFloat(row.CurrentTokenFDVUSD, row.FDVUSD)),
+		TokenSupplyUpdatedAt:    row.TokenSupplyUpdatedAt,
+		TickSpacing:             cloneCatalogInt(row.TickSpacing),
+		CurrentTick:             row.CurrentTick,
+		CurrentSqrtPriceX96:     strings.TrimSpace(row.CurrentSqrtPriceX96),
+		CurrentLiquidity:        strings.TrimSpace(row.CurrentLiquidity),
+		StableCoinPosition:      strings.TrimSpace(row.StableCoinPosition),
+		MetricTrends:            rawJSONFromString(row.MetricTrendsJSON, "[]"),
+		UniqueWallets:           row.UniqueWallets,
+		TopWalletVolPct:         sanitizeFloat(row.TopWalletVolPct),
+		ActiveTickCount:         row.ActiveTickCount,
+		ActiveLiquidityUSD:      sanitizeFloat(row.ActiveLiquidityUSD),
+		ActiveLiquidityRatio:    sanitizeFloat(row.ActiveLiquidityRatio),
+		LiquidityTicks:          rawJSONFromString(row.LiquidityTicksJSON, "[]"),
+		LiquidityCurrentTick:    row.LiquidityCurrentTick,
+		LiquidityTickSpacing:    row.LiquidityTickSpacing,
+		Badges:                  rawJSONFromString(row.BadgesJSON, "[]"),
+		TotalFees24h:            fees24h,
+		TotalVolume24h:          volume24h,
+		TransactionCount24h:     txCount24h,
+	}
+}
+
+var poolCatalogStableSymbols = map[string]struct{}{
+	"usdc":  {},
+	"usdt":  {},
+	"busd":  {},
+	"dai":   {},
+	"frax":  {},
+	"usdd":  {},
+	"fdusd": {},
+	"wbnb":  {},
+	"weth":  {},
+	"wsol":  {},
+	"bnb":   {},
+	"eth":   {},
+	"sol":   {},
+}
+
+func poolCatalogStableLikeSymbol(symbol string) bool {
+	_, ok := poolCatalogStableSymbols[strings.ToLower(strings.TrimSpace(symbol))]
+	return ok
+}
+
+func poolCatalogPairSymbols(pair string) (string, string) {
+	parts := strings.Split(strings.TrimSpace(pair), "/")
+	if len(parts) != 2 {
+		return "", ""
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+}
+
+func poolCatalogPickDisplayToken(item *HotPoolResponse) {
+	if item == nil {
+		return
+	}
+
+	leftSymbol := strings.TrimSpace(firstNonEmpty(item.Token0Symbol, poolCatalogPairSymbolsLeft(item.TradingPair)))
+	rightSymbol := strings.TrimSpace(firstNonEmpty(item.Token1Symbol, poolCatalogPairSymbolsRight(item.TradingPair)))
+	leftAddress := normalizeCatalogHex(item.Token0Address)
+	rightAddress := normalizeCatalogHex(item.Token1Address)
+	leftName := strings.TrimSpace(item.Token0Name)
+	rightName := strings.TrimSpace(item.Token1Name)
+
+	switch strings.ToLower(strings.TrimSpace(item.StableCoinPosition)) {
+	case "token0":
+		item.DisplayTokenAddress = rightAddress
+		item.DisplayTokenSymbol = rightSymbol
+		item.DisplayTokenName = rightName
+	case "token1":
+		item.DisplayTokenAddress = leftAddress
+		item.DisplayTokenSymbol = leftSymbol
+		item.DisplayTokenName = leftName
+	}
+
+	if item.DisplayTokenAddress != "" || item.DisplayTokenSymbol != "" {
+		return
+	}
+
+	leftStable := poolCatalogStableLikeSymbol(leftSymbol)
+	rightStable := poolCatalogStableLikeSymbol(rightSymbol)
+
+	switch {
+	case leftStable && !rightStable:
+		item.DisplayTokenAddress = rightAddress
+		item.DisplayTokenSymbol = rightSymbol
+		item.DisplayTokenName = rightName
+	case rightStable && !leftStable:
+		item.DisplayTokenAddress = leftAddress
+		item.DisplayTokenSymbol = leftSymbol
+		item.DisplayTokenName = leftName
+	default:
+		item.DisplayTokenAddress = leftAddress
+		item.DisplayTokenSymbol = leftSymbol
+		item.DisplayTokenName = leftName
+	}
+
+	if strings.TrimSpace(item.DisplayTokenAddress) == "" {
+		item.DisplayTokenAddress = rightAddress
+	}
+	if strings.TrimSpace(item.DisplayTokenSymbol) == "" {
+		item.DisplayTokenSymbol = rightSymbol
+	}
+	if strings.TrimSpace(item.DisplayTokenName) == "" {
+		item.DisplayTokenName = rightName
+	}
+}
+
+func (s *Server) enrichHotPoolDisplayTokens(ctx context.Context, chain string, items []HotPoolResponse) {
+	if s == nil || s.TokenMeta == nil || len(items) == 0 {
+		return
+	}
+
+	addresses := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for i := range items {
+		poolCatalogPickDisplayToken(&items[i])
+		addr := strings.TrimSpace(items[i].DisplayTokenAddress)
+		if addr == "" {
+			continue
+		}
+		if _, ok := seen[addr]; ok {
+			continue
+		}
+		seen[addr] = struct{}{}
+		addresses = append(addresses, addr)
+	}
+
+	if len(addresses) == 0 {
+		return
+	}
+
+	meta, err := s.TokenMeta.GetBatch(ctx, chain, addresses)
+	if err != nil {
+		log.Printf("[Pools API] load token metadata failed chain=%s err=%v", chain, err)
+		return
+	}
+
+	for i := range items {
+		addr := strings.TrimSpace(items[i].DisplayTokenAddress)
+		if addr == "" {
+			continue
+		}
+		info, ok := meta[addr]
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(items[i].DisplayTokenSymbol) == "" {
+			items[i].DisplayTokenSymbol = strings.TrimSpace(info.Symbol)
+		}
+		if strings.TrimSpace(info.Symbol) != "" {
+			items[i].DisplayTokenSymbol = strings.TrimSpace(info.Symbol)
+		}
+		if strings.TrimSpace(items[i].DisplayTokenName) == "" {
+			items[i].DisplayTokenName = strings.TrimSpace(info.Name)
+		}
+		items[i].DisplayTokenLogoURL = strings.TrimSpace(info.LogoURL)
 	}
 }
 
 func poolCatalogWindowMetrics(row models.Pool, timeframeMinutes int) (float64, float64) {
-	switch {
-	case timeframeMinutes <= 5:
-		return row.FeeUSDM5, row.VolumeM5
-	case timeframeMinutes <= 60:
-		return row.FeeUSDH1, row.VolumeH1
-	case timeframeMinutes <= 360:
-		return row.FeeUSDH6, row.VolumeH6
-	default:
-		return row.FeeUSDH24, row.VolumeH24
+	_ = timeframeMinutes
+	if row.TotalFees > 0 || row.TotalVolume > 0 {
+		return row.TotalFees, row.TotalVolume
 	}
+	return row.FeeUSDM5, row.VolumeM5
 }
 
 func poolCatalogSortMetric(item HotPoolResponse, sortKey string) float64 {
@@ -260,38 +493,11 @@ func poolCatalogSortMetric(item HotPoolResponse, sortKey string) float64 {
 func poolCatalogOrderClause(opts poolCatalogOptions) string {
 	switch opts.Sort {
 	case "volume":
-		switch {
-		case opts.TimeframeMinutes <= 5:
-			return "volume_m5 DESC"
-		case opts.TimeframeMinutes <= 60:
-			return "volume_h1 DESC"
-		case opts.TimeframeMinutes <= 360:
-			return "volume_h6 DESC"
-		default:
-			return "volume_h24 DESC"
-		}
+		return "total_volume DESC, updated_at DESC"
 	case "fee_rate":
-		switch {
-		case opts.TimeframeMinutes <= 5:
-			return "fee_apr_m5 DESC"
-		case opts.TimeframeMinutes <= 60:
-			return "fee_apr_h1 DESC"
-		case opts.TimeframeMinutes <= 360:
-			return "fee_apr_h6 DESC"
-		default:
-			return "fee_apr_h24 DESC"
-		}
+		return "CASE WHEN current_pool_value > 0 THEN total_fees / current_pool_value * 100 ELSE 0 END DESC, updated_at DESC"
 	default:
-		switch {
-		case opts.TimeframeMinutes <= 5:
-			return "fee_usd_m5 DESC"
-		case opts.TimeframeMinutes <= 60:
-			return "fee_usd_h1 DESC"
-		case opts.TimeframeMinutes <= 360:
-			return "fee_usd_h6 DESC"
-		default:
-			return "fee_usd_h24 DESC"
-		}
+		return "total_fees DESC, updated_at DESC"
 	}
 }
 
@@ -354,7 +560,7 @@ func sanitizePoolCatalogName(name string) string {
 }
 
 func inferPoolCatalogProtocolVersion(row models.Pool) string {
-	text := strings.ToLower(strings.TrimSpace(row.DexID))
+	text := strings.ToLower(strings.TrimSpace(firstNonEmpty(row.ProtocolVersion, row.DexID, row.FactoryName)))
 	switch {
 	case strings.Contains(text, "v4"):
 		return "v4"
@@ -374,6 +580,10 @@ func inferPoolCatalogProtocolVersion(row models.Pool) string {
 }
 
 func inferPoolCatalogFactoryName(row models.Pool, protocolVersion string) string {
+	if raw := strings.TrimSpace(row.FactoryName); raw != "" {
+		return raw
+	}
+
 	raw := strings.TrimSpace(row.DexID)
 	lower := strings.ToLower(raw)
 
@@ -424,4 +634,77 @@ func formatPoolCatalogPrice(price float64) string {
 		return ""
 	}
 	return "$" + text
+}
+
+func rawJSONFromString(raw string, fallback string) json.RawMessage {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return json.RawMessage(fallback)
+	}
+	if !json.Valid([]byte(text)) {
+		return json.RawMessage(fallback)
+	}
+	return json.RawMessage(text)
+}
+
+func firstPositiveFloat(values ...float64) float64 {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func cloneCatalogInt(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	v := *value
+	return &v
+}
+
+func poolCatalogPairSymbolsLeft(pair string) string {
+	left, _ := poolCatalogPairSymbols(pair)
+	return left
+}
+
+func poolCatalogPairSymbolsRight(pair string) string {
+	_, right := poolCatalogPairSymbols(pair)
+	return right
+}
+
+func normalizeCatalogLower(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func metricTrendPriceChange(raw json.RawMessage) float64 {
+	if len(raw) == 0 {
+		return 0
+	}
+
+	var rows [][]float64
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return 0
+	}
+
+	first := 0.0
+	last := 0.0
+	for _, row := range rows {
+		if len(row) < 5 {
+			continue
+		}
+		price := row[4]
+		if price <= 0 {
+			continue
+		}
+		if first <= 0 {
+			first = price
+		}
+		last = price
+	}
+	if first <= 0 || last <= 0 {
+		return 0
+	}
+	return (last/first - 1) * 100
 }

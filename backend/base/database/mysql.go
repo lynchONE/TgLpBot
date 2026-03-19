@@ -59,7 +59,7 @@ func InitMySQL() error {
 
 // autoMigrate runs auto migration for all models
 func autoMigrate() error {
-	return DB.AutoMigrate(
+	if err := DB.AutoMigrate(
 		&models.User{},
 		&models.Wallet{},
 		&models.WalletChainContract{},
@@ -79,9 +79,18 @@ func autoMigrate() error {
 		&models.TokenMetadata{},
 		&models.MonitoredWallet{},
 		&models.WatchContract{},
+		&models.SmartMoneyScanState{},
 		&models.SmartMoneyLPEvent{},
 		&models.SmartMoneyLPPosition{},
-	)
+	); err != nil {
+		return err
+	}
+
+	// GORM AutoMigrate does not alter existing column types, fix manually.
+	DB.Exec("ALTER TABLE sm_lp_events MODIFY COLUMN token0_amount DECIMAL(65,0) NOT NULL DEFAULT 0")
+	DB.Exec("ALTER TABLE sm_lp_events MODIFY COLUMN token1_amount DECIMAL(65,0) NOT NULL DEFAULT 0")
+
+	return nil
 }
 
 // CloseMySQL closes the MySQL database connection

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
     Eye, Wallet, Settings, Search, Plus, ExternalLink, X, Check,
-    ChevronRight, ChevronDown, Pause, Play, Trash2, Copy, Brain,
+    ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Brain,
 } from 'lucide-react';
 import {
     fetchSMPools, fetchSMPoolStats, fetchSMPositions, fetchSMWallets,
@@ -10,6 +10,10 @@ import {
 } from '../smartMoneyApi';
 import uniswapLogo from '../img/uniswap.svg';
 import pancakeLogo from '../img/pancake.svg';
+import bnbIcon from '../img/bnb.svg';
+import baseIcon from '../img/base.svg';
+import flashIcon from '../img/flash.svg';
+import telegramIcon from '../img/telegram.svg';
 
 const PROTOCOL_MAP = {
     pancake_v3: { version: 'V3', icon: pancakeLogo, color: '#d1884f' },
@@ -18,15 +22,78 @@ const PROTOCOL_MAP = {
 };
 const PROTOCOL_LABELS = Object.fromEntries(Object.entries(PROTOCOL_MAP).map(([k, v]) => [k, v.version]));
 
+const WALLET_AVATAR_ICONS = [bnbIcon, baseIcon, flashIcon, telegramIcon, pancakeLogo, uniswapLogo];
+function walletAvatarIdx(addr) {
+    if (!addr || addr.length < 6) return 0;
+    return parseInt(addr.slice(-4), 16) % WALLET_AVATAR_ICONS.length;
+}
+
 function shortAddr(addr) {
     if (!addr || addr.length < 10) return addr || '';
     return addr.slice(0, 6) + '...' + addr.slice(-4);
+}
+
+function tailAddr(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '--';
+    return raw.slice(-4);
+}
+
+function isHexAddressValue(value) {
+    return /^0x[a-fA-F0-9]{40}$/.test(String(value || '').trim());
+}
+
+function getPairLabel(value) {
+    const pair = String(value?.trading_pair || '').trim();
+    if (pair && pair !== '/') return pair;
+    const left = String(value?.token0_symbol || '').trim();
+    const right = String(value?.token1_symbol || '').trim();
+    if (left && right) return `${left}/${right}`;
+    if (left) return left;
+    if (right) return right;
+    return '未识别交易对';
+}
+
+function getPoolIdentifier(value) {
+    return String(value?.pool_address || '').trim();
+}
+
+function getPoolIdentifierLabel(value) {
+    return isHexAddressValue(value) ? 'Pool Address' : 'Pool ID';
+}
+
+function getPairInitials(value) {
+    const pair = getPairLabel(value);
+    return pair
+        .split(/[/-]/)
+        .map((part) => String(part || '').trim().charAt(0).toUpperCase())
+        .join('')
+        .slice(0, 2) || 'LP';
 }
 
 function formatFeeTier(fee) {
     if (!fee) return '';
     const map = { 100: '0.01%', 500: '0.05%', 2500: '0.25%', 3000: '0.3%', 10000: '1%' };
     return map[fee] || `${(fee / 10000).toFixed(2)}%`;
+}
+
+function formatUSDCompact(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return '—';
+    const abs = Math.abs(num);
+    if (abs >= 1000000) return `$${(num / 1000000).toFixed(abs >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M`;
+    if (abs >= 1000) return `$${(num / 1000).toFixed(abs >= 10000 ? 0 : 1).replace(/\.0$/, '')}K`;
+    if (abs >= 100) return `$${num.toFixed(0)}`;
+    if (abs >= 10) return `$${num.toFixed(1).replace(/\.0$/, '')}`;
+    return `$${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}`;
+}
+
+function formatRangePercent(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return '—';
+    if (num >= 100) return `±${Math.round(num)}%`;
+    if (num >= 10) return `±${num.toFixed(1).replace(/\.0$/, '')}%`;
+    return `±${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
 }
 
 function relativeTime(dateStr) {
@@ -53,19 +120,63 @@ function CopyBtn({ text }) {
     );
 }
 
-function WalletDot({ color, size = 18, label }) {
+function CopyTinyBtn({ text }) {
+    const [copied, setCopied] = useState(false);
+    if (!text) return null;
     return (
-        <span
-            className="smd-wallet-dot"
-            style={{ backgroundColor: color, width: size, height: size, fontSize: size * 0.5 }}
-        >
-            {(label || '?')[0].toUpperCase()}
+        <button className="smd-copy-btn smd-copy-btn--tiny" onClick={e => {
+            e.stopPropagation();
+            navigator.clipboard.writeText(text);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1200);
+        }} title="复制">
+            {copied ? <Check size={10} /> : <Copy size={10} />}
+        </button>
+    );
+}
+
+function WalletAvatar({ address, color, size = 18 }) {
+    const iconSrc = WALLET_AVATAR_ICONS[walletAvatarIdx(address)];
+    return (
+        <span className="smd-wallet-avatar" style={{ borderColor: color, width: size, height: size }}>
+            <img src={iconSrc} alt="" className="smd-wallet-avatar-icon" />
         </span>
     );
 }
 
-function Badge({ children, cls = '' }) {
-    return <span className={`smd-badge ${cls}`}>{children}</span>;
+function CompactIdentifier({ value, label = 'ID' }) {
+    if (!value) return null;
+    return (
+        <span className="smd-inline-id">
+            <span className="smd-inline-id-label">{label}</span>
+            <span className="smd-inline-id-value">{tailAddr(value)}</span>
+            <CopyTinyBtn text={value} />
+        </span>
+    );
+}
+
+function WalletIdentity({ address, color, label, size = 16, onClick, showCopy = false }) {
+    const content = (
+        <>
+            <WalletAvatar address={address} color={color} size={size} />
+            <span className="smd-wallet-info-name">{label && label !== address ? label : tailAddr(address)}</span>
+            {showCopy ? <CopyTinyBtn text={address} /> : null}
+        </>
+    );
+
+    if (typeof onClick === 'function') {
+        return (
+            <button className="smd-wallet-info smd-wallet-btn" onClick={onClick}>
+                {content}
+            </button>
+        );
+    }
+
+    return <div className="smd-wallet-info">{content}</div>;
+}
+
+function Badge({ children, cls = '', ...rest }) {
+    return <span className={`smd-badge ${cls}`} {...rest}>{children}</span>;
 }
 
 function ProtocolBadge({ protocol }) {
@@ -75,6 +186,34 @@ function ProtocolBadge({ protocol }) {
         <span className="smd-badge proto smd-proto-icon" style={{ borderColor: info.color + '40' }}>
             <img src={info.icon} alt="" className="smd-proto-img" />
             {info.version}
+        </span>
+    );
+}
+
+function PairAvatar({ item, size = 'md' }) {
+    const displayTokenLogoUrl = String(item?.display_token_logo_url || '').trim();
+    const displayTokenSymbol = String(item?.display_token_symbol || '').trim();
+    const avatarLabel = (displayTokenSymbol || getPairInitials(item) || 'LP').slice(0, 4).toUpperCase();
+    const avatarSrc = displayTokenLogoUrl;
+
+    return (
+        <span className={`pool-avatar smd-pair-avatar smd-pair-avatar--${size}`}>
+            {avatarSrc ? (
+                <>
+                    <img
+                        src={avatarSrc}
+                        alt=""
+                        onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                            const fallback = e.currentTarget.parentElement?.querySelector('.pool-avatar-fallback');
+                            if (fallback) fallback.style.display = 'flex';
+                        }}
+                    />
+                    <span className="pool-avatar-fallback" style={{ display: 'none' }}>{avatarLabel}</span>
+                </>
+            ) : (
+                <span className="pool-avatar-fallback">{avatarLabel}</span>
+            )}
         </span>
     );
 }
@@ -185,7 +324,10 @@ function PoolList({ apiBaseUrl, onSelect }) {
 
     const filtered = useMemo(() => {
         let l = pools;
-        if (search) { const q = search.toLowerCase(); l = l.filter(p => `${p.token0_symbol}/${p.token1_symbol}`.toLowerCase().includes(q) || p.pool_address.toLowerCase().includes(q)); }
+        if (search) {
+            const q = search.toLowerCase();
+            l = l.filter((p) => getPairLabel(p).toLowerCase().includes(q) || getPoolIdentifier(p).toLowerCase().includes(q));
+        }
         if (proto !== 'all') l = l.filter(p => p.protocol === proto);
         return l;
     }, [pools, search, proto]);
@@ -212,36 +354,53 @@ function PoolList({ apiBaseUrl, onSelect }) {
             {loading ? <div className="smd-loading">加载中...</div> : filtered.length === 0 ? (
                 <div className="smd-empty">暂无活跃仓位的池子</div>
             ) : (
-                <table className="smd-table">
-                    <thead>
-                    <tr>
-                        <th>池子</th>
-                        <th>协议</th>
-                        <th className="right">钱包数</th>
-                        <th className="right">仓位数</th>
-                        <th className="right">最近活跃</th>
-                    </tr>
-                    </thead>
-                    <tbody>
+                <div className="smd-pool-cards">
                     {filtered.map(p => (
-                        <tr key={p.pool_address} className="clickable" onClick={() => onSelect(p)}>
-                            <td>
-                                <span style={{ fontWeight: 500 }}>{p.token0_symbol}/{p.token1_symbol}</span>
-                                {p.fee_tier && <Badge cls="fee" style={{ marginLeft: 6 }}>{formatFeeTier(p.fee_tier)}</Badge>}
-                            </td>
-                            <td><ProtocolBadge protocol={p.protocol} /></td>
-                            <td className="right">{p.wallet_count}</td>
-                            <td className="right">{p.open_position_count}</td>
-                            <td className="right">
+                        <div key={p.pool_address} className="smd-pool-card" onClick={() => onSelect(p)}>
+                            <div className="smd-pool-card-head">
+                                <PairAvatar item={p} size="sm" />
+                                <span className="smd-pool-card-pair">{getPairLabel(p)}</span>
+                                <div className="smd-pool-card-badges">
+                                    <ProtocolBadge protocol={p.protocol} />
+                                    {p.fee_tier && <Badge cls="fee">{formatFeeTier(p.fee_tier)}</Badge>}
+                                </div>
+                            </div>
+                            <div className="smd-pool-card-meta">
+                                <CompactIdentifier value={getPoolIdentifier(p)} />
+                                {p.total_position_amount_usd > 0 && (
+                                    <span className="smd-pool-card-tvl">{formatUSDCompact(p.total_position_amount_usd)}</span>
+                                )}
+                            </div>
+                            <div className="smd-pool-card-foot">
+                                <span>{p.wallet_count} 钱包</span>
+                                <span className="smd-dot-sep">·</span>
+                                <span>{p.open_position_count} 仓位</span>
+                                <span className="smd-pool-card-time">
                                     <span className={`smd-status-dot ${p.latest_event_at && (Date.now() - new Date(p.latest_event_at).getTime()) < 120000 ? 'green' : 'muted'}`}>
                                         {relativeTime(p.latest_event_at)}
                                     </span>
-                            </td>
-                        </tr>
+                                </span>
+                            </div>
+                        </div>
                     ))}
-                    </tbody>
-                </table>
+                </div>
             )}
+        </div>
+    );
+}
+
+function RangeSummary({ position }) {
+    const isClosed = position.status === 'closed';
+    const rangeText = position.price_lower && position.price_upper
+        ? `${position.price_lower} – ${position.price_upper}`
+        : '—';
+
+    return (
+        <div className="smd-range-cell">
+            <div className={`smd-range-main mono muted${isClosed ? ' is-closed' : ''}`}>
+                {rangeText}
+            </div>
+            <div className="smd-range-sub">{formatRangePercent(position.range_percent)}</div>
         </div>
     );
 }
@@ -251,6 +410,7 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet }) {
     const [stats, setStats] = useState(null);
     const [status, setStatus] = useState('open');
     const [loading, setLoading] = useState(true);
+    const poolIdentifier = getPoolIdentifier(pool);
 
     useEffect(() => { fetchSMPoolStats({ apiBaseUrl, poolAddress: pool.pool_address }).then(setStats).catch(() => {}); }, [apiBaseUrl, pool.pool_address]);
     useEffect(() => {
@@ -260,24 +420,23 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet }) {
 
     return (
         <div>
-            <button onClick={onBack} className="smd-back-btn">&larr; 返回池子列表</button>
+            <button onClick={onBack} className="smd-back-btn">
+                <ChevronLeft size={14} />
+                <span>返回池子列表</span>
+            </button>
             <div className="smd-detail-header">
-                <h3 className="smd-detail-title">{pool.token0_symbol}/{pool.token1_symbol}</h3>
+                <PairAvatar item={pool} size="lg" />
+                <h3 className="smd-detail-title">{getPairLabel(pool)}</h3>
                 <ProtocolBadge protocol={pool.protocol} />
                 {pool.fee_tier && <Badge cls="fee">{formatFeeTier(pool.fee_tier)}</Badge>}
-                <span className="smd-detail-addr">{pool.pool_address}</span>
-                <CopyBtn text={pool.pool_address} />
-                <a href={`https://bscscan.com/address/${pool.pool_address}`} target="_blank" rel="noopener noreferrer" className="smd-link">
-                    BSCScan <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
-                </a>
+                <CompactIdentifier value={poolIdentifier} />
             </div>
 
             {stats && (
-                <div className="smd-stats-grid" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
+                <div className="smd-stats-grid smd-stats-grid--pool">
                     <StatCard label="当前价格" value={stats.current_price || '—'} />
-                    <StatCard label="24h 涨跌" value={stats.price_change_24h ? `${stats.price_change_24h}%` : '—'} color={stats.price_change_24h < 0 ? 'red' : undefined} />
                     <StatCard label="钱包数" value={stats.wallet_count} />
-                    <StatCard label="持仓中" value={stats.open_position_count} />
+                    <StatCard label="持仓笔数" value={stats.open_position_count} />
                     <StatCard label="今日关闭" value={stats.closed_today_count} color="red" />
                 </div>
             )}
@@ -298,47 +457,27 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet }) {
             {loading ? <div className="smd-loading">加载中...</div> : positions.length === 0 ? (
                 <div className="smd-empty">{status === 'open' ? '全部已关闭，切换到"全部"查看' : '暂无仓位'}</div>
             ) : (
-                <table className="smd-table">
-                    <thead>
-                    <tr>
-                        <th>钱包</th>
-                        <th>价格区间</th>
-                        <th className="center">区间内</th>
-                        <th>开仓时间</th>
-                        <th>NFT ID</th>
-                        <th className="center">状态</th>
-                        <th className="right">交易</th>
-                    </tr>
-                    </thead>
-                    <tbody>
+                <div className="smd-pos-list">
                     {positions.map(pos => (
-                        <tr key={pos.id} className={pos.status === 'closed' ? 'dim' : ''}>
-                            <td>
-                                <button className="smd-wallet-info" style={{ background: 'none', border: 'none', cursor: 'pointer' }} onClick={() => onSelectWallet(pos.wallet_address)}>
-                                    <WalletDot color={pos.wallet_color} size={16} label={pos.wallet_label || pos.wallet_address} />
-                                    <span className="smd-wallet-info-name">{pos.wallet_label || shortAddr(pos.wallet_address)}</span>
-                                </button>
-                            </td>
-                            <td className={`mono muted${pos.status === 'closed' ? '' : ''}`} style={pos.status === 'closed' ? { textDecoration: 'line-through' } : {}}>
-                                {pos.price_lower || '—'} – {pos.price_upper || '—'}
-                            </td>
-                            <td className="center">
-                                {pos.status === 'open' ? <span className="smd-status-dot green">在区间内</span> : <span className="smd-status-dot muted">—</span>}
-                            </td>
-                            <td className="muted">{pos.opened_at ? new Date(pos.opened_at).toLocaleDateString() : '—'}</td>
-                            <td className="mono muted">#{pos.nft_token_id}</td>
-                            <td className="center">
-                                <span className={`smd-status-dot ${pos.status === 'open' ? 'green' : 'muted'}`}>{pos.status === 'open' ? '持仓中' : '已关闭'}</span>
-                            </td>
-                            <td className="right">
-                                <a href={pos.bscscan_url} target="_blank" rel="noopener noreferrer" className="smd-link">
-                                    {shortAddr(pos.open_tx_hash)} <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
-                                </a>
-                            </td>
-                        </tr>
+                        <div key={pos.id} className={`smd-pos-card${pos.status === 'closed' ? ' closed' : ''}`}>
+                            <div className="smd-pos-card-top">
+                                <WalletIdentity
+                                    address={pos.wallet_address}
+                                    color={pos.wallet_color}
+                                    label={pos.wallet_label || pos.wallet_address}
+                                    onClick={() => onSelectWallet(pos.wallet_address)}
+                                />
+                                <span className="smd-pos-card-amount">{formatUSDCompact(pos.position_amount_usd)}</span>
+                            </div>
+                            <div className="smd-pos-card-range">
+                                <span className={`smd-pos-card-prices${pos.status === 'closed' ? ' is-closed' : ''}`}>
+                                    {pos.price_lower && pos.price_upper ? `${pos.price_lower} – ${pos.price_upper}` : '—'}
+                                </span>
+                                {pos.range_percent > 0 && <span className="smd-pos-card-pct">{formatRangePercent(pos.range_percent)}</span>}
+                            </div>
+                        </div>
                     ))}
-                    </tbody>
-                </table>
+                </div>
             )}
         </div>
     );
@@ -409,15 +548,14 @@ function WalletList({ apiBaseUrl, onSelect, onAdd }) {
             {loading ? <div className="smd-loading">加载中...</div> : filtered.length === 0 ? (
                 <div className="smd-empty">暂无监控钱包，点击"添加钱包"开始</div>
             ) : (
-                <table className="smd-table">
+                <div className="smd-table-wrap">
+                <table className="smd-table smd-table--wallets">
                     <thead>
                     <tr>
                         <th>钱包</th>
-                        <th>来源</th>
+                        <th className="center">状态</th>
                         <th className="right">持仓</th>
                         <th className="right">池子</th>
-                        <th className="right">最近活跃</th>
-                        <th className="center">状态</th>
                         <th className="right">操作</th>
                     </tr>
                     </thead>
@@ -425,27 +563,15 @@ function WalletList({ apiBaseUrl, onSelect, onAdd }) {
                     {filtered.map(w => (
                         <tr key={w.address} className="clickable" onClick={() => onSelect(w.address)}>
                             <td>
-                                <div className="smd-wallet-info">
-                                    <WalletDot color={w.color} size={20} label={w.label || w.address} />
-                                    <div>
-                                        <div>{w.label || shortAddr(w.address)}</div>
-                                        <div className="smd-detail-addr" style={{ marginLeft: 0 }}>{shortAddr(w.address)}</div>
-                                    </div>
-                                </div>
+                                <WalletIdentity address={w.address} color={w.color} label={w.label || w.address} size={20} showCopy />
                             </td>
-                            <td>
-                                <Badge cls={w.source === 'manual' ? 'source-manual' : 'source-contract'}>
-                                    {w.source === 'manual' ? '手动' : '合约'}
-                                </Badge>
+                            <td className="center">
+                                <span className={`smd-status-dot ${w.is_active ? 'green' : 'muted'}`}>
+                                    {w.is_active ? '监控中' : '已暂停'}
+                                </span>
                             </td>
                             <td className="right">{w.open_position_count}</td>
                             <td className="right">{w.active_pool_count}</td>
-                            <td className="right muted">{relativeTime(w.last_active_at)}</td>
-                            <td className="center">
-                                    <span className={`smd-status-dot ${w.is_active ? 'green' : 'muted'}`}>
-                                        {w.is_active ? '监控中' : '已暂停'}
-                                    </span>
-                            </td>
                             <td className="right">
                                 <div className="smd-action-row" style={{ justifyContent: 'flex-end' }}>
                                     <button type="button" className="smd-icon-btn" disabled={busyKey === `wallet-toggle:${w.address}` || busyKey === `wallet-delete:${w.address}`} onClick={e => {
@@ -468,6 +594,7 @@ function WalletList({ apiBaseUrl, onSelect, onAdd }) {
                     ))}
                     </tbody>
                 </table>
+                </div>
             )}
             <ConfirmDialog
                 open={Boolean(confirmState)}
@@ -497,7 +624,19 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool }) {
     const groups = useMemo(() => {
         const m = {};
         (positions || []).forEach(p => {
-            if (!m[p.pool_address]) m[p.pool_address] = { pool_address: p.pool_address, token0_symbol: p.token0_symbol, token1_symbol: p.token1_symbol, fee_tier: p.fee_tier, protocol: p.protocol, positions: [], hasOpen: false };
+            if (!m[p.pool_address]) m[p.pool_address] = {
+                pool_address: p.pool_address,
+                token0_symbol: p.token0_symbol,
+                token1_symbol: p.token1_symbol,
+                trading_pair: p.trading_pair,
+                display_token_address: p.display_token_address,
+                display_token_symbol: p.display_token_symbol,
+                display_token_logo_url: p.display_token_logo_url,
+                fee_tier: p.fee_tier,
+                protocol: p.protocol,
+                positions: [],
+                hasOpen: false,
+            };
             m[p.pool_address].positions.push(p);
             if (p.status === 'open') m[p.pool_address].hasOpen = true;
         });
@@ -506,19 +645,21 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool }) {
 
     return (
         <div>
-            <button onClick={onBack} className="smd-back-btn">&larr; 返回钱包列表</button>
+            <button onClick={onBack} className="smd-back-btn">
+                <ChevronLeft size={14} />
+                <span>返回钱包列表</span>
+            </button>
             {info && (
                 <div style={{ marginBottom: 16 }}>
                     <div className="smd-detail-header">
-                        <WalletDot color={info.color || '#7F77DD'} size={36} label={info.label || addr} />
+                        <WalletAvatar address={addr} color={info.color || '#7F77DD'} size={36} />
                         <div>
-                            <h3 className="smd-detail-title">{info.label || '未命名钱包'}</h3>
-                            <span className="smd-detail-addr">{addr}</span>
-                            <CopyBtn text={addr} />
+                            <h3 className="smd-detail-title">{info.label || `钱包 ${tailAddr(addr)}`}</h3>
+                            <CompactIdentifier value={addr} label="钱包" />
                         </div>
                     </div>
                     <div className="smd-stats-grid">
-                        <StatCard label="持仓中" value={info.open_position_count} />
+                        <StatCard label="持仓笔数" value={info.open_position_count} />
                         <StatCard label="活跃池子" value={info.active_pool_count} />
                         <StatCard label="总添加次数" value={info.total_add_count} />
                         <StatCard label="总移除次数" value={info.total_remove_count} />
@@ -543,41 +684,30 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool }) {
                 <div key={g.pool_address} className={`smd-pool-group${!g.hasOpen ? ' dim' : ''}`}>
                     <div className="smd-pool-group-header">
                         <div className="smd-pool-group-left">
-                            <span className="smd-pool-group-pair">{g.token0_symbol}/{g.token1_symbol}</span>
+                            <div className="smd-pair-row smd-pair-row--group">
+                                <PairAvatar item={g} size="sm" />
+                                <span className="smd-pool-group-pair">{getPairLabel(g)}</span>
+                            </div>
+                            <CompactIdentifier value={g.pool_address} />
                             {g.fee_tier && <Badge cls="fee">{formatFeeTier(g.fee_tier)}</Badge>}
                             <ProtocolBadge protocol={g.protocol} />
                             <span className="smd-pool-group-count">{g.positions.length} 个仓位</span>
                         </div>
                         <button className="smd-link" onClick={() => onSelectPool({
-                            pool_address: g.pool_address, token0_symbol: g.token0_symbol, token1_symbol: g.token1_symbol, fee_tier: g.fee_tier, protocol: g.protocol,
+                            pool_address: g.pool_address, token0_symbol: g.token0_symbol, token1_symbol: g.token1_symbol, trading_pair: g.trading_pair, display_token_address: g.display_token_address, display_token_symbol: g.display_token_symbol, display_token_logo_url: g.display_token_logo_url, fee_tier: g.fee_tier, protocol: g.protocol,
                         })}>池子详情 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} /></button>
                     </div>
-                    <table className="smd-table">
-                        <thead><tr>
-                            <th>价格区间</th>
-                            <th className="center">状态</th>
-                            <th>NFT</th>
-                            <th className="right">交易</th>
-                        </tr></thead>
-                        <tbody>
+                    <div className="smd-pos-list smd-pos-list--compact">
                         {g.positions.map(pos => (
-                            <tr key={pos.id} className={pos.status === 'closed' ? 'dim' : ''}>
-                                <td className="mono muted" style={pos.status === 'closed' ? { textDecoration: 'line-through' } : {}}>
-                                    {pos.price_lower || '—'} – {pos.price_upper || '—'}
-                                </td>
-                                <td className="center">
-                                    <span className={`smd-status-dot ${pos.status === 'open' ? 'green' : 'muted'}`}>{pos.status}</span>
-                                </td>
-                                <td className="mono muted">#{pos.nft_token_id}</td>
-                                <td className="right">
-                                    <a href={pos.bscscan_url} target="_blank" rel="noopener noreferrer" className="smd-link">
-                                        <ExternalLink size={10} />
-                                    </a>
-                                </td>
-                            </tr>
+                            <div key={pos.id} className={`smd-pos-card smd-pos-card--compact${pos.status === 'closed' ? ' closed' : ''}`}>
+                                <span className="smd-pos-card-amount">{formatUSDCompact(pos.position_amount_usd)}</span>
+                                <span className={`smd-pos-card-prices${pos.status === 'closed' ? ' is-closed' : ''}`}>
+                                    {pos.price_lower && pos.price_upper ? `${pos.price_lower} – ${pos.price_upper}` : '—'}
+                                </span>
+                                {pos.range_percent > 0 && <span className="smd-pos-card-pct">{formatRangePercent(pos.range_percent)}</span>}
+                            </div>
                         ))}
-                        </tbody>
-                    </table>
+                    </div>
                 </div>
             ))}
         </div>
@@ -585,8 +715,6 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool }) {
 }
 
 function SettingsPanel({ apiBaseUrl }) {
-    const [tab, setTab] = useState('wallets');
-    const [wallets, setWallets] = useState([]);
     const [contracts, setContracts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [busyKey, setBusyKey] = useState('');
@@ -594,15 +722,9 @@ function SettingsPanel({ apiBaseUrl }) {
     const [confirmState, setConfirmState] = useState(null);
     const [showAdd, setShowAdd] = useState(false);
     const [newAddr, setNewAddr] = useState('');
-    const [newLabel, setNewLabel] = useState('');
     const [newProto, setNewProto] = useState('');
     const [newDesc, setNewDesc] = useState('');
 
-    const loadWallets = useCallback(async () => {
-        const d = await fetchSMWallets({ apiBaseUrl, size: 100 });
-        setWallets(d?.list || []);
-        return d;
-    }, [apiBaseUrl]);
     const loadContracts = useCallback(async () => {
         const d = await fetchSMContracts({ apiBaseUrl });
         setContracts(d?.list || []);
@@ -611,10 +733,10 @@ function SettingsPanel({ apiBaseUrl }) {
 
     useEffect(() => {
         setLoading(true);
-        Promise.all([loadWallets(), loadContracts()])
+        loadContracts()
             .catch((err) => setActionError(String(err?.message || err || '加载失败')))
             .finally(() => setLoading(false));
-    }, [loadWallets, loadContracts]);
+    }, [loadContracts]);
 
     const runAction = useCallback(async (key, action, refresh) => {
         setBusyKey(key);
@@ -629,14 +751,6 @@ function SettingsPanel({ apiBaseUrl }) {
         }
     }, []);
 
-    const handleAddWallet = async () => {
-        await runAction('add-wallet', async () => {
-            await addSMWallet({ apiBaseUrl, address: newAddr, label: newLabel });
-            setShowAdd(false);
-            setNewAddr('');
-            setNewLabel('');
-        }, loadWallets);
-    };
     const handleAddContract = async () => {
         await runAction('add-contract', async () => {
             await addSMContract({ apiBaseUrl, contract_address: newAddr, protocol: newProto, description: newDesc });
@@ -669,21 +783,15 @@ function SettingsPanel({ apiBaseUrl }) {
         setConfirmState({ key, title, description, action, refresh });
     };
 
-    const addBusy = busyKey === 'add-wallet' || busyKey === 'add-contract';
-    const deleteBusy = busyKey.startsWith('wallet-delete:') || busyKey.startsWith('contract-delete:');
+    const addBusy = busyKey === 'add-contract';
+    const deleteBusy = busyKey.startsWith('contract-delete:');
 
     return (
         <div>
             <div className="smd-search-row">
-                <div className="smd-filter-group">
-                    {[['wallets', '钱包'], ['contracts', '合约']].map(([t, label]) => (
-                        <button type="button" key={t} className={`smd-filter-btn${tab === t ? ' active' : ''}`} onClick={() => { setTab(t); setShowAdd(false); setActionError(''); }}>
-                            {label}
-                        </button>
-                    ))}
-                </div>
+                <div className="smd-section-title">合约管理</div>
                 <button type="button" onClick={() => setShowAdd(!showAdd)} className="smd-add-btn" style={{ marginLeft: 'auto' }}>
-                    <Plus size={14} /> 添加{tab === 'wallets' ? '钱包' : '合约'}
+                    <Plus size={14} /> 添加合约
                 </button>
             </div>
 
@@ -691,62 +799,20 @@ function SettingsPanel({ apiBaseUrl }) {
 
             {showAdd && (
                 <div className="smd-add-form">
-                    <input placeholder={tab === 'wallets' ? '0x...' : '合约地址'} value={newAddr} onChange={e => setNewAddr(e.target.value)} />
-                    {tab === 'wallets' ? (
-                        <input className="w-sm" placeholder="标签" value={newLabel} onChange={e => setNewLabel(e.target.value)} />
-                    ) : (<>
+                    <input placeholder="合约地址" value={newAddr} onChange={e => setNewAddr(e.target.value)} />
+                    <>
                         <input className="w-md" placeholder="协议" value={newProto} onChange={e => setNewProto(e.target.value)} />
                         <input className="w-sm" placeholder="描述" value={newDesc} onChange={e => setNewDesc(e.target.value)} />
-                    </>)}
-                    <button type="button" disabled={addBusy} onClick={tab === 'wallets' ? handleAddWallet : handleAddContract}>
+                    </>
+                    <button type="button" disabled={addBusy} onClick={handleAddContract}>
                         {addBusy ? '处理中...' : '添加'}
                     </button>
                 </div>
             )}
 
-            {loading ? <div className="smd-loading">加载中...</div> : tab === 'wallets' ? (
-                <table className="smd-table">
-                    <thead><tr>
-                        <th>地址</th>
-                        <th>标签</th>
-                        <th>来源</th>
-                        <th className="center">状态</th>
-                        <th className="right">操作</th>
-                    </tr></thead>
-                    <tbody>
-                    {wallets.map(w => (
-                        <tr key={w.address}>
-                            <td className="mono">{shortAddr(w.address)}</td>
-                            <td className="muted">{w.label || '—'}</td>
-                            <td><Badge cls={w.source === 'manual' ? 'source-manual' : 'source-contract'}>{w.source}</Badge></td>
-                            <td className="center"><span className={`smd-status-dot ${w.is_active ? 'green' : 'muted'}`}>{w.is_active ? '活跃' : '已暂停'}</span></td>
-                            <td className="right">
-                                <div className="smd-action-row" style={{ justifyContent: 'flex-end' }}>
-                                    <button type="button" className="smd-icon-btn" disabled={busyKey === `wallet-toggle:${w.address}` || busyKey === `wallet-delete:${w.address}`} onClick={() => runAction(`wallet-toggle:${w.address}`, () => updateSMWallet({ apiBaseUrl, address: w.address, updates: { is_active: !w.is_active } }), loadWallets)}>
-                                        {w.is_active ? <Pause size={14} /> : <Play size={14} />}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        className="smd-icon-btn danger"
-                                        disabled={busyKey === `wallet-delete:${w.address}` || busyKey === `wallet-toggle:${w.address}`}
-                                        onClick={() => openDeleteConfirm({
-                                            key: `wallet-delete:${w.address}`,
-                                            title: '删除钱包',
-                                            description: `确认删除钱包 ${shortAddr(w.address)} 吗？`,
-                                            action: () => deleteSMWallet({ apiBaseUrl, address: w.address }),
-                                            refresh: loadWallets,
-                                        })}
-                                    >
-                                        <Trash2 size={14} />
-                                    </button>
-                                </div>
-                            </td>
-                        </tr>
-                    ))}
-                    </tbody>
-                </table>
-            ) : (
-                <table className="smd-table">
+            {loading ? <div className="smd-loading">加载中...</div> : (
+                <div className="smd-table-wrap">
+                <table className="smd-table smd-table--settings">
                     <thead><tr>
                         <th>地址</th>
                         <th>协议</th>
@@ -793,6 +859,7 @@ function SettingsPanel({ apiBaseUrl }) {
                     ))}
                     </tbody>
                 </table>
+                </div>
             )}
             <ConfirmDialog
                 open={Boolean(confirmState)}
@@ -875,7 +942,7 @@ export default function SmartMoneyDashboard({ apiBaseUrl }) {
                     <div className="smd-stats-grid">
                         <StatCard label="活跃池子" value={stats.active_pool_count} />
                         <StatCard label="监控钱包" value={stats.monitored_wallet_count} />
-                        <StatCard label="持仓中" value={stats.open_position_count} />
+                        <StatCard label="持仓笔数" value={stats.open_position_count} />
                         <StatCard label="今日关闭" value={stats.closed_today_count} color="red" />
                     </div>
                 )}
@@ -885,7 +952,7 @@ export default function SmartMoneyDashboard({ apiBaseUrl }) {
                         {[
                             { key: 'pools', label: '池子视图', icon: Eye },
                             { key: 'wallets', label: '钱包视图', icon: Wallet },
-                            { key: 'settings', label: '设置', icon: Settings },
+                            { key: 'settings', label: '合约视图', icon: Settings },
                         ].map(({ key, label, icon: Icon }) => (
                             <button key={key} className={`smd-tab${view === key ? ' active' : ''}`} onClick={() => setView(key)}>
                                 <Icon size={16} /> {label}

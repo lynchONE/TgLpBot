@@ -192,14 +192,8 @@ func (s *Server) handleGetPools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pools, updatedAt := buildPoolCatalogResponse(poolRows, opts)
-	resp := map[string]any{
-		"chain":             opts.Chain,
-		"sort":              opts.Sort,
-		"timeframe_minutes": opts.TimeframeMinutes,
-		"updated_at":        updatedAt.Format(time.RFC3339),
-		"data":              pools,
-	}
+	resp := buildPoolCatalogResponse(poolRows, opts)
+	s.enrichHotPoolDisplayTokens(ctx, opts.Chain, resp.Data)
 	b, err := marshalJSONPayload(resp)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

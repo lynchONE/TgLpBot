@@ -4,12 +4,10 @@ import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
-	"TgLpBot/service/pool"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
-	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,30 +17,15 @@ import (
 
 const (
 	defaultSyncInterval = 60 * time.Second
-	defaultFetchDelay   = 250 * time.Millisecond
 	defaultRetention    = 24 * time.Hour
 )
 
 type Service struct {
-	poolm       *PoolMClient
-	dexScreener *DexScreenerClient
-	poolService *pool.PoolService
+	poolm *PoolMClient
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
 	ticker   *time.Ticker
-}
-
-type poolKey struct {
-	proto string
-	addr  string
-}
-
-type poolCandidate struct {
-	Key       poolKey
-	ByWindow  map[int]PoolMFeePool
-	Best      PoolMFeePool
-	BestScore float64
 }
 
 func NewService() *Service {
@@ -51,10 +34,8 @@ func NewService() *Service {
 		baseURL = config.AppConfig.PoolsSyncPoolMBaseURL
 	}
 	return &Service{
-		poolm:       NewPoolMClient(baseURL),
-		dexScreener: NewDexScreenerClient(""),
-		poolService: pool.NewPoolService(),
-		stopCh:      make(chan struct{}),
+		poolm:  NewPoolMClient(baseURL),
+		stopCh: make(chan struct{}),
 	}
 }
 
@@ -108,17 +89,17 @@ func (s *Service) runOnce() {
 	defer cancel()
 
 	start := time.Now()
-	candidates, err := s.fetchCandidates(ctx)
+	snapshot, err := s.fetchSnapshot(ctx)
 	if err != nil {
-		log.Printf("[PoolSync] fetch candidates failed: %v", err)
+		log.Printf("[PoolSync] fetch snapshot failed: %v", err)
 		return
 	}
-	if len(candidates) == 0 {
+	if snapshot == nil || len(snapshot.Data) == 0 {
 		log.Printf("[PoolSync] no pools fetched")
 		return
 	}
 
-	rows, err := s.buildRows(ctx, candidates)
+	rows, err := s.buildRows(snapshot, time.Now())
 	if err != nil {
 		log.Printf("[PoolSync] build rows failed: %v", err)
 		return
@@ -139,10 +120,9 @@ func (s *Service) runOnce() {
 	log.Printf("[PoolSync] synced %d pools in %s", len(rows), time.Since(start).String())
 }
 
-func (s *Service) fetchCandidates(ctx context.Context) ([]poolCandidate, error) {
+func (s *Service) fetchSnapshot(ctx context.Context) (*PoolMTopFeesResponse, error) {
 	chain := "bsc"
 	dexes := []string{"pcsv3", "univ3", "univ4"}
-	delay := defaultFetchDelay
 	if config.AppConfig != nil {
 		if v := strings.ToLower(strings.TrimSpace(config.AppConfig.PoolsSyncChain)); v != "" {
 			chain = v
@@ -150,123 +130,27 @@ func (s *Service) fetchCandidates(ctx context.Context) ([]poolCandidate, error) 
 		if v := poolSyncDexList(config.AppConfig.PoolsSyncDexes); len(v) > 0 {
 			dexes = v
 		}
-		if config.AppConfig.PoolsSyncFetchDelayMillis > 0 {
-			delay = time.Duration(config.AppConfig.PoolsSyncFetchDelayMillis) * time.Millisecond
-		}
 	}
-
-	timeframes := []int{5, 60}
-	dexParam := strings.Join(dexes, ",")
-	candidates := make(map[poolKey]*poolCandidate)
-
-	for _, tf := range timeframes {
-		resp, err := s.poolm.TopFees(ctx, tf, chain, dexParam)
-		if err != nil {
-			return nil, err
-		}
-
-		for _, p := range resp.Data {
-			addr := normalizePairAddress(p.PoolAddress)
-			if addr == "" {
-				continue
-			}
-			proto := normalizePoolMProtocolVersion(p, addr)
-			if proto == "" {
-				continue
-			}
-
-			key := poolKey{proto: proto, addr: addr}
-			candidate, ok := candidates[key]
-			if !ok {
-				candidate = &poolCandidate{
-					Key:      key,
-					ByWindow: make(map[int]PoolMFeePool),
-				}
-				candidates[key] = candidate
-			}
-			candidate.ByWindow[tf] = p
-			score := candidateScore(p)
-			if score >= candidate.BestScore {
-				candidate.Best = p
-				candidate.BestScore = score
-			}
-		}
-
-		if delay > 0 {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(delay):
-			}
-		}
-	}
-
-	out := make([]poolCandidate, 0, len(candidates))
-	for _, candidate := range candidates {
-		if candidate == nil {
-			continue
-		}
-		out = append(out, *candidate)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].BestScore > out[j].BestScore
-	})
-	return out, nil
+	return s.poolm.TopFees(ctx, 5, chain, strings.Join(dexes, ","))
 }
 
-func (s *Service) buildRows(ctx context.Context, candidates []poolCandidate) ([]models.Pool, error) {
-	chain := "bsc"
-	if config.AppConfig != nil && strings.TrimSpace(config.AppConfig.PoolsSyncChain) != "" {
-		chain = strings.ToLower(strings.TrimSpace(config.AppConfig.PoolsSyncChain))
-	}
-
-	workers := 8
-	if len(candidates) < workers {
-		workers = len(candidates)
-	}
-	if workers < 1 {
+func (s *Service) buildRows(snapshot *PoolMTopFeesResponse, updatedAt time.Time) ([]models.Pool, error) {
+	if snapshot == nil {
 		return nil, nil
 	}
-
-	type result struct {
-		row *models.Pool
-		err error
-	}
-
-	jobs := make(chan poolCandidate)
-	results := make(chan result, len(candidates))
-
-	var wg sync.WaitGroup
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for candidate := range jobs {
-				row, err := s.buildRow(ctx, chain, candidate)
-				results <- result{row: row, err: err}
-			}
-		}()
-	}
-
-	for _, candidate := range candidates {
-		jobs <- candidate
-	}
-	close(jobs)
-	wg.Wait()
-	close(results)
-
-	rows := make([]models.Pool, 0, len(candidates))
+	rows := make([]models.Pool, 0, len(snapshot.Data))
 	var firstErr error
-	for result := range results {
-		if result.err != nil {
-			log.Printf("[PoolSync] build row warning: %v", result.err)
+	for _, item := range snapshot.Data {
+		row, err := s.buildRow(snapshot, item, updatedAt)
+		if err != nil {
+			log.Printf("[PoolSync] build row warning: %v", err)
 			if firstErr == nil {
-				firstErr = result.err
+				firstErr = err
 			}
 			continue
 		}
-		if result.row != nil {
-			rows = append(rows, *result.row)
+		if row != nil {
+			rows = append(rows, *row)
 		}
 	}
 	if len(rows) == 0 && firstErr != nil {
@@ -275,150 +159,200 @@ func (s *Service) buildRows(ctx context.Context, candidates []poolCandidate) ([]
 	return rows, nil
 }
 
-func (s *Service) buildRow(ctx context.Context, chain string, candidate poolCandidate) (*models.Pool, error) {
-	best := candidate.Best
-	if strings.TrimSpace(best.PoolAddress) == "" {
+func (s *Service) buildRow(snapshot *PoolMTopFeesResponse, item PoolMFeePool, updatedAt time.Time) (*models.Pool, error) {
+	addr := normalizePairAddress(item.PoolAddress)
+	if addr == "" {
 		return nil, fmt.Errorf("empty pool address")
 	}
 
-	var (
-		pair     *DexScreenerPair
-		poolInfo *pool.PoolInfo
-	)
-
-	pairCtx, pairCancel := context.WithTimeout(ctx, 12*time.Second)
-	defer pairCancel()
-	pair, _ = s.dexScreener.GetPair(pairCtx, chain, candidate.Key.addr)
-
-	_, infoCancel := context.WithTimeout(ctx, 12*time.Second)
-	defer infoCancel()
-	switch candidate.Key.proto {
-	case "v4":
-		if strings.EqualFold(chain, "bsc") {
-			poolInfo, _ = s.poolService.GetV4PoolInfo(candidate.Key.addr)
-		}
-	default:
-		poolInfo, _ = s.poolService.GetPoolInfoForChain(chain, candidate.Key.addr)
+	protocolVersion := normalizePoolMProtocolVersion(item, addr)
+	if protocolVersion == "" {
+		return nil, fmt.Errorf("unknown protocol version for pool %s", addr)
 	}
+
+	sourceRequestedLimit := snapshot.RequestedLimit
+	if sourceRequestedLimit <= 0 {
+		sourceRequestedLimit = len(snapshot.Data)
+	}
+
+	priceChange := metricTrendPriceChange(item.MetricTrends)
+	name := strings.TrimSpace(item.TradingPair)
+	if name == "" {
+		name = addr
+	}
+	dexName := strings.TrimSpace(firstNonEmpty(item.FactoryName, item.Dex))
 
 	row := models.Pool{
-		ID:        candidate.Key.addr,
+		ID:        addr,
 		Type:      "pool",
-		Address:   candidate.Key.addr,
-		Name:      strings.TrimSpace(best.TradingPair),
-		UpdatedAt: time.Now(),
-	}
+		Address:   addr,
+		UpdatedAt: updatedAt,
 
-	if row.Name == "" && poolInfo != nil {
-		row.Name = strings.TrimSpace(poolInfo.Token0Symbol + "/" + poolInfo.Token1Symbol)
-	}
-	if row.Name == "" && pair != nil {
-		row.Name = strings.TrimSpace(pair.BaseToken.Symbol + "/" + pair.QuoteToken.Symbol)
-	}
-	if row.Name == "" {
-		row.Name = candidate.Key.addr
-	}
+		Name:         name,
+		BaseTokenID:  normalizePairAddress(item.Token0Address),
+		QuoteTokenID: normalizePairAddress(item.Token1Address),
+		DexID:        dexName,
 
-	row.DexID = strings.TrimSpace(best.Dex)
-	if pair != nil && strings.TrimSpace(pair.DexID) != "" {
-		row.DexID = strings.TrimSpace(pair.DexID)
-	} else if poolInfo != nil && strings.TrimSpace(poolInfo.Exchange) != "" {
-		row.DexID = strings.TrimSpace(poolInfo.Exchange)
-	}
+		BaseTokenPriceUSD: item.CurrentTokenPrice,
+		FDVUSD:            item.CurrentTokenFDVUSD,
+		MarketCapUSD:      item.CurrentTokenFDVUSD,
+		ReserveInUSD:      item.CurrentPoolValue,
+		PriceChangeM5:     priceChange,
+		PoolFeePercentage: item.FeePercentage,
+		VolumeM5:          item.TotalVolume,
+		FeeUSDM5:          item.TotalFees,
+		FeeAPRM5:          calcFeeAPR(item.TotalFees, item.CurrentPoolValue, 5*time.Minute),
 
-	row.BaseTokenID = normalizePairAddress(best.Token0Address)
-	row.QuoteTokenID = normalizePairAddress(best.Token1Address)
-	if pair != nil {
-		if v := normalizePairAddress(pair.BaseToken.Address); v != "" {
-			row.BaseTokenID = v
-		}
-		if v := normalizePairAddress(pair.QuoteToken.Address); v != "" {
-			row.QuoteTokenID = v
-		}
+		Chain:                       normalizeLower(firstNonEmpty(item.Chain, snapshot.RequestedChain)),
+		ProtocolVersion:             protocolVersion,
+		FactoryName:                 strings.TrimSpace(item.FactoryName),
+		FactoryAddress:              normalizePairAddress(item.FactoryAddress),
+		Token0Symbol:                strings.TrimSpace(item.Token0Symbol),
+		Token1Symbol:                strings.TrimSpace(item.Token1Symbol),
+		Token0Name:                  strings.TrimSpace(item.Token0Name),
+		Token1Name:                  strings.TrimSpace(item.Token1Name),
+		Token0Decimals:              item.Token0Decimals,
+		Token1Decimals:              item.Token1Decimals,
+		StableCoinSymbol:            strings.TrimSpace(item.StableCoinSymbol),
+		PoolMFeeRate:                item.FeeRate,
+		HookAddress:                 normalizePairAddress(item.HookAddress),
+		TransactionCount:            uint32(nonNegativeInt(item.TransactionCount)),
+		TotalFees:                   item.TotalFees,
+		TotalVolume:                 item.TotalVolume,
+		CurrentPoolValue:            item.CurrentPoolValue,
+		CurrentToken0Balance:        item.CurrentToken0Balance,
+		CurrentToken1Balance:        item.CurrentToken1Balance,
+		CurrentTokenPrice:           item.CurrentTokenPrice,
+		PricedTokenAddress:          normalizePairAddress(item.PricedTokenAddress),
+		CurrentTokenTotalSupply:     item.CurrentTokenTotalSupply,
+		CurrentTokenFDVUSD:          item.CurrentTokenFDVUSD,
+		TokenSupplyUpdatedAt:        parsePoolMTime(item.TokenSupplyUpdatedAt),
+		PriceDisplay:                strings.TrimSpace(item.PriceDisplay),
+		LastSwapAt:                  parsePoolMTime(item.LastSwapAt),
+		TickSpacing:                 copyIntPtr(item.TickSpacing),
+		CurrentTick:                 item.CurrentTick,
+		CurrentSqrtPriceX96:         strings.TrimSpace(item.CurrentSqrtPriceX96),
+		CurrentLiquidity:            strings.TrimSpace(item.CurrentLiquidity),
+		StableCoinPosition:          strings.TrimSpace(item.StableCoinPosition),
+		UniqueWallets:               uint32(nonNegativeInt(item.UniqueWallets)),
+		TopWalletVolPct:             item.TopWalletVolPct,
+		ActiveTickCount:             item.ActiveTickCount,
+		ActiveLiquidityUSD:          item.ActiveLiquidityUSD,
+		ActiveLiquidityRatio:        item.ActiveLiquidityRatio,
+		LiquidityCurrentTick:        item.LiquidityCurrentTick,
+		LiquidityTickSpacing:        item.LiquidityTickSpacing,
+		SourceTimeframe:             strings.TrimSpace(snapshot.Timeframe),
+		SourceRequestedLimit:        sourceRequestedLimit,
+		SourceRequestedChain:        normalizeLower(snapshot.RequestedChain),
+		SourceTotalPools:            snapshot.TotalPools,
+		SourceRequestedProtocolJSON: marshalJSONString(snapshot.RequestedProtocol, "[]"),
+		SourceRequestedDexJSON:      marshalJSONString(snapshot.RequestedDex, "[]"),
+		MetricTrendsIndexJSON:       jsonText(snapshot.MetricTrendsIndex, "[]"),
+		LiquidityTicksIndexJSON:     jsonText(snapshot.LiquidityTicksIndex, "[]"),
+		MetricTrendsJSON:            jsonText(item.MetricTrends, "[]"),
+		LiquidityTicksJSON:          jsonText(item.LiquidityTicks, "[]"),
+		BadgesJSON:                  jsonText(item.Badges, "[]"),
+		SourcePayloadJSON:           marshalJSONString(item, "{}"),
 	}
-	if poolInfo != nil {
-		if v := normalizePairAddress(poolInfo.Token0); v != "" {
-			row.BaseTokenID = v
-		}
-		if v := normalizePairAddress(poolInfo.Token1); v != "" {
-			row.QuoteTokenID = v
-		}
-	}
-
-	row.BaseTokenPriceUSD = parseFloatString(pairValue(pair, func(p *DexScreenerPair) string { return p.PriceUSD }))
-	if row.BaseTokenPriceUSD <= 0 {
-		row.BaseTokenPriceUSD = best.CurrentTokenPrice
-	}
-	row.BaseTokenPriceNativeCurrency = parseFloatString(pairValue(pair, func(p *DexScreenerPair) string { return p.PriceNative }))
-	row.QuoteTokenPriceUSD = 0
-	row.QuoteTokenPriceNativeCurrency = 0
-	row.BaseTokenPriceQuoteToken = 0
-	row.QuoteTokenPriceBaseToken = 0
-
-	if pair != nil {
-		if pair.PairCreatedAt > 0 {
-			t := time.UnixMilli(pair.PairCreatedAt).UTC()
-			row.PoolCreatedAt = &t
-		}
-		row.FDVUSD = pair.FDV
-		row.MarketCapUSD = pair.MarketCap
-		row.ReserveInUSD = pair.Liquidity.USD
-		row.PriceChangeM5 = pair.PriceChange.M5
-		row.PriceChangeH1 = pair.PriceChange.H1
-		row.PriceChangeH6 = pair.PriceChange.H6
-		row.PriceChangeH24 = pair.PriceChange.H24
-		row.VolumeM5 = pair.Volume.M5
-		row.VolumeH1 = pair.Volume.H1
-		row.VolumeH6 = pair.Volume.H6
-		row.VolumeH24 = pair.Volume.H24
-		row.TransactionsH24Buys = uint32(maxInt(pair.Txns.H24.Buys, 0))
-		row.TransactionsH24Sells = uint32(maxInt(pair.Txns.H24.Sells, 0))
-		row.TransactionsH24Buyers = uint32(maxInt(pair.Txns.H24.Buyers, 0))
-		row.TransactionsH24Sellers = uint32(maxInt(pair.Txns.H24.Sellers, 0))
-	}
-
-	if row.ReserveInUSD <= 0 {
-		row.ReserveInUSD = best.CurrentPoolValue
-	}
-	if row.VolumeM5 <= 0 {
-		if p, ok := candidate.ByWindow[5]; ok {
-			row.VolumeM5 = p.TotalVolume
-		}
-	}
-	if row.VolumeH1 <= 0 {
-		if p, ok := candidate.ByWindow[60]; ok {
-			row.VolumeH1 = p.TotalVolume
-		}
-	}
-
-	row.PoolFeePercentage = best.FeePercentage
-	if row.PoolFeePercentage <= 0 && poolInfo != nil && poolInfo.Fee > 0 {
-		row.PoolFeePercentage = float64(poolInfo.Fee) / 10000.0
-	}
-	if row.PoolFeePercentage < 0 {
-		row.PoolFeePercentage = 0
-	}
-
-	if p, ok := candidate.ByWindow[5]; ok {
-		row.FeeUSDM5 = p.TotalFees
-	}
-	if p, ok := candidate.ByWindow[60]; ok {
-		row.FeeUSDH1 = p.TotalFees
-	}
-	if row.FeeUSDM5 <= 0 {
-		row.FeeUSDM5 = calcFeeUSD(row.VolumeM5, row.PoolFeePercentage)
-	}
-	if row.FeeUSDH1 <= 0 {
-		row.FeeUSDH1 = calcFeeUSD(row.VolumeH1, row.PoolFeePercentage)
-	}
-	row.FeeUSDH6 = calcFeeUSD(row.VolumeH6, row.PoolFeePercentage)
-	row.FeeUSDH24 = calcFeeUSD(row.VolumeH24, row.PoolFeePercentage)
-	row.FeeAPRM5 = calcFeeAPR(row.FeeUSDM5, row.ReserveInUSD, 5*time.Minute)
-	row.FeeAPRH1 = calcFeeAPR(row.FeeUSDH1, row.ReserveInUSD, time.Hour)
-	row.FeeAPRH6 = calcFeeAPR(row.FeeUSDH6, row.ReserveInUSD, 6*time.Hour)
-	row.FeeAPRH24 = calcFeeAPR(row.FeeUSDH24, row.ReserveInUSD, 24*time.Hour)
 
 	return &row, nil
+}
+
+func parsePoolMTime(raw string) *time.Time {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+	}
+	for _, layout := range layouts {
+		if ts, err := time.Parse(layout, raw); err == nil {
+			out := ts.UTC()
+			return &out
+		}
+	}
+	return nil
+}
+
+func jsonText(raw json.RawMessage, fallback string) string {
+	text := strings.TrimSpace(string(raw))
+	if text == "" {
+		return fallback
+	}
+	return text
+}
+
+func marshalJSONString(value any, fallback string) string {
+	b, err := json.Marshal(value)
+	if err != nil {
+		return fallback
+	}
+	text := strings.TrimSpace(string(b))
+	if text == "" {
+		return fallback
+	}
+	return text
+}
+
+func copyIntPtr(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	v := *value
+	return &v
+}
+
+func metricTrendPriceChange(raw json.RawMessage) float64 {
+	if len(raw) == 0 {
+		return 0
+	}
+	var rows [][]float64
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return 0
+	}
+	var first float64
+	var last float64
+	for _, row := range rows {
+		if len(row) < 5 {
+			continue
+		}
+		price := row[4]
+		if price <= 0 {
+			continue
+		}
+		if first <= 0 {
+			first = price
+		}
+		last = price
+	}
+	if first <= 0 || last <= 0 {
+		return 0
+	}
+	return (last/first - 1) * 100
+}
+
+func nonNegativeInt(value int) int {
+	if value < 0 {
+		return 0
+	}
+	return value
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func normalizeLower(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func (s *Service) upsertRows(ctx context.Context, rows []models.Pool) error {
@@ -521,47 +455,10 @@ func normalizePoolMProtocolVersion(p PoolMFeePool, poolAddr string) string {
 	}
 }
 
-func candidateScore(p PoolMFeePool) float64 {
-	return p.TotalFees + p.TotalVolume + p.CurrentPoolValue + float64(maxInt(p.TransactionCount, 0))
-}
-
-func calcFeeUSD(volume float64, feePct float64) float64 {
-	if volume <= 0 || feePct <= 0 {
-		return 0
-	}
-	return volume * feePct / 100.0
-}
-
 func calcFeeAPR(feeUSD float64, reserveUSD float64, window time.Duration) float64 {
 	if feeUSD <= 0 || reserveUSD <= 0 || window <= 0 {
 		return 0
 	}
 	annualized := feeUSD * (365 * 24 * float64(time.Hour)) / float64(window)
 	return annualized / reserveUSD * 100.0
-}
-
-func parseFloatString(raw string) float64 {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return 0
-	}
-	v, err := strconv.ParseFloat(raw, 64)
-	if err != nil {
-		return 0
-	}
-	return v
-}
-
-func pairValue(pair *DexScreenerPair, pick func(*DexScreenerPair) string) string {
-	if pair == nil || pick == nil {
-		return ""
-	}
-	return pick(pair)
-}
-
-func maxInt(a int, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

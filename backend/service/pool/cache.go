@@ -11,10 +11,13 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v8"
+	"golang.org/x/sync/singleflight"
 )
 
 const poolInfoCachePrefix = "pool:info"
 const poolInfoCacheTTL = 24 * time.Hour
+
+var poolInfoSingleflight singleflight.Group
 
 func poolInfoCacheKey(chain string, poolVersion string, poolID string) string {
 	chain = config.NormalizeChain(chain)
@@ -77,19 +80,31 @@ func (s *PoolService) GetPoolInfoForVersionCached(chain string, poolVersion stri
 		return cached, nil
 	}
 
-	var (
-		info *PoolInfo
-		err  error
-	)
-	switch poolVersion {
-	case "v4":
-		info, err = s.GetV4PoolInfo(poolID)
-	default:
-		info, err = s.GetPoolInfoForChain(chain, poolID)
-	}
+	key := poolInfoCacheKey(chain, poolVersion, poolID)
+	v, err, _ := poolInfoSingleflight.Do(key, func() (interface{}, error) {
+		if cached, ok := readPoolInfoCache(chain, poolVersion, poolID); ok {
+			return cached, nil
+		}
+
+		var (
+			info *PoolInfo
+			err  error
+		)
+		switch poolVersion {
+		case "v4":
+			info, err = s.GetV4PoolInfo(poolID)
+		default:
+			info, err = s.GetPoolInfoForChain(chain, poolID)
+		}
+		if err != nil {
+			return nil, err
+		}
+		writePoolInfoCache(chain, poolVersion, poolID, info)
+		return info, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	writePoolInfoCache(chain, poolVersion, poolID, info)
+	info, _ := v.(*PoolInfo)
 	return info, nil
 }

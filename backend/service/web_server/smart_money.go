@@ -1,11 +1,14 @@
 package web_server
 
 import (
+	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	sm "TgLpBot/service/smart_money"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -60,6 +63,8 @@ func (s *Server) handleSMWallets(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
+		repairSmartMoneyPositions(ctx, repo)
+
 		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 		size, _ := strconv.Atoi(r.URL.Query().Get("size"))
 		if page <= 0 {
@@ -289,6 +294,7 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 	}
 	repo := smService.Repo()
 	ctx := r.Context()
+	repairSmartMoneyPositions(ctx, repo)
 
 	poolAddr := r.URL.Query().Get("pool")
 	if poolAddr != "" {
@@ -298,6 +304,23 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		stats.TradingPair = buildSmartMoneyTradingPair(stats.Token0Symbol, stats.Token1Symbol)
+		stats.DisplayTokenAddress, stats.DisplayTokenSymbol = smartMoneyPickDisplayToken(
+			stats.Token0Address,
+			stats.Token1Address,
+			stats.Token0Symbol,
+			stats.Token1Symbol,
+		)
+		stats.CurrentPrice, stats.PriceChange24h = loadSmartMoneyPoolMarketSnapshot(ctx, poolAddr)
+		applySmartMoneyDisplayToken(
+			smartMoneyChainSlug(stats.ChainID),
+			&stats.DisplayTokenAddress,
+			&stats.DisplayTokenSymbol,
+			&stats.DisplayTokenLogoURL,
+			s.loadSmartMoneyTokenMetadataByChain(ctx, map[string][]string{
+				smartMoneyChainSlug(stats.ChainID): []string{stats.DisplayTokenAddress},
+			}),
+		)
 		jsonOK(w, stats)
 		return
 	}
@@ -307,6 +330,36 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	addressesByChain := make(map[string][]string)
+	for i := range pools {
+		pools[i].TradingPair = buildSmartMoneyTradingPair(pools[i].Token0Symbol, pools[i].Token1Symbol)
+		pools[i].DisplayTokenAddress, pools[i].DisplayTokenSymbol = smartMoneyPickDisplayToken(
+			pools[i].Token0Address,
+			pools[i].Token1Address,
+			pools[i].Token0Symbol,
+			pools[i].Token1Symbol,
+		)
+		if pools[i].DisplayTokenAddress != "" {
+			chain := smartMoneyChainSlug(pools[i].ChainID)
+			addressesByChain[chain] = append(addressesByChain[chain], pools[i].DisplayTokenAddress)
+		}
+	}
+	metaByChain := s.loadSmartMoneyTokenMetadataByChain(ctx, addressesByChain)
+	poolAmounts, _ := repo.GetPoolTotalAmountsUSD(ctx)
+	for i := range pools {
+		applySmartMoneyDisplayToken(
+			smartMoneyChainSlug(pools[i].ChainID),
+			&pools[i].DisplayTokenAddress,
+			&pools[i].DisplayTokenSymbol,
+			&pools[i].DisplayTokenLogoURL,
+			metaByChain,
+		)
+		if poolAmounts != nil {
+			if amt, ok := poolAmounts[strings.ToLower(pools[i].PoolAddress)]; ok {
+				pools[i].TotalPositionAmountUSD = amt
+			}
+		}
 	}
 	jsonOK(w, map[string]interface{}{
 		"total": len(pools),
@@ -323,6 +376,7 @@ func (s *Server) handleSMPositions(w http.ResponseWriter, r *http.Request) {
 	}
 	repo := smService.Repo()
 	ctx := r.Context()
+	repairSmartMoneyPositions(ctx, repo)
 
 	q := r.URL.Query()
 	status := q.Get("status")
@@ -351,14 +405,26 @@ func (s *Server) handleSMPositions(w http.ResponseWriter, r *http.Request) {
 	// Enrich with wallet color, label, price_lower, price_upper
 	type posResp struct {
 		models.SmartMoneyLPPosition
-		WalletLabel *string `json:"wallet_label"`
-		WalletColor string  `json:"wallet_color"`
-		PriceLower  string  `json:"price_lower"`
-		PriceUpper  string  `json:"price_upper"`
-		BscscanURL  string  `json:"bscscan_url"`
+		WalletLabel         *string `json:"wallet_label"`
+		WalletColor         string  `json:"wallet_color"`
+		PriceLower          string  `json:"price_lower"`
+		PriceUpper          string  `json:"price_upper"`
+		RangePercent        float64 `json:"range_percent"`
+		PositionAmountUSD   float64 `json:"position_amount_usd"`
+		BscscanURL          string  `json:"bscscan_url"`
+		TradingPair         string  `json:"trading_pair"`
+		DisplayTokenAddress string  `json:"display_token_address,omitempty"`
+		DisplayTokenSymbol  string  `json:"display_token_symbol,omitempty"`
+		DisplayTokenLogoURL string  `json:"display_token_logo_url,omitempty"`
 	}
 
 	list := make([]posResp, 0, len(positions))
+	addressesByChain := make(map[string][]string)
+	amountsByChain, err := repo.GetPositionOpenAmountsUSD(ctx, positions)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	// Cache wallet labels
 	walletCache := make(map[string]*models.MonitoredWallet)
 	for _, p := range positions {
@@ -388,8 +454,33 @@ func (s *Server) handleSMPositions(w http.ResponseWriter, r *http.Request) {
 		if p.TickUpper != nil {
 			resp.PriceUpper = fmt.Sprintf("%.6g", sm.TickToPrice(*p.TickUpper, 18, 18))
 		}
+		resp.RangePercent = smartMoneyRangePercentFromTicks(p.TickLower, p.TickUpper)
+		if byNFT, ok := amountsByChain[p.ChainID]; ok {
+			resp.PositionAmountUSD = byNFT[p.NftTokenID]
+		}
+		resp.TradingPair = buildSmartMoneyTradingPair(p.Token0Symbol, p.Token1Symbol)
+		resp.DisplayTokenAddress, resp.DisplayTokenSymbol = smartMoneyPickDisplayToken(
+			p.Token0Address,
+			p.Token1Address,
+			p.Token0Symbol,
+			p.Token1Symbol,
+		)
+		if resp.DisplayTokenAddress != "" {
+			chain := smartMoneyChainSlug(p.ChainID)
+			addressesByChain[chain] = append(addressesByChain[chain], resp.DisplayTokenAddress)
+		}
 
 		list = append(list, resp)
+	}
+	metaByChain := s.loadSmartMoneyTokenMetadataByChain(ctx, addressesByChain)
+	for i := range list {
+		applySmartMoneyDisplayToken(
+			smartMoneyChainSlug(list[i].ChainID),
+			&list[i].DisplayTokenAddress,
+			&list[i].DisplayTokenSymbol,
+			&list[i].DisplayTokenLogoURL,
+			metaByChain,
+		)
 	}
 
 	jsonOK(w, map[string]interface{}{
@@ -444,6 +535,7 @@ func (s *Server) handleSMStats(w http.ResponseWriter, r *http.Request) {
 	}
 	repo := smService.Repo()
 	ctx := r.Context()
+	repairSmartMoneyPositions(ctx, repo)
 
 	// Single wallet stats
 	addr := r.URL.Query().Get("address")
@@ -515,4 +607,193 @@ func extractPathParam(path, prefix string) string {
 		return strings.TrimPrefix(path, prefix)
 	}
 	return ""
+}
+
+func repairSmartMoneyPositions(ctx context.Context, repo *sm.Repository) {
+	if err := sm.RepairPositions(ctx, repo); err != nil {
+		log.Printf("[SmartMoney API] repair position metadata failed: %v", err)
+	}
+}
+
+func buildSmartMoneyTradingPair(token0Symbol string, token1Symbol string) string {
+	left := strings.TrimSpace(token0Symbol)
+	right := strings.TrimSpace(token1Symbol)
+	switch {
+	case left != "" && right != "":
+		return left + "/" + right
+	case left != "":
+		return left
+	case right != "":
+		return right
+	default:
+		return ""
+	}
+}
+
+func loadSmartMoneyPoolMarketSnapshot(ctx context.Context, poolAddress string) (string, float64) {
+	poolAddress = strings.ToLower(strings.TrimSpace(poolAddress))
+	if poolAddress == "" || database.DB == nil {
+		return "", 0
+	}
+
+	var row models.Pool
+	if err := database.DB.WithContext(ctx).
+		Model(&models.Pool{}).
+		Where("LOWER(address) = ?", poolAddress).
+		First(&row).Error; err != nil {
+		return "", 0
+	}
+
+	priceDisplay := strings.TrimSpace(row.PriceDisplay)
+	if priceDisplay == "" {
+		priceDisplay = formatPoolCatalogPrice(firstPositiveFloat(row.CurrentTokenPrice, row.BaseTokenPriceUSD))
+	}
+
+	priceChange := row.PriceChangeH24
+	if priceChange == 0 {
+		priceChange = metricTrendPriceChange(rawJSONFromString(row.MetricTrendsJSON, "[]"))
+	}
+
+	return priceDisplay, priceChange
+}
+
+var smartMoneyStableSymbols = map[string]struct{}{
+	"usdc":  {},
+	"usdt":  {},
+	"busd":  {},
+	"dai":   {},
+	"frax":  {},
+	"usdd":  {},
+	"fdusd": {},
+	"wbnb":  {},
+	"weth":  {},
+	"wsol":  {},
+	"bnb":   {},
+	"eth":   {},
+	"sol":   {},
+}
+
+func smartMoneyChainSlug(chainID int) string {
+	switch chainID {
+	case 8453:
+		return "base"
+	default:
+		return "bsc"
+	}
+}
+
+func smartMoneyNormalizeTokenAddress(value string) string {
+	value = strings.TrimSpace(value)
+	if !isValidAddress(value) {
+		return ""
+	}
+	return strings.ToLower(value)
+}
+
+func smartMoneyIsStableLikeSymbol(symbol string) bool {
+	_, ok := smartMoneyStableSymbols[strings.ToLower(strings.TrimSpace(symbol))]
+	return ok
+}
+
+func smartMoneyPickDisplayToken(token0Address string, token1Address string, token0Symbol string, token1Symbol string) (string, string) {
+	token0Address = smartMoneyNormalizeTokenAddress(token0Address)
+	token1Address = smartMoneyNormalizeTokenAddress(token1Address)
+	token0Symbol = strings.TrimSpace(token0Symbol)
+	token1Symbol = strings.TrimSpace(token1Symbol)
+
+	token0Stable := smartMoneyIsStableLikeSymbol(token0Symbol)
+	token1Stable := smartMoneyIsStableLikeSymbol(token1Symbol)
+
+	switch {
+	case token0Stable && !token1Stable:
+		return firstSmartMoneyDisplayToken(token1Address, token1Symbol, token0Address, token0Symbol)
+	case token1Stable && !token0Stable:
+		return firstSmartMoneyDisplayToken(token0Address, token0Symbol, token1Address, token1Symbol)
+	default:
+		return firstSmartMoneyDisplayToken(token0Address, token0Symbol, token1Address, token1Symbol)
+	}
+}
+
+func firstSmartMoneyDisplayToken(primaryAddress string, primarySymbol string, fallbackAddress string, fallbackSymbol string) (string, string) {
+	if primaryAddress != "" || primarySymbol != "" {
+		return primaryAddress, primarySymbol
+	}
+	return fallbackAddress, fallbackSymbol
+}
+
+func (s *Server) loadSmartMoneyTokenMetadataByChain(ctx context.Context, addressesByChain map[string][]string) map[string]map[string]models.TokenMetadata {
+	out := make(map[string]map[string]models.TokenMetadata, len(addressesByChain))
+	if s == nil || s.TokenMeta == nil {
+		return out
+	}
+
+	for chain, addresses := range addressesByChain {
+		normalized := make([]string, 0, len(addresses))
+		seen := make(map[string]struct{}, len(addresses))
+		for _, raw := range addresses {
+			addr := smartMoneyNormalizeTokenAddress(raw)
+			if addr == "" {
+				continue
+			}
+			if _, ok := seen[addr]; ok {
+				continue
+			}
+			seen[addr] = struct{}{}
+			normalized = append(normalized, addr)
+		}
+		if len(normalized) == 0 {
+			continue
+		}
+
+		meta, err := s.TokenMeta.GetBatch(ctx, chain, normalized)
+		if err != nil {
+			log.Printf("[SmartMoney API] load token metadata failed chain=%s err=%v", chain, err)
+			continue
+		}
+		out[chain] = meta
+	}
+
+	return out
+}
+
+func applySmartMoneyDisplayToken(chain string, displayAddress *string, displaySymbol *string, displayLogoURL *string, metaByChain map[string]map[string]models.TokenMetadata) {
+	if displayAddress == nil || displaySymbol == nil || displayLogoURL == nil {
+		return
+	}
+
+	addr := smartMoneyNormalizeTokenAddress(*displayAddress)
+	if addr == "" {
+		return
+	}
+
+	meta := metaByChain[chain][addr]
+	*displayAddress = addr
+	if strings.TrimSpace(*displaySymbol) == "" {
+		*displaySymbol = strings.TrimSpace(meta.Symbol)
+	}
+	if strings.TrimSpace(meta.LogoURL) != "" {
+		*displayLogoURL = strings.TrimSpace(meta.LogoURL)
+	}
+}
+
+func smartMoneyRangePercentFromTicks(tickLower *int, tickUpper *int) float64 {
+	if tickLower == nil || tickUpper == nil {
+		return 0
+	}
+
+	lower := *tickLower
+	upper := *tickUpper
+	if upper <= lower {
+		return 0
+	}
+
+	halfWidth := float64(upper-lower) / 2.0
+	pct := (math.Pow(1.0001, halfWidth) - 1.0) * 100.0
+	if pct < 0 {
+		return 0
+	}
+	if pct > 999 {
+		pct = 999
+	}
+	return math.Round(pct*10) / 10
 }

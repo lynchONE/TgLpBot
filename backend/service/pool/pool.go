@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -36,6 +37,17 @@ func NewPoolService() *PoolService {
 	return &PoolService{}
 }
 
+func poolDebugEnabled() bool {
+	v := strings.TrimSpace(os.Getenv("POOL_DEBUG"))
+	return v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")
+}
+
+func poolDebugf(format string, args ...interface{}) {
+	if poolDebugEnabled() {
+		log.Printf("[PoolService] "+format, args...)
+	}
+}
+
 // GetPoolInfo retrieves information about a V3 pool from blockchain (default chain: bsc).
 func (s *PoolService) GetPoolInfo(poolAddress string) (*PoolInfo, error) {
 	return s.GetPoolInfoForChain("bsc", poolAddress)
@@ -49,7 +61,7 @@ func (s *PoolService) GetPoolInfoForChain(chain string, poolAddress string) (*Po
 	}
 	chain = config.NormalizeChain(chain)
 
-	log.Printf("[PoolService] GetPoolInfo called: chain=%s pool=%s", chain, poolAddress)
+	poolDebugf("GetPoolInfo called: chain=%s pool=%s", chain, poolAddress)
 	return s.getPoolInfoFromChain(chain, poolAddress)
 }
 
@@ -62,7 +74,7 @@ func (s *PoolService) GetV4PoolInfo(poolId string) (*PoolInfo, error) {
 		poolId = "0x" + poolId
 	}
 
-	log.Printf("[PoolService] GetV4PoolInfo called for: %s", poolId)
+	poolDebugf("GetV4PoolInfo called for: %s", poolId)
 
 	if blockchain.Client == nil {
 		return nil, fmt.Errorf("blockchain client not initialized")
@@ -91,7 +103,7 @@ func (s *PoolService) GetV4PoolInfo(poolId string) (*PoolInfo, error) {
 		token1Symbol = "UNKNOWN"
 	}
 
-	log.Printf("[PoolService] V4 Pool info retrieved from chain: Uniswap V4 %s/%s (fee: %d)", token0Symbol, token1Symbol, fee)
+	poolDebugf("V4 Pool info retrieved from chain: Uniswap V4 %s/%s (fee: %d)", token0Symbol, token1Symbol, fee)
 
 	return &PoolInfo{
 		Address:      poolId,
@@ -190,7 +202,7 @@ func (s *PoolService) getPoolInfoFromChain(chain string, poolAddress string) (*P
 	}
 
 	tickSpacing := s.calculateTickSpacing(int(fee))
-	log.Printf("[PoolService] Pool info retrieved from chain: %s %s/%s (fee: %d)", exchange, token0Symbol, token1Symbol, fee)
+	poolDebugf("Pool info retrieved from chain: %s %s/%s (fee: %d)", exchange, token0Symbol, token1Symbol, fee)
 
 	return &PoolInfo{
 		Address:      poolAddress,

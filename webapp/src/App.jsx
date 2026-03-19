@@ -1017,7 +1017,7 @@ export default function App() {
               const avatarLabel = (displayTokenSymbol || pairInitials || 'LP').slice(0, 4).toUpperCase();
               const dex = getDexIcon(factoryName);
               const protocolTagText = protocolVersion || dex?.label || '';
-              const avatarSrc = displayTokenLogoUrl || dex?.src || '';
+              const avatarSrc = displayTokenLogoUrl;
               const filterToken = resolveHotPoolFilterToken(pool);
               const avatarFilterActive = filterToken && hotTokenFilter?.address === filterToken.address;
 
@@ -1033,7 +1033,6 @@ export default function App() {
                   <button
                     type="button"
                     className={`pool-avatar ${filterToken ? 'filterable' : ''} ${avatarFilterActive ? 'active' : ''}`}
-                    style={dex ? { borderColor: dex.color + '60' } : undefined}
                     title={filterToken ? `筛选 ${filterToken.symbol} 的池子` : '该池子无法按单一非稳定币筛选'}
                     onClick={(e) => {
                       if (!filterToken) return;
@@ -1048,15 +1047,7 @@ export default function App() {
                         <img
                           src={avatarSrc}
                           alt=""
-                          data-fallback-to-dex={displayTokenLogoUrl && dex?.src ? '1' : '0'}
-                          data-dex-src={dex?.src || ''}
                           onError={(e) => {
-                            const nextSrc = e.currentTarget.dataset.dexSrc || '';
-                            if (e.currentTarget.dataset.fallbackToDex === '1' && nextSrc) {
-                              e.currentTarget.dataset.fallbackToDex = '0';
-                              e.currentTarget.src = nextSrc;
-                              return;
-                            }
                             e.currentTarget.style.display = 'none';
                             const fallback = e.currentTarget.parentElement?.querySelector('.pool-avatar-fallback');
                             if (fallback) fallback.style.display = 'flex';

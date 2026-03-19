@@ -1,6 +1,7 @@
 package smart_money
 
 import (
+	"TgLpBot/base/blockchain"
 	"TgLpBot/base/models"
 	"TgLpBot/base/rpcpool"
 	"context"
@@ -27,7 +28,7 @@ var (
 )
 
 const (
-	smartMoneyMaxBlocksPerPoll = 10
+	smartMoneyMaxBlocksPerPoll = 25
 	smartMoneyBaseErrorDelay   = 5 * time.Second
 	smartMoneyRateLimitDelay   = 15 * time.Second
 	smartMoneyMaxRetryDelay    = time.Minute
@@ -101,7 +102,11 @@ type watcherScanStats struct {
 	StartedAt           time.Time
 }
 
-func NewWatcher(repo *Repository, chainID int64, pancakeV3NPM, uniswapV3NPM, uniswapV4PM string, pollIntervalSec int) *Watcher {
+type pollResult struct {
+	Remaining uint64
+}
+
+func NewWatcher(repo *Repository, chainID int64, pancakeV3NPM, uniswapV3NPM, uniswapV4PoolManager string, pollIntervalSec int) *Watcher {
 	var lpContracts []common.Address
 	if pancakeV3NPM != "" {
 		lpContracts = append(lpContracts, common.HexToAddress(pancakeV3NPM))
@@ -109,8 +114,8 @@ func NewWatcher(repo *Repository, chainID int64, pancakeV3NPM, uniswapV3NPM, uni
 	if uniswapV3NPM != "" {
 		lpContracts = append(lpContracts, common.HexToAddress(uniswapV3NPM))
 	}
-	if uniswapV4PM != "" {
-		lpContracts = append(lpContracts, common.HexToAddress(uniswapV4PM))
+	if uniswapV4PoolManager != "" {
+		lpContracts = append(lpContracts, common.HexToAddress(uniswapV4PoolManager))
 	}
 
 	if pollIntervalSec <= 0 {
@@ -191,13 +196,25 @@ func (w *Watcher) Start(ctx context.Context) {
 			}
 
 			lastProcessed = startBlock
+			if err := w.repo.UpsertLPScanState(ctx, int(w.chainID), lastProcessed); err != nil {
+				log.Printf("[SmartMoney Watcher] persist initial scan state failed: %v", err)
+				select {
+				case <-time.After(smartMoneyBaseErrorDelay):
+				case <-ctx.Done():
+					return
+				case <-w.stopCh:
+					return
+				}
+				continue
+			}
 			initialized = true
 			rateLimitDelay = smartMoneyRateLimitDelay
-			log.Printf("[SmartMoney Watcher] started from block %d, mode=http-polling, interval=%s, lp_contracts=%d",
-				startBlock, pollDelay, len(w.lpContracts))
+			log.Printf("[SmartMoney Watcher] started from latest block %d, mode=http-polling, interval=%s, lp_contracts=%d",
+				lastProcessed, pollDelay, len(w.lpContracts))
 		}
 
-		if err := w.pollOnce(ctx, &lastProcessed); err != nil {
+		result, err := w.pollOnce(ctx, &lastProcessed)
+		if err != nil {
 			delay := smartMoneyBaseErrorDelay
 			if rpcpool.IsRateLimitedError(err) {
 				delay = rateLimitDelay
@@ -220,6 +237,9 @@ func (w *Watcher) Start(ctx context.Context) {
 			continue
 		}
 		rateLimitDelay = smartMoneyRateLimitDelay
+		if result.Remaining > 0 {
+			continue
+		}
 
 		select {
 		case <-time.After(pollDelay):
@@ -239,19 +259,19 @@ func (w *Watcher) Stop() {
 	}
 }
 
-func (w *Watcher) pollOnce(ctx context.Context, lastProcessed *uint64) error {
+func (w *Watcher) pollOnce(ctx context.Context, lastProcessed *uint64) (pollResult, error) {
 	rpcClient, httpClient, eff, err := w.openHTTPRPC(ctx)
 	if err != nil {
-		return err
+		return pollResult{}, err
 	}
 	defer rpcClient.Close()
 
 	latestBlock, err := w.getLatestHTTPBlockWithClient(ctx, httpClient, eff)
 	if err != nil {
-		return err
+		return pollResult{}, err
 	}
 	if latestBlock <= *lastProcessed {
-		return nil
+		return pollResult{}, nil
 	}
 
 	fromBlock := *lastProcessed + 1
@@ -267,24 +287,91 @@ func (w *Watcher) pollOnce(ctx context.Context, lastProcessed *uint64) error {
 		FromBlock:   fromBlock,
 		ToBlock:     toBlock,
 		LatestBlock: latestBlock,
+		Blocks:      int(toBlock - fromBlock + 1),
 		StartedAt:   time.Now(),
 	}
 	log.Printf("[SmartMoney Watcher] scanning blocks=%d-%d latest=%d",
 		stats.FromBlock, stats.ToBlock, stats.LatestBlock)
 
-	for blockNum := fromBlock; blockNum <= toBlock; blockNum++ {
-		blockStats, err := w.processBlockWithClients(ctx, rpcClient, httpClient, eff, blockNum)
-		if err != nil {
-			return fmt.Errorf("process block %d: %w", blockNum, err)
-		}
-		stats.addBlock(blockStats)
-		*lastProcessed = blockNum
+	contracts, err := w.repo.GetActiveWatchContractsByChain(ctx, int(w.chainID))
+	if err != nil {
+		return pollResult{}, err
 	}
+	contractByAddr := make(map[string]models.WatchContract, len(contracts))
+	seenWallets := make(map[string]map[string]struct{}, len(contracts))
+	for _, contract := range contracts {
+		addr := strings.ToLower(strings.TrimSpace(contract.ContractAddress))
+		if addr == "" {
+			continue
+		}
+		contractByAddr[addr] = contract
+	}
+
+	activeWallets := make(map[string]struct{})
+	if len(w.lpContracts) > 0 {
+		activeWallets, err = w.repo.GetAllActiveWalletAddresses(ctx, int(w.chainID))
+		if err != nil {
+			return pollResult{}, err
+		}
+	}
+
+	blocks, err := w.loadBlockSnapshots(ctx, rpcClient, eff, fromBlock, toBlock)
+	if err != nil {
+		return pollResult{}, err
+	}
+	logsByBlock, err := w.loadLPLogsByBlock(ctx, httpClient, eff, fromBlock, toBlock)
+	if err != nil {
+		return pollResult{}, err
+	}
+
+	for _, block := range blocks {
+		blockStats := blockProcessStats{
+			TxCount:    len(block.Transactions),
+			LPLogCount: len(logsByBlock[block.Number]),
+		}
+
+		if len(contractByAddr) > 0 {
+			contractStats, newWallets, err := w.processContractInteractionsBlock(ctx, block, contractByAddr, seenWallets)
+			if err != nil {
+				return pollResult{}, fmt.Errorf("process block %d contract interactions: %w", block.Number, err)
+			}
+			blockStats.ContractTxCount = contractStats.MatchedTxCount
+			for _, wallet := range newWallets {
+				activeWallets[wallet] = struct{}{}
+			}
+		}
+
+		if blockStats.LPLogCount > 0 {
+			lpStats, err := w.processLPLogsForBlock(ctx, block, logsByBlock[block.Number], activeWallets)
+			if err != nil {
+				return pollResult{}, fmt.Errorf("process block %d lp logs: %w", block.Number, err)
+			}
+			blockStats.LPActiveWalletLogs = lpStats.ActiveWalletLogs
+			blockStats.LPEventCount = lpStats.HandledEvents
+		}
+
+		stats.addBlock(blockStats)
+		if block.Number > *lastProcessed {
+			*lastProcessed = block.Number
+			if err := w.repo.UpsertLPScanState(ctx, int(w.chainID), *lastProcessed); err != nil {
+				return pollResult{}, fmt.Errorf("persist scan state block %d: %w", *lastProcessed, err)
+			}
+		}
+	}
+
+	if len(contracts) > 0 {
+		walletCount, err := w.finalizeContractInteractions(ctx, contracts, seenWallets, fromBlock, toBlock)
+		if err != nil {
+			return pollResult{}, err
+		}
+		stats.ContractWalletCount = walletCount
+	}
+
 	log.Printf("[SmartMoney Watcher] scanned blocks=%d-%d latest=%d blocks=%d tx=%d contract_txs=%d contract_wallets=%d lp_logs=%d lp_wallet_logs=%d lp_events=%d elapsed=%s remaining=%d",
 		stats.FromBlock, stats.ToBlock, stats.LatestBlock, stats.Blocks, stats.TxCount,
 		stats.ContractTxCount, stats.ContractWalletCount, stats.LPLogCount, stats.LPActiveWalletLogs,
 		stats.LPEventCount, time.Since(stats.StartedAt).Round(time.Millisecond), stats.remaining())
-	return nil
+	return pollResult{Remaining: stats.remaining()}, nil
 }
 
 func (w *Watcher) getLatestHTTPBlock(ctx context.Context) (uint64, error) {
@@ -316,34 +403,6 @@ func (w *Watcher) getLatestHTTPBlockWithClient(ctx context.Context, client *ethc
 	return blockNum, nil
 }
 
-func (w *Watcher) processBlockWithClients(ctx context.Context, rpcClient *rpc.Client, httpClient *ethclient.Client, eff rpcpool.Effective, blockNum uint64) (blockProcessStats, error) {
-	block, err := w.loadBlockSnapshot(ctx, rpcClient, eff, blockNum)
-	if err != nil {
-		return blockProcessStats{}, err
-	}
-
-	stats := blockProcessStats{
-		TxCount: len(block.Transactions),
-	}
-
-	contractStats, err := w.processContractInteractions(ctx, block, blockNum)
-	if err != nil {
-		return stats, err
-	}
-	stats.ContractTxCount = contractStats.MatchedTxCount
-	stats.ContractWalletCount = contractStats.WalletCount
-
-	lpStats, err := w.processLPLogs(ctx, httpClient, block, blockNum, eff)
-	if err != nil {
-		return stats, err
-	}
-	stats.LPLogCount = lpStats.TotalLogs
-	stats.LPActiveWalletLogs = lpStats.ActiveWalletLogs
-	stats.LPEventCount = lpStats.HandledEvents
-
-	return stats, nil
-}
-
 func (w *Watcher) openHTTPRPC(ctx context.Context) (*rpc.Client, *ethclient.Client, rpcpool.Effective, error) {
 	eff, err := resolveSmartMoneyRPC(ctx, rpcpool.TransportHTTP)
 	if err != nil {
@@ -357,13 +416,67 @@ func (w *Watcher) openHTTPRPC(ctx context.Context) (*rpc.Client, *ethclient.Clie
 	return rpcClient, ethclient.NewClient(rpcClient), eff, nil
 }
 
+func (w *Watcher) loadBlockSnapshots(ctx context.Context, rpcClient *rpc.Client, eff rpcpool.Effective, fromBlock uint64, toBlock uint64) ([]*blockSnapshot, error) {
+	if toBlock < fromBlock {
+		return nil, nil
+	}
+
+	count := int(toBlock - fromBlock + 1)
+	raws := make([]rawBlockSnapshot, count)
+	batch := make([]rpc.BatchElem, count)
+	for i := 0; i < count; i++ {
+		blockNum := fromBlock + uint64(i)
+		batch[i] = rpc.BatchElem{
+			Method: "eth_getBlockByNumber",
+			Args:   []interface{}{fmt.Sprintf("0x%x", blockNum), true},
+			Result: &raws[i],
+		}
+	}
+
+	if err := rpcClient.BatchCallContext(ctx, batch); err != nil {
+		handleSmartMoneyRPCEndpointError(eff, err)
+		return w.loadBlockSnapshotsSequential(ctx, rpcClient, eff, fromBlock, toBlock)
+	}
+
+	snapshots := make([]*blockSnapshot, 0, count)
+	for i := 0; i < count; i++ {
+		if batch[i].Error != nil {
+			handleSmartMoneyRPCEndpointError(eff, batch[i].Error)
+			return w.loadBlockSnapshotsSequential(ctx, rpcClient, eff, fromBlock, toBlock)
+		}
+
+		blockNum := fromBlock + uint64(i)
+		snapshot, err := decodeRawBlockSnapshot(blockNum, raws[i])
+		if err != nil {
+			return nil, fmt.Errorf("decode block %d: %w", blockNum, err)
+		}
+		snapshots = append(snapshots, snapshot)
+	}
+	return snapshots, nil
+}
+
+func (w *Watcher) loadBlockSnapshotsSequential(ctx context.Context, rpcClient *rpc.Client, eff rpcpool.Effective, fromBlock uint64, toBlock uint64) ([]*blockSnapshot, error) {
+	snapshots := make([]*blockSnapshot, 0, int(toBlock-fromBlock+1))
+	for blockNum := fromBlock; blockNum <= toBlock; blockNum++ {
+		snapshot, err := w.loadBlockSnapshot(ctx, rpcClient, eff, blockNum)
+		if err != nil {
+			return nil, err
+		}
+		snapshots = append(snapshots, snapshot)
+	}
+	return snapshots, nil
+}
+
 func (w *Watcher) loadBlockSnapshot(ctx context.Context, rpcClient *rpc.Client, eff rpcpool.Effective, blockNum uint64) (*blockSnapshot, error) {
 	var raw rawBlockSnapshot
 	if err := rpcClient.CallContext(ctx, &raw, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNum), true); err != nil {
 		handleSmartMoneyRPCEndpointError(eff, err)
 		return nil, err
 	}
+	return decodeRawBlockSnapshot(blockNum, raw)
+}
 
+func decodeRawBlockSnapshot(blockNum uint64, raw rawBlockSnapshot) (*blockSnapshot, error) {
 	timestampNum, err := parseHexUint64(raw.Timestamp)
 	if err != nil {
 		return nil, fmt.Errorf("decode block timestamp: %w", err)
@@ -398,27 +511,11 @@ func (w *Watcher) loadBlockSnapshot(ctx context.Context, rpcClient *rpc.Client, 
 	return snapshot, nil
 }
 
-func (w *Watcher) processContractInteractions(ctx context.Context, block *blockSnapshot, blockNum uint64) (contractInteractionStats, error) {
+func (w *Watcher) processContractInteractionsBlock(ctx context.Context, block *blockSnapshot, contractByAddr map[string]models.WatchContract, seenWallets map[string]map[string]struct{}) (contractInteractionStats, []string, error) {
 	stats := contractInteractionStats{}
-	contracts, err := w.repo.GetActiveWatchContractsByChain(ctx, int(w.chainID))
-	if err != nil {
-		return stats, err
-	}
-	if len(contracts) == 0 {
-		return stats, nil
-	}
-
-	contractByAddr := make(map[string]models.WatchContract, len(contracts))
-	seenWallets := make(map[string]map[string]struct{}, len(contracts))
-	for _, contract := range contracts {
-		addr := strings.ToLower(strings.TrimSpace(contract.ContractAddress))
-		if addr == "" {
-			continue
-		}
-		contractByAddr[addr] = contract
-	}
+	newWallets := make([]string, 0)
 	if len(contractByAddr) == 0 {
-		return stats, nil
+		return stats, newWallets, nil
 	}
 
 	for _, tx := range block.Transactions {
@@ -450,6 +547,7 @@ func (w *Watcher) processContractInteractions(ctx context.Context, block *blockS
 			log.Printf("[SmartMoney Watcher] upsert wallet %s error: %v", sender, err)
 			continue
 		}
+		newWallets = append(newWallets, sender)
 
 		if seenWallets[contractAddr] == nil {
 			seenWallets[contractAddr] = make(map[string]struct{})
@@ -457,33 +555,36 @@ func (w *Watcher) processContractInteractions(ctx context.Context, block *blockS
 		seenWallets[contractAddr][sender] = struct{}{}
 	}
 
+	return stats, newWallets, nil
+}
+
+func (w *Watcher) finalizeContractInteractions(ctx context.Context, contracts []models.WatchContract, seenWallets map[string]map[string]struct{}, fromBlock uint64, toBlock uint64) (int, error) {
+	totalWallets := 0
 	for _, contract := range contracts {
-		if contract.LastScannedBlock >= blockNum {
-			continue
-		}
-		if err := w.repo.UpdateWatchContractLastBlock(ctx, contract.ID, blockNum); err != nil {
-			return stats, fmt.Errorf("update watch contract %s last block: %w", contract.ContractAddress, err)
+		if contract.LastScannedBlock < toBlock {
+			if err := w.repo.UpdateWatchContractLastBlock(ctx, contract.ID, toBlock); err != nil {
+				return totalWallets, fmt.Errorf("update watch contract %s last block: %w", contract.ContractAddress, err)
+			}
 		}
 
 		if wallets := seenWallets[strings.ToLower(contract.ContractAddress)]; len(wallets) > 0 {
-			stats.WalletCount += len(wallets)
-			log.Printf("[SmartMoney Watcher] contract interaction: contract=%s block=%d wallets=%d",
-				shortAddr(contract.ContractAddress), blockNum, len(wallets))
+			totalWallets += len(wallets)
+			log.Printf("[SmartMoney Watcher] contract interaction: contract=%s blocks=%d-%d wallets=%d",
+				shortAddr(contract.ContractAddress), fromBlock, toBlock, len(wallets))
 		}
 	}
-
-	return stats, nil
+	return totalWallets, nil
 }
 
-func (w *Watcher) processLPLogs(ctx context.Context, client *ethclient.Client, block *blockSnapshot, blockNum uint64, eff rpcpool.Effective) (lpLogStats, error) {
-	stats := lpLogStats{}
+func (w *Watcher) loadLPLogsByBlock(ctx context.Context, client *ethclient.Client, eff rpcpool.Effective, fromBlock uint64, toBlock uint64) (map[uint64][]types.Log, error) {
+	logsByBlock := make(map[uint64][]types.Log)
 	if len(w.lpContracts) == 0 {
-		return stats, nil
+		return logsByBlock, nil
 	}
 
 	query := ethereum.FilterQuery{
-		FromBlock: new(big.Int).SetUint64(blockNum),
-		ToBlock:   new(big.Int).SetUint64(blockNum),
+		FromBlock: new(big.Int).SetUint64(fromBlock),
+		ToBlock:   new(big.Int).SetUint64(toBlock),
 		Addresses: w.lpContracts,
 		Topics:    w.lpTopics,
 	}
@@ -491,18 +592,19 @@ func (w *Watcher) processLPLogs(ctx context.Context, client *ethclient.Client, b
 	logs, err := client.FilterLogs(ctx, query)
 	if err != nil {
 		handleSmartMoneyRPCEndpointError(eff, err)
-		return stats, err
+		return nil, err
 	}
-	stats.TotalLogs = len(logs)
-	if len(logs) == 0 {
-		return stats, nil
+	for _, vlog := range logs {
+		logsByBlock[vlog.BlockNumber] = append(logsByBlock[vlog.BlockNumber], vlog)
 	}
+	return logsByBlock, nil
+}
 
-	activeWallets, err := w.repo.GetAllActiveWalletAddresses(ctx, int(w.chainID))
-	if err != nil {
-		return stats, err
+func (w *Watcher) processLPLogsForBlock(ctx context.Context, block *blockSnapshot, logs []types.Log, activeWallets map[string]struct{}) (lpLogStats, error) {
+	stats := lpLogStats{
+		TotalLogs: len(logs),
 	}
-	if len(activeWallets) == 0 {
+	if len(logs) == 0 || len(activeWallets) == 0 {
 		return stats, nil
 	}
 
@@ -518,7 +620,7 @@ func (w *Watcher) processLPLogs(ctx context.Context, client *ethclient.Client, b
 		}
 		stats.ActiveWalletLogs++
 
-		if err := w.handleLPLog(ctx, vlog, sender, blockNum, blockTime); err != nil {
+		if err := w.handleLPLog(ctx, vlog, sender, block.Number, blockTime); err != nil {
 			log.Printf("[SmartMoney Watcher] handle LP log error: tx=%s err=%v", shortAddr(vlog.TxHash.Hex()), err)
 			continue
 		}
@@ -532,7 +634,6 @@ func (s *watcherScanStats) addBlock(blockStats blockProcessStats) {
 	if s == nil {
 		return
 	}
-	s.Blocks++
 	s.TxCount += blockStats.TxCount
 	s.ContractTxCount += blockStats.ContractTxCount
 	s.ContractWalletCount += blockStats.ContractWalletCount
@@ -559,6 +660,20 @@ func (w *Watcher) handleLPLog(ctx context.Context, vlog types.Log, sender string
 	event.TxHash = vlog.TxHash.Hex()
 	event.LogIndex = int(vlog.Index)
 	event.TxTimestamp = blockTime
+	if err := EnrichLPEvent(ctx, event); err != nil {
+		log.Printf("[SmartMoney Watcher] enrich LP event metadata failed: protocol=%s nft=%v tx=%s err=%v",
+			event.Protocol, event.NftTokenID, shortAddr(event.TxHash), err)
+	}
+
+	// If amounts are 0 (V4 ModifyLiquidity doesn't include amounts),
+	// resolve from Transfer events in the same tx receipt.
+	if event.Token0Amount == "0" && event.Token1Amount == "0" &&
+		event.Token0Address != "" && event.Token1Address != "" {
+		w.resolveAmountsFromReceipt(ctx, event)
+	}
+
+	// Compute USD amounts via OKX/Gecko real prices
+	ComputeEventAmountUSD(ctx, event)
 
 	if err := w.repo.WithTx(ctx, func(tx *gorm.DB) error {
 		if err := w.repo.InsertLPEvent(tx, event); err != nil {
@@ -577,6 +692,88 @@ func (w *Watcher) handleLPLog(ctx context.Context, vlog types.Log, sender string
 		w.notifier(event)
 	}
 	return nil
+}
+
+// resolveAmountsFromReceipt fetches the tx receipt and extracts token
+// amounts from ERC-20 Transfer events for protocols (like V4) whose
+// LP event doesn't include amounts directly.
+func (w *Watcher) resolveAmountsFromReceipt(ctx context.Context, event *models.SmartMoneyLPEvent) {
+	if event == nil || event.TxHash == "" {
+		return
+	}
+	chain := smartMoneyChainName(event.ChainID)
+	client, _, err := blockchain.GetEVMClient(chain)
+	if err != nil {
+		return
+	}
+
+	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	receipt, err := client.TransactionReceipt(callCtx, common.HexToHash(event.TxHash))
+	if err != nil || receipt == nil {
+		log.Printf("[SmartMoney Watcher] resolveAmountsFromReceipt: fetch receipt failed tx=%s: %v",
+			shortAddr(event.TxHash), err)
+		return
+	}
+
+	topicTransfer := crypto.Keccak256Hash([]byte("Transfer(address,address,uint256)"))
+	token0 := common.HexToAddress(event.Token0Address)
+	token1 := common.HexToAddress(event.Token1Address)
+
+	// For V4, the pool_address is a poolId hash, not a contract.
+	// Tokens flow through the LP contract addresses (NPM / PoolManager).
+	targets := make(map[common.Address]struct{}, len(w.lpContracts)+1)
+	for _, c := range w.lpContracts {
+		targets[c] = struct{}{}
+	}
+	poolAddr := common.HexToAddress(event.PoolAddress)
+	targets[poolAddr] = struct{}{}
+
+	var sum0, sum1 big.Int
+	for _, vlog := range receipt.Logs {
+		if len(vlog.Topics) < 3 || vlog.Topics[0] != topicTransfer {
+			continue
+		}
+		if len(vlog.Data) < 32 {
+			continue
+		}
+		tokenAddr := vlog.Address
+		if tokenAddr != token0 && tokenAddr != token1 {
+			continue
+		}
+		amount := new(big.Int).SetBytes(vlog.Data[:32])
+		if amount.Sign() <= 0 {
+			continue
+		}
+
+		from := common.BytesToAddress(vlog.Topics[1].Bytes())
+		to := common.BytesToAddress(vlog.Topics[2].Bytes())
+
+		// Match transfers directly involving LP infrastructure contracts
+		var match bool
+		if event.EventType == "add" {
+			_, match = targets[to] // tokens flowing INTO pool/manager
+		} else {
+			_, match = targets[from] // tokens flowing OUT of pool/manager
+		}
+		if !match {
+			continue
+		}
+
+		if tokenAddr == token0 {
+			sum0.Add(&sum0, amount)
+		} else {
+			sum1.Add(&sum1, amount)
+		}
+	}
+
+	if sum0.Sign() > 0 {
+		event.Token0Amount = sum0.String()
+	}
+	if sum1.Sign() > 0 {
+		event.Token1Amount = sum1.String()
+	}
 }
 
 func (w *Watcher) parseLog(vlog types.Log) (*models.SmartMoneyLPEvent, error) {
@@ -602,7 +799,8 @@ func (w *Watcher) parseIncreaseLiquidity(vlog types.Log) (*models.SmartMoneyLPEv
 	tokenID := new(big.Int).SetBytes(vlog.Topics[1].Bytes())
 	nftID := tokenID.Uint64()
 
-	var amount0Str, amount1Str string
+	amount0Str := "0"
+	amount1Str := "0"
 	if len(vlog.Data) >= 96 {
 		amount0 := new(big.Int).SetBytes(vlog.Data[32:64])
 		amount1 := new(big.Int).SetBytes(vlog.Data[64:96])
@@ -628,7 +826,8 @@ func (w *Watcher) parseDecreaseLiquidity(vlog types.Log) (*models.SmartMoneyLPEv
 	tokenID := new(big.Int).SetBytes(vlog.Topics[1].Bytes())
 	nftID := tokenID.Uint64()
 
-	var amount0Str, amount1Str string
+	amount0Str := "0"
+	amount1Str := "0"
 	if len(vlog.Data) >= 96 {
 		amount0 := new(big.Int).SetBytes(vlog.Data[32:64])
 		amount1 := new(big.Int).SetBytes(vlog.Data[64:96])
@@ -648,24 +847,24 @@ func (w *Watcher) parseDecreaseLiquidity(vlog types.Log) (*models.SmartMoneyLPEv
 }
 
 func (w *Watcher) parseModifyLiquidity(vlog types.Log) (*models.SmartMoneyLPEvent, error) {
-	if len(vlog.Data) < 96 {
+	if len(vlog.Data) < 128 {
 		return nil, fmt.Errorf("ModifyLiquidity: insufficient data")
 	}
 
-	tickLowerRaw := new(big.Int).SetBytes(vlog.Data[0:32])
-	tickUpperRaw := new(big.Int).SetBytes(vlog.Data[32:64])
+	tickLower, err := decodeSignedInt24Word(vlog.Data[0:32])
+	if err != nil {
+		return nil, fmt.Errorf("ModifyLiquidity: decode tickLower: %w", err)
+	}
+	tickUpper, err := decodeSignedInt24Word(vlog.Data[32:64])
+	if err != nil {
+		return nil, fmt.Errorf("ModifyLiquidity: decode tickUpper: %w", err)
+	}
 	liquidityDelta := new(big.Int).SetBytes(vlog.Data[64:96])
+	salt := new(big.Int).SetBytes(vlog.Data[96:128])
 
 	maxInt256 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(1))
 	if liquidityDelta.Cmp(maxInt256) > 0 {
 		liquidityDelta.Sub(liquidityDelta, new(big.Int).Lsh(big.NewInt(1), 256))
-	}
-
-	if tickLowerRaw.Bit(23) == 1 {
-		tickLowerRaw.Sub(tickLowerRaw, new(big.Int).Lsh(big.NewInt(1), 24))
-	}
-	if tickUpperRaw.Bit(23) == 1 {
-		tickUpperRaw.Sub(tickUpperRaw, new(big.Int).Lsh(big.NewInt(1), 24))
 	}
 
 	eventType := "add"
@@ -673,16 +872,33 @@ func (w *Watcher) parseModifyLiquidity(vlog types.Log) (*models.SmartMoneyLPEven
 		eventType = "remove"
 	}
 
-	tickLower := int(tickLowerRaw.Int64())
-	tickUpper := int(tickUpperRaw.Int64())
+	var nftID *uint64
+	if salt.Sign() > 0 && salt.IsUint64() {
+		parsed := salt.Uint64()
+		nftID = &parsed
+	}
 
 	return &models.SmartMoneyLPEvent{
-		Protocol:    "uniswap_v4",
-		EventType:   eventType,
-		PoolAddress: strings.ToLower(vlog.Address.Hex()),
-		TickLower:   &tickLower,
-		TickUpper:   &tickUpper,
+		Protocol:     "uniswap_v4",
+		EventType:    eventType,
+		PoolAddress:  strings.ToLower(vlog.Address.Hex()),
+		TickLower:    &tickLower,
+		TickUpper:    &tickUpper,
+		NftTokenID:   nftID,
+		Token0Amount: "0",
+		Token1Amount: "0",
 	}, nil
+}
+
+func decodeSignedInt24Word(word []byte) (int, error) {
+	if len(word) < 32 {
+		return 0, fmt.Errorf("word too short: %d", len(word))
+	}
+	v := int32(word[29])<<16 | int32(word[30])<<8 | int32(word[31])
+	if v&0x800000 != 0 {
+		v -= 1 << 24
+	}
+	return int(v), nil
 }
 
 func detectProtocol(addr common.Address) string {

@@ -40,7 +40,7 @@ func NewService() *Service {
 			cfg.BSCChainID,
 			cfg.PancakeV3PositionManagerAddress,
 			cfg.UniswapV3PositionManagerAddress,
-			cfg.UniswapV4PositionManagerAddress,
+			cfg.UniswapV4PoolManagerAddress,
 			cfg.SmartMoneyPollInterval,
 		)
 	}

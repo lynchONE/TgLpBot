@@ -562,9 +562,9 @@ func (s *StrategyService) refreshTaskPoolMeta(task *models.StrategyTask) error {
 		if chain != "bsc" {
 			return fmt.Errorf("v4 not supported on chain=%s", chain)
 		}
-		info, err = s.poolService.GetV4PoolInfo(poolID)
+		info, err = s.poolService.GetPoolInfoForVersionCached(chain, "v4", poolID)
 	default:
-		info, err = s.poolService.GetPoolInfoForChain(chain, poolID)
+		info, err = s.poolService.GetPoolInfoForVersionCached(chain, "v3", poolID)
 	}
 	if err != nil {
 		return err

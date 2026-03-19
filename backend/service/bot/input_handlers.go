@@ -143,7 +143,7 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
 
 		b.sendMessage(message.Chat.ID, "⏳ 正在查询 Uniswap V4 池子信息...")
 
-		poolInfo, err := b.poolService.GetV4PoolInfo(poolInput)
+		poolInfo, err := b.poolService.GetPoolInfoForVersionCached(chain, "v4", poolInput)
 		if err != nil {
 			b.sendMessage(
 				message.Chat.ID,
@@ -244,7 +244,7 @@ func (b *Bot) handlePoolAddress(message *tgbotapi.Message, user *models.User) {
 	// Query V3 pool information
 	b.sendMessage(message.Chat.ID, "⏳ 正在查询 V3 池子信息...")
 
-	poolInfo, err := b.poolService.GetPoolInfoForChain(chain, poolInput)
+	poolInfo, err := b.poolService.GetPoolInfoForVersionCached(chain, "v3", poolInput)
 	if err != nil {
 		b.sendMessage(
 			message.Chat.ID,

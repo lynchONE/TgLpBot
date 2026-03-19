@@ -2,6 +2,7 @@ package web_server
 
 import (
 	"TgLpBot/base/database"
+	"context"
 	"errors"
 	"log"
 	"strings"
@@ -11,13 +12,20 @@ import (
 )
 
 const poolsCacheTTL = 10 * time.Second
+const poolsCacheAccessTimeout = 150 * time.Millisecond
 
 func readRedisRawCache(key string) ([]byte, bool) {
-	if database.RedisClient == nil {
+	if database.RedisClient == nil || strings.TrimSpace(key) == "" {
 		return nil, false
 	}
-	raw, err := database.GetCache(key)
+	ctx, cancel := context.WithTimeout(context.Background(), poolsCacheAccessTimeout)
+	defer cancel()
+
+	raw, err := database.RedisClient.Get(ctx, key).Result()
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return nil, false
+		}
 		if !errors.Is(err, redis.Nil) {
 			log.Printf("[WebCache] redis get failed key=%s err=%v", key, err)
 		}
@@ -30,10 +38,18 @@ func readRedisRawCache(key string) ([]byte, bool) {
 }
 
 func writeRedisRawCache(key string, payload []byte, expiration time.Duration) {
-	if database.RedisClient == nil || len(payload) == 0 {
+	if database.RedisClient == nil || len(payload) == 0 || strings.TrimSpace(key) == "" || expiration <= 0 {
 		return
 	}
-	if err := database.SetCache(key, string(payload), expiration); err != nil {
-		log.Printf("[WebCache] redis set failed key=%s err=%v", key, err)
-	}
+	data := append([]byte(nil), payload...)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), poolsCacheAccessTimeout)
+		defer cancel()
+		if err := database.RedisClient.Set(ctx, key, string(data), expiration).Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				return
+			}
+			log.Printf("[WebCache] redis set failed key=%s err=%v", key, err)
+		}
+	}()
 }

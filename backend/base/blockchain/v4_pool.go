@@ -230,46 +230,43 @@ func GetUniswapV4PoolKeyFromPositionManager(positionManager common.Address, pool
 	return GetUniswapV4PoolKeyFromPositionManagerCtx(context.Background(), positionManager, poolID)
 }
 
-// GetUniswapV4PoolKeyFromPositionManagerCtx reads PositionManager.poolKeys(bytes25(poolId)) with a caller-provided context.
-func GetUniswapV4PoolKeyFromPositionManagerCtx(ctx context.Context, positionManager common.Address, poolID string) (common.Address, common.Address, uint64, int, common.Address, error) {
+func GetUniswapV4PoolKeyFromPositionManagerBytes25(positionManager common.Address, poolID25 [25]byte) (common.Hash, common.Address, common.Address, uint64, int, common.Address, error) {
+	return GetUniswapV4PoolKeyFromPositionManagerBytes25Ctx(context.Background(), positionManager, poolID25)
+}
+
+func GetUniswapV4PoolKeyFromPositionManagerBytes25Ctx(ctx context.Context, positionManager common.Address, poolID25 [25]byte) (common.Hash, common.Address, common.Address, uint64, int, common.Address, error) {
 	if Client == nil {
-		return common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("blockchain client not initialized")
+		return common.Hash{}, common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("blockchain client not initialized")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if (positionManager == common.Address{}) {
-		return common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("uniswap v4 position manager address not configured")
-	}
-
-	poolId25, fullID, err := poolIDToBytes25(poolID)
-	if err != nil {
-		return common.Address{}, common.Address{}, 0, 0, common.Address{}, err
+	if positionManager == (common.Address{}) {
+		return common.Hash{}, common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("uniswap v4 position manager address not configured")
 	}
 
 	parsedABI, err := abi.JSON(strings.NewReader(uniswapV4PositionManagerPoolKeysABI))
 	if err != nil {
-		return common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("parse position manager ABI failed: %w", err)
+		return common.Hash{}, common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("parse position manager ABI failed: %w", err)
 	}
 
-	data, err := parsedABI.Pack("poolKeys", poolId25)
+	data, err := parsedABI.Pack("poolKeys", poolID25)
 	if err != nil {
-		return common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("pack positionManager.poolKeys failed: %w", err)
+		return common.Hash{}, common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("pack positionManager.poolKeys failed: %w", err)
 	}
 
-	v4Debugf("posm poolKeys: PositionManager=%s PoolId=%s (bytes25=%x)", positionManager.Hex(), poolID, poolId25)
 	msg := ethereum.CallMsg{To: &positionManager, Data: data}
 	raw, err := Client.CallContract(ctx, msg, nil)
 	if err != nil {
-		return common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("call positionManager.poolKeys failed: %w", err)
+		return common.Hash{}, common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("call positionManager.poolKeys failed: %w", err)
 	}
 
 	out, err := parsedABI.Unpack("poolKeys", raw)
 	if err != nil {
-		return common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("unpack positionManager.poolKeys failed: %w", err)
+		return common.Hash{}, common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("unpack positionManager.poolKeys failed: %w", err)
 	}
 	if len(out) < 5 {
-		return common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("unexpected positionManager.poolKeys return length: %d", len(out))
+		return common.Hash{}, common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("unexpected positionManager.poolKeys return length: %d", len(out))
 	}
 
 	c0, _ := out[0].(common.Address)
@@ -283,19 +280,31 @@ func GetUniswapV4PoolKeyFromPositionManagerCtx(ctx context.Context, positionMana
 		fee = feeBig.Uint64()
 	}
 	if tickSpacingBig == nil {
-		return common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("unexpected tickSpacing type: %T", out[3])
+		return common.Hash{}, common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("unexpected tickSpacing type: %T", out[3])
 	}
 	tickSpacing := int(tickSpacingBig.Int64())
-
-	// When the mapping isn't set yet, tickSpacing is 0 and currencies are zero.
 	if tickSpacing == 0 || (c0 == common.Address{} && c1 == common.Address{}) {
-		return common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("positionManager.poolKeys not set for PoolId=%s (need at least 1 mint via this PositionManager)", poolID)
+		return common.Hash{}, common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("positionManager.poolKeys not set for pool bytes25=%x", poolID25)
 	}
 
-	// Sanity check: derived PoolId must match the input PoolId (avoid bytes25 collisions / wrong mapping).
-	derivedID, derr := computeUniswapV4PoolID(c0, c1, fee, tickSpacing, hooks)
+	fullID, derr := computeUniswapV4PoolID(c0, c1, fee, tickSpacing, hooks)
 	if derr != nil {
-		return common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("compute poolId failed: %w", derr)
+		return common.Hash{}, common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("compute poolId failed: %w", derr)
+	}
+	return fullID, c0, c1, fee, tickSpacing, hooks, nil
+}
+
+// GetUniswapV4PoolKeyFromPositionManagerCtx reads PositionManager.poolKeys(bytes25(poolId)) with a caller-provided context.
+func GetUniswapV4PoolKeyFromPositionManagerCtx(ctx context.Context, positionManager common.Address, poolID string) (common.Address, common.Address, uint64, int, common.Address, error) {
+	poolId25, fullID, err := poolIDToBytes25(poolID)
+	if err != nil {
+		return common.Address{}, common.Address{}, 0, 0, common.Address{}, err
+	}
+
+	v4Debugf("posm poolKeys: PositionManager=%s PoolId=%s (bytes25=%x)", positionManager.Hex(), poolID, poolId25)
+	derivedID, c0, c1, fee, tickSpacing, hooks, err := GetUniswapV4PoolKeyFromPositionManagerBytes25Ctx(ctx, positionManager, poolId25)
+	if err != nil {
+		return common.Address{}, common.Address{}, 0, 0, common.Address{}, err
 	}
 	if derivedID != fullID {
 		return common.Address{}, common.Address{}, 0, 0, common.Address{}, fmt.Errorf("poolId mismatch: expected=%s derived=%s (PositionManager.poolKeys bytes25 collision?)", fullID.Hex(), derivedID.Hex())

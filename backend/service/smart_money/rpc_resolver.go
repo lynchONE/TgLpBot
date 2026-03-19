@@ -30,22 +30,28 @@ func hasSmartMoneyRPC(ctx context.Context, transport string) bool {
 }
 
 func handleSmartMoneyRPCEndpointError(eff rpcpool.Effective, err error) {
+	handleSmartMoneyRPCEndpointErrorWithManager(rpcpool.Default(), eff, err)
+}
+
+func handleSmartMoneyRPCEndpointErrorWithManager(mgr *rpcpool.Manager, eff rpcpool.Effective, err error) {
 	if err == nil || eff.Source != rpcpool.SourceDB || eff.Endpoint == nil {
 		return
 	}
-	mgr := rpcpool.Default()
 	if mgr == nil {
 		return
 	}
+
+	if shouldBackoffSmartMoneyRPCError(err) {
+		// Smart Money block scans are bursty by design. Providers may return
+		// both per-second throttling and temporary credit-plan 429s here.
+		// Let the watcher back off locally instead of poisoning the shared RPC pool.
+		return
+	}
+
 	ctx := context.Background()
-	if rpcpool.IsQuotaExhaustedError(err) {
-		_ = mgr.DisableUntilNextMonth(ctx, eff.Endpoint.ID)
-		return
-	}
-	if rpcpool.IsRateLimitedError(err) {
-		// Smart Money watcher's block scans are bursty by design. A temporary
-		// rate limit should trigger local backoff instead of poisoning the RPC pool.
-		return
-	}
 	_ = mgr.DisableEndpoint(ctx, eff.Endpoint.ID, time.Now().Add(10*time.Minute), rpcpool.ReasonHealthFail)
+}
+
+func shouldBackoffSmartMoneyRPCError(err error) bool {
+	return rpcpool.IsRateLimitedError(err) || rpcpool.IsQuotaExhaustedError(err)
 }
