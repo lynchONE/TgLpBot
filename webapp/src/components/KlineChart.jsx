@@ -429,30 +429,24 @@ export default function KlineChart({
 
   const markerClusters = useMemo(() => {
     const rows = Array.isArray(markers) ? markers : [];
-    const grouped = new Map();
-    rows.forEach((row) => {
-      const action = String(row?.action || 'add').toLowerCase() === 'remove' ? 'remove' : 'add';
-      const time = toUnixSeconds(row?.bucket_t || row?.t);
-      if (!time) return;
-      const isMyTrade = Boolean(row?.is_my_trade);
-      const key = isMyTrade ? `my:${time}:${action}` : `${time}:${action}`;
-      const prev = grouped.get(key) || {
-        id: key,
-        time,
-        action,
-        items: [],
-        estimatedUSD: 0,
-        isMyTrade,
-      };
-      prev.items.push(row);
-      prev.estimatedUSD += Number(row?.estimated_usd || 0);
-      grouped.set(key, prev);
-    });
-    return Array.from(grouped.values())
-      .map((cluster) => ({
-        ...cluster,
-        items: [...cluster.items].sort((a, b) => Number(b?.estimated_usd || 0) - Number(a?.estimated_usd || 0)),
-      }))
+    return rows
+      .map((row, index) => {
+        const action = String(row?.action || 'add').toLowerCase() === 'remove' ? 'remove' : 'add';
+        const time = toUnixSeconds(row?.bucket_t || row?.t);
+        if (!time) return null;
+        const isMyTrade = Boolean(row?.is_my_trade);
+        const walletAddress = normalizeWalletAddress(row?.wallet_address);
+        const eventID = String(row?.event_id || '').trim();
+        return {
+          id: eventID || `${isMyTrade ? 'my' : 'sm'}:${time}:${action}:${walletAddress || index}:${index}`,
+          time,
+          action,
+          items: [row],
+          estimatedUSD: Number(row?.estimated_usd || 0),
+          isMyTrade,
+        };
+      })
+      .filter(Boolean)
       .sort((a, b) => a.time - b.time);
   }, [markers]);
 
@@ -476,12 +470,13 @@ export default function KlineChart({
   }, []);
 
   const scheduleTooltipHide = useCallback(() => {
+    if (activeMarkerId) return;
     clearTooltipHideTimer();
     tooltipHideTimerRef.current = window.setTimeout(() => {
       setHoveredCluster(null);
       tooltipHideTimerRef.current = null;
     }, 180);
-  }, [clearTooltipHideTimer]);
+  }, [activeMarkerId, clearTooltipHideTimer]);
 
   const clearDrawingState = useCallback(() => {
     drawingStartRef.current = null;
@@ -590,6 +585,18 @@ export default function KlineChart({
       setHoveredCluster(null);
     }
   }, [clearTooltipHideTimer, drawingTool]);
+
+  useEffect(() => {
+    if (!activeMarkerId) return;
+    clearTooltipHideTimer();
+    setHoveredCluster(displayMarkers.find((item) => item.id === activeMarkerId) || null);
+  }, [activeMarkerId, clearTooltipHideTimer, displayMarkers]);
+
+  useEffect(() => {
+    if (activeMarkerId) return;
+    clearTooltipHideTimer();
+    setHoveredCluster(null);
+  }, [activeMarkerId, clearTooltipHideTimer]);
 
   const updateProjection = useCallback(() => {
     const hostWidth = chartHostRef.current?.clientWidth || wrapRef.current?.clientWidth || 0;
@@ -778,10 +785,13 @@ export default function KlineChart({
   }, [updateProjection]);
 
   const empty = !loading && !error && candleData.length === 0;
+  const tooltipCluster = activeMarkerId
+    ? (displayMarkers.find((item) => item.id === activeMarkerId) || null)
+    : hoveredCluster;
 
   const tooltipData = useMemo(() => {
-    if (!hoveredCluster) return null;
-    const c = hoveredCluster;
+    if (!tooltipCluster) return null;
+    const c = tooltipCluster;
     const primary = c.items?.[0];
     if (!primary) return null;
     const walletAddress = normalizeWalletAddress(primary.wallet_address || '');
@@ -803,7 +813,7 @@ export default function KlineChart({
       watched: walletAddress ? watchedWalletSet.has(walletAddress) : false,
       watchBusy: walletAddress ? Boolean(watchToggleMap[walletAddress]) : false,
     };
-  }, [hoveredCluster, watchToggleMap, watchedWalletSet]);
+  }, [tooltipCluster, watchToggleMap, watchedWalletSet]);
 
   const chartStageStyle = {
     height: `${Math.max(320, Number(chartHeight || 0))}px`,
@@ -868,29 +878,37 @@ export default function KlineChart({
               left: `${cluster.x}px`,
               top: `${cluster.y}px`,
             }}
-            onClick={() => onMarkerClick?.(cluster)}
+            onClick={() => {
+              clearTooltipHideTimer();
+              setHoveredCluster(cluster);
+              onMarkerClick?.(cluster);
+            }}
             onMouseEnter={() => {
+              if (activeMarkerId) return;
               clearTooltipHideTimer();
               setHoveredCluster(cluster);
             }}
             onMouseLeave={scheduleTooltipHide}
           >
             <img className="kline-marker-avatar" src={cluster.label} alt="" />
+            {cluster.items.length > 1 ? (
+              <span className="kline-marker-badge">{cluster.items.length}</span>
+            ) : null}
           </button>
         ))}
 
-        {hoveredCluster && tooltipData && (
+        {tooltipCluster && tooltipData && (
           <div
-            className={`kline-marker-tooltip ${hoveredCluster.action}`}
+            className={`kline-marker-tooltip ${tooltipCluster.action}`}
             style={{
-              left: `${hoveredCluster.x}px`,
-              top: `${hoveredCluster.y}px`,
+              left: `${tooltipCluster.x}px`,
+              top: `${tooltipCluster.y}px`,
             }}
             onMouseEnter={clearTooltipHideTimer}
             onMouseLeave={scheduleTooltipHide}
           >
             <div className="kmt-head">
-              <span className="kmt-emoji"><img src={hoveredCluster.label} alt="" /></span>
+              <span className="kmt-emoji"><img src={tooltipCluster.label} alt="" /></span>
               <span className="kmt-wallet-wrap">
                 <span className="kmt-wallet">{tooltipData.walletName}</span>
                 {tooltipData.walletAddress ? (
@@ -925,11 +943,11 @@ export default function KlineChart({
                   {tooltipData.watched ? '\u2665' : '\u2661'}
                 </button>
               ) : null}
-              {tooltipData.count > 1 && <span className="kmt-count">等{tooltipData.count}笔</span>}
+              {tooltipData.count > 1 ? <span className="kmt-count">x{tooltipData.count}</span> : null}
             </div>
             <div className="kmt-row">
-              <span className={`kmt-action ${hoveredCluster.action}`}>
-                {hoveredCluster.action === 'remove' ? '减仓' : '加仓'}
+              <span className={`kmt-action ${tooltipCluster.action}`}>
+                {tooltipCluster.action === 'remove' ? '减仓' : '加仓'}
               </span>
               <span className="kmt-usd">{formatUSD(tooltipData.totalUSD)}</span>
             </div>

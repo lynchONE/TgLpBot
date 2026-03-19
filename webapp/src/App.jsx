@@ -24,6 +24,7 @@ import {
   deleteTask,
   fetchHotPools,
   fetchRealtimePositions,
+  fetchSmartMoneyPoolMarkers,
   fetchTokenCandles,
   fetchWallets,
   generateLoginCode,
@@ -148,6 +149,7 @@ const STORAGE = {
   accentTheme: 'tglp_web_accent_theme',
   walletId: 'tglp_web_wallet_id',
   klineHeight: 'tglp_web_kline_height',
+  smartMoneyWatchWallets: 'tglp_web_sm_watch_wallets',
 };
 
 function storageGet(key) {
@@ -204,6 +206,26 @@ function normalizeWalletAddress(value) {
   const raw = String(value || '').trim();
   if (!/^0x[0-9a-fA-F]{40}$/.test(raw)) return '';
   return `0x${raw.slice(2).toLowerCase()}`;
+}
+
+function parseStoredWatchWallets(raw) {
+  if (!raw) return [];
+  try {
+    const values = JSON.parse(raw);
+    if (!Array.isArray(values)) return [];
+    return Array.from(
+      new Set(values.map((item) => normalizeWalletAddress(item)).filter(Boolean))
+    ).sort();
+  } catch {
+    return [];
+  }
+}
+
+function markerWalletDisplayName(marker) {
+  const label = String(marker?.wallet_label || '').trim();
+  if (label) return label;
+  const address = normalizeWalletAddress(marker?.wallet_address);
+  return address ? address.slice(-4) : '--';
 }
 
 function parseLoginUser(raw) {
@@ -300,6 +322,15 @@ export default function App() {
   const [klineChartHeight, setKlineChartHeight] = useState(() =>
     clampKlineChartHeight(storageGet(STORAGE.klineHeight) || DEFAULT_KLINE_CHART_HEIGHT)
   );
+  const [klineMarkers, setKlineMarkers] = useState([]);
+  const [klineMarkersLoading, setKlineMarkersLoading] = useState(false);
+  const [klineMarkersError, setKlineMarkersError] = useState('');
+  const [klineActiveMarkerId, setKlineActiveMarkerId] = useState('');
+  const [klineFocusedWalletAddress, setKlineFocusedWalletAddress] = useState('');
+  const [klineWatchedWallets, setKlineWatchedWallets] = useState(() =>
+    parseStoredWatchWallets(storageGet(STORAGE.smartMoneyWatchWallets))
+  );
+  const [klineWatchToggleMap, setKlineWatchToggleMap] = useState({});
 
   const [refreshing, setRefreshing] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false);
@@ -431,6 +462,44 @@ export default function App() {
     () => `${selectedPoolAddress || 'pool'}:${klineTokenAddress || 'token'}:${klineInterval}`,
     [klineInterval, klineTokenAddress, selectedPoolAddress]
   );
+  const klineMarkerRange = useMemo(() => {
+    if (!Array.isArray(klineCandles) || !klineCandles.length) return null;
+    const from = Number(klineCandles[0]?.t || 0);
+    const to = Number(klineCandles[klineCandles.length - 1]?.t || 0);
+    if (!from || !to) return null;
+    return from <= to ? { from, to } : { from: to, to: from };
+  }, [klineCandles]);
+  const klineWatchedWalletSet = useMemo(
+    () => new Set(klineWatchedWallets),
+    [klineWatchedWallets]
+  );
+  const klineRangeOverlays = useMemo(() => {
+    if (!klineMarkers.length || !klineWatchedWallets.length) return [];
+    const watched = new Set(klineWatchedWallets);
+    const seen = new Set();
+    return klineMarkers
+      .filter((marker) => String(marker?.action || '').toLowerCase() === 'add')
+      .filter((marker) => watched.has(normalizeWalletAddress(marker?.wallet_address)))
+      .map((marker, index) => {
+        const walletAddress = normalizeWalletAddress(marker?.wallet_address);
+        const priceLower = Number(marker?.price_lower || 0);
+        const priceUpper = Number(marker?.price_upper || 0);
+        const midPrice = Number(marker?.mid_price || marker?.anchor_price || 0) ||
+          (priceLower > 0 && priceUpper > 0 ? (priceLower + priceUpper) / 2 : 0);
+        if (!walletAddress || !Number.isFinite(midPrice) || midPrice <= 0) return null;
+        const dedupeKey = `${walletAddress}:${midPrice.toFixed(12)}:${marker?.event_id || index}`;
+        if (seen.has(dedupeKey)) return null;
+        seen.add(dedupeKey);
+        return {
+          id: `watch:${dedupeKey}`,
+          type: 'mid',
+          color: 'blue',
+          price: midPrice,
+          label: markerWalletDisplayName(marker),
+        };
+      })
+      .filter(Boolean);
+  }, [klineMarkers, klineWatchedWallets]);
   const clearKlineDrawing = useCallback(() => {
     setKlineDrawResetNonce((prev) => prev + 1);
   }, []);
@@ -455,6 +524,7 @@ export default function App() {
     storageSet(STORAGE.refreshInterval, String(refreshInterval));
     storageSet(STORAGE.accentTheme, accentTheme);
     storageSet(STORAGE.klineHeight, String(klineChartHeight));
+    storageSet(STORAGE.smartMoneyWatchWallets, JSON.stringify(klineWatchedWallets));
 
     if (initData) {
       storageSet(STORAGE.initData, initData);
@@ -466,7 +536,7 @@ export default function App() {
     } else {
       storageRemove(STORAGE.loginUser);
     }
-  }, [accentTheme, chain, hotSort, initData, klineChartHeight, loginUser, refreshInterval, widgets]);
+  }, [accentTheme, chain, hotSort, initData, klineChartHeight, klineWatchedWallets, loginUser, refreshInterval, widgets]);
 
   useEffect(() => {
     if (!workMode) return;
@@ -613,6 +683,56 @@ export default function App() {
     ]
   );
 
+  const loadKlineMarkers = useCallback(
+    async (signal) => {
+      if (!hasInitData || !selectedPoolAddress || !klineMarkerRange) {
+        setKlineMarkers([]);
+        setKlineMarkersError('');
+        setKlineMarkersLoading(false);
+        return;
+      }
+
+      setKlineMarkersLoading(true);
+      setKlineMarkersError('');
+      try {
+        const rangeHours = Math.max(1, Math.ceil((klineMarkerRange.to - klineMarkerRange.from) / 3600) + 1);
+        const resp = await fetchSmartMoneyPoolMarkers({
+          apiBaseUrl,
+          initData,
+          chain: selectedPool?.chain || chain,
+          poolId: selectedPoolAddress,
+          poolVersion: selectedPoolVersion,
+          bucketSec: klineIntervalMeta.bucketSec,
+          windowHours: rangeHours,
+          limit: klineIntervalMeta.poolLimit,
+          startTs: klineMarkerRange.from,
+          endTs: klineMarkerRange.to,
+          signal,
+        });
+        setKlineMarkers(Array.isArray(resp?.events) ? resp.events : []);
+      } catch (e) {
+        if (e?.name !== 'AbortError') {
+          setKlineMarkers([]);
+          setKlineMarkersError(String(e?.message || e));
+        }
+      } finally {
+        setKlineMarkersLoading(false);
+      }
+    },
+    [
+      apiBaseUrl,
+      chain,
+      hasInitData,
+      initData,
+      klineIntervalMeta.bucketSec,
+      klineIntervalMeta.poolLimit,
+      klineMarkerRange,
+      selectedPool?.chain,
+      selectedPoolAddress,
+      selectedPoolVersion,
+    ]
+  );
+
   useEffect(() => {
     const ctrl = new AbortController();
     loadHotPools(ctrl.signal);
@@ -636,6 +756,12 @@ export default function App() {
     loadKline(ctrl.signal);
     return () => ctrl.abort();
   }, [loadKline, klineRefreshNonce]);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    loadKlineMarkers(ctrl.signal);
+    return () => ctrl.abort();
+  }, [loadKlineMarkers, klineRefreshNonce]);
 
   useEffect(() => {
     if (!hasInitData) return undefined;
@@ -681,6 +807,8 @@ export default function App() {
   useEffect(() => {
     setKlineDrawTool('none');
     setKlineDrawResetNonce((prev) => prev + 1);
+    setKlineActiveMarkerId('');
+    setKlineFocusedWalletAddress('');
   }, [klineViewportKey]);
 
   useEffect(() => {
@@ -688,6 +816,10 @@ export default function App() {
     setKlineSource('');
     setKlineDrawTool('none');
     setKlineDrawResetNonce((prev) => prev + 1);
+    setKlineMarkers([]);
+    setKlineMarkersError('');
+    setKlineActiveMarkerId('');
+    setKlineFocusedWalletAddress('');
   }, [selectedPoolAddress]);
 
   const [loginCode, setLoginCode] = useState('');
@@ -760,6 +892,10 @@ export default function App() {
     storageRemove(STORAGE.loginUser);
     setHotPools([]);
     setPositions(null);
+    setKlineMarkers([]);
+    setKlineMarkersError('');
+    setKlineActiveMarkerId('');
+    setKlineFocusedWalletAddress('');
   }, []);
 
   const refreshAll = useCallback(async () => {
@@ -772,6 +908,39 @@ export default function App() {
 
   const refreshKline = useCallback(() => {
     setKlineRefreshNonce((v) => v + 1);
+  }, []);
+
+  const handleKlineMarkerClick = useCallback((cluster) => {
+    if (!cluster?.id) {
+      setKlineActiveMarkerId('');
+      setKlineFocusedWalletAddress('');
+      return;
+    }
+    const nextId = klineActiveMarkerId === cluster.id ? '' : cluster.id;
+    setKlineActiveMarkerId(nextId);
+    setKlineFocusedWalletAddress(
+      nextId ? normalizeWalletAddress(cluster?.items?.[0]?.wallet_address) : ''
+    );
+  }, [klineActiveMarkerId]);
+
+  const handleToggleKlineWatch = useCallback((walletAddress) => {
+    const address = normalizeWalletAddress(walletAddress);
+    if (!address) return;
+    setKlineWatchToggleMap((prev) => ({ ...prev, [address]: true }));
+    setKlineWatchedWallets((prev) => {
+      const next = new Set(prev);
+      if (next.has(address)) next.delete(address);
+      else next.add(address);
+      return Array.from(next).sort();
+    });
+    window.setTimeout(() => {
+      setKlineWatchToggleMap((prev) => {
+        if (!prev[address]) return prev;
+        const next = { ...prev };
+        delete next[address];
+        return next;
+      });
+    }, 0);
   }, []);
 
   const toggleWidget = useCallback((key) => {
@@ -1307,15 +1476,34 @@ export default function App() {
 
               <KlineChart
                 candles={klineCandles}
+                markers={klineMarkers}
+                rangeOverlays={klineRangeOverlays}
                 loading={klineLoading}
                 error={klineError}
                 viewportKey={klineViewportKey}
+                activeMarkerId={klineActiveMarkerId}
+                highlightWalletAddress={klineFocusedWalletAddress}
+                watchedWalletSet={klineWatchedWalletSet}
+                watchToggleMap={klineWatchToggleMap}
+                onMarkerClick={handleKlineMarkerClick}
+                onToggleWatch={handleToggleKlineWatch}
                 drawingTool={klineDrawTool}
                 drawingResetNonce={klineDrawResetNonce}
                 chartHeight={klineChartHeight}
                 userAvatarUrl={loginUser?.photo_url || ''}
               />
             </div>
+
+            {klineMarkersError ? (
+              <div className="kline-inline-note">
+                聪明钱气泡加载失败：{klineMarkersError}
+              </div>
+            ) : null}
+            {!klineMarkersError && !klineMarkersLoading && selectedPoolAddress && klineCandles.length > 0 && klineMarkers.length === 0 ? (
+              <div className="kline-inline-note">
+                当前时间窗口没有聪明钱开仓/撤仓气泡。
+              </div>
+            ) : null}
 
             <div className="kline-ext-links">
               {selectedPoolGmgnUrl && (
@@ -1560,7 +1748,13 @@ export default function App() {
       </PanelShell>
     ),
 
-    smart_money: <SmartMoneyDashboard apiBaseUrl={apiBaseUrl} />,
+    smart_money: (
+      <SmartMoneyDashboard
+        apiBaseUrl={apiBaseUrl}
+        onSelectPool={selectPool}
+        activePoolAddress={selectedPoolAddress}
+      />
+    ),
   };
 
   return (

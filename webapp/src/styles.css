@@ -1599,8 +1599,8 @@ body {
 .kline-marker {
   position: absolute;
   transform: translate(-50%, -50%);
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   border: 2px solid transparent;
   display: flex;
@@ -1608,11 +1608,13 @@ body {
   justify-content: center;
   pointer-events: auto;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  box-sizing: border-box;
+  padding: 2px;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.38);
   z-index: 5;
-  padding: 0;
-  background: #1a1f2a;
+  background: radial-gradient(circle at 30% 25%, rgba(35, 46, 67, 0.98), rgba(9, 16, 24, 0.98));
   overflow: hidden;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
 }
 
 .kline-marker-avatar {
@@ -1645,17 +1647,22 @@ body {
 }
 
 .kline-marker.add {
-  border-color: #16c784;
-  box-shadow: 0 0 8px rgba(22, 199, 132, 0.4), 0 4px 12px rgba(0, 0, 0, 0.35);
+  border-color: #23d18b;
+  box-shadow: 0 0 0 1px rgba(35, 209, 139, 0.22), 0 0 12px rgba(35, 209, 139, 0.34), 0 8px 18px rgba(0, 0, 0, 0.38);
 }
 
 .kline-marker.remove {
-  border-color: #ea3943;
-  box-shadow: 0 0 8px rgba(234, 57, 67, 0.4), 0 4px 12px rgba(0, 0, 0, 0.35);
+  border-color: #ff667d;
+  box-shadow: 0 0 0 1px rgba(255, 102, 125, 0.22), 0 0 12px rgba(255, 102, 125, 0.34), 0 8px 18px rgba(0, 0, 0, 0.38);
+}
+
+.kline-marker:hover {
+  transform: translate(-50%, -50%) scale(1.05);
 }
 
 .kline-marker.active {
-  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.45), 0 10px 20px rgba(0, 0, 0, 0.32);
+  transform: translate(-50%, -50%) scale(1.06);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.4), 0 0 20px rgba(var(--accent-rgb), 0.24), 0 12px 24px rgba(0, 0, 0, 0.4);
 }
 
 .kline-marker.my-trade {
@@ -1806,16 +1813,16 @@ body {
 .kline-marker-tooltip {
   position: absolute;
   transform: translate(-50%, calc(-100% - 22px));
-  background: rgba(12, 18, 30, 0.95);
-  border: 1px solid rgba(136, 157, 191, 0.22);
-  border-radius: 10px;
-  padding: 8px 10px;
+  background: rgba(12, 18, 30, 0.97);
+  border: 1px solid rgba(136, 157, 191, 0.24);
+  border-radius: 12px;
+  padding: 9px 11px;
   min-width: 160px;
   max-width: 260px;
   pointer-events: auto;
   z-index: 20;
   backdrop-filter: blur(8px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.46);
 }
 .kline-marker-tooltip.add { border-top: 2px solid rgba(22, 199, 132, 0.7); }
 .kline-marker-tooltip.remove { border-top: 2px solid rgba(234, 57, 67, 0.7); }
@@ -6069,6 +6076,11 @@ body {
   background: rgba(18, 26, 40, 0.6);
   border-color: rgba(var(--accent-rgb), 0.3);
 }
+.smd-pool-card.active {
+  background: rgba(var(--accent-rgb), 0.12);
+  border-color: rgba(var(--accent-rgb), 0.46);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.14);
+}
 .smd-pool-card-head {
   display: flex;
   align-items: center;
@@ -6114,6 +6126,16 @@ body {
 }
 .smd-dot-sep { opacity: 0.5; }
 .smd-pool-card-time { margin-left: auto; }
+.smd-pool-card-detail-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
 
 /* -- Wallet avatar -- */
 .smd-wallet-avatar {

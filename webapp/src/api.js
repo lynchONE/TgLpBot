@@ -79,6 +79,36 @@ export async function fetchTokenCandles({
   return requestJson(url, { method: 'GET', signal });
 }
 
+export async function fetchSmartMoneyPoolMarkers({
+  apiBaseUrl,
+  initData,
+  chain = 'bsc',
+  poolId,
+  poolVersion,
+  bucketSec = 300,
+  windowHours = 12,
+  limit = 300,
+  startTs,
+  endTs,
+  signal,
+}) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const params = new URLSearchParams();
+  if (initData) params.set('initData', String(initData));
+  if (chain) params.set('chain', String(chain));
+  if (poolId) params.set('pool_id', String(poolId));
+  if (poolVersion) params.set('pool_version', String(poolVersion));
+  if (Number.isFinite(bucketSec)) params.set('bucket_sec', String(bucketSec));
+  if (Number.isFinite(windowHours)) params.set('window_hours', String(windowHours));
+  if (Number.isFinite(limit)) params.set('limit', String(limit));
+  if (Number.isFinite(startTs) && startTs > 0) params.set('start_ts', String(Math.floor(startTs)));
+  if (Number.isFinite(endTs) && endTs > 0) params.set('end_ts', String(Math.floor(endTs)));
+
+  const qs = params.toString();
+  const url = `${base}/api/smart_money_pool_markers${qs ? `?${qs}` : ''}`;
+  return requestJson(url, { method: 'GET', signal });
+}
+
 export async function fetchRealtimePositions({ apiBaseUrl, initData, signal }) {
   const base = normalizeBaseUrl(apiBaseUrl);
   const url = `${base}/api/positions?endpoint=realtime_positions`;

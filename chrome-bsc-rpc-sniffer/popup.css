@@ -1,0 +1,266 @@
+:root {
+  color-scheme: dark;
+  --bg: #07111b;
+  --panel: rgba(9, 22, 36, 0.92);
+  --panel-border: rgba(128, 173, 209, 0.18);
+  --text: #f4f7fb;
+  --muted: #9fb4c9;
+  --accent: #f59e0b;
+  --accent-soft: rgba(245, 158, 11, 0.16);
+  --shadow: 0 20px 45px rgba(0, 0, 0, 0.28);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-width: 420px;
+  width: 420px;
+  min-height: 620px;
+  max-height: 720px;
+  background:
+    radial-gradient(circle at top right, rgba(245, 158, 11, 0.16), transparent 36%),
+    linear-gradient(160deg, #08111b 0%, #0a1726 46%, #112233 100%);
+  color: var(--text);
+  font: 14px/1.5 "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+body {
+  overflow: hidden;
+}
+
+.shell {
+  height: 100%;
+  padding: 18px;
+  overflow-y: auto;
+}
+
+.hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(245, 158, 11, 0.76);
+}
+
+.hero h1 {
+  margin: 4px 0 0;
+  font-size: 24px;
+  line-height: 1.15;
+}
+
+.meta {
+  max-width: 160px;
+  padding: 8px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.panel {
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.stats-panel {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.stat-card {
+  padding: 12px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(8, 18, 28, 0.56));
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.stat-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stat-card strong {
+  font-size: 16px;
+}
+
+.action-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+button {
+  appearance: none;
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.22), rgba(245, 158, 11, 0.1));
+  color: var(--text);
+  cursor: pointer;
+  padding: 10px 12px;
+  font-weight: 600;
+}
+
+button.small {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+button.ghost {
+  border-color: rgba(159, 180, 201, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+}
+
+button.danger {
+  border-color: rgba(251, 113, 133, 0.3);
+  background: linear-gradient(180deg, rgba(251, 113, 133, 0.24), rgba(251, 113, 133, 0.08));
+}
+
+.hint {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.hint code {
+  color: #ffd48a;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.section-head h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 54px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: #ffd48a;
+  font-size: 12px;
+}
+
+.tag.neutral {
+  background: rgba(159, 180, 201, 0.12);
+  color: var(--muted);
+}
+
+textarea {
+  width: 100%;
+  min-height: 170px;
+  resize: vertical;
+  border: 1px solid rgba(159, 180, 201, 0.16);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.22);
+  color: #e6edf5;
+  font: 12px/1.5 Consolas, "Courier New", monospace;
+}
+
+.endpoint-list {
+  display: grid;
+  gap: 12px;
+}
+
+.empty-state {
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px dashed rgba(159, 180, 201, 0.18);
+  color: var(--muted);
+  text-align: center;
+}
+
+.endpoint-card {
+  padding: 12px;
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01)),
+    rgba(6, 15, 24, 0.8);
+  border: 1px solid rgba(159, 180, 201, 0.12);
+}
+
+.endpoint-top,
+.endpoint-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: rgba(159, 180, 201, 0.1);
+  color: var(--muted);
+}
+
+.status-pill.usable {
+  background: rgba(52, 211, 153, 0.14);
+  color: #8cf1cb;
+}
+
+.status-pill.validating {
+  background: rgba(251, 191, 36, 0.14);
+  color: #ffd873;
+}
+
+.status-pill.invalid {
+  background: rgba(251, 113, 133, 0.14);
+  color: #ff9dad;
+}
+
+.endpoint-url {
+  margin-top: 10px;
+  font: 12px/1.5 Consolas, "Courier New", monospace;
+  word-break: break-all;
+}
+
+.endpoint-meta,
+.endpoint-details {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.endpoint-details code {
+  color: #ffd48a;
+}
+
+.endpoint-footer {
+  margin-top: 10px;
+}

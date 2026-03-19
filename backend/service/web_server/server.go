@@ -40,6 +40,7 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/trading", s.handleTrading)
 	mux.HandleFunc("/api/search_pools", s.handleSearchPools)
 	mux.HandleFunc("/api/token_candles", s.handleTokenCandles)
+	mux.HandleFunc("/api/smart_money_pool_markers", s.handleSmartMoneyPoolMarkers)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/global_config", s.handleGlobalConfig)
 	mux.HandleFunc("/api/position_profit_poster", s.handlePositionProfitPoster)
