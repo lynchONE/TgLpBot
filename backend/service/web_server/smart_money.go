@@ -1,9 +1,11 @@
 package web_server
 
 import (
+	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	sm "TgLpBot/service/smart_money"
+	smgd "TgLpBot/service/smart_money_golden_dog"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,8 +17,9 @@ import (
 )
 
 var (
-	smService *sm.Service
-	smWSHub   *sm.WSHub
+	smService      *sm.Service
+	smWSHub        *sm.WSHub
+	smGoldenDogSvc *smgd.Service
 )
 
 func initSmartMoney() {
@@ -35,11 +38,16 @@ func initSmartMoney() {
 	})
 
 	smService.Start()
+	smGoldenDogSvc = smgd.NewService()
+	smGoldenDogSvc.Start()
 }
 
 func stopSmartMoney() {
 	if smService != nil {
 		smService.Stop()
+	}
+	if smGoldenDogSvc != nil {
+		smGoldenDogSvc.Stop()
 	}
 }
 
@@ -52,6 +60,7 @@ func (s *Server) registerSmartMoneyRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/sm/positions", s.handleSMPositions)
 	mux.HandleFunc("/api/sm/events", s.handleSMEvents)
 	mux.HandleFunc("/api/sm/stats", s.handleSMStats)
+	mux.HandleFunc("/api/smart_money_golden_dog_config", s.handleSmartMoneyGoldenDogConfig)
 	mux.HandleFunc("/ws/sm/events", smWSHub.HandleWS)
 }
 
@@ -60,6 +69,7 @@ func (s *Server) registerSmartMoneyRoutes(mux *http.ServeMux) {
 func (s *Server) handleSMWallets(w http.ResponseWriter, r *http.Request) {
 	repo := smService.Repo()
 	ctx := r.Context()
+	chainID := resolveSmartMoneyRequestChainID(r)
 
 	switch r.Method {
 	case http.MethodGet:
@@ -128,7 +138,7 @@ func (s *Server) handleSMWallets(w http.ResponseWriter, r *http.Request) {
 		}
 		wallet := &models.MonitoredWallet{
 			Address:  strings.ToLower(addr),
-			ChainID:  56,
+			ChainID:  chainID,
 			Source:   "manual",
 			Label:    labelPtr,
 			IsActive: true,
@@ -168,7 +178,60 @@ func (s *Server) handleSMWallets(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, "no valid fields to update", http.StatusBadRequest)
 			return
 		}
-		if err := repo.UpdateMonitoredWallet(ctx, addr, 56, filtered); err != nil {
+		if rawLabel, ok := filtered["label"]; ok {
+			switch v := rawLabel.(type) {
+			case nil:
+				filtered["label"] = nil
+			case string:
+				label := strings.TrimSpace(v)
+				if label == "" {
+					filtered["label"] = nil
+				} else {
+					filtered["label"] = label
+				}
+			default:
+				label := strings.TrimSpace(fmt.Sprint(v))
+				if label == "" {
+					filtered["label"] = nil
+				} else {
+					filtered["label"] = label
+				}
+			}
+		}
+
+		existing, err := repo.GetMonitoredWalletByAddress(ctx, addr, chainID)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if existing == nil {
+			labelValue, hasLabel := filtered["label"]
+			_, hasActive := filtered["is_active"]
+			if !hasLabel || hasActive {
+				jsonError(w, "wallet not found", http.StatusNotFound)
+				return
+			}
+			var labelPtr *string
+			if label, ok := labelValue.(string); ok && strings.TrimSpace(label) != "" {
+				trimmed := strings.TrimSpace(label)
+				labelPtr = &trimmed
+			}
+			wallet := &models.MonitoredWallet{
+				Address:  strings.ToLower(addr),
+				ChainID:  chainID,
+				Source:   "manual",
+				Label:    labelPtr,
+				IsActive: false,
+			}
+			if err := repo.CreateMonitoredWallet(ctx, wallet); err != nil {
+				jsonError(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			jsonOK(w, map[string]interface{}{"ok": true})
+			return
+		}
+
+		if err := repo.UpdateMonitoredWallet(ctx, addr, chainID, filtered); err != nil {
 			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -183,7 +246,7 @@ func (s *Server) handleSMWallets(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, "invalid address", http.StatusBadRequest)
 			return
 		}
-		if err := repo.SoftDeleteMonitoredWallet(ctx, addr, 56); err != nil {
+		if err := repo.SoftDeleteMonitoredWallet(ctx, addr, chainID); err != nil {
 			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -684,6 +747,24 @@ var smartMoneyStableSymbols = map[string]struct{}{
 	"bnb":   {},
 	"eth":   {},
 	"sol":   {},
+}
+
+func resolveSmartMoneyRequestChainID(r *http.Request) int {
+	if r == nil {
+		return 56
+	}
+	query := r.URL.Query()
+	if raw := strings.TrimSpace(query.Get("chain_id")); raw != "" {
+		if chainID, err := strconv.Atoi(raw); err == nil && chainID > 0 {
+			return chainID
+		}
+	}
+	switch config.NormalizeChain(query.Get("chain")) {
+	case "base":
+		return 8453
+	default:
+		return 56
+	}
 }
 
 func smartMoneyChainSlug(chainID int) string {

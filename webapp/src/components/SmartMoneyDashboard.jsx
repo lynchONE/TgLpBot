@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
     Eye, Wallet, Settings, Search, Plus, ExternalLink, X, Check,
-    ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Brain,
+    ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Brain, Flame,
 } from 'lucide-react';
 import {
     fetchSMPools, fetchSMPoolStats, fetchSMPositions, fetchSMWallets,
     fetchSMStats, addSMWallet, updateSMWallet, deleteSMWallet,
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
+    fetchSMGoldenDogConfig, saveSMGoldenDogConfig,
 } from '../smartMoneyApi';
 import uniswapLogo from '../img/uniswap.svg';
 import pancakeLogo from '../img/pancake.svg';
@@ -57,6 +58,10 @@ function getPairLabel(value) {
 
 function getPoolIdentifier(value) {
     return String(value?.pool_address || '').trim();
+}
+
+function normalizePoolSelectionId(value) {
+    return String(value?.pool_address || value?.pool_id || value || '').trim().toLowerCase();
 }
 
 function getPoolIdentifierLabel(value) {
@@ -320,11 +325,15 @@ function ConfirmDialog({ open, title, description, confirmLabel = '确认', busy
 
 // ---- Pages ----
 
-function PoolList({ apiBaseUrl, onSelect }) {
+function PoolList({ apiBaseUrl, onSelect, onOpenDetail, activePoolAddress = '' }) {
     const [pools, setPools] = useState([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [proto, setProto] = useState('all');
+    const normalizedActivePoolAddress = useMemo(
+        () => normalizePoolSelectionId(activePoolAddress),
+        [activePoolAddress]
+    );
 
     useEffect(() => {
         setLoading(true);
@@ -364,8 +373,20 @@ function PoolList({ apiBaseUrl, onSelect }) {
                 <div className="smd-empty">暂无活跃仓位的池子</div>
             ) : (
                 <div className="smd-pool-cards">
-                    {filtered.map(p => (
-                        <div key={p.pool_address} className="smd-pool-card" onClick={() => onSelect(p)}>
+                    {filtered.map((p) => {
+                        const isActive = normalizedActivePoolAddress && normalizePoolSelectionId(p) === normalizedActivePoolAddress;
+                        return (
+                            <div
+                            key={p.pool_address}
+                            className={`smd-pool-card${isActive ? ' active' : ''}`}
+                            onClick={() => {
+                                if (typeof onSelect === 'function') {
+                                    onSelect(p);
+                                    return;
+                                }
+                                onOpenDetail?.(p);
+                            }}
+                        >
                             <div className="smd-pool-card-head">
                                 <PairAvatar item={p} size="sm" />
                                 <span className="smd-pool-card-pair">{getPairLabel(p)}</span>
@@ -389,9 +410,20 @@ function PoolList({ apiBaseUrl, onSelect }) {
                                         {relativeTime(p.latest_event_at)}
                                     </span>
                                 </span>
+                                <button
+                                    type="button"
+                                    className="smd-link smd-pool-card-detail-btn"
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        onOpenDetail?.(p);
+                                    }}
+                                >
+                                    详情 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
+                                </button>
                             </div>
-                        </div>
-                    ))}
+                            </div>
+                        );
+                    })}
                 </div>
             )}
         </div>
@@ -450,7 +482,7 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet }) {
                                 rel="noopener noreferrer"
                                 className="smd-link"
                             >
-                                鏌ョ湅姹犲瓙 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
+                                查看池子 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
                             </a>
                         </div>
                     </div>
@@ -515,7 +547,7 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet }) {
                                         rel="noopener noreferrer"
                                         className="smd-link smd-pos-card-link"
                                     >
-                                        鏌ョ湅浜ゆ槗 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
+                                        查看交易 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
                                     </a>
                                 ) : null}
                             </div>
@@ -758,6 +790,200 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool }) {
     );
 }
 
+function GoldenDogPanel({ apiBaseUrl, initData }) {
+    const hasInitData = Boolean(String(initData || '').trim());
+    const [loading, setLoading] = useState(hasInitData);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+    const [savedAt, setSavedAt] = useState('');
+    const [status, setStatus] = useState(null);
+    const [draft, setDraft] = useState({
+        enabled: false,
+        min_wallets: '3',
+        window_minutes: '10',
+        cooldown_minutes: '30',
+    });
+
+    const applyResponse = useCallback((resp) => {
+        setStatus(resp || null);
+        const cfg = resp?.config || {};
+        setDraft({
+            enabled: Boolean(cfg.enabled),
+            min_wallets: String(cfg.min_wallets ?? 3),
+            window_minutes: String(cfg.window_minutes ?? 10),
+            cooldown_minutes: String(cfg.cooldown_minutes ?? 30),
+        });
+    }, []);
+
+    const loadConfig = useCallback(async () => {
+        if (!hasInitData) {
+            setLoading(false);
+            setStatus(null);
+            return;
+        }
+        setLoading(true);
+        setError('');
+        try {
+            applyResponse(await fetchSMGoldenDogConfig({ apiBaseUrl, initData, chain: 'bsc' }));
+        } catch (err) {
+            setError(String(err?.message || err || '加载失败'));
+        } finally {
+            setLoading(false);
+        }
+    }, [apiBaseUrl, applyResponse, hasInitData, initData]);
+
+    useEffect(() => {
+        loadConfig();
+    }, [loadConfig]);
+
+    const barkStatusText = useMemo(() => {
+        if (status?.bark_ready) return '已就绪';
+        if (status?.bark_configured) return status?.bark_enabled ? '已配置未就绪' : '已配置未开启';
+        return '未配置';
+    }, [status]);
+
+    const handleSave = useCallback(async () => {
+        if (!hasInitData) {
+            setError('请先登录 WebApp，拿到 initData 后才能保存金狗通知。');
+            return;
+        }
+
+        const minWallets = Number.parseInt(String(draft.min_wallets || '').trim(), 10);
+        const windowMinutes = Number.parseInt(String(draft.window_minutes || '').trim(), 10);
+        const cooldownMinutes = Number.parseInt(String(draft.cooldown_minutes || '').trim(), 10);
+        if (!Number.isFinite(minWallets) || minWallets < 1) {
+            setError('钱包数量必须大于等于 1。');
+            return;
+        }
+        if (!Number.isFinite(windowMinutes) || windowMinutes < 1) {
+            setError('统计窗口必须大于等于 1 分钟。');
+            return;
+        }
+        if (!Number.isFinite(cooldownMinutes) || cooldownMinutes < 0) {
+            setError('冷却时间不能小于 0。');
+            return;
+        }
+
+        setSaving(true);
+        setError('');
+        setSavedAt('');
+        try {
+            const resp = await saveSMGoldenDogConfig({
+                apiBaseUrl,
+                initData,
+                chain: 'bsc',
+                config: {
+                    enabled: Boolean(draft.enabled),
+                    min_wallets: minWallets,
+                    window_minutes: windowMinutes,
+                    cooldown_minutes: cooldownMinutes,
+                },
+            });
+            applyResponse(resp);
+            setSavedAt('配置已保存');
+        } catch (err) {
+            setError(String(err?.message || err || '保存失败'));
+        } finally {
+            setSaving(false);
+        }
+    }, [apiBaseUrl, applyResponse, draft, hasInitData, initData]);
+
+    return (
+        <div>
+            <div className="smd-search-row">
+                <div className="smd-section-title">金狗通知</div>
+                <div className="smd-filter-group">
+                    <button
+                        type="button"
+                        className={`smd-filter-btn${draft.enabled ? ' active' : ''}`}
+                        onClick={() => setDraft((prev) => ({ ...prev, enabled: true }))}
+                    >
+                        开启
+                    </button>
+                    <button
+                        type="button"
+                        className={`smd-filter-btn${!draft.enabled ? ' active' : ''}`}
+                        onClick={() => setDraft((prev) => ({ ...prev, enabled: false }))}
+                    >
+                        关闭
+                    </button>
+                </div>
+            </div>
+
+            <div className="smd-stats-grid" style={{ marginBottom: 16 }}>
+                <StatCard label="Bark 状态" value={barkStatusText} />
+                <StatCard label="钱包阈值" value={`${draft.min_wallets || '--'} 个`} />
+                <StatCard label="冷却时间" value={`${draft.cooldown_minutes || '--'} 分钟`} />
+            </div>
+
+            {!hasInitData ? (
+                <div className="smd-inline-error">
+                    Web 端需要先登录 Telegram 才能保存提醒配置。Bark Key 继续复用全局配置，不在这里单独设置。
+                </div>
+            ) : null}
+            {error ? <div className="smd-inline-error">{error}</div> : null}
+            {!error && savedAt ? (
+                <div className="smd-inline-error" style={{ color: '#86efac', borderColor: 'rgba(34,197,94,0.28)', background: 'rgba(34,197,94,0.10)' }}>
+                    {savedAt}
+                </div>
+            ) : null}
+
+            <div className="smd-detail-card" style={{ marginBottom: 16 }}>
+                <div className="muted" style={{ lineHeight: 1.7 }}>
+                    当同一个交易对在统计窗口内达到设定的钱包数量时，后端会按交易对聚合发送 Bark。
+                    同一波信号跨多个池子和 fee tier 只按交易对判断，不再重复拆分。
+                </div>
+                <div className="muted" style={{ marginTop: 10, lineHeight: 1.7 }}>
+                    Bark Server / Key / Group 继续复用全局配置。Web 端这里只负责开关、阈值和冷却时间。
+                </div>
+            </div>
+
+            {loading ? <div className="smd-loading">加载中...</div> : (
+                <div className="smd-add-form" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12, alignItems: 'end' }}>
+                    <label style={{ display: 'grid', gap: 6 }}>
+                        <span className="muted">钱包数量</span>
+                        <input
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={draft.min_wallets}
+                            onChange={(e) => setDraft((prev) => ({ ...prev, min_wallets: e.target.value }))}
+                        />
+                    </label>
+                    <label style={{ display: 'grid', gap: 6 }}>
+                        <span className="muted">统计窗口(分钟)</span>
+                        <input
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={draft.window_minutes}
+                            onChange={(e) => setDraft((prev) => ({ ...prev, window_minutes: e.target.value }))}
+                        />
+                    </label>
+                    <label style={{ display: 'grid', gap: 6 }}>
+                        <span className="muted">冷却时间(分钟)</span>
+                        <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={draft.cooldown_minutes}
+                            onChange={(e) => setDraft((prev) => ({ ...prev, cooldown_minutes: e.target.value }))}
+                        />
+                    </label>
+                    <button
+                        type="button"
+                        disabled={saving || !hasInitData}
+                        onClick={handleSave}
+                        style={{ gridColumn: '1 / -1' }}
+                    >
+                        {saving ? '保存中...' : '保存金狗通知配置'}
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
+
 function SettingsPanel({ apiBaseUrl }) {
     const [contracts, setContracts] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -920,7 +1146,7 @@ function SettingsPanel({ apiBaseUrl }) {
 
 // ---- Main ----
 
-export default function SmartMoneyDashboard({ apiBaseUrl }) {
+export default function SmartMoneyDashboard({ apiBaseUrl, initData = '', onSelectPool, activePoolAddress = '' }) {
     const [view, setView] = useState('pools');
     const [stats, setStats] = useState(null);
     const [selectedPool, setSelectedPool] = useState(null);
@@ -934,6 +1160,18 @@ export default function SmartMoneyDashboard({ apiBaseUrl }) {
     }, [apiBaseUrl]);
 
     const isDetail = selectedPool || selectedWallet;
+    const handlePoolCardSelect = useCallback((pool) => {
+        if (typeof onSelectPool === 'function') {
+            onSelectPool(pool);
+            return;
+        }
+        setSelectedPool(pool);
+        setSelectedWallet(null);
+    }, [onSelectPool]);
+    const handleOpenPoolDetail = useCallback((pool) => {
+        setSelectedPool(pool);
+        setSelectedWallet(null);
+    }, []);
     const monitorSummary = useMemo(() => {
         const activeWallets = stats?.monitored_wallet_count ?? 0;
         const activeContracts = stats?.active_contract_count ?? 0;
@@ -1002,6 +1240,13 @@ export default function SmartMoneyDashboard({ apiBaseUrl }) {
                                 <Icon size={16} /> {label}
                             </button>
                         ))}
+                        <button
+                            key="golden_dog"
+                            className={`smd-tab${view === 'golden_dog' ? ' active' : ''}`}
+                            onClick={() => setView('golden_dog')}
+                        >
+                            <Flame size={16} /> 金狗通知
+                        </button>
                     </div>
                 )}
 
@@ -1010,9 +1255,16 @@ export default function SmartMoneyDashboard({ apiBaseUrl }) {
                 ) : selectedWallet ? (
                     <WalletDetail apiBaseUrl={apiBaseUrl} addr={selectedWallet} onBack={() => setSelectedWallet(null)} onSelectPool={p => { setSelectedPool(p); setSelectedWallet(null); }} />
                 ) : view === 'pools' ? (
-                    <PoolList apiBaseUrl={apiBaseUrl} onSelect={setSelectedPool} />
+                    <PoolList
+                        apiBaseUrl={apiBaseUrl}
+                        onSelect={handlePoolCardSelect}
+                        onOpenDetail={handleOpenPoolDetail}
+                        activePoolAddress={activePoolAddress}
+                    />
                 ) : view === 'wallets' ? (
                     <WalletList apiBaseUrl={apiBaseUrl} onSelect={setSelectedWallet} onAdd={() => setShowAddModal(true)} />
+                ) : view === 'golden_dog' ? (
+                    <GoldenDogPanel apiBaseUrl={apiBaseUrl} initData={initData} />
                 ) : (
                     <SettingsPanel apiBaseUrl={apiBaseUrl} />
                 )}

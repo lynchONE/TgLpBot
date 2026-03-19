@@ -2044,7 +2044,7 @@ export default function App() {
                     </ModuleHeader>
                 ) : isSmartMoney ? (
                     <div className="mb-2">
-                        <SmartMoneyPage apiBaseUrl={apiBaseUrl} accentTheme={accentTheme} />
+                        <SmartMoneyPage apiBaseUrl={apiBaseUrl} initData={initData} accentTheme={accentTheme} />
                     </div>
                 ) : isHotPools ? (
                     <ModuleHeader

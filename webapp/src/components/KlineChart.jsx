@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, CandlestickSeries, HistogramSeries } from 'lightweight-charts';
-import { Copy } from 'lucide-react';
+import { Check, Copy, Pencil, X } from 'lucide-react';
 import { formatUtc8DateTime, formatUtc8TickMark, shortAddress, toUnixSeconds } from '../utils';
 
 /* ── Wallet avatar images ── */
@@ -357,6 +357,7 @@ export default function KlineChart({
   watchedWalletSet = new Set(),
   watchToggleMap = {},
   onToggleWatch,
+  onSaveWalletLabel,
   drawingTool = 'none',
   drawingResetNonce = 0,
   viewportKey = '',
@@ -376,6 +377,10 @@ export default function KlineChart({
   const [hoveredCluster, setHoveredCluster] = useState(null);
   const [completedDrawing, setCompletedDrawing] = useState(null);
   const [draftDrawing, setDraftDrawing] = useState(null);
+  const [labelEditing, setLabelEditing] = useState(false);
+  const [labelDraft, setLabelDraft] = useState('');
+  const [labelSaving, setLabelSaving] = useState(false);
+  const [labelError, setLabelError] = useState('');
   const updateProjectionRef = useRef(null);
   const visibleRangeHandlerRef = useRef(onVisibleRangeChange);
   const tooltipHideTimerRef = useRef(null);
@@ -598,6 +603,23 @@ export default function KlineChart({
     setHoveredCluster(null);
   }, [activeMarkerId, clearTooltipHideTimer]);
 
+  useEffect(() => {
+    const handlePointerDownOutside = (event) => {
+      if (!activeMarkerId && !hoveredCluster) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest('.kline-marker') || target.closest('.kline-marker-tooltip')) return;
+      clearTooltipHideTimer();
+      setHoveredCluster(null);
+      onMarkerClick?.(null);
+    };
+
+    document.addEventListener('mousedown', handlePointerDownOutside);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDownOutside);
+    };
+  }, [activeMarkerId, hoveredCluster, clearTooltipHideTimer, onMarkerClick]);
+
   const updateProjection = useCallback(() => {
     const hostWidth = chartHostRef.current?.clientWidth || wrapRef.current?.clientWidth || 0;
     const hostHeight = chartHostRef.current?.clientHeight || wrapRef.current?.clientHeight || 0;
@@ -795,7 +817,8 @@ export default function KlineChart({
     const primary = c.items?.[0];
     if (!primary) return null;
     const walletAddress = normalizeWalletAddress(primary.wallet_address || '');
-    const walletName = c.isMyTrade ? '我的交易' : (String(primary.wallet_label || '').trim() || walletTailLabel(walletAddress));
+    const walletLabelRaw = c.isMyTrade ? '' : String(primary.wallet_label || '').trim();
+    const walletName = c.isMyTrade ? '我的交易' : (walletLabelRaw || walletTailLabel(walletAddress));
     const lower = Number(primary.price_lower || 0);
     const upper = Number(primary.price_upper || 0);
     const hasRange = lower > 0 && upper > 0;
@@ -803,6 +826,7 @@ export default function KlineChart({
     return {
       walletAddress,
       walletName,
+      walletLabelRaw,
       lower,
       upper,
       hasRange,
@@ -810,10 +834,45 @@ export default function KlineChart({
       totalUSD: c.estimatedUSD,
       count: c.items.length,
       isMyTrade: c.isMyTrade,
+      canEditLabel: !c.isMyTrade && Boolean(walletAddress),
       watched: walletAddress ? watchedWalletSet.has(walletAddress) : false,
       watchBusy: walletAddress ? Boolean(watchToggleMap[walletAddress]) : false,
     };
   }, [tooltipCluster, watchToggleMap, watchedWalletSet]);
+
+  useEffect(() => {
+    setLabelEditing(false);
+    setLabelDraft(tooltipData?.walletLabelRaw || '');
+    setLabelSaving(false);
+    setLabelError('');
+  }, [tooltipCluster?.id, tooltipData?.walletAddress, tooltipData?.walletLabelRaw]);
+
+  const handleSubmitWalletLabel = useCallback(async (event) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (!tooltipData?.canEditLabel || !tooltipData.walletAddress) return;
+    const nextLabel = String(labelDraft || '').trim();
+    if (nextLabel === String(tooltipData.walletLabelRaw || '').trim()) {
+      setLabelEditing(false);
+      setLabelError('');
+      return;
+    }
+    if (typeof onSaveWalletLabel !== 'function') {
+      setLabelEditing(false);
+      setLabelError('');
+      return;
+    }
+    setLabelSaving(true);
+    setLabelError('');
+    try {
+      await onSaveWalletLabel(tooltipData.walletAddress, nextLabel);
+      setLabelEditing(false);
+    } catch (err) {
+      setLabelError(String(err?.message || err || '保存失败'));
+    } finally {
+      setLabelSaving(false);
+    }
+  }, [labelDraft, onSaveWalletLabel, tooltipData]);
 
   const chartStageStyle = {
     height: `${Math.max(320, Number(chartHeight || 0))}px`,
@@ -927,6 +986,25 @@ export default function KlineChart({
                   </button>
                 ) : null}
               </span>
+              {tooltipData.canEditLabel ? (
+                <button
+                  type="button"
+                  className={`kmt-edit-btn ${labelEditing ? 'active' : ''}`}
+                  disabled={labelSaving}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (labelEditing) return;
+                    setLabelDraft(tooltipData.walletLabelRaw || '');
+                    setLabelError('');
+                    setLabelEditing(true);
+                  }}
+                  aria-label="编辑钱包标签"
+                  title="编辑钱包标签"
+                >
+                  <Pencil size={11} />
+                </button>
+              ) : null}
               {!tooltipData.isMyTrade && tooltipData.walletAddress ? (
                 <button
                   type="button"
@@ -945,6 +1023,56 @@ export default function KlineChart({
               ) : null}
               {tooltipData.count > 1 ? <span className="kmt-count">x{tooltipData.count}</span> : null}
             </div>
+            {labelEditing ? (
+              <form className="kmt-label-form" onSubmit={handleSubmitWalletLabel}>
+                <input
+                  className="kmt-label-input"
+                  type="text"
+                  maxLength={100}
+                  autoFocus
+                  placeholder="输入钱包标签，留空可清除"
+                  value={labelDraft}
+                  onChange={(event) => setLabelDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Escape') return;
+                    event.preventDefault();
+                    setLabelDraft(tooltipData.walletLabelRaw || '');
+                    setLabelError('');
+                    setLabelEditing(false);
+                  }}
+                />
+                <div className="kmt-label-actions">
+                  <button
+                    type="submit"
+                    className="kmt-text-btn primary"
+                    disabled={labelSaving}
+                  >
+                    <Check size={11} />
+                    {labelSaving ? '保存中' : '保存'}
+                  </button>
+                  <button
+                    type="button"
+                    className="kmt-text-btn"
+                    disabled={labelSaving}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setLabelDraft(tooltipData.walletLabelRaw || '');
+                      setLabelError('');
+                      setLabelEditing(false);
+                    }}
+                  >
+                    <X size={11} />
+                    取消
+                  </button>
+                </div>
+                {labelError ? (
+                  <div className="kmt-error">{labelError}</div>
+                ) : (
+                  <div className="kmt-hint">留空后保存可清除标签</div>
+                )}
+              </form>
+            ) : null}
             <div className="kmt-row">
               <span className={`kmt-action ${tooltipCluster.action}`}>
                 {tooltipCluster.action === 'remove' ? '减仓' : '加仓'}

@@ -1846,7 +1846,8 @@ body {
 .kmt-wallet { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; color: #edf3ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kmt-count { font-size: 10px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
 .kmt-copy-btn,
-.kmt-watch-btn {
+.kmt-watch-btn,
+.kmt-edit-btn {
   width: 22px;
   height: 22px;
   border: 1px solid rgba(92, 167, 255, 0.28);
@@ -1863,7 +1864,8 @@ body {
   transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
 }
 .kmt-copy-btn:hover:not(:disabled),
-.kmt-watch-btn:hover:not(:disabled) {
+.kmt-watch-btn:hover:not(:disabled),
+.kmt-edit-btn:hover:not(:disabled) {
   transform: scale(1.05);
   border-color: rgba(92, 167, 255, 0.46);
   background: rgba(92, 167, 255, 0.14);
@@ -1871,14 +1873,87 @@ body {
 .kmt-copy-btn {
   color: #8ab9ff;
 }
+.kmt-edit-btn.active {
+  border-color: rgba(255, 205, 94, 0.46);
+  background: rgba(255, 205, 94, 0.14);
+  color: #ffcd5e;
+}
 .kmt-watch-btn.active {
   border-color: rgba(255, 93, 115, 0.5);
   background: rgba(255, 93, 115, 0.14);
   color: #ff5d73;
 }
-.kmt-watch-btn:disabled {
+.kmt-watch-btn:disabled,
+.kmt-edit-btn:disabled {
   opacity: 0.55;
   cursor: wait;
+}
+.kmt-label-form {
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.kmt-label-input {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid rgba(136, 157, 191, 0.2);
+  background: rgba(17, 24, 37, 0.82);
+  color: #edf3ff;
+  padding: 8px 10px;
+  font-size: 12px;
+  outline: none;
+}
+.kmt-label-input:focus {
+  border-color: rgba(var(--accent-rgb), 0.46);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
+}
+.kmt-label-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.kmt-text-btn {
+  border: 1px solid rgba(136, 157, 191, 0.18);
+  background: rgba(17, 24, 37, 0.76);
+  color: #dbe7fb;
+  border-radius: 8px;
+  padding: 5px 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+.kmt-text-btn.primary {
+  border-color: rgba(var(--accent-rgb), 0.36);
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--accent-text);
+}
+.kmt-text-btn:hover:not(:disabled) {
+  border-color: rgba(136, 157, 191, 0.32);
+  background: rgba(24, 34, 52, 0.92);
+}
+.kmt-text-btn.primary:hover:not(:disabled) {
+  border-color: rgba(var(--accent-rgb), 0.48);
+  background: rgba(var(--accent-rgb), 0.22);
+}
+.kmt-text-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.kmt-hint,
+.kmt-error {
+  font-size: 10px;
+  line-height: 1.4;
+}
+.kmt-hint {
+  color: var(--text-muted);
+}
+.kmt-error {
+  color: #ff8f9c;
 }
 .kmt-row {
   display: flex;

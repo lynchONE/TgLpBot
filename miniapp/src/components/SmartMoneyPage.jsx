@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
     Eye, Wallet, Settings, Search, Plus, ExternalLink, X, Check,
-    ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy,
+    ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Flame,
 } from 'lucide-react';
 import {
     fetchSMPools, fetchSMPoolStats, fetchSMPositions, fetchSMWallets,
     fetchSMStats, addSMWallet, updateSMWallet, deleteSMWallet,
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
+    fetchSMGoldenDogConfig, saveSMGoldenDogConfig,
 } from '../lib/smartMoneyApi';
 import { getBrandTheme } from '../lib/brand';
 import uniswapIcon from '../image/uniswap.svg';
@@ -1167,6 +1168,206 @@ function ContractSettingsPage({ apiBaseUrl, brand }) {
     return <ContractSettingsTab apiBaseUrl={apiBaseUrl} brand={brand} />;
 }
 
+function GoldenDogPage({ apiBaseUrl, initData, brand }) {
+    const hasInitData = Boolean(String(initData || '').trim());
+    const [loading, setLoading] = useState(hasInitData);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+    const [savedAt, setSavedAt] = useState('');
+    const [status, setStatus] = useState(null);
+    const [draft, setDraft] = useState({
+        enabled: false,
+        min_wallets: '3',
+        window_minutes: '10',
+        cooldown_minutes: '30',
+    });
+
+    const applyResponse = useCallback((resp) => {
+        setStatus(resp || null);
+        const cfg = resp?.config || {};
+        setDraft({
+            enabled: Boolean(cfg.enabled),
+            min_wallets: String(cfg.min_wallets ?? 3),
+            window_minutes: String(cfg.window_minutes ?? 10),
+            cooldown_minutes: String(cfg.cooldown_minutes ?? 30),
+        });
+    }, []);
+
+    const loadConfig = useCallback(async () => {
+        if (!hasInitData) {
+            setLoading(false);
+            setStatus(null);
+            return;
+        }
+        setLoading(true);
+        setError('');
+        try {
+            applyResponse(await fetchSMGoldenDogConfig({ apiBaseUrl, initData, chain: 'bsc' }));
+        } catch (err) {
+            setError(String(err?.message || err || '加载失败'));
+        } finally {
+            setLoading(false);
+        }
+    }, [apiBaseUrl, applyResponse, hasInitData, initData]);
+
+    useEffect(() => {
+        loadConfig();
+    }, [loadConfig]);
+
+    const barkStatusText = useMemo(() => {
+        if (status?.bark_ready) return '已就绪';
+        if (status?.bark_configured) return status?.bark_enabled ? '已配置未就绪' : '已配置未开启';
+        return '未配置';
+    }, [status]);
+
+    const handleSave = useCallback(async () => {
+        if (!hasInitData) {
+            setError('缺少 Telegram initData，无法保存提醒配置。');
+            return;
+        }
+
+        const minWallets = Number.parseInt(String(draft.min_wallets || '').trim(), 10);
+        const windowMinutes = Number.parseInt(String(draft.window_minutes || '').trim(), 10);
+        const cooldownMinutes = Number.parseInt(String(draft.cooldown_minutes || '').trim(), 10);
+        if (!Number.isFinite(minWallets) || minWallets < 1) {
+            setError('钱包数量必须大于等于 1。');
+            return;
+        }
+        if (!Number.isFinite(windowMinutes) || windowMinutes < 1) {
+            setError('统计窗口必须大于等于 1 分钟。');
+            return;
+        }
+        if (!Number.isFinite(cooldownMinutes) || cooldownMinutes < 0) {
+            setError('冷却时间不能小于 0。');
+            return;
+        }
+
+        setSaving(true);
+        setError('');
+        setSavedAt('');
+        try {
+            const resp = await saveSMGoldenDogConfig({
+                apiBaseUrl,
+                initData,
+                chain: 'bsc',
+                config: {
+                    enabled: Boolean(draft.enabled),
+                    min_wallets: minWallets,
+                    window_minutes: windowMinutes,
+                    cooldown_minutes: cooldownMinutes,
+                },
+            });
+            applyResponse(resp);
+            setSavedAt('配置已保存');
+        } catch (err) {
+            setError(String(err?.message || err || '保存失败'));
+        } finally {
+            setSaving(false);
+        }
+    }, [apiBaseUrl, applyResponse, draft, hasInitData, initData]);
+
+    return (
+        <div>
+            <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                    <div className="text-sm font-medium text-zinc-100">金狗通知</div>
+                    <div className="text-[11px] text-zinc-500">同交易对聚合聪明钱钱包数，满足阈值后 Bark 提醒</div>
+                </div>
+                <div className="flex gap-2">
+                    <button
+                        type="button"
+                        className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(draft.enabled, brand)}`}
+                        onClick={() => setDraft((prev) => ({ ...prev, enabled: true }))}
+                    >
+                        开启
+                    </button>
+                    <button
+                        type="button"
+                        className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(!draft.enabled, brand)}`}
+                        onClick={() => setDraft((prev) => ({ ...prev, enabled: false }))}
+                    >
+                        关闭
+                    </button>
+                </div>
+            </div>
+
+            <div className="mb-4 grid grid-cols-3 gap-2">
+                <StatCard label="Bark 状态" value={barkStatusText} compact />
+                <StatCard label="钱包阈值" value={`${draft.min_wallets || '--'} 个`} compact />
+                <StatCard label="冷却时间" value={`${draft.cooldown_minutes || '--'} 分钟`} compact />
+            </div>
+
+            {!hasInitData ? (
+                <div className="mb-3 rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                    缺少 Telegram initData，无法保存提醒配置。
+                </div>
+            ) : null}
+            {error ? (
+                <div className="mb-3 rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                    {error}
+                </div>
+            ) : null}
+            {!error && savedAt ? (
+                <div className="mb-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+                    {savedAt}
+                </div>
+            ) : null}
+
+            <div className="mb-4 rounded-[24px] border border-white/[0.04] bg-zinc-900/60 p-4 text-sm text-zinc-400">
+                <div className="leading-6">
+                    当同一个交易对在统计窗口内达到设定的钱包数量时，后端会复用全局 Bark 配置发送提醒。
+                    聚合口径按交易对计算，不区分池子地址和 fee tier。
+                </div>
+                <div className="mt-2 leading-6">
+                    Bark Key / Server / Group 继续来自全局配置，这里只维护开关、阈值、窗口和冷却时间。
+                </div>
+            </div>
+
+            {loading ? (
+                <div className="py-8 text-center text-zinc-500">加载中...</div>
+            ) : (
+                <div className="space-y-3">
+                    <input
+                        className={getInputClass(brand)}
+                        type="number"
+                        min="1"
+                        step="1"
+                        placeholder="钱包数量"
+                        value={draft.min_wallets}
+                        onChange={e => setDraft((prev) => ({ ...prev, min_wallets: e.target.value }))}
+                    />
+                    <input
+                        className={getInputClass(brand)}
+                        type="number"
+                        min="1"
+                        step="1"
+                        placeholder="统计窗口(分钟)"
+                        value={draft.window_minutes}
+                        onChange={e => setDraft((prev) => ({ ...prev, window_minutes: e.target.value }))}
+                    />
+                    <input
+                        className={getInputClass(brand)}
+                        type="number"
+                        min="0"
+                        step="1"
+                        placeholder="冷却时间(分钟)"
+                        value={draft.cooldown_minutes}
+                        onChange={e => setDraft((prev) => ({ ...prev, cooldown_minutes: e.target.value }))}
+                    />
+                    <button
+                        type="button"
+                        onClick={handleSave}
+                        disabled={saving || !hasInitData}
+                        className={`w-full rounded-2xl px-4 py-2.5 text-sm disabled:opacity-50 ${brand.solidButtonClass}`}
+                    >
+                        {saving ? '保存中...' : '保存金狗通知配置'}
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
+
 function WalletSettingsTab({ apiBaseUrl, brand }) {
     const [wallets, setWallets] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -1561,7 +1762,7 @@ function AddWalletModal({ apiBaseUrl, onClose, onAdded, brand }) {
 }
 
 // ============ MAIN COMPONENT ============
-export default function SmartMoneyPage({ apiBaseUrl, accentTheme = 'lime' }) {
+export default function SmartMoneyPage({ apiBaseUrl, initData = '', accentTheme = 'lime' }) {
     const brand = useMemo(() => getBrandTheme(accentTheme), [accentTheme]);
     const [view, setView] = useState('pools');
     const [stats, setStats] = useState(null);
@@ -1654,7 +1855,7 @@ export default function SmartMoneyPage({ apiBaseUrl, accentTheme = 'lime' }) {
                 )}
 
                 {!isDetailView && (
-                    <div className="grid grid-cols-3 gap-2 mb-4">
+                    <div className="grid grid-cols-4 gap-2 mb-4">
                         {[
                             { key: 'pools', label: '池子视图', icon: Eye },
                             { key: 'wallets', label: '钱包视图', icon: Wallet },
@@ -1670,6 +1871,14 @@ export default function SmartMoneyPage({ apiBaseUrl, accentTheme = 'lime' }) {
                                 <span className="truncate">{label}</span>
                             </button>
                         ))}
+                        <button
+                            type="button"
+                            className={`inline-flex items-center justify-center gap-1.5 rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(view === 'golden_dog', brand)}`}
+                            onClick={() => setView('golden_dog')}
+                        >
+                            <Flame size={14} />
+                            <span className="truncate">金狗通知</span>
+                        </button>
                     </div>
                 )}
 
@@ -1702,6 +1911,12 @@ export default function SmartMoneyPage({ apiBaseUrl, accentTheme = 'lime' }) {
                         onAddWallet={() => setShowAddModal(true)}
                         brand={brand}
                         refreshKey={walletRefreshKey}
+                    />
+                ) : view === 'golden_dog' ? (
+                    <GoldenDogPage
+                        apiBaseUrl={apiBaseUrl}
+                        initData={initData}
+                        brand={brand}
                     />
                 ) : (
                     <ContractSettingsPage apiBaseUrl={apiBaseUrl} brand={brand} />

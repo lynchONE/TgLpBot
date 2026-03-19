@@ -82,13 +82,122 @@ func autoMigrate() error {
 		&models.SmartMoneyScanState{},
 		&models.SmartMoneyLPEvent{},
 		&models.SmartMoneyLPPosition{},
+		&models.SmartMoneyGoldenDogConfig{},
 	); err != nil {
+		return err
+	}
+
+	if err := migrateSmartMoneyGoldenDogAlertStateTable(); err != nil {
 		return err
 	}
 
 	// GORM AutoMigrate does not alter existing column types, fix manually.
 	DB.Exec("ALTER TABLE sm_lp_events MODIFY COLUMN token0_amount DECIMAL(65,0) NOT NULL DEFAULT 0")
 	DB.Exec("ALTER TABLE sm_lp_events MODIFY COLUMN token1_amount DECIMAL(65,0) NOT NULL DEFAULT 0")
+
+	return nil
+}
+
+func migrateSmartMoneyGoldenDogAlertStateTable() error {
+	if DB == nil {
+		return nil
+	}
+
+	model := &models.SmartMoneyGoldenDogAlertState{}
+	tableName := model.TableName()
+	migrator := DB.Migrator()
+
+	if migrator.HasTable(tableName) {
+		legacy, err := hasLegacySmartMoneyGoldenDogAlertStateSchema(tableName)
+		if err != nil {
+			return err
+		}
+		if legacy {
+			log.Printf("[DB] recreate legacy table: %s", tableName)
+			if err := migrator.DropTable(tableName); err != nil {
+				return fmt.Errorf("drop legacy %s: %w", tableName, err)
+			}
+		} else {
+			if err := cleanupSmartMoneyGoldenDogAlertStateRows(tableName); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err := DB.AutoMigrate(model); err != nil {
+		return err
+	}
+
+	return cleanupSmartMoneyGoldenDogAlertStateRows(tableName)
+}
+
+func hasLegacySmartMoneyGoldenDogAlertStateSchema(tableName string) (bool, error) {
+	hasPairKey, err := tableColumnExists(tableName, "pair_key")
+	if err != nil {
+		return false, fmt.Errorf("inspect %s.pair_key: %w", tableName, err)
+	}
+	if !hasPairKey {
+		return true, nil
+	}
+
+	legacyColumns := []string{"pool_version", "pool_id", "last_pair", "deleted_at"}
+	for _, column := range legacyColumns {
+		exists, err := tableColumnExists(tableName, column)
+		if err != nil {
+			return false, fmt.Errorf("inspect %s.%s: %w", tableName, column, err)
+		}
+		if exists {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func tableColumnExists(tableName, columnName string) (bool, error) {
+	var count int64
+	err := DB.Raw(`
+		SELECT COUNT(*)
+		FROM information_schema.columns
+		WHERE table_schema = DATABASE()
+		  AND table_name = ?
+		  AND column_name = ?
+	`, tableName, columnName).Scan(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func cleanupSmartMoneyGoldenDogAlertStateRows(tableName string) error {
+	hasPairKey, err := tableColumnExists(tableName, "pair_key")
+	if err != nil {
+		return fmt.Errorf("inspect %s.pair_key before cleanup: %w", tableName, err)
+	}
+	if !hasPairKey {
+		return nil
+	}
+
+	if err := DB.Exec(`
+		DELETE FROM smart_money_golden_dog_alert_states
+		WHERE COALESCE(TRIM(pair_key), '') = ''
+	`).Error; err != nil {
+		return fmt.Errorf("delete empty pair_key rows: %w", err)
+	}
+
+	if err := DB.Exec(`
+		DELETE older
+		FROM smart_money_golden_dog_alert_states AS older
+		INNER JOIN smart_money_golden_dog_alert_states AS newer
+			ON older.user_id = newer.user_id
+			AND older.chain = newer.chain
+			AND older.pair_key = newer.pair_key
+			AND (
+				older.updated_at < newer.updated_at
+				OR (older.updated_at = newer.updated_at AND older.id < newer.id)
+			)
+	`).Error; err != nil {
+		return fmt.Errorf("dedupe pair_key rows: %w", err)
+	}
 
 	return nil
 }
