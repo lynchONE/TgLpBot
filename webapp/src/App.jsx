@@ -1112,9 +1112,10 @@ export default function App() {
     setOpenPosSmartRangesLoading(true);
     try {
       const resp = await fetchSMPoolStats({ apiBaseUrl, poolAddress: normalizedPoolAddress });
-      setOpenPosSmartRanges(Array.isArray(resp?.range_groups) ? resp.range_groups : []);
+      const nextGroups = Array.isArray(resp?.range_groups) ? resp.range_groups : [];
+      setOpenPosSmartRanges((prev) => (nextGroups.length > 0 ? nextGroups : prev));
     } catch {
-      setOpenPosSmartRanges([]);
+      setOpenPosSmartRanges((prev) => prev);
     } finally {
       setOpenPosSmartRangesLoading(false);
     }

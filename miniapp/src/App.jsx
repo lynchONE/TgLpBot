@@ -32,6 +32,7 @@ import {
     removeCooldown,
     saveGlobalConfig,
 } from './lib/api';
+import { fetchSMPoolStats } from './lib/smartMoneyApi';
 import { getTelegramWebApp, hapticImpact, hapticNotification, hapticSelection } from './lib/telegram';
 import { formatRelativeTime, useTick } from './lib/time';
 import {
@@ -208,6 +209,25 @@ function formatUsd(v) {
     return usdFormatter.format(n);
 }
 
+function formatUsdCompact(v) {
+    const n = Number(v ?? 0);
+    if (!Number.isFinite(n) || n <= 0 || Math.abs(n) > USD_DISPLAY_LIMIT) return '$--';
+    const abs = Math.abs(n);
+    if (abs >= 1000000) return `$${(n / 1000000).toFixed(abs >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M`;
+    if (abs >= 1000) return `$${(n / 1000).toFixed(abs >= 10000 ? 0 : 1).replace(/\.0$/, '')}K`;
+    if (abs >= 100) return `$${n.toFixed(0)}`;
+    if (abs >= 10) return `$${n.toFixed(1).replace(/\.0$/, '')}`;
+    return `$${n.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}`;
+}
+
+function formatRangePercentCompact(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return '--';
+    if (num >= 100) return `${Math.round(num)}%`;
+    if (num >= 10) return `${num.toFixed(1).replace(/\.0$/, '')}%`;
+    return `${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
+}
+
 const defaultHotPoolsFilter = {
     enabled: true,
     keyword: '',
@@ -382,6 +402,8 @@ export default function App() {
     const [openPositionAllowSwap, setOpenPositionAllowSwap] = useState(false);
     const [openPositionError, setOpenPositionError] = useState('');
     const [openPositionLoading, setOpenPositionLoading] = useState(false);
+    const [openPositionSmartRanges, setOpenPositionSmartRanges] = useState([]);
+    const [openPositionSmartRangesLoading, setOpenPositionSmartRangesLoading] = useState(false);
     const [operationProgress, setOperationProgress] = useState(null);
     const [walletsData, setWalletsData] = useState(null);
     const [walletsError, setWalletsError] = useState('');
@@ -1220,6 +1242,34 @@ export default function App() {
         { label: '闁?0%', value: '闁?0' },
     ];
     const effectiveQuickRangeOptions = useMemo(() => quickRangeOptions.slice(0, 6), []);
+    const defaultQuickRangeOptions = useMemo(() => ([
+        { key: '1', label: '1%', lowerValue: '1', upperValue: '1' },
+        { key: '2', label: '2%', lowerValue: '2', upperValue: '2' },
+        { key: '3', label: '3%', lowerValue: '3', upperValue: '3' },
+        { key: '5', label: '5%', lowerValue: '5', upperValue: '5' },
+        { key: '10', label: '10%', lowerValue: '10', upperValue: '10' },
+        { key: '20', label: '20%', lowerValue: '20', upperValue: '20' },
+    ]), []);
+    const smartQuickRangeOptions = useMemo(() => (
+        Array.isArray(openPositionSmartRanges)
+            ? openPositionSmartRanges
+                .filter((item) => Number(item?.range_percent) > 0)
+                .slice(0, 6)
+                .map((item, index) => {
+                    const rangePercent = Number(item?.range_percent);
+                    const positionCount = Math.max(0, Number(item?.position_count) || 0);
+                    return {
+                        key: `smart-${rangePercent}-${positionCount}-${index}`,
+                        label: `${formatRangePercentCompact(rangePercent)}${positionCount > 1 ? ` +${positionCount - 1}` : ''}`,
+                        subLabel: formatUsdCompact(item?.total_amount_usd),
+                        lowerValue: String(rangePercent),
+                        upperValue: String(rangePercent),
+                        smart: true,
+                    };
+                })
+            : []
+    ), [openPositionSmartRanges]);
+    const primaryQuickRangeOptions = smartQuickRangeOptions.length > 0 ? smartQuickRangeOptions : defaultQuickRangeOptions;
 
     const parseRangeInput = (lowerRaw, upperRaw) => {
         const lower = Number(String(lowerRaw || '').trim());
@@ -1293,12 +1343,16 @@ export default function App() {
             chain,
             ...(poolVersion ? { protocol_version: poolVersion, pool_version: poolVersion } : {}),
         });
+        setOpenPositionSmartRanges(Array.isArray(pool?.range_groups) ? pool.range_groups : []);
+        setOpenPositionSmartRangesLoading(Boolean(addr));
         resetOpenPositionDraft();
     };
 
     const closeOpenPosition = () => {
         if (openPositionLoading) return;
         setOpenPositionPool(null);
+        setOpenPositionSmartRanges([]);
+        setOpenPositionSmartRangesLoading(false);
     };
 
     // Refresh config when opening the modal so toggles from the bot take effect without a full reload.
@@ -1322,6 +1376,39 @@ export default function App() {
             controller.abort();
         };
     }, [apiBaseUrl, initData, hasInitData, openPositionPool]);
+
+    useEffect(() => {
+        if (!openPositionPool) return;
+
+        let aborted = false;
+        const controller = new AbortController();
+        const poolAddress = String(openPositionPool?.pool_address || '').trim();
+        if (!poolAddress) {
+            setOpenPositionSmartRanges([]);
+            setOpenPositionSmartRangesLoading(false);
+            return undefined;
+        }
+
+        setOpenPositionSmartRangesLoading(true);
+        fetchSMPoolStats({ apiBaseUrl, poolAddress, signal: controller.signal })
+            .then((resp) => {
+                if (aborted) return;
+                const nextGroups = Array.isArray(resp?.range_groups) ? resp.range_groups : [];
+                setOpenPositionSmartRanges((prev) => (nextGroups.length > 0 ? nextGroups : prev));
+            })
+            .catch(() => {
+                if (aborted) return;
+            })
+            .finally(() => {
+                if (aborted) return;
+                setOpenPositionSmartRangesLoading(false);
+            });
+
+        return () => {
+            aborted = true;
+            controller.abort();
+        };
+    }, [apiBaseUrl, openPositionPool]);
 
     useEffect(() => {
         if (!openPositionPool || !hasInitData || !multiWalletEnabled) return;
@@ -2044,7 +2131,12 @@ export default function App() {
                     </ModuleHeader>
                 ) : isSmartMoney ? (
                     <div className="mb-2">
-                        <SmartMoneyPage apiBaseUrl={apiBaseUrl} initData={initData} accentTheme={accentTheme} />
+                        <SmartMoneyPage
+                            apiBaseUrl={apiBaseUrl}
+                            initData={initData}
+                            accentTheme={accentTheme}
+                            onOpenPosition={openPositionModal}
+                        />
                     </div>
                 ) : isHotPools ? (
                     <ModuleHeader
@@ -2933,30 +3025,80 @@ export default function App() {
                                         placeholder="上限 %"
                                     />
                                 </div>
+                                {openPositionSmartRangesLoading ? (
+                                    <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
+                                        聪明钱区间加载中...
+                                    </div>
+                                ) : null}
                                 <div className="mt-2 flex flex-wrap gap-1.5">
-                                    {effectiveQuickRangeOptions.map((option) => (
-                                        <button
-                                            key={option.value}
-                                            type="button"
-                                            onClick={() => {
-                                                if (option.value.includes(' ')) {
-                                                    const parts = option.value.split(/\s+/);
-                                                    setOpenPositionRangeLower(parts[0] || '');
-                                                    setOpenPositionRangeUpper(parts[1] || '');
-                                                } else {
-                                                    const normalized = option.value.replace(/[^0-9.]/g, '');
-                                                    setOpenPositionRangeLower(normalized);
-                                                    setOpenPositionRangeUpper(normalized);
-                                                }
-                                                setOpenPositionRangeUpperAuto(true);
-                                                setOpenPositionError('');
-                                            }}
-                                            className="rounded-lg px-2 py-1 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-500/30 bg-gradient-to-r from-amber-50 via-amber-100/60 to-yellow-100/60 hover:from-amber-100 hover:via-amber-200/70 hover:to-yellow-200/70 dark:text-amber-200 dark:ring-amber-400/30 dark:from-amber-500/10 dark:via-amber-400/10 dark:to-yellow-400/10"
-                                        >
-                                            {option.label}
-                                        </button>
-                                    ))}
+                                    {primaryQuickRangeOptions.map((option) => {
+                                        const lowerValue = Number(option.lowerValue);
+                                        const upperValue = Number(option.upperValue);
+                                        const isActive =
+                                            Math.abs(Number(openPositionRangeLower) - lowerValue) < 0.05 &&
+                                            Math.abs(Number(openPositionRangeUpper) - upperValue) < 0.05;
+                                        return (
+                                            <button
+                                                key={option.key}
+                                                type="button"
+                                                onClick={() => {
+                                                    setOpenPositionRangeLower(option.lowerValue);
+                                                    setOpenPositionRangeUpper(option.upperValue);
+                                                    setOpenPositionRangeUpperAuto(true);
+                                                    setOpenPositionError('');
+                                                }}
+                                                className={`inline-flex min-w-[72px] flex-col items-start rounded-lg border px-2 py-1.5 text-left text-[11px] font-semibold transition ${isActive
+                                                    ? `${brand.selectionClass} text-zinc-900 dark:text-white`
+                                                    : option.smart
+                                                        ? 'border-amber-200 bg-gradient-to-r from-amber-50 via-amber-100/60 to-yellow-100/60 text-amber-700 hover:from-amber-100 hover:via-amber-200/70 hover:to-yellow-200/70 dark:border-amber-400/30 dark:from-amber-500/10 dark:via-amber-400/10 dark:to-yellow-400/10 dark:text-amber-200'
+                                                        : 'border-zinc-200 bg-white/70 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
+                                                    }`}
+                                            >
+                                                <span className="leading-none">{option.label}</span>
+                                                {option.subLabel ? (
+                                                    <span className="mt-1 text-[10px] font-medium opacity-70">{option.subLabel}</span>
+                                                ) : null}
+                                            </button>
+                                        );
+                                    })}
                                 </div>
+                                {smartQuickRangeOptions.length > 0 ? (
+                                    <>
+                                        <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
+                                            聪明钱近期开仓金额
+                                        </div>
+                                        <div className="mt-2 flex flex-wrap gap-1.5">
+                                            {defaultQuickRangeOptions.map((option) => {
+                                                const lowerValue = Number(option.lowerValue);
+                                                const upperValue = Number(option.upperValue);
+                                                const isActive =
+                                                    Math.abs(Number(openPositionRangeLower) - lowerValue) < 0.05 &&
+                                                    Math.abs(Number(openPositionRangeUpper) - upperValue) < 0.05;
+                                                return (
+                                                    <button
+                                                        key={`default-${option.key}`}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setOpenPositionRangeLower(option.lowerValue);
+                                                            setOpenPositionRangeUpper(option.upperValue);
+                                                            setOpenPositionRangeUpperAuto(true);
+                                                            setOpenPositionError('');
+                                                        }}
+                                                        className={`rounded-lg border px-2 py-1 text-[11px] font-semibold transition ${isActive
+                                                            ? `${brand.selectionClass} text-zinc-900 dark:text-white`
+                                                            : 'border-zinc-200 bg-white/70 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
+                                                            }`}
+                                                    >
+                                                        {option.label}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                        <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
+                                            下方为默认区间
+                                        </div>
+                                    </>
+                                ) : null}
                                 <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
                                     输入下限和上限百分比。例如 1 / 3 表示下跌 1%、上涨 3%。
                                 </div>

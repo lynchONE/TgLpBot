@@ -11,6 +11,7 @@ import {
 } from '../smartMoneyApi';
 import uniswapLogo from '../img/uniswap.svg';
 import pancakeLogo from '../img/pancake.svg';
+import flashIcon from '../img/flash.svg';
 
 const PROTOCOL_MAP = {
     pancake_v3: { version: 'V3', icon: pancakeLogo, color: '#d1884f' },
@@ -413,9 +414,9 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
                 <div className="smd-pool-cards">
                     {filtered.map((p) => {
                         const isActive = normalizedActivePoolAddress && normalizePoolSelectionId(p) === normalizedActivePoolAddress;
-                        const rangeGroups = Array.isArray(p?.range_groups)
-                            ? p.range_groups.filter((item) => Number(item?.range_percent) > 0).slice(0, 3)
-                            : [];
+                        const rangeSummary = Array.isArray(p?.range_groups)
+                            ? p.range_groups.filter((item) => Number(item?.range_percent) > 0)[0] || null
+                            : null;
                         return (
                             <div
                             key={p.pool_address}
@@ -443,20 +444,13 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
                                 )}
                             </div>
                             <div className="smd-pool-card-range-row">
-                                {rangeGroups.length > 0 ? (
-                                    <div className="smd-pool-card-ranges">
-                                        {rangeGroups.map((group, index) => {
-                                            const positionCount = Math.max(0, Number(group?.position_count) || 0);
-                                            return (
-                                                <div key={`${group.range_percent}-${positionCount}-${index}`} className="smd-range-pill">
-                                                    <div className="smd-range-pill-top">
-                                                        <span>{formatRangePercentPlain(group.range_percent)}</span>
-                                                        {positionCount > 1 ? <span className="smd-range-pill-badge">+{positionCount - 1}</span> : null}
-                                                    </div>
-                                                    <div className="smd-range-pill-sub">{formatUSDCompact(group.total_amount_usd)}</div>
-                                                </div>
-                                            );
-                                        })}
+                                {rangeSummary ? (
+                                    <div className="smd-range-summary-line">
+                                        <span className="smd-range-summary-pct">{formatRangePercentPlain(rangeSummary.range_percent)}</span>
+                                        {Math.max(0, Number(rangeSummary?.position_count) || 0) > 1 ? (
+                                            <span className="smd-range-summary-badge">+{Math.max(0, Number(rangeSummary?.position_count) || 0) - 1}</span>
+                                        ) : null}
+                                        <span className="smd-range-summary-amount">{formatUSDCompact(rangeSummary.total_amount_usd)}</span>
                                     </div>
                                 ) : (
                                     <div className="smd-pool-card-range-empty">暂无聪明钱区间聚合</div>
@@ -464,13 +458,14 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
                                 {typeof onOpenPosition === 'function' ? (
                                     <button
                                         type="button"
-                                        className="smd-follow-open-btn"
+                                        className="pool-buy-btn smd-follow-open-btn"
                                         onClick={(event) => {
                                             event.stopPropagation();
                                             onOpenPosition(p);
                                         }}
                                     >
-                                        跟单开仓
+                                        <img src={flashIcon} alt="" className="open-lightning-icon" aria-hidden="true" />
+                                        跟单
                                     </button>
                                 ) : null}
                             </div>

@@ -192,42 +192,37 @@ export default function OpenPositionModal({
             />
           </label>
 
-          {smartRangesLoading || visibleSmartRanges.length > 0 ? (
-            <div className="modal-range-section">
-              <span className="modal-range-label">聪明钱区间</span>
-              {smartRangesLoading ? (
-                <div className="modal-range-hint">聪明钱区间加载中...</div>
-              ) : (
-                <>
-                  <div className="modal-range-picks">
-                    {visibleSmartRanges.map((item, index) => {
-                      const rangePct = Number(item?.range_percent);
-                      const positionCount = Math.max(0, Number(item?.position_count) || 0);
-                      const isActive =
-                        Math.abs(Number(rangeLower) - rangePct) < 0.05 &&
-                        Math.abs(Number(rangeUpper) - rangePct) < 0.05;
-                      return (
-                        <button
-                          key={`${rangePct}-${positionCount}-${index}`}
-                          type="button"
-                          className={`range-chip smart ${isActive ? 'active' : ''}`}
-                          onClick={() => applyRange(rangePct, rangePct)}
-                        >
-                          <span>{`${rangePct}%${positionCount > 1 ? ` +${positionCount - 1}` : ''}`}</span>
-                          <span className="range-chip-sub">{formatUsdCompact(item?.total_amount_usd)}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="modal-range-hint">按近期聪明钱开仓金额聚合</div>
-                </>
-              )}
-            </div>
-          ) : null}
-
           <div className="modal-range-section">
             <span className="modal-range-label">快捷区间</span>
-            <div className="modal-range-picks">
+            {smartRangesLoading ? (
+              <div className="modal-range-hint">聪明钱区间加载中...</div>
+            ) : null}
+            {visibleSmartRanges.length > 0 ? (
+              <>
+                <div className="modal-range-picks">
+                  {visibleSmartRanges.map((item, index) => {
+                    const rangePct = Number(item?.range_percent);
+                    const positionCount = Math.max(0, Number(item?.position_count) || 0);
+                    const isActive =
+                      Math.abs(Number(rangeLower) - rangePct) < 0.05 &&
+                      Math.abs(Number(rangeUpper) - rangePct) < 0.05;
+                    return (
+                      <button
+                        key={`${rangePct}-${positionCount}-${index}`}
+                        type="button"
+                        className={`range-chip smart ${isActive ? 'active' : ''}`}
+                        onClick={() => applyRange(rangePct, rangePct)}
+                      >
+                        <span>{`${rangePct}%${positionCount > 1 ? ` +${positionCount - 1}` : ''}`}</span>
+                        <span className="range-chip-sub">{formatUsdCompact(item?.total_amount_usd)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="modal-range-hint">聪明钱近期开仓金额</div>
+              </>
+            ) : null}
+            <div className="modal-range-picks modal-range-picks-default">
               {PRESET_RANGES.map((item) => {
                 const isActive =
                   Math.abs(Number(rangeLower) - item) < 0.05 &&
@@ -244,6 +239,9 @@ export default function OpenPositionModal({
                 );
               })}
             </div>
+            {visibleSmartRanges.length > 0 ? (
+              <div className="modal-range-hint">下方为默认区间</div>
+            ) : null}
           </div>
           <div className="modal-row">
             <label className="modal-field">

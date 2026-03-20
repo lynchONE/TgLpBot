@@ -182,10 +182,10 @@ func (r *Repository) InsertLPEvent(tx *gorm.DB, event *models.SmartMoneyLPEvent)
 func (r *Repository) ListLPEvents(ctx context.Context, wallet, pool string, page, size int) ([]models.SmartMoneyLPEvent, int64, error) {
 	db := database.DB.WithContext(ctx).Model(&models.SmartMoneyLPEvent{})
 	if wallet != "" {
-		db = db.Where("wallet_address = ?", strings.ToLower(wallet))
+		db = db.Where("LOWER(wallet_address) = ?", strings.ToLower(wallet))
 	}
 	if pool != "" {
-		db = db.Where("pool_address = ?", strings.ToLower(pool))
+		db = db.Where("LOWER(pool_address) = ?", strings.ToLower(pool))
 	}
 	var total int64
 	if err := db.Count(&total).Error; err != nil {
@@ -258,10 +258,10 @@ func (r *Repository) ListPositions(ctx context.Context, status, wallet, pool, pr
 		}
 	}
 	if wallet != "" {
-		db = db.Where("wallet_address = ?", strings.ToLower(wallet))
+		db = db.Where("LOWER(wallet_address) = ?", strings.ToLower(wallet))
 	}
 	if pool != "" {
-		db = db.Where("pool_address = ?", strings.ToLower(pool))
+		db = db.Where("LOWER(pool_address) = ?", strings.ToLower(pool))
 	}
 	if protocol != "" {
 		db = db.Where("protocol = ?", protocol)
@@ -614,7 +614,7 @@ func (r *Repository) GetPoolStats(ctx context.Context, poolAddress string) (*Poo
 			WHERE event_type = 'add'
 			GROUP BY chain_id, nft_token_id
 		) e_agg ON e_agg.chain_id = p.chain_id AND e_agg.nft_token_id = p.nft_token_id
-		WHERE p.pool_address = ?
+		WHERE LOWER(p.pool_address) = ?
 		GROUP BY pool_address
 	`, recentCutoff, recentCutoff, today, recentCutoff, poolAddress).Scan(&stats).Error
 	if err != nil {

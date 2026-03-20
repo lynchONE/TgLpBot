@@ -10,6 +10,7 @@ import {
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig,
 } from '../lib/smartMoneyApi';
 import { getBrandTheme } from '../lib/brand';
+import FlashIcon from './FlashIcon.jsx';
 import uniswapIcon from '../image/uniswap.svg';
 import pancakeIcon from '../image/pancake.svg';
 import avatar01 from '../../../webapp/src/icon/avatar_01.png';
@@ -150,6 +151,14 @@ function formatRangePercent(value) {
     if (num >= 100) return `±${Math.round(num)}%`;
     if (num >= 10) return `±${num.toFixed(1).replace(/\.0$/, '')}%`;
     return `±${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
+}
+
+function formatRangePercentPlain(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return '--';
+    if (num >= 100) return `${Math.round(num)}%`;
+    if (num >= 10) return `${num.toFixed(1).replace(/\.0$/, '')}%`;
+    return `${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
 }
 
 function relativeTime(dateStr) {
@@ -474,7 +483,7 @@ function ConfirmDialog({ open, title, description, confirmLabel = '确认', busy
 
 // ============ PAGES ============
 
-function PoolListPage({ apiBaseUrl, onSelectPool, brand }) {
+function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand }) {
     const [pools, setPools] = useState([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
@@ -583,8 +592,42 @@ function PoolListPage({ apiBaseUrl, onSelectPool, brand }) {
                                             {relativeTime(pool.latest_event_at)}
                                         </span>
                                     </div>
+                                    <div className="mt-1.5">
+                                        {(() => {
+                                            const rangeSummary = Array.isArray(pool?.range_groups)
+                                                ? pool.range_groups.filter((item) => Number(item?.range_percent) > 0)[0] || null
+                                                : null;
+                                            const repeatedCount = Math.max(0, Number(rangeSummary?.position_count) || 0);
+                                            if (!rangeSummary) {
+                                                return <div className="text-[10px] text-zinc-500">暂无聪明钱区间</div>;
+                                            }
+                                            return (
+                                                <div className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-white/[0.05] bg-black/20 px-2.5 py-1 text-[10px] text-zinc-300">
+                                                    <span className="shrink-0 font-semibold text-zinc-100">{formatRangePercentPlain(rangeSummary.range_percent)}</span>
+                                                    {repeatedCount > 1 ? (
+                                                        <span className="shrink-0 rounded-full bg-white/[0.05] px-1.5 py-0.5 text-[9px] font-semibold text-zinc-200">+{repeatedCount - 1}</span>
+                                                    ) : null}
+                                                    <span className="truncate text-zinc-400">{formatUSDCompact(rangeSummary.total_amount_usd)}</span>
+                                                </div>
+                                            );
+                                        })()}
+                                    </div>
                                 </div>
-                                <ChevronRight size={16} className="mt-1 shrink-0 text-zinc-600" />
+                                {typeof onOpenPosition === 'function' ? (
+                                    <button
+                                        type="button"
+                                        className={`${brand.actionPillButtonClass} mt-1 shrink-0`}
+                                        onClick={(event) => {
+                                            event.stopPropagation();
+                                            onOpenPosition(pool);
+                                        }}
+                                    >
+                                        <FlashIcon className="h-3 w-3 shrink-0" />
+                                        璺熷崟
+                                    </button>
+                                ) : (
+                                    <ChevronRight size={16} className="mt-1 shrink-0 text-zinc-600" />
+                                )}
                             </div>
                         </button>
                     ))}
@@ -1765,7 +1808,7 @@ function AddWalletModal({ apiBaseUrl, onClose, onAdded, brand }) {
 }
 
 // ============ MAIN COMPONENT ============
-export default function SmartMoneyPage({ apiBaseUrl, initData = '', accentTheme = 'lime' }) {
+export default function SmartMoneyPage({ apiBaseUrl, initData = '', accentTheme = 'lime', onOpenPosition }) {
     const brand = useMemo(() => getBrandTheme(accentTheme), [accentTheme]);
     const [view, setView] = useState('pools');
     const [stats, setStats] = useState(null);
@@ -1905,6 +1948,7 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', accentTheme 
                     <PoolListPage
                         apiBaseUrl={apiBaseUrl}
                         onSelectPool={handleSelectPool}
+                        onOpenPosition={onOpenPosition}
                         brand={brand}
                     />
                 ) : view === 'wallets' ? (
