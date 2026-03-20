@@ -42,7 +42,7 @@ import OpenPositionModal from './components/OpenPositionModal';
 import StepProgressModal from './components/StepProgressModal';
 import TaskActionMenu from './components/TaskActionMenu';
 import NumberFlowValue from './components/NumberFlowValue';
-import { updateSMWallet } from './smartMoneyApi';
+import { fetchSMPoolStats, updateSMWallet } from './smartMoneyApi';
 import telegramLogo from './img/telegram.svg';
 import uniswapLogo from './img/uniswap.svg';
 import pancakeLogo from './img/pancake.svg';
@@ -1079,6 +1079,8 @@ export default function App() {
   const [openPosSubmitError, setOpenPosSubmitError] = useState('');
   const [openPosWallets, setOpenPosWallets] = useState(null);
   const [openPosWalletsLoading, setOpenPosWalletsLoading] = useState(false);
+  const [openPosSmartRanges, setOpenPosSmartRanges] = useState([]);
+  const [openPosSmartRangesLoading, setOpenPosSmartRangesLoading] = useState(false);
   const [openPosWalletId, setOpenPosWalletId] = useState(() => {
     const saved = Number(storageGet(STORAGE.walletId));
     return Number.isFinite(saved) && saved > 0 ? saved : 0;
@@ -1099,6 +1101,25 @@ export default function App() {
     }
   }, [apiBaseUrl, chain, hasInitData, initData]);
 
+  const loadSmartRangesForModal = useCallback(async (poolAddress) => {
+    const normalizedPoolAddress = normalizePoolAddress(poolAddress);
+    if (!normalizedPoolAddress) {
+      setOpenPosSmartRanges([]);
+      setOpenPosSmartRangesLoading(false);
+      return;
+    }
+
+    setOpenPosSmartRangesLoading(true);
+    try {
+      const resp = await fetchSMPoolStats({ apiBaseUrl, poolAddress: normalizedPoolAddress });
+      setOpenPosSmartRanges(Array.isArray(resp?.range_groups) ? resp.range_groups : []);
+    } catch {
+      setOpenPosSmartRanges([]);
+    } finally {
+      setOpenPosSmartRangesLoading(false);
+    }
+  }, [apiBaseUrl]);
+
   const openPositionModal = useCallback((pool) => {
     const resolvedChain = normalizeChain(pool?.chain || chain);
     const resolvedVersion = String(
@@ -1106,15 +1127,19 @@ export default function App() {
     )
       .trim()
       .toLowerCase();
+    const normalizedPoolAddress = normalizePoolAddress(pool?.pool_address || pool?.pool_id);
 
     setOpenPosSubmitError('');
+    setOpenPosSmartRanges(Array.isArray(pool?.range_groups) ? pool.range_groups : []);
+    setOpenPosSmartRangesLoading(Boolean(normalizedPoolAddress));
     setOpenPosPool({
       ...pool,
       chain: resolvedChain,
       ...(resolvedVersion ? { protocol_version: resolvedVersion, pool_version: resolvedVersion } : {}),
     });
     loadWalletsForModal(resolvedChain);
-  }, [chain, loadWalletsForModal]);
+    loadSmartRangesForModal(normalizedPoolAddress);
+  }, [chain, loadSmartRangesForModal, loadWalletsForModal]);
 
   const handleOpenPosition = useCallback(async (params) => {
     const panelKey = openPosPool?.panelKey || 'hot_pools';
@@ -1133,6 +1158,8 @@ export default function App() {
       setOperationProgress(prev => prev?.operation === 'open_position'
         ? { ...prev, currentStep: 4, status: 'done' } : prev);
       setOpenPosSubmitError('');
+      setOpenPosSmartRanges([]);
+      setOpenPosSmartRangesLoading(false);
       setOpenPosPool(null);
       loadPositions();
     } catch (e) {
@@ -2007,6 +2034,12 @@ export default function App() {
         initData={initData}
         onSelectPool={selectPool}
         activePoolAddress={selectedPoolAddress}
+        refreshInterval={refreshInterval}
+        onOpenPosition={(pool) => openPositionModal({
+          ...pool,
+          chain: String(pool?.chain || (Number(pool?.chain_id) === 8453 ? 'base' : chain)).toLowerCase(),
+          panelKey: 'smart_money',
+        })}
       />
     ),
   };
@@ -2236,6 +2269,8 @@ export default function App() {
           chain={openPosPool?.chain || chain}
           wallets={openPosWallets}
           walletsLoading={openPosWalletsLoading}
+          smartRanges={openPosSmartRanges}
+          smartRangesLoading={openPosSmartRangesLoading}
           selectedWalletId={openPosWalletId}
           submitError={openPosSubmitError}
           onClearSubmitError={() => setOpenPosSubmitError('')}
@@ -2247,6 +2282,8 @@ export default function App() {
           onSubmit={handleOpenPosition}
           onClose={() => {
             setOpenPosSubmitError('');
+            setOpenPosSmartRanges([]);
+            setOpenPosSmartRangesLoading(false);
             setOpenPosPool(null);
           }}
           busy={openPosBusy}

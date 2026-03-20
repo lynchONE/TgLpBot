@@ -63,6 +63,11 @@ function normalizePoolSelectionId(value) {
     return String(value?.pool_address || value?.pool_id || value || '').trim().toLowerCase();
 }
 
+function resolvePoolChain(value) {
+    if (String(value?.chain || '').trim()) return String(value.chain).trim().toLowerCase();
+    return Number(value?.chain_id) === 8453 ? 'base' : 'bsc';
+}
+
 function getPoolIdentifierLabel(value) {
     return isHexAddressValue(value) ? 'Pool Address' : 'Pool ID';
 }
@@ -99,6 +104,20 @@ function formatRangePercent(value) {
     if (num >= 100) return `±${Math.round(num)}%`;
     if (num >= 10) return `±${num.toFixed(1).replace(/\.0$/, '')}%`;
     return `±${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
+}
+
+function formatRangePercentPlain(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return '--';
+    if (num >= 100) return `${Math.round(num)}%`;
+    if (num >= 10) return `${num.toFixed(1).replace(/\.0$/, '')}%`;
+    return `${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
+}
+
+function getRefreshIntervalMs(refreshInterval) {
+    const seconds = Number(refreshInterval);
+    if (!Number.isFinite(seconds) || seconds <= 0) return 10000;
+    return Math.max(Math.round(seconds), 10) * 1000;
 }
 
 function relativeTime(dateStr) {
@@ -324,7 +343,7 @@ function ConfirmDialog({ open, title, description, confirmLabel = '确认', busy
 
 // ---- Pages ----
 
-function PoolList({ apiBaseUrl, onSelect, onOpenDetail, activePoolAddress = '' }) {
+function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePoolAddress = '', refreshInterval = 10 }) {
     const [pools, setPools] = useState([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
@@ -333,11 +352,31 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, activePoolAddress = '' }
         () => normalizePoolSelectionId(activePoolAddress),
         [activePoolAddress]
     );
+    const refreshIntervalMs = useMemo(
+        () => getRefreshIntervalMs(refreshInterval),
+        [refreshInterval]
+    );
+
+    const loadPools = useCallback((silent = false) => {
+        if (!silent) setLoading(true);
+        return fetchSMPools({ apiBaseUrl })
+            .then((d) => setPools(d?.list || []))
+            .catch(() => {})
+            .finally(() => {
+                if (!silent) setLoading(false);
+            });
+    }, [apiBaseUrl]);
 
     useEffect(() => {
-        setLoading(true);
-        fetchSMPools({ apiBaseUrl }).then(d => setPools(d?.list || [])).catch(() => {}).finally(() => setLoading(false));
-    }, [apiBaseUrl]);
+        loadPools();
+    }, [loadPools]);
+
+    useEffect(() => {
+        const timer = setInterval(() => {
+            loadPools(true);
+        }, refreshIntervalMs);
+        return () => clearInterval(timer);
+    }, [loadPools, refreshIntervalMs]);
 
     const filtered = useMemo(() => {
         let l = pools;
@@ -374,6 +413,9 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, activePoolAddress = '' }
                 <div className="smd-pool-cards">
                     {filtered.map((p) => {
                         const isActive = normalizedActivePoolAddress && normalizePoolSelectionId(p) === normalizedActivePoolAddress;
+                        const rangeGroups = Array.isArray(p?.range_groups)
+                            ? p.range_groups.filter((item) => Number(item?.range_percent) > 0).slice(0, 3)
+                            : [];
                         return (
                             <div
                             key={p.pool_address}
@@ -399,6 +441,38 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, activePoolAddress = '' }
                                 {p.total_position_amount_usd > 0 && (
                                     <span className="smd-pool-card-tvl">{formatUSDCompact(p.total_position_amount_usd)}</span>
                                 )}
+                            </div>
+                            <div className="smd-pool-card-range-row">
+                                {rangeGroups.length > 0 ? (
+                                    <div className="smd-pool-card-ranges">
+                                        {rangeGroups.map((group, index) => {
+                                            const positionCount = Math.max(0, Number(group?.position_count) || 0);
+                                            return (
+                                                <div key={`${group.range_percent}-${positionCount}-${index}`} className="smd-range-pill">
+                                                    <div className="smd-range-pill-top">
+                                                        <span>{formatRangePercentPlain(group.range_percent)}</span>
+                                                        {positionCount > 1 ? <span className="smd-range-pill-badge">+{positionCount - 1}</span> : null}
+                                                    </div>
+                                                    <div className="smd-range-pill-sub">{formatUSDCompact(group.total_amount_usd)}</div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                ) : (
+                                    <div className="smd-pool-card-range-empty">暂无聪明钱区间聚合</div>
+                                )}
+                                {typeof onOpenPosition === 'function' ? (
+                                    <button
+                                        type="button"
+                                        className="smd-follow-open-btn"
+                                        onClick={(event) => {
+                                            event.stopPropagation();
+                                            onOpenPosition(p);
+                                        }}
+                                    >
+                                        跟单开仓
+                                    </button>
+                                ) : null}
                             </div>
                             <div className="smd-pool-card-foot">
                                 <span>{p.wallet_count} 钱包</span>
@@ -445,18 +519,46 @@ function RangeSummary({ position }) {
     );
 }
 
-function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet }) {
+function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval = 10 }) {
     const [positions, setPositions] = useState([]);
     const [stats, setStats] = useState(null);
     const [status, setStatus] = useState('open');
     const [loading, setLoading] = useState(true);
     const poolIdentifier = getPoolIdentifier(pool);
+    const refreshIntervalMs = useMemo(
+        () => getRefreshIntervalMs(refreshInterval),
+        [refreshInterval]
+    );
 
-    useEffect(() => { fetchSMPoolStats({ apiBaseUrl, poolAddress: pool.pool_address }).then(setStats).catch(() => {}); }, [apiBaseUrl, pool.pool_address]);
-    useEffect(() => {
-        setLoading(true);
-        fetchSMPositions({ apiBaseUrl, pool: pool.pool_address, status, size: 100 }).then(d => setPositions(d?.list || [])).catch(() => {}).finally(() => setLoading(false));
+    const loadStats = useCallback(() => (
+        fetchSMPoolStats({ apiBaseUrl, poolAddress: pool.pool_address }).then(setStats).catch(() => {})
+    ), [apiBaseUrl, pool.pool_address]);
+
+    const loadPositions = useCallback((silent = false) => {
+        if (!silent) setLoading(true);
+        return fetchSMPositions({ apiBaseUrl, pool: pool.pool_address, status, size: 100 })
+            .then((d) => setPositions(d?.list || []))
+            .catch(() => {})
+            .finally(() => {
+                if (!silent) setLoading(false);
+            });
     }, [apiBaseUrl, pool.pool_address, status]);
+
+    useEffect(() => {
+        loadStats();
+    }, [loadStats]);
+
+    useEffect(() => {
+        loadPositions();
+    }, [loadPositions]);
+
+    useEffect(() => {
+        const timer = setInterval(() => {
+            loadStats();
+            loadPositions(true);
+        }, refreshIntervalMs);
+        return () => clearInterval(timer);
+    }, [loadPositions, loadStats, refreshIntervalMs]);
 
     return (
         <div>
@@ -558,19 +660,34 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet }) {
     );
 }
 
-function WalletList({ apiBaseUrl, onSelect, onAdd }) {
+function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
     const [wallets, setWallets] = useState([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [busyKey, setBusyKey] = useState('');
     const [actionError, setActionError] = useState('');
     const [confirmState, setConfirmState] = useState(null);
+    const refreshIntervalMs = useMemo(
+        () => getRefreshIntervalMs(refreshInterval),
+        [refreshInterval]
+    );
 
-    const load = useCallback(() => {
-        setLoading(true);
-        fetchSMWallets({ apiBaseUrl, size: 100 }).then(d => setWallets(d?.list || [])).catch(() => {}).finally(() => setLoading(false));
+    const load = useCallback((silent = false) => {
+        if (!silent) setLoading(true);
+        return fetchSMWallets({ apiBaseUrl, size: 100 })
+            .then((d) => setWallets(d?.list || []))
+            .catch(() => {})
+            .finally(() => {
+                if (!silent) setLoading(false);
+            });
     }, [apiBaseUrl]);
     useEffect(() => { load(); }, [load]);
+    useEffect(() => {
+        const timer = setInterval(() => {
+            load(true);
+        }, refreshIntervalMs);
+        return () => clearInterval(timer);
+    }, [load, refreshIntervalMs]);
 
     const filtered = useMemo(() => {
         if (!search) return wallets;
@@ -684,17 +801,45 @@ function WalletList({ apiBaseUrl, onSelect, onAdd }) {
     );
 }
 
-function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool }) {
+function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval = 10 }) {
     const [positions, setPositions] = useState([]);
     const [info, setInfo] = useState(null);
     const [status, setStatus] = useState('open');
     const [loading, setLoading] = useState(true);
+    const refreshIntervalMs = useMemo(
+        () => getRefreshIntervalMs(refreshInterval),
+        [refreshInterval]
+    );
 
-    useEffect(() => { fetchSMStats({ apiBaseUrl, address: addr }).then(setInfo).catch(() => {}); }, [apiBaseUrl, addr]);
-    useEffect(() => {
-        setLoading(true);
-        fetchSMPositions({ apiBaseUrl, wallet: addr, status, size: 100 }).then(d => setPositions(d?.list || [])).catch(() => {}).finally(() => setLoading(false));
+    const loadInfo = useCallback(() => (
+        fetchSMStats({ apiBaseUrl, address: addr }).then(setInfo).catch(() => {})
+    ), [apiBaseUrl, addr]);
+
+    const loadPositions = useCallback((silent = false) => {
+        if (!silent) setLoading(true);
+        return fetchSMPositions({ apiBaseUrl, wallet: addr, status, size: 100 })
+            .then((d) => setPositions(d?.list || []))
+            .catch(() => {})
+            .finally(() => {
+                if (!silent) setLoading(false);
+            });
     }, [apiBaseUrl, addr, status]);
+
+    useEffect(() => {
+        loadInfo();
+    }, [loadInfo]);
+
+    useEffect(() => {
+        loadPositions();
+    }, [loadPositions]);
+
+    useEffect(() => {
+        const timer = setInterval(() => {
+            loadInfo();
+            loadPositions(true);
+        }, refreshIntervalMs);
+        return () => clearInterval(timer);
+    }, [loadInfo, loadPositions, refreshIntervalMs]);
 
     const groups = useMemo(() => {
         const m = {};
@@ -1143,30 +1288,51 @@ function SettingsPanel({ apiBaseUrl }) {
 
 // ---- Main ----
 
-export default function SmartMoneyDashboard({ apiBaseUrl, initData = '', onSelectPool, activePoolAddress = '' }) {
+export default function SmartMoneyDashboard({
+    apiBaseUrl,
+    initData = '',
+    onSelectPool,
+    activePoolAddress = '',
+    refreshInterval = 10,
+    onOpenPosition,
+}) {
     const [view, setView] = useState('pools');
     const [stats, setStats] = useState(null);
     const [selectedPool, setSelectedPool] = useState(null);
     const [selectedWallet, setSelectedWallet] = useState(null);
     const [showAddModal, setShowAddModal] = useState(false);
+    const refreshIntervalMs = useMemo(
+        () => getRefreshIntervalMs(refreshInterval),
+        [refreshInterval]
+    );
+
+    const loadStats = useCallback(() => (
+        fetchSMStats({ apiBaseUrl }).then(setStats).catch(() => {})
+    ), [apiBaseUrl]);
 
     useEffect(() => {
-        fetchSMStats({ apiBaseUrl }).then(setStats).catch(() => {});
-        const t = setInterval(() => fetchSMStats({ apiBaseUrl }).then(setStats).catch(() => {}), 30000);
-        return () => clearInterval(t);
-    }, [apiBaseUrl]);
+        loadStats();
+    }, [loadStats]);
+
+    useEffect(() => {
+        const timer = setInterval(() => {
+            loadStats();
+        }, refreshIntervalMs);
+        return () => clearInterval(timer);
+    }, [loadStats, refreshIntervalMs]);
 
     const isDetail = selectedPool || selectedWallet;
     const handlePoolCardSelect = useCallback((pool) => {
+        const nextPool = { ...pool, chain: resolvePoolChain(pool) };
         if (typeof onSelectPool === 'function') {
-            onSelectPool(pool);
+            onSelectPool(nextPool);
             return;
         }
-        setSelectedPool(pool);
+        setSelectedPool(nextPool);
         setSelectedWallet(null);
     }, [onSelectPool]);
     const handleOpenPoolDetail = useCallback((pool) => {
-        setSelectedPool(pool);
+        setSelectedPool({ ...pool, chain: resolvePoolChain(pool) });
         setSelectedWallet(null);
     }, []);
     const monitorSummary = useMemo(() => {
@@ -1248,18 +1414,37 @@ export default function SmartMoneyDashboard({ apiBaseUrl, initData = '', onSelec
                 )}
 
                 {selectedPool ? (
-                    <PoolDetail apiBaseUrl={apiBaseUrl} pool={selectedPool} onBack={() => setSelectedPool(null)} onSelectWallet={addr => { setSelectedWallet(addr); setView('wallets'); setSelectedPool(null); }} />
+                    <PoolDetail
+                        apiBaseUrl={apiBaseUrl}
+                        pool={selectedPool}
+                        onBack={() => setSelectedPool(null)}
+                        onSelectWallet={addr => { setSelectedWallet(addr); setView('wallets'); setSelectedPool(null); }}
+                        refreshInterval={refreshInterval}
+                    />
                 ) : selectedWallet ? (
-                    <WalletDetail apiBaseUrl={apiBaseUrl} addr={selectedWallet} onBack={() => setSelectedWallet(null)} onSelectPool={p => { setSelectedPool(p); setSelectedWallet(null); }} />
+                    <WalletDetail
+                        apiBaseUrl={apiBaseUrl}
+                        addr={selectedWallet}
+                        onBack={() => setSelectedWallet(null)}
+                        onSelectPool={p => { setSelectedPool(p); setSelectedWallet(null); }}
+                        refreshInterval={refreshInterval}
+                    />
                 ) : view === 'pools' ? (
                     <PoolList
                         apiBaseUrl={apiBaseUrl}
                         onSelect={handlePoolCardSelect}
                         onOpenDetail={handleOpenPoolDetail}
                         activePoolAddress={activePoolAddress}
+                        refreshInterval={refreshInterval}
+                        onOpenPosition={onOpenPosition}
                     />
                 ) : view === 'wallets' ? (
-                    <WalletList apiBaseUrl={apiBaseUrl} onSelect={setSelectedWallet} onAdd={() => setShowAddModal(true)} />
+                    <WalletList
+                        apiBaseUrl={apiBaseUrl}
+                        onSelect={setSelectedWallet}
+                        onAdd={() => setShowAddModal(true)}
+                        refreshInterval={refreshInterval}
+                    />
                 ) : view === 'golden_dog' ? (
                     <GoldenDogPanel apiBaseUrl={apiBaseUrl} initData={initData} />
                 ) : (

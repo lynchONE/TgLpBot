@@ -35,7 +35,7 @@ async function readErrorMessage(resp) {
 }
 
 async function smRequest(url, options = {}) {
-    const resp = await fetch(url, options);
+    const resp = await fetch(url, { cache: 'no-store', ...options });
     if (!resp.ok) {
         throw new Error(await readErrorMessage(resp));
     }
@@ -47,7 +47,7 @@ async function smRequest(url, options = {}) {
 }
 
 async function goldenDogRequest(url, options = {}) {
-    const resp = await fetch(url, options);
+    const resp = await fetch(url, { cache: 'no-store', ...options });
     if (!resp.ok) {
         throw new Error(await readErrorMessage(resp));
     }

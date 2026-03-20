@@ -8,11 +8,24 @@ function shortAddr(addr) {
   return `${value.slice(0, 6)}..${value.slice(-4)}`;
 }
 
+function formatUsdCompact(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return '--';
+  const abs = Math.abs(num);
+  if (abs >= 1000000) return `$${(num / 1000000).toFixed(abs >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M`;
+  if (abs >= 1000) return `$${(num / 1000).toFixed(abs >= 10000 ? 0 : 1).replace(/\.0$/, '')}K`;
+  if (abs >= 100) return `$${num.toFixed(0)}`;
+  if (abs >= 10) return `$${num.toFixed(1).replace(/\.0$/, '')}`;
+  return `$${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}`;
+}
+
 export default function OpenPositionModal({
   pool,
   chain,
   wallets,
   walletsLoading,
+  smartRanges,
+  smartRangesLoading,
   selectedWalletId,
   submitError,
   onClearSubmitError,
@@ -33,6 +46,13 @@ export default function OpenPositionModal({
   const version = String(pool?.protocol_version || pool?.factory_name || '').trim();
 
   const showWalletPicker = Array.isArray(wallets) && wallets.length > 1;
+  const visibleSmartRanges = useMemo(() => (
+    Array.isArray(smartRanges)
+      ? smartRanges
+        .filter((item) => Number(item?.range_percent) > 0)
+        .slice(0, 6)
+      : []
+  ), [smartRanges]);
   const resolvedWalletId = useMemo(() => {
     if (!Array.isArray(wallets) || wallets.length === 0) return 0;
     if (wallets.length === 1) return wallets[0].id;
@@ -171,6 +191,39 @@ export default function OpenPositionModal({
               step="10"
             />
           </label>
+
+          {smartRangesLoading || visibleSmartRanges.length > 0 ? (
+            <div className="modal-range-section">
+              <span className="modal-range-label">聪明钱区间</span>
+              {smartRangesLoading ? (
+                <div className="modal-range-hint">聪明钱区间加载中...</div>
+              ) : (
+                <>
+                  <div className="modal-range-picks">
+                    {visibleSmartRanges.map((item, index) => {
+                      const rangePct = Number(item?.range_percent);
+                      const positionCount = Math.max(0, Number(item?.position_count) || 0);
+                      const isActive =
+                        Math.abs(Number(rangeLower) - rangePct) < 0.05 &&
+                        Math.abs(Number(rangeUpper) - rangePct) < 0.05;
+                      return (
+                        <button
+                          key={`${rangePct}-${positionCount}-${index}`}
+                          type="button"
+                          className={`range-chip smart ${isActive ? 'active' : ''}`}
+                          onClick={() => applyRange(rangePct, rangePct)}
+                        >
+                          <span>{`${rangePct}%${positionCount > 1 ? ` +${positionCount - 1}` : ''}`}</span>
+                          <span className="range-chip-sub">{formatUsdCompact(item?.total_amount_usd)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="modal-range-hint">按近期聪明钱开仓金额聚合</div>
+                </>
+              )}
+            </div>
+          ) : null}
 
           <div className="modal-range-section">
             <span className="modal-range-label">快捷区间</span>

@@ -431,6 +431,20 @@ type PoolAmountRow struct {
 	TotalAmountUSD float64 `json:"total_amount_usd"`
 }
 
+type PoolPositionRangeRow struct {
+	PoolAddress    string  `json:"pool_address"`
+	TickLower      *int    `json:"tick_lower"`
+	TickUpper      *int    `json:"tick_upper"`
+	PositionCount  int     `json:"position_count"`
+	TotalAmountUSD float64 `json:"total_amount_usd"`
+}
+
+type PoolRangeGroup struct {
+	RangePercent   float64 `json:"range_percent"`
+	PositionCount  int     `json:"position_count"`
+	TotalAmountUSD float64 `json:"total_amount_usd"`
+}
+
 func (r *Repository) GetPoolTotalAmountsUSD(ctx context.Context) (map[string]float64, error) {
 	recentCutoff := time.Now().Add(-2 * time.Hour)
 	var rows []PoolAmountRow
@@ -459,25 +473,72 @@ func (r *Repository) GetPoolTotalAmountsUSD(ctx context.Context) (map[string]flo
 	return out, nil
 }
 
+func (r *Repository) ListRecentOpenPositionRanges(ctx context.Context, poolAddresses []string) ([]PoolPositionRangeRow, error) {
+	recentCutoff := time.Now().Add(-2 * time.Hour)
+	normalizedPools := make([]string, 0, len(poolAddresses))
+	for _, raw := range poolAddresses {
+		addr := strings.ToLower(strings.TrimSpace(raw))
+		if addr == "" {
+			continue
+		}
+		normalizedPools = append(normalizedPools, addr)
+	}
+
+	query := `
+		SELECT
+			p.pool_address,
+			p.tick_lower,
+			p.tick_upper,
+			COUNT(*) AS position_count,
+			COALESCE(SUM(COALESCE(e_agg.position_amount_usd, 0)), 0) AS total_amount_usd
+		FROM sm_lp_positions p
+		LEFT JOIN (
+			SELECT chain_id, nft_token_id,
+				MAX(COALESCE(total_usd, COALESCE(token0_amount_usd, 0) + COALESCE(token1_amount_usd, 0), 0)) AS position_amount_usd
+			FROM sm_lp_events
+			WHERE event_type = 'add'
+			GROUP BY chain_id, nft_token_id
+		) e_agg ON e_agg.chain_id = p.chain_id AND e_agg.nft_token_id = p.nft_token_id
+		WHERE p.status = 'open' AND p.opened_at >= ?
+	`
+	args := []interface{}{recentCutoff}
+	if len(normalizedPools) > 0 {
+		query += ` AND LOWER(p.pool_address) IN ?`
+		args = append(args, normalizedPools)
+	}
+	query += `
+		GROUP BY p.pool_address, p.tick_lower, p.tick_upper
+		ORDER BY p.pool_address ASC, total_amount_usd DESC, position_count DESC
+	`
+
+	var rows []PoolPositionRangeRow
+	err := database.DB.WithContext(ctx).Raw(query, args...).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // --- Aggregate queries ---
 
 type PoolAggRow struct {
-	PoolAddress            string    `json:"pool_address"`
-	Token0Symbol           string    `json:"token0_symbol"`
-	Token1Symbol           string    `json:"token1_symbol"`
-	Token0Address          string    `json:"token0_address"`
-	Token1Address          string    `json:"token1_address"`
-	FeeTier                *int      `json:"fee_tier"`
-	Protocol               string    `json:"protocol"`
-	ChainID                int       `json:"chain_id"`
-	OpenPositionCount      int       `json:"open_position_count"`
-	WalletCount            int       `json:"wallet_count"`
-	LatestEventAt          time.Time `json:"latest_event_at"`
-	TradingPair            string    `json:"trading_pair"`
-	DisplayTokenAddress    string    `json:"display_token_address,omitempty"`
-	DisplayTokenSymbol     string    `json:"display_token_symbol,omitempty"`
-	DisplayTokenLogoURL    string    `json:"display_token_logo_url,omitempty"`
-	TotalPositionAmountUSD float64   `json:"total_position_amount_usd"`
+	PoolAddress            string           `json:"pool_address"`
+	Token0Symbol           string           `json:"token0_symbol"`
+	Token1Symbol           string           `json:"token1_symbol"`
+	Token0Address          string           `json:"token0_address"`
+	Token1Address          string           `json:"token1_address"`
+	FeeTier                *int             `json:"fee_tier"`
+	Protocol               string           `json:"protocol"`
+	ChainID                int              `json:"chain_id"`
+	OpenPositionCount      int              `json:"open_position_count"`
+	WalletCount            int              `json:"wallet_count"`
+	LatestEventAt          time.Time        `json:"latest_event_at"`
+	TradingPair            string           `json:"trading_pair"`
+	DisplayTokenAddress    string           `json:"display_token_address,omitempty"`
+	DisplayTokenSymbol     string           `json:"display_token_symbol,omitempty"`
+	DisplayTokenLogoURL    string           `json:"display_token_logo_url,omitempty"`
+	TotalPositionAmountUSD float64          `json:"total_position_amount_usd"`
+	RangeGroups            []PoolRangeGroup `json:"range_groups,omitempty"`
 }
 
 func (r *Repository) ListPoolsWithPositions(ctx context.Context) ([]PoolAggRow, error) {
@@ -505,24 +566,25 @@ func (r *Repository) ListPoolsWithPositions(ctx context.Context) ([]PoolAggRow, 
 }
 
 type PoolStats struct {
-	PoolAddress            string  `json:"pool_address"`
-	Token0Symbol           string  `json:"token0_symbol"`
-	Token1Symbol           string  `json:"token1_symbol"`
-	Token0Address          string  `json:"token0_address"`
-	Token1Address          string  `json:"token1_address"`
-	FeeTier                *int    `json:"fee_tier"`
-	Protocol               string  `json:"protocol"`
-	ChainID                int     `json:"chain_id"`
-	OpenPositionCount      int     `json:"open_position_count"`
-	WalletCount            int     `json:"wallet_count"`
-	ClosedTodayCount       int     `json:"closed_today_count"`
-	TotalPositionAmountUSD float64 `json:"total_position_amount_usd"`
-	TradingPair            string  `json:"trading_pair"`
-	CurrentPrice           string  `json:"current_price"`
-	PriceChange24h         float64 `json:"price_change_24h"`
-	DisplayTokenAddress    string  `json:"display_token_address,omitempty"`
-	DisplayTokenSymbol     string  `json:"display_token_symbol,omitempty"`
-	DisplayTokenLogoURL    string  `json:"display_token_logo_url,omitempty"`
+	PoolAddress            string           `json:"pool_address"`
+	Token0Symbol           string           `json:"token0_symbol"`
+	Token1Symbol           string           `json:"token1_symbol"`
+	Token0Address          string           `json:"token0_address"`
+	Token1Address          string           `json:"token1_address"`
+	FeeTier                *int             `json:"fee_tier"`
+	Protocol               string           `json:"protocol"`
+	ChainID                int              `json:"chain_id"`
+	OpenPositionCount      int              `json:"open_position_count"`
+	WalletCount            int              `json:"wallet_count"`
+	ClosedTodayCount       int              `json:"closed_today_count"`
+	TotalPositionAmountUSD float64          `json:"total_position_amount_usd"`
+	TradingPair            string           `json:"trading_pair"`
+	CurrentPrice           string           `json:"current_price"`
+	PriceChange24h         float64          `json:"price_change_24h"`
+	DisplayTokenAddress    string           `json:"display_token_address,omitempty"`
+	DisplayTokenSymbol     string           `json:"display_token_symbol,omitempty"`
+	DisplayTokenLogoURL    string           `json:"display_token_logo_url,omitempty"`
+	RangeGroups            []PoolRangeGroup `json:"range_groups,omitempty"`
 }
 
 func (r *Repository) GetPoolStats(ctx context.Context, poolAddress string) (*PoolStats, error) {

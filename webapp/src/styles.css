@@ -6218,6 +6218,7 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
+  flex-wrap: wrap;
   font-size: 11px;
   color: var(--text-muted);
 }
@@ -6232,6 +6233,80 @@ body {
   border: 0;
   background: transparent;
   cursor: pointer;
+}
+.smd-pool-card-range-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.smd-pool-card-ranges {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.smd-range-pill {
+  min-width: 68px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 122, 0, 0.45);
+  background: rgba(255, 122, 0, 0.08);
+}
+.smd-range-pill-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffd0a6;
+}
+.smd-range-pill-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(255, 122, 0, 0.18);
+  color: #ffb36d;
+  font-size: 10px;
+  font-weight: 700;
+}
+.smd-range-pill-sub {
+  margin-top: 3px;
+  font-size: 10px;
+  color: rgba(255, 208, 166, 0.72);
+}
+.smd-pool-card-range-empty {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.38);
+}
+.smd-follow-open-btn {
+  flex-shrink: 0;
+  min-width: 88px;
+  padding: 0 14px;
+  border: 1px solid rgba(183, 255, 45, 0.4);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(183, 255, 45, 0.24), rgba(183, 255, 45, 0.14));
+  color: #d8ff84;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.smd-follow-open-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(183, 255, 45, 0.58);
+  background: linear-gradient(180deg, rgba(183, 255, 45, 0.3), rgba(183, 255, 45, 0.18));
 }
 
 /* -- Wallet avatar -- */

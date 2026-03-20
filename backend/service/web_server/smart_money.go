@@ -12,6 +12,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -410,6 +411,10 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 				smartMoneyChainSlug(stats.ChainID): []string{stats.DisplayTokenAddress},
 			}),
 		)
+		if err := attachSmartMoneyRangeGroupsToPoolStats(ctx, repo, stats); err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		jsonOK(w, stats)
 		return
 	}
@@ -449,6 +454,10 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 				pools[i].TotalPositionAmountUSD = amt
 			}
 		}
+	}
+	if err := attachSmartMoneyRangeGroupsToPoolList(ctx, repo, pools); err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 	jsonOK(w, map[string]interface{}{
 		"total": len(pools),
@@ -1031,4 +1040,98 @@ func smartMoneyRangePercentFromTicks(tickLower *int, tickUpper *int) float64 {
 		pct = 999
 	}
 	return math.Round(pct*10) / 10
+}
+
+func buildSmartMoneyPoolRangeGroups(rows []sm.PoolPositionRangeRow) map[string][]sm.PoolRangeGroup {
+	byPool := make(map[string]map[string]*sm.PoolRangeGroup)
+
+	for _, row := range rows {
+		poolAddress := strings.ToLower(strings.TrimSpace(row.PoolAddress))
+		if poolAddress == "" {
+			continue
+		}
+		rangePercent := smartMoneyRangePercentFromTicks(row.TickLower, row.TickUpper)
+		if rangePercent <= 0 {
+			continue
+		}
+		rangePercent = math.Round(rangePercent*10) / 10
+		rangeKey := strconv.FormatFloat(rangePercent, 'f', 1, 64)
+
+		if _, ok := byPool[poolAddress]; !ok {
+			byPool[poolAddress] = make(map[string]*sm.PoolRangeGroup)
+		}
+		group, ok := byPool[poolAddress][rangeKey]
+		if !ok {
+			group = &sm.PoolRangeGroup{RangePercent: rangePercent}
+			byPool[poolAddress][rangeKey] = group
+		}
+		group.PositionCount += row.PositionCount
+		group.TotalAmountUSD += row.TotalAmountUSD
+	}
+
+	out := make(map[string][]sm.PoolRangeGroup, len(byPool))
+	for poolAddress, groups := range byPool {
+		list := make([]sm.PoolRangeGroup, 0, len(groups))
+		for _, group := range groups {
+			if group == nil || group.PositionCount <= 0 {
+				continue
+			}
+			list = append(list, *group)
+		}
+		sort.Slice(list, func(i, j int) bool {
+			if math.Abs(list[i].TotalAmountUSD-list[j].TotalAmountUSD) > 0.0001 {
+				return list[i].TotalAmountUSD > list[j].TotalAmountUSD
+			}
+			if list[i].PositionCount != list[j].PositionCount {
+				return list[i].PositionCount > list[j].PositionCount
+			}
+			return list[i].RangePercent < list[j].RangePercent
+		})
+		out[poolAddress] = list
+	}
+
+	return out
+}
+
+func attachSmartMoneyRangeGroupsToPoolList(ctx context.Context, repo *sm.Repository, pools []sm.PoolAggRow) error {
+	if repo == nil || len(pools) == 0 {
+		return nil
+	}
+
+	poolAddresses := make([]string, 0, len(pools))
+	for _, pool := range pools {
+		addr := strings.ToLower(strings.TrimSpace(pool.PoolAddress))
+		if addr == "" {
+			continue
+		}
+		poolAddresses = append(poolAddresses, addr)
+	}
+
+	rangeRows, err := repo.ListRecentOpenPositionRanges(ctx, poolAddresses)
+	if err != nil {
+		return err
+	}
+	rangeGroups := buildSmartMoneyPoolRangeGroups(rangeRows)
+	for i := range pools {
+		pools[i].RangeGroups = rangeGroups[strings.ToLower(strings.TrimSpace(pools[i].PoolAddress))]
+	}
+	return nil
+}
+
+func attachSmartMoneyRangeGroupsToPoolStats(ctx context.Context, repo *sm.Repository, stats *sm.PoolStats) error {
+	if repo == nil || stats == nil {
+		return nil
+	}
+
+	addr := strings.ToLower(strings.TrimSpace(stats.PoolAddress))
+	if addr == "" {
+		return nil
+	}
+
+	rangeRows, err := repo.ListRecentOpenPositionRanges(ctx, []string{addr})
+	if err != nil {
+		return err
+	}
+	stats.RangeGroups = buildSmartMoneyPoolRangeGroups(rangeRows)[addr]
+	return nil
 }
