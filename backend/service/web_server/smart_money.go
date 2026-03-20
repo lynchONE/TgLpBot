@@ -1031,13 +1031,19 @@ func smartMoneyRangePercentFromTicks(tickLower *int, tickUpper *int) float64 {
 		return 0
 	}
 
-	halfWidth := float64(upper-lower) / 2.0
-	pct := (math.Pow(1.0001, halfWidth) - 1.0) * 100.0
+	lowerPrice := math.Pow(1.0001, float64(lower))
+	upperPrice := math.Pow(1.0001, float64(upper))
+	if lowerPrice <= 0 || upperPrice <= 0 || math.IsNaN(lowerPrice) || math.IsNaN(upperPrice) || math.IsInf(lowerPrice, 0) || math.IsInf(upperPrice, 0) {
+		return 0
+	}
+
+	// Use half-width around the range midpoint so the displayed value matches a true "±range".
+	pct := ((upperPrice - lowerPrice) / (upperPrice + lowerPrice)) * 100.0
 	if pct < 0 {
 		return 0
 	}
-	if pct > 999 {
-		pct = 999
+	if pct > 100 {
+		pct = 100
 	}
 	return math.Round(pct*10) / 10
 }

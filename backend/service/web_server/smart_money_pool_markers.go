@@ -26,6 +26,7 @@ type smartMoneyPoolMarkerEvent struct {
 	TickUpper     *int    `json:"tick_upper,omitempty"`
 	PriceLower    float64 `json:"price_lower,omitempty"`
 	PriceUpper    float64 `json:"price_upper,omitempty"`
+	RangePercent  float64 `json:"range_percent,omitempty"`
 	MidPrice      float64 `json:"mid_price,omitempty"`
 	AnchorPrice   float64 `json:"anchor_price,omitempty"`
 	EstimatedUSD  float64 `json:"estimated_usd"`
@@ -344,6 +345,7 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 			TickUpper:     event.TickUpper,
 			PriceLower:    priceLower,
 			PriceUpper:    priceUpper,
+			RangePercent:  smartMoneyRangePercentFromTicks(event.TickLower, event.TickUpper),
 			MidPrice:      midPrice,
 			AnchorPrice:   midPrice,
 			EstimatedUSD:  estimatedUSD,

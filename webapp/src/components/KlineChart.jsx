@@ -54,6 +54,14 @@ function formatUSD(v) {
   return '$' + v.toFixed(v >= 100 ? 0 : 2);
 }
 
+function formatRangePercent(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return '';
+  if (num >= 100) return `\u00B1${Math.round(num)}%`;
+  if (num >= 10) return `\u00B1${num.toFixed(1).replace(/\.0$/, '')}%`;
+  return `\u00B1${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
+}
+
 function deOverlapMarkers(markers) {
   const step = 36;
   const xThreshold = 28;
@@ -831,6 +839,9 @@ export default function KlineChart({
       upper,
       hasRange,
       rangePct,
+      normalizedRangePct: Number(primary.range_percent || 0) > 0
+        ? formatRangePercent(primary.range_percent)
+        : rangePct,
       totalUSD: c.estimatedUSD,
       count: c.items.length,
       isMyTrade: c.isMyTrade,
@@ -1084,7 +1095,7 @@ export default function KlineChart({
                 <span className="kmt-range">
                   {smartPriceFormatter(tooltipData.lower)} → {smartPriceFormatter(tooltipData.upper)}
                 </span>
-                <span className="kmt-pct">{tooltipData.rangePct}</span>
+                <span className="kmt-pct">{tooltipData.normalizedRangePct || tooltipData.rangePct}</span>
               </div>
             )}
           </div>
