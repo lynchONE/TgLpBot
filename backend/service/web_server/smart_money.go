@@ -286,8 +286,19 @@ func (s *Server) handleSMContracts(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, "invalid contract address", http.StatusBadRequest)
 			return
 		}
-		if strings.TrimSpace(req.Protocol) == "" {
-			jsonError(w, "protocol is required", http.StatusBadRequest)
+		protocol := normalizeSmartMoneyProtocol(req.Protocol)
+		if protocol == "" {
+			jsonError(w, "unsupported protocol, use pancake_v3 / uniswap_v3 / uniswap_v4", http.StatusBadRequest)
+			return
+		}
+		addr := strings.ToLower(strings.TrimSpace(req.ContractAddress))
+		existing, err := repo.GetWatchContractByAddress(ctx, addr, 56)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if existing != nil {
+			jsonError(w, "contract already exists", http.StatusConflict)
 			return
 		}
 		var desc *string
@@ -295,9 +306,9 @@ func (s *Server) handleSMContracts(w http.ResponseWriter, r *http.Request) {
 			desc = &d
 		}
 		c := &models.WatchContract{
-			ContractAddress: strings.ToLower(req.ContractAddress),
+			ContractAddress: addr,
 			ChainID:         56,
-			Protocol:        strings.TrimSpace(req.Protocol),
+			Protocol:        protocol,
 			Description:     desc,
 			IsActive:        true,
 		}
@@ -323,6 +334,26 @@ func (s *Server) handleSMContracts(w http.ResponseWriter, r *http.Request) {
 		for k, v := range updates {
 			if allowed[k] {
 				filtered[k] = v
+			}
+		}
+		if rawProtocol, ok := filtered["protocol"]; ok {
+			protocol := normalizeSmartMoneyProtocol(fmt.Sprintf("%v", rawProtocol))
+			if protocol == "" {
+				jsonError(w, "unsupported protocol, use pancake_v3 / uniswap_v3 / uniswap_v4", http.StatusBadRequest)
+				return
+			}
+			filtered["protocol"] = protocol
+		}
+		if rawDescription, ok := filtered["description"]; ok {
+			if rawDescription == nil {
+				filtered["description"] = nil
+			} else {
+				desc := strings.TrimSpace(fmt.Sprintf("%v", rawDescription))
+				if desc == "" {
+					filtered["description"] = nil
+				} else {
+					filtered["description"] = desc
+				}
 			}
 		}
 		if err := repo.UpdateWatchContract(ctx, addr, 56, filtered); err != nil {
@@ -688,6 +719,19 @@ func extractPathParam(path, prefix string) string {
 func repairSmartMoneyPositions(ctx context.Context, repo *sm.Repository) {
 	if err := sm.RepairPositions(ctx, repo); err != nil {
 		log.Printf("[SmartMoney API] repair position metadata failed: %v", err)
+	}
+}
+
+func normalizeSmartMoneyProtocol(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "pcsv3", "pancakev3", "pancakeswap_v3", "pancake_v3":
+		return "pancake_v3"
+	case "univ3", "uniswapv3", "uniswap_v3":
+		return "uniswap_v3"
+	case "univ4", "uniswapv4", "uniswap_v4":
+		return "uniswap_v4"
+	default:
+		return ""
 	}
 }
 

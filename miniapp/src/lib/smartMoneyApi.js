@@ -6,11 +6,22 @@ function normalizeBase(apiBaseUrl) {
     return String(apiBaseUrl || '').replace(/\/$/, '');
 }
 
+async function readErrorMessage(resp) {
+    const text = await resp.text().catch(() => '');
+    if (!text) return `HTTP ${resp.status}`;
+    try {
+        const json = JSON.parse(text);
+        if (json?.message) return String(json.message);
+    } catch {
+        // ignore JSON parse errors and fall back to raw text
+    }
+    return text;
+}
+
 async function smRequest(url, options = {}) {
     const resp = await fetch(url, options);
     if (!resp.ok) {
-        const text = await resp.text().catch(() => '');
-        throw new Error(text || `HTTP ${resp.status}`);
+        throw new Error(await readErrorMessage(resp));
     }
     const json = await resp.json();
     if (json.code !== 0 && json.code !== undefined) {
@@ -22,8 +33,7 @@ async function smRequest(url, options = {}) {
 async function goldenDogRequest(url, options = {}) {
     const resp = await fetch(url, options);
     if (!resp.ok) {
-        const text = await resp.text().catch(() => '');
-        throw new Error(text || `HTTP ${resp.status}`);
+        throw new Error(await readErrorMessage(resp));
     }
     const json = await resp.json();
     if (!json?.ok) {

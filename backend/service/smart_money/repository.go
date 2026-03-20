@@ -138,6 +138,17 @@ func (r *Repository) GetActiveWatchContractsByChain(ctx context.Context, chainID
 	return contracts, err
 }
 
+func (r *Repository) GetWatchContractByAddress(ctx context.Context, address string, chainID int) (*models.WatchContract, error) {
+	var contract models.WatchContract
+	err := database.DB.WithContext(ctx).
+		Where("contract_address = ? AND chain_id = ?", strings.ToLower(address), chainID).
+		First(&contract).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	return &contract, err
+}
+
 func (r *Repository) CreateWatchContract(ctx context.Context, c *models.WatchContract) error {
 	c.ContractAddress = strings.ToLower(c.ContractAddress)
 	return database.DB.WithContext(ctx).Create(c).Error

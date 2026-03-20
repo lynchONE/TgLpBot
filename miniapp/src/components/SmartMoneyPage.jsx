@@ -34,6 +34,12 @@ const PROTOCOL_MAP = {
     uniswap_v3: { version: 'V3', icon: uniswapIcon, color: '#ff007a' },
     uniswap_v4: { version: 'V4', icon: uniswapIcon, color: '#ff007a' },
 };
+const SMART_MONEY_PROTOCOL_OPTIONS = [
+    { value: 'pancake_v3', label: 'PancakeSwap V3' },
+    { value: 'uniswap_v3', label: 'Uniswap V3' },
+    { value: 'uniswap_v4', label: 'Uniswap V4' },
+];
+const DEFAULT_SMART_MONEY_PROTOCOL = SMART_MONEY_PROTOCOL_OPTIONS[0].value;
 const WALLET_AVATAR_ICONS = [
     avatar01,
     avatar02,
@@ -98,6 +104,10 @@ function tailAddr(value) {
     const raw = String(value || '').trim();
     if (!raw) return '--';
     return raw.slice(-4);
+}
+
+function isHexAddressValue(value) {
+    return /^0x[a-fA-F0-9]{40}$/.test(String(value || '').trim());
 }
 
 function getPairLabel(value) {
@@ -1496,7 +1506,7 @@ function ContractSettingsTab({ apiBaseUrl, brand }) {
     const [loading, setLoading] = useState(true);
     const [showAdd, setShowAdd] = useState(false);
     const [newAddr, setNewAddr] = useState('');
-    const [newProtocol, setNewProtocol] = useState('');
+    const [newProtocol, setNewProtocol] = useState(DEFAULT_SMART_MONEY_PROTOCOL);
     const [newDesc, setNewDesc] = useState('');
     const [saving, setSaving] = useState(false);
     const [busyKey, setBusyKey] = useState('');
@@ -1529,10 +1539,17 @@ function ContractSettingsTab({ apiBaseUrl, brand }) {
         setSaving(true);
         setActionError('');
         try {
-            await addSMContract({ apiBaseUrl, contract_address: newAddr, protocol: newProtocol, description: newDesc });
+            const addr = String(newAddr || '').trim();
+            if (!isHexAddressValue(addr)) {
+                throw new Error('请输入合法的合约地址');
+            }
+            if (!SMART_MONEY_PROTOCOL_OPTIONS.some((option) => option.value === newProtocol)) {
+                throw new Error('请选择支持的协议');
+            }
+            await addSMContract({ apiBaseUrl, contract_address: addr, protocol: newProtocol, description: newDesc });
             setShowAdd(false);
             setNewAddr('');
-            setNewProtocol('');
+            setNewProtocol(DEFAULT_SMART_MONEY_PROTOCOL);
             setNewDesc('');
             await load();
         } catch (err) {
@@ -1601,12 +1618,17 @@ function ContractSettingsTab({ apiBaseUrl, brand }) {
                         value={newAddr}
                         onChange={e => setNewAddr(e.target.value)}
                     />
-                    <input
+                    <select
                         className={getInputClass(brand)}
-                        placeholder="协议名称"
                         value={newProtocol}
                         onChange={e => setNewProtocol(e.target.value)}
-                    />
+                    >
+                        {SMART_MONEY_PROTOCOL_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value} className="bg-zinc-950 text-zinc-100">
+                                {option.label}
+                            </option>
+                        ))}
+                    </select>
                     <textarea
                         className={`${getInputClass(brand)} min-h-[88px] resize-none`}
                         placeholder="描述（可选）"
@@ -1614,6 +1636,9 @@ function ContractSettingsTab({ apiBaseUrl, brand }) {
                         value={newDesc}
                         onChange={e => setNewDesc(e.target.value)}
                     />
+                    <div className="text-[11px] text-zinc-500">
+                        目前仅支持 PancakeSwap V3、Uniswap V3、Uniswap V4
+                    </div>
                     <div className="flex gap-2">
                         <button type="button" onClick={() => setShowAdd(false)} className="flex-1 rounded-2xl border border-white/[0.05] bg-zinc-900/65 px-4 py-2.5 text-sm text-zinc-300 transition hover:bg-zinc-800/80">取消</button>
                         <button type="button" onClick={handleAdd} disabled={saving} className={`flex-1 rounded-2xl px-4 py-2.5 text-sm disabled:opacity-50 ${brand.solidButtonClass}`}>

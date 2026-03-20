@@ -5777,6 +5777,7 @@ body {
 }
 .smd-add-form {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: flex-end;
   background: rgba(18, 26, 40, 0.85);
@@ -5785,7 +5786,8 @@ body {
   padding: 12px;
   margin-bottom: 12px;
 }
-.smd-add-form input {
+.smd-add-form input,
+.smd-add-form select {
   flex: 1;
   background: rgba(7, 11, 17, 0.8);
   border: 1px solid rgba(139, 160, 196, 0.28);
@@ -5795,10 +5797,19 @@ body {
   font: inherit;
   font-size: 13px;
   outline: none;
+  appearance: none;
 }
-.smd-add-form input:focus { border-color: rgba(var(--accent-rgb), 0.6); }
-.smd-add-form input.w-sm { max-width: 160px; }
-.smd-add-form input.w-md { max-width: 130px; }
+.smd-add-form input:focus,
+.smd-add-form select:focus { border-color: rgba(var(--accent-rgb), 0.6); }
+.smd-add-form input.w-sm,
+.smd-add-form select.w-sm { max-width: 160px; }
+.smd-add-form input.w-md,
+.smd-add-form select.w-md { max-width: 160px; }
+.smd-add-form-hint {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: rgba(195, 212, 238, 0.65);
+}
 .smd-add-form button {
   background: var(--accent);
   color: var(--accent-contrast);
@@ -6091,9 +6102,20 @@ body {
 
 .workbench.layout-4 .module-smart_money .smd-add-form input.w-sm,
 .workbench.layout-4 .module-smart_money .smd-add-form input.w-md,
+.workbench.layout-4 .module-smart_money .smd-add-form select.w-sm,
+.workbench.layout-4 .module-smart_money .smd-add-form select.w-md,
 .workbench.layout-work-4 .module-smart_money .smd-add-form input.w-sm,
-.workbench.layout-work-4 .module-smart_money .smd-add-form input.w-md {
+.workbench.layout-work-4 .module-smart_money .smd-add-form input.w-md,
+.workbench.layout-work-4 .module-smart_money .smd-add-form select.w-sm,
+.workbench.layout-work-4 .module-smart_money .smd-add-form select.w-md {
   max-width: none;
+}
+
+.workbench.layout-4 .module-smart_money .smd-add-form-hint,
+.workbench.layout-work-4 .module-smart_money .smd-add-form-hint {
+  grid-column: 1 / -1;
+  justify-self: start;
+  white-space: normal;
 }
 
 .workbench.layout-4 .module-smart_money .smd-add-form button,
