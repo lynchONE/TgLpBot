@@ -1867,20 +1867,20 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', accentTheme 
                             <button
                                 key={key}
                                 type="button"
-                                className={`inline-flex items-center justify-center gap-1.5 rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(view === key, brand)}`}
+                                className={`inline-flex min-h-[60px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] leading-tight sm:min-h-0 sm:flex-row sm:gap-1.5 sm:px-3 sm:py-2.5 sm:text-sm ${getFilterButtonClass(view === key, brand)}`}
                                 onClick={() => setView(key)}
                             >
-                                <Icon size={14} />
-                                <span className="truncate">{label}</span>
+                                <Icon size={13} className="shrink-0 sm:h-[14px] sm:w-[14px]" />
+                                <span className="text-center whitespace-normal break-words sm:truncate">{label}</span>
                             </button>
                         ))}
                         <button
                             type="button"
-                            className={`inline-flex items-center justify-center gap-1.5 rounded-2xl px-3 py-2.5 text-sm ${getFilterButtonClass(view === 'golden_dog', brand)}`}
+                            className={`inline-flex min-h-[60px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] leading-tight sm:min-h-0 sm:flex-row sm:gap-1.5 sm:px-3 sm:py-2.5 sm:text-sm ${getFilterButtonClass(view === 'golden_dog', brand)}`}
                             onClick={() => setView('golden_dog')}
                         >
-                            <Flame size={14} />
-                            <span className="truncate">金狗通知</span>
+                            <Flame size={13} className="shrink-0 sm:h-[14px] sm:w-[14px]" />
+                            <span className="text-center whitespace-normal break-words sm:truncate">金狗通知</span>
                         </button>
                     </div>
                 )}
