@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
     Eye, Wallet, Settings, Search, Plus, ExternalLink, X, Check,
-    ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Flame,
+    ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Flame, Pencil,
 } from 'lucide-react';
 import {
     fetchSMPools, fetchSMPoolStats, fetchSMPositions, fetchSMWallets,
@@ -623,7 +623,7 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand }) {
                                         }}
                                     >
                                         <FlashIcon className="h-2.5 w-2.5 shrink-0" />
-                                        璺熷崟
+                                        跟单
                                     </button>
                                 ) : (
                                     <ChevronRight size={16} className="mt-1 shrink-0 text-zinc-600" />
@@ -795,6 +795,7 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
     const [busyKey, setBusyKey] = useState('');
     const [actionError, setActionError] = useState('');
     const [confirmState, setConfirmState] = useState(null);
+    const [editingWallet, setEditingWallet] = useState(null);
 
     const load = useCallback((silent = false) => {
         if (!silent) {
@@ -925,6 +926,17 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
                                         type="button"
                                         className={getIconButtonClass(false)}
                                         disabled={busyKey === `wallet-toggle:${w.address}` || busyKey === `wallet-delete:${w.address}`}
+                                        onClick={e => {
+                                            e.stopPropagation();
+                                            setEditingWallet(w);
+                                        }}
+                                    >
+                                        <Pencil size={14} />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={getIconButtonClass(false)}
+                                        disabled={busyKey === `wallet-toggle:${w.address}` || busyKey === `wallet-delete:${w.address}`}
                                         onClick={e => { e.stopPropagation(); handleToggle(w); }}
                                     >
                                         {w.is_active ? <Pause size={14} /> : <Play size={14} />}
@@ -968,6 +980,17 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
                     if (!busyKey.startsWith('wallet-delete:')) setConfirmState(null);
                 }}
                 onConfirm={confirmDelete}
+            />
+            <EditWalletModal
+                open={Boolean(editingWallet)}
+                apiBaseUrl={apiBaseUrl}
+                wallet={editingWallet}
+                brand={brand}
+                onClose={() => setEditingWallet(null)}
+                onSaved={async () => {
+                    await load();
+                    setEditingWallet(null);
+                }}
             />
         </div>
     );
@@ -1314,8 +1337,52 @@ function GoldenDogPage({ apiBaseUrl, initData, brand }) {
     }, [apiBaseUrl, applyResponse, draft, hasInitData, initData]);
 
     return (
-        <div>
-            <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="space-y-4">
+            <section className="rounded-[30px] border border-amber-400/15 bg-[radial-gradient(circle_at_top_left,rgba(251,191,36,0.16),transparent_34%),linear-gradient(180deg,rgba(24,24,27,0.94),rgba(9,9,11,0.98))] p-4 shadow-[0_28px_90px_-42px_rgba(0,0,0,0.95)]">
+                <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-start gap-3">
+                        <div className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-400/20 bg-amber-400/10 text-amber-300">
+                            <Flame size={18} />
+                        </div>
+                        <div className="min-w-0">
+                            <div className="text-base font-semibold text-zinc-100">金狗通知</div>
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                <Badge className={draft.enabled
+                                    ? 'border-amber-400/20 bg-amber-400/12 text-amber-200'
+                                    : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>
+                                    {draft.enabled ? '已开启' : '已关闭'}
+                                </Badge>
+                                <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">
+                                    Bark {barkStatusText}
+                                </Badge>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                        <button
+                            type="button"
+                            className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(draft.enabled, brand)}`}
+                            onClick={() => setDraft((prev) => ({ ...prev, enabled: true }))}
+                        >
+                            开启
+                        </button>
+                        <button
+                            type="button"
+                            className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(!draft.enabled, brand)}`}
+                            onClick={() => setDraft((prev) => ({ ...prev, enabled: false }))}
+                        >
+                            关闭
+                        </button>
+                    </div>
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <StatCard label="通知状态" value={draft.enabled ? '运行中' : '暂停'} compact />
+                    <StatCard label="Bark 状态" value={barkStatusText} compact />
+                    <StatCard label="触发钱包" value={`${draft.min_wallets || '--'} 个`} compact />
+                    <StatCard label="冷却时间" value={`${draft.cooldown_minutes || '--'} 分钟`} compact />
+                </div>
+            </section>
+            <div className="hidden mb-4 flex items-center justify-between gap-3">
                 <div>
                     <div className="text-sm font-medium text-zinc-100">金狗通知</div>
                     <div className="text-[11px] text-zinc-500">同交易对聚合聪明钱钱包数，满足阈值后 Bark 提醒</div>
@@ -1338,7 +1405,7 @@ function GoldenDogPage({ apiBaseUrl, initData, brand }) {
                 </div>
             </div>
 
-            <div className="mb-4 grid grid-cols-3 gap-2">
+            <div className="hidden mb-4 grid grid-cols-3 gap-2">
                 <StatCard label="Bark 状态" value={barkStatusText} compact />
                 <StatCard label="钱包阈值" value={`${draft.min_wallets || '--'} 个`} compact />
                 <StatCard label="冷却时间" value={`${draft.cooldown_minutes || '--'} 分钟`} compact />
@@ -1360,7 +1427,7 @@ function GoldenDogPage({ apiBaseUrl, initData, brand }) {
                 </div>
             ) : null}
 
-            <div className="mb-4 rounded-[24px] border border-white/[0.04] bg-zinc-900/60 p-4 text-sm text-zinc-400">
+            <div className="hidden mb-4 rounded-[24px] border border-white/[0.04] bg-zinc-900/60 p-4 text-sm text-zinc-400">
                 <div className="leading-6">
                     当同一个交易对在统计窗口内达到设定的钱包数量时，后端会复用全局 Bark 配置发送提醒。
                     聚合口径按交易对计算，不区分池子地址和 fee tier。
@@ -1373,7 +1440,7 @@ function GoldenDogPage({ apiBaseUrl, initData, brand }) {
             {loading ? (
                 <div className="py-8 text-center text-zinc-500">加载中...</div>
             ) : (
-                <div className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-3">
                     <input
                         className={getInputClass(brand)}
                         type="number"
@@ -1405,7 +1472,7 @@ function GoldenDogPage({ apiBaseUrl, initData, brand }) {
                         type="button"
                         onClick={handleSave}
                         disabled={saving || !hasInitData}
-                        className={`w-full rounded-2xl px-4 py-2.5 text-sm disabled:opacity-50 ${brand.solidButtonClass}`}
+                        className={`w-full rounded-[24px] px-4 py-3 text-sm font-semibold disabled:opacity-50 sm:col-span-3 ${brand.solidButtonClass}`}
                     >
                         {saving ? '保存中...' : '保存金狗通知配置'}
                     </button>
@@ -1548,6 +1615,7 @@ function ContractSettingsTab({ apiBaseUrl, brand }) {
     const [busyKey, setBusyKey] = useState('');
     const [actionError, setActionError] = useState('');
     const [confirmState, setConfirmState] = useState(null);
+    const [editingContract, setEditingContract] = useState(null);
 
     const load = useCallback((silent = false) => {
         if (!silent) {
@@ -1696,6 +1764,14 @@ function ContractSettingsTab({ apiBaseUrl, brand }) {
                                 <div className="flex shrink-0 gap-1">
                                     <button
                                         type="button"
+                                        onClick={() => setEditingContract(c)}
+                                        disabled={busyKey === `contract-toggle:${c.contract_address}` || busyKey === `contract-delete:${c.contract_address}`}
+                                        className={getIconButtonClass(false)}
+                                    >
+                                        <Pencil size={14} />
+                                    </button>
+                                    <button
+                                        type="button"
                                         onClick={() => handleToggle(c)}
                                         disabled={busyKey === `contract-toggle:${c.contract_address}` || busyKey === `contract-delete:${c.contract_address}`}
                                         className={getIconButtonClass(false)}
@@ -1733,6 +1809,174 @@ function ContractSettingsTab({ apiBaseUrl, brand }) {
                 }}
                 onConfirm={confirmDelete}
             />
+            <EditContractModal
+                open={Boolean(editingContract)}
+                apiBaseUrl={apiBaseUrl}
+                contract={editingContract}
+                brand={brand}
+                onClose={() => setEditingContract(null)}
+                onSaved={async () => {
+                    await load();
+                    setEditingContract(null);
+                }}
+            />
+        </div>
+    );
+}
+
+function EditWalletModal({ open, apiBaseUrl, wallet, onClose, onSaved, brand }) {
+    const [label, setLabel] = useState('');
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+        if (!open || !wallet) return;
+        setLabel(String(wallet?.label || ''));
+        setError('');
+        setSaving(false);
+    }, [open, wallet]);
+
+    const handleSubmit = async () => {
+        if (!wallet?.address) return;
+        setSaving(true);
+        setError('');
+        try {
+            await updateSMWallet({
+                apiBaseUrl,
+                address: wallet.address,
+                updates: { label: String(label || '').trim() || null },
+            });
+            await onSaved?.();
+        } catch (err) {
+            setError(err?.message || '保存失败');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    if (!open || !wallet) return null;
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center" onClick={saving ? undefined : onClose}>
+            <div className="w-full max-w-md rounded-[28px] border border-white/[0.05] bg-zinc-950/95 p-5 shadow-[0_24px_80px_-32px_rgba(0,0,0,0.95)]" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-start justify-between gap-3">
+                    <div>
+                        <h3 className="text-lg font-semibold text-zinc-100">编辑钱包</h3>
+                        <div className="mt-2">
+                            <CompactIdentifier value={wallet.address} label="钱包" />
+                        </div>
+                    </div>
+                    <button type="button" onClick={onClose} disabled={saving} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.05] bg-zinc-900/65 text-zinc-400 transition hover:text-zinc-200">
+                        <X size={18} />
+                    </button>
+                </div>
+
+                {error ? (
+                    <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                        {error}
+                    </div>
+                ) : null}
+
+                <div className="mt-4 space-y-3">
+                    <input
+                        className={getInputClass(brand)}
+                        placeholder="钱包标签"
+                        value={label}
+                        onChange={(e) => setLabel(e.target.value)}
+                    />
+                </div>
+
+                <div className="mt-5 flex gap-2">
+                    <button type="button" onClick={onClose} disabled={saving} className="flex-1 rounded-2xl border border-white/[0.05] bg-zinc-900/65 px-4 py-2.5 text-sm text-zinc-300 transition hover:bg-zinc-800/80">取消</button>
+                    <button
+                        type="button"
+                        onClick={handleSubmit}
+                        disabled={saving}
+                        className={`flex-1 rounded-2xl px-4 py-2.5 text-sm disabled:opacity-50 ${brand.solidButtonClass}`}
+                    >
+                        {saving ? '保存中...' : '保存'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function EditContractModal({ open, apiBaseUrl, contract, onClose, onSaved, brand }) {
+    const [description, setDescription] = useState('');
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+        if (!open || !contract) return;
+        setDescription(String(contract?.description || ''));
+        setError('');
+        setSaving(false);
+    }, [contract, open]);
+
+    const handleSubmit = async () => {
+        if (!contract?.contract_address) return;
+        setSaving(true);
+        setError('');
+        try {
+            await updateSMContract({
+                apiBaseUrl,
+                address: contract.contract_address,
+                updates: { description: String(description || '').trim() || null },
+            });
+            await onSaved?.();
+        } catch (err) {
+            setError(err?.message || '保存失败');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    if (!open || !contract) return null;
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center" onClick={saving ? undefined : onClose}>
+            <div className="w-full max-w-md rounded-[28px] border border-white/[0.05] bg-zinc-950/95 p-5 shadow-[0_24px_80px_-32px_rgba(0,0,0,0.95)]" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-start justify-between gap-3">
+                    <div>
+                        <h3 className="text-lg font-semibold text-zinc-100">编辑合约</h3>
+                        <div className="mt-2">
+                            <CompactIdentifier value={contract.contract_address} label="合约" />
+                        </div>
+                    </div>
+                    <button type="button" onClick={onClose} disabled={saving} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.05] bg-zinc-900/65 text-zinc-400 transition hover:text-zinc-200">
+                        <X size={18} />
+                    </button>
+                </div>
+
+                {error ? (
+                    <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                        {error}
+                    </div>
+                ) : null}
+
+                <div className="mt-4 space-y-3">
+                    <textarea
+                        className={`${getInputClass(brand)} min-h-[110px] resize-none`}
+                        placeholder="合约备注"
+                        rows={3}
+                        value={description}
+                        onChange={(e) => setDescription(e.target.value)}
+                    />
+                </div>
+
+                <div className="mt-5 flex gap-2">
+                    <button type="button" onClick={onClose} disabled={saving} className="flex-1 rounded-2xl border border-white/[0.05] bg-zinc-900/65 px-4 py-2.5 text-sm text-zinc-300 transition hover:bg-zinc-800/80">取消</button>
+                    <button
+                        type="button"
+                        onClick={handleSubmit}
+                        disabled={saving}
+                        className={`flex-1 rounded-2xl px-4 py-2.5 text-sm disabled:opacity-50 ${brand.solidButtonClass}`}
+                    >
+                        {saving ? '保存中...' : '保存'}
+                    </button>
+                </div>
+            </div>
         </div>
     );
 }

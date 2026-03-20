@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
     Eye, Wallet, Settings, Search, Plus, ExternalLink, X, Check,
-    ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Brain, Flame,
+    ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Brain, Flame, Pencil,
 } from 'lucide-react';
 import {
     fetchSMPools, fetchSMPoolStats, fetchSMPositions, fetchSMWallets,
@@ -662,6 +662,7 @@ function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
     const [busyKey, setBusyKey] = useState('');
     const [actionError, setActionError] = useState('');
     const [confirmState, setConfirmState] = useState(null);
+    const [editingWallet, setEditingWallet] = useState(null);
     const refreshIntervalMs = useMemo(
         () => getRefreshIntervalMs(refreshInterval),
         [refreshInterval]
@@ -763,6 +764,10 @@ function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
                                 <div className="smd-action-row" style={{ justifyContent: 'flex-end' }}>
                                     <button type="button" className="smd-icon-btn" disabled={busyKey === `wallet-toggle:${w.address}` || busyKey === `wallet-delete:${w.address}`} onClick={e => {
                                         e.stopPropagation();
+                                        setEditingWallet(w);
+                                    }}><Pencil size={14} /></button>
+                                    <button type="button" className="smd-icon-btn" disabled={busyKey === `wallet-toggle:${w.address}` || busyKey === `wallet-delete:${w.address}`} onClick={e => {
+                                        e.stopPropagation();
                                         runAction(`wallet-toggle:${w.address}`, () => updateSMWallet({ apiBaseUrl, address: w.address, updates: { is_active: !w.is_active } }));
                                     }}>{w.is_active ? <Pause size={14} /> : <Play size={14} />}</button>
                                     <button type="button" className="smd-icon-btn danger" disabled={busyKey === `wallet-delete:${w.address}` || busyKey === `wallet-toggle:${w.address}`} onClick={e => {
@@ -791,6 +796,16 @@ function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
                 busy={busyKey.startsWith('wallet-delete:')}
                 onCancel={() => { if (!busyKey.startsWith('wallet-delete:')) setConfirmState(null); }}
                 onConfirm={confirmDelete}
+            />
+            <EditWalletModal
+                open={Boolean(editingWallet)}
+                apiBaseUrl={apiBaseUrl}
+                wallet={editingWallet}
+                onClose={() => setEditingWallet(null)}
+                onSaved={async () => {
+                    await load();
+                    setEditingWallet(null);
+                }}
             />
         </div>
     );
@@ -1029,30 +1044,65 @@ function GoldenDogPanel({ apiBaseUrl, initData }) {
 
     return (
         <div>
-            <div className="smd-search-row">
-                <div className="smd-section-title">金狗通知</div>
-                <div className="smd-filter-group">
-                    <button
-                        type="button"
-                        className={`smd-filter-btn${draft.enabled ? ' active' : ''}`}
-                        onClick={() => setDraft((prev) => ({ ...prev, enabled: true }))}
-                    >
-                        开启
-                    </button>
-                    <button
-                        type="button"
-                        className={`smd-filter-btn${!draft.enabled ? ' active' : ''}`}
-                        onClick={() => setDraft((prev) => ({ ...prev, enabled: false }))}
-                    >
-                        关闭
-                    </button>
+            <div className="smd-detail-card" style={{
+                marginBottom: 16,
+                padding: 18,
+                border: '1px solid rgba(251, 191, 36, 0.18)',
+                background: 'radial-gradient(circle at top left, rgba(251, 191, 36, 0.16), transparent 34%), linear-gradient(180deg, rgba(24, 24, 27, 0.94), rgba(9, 9, 11, 0.98))',
+                boxShadow: '0 28px 90px -42px rgba(0, 0, 0, 0.95)',
+            }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
+                        <div style={{
+                            width: 42,
+                            height: 42,
+                            borderRadius: 16,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            border: '1px solid rgba(251, 191, 36, 0.2)',
+                            background: 'rgba(251, 191, 36, 0.10)',
+                            color: '#fcd34d',
+                            flexShrink: 0,
+                        }}>
+                            <Flame size={18} />
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                            <div className="smd-section-title" style={{ marginBottom: 8 }}>金狗通知</div>
+                            <div className="smd-pool-card-badges">
+                                <Badge style={draft.enabled
+                                    ? { borderColor: 'rgba(251, 191, 36, 0.2)', background: 'rgba(251, 191, 36, 0.12)', color: '#fde68a' }
+                                    : undefined}>
+                                    {draft.enabled ? '已开启' : '已关闭'}
+                                </Badge>
+                                <Badge>Bark {barkStatusText}</Badge>
+                                <Badge>BSC</Badge>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="smd-filter-group">
+                        <button
+                            type="button"
+                            className={`smd-filter-btn${draft.enabled ? ' active' : ''}`}
+                            onClick={() => setDraft((prev) => ({ ...prev, enabled: true }))}
+                        >
+                            开启
+                        </button>
+                        <button
+                            type="button"
+                            className={`smd-filter-btn${!draft.enabled ? ' active' : ''}`}
+                            onClick={() => setDraft((prev) => ({ ...prev, enabled: false }))}
+                        >
+                            关闭
+                        </button>
+                    </div>
                 </div>
-            </div>
-
-            <div className="smd-stats-grid" style={{ marginBottom: 16 }}>
-                <StatCard label="Bark 状态" value={barkStatusText} />
-                <StatCard label="钱包阈值" value={`${draft.min_wallets || '--'} 个`} />
-                <StatCard label="冷却时间" value={`${draft.cooldown_minutes || '--'} 分钟`} />
+                <div className="smd-stats-grid" style={{ marginTop: 16, marginBottom: 0 }}>
+                    <StatCard label="通知状态" value={draft.enabled ? '运行中' : '暂停'} />
+                    <StatCard label="Bark 状态" value={barkStatusText} />
+                    <StatCard label="钱包阈值" value={`${draft.min_wallets || '--'} 个`} />
+                    <StatCard label="统计窗口" value={`${draft.window_minutes || '--'} 分钟`} />
+                </div>
             </div>
 
             {!hasInitData ? (
@@ -1066,16 +1116,6 @@ function GoldenDogPanel({ apiBaseUrl, initData }) {
                     {savedAt}
                 </div>
             ) : null}
-
-            <div className="smd-detail-card" style={{ marginBottom: 16 }}>
-                <div className="muted" style={{ lineHeight: 1.7 }}>
-                    当同一个交易对在统计窗口内达到设定的钱包数量时，后端会按交易对聚合发送 Bark。
-                    同一波信号跨多个池子和 fee tier 只按交易对判断，不再重复拆分。
-                </div>
-                <div className="muted" style={{ marginTop: 10, lineHeight: 1.7 }}>
-                    Bark Server / Key / Group 继续复用全局配置。Web 端这里只负责开关、阈值和冷却时间。
-                </div>
-            </div>
 
             {loading ? <div className="smd-loading">加载中...</div> : (
                 <div className="smd-add-form" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12, alignItems: 'end' }}>
@@ -1129,6 +1169,7 @@ function SettingsPanel({ apiBaseUrl }) {
     const [busyKey, setBusyKey] = useState('');
     const [actionError, setActionError] = useState('');
     const [confirmState, setConfirmState] = useState(null);
+    const [editingContract, setEditingContract] = useState(null);
     const [showAdd, setShowAdd] = useState(false);
     const [newAddr, setNewAddr] = useState('');
     const [newDesc, setNewDesc] = useState('');
@@ -1242,6 +1283,14 @@ function SettingsPanel({ apiBaseUrl }) {
                                         type="button"
                                         className="smd-icon-btn"
                                         disabled={busyKey === `contract-toggle:${c.contract_address}` || busyKey === `contract-delete:${c.contract_address}`}
+                                        onClick={() => setEditingContract(c)}
+                                    >
+                                        <Pencil size={14} />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="smd-icon-btn"
+                                        disabled={busyKey === `contract-toggle:${c.contract_address}` || busyKey === `contract-delete:${c.contract_address}`}
                                         onClick={() => runAction(`contract-toggle:${c.contract_address}`, () => updateSMContract({ apiBaseUrl, address: c.contract_address, updates: { is_active: !c.is_active } }), loadContracts)}
                                     >
                                         {c.is_active ? <Pause size={14} /> : <Play size={14} />}
@@ -1277,6 +1326,139 @@ function SettingsPanel({ apiBaseUrl }) {
                 onCancel={() => { if (!deleteBusy) setConfirmState(null); }}
                 onConfirm={confirmAction}
             />
+            <EditContractModal
+                open={Boolean(editingContract)}
+                apiBaseUrl={apiBaseUrl}
+                contract={editingContract}
+                onClose={() => setEditingContract(null)}
+                onSaved={async () => {
+                    await loadContracts();
+                    setEditingContract(null);
+                }}
+            />
+        </div>
+    );
+}
+
+function EditWalletModal({ open, apiBaseUrl, wallet, onClose, onSaved }) {
+    const [label, setLabel] = useState('');
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+        if (!open || !wallet) return;
+        setLabel(String(wallet?.label || ''));
+        setSaving(false);
+        setError('');
+    }, [open, wallet]);
+
+    const handleSubmit = useCallback(async () => {
+        if (!wallet?.address) return;
+        setSaving(true);
+        setError('');
+        try {
+            await updateSMWallet({
+                apiBaseUrl,
+                address: wallet.address,
+                updates: { label: String(label || '').trim() || null },
+            });
+            await onSaved?.();
+        } catch (err) {
+            setError(String(err?.message || err || '保存失败'));
+        } finally {
+            setSaving(false);
+        }
+    }, [apiBaseUrl, label, onSaved, wallet]);
+
+    if (!open || !wallet) return null;
+
+    return (
+        <div className="smd-modal-overlay" onClick={saving ? undefined : onClose}>
+            <div className="smd-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="smd-modal-header">
+                    <h3 className="smd-modal-title">编辑钱包</h3>
+                    <button type="button" onClick={onClose} disabled={saving} className="smd-modal-close">
+                        <X size={18} />
+                    </button>
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                    <CompactIdentifier value={wallet.address} label="钱包" />
+                </div>
+                {error ? <div className="smd-inline-error">{error}</div> : null}
+                <div className="smd-modal-form">
+                    <input placeholder="钱包标签" value={label} onChange={(e) => setLabel(e.target.value)} />
+                </div>
+                <div className="smd-modal-actions">
+                    <button type="button" onClick={onClose} disabled={saving} className="smd-modal-cancel">取消</button>
+                    <button type="button" onClick={handleSubmit} disabled={saving} className="smd-modal-submit">
+                        {saving ? '保存中...' : '保存'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function EditContractModal({ open, apiBaseUrl, contract, onClose, onSaved }) {
+    const [description, setDescription] = useState('');
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+        if (!open || !contract) return;
+        setDescription(String(contract?.description || ''));
+        setSaving(false);
+        setError('');
+    }, [contract, open]);
+
+    const handleSubmit = useCallback(async () => {
+        if (!contract?.contract_address) return;
+        setSaving(true);
+        setError('');
+        try {
+            await updateSMContract({
+                apiBaseUrl,
+                address: contract.contract_address,
+                updates: { description: String(description || '').trim() || null },
+            });
+            await onSaved?.();
+        } catch (err) {
+            setError(String(err?.message || err || '保存失败'));
+        } finally {
+            setSaving(false);
+        }
+    }, [apiBaseUrl, contract, description, onSaved]);
+
+    if (!open || !contract) return null;
+
+    return (
+        <div className="smd-modal-overlay" onClick={saving ? undefined : onClose}>
+            <div className="smd-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="smd-modal-header">
+                    <h3 className="smd-modal-title">编辑合约</h3>
+                    <button type="button" onClick={onClose} disabled={saving} className="smd-modal-close">
+                        <X size={18} />
+                    </button>
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                    <CompactIdentifier value={contract.contract_address} label="合约" />
+                </div>
+                {error ? <div className="smd-inline-error">{error}</div> : null}
+                <div className="smd-modal-form">
+                    <textarea
+                        placeholder="合约备注"
+                        rows={4}
+                        value={description}
+                        onChange={(e) => setDescription(e.target.value)}
+                    />
+                </div>
+                <div className="smd-modal-actions">
+                    <button type="button" onClick={onClose} disabled={saving} className="smd-modal-cancel">取消</button>
+                    <button type="button" onClick={handleSubmit} disabled={saving} className="smd-modal-submit">
+                        {saving ? '保存中...' : '保存'}
+                    </button>
+                </div>
+            </div>
         </div>
     );
 }

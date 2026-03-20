@@ -6290,8 +6290,12 @@ body {
   padding-right: 12px;
 }
 .smd-follow-open-btn .open-lightning-icon {
-  width: 12px;
-  height: 12px;
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  display: block;
+  object-fit: contain;
+  filter: none;
 }
 
 /* -- Wallet avatar -- */
