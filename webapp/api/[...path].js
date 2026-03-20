@@ -5,23 +5,6 @@ function normalizeBaseUrl(value) {
   return `http://${trimmed.replace(/\/$/, '')}`;
 }
 
-function resolveBackendPath(req) {
-  const pathParts = Array.isArray(req.query?.path)
-    ? req.query.path
-    : (req.query?.path ? [req.query.path] : []);
-  const fromQuery = pathParts
-    .map((part) => String(part || '').trim())
-    .filter(Boolean)
-    .join('/');
-  if (fromQuery) return fromQuery;
-
-  const rawPath = String(req.url || '').split('?')[0];
-  const match = rawPath.match(/^\/api\/(.+)$/);
-  if (match?.[1]) return String(match[1]).trim();
-
-  return '';
-}
-
 export default async function handler(req, res) {
   const backendBaseUrl = normalizeBaseUrl(
     process.env.BACKEND_API_BASE_URL || process.env.VITE_API_BASE_URL,
@@ -39,17 +22,18 @@ export default async function handler(req, res) {
     return;
   }
 
-  const backendPath = resolveBackendPath(req);
-  if (!backendPath) {
+  const rawPath = String(req.url || '').split('?')[0];
+  const match = rawPath.match(/^\/api\/(.+)$/);
+  if (!match) {
     res.statusCode = 404;
     res.end('not found');
     return;
   }
+  const backendPath = match[1];
 
   // Rebuild query string
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(req.query || {})) {
-    if (key === 'path') continue;
     if (value !== undefined && value !== null) {
       if (Array.isArray(value)) {
         for (const item of value) params.append(key, String(item));
