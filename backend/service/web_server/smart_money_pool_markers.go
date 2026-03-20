@@ -5,6 +5,8 @@ import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	sm "TgLpBot/service/smart_money"
+	"context"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -13,23 +15,28 @@ import (
 )
 
 type smartMoneyPoolMarkerEvent struct {
-	EventID       string  `json:"event_id"`
-	T             int64   `json:"t"`
-	BucketT       int64   `json:"bucket_t"`
-	WalletAddress string  `json:"wallet_address"`
-	WalletLabel   string  `json:"wallet_label,omitempty"`
-	WalletColor   string  `json:"wallet_color,omitempty"`
-	Action        string  `json:"action"`
-	TxHash        string  `json:"tx_hash,omitempty"`
-	TxURL         string  `json:"tx_url,omitempty"`
-	TickLower     *int    `json:"tick_lower,omitempty"`
-	TickUpper     *int    `json:"tick_upper,omitempty"`
-	PriceLower    float64 `json:"price_lower,omitempty"`
-	PriceUpper    float64 `json:"price_upper,omitempty"`
-	RangePercent  float64 `json:"range_percent,omitempty"`
-	MidPrice      float64 `json:"mid_price,omitempty"`
-	AnchorPrice   float64 `json:"anchor_price,omitempty"`
-	EstimatedUSD  float64 `json:"estimated_usd"`
+	EventID                 string   `json:"event_id"`
+	T                       int64    `json:"t"`
+	BucketT                 int64    `json:"bucket_t"`
+	WalletAddress           string   `json:"wallet_address"`
+	WalletLabel             string   `json:"wallet_label,omitempty"`
+	WalletColor             string   `json:"wallet_color,omitempty"`
+	Action                  string   `json:"action"`
+	TxHash                  string   `json:"tx_hash,omitempty"`
+	TxURL                   string   `json:"tx_url,omitempty"`
+	TickLower               *int     `json:"tick_lower,omitempty"`
+	TickUpper               *int     `json:"tick_upper,omitempty"`
+	PriceLower              float64  `json:"price_lower,omitempty"`
+	PriceUpper              float64  `json:"price_upper,omitempty"`
+	RangePercent            float64  `json:"range_percent,omitempty"`
+	MidPrice                float64  `json:"mid_price,omitempty"`
+	AnchorPrice             float64  `json:"anchor_price,omitempty"`
+	EstimatedUSD            float64  `json:"estimated_usd"`
+	MatchedOpenTxHash       string   `json:"matched_open_tx_hash,omitempty"`
+	MatchedOpenT            *int64   `json:"matched_open_t,omitempty"`
+	EstimatedCostUSD        *float64 `json:"estimated_cost_usd,omitempty"`
+	EstimatedRealizedPnlUSD *float64 `json:"estimated_realized_pnl_usd,omitempty"`
+	EstimatedRealizedPnlPct *float64 `json:"estimated_realized_pnl_pct,omitempty"`
 }
 
 type smartMoneyPoolMarkersEnvelope struct {
@@ -41,6 +48,19 @@ type smartMoneyPoolMarkersEnvelope struct {
 	UpdatedAt   time.Time                   `json:"updated_at"`
 	Events      []smartMoneyPoolMarkerEvent `json:"events"`
 	Warnings    []string                    `json:"warnings,omitempty"`
+}
+
+type smartMoneyMarkerEstimate struct {
+	MatchedOpenTxHash       string
+	MatchedOpenT            int64
+	EstimatedCostUSD        float64
+	EstimatedRealizedPnlUSD float64
+	EstimatedRealizedPnlPct *float64
+}
+
+type smartMoneyMarkerReplayState struct {
+	OpenEvent *models.SmartMoneyLPEvent
+	Ambiguous bool
 }
 
 func normalizeSmartMoneyPoolID(raw string) string {
@@ -105,6 +125,210 @@ func scanExplorerBase(chain string) string {
 		return "https://basescan.org"
 	}
 	return "https://bscscan.com"
+}
+
+func smartMoneyMarkerEventID(event *models.SmartMoneyLPEvent) string {
+	if event == nil {
+		return ""
+	}
+	hash := strings.ToLower(strings.TrimSpace(event.TxHash))
+	if hash == "" {
+		return ""
+	}
+	return hash + ":" + strconv.Itoa(event.LogIndex)
+}
+
+func smartMoneyMarkerPositionKey(event *models.SmartMoneyLPEvent) string {
+	if event == nil {
+		return ""
+	}
+	wallet := strings.ToLower(strings.TrimSpace(event.WalletAddress))
+	pool := strings.ToLower(strings.TrimSpace(event.PoolAddress))
+	if wallet == "" || pool == "" {
+		return ""
+	}
+	if event.NftTokenID != nil && *event.NftTokenID > 0 {
+		return wallet + "|" + pool + "|nft|" + strconv.FormatUint(*event.NftTokenID, 10)
+	}
+	if event.TickLower != nil && event.TickUpper != nil {
+		return wallet + "|" + pool + "|range|" + strconv.Itoa(*event.TickLower) + "|" + strconv.Itoa(*event.TickUpper)
+	}
+	return ""
+}
+
+func smartMoneyMarkerEventUSD(event *models.SmartMoneyLPEvent) float64 {
+	total := decimalStringToFloat(event.TotalUSD)
+	if total > 0 {
+		return total
+	}
+	total = decimalStringToFloat(event.Token0AmountUSD) + decimalStringToFloat(event.Token1AmountUSD)
+	return sanitizeFloat(total)
+}
+
+func smartMoneyMarkerRoundUSD(value float64) float64 {
+	return math.Round(sanitizeFloat(value)*100) / 100
+}
+
+func smartMoneyMarkerRoundPercent(value float64) float64 {
+	return math.Round(sanitizeFloat(value)*100) / 100
+}
+
+func replaySmartMoneyMarkerEstimates(
+	historyEvents []models.SmartMoneyLPEvent,
+	targetKeys map[string]struct{},
+) (map[string]smartMoneyMarkerEstimate, []string) {
+	estimates := make(map[string]smartMoneyMarkerEstimate)
+	if len(historyEvents) == 0 || len(targetKeys) == 0 {
+		return estimates, nil
+	}
+
+	states := make(map[string]*smartMoneyMarkerReplayState)
+	warningSet := make(map[string]struct{})
+	appendWarning := func(message string) {
+		message = strings.TrimSpace(message)
+		if message == "" {
+			return
+		}
+		warningSet[message] = struct{}{}
+	}
+
+	for i := range historyEvents {
+		event := &historyEvents[i]
+		key := smartMoneyMarkerPositionKey(event)
+		if key == "" {
+			continue
+		}
+		if _, ok := targetKeys[key]; !ok {
+			continue
+		}
+
+		state := states[key]
+		if state == nil {
+			state = &smartMoneyMarkerReplayState{}
+			states[key] = state
+		}
+
+		action := strings.ToLower(strings.TrimSpace(event.EventType))
+		eventUSD := smartMoneyMarkerEventUSD(event)
+
+		if action == "add" {
+			if state.OpenEvent != nil {
+				state.Ambiguous = true
+				appendWarning("smart money remove pnl unavailable for some positions because the same position has multiple add events before closing")
+				continue
+			}
+			openEvent := *event
+			state.OpenEvent = &openEvent
+			if eventUSD <= 0 {
+				state.Ambiguous = true
+				appendWarning("smart money remove pnl unavailable for some positions because add-event usd snapshots are missing")
+			}
+			continue
+		}
+
+		if action != "remove" {
+			continue
+		}
+		if state.OpenEvent == nil {
+			state.Ambiguous = false
+			continue
+		}
+
+		openUSD := smartMoneyMarkerEventUSD(state.OpenEvent)
+		if state.Ambiguous || openUSD <= 0 || eventUSD <= 0 {
+			if eventUSD <= 0 {
+				appendWarning("smart money remove pnl unavailable for some positions because remove-event usd snapshots are missing")
+			}
+			if openUSD <= 0 {
+				appendWarning("smart money remove pnl unavailable for some positions because add-event usd snapshots are missing")
+			}
+		} else {
+			costUSD := smartMoneyMarkerRoundUSD(openUSD)
+			pnlUSD := smartMoneyMarkerRoundUSD(eventUSD - openUSD)
+			estimate := smartMoneyMarkerEstimate{
+				MatchedOpenTxHash:       strings.TrimSpace(state.OpenEvent.TxHash),
+				MatchedOpenT:            state.OpenEvent.TxTimestamp.Unix(),
+				EstimatedCostUSD:        costUSD,
+				EstimatedRealizedPnlUSD: pnlUSD,
+			}
+			if costUSD > 0 {
+				pct := smartMoneyMarkerRoundPercent((pnlUSD / costUSD) * 100)
+				estimate.EstimatedRealizedPnlPct = &pct
+			}
+			estimates[smartMoneyMarkerEventID(event)] = estimate
+		}
+
+		state.OpenEvent = nil
+		state.Ambiguous = false
+	}
+
+	warnings := make([]string, 0, len(warningSet))
+	for message := range warningSet {
+		warnings = append(warnings, message)
+	}
+	sort.Strings(warnings)
+	return estimates, warnings
+}
+
+func buildSmartMoneyMarkerEstimates(
+	ctx context.Context,
+	chainID int,
+	poolID string,
+	poolVersion string,
+	queryEnd time.Time,
+	visibleEvents []models.SmartMoneyLPEvent,
+) (map[string]smartMoneyMarkerEstimate, []string) {
+	targetKeys := make(map[string]struct{})
+	walletSeen := make(map[string]struct{})
+	wallets := make([]string, 0)
+
+	for i := range visibleEvents {
+		event := &visibleEvents[i]
+		if !strings.EqualFold(event.EventType, "remove") {
+			continue
+		}
+		key := smartMoneyMarkerPositionKey(event)
+		if key != "" {
+			targetKeys[key] = struct{}{}
+		}
+		wallet := strings.ToLower(strings.TrimSpace(event.WalletAddress))
+		if wallet == "" {
+			continue
+		}
+		if _, ok := walletSeen[wallet]; ok {
+			continue
+		}
+		walletSeen[wallet] = struct{}{}
+		wallets = append(wallets, wallet)
+	}
+
+	if len(targetKeys) == 0 || len(wallets) == 0 {
+		return nil, nil
+	}
+
+	var historyEvents []models.SmartMoneyLPEvent
+	db := database.DB.WithContext(ctx).
+		Model(&models.SmartMoneyLPEvent{}).
+		Where("chain_id = ? AND LOWER(pool_address) = ?", chainID, poolID).
+		Where("tx_timestamp <= ?", queryEnd).
+		Where("LOWER(wallet_address) IN ?", wallets).
+		Where("event_type IN ?", []string{"add", "remove"})
+	if protocolFilter := poolVersionProtocolFilter(poolVersion); protocolFilter != "" {
+		db = db.Where("LOWER(protocol) LIKE ?", protocolFilter)
+	}
+	if err := db.
+		Order("tx_timestamp ASC").
+		Order("block_number ASC").
+		Order("log_index ASC").
+		Find(&historyEvents).Error; err != nil {
+		return nil, []string{"smart money remove pnl unavailable: failed to load historical position events"}
+	}
+	if len(historyEvents) == 0 {
+		return nil, nil
+	}
+
+	estimates, warnings := replaySmartMoneyMarkerEstimates(historyEvents, targetKeys)
+	return estimates, warnings
 }
 
 func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Request) {
@@ -258,6 +482,7 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 	repo := smService.Repo()
 	walletCache := make(map[string]*models.MonitoredWallet)
 	explorerBase := scanExplorerBase(chain)
+	estimates, warnings := buildSmartMoneyMarkerEstimates(ctx, int(cc.ChainID), poolID, poolVersion, queryEnd, events)
 	out := make([]smartMoneyPoolMarkerEvent, 0, len(events))
 
 	for _, event := range events {
@@ -331,8 +556,8 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 			txURL = explorerBase + "/tx/" + hash
 		}
 
-		out = append(out, smartMoneyPoolMarkerEvent{
-			EventID:       strings.ToLower(strings.TrimSpace(event.TxHash)) + ":" + strconv.Itoa(event.LogIndex),
+		marker := smartMoneyPoolMarkerEvent{
+			EventID:       smartMoneyMarkerEventID(&event),
 			T:             event.TxTimestamp.Unix(),
 			BucketT:       bucketUnix(event.TxTimestamp.Unix(), bucketSec),
 			WalletAddress: walletAddress,
@@ -349,7 +574,24 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 			MidPrice:      midPrice,
 			AnchorPrice:   midPrice,
 			EstimatedUSD:  estimatedUSD,
-		})
+		}
+		if estimate, ok := estimates[marker.EventID]; ok {
+			marker.MatchedOpenTxHash = estimate.MatchedOpenTxHash
+			if estimate.MatchedOpenT > 0 {
+				matchedOpenT := estimate.MatchedOpenT
+				marker.MatchedOpenT = &matchedOpenT
+			}
+			costUSD := estimate.EstimatedCostUSD
+			marker.EstimatedCostUSD = &costUSD
+			pnlUSD := estimate.EstimatedRealizedPnlUSD
+			marker.EstimatedRealizedPnlUSD = &pnlUSD
+			if estimate.EstimatedRealizedPnlPct != nil {
+				pnlPct := *estimate.EstimatedRealizedPnlPct
+				marker.EstimatedRealizedPnlPct = &pnlPct
+			}
+		}
+
+		out = append(out, marker)
 	}
 
 	writeJSON(w, http.StatusOK, smartMoneyPoolMarkersEnvelope{
@@ -360,5 +602,6 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 		WindowSec:   durationSeconds(rangeStart, rangeEnd),
 		UpdatedAt:   time.Now().UTC(),
 		Events:      out,
+		Warnings:    warnings,
 	})
 }

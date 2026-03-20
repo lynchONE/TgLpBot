@@ -54,6 +54,21 @@ function formatUSD(v) {
   return '$' + v.toFixed(v >= 100 ? 0 : 2);
 }
 
+function formatSignedUSD(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num === 0) return '$0';
+  return `${num > 0 ? '+' : '-'}${formatUSD(Math.abs(num))}`;
+}
+
+function formatSignedPercent(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '';
+  if (num === 0) return '0%';
+  if (Math.abs(num) >= 100) return `${num > 0 ? '+' : '-'}${Math.abs(num).toFixed(0)}%`;
+  if (Math.abs(num) >= 10) return `${num > 0 ? '+' : '-'}${Math.abs(num).toFixed(1).replace(/\.0$/, '')}%`;
+  return `${num > 0 ? '+' : '-'}${Math.abs(num).toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
+}
+
 function formatRangePercent(value) {
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0) return '';
@@ -830,6 +845,16 @@ export default function KlineChart({
     const lower = Number(primary.price_lower || 0);
     const upper = Number(primary.price_upper || 0);
     const hasRange = lower > 0 && upper > 0;
+    const estimatedCostUsd = Number(primary.estimated_cost_usd);
+    const hasEstimatedCost = primary.estimated_cost_usd !== undefined && primary.estimated_cost_usd !== null && Number.isFinite(estimatedCostUsd);
+    const estimatedPnlUsd = Number(primary.estimated_realized_pnl_usd);
+    const hasEstimatedPnl = primary.estimated_realized_pnl_usd !== undefined && primary.estimated_realized_pnl_usd !== null && Number.isFinite(estimatedPnlUsd);
+    const estimatedPnlPct = Number(primary.estimated_realized_pnl_pct);
+    const hasEstimatedPnlPct = primary.estimated_realized_pnl_pct !== undefined && primary.estimated_realized_pnl_pct !== null && Number.isFinite(estimatedPnlPct);
+    const matchedOpenT = Number(primary.matched_open_t || 0);
+    const nearestCandle = findNearestCandle(candleData, candleMap, primary.t || primary.bucket_t);
+    const nearestChartPrice = Number(nearestCandle?.candle?.close || 0);
+    const nearestChartTime = Number(nearestCandle?.time || 0);
     const rangePct = hasRange ? `±${(((upper - lower) / (upper + lower)) * 100).toFixed(1)}%` : '';
     return {
       walletAddress,
@@ -843,13 +868,22 @@ export default function KlineChart({
         ? formatRangePercent(primary.range_percent)
         : rangePct,
       totalUSD: c.estimatedUSD,
+      hasEstimatedCost,
+      estimatedCostUsd,
+      hasEstimatedPnl,
+      estimatedPnlUsd,
+      estimatedPnlPctLabel: hasEstimatedPnlPct ? formatSignedPercent(estimatedPnlPct) : '',
+      matchedOpenLabel: matchedOpenT > 0 ? formatUtc8DateTime(matchedOpenT) : '',
+      hasNearestChartPrice: Number.isFinite(nearestChartPrice) && nearestChartPrice > 0,
+      nearestChartPrice,
+      nearestChartTimeLabel: nearestChartTime > 0 ? formatUtc8DateTime(nearestChartTime) : '',
       count: c.items.length,
       isMyTrade: c.isMyTrade,
       canEditLabel: !c.isMyTrade && Boolean(walletAddress),
       watched: walletAddress ? watchedWalletSet.has(walletAddress) : false,
       watchBusy: walletAddress ? Boolean(watchToggleMap[walletAddress]) : false,
     };
-  }, [tooltipCluster, watchToggleMap, watchedWalletSet]);
+  }, [candleData, candleMap, tooltipCluster, watchToggleMap, watchedWalletSet]);
 
   useEffect(() => {
     setLabelEditing(false);
@@ -1098,6 +1132,35 @@ export default function KlineChart({
                 <span className="kmt-pct">{tooltipData.normalizedRangePct || tooltipData.rangePct}</span>
               </div>
             )}
+            {tooltipCluster.action === 'remove' && tooltipData.hasEstimatedCost ? (
+              <div className="kmt-stat-row">
+                <span className="kmt-stat-label">估算成本</span>
+                <span className="kmt-stat-value">{formatUSD(tooltipData.estimatedCostUsd)}</span>
+              </div>
+            ) : null}
+            {tooltipCluster.action === 'remove' && tooltipData.hasEstimatedPnl ? (
+              <div className="kmt-stat-row">
+                <span className="kmt-stat-label">估算盈亏</span>
+                <span className={`kmt-stat-value ${tooltipData.estimatedPnlUsd > 0 ? 'positive' : tooltipData.estimatedPnlUsd < 0 ? 'negative' : 'neutral'}`}>
+                  {formatSignedUSD(tooltipData.estimatedPnlUsd)}
+                  {tooltipData.estimatedPnlPctLabel ? (
+                    <span className="kmt-stat-pct">{tooltipData.estimatedPnlPctLabel}</span>
+                  ) : null}
+                </span>
+              </div>
+            ) : null}
+            {tooltipCluster.action === 'remove' && tooltipData.hasNearestChartPrice ? (
+              <div className="kmt-stat-row">
+                <span className="kmt-stat-label">图表最近价</span>
+                <span className="kmt-stat-value subtle">{smartPriceFormatter(tooltipData.nearestChartPrice)}</span>
+              </div>
+            ) : null}
+            {tooltipCluster.action === 'remove' && tooltipData.matchedOpenLabel ? (
+              <div className="kmt-meta-row">对应开仓: {tooltipData.matchedOpenLabel}</div>
+            ) : null}
+            {tooltipCluster.action === 'remove' && tooltipData.nearestChartTimeLabel ? (
+              <div className="kmt-meta-row">最近 candle: {tooltipData.nearestChartTimeLabel}</div>
+            ) : null}
           </div>
         )}
       </div>
