@@ -5,6 +5,23 @@ function normalizeBaseUrl(value) {
   return `http://${trimmed.replace(/\/$/, '')}`;
 }
 
+function resolveBackendPath(req) {
+  const pathParts = Array.isArray(req.query?.path)
+    ? req.query.path
+    : (req.query?.path ? [req.query.path] : []);
+  const fromQuery = pathParts
+    .map((part) => String(part || '').trim())
+    .filter(Boolean)
+    .join('/');
+  if (fromQuery) return fromQuery;
+
+  const rawPath = String(req.url || '').split('?')[0];
+  const match = rawPath.match(/^\/api\/(.+)$/);
+  if (match?.[1]) return String(match[1]).trim();
+
+  return '';
+}
+
 export default async function handler(req, res) {
   const backendBaseUrl = normalizeBaseUrl(
     process.env.BACKEND_API_BASE_URL || process.env.VITE_API_BASE_URL,
@@ -22,13 +39,7 @@ export default async function handler(req, res) {
     return;
   }
 
-  const pathParts = Array.isArray(req.query?.path)
-    ? req.query.path
-    : (req.query?.path ? [req.query.path] : []);
-  const backendPath = pathParts
-    .map((part) => String(part || '').trim())
-    .filter(Boolean)
-    .join('/');
+  const backendPath = resolveBackendPath(req);
   if (!backendPath) {
     res.statusCode = 404;
     res.end('not found');
