@@ -22,19 +22,23 @@ export default async function handler(req, res) {
     return;
   }
 
-  // Extract the path after /api/  e.g. /api/pools -> pools, /api/web_login -> web_login
-  const rawPath = String(req.url || '').split('?')[0];
-  const match = rawPath.match(/^\/api\/(.+)$/);
-  if (!match) {
+  const pathParts = Array.isArray(req.query?.path)
+    ? req.query.path
+    : (req.query?.path ? [req.query.path] : []);
+  const backendPath = pathParts
+    .map((part) => String(part || '').trim())
+    .filter(Boolean)
+    .join('/');
+  if (!backendPath) {
     res.statusCode = 404;
     res.end('not found');
     return;
   }
-  const backendPath = match[1];
 
   // Rebuild query string
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(req.query || {})) {
+    if (key === 'path') continue;
     if (value !== undefined && value !== null) {
       if (Array.isArray(value)) {
         for (const item of value) params.append(key, String(item));
