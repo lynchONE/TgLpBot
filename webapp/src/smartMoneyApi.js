@@ -5,6 +5,23 @@ function normalizeBase(apiBaseUrl) {
     return String(apiBaseUrl || '').trim().replace(/\/$/, '');
 }
 
+function isSameOriginBase(base) {
+    if (!base) return true;
+    if (typeof window === 'undefined') return false;
+    return base === window.location.origin;
+}
+
+function buildSMUrl(apiBaseUrl, endpoint, params) {
+    const base = normalizeBase(apiBaseUrl);
+    const search = params ? `?${params}` : '';
+    if (isSameOriginBase(base)) {
+        const proxyParams = new URLSearchParams(params || '');
+        proxyParams.set('endpoint', endpoint);
+        return `${base}/api/sm?${proxyParams.toString()}`;
+    }
+    return `${base}${SM_BASE}/${endpoint}${search}`;
+}
+
 async function readErrorMessage(resp) {
     const text = await resp.text().catch(() => '');
     if (!text) return `HTTP ${resp.status}`;
@@ -42,22 +59,19 @@ async function goldenDogRequest(url, options = {}) {
 }
 
 export async function fetchSMWallets({ apiBaseUrl, page = 1, size = 20, keyword, source, active, signal }) {
-    const base = normalizeBase(apiBaseUrl);
     const params = new URLSearchParams();
     params.set('page', String(page));
     params.set('size', String(size));
     if (keyword) params.set('keyword', keyword);
     if (source) params.set('source', source);
     if (active !== undefined) params.set('active', String(active));
-    return smRequest(`${base}${SM_BASE}/wallets?${params}`, { signal });
+    return smRequest(buildSMUrl(apiBaseUrl, 'wallets', params.toString()), { signal });
 }
 
 export async function addSMWallet({ apiBaseUrl, address, label, chain, signal }) {
-    const base = normalizeBase(apiBaseUrl);
     const params = new URLSearchParams();
     if (chain) params.set('chain', String(chain));
-    const qs = params.toString();
-    return smRequest(`${base}${SM_BASE}/wallets${qs ? `?${qs}` : ''}`, {
+    return smRequest(buildSMUrl(apiBaseUrl, 'wallets', params.toString()), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ address, label }),
@@ -66,11 +80,10 @@ export async function addSMWallet({ apiBaseUrl, address, label, chain, signal })
 }
 
 export async function updateSMWallet({ apiBaseUrl, address, updates, chain, signal }) {
-    const base = normalizeBase(apiBaseUrl);
     const params = new URLSearchParams();
     params.set('address', String(address));
     if (chain) params.set('chain', String(chain));
-    return smRequest(`${base}${SM_BASE}/wallets?${params}`, {
+    return smRequest(buildSMUrl(apiBaseUrl, 'wallets', params.toString()), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
@@ -79,24 +92,21 @@ export async function updateSMWallet({ apiBaseUrl, address, updates, chain, sign
 }
 
 export async function deleteSMWallet({ apiBaseUrl, address, chain, signal }) {
-    const base = normalizeBase(apiBaseUrl);
     const params = new URLSearchParams();
     params.set('address', String(address));
     if (chain) params.set('chain', String(chain));
-    return smRequest(`${base}${SM_BASE}/wallets?${params}`, {
+    return smRequest(buildSMUrl(apiBaseUrl, 'wallets', params.toString()), {
         method: 'DELETE',
         signal,
     });
 }
 
 export async function fetchSMContracts({ apiBaseUrl, signal }) {
-    const base = normalizeBase(apiBaseUrl);
-    return smRequest(`${base}${SM_BASE}/contracts`, { signal });
+    return smRequest(buildSMUrl(apiBaseUrl, 'contracts', ''), { signal });
 }
 
 export async function addSMContract({ apiBaseUrl, contract_address, description, signal }) {
-    const base = normalizeBase(apiBaseUrl);
-    return smRequest(`${base}${SM_BASE}/contracts`, {
+    return smRequest(buildSMUrl(apiBaseUrl, 'contracts', ''), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contract_address, description }),
@@ -105,8 +115,9 @@ export async function addSMContract({ apiBaseUrl, contract_address, description,
 }
 
 export async function updateSMContract({ apiBaseUrl, address, updates, signal }) {
-    const base = normalizeBase(apiBaseUrl);
-    return smRequest(`${base}${SM_BASE}/contracts?address=${encodeURIComponent(address)}`, {
+    const params = new URLSearchParams();
+    params.set('address', String(address));
+    return smRequest(buildSMUrl(apiBaseUrl, 'contracts', params.toString()), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
@@ -115,25 +126,25 @@ export async function updateSMContract({ apiBaseUrl, address, updates, signal })
 }
 
 export async function deleteSMContract({ apiBaseUrl, address, signal }) {
-    const base = normalizeBase(apiBaseUrl);
-    return smRequest(`${base}${SM_BASE}/contracts?address=${encodeURIComponent(address)}`, {
+    const params = new URLSearchParams();
+    params.set('address', String(address));
+    return smRequest(buildSMUrl(apiBaseUrl, 'contracts', params.toString()), {
         method: 'DELETE',
         signal,
     });
 }
 
 export async function fetchSMPools({ apiBaseUrl, signal }) {
-    const base = normalizeBase(apiBaseUrl);
-    return smRequest(`${base}${SM_BASE}/pools`, { signal });
+    return smRequest(buildSMUrl(apiBaseUrl, 'pools', ''), { signal });
 }
 
 export async function fetchSMPoolStats({ apiBaseUrl, poolAddress, signal }) {
-    const base = normalizeBase(apiBaseUrl);
-    return smRequest(`${base}${SM_BASE}/pools?pool=${encodeURIComponent(poolAddress)}`, { signal });
+    const params = new URLSearchParams();
+    params.set('pool', String(poolAddress));
+    return smRequest(buildSMUrl(apiBaseUrl, 'pools', params.toString()), { signal });
 }
 
 export async function fetchSMPositions({ apiBaseUrl, status = 'open', wallet, pool, protocol, page = 1, size = 20, orderBy, signal }) {
-    const base = normalizeBase(apiBaseUrl);
     const params = new URLSearchParams();
     params.set('status', status);
     params.set('page', String(page));
@@ -142,23 +153,22 @@ export async function fetchSMPositions({ apiBaseUrl, status = 'open', wallet, po
     if (pool) params.set('pool', pool);
     if (protocol) params.set('protocol', protocol);
     if (orderBy) params.set('order_by', orderBy);
-    return smRequest(`${base}${SM_BASE}/positions?${params}`, { signal });
+    return smRequest(buildSMUrl(apiBaseUrl, 'positions', params.toString()), { signal });
 }
 
 export async function fetchSMEvents({ apiBaseUrl, wallet, pool, page = 1, size = 20, signal }) {
-    const base = normalizeBase(apiBaseUrl);
     const params = new URLSearchParams();
     params.set('page', String(page));
     params.set('size', String(size));
     if (wallet) params.set('wallet', wallet);
     if (pool) params.set('pool', pool);
-    return smRequest(`${base}${SM_BASE}/events?${params}`, { signal });
+    return smRequest(buildSMUrl(apiBaseUrl, 'events', params.toString()), { signal });
 }
 
 export async function fetchSMStats({ apiBaseUrl, address, signal }) {
-    const base = normalizeBase(apiBaseUrl);
-    const params = address ? `?address=${encodeURIComponent(address)}` : '';
-    return smRequest(`${base}${SM_BASE}/stats${params}`, { signal });
+    const params = new URLSearchParams();
+    if (address) params.set('address', String(address));
+    return smRequest(buildSMUrl(apiBaseUrl, 'stats', params.toString()), { signal });
 }
 
 export async function fetchSMGoldenDogConfig({ apiBaseUrl, initData, chain = 'bsc', signal }) {
