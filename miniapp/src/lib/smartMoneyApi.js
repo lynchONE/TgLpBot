@@ -88,12 +88,12 @@ export async function fetchSMContracts({ apiBaseUrl, signal }) {
     return smRequest(`${base}${SM_BASE}/contracts`, { signal });
 }
 
-export async function addSMContract({ apiBaseUrl, contract_address, protocol, description, signal }) {
+export async function addSMContract({ apiBaseUrl, contract_address, description, signal }) {
     const base = normalizeBase(apiBaseUrl);
     return smRequest(`${base}${SM_BASE}/contracts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contract_address, protocol, description }),
+        body: JSON.stringify({ contract_address, description }),
         signal,
     });
 }

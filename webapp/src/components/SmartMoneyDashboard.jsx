@@ -17,13 +17,6 @@ const PROTOCOL_MAP = {
     uniswap_v3: { version: 'V3', icon: uniswapLogo, color: '#ff007a' },
     uniswap_v4: { version: 'V4', icon: uniswapLogo, color: '#ff007a' },
 };
-const PROTOCOL_LABELS = Object.fromEntries(Object.entries(PROTOCOL_MAP).map(([k, v]) => [k, v.version]));
-fu const SMART_MONEY_PROTOCOL_OPTIONS = [
-    { value: 'pancake_v3', label: 'PancakeSwap V3' },
-    { value: 'uniswap_v3', label: 'Uniswap V3' },
-    { value: 'uniswap_v4', label: 'Uniswap V4' },
-];
-const DEFAULT_SMART_MONEY_PROTOCOL = SMART_MONEY_PROTOCOL_OPTIONS[0].value;
 
 const WALLET_AVATAR_ICONS = Object.entries(
     import.meta.glob('../icon/avatar_*.png', { eager: true, import: 'default' })
@@ -998,7 +991,6 @@ function SettingsPanel({ apiBaseUrl }) {
     const [confirmState, setConfirmState] = useState(null);
     const [showAdd, setShowAdd] = useState(false);
     const [newAddr, setNewAddr] = useState('');
-    const [newProto, setNewProto] = useState(DEFAULT_SMART_MONEY_PROTOCOL);
     const [newDesc, setNewDesc] = useState('');
 
     const loadContracts = useCallback(async () => {
@@ -1033,13 +1025,9 @@ function SettingsPanel({ apiBaseUrl }) {
             if (!isHexAddressValue(addr)) {
                 throw new Error('请输入合法的合约地址');
             }
-            if (!SMART_MONEY_PROTOCOL_OPTIONS.some((option) => option.value === newProto)) {
-                throw new Error('请选择支持的协议');
-            }
-            await addSMContract({ apiBaseUrl, contract_address: addr, protocol: newProto, description: newDesc });
+            await addSMContract({ apiBaseUrl, contract_address: addr, description: newDesc });
             setShowAdd(false);
             setNewAddr('');
-            setNewProto(DEFAULT_SMART_MONEY_PROTOCOL);
             setNewDesc('');
         }, loadContracts);
     };
@@ -1083,17 +1071,8 @@ function SettingsPanel({ apiBaseUrl }) {
             {showAdd && (
                 <div className="smd-add-form">
                     <input placeholder="合约地址" value={newAddr} onChange={e => setNewAddr(e.target.value)} />
-                    <>
-                        <select className="w-md" value={newProto} onChange={e => setNewProto(e.target.value)}>
-                            {SMART_MONEY_PROTOCOL_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                    {option.label}
-                                </option>
-                            ))}
-                        </select>
-                        <input className="w-sm" placeholder="描述" value={newDesc} onChange={e => setNewDesc(e.target.value)} />
-                    </>
-                    <div className="smd-add-form-hint">仅支持 PancakeSwap V3、Uniswap V3、Uniswap V4</div>
+                    <input className="w-sm" placeholder="描述" value={newDesc} onChange={e => setNewDesc(e.target.value)} />
+                    <div className="smd-add-form-hint">只需要填写监控合约地址，添加后会直接扫描发往该地址的交易。</div>
                     <button type="button" disabled={addBusy} onClick={handleAddContract}>
                         {addBusy ? '处理中...' : '添加'}
                     </button>
@@ -1105,7 +1084,6 @@ function SettingsPanel({ apiBaseUrl }) {
                 <table className="smd-table smd-table--settings">
                     <thead><tr>
                         <th>地址</th>
-                        <th>协议</th>
                         <th>描述</th>
                         <th className="center">状态</th>
                         <th className="right">已扫描至区块</th>
@@ -1115,8 +1093,7 @@ function SettingsPanel({ apiBaseUrl }) {
                     {contracts.map(c => (
                         <tr key={c.contract_address}>
                             <td className="mono">{shortAddr(c.contract_address)}</td>
-                            <td className="muted">{c.protocol}</td>
-                            <td className="muted">{c.description || '—'}</td>
+                            <td className="muted">{c.description || '-'}</td>
                             <td className="center"><span className={`smd-status-dot ${c.is_active ? 'green' : 'muted'}`}>{c.is_active ? '活跃' : '已暂停'}</span></td>
                             <td className="right mono muted">{c.last_scanned_block || '未扫描'}</td>
                             <td className="right">

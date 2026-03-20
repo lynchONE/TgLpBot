@@ -288,8 +288,7 @@ func (s *Server) handleSMContracts(w http.ResponseWriter, r *http.Request) {
 		}
 		protocol := normalizeSmartMoneyProtocol(req.Protocol)
 		if protocol == "" {
-			jsonError(w, "unsupported protocol, use pancake_v3 / uniswap_v3 / uniswap_v4", http.StatusBadRequest)
-			return
+			protocol = "watch_contract"
 		}
 		addr := strings.ToLower(strings.TrimSpace(req.ContractAddress))
 		existing, err := repo.GetWatchContractByAddress(ctx, addr, 56)
@@ -329,20 +328,16 @@ func (s *Server) handleSMContracts(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		allowed := map[string]bool{"protocol": true, "description": true, "is_active": true}
+		allowed := map[string]bool{"description": true, "is_active": true}
 		filtered := make(map[string]interface{})
 		for k, v := range updates {
 			if allowed[k] {
 				filtered[k] = v
 			}
 		}
-		if rawProtocol, ok := filtered["protocol"]; ok {
-			protocol := normalizeSmartMoneyProtocol(fmt.Sprintf("%v", rawProtocol))
-			if protocol == "" {
-				jsonError(w, "unsupported protocol, use pancake_v3 / uniswap_v3 / uniswap_v4", http.StatusBadRequest)
-				return
-			}
-			filtered["protocol"] = protocol
+		if len(filtered) == 0 {
+			jsonError(w, "no valid fields to update", http.StatusBadRequest)
+			return
 		}
 		if rawDescription, ok := filtered["description"]; ok {
 			if rawDescription == nil {

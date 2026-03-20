@@ -34,12 +34,6 @@ const PROTOCOL_MAP = {
     uniswap_v3: { version: 'V3', icon: uniswapIcon, color: '#ff007a' },
     uniswap_v4: { version: 'V4', icon: uniswapIcon, color: '#ff007a' },
 };
-const SMART_MONEY_PROTOCOL_OPTIONS = [
-    { value: 'pancake_v3', label: 'PancakeSwap V3' },
-    { value: 'uniswap_v3', label: 'Uniswap V3' },
-    { value: 'uniswap_v4', label: 'Uniswap V4' },
-];
-const DEFAULT_SMART_MONEY_PROTOCOL = SMART_MONEY_PROTOCOL_OPTIONS[0].value;
 const WALLET_AVATAR_ICONS = [
     avatar01,
     avatar02,
@@ -1506,7 +1500,6 @@ function ContractSettingsTab({ apiBaseUrl, brand }) {
     const [loading, setLoading] = useState(true);
     const [showAdd, setShowAdd] = useState(false);
     const [newAddr, setNewAddr] = useState('');
-    const [newProtocol, setNewProtocol] = useState(DEFAULT_SMART_MONEY_PROTOCOL);
     const [newDesc, setNewDesc] = useState('');
     const [saving, setSaving] = useState(false);
     const [busyKey, setBusyKey] = useState('');
@@ -1543,13 +1536,9 @@ function ContractSettingsTab({ apiBaseUrl, brand }) {
             if (!isHexAddressValue(addr)) {
                 throw new Error('请输入合法的合约地址');
             }
-            if (!SMART_MONEY_PROTOCOL_OPTIONS.some((option) => option.value === newProtocol)) {
-                throw new Error('请选择支持的协议');
-            }
-            await addSMContract({ apiBaseUrl, contract_address: addr, protocol: newProtocol, description: newDesc });
+            await addSMContract({ apiBaseUrl, contract_address: addr, description: newDesc });
             setShowAdd(false);
             setNewAddr('');
-            setNewProtocol(DEFAULT_SMART_MONEY_PROTOCOL);
             setNewDesc('');
             await load();
         } catch (err) {
@@ -1618,17 +1607,6 @@ function ContractSettingsTab({ apiBaseUrl, brand }) {
                         value={newAddr}
                         onChange={e => setNewAddr(e.target.value)}
                     />
-                    <select
-                        className={getInputClass(brand)}
-                        value={newProtocol}
-                        onChange={e => setNewProtocol(e.target.value)}
-                    >
-                        {SMART_MONEY_PROTOCOL_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value} className="bg-zinc-950 text-zinc-100">
-                                {option.label}
-                            </option>
-                        ))}
-                    </select>
                     <textarea
                         className={`${getInputClass(brand)} min-h-[88px] resize-none`}
                         placeholder="描述（可选）"
@@ -1637,7 +1615,7 @@ function ContractSettingsTab({ apiBaseUrl, brand }) {
                         onChange={e => setNewDesc(e.target.value)}
                     />
                     <div className="text-[11px] text-zinc-500">
-                        目前仅支持 PancakeSwap V3、Uniswap V3、Uniswap V4
+                        只需要填写监控合约地址，添加后会直接扫描发往该地址的交易。
                     </div>
                     <div className="flex gap-2">
                         <button type="button" onClick={() => setShowAdd(false)} className="flex-1 rounded-2xl border border-white/[0.05] bg-zinc-900/65 px-4 py-2.5 text-sm text-zinc-300 transition hover:bg-zinc-800/80">取消</button>
@@ -1659,7 +1637,7 @@ function ContractSettingsTab({ apiBaseUrl, brand }) {
                             <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0 flex-1">
                                     <div className="flex flex-wrap items-center gap-1.5">
-                                        <span className="text-sm font-semibold text-zinc-100">{c.protocol || '未命名协议'}</span>
+                                        <span className="text-sm font-semibold text-zinc-100">监控合约</span>
                                         <Badge className={c.is_active
                                             ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
                                             : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>
