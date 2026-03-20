@@ -60,9 +60,11 @@ import {
   formatPriceDisplay,
   formatUsd,
   formatUsdCompact,
+  computeHotPoolActiveFeeRate,
   normalizePoolAddress,
   normalizeHexAddress,
   normalizeWidgetSelection,
+  parseHotPoolBadges,
   pickNonStableTokenAddress,
   resolveHotPoolFilterToken,
   resolveKlineTokenOptions,
@@ -1322,10 +1324,13 @@ export default function App() {
               const volume = Number(pool?.total_volume || 0);
               const totalFees = Number(pool?.total_fees || 0);
               const tvl = Number(pool?.current_pool_value || 0);
+              const activeLiquidityFeeRate = computeHotPoolActiveFeeRate(pool);
               const txCount = Number(pool?.transaction_count || 0);
               const priceDisplay = String(pool?.price_display || '');
               const feeRateAvailable = Number.isFinite(tvl) && tvl > 0 && Number.isFinite(feeRate);
               const feeRateText = feeRateAvailable ? `${feeRate.toFixed(3)}%` : '--';
+              const activeLiquidityFeeRateAvailable = Number.isFinite(activeLiquidityFeeRate);
+              const activeLiquidityFeeRateText = activeLiquidityFeeRateAvailable ? `${activeLiquidityFeeRate.toFixed(3)}%` : '--';
               const factoryName = String(pool?.factory_name || pool?.dex || '');
               const userPosUsd = Number(pool?.userPositionUsd || 0);
               const pair = String(pool?.trading_pair || '--');
@@ -1339,6 +1344,7 @@ export default function App() {
               const avatarSrc = displayTokenLogoUrl;
               const filterToken = resolveHotPoolFilterToken(pool);
               const avatarFilterActive = filterToken && hotTokenFilter?.address === filterToken.address;
+              const badges = parseHotPoolBadges(pool?.badges);
 
               const isHighFeeRate = feeRate >= 1;
 
@@ -1397,6 +1403,21 @@ export default function App() {
                         </span>
                       )}
                     </div>
+                    {badges.length > 0 && (
+                      <div className="pool-badge-line">
+                        {badges.map((badge, badgeIdx) => (
+                          <span
+                            key={`${badge.text}:${badgeIdx}`}
+                            className="tag tag-badge pool-badge-chip"
+                            data-tip={badge.tip}
+                            aria-label={badge.tip}
+                            tabIndex={0}
+                          >
+                            <span>{badge.text}</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     <div className="pool-meta-line">
                       <span className="meta-cyan">Vol <b><NumberFlowValue value={volume} formatter={(v) => formatUsdCompact(v)} /></b></span>
                       <span className="dot-sep" />
@@ -1405,10 +1426,20 @@ export default function App() {
                       <span className="meta-orange"><NumberFlowValue value={txCount} formatter={(v) => `${Number(v || 0).toLocaleString()}笔`} /></span>
                       <span className="dot-sep" />
                       <span className={`meta-accent ${feeRateAvailable ? '' : 'muted'}`}>
+                        费率{' '}
                         <b>
                           {feeRateAvailable ? (
                             <NumberFlowValue value={feeRate} formatter={(v) => `${Number(v).toFixed(3)}%`} />
                           ) : '--'}
+                        </b>
+                      </span>
+                      <span className="dot-sep" />
+                      <span className={`meta-gold ${activeLiquidityFeeRateAvailable ? '' : 'muted'}`}>
+                        活跃{' '}
+                        <b>
+                          {activeLiquidityFeeRateAvailable ? (
+                            <NumberFlowValue value={activeLiquidityFeeRate} formatter={() => activeLiquidityFeeRateText} />
+                          ) : activeLiquidityFeeRateText}
                         </b>
                       </span>
                     </div>

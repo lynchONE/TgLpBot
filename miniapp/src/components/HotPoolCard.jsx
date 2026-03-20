@@ -137,6 +137,89 @@ function formatRatePct(v) {
     return `${n.toFixed(3)}%`;
 }
 
+function computeActiveLiquidityFeeRate(pool) {
+    const totalFees = Number(pool?.total_fees ?? 0);
+    const activeLiquidityUsd = Number(pool?.activeLiquidityUSD ?? pool?.active_liquidity_usd ?? 0);
+    if (!Number.isFinite(totalFees) || !Number.isFinite(activeLiquidityUsd) || activeLiquidityUsd <= 0) {
+        return null;
+    }
+    return (totalFees / activeLiquidityUsd) * 100;
+}
+
+function normalizeHotPoolBadgeText(value) {
+    if (typeof value === 'string' || typeof value === 'number') {
+        return String(value).trim();
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return '';
+    }
+
+    const orderedKeys = ['label', 'text', 'title', 'name', 'badge', 'content', 'value', 'type', 'tip'];
+    for (const key of orderedKeys) {
+        const candidate = value[key];
+        if (typeof candidate === 'string' || typeof candidate === 'number') {
+            const label = String(candidate).trim();
+            if (label) return label;
+        }
+    }
+
+    for (const candidate of Object.values(value)) {
+        if (typeof candidate === 'string' || typeof candidate === 'number') {
+            const label = String(candidate).trim();
+            if (label) return label;
+        }
+    }
+
+    return '';
+}
+
+function normalizeHotPoolBadgeTip(value, fallbackText) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return fallbackText;
+    }
+
+    const orderedKeys = ['tip', 'tooltip', 'description', 'desc', 'detail', 'title', 'text', 'label'];
+    for (const key of orderedKeys) {
+        const candidate = value[key];
+        if (typeof candidate === 'string' || typeof candidate === 'number') {
+            const tip = String(candidate).trim();
+            if (tip) return tip;
+        }
+    }
+
+    return fallbackText;
+}
+
+function parseHotPoolBadges(value, limit = 6) {
+    let source = value;
+    if (typeof source === 'string') {
+        const raw = source.trim();
+        if (!raw) return [];
+        try {
+            source = JSON.parse(raw);
+        } catch {
+            source = [raw];
+        }
+    }
+
+    if (!Array.isArray(source) || !source.length) return [];
+
+    const badges = [];
+    const seen = new Set();
+    for (const item of source) {
+        const text = normalizeHotPoolBadgeText(item);
+        if (!text) continue;
+        const tip = normalizeHotPoolBadgeTip(item, text);
+        const normalized = `${text.toLowerCase()}::${tip.toLowerCase()}`;
+        if (seen.has(normalized)) continue;
+        seen.add(normalized);
+        badges.push({ text, tip });
+        if (badges.length >= limit) break;
+    }
+
+    return badges;
+}
+
 function normalizeDexName(dex) {
     const v = String(dex || '').trim().toLowerCase();
     if (!v) return '';
@@ -367,16 +450,31 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
     const tvlValue = useMemo(() => Number(pool?.current_pool_value ?? 0), [pool?.current_pool_value]);
     const feeRateValue = useMemo(() => Number(pool?.fee_rate ?? 0), [pool?.fee_rate]);
     const totalFeesValue = useMemo(() => Number(pool?.total_fees ?? 0), [pool?.total_fees]);
+    const activeLiquidityFeeRateValue = useMemo(
+        () => computeActiveLiquidityFeeRate(pool),
+        [pool?.total_fees, pool?.activeLiquidityUSD, pool?.active_liquidity_usd],
+    );
+    const hotPoolBadges = useMemo(() => parseHotPoolBadges(pool?.badges), [pool?.badges]);
     const showVolume = useMemo(() => Number.isFinite(volumeValue) && volumeValue > 0, [volumeValue]);
     const showTVL = useMemo(() => Number.isFinite(tvlValue) && tvlValue > 0, [tvlValue]);
     const feeRateAvailable = useMemo(() => Number.isFinite(tvlValue) && tvlValue > 0 && Number.isFinite(feeRateValue), [tvlValue, feeRateValue]);
+    const activeLiquidityFeeRateAvailable = useMemo(() => Number.isFinite(activeLiquidityFeeRateValue), [activeLiquidityFeeRateValue]);
     const showTotalFees = useMemo(() => Number.isFinite(totalFeesValue) && totalFeesValue > 0, [totalFeesValue]);
     const secondaryMetricText = useMemo(() => {
         if (metric === 'fee_rate') {
             return showTotalFees ? formatUsd(totalFeesValue) : '';
         }
         return feeRateAvailable ? formatRatePct(feeRateValue) : '--';
-    }, [metric, feeRateAvailable, showTotalFees, feeRateValue, totalFeesValue]);
+    }, [metric, feeRateAvailable, feeRateValue, showTotalFees, totalFeesValue]);
+    const secondaryMetricClass = useMemo(() => {
+        if (metric === 'fee_rate') {
+            return feeRateAvailable ? 'text-violet-600 dark:text-violet-300' : 'text-zinc-400 dark:text-white/35';
+        }
+        return feeRateAvailable ? 'text-violet-600 dark:text-violet-300' : 'text-zinc-400 dark:text-white/35';
+    }, [metric, feeRateAvailable]);
+    const activeMetricText = useMemo(() => {
+        return activeLiquidityFeeRateAvailable ? formatRatePct(activeLiquidityFeeRateValue) : '--';
+    }, [activeLiquidityFeeRateAvailable, activeLiquidityFeeRateValue]);
 
     const copyAddr = async () => {
         if (!addr) return;
@@ -507,10 +605,14 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                         </div>
                     ) : null}
                     {secondaryMetricText ? (
-                        <div className={`mt-0.5 text-[10px] font-semibold tabular-nums ${feeRateAvailable ? 'text-violet-600 dark:text-violet-300' : 'text-zinc-400 dark:text-white/35'}`}>
+                        <div className={`mt-0.5 text-[10px] font-semibold tabular-nums ${secondaryMetricClass}`}>
                             <NumberFlowValue value={secondaryMetricText} formatter={() => secondaryMetricText} />
                         </div>
                     ) : null}
+                    <div className={`mt-0.5 text-[10px] font-semibold tabular-nums ${activeLiquidityFeeRateAvailable ? 'text-amber-600 dark:text-amber-300' : 'text-zinc-400 dark:text-white/35'}`}>
+                        <span className="mr-1">活跃</span>
+                        <NumberFlowValue value={activeMetricText} formatter={() => activeMetricText} />
+                    </div>
                     {pool?.transaction_count > 0 ? (
                         <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40 flex items-center justify-end">
                             交易笔数:{' '}
@@ -544,6 +646,20 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                             <span>GMGN</span>
                         </button>
                     ) : null}
+                    {hotPoolBadges.map((badge, badgeIdx) => (
+                        <span
+                            key={`${badge.text}:${badgeIdx}`}
+                            className="group relative inline-flex max-w-[120px] items-center rounded-full border border-cyan-400/20 bg-slate-900/85 px-2.5 py-1 text-[11px] font-semibold text-cyan-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_8px_18px_rgba(8,15,30,0.14)] backdrop-blur-sm"
+                            title={badge.tip}
+                            tabIndex={0}
+                        >
+                            <span className="truncate">{badge.text}</span>
+                            <span className="pointer-events-none absolute left-1/2 top-0 z-20 h-2.5 w-2.5 -translate-x-1/2 -translate-y-[7px] rotate-45 border-r border-b border-cyan-400/20 bg-slate-950/95 opacity-0 invisible transition duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100" />
+                            <span className="pointer-events-none absolute left-1/2 top-0 z-20 w-max max-w-[180px] -translate-x-1/2 -translate-y-[calc(100%+10px)] rounded-xl border border-cyan-400/20 bg-slate-950/95 px-2.5 py-1.5 text-[10px] font-medium leading-4 text-slate-100 shadow-[0_14px_30px_rgba(2,8,23,0.35)] opacity-0 invisible transition duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
+                                {badge.tip}
+                            </span>
+                        </span>
+                    ))}
                     <PositionBadge pool={pool} />
                     {isBlacklisted ? (
                         <div className="inline-flex items-center gap-1 rounded-lg bg-red-500/15 px-2 py-0.5 text-[11px] font-bold text-red-700 ring-1 ring-red-500/25 dark:bg-red-500/20 dark:text-red-200 dark:ring-red-500/30">

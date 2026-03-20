@@ -39,6 +39,15 @@ export function formatPct(value, digits = 2) {
   return `${n.toFixed(digits)}%`;
 }
 
+export function computeHotPoolActiveFeeRate(pool) {
+  const totalFees = Number(pool?.total_fees ?? 0);
+  const activeLiquidityUsd = Number(pool?.activeLiquidityUSD ?? pool?.active_liquidity_usd ?? 0);
+  if (!Number.isFinite(totalFees) || !Number.isFinite(activeLiquidityUsd) || activeLiquidityUsd <= 0) {
+    return null;
+  }
+  return (totalFees / activeLiquidityUsd) * 100;
+}
+
 export function formatNumber(value, digits = 0) {
   const n = Number(value ?? 0);
   if (!Number.isFinite(n)) return '--';
@@ -128,6 +137,79 @@ export function resolveHotPoolFilterToken(pool) {
     return { address: token0Address, symbol: token0Symbol || 'Token' };
   }
   return null;
+}
+
+function normalizeHotPoolBadgeText(value) {
+  if (typeof value === 'string' || typeof value === 'number') {
+    return String(value).trim();
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return '';
+  }
+
+  const orderedKeys = ['label', 'text', 'title', 'name', 'badge', 'content', 'value', 'type', 'tip'];
+  for (const key of orderedKeys) {
+    const candidate = value[key];
+    if (typeof candidate === 'string' || typeof candidate === 'number') {
+      const label = String(candidate).trim();
+      if (label) return label;
+    }
+  }
+
+  for (const candidate of Object.values(value)) {
+    if (typeof candidate === 'string' || typeof candidate === 'number') {
+      const label = String(candidate).trim();
+      if (label) return label;
+    }
+  }
+
+  return '';
+}
+
+function normalizeHotPoolBadgeTip(value, fallbackText) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return fallbackText;
+  }
+
+  const orderedKeys = ['tip', 'tooltip', 'description', 'desc', 'detail', 'title', 'text', 'label'];
+  for (const key of orderedKeys) {
+    const candidate = value[key];
+    if (typeof candidate === 'string' || typeof candidate === 'number') {
+      const tip = String(candidate).trim();
+      if (tip) return tip;
+    }
+  }
+
+  return fallbackText;
+}
+
+export function parseHotPoolBadges(value, limit = 6) {
+  let source = value;
+  if (typeof source === 'string') {
+    const raw = source.trim();
+    if (!raw) return [];
+    try {
+      source = JSON.parse(raw);
+    } catch {
+      source = [raw];
+    }
+  }
+
+  if (!Array.isArray(source) || !source.length) return [];
+
+  const badges = [];
+  const seen = new Set();
+  for (const item of source) {
+    const text = normalizeHotPoolBadgeText(item);
+    if (!text) continue;
+    const tip = normalizeHotPoolBadgeTip(item, text);
+    const normalized = `${text.toLowerCase()}::${tip.toLowerCase()}`;
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    badges.push({ text, tip });
+    if (badges.length >= limit) break;
+  }
+  return badges;
 }
 
 export function inferPoolVersion(pool) {
