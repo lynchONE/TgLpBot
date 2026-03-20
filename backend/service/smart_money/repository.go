@@ -538,7 +538,7 @@ type PoolAggRow struct {
 	DisplayTokenSymbol     string           `json:"display_token_symbol,omitempty"`
 	DisplayTokenLogoURL    string           `json:"display_token_logo_url,omitempty"`
 	TotalPositionAmountUSD float64          `json:"total_position_amount_usd"`
-	RangeGroups            []PoolRangeGroup `json:"range_groups,omitempty"`
+	RangeGroups            []PoolRangeGroup `gorm:"-" json:"range_groups,omitempty"`
 }
 
 func (r *Repository) ListPoolsWithPositions(ctx context.Context) ([]PoolAggRow, error) {
@@ -584,7 +584,7 @@ type PoolStats struct {
 	DisplayTokenAddress    string           `json:"display_token_address,omitempty"`
 	DisplayTokenSymbol     string           `json:"display_token_symbol,omitempty"`
 	DisplayTokenLogoURL    string           `json:"display_token_logo_url,omitempty"`
-	RangeGroups            []PoolRangeGroup `json:"range_groups,omitempty"`
+	RangeGroups            []PoolRangeGroup `gorm:"-" json:"range_groups,omitempty"`
 }
 
 func (r *Repository) GetPoolStats(ctx context.Context, poolAddress string) (*PoolStats, error) {
