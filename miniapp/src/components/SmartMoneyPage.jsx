@@ -616,13 +616,13 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand }) {
                                 {typeof onOpenPosition === 'function' ? (
                                     <button
                                         type="button"
-                                        className={`${brand.actionPillButtonClass} mt-1 shrink-0`}
+                                        className={`mt-1 inline-flex h-6 shrink-0 items-center gap-1 rounded-full px-2 text-[10px] font-semibold leading-none shadow-sm ${brand.solidButtonClass} ${brand.solidRingClass}`}
                                         onClick={(event) => {
                                             event.stopPropagation();
                                             onOpenPosition(pool);
                                         }}
                                     >
-                                        <FlashIcon className="h-3 w-3 shrink-0" />
+                                        <FlashIcon className="h-2.5 w-2.5 shrink-0" />
                                         璺熷崟
                                     </button>
                                 ) : (
