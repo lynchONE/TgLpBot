@@ -3,12 +3,14 @@ package assets
 import (
 	"TgLpBot/base/blockchain"
 	"TgLpBot/base/config"
+	"TgLpBot/base/convert"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/base/timeutil"
 	"context"
 	"fmt"
 	"log"
+	"math/big"
 	"sort"
 	"strings"
 	"time"
@@ -23,6 +25,246 @@ func activeStrategyStatuses() []models.StrategyStatus {
 		models.StrategyStatusWaiting,
 		models.StrategyStatusStopping,
 	}
+}
+
+type userLPTradeRow struct {
+	ID           uint
+	UserID       uint
+	PoolID       string
+	Token0Symbol string
+	Token1Symbol string
+	Chain        string
+	ProfitUSDT   string
+	ClosedAt     *time.Time
+}
+
+type userLPBucket struct {
+	ProfitWei      *big.Int
+	ClosedCount    int
+	WinCount       int
+	LossCount      int
+	BreakEvenCount int
+}
+
+type userLPPoolKey struct {
+	PoolID       string
+	Token0Symbol string
+	Token1Symbol string
+	Chain        string
+}
+
+type userLPPoolBucket struct {
+	Key         userLPPoolKey
+	ProfitWei   *big.Int
+	ClosedCount int
+}
+
+func (b *userLPBucket) addProfit(profitWei *big.Int) {
+	if b == nil {
+		return
+	}
+	if b.ProfitWei == nil {
+		b.ProfitWei = big.NewInt(0)
+	}
+	if profitWei == nil {
+		profitWei = big.NewInt(0)
+	}
+	b.ProfitWei.Add(b.ProfitWei, profitWei)
+	b.ClosedCount++
+	switch profitWei.Sign() {
+	case 1:
+		b.WinCount++
+	case -1:
+		b.LossCount++
+	default:
+		b.BreakEvenCount++
+	}
+}
+
+func (b *userLPBucket) toWindowStats(days int) UserLPWindowStats {
+	stats := UserLPWindowStats{
+		Days:           days,
+		RealizedPnLUSD: profitWeiToUSD(b.ProfitWei),
+		ClosedCount:    b.ClosedCount,
+		WinCount:       b.WinCount,
+		LossCount:      b.LossCount,
+		BreakEvenCount: b.BreakEvenCount,
+	}
+	if stats.ClosedCount > 0 {
+		stats.WinRate = round4(float64(stats.WinCount) / float64(stats.ClosedCount))
+		stats.AvgPnLUSD = round2(stats.RealizedPnLUSD / float64(stats.ClosedCount))
+	}
+	return stats
+}
+
+func (b *userLPPoolBucket) addProfit(profitWei *big.Int) {
+	if b == nil {
+		return
+	}
+	if b.ProfitWei == nil {
+		b.ProfitWei = big.NewInt(0)
+	}
+	if profitWei == nil {
+		profitWei = big.NewInt(0)
+	}
+	b.ProfitWei.Add(b.ProfitWei, profitWei)
+	b.ClosedCount++
+}
+
+func (b *userLPPoolBucket) toResponse() UserLPPoolPnL {
+	return UserLPPoolPnL{
+		PoolID:       b.Key.PoolID,
+		Token0Symbol: b.Key.Token0Symbol,
+		Token1Symbol: b.Key.Token1Symbol,
+		Chain:        b.Key.Chain,
+		ProfitUSD:    profitWeiToUSD(b.ProfitWei),
+		ClosedCount:  b.ClosedCount,
+	}
+}
+
+func profitWeiToUSD(profitWei *big.Int) float64 {
+	if profitWei == nil || profitWei.Sign() == 0 {
+		return 0
+	}
+	return round2(amountToFloat(profitWei.String(), 18))
+}
+
+func parseTradeProfitWei(record userLPTradeRow) *big.Int {
+	value, err := convert.ParseBigInt(record.ProfitUSDT)
+	if err != nil {
+		log.Printf("[Assets] invalid trade profit record_id=%d user_id=%d raw=%q err=%v", record.ID, record.UserID, record.ProfitUSDT, err)
+		return big.NewInt(0)
+	}
+	return value
+}
+
+func buildUserLPStatsFromTrades(trades []userLPTradeRow, now time.Time) UserLPStatsResponse {
+	startOfToday := dayStart(now)
+	windowDays := []int{1, 7, 30}
+	windowStarts := map[int]time.Time{
+		1:  startOfToday.AddDate(0, 0, -1),
+		7:  startOfToday.AddDate(0, 0, -7),
+		30: startOfToday.AddDate(0, 0, -30),
+	}
+	windowBuckets := map[int]*userLPBucket{
+		1:  {},
+		7:  {},
+		30: {},
+	}
+	todayBucket := &userLPBucket{}
+	todayPools := make(map[userLPPoolKey]*userLPPoolBucket)
+	dailyBuckets := make(map[string]*userLPBucket)
+
+	for _, trade := range trades {
+		if trade.ClosedAt == nil || trade.ClosedAt.IsZero() {
+			continue
+		}
+		closedAt := trade.ClosedAt.In(timeutil.Location())
+		profitWei := parseTradeProfitWei(trade)
+
+		if !closedAt.Before(startOfToday) {
+			todayBucket.addProfit(profitWei)
+			key := userLPPoolKey{
+				PoolID:       trade.PoolID,
+				Token0Symbol: trade.Token0Symbol,
+				Token1Symbol: trade.Token1Symbol,
+				Chain:        trade.Chain,
+			}
+			poolBucket := todayPools[key]
+			if poolBucket == nil {
+				poolBucket = &userLPPoolBucket{Key: key}
+				todayPools[key] = poolBucket
+			}
+			poolBucket.addProfit(profitWei)
+			continue
+		}
+
+		for _, days := range windowDays {
+			if !closedAt.Before(windowStarts[days]) {
+				windowBuckets[days].addProfit(profitWei)
+			}
+		}
+
+		if !closedAt.Before(windowStarts[30]) {
+			dayKey := formatDay(closedAt)
+			dailyBucket := dailyBuckets[dayKey]
+			if dailyBucket == nil {
+				dailyBucket = &userLPBucket{}
+				dailyBuckets[dayKey] = dailyBucket
+			}
+			dailyBucket.addProfit(profitWei)
+		}
+	}
+
+	windows := make([]UserLPWindowStats, 0, len(windowDays))
+	for _, days := range windowDays {
+		windows = append(windows, windowBuckets[days].toWindowStats(days))
+	}
+
+	dailyKeys := make([]string, 0, len(dailyBuckets))
+	for dayKey := range dailyBuckets {
+		dailyKeys = append(dailyKeys, dayKey)
+	}
+	sort.Strings(dailyKeys)
+
+	dailyHistory := make([]UserLPDailyPoint, 0, len(dailyKeys))
+	for _, dayKey := range dailyKeys {
+		bucket := dailyBuckets[dayKey]
+		dailyHistory = append(dailyHistory, UserLPDailyPoint{
+			Day:            dayKey,
+			RealizedPnLUSD: profitWeiToUSD(bucket.ProfitWei),
+			ClosedCount:    bucket.ClosedCount,
+			WinCount:       bucket.WinCount,
+			LossCount:      bucket.LossCount,
+		})
+	}
+
+	pools := make([]UserLPPoolPnL, 0, len(todayPools))
+	for _, bucket := range todayPools {
+		pools = append(pools, bucket.toResponse())
+	}
+	sort.Slice(pools, func(i, j int) bool {
+		if pools[i].ProfitUSD != pools[j].ProfitUSD {
+			return pools[i].ProfitUSD > pools[j].ProfitUSD
+		}
+		if pools[i].ClosedCount != pools[j].ClosedCount {
+			return pools[i].ClosedCount > pools[j].ClosedCount
+		}
+		if pools[i].PoolID != pools[j].PoolID {
+			return pools[i].PoolID < pools[j].PoolID
+		}
+		if pools[i].Chain != pools[j].Chain {
+			return pools[i].Chain < pools[j].Chain
+		}
+		if pools[i].Token0Symbol != pools[j].Token0Symbol {
+			return pools[i].Token0Symbol < pools[j].Token0Symbol
+		}
+		return pools[i].Token1Symbol < pools[j].Token1Symbol
+	})
+
+	return UserLPStatsResponse{
+		Windows:      windows,
+		Today:        todayBucket.toWindowStats(0),
+		TodayPools:   pools,
+		DailyHistory: dailyHistory,
+		Timezone:     timeutil.LocationName(),
+	}
+}
+
+func (s *Service) loadUserLPTrades(ctx context.Context, userID uint, start, end time.Time) ([]userLPTradeRow, error) {
+	query := database.DB.WithContext(ctx).
+		Model(&models.TradeRecord{}).
+		Select("id, user_id, pool_id, token0_symbol, token1_symbol, chain, profit_usdt, closed_at").
+		Where("status = ? AND closed_at >= ? AND closed_at < ?", models.TradeStatusClosed, start, end)
+	if userID > 0 {
+		query = query.Where("user_id = ?", userID)
+	}
+
+	var rows []userLPTradeRow
+	if err := query.Order("closed_at ASC, id ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func (s *Service) GetUserOverview(ctx context.Context, userID uint) (*UserAssetOverview, error) {
@@ -330,131 +572,14 @@ func (s *Service) GetUserHistory(ctx context.Context, userID uint, days int) (*U
 }
 
 func (s *Service) GetUserLPStats(ctx context.Context, userID uint) (*UserLPStatsResponse, error) {
-	windows := []int{1, 7, 30}
-	startOfToday := dayStart(timeutil.Now())
-	out := make([]UserLPWindowStats, 0, len(windows))
-	for _, days := range windows {
-		stats, err := s.queryUserLPWindow(ctx, userID, startOfToday.AddDate(0, 0, -days), startOfToday, days)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, stats)
-	}
-	today, err := s.queryUserLPWindow(ctx, userID, startOfToday, timeutil.Now(), 0)
+	now := timeutil.Now()
+	start := dayStart(now).AddDate(0, 0, -30)
+	trades, err := s.loadUserLPTrades(ctx, userID, start, now)
 	if err != nil {
 		return nil, err
 	}
-
-	// Per-pool today breakdown
-	type poolRow struct {
-		PoolId       string
-		Token0Symbol string
-		Token1Symbol string
-		Chain        string
-		ProfitUSD    float64
-		ClosedCount  int
-	}
-	var poolRows []poolRow
-	database.DB.WithContext(ctx).
-		Raw(`
-			SELECT
-				pool_id,
-				token0_symbol,
-				token1_symbol,
-				chain,
-				COALESCE(SUM(CAST(profit_usdt AS DECIMAL(36, 18)) / 1000000000000000000), 0) AS profit_usd,
-				COUNT(*) AS closed_count
-			FROM trade_records
-			WHERE user_id = ?
-			  AND status = ?
-			  AND closed_at >= ?
-			  AND closed_at < ?
-			GROUP BY pool_id, token0_symbol, token1_symbol, chain
-			ORDER BY profit_usd DESC
-		`, userID, models.TradeStatusClosed, startOfToday, timeutil.Now()).
-		Scan(&poolRows)
-
-	todayPools := make([]UserLPPoolPnL, 0, len(poolRows))
-	for _, pr := range poolRows {
-		todayPools = append(todayPools, UserLPPoolPnL{
-			PoolID:       pr.PoolId,
-			Token0Symbol: pr.Token0Symbol,
-			Token1Symbol: pr.Token1Symbol,
-			Chain:        pr.Chain,
-			ProfitUSD:    round2(pr.ProfitUSD),
-			ClosedCount:  pr.ClosedCount,
-		})
-	}
-
-	// Daily LP history (last 30 days)
-	var dailyRows []models.UserLPDailyStat
-	database.DB.WithContext(ctx).
-		Where("user_id = ? AND wallet_id = ? AND chain = ? AND stat_day >= ?",
-			userID, aggregateWalletID, "", formatDay(startOfToday.AddDate(0, 0, -30))).
-		Order("stat_day ASC").
-		Find(&dailyRows)
-
-	dailyHistory := make([]UserLPDailyPoint, 0, len(dailyRows))
-	for _, dr := range dailyRows {
-		dailyHistory = append(dailyHistory, UserLPDailyPoint{
-			Day:            dr.StatDay,
-			RealizedPnLUSD: round2(dr.RealizedPnLUSD),
-			ClosedCount:    dr.ClosedCount,
-			WinCount:       dr.WinCount,
-			LossCount:      dr.LossCount,
-		})
-	}
-
-	return &UserLPStatsResponse{
-		Windows:      out,
-		Today:        today,
-		TodayPools:   todayPools,
-		DailyHistory: dailyHistory,
-		Timezone:     timeutil.LocationName(),
-	}, nil
-}
-
-func (s *Service) queryUserLPWindow(ctx context.Context, userID uint, start time.Time, end time.Time, days int) (UserLPWindowStats, error) {
-	type row struct {
-		RealizedPnLUSD float64
-		ClosedCount    int
-		WinCount       int
-		LossCount      int
-		BreakEvenCount int
-	}
-	var result row
-	err := database.DB.WithContext(ctx).
-		Raw(`
-			SELECT
-				COALESCE(SUM(CAST(profit_usdt AS DECIMAL(36, 18)) / 1000000000000000000), 0) AS realized_pnl_usd,
-				COUNT(*) AS closed_count,
-				SUM(CASE WHEN CAST(profit_usdt AS DECIMAL(36, 18)) > 0 THEN 1 ELSE 0 END) AS win_count,
-				SUM(CASE WHEN CAST(profit_usdt AS DECIMAL(36, 18)) < 0 THEN 1 ELSE 0 END) AS loss_count,
-				SUM(CASE WHEN CAST(profit_usdt AS DECIMAL(36, 18)) = 0 THEN 1 ELSE 0 END) AS break_even_count
-			FROM trade_records
-			WHERE user_id = ?
-			  AND status = ?
-			  AND closed_at >= ?
-			  AND closed_at < ?
-		`, userID, models.TradeStatusClosed, start, end).
-		Scan(&result).Error
-	if err != nil {
-		return UserLPWindowStats{}, err
-	}
-
-	stats := UserLPWindowStats{
-		Days:           days,
-		RealizedPnLUSD: round2(result.RealizedPnLUSD),
-		ClosedCount:    result.ClosedCount,
-		WinCount:       result.WinCount,
-		LossCount:      result.LossCount,
-		BreakEvenCount: result.BreakEvenCount,
-	}
-	if stats.ClosedCount > 0 {
-		stats.WinRate = round4(float64(stats.WinCount) / float64(stats.ClosedCount))
-		stats.AvgPnLUSD = round2(stats.RealizedPnLUSD / float64(stats.ClosedCount))
-	}
-	return stats, nil
+	resp := buildUserLPStatsFromTrades(trades, now)
+	return &resp, nil
 }
 
 func (s *Service) captureUserAssetSnapshots(ctx context.Context, day time.Time) error {
@@ -523,45 +648,44 @@ func (s *Service) captureUserLPDailyStats(ctx context.Context, day time.Time) er
 		return err
 	}
 
-	type row struct {
-		UserID         uint
-		RealizedPnLUSD float64
-		ClosedCount    int
-		WinCount       int
-		LossCount      int
-		BreakEvenCount int
-	}
-	var rows []row
-	if err := database.DB.WithContext(ctx).
-		Raw(`
-			SELECT
-				user_id,
-				COALESCE(SUM(CAST(profit_usdt AS DECIMAL(36, 18)) / 1000000000000000000), 0) AS realized_pnl_usd,
-				COUNT(*) AS closed_count,
-				SUM(CASE WHEN CAST(profit_usdt AS DECIMAL(36, 18)) > 0 THEN 1 ELSE 0 END) AS win_count,
-				SUM(CASE WHEN CAST(profit_usdt AS DECIMAL(36, 18)) < 0 THEN 1 ELSE 0 END) AS loss_count,
-				SUM(CASE WHEN CAST(profit_usdt AS DECIMAL(36, 18)) = 0 THEN 1 ELSE 0 END) AS break_even_count
-			FROM trade_records
-			WHERE status = ?
-			  AND closed_at >= ?
-			  AND closed_at < ?
-			GROUP BY user_id
-		`, models.TradeStatusClosed, start, end).
-		Scan(&rows).Error; err != nil {
+	trades, err := s.loadUserLPTrades(ctx, 0, start, end)
+	if err != nil {
 		return err
 	}
 
-	for _, item := range rows {
+	statsByUser := make(map[uint]*userLPBucket)
+	for _, trade := range trades {
+		if trade.UserID == 0 {
+			continue
+		}
+		bucket := statsByUser[trade.UserID]
+		if bucket == nil {
+			bucket = &userLPBucket{}
+			statsByUser[trade.UserID] = bucket
+		}
+		bucket.addProfit(parseTradeProfitWei(trade))
+	}
+
+	userIDs := make([]uint, 0, len(statsByUser))
+	for userID := range statsByUser {
+		userIDs = append(userIDs, userID)
+	}
+	sort.Slice(userIDs, func(i, j int) bool {
+		return userIDs[i] < userIDs[j]
+	})
+
+	for _, userID := range userIDs {
+		stats := statsByUser[userID].toWindowStats(0)
 		row := &models.UserLPDailyStat{
-			UserID:         item.UserID,
+			UserID:         userID,
 			WalletID:       aggregateWalletID,
 			Chain:          "",
 			StatDay:        dayKey,
-			RealizedPnLUSD: round2(item.RealizedPnLUSD),
-			ClosedCount:    item.ClosedCount,
-			WinCount:       item.WinCount,
-			LossCount:      item.LossCount,
-			BreakEvenCount: item.BreakEvenCount,
+			RealizedPnLUSD: stats.RealizedPnLUSD,
+			ClosedCount:    stats.ClosedCount,
+			WinCount:       stats.WinCount,
+			LossCount:      stats.LossCount,
+			BreakEvenCount: stats.BreakEvenCount,
 			CapturedAt:     timeutil.Now(),
 		}
 		if err := upsertByColumns(ctx, row,
