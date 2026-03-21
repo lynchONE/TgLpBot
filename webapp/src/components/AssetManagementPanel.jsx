@@ -228,84 +228,85 @@ function LWAreaChart({ points, stroke = '#52d1ff', height = 220 }) {
   return <div ref={containerRef} style={{ minHeight: height, borderRadius: 'var(--radius-md)', overflow: 'hidden' }} />;
 }
 
-/* ─── TradingView Histogram Chart for daily LP PnL ─── */
-function LWHistogramChart({ data, height = 160 }) {
-  const containerRef = useRef(null);
-  const chartRef = useRef(null);
-  const seriesRef = useRef(null);
+/* ─── PnL Calendar (盈亏日历) ─── */
+const PNL_CAL_WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
+function PnLCalendar({ data, loading = false }) {
+  const [viewDate, setViewDate] = useState(() => new Date());
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstDayJS = new Date(year, month, 1).getDay();
+  const startOffset = firstDayJS === 0 ? 6 : firstDayJS - 1;
 
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const chart = createChart(containerRef.current, {
-      width: containerRef.current.clientWidth,
-      height,
-      layout: {
-        background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: 'rgba(154, 168, 196, 0.6)',
-        fontFamily: "'Space Grotesk', system-ui, sans-serif",
-        fontSize: 10,
-      },
-      grid: {
-        vertLines: { color: 'rgba(134, 153, 184, 0.06)' },
-        horzLines: { color: 'rgba(134, 153, 184, 0.06)' },
-      },
-      rightPriceScale: {
-        borderVisible: false,
-        scaleMargins: { top: 0.15, bottom: 0.05 },
-      },
-      timeScale: {
-        borderVisible: false,
-        fixLeftEdge: true,
-        fixRightEdge: true,
-        timeVisible: false,
-      },
-      handleScroll: false,
-      handleScale: false,
-    });
-
-    const series = chart.addSeries(HistogramSeries, {
-      priceFormat: {
-        type: 'custom',
-        formatter: (v) => {
-          const abs = Math.abs(v);
-          if (abs >= 1000) return `$${(v / 1000).toFixed(1)}K`;
-          return `$${v.toFixed(0)}`;
-        },
-      },
-    });
-
-    chartRef.current = chart;
-    seriesRef.current = series;
-
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) chart.applyOptions({ width: entry.contentRect.width });
-    });
-    ro.observe(containerRef.current);
-
-    return () => {
-      ro.disconnect();
-      chart.remove();
-    };
-  }, [height]);
-
-  useEffect(() => {
-    if (!seriesRef.current || !data || data.length < 1) return;
-    const mapped = data
-      .filter((d) => d.day)
-      .map((d) => ({
-        time: d.day,
-        value: Number(d.realized_pnl_usd || 0),
-        color: Number(d.realized_pnl_usd || 0) >= 0 ? 'rgba(34, 211, 138, 0.7)' : 'rgba(255, 94, 118, 0.7)',
-      }));
-    seriesRef.current.setData(mapped);
-    chartRef.current?.timeScale().fitContent();
+  const pnlMap = useMemo(() => {
+    const map = {};
+    if (Array.isArray(data)) data.forEach((d) => { if (d.day) map[d.day] = d; });
+    return map;
   }, [data]);
+
+  const monthLabel = new Date(year, month).toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+  const prevMonth = () => setViewDate(new Date(year, month - 1, 1));
+  const nextMonth = () => setViewDate(new Date(year, month + 1, 1));
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+  if (loading) {
+    return <div className="am-chart-empty">加载中...</div>;
+  }
+
+  const cells = [];
+  for (let i = 0; i < startOffset; i++) {
+    cells.push(<div key={`e-${i}`} className="pnl-cal-cell pnl-cal-empty" />);
+  }
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const entry = pnlMap[dateStr];
+    const pnl = entry ? Number(entry.realized_pnl_usd || 0) : null;
+    const isToday = dateStr === todayStr;
+    const isFuture = new Date(year, month, day) > now;
+    const cls = ['pnl-cal-cell'];
+    if (isToday) cls.push('pnl-cal-today');
+    else if (isFuture) cls.push('pnl-cal-future');
+    if (pnl !== null) cls.push(pnl >= 0 ? 'pnl-cal-pos' : 'pnl-cal-neg');
+    cells.push(
+      <div key={day} className={cls.join(' ')}>
+        {pnl !== null ? `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}` : ''}
+      </div>
+    );
+  }
+  const remainder = (startOffset + daysInMonth) % 7;
+  if (remainder > 0) {
+    for (let i = 0; i < 7 - remainder; i++) {
+      cells.push(<div key={`t-${i}`} className="pnl-cal-cell pnl-cal-empty" />);
+    }
+  }
 
   if (!data || data.length === 0) {
     return <div className="am-chart-empty">暂无每日 LP 数据</div>;
   }
 
-  return <div ref={containerRef} style={{ minHeight: height, borderRadius: 'var(--radius-md)', overflow: 'hidden' }} />;
+  return (
+    <div className="pnl-calendar">
+      <div className="pnl-cal-header">
+        <div className="pnl-cal-month">
+          <span>{monthLabel}</span>
+          <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
+          </svg>
+        </div>
+        <div className="pnl-cal-nav">
+          <button type="button" onClick={prevMonth}><ChevronLeft size={14} /></button>
+          <button type="button" onClick={nextMonth}><ChevronRight size={14} /></button>
+        </div>
+      </div>
+      <div className="pnl-cal-grid">
+        {PNL_CAL_WEEKDAYS.map((d) => (
+          <div key={d} className="pnl-cal-weekday">{d}</div>
+        ))}
+        {cells}
+      </div>
+    </div>
+  );
 }
 
 /* ─── Small sparkline for smart money wallet detail (kept simple) ─── */
@@ -342,10 +343,15 @@ const WALLET_COLORS = ['#59f09d', '#52d1ff', '#c792ff', '#ffae42', '#ff6b9d', '#
 function DonutChart({ wallets }) {
   const items = useMemo(() => {
     if (!Array.isArray(wallets) || wallets.length === 0) return [];
-    return wallets.map((w, i) => ({
-      label: w.wallet_address ? `${w.wallet_address.slice(0, 6)}...${w.wallet_address.slice(-4)}` : `#${w.wallet_id}`,
-      chain: String(w.chain || '').toUpperCase(),
-      value: Math.max(0, Number(w.total_usd || 0)),
+    const merged = {};
+    wallets.forEach((w) => {
+      const addr = w.wallet_address || `#${w.wallet_id}`;
+      if (!merged[addr]) merged[addr] = { addr, total: 0 };
+      merged[addr].total += Math.max(0, Number(w.total_usd || 0));
+    });
+    return Object.values(merged).map((m, i) => ({
+      label: m.addr.startsWith('#') ? m.addr : `${m.addr.slice(0, 6)}...${m.addr.slice(-4)}`,
+      value: m.total,
       color: WALLET_COLORS[i % WALLET_COLORS.length],
     })).filter((i) => i.value > 0);
   }, [wallets]);
@@ -377,7 +383,7 @@ function DonutChart({ wallets }) {
         {arcs.map((a, i) => (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: a.color, flexShrink: 0 }} />
-            <span className="am-item-sub" style={{ margin: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.label} · {a.chain}</span>
+            <span className="am-item-sub" style={{ margin: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.label}</span>
             <strong style={{ fontSize: 11, flexShrink: 0 }}>{formatUsdCompact(a.value)}</strong>
             <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>{a.pct}%</span>
           </div>
@@ -390,13 +396,21 @@ function DonutChart({ wallets }) {
 function WalletBarChart({ wallets }) {
   const items = useMemo(() => {
     if (!Array.isArray(wallets)) return [];
-    return wallets.map((w) => ({
-      label: w.wallet_address ? `${w.wallet_address.slice(0, 6)}...${w.wallet_address.slice(-4)}` : `#${w.wallet_id}`,
-      chain: String(w.chain || '').toUpperCase(),
-      native: Math.max(0, Number(w.native_usd || 0)),
-      stable: Math.max(0, Number(w.stable_usd || 0)),
-      token: Math.max(0, Number(w.token_usd || 0)),
-      total: Math.max(0, Number(w.total_usd || 0)),
+    const merged = {};
+    wallets.forEach((w) => {
+      const addr = w.wallet_address || `#${w.wallet_id}`;
+      if (!merged[addr]) merged[addr] = { addr, native: 0, stable: 0, token: 0, total: 0 };
+      merged[addr].native += Math.max(0, Number(w.native_usd || 0));
+      merged[addr].stable += Math.max(0, Number(w.stable_usd || 0));
+      merged[addr].token += Math.max(0, Number(w.token_usd || 0));
+      merged[addr].total += Math.max(0, Number(w.total_usd || 0));
+    });
+    return Object.values(merged).map((m) => ({
+      label: m.addr.startsWith('#') ? m.addr : `${m.addr.slice(0, 6)}...${m.addr.slice(-4)}`,
+      native: m.native,
+      stable: m.stable,
+      token: m.token,
+      total: m.total,
     }));
   }, [wallets]);
   const maxVal = useMemo(() => Math.max(...items.map((i) => i.total), 1), [items]);
@@ -422,7 +436,7 @@ function WalletBarChart({ wallets }) {
         return (
           <div key={i}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)' }}>{item.label} <span style={{ fontSize: 9, fontWeight: 400, color: 'var(--text-muted)' }}>{item.chain}</span></span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)' }}>{item.label}</span>
               <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>{formatUsdCompact(item.total)}</span>
             </div>
             <div style={{ height: 10, borderRadius: 999, overflow: 'hidden', background: 'rgba(136,157,191,0.08)', width: `${Math.max(barW, 10)}%` }}>
@@ -460,7 +474,7 @@ export default function AssetManagementPanel({
 
   const [activeTab, setActiveTab] = useState('my_assets');
   const [historyDays, setHistoryDays] = useState(30);
-  const [historyMetric, setHistoryMetric] = useState('total_usd');
+  const [historyMetric] = useState('wallet_usd');
   const [assetState, setAssetState] = useState({ overview: null, history: null, lp: null });
   const [assetLoading, setAssetLoading] = useState(false);
   const [assetRefreshing, setAssetRefreshing] = useState(false);
@@ -834,7 +848,7 @@ export default function AssetManagementPanel({
         ? '系统配置、RPC 与 Private Zap'
         : '资产快照、历史趋势与 LP 统计';
 
-  const metricColor = HISTORY_METRICS.find((m) => m.key === historyMetric)?.color || '#59f09d';
+  const metricColor = '#52d1ff';
 
   const actions = (
     <div className="am-actions">
@@ -905,16 +919,9 @@ export default function AssetManagementPanel({
                 ))}
               </div>
             </div>
-            <div className="am-pill-group am-pill-group-wrap">
-              {HISTORY_METRICS.map((item) => (
-                <button key={item.key} type="button" className={`am-pill ${historyMetric === item.key ? 'active' : ''}`} onClick={() => setHistoryMetric(item.key)}>
-                  {item.label}
-                </button>
-              ))}
-            </div>
             <div className="am-chart-header">
               <div>
-                <div className="am-chart-label">{HISTORY_METRICS.find((item) => item.key === historyMetric)?.label || '总资产'}</div>
+                <div className="am-chart-label">钱包余额</div>
                 <div className="am-chart-value">{formatUsd(chartPoints[chartPoints.length - 1]?.value)}</div>
               </div>
               <span className="am-badge">{assetState.overview?.updated_at ? new Date(assetState.overview.updated_at).toLocaleTimeString() : ''}</span>
@@ -961,11 +968,7 @@ export default function AssetManagementPanel({
             </div>
 
             <div className="am-card">
-              <div className="am-card-title">每日 LP 盈亏</div>
-              <div className="am-item-sub" style={{ margin: 0 }}>近30天每日平仓盈亏柱状图</div>
-              {Array.isArray(assetState.lp?.daily_history) && assetState.lp.daily_history.length > 0 ? (
-                <LWHistogramChart data={assetState.lp.daily_history} />
-              ) : <EmptyState text={assetLoading ? '正在加载...' : '暂无每日数据'} />}
+              <PnLCalendar data={assetState.lp?.daily_history} loading={assetLoading} />
               {Array.isArray(assetState.lp?.windows) && assetState.lp.windows.length > 0 && (
                 <div className="am-stat-grid am-stat-grid-3" style={{ marginTop: 10 }}>
                   {assetState.lp.windows.map((item) => (

@@ -307,92 +307,89 @@ function LWAreaChart({ data, color = '#10b981', loading = false }) {
     return <div ref={containerRef} className="w-full rounded-lg overflow-hidden" style={{ minHeight: 200 }} />;
 }
 
-/* ─── LP Daily History Bar Chart (lightweight-charts v5) ─── */
-function LPDailyBarChart({ data, loading = false }) {
-    const containerRef = useRef(null);
-    const chartRef = useRef(null);
-    const pnlSeriesRef = useRef(null);
-    const countSeriesRef = useRef(null);
+/* ─── PnL Calendar (盈亏日历) ─── */
+const PNL_CAL_WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
+function PnLCalendar({ data, loading = false }) {
+    const [viewDate, setViewDate] = useState(() => new Date());
+    const year = viewDate.getFullYear();
+    const month = viewDate.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const firstDayJS = new Date(year, month, 1).getDay();
+    const startOffset = firstDayJS === 0 ? 6 : firstDayJS - 1;
 
-    useEffect(() => {
-        if (!containerRef.current) return;
-        const isDark = document.documentElement.classList.contains('dark') || window.matchMedia?.('(prefers-color-scheme: dark)')?.matches;
-        const chart = createChart(containerRef.current, {
-            width: containerRef.current.clientWidth,
-            height: 160,
-            layout: {
-                background: { type: ColorType.Solid, color: 'transparent' },
-                textColor: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)',
-                fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
-                fontSize: 10,
-            },
-            grid: {
-                vertLines: { color: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' },
-                horzLines: { color: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' },
-            },
-            rightPriceScale: {
-                borderVisible: false,
-                scaleMargins: { top: 0.15, bottom: 0.05 },
-            },
-            timeScale: {
-                borderVisible: false,
-                fixLeftEdge: true,
-                fixRightEdge: true,
-                timeVisible: false,
-            },
-            handleScroll: false,
-            handleScale: false,
-        });
-
-        const pnlSeries = chart.addSeries(HistogramSeries, {
-            priceFormat: { type: 'custom', formatter: (v) => {
-                const abs = Math.abs(v);
-                if (abs >= 1000) return `$${(v / 1000).toFixed(1)}K`;
-                return `$${v.toFixed(0)}`;
-            }},
-            priceScaleId: 'right',
-        });
-
-        chartRef.current = chart;
-        pnlSeriesRef.current = pnlSeries;
-
-        const ro = new ResizeObserver((entries) => {
-            for (const entry of entries) chart.applyOptions({ width: entry.contentRect.width });
-        });
-        ro.observe(containerRef.current);
-
-        return () => {
-            ro.disconnect();
-            chart.remove();
-        };
-    }, []);
-
-    useEffect(() => {
-        if (!pnlSeriesRef.current || !data || data.length < 1) return;
-        const mapped = data
-            .filter((d) => d.day)
-            .map((d) => ({
-                time: d.day,
-                value: Number(d.realized_pnl_usd || 0),
-                color: Number(d.realized_pnl_usd || 0) >= 0 ? 'rgba(16,185,129,0.7)' : 'rgba(239,68,68,0.7)',
-            }));
-        pnlSeriesRef.current.setData(mapped);
-        chartRef.current?.timeScale().fitContent();
+    const pnlMap = useMemo(() => {
+        const map = {};
+        if (Array.isArray(data)) data.forEach((d) => { if (d.day) map[d.day] = d; });
+        return map;
     }, [data]);
 
+    const monthLabel = new Date(year, month).toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+    const prevMonth = () => setViewDate(new Date(year, month - 1, 1));
+    const nextMonth = () => setViewDate(new Date(year, month + 1, 1));
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
     if (loading) {
-        return <div className="animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-700" style={{ height: 160 }} />;
+        return <div className="animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-700" style={{ height: 200 }} />;
     }
 
-    if (!data || data.length === 0) {
-        return (
-            <div className="flex items-center justify-center text-[11px] text-zinc-400 dark:text-white/30" style={{ height: 160 }}>
-                暂无每日 LP 数据
+    const cells = [];
+    for (let i = 0; i < startOffset; i++) {
+        cells.push(<div key={`e-${i}`} className="rounded-md bg-zinc-100/50 dark:bg-white/[0.02]" style={{ minHeight: 32 }} />);
+    }
+    for (let day = 1; day <= daysInMonth; day++) {
+        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const entry = pnlMap[dateStr];
+        const pnl = entry ? Number(entry.realized_pnl_usd || 0) : null;
+        const isToday = dateStr === todayStr;
+        const isFuture = new Date(year, month, day) > now;
+        cells.push(
+            <div
+                key={day}
+                className={`rounded-md flex items-center justify-center text-[10px] font-semibold tabular-nums ${
+                    isToday ? 'bg-emerald-500/15 ring-1 ring-emerald-500/30'
+                    : isFuture ? 'bg-zinc-100/30 dark:bg-white/[0.015]'
+                    : 'bg-zinc-100/50 dark:bg-white/[0.03]'
+                } ${
+                    pnl !== null
+                        ? pnl >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'
+                        : 'text-zinc-300 dark:text-white/10'
+                }`}
+                style={{ minHeight: 32 }}
+            >
+                {pnl !== null ? `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}` : ''}
             </div>
         );
     }
+    const remainder = (startOffset + daysInMonth) % 7;
+    if (remainder > 0) {
+        for (let i = 0; i < 7 - remainder; i++) {
+            cells.push(<div key={`t-${i}`} className="rounded-md bg-zinc-100/30 dark:bg-white/[0.015]" style={{ minHeight: 32 }} />);
+        }
+    }
 
-    return <div ref={containerRef} className="w-full rounded-lg overflow-hidden" style={{ minHeight: 160 }} />;
+    return (
+        <div>
+            <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5">
+                    <span className="text-[13px] font-bold text-zinc-900 dark:text-white/90">{monthLabel}</span>
+                    <svg className="w-3.5 h-3.5 text-zinc-400 dark:text-white/30" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                        <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
+                    </svg>
+                </div>
+                <div className="flex items-center gap-0.5">
+                    <button onClick={prevMonth} className="p-1 rounded-md hover:bg-zinc-200 dark:hover:bg-white/10 text-zinc-500 dark:text-white/40"><ChevronLeft size={14} /></button>
+                    <button onClick={nextMonth} className="p-1 rounded-md hover:bg-zinc-200 dark:hover:bg-white/10 text-zinc-500 dark:text-white/40"><ChevronRight size={14} /></button>
+                </div>
+            </div>
+            <div className="grid grid-cols-7 gap-1">
+                {PNL_CAL_WEEKDAYS.map((d) => (
+                    <div key={d} className="text-center text-[9px] text-zinc-400 dark:text-white/20 pb-0.5">{d}</div>
+                ))}
+                {cells}
+            </div>
+        </div>
+    );
 }
 
 /* ─── Per-pool PnL list for today ─── */
@@ -993,13 +990,9 @@ export default function AssetManagementPage({
                         </div>
                     </Card>
 
-                    {/* LP daily history bar chart */}
+                    {/* LP daily PnL calendar */}
                     <Card>
-                        <div className="text-[12px] font-bold text-zinc-900 dark:text-white/90">每日 LP 盈亏</div>
-                        <div className="mt-0.5 text-[9px] text-zinc-400 dark:text-white/30">绿色盈利 / 红色亏损，近30天每日平仓盈亏</div>
-                        <div className="mt-2.5 rounded-xl border border-zinc-100 bg-zinc-50/60 p-2 dark:border-white/[0.04] dark:bg-[#0d0f12]">
-                            <LPDailyBarChart data={assetsData.lp?.daily_history} loading={assetsLoading} />
-                        </div>
+                        <PnLCalendar data={assetsData.lp?.daily_history} loading={assetsLoading} />
                         {/* summary stats below chart */}
                         {Array.isArray(assetsData.lp?.windows) && assetsData.lp.windows.length > 0 && (
                             <div className="mt-2.5 grid grid-cols-3 gap-1.5">
