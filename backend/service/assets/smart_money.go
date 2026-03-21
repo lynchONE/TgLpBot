@@ -98,7 +98,7 @@ func (s *Service) GetSmartMoneyOverview(ctx context.Context, days int) (*SmartMo
 	}
 
 	windowStart := dayStart(timeutil.Now()).AddDate(0, 0, -days)
-	statsByWallet, err := s.computeSmartMoneyStats(ctx, wallets, windowStart, dayStart(timeutil.Now()))
+	statsByWallet, err := s.computeSmartMoneyStats(ctx, wallets, windowStart, timeutil.Now())
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +156,7 @@ func (s *Service) GetSmartMoneyWallet(ctx context.Context, address string, chain
 	windowDays := []int{1, 7, 30}
 	windows := make([]SmartMoneyWindowStats, 0, len(windowDays))
 	for _, window := range windowDays {
-		statsByWallet, err := s.computeSmartMoneyStats(ctx, []models.MonitoredWallet{*walletRow}, dayStart(timeutil.Now()).AddDate(0, 0, -window), dayStart(timeutil.Now()))
+		statsByWallet, err := s.computeSmartMoneyStats(ctx, []models.MonitoredWallet{*walletRow}, dayStart(timeutil.Now()).AddDate(0, 0, -window), timeutil.Now())
 		if err != nil {
 			return nil, err
 		}
@@ -199,7 +199,7 @@ func (s *Service) GetSmartMoneyLeaderboard(ctx context.Context, metric string, d
 	metric = normalizeLeaderboardMetric(metric)
 
 	start := dayStart(timeutil.Now()).AddDate(0, 0, -days)
-	end := dayStart(timeutil.Now())
+	end := timeutil.Now()
 	statsByWallet, err := s.computeSmartMoneyStats(ctx, wallets, start, end)
 	if err != nil {
 		return nil, err

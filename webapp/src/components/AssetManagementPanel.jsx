@@ -2,15 +2,18 @@ import React, { startTransition, useCallback, useEffect, useMemo, useRef, useSta
 import { createChart, AreaSeries, HistogramSeries, ColorType } from 'lightweight-charts';
 import {
   Activity,
+  AlertTriangle,
   ArrowRightLeft,
   Ban,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   ClipboardList,
   Crown,
   Medal,
   Plus,
   RefreshCw,
+  Search,
   Server,
   Settings2,
   Shield,
@@ -472,6 +475,12 @@ export default function AssetManagementPanel({
   const [smartMoneyRefreshing, setSmartMoneyRefreshing] = useState(false);
   const [smartMoneyError, setSmartMoneyError] = useState('');
   const [selectedWalletId, setSelectedWalletId] = useState('');
+  const [smSubTab, setSmSubTab] = useState('wallets');
+  const [smWalletSearch, setSmWalletSearch] = useState('');
+  const [smWalletPage, setSmWalletPage] = useState(0);
+  const [smLeaderSearch, setSmLeaderSearch] = useState('');
+  const [smLeaderPage, setSmLeaderPage] = useState(0);
+  const [smDrillWalletId, setSmDrillWalletId] = useState('');
 
   const [opsLoading, setOpsLoading] = useState(false);
   const [opsError, setOpsError] = useState('');
@@ -784,6 +793,37 @@ export default function AssetManagementPanel({
     const wallets = Array.isArray(smartMoneyOverview?.wallets) ? smartMoneyOverview.wallets : [];
     return wallets.find((item) => walletKey(item) === selectedWalletId) || null;
   }, [selectedWalletId, smartMoneyOverview]);
+
+  const SM_PAGE_SIZE = 10;
+
+  const filteredWallets = useMemo(() => {
+    const list = Array.isArray(smartMoneyOverview?.wallets) ? smartMoneyOverview.wallets : [];
+    if (!smWalletSearch.trim()) return list;
+    const q = smWalletSearch.trim().toLowerCase();
+    return list.filter((w) => {
+      const addr = String(w.address || '').toLowerCase();
+      const label = String(w.label || '').toLowerCase();
+      return addr.includes(q) || label.includes(q);
+    });
+  }, [smartMoneyOverview, smWalletSearch]);
+
+  const walletTotalPages = Math.max(1, Math.ceil(filteredWallets.length / SM_PAGE_SIZE));
+  const pagedWallets = useMemo(() => filteredWallets.slice(smWalletPage * SM_PAGE_SIZE, (smWalletPage + 1) * SM_PAGE_SIZE), [filteredWallets, smWalletPage]);
+
+  const filteredLeaderboard = useMemo(() => {
+    const list = Array.isArray(smartMoneyLeaderboard?.list) ? smartMoneyLeaderboard.list : [];
+    if (!smLeaderSearch.trim()) return list;
+    const q = smLeaderSearch.trim().toLowerCase();
+    return list.filter((item) => {
+      const addr = String(item.address || '').toLowerCase();
+      const label = String(item.label || '').toLowerCase();
+      return addr.includes(q) || label.includes(q);
+    });
+  }, [smartMoneyLeaderboard, smLeaderSearch]);
+
+  const leaderTotalPages = Math.max(1, Math.ceil(filteredLeaderboard.length / SM_PAGE_SIZE));
+  const pagedLeaderboard = useMemo(() => filteredLeaderboard.slice(smLeaderPage * SM_PAGE_SIZE, (smLeaderPage + 1) * SM_PAGE_SIZE), [filteredLeaderboard, smLeaderPage]);
+
   const isRefreshing = assetLoading || assetRefreshing || smartMoneyLoading || smartMoneyRefreshing || opsLoading || systemLoading;
 
   const subtitle = activeTab === 'smart_money'
@@ -975,14 +1015,32 @@ export default function AssetManagementPanel({
             <MetricCard label="代币种类" value={`${Number(smartMoneyOverview?.summary?.tracked_token_count || 0)} 个`} />
           </div>
 
-          <div className="am-two-col">
+          {/* sub-tab pills */}
+          <div className="am-pill-group">
+            <button type="button" className={`am-pill ${smSubTab === 'wallets' ? 'active' : ''}`} onClick={() => { setSmSubTab('wallets'); setSmDrillWalletId(''); }}>钱包总览</button>
+            <button type="button" className={`am-pill ${smSubTab === 'leaderboard' ? 'active' : ''}`} onClick={() => { setSmSubTab('leaderboard'); setSmDrillWalletId(''); }}>排行榜</button>
+          </div>
+
+          {/* ── wallets sub-tab ── */}
+          {smSubTab === 'wallets' && !smDrillWalletId ? (
             <div className="am-card">
               <div className="am-card-header">
                 <div className="am-card-title">钱包总览</div>
-                <span className="am-badge">{Array.isArray(smartMoneyOverview?.wallets) ? smartMoneyOverview.wallets.length : 0} 个</span>
+                <span className="am-badge">{filteredWallets.length} 个</span>
+              </div>
+              <div style={{ position: 'relative', marginTop: 8 }}>
+                <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', opacity: 0.35 }} />
+                <input
+                  type="text"
+                  value={smWalletSearch}
+                  onChange={(e) => { setSmWalletSearch(e.target.value); setSmWalletPage(0); }}
+                  placeholder="搜索地址或标签"
+                  className="am-search-input"
+                  style={{ width: '100%', padding: '7px 12px 7px 32px', borderRadius: 10, border: '1px solid rgba(136,157,191,0.12)', background: 'rgba(136,157,191,0.04)', fontSize: 12, outline: 'none', color: 'inherit' }}
+                />
               </div>
               <div className="am-list">
-                {Array.isArray(smartMoneyOverview?.wallets) && smartMoneyOverview.wallets.length > 0 ? smartMoneyOverview.wallets.map((wallet) => {
+                {pagedWallets.length > 0 ? pagedWallets.map((wallet) => {
                   const assets = wallet.assets || {};
                   const total = Number(assets.total_usd || 0);
                   const nativePct = total > 0 ? (Number(assets.native_usd || 0) / total * 100) : 0;
@@ -990,7 +1048,7 @@ export default function AssetManagementPanel({
                   const tokenPct = total > 0 ? (Number(assets.tracked_token_usd || 0) / total * 100) : 0;
                   const lpPct = total > 0 ? (Number(assets.open_lp_usd || 0) / total * 100) : 0;
                   return (
-                    <button key={walletKey(wallet)} type="button" className={`am-list-item am-list-btn ${walletKey(wallet) === selectedWalletId ? 'selected' : ''}`} onClick={() => setSelectedWalletId(walletKey(wallet))}>
+                    <button key={walletKey(wallet)} type="button" className={`am-list-item am-list-btn ${walletKey(wallet) === selectedWalletId ? 'selected' : ''}`} onClick={() => { const wk = walletKey(wallet); setSelectedWalletId(wk); setSmDrillWalletId(wk); }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
                         <WalletAvatar address={wallet.address} size={28} />
                         <div style={{ minWidth: 0 }}>
@@ -1016,34 +1074,96 @@ export default function AssetManagementPanel({
                   );
                 }) : <EmptyState text={smartMoneyLoading ? '正在加载...' : '暂无钱包数据'} />}
               </div>
+              {walletTotalPages > 1 && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, paddingTop: 8 }}>
+                  <button type="button" disabled={smWalletPage <= 0} onClick={() => setSmWalletPage(smWalletPage - 1)} style={{ padding: '4px 10px', borderRadius: 8, border: '1px solid rgba(136,157,191,0.15)', background: 'transparent', fontSize: 11, cursor: smWalletPage <= 0 ? 'default' : 'pointer', opacity: smWalletPage <= 0 ? 0.3 : 1, color: 'inherit' }}>上一页</button>
+                  <span style={{ fontSize: 11, opacity: 0.5 }}>{smWalletPage + 1} / {walletTotalPages}</span>
+                  <button type="button" disabled={smWalletPage >= walletTotalPages - 1} onClick={() => setSmWalletPage(smWalletPage + 1)} style={{ padding: '4px 10px', borderRadius: 8, border: '1px solid rgba(136,157,191,0.15)', background: 'transparent', fontSize: 11, cursor: smWalletPage >= walletTotalPages - 1 ? 'default' : 'pointer', opacity: smWalletPage >= walletTotalPages - 1 ? 0.3 : 1, color: 'inherit' }}>下一页</button>
+                </div>
+              )}
             </div>
+          ) : null}
 
+          {/* ── wallet drill-in detail ── */}
+          {smSubTab === 'wallets' && smDrillWalletId ? (
             <div className="am-card">
-              <div className="am-card-title">钱包详情</div>
+              <button type="button" onClick={() => setSmDrillWalletId('')} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginBottom: 8, opacity: 0.55, color: 'inherit' }}>
+                <ChevronLeft size={14} />返回列表
+              </button>
               {selectedWallet && smartMoneyWallet ? (
                 <div className="am-stack">
+                  {/* wallet header */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0' }}>
                     <WalletAvatar address={selectedWallet.address} size={36} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div className="am-item-title" style={{ fontSize: 13 }}>{walletLabel(selectedWallet)}</div>
-                      <div className="am-item-sub">{formatChain(selectedWallet.chain_id)} · 今日收益 {formatUsd(smartMoneyWallet.today?.estimated_realized_pnl_usd)}</div>
+                      <div className="am-item-sub">{formatChain(selectedWallet.chain_id)} · 总资产 <strong>{formatUsdCompact(smartMoneyWallet.wallet?.assets?.total_usd)}</strong></div>
                     </div>
-                    <strong style={{ fontSize: 16 }}>{formatUsdCompact(smartMoneyWallet.wallet?.assets?.total_usd)}</strong>
                   </div>
-                  <div className="am-stat-grid">
+
+                  {/* today activity grid */}
+                  <div className="am-stat-grid am-stat-grid-3">
                     <div className="am-stat">
                       <div className="am-stat-label">今日收益</div>
-                      <div className="am-stat-value">{formatUsd(smartMoneyWallet.today?.estimated_realized_pnl_usd)}</div>
+                      <div className="am-stat-value" style={{ color: Number(smartMoneyWallet.today?.estimated_realized_pnl_usd || 0) >= 0 ? '#59f09d' : '#ff6b6b' }}>{formatUsd(smartMoneyWallet.today?.estimated_realized_pnl_usd)}</div>
                     </div>
                     <div className="am-stat">
-                      <div className="am-stat-label">Add / Remove</div>
-                      <div className="am-stat-value">{Number(smartMoneyWallet.today?.add_count || 0)} / {Number(smartMoneyWallet.today?.remove_count || 0)}</div>
+                      <div className="am-stat-label">加仓次数</div>
+                      <div className="am-stat-value">{Number(smartMoneyWallet.today?.add_count || 0)} 次</div>
+                    </div>
+                    <div className="am-stat">
+                      <div className="am-stat-label">撤仓次数</div>
+                      <div className="am-stat-value">{Number(smartMoneyWallet.today?.remove_count || 0)} 次</div>
+                    </div>
+                    <div className="am-stat">
+                      <div className="am-stat-label">活跃池数</div>
+                      <div className="am-stat-value">{Number(smartMoneyWallet.today?.active_pool_count || 0)} 池</div>
+                    </div>
+                    <div className="am-stat">
+                      <div className="am-stat-label">已匹配</div>
+                      <div className="am-stat-value">{Number(smartMoneyWallet.today?.matched_remove_count || 0)} 次</div>
+                    </div>
+                    <div className="am-stat">
+                      <div className="am-stat-label">未匹配</div>
+                      <div className="am-stat-value" style={{ color: Number(smartMoneyWallet.today?.unmatched_remove_count || 0) > 0 ? '#ffae42' : undefined }}>{Number(smartMoneyWallet.today?.unmatched_remove_count || 0)} 次</div>
                     </div>
                   </div>
+
+                  {/* asset distribution bar */}
+                  {(() => {
+                    const wa = smartMoneyWallet.wallet?.assets || {};
+                    const total = Number(wa.total_usd || 0);
+                    if (total <= 0) return null;
+                    const nativePct = Number(wa.native_usd || 0) / total * 100;
+                    const stablePct = Number(wa.stable_usd || 0) / total * 100;
+                    const tokenPct = Number(wa.tracked_token_usd || 0) / total * 100;
+                    const lpPct = Number(wa.open_lp_usd || 0) / total * 100;
+                    return (
+                      <div style={{ borderRadius: 10, border: '1px solid rgba(136,157,191,0.08)', padding: '10px 12px', background: 'rgba(136,157,191,0.03)' }}>
+                        <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', opacity: 0.4, marginBottom: 8 }}>资产分布</div>
+                        <div style={{ height: 6, borderRadius: 3, overflow: 'hidden', background: 'rgba(136,157,191,0.08)', display: 'flex' }}>
+                          {nativePct > 0 && <div style={{ width: `${nativePct}%`, height: '100%', background: '#52d1ff' }} />}
+                          {stablePct > 0 && <div style={{ width: `${stablePct}%`, height: '100%', background: '#59f09d' }} />}
+                          {tokenPct > 0 && <div style={{ width: `${tokenPct}%`, height: '100%', background: '#c792ff' }} />}
+                          {lpPct > 0 && <div style={{ width: `${lpPct}%`, height: '100%', background: '#ffae42' }} />}
+                        </div>
+                        <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: '2px 12px', fontSize: 10, opacity: 0.5 }}>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: 3, background: '#52d1ff', flexShrink: 0 }} />原生 {formatUsdCompact(wa.native_usd)}</span>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: 3, background: '#59f09d', flexShrink: 0 }} />稳定 {formatUsdCompact(wa.stable_usd)}</span>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: 3, background: '#c792ff', flexShrink: 0 }} />代币 {formatUsdCompact(wa.tracked_token_usd)}</span>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: 3, background: '#ffae42', flexShrink: 0 }} />LP {formatUsdCompact(wa.open_lp_usd)}</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* 30-day trend */}
                   <div className="am-chart-box">
                     <div className="am-chart-label">30 天趋势</div>
                     <SparklineChart points={Array.isArray(smartMoneyWallet.history) ? smartMoneyWallet.history.map((item) => ({ value: Number(item?.total_usd || 0) })) : []} />
                   </div>
+
+                  {/* window stats */}
                   <div className="am-stat-grid am-stat-grid-3">
                     {Array.isArray(smartMoneyWallet.windows) ? smartMoneyWallet.windows.map((item) => (
                       <div key={item.days} className="am-stat">
@@ -1053,46 +1173,82 @@ export default function AssetManagementPanel({
                       </div>
                     )) : null}
                   </div>
-                </div>
-              ) : <EmptyState text="选择钱包查看明细" />}
-            </div>
-          </div>
 
-          <div className="am-card">
-            <div className="am-card-header">
-              <div className="am-card-title">排行榜</div>
-              <div className="am-pill-group">
-                {LEADERBOARD_METRICS.map((item) => (
-                  <button key={item.key} type="button" className={`am-pill ${leaderboardMetric === item.key ? 'active' : ''}`} onClick={() => setLeaderboardMetric(item.key)}>
-                    {item.label}
-                  </button>
-                ))}
-              </div>
+                  {/* warnings */}
+                  {Array.isArray(smartMoneyWallet.warnings) && smartMoneyWallet.warnings.length > 0 && (
+                    <div className="am-stack" style={{ gap: 6 }}>
+                      {smartMoneyWallet.warnings.map((warn, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, borderRadius: 10, border: '1px solid rgba(255,174,66,0.2)', background: 'rgba(255,174,66,0.06)', padding: '8px 12px' }}>
+                          <AlertTriangle size={14} style={{ flexShrink: 0, color: '#ffae42', marginTop: 1 }} />
+                          <span style={{ fontSize: 11, color: '#ffae42' }}>{typeof warn === 'string' ? warn : warn.message || JSON.stringify(warn)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : <EmptyState text={smartMoneyLoading ? '正在加载...' : '选择钱包查看明细'} />}
             </div>
-            <div className="am-list">
-              {Array.isArray(smartMoneyLeaderboard?.list) && smartMoneyLeaderboard.list.length > 0 ? smartMoneyLeaderboard.list.map((item) => {
-                const metricText = leaderboardMetric === 'yield_rate' ? formatPct(item.metric_value) : leaderboardMetric === 'participation' ? `${Number(item.metric_value || 0)} 次` : formatUsd(item.metric_value);
-                const pnl = Number(item.estimated_realized_pnl_usd || 0);
-                return (
-                  <div key={`${item.rank}:${item.address}`} className={`am-list-item ${item.rank <= 3 ? 'am-top-rank' : ''}`}>
-                    <div className="am-rank-row">
-                      <RankBadge rank={Number(item.rank || 0)} />
-                      <WalletAvatar address={item.address} size={30} />
-                      <div>
-                        <div className="am-item-title">{item.label || `${item.address.slice(0, 6)}...${item.address.slice(-4)}`}</div>
-                        <div className="am-item-sub">{formatChain(item.chain_id)} · {Number(item.active_pool_count || 0)} 池 · {Number(item.participation_count || 0)} 次操作</div>
+          ) : null}
+
+          {/* ── leaderboard sub-tab ── */}
+          {smSubTab === 'leaderboard' ? (
+            <div className="am-card">
+              <div className="am-card-header">
+                <div className="am-card-title">排行榜</div>
+                <div className="am-pill-group">
+                  {LEADERBOARD_METRICS.map((item) => (
+                    <button key={item.key} type="button" className={`am-pill ${leaderboardMetric === item.key ? 'active' : ''}`} onClick={() => setLeaderboardMetric(item.key)}>
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {smartMoneyLeaderboard?.description && (
+                <div style={{ fontSize: 10, opacity: 0.4, marginTop: 4 }}>{smartMoneyLeaderboard.description} · {smartMoneyLeaderboard.start_day} ~ {smartMoneyLeaderboard.end_day}</div>
+              )}
+              <div style={{ position: 'relative', marginTop: 8 }}>
+                <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', opacity: 0.35 }} />
+                <input
+                  type="text"
+                  value={smLeaderSearch}
+                  onChange={(e) => { setSmLeaderSearch(e.target.value); setSmLeaderPage(0); }}
+                  placeholder="搜索地址或标签"
+                  className="am-search-input"
+                  style={{ width: '100%', padding: '7px 12px 7px 32px', borderRadius: 10, border: '1px solid rgba(136,157,191,0.12)', background: 'rgba(136,157,191,0.04)', fontSize: 12, outline: 'none', color: 'inherit' }}
+                />
+              </div>
+              <div className="am-list">
+                {pagedLeaderboard.length > 0 ? pagedLeaderboard.map((item) => {
+                  const metricText = leaderboardMetric === 'yield_rate' ? formatPct(item.metric_value) : leaderboardMetric === 'participation' ? `${Number(item.metric_value || 0)} 次` : formatUsd(item.metric_value);
+                  const pnl = Number(item.estimated_realized_pnl_usd || 0);
+                  return (
+                    <div key={`${item.rank}:${item.address}`} className={`am-list-item ${item.rank <= 3 ? 'am-top-rank' : ''}`}>
+                      <div className="am-rank-row">
+                        <RankBadge rank={Number(item.rank || 0)} />
+                        <WalletAvatar address={item.address} size={30} />
+                        <div>
+                          <div className="am-item-title">{item.label || `${item.address.slice(0, 6)}...${item.address.slice(-4)}`}</div>
+                          <div className="am-item-sub">{formatChain(item.chain_id)} · {Number(item.active_pool_count || 0)} 池 · {Number(item.participation_count || 0)} 次操作</div>
+                        </div>
+                      </div>
+                      <div className="am-list-end" style={{ flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                        <strong style={{ color: leaderboardMetric === 'pnl' ? (pnl >= 0 ? '#59f09d' : '#ff6b6b') : undefined }}>{metricText}</strong>
+                        {leaderboardMetric !== 'pnl' && <span className="am-item-sub" style={{ color: pnl >= 0 ? '#59f09d' : '#ff6b6b' }}>{pnl >= 0 ? '+' : ''}{formatUsdCompact(pnl)}</span>}
+                        {leaderboardMetric === 'pnl' && Number(item.yield_rate || 0) !== 0 && <span className="am-item-sub">{formatPct(item.yield_rate)}</span>}
                       </div>
                     </div>
-                    <div className="am-list-end" style={{ flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
-                      <strong style={{ color: leaderboardMetric === 'pnl' ? (pnl >= 0 ? '#59f09d' : '#ff6b6b') : undefined }}>{metricText}</strong>
-                      {leaderboardMetric !== 'pnl' && <span className="am-item-sub" style={{ color: pnl >= 0 ? '#59f09d' : '#ff6b6b' }}>{pnl >= 0 ? '+' : ''}{formatUsdCompact(pnl)}</span>}
-                      {leaderboardMetric === 'pnl' && Number(item.yield_rate || 0) !== 0 && <span className="am-item-sub">{formatPct(item.yield_rate)}</span>}
-                    </div>
-                  </div>
-                );
-              }) : <EmptyState text={smartMoneyLoading ? '正在加载...' : '暂无排行榜数据'} />}
+                  );
+                }) : <EmptyState text={smartMoneyLoading ? '正在加载...' : '暂无排行榜数据'} />}
+              </div>
+              {leaderTotalPages > 1 && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, paddingTop: 8 }}>
+                  <button type="button" disabled={smLeaderPage <= 0} onClick={() => setSmLeaderPage(smLeaderPage - 1)} style={{ padding: '4px 10px', borderRadius: 8, border: '1px solid rgba(136,157,191,0.15)', background: 'transparent', fontSize: 11, cursor: smLeaderPage <= 0 ? 'default' : 'pointer', opacity: smLeaderPage <= 0 ? 0.3 : 1, color: 'inherit' }}>上一页</button>
+                  <span style={{ fontSize: 11, opacity: 0.5 }}>{smLeaderPage + 1} / {leaderTotalPages}</span>
+                  <button type="button" disabled={smLeaderPage >= leaderTotalPages - 1} onClick={() => setSmLeaderPage(smLeaderPage + 1)} style={{ padding: '4px 10px', borderRadius: 8, border: '1px solid rgba(136,157,191,0.15)', background: 'transparent', fontSize: 11, cursor: smLeaderPage >= leaderTotalPages - 1 ? 'default' : 'pointer', opacity: smLeaderPage >= leaderTotalPages - 1 ? 0.3 : 1, color: 'inherit' }}>下一页</button>
+                </div>
+              )}
             </div>
-          </div>
+          ) : null}
         </div>
       ) : null}
 
