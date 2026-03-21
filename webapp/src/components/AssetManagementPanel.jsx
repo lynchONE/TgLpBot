@@ -1188,7 +1188,7 @@ export default function AssetManagementPanel({
 
             <div className="am-card">
               <div className="am-card-header">
-                <div className="am-card-title"><Zap size={14} /> Private Zap</div>
+                <div className="am-card-title"><Zap size={14} /> 私有 Zap</div>
                 <span className="am-badge">{Array.isArray(privateZap?.chains) ? privateZap.chains.length : 0} 条链</span>
               </div>
               <div className="am-list">
@@ -1198,7 +1198,7 @@ export default function AssetManagementPanel({
                       <div className="am-item-title">{String(chain || '').toUpperCase()}</div>
                       <div className="am-item-sub">清空绑定地址与缓存</div>
                     </div>
-                    <button type="button" className="am-action-btn" onClick={() => refreshSystemAfter(() => invalidateAdminPrivateZap({ apiBaseUrl, initData, chain }))}>Invalidate</button>
+                    <button type="button" className="am-action-btn" onClick={() => refreshSystemAfter(() => invalidateAdminPrivateZap({ apiBaseUrl, initData, chain }))}>清空</button>
                   </div>
                 )) : <EmptyState text={systemLoading ? '正在加载...' : '暂无数据'} />}
               </div>
@@ -1247,31 +1247,65 @@ export default function AssetManagementPanel({
                     <div className="am-item-sub">来源 {group.effective_source || '--'} · {group.effective_url_masked || '--'}</div>
                   </div>
                   <div className="am-list">
-                    {Array.isArray(group.endpoints) && group.endpoints.length > 0 ? group.endpoints.map((endpoint) => (
-                      <div key={endpoint.id} className="am-list-item am-list-item-wrap">
-                        <div>
-                          <div className="am-item-title">{endpoint.name || `#${endpoint.id}`}</div>
-                          <div className="am-item-sub">{endpoint.url_masked || endpoint.url || '--'}</div>
+                    {Array.isArray(group.endpoints) && group.endpoints.length > 0 ? group.endpoints.map((endpoint) => {
+                      const latency = Number(endpoint.last_latency_ms || 0);
+                      const failures = Number(endpoint.consecutive_failures || 0);
+                      const lastChecked = endpoint.last_checked_at ? new Date(endpoint.last_checked_at).toLocaleTimeString() : '';
+                      const lastError = String(endpoint.last_error || '').trim();
+                      const isAvailable = endpoint.status === 'available';
+                      const statusLabel = endpoint.is_current ? '使用中' : isAvailable ? '可用' : '不可用';
+                      const statusClass = endpoint.is_current ? 'am-badge-ok' : isAvailable ? '' : 'am-badge-warn';
+                      return (
+                        <div key={endpoint.id} className="am-list-item am-list-item-wrap">
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div className="am-item-title">{endpoint.name || `#${endpoint.id}`}</div>
+                            <div className="am-item-sub">{endpoint.url_masked || endpoint.url || '--'}</div>
+                            <div className="am-item-sub" style={{ marginTop: 3, display: 'flex', flexWrap: 'wrap', gap: '6px 12px', alignItems: 'center' }}>
+                              {latency > 0 && (
+                                <span style={{ color: latency < 200 ? '#59f09d' : latency < 500 ? '#ffae42' : '#ff6b6b', fontWeight: 600, fontSize: 11 }}>
+                                  {latency}ms
+                                </span>
+                              )}
+                              {lastChecked && <span>检测: {lastChecked}</span>}
+                              {failures > 0 && <span style={{ color: '#ff6b6b' }}>连续失败 {failures} 次</span>}
+                              {endpoint.disabled_until && <span style={{ color: '#ffae42' }}>停用至 {new Date(endpoint.disabled_until).toLocaleDateString()}</span>}
+                            </div>
+                            {lastError && (
+                              <div className="am-item-sub" style={{ marginTop: 2, color: '#ff6b6b', wordBreak: 'break-all' }}>
+                                {lastError.length > 80 ? lastError.slice(0, 80) + '...' : lastError}
+                              </div>
+                            )}
+                          </div>
+                          <div className="am-btn-group">
+                            <span className={`am-badge ${statusClass}`}>{statusLabel}</span>
+                            {!endpoint.is_current && <button type="button" className="am-icon-btn" title="切换为当前" onClick={() => refreshSystemAfter(() => switchAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: endpoint.id }))}><ArrowRightLeft size={13} /></button>}
+                            <button type="button" className="am-icon-btn" title="检测连通性" onClick={async (e) => {
+                              const btn = e.currentTarget;
+                              btn.disabled = true;
+                              btn.style.opacity = '0.5';
+                              try {
+                                await refreshSystemAfter(() => checkAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: endpoint.id }));
+                              } finally {
+                                btn.disabled = false;
+                                btn.style.opacity = '';
+                              }
+                            }}><CheckCircle2 size={13} /></button>
+                            {isAvailable && !endpoint.is_current && <button type="button" className="am-icon-btn" title="下月停用" onClick={() => refreshSystemAfter(() => disableAdminRPCEndpointNextMonth({ apiBaseUrl, initData, endpointId: endpoint.id }))}><Ban size={13} /></button>}
+                            {!isAvailable && <button type="button" className="am-icon-btn" title="启用" onClick={() => refreshSystemAfter(() => enableAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: endpoint.id }))}><CheckCircle2 size={13} /></button>}
+                            {!endpoint.is_current && <button type="button" className="am-icon-btn am-icon-btn-danger" title="删除" onClick={() => refreshSystemAfter(() => deleteAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: endpoint.id }))}><Trash2 size={13} /></button>}
+                          </div>
+                          <label className="am-rename">
+                            <span>改名</span>
+                            <input defaultValue={endpoint.name || ''} onBlur={(e) => {
+                              const nextName = String(e.target.value || '').trim();
+                              if (nextName && nextName !== String(endpoint.name || '').trim()) {
+                                refreshSystemAfter(() => renameAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: endpoint.id, name: nextName }));
+                              }
+                            }} />
+                          </label>
                         </div>
-                        <div className="am-btn-group">
-                          <span className={`am-badge ${endpoint.is_current ? 'am-badge-ok' : ''}`}>{endpoint.is_current ? 'IN USE' : endpoint.status || '--'}</span>
-                          <button type="button" className="am-icon-btn" title="切换" onClick={() => refreshSystemAfter(() => switchAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: endpoint.id }))}><ArrowRightLeft size={13} /></button>
-                          <button type="button" className="am-icon-btn" title="检测" onClick={() => refreshSystemAfter(() => checkAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: endpoint.id }))}><CheckCircle2 size={13} /></button>
-                          <button type="button" className="am-icon-btn" title="下月停用" onClick={() => refreshSystemAfter(() => disableAdminRPCEndpointNextMonth({ apiBaseUrl, initData, endpointId: endpoint.id }))}><Ban size={13} /></button>
-                          <button type="button" className="am-icon-btn" title="启用" onClick={() => refreshSystemAfter(() => enableAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: endpoint.id }))}><CheckCircle2 size={13} /></button>
-                          <button type="button" className="am-icon-btn am-icon-btn-danger" title="删除" onClick={() => refreshSystemAfter(() => deleteAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: endpoint.id }))}><Trash2 size={13} /></button>
-                        </div>
-                        <label className="am-rename">
-                          <span>改名</span>
-                          <input defaultValue={endpoint.name || ''} onBlur={(e) => {
-                            const nextName = String(e.target.value || '').trim();
-                            if (nextName && nextName !== String(endpoint.name || '').trim()) {
-                              refreshSystemAfter(() => renameAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: endpoint.id, name: nextName }));
-                            }
-                          }} />
-                        </label>
-                      </div>
-                    )) : <EmptyState text="暂无端点" />}
+                      );
+                    }) : <EmptyState text="暂无端点" />}
                   </div>
                 </div>
               )) : <EmptyState text={systemLoading ? '正在加载...' : '暂无 RPC 数据'} />}
