@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, AreaSeries, HistogramSeries, ColorType } from 'lightweight-charts';
 import {
   Activity,
@@ -460,6 +460,7 @@ export default function AssetManagementPanel({
   const [historyMetric, setHistoryMetric] = useState('total_usd');
   const [assetState, setAssetState] = useState({ overview: null, history: null, lp: null });
   const [assetLoading, setAssetLoading] = useState(false);
+  const [assetRefreshing, setAssetRefreshing] = useState(false);
   const [assetError, setAssetError] = useState('');
 
   const [smartMoneyDays, setSmartMoneyDays] = useState(7);
@@ -468,6 +469,7 @@ export default function AssetManagementPanel({
   const [smartMoneyWallet, setSmartMoneyWallet] = useState(null);
   const [smartMoneyLeaderboard, setSmartMoneyLeaderboard] = useState(null);
   const [smartMoneyLoading, setSmartMoneyLoading] = useState(false);
+  const [smartMoneyRefreshing, setSmartMoneyRefreshing] = useState(false);
   const [smartMoneyError, setSmartMoneyError] = useState('');
   const [selectedWalletId, setSelectedWalletId] = useState('');
 
@@ -495,38 +497,91 @@ export default function AssetManagementPanel({
     }
   }, [activeTab, tabs]);
 
-  const loadAssets = useCallback(async () => {
+  const hasAssetData = Boolean(assetState.overview || assetState.history || assetState.lp);
+  const hasSmartMoneyData = Boolean(smartMoneyOverview || smartMoneyLeaderboard || smartMoneyWallet);
+  const hasAssetDataRef = useRef(false);
+  const hasSmartMoneyDataRef = useRef(false);
+
+  useEffect(() => {
+    hasAssetDataRef.current = hasAssetData;
+  }, [hasAssetData]);
+
+  useEffect(() => {
+    hasSmartMoneyDataRef.current = hasSmartMoneyData;
+  }, [hasSmartMoneyData]);
+
+  const loadAssets = useCallback(async ({ forceRefresh = false } = {}) => {
     if (!hasInitData) return;
-    setAssetLoading(true);
+    if (hasAssetDataRef.current) setAssetRefreshing(true);
+    else setAssetLoading(true);
     setAssetError('');
     try {
-      const [overview, history, lp] = await Promise.all([
-        fetchAssetOverview({ apiBaseUrl, initData }),
-        fetchAssetHistory({ apiBaseUrl, initData, days: historyDays }),
-        fetchAssetLPStats({ apiBaseUrl, initData }),
+      const overviewPromise = fetchAssetOverview({ apiBaseUrl, initData, forceRefresh });
+      const historyPromise = fetchAssetHistory({ apiBaseUrl, initData, days: historyDays, forceRefresh });
+      const lpPromise = fetchAssetLPStats({ apiBaseUrl, initData, forceRefresh });
+
+      overviewPromise
+        .then((overview) => {
+          startTransition(() => {
+            setAssetState((prev) => ({ ...prev, overview: overview || null }));
+          });
+        })
+        .catch(() => {});
+
+      const [overviewResult, historyResult, lpResult] = await Promise.allSettled([
+        overviewPromise,
+        historyPromise,
+        lpPromise,
       ]);
-      setAssetState({ overview: overview || null, history: history || null, lp: lp || null });
+
+      const nextState = {};
+      const errors = [];
+
+      if (overviewResult.status === 'fulfilled') {
+        nextState.overview = overviewResult.value || null;
+      } else {
+        errors.push(errorText(overviewResult.reason));
+      }
+      if (historyResult.status === 'fulfilled') {
+        nextState.history = historyResult.value || null;
+      } else {
+        errors.push(errorText(historyResult.reason));
+      }
+      if (lpResult.status === 'fulfilled') {
+        nextState.lp = lpResult.value || null;
+      } else {
+        errors.push(errorText(lpResult.reason));
+      }
+
+      startTransition(() => {
+        setAssetState((prev) => ({ ...prev, ...nextState }));
+      });
+      setAssetError(errors.find(Boolean) || '');
     } catch (err) {
       setAssetError(String(err?.message || err));
     } finally {
       setAssetLoading(false);
+      setAssetRefreshing(false);
     }
   }, [apiBaseUrl, hasInitData, historyDays, initData]);
 
-  const loadSmartMoney = useCallback(async () => {
+  const loadSmartMoney = useCallback(async ({ forceRefresh = false } = {}) => {
     if (!hasInitData || !isAdmin) return;
-    setSmartMoneyLoading(true);
+    if (hasSmartMoneyDataRef.current) setSmartMoneyRefreshing(true);
+    else setSmartMoneyLoading(true);
     setSmartMoneyError('');
     try {
       const [overviewResult, leaderboardResult] = await Promise.allSettled([
-        fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days: smartMoneyDays }),
-        fetchAdminSmartMoneyLeaderboard({ apiBaseUrl, initData, days: smartMoneyDays, metric: leaderboardMetric, limit: 20 }),
+        fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days: smartMoneyDays, forceRefresh }),
+        fetchAdminSmartMoneyLeaderboard({ apiBaseUrl, initData, days: smartMoneyDays, metric: leaderboardMetric, limit: 20, forceRefresh }),
       ]);
       const overview = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
       const leaderboard = leaderboardResult.status === 'fulfilled' ? leaderboardResult.value : null;
       const wallets = Array.isArray(overview?.wallets) ? overview.wallets : [];
-      setSmartMoneyOverview(overview || null);
-      setSmartMoneyLeaderboard(leaderboard || null);
+      startTransition(() => {
+        if (overviewResult.status === 'fulfilled') setSmartMoneyOverview(overview || null);
+        if (leaderboardResult.status === 'fulfilled') setSmartMoneyLeaderboard(leaderboard || null);
+      });
       if (!wallets.some((item) => walletKey(item) === selectedWalletId)) {
         setSelectedWalletId(wallets[0] ? walletKey(wallets[0]) : '');
       }
@@ -541,6 +596,7 @@ export default function AssetManagementPanel({
       setSmartMoneyError(errorText(err));
     } finally {
       setSmartMoneyLoading(false);
+      setSmartMoneyRefreshing(false);
     }
   }, [apiBaseUrl, hasInitData, initData, isAdmin, leaderboardMetric, selectedWalletId, smartMoneyDays]);
 
@@ -606,7 +662,7 @@ export default function AssetManagementPanel({
     if (activeTab !== 'my_assets') return undefined;
     loadAssets();
     if (!hasInitData) return undefined;
-    const timer = setInterval(loadAssets, Math.max(15, Number(refreshInterval || 10)) * 1000);
+    const timer = setInterval(() => loadAssets(), Math.max(60, Number(refreshInterval || 10)) * 1000);
     return () => clearInterval(timer);
   }, [activeTab, hasInitData, loadAssets, refreshInterval]);
 
@@ -614,49 +670,56 @@ export default function AssetManagementPanel({
     if (activeTab !== 'smart_money') return undefined;
     loadSmartMoney();
     if (!hasInitData || !isAdmin) return undefined;
-    const timer = setInterval(loadSmartMoney, Math.max(20, Number(refreshInterval || 10)) * 1000);
+    const timer = setInterval(() => loadSmartMoney(), Math.max(60, Number(refreshInterval || 10)) * 1000);
     return () => clearInterval(timer);
   }, [activeTab, hasInitData, isAdmin, loadSmartMoney, refreshInterval]);
+
+  const loadSmartMoneyWallet = useCallback(async ({ wallet, forceRefresh = false } = {}) => {
+    if (!wallet || !hasInitData || !isAdmin) return;
+    try {
+      const detail = await fetchAdminSmartMoneyWallet({
+        apiBaseUrl,
+        initData,
+        address: wallet.address,
+        chainId: wallet.chain_id,
+        days: smartMoneyDays,
+        forceRefresh,
+      });
+      startTransition(() => {
+        setSmartMoneyWallet(detail || null);
+      });
+      setSmartMoneyError('');
+    } catch (err) {
+      if (isIgnorableSmartMoneyDataError(err)) {
+        setSmartMoneyError('');
+      } else {
+        setSmartMoneyError(errorText(err));
+      }
+    }
+  }, [apiBaseUrl, hasInitData, initData, isAdmin, smartMoneyDays]);
 
   useEffect(() => {
     const wallets = Array.isArray(smartMoneyOverview?.wallets) ? smartMoneyOverview.wallets : [];
     const current = wallets.find((item) => walletKey(item) === selectedWalletId);
     if (activeTab !== 'smart_money' || !current || !hasInitData || !isAdmin) return undefined;
     let disposed = false;
-    const run = async () => {
-      try {
-        const detail = await fetchAdminSmartMoneyWallet({
-          apiBaseUrl,
-          initData,
-          address: current.address,
-          chainId: current.chain_id,
-          days: smartMoneyDays,
-        });
-        if (!disposed) setSmartMoneyWallet(detail || null);
-      } catch (err) {
-        if (!disposed) {
-          setSmartMoneyWallet(null);
-          if (isIgnorableSmartMoneyDataError(err)) {
-            setSmartMoneyError('');
-          } else {
-            setSmartMoneyError(errorText(err));
-          }
-        }
-      }
+    const run = async (forceRefresh = false) => {
+      await loadSmartMoneyWallet({ wallet: current, forceRefresh });
+      if (disposed) return;
     };
     run();
-    const timer = setInterval(run, Math.max(20, Number(refreshInterval || 10)) * 1000);
+    const timer = setInterval(() => run(), Math.max(60, Number(refreshInterval || 10)) * 1000);
     return () => {
       disposed = true;
       clearInterval(timer);
     };
-  }, [activeTab, apiBaseUrl, hasInitData, initData, isAdmin, refreshInterval, selectedWalletId, smartMoneyDays, smartMoneyOverview]);
+  }, [activeTab, hasInitData, isAdmin, loadSmartMoneyWallet, refreshInterval, selectedWalletId, smartMoneyOverview]);
 
   useEffect(() => {
     if (activeTab !== 'operations') return undefined;
     loadOperations();
     if (!hasInitData || !isAdmin) return undefined;
-    const timer = setInterval(loadOperations, Math.max(20, Number(refreshInterval || 10)) * 1000);
+    const timer = setInterval(loadOperations, Math.max(60, Number(refreshInterval || 10)) * 1000);
     return () => clearInterval(timer);
   }, [activeTab, hasInitData, isAdmin, loadOperations, refreshInterval]);
 
@@ -664,7 +727,7 @@ export default function AssetManagementPanel({
     if (activeTab !== 'system') return undefined;
     loadSystem();
     if (!hasInitData || !isAdmin) return undefined;
-    const timer = setInterval(loadSystem, Math.max(30, Number(refreshInterval || 10)) * 1000);
+    const timer = setInterval(loadSystem, Math.max(60, Number(refreshInterval || 10)) * 1000);
     return () => clearInterval(timer);
   }, [activeTab, hasInitData, isAdmin, loadSystem, refreshInterval]);
 
@@ -721,6 +784,7 @@ export default function AssetManagementPanel({
     const wallets = Array.isArray(smartMoneyOverview?.wallets) ? smartMoneyOverview.wallets : [];
     return wallets.find((item) => walletKey(item) === selectedWalletId) || null;
   }, [selectedWalletId, smartMoneyOverview]);
+  const isRefreshing = assetLoading || assetRefreshing || smartMoneyLoading || smartMoneyRefreshing || opsLoading || systemLoading;
 
   const subtitle = activeTab === 'smart_money'
     ? '聪明钱资产、排行榜与钱包详情'
@@ -751,14 +815,18 @@ export default function AssetManagementPanel({
       <button
         type="button"
         className="am-tab-btn"
+        disabled={isRefreshing}
         onClick={() => {
-          if (activeTab === 'my_assets') loadAssets();
-          if (activeTab === 'smart_money') loadSmartMoney();
+          if (activeTab === 'my_assets') loadAssets({ forceRefresh: true });
+          if (activeTab === 'smart_money') {
+            loadSmartMoney({ forceRefresh: true });
+            if (selectedWallet) loadSmartMoneyWallet({ wallet: selectedWallet, forceRefresh: true });
+          }
           if (activeTab === 'operations') loadOperations();
           if (activeTab === 'system') loadSystem();
         }}
       >
-        <RefreshCw size={12} />
+        <RefreshCw size={12} className={isRefreshing ? 'animate-spin' : undefined} />
         刷新
       </button>
     </div>

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ChevronRight, Crown, Medal, RefreshCw, Settings2, Shield, TrendingUp, Trophy, Wallet } from 'lucide-react';
 import { createChart, AreaSeries, HistogramSeries, ColorType } from 'lightweight-charts';
 import {
@@ -10,9 +10,10 @@ import {
     fetchAssetOverview,
 } from '../lib/api';
 import { getBrandTheme } from '../lib/brand';
-import AdminPage from './AdminPage.jsx';
 import MiniChart from './MiniChart.jsx';
 import NumberFlowValue from './NumberFlowValue.jsx';
+
+const LazyAdminPage = lazy(() => import('./AdminPage.jsx'));
 
 const AVATAR_URLS = Object.entries(
     import.meta.glob('../icon/avatar_*.png', { eager: true, import: 'default' })
@@ -563,6 +564,7 @@ export default function AssetManagementPage({
     const [historyMetric, setHistoryMetric] = useState('total_usd');
     const [assetsData, setAssetsData] = useState({ overview: null, history: null, lp: null });
     const [assetsLoading, setAssetsLoading] = useState(false);
+    const [assetsRefreshing, setAssetsRefreshing] = useState(false);
     const [assetsError, setAssetsError] = useState('');
 
     const [smartMoneyDays, setSmartMoneyDays] = useState(7);
@@ -571,6 +573,7 @@ export default function AssetManagementPage({
     const [smartMoneyWallet, setSmartMoneyWallet] = useState(null);
     const [smartMoneyLeaderboard, setSmartMoneyLeaderboard] = useState(null);
     const [smartMoneyLoading, setSmartMoneyLoading] = useState(false);
+    const [smartMoneyRefreshing, setSmartMoneyRefreshing] = useState(false);
     const [smartMoneyError, setSmartMoneyError] = useState('');
     const [selectedWalletId, setSelectedWalletId] = useState('');
 
@@ -580,21 +583,71 @@ export default function AssetManagementPage({
         }
     }, [activeTab, tabs]);
 
-    const loadAssets = useCallback(async () => {
+    const hasAssetData = Boolean(assetsData.overview || assetsData.history || assetsData.lp);
+    const hasSmartMoneyData = Boolean(smartMoneyOverview || smartMoneyLeaderboard || smartMoneyWallet);
+    const hasAssetDataRef = useRef(false);
+    const hasSmartMoneyDataRef = useRef(false);
+
+    useEffect(() => {
+        hasAssetDataRef.current = hasAssetData;
+    }, [hasAssetData]);
+
+    useEffect(() => {
+        hasSmartMoneyDataRef.current = hasSmartMoneyData;
+    }, [hasSmartMoneyData]);
+
+    const loadAssets = useCallback(async ({ forceRefresh = false } = {}) => {
         if (!hasInitData) return;
-        setAssetsLoading(true);
+        if (hasAssetDataRef.current) setAssetsRefreshing(true);
+        else setAssetsLoading(true);
         setAssetsError('');
         try {
-            const [overview, history, lp] = await Promise.all([
-                fetchAssetOverview({ apiBaseUrl, initData }),
-                fetchAssetHistory({ apiBaseUrl, initData, days: historyDays }),
-                fetchAssetLPStats({ apiBaseUrl, initData }),
+            const overviewPromise = fetchAssetOverview({ apiBaseUrl, initData, forceRefresh });
+            const historyPromise = fetchAssetHistory({ apiBaseUrl, initData, days: historyDays, forceRefresh });
+            const lpPromise = fetchAssetLPStats({ apiBaseUrl, initData, forceRefresh });
+
+            overviewPromise
+                .then((overview) => {
+                    startTransition(() => {
+                        setAssetsData((prev) => ({ ...prev, overview: overview || null }));
+                    });
+                })
+                .catch(() => {});
+
+            const [overviewResult, historyResult, lpResult] = await Promise.allSettled([
+                overviewPromise,
+                historyPromise,
+                lpPromise,
             ]);
-            setAssetsData({ overview: overview || null, history: history || null, lp: lp || null });
+
+            const nextState = {};
+            const errors = [];
+
+            if (overviewResult.status === 'fulfilled') {
+                nextState.overview = overviewResult.value || null;
+            } else {
+                errors.push(errorText(overviewResult.reason));
+            }
+            if (historyResult.status === 'fulfilled') {
+                nextState.history = historyResult.value || null;
+            } else {
+                errors.push(errorText(historyResult.reason));
+            }
+            if (lpResult.status === 'fulfilled') {
+                nextState.lp = lpResult.value || null;
+            } else {
+                errors.push(errorText(lpResult.reason));
+            }
+
+            startTransition(() => {
+                setAssetsData((prev) => ({ ...prev, ...nextState }));
+            });
+            setAssetsError(errors.find(Boolean) || '');
         } catch (err) {
             setAssetsError(String(err?.message || err));
         } finally {
             setAssetsLoading(false);
+            setAssetsRefreshing(false);
         }
     }, [apiBaseUrl, hasInitData, historyDays, initData]);
 
@@ -602,24 +655,27 @@ export default function AssetManagementPage({
         if (activeTab !== 'my_assets') return undefined;
         loadAssets();
         if (!hasInitData) return undefined;
-        const timer = setInterval(loadAssets, Math.max(15, Number(pollIntervalSec || 15)) * 1000);
+        const timer = setInterval(() => loadAssets(), Math.max(60, Number(pollIntervalSec || 15)) * 1000);
         return () => clearInterval(timer);
     }, [activeTab, hasInitData, loadAssets, pollIntervalSec]);
 
-    const loadSmartMoney = useCallback(async () => {
+    const loadSmartMoney = useCallback(async ({ forceRefresh = false } = {}) => {
         if (!hasInitData || !isAdmin) return;
-        setSmartMoneyLoading(true);
+        if (hasSmartMoneyDataRef.current) setSmartMoneyRefreshing(true);
+        else setSmartMoneyLoading(true);
         setSmartMoneyError('');
         try {
             const [overviewResult, leaderboardResult] = await Promise.allSettled([
-                fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days: smartMoneyDays }),
-                fetchAdminSmartMoneyLeaderboard({ apiBaseUrl, initData, days: smartMoneyDays, metric: leaderboardMetric, limit: 20 }),
+                fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days: smartMoneyDays, forceRefresh }),
+                fetchAdminSmartMoneyLeaderboard({ apiBaseUrl, initData, days: smartMoneyDays, metric: leaderboardMetric, limit: 20, forceRefresh }),
             ]);
             const overview = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
             const leaderboard = leaderboardResult.status === 'fulfilled' ? leaderboardResult.value : null;
             const wallets = Array.isArray(overview?.wallets) ? overview.wallets : [];
-            setSmartMoneyOverview(overview || null);
-            setSmartMoneyLeaderboard(leaderboard || null);
+            startTransition(() => {
+                if (overviewResult.status === 'fulfilled') setSmartMoneyOverview(overview || null);
+                if (leaderboardResult.status === 'fulfilled') setSmartMoneyLeaderboard(leaderboard || null);
+            });
             if (!wallets.some((item) => walletKey(item) === selectedWalletId)) {
                 setSelectedWalletId(wallets[0] ? walletKey(wallets[0]) : '');
             }
@@ -634,6 +690,7 @@ export default function AssetManagementPage({
             setSmartMoneyError(errorText(err));
         } finally {
             setSmartMoneyLoading(false);
+            setSmartMoneyRefreshing(false);
         }
     }, [apiBaseUrl, hasInitData, initData, isAdmin, leaderboardMetric, selectedWalletId, smartMoneyDays]);
 
@@ -641,7 +698,7 @@ export default function AssetManagementPage({
         if (activeTab !== 'smart_money_assets') return undefined;
         loadSmartMoney();
         if (!hasInitData || !isAdmin) return undefined;
-        const timer = setInterval(loadSmartMoney, Math.max(20, Number(pollIntervalSec || 15)) * 1000);
+        const timer = setInterval(() => loadSmartMoney(), Math.max(60, Number(pollIntervalSec || 15)) * 1000);
         return () => clearInterval(timer);
     }, [activeTab, hasInitData, isAdmin, loadSmartMoney, pollIntervalSec]);
 
@@ -650,37 +707,44 @@ export default function AssetManagementPage({
         return wallets.find((item) => walletKey(item) === selectedWalletId) || null;
     }, [selectedWalletId, smartMoneyOverview]);
 
+    const loadSmartMoneyWallet = useCallback(async ({ wallet, forceRefresh = false } = {}) => {
+        if (!wallet || !hasInitData || !isAdmin) return;
+        try {
+            const detail = await fetchAdminSmartMoneyWallet({
+                apiBaseUrl,
+                initData,
+                address: wallet.address,
+                chainId: wallet.chain_id,
+                days: smartMoneyDays,
+                forceRefresh,
+            });
+            startTransition(() => {
+                setSmartMoneyWallet(detail || null);
+            });
+            setSmartMoneyError('');
+        } catch (err) {
+            if (isIgnorableSmartMoneyDataError(err)) {
+                setSmartMoneyError('');
+            } else {
+                setSmartMoneyError(errorText(err));
+            }
+        }
+    }, [apiBaseUrl, hasInitData, initData, isAdmin, smartMoneyDays]);
+
     useEffect(() => {
         if (activeTab !== 'smart_money_assets' || !selectedWallet || !hasInitData || !isAdmin) return undefined;
         let disposed = false;
-        const run = async () => {
-            try {
-                const detail = await fetchAdminSmartMoneyWallet({
-                    apiBaseUrl,
-                    initData,
-                    address: selectedWallet.address,
-                    chainId: selectedWallet.chain_id,
-                    days: smartMoneyDays,
-                });
-                if (!disposed) setSmartMoneyWallet(detail || null);
-            } catch (err) {
-                if (!disposed) {
-                    setSmartMoneyWallet(null);
-                    if (isIgnorableSmartMoneyDataError(err)) {
-                        setSmartMoneyError('');
-                    } else {
-                        setSmartMoneyError(errorText(err));
-                    }
-                }
-            }
+        const run = async (forceRefresh = false) => {
+            await loadSmartMoneyWallet({ wallet: selectedWallet, forceRefresh });
+            if (disposed) return;
         };
         run();
-        const timer = setInterval(run, Math.max(20, Number(pollIntervalSec || 15)) * 1000);
+        const timer = setInterval(() => run(), Math.max(60, Number(pollIntervalSec || 15)) * 1000);
         return () => {
             disposed = true;
             clearInterval(timer);
         };
-    }, [activeTab, apiBaseUrl, hasInitData, initData, isAdmin, pollIntervalSec, selectedWallet, smartMoneyDays]);
+    }, [activeTab, hasInitData, isAdmin, loadSmartMoneyWallet, pollIntervalSec, selectedWallet]);
 
     const chartRows = useMemo(() => seriesRows(assetsData.history, historyMetric), [assetsData.history, historyMetric]);
     const smartMoneyRows = useMemo(
@@ -688,8 +752,9 @@ export default function AssetManagementPage({
         [smartMoneyWallet],
     );
 
-    const isLoading = assetsLoading || smartMoneyLoading;
+    const isLoading = assetsLoading || assetsRefreshing || smartMoneyLoading || smartMoneyRefreshing;
     const metricColor = HISTORY_METRICS.find((m) => m.key === historyMetric)?.color || '#10b981';
+    const canManualRefresh = hasInitData && (activeTab === 'my_assets' || activeTab === 'smart_money_assets');
 
     return (
         <div className="flex flex-col gap-3">
@@ -706,10 +771,13 @@ export default function AssetManagementPage({
                         <button
                             type="button"
                             onClick={() => {
-                                if (activeTab === 'my_assets') loadAssets();
-                                if (activeTab === 'smart_money_assets') loadSmartMoney();
+                                if (activeTab === 'my_assets') loadAssets({ forceRefresh: true });
+                                if (activeTab === 'smart_money_assets') {
+                                    loadSmartMoney({ forceRefresh: true });
+                                    if (selectedWallet) loadSmartMoneyWallet({ wallet: selectedWallet, forceRefresh: true });
+                                }
                             }}
-                            disabled={!hasInitData || isLoading}
+                            disabled={!canManualRefresh || isLoading}
                             className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-200/80 bg-zinc-50 text-zinc-500 transition active:scale-95 dark:border-white/5 dark:bg-[#1a1c20] dark:text-white/50 dark:hover:bg-white/5 disabled:opacity-40"
                         >
                             <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
@@ -1073,8 +1141,16 @@ export default function AssetManagementPage({
             )}
 
             {/* ══════ Operations & System Tabs ══════ */}
-            {activeTab === 'operations' && <AdminPage apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} tick={tick} pollIntervalSec={pollIntervalSec} accentTheme={accentTheme} visibleTabs={['online_users', 'active_tasks', 'user_detail']} initialTab="online_users" onNotice={onNotice} />}
-            {activeTab === 'system' && <AdminPage apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} tick={tick} pollIntervalSec={pollIntervalSec} accentTheme={accentTheme} visibleTabs={['system_config', 'rpc_pool']} initialTab="system_config" onNotice={onNotice} />}
+            {activeTab === 'operations' && (
+                <Suspense fallback={<Card><div className="text-[11px] text-zinc-400 dark:text-white/35">正在加载管理模块...</div></Card>}>
+                    <LazyAdminPage apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} tick={tick} pollIntervalSec={pollIntervalSec} accentTheme={accentTheme} visibleTabs={['online_users', 'active_tasks', 'user_detail']} initialTab="online_users" onNotice={onNotice} />
+                </Suspense>
+            )}
+            {activeTab === 'system' && (
+                <Suspense fallback={<Card><div className="text-[11px] text-zinc-400 dark:text-white/35">正在加载系统模块...</div></Card>}>
+                    <LazyAdminPage apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} tick={tick} pollIntervalSec={pollIntervalSec} accentTheme={accentTheme} visibleTabs={['system_config', 'rpc_pool']} initialTab="system_config" onNotice={onNotice} />
+                </Suspense>
+            )}
         </div>
     );
 }

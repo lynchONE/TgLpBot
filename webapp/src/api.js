@@ -2,6 +2,47 @@ function normalizeBaseUrl(apiBaseUrl) {
   return String(apiBaseUrl || '').trim().replace(/\/$/, '');
 }
 
+const ASSET_CACHE_TTL_MS = 60_000;
+const assetResponseCache = new Map();
+
+function cloneCachedPayload(payload) {
+  if (payload === null || payload === undefined) return payload;
+  try {
+    return JSON.parse(JSON.stringify(payload));
+  } catch {
+    return payload;
+  }
+}
+
+function readAssetCache(cacheKey, ttlMs) {
+  if (!cacheKey || ttlMs <= 0) return undefined;
+  const entry = assetResponseCache.get(cacheKey);
+  if (!entry) return undefined;
+  if (entry.expiresAt <= Date.now()) {
+    assetResponseCache.delete(cacheKey);
+    return undefined;
+  }
+  return cloneCachedPayload(entry.payload);
+}
+
+function writeAssetCache(cacheKey, payload, ttlMs) {
+  if (!cacheKey || ttlMs <= 0) return;
+  assetResponseCache.set(cacheKey, {
+    payload: cloneCachedPayload(payload),
+    expiresAt: Date.now() + ttlMs,
+  });
+}
+
+async function resolveAssetCachedPayload({ cacheKey, ttlMs = ASSET_CACHE_TTL_MS, forceRefresh = false, load }) {
+  if (!forceRefresh) {
+    const cached = readAssetCache(cacheKey, ttlMs);
+    if (cached !== undefined) return cached;
+  }
+  const payload = await load();
+  writeAssetCache(cacheKey, payload, ttlMs);
+  return cloneCachedPayload(payload);
+}
+
 async function readErrorMessage(resp) {
   const text = await resp.text().catch(() => '');
   if (!text) return `HTTP ${resp.status}`;
@@ -120,40 +161,61 @@ export async function fetchRealtimePositions({ apiBaseUrl, initData, signal }) {
   });
 }
 
-export async function fetchAssetOverview({ apiBaseUrl, initData, signal }) {
+export async function fetchAssetOverview({ apiBaseUrl, initData, forceRefresh = false, signal }) {
   const base = normalizeBaseUrl(apiBaseUrl);
   const url = `${base}/api/positions?endpoint=assets_overview`;
-  const payload = await requestJson(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ initData }),
-    signal,
+  const cacheKey = `asset-overview:${base}:${initData}`;
+  return resolveAssetCachedPayload({
+    cacheKey,
+    forceRefresh,
+    load: async () => {
+      const payload = await requestJson(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, force_refresh: forceRefresh }),
+        signal,
+      });
+      return payload?.data ?? payload;
+    },
   });
-  return payload?.data ?? payload;
 }
 
-export async function fetchAssetHistory({ apiBaseUrl, initData, days = 30, signal }) {
+export async function fetchAssetHistory({ apiBaseUrl, initData, days = 30, forceRefresh = false, signal }) {
   const base = normalizeBaseUrl(apiBaseUrl);
   const url = `${base}/api/positions?endpoint=assets_history`;
-  const payload = await requestJson(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ initData, days }),
-    signal,
+  const cacheKey = `asset-history:${base}:${initData}:${days}`;
+  return resolveAssetCachedPayload({
+    cacheKey,
+    forceRefresh,
+    load: async () => {
+      const payload = await requestJson(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, days, force_refresh: forceRefresh }),
+        signal,
+      });
+      return payload?.data ?? payload;
+    },
   });
-  return payload?.data ?? payload;
 }
 
-export async function fetchAssetLPStats({ apiBaseUrl, initData, signal }) {
+export async function fetchAssetLPStats({ apiBaseUrl, initData, forceRefresh = false, signal }) {
   const base = normalizeBaseUrl(apiBaseUrl);
   const url = `${base}/api/positions?endpoint=assets_lp_stats`;
-  const payload = await requestJson(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ initData }),
-    signal,
+  const cacheKey = `asset-lp:${base}:${initData}`;
+  return resolveAssetCachedPayload({
+    cacheKey,
+    forceRefresh,
+    load: async () => {
+      const payload = await requestJson(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, force_refresh: forceRefresh }),
+        signal,
+      });
+      return payload?.data ?? payload;
+    },
   });
-  return payload?.data ?? payload;
 }
 
 export async function fetchPositionProfitPoster({ apiBaseUrl, initData, taskId, signal }) {
@@ -197,16 +259,23 @@ export async function fetchWallets({ apiBaseUrl, initData, chain, signal }) {
   });
 }
 
-export async function fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days = 7, signal }) {
+export async function fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days = 7, forceRefresh = false, signal }) {
   const base = normalizeBaseUrl(apiBaseUrl);
   const url = `${base}/api/admin?endpoint=assets_smart_money_overview`;
-  const payload = await requestJson(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ initData, days }),
-    signal,
+  const cacheKey = `admin-smart-money-overview:${base}:${initData}:${days}`;
+  return resolveAssetCachedPayload({
+    cacheKey,
+    forceRefresh,
+    load: async () => {
+      const payload = await requestJson(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, days, force_refresh: forceRefresh }),
+        signal,
+      });
+      return payload?.data ?? payload;
+    },
   });
-  return payload?.data ?? payload;
 }
 
 export async function fetchAdminSmartMoneyWallet({
@@ -215,17 +284,25 @@ export async function fetchAdminSmartMoneyWallet({
   address,
   chainId,
   days = 7,
+  forceRefresh = false,
   signal,
 }) {
   const base = normalizeBaseUrl(apiBaseUrl);
   const url = `${base}/api/admin?endpoint=assets_smart_money_wallet`;
-  const payload = await requestJson(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ initData, address, chain_id: chainId, days }),
-    signal,
+  const cacheKey = `admin-smart-money-wallet:${base}:${initData}:${String(address || '').toLowerCase()}:${chainId}:${days}`;
+  return resolveAssetCachedPayload({
+    cacheKey,
+    forceRefresh,
+    load: async () => {
+      const payload = await requestJson(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, address, chain_id: chainId, days, force_refresh: forceRefresh }),
+        signal,
+      });
+      return payload?.data ?? payload;
+    },
   });
-  return payload?.data ?? payload;
 }
 
 export async function fetchAdminSmartMoneyLeaderboard({
@@ -234,17 +311,25 @@ export async function fetchAdminSmartMoneyLeaderboard({
   days = 1,
   metric = 'pnl',
   limit = 20,
+  forceRefresh = false,
   signal,
 }) {
   const base = normalizeBaseUrl(apiBaseUrl);
   const url = `${base}/api/admin?endpoint=assets_smart_money_leaderboard`;
-  const payload = await requestJson(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ initData, days, metric, limit }),
-    signal,
+  const cacheKey = `admin-smart-money-leaderboard:${base}:${initData}:${days}:${metric}:${limit}`;
+  return resolveAssetCachedPayload({
+    cacheKey,
+    forceRefresh,
+    load: async () => {
+      const payload = await requestJson(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, days, metric, limit, force_refresh: forceRefresh }),
+        signal,
+      });
+      return payload?.data ?? payload;
+    },
   });
-  return payload?.data ?? payload;
 }
 
 export async function fetchAdminOnlineUsers({ apiBaseUrl, initData, limit, signal }) {

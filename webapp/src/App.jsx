@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   BriefcaseBusiness,
@@ -35,7 +35,6 @@ import {
 } from './api';
 import { WEBAPP_CONFIG } from './config';
 import PanelShell, { EmptyState, MetricCard } from './components/PanelShell';
-import AssetManagementPanel from './components/AssetManagementPanel';
 import KlineChart from './components/KlineChart';
 import CreatePoolPanel from './components/CreatePoolPanel';
 import SmartMoneyDashboard from './components/SmartMoneyDashboard';
@@ -74,6 +73,8 @@ import {
   computePriceRange,
   formatDuration,
 } from './utils';
+
+const LazyAssetManagementPanel = lazy(() => import('./components/AssetManagementPanel'));
 
 const KLINE_INTERVALS = [
   { key: '1m', label: '1m', bucketSec: 60, limit: 240, timeframe: 'minute', aggregate: 1, poolLimit: 300 },
@@ -2062,13 +2063,19 @@ export default function App() {
     ),
 
     assets: (
-      <AssetManagementPanel
-        apiBaseUrl={apiBaseUrl}
-        initData={initData}
-        hasInitData={hasInitData}
-        isAdmin={Boolean(positions?.is_admin)}
-        refreshInterval={refreshInterval}
-      />
+      <Suspense fallback={(
+        <PanelShell title="资产管理" subtitle="正在加载模块" icon={BriefcaseBusiness}>
+          <EmptyState text="正在加载资产管理模块..." />
+        </PanelShell>
+      )}>
+        <LazyAssetManagementPanel
+          apiBaseUrl={apiBaseUrl}
+          initData={initData}
+          hasInitData={hasInitData}
+          isAdmin={Boolean(positions?.is_admin)}
+          refreshInterval={refreshInterval}
+        />
+      </Suspense>
     ),
 
     smart_money: (

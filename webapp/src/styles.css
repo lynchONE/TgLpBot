@@ -7084,6 +7084,127 @@ body {
 }
 
 /* responsive */
+
+/* Asset Management compact mode when in 4-column layout */
+.workbench.layout-4 .module-assets .am-metric-row,
+.workbench.layout-work-4 .module-assets .am-metric-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.workbench.layout-4 .module-assets .am-two-col,
+.workbench.layout-work-4 .module-assets .am-two-col {
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.workbench.layout-4 .module-assets .am-stat-grid,
+.workbench.layout-work-4 .module-assets .am-stat-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.workbench.layout-4 .module-assets .am-stat-grid-3,
+.workbench.layout-work-4 .module-assets .am-stat-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.workbench.layout-4 .module-assets .am-card,
+.workbench.layout-work-4 .module-assets .am-card {
+  padding: 10px;
+}
+
+.workbench.layout-4 .module-assets .am-card-title,
+.workbench.layout-work-4 .module-assets .am-card-title {
+  font-size: 12px;
+}
+
+.workbench.layout-4 .module-assets .am-card-header,
+.workbench.layout-work-4 .module-assets .am-card-header {
+  margin-bottom: 8px;
+}
+
+.workbench.layout-4 .module-assets .am-pill,
+.workbench.layout-work-4 .module-assets .am-pill {
+  padding: 3px 7px;
+  font-size: 9px;
+}
+
+.workbench.layout-4 .module-assets .am-pill-group,
+.workbench.layout-work-4 .module-assets .am-pill-group {
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.workbench.layout-4 .module-assets .am-list-item,
+.workbench.layout-work-4 .module-assets .am-list-item {
+  padding: 8px 10px;
+  gap: 6px;
+}
+
+.workbench.layout-4 .module-assets .am-item-title,
+.workbench.layout-work-4 .module-assets .am-item-title {
+  font-size: 11px;
+}
+
+.workbench.layout-4 .module-assets .am-item-sub,
+.workbench.layout-work-4 .module-assets .am-item-sub {
+  font-size: 9px;
+}
+
+.workbench.layout-4 .module-assets .am-list-end strong,
+.workbench.layout-work-4 .module-assets .am-list-end strong {
+  font-size: 11px;
+}
+
+.workbench.layout-4 .module-assets .am-rank-row,
+.workbench.layout-work-4 .module-assets .am-rank-row {
+  gap: 6px;
+}
+
+.workbench.layout-4 .module-assets .am-stat,
+.workbench.layout-work-4 .module-assets .am-stat {
+  padding: 8px;
+}
+
+.workbench.layout-4 .module-assets .am-stat-label,
+.workbench.layout-work-4 .module-assets .am-stat-label {
+  font-size: 9px;
+}
+
+.workbench.layout-4 .module-assets .am-stat-value,
+.workbench.layout-work-4 .module-assets .am-stat-value {
+  font-size: 13px;
+}
+
+.workbench.layout-4 .module-assets .metric-card,
+.workbench.layout-work-4 .module-assets .metric-card {
+  padding: 6px 8px;
+}
+
+.workbench.layout-4 .module-assets .metric-label,
+.workbench.layout-work-4 .module-assets .metric-label {
+  font-size: 9px;
+}
+
+.workbench.layout-4 .module-assets .metric-value,
+.workbench.layout-work-4 .module-assets .metric-value {
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.workbench.layout-4 .module-assets .am-stack,
+.workbench.layout-work-4 .module-assets .am-stack {
+  gap: 8px;
+}
+
+.workbench.layout-4 .module-assets .am-badge,
+.workbench.layout-work-4 .module-assets .am-badge {
+  font-size: 9px;
+  padding: 2px 6px;
+}
+
 @media (max-width: 1080px) {
   .am-metric-row,
   .am-two-col,

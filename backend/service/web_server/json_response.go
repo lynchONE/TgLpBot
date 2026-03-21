@@ -29,3 +29,15 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.WriteHeader(status)
 	_, _ = w.Write(b)
 }
+
+func writeJSONBytes(w http.ResponseWriter, status int, payload []byte) {
+	if w == nil {
+		return
+	}
+	if status <= 0 {
+		status = http.StatusOK
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = w.Write(payload)
+}

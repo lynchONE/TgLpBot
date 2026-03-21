@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import HotPoolCard from './components/HotPoolCard.jsx';
 import KlineModal from './components/KlineModal.jsx';
 import PositionCard from './components/PositionCard.jsx';
@@ -8,8 +8,6 @@ import ModuleHeader from './components/ModuleHeader.jsx';
 import NumberFlowValue from './components/NumberFlowValue.jsx';
 import StepProgressModal from './components/StepProgressModal.jsx';
 import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
-import AdminPage from './components/AdminPage.jsx';
-import AssetManagementPage from './components/AssetManagementPage.jsx';
 import SmartMoneyPage from './components/SmartMoneyPage.jsx';
 import { Bot, BarChart2, Filter, Search, Moon, Sun, Settings, X, Check, RotateCcw, AlertTriangle, Flame, Eye, Wallet } from 'lucide-react';
 import {
@@ -41,6 +39,9 @@ import {
     getBrandTheme,
     normalizeAccentTheme,
 } from './lib/brand';
+
+const LazyAdminPage = lazy(() => import('./components/AdminPage.jsx'));
+const LazyAssetManagementPage = lazy(() => import('./components/AssetManagementPage.jsx'));
 
 function resolveApiBaseUrl() {
     const queryApiBase = new URLSearchParams(window.location.search).get('apiBaseUrl');
@@ -2140,16 +2141,18 @@ export default function App() {
                     </ModuleHeader>
                 ) : isAssets ? (
                     <div className="mb-2">
-                        <AssetManagementPage
-                            apiBaseUrl={apiBaseUrl}
-                            initData={initData}
-                            hasInitData={hasInitData}
-                            isAdmin={isAdmin}
-                            tick={tick}
-                            pollIntervalSec={pollIntervalSec}
-                            accentTheme={accentTheme}
-                            onNotice={showNotice}
-                        />
+                        <Suspense fallback={<div className="rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">正在加载资产管理模块...</div>}>
+                            <LazyAssetManagementPage
+                                apiBaseUrl={apiBaseUrl}
+                                initData={initData}
+                                hasInitData={hasInitData}
+                                isAdmin={isAdmin}
+                                tick={tick}
+                                pollIntervalSec={pollIntervalSec}
+                                accentTheme={accentTheme}
+                                onNotice={showNotice}
+                            />
+                        </Suspense>
                     </div>
                 ) : isSmartMoney ? (
                     <div className="mb-2">
@@ -2309,15 +2312,17 @@ export default function App() {
 
             {
                 !isHotPools && showAdmin ? (
-                    <AdminPage
-                        apiBaseUrl={apiBaseUrl}
-                        initData={initData}
-                        hasInitData={hasInitData}
-                        tick={tick}
-                        pollIntervalSec={pollIntervalSec}
-                        accentTheme={accentTheme}
-                        onNotice={showNotice}
-                    />
+                    <Suspense fallback={<div className="mb-4 rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">正在加载管理模块...</div>}>
+                        <LazyAdminPage
+                            apiBaseUrl={apiBaseUrl}
+                            initData={initData}
+                            hasInitData={hasInitData}
+                            tick={tick}
+                            pollIntervalSec={pollIntervalSec}
+                            accentTheme={accentTheme}
+                            onNotice={showNotice}
+                        />
+                    </Suspense>
                 ) : null
             }
 
