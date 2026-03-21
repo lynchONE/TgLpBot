@@ -32,6 +32,9 @@ export default async function handler(req, res) {
         'user_access',
         'rpc_pool',
         'private_zap',
+        'assets_smart_money_overview',
+        'assets_smart_money_wallet',
+        'assets_smart_money_leaderboard',
     ];
 
     if (!validEndpoints.includes(endpoint)) {

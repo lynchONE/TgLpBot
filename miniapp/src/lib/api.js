@@ -181,7 +181,7 @@ export async function fetchAdminRealtimePositions({ apiBaseUrl, initData, userId
 
 export async function fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days = 7, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/admin/assets/smart_money_overview`;
+    const url = `${base}/api/admin?endpoint=assets_smart_money_overview`;
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -198,7 +198,7 @@ export async function fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days 
 
 export async function fetchAdminSmartMoneyWallet({ apiBaseUrl, initData, address, chainId, days = 7, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/admin/assets/smart_money_wallet`;
+    const url = `${base}/api/admin?endpoint=assets_smart_money_wallet`;
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -222,7 +222,7 @@ export async function fetchAdminSmartMoneyLeaderboard({
     signal,
 }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/admin/assets/smart_money_leaderboard`;
+    const url = `${base}/api/admin?endpoint=assets_smart_money_leaderboard`;
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -239,7 +239,7 @@ export async function fetchAdminSmartMoneyLeaderboard({
 
 export async function fetchAssetOverview({ apiBaseUrl, initData, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/assets/overview`;
+    const url = `${base}/api/positions?endpoint=assets_overview`;
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -256,7 +256,7 @@ export async function fetchAssetOverview({ apiBaseUrl, initData, signal }) {
 
 export async function fetchAssetHistory({ apiBaseUrl, initData, days = 30, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/assets/history`;
+    const url = `${base}/api/positions?endpoint=assets_history`;
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -273,7 +273,7 @@ export async function fetchAssetHistory({ apiBaseUrl, initData, days = 30, signa
 
 export async function fetchAssetLPStats({ apiBaseUrl, initData, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/assets/lp_stats`;
+    const url = `${base}/api/positions?endpoint=assets_lp_stats`;
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

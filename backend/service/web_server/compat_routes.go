@@ -16,6 +16,12 @@ func (s *Server) handlePositions(w http.ResponseWriter, r *http.Request) {
 		s.handleMe(w, r)
 	case "position_profit_poster":
 		s.handlePositionProfitPoster(w, r)
+	case "assets_overview":
+		s.handleAssetOverview(w, r)
+	case "assets_history":
+		s.handleAssetHistory(w, r)
+	case "assets_lp_stats":
+		s.handleAssetLPStats(w, r)
 	default:
 		http.Error(w, "invalid endpoint", http.StatusBadRequest)
 	}
@@ -68,6 +74,12 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		s.handleAdminRPCPool(w, r)
 	case "private_zap":
 		s.handleAdminPrivateZap(w, r)
+	case "assets_smart_money_overview":
+		s.handleAdminSmartMoneyOverview(w, r)
+	case "assets_smart_money_wallet":
+		s.handleAdminSmartMoneyWallet(w, r)
+	case "assets_smart_money_leaderboard":
+		s.handleAdminSmartMoneyLeaderboard(w, r)
 	default:
 		http.Error(w, "invalid endpoint", http.StatusBadRequest)
 	}
