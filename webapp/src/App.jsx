@@ -35,6 +35,7 @@ import {
 } from './api';
 import { WEBAPP_CONFIG } from './config';
 import PanelShell, { EmptyState, MetricCard } from './components/PanelShell';
+import AssetManagementPanel from './components/AssetManagementPanel';
 import KlineChart from './components/KlineChart';
 import CreatePoolPanel from './components/CreatePoolPanel';
 import SmartMoneyDashboard from './components/SmartMoneyDashboard';
@@ -2058,6 +2059,16 @@ export default function App() {
         </div>
         {renderOperationProgress('positions')}
       </PanelShell>
+    ),
+
+    assets: (
+      <AssetManagementPanel
+        apiBaseUrl={apiBaseUrl}
+        initData={initData}
+        hasInitData={hasInitData}
+        isAdmin={Boolean(positions?.is_admin)}
+        refreshInterval={refreshInterval}
+      />
     ),
 
     smart_money: (

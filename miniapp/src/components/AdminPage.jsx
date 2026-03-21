@@ -40,10 +40,23 @@ export default function AdminPage({
     tick,
     pollIntervalSec = 15,
     accentTheme = 'lime',
+    visibleTabs,
+    initialTab,
     onNotice,
 }) {
     const brand = useMemo(() => getBrandTheme(accentTheme), [accentTheme]);
-    const [activeTab, setActiveTab] = useState('online_users');
+    const tabs = useMemo(() => {
+        if (!Array.isArray(visibleTabs) || visibleTabs.length === 0) return ADMIN_TABS;
+        const allow = new Set(visibleTabs.map((item) => String(item || '').trim()).filter(Boolean));
+        const next = ADMIN_TABS.filter((tab) => allow.has(tab.key));
+        return next.length > 0 ? next : ADMIN_TABS;
+    }, [visibleTabs]);
+    const defaultTab = useMemo(() => {
+        const requested = String(initialTab || '').trim();
+        if (requested && tabs.some((tab) => tab.key === requested)) return requested;
+        return tabs[0]?.key || 'online_users';
+    }, [initialTab, tabs]);
+    const [activeTab, setActiveTab] = useState(defaultTab);
 
     const [onlineUsers, setOnlineUsers] = useState([]);
     const [onlineUsersLoading, setOnlineUsersLoading] = useState(false);
@@ -59,6 +72,12 @@ export default function AdminPage({
     const [userPositionsError, setUserPositionsError] = useState('');
 
     const [userAccess, setUserAccess] = useState(null);
+
+    useEffect(() => {
+        if (!tabs.some((tab) => tab.key === activeTab)) {
+            setActiveTab(defaultTab);
+        }
+    }, [activeTab, defaultTab, tabs]);
 
     const loadOnlineUsers = useCallback(async () => {
         if (!hasInitData) return;
@@ -145,8 +164,10 @@ export default function AdminPage({
         setUserPositions(null);
         setUserAccess(null);
         setUserPositionsError('');
-        setActiveTab('user_detail');
-    }, []);
+        if (tabs.some((tab) => tab.key === 'user_detail')) {
+            setActiveTab('user_detail');
+        }
+    }, [tabs]);
 
     const handleSelectTaskUser = useCallback((task) => {
         if (!task?.user_id) return;
@@ -166,8 +187,11 @@ export default function AdminPage({
 
     return (
         <div className="space-y-4">
-            <div className="grid grid-cols-5 gap-1 rounded-2xl border border-zinc-200 bg-white/70 p-1 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none">
-                {ADMIN_TABS.map((tab) => (
+            <div
+                className="grid gap-1 rounded-2xl border border-zinc-200 bg-white/70 p-1 shadow-sm dark:border-white/10 dark:bg-white/5 dark:shadow-none"
+                style={{ gridTemplateColumns: `repeat(${Math.max(tabs.length, 1)}, minmax(0, 1fr))` }}
+            >
+                {tabs.map((tab) => (
                     <button
                         key={tab.key}
                         type="button"

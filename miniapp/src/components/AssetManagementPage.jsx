@@ -1,0 +1,1080 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, ChevronRight, Crown, Medal, RefreshCw, Settings2, Shield, TrendingUp, Trophy, Wallet } from 'lucide-react';
+import { createChart, AreaSeries, HistogramSeries, ColorType } from 'lightweight-charts';
+import {
+    fetchAdminSmartMoneyLeaderboard,
+    fetchAdminSmartMoneyOverview,
+    fetchAdminSmartMoneyWallet,
+    fetchAssetHistory,
+    fetchAssetLPStats,
+    fetchAssetOverview,
+} from '../lib/api';
+import { getBrandTheme } from '../lib/brand';
+import AdminPage from './AdminPage.jsx';
+import MiniChart from './MiniChart.jsx';
+import NumberFlowValue from './NumberFlowValue.jsx';
+
+const AVATAR_URLS = Object.entries(
+    import.meta.glob('../icon/avatar_*.png', { eager: true, import: 'default' })
+).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([, src]) => src);
+
+const HISTORY_WINDOWS = [7, 30, 90];
+const HISTORY_METRICS = [
+    { key: 'total_usd', label: '总资产', color: '#10b981' },
+    { key: 'wallet_usd', label: '钱包', color: '#0ea5e9' },
+    { key: 'position_usd', label: 'LP', color: '#8b5cf6' },
+    { key: 'fee_usd', label: '手续费', color: '#f59e0b' },
+];
+const SMART_MONEY_WINDOWS = [1, 7, 30];
+const LEADERBOARD_METRICS = [
+    { key: 'pnl', label: '收益额' },
+    { key: 'yield_rate', label: '收益率' },
+    { key: 'participation', label: '参与次数' },
+];
+
+const usdFmt = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
+function formatUsd(value) {
+    const num = Number(value || 0);
+    if (!Number.isFinite(num)) return '$--';
+    return usdFmt.format(num);
+}
+
+function formatUsdCompact(value) {
+    const num = Number(value || 0);
+    if (!Number.isFinite(num)) return '$--';
+    const abs = Math.abs(num);
+    if (abs >= 1000000) return `$${(num / 1000000).toFixed(abs >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M`;
+    if (abs >= 1000) return `$${(num / 1000).toFixed(abs >= 10000 ? 0 : 1).replace(/\.0$/, '')}K`;
+    if (abs >= 100) return `$${num.toFixed(0)}`;
+    if (abs >= 10) return `$${num.toFixed(1).replace(/\.0$/, '')}`;
+    return `$${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}`;
+}
+
+function formatPct(value, digits = 2) {
+    const num = Number(value || 0);
+    if (!Number.isFinite(num)) return '--';
+    return `${(num * 100).toFixed(digits).replace(/\.?0+$/, '')}%`;
+}
+
+function formatChain(chainId) {
+    return Number(chainId) === 8453 ? 'Base' : 'BSC';
+}
+
+function walletKey(wallet) {
+    return `${Number(wallet?.chain_id || 0)}:${String(wallet?.address || '').toLowerCase()}`;
+}
+
+function walletLabel(wallet) {
+    const label = String(wallet?.label || '').trim();
+    if (label) return label;
+    const address = String(wallet?.address || '').trim();
+    return address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '--';
+}
+
+function errorText(err) {
+    return String(err?.message || err || '').trim();
+}
+
+function isIgnorableSmartMoneyDataError(err) {
+    const message = errorText(err).toLowerCase();
+    return message.includes("unknown column 'open_lp_usd'") || message.includes("unknown column `open_lp_usd`");
+}
+
+function seriesRows(history, metric) {
+    const rows = Array.isArray(history?.history) ? [...history.history] : [];
+    if (history?.today?.day) rows.push(history.today);
+    return rows.map((item) => ({ day: item.day, value: Number(item?.[metric] || 0), close: Number(item?.[metric] || 0) }));
+}
+
+/* ─── Pill toggle (matches PositionCard / HotPoolCard style) ─── */
+function Pill({ active, brand, onClick, children }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold ring-1 transition active:scale-95 ${
+                active
+                    ? `${brand.softButtonClass}`
+                    : 'bg-zinc-100 text-zinc-500 ring-zinc-200 hover:bg-zinc-50 dark:bg-white/[0.04] dark:text-white/50 dark:ring-white/[0.06] dark:hover:bg-white/[0.07]'
+            }`}
+        >
+            {children}
+        </button>
+    );
+}
+
+/* ─── Card wrapper ─── */
+function Card({ children, className = '' }) {
+    return (
+        <div className={`rounded-2xl border border-zinc-200/80 bg-white p-3 dark:border-white/5 dark:bg-[#131518] ${className}`.trim()}>
+            {children}
+        </div>
+    );
+}
+
+/* ─── Metric stat (compact, like PositionCard value blocks) ─── */
+function StatBlock({ label, value, sub, tone = 'default' }) {
+    const toneRing = tone === 'accent'
+        ? 'ring-emerald-500/20 dark:ring-emerald-400/25'
+        : tone === 'warn'
+            ? 'ring-amber-500/20 dark:ring-amber-400/25'
+            : 'ring-zinc-200 dark:ring-white/[0.06]';
+    const toneBg = tone === 'accent'
+        ? 'bg-emerald-500/[0.06] dark:bg-emerald-500/[0.08]'
+        : tone === 'warn'
+            ? 'bg-amber-500/[0.06] dark:bg-amber-500/[0.08]'
+            : 'bg-zinc-50 dark:bg-white/[0.03]';
+    return (
+        <div className={`rounded-xl ${toneBg} ring-1 ${toneRing} px-3 py-2.5`}>
+            <div className="text-[9px] font-medium uppercase tracking-wide text-zinc-400 dark:text-white/35">{label}</div>
+            <div className="mt-1 text-base font-extrabold tabular-nums text-zinc-900 dark:text-white/95 leading-none">
+                <NumberFlowValue value={value} formatter={() => value} />
+            </div>
+            {sub ? <div className="mt-1.5 text-[10px] text-zinc-500 dark:text-white/40">{sub}</div> : null}
+        </div>
+    );
+}
+
+/* ─── Empty state ─── */
+function Empty({ text }) {
+    return (
+        <div className="flex items-center justify-center rounded-xl border border-dashed border-zinc-200 bg-zinc-50/50 px-4 py-6 text-[11px] text-zinc-400 dark:border-white/[0.06] dark:bg-white/[0.02] dark:text-white/30">
+            {text}
+        </div>
+    );
+}
+
+/* ─── Wallet Avatar (address-based icon image) ─── */
+function walletAvatarUrl(address) {
+    if (!AVATAR_URLS.length) return '';
+    const hex = String(address || '').toLowerCase();
+    let hash = 0;
+    for (let i = 0; i < hex.length; i++) hash = ((hash << 5) - hash + hex.charCodeAt(i)) | 0;
+    return AVATAR_URLS[Math.abs(hash) % AVATAR_URLS.length] || AVATAR_URLS[0] || '';
+}
+
+function WalletAvatar({ address, size = 28, className = '' }) {
+    const src = useMemo(() => walletAvatarUrl(address), [address]);
+    if (!src) return null;
+    return (
+        <img
+            src={src}
+            alt=""
+            width={size}
+            height={size}
+            className={`shrink-0 rounded-lg object-cover ${className}`.trim()}
+            style={{ width: size, height: size }}
+        />
+    );
+}
+
+/* ─── Rank badge for leaderboard ─── */
+function RankBadge({ rank }) {
+    if (rank === 1) {
+        return (
+            <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-yellow-400 to-amber-500 shadow-sm shadow-amber-500/30">
+                <Trophy className="h-3.5 w-3.5 text-white" />
+            </span>
+        );
+    }
+    if (rank === 2) {
+        return (
+            <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-slate-300 to-slate-400 shadow-sm shadow-slate-400/30">
+                <Medal className="h-3.5 w-3.5 text-white" />
+            </span>
+        );
+    }
+    if (rank === 3) {
+        return (
+            <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-600 to-amber-700 shadow-sm shadow-amber-700/30">
+                <Medal className="h-3.5 w-3.5 text-white" />
+            </span>
+        );
+    }
+    return (
+        <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-[11px] font-bold tabular-nums text-zinc-500 dark:bg-white/[0.06] dark:text-white/50">
+            {rank}
+        </span>
+    );
+}
+
+/* ─── TradingView-style Area Chart (lightweight-charts v5) ─── */
+function LWAreaChart({ data, color = '#10b981', loading = false }) {
+    const containerRef = useRef(null);
+    const chartRef = useRef(null);
+    const seriesRef = useRef(null);
+
+    useEffect(() => {
+        if (!containerRef.current) return;
+        const isDark = document.documentElement.classList.contains('dark') || window.matchMedia?.('(prefers-color-scheme: dark)')?.matches;
+        const chart = createChart(containerRef.current, {
+            width: containerRef.current.clientWidth,
+            height: 200,
+            layout: {
+                background: { type: ColorType.Solid, color: 'transparent' },
+                textColor: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)',
+                fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+                fontSize: 10,
+            },
+            grid: {
+                vertLines: { color: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' },
+                horzLines: { color: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' },
+            },
+            rightPriceScale: {
+                borderVisible: false,
+                scaleMargins: { top: 0.1, bottom: 0.05 },
+            },
+            timeScale: {
+                borderVisible: false,
+                fixLeftEdge: true,
+                fixRightEdge: true,
+                timeVisible: false,
+            },
+            crosshair: {
+                horzLine: { color: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)', style: 2 },
+                vertLine: { color: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)', style: 2 },
+            },
+            handleScroll: false,
+            handleScale: false,
+        });
+        const series = chart.addSeries(AreaSeries, {
+            lineColor: color,
+            lineWidth: 2,
+            topColor: `${color}40`,
+            bottomColor: `${color}05`,
+            priceFormat: { type: 'custom', formatter: (v) => {
+                const abs = Math.abs(v);
+                if (abs >= 1000000) return `$${(v / 1000000).toFixed(1)}M`;
+                if (abs >= 1000) return `$${(v / 1000).toFixed(abs >= 10000 ? 0 : 1)}K`;
+                return `$${v.toFixed(0)}`;
+            }},
+            crosshairMarkerRadius: 4,
+            crosshairMarkerBorderColor: color,
+            crosshairMarkerBackgroundColor: isDark ? '#131518' : '#ffffff',
+        });
+        chartRef.current = chart;
+        seriesRef.current = series;
+
+        const ro = new ResizeObserver((entries) => {
+            for (const entry of entries) chart.applyOptions({ width: entry.contentRect.width });
+        });
+        ro.observe(containerRef.current);
+
+        return () => {
+            ro.disconnect();
+            chart.remove();
+            chartRef.current = null;
+            seriesRef.current = null;
+        };
+    }, [color]);
+
+    useEffect(() => {
+        if (!seriesRef.current || !data || data.length < 1) return;
+        const mapped = data
+            .filter((d) => d.day && Number.isFinite(d.value))
+            .map((d) => ({ time: d.day, value: d.value }));
+        seriesRef.current.setData(mapped);
+        chartRef.current?.timeScale().fitContent();
+    }, [data]);
+
+    if (loading) {
+        return <div className="animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-700" style={{ height: 200 }} />;
+    }
+
+    return <div ref={containerRef} className="w-full rounded-lg overflow-hidden" style={{ minHeight: 200 }} />;
+}
+
+/* ─── LP Daily History Bar Chart (lightweight-charts v5) ─── */
+function LPDailyBarChart({ data, loading = false }) {
+    const containerRef = useRef(null);
+    const chartRef = useRef(null);
+    const pnlSeriesRef = useRef(null);
+    const countSeriesRef = useRef(null);
+
+    useEffect(() => {
+        if (!containerRef.current) return;
+        const isDark = document.documentElement.classList.contains('dark') || window.matchMedia?.('(prefers-color-scheme: dark)')?.matches;
+        const chart = createChart(containerRef.current, {
+            width: containerRef.current.clientWidth,
+            height: 160,
+            layout: {
+                background: { type: ColorType.Solid, color: 'transparent' },
+                textColor: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)',
+                fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+                fontSize: 10,
+            },
+            grid: {
+                vertLines: { color: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' },
+                horzLines: { color: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' },
+            },
+            rightPriceScale: {
+                borderVisible: false,
+                scaleMargins: { top: 0.15, bottom: 0.05 },
+            },
+            timeScale: {
+                borderVisible: false,
+                fixLeftEdge: true,
+                fixRightEdge: true,
+                timeVisible: false,
+            },
+            handleScroll: false,
+            handleScale: false,
+        });
+
+        const pnlSeries = chart.addSeries(HistogramSeries, {
+            priceFormat: { type: 'custom', formatter: (v) => {
+                const abs = Math.abs(v);
+                if (abs >= 1000) return `$${(v / 1000).toFixed(1)}K`;
+                return `$${v.toFixed(0)}`;
+            }},
+            priceScaleId: 'right',
+        });
+
+        chartRef.current = chart;
+        pnlSeriesRef.current = pnlSeries;
+
+        const ro = new ResizeObserver((entries) => {
+            for (const entry of entries) chart.applyOptions({ width: entry.contentRect.width });
+        });
+        ro.observe(containerRef.current);
+
+        return () => {
+            ro.disconnect();
+            chart.remove();
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!pnlSeriesRef.current || !data || data.length < 1) return;
+        const mapped = data
+            .filter((d) => d.day)
+            .map((d) => ({
+                time: d.day,
+                value: Number(d.realized_pnl_usd || 0),
+                color: Number(d.realized_pnl_usd || 0) >= 0 ? 'rgba(16,185,129,0.7)' : 'rgba(239,68,68,0.7)',
+            }));
+        pnlSeriesRef.current.setData(mapped);
+        chartRef.current?.timeScale().fitContent();
+    }, [data]);
+
+    if (loading) {
+        return <div className="animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-700" style={{ height: 160 }} />;
+    }
+
+    if (!data || data.length === 0) {
+        return (
+            <div className="flex items-center justify-center text-[11px] text-zinc-400 dark:text-white/30" style={{ height: 160 }}>
+                暂无每日 LP 数据
+            </div>
+        );
+    }
+
+    return <div ref={containerRef} className="w-full rounded-lg overflow-hidden" style={{ minHeight: 160 }} />;
+}
+
+/* ─── Per-pool PnL list for today ─── */
+function TodayPoolPnL({ pools }) {
+    if (!Array.isArray(pools) || pools.length === 0) {
+        return <Empty text="今日暂无平仓记录" />;
+    }
+    return (
+        <div className="flex flex-col gap-1.5">
+            {pools.map((pool, i) => {
+                const pnl = Number(pool.profit_usd || 0);
+                const positive = pnl >= 0;
+                return (
+                    <div key={`${pool.pool_id}-${i}`} className="flex items-center justify-between gap-3 rounded-xl border border-zinc-100 bg-zinc-50/60 px-3 py-2 dark:border-white/[0.04] dark:bg-[#0d0f12]">
+                        <div className="min-w-0">
+                            <div className="text-[11px] font-semibold text-zinc-900 dark:text-white/90 truncate">
+                                {pool.token0_symbol || '?'}/{pool.token1_symbol || '?'}
+                            </div>
+                            <div className="mt-0.5 text-[9px] text-zinc-400 dark:text-white/30">
+                                {String(pool.chain || 'bsc').toUpperCase()} · {pool.closed_count || 0} 笔
+                            </div>
+                        </div>
+                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold tabular-nums ring-1 ${
+                            positive
+                                ? 'bg-emerald-500/[0.08] text-emerald-600 ring-emerald-500/20 dark:bg-emerald-500/[0.12] dark:text-emerald-300 dark:ring-emerald-400/25'
+                                : 'bg-red-500/[0.08] text-red-600 ring-red-500/20 dark:bg-red-500/[0.12] dark:text-red-300 dark:ring-red-400/25'
+                        }`}>
+                            {positive ? '+' : ''}{formatUsd(pnl)}
+                        </span>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+/* ─── Donut chart for wallet distribution ─── */
+const WALLET_COLORS = ['#10b981', '#0ea5e9', '#8b5cf6', '#f59e0b', '#ec4899', '#06b6d4', '#f97316', '#84cc16'];
+
+function DonutChart({ wallets }) {
+    const items = useMemo(() => {
+        if (!Array.isArray(wallets) || wallets.length === 0) return [];
+        return wallets
+            .map((w, i) => ({
+                label: w.wallet_address ? `${w.wallet_address.slice(0, 6)}...${w.wallet_address.slice(-4)}` : `钱包 #${w.wallet_id}`,
+                chain: String(w.chain || '').toUpperCase(),
+                value: Math.max(0, Number(w.total_usd || 0)),
+                native: Number(w.native_usd || 0),
+                stable: Number(w.stable_usd || 0),
+                token: Number(w.token_usd || 0),
+                color: WALLET_COLORS[i % WALLET_COLORS.length],
+            }))
+            .filter((item) => item.value > 0);
+    }, [wallets]);
+
+    const total = useMemo(() => items.reduce((s, item) => s + item.value, 0), [items]);
+
+    if (items.length === 0) return null;
+
+    // donut arcs
+    const cx = 60, cy = 60, r = 48, innerR = 30;
+    let startAngle = -Math.PI / 2;
+    const arcs = items.map((item) => {
+        const fraction = item.value / total;
+        const angle = fraction * Math.PI * 2;
+        const endAngle = startAngle + angle;
+        const largeArc = angle > Math.PI ? 1 : 0;
+        const gap = items.length > 1 ? 0.02 : 0;
+        const s = startAngle + gap;
+        const e = endAngle - gap;
+        const x1o = cx + r * Math.cos(s), y1o = cy + r * Math.sin(s);
+        const x2o = cx + r * Math.cos(e), y2o = cy + r * Math.sin(e);
+        const x1i = cx + innerR * Math.cos(e), y1i = cy + innerR * Math.sin(e);
+        const x2i = cx + innerR * Math.cos(s), y2i = cy + innerR * Math.sin(s);
+        const d = `M${x1o},${y1o} A${r},${r} 0 ${largeArc} 1 ${x2o},${y2o} L${x1i},${y1i} A${innerR},${innerR} 0 ${largeArc} 0 ${x2i},${y2i} Z`;
+        startAngle = endAngle;
+        return { ...item, d, pct: (fraction * 100).toFixed(1) };
+    });
+
+    return (
+        <div className="flex items-start gap-4">
+            <svg width="120" height="120" viewBox="0 0 120 120" className="shrink-0">
+                {arcs.map((arc, i) => (
+                    <path key={i} d={arc.d} fill={arc.color} fillOpacity="0.85" />
+                ))}
+                <text x={cx} y={cy - 2} textAnchor="middle" fill="currentColor" fillOpacity="0.4" fontSize="8" fontWeight="500">总计</text>
+                <text x={cx} y={cy + 10} textAnchor="middle" fill="currentColor" fillOpacity="0.9" fontSize="11" fontWeight="700">{formatUsdCompact(total)}</text>
+            </svg>
+            <div className="flex flex-1 flex-col gap-1.5 min-w-0 pt-1">
+                {arcs.map((arc, i) => (
+                    <div key={i} className="flex items-center gap-2 min-w-0">
+                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: arc.color }} />
+                        <span className="truncate text-[10px] text-zinc-600 dark:text-white/60">{arc.label}</span>
+                        <span className="ml-auto shrink-0 text-[10px] font-bold tabular-nums text-zinc-800 dark:text-white/80">{formatUsdCompact(arc.value)}</span>
+                        <span className="shrink-0 text-[9px] text-zinc-400 dark:text-white/30">{arc.pct}%</span>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+/* ─── Horizontal stacked bar for wallet asset breakdown ─── */
+function WalletStackedBar({ wallets }) {
+    const items = useMemo(() => {
+        if (!Array.isArray(wallets)) return [];
+        return wallets.map((w, i) => ({
+            label: w.wallet_address ? `${w.wallet_address.slice(0, 6)}...${w.wallet_address.slice(-4)}` : `#${w.wallet_id}`,
+            chain: String(w.chain || '').toUpperCase(),
+            native: Math.max(0, Number(w.native_usd || 0)),
+            stable: Math.max(0, Number(w.stable_usd || 0)),
+            token: Math.max(0, Number(w.token_usd || 0)),
+            total: Math.max(0, Number(w.total_usd || 0)),
+        }));
+    }, [wallets]);
+
+    const maxVal = useMemo(() => Math.max(...items.map((i) => i.total), 1), [items]);
+
+    if (items.length === 0) return null;
+
+    const COLORS = { native: '#0ea5e9', stable: '#10b981', token: '#8b5cf6' };
+
+    return (
+        <div className="flex flex-col gap-2.5">
+            {/* legend */}
+            <div className="flex items-center gap-3">
+                {[
+                    { key: 'native', label: '原生币', color: COLORS.native },
+                    { key: 'stable', label: '稳定币', color: COLORS.stable },
+                    { key: 'token', label: '代币', color: COLORS.token },
+                ].map((item) => (
+                    <div key={item.key} className="flex items-center gap-1">
+                        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: item.color }} />
+                        <span className="text-[9px] text-zinc-400 dark:text-white/35">{item.label}</span>
+                    </div>
+                ))}
+            </div>
+            {items.map((item, i) => {
+                const barWidth = (item.total / maxVal) * 100;
+                const nPct = item.total > 0 ? (item.native / item.total) * 100 : 0;
+                const sPct = item.total > 0 ? (item.stable / item.total) * 100 : 0;
+                const tPct = item.total > 0 ? (item.token / item.total) * 100 : 0;
+                return (
+                    <div key={i}>
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="text-[10px] font-semibold text-zinc-800 dark:text-white/80 truncate">{item.label}</span>
+                                <span className="text-[9px] text-zinc-400 dark:text-white/30">{item.chain}</span>
+                            </div>
+                            <span className="text-[10px] font-bold tabular-nums text-zinc-900 dark:text-white/90 shrink-0">{formatUsdCompact(item.total)}</span>
+                        </div>
+                        <div className="h-3 rounded-full overflow-hidden bg-zinc-100 dark:bg-white/[0.04]" style={{ width: `${Math.max(barWidth, 8)}%` }}>
+                            <div className="flex h-full">
+                                {item.native > 0 && <div className="h-full rounded-l-full" style={{ width: `${nPct}%`, backgroundColor: COLORS.native }} />}
+                                {item.stable > 0 && <div className="h-full" style={{ width: `${sPct}%`, backgroundColor: COLORS.stable }} />}
+                                {item.token > 0 && <div className="h-full rounded-r-full" style={{ width: `${tPct}%`, backgroundColor: COLORS.token }} />}
+                            </div>
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+export default function AssetManagementPage({
+    apiBaseUrl,
+    initData,
+    hasInitData,
+    isAdmin = false,
+    tick,
+    pollIntervalSec = 15,
+    accentTheme = 'lime',
+    onNotice,
+}) {
+    const brand = useMemo(() => getBrandTheme(accentTheme), [accentTheme]);
+    const tabs = useMemo(() => {
+        const list = [{ key: 'my_assets', label: '我的资产', icon: Wallet }];
+        if (isAdmin) {
+            list.push(
+                { key: 'smart_money_assets', label: '聪明钱', icon: TrendingUp },
+                { key: 'operations', label: '运行管理', icon: Shield },
+                { key: 'system', label: '系统', icon: Settings2 },
+            );
+        }
+        return list;
+    }, [isAdmin]);
+    const [activeTab, setActiveTab] = useState('my_assets');
+
+    const [historyDays, setHistoryDays] = useState(30);
+    const [historyMetric, setHistoryMetric] = useState('total_usd');
+    const [assetsData, setAssetsData] = useState({ overview: null, history: null, lp: null });
+    const [assetsLoading, setAssetsLoading] = useState(false);
+    const [assetsError, setAssetsError] = useState('');
+
+    const [smartMoneyDays, setSmartMoneyDays] = useState(7);
+    const [leaderboardMetric, setLeaderboardMetric] = useState('pnl');
+    const [smartMoneyOverview, setSmartMoneyOverview] = useState(null);
+    const [smartMoneyWallet, setSmartMoneyWallet] = useState(null);
+    const [smartMoneyLeaderboard, setSmartMoneyLeaderboard] = useState(null);
+    const [smartMoneyLoading, setSmartMoneyLoading] = useState(false);
+    const [smartMoneyError, setSmartMoneyError] = useState('');
+    const [selectedWalletId, setSelectedWalletId] = useState('');
+
+    useEffect(() => {
+        if (!tabs.some((tab) => tab.key === activeTab)) {
+            setActiveTab('my_assets');
+        }
+    }, [activeTab, tabs]);
+
+    const loadAssets = useCallback(async () => {
+        if (!hasInitData) return;
+        setAssetsLoading(true);
+        setAssetsError('');
+        try {
+            const [overview, history, lp] = await Promise.all([
+                fetchAssetOverview({ apiBaseUrl, initData }),
+                fetchAssetHistory({ apiBaseUrl, initData, days: historyDays }),
+                fetchAssetLPStats({ apiBaseUrl, initData }),
+            ]);
+            setAssetsData({ overview: overview || null, history: history || null, lp: lp || null });
+        } catch (err) {
+            setAssetsError(String(err?.message || err));
+        } finally {
+            setAssetsLoading(false);
+        }
+    }, [apiBaseUrl, hasInitData, historyDays, initData]);
+
+    useEffect(() => {
+        if (activeTab !== 'my_assets') return undefined;
+        loadAssets();
+        if (!hasInitData) return undefined;
+        const timer = setInterval(loadAssets, Math.max(15, Number(pollIntervalSec || 15)) * 1000);
+        return () => clearInterval(timer);
+    }, [activeTab, hasInitData, loadAssets, pollIntervalSec]);
+
+    const loadSmartMoney = useCallback(async () => {
+        if (!hasInitData || !isAdmin) return;
+        setSmartMoneyLoading(true);
+        setSmartMoneyError('');
+        try {
+            const [overviewResult, leaderboardResult] = await Promise.allSettled([
+                fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days: smartMoneyDays }),
+                fetchAdminSmartMoneyLeaderboard({ apiBaseUrl, initData, days: smartMoneyDays, metric: leaderboardMetric, limit: 20 }),
+            ]);
+            const overview = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
+            const leaderboard = leaderboardResult.status === 'fulfilled' ? leaderboardResult.value : null;
+            const wallets = Array.isArray(overview?.wallets) ? overview.wallets : [];
+            setSmartMoneyOverview(overview || null);
+            setSmartMoneyLeaderboard(leaderboard || null);
+            if (!wallets.some((item) => walletKey(item) === selectedWalletId)) {
+                setSelectedWalletId(wallets[0] ? walletKey(wallets[0]) : '');
+            }
+            const rejected = [overviewResult, leaderboardResult]
+                .filter((item) => item.status === 'rejected')
+                .map((item) => item.reason);
+            const fatalError = rejected.find((item) => !isIgnorableSmartMoneyDataError(item));
+            if (fatalError) {
+                setSmartMoneyError(errorText(fatalError));
+            }
+        } catch (err) {
+            setSmartMoneyError(errorText(err));
+        } finally {
+            setSmartMoneyLoading(false);
+        }
+    }, [apiBaseUrl, hasInitData, initData, isAdmin, leaderboardMetric, selectedWalletId, smartMoneyDays]);
+
+    useEffect(() => {
+        if (activeTab !== 'smart_money_assets') return undefined;
+        loadSmartMoney();
+        if (!hasInitData || !isAdmin) return undefined;
+        const timer = setInterval(loadSmartMoney, Math.max(20, Number(pollIntervalSec || 15)) * 1000);
+        return () => clearInterval(timer);
+    }, [activeTab, hasInitData, isAdmin, loadSmartMoney, pollIntervalSec]);
+
+    const selectedWallet = useMemo(() => {
+        const wallets = Array.isArray(smartMoneyOverview?.wallets) ? smartMoneyOverview.wallets : [];
+        return wallets.find((item) => walletKey(item) === selectedWalletId) || null;
+    }, [selectedWalletId, smartMoneyOverview]);
+
+    useEffect(() => {
+        if (activeTab !== 'smart_money_assets' || !selectedWallet || !hasInitData || !isAdmin) return undefined;
+        let disposed = false;
+        const run = async () => {
+            try {
+                const detail = await fetchAdminSmartMoneyWallet({
+                    apiBaseUrl,
+                    initData,
+                    address: selectedWallet.address,
+                    chainId: selectedWallet.chain_id,
+                    days: smartMoneyDays,
+                });
+                if (!disposed) setSmartMoneyWallet(detail || null);
+            } catch (err) {
+                if (!disposed) {
+                    setSmartMoneyWallet(null);
+                    if (isIgnorableSmartMoneyDataError(err)) {
+                        setSmartMoneyError('');
+                    } else {
+                        setSmartMoneyError(errorText(err));
+                    }
+                }
+            }
+        };
+        run();
+        const timer = setInterval(run, Math.max(20, Number(pollIntervalSec || 15)) * 1000);
+        return () => {
+            disposed = true;
+            clearInterval(timer);
+        };
+    }, [activeTab, apiBaseUrl, hasInitData, initData, isAdmin, pollIntervalSec, selectedWallet, smartMoneyDays]);
+
+    const chartRows = useMemo(() => seriesRows(assetsData.history, historyMetric), [assetsData.history, historyMetric]);
+    const smartMoneyRows = useMemo(
+        () => (Array.isArray(smartMoneyWallet?.history) ? smartMoneyWallet.history.map((item) => ({ close: Number(item?.total_usd || 0) })) : []),
+        [smartMoneyWallet],
+    );
+
+    const isLoading = assetsLoading || smartMoneyLoading;
+    const metricColor = HISTORY_METRICS.find((m) => m.key === historyMetric)?.color || '#10b981';
+
+    return (
+        <div className="flex flex-col gap-3">
+            {/* ══════ Header ══════ */}
+            <Card className="!p-0 overflow-hidden">
+                <div className="px-3.5 pt-3 pb-2.5">
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                            <div className="text-[14px] font-extrabold leading-tight text-zinc-900 dark:text-white/95">资产管理</div>
+                            <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">
+                                {hasInitData ? '资产快照 / 趋势 / LP 统计' : '需要有效的 Telegram initData'}
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                if (activeTab === 'my_assets') loadAssets();
+                                if (activeTab === 'smart_money_assets') loadSmartMoney();
+                            }}
+                            disabled={!hasInitData || isLoading}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-200/80 bg-zinc-50 text-zinc-500 transition active:scale-95 dark:border-white/5 dark:bg-[#1a1c20] dark:text-white/50 dark:hover:bg-white/5 disabled:opacity-40"
+                        >
+                            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+                        </button>
+                    </div>
+                </div>
+                {/* tab bar */}
+                <div className="flex border-t border-zinc-100 dark:border-white/[0.04]">
+                    {tabs.map((tab) => {
+                        const Icon = tab.icon;
+                        const active = activeTab === tab.key;
+                        return (
+                            <button
+                                key={tab.key}
+                                type="button"
+                                onClick={() => setActiveTab(tab.key)}
+                                className={`relative flex flex-1 items-center justify-center gap-1.5 px-2 py-2.5 text-[11px] font-semibold transition ${
+                                    active
+                                        ? `${brand.textClass}`
+                                        : 'text-zinc-400 hover:text-zinc-600 dark:text-white/35 dark:hover:text-white/60'
+                                }`}
+                            >
+                                <Icon className="h-3.5 w-3.5" />
+                                <span className="truncate">{tab.label}</span>
+                                {active && (
+                                    <span className={`absolute bottom-0 left-1/2 h-[2px] w-6 -translate-x-1/2 rounded-full ${brand.dotClass}`} />
+                                )}
+                            </button>
+                        );
+                    })}
+                </div>
+            </Card>
+
+            {/* ══════ My Assets Tab ══════ */}
+            {activeTab === 'my_assets' && (
+                <>
+                    {assetsError && (
+                        <div className="rounded-xl border border-red-500/20 bg-red-500/[0.06] px-3 py-2.5 text-[11px] font-medium text-red-600 ring-1 ring-red-500/15 dark:text-red-300">{assetsError}</div>
+                    )}
+                    {assetsData.overview?.warnings?.length > 0 && (
+                        <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2.5 text-[11px] ring-1 ring-amber-500/15">
+                            <div className="flex items-center gap-1.5 font-semibold text-amber-700 dark:text-amber-300"><AlertTriangle className="h-3 w-3" />数据提示</div>
+                            <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                {assetsData.overview.warnings.map((w) => (
+                                    <span key={w} className="inline-flex rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-200">{w}</span>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* overview metrics */}
+                    <div className="grid grid-cols-2 gap-2">
+                        <StatBlock label="总资产" value={formatUsd(assetsData.overview?.summary?.total_usd)} tone="accent" />
+                        <StatBlock label="钱包余额" value={formatUsd(assetsData.overview?.summary?.wallet_usd)} />
+                        <StatBlock label="LP 持仓" value={formatUsd(assetsData.overview?.summary?.position_usd)} />
+                        <StatBlock label="未领取手续费" value={formatUsd(assetsData.overview?.summary?.fee_usd)} tone="warn" />
+                    </div>
+
+                    {/* trend chart */}
+                    <Card>
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="text-[12px] font-bold text-zinc-900 dark:text-white/90">资产趋势</span>
+                            <div className="flex gap-1.5">
+                                {HISTORY_WINDOWS.map((d) => (
+                                    <Pill key={d} active={historyDays === d} brand={brand} onClick={() => setHistoryDays(d)}>{d}D</Pill>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                            {HISTORY_METRICS.map((m) => (
+                                <Pill key={m.key} active={historyMetric === m.key} brand={brand} onClick={() => setHistoryMetric(m.key)}>{m.label}</Pill>
+                            ))}
+                        </div>
+                        <div className="mt-3 rounded-xl border border-zinc-100 bg-zinc-50/60 p-3 dark:border-white/[0.04] dark:bg-[#0d0f12]">
+                            <div className="flex items-end justify-between gap-2">
+                                <div>
+                                    <div className="text-[9px] font-medium uppercase tracking-wide text-zinc-400 dark:text-white/35">
+                                        {HISTORY_METRICS.find((m) => m.key === historyMetric)?.label || '总资产'}
+                                    </div>
+                                    <div className="mt-1 text-xl font-extrabold tabular-nums text-zinc-900 dark:text-white leading-none">
+                                        <NumberFlowValue value={chartRows[chartRows.length - 1]?.value || 0} formatter={(v) => formatUsd(v)} />
+                                    </div>
+                                </div>
+                                <span className="text-[10px] text-zinc-400 dark:text-white/30">
+                                    {assetsData.overview?.updated_at ? new Date(assetsData.overview.updated_at).toLocaleTimeString() : ''}
+                                </span>
+                            </div>
+                            <div className="mt-3">
+                                <LWAreaChart data={chartRows} color={metricColor} loading={assetsLoading} />
+                            </div>
+                        </div>
+                    </Card>
+
+                    {/* today data */}
+                    <Card>
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="text-[12px] font-bold text-zinc-900 dark:text-white/90">今日盈亏</span>
+                            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-bold tabular-nums ring-1 ${
+                                Number(assetsData.lp?.today?.realized_pnl_usd || 0) >= 0
+                                    ? 'bg-emerald-500/[0.08] text-emerald-600 ring-emerald-500/20 dark:bg-emerald-500/[0.12] dark:text-emerald-300'
+                                    : 'bg-red-500/[0.08] text-red-600 ring-red-500/20 dark:bg-red-500/[0.12] dark:text-red-300'
+                            }`}>
+                                {Number(assetsData.lp?.today?.realized_pnl_usd || 0) >= 0 ? '+' : ''}{formatUsd(assetsData.lp?.today?.realized_pnl_usd)}
+                            </span>
+                        </div>
+                        <div className="mt-2 grid grid-cols-4 gap-1.5">
+                            <div className="rounded-lg bg-zinc-50 px-2 py-1.5 ring-1 ring-zinc-200 dark:bg-white/[0.03] dark:ring-white/[0.06]">
+                                <div className="text-[9px] text-zinc-400 dark:text-white/30">平仓</div>
+                                <div className="mt-0.5 text-[11px] font-bold tabular-nums text-zinc-800 dark:text-white/80">{Number(assetsData.lp?.today?.closed_count || 0)}</div>
+                            </div>
+                            <div className="rounded-lg bg-zinc-50 px-2 py-1.5 ring-1 ring-zinc-200 dark:bg-white/[0.03] dark:ring-white/[0.06]">
+                                <div className="text-[9px] text-zinc-400 dark:text-white/30">胜率</div>
+                                <div className="mt-0.5 text-[11px] font-bold tabular-nums text-zinc-800 dark:text-white/80">{formatPct(assetsData.lp?.today?.win_rate)}</div>
+                            </div>
+                            <div className="rounded-lg bg-emerald-500/[0.06] px-2 py-1.5 ring-1 ring-emerald-500/15 dark:bg-emerald-500/[0.08]">
+                                <div className="text-[9px] text-emerald-600 dark:text-emerald-400">盈利</div>
+                                <div className="mt-0.5 text-[11px] font-bold tabular-nums text-emerald-700 dark:text-emerald-300">{Number(assetsData.lp?.today?.win_count || 0)}</div>
+                            </div>
+                            <div className="rounded-lg bg-red-500/[0.06] px-2 py-1.5 ring-1 ring-red-500/15 dark:bg-red-500/[0.08]">
+                                <div className="text-[9px] text-red-600 dark:text-red-400">亏损</div>
+                                <div className="mt-0.5 text-[11px] font-bold tabular-nums text-red-700 dark:text-red-300">{Number(assetsData.lp?.today?.loss_count || 0)}</div>
+                            </div>
+                        </div>
+                        <div className="mt-3">
+                            <div className="text-[10px] font-medium text-zinc-500 dark:text-white/40 mb-1.5">各池子盈亏明细</div>
+                            <TodayPoolPnL pools={assetsData.lp?.today_pools} />
+                        </div>
+                    </Card>
+
+                    {/* LP daily history bar chart */}
+                    <Card>
+                        <div className="text-[12px] font-bold text-zinc-900 dark:text-white/90">每日 LP 盈亏</div>
+                        <div className="mt-0.5 text-[9px] text-zinc-400 dark:text-white/30">绿色盈利 / 红色亏损，近30天每日平仓盈亏</div>
+                        <div className="mt-2.5 rounded-xl border border-zinc-100 bg-zinc-50/60 p-2 dark:border-white/[0.04] dark:bg-[#0d0f12]">
+                            <LPDailyBarChart data={assetsData.lp?.daily_history} loading={assetsLoading} />
+                        </div>
+                        {/* summary stats below chart */}
+                        {Array.isArray(assetsData.lp?.windows) && assetsData.lp.windows.length > 0 && (
+                            <div className="mt-2.5 grid grid-cols-3 gap-1.5">
+                                {assetsData.lp.windows.map((item) => (
+                                    <div key={item.days} className="rounded-lg bg-zinc-50 px-2.5 py-2 ring-1 ring-zinc-200 dark:bg-white/[0.03] dark:ring-white/[0.06]">
+                                        <div className="text-[9px] text-zinc-400 dark:text-white/30">{item.days}D</div>
+                                        <div className={`mt-0.5 text-[11px] font-bold tabular-nums ${Number(item.realized_pnl_usd || 0) >= 0 ? 'text-emerald-600 dark:text-emerald-300' : 'text-red-600 dark:text-red-300'}`}>
+                                            {Number(item.realized_pnl_usd || 0) >= 0 ? '+' : ''}{formatUsdCompact(item.realized_pnl_usd)}
+                                        </div>
+                                        <div className="mt-0.5 text-[9px] text-zinc-400 dark:text-white/30">{item.closed_count || 0} 笔 · {formatPct(item.win_rate)}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </Card>
+
+                    {/* wallet distribution */}
+                    <Card>
+                        <div className="text-[12px] font-bold text-zinc-900 dark:text-white/90">钱包资产分布</div>
+                        {Array.isArray(assetsData.overview?.wallets) && assetsData.overview.wallets.length > 0 ? (
+                            <div className="mt-3 flex flex-col gap-4">
+                                <DonutChart wallets={assetsData.overview.wallets} />
+                                <div className="border-t border-zinc-100 dark:border-white/[0.04] pt-3">
+                                    <WalletStackedBar wallets={assetsData.overview.wallets} />
+                                </div>
+                            </div>
+                        ) : <div className="mt-2.5"><Empty text={assetsLoading ? '加载中...' : '暂无钱包数据'} /></div>}
+                    </Card>
+                </>
+            )}
+
+            {/* ══════ Smart Money Tab ══════ */}
+            {activeTab === 'smart_money_assets' && (
+                <>
+                    {smartMoneyError && (
+                        <div className="rounded-xl border border-red-500/20 bg-red-500/[0.06] px-3 py-2.5 text-[11px] font-medium text-red-600 ring-1 ring-red-500/15 dark:text-red-300">{smartMoneyError}</div>
+                    )}
+
+                    <div className="flex flex-wrap gap-1.5">
+                        {SMART_MONEY_WINDOWS.map((d) => (
+                            <Pill key={d} active={smartMoneyDays === d} brand={brand} onClick={() => setSmartMoneyDays(d)}>{d === 1 ? '昨日' : `${d}D`}</Pill>
+                        ))}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                        <StatBlock label="总资产" value={formatUsd(smartMoneyOverview?.summary?.total_usd)} tone="accent" />
+                        <StatBlock label="原生币" value={formatUsd(smartMoneyOverview?.summary?.native_usd)} />
+                        <StatBlock label="稳定币" value={formatUsd(smartMoneyOverview?.summary?.stable_usd)} />
+                        <StatBlock label="代币持仓" value={formatUsd(smartMoneyOverview?.summary?.tracked_token_usd)} />
+                        <StatBlock label="Open LP" value={formatUsd(smartMoneyOverview?.summary?.open_lp_usd)} />
+                        <StatBlock label="代币种类" value={`${Number(smartMoneyOverview?.summary?.tracked_token_count || 0)} 个`} />
+                    </div>
+
+                    {/* wallet overview */}
+                    <Card>
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="text-[12px] font-bold text-zinc-900 dark:text-white/90">钱包总览</span>
+                            <span className="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-500 ring-1 ring-zinc-200 dark:bg-white/[0.04] dark:text-white/50 dark:ring-white/[0.06]">
+                                {Array.isArray(smartMoneyOverview?.wallets) ? smartMoneyOverview.wallets.length : 0} 个
+                            </span>
+                        </div>
+                        <div className="mt-2.5 flex flex-col gap-2">
+                            {Array.isArray(smartMoneyOverview?.wallets) && smartMoneyOverview.wallets.length > 0 ? smartMoneyOverview.wallets.map((wallet) => {
+                                const selected = walletKey(wallet) === selectedWalletId;
+                                const assets = wallet.assets || {};
+                                const total = Number(assets.total_usd || 0);
+                                const nativePct = total > 0 ? (Number(assets.native_usd || 0) / total * 100) : 0;
+                                const stablePct = total > 0 ? (Number(assets.stable_usd || 0) / total * 100) : 0;
+                                const tokenPct = total > 0 ? (Number(assets.tracked_token_usd || 0) / total * 100) : 0;
+                                const lpPct = total > 0 ? (Number(assets.open_lp_usd || 0) / total * 100) : 0;
+                                return (
+                                    <button
+                                        key={walletKey(wallet)}
+                                        type="button"
+                                        onClick={() => setSelectedWalletId(walletKey(wallet))}
+                                        className={`flex w-full flex-col gap-2 rounded-xl border px-3 py-2.5 text-left transition active:scale-[0.98] ${
+                                            selected
+                                                ? `${brand.selectionClass} dark:text-white`
+                                                : 'border-zinc-100 bg-zinc-50/60 text-zinc-700 hover:bg-white dark:border-white/[0.04] dark:bg-[#0d0f12] dark:text-white/75 dark:hover:bg-white/[0.06]'
+                                        }`}
+                                    >
+                                        <div className="flex items-center justify-between gap-3 w-full">
+                                            <div className="flex items-center gap-2.5 min-w-0">
+                                                <WalletAvatar address={wallet.address} size={28} />
+                                                <div className="min-w-0">
+                                                    <div className="truncate text-[12px] font-semibold">{walletLabel(wallet)}</div>
+                                                    <div className="mt-0.5 text-[10px] opacity-60">{formatChain(wallet.chain_id)} · {Number(wallet.today_event_count || 0)} 事件 · {Number(wallet.active_pool_count || 0)} 池</div>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-1.5 shrink-0">
+                                                <span className="text-[13px] font-bold tabular-nums">{formatUsdCompact(wallet.assets?.total_usd)}</span>
+                                                <ChevronRight className="h-3 w-3 opacity-40" />
+                                            </div>
+                                        </div>
+                                        {/* asset breakdown bar */}
+                                        {total > 0 && (
+                                            <div className="w-full">
+                                                <div className="h-1.5 w-full rounded-full overflow-hidden bg-zinc-200/60 dark:bg-white/[0.06]">
+                                                    <div className="flex h-full">
+                                                        {nativePct > 0 && <div className="h-full" style={{ width: `${nativePct}%`, backgroundColor: '#0ea5e9' }} />}
+                                                        {stablePct > 0 && <div className="h-full" style={{ width: `${stablePct}%`, backgroundColor: '#10b981' }} />}
+                                                        {tokenPct > 0 && <div className="h-full" style={{ width: `${tokenPct}%`, backgroundColor: '#8b5cf6' }} />}
+                                                        {lpPct > 0 && <div className="h-full" style={{ width: `${lpPct}%`, backgroundColor: '#f59e0b' }} />}
+                                                    </div>
+                                                </div>
+                                                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                                                    {Number(assets.native_usd || 0) > 0 && <span className="flex items-center gap-1 text-[9px] text-zinc-400 dark:text-white/35"><span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#0ea5e9' }} />原生 {formatUsdCompact(assets.native_usd)}</span>}
+                                                    {Number(assets.stable_usd || 0) > 0 && <span className="flex items-center gap-1 text-[9px] text-zinc-400 dark:text-white/35"><span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#10b981' }} />稳定 {formatUsdCompact(assets.stable_usd)}</span>}
+                                                    {Number(assets.tracked_token_usd || 0) > 0 && <span className="flex items-center gap-1 text-[9px] text-zinc-400 dark:text-white/35"><span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#8b5cf6' }} />代币 {formatUsdCompact(assets.tracked_token_usd)}</span>}
+                                                    {Number(assets.open_lp_usd || 0) > 0 && <span className="flex items-center gap-1 text-[9px] text-zinc-400 dark:text-white/35"><span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#f59e0b' }} />LP {formatUsdCompact(assets.open_lp_usd)}</span>}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </button>
+                                );
+                            }) : <Empty text={smartMoneyLoading ? '加载中...' : '暂无钱包数据'} />}
+                        </div>
+                    </Card>
+
+                    {/* wallet detail */}
+                    <Card>
+                        <div className="text-[12px] font-bold text-zinc-900 dark:text-white/90">钱包详情</div>
+                        {selectedWallet && smartMoneyWallet ? (
+                            <div className="mt-2.5 flex flex-col gap-2.5">
+                                <div className="flex items-center gap-3 rounded-xl bg-emerald-500/[0.06] ring-1 ring-emerald-500/20 dark:bg-emerald-500/[0.08] dark:ring-emerald-400/25 px-3 py-2.5">
+                                    <WalletAvatar address={selectedWallet.address} size={36} />
+                                    <div className="flex-1 min-w-0">
+                                        <div className="text-[12px] font-bold text-zinc-900 dark:text-white/95 truncate">{walletLabel(selectedWallet)}</div>
+                                        <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">
+                                            {formatChain(selectedWallet.chain_id)} · 今日收益 <span className={Number(smartMoneyWallet.today?.estimated_realized_pnl_usd || 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}>{formatUsd(smartMoneyWallet.today?.estimated_realized_pnl_usd)}</span>
+                                        </div>
+                                    </div>
+                                    <div className="text-right shrink-0">
+                                        <div className="text-lg font-extrabold tabular-nums text-zinc-900 dark:text-white/95 leading-none">{formatUsdCompact(smartMoneyWallet.wallet?.assets?.total_usd)}</div>
+                                    </div>
+                                </div>
+                                <div className="rounded-xl border border-zinc-100 bg-zinc-50/60 p-3 dark:border-white/[0.04] dark:bg-[#0d0f12]">
+                                    <div className="text-[9px] font-medium uppercase tracking-wide text-zinc-400 dark:text-white/35">30 天趋势</div>
+                                    <div className="mt-2">
+                                        <MiniChart data={smartMoneyRows} width={320} height={80} strokeColor="#38bdf8" loading={smartMoneyLoading} error={!smartMoneyLoading && smartMoneyRows.length === 0} />
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-3 gap-1.5">
+                                    {Array.isArray(smartMoneyWallet.windows) && smartMoneyWallet.windows.map((item) => (
+                                        <StatBlock key={item.days} label={`${item.days}D`} value={formatUsd(item.estimated_realized_pnl_usd)} sub={`${formatPct(item.yield_rate)} · ${Number(item.active_pool_count || 0)} 池`} />
+                                    ))}
+                                </div>
+                            </div>
+                        ) : <Empty text="选择钱包查看明细" />}
+                    </Card>
+
+                    {/* leaderboard */}
+                    <Card>
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="text-[12px] font-bold text-zinc-900 dark:text-white/90">排行榜</span>
+                            <div className="flex gap-1.5">
+                                {LEADERBOARD_METRICS.map((m) => (
+                                    <Pill key={m.key} active={leaderboardMetric === m.key} brand={brand} onClick={() => setLeaderboardMetric(m.key)}>{m.label}</Pill>
+                                ))}
+                            </div>
+                        </div>
+                        {smartMoneyLeaderboard?.description && (
+                            <div className="mt-1.5 text-[9px] text-zinc-400 dark:text-white/30">{smartMoneyLeaderboard.description} · {smartMoneyLeaderboard.start_day} ~ {smartMoneyLeaderboard.end_day}</div>
+                        )}
+                        <div className="mt-2.5 flex flex-col gap-2">
+                            {Array.isArray(smartMoneyLeaderboard?.list) && smartMoneyLeaderboard.list.length > 0 ? smartMoneyLeaderboard.list.map((item) => {
+                                const metricText = leaderboardMetric === 'yield_rate' ? formatPct(item.metric_value) : leaderboardMetric === 'participation' ? `${Number(item.metric_value || 0)} 次` : formatUsd(item.metric_value);
+                                const pnl = Number(item.estimated_realized_pnl_usd || 0);
+                                const isTop3 = item.rank <= 3;
+                                return (
+                                    <div
+                                        key={`${item.rank}:${item.address}`}
+                                        className={`flex items-center gap-3 rounded-xl border px-3 py-3 transition ${
+                                            isTop3
+                                                ? 'border-amber-500/15 bg-gradient-to-r from-amber-500/[0.04] to-transparent dark:border-amber-400/10 dark:from-amber-500/[0.06]'
+                                                : 'border-zinc-100 bg-zinc-50/60 dark:border-white/[0.04] dark:bg-[#0d0f12]'
+                                        }`}
+                                    >
+                                        <RankBadge rank={Number(item.rank || 0)} />
+                                        <WalletAvatar address={item.address} size={32} />
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="truncate text-[12px] font-semibold text-zinc-900 dark:text-white/90">
+                                                    {item.label || `${item.address.slice(0, 6)}...${item.address.slice(-4)}`}
+                                                </span>
+                                                <span className="shrink-0 rounded bg-zinc-100 px-1 py-0.5 text-[8px] font-medium text-zinc-500 dark:bg-white/[0.06] dark:text-white/40">
+                                                    {formatChain(item.chain_id)}
+                                                </span>
+                                            </div>
+                                            <div className="mt-0.5 flex items-center gap-2 text-[10px] text-zinc-500 dark:text-white/40">
+                                                <span>{Number(item.active_pool_count || 0)} 池</span>
+                                                <span>·</span>
+                                                <span>{Number(item.participation_count || 0)} 次操作</span>
+                                                {Number(item.unmatched_remove_count || 0) > 0 && (
+                                                    <>
+                                                        <span>·</span>
+                                                        <span className="text-amber-500">{item.unmatched_remove_count} 未匹配</span>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div className="text-right shrink-0">
+                                            <div className={`text-[13px] font-bold tabular-nums ${
+                                                leaderboardMetric === 'pnl'
+                                                    ? pnl >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'
+                                                    : 'text-zinc-900 dark:text-white'
+                                            }`}>{metricText}</div>
+                                            {leaderboardMetric !== 'pnl' && (
+                                                <div className={`mt-0.5 text-[10px] tabular-nums ${pnl >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
+                                                    {pnl >= 0 ? '+' : ''}{formatUsdCompact(pnl)}
+                                                </div>
+                                            )}
+                                            {leaderboardMetric === 'pnl' && Number(item.yield_rate || 0) !== 0 && (
+                                                <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40 tabular-nums">
+                                                    {formatPct(item.yield_rate)}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            }) : <Empty text={smartMoneyLoading ? '加载中...' : '暂无排行榜数据'} />}
+                        </div>
+                    </Card>
+                </>
+            )}
+
+            {/* ══════ Operations & System Tabs ══════ */}
+            {activeTab === 'operations' && <AdminPage apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} tick={tick} pollIntervalSec={pollIntervalSec} accentTheme={accentTheme} visibleTabs={['online_users', 'active_tasks', 'user_detail']} initialTab="online_users" onNotice={onNotice} />}
+            {activeTab === 'system' && <AdminPage apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} tick={tick} pollIntervalSec={pollIntervalSec} accentTheme={accentTheme} visibleTabs={['system_config', 'rpc_pool']} initialTab="system_config" onNotice={onNotice} />}
+        </div>
+    );
+}

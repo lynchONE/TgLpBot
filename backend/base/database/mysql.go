@@ -75,6 +75,8 @@ func autoMigrate() error {
 		&models.Announcement{},
 		&models.TradeRecord{},
 		&models.WalletBalanceSnapshot{},
+		&models.UserAssetDailySnapshot{},
+		&models.UserLPDailyStat{},
 		&models.StrategyTask{},
 		&models.TokenMetadata{},
 		&models.MonitoredWallet{},
@@ -82,6 +84,8 @@ func autoMigrate() error {
 		&models.SmartMoneyScanState{},
 		&models.SmartMoneyLPEvent{},
 		&models.SmartMoneyLPPosition{},
+		&models.SmartMoneyWalletDailySnapshot{},
+		&models.SmartMoneyLPDailyStat{},
 		&models.SmartMoneyGoldenDogConfig{},
 	); err != nil {
 		return err
@@ -95,7 +99,26 @@ func autoMigrate() error {
 	DB.Exec("ALTER TABLE sm_lp_events MODIFY COLUMN token0_amount DECIMAL(65,0) NOT NULL DEFAULT 0")
 	DB.Exec("ALTER TABLE sm_lp_events MODIFY COLUMN token1_amount DECIMAL(65,0) NOT NULL DEFAULT 0")
 
+	// Ensure new columns exist (AutoMigrate may skip if table already exists with old schema)
+	ensureColumn("sm_wallet_daily_snapshots", "open_lp_usd", "DECIMAL(20,4) NOT NULL DEFAULT 0 AFTER tracked_token_usd")
+	ensureColumn("sm_wallet_daily_snapshots", "tracked_token_count", "INT NOT NULL DEFAULT 0 AFTER total_usd")
+
 	return nil
+}
+
+func ensureColumn(table, column, definition string) {
+	if DB == nil {
+		return
+	}
+	if DB.Migrator().HasColumn(&struct{}{}, column) {
+		return
+	}
+	var count int64
+	DB.Raw("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?", table, column).Scan(&count)
+	if count == 0 {
+		DB.Exec(fmt.Sprintf("ALTER TABLE `%s` ADD COLUMN `%s` %s", table, column, definition))
+		log.Printf("[DB] added column %s.%s", table, column)
+	}
 }
 
 func migrateSmartMoneyGoldenDogAlertStateTable() error {

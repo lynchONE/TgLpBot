@@ -84,6 +84,13 @@ func (s *BalanceSnapshotService) CaptureForWallet(userID uint, walletAddress str
 }
 
 func (s *BalanceSnapshotService) run() {
+	// Wait for blockchain client to initialize before first capture
+	for i := 0; i < 60; i++ {
+		if blockchain.Client != nil {
+			break
+		}
+		time.Sleep(5 * time.Second)
+	}
 	lastDay := time.Now().Format("2006-01-02")
 	if err := s.CaptureDayForAllUsers(lastDay); err != nil {
 		log.Printf("[BalanceSnapshot] capture day failed: %v", err)

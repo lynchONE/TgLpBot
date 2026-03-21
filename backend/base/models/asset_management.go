@@ -1,0 +1,101 @@
+package models
+
+import "time"
+
+// UserAssetDailySnapshot stores one daily asset snapshot for a user.
+// wallet_id=0 and chain="" represent the aggregated user view.
+type UserAssetDailySnapshot struct {
+	ID uint `gorm:"primaryKey" json:"id"`
+
+	UserID      uint   `gorm:"not null;index;uniqueIndex:idx_user_asset_day" json:"user_id"`
+	WalletID    uint   `gorm:"not null;default:0;uniqueIndex:idx_user_asset_day" json:"wallet_id"`
+	Chain       string `gorm:"size:16;not null;default:'';uniqueIndex:idx_user_asset_day" json:"chain"`
+	SnapshotDay string `gorm:"size:10;not null;uniqueIndex:idx_user_asset_day" json:"snapshot_day"`
+
+	WalletUSD   float64   `gorm:"type:decimal(20,4);not null;default:0" json:"wallet_usd"`
+	PositionUSD float64   `gorm:"type:decimal(20,4);not null;default:0" json:"position_usd"`
+	FeeUSD      float64   `gorm:"type:decimal(20,4);not null;default:0" json:"fee_usd"`
+	TotalUSD    float64   `gorm:"type:decimal(20,4);not null;default:0" json:"total_usd"`
+	CapturedAt  time.Time `gorm:"not null;index" json:"captured_at"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (UserAssetDailySnapshot) TableName() string {
+	return "user_asset_daily_snapshots"
+}
+
+// UserLPDailyStat stores one daily realized LP statistic row for a user.
+// wallet_id=0 and chain="" represent the aggregated user view.
+type UserLPDailyStat struct {
+	ID uint `gorm:"primaryKey" json:"id"`
+
+	UserID   uint   `gorm:"not null;index;uniqueIndex:idx_user_lp_day" json:"user_id"`
+	WalletID uint   `gorm:"not null;default:0;uniqueIndex:idx_user_lp_day" json:"wallet_id"`
+	Chain    string `gorm:"size:16;not null;default:'';uniqueIndex:idx_user_lp_day" json:"chain"`
+	StatDay  string `gorm:"size:10;not null;uniqueIndex:idx_user_lp_day" json:"stat_day"`
+
+	RealizedPnLUSD float64   `gorm:"column:realized_pnl_usd;type:decimal(20,4);not null;default:0" json:"realized_pnl_usd"`
+	ClosedCount    int       `gorm:"not null;default:0" json:"closed_count"`
+	WinCount       int       `gorm:"not null;default:0" json:"win_count"`
+	LossCount      int       `gorm:"not null;default:0" json:"loss_count"`
+	BreakEvenCount int       `gorm:"not null;default:0" json:"break_even_count"`
+	CapturedAt     time.Time `gorm:"not null;index" json:"captured_at"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (UserLPDailyStat) TableName() string {
+	return "user_lp_daily_stats"
+}
+
+// SmartMoneyWalletDailySnapshot stores one daily recognized-asset snapshot for a smart money wallet.
+type SmartMoneyWalletDailySnapshot struct {
+	ID uint `gorm:"primaryKey" json:"id"`
+
+	WalletAddress string `gorm:"size:42;not null;uniqueIndex:idx_sm_wallet_asset_day" json:"wallet_address"`
+	ChainID       int    `gorm:"not null;default:56;uniqueIndex:idx_sm_wallet_asset_day" json:"chain_id"`
+	SnapshotDay   string `gorm:"size:10;not null;uniqueIndex:idx_sm_wallet_asset_day" json:"snapshot_day"`
+
+	NativeUSD         float64   `gorm:"type:decimal(20,4);not null;default:0" json:"native_usd"`
+	StableUSD         float64   `gorm:"type:decimal(20,4);not null;default:0" json:"stable_usd"`
+	TrackedTokenUSD   float64   `gorm:"type:decimal(20,4);not null;default:0" json:"tracked_token_usd"`
+	OpenLPUSD         float64   `gorm:"type:decimal(20,4);not null;default:0" json:"open_lp_usd"`
+	TotalUSD          float64   `gorm:"type:decimal(20,4);not null;default:0" json:"total_usd"`
+	TrackedTokenCount int       `gorm:"not null;default:0" json:"tracked_token_count"`
+	CapturedAt        time.Time `gorm:"not null;index" json:"captured_at"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (SmartMoneyWalletDailySnapshot) TableName() string {
+	return "sm_wallet_daily_snapshots"
+}
+
+// SmartMoneyLPDailyStat stores one daily smart money LP statistic row for a wallet.
+type SmartMoneyLPDailyStat struct {
+	ID uint `gorm:"primaryKey" json:"id"`
+
+	WalletAddress string `gorm:"size:42;not null;uniqueIndex:idx_sm_lp_day" json:"wallet_address"`
+	ChainID       int    `gorm:"not null;default:56;uniqueIndex:idx_sm_lp_day" json:"chain_id"`
+	StatDay       string `gorm:"size:10;not null;uniqueIndex:idx_sm_lp_day" json:"stat_day"`
+
+	EstimatedRealizedPnLUSD float64   `gorm:"column:estimated_realized_pnl_usd;type:decimal(20,4);not null;default:0" json:"estimated_realized_pnl_usd"`
+	MatchedCostUSD          float64   `gorm:"column:matched_cost_usd;type:decimal(20,4);not null;default:0" json:"matched_cost_usd"`
+	MatchedRemoveCount      int       `gorm:"not null;default:0" json:"matched_remove_count"`
+	UnmatchedRemoveCount    int       `gorm:"not null;default:0" json:"unmatched_remove_count"`
+	AddCount                int       `gorm:"not null;default:0" json:"add_count"`
+	RemoveCount             int       `gorm:"not null;default:0" json:"remove_count"`
+	ActivePoolCount         int       `gorm:"not null;default:0" json:"active_pool_count"`
+	CapturedAt              time.Time `gorm:"not null;index" json:"captured_at"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (SmartMoneyLPDailyStat) TableName() string {
+	return "sm_lp_daily_stats"
+}

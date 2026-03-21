@@ -2,6 +2,7 @@ package web_server
 
 import (
 	"TgLpBot/base/config"
+	"TgLpBot/service/assets"
 	"TgLpBot/service/pricing"
 	"TgLpBot/service/realtime"
 	"TgLpBot/service/token_metadata"
@@ -18,6 +19,7 @@ type Server struct {
 	Realtime   *realtime.RealtimePositionsService
 	TokenPrice *pricing.TokenPriceService
 	TokenMeta  *token_metadata.Service
+	Assets     *assets.Service
 }
 
 func NewServer() *Server {
@@ -25,6 +27,7 @@ func NewServer() *Server {
 		Realtime:   realtime.NewRealtimePositionsService(),
 		TokenPrice: pricing.NewTokenPriceService(),
 		TokenMeta:  token_metadata.NewService(),
+		Assets:     assets.NewService(),
 	}
 }
 
@@ -47,6 +50,12 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/me", s.handleMe)
 	mux.HandleFunc("/api/me/avatar", s.handleMeAvatar)
 	mux.HandleFunc("/api/realtime_positions", s.handleRealtimePositions)
+	mux.HandleFunc("/api/assets/overview", s.handleAssetOverview)
+	mux.HandleFunc("/api/assets/history", s.handleAssetHistory)
+	mux.HandleFunc("/api/assets/lp_stats", s.handleAssetLPStats)
+	mux.HandleFunc("/api/admin/assets/smart_money_overview", s.handleAdminSmartMoneyOverview)
+	mux.HandleFunc("/api/admin/assets/smart_money_wallet", s.handleAdminSmartMoneyWallet)
+	mux.HandleFunc("/api/admin/assets/smart_money_leaderboard", s.handleAdminSmartMoneyLeaderboard)
 	mux.HandleFunc("/api/task_pause", s.handleTaskPause)
 	mux.HandleFunc("/api/task_stop", s.handleTaskStop)
 	mux.HandleFunc("/api/task_delete", s.handleTaskDelete)

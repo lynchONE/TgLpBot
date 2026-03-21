@@ -3,6 +3,7 @@ package bot
 import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/models"
+	"TgLpBot/service/assets"
 	"TgLpBot/service/exchange"
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/pool"
@@ -29,6 +30,7 @@ type Bot struct {
 	configService    *user.GlobalConfigService
 	taskService      *strategy.StrategyTaskService
 	snapshotService  *wallet.BalanceSnapshotService
+	assetService     *assets.Service
 	pnlService       *strategy.PnLService
 }
 
@@ -54,6 +56,7 @@ func NewBot() (*Bot, error) {
 		configService:    user.NewGlobalConfigService(),
 		taskService:      strategy.NewStrategyTaskService(),
 		snapshotService:  wallet.NewBalanceSnapshotService(),
+		assetService:     assets.NewService(),
 		pnlService:       strategy.NewPnLService(),
 	}
 
@@ -177,6 +180,9 @@ func (b *Bot) Start() {
 	b.strategyService.Start()
 	if b.snapshotService != nil {
 		b.snapshotService.Start()
+	}
+	if b.assetService != nil {
+		b.assetService.Start()
 	}
 
 	u := tgbotapi.NewUpdate(0)
@@ -519,6 +525,9 @@ func (b *Bot) Stop() {
 	b.strategyService.Stop()
 	if b.snapshotService != nil {
 		b.snapshotService.Stop()
+	}
+	if b.assetService != nil {
+		b.assetService.Stop()
 	}
 	b.api.StopReceivingUpdates()
 }

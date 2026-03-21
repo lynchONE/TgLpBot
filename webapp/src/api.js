@@ -120,6 +120,42 @@ export async function fetchRealtimePositions({ apiBaseUrl, initData, signal }) {
   });
 }
 
+export async function fetchAssetOverview({ apiBaseUrl, initData, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/assets/overview`;
+  const payload = await requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData }),
+    signal,
+  });
+  return payload?.data ?? payload;
+}
+
+export async function fetchAssetHistory({ apiBaseUrl, initData, days = 30, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/assets/history`;
+  const payload = await requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData, days }),
+    signal,
+  });
+  return payload?.data ?? payload;
+}
+
+export async function fetchAssetLPStats({ apiBaseUrl, initData, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/assets/lp_stats`;
+  const payload = await requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData }),
+    signal,
+  });
+  return payload?.data ?? payload;
+}
+
 export async function fetchPositionProfitPoster({ apiBaseUrl, initData, taskId, signal }) {
   const base = normalizeBaseUrl(apiBaseUrl);
   const url = `${base}/api/position_profit_poster`;
@@ -157,6 +193,225 @@ export async function fetchWallets({ apiBaseUrl, initData, chain, signal }) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export async function fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days = 7, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/admin/assets/smart_money_overview`;
+  const payload = await requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData, days }),
+    signal,
+  });
+  return payload?.data ?? payload;
+}
+
+export async function fetchAdminSmartMoneyWallet({
+  apiBaseUrl,
+  initData,
+  address,
+  chainId,
+  days = 7,
+  signal,
+}) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/admin/assets/smart_money_wallet`;
+  const payload = await requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData, address, chain_id: chainId, days }),
+    signal,
+  });
+  return payload?.data ?? payload;
+}
+
+export async function fetchAdminSmartMoneyLeaderboard({
+  apiBaseUrl,
+  initData,
+  days = 1,
+  metric = 'pnl',
+  limit = 20,
+  signal,
+}) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/admin/assets/smart_money_leaderboard`;
+  const payload = await requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData, days, metric, limit }),
+    signal,
+  });
+  return payload?.data ?? payload;
+}
+
+export async function fetchAdminOnlineUsers({ apiBaseUrl, initData, limit, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/admin?endpoint=online_users`;
+  const payload = { initData };
+  if (Number.isFinite(limit)) payload.limit = limit;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export async function fetchAdminActiveTasks({ apiBaseUrl, initData, limit, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/admin?endpoint=active_tasks`;
+  const payload = { initData };
+  if (Number.isFinite(limit)) payload.limit = limit;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export async function fetchAdminRealtimePositions({ apiBaseUrl, initData, userId, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/admin?endpoint=realtime_positions`;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData, userId }),
+    signal,
+  });
+}
+
+export async function fetchSystemConfig({ apiBaseUrl, initData, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/admin?endpoint=system_config`;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData }),
+    signal,
+  });
+}
+
+export async function updateSystemConfig({ apiBaseUrl, initData, config, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/admin?endpoint=system_config`;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData, ...(config || {}) }),
+    signal,
+  });
+}
+
+async function adminRPCPoolRequest({ apiBaseUrl, payload, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/admin?endpoint=rpc_pool`;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+    signal,
+  });
+}
+
+export async function fetchAdminRPCPool({ apiBaseUrl, initData, signal }) {
+  return adminRPCPoolRequest({
+    apiBaseUrl,
+    payload: { initData, action: 'list' },
+    signal,
+  });
+}
+
+export async function addAdminRPCEndpoint({ apiBaseUrl, initData, chain, transport, name, url, setCurrent, signal }) {
+  return adminRPCPoolRequest({
+    apiBaseUrl,
+    payload: {
+      initData,
+      action: 'add',
+      chain,
+      transport,
+      name,
+      url,
+      set_current: Boolean(setCurrent),
+    },
+    signal,
+  });
+}
+
+export async function renameAdminRPCEndpoint({ apiBaseUrl, initData, endpointId, name, signal }) {
+  return adminRPCPoolRequest({
+    apiBaseUrl,
+    payload: { initData, action: 'rename', endpoint_id: Number(endpointId), name },
+    signal,
+  });
+}
+
+export async function switchAdminRPCEndpoint({ apiBaseUrl, initData, endpointId, signal }) {
+  return adminRPCPoolRequest({
+    apiBaseUrl,
+    payload: { initData, action: 'switch', endpoint_id: Number(endpointId) },
+    signal,
+  });
+}
+
+export async function disableAdminRPCEndpointNextMonth({ apiBaseUrl, initData, endpointId, signal }) {
+  return adminRPCPoolRequest({
+    apiBaseUrl,
+    payload: { initData, action: 'disable', endpoint_id: Number(endpointId), disable_next_month: true },
+    signal,
+  });
+}
+
+export async function enableAdminRPCEndpoint({ apiBaseUrl, initData, endpointId, signal }) {
+  return adminRPCPoolRequest({
+    apiBaseUrl,
+    payload: { initData, action: 'enable', endpoint_id: Number(endpointId) },
+    signal,
+  });
+}
+
+export async function deleteAdminRPCEndpoint({ apiBaseUrl, initData, endpointId, signal }) {
+  return adminRPCPoolRequest({
+    apiBaseUrl,
+    payload: { initData, action: 'delete', endpoint_id: Number(endpointId) },
+    signal,
+  });
+}
+
+export async function checkAdminRPCEndpoint({ apiBaseUrl, initData, endpointId, signal }) {
+  return adminRPCPoolRequest({
+    apiBaseUrl,
+    payload: { initData, action: 'check', endpoint_id: Number(endpointId) },
+    signal,
+  });
+}
+
+async function adminPrivateZapRequest({ apiBaseUrl, payload, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/admin?endpoint=private_zap`;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+    signal,
+  });
+}
+
+export async function fetchAdminPrivateZap({ apiBaseUrl, initData, signal }) {
+  return adminPrivateZapRequest({
+    apiBaseUrl,
+    payload: { initData, action: 'list' },
+    signal,
+  });
+}
+
+export async function invalidateAdminPrivateZap({ apiBaseUrl, initData, chain, signal }) {
+  return adminPrivateZapRequest({
+    apiBaseUrl,
+    payload: { initData, action: 'invalidate', chain },
     signal,
   });
 }

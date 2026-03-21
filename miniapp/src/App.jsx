@@ -9,8 +9,9 @@ import NumberFlowValue from './components/NumberFlowValue.jsx';
 import StepProgressModal from './components/StepProgressModal.jsx';
 import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
 import AdminPage from './components/AdminPage.jsx';
+import AssetManagementPage from './components/AssetManagementPage.jsx';
 import SmartMoneyPage from './components/SmartMoneyPage.jsx';
-import { Bot, BarChart2, Filter, Search, Moon, Sun, Settings, X, Check, RotateCcw, AlertTriangle, Flame, Eye } from 'lucide-react';
+import { Bot, BarChart2, Filter, Search, Moon, Sun, Settings, X, Check, RotateCcw, AlertTriangle, Flame, Eye, Wallet } from 'lucide-react';
 import {
     deleteTask,
     fetchAdminRealtimePositions,
@@ -326,6 +327,7 @@ const icons = {
     alert: AlertTriangle,
     fire: Flame,
     eye: Eye,
+    wallet: Wallet,
 };
 
 const Icon = ({ path: IconCmp, className = '' }) => {
@@ -334,13 +336,13 @@ const Icon = ({ path: IconCmp, className = '' }) => {
 };
 
 function buildTopNavItems({ isAdmin }) {
-    const items = [
+    void isAdmin;
+    return [
         { key: 'hot_pools', label: '热门池子' },
         { key: 'positions', label: '仓位' },
+        { key: 'assets', label: '资产' },
         { key: 'smart_money', label: '聪明钱' },
     ];
-    if (isAdmin) items.push({ key: 'admin', label: '管理' });
-    return items;
 }
 const HOT_POOL_SORT_TABS = [
     { key: 'fees', label: '手续费' },
@@ -500,12 +502,13 @@ export default function App() {
     const showAdmin = isAdmin && viewMode === 'admin';
     const isHotPools = viewMode === 'hot_pools';
     const isPositions = viewMode === 'positions';
+    const isAssets = viewMode === 'assets';
     const isSmartMoney = viewMode === 'smart_money';
     const topNavItems = useMemo(
         () => buildTopNavItems({ isAdmin }),
         [isAdmin],
     );
-    const showWalletSummaryCard = !showAdmin && !isHotPools;
+    const showWalletSummaryCard = !showAdmin && !isHotPools && !isAssets;
     const hotPoolsDefaultPollSec = 10;
     const hotPoolsPollIntervalSec = Math.max(5, Number(pollOverrideSec || hotPoolsDefaultPollSec));
     const settingsPollIntervalSec = isHotPools ? hotPoolsPollIntervalSec : pollIntervalSec;
@@ -777,7 +780,8 @@ export default function App() {
     }, [apiBaseUrl, initData, hasInitData]);
 
     useEffect(() => {
-        if (!isAdmin && viewMode === 'admin') setViewMode('positions');
+        if (viewMode !== 'admin') return;
+        setViewMode(isAdmin ? 'assets' : 'positions');
     }, [isAdmin, viewMode]);
 
     useEffect(() => {
@@ -1963,6 +1967,11 @@ export default function App() {
             icon: icons.bot,
             subtitle: walletAddress ? `钱包 ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '钱包未连接',
         },
+        assets: {
+            title: '资产管理',
+            icon: icons.wallet,
+            subtitle: isAdmin ? '我的资产、聪明钱与管理入口' : '我的资产与历史统计',
+        },
         smart_money: {
             title: '聪明钱',
             icon: icons.eye,
@@ -2129,6 +2138,19 @@ export default function App() {
                             </div>
                         ) : null}
                     </ModuleHeader>
+                ) : isAssets ? (
+                    <div className="mb-2">
+                        <AssetManagementPage
+                            apiBaseUrl={apiBaseUrl}
+                            initData={initData}
+                            hasInitData={hasInitData}
+                            isAdmin={isAdmin}
+                            tick={tick}
+                            pollIntervalSec={pollIntervalSec}
+                            accentTheme={accentTheme}
+                            onNotice={showNotice}
+                        />
+                    </div>
                 ) : isSmartMoney ? (
                     <div className="mb-2">
                         <SmartMoneyPage
@@ -3371,6 +3393,7 @@ export default function App() {
                         let iconPath = icons.bot;
                         if (item.key === 'hot_pools') iconPath = icons.fire;
                         if (item.key === 'positions') iconPath = icons.chart;
+                        if (item.key === 'assets') iconPath = icons.wallet;
                         if (item.key === 'smart_money') iconPath = icons.eye;
                         if (item.key === 'admin') iconPath = icons.gear;
 

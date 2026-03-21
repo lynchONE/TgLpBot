@@ -179,6 +179,115 @@ export async function fetchAdminRealtimePositions({ apiBaseUrl, initData, userId
     return resp.json();
 }
 
+export async function fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days = 7, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/admin/assets/smart_money_overview`;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, days }),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    const payload = await resp.json();
+    return payload?.data ?? payload;
+}
+
+export async function fetchAdminSmartMoneyWallet({ apiBaseUrl, initData, address, chainId, days = 7, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/admin/assets/smart_money_wallet`;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, address, chain_id: chainId, days }),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    const payload = await resp.json();
+    return payload?.data ?? payload;
+}
+
+export async function fetchAdminSmartMoneyLeaderboard({
+    apiBaseUrl,
+    initData,
+    days = 1,
+    metric = 'pnl',
+    limit = 20,
+    signal,
+}) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/admin/assets/smart_money_leaderboard`;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, days, metric, limit }),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    const payload = await resp.json();
+    return payload?.data ?? payload;
+}
+
+export async function fetchAssetOverview({ apiBaseUrl, initData, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/assets/overview`;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData }),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    const payload = await resp.json();
+    return payload?.data ?? payload;
+}
+
+export async function fetchAssetHistory({ apiBaseUrl, initData, days = 30, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/assets/history`;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, days }),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    const payload = await resp.json();
+    return payload?.data ?? payload;
+}
+
+export async function fetchAssetLPStats({ apiBaseUrl, initData, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/assets/lp_stats`;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData }),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    const payload = await resp.json();
+    return payload?.data ?? payload;
+}
+
 export async function fetchAdminOnlineUsers({ apiBaseUrl, initData, limit, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/admin?endpoint=online_users`;
