@@ -221,11 +221,14 @@ function LWAreaChart({ points, stroke = '#52d1ff', height = 220 }) {
     chartRef.current?.timeScale().fitContent();
   }, [points]);
 
-  if (!points || points.length < 2) {
-    return <div className="am-chart-empty">暂无趋势数据</div>;
-  }
-
-  return <div ref={containerRef} style={{ minHeight: height, borderRadius: 'var(--radius-md)', overflow: 'hidden' }} />;
+  return (
+    <div style={{ position: 'relative', minHeight: height }}>
+      <div ref={containerRef} style={{ minHeight: height, borderRadius: 'var(--radius-md)', overflow: 'hidden' }} />
+      {(!points || points.length < 2) && (
+        <div className="am-chart-empty" style={{ position: 'absolute', inset: 0, zIndex: 1 }}>暂无趋势数据</div>
+      )}
+    </div>
+  );
 }
 
 /* ─── PnL Calendar (盈亏日历) ─── */
@@ -279,10 +282,6 @@ function PnLCalendar({ data, loading = false }) {
     for (let i = 0; i < 7 - remainder; i++) {
       cells.push(<div key={`t-${i}`} className="pnl-cal-cell pnl-cal-empty" />);
     }
-  }
-
-  if (!data || data.length === 0) {
-    return <div className="am-chart-empty">暂无每日 LP 数据</div>;
   }
 
   return (
@@ -596,7 +595,7 @@ export default function AssetManagementPanel({
     try {
       const [overviewResult, leaderboardResult] = await Promise.allSettled([
         fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days: smartMoneyDays, forceRefresh }),
-        fetchAdminSmartMoneyLeaderboard({ apiBaseUrl, initData, days: smartMoneyDays, metric: leaderboardMetric, limit: 20, forceRefresh }),
+        fetchAdminSmartMoneyLeaderboard({ apiBaseUrl, initData, days: 1, metric: leaderboardMetric, limit: 20, forceRefresh }),
       ]);
       const overview = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
       const leaderboard = leaderboardResult.status === 'fulfilled' ? leaderboardResult.value : null;
@@ -759,6 +758,15 @@ export default function AssetManagementPanel({
     if (assetState?.history?.today?.day) rows.push(assetState.history.today);
     return rows.map((item) => ({ day: item.day, value: Number(item?.[historyMetric] || 0) }));
   }, [assetState.history, historyMetric]);
+
+  const smartMoneyPnlCalData = useMemo(() => {
+    const history = Array.isArray(smartMoneyWallet?.history) ? [...smartMoneyWallet.history].sort((a, b) => a.day.localeCompare(b.day)) : [];
+    if (history.length < 2) return [];
+    return history.slice(1).map((item, i) => ({
+      day: item.day,
+      realized_pnl_usd: Number(item.total_usd || 0) - Number(history[i].total_usd || 0),
+    }));
+  }, [smartMoneyWallet?.history]);
 
   const handleSaveSystemConfig = useCallback(async () => {
     try {
@@ -1160,11 +1168,8 @@ export default function AssetManagementPanel({
                     );
                   })()}
 
-                  {/* 30-day trend */}
-                  <div className="am-chart-box">
-                    <div className="am-chart-label">30 天趋势</div>
-                    <SparklineChart points={Array.isArray(smartMoneyWallet.history) ? smartMoneyWallet.history.map((item) => ({ value: Number(item?.total_usd || 0) })) : []} />
-                  </div>
+                  {/* PnL calendar (daily balance diff) */}
+                  <PnLCalendar data={smartMoneyPnlCalData} />
 
                   {/* window stats */}
                   <div className="am-stat-grid am-stat-grid-3">
@@ -1197,7 +1202,7 @@ export default function AssetManagementPanel({
           {smSubTab === 'leaderboard' ? (
             <div className="am-card">
               <div className="am-card-header">
-                <div className="am-card-title">排行榜</div>
+                <div className="am-card-title">昨日排行</div>
                 <div className="am-pill-group">
                   {LEADERBOARD_METRICS.map((item) => (
                     <button key={item.key} type="button" className={`am-pill ${leaderboardMetric === item.key ? 'active' : ''}`} onClick={() => setLeaderboardMetric(item.key)}>

@@ -726,7 +726,7 @@ export default function AssetManagementPage({
         try {
             const [overviewResult, leaderboardResult] = await Promise.allSettled([
                 fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days: smartMoneyDays, forceRefresh }),
-                fetchAdminSmartMoneyLeaderboard({ apiBaseUrl, initData, days: smartMoneyDays, metric: leaderboardMetric, limit: 20, forceRefresh }),
+                fetchAdminSmartMoneyLeaderboard({ apiBaseUrl, initData, days: 1, metric: leaderboardMetric, limit: 20, forceRefresh }),
             ]);
             const overview = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
             const leaderboard = leaderboardResult.status === 'fulfilled' ? leaderboardResult.value : null;
@@ -810,6 +810,15 @@ export default function AssetManagementPage({
         () => (Array.isArray(smartMoneyWallet?.history) ? smartMoneyWallet.history.map((item) => ({ close: Number(item?.total_usd || 0) })) : []),
         [smartMoneyWallet],
     );
+
+    const smartMoneyPnlCalData = useMemo(() => {
+        const history = Array.isArray(smartMoneyWallet?.history) ? [...smartMoneyWallet.history].sort((a, b) => a.day.localeCompare(b.day)) : [];
+        if (history.length < 2) return [];
+        return history.slice(1).map((item, i) => ({
+            day: item.day,
+            realized_pnl_usd: Number(item.total_usd || 0) - Number(history[i].total_usd || 0),
+        }));
+    }, [smartMoneyWallet?.history]);
 
     const SM_PAGE_SIZE = 10;
 
@@ -1183,13 +1192,8 @@ export default function AssetManagementPage({
                                         );
                                     })()}
 
-                                    {/* 30-day trend */}
-                                    <div className="rounded-xl border border-zinc-100 bg-zinc-50/60 p-3 dark:border-white/[0.04] dark:bg-[#0d0f12]">
-                                        <div className="text-[9px] font-medium uppercase tracking-wide text-zinc-400 dark:text-white/35">30 天趋势</div>
-                                        <div className="mt-2">
-                                            <MiniChart data={smartMoneyRows} width={320} height={80} strokeColor="#38bdf8" loading={smartMoneyLoading} error={!smartMoneyLoading && smartMoneyRows.length === 0} />
-                                        </div>
-                                    </div>
+                                    {/* PnL calendar (daily balance diff) */}
+                                    <PnLCalendar data={smartMoneyPnlCalData} />
 
                                     {/* window stats */}
                                     <div className="grid grid-cols-3 gap-1.5">
@@ -1218,7 +1222,7 @@ export default function AssetManagementPage({
                     {smSubTab === 'leaderboard' && (
                         <Card>
                             <div className="flex items-center justify-between gap-2">
-                                <span className="text-[12px] font-bold text-zinc-900 dark:text-white/90">排行榜</span>
+                                <span className="text-[12px] font-bold text-zinc-900 dark:text-white/90">昨日排行</span>
                                 <div className="flex gap-1.5">
                                     {LEADERBOARD_METRICS.map((m) => (
                                         <Pill key={m.key} active={leaderboardMetric === m.key} brand={brand} onClick={() => setLeaderboardMetric(m.key)}>{m.label}</Pill>
