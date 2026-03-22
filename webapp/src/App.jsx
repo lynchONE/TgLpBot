@@ -23,6 +23,7 @@ import {
   checkLoginCode,
   deleteTask,
   fetchHotPools,
+  fetchMyTradeMarkers,
   fetchRealtimePositions,
   fetchSmartMoneyPoolMarkers,
   fetchTokenCandles,
@@ -533,8 +534,9 @@ export default function App() {
   );
   const klineFilteredMarkers = useMemo(() => (
     klineMarkers.filter((marker) => {
+      const isMyTrade = Boolean(marker?.is_my_trade);
       const walletAddress = normalizeWalletAddress(marker?.wallet_address);
-      if (klineMarkerWalletSelectionSet.size > 0 && !klineMarkerWalletSelectionSet.has(walletAddress)) {
+      if (!isMyTrade && klineMarkerWalletSelectionSet.size > 0 && !klineMarkerWalletSelectionSet.has(walletAddress)) {
         return false;
       }
       if (klineMarkerFilterMinUsd > 0) {
@@ -803,20 +805,59 @@ export default function App() {
       setKlineMarkersError('');
       try {
         const rangeHours = Math.max(1, Math.ceil((klineMarkerRange.to - klineMarkerRange.from) / 3600) + 1);
-        const resp = await fetchSmartMoneyPoolMarkers({
+        const markerParams = {
           apiBaseUrl,
           initData,
           chain: selectedPool?.chain || chain,
           poolId: selectedPoolAddress,
-          poolVersion: selectedPoolVersion,
           bucketSec: klineIntervalMeta.bucketSec,
-          windowHours: rangeHours,
-          limit: klineIntervalMeta.poolLimit,
           startTs: klineMarkerRange.from,
           endTs: klineMarkerRange.to,
           signal,
+        };
+        const [smartResp, myResp] = await Promise.allSettled([
+          fetchSmartMoneyPoolMarkers({
+            ...markerParams,
+            poolVersion: selectedPoolVersion,
+            windowHours: rangeHours,
+            limit: klineIntervalMeta.poolLimit,
+          }),
+          fetchMyTradeMarkers({
+            ...markerParams,
+            windowSec: Math.max(
+              klineIntervalMeta.bucketSec,
+              Number(klineMarkerRange.to || 0) - Number(klineMarkerRange.from || 0) + (klineIntervalMeta.bucketSec * 2)
+            ),
+          }),
+        ]);
+
+        const nextMarkers = [];
+        let nextError = '';
+
+        if (smartResp.status === 'fulfilled') {
+          nextMarkers.push(...(Array.isArray(smartResp.value?.events) ? smartResp.value.events : []));
+        } else {
+          nextError = String(smartResp.reason?.message || smartResp.reason || '');
+        }
+
+        if (myResp.status === 'fulfilled') {
+          const myEvents = Array.isArray(myResp.value?.events) ? myResp.value.events : [];
+          nextMarkers.push(...myEvents.map((event, index) => ({
+            ...event,
+            event_id: String(event?.event_id || '').trim() || `my:${String(event?.action || 'add').toLowerCase()}:${Number(event?.t || event?.bucket_t || 0)}:${String(event?.tx_hash || '').toLowerCase() || index}`,
+            is_my_trade: true,
+          })));
+        }
+
+        nextMarkers.sort((a, b) => {
+          const timeA = Number(a?.t || a?.bucket_t || 0);
+          const timeB = Number(b?.t || b?.bucket_t || 0);
+          if (timeA !== timeB) return timeA - timeB;
+          return String(a?.action || '').localeCompare(String(b?.action || ''));
         });
-        setKlineMarkers(Array.isArray(resp?.events) ? resp.events : []);
+
+        setKlineMarkers(nextMarkers);
+        setKlineMarkersError(nextError);
       } catch (e) {
         if (e?.name !== 'AbortError') {
           setKlineMarkers([]);

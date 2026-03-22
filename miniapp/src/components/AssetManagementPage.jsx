@@ -393,35 +393,177 @@ function PnLCalendar({ data, loading = false }) {
 }
 
 /* ─── Per-pool PnL list for today ─── */
-function TodayPoolPnL({ pools }) {
+function formatPoolPair(pool) {
+    const token0 = String(pool?.token0_symbol || '').trim();
+    const token1 = String(pool?.token1_symbol || '').trim();
+    if (token0 || token1) return `${token0 || '?'} / ${token1 || '?'}`;
+    const poolId = String(pool?.pool_id || '').trim();
+    return poolId ? `${poolId.slice(0, 6)}...${poolId.slice(-4)}` : '未命名池子';
+}
+
+function summarizeTodayPools(pools) {
     if (!Array.isArray(pools) || pools.length === 0) {
+        return {
+            rows: [],
+            positiveRows: [],
+            negativeRows: [],
+            flatCount: 0,
+            topPositive: [],
+            topNegative: [],
+            remainingCount: 0,
+            maxAbsPnl: 1,
+        };
+    }
+
+    const merged = new Map();
+    for (const pool of pools) {
+        const chain = String(pool?.chain || 'bsc').toUpperCase();
+        const poolId = String(pool?.pool_id || '').trim();
+        const pair = formatPoolPair(pool);
+        const key = poolId ? `${chain}:${poolId}` : `${chain}:${pair}`;
+        const prev = merged.get(key) || {
+            key,
+            chain,
+            pair,
+            closed_count: 0,
+            profit_usd: 0,
+        };
+        prev.closed_count += Number(pool?.closed_count || 0);
+        prev.profit_usd += Number(pool?.profit_usd || 0);
+        merged.set(key, prev);
+    }
+
+    const rows = [...merged.values()].sort((a, b) => Math.abs(b.profit_usd) - Math.abs(a.profit_usd));
+    const positiveRows = rows.filter((row) => row.profit_usd > 0).sort((a, b) => b.profit_usd - a.profit_usd);
+    const negativeRows = rows.filter((row) => row.profit_usd < 0).sort((a, b) => a.profit_usd - b.profit_usd);
+    const topPositive = positiveRows.slice(0, 3);
+    const topNegative = negativeRows.slice(0, 3);
+    const featuredKeys = new Set([...topPositive, ...topNegative].map((row) => row.key));
+
+    return {
+        rows,
+        positiveRows,
+        negativeRows,
+        flatCount: rows.length - positiveRows.length - negativeRows.length,
+        topPositive,
+        topNegative,
+        remainingCount: rows.filter((row) => !featuredKeys.has(row.key)).length,
+        maxAbsPnl: Math.max(...rows.map((row) => Math.abs(row.profit_usd)), 1),
+    };
+}
+
+function TodayPoolContributionRow({ row, maxAbsPnl }) {
+    const pnl = Number(row?.profit_usd || 0);
+    const positive = pnl >= 0;
+    const ratio = Math.max(Math.abs(pnl) / Math.max(maxAbsPnl, 1), 0.08);
+
+    return (
+        <div className="rounded-xl border border-zinc-100 bg-zinc-50/60 px-3 py-2.5 dark:border-white/[0.04] dark:bg-[#0d0f12]">
+            <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0 truncate text-[11px] font-semibold text-zinc-900 dark:text-white/90">
+                    {row?.pair || '未命名池子'}
+                </div>
+                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold tabular-nums ring-1 ${
+                    positive
+                        ? 'bg-emerald-500/[0.08] text-emerald-600 ring-emerald-500/20 dark:bg-emerald-500/[0.12] dark:text-emerald-300 dark:ring-emerald-400/25'
+                        : 'bg-red-500/[0.08] text-red-600 ring-red-500/20 dark:bg-red-500/[0.12] dark:text-red-300 dark:ring-red-400/25'
+                }`}>
+                    {positive ? '+' : ''}{formatUsdCompact(pnl)}
+                </span>
+            </div>
+            <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[9px] text-zinc-400 dark:text-white/30">
+                <span>{String(row?.chain || 'BSC').toUpperCase()}</span>
+                <span>{Number(row?.closed_count || 0)} 笔</span>
+            </div>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-zinc-100 dark:bg-white/[0.04]">
+                <div
+                    className={positive ? 'h-full rounded-full bg-emerald-400/90' : 'h-full rounded-full bg-red-400/90'}
+                    style={{ width: `${ratio * 100}%` }}
+                />
+            </div>
+        </div>
+    );
+}
+
+function TodayPoolPnL({ pools, brand }) {
+    const [view, setView] = useState('leaders');
+    const summary = useMemo(() => summarizeTodayPools(pools), [pools]);
+    const showDetailsTab = summary.remainingCount > 0 || summary.flatCount > 0;
+
+    useEffect(() => {
+        if (!showDetailsTab && view !== 'leaders') {
+            setView('leaders');
+        }
+    }, [showDetailsTab, view]);
+
+    if (!summary.rows.length) {
         return <Empty text="今日暂无平仓记录" />;
     }
+
     return (
-        <div className="flex flex-col gap-1.5">
-            {pools.map((pool, i) => {
-                const pnl = Number(pool.profit_usd || 0);
-                const positive = pnl >= 0;
-                return (
-                    <div key={`${pool.pool_id}-${i}`} className="flex items-center justify-between gap-3 rounded-xl border border-zinc-100 bg-zinc-50/60 px-3 py-2 dark:border-white/[0.04] dark:bg-[#0d0f12]">
-                        <div className="min-w-0">
-                            <div className="text-[11px] font-semibold text-zinc-900 dark:text-white/90 truncate">
-                                {pool.token0_symbol || '?'}/{pool.token1_symbol || '?'}
-                            </div>
-                            <div className="mt-0.5 text-[9px] text-zinc-400 dark:text-white/30">
-                                {String(pool.chain || 'bsc').toUpperCase()} · {pool.closed_count || 0} 笔
-                            </div>
+        <div className="flex flex-col gap-2.5">
+            <div className="flex items-start justify-between gap-2">
+                <div>
+                    <div className="text-[10px] font-medium text-zinc-500 dark:text-white/40">池子贡献</div>
+                    <div className="mt-0.5 text-[10px] text-zinc-400 dark:text-white/30">默认只看贡献榜，完整明细收进二级视图</div>
+                </div>
+                <div className="flex gap-1.5">
+                    <Pill active={view === 'leaders'} brand={brand} onClick={() => setView('leaders')}>贡献榜</Pill>
+                    {showDetailsTab ? <Pill active={view === 'details'} brand={brand} onClick={() => setView('details')}>全部明细</Pill> : null}
+                </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-1.5">
+                {[
+                    { label: '参与池子', value: summary.rows.length, tone: '' },
+                    { label: '盈利池', value: summary.positiveRows.length, tone: 'text-emerald-600 dark:text-emerald-300' },
+                    { label: '亏损池', value: summary.negativeRows.length, tone: 'text-red-600 dark:text-red-300' },
+                    { label: '持平池', value: summary.flatCount, tone: '' },
+                ].map((item) => (
+                    <div key={item.label} className="rounded-lg bg-zinc-50 px-2.5 py-2 ring-1 ring-zinc-200 dark:bg-white/[0.03] dark:ring-white/[0.06]">
+                        <div className="text-[9px] text-zinc-400 dark:text-white/30">{item.label}</div>
+                        <div className={`mt-0.5 text-[13px] font-bold tabular-nums text-zinc-900 dark:text-white/90 ${item.tone}`.trim()}>
+                            {item.value}
                         </div>
-                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold tabular-nums ring-1 ${
-                            positive
-                                ? 'bg-emerald-500/[0.08] text-emerald-600 ring-emerald-500/20 dark:bg-emerald-500/[0.12] dark:text-emerald-300 dark:ring-emerald-400/25'
-                                : 'bg-red-500/[0.08] text-red-600 ring-red-500/20 dark:bg-red-500/[0.12] dark:text-red-300 dark:ring-red-400/25'
-                        }`}>
-                            {positive ? '+' : ''}{formatUsd(pnl)}
-                        </span>
                     </div>
-                );
-            })}
+                ))}
+            </div>
+
+            {view === 'leaders' ? (
+                <div className="flex flex-col gap-2.5">
+                    <div className="flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] font-semibold text-zinc-700 dark:text-white/70">Top 盈利</span>
+                            <span className="text-[9px] text-zinc-400 dark:text-white/30">{summary.topPositive.length} 个</span>
+                        </div>
+                        {summary.topPositive.length > 0
+                            ? summary.topPositive.map((row) => <TodayPoolContributionRow key={row.key} row={row} maxAbsPnl={summary.maxAbsPnl} />)
+                            : <Empty text="今日暂无盈利池" />}
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] font-semibold text-zinc-700 dark:text-white/70">Top 亏损</span>
+                            <span className="text-[9px] text-zinc-400 dark:text-white/30">{summary.topNegative.length} 个</span>
+                        </div>
+                        {summary.topNegative.length > 0
+                            ? summary.topNegative.map((row) => <TodayPoolContributionRow key={row.key} row={row} maxAbsPnl={summary.maxAbsPnl} />)
+                            : <Empty text="今日暂无亏损池" />}
+                    </div>
+
+                    {showDetailsTab ? (
+                        <div className="text-[10px] text-zinc-400 dark:text-white/30">
+                            其余 {summary.remainingCount} 个池子已折叠，点“全部明细”查看完整列表。
+                        </div>
+                    ) : null}
+                </div>
+            ) : (
+                <div className="flex max-h-[280px] flex-col gap-1.5 overflow-y-auto pr-1">
+                    {summary.rows.map((row) => (
+                        <TodayPoolContributionRow key={row.key} row={row} maxAbsPnl={summary.maxAbsPnl} />
+                    ))}
+                </div>
+            )}
         </div>
     );
 }
@@ -994,8 +1136,7 @@ export default function AssetManagementPage({
                             </div>
                         </div>
                         <div className="mt-3">
-                            <div className="text-[10px] font-medium text-zinc-500 dark:text-white/40 mb-1.5">各池子盈亏明细</div>
-                            <TodayPoolPnL pools={assetsData.lp?.today_pools} />
+                            <TodayPoolPnL pools={assetsData.lp?.today_pools} brand={brand} />
                         </div>
                     </Card>
 

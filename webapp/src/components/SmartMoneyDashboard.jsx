@@ -115,6 +115,50 @@ function formatRangePercentPlain(value) {
     return `${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
 }
 
+const POOL_CARD_RANGE_LIMIT = 5;
+
+function getPoolCardRangeGroups(pool) {
+    const groups = Array.isArray(pool?.range_groups)
+        ? pool.range_groups.filter((item) => Number(item?.range_percent) > 0)
+        : [];
+    return groups;
+}
+
+function PoolCardRangeSummary({ pool }) {
+    const [expanded, setExpanded] = useState(false);
+    const groups = getPoolCardRangeGroups(pool);
+    const visibleGroups = expanded ? groups : groups.slice(0, POOL_CARD_RANGE_LIMIT);
+    const hiddenCount = Math.max(0, groups.length - visibleGroups.length);
+    if (!groups.length) {
+        return <div className="smd-pool-card-range-empty">暂无聪明钱区间聚合</div>;
+    }
+    return (
+        <div className="smd-range-summary-stack">
+            {visibleGroups.map((group, index) => (
+                <div key={`${pool?.pool_address || 'pool'}:${Number(group?.range_percent || 0)}:${index}`} className="smd-range-summary-line">
+                    <span className="smd-range-summary-pct">{formatRangePercentPlain(group.range_percent)}</span>
+                    {Math.max(0, Number(group?.position_count) || 0) > 1 ? (
+                        <span className="smd-range-summary-badge">{Number(group.position_count)}仓</span>
+                    ) : null}
+                    <span className="smd-range-summary-amount">{formatUSDCompact(group.total_amount_usd)}</span>
+                </div>
+            ))}
+            {groups.length > POOL_CARD_RANGE_LIMIT ? (
+                <button
+                    type="button"
+                    className="smd-range-summary-toggle"
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        setExpanded((prev) => !prev);
+                    }}
+                >
+                    {expanded ? '收起区间' : `展开全部区间${hiddenCount > 0 ? ` (+${hiddenCount})` : ''}`}
+                </button>
+            ) : null}
+        </div>
+    );
+}
+
 function getRefreshIntervalMs(refreshInterval) {
     const seconds = Number(refreshInterval);
     if (!Number.isFinite(seconds) || seconds <= 0) return 10000;
@@ -414,9 +458,6 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
                 <div className="smd-pool-cards">
                     {filtered.map((p) => {
                         const isActive = normalizedActivePoolAddress && normalizePoolSelectionId(p) === normalizedActivePoolAddress;
-                        const rangeSummary = Array.isArray(p?.range_groups)
-                            ? p.range_groups.filter((item) => Number(item?.range_percent) > 0)[0] || null
-                            : null;
                         return (
                             <div
                             key={p.pool_address}
@@ -444,17 +485,7 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
                                 )}
                             </div>
                             <div className="smd-pool-card-range-row">
-                                {rangeSummary ? (
-                                    <div className="smd-range-summary-line">
-                                        <span className="smd-range-summary-pct">{formatRangePercentPlain(rangeSummary.range_percent)}</span>
-                                        {Math.max(0, Number(rangeSummary?.position_count) || 0) > 1 ? (
-                                            <span className="smd-range-summary-badge">+{Math.max(0, Number(rangeSummary?.position_count) || 0) - 1}</span>
-                                        ) : null}
-                                        <span className="smd-range-summary-amount">{formatUSDCompact(rangeSummary.total_amount_usd)}</span>
-                                    </div>
-                                ) : (
-                                    <div className="smd-pool-card-range-empty">暂无聪明钱区间聚合</div>
-                                )}
+                                <PoolCardRangeSummary pool={p} />
                                 {typeof onOpenPosition === 'function' ? (
                                     <button
                                         type="button"

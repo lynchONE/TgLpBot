@@ -308,6 +308,184 @@ function PnLCalendar({ data, loading = false }) {
   );
 }
 
+/* ─── Per-pool PnL overview for today ─── */
+function formatPoolPair(pool) {
+  const token0 = String(pool?.token0_symbol || '').trim();
+  const token1 = String(pool?.token1_symbol || '').trim();
+  if (token0 || token1) return `${token0 || '?'} / ${token1 || '?'}`;
+  const poolId = String(pool?.pool_id || '').trim();
+  return poolId ? `${poolId.slice(0, 6)}...${poolId.slice(-4)}` : '未命名池子';
+}
+
+function summarizeTodayPools(pools) {
+  if (!Array.isArray(pools) || pools.length === 0) {
+    return {
+      rows: [],
+      positiveRows: [],
+      negativeRows: [],
+      flatCount: 0,
+      topPositive: [],
+      topNegative: [],
+      remainingCount: 0,
+      maxAbsPnl: 1,
+    };
+  }
+
+  const merged = new Map();
+  for (const pool of pools) {
+    const chain = String(pool?.chain || 'bsc').toUpperCase();
+    const poolId = String(pool?.pool_id || '').trim();
+    const pair = formatPoolPair(pool);
+    const key = poolId ? `${chain}:${poolId}` : `${chain}:${pair}`;
+    const prev = merged.get(key) || {
+      key,
+      chain,
+      pair,
+      closed_count: 0,
+      profit_usd: 0,
+    };
+    prev.closed_count += Number(pool?.closed_count || 0);
+    prev.profit_usd += Number(pool?.profit_usd || 0);
+    merged.set(key, prev);
+  }
+
+  const rows = [...merged.values()].sort((a, b) => Math.abs(b.profit_usd) - Math.abs(a.profit_usd));
+  const positiveRows = rows.filter((row) => row.profit_usd > 0).sort((a, b) => b.profit_usd - a.profit_usd);
+  const negativeRows = rows.filter((row) => row.profit_usd < 0).sort((a, b) => a.profit_usd - b.profit_usd);
+  const topPositive = positiveRows.slice(0, 3);
+  const topNegative = negativeRows.slice(0, 3);
+  const featuredKeys = new Set([...topPositive, ...topNegative].map((row) => row.key));
+
+  return {
+    rows,
+    positiveRows,
+    negativeRows,
+    flatCount: rows.length - positiveRows.length - negativeRows.length,
+    topPositive,
+    topNegative,
+    remainingCount: rows.filter((row) => !featuredKeys.has(row.key)).length,
+    maxAbsPnl: Math.max(...rows.map((row) => Math.abs(row.profit_usd)), 1),
+  };
+}
+
+function PoolContributionRow({ row, maxAbsPnl }) {
+  const pnl = Number(row?.profit_usd || 0);
+  const ratio = Math.max(Math.abs(pnl) / Math.max(maxAbsPnl, 1), 0.08);
+  const positive = pnl >= 0;
+
+  return (
+    <div className="am-pool-row">
+      <div className="am-pool-row-head">
+        <div className="am-pool-row-title">{row?.pair || '未命名池子'}</div>
+        <span className={`am-badge ${positive ? 'am-badge-ok' : 'am-badge-warn'}`}>
+          {positive ? '+' : ''}{formatUsdCompact(pnl)}
+        </span>
+      </div>
+      <div className="am-pool-row-meta">
+        <span>{String(row?.chain || 'BSC').toUpperCase()}</span>
+        <span>{Number(row?.closed_count || 0)} 笔</span>
+      </div>
+      <div className="am-pool-bar-track">
+        <div className={`am-pool-bar ${positive ? 'positive' : 'negative'}`} style={{ width: `${ratio * 100}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function TodayPoolPnL({ pools }) {
+  const [view, setView] = useState('leaders');
+  const summary = useMemo(() => summarizeTodayPools(pools), [pools]);
+  const showDetailsTab = summary.remainingCount > 0 || summary.flatCount > 0;
+
+  useEffect(() => {
+    if (!showDetailsTab && view !== 'leaders') {
+      setView('leaders');
+    }
+  }, [showDetailsTab, view]);
+
+  if (!summary.rows.length) {
+    return <EmptyState text="今日暂无平仓记录" />;
+  }
+
+  return (
+    <div className="am-pool-card">
+      <div className="am-pool-toolbar">
+        <div>
+          <div className="am-card-title" style={{ fontSize: 12 }}>池子贡献</div>
+          <div className="am-item-sub" style={{ margin: 0 }}>默认看贡献榜，完整明细收进二级视图</div>
+        </div>
+        <div className="am-pill-group">
+          <button type="button" className={`am-pill ${view === 'leaders' ? 'active' : ''}`} onClick={() => setView('leaders')}>
+            贡献榜
+          </button>
+          {showDetailsTab ? (
+            <button type="button" className={`am-pill ${view === 'details' ? 'active' : ''}`} onClick={() => setView('details')}>
+              全部明细
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="am-pool-summary-grid">
+        <div className="am-pool-summary">
+          <div className="am-pool-summary-label">参与池子</div>
+          <div className="am-pool-summary-value">{summary.rows.length}</div>
+        </div>
+        <div className="am-pool-summary">
+          <div className="am-pool-summary-label">盈利池</div>
+          <div className="am-pool-summary-value is-positive">{summary.positiveRows.length}</div>
+        </div>
+        <div className="am-pool-summary">
+          <div className="am-pool-summary-label">亏损池</div>
+          <div className="am-pool-summary-value is-negative">{summary.negativeRows.length}</div>
+        </div>
+        <div className="am-pool-summary">
+          <div className="am-pool-summary-label">持平池</div>
+          <div className="am-pool-summary-value">{summary.flatCount}</div>
+        </div>
+      </div>
+
+      {view === 'leaders' ? (
+        <>
+          <div className="am-pool-board">
+            <div className="am-pool-column">
+              <div className="am-pool-section-head">
+                <span className="am-pool-section-title">Top 盈利</span>
+                <span className="am-pool-section-count">{summary.topPositive.length} 个</span>
+              </div>
+              {summary.topPositive.length > 0 ? summary.topPositive.map((row) => (
+                <PoolContributionRow key={row.key} row={row} maxAbsPnl={summary.maxAbsPnl} />
+              )) : <div className="am-pool-empty">今日暂无盈利池</div>}
+            </div>
+
+            <div className="am-pool-column">
+              <div className="am-pool-section-head">
+                <span className="am-pool-section-title">Top 亏损</span>
+                <span className="am-pool-section-count">{summary.topNegative.length} 个</span>
+              </div>
+              {summary.topNegative.length > 0 ? summary.topNegative.map((row) => (
+                <PoolContributionRow key={row.key} row={row} maxAbsPnl={summary.maxAbsPnl} />
+              )) : <div className="am-pool-empty">今日暂无亏损池</div>}
+            </div>
+          </div>
+
+          {showDetailsTab ? (
+            <div className="am-pool-note">
+              其余 {summary.remainingCount} 个池子已折叠，点“全部明细”查看完整列表。
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <div className="am-pool-details">
+          {summary.rows.map((row) => (
+            <PoolContributionRow key={row.key} row={row} maxAbsPnl={summary.maxAbsPnl} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── Small sparkline for smart money wallet detail (kept simple) ─── */
 function SparklineChart({ points, stroke = '#52d1ff' }) {
   const values = Array.isArray(points) ? points.map((item) => Number(item?.value || 0)).filter(Number.isFinite) : [];
@@ -956,23 +1134,7 @@ export default function AssetManagementPanel({
                   <div className="am-stat-sub">{Number(assetState.lp?.today?.win_count || 0)}W / {Number(assetState.lp?.today?.loss_count || 0)}L</div>
                 </div>
               </div>
-              {Array.isArray(assetState.lp?.today_pools) && assetState.lp.today_pools.length > 0 ? (
-                <div className="am-list" style={{ marginTop: 10 }}>
-                  <div className="am-item-sub" style={{ margin: 0, marginBottom: 4 }}>各池子盈亏</div>
-                  {assetState.lp.today_pools.map((pool, i) => {
-                    const pnl = Number(pool.profit_usd || 0);
-                    return (
-                      <div key={`${pool.pool_id}-${i}`} className="am-list-item">
-                        <div>
-                          <div className="am-item-title">{pool.token0_symbol || '?'}/{pool.token1_symbol || '?'}</div>
-                          <div className="am-item-sub">{String(pool.chain || 'bsc').toUpperCase()} · {pool.closed_count || 0} 笔</div>
-                        </div>
-                        <span className={`am-badge ${pnl >= 0 ? 'am-badge-ok' : 'am-badge-warn'}`}>{pnl >= 0 ? '+' : ''}{formatUsd(pnl)}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : <EmptyState text="今日暂无平仓记录" />}
+              <TodayPoolPnL pools={assetState.lp?.today_pools} />
             </div>
 
             <div className="am-card">

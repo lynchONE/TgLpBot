@@ -161,6 +161,55 @@ function formatRangePercentPlain(value) {
     return `${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
 }
 
+const POOL_CARD_RANGE_LIMIT = 5;
+
+function getPoolCardRangeGroups(pool) {
+    const groups = Array.isArray(pool?.range_groups)
+        ? pool.range_groups.filter((item) => Number(item?.range_percent) > 0)
+        : [];
+    return groups;
+}
+
+function PoolCardRangeSummary({ pool }) {
+    const [expanded, setExpanded] = useState(false);
+    const groups = getPoolCardRangeGroups(pool);
+    const visibleGroups = expanded ? groups : groups.slice(0, POOL_CARD_RANGE_LIMIT);
+    const hiddenCount = Math.max(0, groups.length - visibleGroups.length);
+    if (!groups.length) {
+        return <div className="text-[10px] text-zinc-500">暂无聪明钱区间</div>;
+    }
+    return (
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            {visibleGroups.map((group, index) => (
+                <div
+                    key={`${pool?.pool_address || 'pool'}:${Number(group?.range_percent || 0)}:${index}`}
+                    className="inline-flex min-w-0 max-w-full items-center gap-1.5 self-start rounded-full border border-white/[0.05] bg-black/20 px-2.5 py-1 text-[10px] text-zinc-300"
+                >
+                    <span className="shrink-0 font-semibold text-zinc-100">{formatRangePercentPlain(group.range_percent)}</span>
+                    {Math.max(0, Number(group?.position_count) || 0) > 1 ? (
+                        <span className="shrink-0 rounded-full bg-white/[0.05] px-1.5 py-0.5 text-[9px] font-semibold text-zinc-200">
+                            {Number(group.position_count)}仓
+                        </span>
+                    ) : null}
+                    <span className="truncate text-zinc-400">{formatUSDCompact(group.total_amount_usd)}</span>
+                </div>
+            ))}
+            {groups.length > POOL_CARD_RANGE_LIMIT ? (
+                <button
+                    type="button"
+                    className="w-fit pl-1 text-[10px] text-lime-300/80 transition hover:text-lime-200"
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        setExpanded((prev) => !prev);
+                    }}
+                >
+                    {expanded ? '收起区间' : `展开全部区间${hiddenCount > 0 ? ` (+${hiddenCount})` : ''}`}
+                </button>
+            ) : null}
+        </div>
+    );
+}
+
 function relativeTime(dateStr) {
     if (!dateStr) return '';
     const d = new Date(dateStr);
@@ -593,24 +642,7 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand }) {
                                         </span>
                                     </div>
                                     <div className="mt-1.5">
-                                        {(() => {
-                                            const rangeSummary = Array.isArray(pool?.range_groups)
-                                                ? pool.range_groups.filter((item) => Number(item?.range_percent) > 0)[0] || null
-                                                : null;
-                                            const repeatedCount = Math.max(0, Number(rangeSummary?.position_count) || 0);
-                                            if (!rangeSummary) {
-                                                return <div className="text-[10px] text-zinc-500">暂无聪明钱区间</div>;
-                                            }
-                                            return (
-                                                <div className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-white/[0.05] bg-black/20 px-2.5 py-1 text-[10px] text-zinc-300">
-                                                    <span className="shrink-0 font-semibold text-zinc-100">{formatRangePercentPlain(rangeSummary.range_percent)}</span>
-                                                    {repeatedCount > 1 ? (
-                                                        <span className="shrink-0 rounded-full bg-white/[0.05] px-1.5 py-0.5 text-[9px] font-semibold text-zinc-200">+{repeatedCount - 1}</span>
-                                                    ) : null}
-                                                    <span className="truncate text-zinc-400">{formatUSDCompact(rangeSummary.total_amount_usd)}</span>
-                                                </div>
-                                            );
-                                        })()}
+                                        <PoolCardRangeSummary pool={pool} />
                                     </div>
                                 </div>
                                 {typeof onOpenPosition === 'function' ? (

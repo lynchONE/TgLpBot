@@ -6371,20 +6371,30 @@ body {
 }
 .smd-pool-card-range-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   margin-bottom: 6px;
-  min-height: 32px;
+  min-height: 38px;
 }
-.smd-range-summary-line {
+.smd-range-summary-stack {
   flex: 1;
   min-width: 0;
   display: flex;
+  flex-direction: column;
   gap: 6px;
-  display: flex;
+  padding: 0 2px;
+}
+.smd-range-summary-line {
+  width: fit-content;
+  max-width: 100%;
+  display: inline-flex;
+  gap: 6px;
   align-items: center;
   flex-wrap: wrap;
-  padding: 0 2px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.03);
 }
 .smd-range-summary-pct {
   font-size: 11px;
@@ -6407,6 +6417,18 @@ body {
 .smd-range-summary-amount {
   font-size: 10px;
   color: rgba(255, 208, 166, 0.72);
+}
+.smd-range-summary-toggle {
+  width: fit-content;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: rgba(223, 255, 139, 0.78);
+  font-size: 10px;
+  cursor: pointer;
+}
+.smd-range-summary-toggle:hover {
+  color: #dfff8b;
 }
 .smd-pool-card-range-empty {
   flex: 1;
@@ -6865,6 +6887,166 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.am-pool-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.am-pool-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.am-pool-summary-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.am-pool-summary {
+  border: 1px solid rgba(136, 157, 191, 0.1);
+  border-radius: var(--radius-md);
+  background: rgba(7, 11, 17, 0.35);
+  padding: 10px 12px;
+}
+
+.am-pool-summary-label {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.am-pool-summary-value {
+  margin-top: 4px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.am-pool-summary-value.is-positive {
+  color: var(--positive);
+}
+
+.am-pool-summary-value.is-negative {
+  color: var(--negative);
+}
+
+.am-pool-board {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.am-pool-column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.am-pool-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.am-pool-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.am-pool-section-count {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.am-pool-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid rgba(136, 157, 191, 0.1);
+  border-radius: var(--radius-md);
+  background: rgba(7, 11, 17, 0.45);
+  padding: 10px 12px;
+}
+
+.am-pool-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.am-pool-row-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.am-pool-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.am-pool-bar-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(136, 157, 191, 0.08);
+  overflow: hidden;
+}
+
+.am-pool-bar {
+  height: 100%;
+  border-radius: 999px;
+}
+
+.am-pool-bar.positive {
+  background: linear-gradient(90deg, rgba(89, 240, 157, 0.45), rgba(89, 240, 157, 1));
+}
+
+.am-pool-bar.negative {
+  background: linear-gradient(90deg, rgba(255, 107, 107, 0.45), rgba(255, 107, 107, 1));
+}
+
+.am-pool-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 72px;
+  border: 1px dashed rgba(136, 157, 191, 0.16);
+  border-radius: var(--radius-md);
+  background: rgba(7, 11, 17, 0.2);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.am-pool-note {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.am-pool-details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 280px;
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .am-list-item {
