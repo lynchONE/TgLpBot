@@ -3376,6 +3376,10 @@ body {
 }
 
 /* Sort toggle tabs */
+.hot-pools-toolbar-shell {
+  position: relative;
+}
+
 .sort-tabs {
   display: flex;
   justify-content: center;
@@ -3397,6 +3401,14 @@ body {
   transition: all 0.15s;
   white-space: nowrap;
 }
+.sort-tab.icon-only {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  padding: 4px 10px;
+}
 .sort-tab:hover {
   color: var(--text);
   background: rgba(138, 160, 194, 0.1);
@@ -3405,6 +3417,44 @@ body {
   background: rgba(var(--accent-rgb), 0.18);
   color: var(--accent-text);
   border: 1px solid rgba(var(--accent-rgb), 0.35);
+}
+.hot-filter-dot {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px rgba(11, 17, 27, 0.9);
+}
+.hot-pools-filter-popover {
+  top: calc(100% + 8px);
+  left: auto;
+  right: 0;
+  width: min(360px, calc(100vw - 48px));
+}
+.hot-pools-filter-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (max-width: 640px) {
+  .hot-pools-filter-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.hot-filter-empty-note {
+  border-radius: 10px;
+  border: 1px solid rgba(138, 160, 194, 0.18);
+  background: rgba(18, 26, 40, 0.55);
+  color: var(--text-muted);
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.filter-toggle.active .hot-filter-dot {
+  background: var(--accent-text);
 }
 .badge-pos {
   background: rgba(168, 85, 247, 0.15);

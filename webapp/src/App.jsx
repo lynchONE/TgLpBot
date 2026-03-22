@@ -215,6 +215,7 @@ const STORAGE = {
   walletId: 'tglp_web_wallet_id',
   klineHeight: 'tglp_web_kline_height',
   hotPoolsHeight: 'tglp_web_hot_pools_height',
+  hotPoolsFilter: 'tglp_web_hot_pools_filter_v1',
   smartMoneyWatchWallets: 'tglp_web_sm_watch_wallets',
 };
 
@@ -292,6 +293,86 @@ function parseKlineMarkerFilterUsd(raw) {
   if (!text) return 0;
   const value = Number(text);
   return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+const HOT_POOLS_FILTER_DEFAULTS = {
+  minFees: 60,
+  minFeeRate: 0.3,
+  minTvl: 1000,
+  minVolume: 2000,
+};
+
+const defaultHotPoolsFilter = {
+  enabled: false,
+  keyword: '',
+  ...HOT_POOLS_FILTER_DEFAULTS,
+};
+
+function parseNullableNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, n);
+}
+
+function parseMetricNumber(value) {
+  if (value === null || value === undefined || value === '') return NaN;
+  const raw = typeof value === 'string' ? value.replace(/,/g, '').trim() : value;
+  const direct = Number(raw);
+  if (Number.isFinite(direct)) return direct;
+  const match = String(value).match(/-?\d+(\.\d+)?/);
+  if (!match) return NaN;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function normalizeHotPoolsFilter(value) {
+  const base = { ...defaultHotPoolsFilter };
+  if (!value || typeof value !== 'object') return base;
+  if (Object.prototype.hasOwnProperty.call(value, 'enabled')) {
+    base.enabled = Boolean(value.enabled);
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'keyword')) {
+    const raw = String(value.keyword ?? '').trim();
+    base.keyword = raw.length > 64 ? raw.slice(0, 64) : raw;
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'minFees')) {
+    base.minFees = parseNullableNumber(value.minFees);
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'minFeeRate')) {
+    base.minFeeRate = parseNullableNumber(value.minFeeRate);
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'minTvl')) {
+    base.minTvl = parseNullableNumber(value.minTvl);
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'minVolume')) {
+    base.minVolume = parseNullableNumber(value.minVolume);
+  }
+  return base;
+}
+
+function parseDraftNumber(raw) {
+  const text = String(raw || '').replace(/,/g, '').trim();
+  if (!text) return null;
+  const match = text.match(/-?\d+(\.\d+)?/);
+  if (!match) return null;
+  const n = Number(match[0]);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, n);
+}
+
+function formatDraftNumber(value) {
+  return Number.isFinite(value) ? String(value) : '';
+}
+
+function buildHotPoolsFilterDraft(filter) {
+  return {
+    keyword: String(filter?.keyword || ''),
+    minFees: formatDraftNumber(filter?.minFees),
+    minFeeRate: formatDraftNumber(filter?.minFeeRate),
+    minTvl: formatDraftNumber(filter?.minTvl),
+    minVolume: formatDraftNumber(filter?.minVolume),
+  };
 }
 
 function klineMarkerEventId(marker) {
@@ -377,6 +458,19 @@ export default function App() {
   const [hotPoolsError, setHotPoolsError] = useState('');
   const [hotPoolsUpdatedAt, setHotPoolsUpdatedAt] = useState('');
   const [hotTokenFilter, setHotTokenFilter] = useState(null);
+  const [hotPoolsFilterOpen, setHotPoolsFilterOpen] = useState(false);
+  const [hotPoolsFilter, setHotPoolsFilter] = useState(() => {
+    const saved = storageGet(STORAGE.hotPoolsFilter);
+    if (!saved) return defaultHotPoolsFilter;
+    try {
+      return normalizeHotPoolsFilter(JSON.parse(saved));
+    } catch {
+      return defaultHotPoolsFilter;
+    }
+  });
+  const [hotPoolsFilterDraft, setHotPoolsFilterDraft] = useState(() =>
+    buildHotPoolsFilterDraft(defaultHotPoolsFilter)
+  );
   const hotPoolsDefaultHeightRef = useRef(getDefaultHotPoolsPanelHeight());
   const [hotPoolsHeightSettingsOpen, setHotPoolsHeightSettingsOpen] = useState(false);
   const [hotPoolsPanelHeight, setHotPoolsPanelHeight] = useState(() =>
@@ -436,6 +530,7 @@ export default function App() {
   const [dragOverKey, setDragOverKey] = useState('');
   const klineToolDockRef = useRef(null);
   const hotPoolsHeightControlRef = useRef(null);
+  const hotPoolsFilterRef = useRef(null);
 
   const hasInitData = Boolean(initData);
   const activeWidgets = useMemo(() => {
@@ -453,6 +548,17 @@ export default function App() {
   const klineTokenMeta = useMemo(() => resolveKlineTokenOptions(selectedPool), [selectedPool]);
   const klineTokenOptions = klineTokenMeta.options || [];
   const klineDefaultTokenSide = klineTokenMeta.defaultKey || '';
+  const hotPoolsFilterEnabled = useMemo(() => {
+    if (!hotPoolsFilter.enabled) return false;
+    const hasKeyword = String(hotPoolsFilter.keyword || '').trim().length > 0;
+    const hasNumbers = [
+      hotPoolsFilter.minFees,
+      hotPoolsFilter.minFeeRate,
+      hotPoolsFilter.minTvl,
+      hotPoolsFilter.minVolume,
+    ].some((value) => Number.isFinite(value));
+    return hasKeyword || hasNumbers;
+  }, [hotPoolsFilter]);
   const klineActiveTokenSide = useMemo(() => {
     if (!klineTokenOptions.length) return '';
     if (klineTokenSide && klineTokenSide !== 'auto') {
@@ -475,6 +581,13 @@ export default function App() {
   const activeHotPoolRankSort = hotInlineSort || hotSort;
   const filteredHotPools = useMemo(() => {
     const q = String(keyword || '').trim().toLowerCase();
+    const filterKeyword = hotPoolsFilterEnabled
+      ? String(hotPoolsFilter.keyword || '').trim().toLowerCase()
+      : '';
+    const minFees = hotPoolsFilterEnabled ? hotPoolsFilter.minFees : null;
+    const minFeeRate = hotPoolsFilterEnabled ? hotPoolsFilter.minFeeRate : null;
+    const minTvl = hotPoolsFilterEnabled ? hotPoolsFilter.minTvl : null;
+    const minVolume = hotPoolsFilterEnabled ? hotPoolsFilter.minVolume : null;
     const positionPoolMap = new Map();
     const positionRows = Array.isArray(positions?.positions) ? positions.positions : [];
     positionRows.forEach((row) => {
@@ -488,10 +601,37 @@ export default function App() {
     const enriched = hotPools
       .filter((row) => {
         const addr = normalizePoolAddress(row?.pool_address || row?.pool_id);
-        if (addr && positionPoolMap.has(addr)) return true;
-        if (!q) return true;
-        const pair = String(row?.trading_pair || '').toLowerCase();
-        return pair.includes(q) || String(addr || '').toLowerCase().includes(q);
+        const hasPosition = Boolean(addr && positionPoolMap.has(addr));
+        if (hasPosition) return true;
+
+        if (q) {
+          const pair = String(row?.trading_pair || '').toLowerCase();
+          if (!pair.includes(q) && !String(addr || '').toLowerCase().includes(q)) return false;
+        }
+
+        if (filterKeyword) {
+          const pair = String(row?.trading_pair || '').toLowerCase();
+          const token0 = String(row?.token0_address || '').toLowerCase();
+          const token1 = String(row?.token1_address || '').toLowerCase();
+          const addrText = String(addr || '').toLowerCase();
+          const matched = (
+            pair.includes(filterKeyword) ||
+            addrText.includes(filterKeyword) ||
+            token0.includes(filterKeyword) ||
+            token1.includes(filterKeyword)
+          );
+          if (!matched) return false;
+        }
+
+        const fees = parseMetricNumber(row?.total_fees);
+        const feeRate = parseMetricNumber(row?.fee_rate);
+        const tvl = parseMetricNumber(row?.current_pool_value);
+        const volume = parseMetricNumber(row?.total_volume);
+        if (Number.isFinite(minFees) && fees < minFees) return false;
+        if (Number.isFinite(minFeeRate) && feeRate < minFeeRate) return false;
+        if (Number.isFinite(minTvl) && tvl < minTvl) return false;
+        if (Number.isFinite(minVolume) && volume < minVolume) return false;
+        return true;
       })
       .map((row, index) => {
         const addr = normalizePoolAddress(row?.pool_address || row?.pool_id);
@@ -514,7 +654,7 @@ export default function App() {
         return Number(a?._listIndex || 0) - Number(b?._listIndex || 0);
       })
       .map(({ _listIndex, _sortValue, ...row }) => row);
-  }, [activeHotPoolRankSort, hotPools, keyword, positions]);
+  }, [activeHotPoolRankSort, hotPools, hotPoolsFilter, hotPoolsFilterEnabled, keyword, positions]);
   const hotPoolIncludeAddresses = useMemo(() => {
     const rows = Array.isArray(positions?.positions) ? positions.positions : [];
     const seen = new Set();
@@ -671,6 +811,49 @@ export default function App() {
   const resetHotPoolsPanelHeight = useCallback(() => {
     setHotPoolsPanelHeight(hotPoolsDefaultHeightRef.current);
   }, []);
+  const openHotPoolsFilter = useCallback(() => {
+    setSearchOpen(false);
+    setHotPoolsFilterDraft(buildHotPoolsFilterDraft(hotPoolsFilter));
+    setHotPoolsFilterOpen(true);
+  }, [hotPoolsFilter]);
+  const applyHotPoolsFilter = useCallback(() => {
+    const next = normalizeHotPoolsFilter({
+      enabled: true,
+      keyword: String(hotPoolsFilterDraft.keyword || '').trim(),
+      minFees: parseDraftNumber(hotPoolsFilterDraft.minFees),
+      minFeeRate: parseDraftNumber(hotPoolsFilterDraft.minFeeRate),
+      minTvl: parseDraftNumber(hotPoolsFilterDraft.minTvl),
+      minVolume: parseDraftNumber(hotPoolsFilterDraft.minVolume),
+    });
+    setHotPoolsFilter(next);
+    storageSet(STORAGE.hotPoolsFilter, JSON.stringify(next));
+    setHotPoolsFilterOpen(false);
+  }, [hotPoolsFilterDraft]);
+  const resetHotPoolsFilter = useCallback(() => {
+    const next = normalizeHotPoolsFilter({
+      enabled: true,
+      keyword: '',
+      ...HOT_POOLS_FILTER_DEFAULTS,
+    });
+    setHotPoolsFilter(next);
+    setHotPoolsFilterDraft(buildHotPoolsFilterDraft(next));
+    storageSet(STORAGE.hotPoolsFilter, JSON.stringify(next));
+    setHotPoolsFilterOpen(false);
+  }, []);
+  const clearHotPoolsFilter = useCallback(() => {
+    const next = normalizeHotPoolsFilter({
+      enabled: false,
+      keyword: '',
+      minFees: null,
+      minFeeRate: null,
+      minTvl: null,
+      minVolume: null,
+    });
+    setHotPoolsFilter(next);
+    setHotPoolsFilterDraft(buildHotPoolsFilterDraft(next));
+    storageSet(STORAGE.hotPoolsFilter, JSON.stringify(next));
+    setHotPoolsFilterOpen(false);
+  }, []);
 
   useEffect(() => {
     if (!klineMarkerWalletSelection.length) return;
@@ -692,17 +875,19 @@ export default function App() {
   }, [klineActiveMarkerId, klineFilteredMarkers]);
 
   useEffect(() => {
-    if (!klineHeightSettingsOpen && !klineMarkerFilterOpen && !hotPoolsHeightSettingsOpen) return undefined;
+    if (!klineHeightSettingsOpen && !klineMarkerFilterOpen && !hotPoolsHeightSettingsOpen && !hotPoolsFilterOpen) return undefined;
     const handlePointerDown = (event) => {
       if (klineToolDockRef.current?.contains(event.target)) return;
       if (hotPoolsHeightControlRef.current?.contains(event.target)) return;
+      if (hotPoolsFilterRef.current?.contains(event.target)) return;
       setKlineHeightSettingsOpen(false);
       setKlineMarkerFilterOpen(false);
       setHotPoolsHeightSettingsOpen(false);
+      setHotPoolsFilterOpen(false);
     };
     document.addEventListener('mousedown', handlePointerDown);
     return () => document.removeEventListener('mousedown', handlePointerDown);
-  }, [hotPoolsHeightSettingsOpen, klineHeightSettingsOpen, klineMarkerFilterOpen]);
+  }, [hotPoolsFilterOpen, hotPoolsHeightSettingsOpen, klineHeightSettingsOpen, klineMarkerFilterOpen]);
 
   useEffect(() => {
     storageSet(STORAGE.chain, chain);
@@ -1467,23 +1652,132 @@ export default function App() {
           </div>
         ) : null}
       >
-        <div className="sort-tabs">
-          {[{ key: 'fees', label: 'Fees' }, { key: 'fee_rate', label: 'Fee Rate' }, { key: 'volume', label: 'Volume' }].map((item) => (
+        <div className="hot-pools-toolbar-shell" ref={hotPoolsFilterRef}>
+          <div className="sort-tabs">
+            {[{ key: 'fees', label: 'Fees' }, { key: 'fee_rate', label: 'Fee Rate' }, { key: 'volume', label: 'Volume' }].map((item) => (
+              <button
+                type="button"
+                key={item.key}
+                className={`sort-tab ${hotSort === item.key ? 'active' : ''}`}
+                onClick={() => {
+                  setHotSort(item.key);
+                  setHotInlineSort('');
+                }}
+              >
+                {item.label}
+              </button>
+            ))}
             <button
               type="button"
-              key={item.key}
-              className={`sort-tab ${hotSort === item.key ? 'active' : ''}`}
+              className={`sort-tab icon-only search-toggle ${searchOpen ? 'active' : ''}`}
               onClick={() => {
-                setHotSort(item.key);
-                setHotInlineSort('');
+                setHotPoolsFilterOpen(false);
+                setSearchOpen((v) => !v);
               }}
+              title="搜索池子"
+              aria-label="搜索池子"
             >
-              {item.label}
+              <Search size={12} />
             </button>
-          ))}
-          <button type="button" className={`sort-tab search-toggle ${searchOpen ? 'active' : ''}`} onClick={() => setSearchOpen((v) => !v)}>
-            <Search size={12} />
-          </button>
+            <button
+              type="button"
+              className={`sort-tab icon-only filter-toggle ${hotPoolsFilterEnabled ? 'active' : ''}`}
+              onClick={() => {
+                if (hotPoolsFilterOpen) {
+                  setHotPoolsFilterOpen(false);
+                  return;
+                }
+                openHotPoolsFilter();
+              }}
+              title="筛选池子"
+              aria-label="筛选池子"
+            >
+              <SlidersHorizontal size={12} />
+              {hotPoolsFilterEnabled ? <span className="hot-filter-dot" /> : null}
+            </button>
+          </div>
+
+          {hotPoolsFilterOpen ? (
+            <div className="kline-filter-popover hot-pools-filter-popover">
+              <div className="kline-filter-popover-head">
+                <div>
+                  <div className="kline-filter-popover-title">热门池子筛选</div>
+                  <div className="kline-filter-popover-sub">仅筛选当前已加载的热门池子</div>
+                </div>
+                <button
+                  type="button"
+                  className="icon-link"
+                  onClick={() => setHotPoolsFilterOpen(false)}
+                  title="Close"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              <label className="kline-filter-field">
+                <span>搜索 (交易对 / 地址)</span>
+                <input
+                  value={hotPoolsFilterDraft.keyword}
+                  onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, keyword: e.target.value }))}
+                  placeholder="例如 USDT"
+                />
+              </label>
+
+              <div className="hot-pools-filter-grid">
+                <label className="kline-filter-field">
+                  <span>手续费 ≥ (USD)</span>
+                  <input
+                    value={hotPoolsFilterDraft.minFees}
+                    onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFees: e.target.value }))}
+                    inputMode="decimal"
+                    placeholder={String(HOT_POOLS_FILTER_DEFAULTS.minFees)}
+                  />
+                </label>
+
+                <label className="kline-filter-field">
+                  <span>费用率 ≥ (%)</span>
+                  <input
+                    value={hotPoolsFilterDraft.minFeeRate}
+                    onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFeeRate: e.target.value }))}
+                    inputMode="decimal"
+                    placeholder={String(HOT_POOLS_FILTER_DEFAULTS.minFeeRate)}
+                  />
+                </label>
+
+                <label className="kline-filter-field">
+                  <span>TVL ≥ (USD)</span>
+                  <input
+                    value={hotPoolsFilterDraft.minTvl}
+                    onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minTvl: e.target.value }))}
+                    inputMode="decimal"
+                    placeholder={String(HOT_POOLS_FILTER_DEFAULTS.minTvl)}
+                  />
+                </label>
+
+                <label className="kline-filter-field">
+                  <span>交易量 ≥ (USD)</span>
+                  <input
+                    value={hotPoolsFilterDraft.minVolume}
+                    onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minVolume: e.target.value }))}
+                    inputMode="decimal"
+                    placeholder={String(HOT_POOLS_FILTER_DEFAULTS.minVolume)}
+                  />
+                </label>
+              </div>
+
+              <div className="kline-filter-actions">
+                <button type="button" className="ghost-chip active" onClick={applyHotPoolsFilter}>
+                  应用
+                </button>
+                <button type="button" className="ghost-chip" onClick={resetHotPoolsFilter}>
+                  默认
+                </button>
+                <button type="button" className="ghost-chip" onClick={clearHotPoolsFilter}>
+                  清空条件
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         {searchOpen && (
@@ -1502,6 +1796,11 @@ export default function App() {
             <button type="button" className="mini-link accent" onClick={() => setHotTokenFilter(null)}>
               清除
             </button>
+          </div>
+        ) : null}
+        {hotPoolsFilterEnabled && !hotPoolsLoading && hotPools.length > 0 && filteredHotPools.length === 0 ? (
+          <div className="hot-filter-empty-note">
+            当前筛选条件下没有可展示的热门池子，调整筛选或清空条件后再试。
           </div>
         ) : null}
 
