@@ -114,7 +114,7 @@ function getKlineIntervalMeta(bar) {
 
 function normalizeHotPoolSort(value) {
   const key = String(value || '').trim().toLowerCase();
-  return HOT_POOL_SORT_OPTIONS.some((item) => item.key === key) ? key : 'fees';
+  return key === 'fee_rate' || key === 'volume' || key === 'fees' ? key : 'fees';
 }
 
 function resolveHotPoolServerSort(sortKey) {
@@ -368,6 +368,7 @@ export default function App() {
   const [hotSort, setHotSort] = useState(() => {
     return normalizeHotPoolSort(storageGet(STORAGE.sort));
   });
+  const [hotInlineSort, setHotInlineSort] = useState('');
 
   const [keyword, setKeyword] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -471,6 +472,7 @@ export default function App() {
   );
   const klineIntervalMeta = useMemo(() => getKlineIntervalMeta(klineInterval), [klineInterval]);
   const selectedPoolGmgnUrl = useMemo(() => buildGmgnUrl(selectedPool, chain), [selectedPool, chain]);
+  const activeHotPoolRankSort = hotInlineSort || hotSort;
   const filteredHotPools = useMemo(() => {
     const q = String(keyword || '').trim().toLowerCase();
     const positionPoolMap = new Map();
@@ -496,7 +498,7 @@ export default function App() {
         return {
           ...row,
           userPositionUsd: addr ? Number(positionPoolMap.get(addr) || 0) : 0,
-          _sortValue: getHotPoolSortRankValue(row, hotSort),
+          _sortValue: getHotPoolSortRankValue(row, activeHotPoolRankSort),
           _listIndex: index,
         };
       });
@@ -512,7 +514,7 @@ export default function App() {
         return Number(a?._listIndex || 0) - Number(b?._listIndex || 0);
       })
       .map(({ _listIndex, _sortValue, ...row }) => row);
-  }, [hotPools, hotSort, keyword, positions]);
+  }, [activeHotPoolRankSort, hotPools, keyword, positions]);
   const hotPoolIncludeAddresses = useMemo(() => {
     const rows = Array.isArray(positions?.positions) ? positions.positions : [];
     const seen = new Set();
@@ -1471,7 +1473,10 @@ export default function App() {
               type="button"
               key={item.key}
               className={`sort-tab ${hotSort === item.key ? 'active' : ''}`}
-              onClick={() => setHotSort(item.key)}
+              onClick={() => {
+                setHotSort(item.key);
+                setHotInlineSort('');
+              }}
             >
               {item.label}
             </button>
@@ -1611,10 +1616,10 @@ export default function App() {
                     <div className="pool-meta-line">
                       <button
                         type="button"
-                        className={`pool-meta-sort meta-cyan ${hotSort === 'volume' ? 'active' : ''}`}
+                        className={`pool-meta-sort meta-cyan ${hotInlineSort === 'volume' ? 'active' : ''}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          setHotSort('volume');
+                          setHotInlineSort((prev) => (prev === 'volume' ? '' : 'volume'));
                         }}
                         title="按 Vol 降序排序"
                       >
@@ -1624,10 +1629,10 @@ export default function App() {
                       <span className="dot-sep" />
                       <button
                         type="button"
-                        className={`pool-meta-sort meta-cyan ${hotSort === 'tvl' ? 'active' : ''}`}
+                        className={`pool-meta-sort meta-cyan ${hotInlineSort === 'tvl' ? 'active' : ''}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          setHotSort('tvl');
+                          setHotInlineSort((prev) => (prev === 'tvl' ? '' : 'tvl'));
                         }}
                         title="按 TVL 降序排序"
                       >
@@ -1637,10 +1642,10 @@ export default function App() {
                       <span className="dot-sep" />
                       <button
                         type="button"
-                        className={`pool-meta-sort meta-orange ${hotSort === 'tx_count' ? 'active' : ''}`}
+                        className={`pool-meta-sort meta-orange ${hotInlineSort === 'tx_count' ? 'active' : ''}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          setHotSort('tx_count');
+                          setHotInlineSort((prev) => (prev === 'tx_count' ? '' : 'tx_count'));
                         }}
                         title="按笔数降序排序"
                       >
@@ -1649,10 +1654,10 @@ export default function App() {
                       <span className="dot-sep" />
                       <button
                         type="button"
-                        className={`pool-meta-sort meta-accent ${hotSort === 'fee_rate' ? 'active' : ''} ${feeRateAvailable ? '' : 'muted'}`}
+                        className={`pool-meta-sort meta-accent ${hotInlineSort === 'fee_rate' ? 'active' : ''} ${feeRateAvailable ? '' : 'muted'}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          setHotSort('fee_rate');
+                          setHotInlineSort((prev) => (prev === 'fee_rate' ? '' : 'fee_rate'));
                         }}
                         title="按费率降序排序"
                       >
@@ -1666,10 +1671,10 @@ export default function App() {
                       <span className="dot-sep" />
                       <button
                         type="button"
-                        className={`pool-meta-sort meta-gold ${hotSort === 'active_fee_rate' ? 'active' : ''} ${activeLiquidityFeeRateAvailable ? '' : 'muted'}`}
+                        className={`pool-meta-sort meta-gold ${hotInlineSort === 'active_fee_rate' ? 'active' : ''} ${activeLiquidityFeeRateAvailable ? '' : 'muted'}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          setHotSort('active_fee_rate');
+                          setHotInlineSort((prev) => (prev === 'active_fee_rate' ? '' : 'active_fee_rate'));
                         }}
                         title="按活跃降序排序"
                       >
@@ -1687,27 +1692,15 @@ export default function App() {
                   <div className="pool-values">
                     <div className="pool-main-val">
                       <NumberFlowValue
-                        value={
-                          hotSort === 'volume' ? volume :
-                          hotSort === 'tvl' ? tvl :
-                          hotSort === 'tx_count' ? txCount :
-                          hotSort === 'fee_rate' ? feeRate :
-                          hotSort === 'active_fee_rate' ? (activeLiquidityFeeRateAvailable ? activeLiquidityFeeRate : 0) :
-                          totalFees
-                        }
-                        formatter={(v) => {
-                          if (hotSort === 'tx_count') return `${Number(v || 0).toLocaleString()}笔`;
-                          if (hotSort === 'fee_rate') return feeRateAvailable ? `${Number(v).toFixed(3)}%` : '--';
-                          if (hotSort === 'active_fee_rate') return activeLiquidityFeeRateAvailable ? `${Number(v).toFixed(3)}%` : '--';
-                          return formatUsdCompact(v);
-                        }}
+                        value={hotSort === 'volume' ? volume : hotSort === 'fee_rate' ? feeRate : totalFees}
+                        formatter={(v) => hotSort === 'fee_rate' ? (Number(v) > 0 ? `${Number(v).toFixed(3)}%` : '--') : formatUsdCompact(v)}
                       />
                     </div>
                     {priceDisplay ? (
                       <div className={`pool-sub-val ${priceDisplay.includes('↑') || priceDisplay.includes('+') ? 'up' : priceDisplay.includes('↓') || priceDisplay.includes('-') ? 'down' : ''}`} title={priceDisplay}>
                         <NumberFlowValue value={priceDisplay} formatter={() => formatPriceDisplay(priceDisplay)} />
                       </div>
-                    ) : hotSort !== 'fee_rate' && hotSort !== 'active_fee_rate' && hotSort !== 'tx_count' ? (
+                    ) : hotSort !== 'fee_rate' ? (
                       <div className={`pool-sub-val purple ${feeRateAvailable ? '' : 'muted'}`}>
                         {feeRateAvailable ? (
                           <NumberFlowValue value={feeRate} formatter={() => feeRateText} />
