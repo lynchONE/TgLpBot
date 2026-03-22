@@ -237,6 +237,7 @@ const defaultHotPoolsFilter = {
     minFeeRate: 0.3,
     minTvl: 1000,
     minVolume: 2000,
+    minTxCount: null,
 };
 
 function parseNullableNumber(value) {
@@ -278,6 +279,9 @@ function normalizeHotPoolsFilter(value) {
     }
     if (Object.prototype.hasOwnProperty.call(value, 'minVolume')) {
         base.minVolume = parseNullableNumber(value.minVolume);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'minTxCount')) {
+        base.minTxCount = parseNullableNumber(value.minTxCount);
     }
     return base;
 }
@@ -382,6 +386,7 @@ export default function App() {
         minFeeRate: String(defaultHotPoolsFilter.minFeeRate),
         minTvl: String(defaultHotPoolsFilter.minTvl),
         minVolume: String(defaultHotPoolsFilter.minVolume),
+        minTxCount: formatDraftNumber(defaultHotPoolsFilter.minTxCount),
     }));
 
     const [poolSearchOpen, setPoolSearchOpen] = useState(false);
@@ -665,7 +670,7 @@ export default function App() {
     const hotPoolsFilterEnabled = useMemo(() => {
         if (!hotPoolsFilter.enabled) return false;
         const hasKeyword = String(hotPoolsFilter.keyword || '').trim().length > 0;
-        const hasNumbers = [hotPoolsFilter.minFees, hotPoolsFilter.minFeeRate, hotPoolsFilter.minTvl, hotPoolsFilter.minVolume].some((v) => Number.isFinite(v));
+        const hasNumbers = [hotPoolsFilter.minFees, hotPoolsFilter.minFeeRate, hotPoolsFilter.minTvl, hotPoolsFilter.minVolume, hotPoolsFilter.minTxCount].some((v) => Number.isFinite(v));
         return hasKeyword || hasNumbers;
     }, [hotPoolsFilter]);
 
@@ -677,12 +682,14 @@ export default function App() {
             const minFeeRate = hotPoolsFilter.minFeeRate;
             const minTvl = hotPoolsFilter.minTvl;
             const minVolume = hotPoolsFilter.minVolume;
+            const minTxCount = hotPoolsFilter.minTxCount;
             const keyword = String(hotPoolsFilter.keyword || '').trim().toLowerCase();
             filtered = hotPoolsRows.filter((row) => {
                 const fees = parseMetricNumber(row?.total_fees);
                 const feeRate = parseMetricNumber(row?.fee_rate);
                 const tvl = parseMetricNumber(row?.current_pool_value);
                 const volume = parseMetricNumber(row?.total_volume);
+                const txCount = parseMetricNumber(row?.transaction_count);
                 // 婵犵鈧啿鈧綊鎮樻径鎰仺闁靛绠戦悡鏇㈡煛閸繍妲风紒顔哄妽閹峰懎顓奸崨顔垮惈闁哄鏅滈悷銈夋煂濠婂唭褔鎮╅懠顒佹啢闂佹寧绋戦惌渚€鎮滈敂鑺ヤ氦闁搞儮鏅濋幗锝夋⒑椤愩埄妾х紒杈ㄧ懄閹便劎鈧綆鍓涢惌鎺楁煛閸曨偄鈷旈柕鍥ㄥ哺閺?
                 const poolAddr = String(row?.pool_address || '').toLowerCase();
                 if (positionsPoolMap.has(poolAddr)) return true;
@@ -698,6 +705,7 @@ export default function App() {
                 if (Number.isFinite(minFeeRate) && feeRate < minFeeRate) return false;
                 if (Number.isFinite(minTvl) && tvl < minTvl) return false;
                 if (Number.isFinite(minVolume) && volume < minVolume) return false;
+                if (Number.isFinite(minTxCount) && txCount < minTxCount) return false;
                 return true;
             });
         }
@@ -874,6 +882,7 @@ export default function App() {
             minFeeRate: formatDraftNumber(hotPoolsFilter.minFeeRate),
             minTvl: formatDraftNumber(hotPoolsFilter.minTvl),
             minVolume: formatDraftNumber(hotPoolsFilter.minVolume),
+            minTxCount: formatDraftNumber(hotPoolsFilter.minTxCount),
         });
     }, [hotPoolsFilterOpen, hotPoolsFilter]);
 
@@ -1131,6 +1140,7 @@ export default function App() {
             minFeeRate: parseDraftNumber(hotPoolsFilterDraft.minFeeRate),
             minTvl: parseDraftNumber(hotPoolsFilterDraft.minTvl),
             minVolume: parseDraftNumber(hotPoolsFilterDraft.minVolume),
+            minTxCount: parseDraftNumber(hotPoolsFilterDraft.minTxCount),
         });
         setHotPoolsFilter(next);
         storage.set(STORAGE_HOT_POOLS_FILTER, JSON.stringify(next));
@@ -1151,6 +1161,7 @@ export default function App() {
             minFeeRate: null,
             minTvl: null,
             minVolume: null,
+            minTxCount: null,
         });
         setHotPoolsFilter(cleared);
         storage.set(STORAGE_HOT_POOLS_FILTER, JSON.stringify(cleared));
@@ -2670,6 +2681,16 @@ export default function App() {
                                                 inputMode="decimal"
                                                 className={`mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                                 placeholder={String(defaultHotPoolsFilter.minVolume)}
+                                            />
+                                        </div>
+                                        <div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">交易笔数 ≥</div>
+                                            <input
+                                                value={hotPoolsFilterDraft.minTxCount}
+                                                onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minTxCount: e.target.value }))}
+                                                inputMode="decimal"
+                                                className={`mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
+                                                placeholder="可选"
                                             />
                                         </div>
                                     </div>

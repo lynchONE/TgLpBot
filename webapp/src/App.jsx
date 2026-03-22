@@ -300,6 +300,7 @@ const HOT_POOLS_FILTER_DEFAULTS = {
   minFeeRate: 0.3,
   minTvl: 1000,
   minVolume: 2000,
+  minTxCount: null,
 };
 
 const defaultHotPoolsFilter = {
@@ -348,6 +349,9 @@ function normalizeHotPoolsFilter(value) {
   if (Object.prototype.hasOwnProperty.call(value, 'minVolume')) {
     base.minVolume = parseNullableNumber(value.minVolume);
   }
+  if (Object.prototype.hasOwnProperty.call(value, 'minTxCount')) {
+    base.minTxCount = parseNullableNumber(value.minTxCount);
+  }
   return base;
 }
 
@@ -372,6 +376,7 @@ function buildHotPoolsFilterDraft(filter) {
     minFeeRate: formatDraftNumber(filter?.minFeeRate),
     minTvl: formatDraftNumber(filter?.minTvl),
     minVolume: formatDraftNumber(filter?.minVolume),
+    minTxCount: formatDraftNumber(filter?.minTxCount),
   };
 }
 
@@ -556,6 +561,7 @@ export default function App() {
       hotPoolsFilter.minFeeRate,
       hotPoolsFilter.minTvl,
       hotPoolsFilter.minVolume,
+      hotPoolsFilter.minTxCount,
     ].some((value) => Number.isFinite(value));
     return hasKeyword || hasNumbers;
   }, [hotPoolsFilter]);
@@ -588,6 +594,7 @@ export default function App() {
     const minFeeRate = hotPoolsFilterEnabled ? hotPoolsFilter.minFeeRate : null;
     const minTvl = hotPoolsFilterEnabled ? hotPoolsFilter.minTvl : null;
     const minVolume = hotPoolsFilterEnabled ? hotPoolsFilter.minVolume : null;
+    const minTxCount = hotPoolsFilterEnabled ? hotPoolsFilter.minTxCount : null;
     const positionPoolMap = new Map();
     const positionRows = Array.isArray(positions?.positions) ? positions.positions : [];
     positionRows.forEach((row) => {
@@ -627,10 +634,12 @@ export default function App() {
         const feeRate = parseMetricNumber(row?.fee_rate);
         const tvl = parseMetricNumber(row?.current_pool_value);
         const volume = parseMetricNumber(row?.total_volume);
+        const txCount = parseMetricNumber(row?.transaction_count);
         if (Number.isFinite(minFees) && fees < minFees) return false;
         if (Number.isFinite(minFeeRate) && feeRate < minFeeRate) return false;
         if (Number.isFinite(minTvl) && tvl < minTvl) return false;
         if (Number.isFinite(minVolume) && volume < minVolume) return false;
+        if (Number.isFinite(minTxCount) && txCount < minTxCount) return false;
         return true;
       })
       .map((row, index) => {
@@ -824,6 +833,7 @@ export default function App() {
       minFeeRate: parseDraftNumber(hotPoolsFilterDraft.minFeeRate),
       minTvl: parseDraftNumber(hotPoolsFilterDraft.minTvl),
       minVolume: parseDraftNumber(hotPoolsFilterDraft.minVolume),
+      minTxCount: parseDraftNumber(hotPoolsFilterDraft.minTxCount),
     });
     setHotPoolsFilter(next);
     storageSet(STORAGE.hotPoolsFilter, JSON.stringify(next));
@@ -848,6 +858,7 @@ export default function App() {
       minFeeRate: null,
       minTvl: null,
       minVolume: null,
+      minTxCount: null,
     });
     setHotPoolsFilter(next);
     setHotPoolsFilterDraft(buildHotPoolsFilterDraft(next));
@@ -1761,6 +1772,16 @@ export default function App() {
                     onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minVolume: e.target.value }))}
                     inputMode="decimal"
                     placeholder={String(HOT_POOLS_FILTER_DEFAULTS.minVolume)}
+                  />
+                </label>
+
+                <label className="kline-filter-field">
+                  <span>交易笔数 ≥</span>
+                  <input
+                    value={hotPoolsFilterDraft.minTxCount}
+                    onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minTxCount: e.target.value }))}
+                    inputMode="decimal"
+                    placeholder="可选"
                   />
                 </label>
               </div>
