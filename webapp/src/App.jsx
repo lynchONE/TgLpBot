@@ -87,6 +87,9 @@ const HOT_POOLS_DISPLAY_LIMIT = 20;
 const DEFAULT_KLINE_CHART_HEIGHT = 520;
 const MIN_KLINE_CHART_HEIGHT = 360;
 const MAX_KLINE_CHART_HEIGHT = 1200;
+const DEFAULT_HOT_POOLS_PANEL_HEIGHT_FALLBACK = 760;
+const MIN_HOT_POOLS_PANEL_HEIGHT = 420;
+const MAX_HOT_POOLS_PANEL_HEIGHT = 1400;
 const ACCENT_THEMES = [
   { key: 'green', label: '绿色' },
   { key: 'yellow', label: '黄色' },
@@ -96,9 +99,49 @@ const KLINE_DRAW_TOOLS = [
   { key: 'line', title: 'Line', icon: Slash },
   { key: 'rect', title: 'Rect', icon: Square },
 ];
+const HOT_POOL_SORT_OPTIONS = [
+  { key: 'fees', label: 'Fees', serverKey: 'fees' },
+  { key: 'volume', label: 'Volume', serverKey: 'volume' },
+  { key: 'tvl', label: 'TVL', serverKey: 'volume' },
+  { key: 'tx_count', label: 'Tx', serverKey: 'volume' },
+  { key: 'fee_rate', label: 'Fee Rate', serverKey: 'fee_rate' },
+  { key: 'active_fee_rate', label: 'Active', serverKey: 'fee_rate' },
+];
 
 function getKlineIntervalMeta(bar) {
   return KLINE_INTERVALS.find((item) => item.key === bar) || KLINE_INTERVALS[0];
+}
+
+function normalizeHotPoolSort(value) {
+  const key = String(value || '').trim().toLowerCase();
+  return HOT_POOL_SORT_OPTIONS.some((item) => item.key === key) ? key : 'fees';
+}
+
+function resolveHotPoolServerSort(sortKey) {
+  return HOT_POOL_SORT_OPTIONS.find((item) => item.key === sortKey)?.serverKey || 'fees';
+}
+
+function getHotPoolSortRankValue(pool, sortKey) {
+  switch (sortKey) {
+    case 'volume':
+      return Number(pool?.total_volume || 0);
+    case 'tvl':
+      return Number(pool?.current_pool_value || 0);
+    case 'tx_count':
+      return Number(pool?.transaction_count || 0);
+    case 'fee_rate': {
+      const tvl = Number(pool?.current_pool_value || 0);
+      const feeRate = Number(pool?.fee_rate || 0);
+      return Number.isFinite(tvl) && tvl > 0 && Number.isFinite(feeRate) ? feeRate : Number.NEGATIVE_INFINITY;
+    }
+    case 'active_fee_rate': {
+      const value = computeHotPoolActiveFeeRate(pool);
+      return Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
+    }
+    case 'fees':
+    default:
+      return Number(pool?.total_fees || 0);
+  }
 }
 
 function normalizeKlineRange(range) {
@@ -116,6 +159,22 @@ function clampKlineChartHeight(value) {
   const numeric = Math.round(Number(value));
   if (!Number.isFinite(numeric)) return DEFAULT_KLINE_CHART_HEIGHT;
   return Math.min(MAX_KLINE_CHART_HEIGHT, Math.max(MIN_KLINE_CHART_HEIGHT, numeric));
+}
+
+function getDefaultHotPoolsPanelHeight() {
+  if (typeof window !== 'undefined') {
+    const viewportHeight = Number(window.innerHeight || 0);
+    if (Number.isFinite(viewportHeight) && viewportHeight > 0) {
+      return Math.round(viewportHeight * 0.75);
+    }
+  }
+  return DEFAULT_HOT_POOLS_PANEL_HEIGHT_FALLBACK;
+}
+
+function clampHotPoolsPanelHeight(value, fallback = getDefaultHotPoolsPanelHeight()) {
+  const numeric = Math.round(Number(value));
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(MAX_HOT_POOLS_PANEL_HEIGHT, Math.max(MIN_HOT_POOLS_PANEL_HEIGHT, numeric));
 }
 
 function findNearestCandleClose(rows, targetTs) {
@@ -155,6 +214,7 @@ const STORAGE = {
   accentTheme: 'tglp_web_accent_theme',
   walletId: 'tglp_web_wallet_id',
   klineHeight: 'tglp_web_kline_height',
+  hotPoolsHeight: 'tglp_web_hot_pools_height',
   smartMoneyWatchWallets: 'tglp_web_sm_watch_wallets',
 };
 
@@ -306,8 +366,7 @@ export default function App() {
     }
   });
   const [hotSort, setHotSort] = useState(() => {
-    const raw = String(storageGet(STORAGE.sort) || '').toLowerCase();
-    return raw === 'fee_rate' || raw === 'volume' || raw === 'fees' ? raw : 'fees';
+    return normalizeHotPoolSort(storageGet(STORAGE.sort));
   });
 
   const [keyword, setKeyword] = useState('');
@@ -317,6 +376,14 @@ export default function App() {
   const [hotPoolsError, setHotPoolsError] = useState('');
   const [hotPoolsUpdatedAt, setHotPoolsUpdatedAt] = useState('');
   const [hotTokenFilter, setHotTokenFilter] = useState(null);
+  const hotPoolsDefaultHeightRef = useRef(getDefaultHotPoolsPanelHeight());
+  const [hotPoolsHeightSettingsOpen, setHotPoolsHeightSettingsOpen] = useState(false);
+  const [hotPoolsPanelHeight, setHotPoolsPanelHeight] = useState(() =>
+    clampHotPoolsPanelHeight(
+      storageGet(STORAGE.hotPoolsHeight) || hotPoolsDefaultHeightRef.current,
+      hotPoolsDefaultHeightRef.current
+    )
+  );
 
   const [positions, setPositions] = useState(null);
   const [positionsLoading, setPositionsLoading] = useState(false);
@@ -367,6 +434,7 @@ export default function App() {
   const [draggingKey, setDraggingKey] = useState('');
   const [dragOverKey, setDragOverKey] = useState('');
   const klineToolDockRef = useRef(null);
+  const hotPoolsHeightControlRef = useRef(null);
 
   const hasInitData = Boolean(initData);
   const activeWidgets = useMemo(() => {
@@ -428,21 +496,23 @@ export default function App() {
         return {
           ...row,
           userPositionUsd: addr ? Number(positionPoolMap.get(addr) || 0) : 0,
+          _sortValue: getHotPoolSortRankValue(row, hotSort),
           _listIndex: index,
         };
       });
 
     return enriched
       .sort((a, b) => {
+        const aMetric = typeof a?._sortValue === 'number' ? a._sortValue : Number.NEGATIVE_INFINITY;
+        const bMetric = typeof b?._sortValue === 'number' ? b._sortValue : Number.NEGATIVE_INFINITY;
+        if (aMetric !== bMetric) return bMetric - aMetric;
         const aPos = Number(a?.userPositionUsd || 0);
         const bPos = Number(b?.userPositionUsd || 0);
-        if (aPos > 0 && bPos <= 0) return -1;
-        if (bPos > 0 && aPos <= 0) return 1;
-        if (aPos > 0 && bPos > 0 && aPos !== bPos) return bPos - aPos;
+        if (aPos !== bPos) return bPos - aPos;
         return Number(a?._listIndex || 0) - Number(b?._listIndex || 0);
       })
-      .map(({ _listIndex, ...row }) => row);
-  }, [hotPools, keyword, positions]);
+      .map(({ _listIndex, _sortValue, ...row }) => row);
+  }, [hotPools, hotSort, keyword, positions]);
   const hotPoolIncludeAddresses = useMemo(() => {
     const rows = Array.isArray(positions?.positions) ? positions.positions : [];
     const seen = new Set();
@@ -478,6 +548,7 @@ export default function App() {
   }, [walletBalances]);
 
   const klineChartHeightCustomized = klineChartHeight !== DEFAULT_KLINE_CHART_HEIGHT;
+  const hotPoolsPanelHeightCustomized = hotPoolsPanelHeight !== hotPoolsDefaultHeightRef.current;
   const klineViewportKey = useMemo(
     () => `${selectedPoolAddress || 'pool'}:${klineTokenAddress || 'token'}:${klineInterval}`,
     [klineInterval, klineTokenAddress, selectedPoolAddress]
@@ -595,6 +666,9 @@ export default function App() {
   const resetKlineChartHeight = useCallback(() => {
     setKlineChartHeight(DEFAULT_KLINE_CHART_HEIGHT);
   }, []);
+  const resetHotPoolsPanelHeight = useCallback(() => {
+    setHotPoolsPanelHeight(hotPoolsDefaultHeightRef.current);
+  }, []);
 
   useEffect(() => {
     if (!klineMarkerWalletSelection.length) return;
@@ -616,15 +690,17 @@ export default function App() {
   }, [klineActiveMarkerId, klineFilteredMarkers]);
 
   useEffect(() => {
-    if (!klineHeightSettingsOpen && !klineMarkerFilterOpen) return undefined;
+    if (!klineHeightSettingsOpen && !klineMarkerFilterOpen && !hotPoolsHeightSettingsOpen) return undefined;
     const handlePointerDown = (event) => {
       if (klineToolDockRef.current?.contains(event.target)) return;
+      if (hotPoolsHeightControlRef.current?.contains(event.target)) return;
       setKlineHeightSettingsOpen(false);
       setKlineMarkerFilterOpen(false);
+      setHotPoolsHeightSettingsOpen(false);
     };
     document.addEventListener('mousedown', handlePointerDown);
     return () => document.removeEventListener('mousedown', handlePointerDown);
-  }, [klineHeightSettingsOpen, klineMarkerFilterOpen]);
+  }, [hotPoolsHeightSettingsOpen, klineHeightSettingsOpen, klineMarkerFilterOpen]);
 
   useEffect(() => {
     storageSet(STORAGE.chain, chain);
@@ -633,6 +709,7 @@ export default function App() {
     storageSet(STORAGE.refreshInterval, String(refreshInterval));
     storageSet(STORAGE.accentTheme, accentTheme);
     storageSet(STORAGE.klineHeight, String(klineChartHeight));
+    storageSet(STORAGE.hotPoolsHeight, String(hotPoolsPanelHeight));
     storageSet(STORAGE.smartMoneyWatchWallets, JSON.stringify(klineWatchedWallets));
 
     if (initData) {
@@ -645,7 +722,7 @@ export default function App() {
     } else {
       storageRemove(STORAGE.loginUser);
     }
-  }, [accentTheme, chain, hotSort, initData, klineChartHeight, klineWatchedWallets, loginUser, refreshInterval, widgets]);
+  }, [accentTheme, chain, hotPoolsPanelHeight, hotSort, initData, klineChartHeight, klineWatchedWallets, loginUser, refreshInterval, widgets]);
 
   useEffect(() => {
     if (!workMode) return;
@@ -690,7 +767,7 @@ export default function App() {
           apiBaseUrl,
           initData,
           chain,
-          sort: hotSort,
+          sort: resolveHotPoolServerSort(hotSort),
           timeframeMinutes: 5,
           limit: hotPoolsLimit,
           tokenAddress: hotTokenFilter?.address || '',
@@ -1317,6 +1394,76 @@ export default function App() {
         title="热门池子"
         subtitle={`支持搜索与排序 · 展示前 ${HOT_POOLS_DISPLAY_LIMIT} 条`}
         icon={Flame}
+        actions={!workMode ? (
+          <div className="settings-wrap" ref={hotPoolsHeightControlRef}>
+            <button
+              type="button"
+              className={`icon-link ${hotPoolsHeightSettingsOpen || hotPoolsPanelHeightCustomized ? 'active' : ''}`}
+              onClick={() => setHotPoolsHeightSettingsOpen((prev) => !prev)}
+              title={`热门池子高度 ${hotPoolsPanelHeight}px`}
+              aria-label="热门池子高度"
+            >
+              <Settings size={14} />
+            </button>
+
+            {hotPoolsHeightSettingsOpen ? (
+              <div className="kline-settings-popover panel-height-popover">
+                <div className="kline-filter-popover-head">
+                  <div>
+                    <div className="kline-filter-popover-title">热门池子高度</div>
+                    <div className="kline-filter-popover-sub">仅保存在当前浏览器</div>
+                  </div>
+                  <button
+                    type="button"
+                    className="icon-link"
+                    onClick={() => setHotPoolsHeightSettingsOpen(false)}
+                    title="Close"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+
+                <div className="kline-height-value">{hotPoolsPanelHeight}px</div>
+
+                <input
+                  className="kline-height-slider"
+                  type="range"
+                  min={MIN_HOT_POOLS_PANEL_HEIGHT}
+                  max={MAX_HOT_POOLS_PANEL_HEIGHT}
+                  step="20"
+                  value={hotPoolsPanelHeight}
+                  onChange={(e) => setHotPoolsPanelHeight(clampHotPoolsPanelHeight(e.target.value, hotPoolsDefaultHeightRef.current))}
+                />
+
+                <label className="kline-filter-field">
+                  <span>高度</span>
+                  <div className="kline-height-input-row">
+                    <input
+                      type="number"
+                      min={MIN_HOT_POOLS_PANEL_HEIGHT}
+                      max={MAX_HOT_POOLS_PANEL_HEIGHT}
+                      step="20"
+                      inputMode="numeric"
+                      value={hotPoolsPanelHeight}
+                      onChange={(e) => {
+                        const nextValue = Number(e.target.value);
+                        if (!Number.isFinite(nextValue)) return;
+                        setHotPoolsPanelHeight(clampHotPoolsPanelHeight(nextValue, hotPoolsDefaultHeightRef.current));
+                      }}
+                    />
+                    <span className="kline-height-unit">px</span>
+                  </div>
+                </label>
+
+                <div className="kline-filter-actions">
+                  <button type="button" className="ghost-chip" onClick={resetHotPoolsPanelHeight}>
+                    默认
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       >
         <div className="sort-tabs">
           {[{ key: 'fees', label: 'Fees' }, { key: 'fee_rate', label: 'Fee Rate' }, { key: 'volume', label: 'Volume' }].map((item) => (
@@ -1462,29 +1609,77 @@ export default function App() {
                       </div>
                     )}
                     <div className="pool-meta-line">
-                      <span className="meta-cyan">Vol <b><NumberFlowValue value={volume} formatter={(v) => formatUsdCompact(v)} /></b></span>
+                      <button
+                        type="button"
+                        className={`pool-meta-sort meta-cyan ${hotSort === 'volume' ? 'active' : ''}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setHotSort('volume');
+                        }}
+                        title="按 Vol 降序排序"
+                      >
+                        <span>Vol</span>
+                        <b><NumberFlowValue value={volume} formatter={(v) => formatUsdCompact(v)} /></b>
+                      </button>
                       <span className="dot-sep" />
-                      <span className="meta-cyan">TVL <b><NumberFlowValue value={tvl} formatter={(v) => formatUsdCompact(v)} /></b></span>
+                      <button
+                        type="button"
+                        className={`pool-meta-sort meta-cyan ${hotSort === 'tvl' ? 'active' : ''}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setHotSort('tvl');
+                        }}
+                        title="按 TVL 降序排序"
+                      >
+                        <span>TVL</span>
+                        <b><NumberFlowValue value={tvl} formatter={(v) => formatUsdCompact(v)} /></b>
+                      </button>
                       <span className="dot-sep" />
-                      <span className="meta-orange"><NumberFlowValue value={txCount} formatter={(v) => `${Number(v || 0).toLocaleString()}笔`} /></span>
+                      <button
+                        type="button"
+                        className={`pool-meta-sort meta-orange ${hotSort === 'tx_count' ? 'active' : ''}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setHotSort('tx_count');
+                        }}
+                        title="按笔数降序排序"
+                      >
+                        <b><NumberFlowValue value={txCount} formatter={(v) => `${Number(v || 0).toLocaleString()}笔`} /></b>
+                      </button>
                       <span className="dot-sep" />
-                      <span className={`meta-accent ${feeRateAvailable ? '' : 'muted'}`}>
-                        费率{' '}
+                      <button
+                        type="button"
+                        className={`pool-meta-sort meta-accent ${hotSort === 'fee_rate' ? 'active' : ''} ${feeRateAvailable ? '' : 'muted'}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setHotSort('fee_rate');
+                        }}
+                        title="按费率降序排序"
+                      >
+                        <span>费率</span>
                         <b>
                           {feeRateAvailable ? (
                             <NumberFlowValue value={feeRate} formatter={(v) => `${Number(v).toFixed(3)}%`} />
                           ) : '--'}
                         </b>
-                      </span>
+                      </button>
                       <span className="dot-sep" />
-                      <span className={`meta-gold ${activeLiquidityFeeRateAvailable ? '' : 'muted'}`}>
-                        活跃{' '}
+                      <button
+                        type="button"
+                        className={`pool-meta-sort meta-gold ${hotSort === 'active_fee_rate' ? 'active' : ''} ${activeLiquidityFeeRateAvailable ? '' : 'muted'}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setHotSort('active_fee_rate');
+                        }}
+                        title="按活跃降序排序"
+                      >
+                        <span>活跃</span>
                         <b>
                           {activeLiquidityFeeRateAvailable ? (
                             <NumberFlowValue value={activeLiquidityFeeRate} formatter={() => activeLiquidityFeeRateText} />
                           ) : activeLiquidityFeeRateText}
                         </b>
-                      </span>
+                      </button>
                     </div>
                   </div>
 
@@ -1492,15 +1687,27 @@ export default function App() {
                   <div className="pool-values">
                     <div className="pool-main-val">
                       <NumberFlowValue
-                        value={hotSort === 'volume' ? volume : hotSort === 'fee_rate' ? feeRate : totalFees}
-                        formatter={(v) => hotSort === 'fee_rate' ? (Number(v) > 0 ? `${Number(v).toFixed(3)}%` : '--') : formatUsdCompact(v)}
+                        value={
+                          hotSort === 'volume' ? volume :
+                          hotSort === 'tvl' ? tvl :
+                          hotSort === 'tx_count' ? txCount :
+                          hotSort === 'fee_rate' ? feeRate :
+                          hotSort === 'active_fee_rate' ? (activeLiquidityFeeRateAvailable ? activeLiquidityFeeRate : 0) :
+                          totalFees
+                        }
+                        formatter={(v) => {
+                          if (hotSort === 'tx_count') return `${Number(v || 0).toLocaleString()}笔`;
+                          if (hotSort === 'fee_rate') return feeRateAvailable ? `${Number(v).toFixed(3)}%` : '--';
+                          if (hotSort === 'active_fee_rate') return activeLiquidityFeeRateAvailable ? `${Number(v).toFixed(3)}%` : '--';
+                          return formatUsdCompact(v);
+                        }}
                       />
                     </div>
                     {priceDisplay ? (
                       <div className={`pool-sub-val ${priceDisplay.includes('↑') || priceDisplay.includes('+') ? 'up' : priceDisplay.includes('↓') || priceDisplay.includes('-') ? 'down' : ''}`} title={priceDisplay}>
                         <NumberFlowValue value={priceDisplay} formatter={() => formatPriceDisplay(priceDisplay)} />
                       </div>
-                    ) : hotSort !== 'fee_rate' ? (
+                    ) : hotSort !== 'fee_rate' && hotSort !== 'active_fee_rate' && hotSort !== 'tx_count' ? (
                       <div className={`pool-sub-val purple ${feeRateAvailable ? '' : 'muted'}`}>
                         {feeRateAvailable ? (
                           <NumberFlowValue value={feeRate} formatter={() => feeRateText} />
@@ -2312,6 +2519,7 @@ export default function App() {
             className={`module-slot module-${widget.key} ${
               draggingKey === widget.key ? 'dragging' : ''
             } ${dragOverKey === widget.key ? 'drop-target' : ''}`}
+            style={widget.key === 'hot_pools' ? { '--hot-pools-panel-height': `${hotPoolsPanelHeight}px` } : undefined}
             onDragOver={(e) => {
               e.preventDefault();
               e.dataTransfer.dropEffect = 'move';
