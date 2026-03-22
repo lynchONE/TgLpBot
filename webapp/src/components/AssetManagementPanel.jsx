@@ -1117,13 +1117,22 @@ export default function AssetManagementPanel({
 
           <div className="am-two-col">
             <div className="am-card">
+              {(() => {
+                const realizedPnl = Number(assetState.lp?.today?.realized_pnl_usd || 0);
+                const pnlLabel = realizedPnl > 0 ? '今日盈利' : realizedPnl < 0 ? '今日亏损' : '今日盈亏';
+                const pnlColor = realizedPnl >= 0 ? 'var(--positive)' : 'var(--negative)';
+                return (
+                  <>
               <div className="am-card-header">
                 <div className="am-card-title">今日盈亏</div>
-                <span className={`am-badge ${Number(assetState.lp?.today?.realized_pnl_usd || 0) >= 0 ? 'am-badge-ok' : 'am-badge-warn'}`}>
-                  {Number(assetState.lp?.today?.realized_pnl_usd || 0) >= 0 ? '+' : ''}{formatUsd(assetState.lp?.today?.realized_pnl_usd)}
-                </span>
               </div>
-              <div className="am-stat-grid">
+              <div className="am-stat-grid am-stat-grid-3 am-today-pnl-grid">
+                <div className="am-stat am-stat-compact am-stat-pnl">
+                  <div className="am-stat-label">{pnlLabel}</div>
+                  <div className="am-stat-value" style={{ color: pnlColor }}>
+                    {realizedPnl > 0 ? '+' : ''}{formatUsd(realizedPnl)}
+                  </div>
+                </div>
                 <div className="am-stat am-stat-compact">
                   <div className="am-stat-label">平仓笔数</div>
                   <div className="am-stat-value">{Number(assetState.lp?.today?.closed_count || 0)}</div>
@@ -1134,6 +1143,9 @@ export default function AssetManagementPanel({
                   <div className="am-stat-sub">{Number(assetState.lp?.today?.win_count || 0)}W / {Number(assetState.lp?.today?.loss_count || 0)}L</div>
                 </div>
               </div>
+                  </>
+                );
+              })()}
               <TodayPoolPnL pools={assetState.lp?.today_pools} />
             </div>
 
