@@ -408,7 +408,7 @@ function TodayPoolPnL({ pools }) {
   }
 
   return (
-    <div className="am-pool-card">
+    <div className="am-pool-card am-pool-card-compact">
       <div className="am-pool-toolbar">
         <div>
           <div className="am-card-title" style={{ fontSize: 12 }}>池子贡献</div>
@@ -1124,11 +1124,11 @@ export default function AssetManagementPanel({
                 </span>
               </div>
               <div className="am-stat-grid">
-                <div className="am-stat">
+                <div className="am-stat am-stat-compact">
                   <div className="am-stat-label">平仓笔数</div>
                   <div className="am-stat-value">{Number(assetState.lp?.today?.closed_count || 0)}</div>
                 </div>
-                <div className="am-stat">
+                <div className="am-stat am-stat-compact">
                   <div className="am-stat-label">胜率</div>
                   <div className="am-stat-value">{formatPct(assetState.lp?.today?.win_rate)}</div>
                   <div className="am-stat-sub">{Number(assetState.lp?.today?.win_count || 0)}W / {Number(assetState.lp?.today?.loss_count || 0)}L</div>

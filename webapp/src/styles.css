@@ -6374,13 +6374,14 @@ body {
   align-items: flex-start;
   gap: 8px;
   margin-bottom: 6px;
-  min-height: 38px;
+  min-height: 0;
 }
 .smd-range-summary-stack {
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 6px;
   padding: 0 2px;
 }
@@ -6420,11 +6421,13 @@ body {
 }
 .smd-range-summary-toggle {
   width: fit-content;
+  align-self: center;
   padding: 0 4px;
   border: 0;
   background: transparent;
   color: rgba(223, 255, 139, 0.78);
   font-size: 10px;
+  white-space: nowrap;
   cursor: pointer;
 }
 .smd-range-summary-toggle:hover {
@@ -6860,6 +6863,25 @@ body {
   padding: 10px 12px;
 }
 
+.am-stat-compact {
+  padding: 8px 10px;
+}
+
+.am-stat-compact .am-stat-label {
+  font-size: 9px;
+  letter-spacing: 0.24px;
+}
+
+.am-stat-compact .am-stat-value {
+  margin-top: 3px;
+  font-size: 14px;
+}
+
+.am-stat-compact .am-stat-sub {
+  margin-top: 2px;
+  font-size: 9px;
+}
+
 .am-stat-label {
   font-size: 10px;
   font-weight: 500;
@@ -6896,6 +6918,20 @@ body {
   margin-top: 10px;
 }
 
+.am-pool-card-compact {
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.am-pool-card-compact .am-pool-toolbar {
+  gap: 8px;
+}
+
+.am-pool-card-compact .am-pill {
+  padding: 3px 8px;
+  font-size: 10px;
+}
+
 .am-pool-toolbar {
   display: flex;
   align-items: flex-start;
@@ -6917,6 +6953,10 @@ body {
   padding: 10px 12px;
 }
 
+.am-pool-card-compact .am-pool-summary {
+  padding: 8px 10px;
+}
+
 .am-pool-summary-label {
   font-size: 10px;
   color: var(--text-muted);
@@ -6928,6 +6968,15 @@ body {
   font-weight: 700;
   color: var(--text);
   letter-spacing: -0.02em;
+}
+
+.am-pool-card-compact .am-pool-summary-label {
+  font-size: 9px;
+}
+
+.am-pool-card-compact .am-pool-summary-value {
+  margin-top: 2px;
+  font-size: 15px;
 }
 
 .am-pool-summary-value.is-positive {
@@ -6948,6 +6997,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.am-pool-card-compact .am-pool-column {
+  gap: 6px;
 }
 
 .am-pool-section-head {
@@ -6978,6 +7031,11 @@ body {
   padding: 10px 12px;
 }
 
+.am-pool-card-compact .am-pool-row {
+  gap: 4px;
+  padding: 8px 10px;
+}
+
 .am-pool-row-head {
   display: flex;
   align-items: center;
@@ -6995,6 +7053,10 @@ body {
   color: var(--text);
 }
 
+.am-pool-card-compact .am-pool-row-title {
+  font-size: 11px;
+}
+
 .am-pool-row-meta {
   display: flex;
   flex-wrap: wrap;
@@ -7003,11 +7065,20 @@ body {
   color: var(--text-muted);
 }
 
+.am-pool-card-compact .am-pool-row-meta {
+  gap: 4px 8px;
+  font-size: 9px;
+}
+
 .am-pool-bar-track {
   height: 6px;
   border-radius: 999px;
   background: rgba(136, 157, 191, 0.08);
   overflow: hidden;
+}
+
+.am-pool-card-compact .am-pool-bar-track {
+  height: 4px;
 }
 
 .am-pool-bar {
