@@ -541,7 +541,7 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, brand, onClose })
                 }, pollSec * 1000);
             } catch (err) {
                 if (cancelled) return;
-                setError(String(err?.message || err || '璇︽儏鍔犺浇澶辫触'));
+                setError(String(err?.message || err || '详情加载失败'));
                 timerId = window.setTimeout(() => {
                     load(true);
                 }, 3000);
