@@ -1134,7 +1134,7 @@ export default function App() {
     const applyHotPoolsFilter = () => {
         const keyword = String(hotPoolsFilterDraft.keyword || '').trim();
         const next = normalizeHotPoolsFilter({
-            enabled: true,
+            enabled: hotPoolsFilterDraft.enabled,
             keyword,
             minFees: parseDraftNumber(hotPoolsFilterDraft.minFees),
             minFeeRate: parseDraftNumber(hotPoolsFilterDraft.minFeeRate),
@@ -2632,6 +2632,28 @@ export default function App() {
                             </div>
 
                             <div className="mt-4 space-y-4 pb-20">
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <div className="text-[11px] font-semibold text-zinc-700 dark:text-white/80">筛选状态</div>
+                                            <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40">
+                                                {hotPoolsFilterDraft.enabled ? '已启用，应用后会按下方条件筛选' : '已关闭，条件会保留但不会生效'}
+                                            </div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => setHotPoolsFilterDraft((prev) => ({ ...prev, enabled: !prev.enabled }))}
+                                            className={`inline-flex min-w-[72px] items-center justify-center rounded-xl px-3 py-2 text-xs font-semibold shadow-sm transition ${hotPoolsFilterDraft.enabled
+                                                ? brand.solidButtonClass
+                                                : 'bg-white/70 text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10 dark:hover:bg-white/10'
+                                                }`}
+                                            aria-pressed={hotPoolsFilterDraft.enabled}
+                                            title={hotPoolsFilterDraft.enabled ? '关闭筛选' : '启用筛选'}
+                                        >
+                                            {hotPoolsFilterDraft.enabled ? '已启用' : '已关闭'}
+                                        </button>
+                                    </div>
+                                </div>
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="mt-1">
                                         <div className="text-[11px] text-zinc-500 dark:text-white/40">搜索 (交易对/地址)</div>

@@ -343,21 +343,30 @@ function PnLCalendar({ data, loading = false }) {
         const pnl = entry ? Number(entry.realized_pnl_usd || 0) : null;
         const isToday = dateStr === todayStr;
         const isFuture = new Date(year, month, day) > now;
+        const dayToneClass = isToday
+            ? 'text-emerald-700 dark:text-emerald-300'
+            : isFuture
+                ? 'text-zinc-300 dark:text-white/15'
+                : 'text-zinc-400 dark:text-white/30';
+        const valueToneClass = pnl !== null
+            ? pnl >= 0
+                ? 'text-emerald-600 dark:text-emerald-400'
+                : 'text-red-500 dark:text-red-400'
+            : 'text-transparent';
         cells.push(
             <div
                 key={day}
-                className={`rounded-md flex items-center justify-center text-[10px] font-semibold tabular-nums ${
+                className={`rounded-md px-1 py-1 ${
                     isToday ? 'bg-emerald-500/15 ring-1 ring-emerald-500/30'
                     : isFuture ? 'bg-zinc-100/30 dark:bg-white/[0.015]'
                     : 'bg-zinc-100/50 dark:bg-white/[0.03]'
-                } ${
-                    pnl !== null
-                        ? pnl >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'
-                        : 'text-zinc-300 dark:text-white/10'
                 }`}
-                style={{ minHeight: 32 }}
+                style={{ minHeight: 38 }}
             >
-                {pnl !== null ? `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}` : ''}
+                <div className={`text-[9px] leading-none ${dayToneClass}`}>{day}</div>
+                <div className={`flex min-h-[20px] items-center justify-center px-0.5 text-center text-[10px] font-semibold leading-tight tabular-nums ${valueToneClass}`}>
+                    {pnl !== null ? `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}` : '0'}
+                </div>
             </div>
         );
     }

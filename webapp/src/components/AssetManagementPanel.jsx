@@ -273,7 +273,10 @@ function PnLCalendar({ data, loading = false }) {
     if (pnl !== null) cls.push(pnl >= 0 ? 'pnl-cal-pos' : 'pnl-cal-neg');
     cells.push(
       <div key={day} className={cls.join(' ')}>
-        {pnl !== null ? `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}` : ''}
+        <div className="pnl-cal-day">{day}</div>
+        <div className="pnl-cal-value">
+          {pnl !== null ? `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}` : '0'}
+        </div>
       </div>
     );
   }

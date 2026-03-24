@@ -371,6 +371,7 @@ function formatDraftNumber(value) {
 
 function buildHotPoolsFilterDraft(filter) {
   return {
+    enabled: Boolean(filter?.enabled),
     keyword: String(filter?.keyword || ''),
     minFees: formatDraftNumber(filter?.minFees),
     minFeeRate: formatDraftNumber(filter?.minFeeRate),
@@ -827,7 +828,7 @@ export default function App() {
   }, [hotPoolsFilter]);
   const applyHotPoolsFilter = useCallback(() => {
     const next = normalizeHotPoolsFilter({
-      enabled: true,
+      enabled: hotPoolsFilterDraft.enabled,
       keyword: String(hotPoolsFilterDraft.keyword || '').trim(),
       minFees: parseDraftNumber(hotPoolsFilterDraft.minFees),
       minFeeRate: parseDraftNumber(hotPoolsFilterDraft.minFeeRate),
@@ -1722,6 +1723,24 @@ export default function App() {
                   title="Close"
                 >
                   <X size={14} />
+                </button>
+              </div>
+
+              <div className="hot-pools-filter-toggle-row">
+                <div className="hot-pools-filter-toggle-copy">
+                  <span className="hot-pools-filter-toggle-label">筛选状态</span>
+                  <span className="hot-pools-filter-toggle-state">
+                    {hotPoolsFilterDraft.enabled ? '已启用，应用后按下方条件筛选' : '已关闭，条件会保留但不会生效'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className={`ghost-chip ${hotPoolsFilterDraft.enabled ? 'active' : ''}`}
+                  onClick={() => setHotPoolsFilterDraft((prev) => ({ ...prev, enabled: !prev.enabled }))}
+                  aria-pressed={hotPoolsFilterDraft.enabled}
+                  title={hotPoolsFilterDraft.enabled ? '关闭筛选' : '启用筛选'}
+                >
+                  {hotPoolsFilterDraft.enabled ? '已启用' : '已关闭'}
                 </button>
               </div>
 

@@ -3439,6 +3439,33 @@ body {
   gap: 10px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
+.hot-pools-filter-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(138, 160, 194, 0.18);
+  background: rgba(18, 26, 40, 0.55);
+}
+.hot-pools-filter-toggle-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.hot-pools-filter-toggle-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.hot-pools-filter-toggle-state {
+  font-size: 11px;
+  color: #edf3ff;
+  line-height: 1.45;
+}
 @media (max-width: 640px) {
   .hot-pools-filter-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -6880,16 +6907,14 @@ body {
   padding-bottom: 2px;
 }
 .pnl-cal-cell {
-  min-height: 32px;
+  min-height: 38px;
   border-radius: 6px;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: space-between;
+  padding: 4px 4px 3px;
   background: rgba(136, 157, 191, 0.06);
-  color: transparent;
 }
 .pnl-cal-cell.pnl-cal-empty {
   background: rgba(136, 157, 191, 0.02);
@@ -6901,8 +6926,36 @@ body {
   background: rgba(34, 211, 138, 0.12);
   box-shadow: inset 0 0 0 1px rgba(34, 211, 138, 0.25);
 }
-.pnl-cal-cell.pnl-cal-pos { color: var(--positive, #22d38a); }
-.pnl-cal-cell.pnl-cal-neg { color: var(--negative, #ff5e76); }
+.pnl-cal-day {
+  align-self: flex-start;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--text-muted);
+  opacity: 0.65;
+}
+.pnl-cal-cell.pnl-cal-future .pnl-cal-day {
+  opacity: 0.35;
+}
+.pnl-cal-cell.pnl-cal-today .pnl-cal-day {
+  color: #8af0bd;
+  opacity: 0.95;
+  font-weight: 700;
+}
+.pnl-cal-value {
+  min-height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 2px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  color: transparent;
+}
+.pnl-cal-cell.pnl-cal-pos .pnl-cal-value { color: var(--positive, #22d38a); }
+.pnl-cal-cell.pnl-cal-neg .pnl-cal-value { color: var(--negative, #ff5e76); }
 
 /* badges */
 .am-badge {
