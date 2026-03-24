@@ -6890,6 +6890,7 @@ body {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 4px;
+  align-items: stretch;
 }
 .smd-pos-card-preview.compact {
   margin-top: 6px;
@@ -6899,18 +6900,26 @@ body {
 .smd-pos-card-metric {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: space-between;
+  gap: 8px;
   min-height: 20px;
+  min-width: 104px;
   padding: 2px 7px;
   border-radius: 999px;
   border: 1px solid rgba(136, 157, 191, 0.14);
   background: rgba(255, 255, 255, 0.03);
   font-size: 10px;
   color: var(--text-muted);
+  white-space: nowrap;
 }
 .smd-pos-card-metric strong {
+  flex: 0 0 auto;
   font-weight: 700;
   color: var(--text);
+}
+.smd-pos-card-metric span:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 .smd-pos-card-metric.positive strong,
 .smd-pos-card-metric.negative strong {

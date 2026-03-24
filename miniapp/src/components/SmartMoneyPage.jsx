@@ -513,18 +513,18 @@ function PositionPreviewMetrics({ position, preview, compact = false }) {
     const pnlText = formatSignedPreviewUsd(preview?.absolutePnlUsd, Boolean(preview?.hasPnl));
 
     return (
-        <div className={`mt-2 flex flex-wrap gap-2 ${compact ? 'pt-2 border-t border-white/[0.05]' : ''}`}>
-            <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] ${feeMetricClass}`}>
+        <div className={`mt-2 flex flex-wrap items-stretch gap-2 ${compact ? 'pt-2 border-t border-white/[0.05]' : ''}`}>
+            <span className={`inline-flex min-w-[104px] items-center justify-between gap-2 whitespace-nowrap rounded-full border px-2.5 py-1 text-[10px] ${feeMetricClass}`}>
                 <strong className={`font-semibold ${feeLabelClass}`}>手续费</strong>
-                <span>{feeText}</span>
+                <span className="text-right tabular-nums">{feeText}</span>
             </span>
-            <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] ${pnlMetricClass}`}>
+            <span className={`inline-flex min-w-[104px] items-center justify-between gap-2 whitespace-nowrap rounded-full border px-2.5 py-1 text-[10px] ${pnlMetricClass}`}>
                 <strong className={`font-semibold ${pnlLabelClass}`}>绝对收益</strong>
-                <span>{pnlText}</span>
+                <span className="text-right tabular-nums">{pnlText}</span>
             </span>
-            <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] ${runtimeMetricClass}`}>
+            <span className={`inline-flex min-w-[104px] items-center justify-between gap-2 whitespace-nowrap rounded-full border px-2.5 py-1 text-[10px] ${runtimeMetricClass}`}>
                 <strong className={`font-semibold ${runtimeLabelClass}`}>运行时间</strong>
-                <span>{runningText}</span>
+                <span className="text-right tabular-nums">{runningText}</span>
             </span>
         </div>
     );
