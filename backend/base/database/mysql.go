@@ -97,10 +97,10 @@ func autoMigrate() error {
 	}
 
 	// GORM AutoMigrate does not alter existing column types, fix manually.
-	DB.Exec("ALTER TABLE sm_lp_events MODIFY COLUMN liquidity_delta DECIMAL(78,0) NOT NULL DEFAULT 0")
+	DB.Exec("ALTER TABLE sm_lp_events MODIFY COLUMN liquidity_delta DECIMAL(65,0) NOT NULL DEFAULT 0")
 	DB.Exec("ALTER TABLE sm_lp_events MODIFY COLUMN token0_amount DECIMAL(65,0) NOT NULL DEFAULT 0")
 	DB.Exec("ALTER TABLE sm_lp_events MODIFY COLUMN token1_amount DECIMAL(65,0) NOT NULL DEFAULT 0")
-	DB.Exec("ALTER TABLE sm_lp_active_positions MODIFY COLUMN current_liquidity DECIMAL(78,0) NOT NULL DEFAULT 0")
+	DB.Exec("ALTER TABLE sm_lp_active_positions MODIFY COLUMN current_liquidity DECIMAL(65,0) NOT NULL DEFAULT 0")
 	DB.Exec("ALTER TABLE sm_lp_active_positions MODIFY COLUMN entry_amount0 DECIMAL(65,0) NOT NULL DEFAULT 0")
 	DB.Exec("ALTER TABLE sm_lp_active_positions MODIFY COLUMN entry_amount1 DECIMAL(65,0) NOT NULL DEFAULT 0")
 	DB.Exec("ALTER TABLE sm_lp_active_positions MODIFY COLUMN net_amount0 DECIMAL(65,0) NOT NULL DEFAULT 0")
@@ -115,7 +115,7 @@ func autoMigrate() error {
 	ensureColumn("sm_wallet_daily_snapshots", "has_transfer_out", "TINYINT(1) NOT NULL DEFAULT 0 AFTER has_transfer_in")
 	ensureColumn("sm_wallet_daily_snapshots", "transfer_in_count", "INT NOT NULL DEFAULT 0 AFTER has_transfer_out")
 	ensureColumn("sm_wallet_daily_snapshots", "transfer_out_count", "INT NOT NULL DEFAULT 0 AFTER transfer_in_count")
-	ensureColumn("sm_lp_events", "liquidity_delta", "DECIMAL(78,0) NOT NULL DEFAULT 0 AFTER token1_symbol")
+	ensureColumn("sm_lp_events", "liquidity_delta", "DECIMAL(65,0) NOT NULL DEFAULT 0 AFTER token1_symbol")
 
 	return nil
 }

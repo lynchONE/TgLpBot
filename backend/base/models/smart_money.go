@@ -48,7 +48,7 @@ type SmartMoneyLPEvent struct {
 	Token1Address   string    `gorm:"size:42;not null" json:"token1_address"`
 	Token0Symbol    string    `gorm:"size:20" json:"token0_symbol"`
 	Token1Symbol    string    `gorm:"size:20" json:"token1_symbol"`
-	LiquidityDelta  string    `gorm:"type:decimal(78,0);not null;default:0" json:"liquidity_delta"`
+	LiquidityDelta  string    `gorm:"type:decimal(65,0);not null;default:0" json:"liquidity_delta"`
 	Token0Amount    string    `gorm:"type:decimal(65,0);not null;default:0" json:"token0_amount"`
 	Token1Amount    string    `gorm:"type:decimal(65,0);not null;default:0" json:"token1_amount"`
 	Token0AmountUSD *string   `gorm:"type:decimal(20,4)" json:"token0_amount_usd"`
@@ -113,7 +113,7 @@ type SmartMoneyActivePosition struct {
 	TickLower              *int       `json:"tick_lower"`
 	TickUpper              *int       `json:"tick_upper"`
 	TickSpacing            int        `gorm:"not null;default:0" json:"tick_spacing"`
-	CurrentLiquidity       string     `gorm:"type:decimal(78,0);not null;default:0" json:"current_liquidity"`
+	CurrentLiquidity       string     `gorm:"type:decimal(65,0);not null;default:0" json:"current_liquidity"`
 	EntryAmount0           string     `gorm:"type:decimal(65,0);not null;default:0" json:"entry_amount0"`
 	EntryAmount1           string     `gorm:"type:decimal(65,0);not null;default:0" json:"entry_amount1"`
 	EntryTotalUSD          *string    `gorm:"type:decimal(20,4)" json:"entry_total_usd"`
