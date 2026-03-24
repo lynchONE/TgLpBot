@@ -157,6 +157,13 @@ export async function fetchSMPositions({ apiBaseUrl, status = 'open', wallet, po
     return smRequest(buildSMUrl(apiBaseUrl, 'positions', params.toString()), { signal });
 }
 
+export async function fetchSMPositionDetail({ apiBaseUrl, positionRef, positionId, signal }) {
+    const params = new URLSearchParams();
+    if (positionRef) params.set('position_ref', String(positionRef));
+    if (positionId) params.set('position_id', String(positionId));
+    return smRequest(buildSMUrl(apiBaseUrl, 'position_detail', params.toString()), { signal });
+}
+
 // Events
 export async function fetchSMEvents({ apiBaseUrl, wallet, pool, page = 1, size = 20, signal }) {
     const params = new URLSearchParams();

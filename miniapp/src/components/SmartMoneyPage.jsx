@@ -5,12 +5,14 @@ import {
 } from 'lucide-react';
 import {
     fetchSMPools, fetchSMPoolStats, fetchSMPositions, fetchSMWallets,
+    fetchSMPositionDetail,
     fetchSMStats, addSMWallet, updateSMWallet, deleteSMWallet,
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig,
 } from '../lib/smartMoneyApi';
 import { getBrandTheme } from '../lib/brand';
 import FlashIcon from './FlashIcon.jsx';
+import PositionCard from './PositionCard.jsx';
 import uniswapIcon from '../image/uniswap.svg';
 import pancakeIcon from '../image/pancake.svg';
 import avatar01 from '../../../webapp/src/icon/avatar_01.png';
@@ -292,7 +294,14 @@ function WalletIdentity({ address, color, label, size = 40, onClick, showCopy = 
 
     if (typeof onClick === 'function') {
         return (
-            <button type="button" className="flex min-w-0 items-center gap-2 rounded-xl text-left transition hover:text-zinc-100" onClick={onClick}>
+            <button
+                type="button"
+                className="flex min-w-0 items-center gap-2 rounded-xl text-left transition hover:text-zinc-100"
+                onClick={(event) => {
+                    event.stopPropagation();
+                    onClick(event);
+                }}
+            >
                 {inner}
             </button>
         );
@@ -367,6 +376,107 @@ function MiniMetric({ label, value }) {
         <div className="rounded-xl border border-white/[0.04] bg-zinc-950/45 px-2.5 py-2 text-center">
             <div className="text-[10px] text-zinc-500">{label}</div>
             <div className="mt-1 text-sm font-semibold text-zinc-100">{value ?? '—'}</div>
+        </div>
+    );
+}
+
+function SmartMoneyPositionDetailModal({ apiBaseUrl, position, brand, onClose }) {
+    const [detail, setDetail] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+        if (!position) return undefined;
+
+        let timerId = 0;
+        let cancelled = false;
+
+        const load = async (silent = false) => {
+            if (!silent) {
+                setLoading(true);
+                setError('');
+            }
+            try {
+                const data = await fetchSMPositionDetail({
+                    apiBaseUrl,
+                    positionRef: position.position_ref,
+                    positionId: position.id,
+                });
+                if (cancelled) return;
+                setDetail(data || null);
+                setError('');
+                const pollSec = Math.max(Number(data?.poll_interval_sec || 1), 1);
+                timerId = window.setTimeout(() => {
+                    load(true);
+                }, pollSec * 1000);
+            } catch (err) {
+                if (cancelled) return;
+                setError(String(err?.message || err || '璇︽儏鍔犺浇澶辫触'));
+                timerId = window.setTimeout(() => {
+                    load(true);
+                }, 3000);
+            } finally {
+                if (!cancelled) {
+                    setLoading(false);
+                }
+            }
+        };
+
+        load(false);
+
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timerId);
+        };
+    }, [apiBaseUrl, position]);
+
+    if (!position) return null;
+
+    return (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/70 p-3 sm:items-center" onClick={onClose}>
+            <div className="w-full max-w-2xl rounded-[30px] border border-white/[0.05] bg-zinc-950/95 p-3 shadow-[0_30px_100px_-40px_rgba(0,0,0,0.98)]" onClick={(event) => event.stopPropagation()}>
+                <div className="mb-3 flex items-start justify-between gap-3 px-1">
+                    <div>
+                        <div className="text-base font-semibold text-zinc-100">聪明钱实时仓位</div>
+                        <div className="mt-1 text-[11px] text-zinc-500">
+                            {detail?.updated_at ? `更新于 ${relativeTime(detail.updated_at)}` : '链上实时刷新'}
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className={`inline-flex h-9 w-9 items-center justify-center rounded-2xl ${brand.softButtonClass}`}
+                    >
+                        <X size={16} />
+                    </button>
+                </div>
+
+                {error ? (
+                    <div className="mb-3 rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                        {error}
+                    </div>
+                ) : null}
+
+                {Array.isArray(detail?.warnings) && detail.warnings.length > 0 ? (
+                    <div className="mb-3 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                        {detail.warnings.join(' / ')}
+                    </div>
+                ) : null}
+
+                {loading && !detail ? (
+                    <div className="rounded-[24px] border border-white/[0.04] bg-zinc-900/55 px-4 py-10 text-center text-sm text-zinc-500">
+                        正在读取链上仓位...
+                    </div>
+                ) : detail ? (
+                    <PositionCard
+                        position={detail}
+                        walletAddress={detail.wallet_address}
+                        updatedAt={detail.updated_at}
+                        pollIntervalSec={detail.poll_interval_sec}
+                        allowTaskActions={false}
+                    />
+                ) : null}
+            </div>
         </div>
     );
 }
@@ -674,6 +784,7 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
     const [poolStats, setPoolStats] = useState(null);
     const [status, setStatus] = useState('open');
     const [loading, setLoading] = useState(true);
+    const [selectedPosition, setSelectedPosition] = useState(null);
 
     useEffect(() => {
         fetchSMPoolStats({ apiBaseUrl, poolAddress: pool.pool_address }).then(setPoolStats).catch(() => {});
@@ -769,7 +880,8 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
                     {positions.map(pos => (
                         <div
                             key={pos.id}
-                            className={`rounded-[22px] border border-white/[0.04] bg-zinc-900/60 p-3 ${pos.status === 'closed' ? 'opacity-70' : ''}`}
+                            className={`rounded-[22px] border border-white/[0.04] bg-zinc-900/60 p-3 transition active:scale-[0.995] ${pos.status === 'closed' ? 'opacity-70' : ''}`}
+                            onClick={() => setSelectedPosition(pos)}
                         >
                             <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0 flex-1">
@@ -806,6 +918,7 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className={`inline-flex items-center gap-1 text-xs ${getBrandLinkClass(brand)}`}
+                                        onClick={(event) => event.stopPropagation()}
                                     >
                                         查看交易
                                         <ExternalLink size={10} />
@@ -816,6 +929,14 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
                     ))}
                 </div>
             )}
+            {selectedPosition ? (
+                <SmartMoneyPositionDetailModal
+                    apiBaseUrl={apiBaseUrl}
+                    position={selectedPosition}
+                    brand={brand}
+                    onClose={() => setSelectedPosition(null)}
+                />
+            ) : null}
         </div>
     );
 }
@@ -1033,6 +1154,7 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
     const [walletInfo, setWalletInfo] = useState(null);
     const [status, setStatus] = useState('open');
     const [loading, setLoading] = useState(true);
+    const [selectedPosition, setSelectedPosition] = useState(null);
 
     useEffect(() => {
         fetchSMStats({ apiBaseUrl, address: walletAddress }).then(setWalletInfo).catch(() => {});
@@ -1149,6 +1271,7 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
                             key={group.pool_address}
                             group={group}
                             brand={brand}
+                            onOpenPositionDetail={setSelectedPosition}
                             onSelectPool={() => onSelectPool({
                                 pool_address: group.pool_address,
                                 token0_symbol: group.token0_symbol,
@@ -1164,11 +1287,19 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
                     ))}
                 </div>
             )}
+            {selectedPosition ? (
+                <SmartMoneyPositionDetailModal
+                    apiBaseUrl={apiBaseUrl}
+                    position={selectedPosition}
+                    brand={brand}
+                    onClose={() => setSelectedPosition(null)}
+                />
+            ) : null}
         </div>
     );
 }
 
-function PoolGroupCard({ group, onSelectPool, brand }) {
+function PoolGroupCard({ group, onSelectPool, onOpenPositionDetail, brand }) {
     const [collapsed, setCollapsed] = useState(!group.hasOpen);
     const openCount = group.positions.filter(p => p.status === 'open').length;
     const closedCount = group.positions.filter(p => p.status === 'closed').length;
@@ -1207,7 +1338,11 @@ function PoolGroupCard({ group, onSelectPool, brand }) {
             {!collapsed && (
                 <div className="px-3 pb-3 space-y-2">
                     {group.positions.map(pos => (
-                        <div key={pos.id} className={`rounded-2xl border border-white/[0.04] bg-zinc-950/45 px-3 py-2.5 ${pos.status === 'closed' ? 'opacity-70' : ''}`}>
+                        <div
+                            key={pos.id}
+                            className={`rounded-2xl border border-white/[0.04] bg-zinc-950/45 px-3 py-2.5 transition active:scale-[0.995] ${pos.status === 'closed' ? 'opacity-70' : ''}`}
+                            onClick={() => onOpenPositionDetail?.(pos)}
+                        >
                             <div className="flex items-center justify-between gap-3">
                                 <span className="text-sm font-semibold text-zinc-100">{formatUSDCompact(pos.position_amount_usd)}</span>
                                 <Badge className={pos.status === 'open'
@@ -1227,7 +1362,13 @@ function PoolGroupCard({ group, onSelectPool, brand }) {
                                     </div>
                                 </div>
                                 {pos.bscscan_url ? (
-                                    <a href={pos.bscscan_url} target="_blank" rel="noopener noreferrer" className={`inline-flex items-center gap-1 text-xs ${getBrandLinkClass(brand)}`}>
+                                    <a
+                                        href={pos.bscscan_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className={`inline-flex items-center gap-1 text-xs ${getBrandLinkClass(brand)}`}
+                                        onClick={(event) => event.stopPropagation()}
+                                    >
                                         查看交易
                                         <ExternalLink size={10} />
                                     </a>

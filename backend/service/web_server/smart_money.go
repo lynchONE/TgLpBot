@@ -59,6 +59,7 @@ func (s *Server) registerSmartMoneyRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/sm/contracts", s.handleSMContracts)
 	mux.HandleFunc("/api/sm/pools", s.handleSMPools)
 	mux.HandleFunc("/api/sm/positions", s.handleSMPositions)
+	mux.HandleFunc("/api/sm/position_detail", s.handleSMPositionDetail)
 	mux.HandleFunc("/api/sm/events", s.handleSMEvents)
 	mux.HandleFunc("/api/sm/stats", s.handleSMStats)
 	mux.HandleFunc("/api/smart_money_golden_dog_config", s.handleSmartMoneyGoldenDogConfig)
@@ -508,6 +509,7 @@ func (s *Server) handleSMPositions(w http.ResponseWriter, r *http.Request) {
 	// Enrich with wallet color, label, price_lower, price_upper
 	type posResp struct {
 		models.SmartMoneyLPPosition
+		PositionRef         string  `json:"position_ref"`
 		WalletLabel         *string `json:"wallet_label"`
 		WalletColor         string  `json:"wallet_color"`
 		PriceLower          string  `json:"price_lower"`
@@ -533,6 +535,7 @@ func (s *Server) handleSMPositions(w http.ResponseWriter, r *http.Request) {
 	for _, p := range positions {
 		resp := posResp{
 			SmartMoneyLPPosition: p,
+			PositionRef:          sm.BuildPositionRefFromPosition(&p),
 			WalletColor:          sm.WalletColor(p.WalletAddress),
 			BscscanURL:           "https://bscscan.com/tx/" + p.OpenTxHash,
 		}
@@ -600,6 +603,60 @@ func (s *Server) handleSMPositions(w http.ResponseWriter, r *http.Request) {
 		"size":  size,
 		"list":  list,
 	})
+}
+
+func (s *Server) handleSMPositionDetail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	repo := smService.Repo()
+	ctx := r.Context()
+	repairSmartMoneyPositions(ctx, repo)
+
+	q := r.URL.Query()
+	positionRef := sm.NormalizePositionRef(q.Get("position_ref"))
+	rawPositionID := strings.TrimSpace(q.Get("position_id"))
+
+	active, err := repo.GetActivePositionByRef(ctx, positionRef)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if active == nil && rawPositionID != "" {
+		positionID, parseErr := strconv.ParseUint(rawPositionID, 10, 64)
+		if parseErr != nil || positionID == 0 {
+			jsonError(w, "invalid position_id", http.StatusBadRequest)
+			return
+		}
+		pos, err := repo.GetPositionByID(ctx, uint(positionID))
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if pos == nil {
+			jsonError(w, "position not found", http.StatusNotFound)
+			return
+		}
+		active, err = repo.EnsureActivePositionFromPosition(ctx, pos)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if active == nil {
+		jsonError(w, "position detail not found", http.StatusNotFound)
+		return
+	}
+
+	detail, err := s.Realtime.GetSmartMoneyPositionDetail(active)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, detail)
 }
 
 // --- Events ---

@@ -42,7 +42,7 @@ export default async function handler(req, res) {
   }
 
   const endpoint = String(req.query?.endpoint || '').trim();
-  const validEndpoints = new Set(['wallets', 'contracts', 'pools', 'positions', 'events', 'stats']);
+  const validEndpoints = new Set(['wallets', 'contracts', 'pools', 'positions', 'position_detail', 'events', 'stats']);
   if (!validEndpoints.has(endpoint)) {
     res.statusCode = 400;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');

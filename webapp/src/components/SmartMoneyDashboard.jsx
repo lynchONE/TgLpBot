@@ -4,11 +4,12 @@ import {
     ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Brain, Flame, Pencil,
 } from 'lucide-react';
 import {
-    fetchSMPools, fetchSMPoolStats, fetchSMPositions, fetchSMWallets,
+    fetchSMPools, fetchSMPoolStats, fetchSMPositionDetail, fetchSMPositions, fetchSMWallets,
     fetchSMStats, addSMWallet, updateSMWallet, deleteSMWallet,
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig,
 } from '../smartMoneyApi';
+import { compactPrice, computePriceRange, formatNumber, formatUsd, shortAddress } from '../utils';
 import uniswapLogo from '../img/uniswap.svg';
 import pancakeLogo from '../img/pancake.svg';
 import flashIcon from '../img/flash.svg';
@@ -235,7 +236,10 @@ function WalletIdentity({ address, color, label, size = 16, onClick, showCopy = 
 
     if (typeof onClick === 'function') {
         return (
-            <button className="smd-wallet-info smd-wallet-btn" onClick={onClick}>
+            <button className="smd-wallet-info smd-wallet-btn" onClick={(event) => {
+                event.stopPropagation();
+                onClick(event);
+            }}>
                 {content}
             </button>
         );
@@ -381,6 +385,198 @@ function ConfirmDialog({ open, title, description, confirmLabel = '确认', busy
                         {busy ? '处理中...' : confirmLabel}
                     </button>
                 </div>
+            </div>
+        </div>
+    );
+}
+
+function SmartMoneyPositionDetailModal({ apiBaseUrl, position, onClose }) {
+    const [detail, setDetail] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+        if (!position) return undefined;
+
+        let timerId = 0;
+        let cancelled = false;
+
+        const load = async (silent = false) => {
+            if (!silent) {
+                setLoading(true);
+                setError('');
+            }
+            try {
+                const data = await fetchSMPositionDetail({
+                    apiBaseUrl,
+                    positionRef: position.position_ref,
+                    positionId: position.id,
+                });
+                if (cancelled) return;
+                setDetail(data || null);
+                setError('');
+                const pollSec = Math.max(Number(data?.poll_interval_sec || 1), 1);
+                timerId = window.setTimeout(() => {
+                    load(true);
+                }, pollSec * 1000);
+            } catch (err) {
+                if (cancelled) return;
+                setError(String(err?.message || err || 'detail load failed'));
+                timerId = window.setTimeout(() => {
+                    load(true);
+                }, 3000);
+            } finally {
+                if (!cancelled) {
+                    setLoading(false);
+                }
+            }
+        };
+
+        load(false);
+
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timerId);
+        };
+    }, [apiBaseUrl, position]);
+
+    if (!position) return null;
+
+    const token0 = detail?.token_rows?.[0];
+    const token1 = detail?.token_rows?.[1];
+    const totalVal = Number.isFinite(Number(detail?.current_value_usd))
+        ? Number(detail.current_value_usd)
+        : Number(detail?.totals?.position_usd || 0) + Number(detail?.totals?.fee_usd || 0);
+    const pnl = Number(detail?.absolute_pnl_usd || 0);
+    const hasPnl = Boolean(detail?.has_pnl) && Number.isFinite(pnl);
+    const statusLabel = String(detail?.status_label || (detail?.has_liquidity ? 'Open' : 'Closed'));
+    const priceRange = detail ? computePriceRange(detail) : null;
+
+    return (
+        <div className="smd-modal-overlay" onClick={onClose}>
+            <div className="smd-modal" style={{ maxWidth: 980, width: 'min(980px, 92vw)' }} onClick={(event) => event.stopPropagation()}>
+                <div className="smd-modal-header">
+                    <div>
+                        <h3 className="smd-modal-title">聪明钱实时仓位</h3>
+                        <div className="smd-confirm-copy" style={{ padding: 0, marginTop: 4 }}>
+                            {detail?.updated_at ? `更新 ${relativeTime(detail.updated_at)}` : '链上实时刷新'}
+                        </div>
+                    </div>
+                    <button type="button" onClick={onClose} className="smd-modal-close">
+                        <X size={18} />
+                    </button>
+                </div>
+
+                {error ? <div className="smd-inline-error" style={{ marginBottom: 12 }}>{error}</div> : null}
+                {Array.isArray(detail?.warnings) && detail.warnings.length > 0 ? (
+                    <div className="smd-inline-error" style={{ marginBottom: 12, color: '#fbbf24', borderColor: 'rgba(251,191,36,0.25)' }}>
+                        {detail.warnings.join(' / ')}
+                    </div>
+                ) : null}
+
+                {loading && !detail ? (
+                    <div className="smd-loading">读取链上仓位中...</div>
+                ) : detail ? (
+                    <div className="position-card">
+                        <div className="pos-card-header">
+                            <div className="pos-card-main">
+                                <div className="pos-card-title-wrap">
+                                    <div className="pos-pair-row">
+                                        <span className="pos-pair-name">{detail?.title || shortAddress(detail?.pool_id || '')}</span>
+                                        {detail?.tick_spacing ? (
+                                            <span className="badge badge-fee">
+                                                {{ 1: '0.01%', 10: '0.05%', 50: '0.25%', 60: '0.30%', 100: '0.50%', 200: '1%', 2000: '2%' }[Number(detail.tick_spacing)] || ''}
+                                            </span>
+                                        ) : null}
+                                    </div>
+                                    <div className="pos-status-row">
+                                        <span className="status-pill">
+                                            <span className="status-dot" />
+                                            {statusLabel}
+                                        </span>
+                                        <span className="pos-wallet-chip">钱包 {shortAddress(detail?.wallet_address || '')}</span>
+                                        <span className={`range-pill ${detail?.in_range ? 'in' : 'out'}`}>
+                                            {detail?.in_range ? 'In Range' : 'Out'}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div className="pos-card-right-block">
+                                    <div className="pos-metrics">
+                                        <div className="pos-total">{formatUsd(totalVal)}</div>
+                                        {hasPnl ? (
+                                            <div className={`pos-pnl ${pnl >= 0 ? 'positive' : 'negative'}`}>
+                                                {pnl >= 0 ? '+' : ''}{formatNumber(pnl, 2)}
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {(token0 || token1) ? (
+                            <div className="pos-token-table">
+                                <div className="pos-token-head">
+                                    <span>Token</span><span>钱包</span><span>仓位</span><span>手续费</span>
+                                </div>
+                                {[token0, token1].filter(Boolean).map((tk) => (
+                                    <div key={tk.address || tk.symbol} className="pos-token-row">
+                                        <div className="pos-tk-name">
+                                            <div>{tk.symbol}</div>
+                                            <div className="pos-tk-price">${Number(tk.price_usd || 0).toFixed(4)}</div>
+                                        </div>
+                                        <div className="pos-tk-cell">
+                                            <div>{tk.wallet_amount ?? '--'}</div>
+                                            <div className="pos-tk-usd">{formatUsd(tk.wallet_usd)}</div>
+                                        </div>
+                                        <div className="pos-tk-cell">
+                                            <div>{tk.position_amount ?? '--'}</div>
+                                            <div className="pos-tk-usd">{formatUsd(tk.position_usd)}</div>
+                                        </div>
+                                        <div className="pos-tk-cell fee">
+                                            <div>{tk.fee_amount ?? '--'}</div>
+                                            <div className="pos-tk-usd">{formatUsd(tk.fee_usd)}</div>
+                                        </div>
+                                    </div>
+                                ))}
+                                <div className="pos-token-foot">
+                                    <span>小计</span>
+                                    <span>{formatUsd(detail?.totals?.wallet_usd)}</span>
+                                    <span>{formatUsd(detail?.totals?.position_usd)}</span>
+                                    <span className="fee">{formatUsd(detail?.totals?.fee_usd)}</span>
+                                </div>
+                            </div>
+                        ) : null}
+
+                        {priceRange ? (
+                            <div className="pos-price-range">
+                                <div className="pos-price-range-header">
+                                    <span className="pos-price-range-label">价格范围 ({priceRange.pairLabel}{priceRange.gridCount ? ` ${priceRange.gridCount}格` : ''})</span>
+                                    {Number.isFinite(priceRange.deviation) && priceRange.deviation > 0 ? (
+                                        <span className="pos-price-range-dev">{priceRange.deviation.toFixed(2)}%</span>
+                                    ) : null}
+                                </div>
+                                <div className="pos-price-range-bar-wrap">
+                                    <div className="pos-price-range-bar">
+                                        <div className="pos-price-range-limit lo" />
+                                        <div className="pos-price-range-limit hi" />
+                                        {priceRange.visibleGridLines?.map((pct, index) => (
+                                            <div key={index} className="pos-price-range-grid" style={{ left: `calc(3% + ${pct * 0.94}%)` }} />
+                                        ))}
+                                        <div
+                                            className={`pos-price-range-cursor ${priceRange.inRange ? 'in' : 'out'}`}
+                                            style={{ left: `calc(3% + ${priceRange.percent * 0.94}%)` }}
+                                        />
+                                    </div>
+                                </div>
+                                <div className="pos-price-range-labels">
+                                    <span className="lo">{compactPrice(priceRange.rangeMin)}</span>
+                                    <span className="cur">{compactPrice((priceRange.rangeMin + priceRange.rangeMax) / 2)}</span>
+                                    <span className="hi">{compactPrice(priceRange.rangeMax)}</span>
+                                </div>
+                            </div>
+                        ) : null}
+                    </div>
+                ) : null}
             </div>
         </div>
     );
@@ -550,6 +746,7 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
     const [stats, setStats] = useState(null);
     const [status, setStatus] = useState('open');
     const [loading, setLoading] = useState(true);
+    const [selectedPosition, setSelectedPosition] = useState(null);
     const poolIdentifier = getPoolIdentifier(pool);
     const refreshIntervalMs = useMemo(
         () => getRefreshIntervalMs(refreshInterval),
@@ -643,7 +840,7 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
             ) : (
                 <div className="smd-pos-list">
                     {positions.map(pos => (
-                        <div key={pos.id} className={`smd-pos-card${pos.status === 'closed' ? ' closed' : ''}`}>
+                        <div key={pos.id} className={`smd-pos-card${pos.status === 'closed' ? ' closed' : ''}`} onClick={() => setSelectedPosition(pos)}>
                             <div className="smd-pos-card-top">
                                 <WalletIdentity
                                     address={pos.wallet_address}
@@ -673,6 +870,7 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className="smd-link smd-pos-card-link"
+                                        onClick={(event) => event.stopPropagation()}
                                     >
                                         查看交易 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
                                     </a>
@@ -682,6 +880,13 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
                     ))}
                 </div>
             )}
+            {selectedPosition ? (
+                <SmartMoneyPositionDetailModal
+                    apiBaseUrl={apiBaseUrl}
+                    position={selectedPosition}
+                    onClose={() => setSelectedPosition(null)}
+                />
+            ) : null}
         </div>
     );
 }
@@ -847,6 +1052,7 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
     const [info, setInfo] = useState(null);
     const [status, setStatus] = useState('open');
     const [loading, setLoading] = useState(true);
+    const [selectedPosition, setSelectedPosition] = useState(null);
     const refreshIntervalMs = useMemo(
         () => getRefreshIntervalMs(refreshInterval),
         [refreshInterval]
@@ -960,7 +1166,7 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
                     </div>
                     <div className="smd-pos-list smd-pos-list--compact">
                         {g.positions.map(pos => (
-                            <div key={pos.id} className={`smd-pos-card smd-pos-card--compact${pos.status === 'closed' ? ' closed' : ''}`}>
+                            <div key={pos.id} className={`smd-pos-card smd-pos-card--compact${pos.status === 'closed' ? ' closed' : ''}`} onClick={() => setSelectedPosition(pos)}>
                                 <span className="smd-pos-card-amount">{formatUSDCompact(pos.position_amount_usd)}</span>
                                 <span className={`smd-pos-card-prices${pos.status === 'closed' ? ' is-closed' : ''}`}>
                                     {pos.price_lower && pos.price_upper ? `${pos.price_lower} – ${pos.price_upper}` : '—'}
@@ -971,6 +1177,13 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
                     </div>
                 </div>
             ))}
+            {selectedPosition ? (
+                <SmartMoneyPositionDetailModal
+                    apiBaseUrl={apiBaseUrl}
+                    position={selectedPosition}
+                    onClose={() => setSelectedPosition(null)}
+                />
+            ) : null}
         </div>
     );
 }

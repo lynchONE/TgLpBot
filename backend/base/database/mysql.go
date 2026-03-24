@@ -84,6 +84,7 @@ func autoMigrate() error {
 		&models.SmartMoneyScanState{},
 		&models.SmartMoneyLPEvent{},
 		&models.SmartMoneyLPPosition{},
+		&models.SmartMoneyActivePosition{},
 		&models.SmartMoneyWalletDailySnapshot{},
 		&models.SmartMoneyLPDailyStat{},
 		&models.SmartMoneyGoldenDogConfig{},
@@ -96,12 +97,21 @@ func autoMigrate() error {
 	}
 
 	// GORM AutoMigrate does not alter existing column types, fix manually.
+	DB.Exec("ALTER TABLE sm_lp_events MODIFY COLUMN liquidity_delta DECIMAL(78,0) NOT NULL DEFAULT 0")
 	DB.Exec("ALTER TABLE sm_lp_events MODIFY COLUMN token0_amount DECIMAL(65,0) NOT NULL DEFAULT 0")
 	DB.Exec("ALTER TABLE sm_lp_events MODIFY COLUMN token1_amount DECIMAL(65,0) NOT NULL DEFAULT 0")
+	DB.Exec("ALTER TABLE sm_lp_active_positions MODIFY COLUMN current_liquidity DECIMAL(78,0) NOT NULL DEFAULT 0")
+	DB.Exec("ALTER TABLE sm_lp_active_positions MODIFY COLUMN entry_amount0 DECIMAL(65,0) NOT NULL DEFAULT 0")
+	DB.Exec("ALTER TABLE sm_lp_active_positions MODIFY COLUMN entry_amount1 DECIMAL(65,0) NOT NULL DEFAULT 0")
+	DB.Exec("ALTER TABLE sm_lp_active_positions MODIFY COLUMN net_amount0 DECIMAL(65,0) NOT NULL DEFAULT 0")
+	DB.Exec("ALTER TABLE sm_lp_active_positions MODIFY COLUMN net_amount1 DECIMAL(65,0) NOT NULL DEFAULT 0")
+	DB.Exec("ALTER TABLE sm_lp_active_positions MODIFY COLUMN fee_amount0 DECIMAL(65,0) NOT NULL DEFAULT 0")
+	DB.Exec("ALTER TABLE sm_lp_active_positions MODIFY COLUMN fee_amount1 DECIMAL(65,0) NOT NULL DEFAULT 0")
 
 	// Ensure new columns exist (AutoMigrate may skip if table already exists with old schema)
 	ensureColumn("sm_wallet_daily_snapshots", "open_lp_usd", "DECIMAL(20,4) NOT NULL DEFAULT 0 AFTER tracked_token_usd")
 	ensureColumn("sm_wallet_daily_snapshots", "tracked_token_count", "INT NOT NULL DEFAULT 0 AFTER total_usd")
+	ensureColumn("sm_lp_events", "liquidity_delta", "DECIMAL(78,0) NOT NULL DEFAULT 0 AFTER token1_symbol")
 
 	return nil
 }

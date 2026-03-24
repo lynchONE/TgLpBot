@@ -799,8 +799,13 @@ func (w *Watcher) parseIncreaseLiquidity(vlog types.Log) (*models.SmartMoneyLPEv
 	tokenID := new(big.Int).SetBytes(vlog.Topics[1].Bytes())
 	nftID := tokenID.Uint64()
 
+	liquidityDeltaStr := "0"
 	amount0Str := "0"
 	amount1Str := "0"
+	if len(vlog.Data) >= 32 {
+		liquidityDelta := new(big.Int).SetBytes(vlog.Data[0:32])
+		liquidityDeltaStr = liquidityDelta.String()
+	}
 	if len(vlog.Data) >= 96 {
 		amount0 := new(big.Int).SetBytes(vlog.Data[32:64])
 		amount1 := new(big.Int).SetBytes(vlog.Data[64:96])
@@ -810,12 +815,13 @@ func (w *Watcher) parseIncreaseLiquidity(vlog types.Log) (*models.SmartMoneyLPEv
 
 	protocol := detectProtocol(vlog.Address)
 	return &models.SmartMoneyLPEvent{
-		Protocol:     protocol,
-		EventType:    "add",
-		NftTokenID:   &nftID,
-		PoolAddress:  strings.ToLower(vlog.Address.Hex()),
-		Token0Amount: amount0Str,
-		Token1Amount: amount1Str,
+		Protocol:       protocol,
+		EventType:      "add",
+		NftTokenID:     &nftID,
+		PoolAddress:    strings.ToLower(vlog.Address.Hex()),
+		LiquidityDelta: liquidityDeltaStr,
+		Token0Amount:   amount0Str,
+		Token1Amount:   amount1Str,
 	}, nil
 }
 
@@ -826,8 +832,14 @@ func (w *Watcher) parseDecreaseLiquidity(vlog types.Log) (*models.SmartMoneyLPEv
 	tokenID := new(big.Int).SetBytes(vlog.Topics[1].Bytes())
 	nftID := tokenID.Uint64()
 
+	liquidityDeltaStr := "0"
 	amount0Str := "0"
 	amount1Str := "0"
+	if len(vlog.Data) >= 32 {
+		liquidityDelta := new(big.Int).SetBytes(vlog.Data[0:32])
+		liquidityDelta.Neg(liquidityDelta)
+		liquidityDeltaStr = liquidityDelta.String()
+	}
 	if len(vlog.Data) >= 96 {
 		amount0 := new(big.Int).SetBytes(vlog.Data[32:64])
 		amount1 := new(big.Int).SetBytes(vlog.Data[64:96])
@@ -837,12 +849,13 @@ func (w *Watcher) parseDecreaseLiquidity(vlog types.Log) (*models.SmartMoneyLPEv
 
 	protocol := detectProtocol(vlog.Address)
 	return &models.SmartMoneyLPEvent{
-		Protocol:     protocol,
-		EventType:    "remove",
-		NftTokenID:   &nftID,
-		PoolAddress:  strings.ToLower(vlog.Address.Hex()),
-		Token0Amount: amount0Str,
-		Token1Amount: amount1Str,
+		Protocol:       protocol,
+		EventType:      "remove",
+		NftTokenID:     &nftID,
+		PoolAddress:    strings.ToLower(vlog.Address.Hex()),
+		LiquidityDelta: liquidityDeltaStr,
+		Token0Amount:   amount0Str,
+		Token1Amount:   amount1Str,
 	}, nil
 }
 
@@ -879,14 +892,15 @@ func (w *Watcher) parseModifyLiquidity(vlog types.Log) (*models.SmartMoneyLPEven
 	}
 
 	return &models.SmartMoneyLPEvent{
-		Protocol:     "uniswap_v4",
-		EventType:    eventType,
-		PoolAddress:  strings.ToLower(vlog.Address.Hex()),
-		TickLower:    &tickLower,
-		TickUpper:    &tickUpper,
-		NftTokenID:   nftID,
-		Token0Amount: "0",
-		Token1Amount: "0",
+		Protocol:       "uniswap_v4",
+		EventType:      eventType,
+		PoolAddress:    strings.ToLower(vlog.Address.Hex()),
+		TickLower:      &tickLower,
+		TickUpper:      &tickUpper,
+		NftTokenID:     nftID,
+		LiquidityDelta: liquidityDelta.String(),
+		Token0Amount:   "0",
+		Token1Amount:   "0",
 	}, nil
 }
 

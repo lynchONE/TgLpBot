@@ -48,6 +48,7 @@ type SmartMoneyLPEvent struct {
 	Token1Address   string    `gorm:"size:42;not null" json:"token1_address"`
 	Token0Symbol    string    `gorm:"size:20" json:"token0_symbol"`
 	Token1Symbol    string    `gorm:"size:20" json:"token1_symbol"`
+	LiquidityDelta  string    `gorm:"type:decimal(78,0);not null;default:0" json:"liquidity_delta"`
 	Token0Amount    string    `gorm:"type:decimal(65,0);not null;default:0" json:"token0_amount"`
 	Token1Amount    string    `gorm:"type:decimal(65,0);not null;default:0" json:"token1_amount"`
 	Token0AmountUSD *string   `gorm:"type:decimal(20,4)" json:"token0_amount_usd"`
@@ -90,3 +91,46 @@ type SmartMoneyLPPosition struct {
 }
 
 func (SmartMoneyLPPosition) TableName() string { return "sm_lp_positions" }
+
+type SmartMoneyActivePosition struct {
+	ID                     uint       `gorm:"primaryKey" json:"id"`
+	PositionRef            string     `gorm:"size:255;not null;uniqueIndex:uq_sm_active_position_ref" json:"position_ref"`
+	WalletAddress          string     `gorm:"size:42;not null;index:idx_sm_active_wallet_status" json:"wallet_address"`
+	ChainID                int        `gorm:"not null;default:56;index:idx_sm_active_wallet_status;index:idx_sm_active_pool_status" json:"chain_id"`
+	Protocol               string     `gorm:"size:20;not null;index:idx_sm_active_protocol" json:"protocol"`
+	NftTokenID             uint64     `gorm:"not null;default:0;index:idx_sm_active_nft" json:"nft_token_id"`
+	PoolAddress            string     `gorm:"size:66;not null;index:idx_sm_active_pool_status" json:"pool_address"`
+	PositionManagerAddress string     `gorm:"size:66" json:"position_manager_address"`
+	PoolManagerAddress     string     `gorm:"size:66" json:"pool_manager_address"`
+	StateViewAddress       string     `gorm:"size:66" json:"state_view_address"`
+	Token0Address          string     `gorm:"size:42;not null" json:"token0_address"`
+	Token1Address          string     `gorm:"size:42;not null" json:"token1_address"`
+	Token0Symbol           string     `gorm:"size:20" json:"token0_symbol"`
+	Token1Symbol           string     `gorm:"size:20" json:"token1_symbol"`
+	Token0Decimals         int        `gorm:"not null;default:0" json:"token0_decimals"`
+	Token1Decimals         int        `gorm:"not null;default:0" json:"token1_decimals"`
+	FeeTier                *int       `json:"fee_tier"`
+	TickLower              *int       `json:"tick_lower"`
+	TickUpper              *int       `json:"tick_upper"`
+	TickSpacing            int        `gorm:"not null;default:0" json:"tick_spacing"`
+	CurrentLiquidity       string     `gorm:"type:decimal(78,0);not null;default:0" json:"current_liquidity"`
+	EntryAmount0           string     `gorm:"type:decimal(65,0);not null;default:0" json:"entry_amount0"`
+	EntryAmount1           string     `gorm:"type:decimal(65,0);not null;default:0" json:"entry_amount1"`
+	EntryTotalUSD          *string    `gorm:"type:decimal(20,4)" json:"entry_total_usd"`
+	NetAmount0             string     `gorm:"type:decimal(65,0);not null;default:0" json:"net_amount0"`
+	NetAmount1             string     `gorm:"type:decimal(65,0);not null;default:0" json:"net_amount1"`
+	NetTotalUSD            *string    `gorm:"type:decimal(20,4)" json:"net_total_usd"`
+	FeeAmount0             string     `gorm:"type:decimal(65,0);not null;default:0" json:"fee_amount0"`
+	FeeAmount1             string     `gorm:"type:decimal(65,0);not null;default:0" json:"fee_amount1"`
+	FeeUSD                 *string    `gorm:"type:decimal(20,4)" json:"fee_usd"`
+	FeeStatus              string     `gorm:"size:20;not null;default:''" json:"fee_status"`
+	FeeUpdatedAt           *time.Time `json:"fee_updated_at"`
+	IsActive               bool       `gorm:"not null;default:true;index:idx_sm_active_wallet_status;index:idx_sm_active_pool_status;index:idx_sm_active_status" json:"is_active"`
+	OpenedAt               time.Time  `gorm:"not null;index:idx_sm_active_opened" json:"opened_at"`
+	LastAddAt              *time.Time `json:"last_add_at"`
+	LastRemoveAt           *time.Time `json:"last_remove_at"`
+	ClosedAt               *time.Time `json:"closed_at"`
+	UpdatedAt              time.Time  `gorm:"not null;autoUpdateTime" json:"updated_at"`
+}
+
+func (SmartMoneyActivePosition) TableName() string { return "sm_lp_active_positions" }
