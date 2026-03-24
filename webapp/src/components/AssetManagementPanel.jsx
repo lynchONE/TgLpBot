@@ -106,12 +106,21 @@ function errorText(err) {
 }
 
 function hasTransferMarker(item) {
-  return Boolean(item?.has_transfer_in || item?.has_transfer_out || Number(item?.transfer_in_count || 0) > 0 || Number(item?.transfer_out_count || 0) > 0);
+  return Boolean(
+    item?.has_transfer_in ||
+    item?.has_transfer_out ||
+    Number(item?.transfer_in_count || 0) > 0 ||
+    Number(item?.transfer_out_count || 0) > 0 ||
+    Number(item?.transfer_in_usd || 0) > 0 ||
+    Number(item?.transfer_out_usd || 0) > 0
+  );
 }
 
 function TransferBadges({ item, compact = false }) {
   const inCount = Number(item?.transfer_in_count || 0);
   const outCount = Number(item?.transfer_out_count || 0);
+  const inUsd = Number(item?.transfer_in_usd || 0);
+  const outUsd = Number(item?.transfer_out_usd || 0);
   const badges = [];
   if (item?.has_transfer_in || inCount > 0) {
     badges.push({
@@ -121,6 +130,9 @@ function TransferBadges({ item, compact = false }) {
       background: 'rgba(22, 163, 74, 0.12)',
       border: 'rgba(22, 163, 74, 0.22)',
     });
+    badges[badges.length - 1].label = compact
+      ? (inUsd > 0 ? `+${formatUsdCompact(inUsd).replace('$', '')}` : '转入')
+      : `转入${inUsd > 0 ? ` ${formatUsdCompact(inUsd)}` : ''}${inCount > 0 ? ` · ${inCount}笔` : ''}`;
   }
   if (item?.has_transfer_out || outCount > 0) {
     badges.push({
@@ -130,6 +142,9 @@ function TransferBadges({ item, compact = false }) {
       background: 'rgba(234, 88, 12, 0.12)',
       border: 'rgba(234, 88, 12, 0.22)',
     });
+    badges[badges.length - 1].label = compact
+      ? (outUsd > 0 ? `-${formatUsdCompact(outUsd).replace('$', '')}` : '转出')
+      : `转出${outUsd > 0 ? ` ${formatUsdCompact(outUsd)}` : ''}${outCount > 0 ? ` · ${outCount}笔` : ''}`;
   }
   if (!badges.length) return null;
   return (
@@ -731,12 +746,15 @@ export default function AssetManagementPanel({
   const [smartMoneyRefreshing, setSmartMoneyRefreshing] = useState(false);
   const [smartMoneyError, setSmartMoneyError] = useState('');
   const [selectedWalletId, setSelectedWalletId] = useState('');
+  const [selectedWalletMeta, setSelectedWalletMeta] = useState(null);
   const [smSubTab, setSmSubTab] = useState('wallets');
   const [smWalletSearch, setSmWalletSearch] = useState('');
   const [smWalletPage, setSmWalletPage] = useState(0);
   const [smLeaderSearch, setSmLeaderSearch] = useState('');
   const [smLeaderPage, setSmLeaderPage] = useState(0);
   const [smDrillWalletId, setSmDrillWalletId] = useState('');
+
+  const SM_PAGE_SIZE = 10;
 
   const [opsLoading, setOpsLoading] = useState(false);
   const [opsError, setOpsError] = useState('');
@@ -774,6 +792,26 @@ export default function AssetManagementPanel({
   useEffect(() => {
     hasSmartMoneyDataRef.current = hasSmartMoneyData;
   }, [hasSmartMoneyData]);
+
+  const selectSmartMoneyWallet = useCallback((wallet, { openDetail = false } = {}) => {
+    if (!wallet) return;
+    const nextWallet = {
+      address: wallet.address,
+      chain_id: wallet.chain_id,
+      label: wallet.label,
+      assets: wallet.assets,
+      active_pool_count: wallet.active_pool_count,
+      today_event_count: wallet.today_event_count,
+      last_active_at: wallet.last_active_at,
+    };
+    const nextWalletId = walletKey(nextWallet);
+    setSelectedWalletId(nextWalletId);
+    setSelectedWalletMeta(nextWallet);
+    if (openDetail) {
+      setSmSubTab('wallets');
+      setSmDrillWalletId(nextWalletId);
+    }
+  }, []);
 
   const loadAssets = useCallback(async ({ forceRefresh = false } = {}) => {
     if (!hasInitData) return;
@@ -837,7 +875,15 @@ export default function AssetManagementPanel({
     setSmartMoneyError('');
     try {
       const [overviewResult, leaderboardResult] = await Promise.allSettled([
-        fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days: smartMoneyDays, forceRefresh }),
+        fetchAdminSmartMoneyOverview({
+          apiBaseUrl,
+          initData,
+          days: smartMoneyDays,
+          page: smWalletPage + 1,
+          pageSize: SM_PAGE_SIZE,
+          keyword: smWalletSearch,
+          forceRefresh,
+        }),
         fetchAdminSmartMoneyLeaderboard({ apiBaseUrl, initData, days: 1, metric: leaderboardMetric, limit: 20, forceRefresh }),
       ]);
       const overview = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
@@ -847,8 +893,15 @@ export default function AssetManagementPanel({
         if (overviewResult.status === 'fulfilled') setSmartMoneyOverview(overview || null);
         if (leaderboardResult.status === 'fulfilled') setSmartMoneyLeaderboard(leaderboard || null);
       });
-      if (!wallets.some((item) => walletKey(item) === selectedWalletId)) {
-        setSelectedWalletId(wallets[0] ? walletKey(wallets[0]) : '');
+      const current = wallets.find((item) => walletKey(item) === selectedWalletId);
+      if (current) {
+        setSelectedWalletMeta((prev) => ({ ...(prev || {}), ...current }));
+      } else if (!selectedWalletId && wallets[0]) {
+        selectSmartMoneyWallet(wallets[0]);
+      } else if (!wallets.length && !smDrillWalletId) {
+        setSelectedWalletId('');
+        setSelectedWalletMeta(null);
+        setSmartMoneyWallet(null);
       }
       const rejected = [overviewResult, leaderboardResult]
         .filter((item) => item.status === 'rejected')
@@ -863,7 +916,20 @@ export default function AssetManagementPanel({
       setSmartMoneyLoading(false);
       setSmartMoneyRefreshing(false);
     }
-  }, [apiBaseUrl, hasInitData, initData, isAdmin, leaderboardMetric, selectedWalletId, smartMoneyDays]);
+  }, [
+    SM_PAGE_SIZE,
+    apiBaseUrl,
+    hasInitData,
+    initData,
+    isAdmin,
+    leaderboardMetric,
+    selectSmartMoneyWallet,
+    selectedWalletId,
+    smDrillWalletId,
+    smWalletPage,
+    smWalletSearch,
+    smartMoneyDays,
+  ]);
 
   const loadOperations = useCallback(async () => {
     if (!hasInitData || !isAdmin) return;
@@ -963,13 +1029,18 @@ export default function AssetManagementPanel({
     }
   }, [apiBaseUrl, hasInitData, initData, isAdmin, smartMoneyDays]);
 
-  useEffect(() => {
+  const selectedWallet = useMemo(() => {
     const wallets = Array.isArray(smartMoneyOverview?.wallets) ? smartMoneyOverview.wallets : [];
-    const current = wallets.find((item) => walletKey(item) === selectedWalletId);
-    if (activeTab !== 'smart_money' || !current || !hasInitData || !isAdmin) return undefined;
+    return wallets.find((item) => walletKey(item) === selectedWalletId) || selectedWalletMeta || null;
+  }, [selectedWalletId, selectedWalletMeta, smartMoneyOverview]);
+
+  useEffect(() => {
+    if (activeTab !== 'smart_money' || smSubTab !== 'wallets' || !smDrillWalletId || !selectedWallet || !hasInitData || !isAdmin) {
+      return undefined;
+    }
     let disposed = false;
     const run = async (forceRefresh = false) => {
-      await loadSmartMoneyWallet({ wallet: current, forceRefresh });
+      await loadSmartMoneyWallet({ wallet: selectedWallet, forceRefresh });
       if (disposed) return;
     };
     run();
@@ -978,7 +1049,7 @@ export default function AssetManagementPanel({
       disposed = true;
       clearInterval(timer);
     };
-  }, [activeTab, hasInitData, isAdmin, loadSmartMoneyWallet, refreshInterval, selectedWalletId, smartMoneyOverview]);
+  }, [activeTab, hasInitData, isAdmin, loadSmartMoneyWallet, refreshInterval, selectedWallet, smDrillWalletId, smSubTab]);
 
   useEffect(() => {
     if (activeTab !== 'operations') return undefined;
@@ -1004,14 +1075,16 @@ export default function AssetManagementPanel({
 
   const smartMoneyPnlCalData = useMemo(() => {
     const history = Array.isArray(smartMoneyWallet?.history) ? [...smartMoneyWallet.history].sort((a, b) => a.day.localeCompare(b.day)) : [];
-    if (history.length < 2) return [];
-    return history.slice(1).map((item, i) => ({
+    if (!history.length) return [];
+    return history.map((item) => ({
       day: item.day,
-      realized_pnl_usd: Number(item.total_usd || 0) - Number(history[i].total_usd || 0),
+      realized_pnl_usd: Number(item.estimated_realized_pnl_usd || 0),
       has_transfer_in: Boolean(item.has_transfer_in),
       has_transfer_out: Boolean(item.has_transfer_out),
       transfer_in_count: Number(item.transfer_in_count || 0),
       transfer_out_count: Number(item.transfer_out_count || 0),
+      transfer_in_usd: Number(item.transfer_in_usd || 0),
+      transfer_out_usd: Number(item.transfer_out_usd || 0),
     }));
   }, [smartMoneyWallet?.history]);
 
@@ -1058,26 +1131,13 @@ export default function AssetManagementPanel({
     setRpcDraft({ chain: 'bsc', transport: 'http', url: '', name: '', setCurrent: false });
   }, [apiBaseUrl, initData, refreshSystemAfter, rpcDraft]);
 
-  const selectedWallet = useMemo(() => {
-    const wallets = Array.isArray(smartMoneyOverview?.wallets) ? smartMoneyOverview.wallets : [];
-    return wallets.find((item) => walletKey(item) === selectedWalletId) || null;
-  }, [selectedWalletId, smartMoneyOverview]);
-
-  const SM_PAGE_SIZE = 10;
-
-  const filteredWallets = useMemo(() => {
-    const list = Array.isArray(smartMoneyOverview?.wallets) ? smartMoneyOverview.wallets : [];
-    if (!smWalletSearch.trim()) return list;
-    const q = smWalletSearch.trim().toLowerCase();
-    return list.filter((w) => {
-      const addr = String(w.address || '').toLowerCase();
-      const label = String(w.label || '').toLowerCase();
-      return addr.includes(q) || label.includes(q);
-    });
-  }, [smartMoneyOverview, smWalletSearch]);
-
-  const walletTotalPages = Math.max(1, Math.ceil(filteredWallets.length / SM_PAGE_SIZE));
-  const pagedWallets = useMemo(() => filteredWallets.slice(smWalletPage * SM_PAGE_SIZE, (smWalletPage + 1) * SM_PAGE_SIZE), [filteredWallets, smWalletPage]);
+  const overviewWallets = useMemo(
+    () => (Array.isArray(smartMoneyOverview?.wallets) ? smartMoneyOverview.wallets : []),
+    [smartMoneyOverview]
+  );
+  const walletTotal = Math.max(0, Number(smartMoneyOverview?.wallet_total || 0) || overviewWallets.length);
+  const walletTotalPages = Math.max(1, Number(smartMoneyOverview?.wallet_total_pages || 0) || 1);
+  const pagedWallets = overviewWallets;
 
   const filteredLeaderboard = useMemo(() => {
     const list = Array.isArray(smartMoneyLeaderboard?.list) ? smartMoneyLeaderboard.list : [];
@@ -1092,6 +1152,12 @@ export default function AssetManagementPanel({
 
   const leaderTotalPages = Math.max(1, Math.ceil(filteredLeaderboard.length / SM_PAGE_SIZE));
   const pagedLeaderboard = useMemo(() => filteredLeaderboard.slice(smLeaderPage * SM_PAGE_SIZE, (smLeaderPage + 1) * SM_PAGE_SIZE), [filteredLeaderboard, smLeaderPage]);
+
+  useEffect(() => {
+    if (smWalletPage > walletTotalPages - 1) {
+      setSmWalletPage(Math.max(walletTotalPages - 1, 0));
+    }
+  }, [smWalletPage, walletTotalPages]);
 
   const isRefreshing = assetLoading || assetRefreshing || smartMoneyLoading || smartMoneyRefreshing || opsLoading || systemLoading;
 
@@ -1280,7 +1346,7 @@ export default function AssetManagementPanel({
             <div className="am-card">
               <div className="am-card-header">
                 <div className="am-card-title">钱包总览</div>
-                <span className="am-badge">{filteredWallets.length} 个</span>
+                <span className="am-badge">{walletTotal} 个</span>
               </div>
               <div style={{ position: 'relative', marginTop: 8 }}>
                 <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', opacity: 0.35 }} />
@@ -1302,7 +1368,7 @@ export default function AssetManagementPanel({
                   const tokenPct = total > 0 ? (Number(assets.tracked_token_usd || 0) / total * 100) : 0;
                   const lpPct = total > 0 ? (Number(assets.open_lp_usd || 0) / total * 100) : 0;
                   return (
-                    <button key={walletKey(wallet)} type="button" className={`am-list-item am-list-btn ${walletKey(wallet) === selectedWalletId ? 'selected' : ''}`} onClick={() => { const wk = walletKey(wallet); setSelectedWalletId(wk); setSmDrillWalletId(wk); }}>
+                    <button key={walletKey(wallet)} type="button" className={`am-list-item am-list-btn ${walletKey(wallet) === selectedWalletId ? 'selected' : ''}`} onClick={() => selectSmartMoneyWallet(wallet, { openDetail: true })}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
                         <WalletAvatar address={wallet.address} size={28} />
                         <div style={{ minWidth: 0 }}>
@@ -1414,7 +1480,7 @@ export default function AssetManagementPanel({
                   {/* PnL calendar (daily balance diff) */}
                   <PnLCalendar
                     data={smartMoneyPnlCalData}
-                    note="按日资产快照差额估算；若出现“转入/转出”标记，说明该日检测到资金划转，当天盈亏会受划转影响。"
+                    note="日历按钱包总资产日变化展示；若出现转入或转出标记，会同步展示当天检测到的转账金额。"
                   />
 
                   {/* window stats */}
@@ -1481,7 +1547,12 @@ export default function AssetManagementPanel({
                   const metricText = leaderboardMetric === 'yield_rate' ? formatPct(item.metric_value) : leaderboardMetric === 'participation' ? `${Number(item.metric_value || 0)} 次` : formatUsd(item.metric_value);
                   const pnl = Number(item.estimated_realized_pnl_usd || 0);
                   return (
-                    <div key={`${item.rank}:${item.address}`} className={`am-list-item ${item.rank <= 3 ? 'am-top-rank' : ''}`}>
+                    <button
+                      key={`${item.rank}:${item.address}`}
+                      type="button"
+                      className={`am-list-item am-list-btn ${item.rank <= 3 ? 'am-top-rank' : ''}`}
+                      onClick={() => selectSmartMoneyWallet(item, { openDetail: true })}
+                    >
                       <div className="am-rank-row">
                         <RankBadge rank={Number(item.rank || 0)} />
                         <WalletAvatar address={item.address} size={30} />
@@ -1496,7 +1567,7 @@ export default function AssetManagementPanel({
                         {leaderboardMetric !== 'pnl' && <span className="am-item-sub" style={{ color: pnl >= 0 ? '#59f09d' : '#ff6b6b' }}>{pnl >= 0 ? '+' : ''}{formatUsdCompact(pnl)}</span>}
                         {leaderboardMetric === 'pnl' && Number(item.yield_rate || 0) !== 0 && <span className="am-item-sub">{formatPct(item.yield_rate)}</span>}
                       </div>
-                    </div>
+                    </button>
                   );
                 }) : <EmptyState text={smartMoneyLoading ? '正在加载...' : '暂无排行榜数据'} />}
               </div>

@@ -115,6 +115,8 @@ func autoMigrate() error {
 	ensureColumn("sm_wallet_daily_snapshots", "has_transfer_out", "TINYINT(1) NOT NULL DEFAULT 0 AFTER has_transfer_in")
 	ensureColumn("sm_wallet_daily_snapshots", "transfer_in_count", "INT NOT NULL DEFAULT 0 AFTER has_transfer_out")
 	ensureColumn("sm_wallet_daily_snapshots", "transfer_out_count", "INT NOT NULL DEFAULT 0 AFTER transfer_in_count")
+	ensureColumn("sm_wallet_daily_snapshots", "transfer_in_usd", "DECIMAL(20,4) NOT NULL DEFAULT 0 AFTER transfer_out_count")
+	ensureColumn("sm_wallet_daily_snapshots", "transfer_out_usd", "DECIMAL(20,4) NOT NULL DEFAULT 0 AFTER transfer_in_usd")
 	ensureColumn("sm_lp_events", "liquidity_delta", "DECIMAL(65,0) NOT NULL DEFAULT 0 AFTER token1_symbol")
 
 	return nil

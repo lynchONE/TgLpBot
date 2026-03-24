@@ -21,6 +21,15 @@ type userAssetHistoryRequest struct {
 	ForceRefresh bool   `json:"force_refresh,omitempty"`
 }
 
+type adminSmartMoneyOverviewRequest struct {
+	InitData     string `json:"initData"`
+	Days         int    `json:"days"`
+	Page         int    `json:"page"`
+	PageSize     int    `json:"page_size"`
+	Keyword      string `json:"keyword"`
+	ForceRefresh bool   `json:"force_refresh,omitempty"`
+}
+
 type adminSmartMoneyWalletRequest struct {
 	InitData     string `json:"initData"`
 	Address      string `json:"address"`
@@ -208,7 +217,7 @@ func (s *Server) handleAdminSmartMoneyOverview(w http.ResponseWriter, r *http.Re
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	var req userAssetHistoryRequest
+	var req adminSmartMoneyOverviewRequest
 	if !decodeJSONBody(w, r, &req) {
 		return
 	}
@@ -217,9 +226,17 @@ func (s *Server) handleAdminSmartMoneyOverview(w http.ResponseWriter, r *http.Re
 		http.Error(w, msg, status)
 		return
 	}
-	key := assetResponseCacheKey("admin", fmt.Sprintf("%d", adminUserID), "smart-money-overview", fmt.Sprintf("%d", req.Days))
+	key := assetResponseCacheKey(
+		"admin",
+		fmt.Sprintf("%d", adminUserID),
+		"smart-money-overview",
+		fmt.Sprintf("%d", req.Days),
+		fmt.Sprintf("%d", req.Page),
+		fmt.Sprintf("%d", req.PageSize),
+		req.Keyword,
+	)
 	if err := respondWithAssetCache(w, key, req.ForceRefresh, func() (interface{}, error) {
-		return s.Assets.GetSmartMoneyOverview(r.Context(), req.Days)
+		return s.Assets.GetSmartMoneyOverview(r.Context(), req.Days, req.Page, req.PageSize, req.Keyword, req.ForceRefresh)
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
@@ -241,7 +258,7 @@ func (s *Server) handleAdminSmartMoneyWallet(w http.ResponseWriter, r *http.Requ
 	}
 	key := assetResponseCacheKey("admin", fmt.Sprintf("%d", adminUserID), "smart-money-wallet", req.Address, fmt.Sprintf("%d", req.ChainID), fmt.Sprintf("%d", req.Days))
 	if err := respondWithAssetCache(w, key, req.ForceRefresh, func() (interface{}, error) {
-		return s.Assets.GetSmartMoneyWallet(r.Context(), req.Address, req.ChainID, req.Days)
+		return s.Assets.GetSmartMoneyWallet(r.Context(), req.Address, req.ChainID, req.Days, req.ForceRefresh)
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
@@ -263,7 +280,7 @@ func (s *Server) handleAdminSmartMoneyLeaderboard(w http.ResponseWriter, r *http
 	}
 	key := assetResponseCacheKey("admin", fmt.Sprintf("%d", adminUserID), "smart-money-leaderboard", req.Metric, fmt.Sprintf("%d", req.Days), fmt.Sprintf("%d", req.Limit))
 	if err := respondWithAssetCache(w, key, req.ForceRefresh, func() (interface{}, error) {
-		return s.Assets.GetSmartMoneyLeaderboard(r.Context(), req.Metric, req.Days, req.Limit)
+		return s.Assets.GetSmartMoneyLeaderboard(r.Context(), req.Metric, req.Days, req.Limit, req.ForceRefresh)
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}

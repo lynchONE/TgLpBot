@@ -93,6 +93,9 @@ func (s *Service) RunDailyAggregation(day time.Time) error {
 	if err := s.captureSmartMoneyLPDailyStats(ctx, day); err != nil {
 		return fmt.Errorf("capture smart money lp daily stats: %w", err)
 	}
+	if err := s.refreshSmartMoneyLeaderboardCaches(ctx, day); err != nil {
+		return fmt.Errorf("refresh smart money leaderboard caches: %w", err)
+	}
 	return nil
 }
 
@@ -220,16 +223,19 @@ type smartMoneyAssetBreakdown struct {
 }
 
 type SmartMoneyHistoryPoint struct {
-	Day              string  `json:"day"`
-	NativeUSD        float64 `json:"native_usd"`
-	StableUSD        float64 `json:"stable_usd"`
-	TrackedTokenUSD  float64 `json:"tracked_token_usd"`
-	OpenLPUSD        float64 `json:"open_lp_usd"`
-	TotalUSD         float64 `json:"total_usd"`
-	HasTransferIn    bool    `json:"has_transfer_in,omitempty"`
-	HasTransferOut   bool    `json:"has_transfer_out,omitempty"`
-	TransferInCount  int     `json:"transfer_in_count,omitempty"`
-	TransferOutCount int     `json:"transfer_out_count,omitempty"`
+	Day                     string  `json:"day"`
+	NativeUSD               float64 `json:"native_usd"`
+	StableUSD               float64 `json:"stable_usd"`
+	TrackedTokenUSD         float64 `json:"tracked_token_usd"`
+	OpenLPUSD               float64 `json:"open_lp_usd"`
+	TotalUSD                float64 `json:"total_usd"`
+	EstimatedRealizedPnLUSD float64 `json:"estimated_realized_pnl_usd,omitempty"`
+	HasTransferIn           bool    `json:"has_transfer_in,omitempty"`
+	HasTransferOut          bool    `json:"has_transfer_out,omitempty"`
+	TransferInCount         int     `json:"transfer_in_count,omitempty"`
+	TransferOutCount        int     `json:"transfer_out_count,omitempty"`
+	TransferInUSD           float64 `json:"transfer_in_usd,omitempty"`
+	TransferOutUSD          float64 `json:"transfer_out_usd,omitempty"`
 }
 
 type SmartMoneyWindowStats struct {
@@ -256,14 +262,19 @@ type SmartMoneyWalletSummary struct {
 }
 
 type SmartMoneyOverview struct {
-	Summary   smartMoneyAssetBreakdown  `json:"summary"`
-	Wallets   []SmartMoneyWalletSummary `json:"wallets"`
-	History   []SmartMoneyHistoryPoint  `json:"history"`
-	Today     SmartMoneyHistoryPoint    `json:"today"`
-	Windows   []SmartMoneyWindowStats   `json:"windows"`
-	UpdatedAt time.Time                 `json:"updated_at"`
-	Timezone  string                    `json:"timezone"`
-	Warnings  []string                  `json:"warnings,omitempty"`
+	Summary          smartMoneyAssetBreakdown  `json:"summary"`
+	Wallets          []SmartMoneyWalletSummary `json:"wallets"`
+	WalletPage       int                       `json:"wallet_page,omitempty"`
+	WalletSize       int                       `json:"wallet_size,omitempty"`
+	WalletTotal      int                       `json:"wallet_total,omitempty"`
+	WalletTotalPages int                       `json:"wallet_total_pages,omitempty"`
+	SnapshotDay      string                    `json:"snapshot_day,omitempty"`
+	History          []SmartMoneyHistoryPoint  `json:"history"`
+	Today            SmartMoneyHistoryPoint    `json:"today"`
+	Windows          []SmartMoneyWindowStats   `json:"windows"`
+	UpdatedAt        time.Time                 `json:"updated_at"`
+	Timezone         string                    `json:"timezone"`
+	Warnings         []string                  `json:"warnings,omitempty"`
 }
 
 type SmartMoneyTodayActivity struct {
@@ -300,6 +311,8 @@ type SmartMoneyLeaderboardEntry struct {
 	HasTransferOut          bool    `json:"has_transfer_out,omitempty"`
 	TransferInCount         int     `json:"transfer_in_count,omitempty"`
 	TransferOutCount        int     `json:"transfer_out_count,omitempty"`
+	TransferInUSD           float64 `json:"transfer_in_usd,omitempty"`
+	TransferOutUSD          float64 `json:"transfer_out_usd,omitempty"`
 }
 
 type SmartMoneyLeaderboardResponse struct {

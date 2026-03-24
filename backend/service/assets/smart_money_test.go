@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestBuildSmartMoneySnapshotLeaderboard_UsesSnapshotDeltaAndTransferFlags(t *testing.T) {
+func TestBuildSmartMoneySnapshotLeaderboard_UsesBalanceDeltaAndTransferAmounts(t *testing.T) {
 	timeutil.Init()
 
 	label := "Alpha"
@@ -22,11 +22,10 @@ func TestBuildSmartMoneySnapshotLeaderboard_UsesSnapshotDeltaAndTransferFlags(t 
 				Label:   &label,
 			},
 			Current: &models.SmartMoneyWalletDailySnapshot{
-				TotalUSD:         135,
-				HasTransferIn:    true,
-				TransferInCount:  2,
-				HasTransferOut:   false,
-				TransferOutCount: 0,
+				TotalUSD:        135,
+				HasTransferIn:   true,
+				TransferInCount: 1,
+				TransferInUSD:   9.5,
 			},
 			Previous: &models.SmartMoneyWalletDailySnapshot{
 				TotalUSD: 100,
@@ -47,6 +46,7 @@ func TestBuildSmartMoneySnapshotLeaderboard_UsesSnapshotDeltaAndTransferFlags(t 
 				TotalUSD:         120,
 				HasTransferOut:   true,
 				TransferOutCount: 1,
+				TransferOutUSD:   18.75,
 			},
 			Previous: &models.SmartMoneyWalletDailySnapshot{
 				TotalUSD: 100,
@@ -97,8 +97,28 @@ func TestBuildSmartMoneySnapshotLeaderboard_UsesSnapshotDeltaAndTransferFlags(t 
 	if got, want := first.ParticipationCount, 3; got != want {
 		t.Fatalf("first participation = %d, want %d", got, want)
 	}
-	if !first.HasTransferIn || first.TransferInCount != 2 {
-		t.Fatalf("first transfer in flag/count = %v/%d, want true/2", first.HasTransferIn, first.TransferInCount)
+	if !first.HasTransferIn || first.TransferInCount != 1 {
+		t.Fatalf("first transfer in flag/count = %v/%d, want true/1", first.HasTransferIn, first.TransferInCount)
+	}
+	if got, want := first.TransferInUSD, 9.5; got != want {
+		t.Fatalf("first transfer in usd = %.2f, want %.2f", got, want)
+	}
+
+	second := resp.List[1]
+	if got, want := second.Address, "0x00000000000000000000000000000000000000b2"; got != want {
+		t.Fatalf("second address = %s, want %s", got, want)
+	}
+	if got, want := second.EstimatedRealizedPnLUSD, 20.0; got != want {
+		t.Fatalf("second pnl = %.2f, want %.2f", got, want)
+	}
+	if got, want := second.YieldRate, 0.2; got != want {
+		t.Fatalf("second yield = %.4f, want %.4f", got, want)
+	}
+	if !second.HasTransferOut || second.TransferOutCount != 1 {
+		t.Fatalf("second transfer out flag/count = %v/%d, want true/1", second.HasTransferOut, second.TransferOutCount)
+	}
+	if got, want := second.TransferOutUSD, 18.75; got != want {
+		t.Fatalf("second transfer out usd = %.2f, want %.2f", got, want)
 	}
 }
 
@@ -143,5 +163,37 @@ func TestBuildSmartMoneySnapshotLeaderboard_ParticipationMetricRanksByDailyOps(t
 	}
 	if got, want := resp.List[1].EstimatedRealizedPnLUSD, 50.0; got != want {
 		t.Fatalf("second pnl = %.2f, want %.2f", got, want)
+	}
+}
+
+func TestBuildSmartMoneySnapshotLeaderboard_FallsBackToSnapshotDeltaWithoutDailyStat(t *testing.T) {
+	timeutil.Init()
+
+	snapshotDay := time.Date(2026, time.March, 23, 0, 0, 0, 0, timeutil.Location())
+	comparedDay := snapshotDay.AddDate(0, 0, -1)
+
+	resp := buildSmartMoneySnapshotLeaderboard("pnl", snapshotDay, comparedDay, 20, []smartMoneyLeaderboardSnapshotInput{
+		{
+			Wallet: models.MonitoredWallet{
+				Address: "0x00000000000000000000000000000000000000f6",
+				ChainID: 56,
+			},
+			Current: &models.SmartMoneyWalletDailySnapshot{
+				TotalUSD: 145,
+			},
+			Previous: &models.SmartMoneyWalletDailySnapshot{
+				TotalUSD: 100,
+			},
+		},
+	})
+
+	if got, want := len(resp.List), 1; got != want {
+		t.Fatalf("leaderboard size = %d, want %d", got, want)
+	}
+	if got, want := resp.List[0].EstimatedRealizedPnLUSD, 45.0; got != want {
+		t.Fatalf("fallback pnl = %.2f, want %.2f", got, want)
+	}
+	if got, want := resp.List[0].YieldRate, 0.45; got != want {
+		t.Fatalf("fallback yield = %.4f, want %.4f", got, want)
 	}
 }

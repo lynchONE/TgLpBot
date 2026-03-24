@@ -69,6 +69,8 @@ type SmartMoneyWalletDailySnapshot struct {
 	HasTransferOut    bool      `gorm:"not null;default:false" json:"has_transfer_out"`
 	TransferInCount   int       `gorm:"not null;default:0" json:"transfer_in_count"`
 	TransferOutCount  int       `gorm:"not null;default:0" json:"transfer_out_count"`
+	TransferInUSD     float64   `gorm:"type:decimal(20,4);not null;default:0" json:"transfer_in_usd"`
+	TransferOutUSD    float64   `gorm:"type:decimal(20,4);not null;default:0" json:"transfer_out_usd"`
 	CapturedAt        time.Time `gorm:"not null;index" json:"captured_at"`
 
 	CreatedAt time.Time `json:"created_at"`

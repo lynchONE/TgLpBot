@@ -220,10 +220,20 @@ export async function fetchAdminRealtimePositions({ apiBaseUrl, initData, userId
     return resp.json();
 }
 
-export async function fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days = 7, forceRefresh = false, signal }) {
+export async function fetchAdminSmartMoneyOverview({
+    apiBaseUrl,
+    initData,
+    days = 7,
+    page = 1,
+    pageSize = 10,
+    keyword = '',
+    forceRefresh = false,
+    signal,
+}) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/admin?endpoint=assets_smart_money_overview`;
-    const cacheKey = `admin-smart-money-overview:${base}:${initData}:${days}`;
+    const normalizedKeyword = String(keyword || '').trim().toLowerCase();
+    const cacheKey = `admin-smart-money-overview:${base}:${initData}:${days}:${page}:${pageSize}:${normalizedKeyword}`;
     return resolveAssetCachedPayload({
         cacheKey,
         forceRefresh,
@@ -231,7 +241,14 @@ export async function fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days 
             const resp = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ initData, days, force_refresh: forceRefresh }),
+                body: JSON.stringify({
+                    initData,
+                    days,
+                    page,
+                    page_size: pageSize,
+                    keyword: normalizedKeyword,
+                    force_refresh: forceRefresh,
+                }),
                 signal,
             });
             if (!resp.ok) {

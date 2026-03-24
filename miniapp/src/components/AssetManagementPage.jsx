@@ -27,6 +27,7 @@ const LEADERBOARD_METRICS = [
     { key: 'participation', label: '参与次数' },
 ];
 
+const SM_PAGE_SIZE = 10;
 const usdFmt = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
 function formatUsd(value) {
     const num = Number(value || 0);
@@ -71,12 +72,21 @@ function errorText(err) {
 }
 
 function hasTransferMarker(item) {
-    return Boolean(item?.has_transfer_in || item?.has_transfer_out || Number(item?.transfer_in_count || 0) > 0 || Number(item?.transfer_out_count || 0) > 0);
+    return Boolean(
+        item?.has_transfer_in ||
+        item?.has_transfer_out ||
+        Number(item?.transfer_in_count || 0) > 0 ||
+        Number(item?.transfer_out_count || 0) > 0 ||
+        Number(item?.transfer_in_usd || 0) > 0 ||
+        Number(item?.transfer_out_usd || 0) > 0
+    );
 }
 
 function TransferBadges({ item, compact = false }) {
     const inCount = Number(item?.transfer_in_count || 0);
     const outCount = Number(item?.transfer_out_count || 0);
+    const inUsd = Number(item?.transfer_in_usd || 0);
+    const outUsd = Number(item?.transfer_out_usd || 0);
     const badges = [];
     if (item?.has_transfer_in || inCount > 0) {
         badges.push({
@@ -84,6 +94,9 @@ function TransferBadges({ item, compact = false }) {
             label: compact ? '入' : `转入${inCount > 0 ? ` ${inCount}` : ''}`,
             className: 'border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-700 dark:text-emerald-300',
         });
+        badges[badges.length - 1].label = compact
+            ? (inUsd > 0 ? `+${formatUsdCompact(inUsd).replace('$', '')}` : '转入')
+            : `转入${inUsd > 0 ? ` ${formatUsdCompact(inUsd)}` : ''}${inCount > 0 ? ` · ${inCount}笔` : ''}`;
     }
     if (item?.has_transfer_out || outCount > 0) {
         badges.push({
@@ -91,6 +104,9 @@ function TransferBadges({ item, compact = false }) {
             label: compact ? '出' : `转出${outCount > 0 ? ` ${outCount}` : ''}`,
             className: 'border-amber-500/25 bg-amber-500/[0.10] text-amber-700 dark:text-amber-300',
         });
+        badges[badges.length - 1].label = compact
+            ? (outUsd > 0 ? `-${formatUsdCompact(outUsd).replace('$', '')}` : '转出')
+            : `转出${outUsd > 0 ? ` ${formatUsdCompact(outUsd)}` : ''}${outCount > 0 ? ` · ${outCount}笔` : ''}`;
     }
     if (!badges.length) return null;
     return (
@@ -826,6 +842,7 @@ export default function AssetManagementPage({
     const [smartMoneyRefreshing, setSmartMoneyRefreshing] = useState(false);
     const [smartMoneyError, setSmartMoneyError] = useState('');
     const [selectedWalletId, setSelectedWalletId] = useState('');
+    const [selectedWalletMeta, setSelectedWalletMeta] = useState(null);
     const [smSubTab, setSmSubTab] = useState('wallets');
     const [smWalletSearch, setSmWalletSearch] = useState('');
     const [smWalletPage, setSmWalletPage] = useState(0);
@@ -851,6 +868,26 @@ export default function AssetManagementPage({
     useEffect(() => {
         hasSmartMoneyDataRef.current = hasSmartMoneyData;
     }, [hasSmartMoneyData]);
+
+    const selectSmartMoneyWallet = useCallback((wallet, { openDetail = false } = {}) => {
+        if (!wallet) return;
+        const nextWallet = {
+            address: wallet.address,
+            chain_id: wallet.chain_id,
+            label: wallet.label,
+            assets: wallet.assets,
+            active_pool_count: wallet.active_pool_count,
+            today_event_count: wallet.today_event_count,
+            last_active_at: wallet.last_active_at,
+        };
+        const nextWalletId = walletKey(nextWallet);
+        setSelectedWalletId(nextWalletId);
+        setSelectedWalletMeta(nextWallet);
+        if (openDetail) {
+            setSmSubTab('wallets');
+            setSmDrillWalletId(nextWalletId);
+        }
+    }, []);
 
     const loadAssets = useCallback(async ({ forceRefresh = false } = {}) => {
         if (!hasInitData) return;
@@ -922,7 +959,15 @@ export default function AssetManagementPage({
         setSmartMoneyError('');
         try {
             const [overviewResult, leaderboardResult] = await Promise.allSettled([
-                fetchAdminSmartMoneyOverview({ apiBaseUrl, initData, days: smartMoneyDays, forceRefresh }),
+                fetchAdminSmartMoneyOverview({
+                    apiBaseUrl,
+                    initData,
+                    days: smartMoneyDays,
+                    page: smWalletPage + 1,
+                    pageSize: SM_PAGE_SIZE,
+                    keyword: smWalletSearch,
+                    forceRefresh,
+                }),
                 fetchAdminSmartMoneyLeaderboard({ apiBaseUrl, initData, days: 1, metric: leaderboardMetric, limit: 20, forceRefresh }),
             ]);
             const overview = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
@@ -932,8 +977,15 @@ export default function AssetManagementPage({
                 if (overviewResult.status === 'fulfilled') setSmartMoneyOverview(overview || null);
                 if (leaderboardResult.status === 'fulfilled') setSmartMoneyLeaderboard(leaderboard || null);
             });
-            if (!wallets.some((item) => walletKey(item) === selectedWalletId)) {
-                setSelectedWalletId(wallets[0] ? walletKey(wallets[0]) : '');
+            const current = wallets.find((item) => walletKey(item) === selectedWalletId);
+            if (current) {
+                setSelectedWalletMeta((prev) => ({ ...(prev || {}), ...current }));
+            } else if (!selectedWalletId && wallets[0]) {
+                selectSmartMoneyWallet(wallets[0]);
+            } else if (!wallets.length && !smDrillWalletId) {
+                setSelectedWalletId('');
+                setSelectedWalletMeta(null);
+                setSmartMoneyWallet(null);
             }
             const rejected = [overviewResult, leaderboardResult]
                 .filter((item) => item.status === 'rejected')
@@ -948,7 +1000,19 @@ export default function AssetManagementPage({
             setSmartMoneyLoading(false);
             setSmartMoneyRefreshing(false);
         }
-    }, [apiBaseUrl, hasInitData, initData, isAdmin, leaderboardMetric, selectedWalletId, smartMoneyDays]);
+    }, [
+        apiBaseUrl,
+        hasInitData,
+        initData,
+        isAdmin,
+        leaderboardMetric,
+        selectSmartMoneyWallet,
+        selectedWalletId,
+        smDrillWalletId,
+        smWalletPage,
+        smWalletSearch,
+        smartMoneyDays,
+    ]);
 
     useEffect(() => {
         if (activeTab !== 'smart_money_assets') return undefined;
@@ -960,8 +1024,8 @@ export default function AssetManagementPage({
 
     const selectedWallet = useMemo(() => {
         const wallets = Array.isArray(smartMoneyOverview?.wallets) ? smartMoneyOverview.wallets : [];
-        return wallets.find((item) => walletKey(item) === selectedWalletId) || null;
-    }, [selectedWalletId, smartMoneyOverview]);
+        return wallets.find((item) => walletKey(item) === selectedWalletId) || selectedWalletMeta || null;
+    }, [selectedWalletId, selectedWalletMeta, smartMoneyOverview]);
 
     const loadSmartMoneyWallet = useCallback(async ({ wallet, forceRefresh = false } = {}) => {
         if (!wallet || !hasInitData || !isAdmin) return;
@@ -988,7 +1052,7 @@ export default function AssetManagementPage({
     }, [apiBaseUrl, hasInitData, initData, isAdmin, smartMoneyDays]);
 
     useEffect(() => {
-        if (activeTab !== 'smart_money_assets' || !selectedWallet || !hasInitData || !isAdmin) return undefined;
+        if (activeTab !== 'smart_money_assets' || smSubTab !== 'wallets' || !smDrillWalletId || !selectedWallet || !hasInitData || !isAdmin) return undefined;
         let disposed = false;
         const run = async (forceRefresh = false) => {
             await loadSmartMoneyWallet({ wallet: selectedWallet, forceRefresh });
@@ -1000,7 +1064,7 @@ export default function AssetManagementPage({
             disposed = true;
             clearInterval(timer);
         };
-    }, [activeTab, hasInitData, isAdmin, loadSmartMoneyWallet, pollIntervalSec, selectedWallet]);
+    }, [activeTab, hasInitData, isAdmin, loadSmartMoneyWallet, pollIntervalSec, selectedWallet, smDrillWalletId, smSubTab]);
 
     const chartRows = useMemo(() => seriesRows(assetsData.history, 'wallet_usd'), [assetsData.history]);
     const smartMoneyRows = useMemo(
@@ -1010,32 +1074,32 @@ export default function AssetManagementPage({
 
     const smartMoneyPnlCalData = useMemo(() => {
         const history = Array.isArray(smartMoneyWallet?.history) ? [...smartMoneyWallet.history].sort((a, b) => a.day.localeCompare(b.day)) : [];
-        if (history.length < 2) return [];
-        return history.slice(1).map((item, i) => ({
+        if (!history.length) return [];
+        return history.map((item) => ({
             day: item.day,
-            realized_pnl_usd: Number(item.total_usd || 0) - Number(history[i].total_usd || 0),
+            realized_pnl_usd: Number(item.estimated_realized_pnl_usd || 0),
             has_transfer_in: Boolean(item.has_transfer_in),
             has_transfer_out: Boolean(item.has_transfer_out),
             transfer_in_count: Number(item.transfer_in_count || 0),
             transfer_out_count: Number(item.transfer_out_count || 0),
+            transfer_in_usd: Number(item.transfer_in_usd || 0),
+            transfer_out_usd: Number(item.transfer_out_usd || 0),
         }));
     }, [smartMoneyWallet?.history]);
 
-    const SM_PAGE_SIZE = 10;
+    const overviewWallets = useMemo(
+        () => (Array.isArray(smartMoneyOverview?.wallets) ? smartMoneyOverview.wallets : []),
+        [smartMoneyOverview],
+    );
+    const walletTotal = Math.max(0, Number(smartMoneyOverview?.wallet_total || 0) || overviewWallets.length);
+    const walletTotalPages = Math.max(1, Number(smartMoneyOverview?.wallet_total_pages || 0) || 1);
+    const pagedWallets = overviewWallets;
 
-    const filteredWallets = useMemo(() => {
-        const list = Array.isArray(smartMoneyOverview?.wallets) ? smartMoneyOverview.wallets : [];
-        if (!smWalletSearch.trim()) return list;
-        const q = smWalletSearch.trim().toLowerCase();
-        return list.filter((w) => {
-            const addr = String(w.address || '').toLowerCase();
-            const label = String(w.label || '').toLowerCase();
-            return addr.includes(q) || label.includes(q);
-        });
-    }, [smartMoneyOverview, smWalletSearch]);
-
-    const walletTotalPages = Math.max(1, Math.ceil(filteredWallets.length / SM_PAGE_SIZE));
-    const pagedWallets = useMemo(() => filteredWallets.slice(smWalletPage * SM_PAGE_SIZE, (smWalletPage + 1) * SM_PAGE_SIZE), [filteredWallets, smWalletPage]);
+    useEffect(() => {
+        if (smWalletPage > walletTotalPages - 1) {
+            setSmWalletPage(Math.max(walletTotalPages - 1, 0));
+        }
+    }, [smWalletPage, walletTotalPages]);
 
     const filteredLeaderboard = useMemo(() => {
         const list = Array.isArray(smartMoneyLeaderboard?.list) ? smartMoneyLeaderboard.list : [];
@@ -1267,7 +1331,7 @@ export default function AssetManagementPage({
                             <div className="flex items-center justify-between gap-2">
                                 <span className="text-[12px] font-bold text-zinc-900 dark:text-white/90">钱包总览</span>
                                 <span className="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-500 ring-1 ring-zinc-200 dark:bg-white/[0.04] dark:text-white/50 dark:ring-white/[0.06]">
-                                    {filteredWallets.length} 个
+                                    {walletTotal} 个
                                 </span>
                             </div>
                             <div className="mt-2">
@@ -1286,7 +1350,7 @@ export default function AssetManagementPage({
                                         <button
                                             key={walletKey(wallet)}
                                             type="button"
-                                            onClick={() => { const wk = walletKey(wallet); setSelectedWalletId(wk); setSmDrillWalletId(wk); }}
+                                            onClick={() => selectSmartMoneyWallet(wallet, { openDetail: true })}
                                             className={`flex w-full flex-col gap-2 rounded-xl border px-3 py-2.5 text-left transition active:scale-[0.98] ${
                                                 selected
                                                     ? `${brand.selectionClass} dark:text-white`
@@ -1395,7 +1459,7 @@ export default function AssetManagementPage({
                                     {/* PnL calendar (daily balance diff) */}
                                     <PnLCalendar
                                         data={smartMoneyPnlCalData}
-                                        note="按日资产快照差额估算；若出现“转入/转出”标记，说明该日检测到资金划转，当天盈亏会受划转影响。"
+                                        note="日历按钱包总资产日变化展示；若出现转入或转出标记，会同步展示当天检测到的转账金额。"
                                     />
 
                                     {/* window stats */}
@@ -1449,9 +1513,11 @@ export default function AssetManagementPage({
                                     const pnl = Number(item.estimated_realized_pnl_usd || 0);
                                     const isTop3 = item.rank <= 3;
                                     return (
-                                        <div
+                                        <button
                                             key={`${item.rank}:${item.address}`}
-                                            className={`flex items-center gap-3 rounded-xl border px-3 py-3 transition ${
+                                            type="button"
+                                            onClick={() => selectSmartMoneyWallet(item, { openDetail: true })}
+                                            className={`flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left transition active:scale-[0.98] ${
                                                 isTop3
                                                     ? 'border-amber-500/15 bg-gradient-to-r from-amber-500/[0.04] to-transparent dark:border-amber-400/10 dark:from-amber-500/[0.06]'
                                                     : 'border-zinc-100 bg-zinc-50/60 dark:border-white/[0.04] dark:bg-[#0d0f12]'
@@ -1502,7 +1568,7 @@ export default function AssetManagementPage({
                                                     </div>
                                                 )}
                                             </div>
-                                        </div>
+                                        </button>
                                     );
                                 }) : <Empty text={smartMoneyLoading ? '加载中...' : '暂无排行榜数据'} />}
                             </div>
