@@ -700,9 +700,6 @@ func (s *StrategyService) calculateRangeFromPercentage(task *models.StrategyTask
 
 	// Use best-fit rounding to minimize distortion caused by tickSpacing quantization.
 	tickLower, tickUpper := tc.CalculateTickFromPercentagesBestFit(currentTick, lowerPct, upperPct, task.TickSpacing)
-	if err := tc.ValidateTickRange(tickLower, tickUpper, task.TickSpacing); err != nil {
-		return 0, 0, err
-	}
 	return tickLower, tickUpper, nil
 }
 

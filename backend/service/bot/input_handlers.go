@@ -552,11 +552,6 @@ func (b *Bot) handleTickRange(message *tgbotapi.Message, user *models.User) {
 	// Use best-fit rounding to minimize distortion caused by tickSpacing quantization,
 	// especially on higher fee tiers (e.g. 1% pools have large tickSpacing).
 	tickLower, tickUpper := tc.CalculateTickFromPercentagesBestFit(currentTick, tickLowerPctReq, tickUpperPctReq, tickSpacing)
-	if err := tc.ValidateTickRange(tickLower, tickUpper, tickSpacing); err != nil {
-		b.sendMessage(message.Chat.ID, fmt.Sprintf("计算出的 tick 范围无效：%v\n\n请尝试更小的百分比。", err))
-		return
-	}
-
 	tickLowerPctEff, tickUpperPctEff := tc.CalculatePercentagesFromTicks(currentTick, tickLower, tickUpper)
 	effectivePct := (tickLowerPctEff + tickUpperPctEff) / 2.0
 	stableLowerPctEff, stableUpperPctEff := pricing.StablePercentagesFromTickPercentages(tmpTask, tickLowerPctEff, tickUpperPctEff)

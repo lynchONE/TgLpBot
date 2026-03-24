@@ -26,6 +26,10 @@ func (tc *TickCalculator) CalculateTickFromPercentage(currentTick int, percentag
 // lowerPct/upperPct: 价格范围百分比 (如 5 表示 5%)
 // Returns: tickLower, tickUpper
 func (tc *TickCalculator) CalculateTickFromPercentages(currentTick int, lowerPct float64, upperPct float64, tickSpacing int) (int, int) {
+	if tickSpacing <= 0 {
+		return currentTick - 1, currentTick + 1
+	}
+
 	priceMultiplierUpper := 1.0 + (upperPct / 100.0)
 	priceMultiplierLower := 1.0 - (lowerPct / 100.0)
 
@@ -50,6 +54,10 @@ func (tc *TickCalculator) CalculateTickFromPercentages(currentTick int, lowerPct
 	}
 	if tickLower >= currentTick {
 		tickLower = tc.RoundDownToTickSpacing(currentTick-1, tickSpacing)
+	}
+
+	if normalizedLower, normalizedUpper, err := tc.NormalizeTickRange(tickLower, tickUpper, tickSpacing); err == nil {
+		return normalizedLower, normalizedUpper
 	}
 
 	return tickLower, tickUpper
@@ -120,7 +128,12 @@ func (tc *TickCalculator) CalculateTickFromPercentagesBestFit(currentTick int, l
 	if math.IsInf(bestScore, 1) {
 		return tc.CalculateTickFromPercentages(currentTick, lowerPct, upperPct, tickSpacing)
 	}
-	return bestLower, bestUpper
+
+	if normalizedLower, normalizedUpper, err := tc.NormalizeTickRange(bestLower, bestUpper, tickSpacing); err == nil {
+		return normalizedLower, normalizedUpper
+	}
+
+	return tc.CalculateTickFromPercentages(currentTick, lowerPct, upperPct, tickSpacing)
 }
 
 // CalculatePercentagesFromTicks estimates lower/upper percentage widths from a tick range.
@@ -179,8 +192,58 @@ func (tc *TickCalculator) RoundUpToTickSpacing(tick int, tickSpacing int) int {
 	return tick - remainder + tickSpacing
 }
 
+// NormalizeTickRange aligns and clamps ticks to the nearest valid on-chain range.
+func (tc *TickCalculator) NormalizeTickRange(tickLower, tickUpper, tickSpacing int) (int, int, error) {
+	if tickSpacing <= 0 {
+		return 0, 0, fmt.Errorf("invalid tick spacing: %d", tickSpacing)
+	}
+
+	minTick, maxTick, err := FullRangeTicks(tickSpacing)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	tickLower = tc.RoundDownToTickSpacing(tickLower, tickSpacing)
+	tickUpper = tc.RoundUpToTickSpacing(tickUpper, tickSpacing)
+
+	if tickLower < minTick {
+		tickLower = minTick
+	}
+	if tickUpper > maxTick {
+		tickUpper = maxTick
+	}
+
+	if tickLower >= tickUpper {
+		switch {
+		case tickLower < maxTick:
+			tickUpper = tickLower + tickSpacing
+		case tickUpper > minTick:
+			tickLower = tickUpper - tickSpacing
+		default:
+			return 0, 0, fmt.Errorf("tick range collapsed for spacing %d", tickSpacing)
+		}
+
+		if tickLower < minTick {
+			tickLower = minTick
+		}
+		if tickUpper > maxTick {
+			tickUpper = maxTick
+		}
+	}
+
+	if tickLower >= tickUpper {
+		return 0, 0, fmt.Errorf("tick range collapsed after normalization")
+	}
+
+	return tickLower, tickUpper, nil
+}
+
 // ValidateTickRange validates if tick range is valid
 func (tc *TickCalculator) ValidateTickRange(tickLower, tickUpper, tickSpacing int) error {
+	if tickSpacing <= 0 {
+		return fmt.Errorf("invalid tick spacing: %d", tickSpacing)
+	}
+
 	if tickLower >= tickUpper {
 		return fmt.Errorf("下限 tick 必须小于上限 tick")
 	}
@@ -194,8 +257,10 @@ func (tc *TickCalculator) ValidateTickRange(tickLower, tickUpper, tickSpacing in
 	}
 
 	// Uniswap V3/V4 tick 范围限制
-	const maxTick = 887272
-	const minTick = -887272
+	minTick, maxTick, err := FullRangeTicks(tickSpacing)
+	if err != nil {
+		return err
+	}
 
 	if tickLower < minTick || tickUpper > maxTick {
 		return fmt.Errorf("tick 范围必须在 %d 到 %d 之间", minTick, maxTick)

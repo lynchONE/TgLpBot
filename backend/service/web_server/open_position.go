@@ -401,10 +401,6 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 
 	tc := pool.NewTickCalculator()
 	tickLower, tickUpper := tc.CalculateTickFromPercentagesBestFit(currentTick, tickLowerPctReq, tickUpperPctReq, poolInfo.TickSpacing)
-	if err := tc.ValidateTickRange(tickLower, tickUpper, poolInfo.TickSpacing); err != nil {
-		http.Error(w, "invalid tick range", http.StatusBadRequest)
-		return
-	}
 
 	tickLowerPctEff, tickUpperPctEff := tc.CalculatePercentagesFromTicks(currentTick, tickLower, tickUpper)
 	rangePctEff := (tickLowerPctEff + tickUpperPctEff) / 2.0
