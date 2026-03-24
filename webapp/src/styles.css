@@ -2760,6 +2760,11 @@ body {
     flex-direction: column;
   }
 
+  .sm-position-card--inline-detail .sm-position-card-head-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
   .sm-position-card .pos-card-right-block,
   .sm-wallet-detail-panel .pos-card-right-block {
     width: 100%;
@@ -3321,6 +3326,20 @@ body {
 .sm-position-card .pos-card-right-block {
   margin-left: auto;
   padding-left: 10px;
+}
+
+.sm-position-card--inline-detail .sm-position-card-head-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.sm-position-card--inline-detail .smd-pos-inline-panel-close {
+  width: 32px;
+  height: 32px;
+  margin-top: -2px;
 }
 
 .sm-position-card-header {
@@ -6362,11 +6381,6 @@ body {
   background:
     radial-gradient(circle at top right, rgba(var(--accent-rgb), 0.08), transparent 36%),
     rgba(10, 15, 24, 0.56);
-}
-.smd-pos-inline-panel-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 8px;
 }
 .smd-pos-inline-panel-close {
   display: inline-flex;

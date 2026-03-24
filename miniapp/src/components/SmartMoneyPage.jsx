@@ -564,16 +564,6 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, brand, onClose })
 
     return (
         <div className="mt-3 rounded-[28px] border border-white/[0.05] bg-zinc-950/82 p-3 shadow-[0_24px_80px_-42px_rgba(0,0,0,0.95)]">
-                <div className="mb-2 flex justify-end">
-                    <button
-                        type="button"
-                        onClick={onClose}
-                        className={`inline-flex h-9 w-9 items-center justify-center rounded-2xl ${brand.softButtonClass}`}
-                    >
-                        <X size={16} />
-                    </button>
-                </div>
-
                 {error ? (
                     <div className="mb-3 rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">
                         {error}
@@ -597,6 +587,16 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, brand, onClose })
                         updatedAt={detail.updated_at}
                         pollIntervalSec={detail.poll_interval_sec}
                         allowTaskActions={false}
+                        headerAccessory={(
+                            <button
+                                type="button"
+                                onClick={onClose}
+                                aria-label="收起详情"
+                                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/[0.06] bg-black/20 text-zinc-400 transition hover:bg-black/30 hover:text-zinc-200"
+                            >
+                                <X size={15} />
+                            </button>
+                        )}
                     />
                 ) : null}
         </div>

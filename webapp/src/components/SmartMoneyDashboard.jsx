@@ -568,12 +568,6 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
 
     return (
         <div className="smd-pos-inline-panel">
-            <div className="smd-pos-inline-panel-actions">
-                <button type="button" onClick={onClose} className="smd-pos-inline-panel-close">
-                    <X size={16} />
-                </button>
-            </div>
-
             {error ? <div className="smd-inline-error" style={{ marginBottom: 12 }}>{error}</div> : null}
             {Array.isArray(detail?.warnings) && detail.warnings.length > 0 ? (
                 <div className="smd-inline-error" style={{ marginBottom: 12, color: '#fbbf24', borderColor: 'rgba(251,191,36,0.25)' }}>
@@ -584,7 +578,7 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
             {loading && !detail ? (
                 <div className="smd-loading">读取链上仓位中...</div>
             ) : detail ? (
-                <div className="pos-card sm-position-card">
+                <div className="pos-card sm-position-card sm-position-card--inline-detail">
                         <div className="pos-card-header">
                             <div className="pos-card-main">
                                 <div className="pos-card-title-wrap">
@@ -607,15 +601,20 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
                                         </span>
                                     </div>
                                 </div>
-                                <div className="pos-card-right-block">
-                                    <div className="pos-metrics">
-                                        <div className="pos-total">{formatUsd(totalVal)}</div>
-                                        {hasPnl ? (
-                                            <div className={`pos-pnl ${pnl >= 0 ? 'positive' : 'negative'}`}>
-                                                {pnl >= 0 ? '+' : ''}{formatNumber(pnl, 2)}
-                                            </div>
-                                        ) : null}
+                                <div className="sm-position-card-head-actions">
+                                    <div className="pos-card-right-block">
+                                        <div className="pos-metrics">
+                                            <div className="pos-total">{formatUsd(totalVal)}</div>
+                                            {hasPnl ? (
+                                                <div className={`pos-pnl ${pnl >= 0 ? 'positive' : 'negative'}`}>
+                                                    {pnl >= 0 ? '+' : ''}{formatNumber(pnl, 2)}
+                                                </div>
+                                            ) : null}
+                                        </div>
                                     </div>
+                                    <button type="button" onClick={onClose} className="smd-pos-inline-panel-close" aria-label="收起详情">
+                                        <X size={16} />
+                                    </button>
                                 </div>
                             </div>
                         </div>

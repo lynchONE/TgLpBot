@@ -135,6 +135,7 @@ export default function PositionCard({
     batchMode = false,
     isSelected = false,
     onToggleSelect,
+    headerAccessory = null,
 }) {
     const [expanded, setExpanded] = useState(true);
 
@@ -417,6 +418,8 @@ export default function PositionCard({
                                 </div>
                             )}
                         </div>
+
+                        {headerAccessory}
 
                         {/* 操作菜单 */}
                         {canTaskAction && (
