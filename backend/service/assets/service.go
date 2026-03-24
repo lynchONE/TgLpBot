@@ -220,12 +220,16 @@ type smartMoneyAssetBreakdown struct {
 }
 
 type SmartMoneyHistoryPoint struct {
-	Day             string  `json:"day"`
-	NativeUSD       float64 `json:"native_usd"`
-	StableUSD       float64 `json:"stable_usd"`
-	TrackedTokenUSD float64 `json:"tracked_token_usd"`
-	OpenLPUSD       float64 `json:"open_lp_usd"`
-	TotalUSD        float64 `json:"total_usd"`
+	Day              string  `json:"day"`
+	NativeUSD        float64 `json:"native_usd"`
+	StableUSD        float64 `json:"stable_usd"`
+	TrackedTokenUSD  float64 `json:"tracked_token_usd"`
+	OpenLPUSD        float64 `json:"open_lp_usd"`
+	TotalUSD         float64 `json:"total_usd"`
+	HasTransferIn    bool    `json:"has_transfer_in,omitempty"`
+	HasTransferOut   bool    `json:"has_transfer_out,omitempty"`
+	TransferInCount  int     `json:"transfer_in_count,omitempty"`
+	TransferOutCount int     `json:"transfer_out_count,omitempty"`
 }
 
 type SmartMoneyWindowStats struct {
@@ -292,6 +296,10 @@ type SmartMoneyLeaderboardEntry struct {
 	ParticipationCount      int     `json:"participation_count"`
 	ActivePoolCount         int     `json:"active_pool_count"`
 	UnmatchedRemoveCount    int     `json:"unmatched_remove_count"`
+	HasTransferIn           bool    `json:"has_transfer_in,omitempty"`
+	HasTransferOut          bool    `json:"has_transfer_out,omitempty"`
+	TransferInCount         int     `json:"transfer_in_count,omitempty"`
+	TransferOutCount        int     `json:"transfer_out_count,omitempty"`
 }
 
 type SmartMoneyLeaderboardResponse struct {
@@ -299,6 +307,8 @@ type SmartMoneyLeaderboardResponse struct {
 	Metric      string                       `json:"metric"`
 	StartDay    string                       `json:"start_day"`
 	EndDay      string                       `json:"end_day"`
+	SnapshotDay string                       `json:"snapshot_day,omitempty"`
+	ComparedDay string                       `json:"compared_day,omitempty"`
 	Timezone    string                       `json:"timezone"`
 	Description string                       `json:"description"`
 	List        []SmartMoneyLeaderboardEntry `json:"list"`

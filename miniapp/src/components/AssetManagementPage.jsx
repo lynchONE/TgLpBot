@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ChevronLeft, ChevronRight, Crown, Medal, RefreshCw, Search, Settings2, Shield, TrendingUp, Trophy, Wallet } from 'lucide-react';
+import { AlertTriangle, ArrowRightLeft, ChevronLeft, ChevronRight, Crown, Medal, RefreshCw, Search, Settings2, Shield, TrendingUp, Trophy, Wallet } from 'lucide-react';
 import { createChart, AreaSeries, HistogramSeries, ColorType } from 'lightweight-charts';
 import {
     fetchAdminSmartMoneyLeaderboard,
@@ -68,6 +68,44 @@ function walletLabel(wallet) {
 
 function errorText(err) {
     return String(err?.message || err || '').trim();
+}
+
+function hasTransferMarker(item) {
+    return Boolean(item?.has_transfer_in || item?.has_transfer_out || Number(item?.transfer_in_count || 0) > 0 || Number(item?.transfer_out_count || 0) > 0);
+}
+
+function TransferBadges({ item, compact = false }) {
+    const inCount = Number(item?.transfer_in_count || 0);
+    const outCount = Number(item?.transfer_out_count || 0);
+    const badges = [];
+    if (item?.has_transfer_in || inCount > 0) {
+        badges.push({
+            key: 'in',
+            label: compact ? '入' : `转入${inCount > 0 ? ` ${inCount}` : ''}`,
+            className: 'border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-700 dark:text-emerald-300',
+        });
+    }
+    if (item?.has_transfer_out || outCount > 0) {
+        badges.push({
+            key: 'out',
+            label: compact ? '出' : `转出${outCount > 0 ? ` ${outCount}` : ''}`,
+            className: 'border-amber-500/25 bg-amber-500/[0.10] text-amber-700 dark:text-amber-300',
+        });
+    }
+    if (!badges.length) return null;
+    return (
+        <div className={`flex flex-wrap gap-1 ${compact ? 'justify-center min-h-[12px]' : ''}`.trim()}>
+            {badges.map((badge) => (
+                <span
+                    key={badge.key}
+                    className={`inline-flex items-center justify-center rounded-full border px-1.5 py-0.5 font-bold leading-none ${badge.className}`}
+                    style={{ fontSize: compact ? 9 : 10 }}
+                >
+                    {badge.label}
+                </span>
+            ))}
+        </div>
+    );
 }
 
 function isIgnorableSmartMoneyDataError(err) {
@@ -309,7 +347,7 @@ function LWAreaChart({ data, color = '#10b981', loading = false }) {
 
 /* ─── PnL Calendar (盈亏日历) ─── */
 const PNL_CAL_WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
-function PnLCalendar({ data, loading = false }) {
+function PnLCalendar({ data, loading = false, note = '' }) {
     const [viewDate, setViewDate] = useState(() => new Date());
     const year = viewDate.getFullYear();
     const month = viewDate.getMonth();
@@ -341,6 +379,7 @@ function PnLCalendar({ data, loading = false }) {
         const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         const entry = pnlMap[dateStr];
         const pnl = entry ? Number(entry.realized_pnl_usd || 0) : null;
+        const hasTransfer = hasTransferMarker(entry);
         const isToday = dateStr === todayStr;
         const isFuture = new Date(year, month, day) > now;
         const dayToneClass = isToday
@@ -367,6 +406,7 @@ function PnLCalendar({ data, loading = false }) {
                 <div className={`flex min-h-[20px] items-center justify-center px-0.5 text-center text-[10px] font-semibold leading-tight tabular-nums ${valueToneClass}`}>
                     {pnl !== null ? `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}` : '0'}
                 </div>
+                {hasTransfer ? <TransferBadges item={entry} compact /> : <div className="min-h-[12px]" />}
             </div>
         );
     }
@@ -397,6 +437,12 @@ function PnLCalendar({ data, loading = false }) {
                 ))}
                 {cells}
             </div>
+            {note ? (
+                <div className="mt-2 flex items-start gap-1.5 text-[10px] leading-[1.45] text-zinc-500 dark:text-white/40">
+                    <ArrowRightLeft className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>{note}</span>
+                </div>
+            ) : null}
         </div>
     );
 }
@@ -968,6 +1014,10 @@ export default function AssetManagementPage({
         return history.slice(1).map((item, i) => ({
             day: item.day,
             realized_pnl_usd: Number(item.total_usd || 0) - Number(history[i].total_usd || 0),
+            has_transfer_in: Boolean(item.has_transfer_in),
+            has_transfer_out: Boolean(item.has_transfer_out),
+            transfer_in_count: Number(item.transfer_in_count || 0),
+            transfer_out_count: Number(item.transfer_out_count || 0),
         }));
     }, [smartMoneyWallet?.history]);
 
@@ -1343,7 +1393,10 @@ export default function AssetManagementPage({
                                     })()}
 
                                     {/* PnL calendar (daily balance diff) */}
-                                    <PnLCalendar data={smartMoneyPnlCalData} />
+                                    <PnLCalendar
+                                        data={smartMoneyPnlCalData}
+                                        note="按日资产快照差额估算；若出现“转入/转出”标记，说明该日检测到资金划转，当天盈亏会受划转影响。"
+                                    />
 
                                     {/* window stats */}
                                     <div className="grid grid-cols-3 gap-1.5">
@@ -1372,16 +1425,21 @@ export default function AssetManagementPage({
                     {smSubTab === 'leaderboard' && (
                         <Card>
                             <div className="flex items-center justify-between gap-2">
-                                <span className="text-[12px] font-bold text-zinc-900 dark:text-white/90">昨日排行</span>
-                                <div className="flex gap-1.5">
-                                    {LEADERBOARD_METRICS.map((m) => (
-                                        <Pill key={m.key} active={leaderboardMetric === m.key} brand={brand} onClick={() => setLeaderboardMetric(m.key)}>{m.label}</Pill>
-                                    ))}
+                                    <span className="text-[12px] font-bold text-zinc-900 dark:text-white/90">昨日快照排行</span>
+                                    <div className="flex gap-1.5">
+                                        {LEADERBOARD_METRICS.map((m) => (
+                                            <Pill key={m.key} active={leaderboardMetric === m.key} brand={brand} onClick={() => setLeaderboardMetric(m.key)}>{m.label}</Pill>
+                                        ))}
+                                    </div>
                                 </div>
+                            <div className="mt-1.5 flex items-center gap-1.5 text-[9px] text-zinc-400 dark:text-white/30">
+                                <ArrowRightLeft className="h-3 w-3 shrink-0" />
+                                <span>
+                                    {smartMoneyLeaderboard?.snapshot_day && (smartMoneyLeaderboard?.compared_day || smartMoneyLeaderboard?.start_day)
+                                        ? `榜单基于 ${smartMoneyLeaderboard.snapshot_day} 相对 ${smartMoneyLeaderboard.compared_day || smartMoneyLeaderboard.start_day} 的资产快照`
+                                        : '榜单基于昨日资产快照'}
+                                </span>
                             </div>
-                            {smartMoneyLeaderboard?.description && (
-                                <div className="mt-1.5 text-[9px] text-zinc-400 dark:text-white/30">{smartMoneyLeaderboard.description} · {smartMoneyLeaderboard.start_day} ~ {smartMoneyLeaderboard.end_day}</div>
-                            )}
                             <div className="mt-2">
                                 <SmSearchInput value={smLeaderSearch} onChange={(v) => { setSmLeaderSearch(v); setSmLeaderPage(0); }} placeholder="搜索地址或标签" />
                             </div>
@@ -1421,6 +1479,11 @@ export default function AssetManagementPage({
                                                         </>
                                                     )}
                                                 </div>
+                                                {hasTransferMarker(item) && (
+                                                    <div className="mt-1">
+                                                        <TransferBadges item={item} />
+                                                    </div>
+                                                )}
                                             </div>
                                             <div className="text-right shrink-0">
                                                 <div className={`text-[13px] font-bold tabular-nums ${

@@ -8,12 +8,16 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 const recognizedAssetBasis = "原生币 + 稳定币 + 近30天参与LP的代币余额 + 当前open LP估算持仓"
@@ -34,6 +38,20 @@ type smartMoneyEventStats struct {
 	MatchedRemoveCount      int
 	UnmatchedRemoveCount    int
 	activePools             map[string]struct{}
+}
+
+type smartMoneyTransferActivity struct {
+	HasTransferIn    bool
+	HasTransferOut   bool
+	TransferInCount  int
+	TransferOutCount int
+}
+
+type smartMoneyLeaderboardSnapshotInput struct {
+	Wallet    models.MonitoredWallet
+	Current   *models.SmartMoneyWalletDailySnapshot
+	Previous  *models.SmartMoneyWalletDailySnapshot
+	DailyStat *models.SmartMoneyLPDailyStat
 }
 
 func (s *Service) GetSmartMoneyOverview(ctx context.Context, days int) (*SmartMoneyOverview, error) {
@@ -192,74 +210,39 @@ func (s *Service) GetSmartMoneyLeaderboard(ctx context.Context, metric string, d
 	if err != nil {
 		return nil, err
 	}
-	days = clampLPDays(days)
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
 	metric = normalizeLeaderboardMetric(metric)
+	snapshotDay := dayStart(timeutil.Now()).AddDate(0, 0, -1)
+	comparedDay := snapshotDay.AddDate(0, 0, -1)
 
-	start := dayStart(timeutil.Now()).AddDate(0, 0, -days)
-	end := timeutil.Now()
-	statsByWallet, err := s.computeSmartMoneyStats(ctx, wallets, start, end)
+	snapshotMap, err := s.loadSmartMoneySnapshotRows(ctx, wallets, comparedDay, snapshotDay)
 	if err != nil {
 		return nil, err
 	}
-
-	type candidate struct {
-		SmartMoneyLeaderboardEntry
+	lpStatMap, err := s.loadSmartMoneyDailyStatRows(ctx, wallets, snapshotDay)
+	if err != nil {
+		return nil, err
 	}
-	list := make([]candidate, 0, len(wallets))
+	inputs := make([]smartMoneyLeaderboardSnapshotInput, 0, len(wallets))
 	for _, walletRow := range wallets {
 		key := smartMoneyWalletKey(walletRow.ChainID, walletRow.Address)
-		stats := statsByWallet[key]
-		entry := SmartMoneyLeaderboardEntry{
-			Address:                 walletRow.Address,
-			ChainID:                 walletRow.ChainID,
-			EstimatedRealizedPnLUSD: round2(stats.EstimatedRealizedPnLUSD),
-			ParticipationCount:      stats.AddCount + stats.RemoveCount,
-			ActivePoolCount:         len(stats.activePools),
-			UnmatchedRemoveCount:    stats.UnmatchedRemoveCount,
+		current := snapshotMap[formatDay(snapshotDay)+"|"+key]
+		previous := snapshotMap[formatDay(comparedDay)+"|"+key]
+		if current == nil || previous == nil {
+			continue
 		}
-		if walletRow.Label != nil {
-			entry.Label = strings.TrimSpace(*walletRow.Label)
-		}
-		if stats.MatchedCostUSD > 0 {
-			entry.YieldRate = round4(stats.EstimatedRealizedPnLUSD / stats.MatchedCostUSD)
-		}
-		switch metric {
-		case "yield_rate":
-			entry.MetricValue = entry.YieldRate
-		case "participation":
-			entry.MetricValue = float64(entry.ParticipationCount)
-		default:
-			entry.MetricValue = entry.EstimatedRealizedPnLUSD
-		}
-		list = append(list, candidate{SmartMoneyLeaderboardEntry: entry})
+		inputs = append(inputs, smartMoneyLeaderboardSnapshotInput{
+			Wallet:    walletRow,
+			Current:   current,
+			Previous:  previous,
+			DailyStat: lpStatMap[key],
+		})
 	}
 
-	sort.Slice(list, func(i, j int) bool {
-		if list[i].MetricValue != list[j].MetricValue {
-			return list[i].MetricValue > list[j].MetricValue
-		}
-		if list[i].EstimatedRealizedPnLUSD != list[j].EstimatedRealizedPnLUSD {
-			return list[i].EstimatedRealizedPnLUSD > list[j].EstimatedRealizedPnLUSD
-		}
-		return strings.ToLower(list[i].Address) < strings.ToLower(list[j].Address)
-	})
-
-	resp := &SmartMoneyLeaderboardResponse{
-		Days:        days,
-		Metric:      metric,
-		StartDay:    formatDay(start),
-		EndDay:      formatDay(end.Add(-time.Second)),
-		Timezone:    timeutil.LocationName(),
-		Description: leaderboardDescription(metric),
-		List:        make([]SmartMoneyLeaderboardEntry, 0, limit),
-	}
-	for i := 0; i < len(list) && i < limit; i++ {
-		list[i].Rank = i + 1
-		resp.List = append(resp.List, list[i].SmartMoneyLeaderboardEntry)
-	}
+	resp := buildSmartMoneySnapshotLeaderboard(metric, snapshotDay, comparedDay, limit, inputs)
+	resp.Timezone = timeutil.LocationName()
 	return resp, nil
 }
 
@@ -287,6 +270,70 @@ func leaderboardDescription(metric string) string {
 
 func smartMoneyWalletKey(chainID int, address string) string {
 	return strconv.Itoa(chainID) + "|" + normalizeAddress(address)
+}
+
+func buildSmartMoneySnapshotLeaderboard(metric string, snapshotDay time.Time, comparedDay time.Time, limit int, inputs []smartMoneyLeaderboardSnapshotInput) *SmartMoneyLeaderboardResponse {
+	list := make([]SmartMoneyLeaderboardEntry, 0, len(inputs))
+	for _, input := range inputs {
+		if input.Current == nil || input.Previous == nil {
+			continue
+		}
+		entry := SmartMoneyLeaderboardEntry{
+			Address:                 input.Wallet.Address,
+			ChainID:                 input.Wallet.ChainID,
+			EstimatedRealizedPnLUSD: round2(input.Current.TotalUSD - input.Previous.TotalUSD),
+			HasTransferIn:           input.Current.HasTransferIn,
+			HasTransferOut:          input.Current.HasTransferOut,
+			TransferInCount:         input.Current.TransferInCount,
+			TransferOutCount:        input.Current.TransferOutCount,
+		}
+		if input.Wallet.Label != nil {
+			entry.Label = strings.TrimSpace(*input.Wallet.Label)
+		}
+		if input.Previous.TotalUSD > 0 {
+			entry.YieldRate = round4(entry.EstimatedRealizedPnLUSD / input.Previous.TotalUSD)
+		}
+		if input.DailyStat != nil {
+			entry.ParticipationCount = input.DailyStat.AddCount + input.DailyStat.RemoveCount
+			entry.ActivePoolCount = input.DailyStat.ActivePoolCount
+			entry.UnmatchedRemoveCount = input.DailyStat.UnmatchedRemoveCount
+		}
+		switch metric {
+		case "yield_rate":
+			entry.MetricValue = entry.YieldRate
+		case "participation":
+			entry.MetricValue = float64(entry.ParticipationCount)
+		default:
+			entry.MetricValue = entry.EstimatedRealizedPnLUSD
+		}
+		list = append(list, entry)
+	}
+
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].MetricValue != list[j].MetricValue {
+			return list[i].MetricValue > list[j].MetricValue
+		}
+		if list[i].EstimatedRealizedPnLUSD != list[j].EstimatedRealizedPnLUSD {
+			return list[i].EstimatedRealizedPnLUSD > list[j].EstimatedRealizedPnLUSD
+		}
+		return strings.ToLower(list[i].Address) < strings.ToLower(list[j].Address)
+	})
+
+	resp := &SmartMoneyLeaderboardResponse{
+		Days:        1,
+		Metric:      metric,
+		StartDay:    formatDay(comparedDay),
+		EndDay:      formatDay(snapshotDay),
+		SnapshotDay: formatDay(snapshotDay),
+		ComparedDay: formatDay(comparedDay),
+		Description: leaderboardDescription(metric),
+		List:        make([]SmartMoneyLeaderboardEntry, 0, limit),
+	}
+	for i := 0; i < len(list) && i < limit; i++ {
+		list[i].Rank = i + 1
+		resp.List = append(resp.List, list[i])
+	}
+	return resp
 }
 
 func (s *Service) loadActiveSmartMoneyWallets(ctx context.Context) ([]models.MonitoredWallet, error) {
@@ -480,9 +527,104 @@ func (s *Service) loadSmartMoneyOpenLPState(ctx context.Context, address string,
 			WHERE p.wallet_address = ?
 			  AND p.chain_id = ?
 			  AND p.status = 'open'
-		`, address, chainID).
+	`, address, chainID).
 		Scan(&result).Error
 	return round2(result.OpenLPUSD), result.ActivePoolCount, err
+}
+
+func (s *Service) loadSmartMoneySnapshotRows(ctx context.Context, wallets []models.MonitoredWallet, days ...time.Time) (map[string]*models.SmartMoneyWalletDailySnapshot, error) {
+	rowsByKey := make(map[string]*models.SmartMoneyWalletDailySnapshot)
+	if len(wallets) == 0 || len(days) == 0 {
+		return rowsByKey, nil
+	}
+
+	chainIDs := make([]int, 0, len(wallets))
+	addresses := make([]string, 0, len(wallets))
+	chainSeen := make(map[int]struct{}, len(wallets))
+	addrSeen := make(map[string]struct{}, len(wallets))
+	for _, wallet := range wallets {
+		if _, ok := chainSeen[wallet.ChainID]; !ok {
+			chainSeen[wallet.ChainID] = struct{}{}
+			chainIDs = append(chainIDs, wallet.ChainID)
+		}
+		addr := normalizeAddress(wallet.Address)
+		if addr == "" {
+			continue
+		}
+		if _, ok := addrSeen[addr]; ok {
+			continue
+		}
+		addrSeen[addr] = struct{}{}
+		addresses = append(addresses, addr)
+	}
+
+	dayKeys := make([]string, 0, len(days))
+	daySeen := make(map[string]struct{}, len(days))
+	for _, day := range days {
+		dayKey := formatDay(day)
+		if _, ok := daySeen[dayKey]; ok {
+			continue
+		}
+		daySeen[dayKey] = struct{}{}
+		dayKeys = append(dayKeys, dayKey)
+	}
+
+	var rows []models.SmartMoneyWalletDailySnapshot
+	if err := database.DB.WithContext(ctx).
+		Where("chain_id IN ? AND wallet_address IN ? AND snapshot_day IN ?", chainIDs, addresses, dayKeys).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	for i := range rows {
+		row := rows[i]
+		key := row.SnapshotDay + "|" + smartMoneyWalletKey(row.ChainID, row.WalletAddress)
+		rowCopy := row
+		rowsByKey[key] = &rowCopy
+	}
+	return rowsByKey, nil
+}
+
+func (s *Service) loadSmartMoneyDailyStatRows(ctx context.Context, wallets []models.MonitoredWallet, day time.Time) (map[string]*models.SmartMoneyLPDailyStat, error) {
+	rowsByKey := make(map[string]*models.SmartMoneyLPDailyStat)
+	if len(wallets) == 0 {
+		return rowsByKey, nil
+	}
+
+	chainIDs := make([]int, 0, len(wallets))
+	addresses := make([]string, 0, len(wallets))
+	chainSeen := make(map[int]struct{}, len(wallets))
+	addrSeen := make(map[string]struct{}, len(wallets))
+	for _, wallet := range wallets {
+		if _, ok := chainSeen[wallet.ChainID]; !ok {
+			chainSeen[wallet.ChainID] = struct{}{}
+			chainIDs = append(chainIDs, wallet.ChainID)
+		}
+		addr := normalizeAddress(wallet.Address)
+		if addr == "" {
+			continue
+		}
+		if _, ok := addrSeen[addr]; ok {
+			continue
+		}
+		addrSeen[addr] = struct{}{}
+		addresses = append(addresses, addr)
+	}
+
+	var rows []models.SmartMoneyLPDailyStat
+	if err := database.DB.WithContext(ctx).
+		Where("chain_id IN ? AND wallet_address IN ? AND stat_day = ?", chainIDs, addresses, formatDay(day)).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	for i := range rows {
+		row := rows[i]
+		key := smartMoneyWalletKey(row.ChainID, row.WalletAddress)
+		rowCopy := row
+		rowsByKey[key] = &rowCopy
+	}
+	return rowsByKey, nil
 }
 
 func (s *Service) loadSmartMoneyHistory(ctx context.Context, wallets []models.MonitoredWallet, start time.Time, end time.Time) ([]SmartMoneyHistoryPoint, error) {
@@ -508,12 +650,16 @@ func (s *Service) loadSmartMoneyHistory(ctx context.Context, wallets []models.Mo
 	}
 
 	type row struct {
-		Day             string
-		NativeUSD       float64
-		StableUSD       float64
-		TrackedTokenUSD float64
-		OpenLPUSD       float64
-		TotalUSD        float64
+		Day              string
+		NativeUSD        float64
+		StableUSD        float64
+		TrackedTokenUSD  float64
+		OpenLPUSD        float64
+		TotalUSD         float64
+		HasTransferIn    int
+		HasTransferOut   int
+		TransferInCount  int
+		TransferOutCount int
 	}
 	var rows []row
 	openLPSelect := "COALESCE(SUM(open_lp_usd), 0) AS open_lp_usd"
@@ -528,7 +674,11 @@ func (s *Service) loadSmartMoneyHistory(ctx context.Context, wallets []models.Mo
 				COALESCE(SUM(stable_usd), 0) AS stable_usd,
 				COALESCE(SUM(tracked_token_usd), 0) AS tracked_token_usd,
 				%s,
-				COALESCE(SUM(total_usd), 0) AS total_usd
+				COALESCE(SUM(total_usd), 0) AS total_usd,
+				MAX(CASE WHEN has_transfer_in THEN 1 ELSE 0 END) AS has_transfer_in,
+				MAX(CASE WHEN has_transfer_out THEN 1 ELSE 0 END) AS has_transfer_out,
+				COALESCE(SUM(transfer_in_count), 0) AS transfer_in_count,
+				COALESCE(SUM(transfer_out_count), 0) AS transfer_out_count
 			FROM sm_wallet_daily_snapshots
 			WHERE chain_id IN ?
 			  AND wallet_address IN ?
@@ -545,12 +695,16 @@ func (s *Service) loadSmartMoneyHistory(ctx context.Context, wallets []models.Mo
 	points := make([]SmartMoneyHistoryPoint, 0, len(rows))
 	for _, row := range rows {
 		points = append(points, SmartMoneyHistoryPoint{
-			Day:             row.Day,
-			NativeUSD:       round2(row.NativeUSD),
-			StableUSD:       round2(row.StableUSD),
-			TrackedTokenUSD: round2(row.TrackedTokenUSD),
-			OpenLPUSD:       round2(row.OpenLPUSD),
-			TotalUSD:        round2(row.TotalUSD),
+			Day:              row.Day,
+			NativeUSD:        round2(row.NativeUSD),
+			StableUSD:        round2(row.StableUSD),
+			TrackedTokenUSD:  round2(row.TrackedTokenUSD),
+			OpenLPUSD:        round2(row.OpenLPUSD),
+			TotalUSD:         round2(row.TotalUSD),
+			HasTransferIn:    row.HasTransferIn > 0,
+			HasTransferOut:   row.HasTransferOut > 0,
+			TransferInCount:  row.TransferInCount,
+			TransferOutCount: row.TransferOutCount,
 		})
 	}
 	return points, nil
@@ -723,12 +877,365 @@ func pointerString(value *string) string {
 	return *value
 }
 
+func (s *Service) detectSmartMoneyWalletTransferActivity(ctx context.Context, wallets []models.MonitoredWallet, day time.Time) (map[string]smartMoneyTransferActivity, error) {
+	out := make(map[string]smartMoneyTransferActivity, len(wallets))
+	if len(wallets) == 0 {
+		return out, nil
+	}
+
+	byChain := make(map[int][]models.MonitoredWallet)
+	for _, wallet := range wallets {
+		key := smartMoneyWalletKey(wallet.ChainID, wallet.Address)
+		out[key] = smartMoneyTransferActivity{}
+		byChain[wallet.ChainID] = append(byChain[wallet.ChainID], wallet)
+	}
+
+	var firstErr error
+	start := dayStart(day)
+	end := dayEnd(day)
+	for chainID, chainWallets := range byChain {
+		if err := s.detectSmartMoneyWalletTransferActivityForChain(ctx, chainID, chainWallets, start, end, out); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			log.Printf("[Assets] smart money transfer detection failed chain=%d day=%s err=%v", chainID, formatDay(day), err)
+		}
+	}
+	return out, firstErr
+}
+
+func (s *Service) detectSmartMoneyWalletTransferActivityForChain(ctx context.Context, chainID int, wallets []models.MonitoredWallet, start time.Time, end time.Time, out map[string]smartMoneyTransferActivity) error {
+	if len(wallets) == 0 {
+		return nil
+	}
+
+	chain := smartMoneyChainFromID(chainID)
+	client, cc, err := s.getClientForChain(chain)
+	if err != nil {
+		return err
+	}
+	fromBlock, toBlock, ok, err := s.findBlockRangeForTimeWindow(ctx, client, start, end)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+
+	baseTokens := []string{cc.StableAddress, cc.USDTAddress, cc.USDCAddress, cc.BUSDAddress, cc.WrappedNativeAddress}
+	tokenAddresses, err := s.loadSmartMoneyTransferTokenAddresses(ctx, wallets, chainID, baseTokens, start)
+	if err != nil {
+		return err
+	}
+	if len(tokenAddresses) == 0 {
+		return nil
+	}
+
+	excludedTxHashes, err := s.loadSmartMoneyLPEventTxHashes(ctx, wallets, chainID, start, end)
+	if err != nil {
+		return err
+	}
+
+	walletTopics := make([]common.Hash, 0, len(wallets))
+	for _, wallet := range wallets {
+		addr := normalizeAddress(wallet.Address)
+		if addr == "" {
+			continue
+		}
+		walletTopics = append(walletTopics, common.BytesToHash(common.HexToAddress(addr).Bytes()))
+	}
+	if len(walletTopics) == 0 {
+		return nil
+	}
+
+	transferSig := crypto.Keccak256Hash([]byte("Transfer(address,address,uint256)"))
+	inTxs := make(map[string]map[string]struct{}, len(wallets))
+	outTxs := make(map[string]map[string]struct{}, len(wallets))
+
+	const walletChunkSize = 32
+	const tokenChunkSize = 64
+
+	for walletStart := 0; walletStart < len(walletTopics); walletStart += walletChunkSize {
+		walletEnd := walletStart + walletChunkSize
+		if walletEnd > len(walletTopics) {
+			walletEnd = len(walletTopics)
+		}
+		walletChunk := walletTopics[walletStart:walletEnd]
+
+		for tokenStart := 0; tokenStart < len(tokenAddresses); tokenStart += tokenChunkSize {
+			tokenEnd := tokenStart + tokenChunkSize
+			if tokenEnd > len(tokenAddresses) {
+				tokenEnd = len(tokenAddresses)
+			}
+			tokenChunk := tokenAddresses[tokenStart:tokenEnd]
+
+			outLogs, err := client.FilterLogs(ctx, ethereum.FilterQuery{
+				FromBlock: new(big.Int).SetUint64(fromBlock),
+				ToBlock:   new(big.Int).SetUint64(toBlock),
+				Addresses: tokenChunk,
+				Topics:    [][]common.Hash{{transferSig}, walletChunk},
+			})
+			if err != nil {
+				return err
+			}
+			for _, lg := range outLogs {
+				if len(lg.Topics) < 3 {
+					continue
+				}
+				txHash := strings.ToLower(lg.TxHash.Hex())
+				if _, excluded := excludedTxHashes[txHash]; excluded {
+					continue
+				}
+				addr := normalizeAddress(common.BytesToAddress(lg.Topics[1].Bytes()).Hex())
+				key := smartMoneyWalletKey(chainID, addr)
+				if _, ok := out[key]; !ok {
+					continue
+				}
+				if outTxs[key] == nil {
+					outTxs[key] = make(map[string]struct{})
+				}
+				outTxs[key][txHash] = struct{}{}
+			}
+
+			inLogs, err := client.FilterLogs(ctx, ethereum.FilterQuery{
+				FromBlock: new(big.Int).SetUint64(fromBlock),
+				ToBlock:   new(big.Int).SetUint64(toBlock),
+				Addresses: tokenChunk,
+				Topics:    [][]common.Hash{{transferSig}, nil, walletChunk},
+			})
+			if err != nil {
+				return err
+			}
+			for _, lg := range inLogs {
+				if len(lg.Topics) < 3 {
+					continue
+				}
+				txHash := strings.ToLower(lg.TxHash.Hex())
+				if _, excluded := excludedTxHashes[txHash]; excluded {
+					continue
+				}
+				addr := normalizeAddress(common.BytesToAddress(lg.Topics[2].Bytes()).Hex())
+				key := smartMoneyWalletKey(chainID, addr)
+				if _, ok := out[key]; !ok {
+					continue
+				}
+				if inTxs[key] == nil {
+					inTxs[key] = make(map[string]struct{})
+				}
+				inTxs[key][txHash] = struct{}{}
+			}
+		}
+	}
+
+	for key, txs := range inTxs {
+		activity := out[key]
+		activity.HasTransferIn = len(txs) > 0
+		activity.TransferInCount = len(txs)
+		out[key] = activity
+	}
+	for key, txs := range outTxs {
+		activity := out[key]
+		activity.HasTransferOut = len(txs) > 0
+		activity.TransferOutCount = len(txs)
+		out[key] = activity
+	}
+	return nil
+}
+
+func (s *Service) loadSmartMoneyTransferTokenAddresses(ctx context.Context, wallets []models.MonitoredWallet, chainID int, baseTokens []string, start time.Time) ([]common.Address, error) {
+	seen := make(map[string]common.Address)
+	for _, raw := range baseTokens {
+		addr := normalizeAddress(raw)
+		if addr == "" {
+			continue
+		}
+		seen[addr] = common.HexToAddress(addr)
+	}
+
+	addresses := make([]string, 0, len(wallets))
+	addrSeen := make(map[string]struct{}, len(wallets))
+	for _, wallet := range wallets {
+		addr := normalizeAddress(wallet.Address)
+		if addr == "" {
+			continue
+		}
+		if _, ok := addrSeen[addr]; ok {
+			continue
+		}
+		addrSeen[addr] = struct{}{}
+		addresses = append(addresses, addr)
+	}
+	if len(addresses) == 0 {
+		return nil, nil
+	}
+
+	cutoff := dayStart(start).AddDate(0, 0, -30)
+	type tokenRow struct {
+		TokenAddress string
+	}
+	var rows []tokenRow
+	if err := database.DB.WithContext(ctx).
+		Raw(`
+			SELECT token_address
+			FROM (
+				SELECT token0_address AS token_address
+				FROM sm_lp_events
+				WHERE wallet_address IN ? AND chain_id = ? AND tx_timestamp >= ?
+				UNION
+				SELECT token1_address AS token_address
+				FROM sm_lp_events
+				WHERE wallet_address IN ? AND chain_id = ? AND tx_timestamp >= ?
+				UNION
+				SELECT token0_address AS token_address
+				FROM sm_lp_positions
+				WHERE wallet_address IN ? AND chain_id = ? AND status = 'open'
+				UNION
+				SELECT token1_address AS token_address
+				FROM sm_lp_positions
+				WHERE wallet_address IN ? AND chain_id = ? AND status = 'open'
+			) tokens
+		`, addresses, chainID, cutoff, addresses, chainID, cutoff, addresses, chainID, addresses, chainID).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	for _, row := range rows {
+		addr := normalizeAddress(row.TokenAddress)
+		if addr == "" {
+			continue
+		}
+		seen[addr] = common.HexToAddress(addr)
+	}
+
+	keys := make([]string, 0, len(seen))
+	for key := range seen {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	out := make([]common.Address, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, seen[key])
+	}
+	return out, nil
+}
+
+func (s *Service) loadSmartMoneyLPEventTxHashes(ctx context.Context, wallets []models.MonitoredWallet, chainID int, start time.Time, end time.Time) (map[string]struct{}, error) {
+	out := make(map[string]struct{})
+	if len(wallets) == 0 {
+		return out, nil
+	}
+
+	addresses := make([]string, 0, len(wallets))
+	seen := make(map[string]struct{}, len(wallets))
+	for _, wallet := range wallets {
+		addr := normalizeAddress(wallet.Address)
+		if addr == "" {
+			continue
+		}
+		if _, ok := seen[addr]; ok {
+			continue
+		}
+		seen[addr] = struct{}{}
+		addresses = append(addresses, addr)
+	}
+	if len(addresses) == 0 {
+		return out, nil
+	}
+
+	type txRow struct {
+		TxHash string
+	}
+	var rows []txRow
+	if err := database.DB.WithContext(ctx).
+		Model(&models.SmartMoneyLPEvent{}).
+		Select("DISTINCT tx_hash").
+		Where("chain_id = ? AND wallet_address IN ? AND tx_timestamp >= ? AND tx_timestamp < ?", chainID, addresses, start, end).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		txHash := strings.ToLower(strings.TrimSpace(row.TxHash))
+		if txHash == "" {
+			continue
+		}
+		out[txHash] = struct{}{}
+	}
+	return out, nil
+}
+
+func (s *Service) findBlockRangeForTimeWindow(ctx context.Context, client *ethclient.Client, start time.Time, end time.Time) (uint64, uint64, bool, error) {
+	if client == nil || !start.Before(end) {
+		return 0, 0, false, nil
+	}
+
+	latest, err := client.BlockNumber(ctx)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	fromBlock, err := s.findFirstBlockAtOrAfter(ctx, client, latest, start)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	if fromBlock > latest {
+		return 0, 0, false, nil
+	}
+
+	toExclusive, err := s.findFirstBlockAtOrAfter(ctx, client, latest, end)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	if toExclusive <= fromBlock {
+		return 0, 0, false, nil
+	}
+	if toExclusive > latest {
+		return fromBlock, latest, true, nil
+	}
+	return fromBlock, toExclusive - 1, true, nil
+}
+
+func (s *Service) findFirstBlockAtOrAfter(ctx context.Context, client *ethclient.Client, latest uint64, target time.Time) (uint64, error) {
+	latestHeader, err := client.HeaderByNumber(ctx, new(big.Int).SetUint64(latest))
+	if err != nil {
+		return 0, err
+	}
+	if latestHeader == nil {
+		return 0, fmt.Errorf("latest header unavailable")
+	}
+	if time.Unix(int64(latestHeader.Time), 0).Before(target) {
+		return latest + 1, nil
+	}
+
+	low := uint64(0)
+	high := latest
+	for low < high {
+		mid := low + (high-low)/2
+		header, err := client.HeaderByNumber(ctx, new(big.Int).SetUint64(mid))
+		if err != nil {
+			return 0, err
+		}
+		if header == nil {
+			return 0, fmt.Errorf("header unavailable for block %d", mid)
+		}
+		if time.Unix(int64(header.Time), 0).Before(target) {
+			low = mid + 1
+		} else {
+			high = mid
+		}
+	}
+	return low, nil
+}
+
 func (s *Service) captureSmartMoneyWalletSnapshots(ctx context.Context, day time.Time) error {
 	wallets, err := s.loadActiveSmartMoneyWallets(ctx)
 	if err != nil {
 		return err
 	}
 	dayKey := formatDay(day)
+	transferActivity, transferErr := s.detectSmartMoneyWalletTransferActivity(ctx, wallets, day)
+	if transferErr != nil {
+		log.Printf("[Assets] smart money transfer detection incomplete day=%s err=%v", dayKey, transferErr)
+	}
 	if err := database.DB.WithContext(ctx).
 		Where("snapshot_day = ?", dayKey).
 		Delete(&models.SmartMoneyWalletDailySnapshot{}).Error; err != nil {
@@ -740,6 +1247,7 @@ func (s *Service) captureSmartMoneyWalletSnapshots(ctx context.Context, day time
 			log.Printf("[Assets] skip smart money snapshot wallet=%s chain=%d err=%v", walletRow.Address, walletRow.ChainID, err)
 			continue
 		}
+		activity := transferActivity[smartMoneyWalletKey(walletRow.ChainID, walletRow.Address)]
 		row := &models.SmartMoneyWalletDailySnapshot{
 			WalletAddress:     normalizeAddress(walletRow.Address),
 			ChainID:           walletRow.ChainID,
@@ -750,6 +1258,10 @@ func (s *Service) captureSmartMoneyWalletSnapshots(ctx context.Context, day time
 			OpenLPUSD:         live.assets.OpenLPUSD,
 			TotalUSD:          live.assets.TotalUSD,
 			TrackedTokenCount: live.assets.TrackedTokenCount,
+			HasTransferIn:     activity.HasTransferIn,
+			HasTransferOut:    activity.HasTransferOut,
+			TransferInCount:   activity.TransferInCount,
+			TransferOutCount:  activity.TransferOutCount,
 			CapturedAt:        timeutil.Now(),
 		}
 		if err := upsertByColumns(ctx, row,
@@ -761,6 +1273,10 @@ func (s *Service) captureSmartMoneyWalletSnapshots(ctx context.Context, day time
 				"open_lp_usd":         row.OpenLPUSD,
 				"total_usd":           row.TotalUSD,
 				"tracked_token_count": row.TrackedTokenCount,
+				"has_transfer_in":     row.HasTransferIn,
+				"has_transfer_out":    row.HasTransferOut,
+				"transfer_in_count":   row.TransferInCount,
+				"transfer_out_count":  row.TransferOutCount,
 				"captured_at":         row.CapturedAt,
 			}); err != nil {
 			return err

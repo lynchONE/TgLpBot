@@ -65,6 +65,10 @@ type SmartMoneyWalletDailySnapshot struct {
 	OpenLPUSD         float64   `gorm:"type:decimal(20,4);not null;default:0" json:"open_lp_usd"`
 	TotalUSD          float64   `gorm:"type:decimal(20,4);not null;default:0" json:"total_usd"`
 	TrackedTokenCount int       `gorm:"not null;default:0" json:"tracked_token_count"`
+	HasTransferIn     bool      `gorm:"not null;default:false" json:"has_transfer_in"`
+	HasTransferOut    bool      `gorm:"not null;default:false" json:"has_transfer_out"`
+	TransferInCount   int       `gorm:"not null;default:0" json:"transfer_in_count"`
+	TransferOutCount  int       `gorm:"not null;default:0" json:"transfer_out_count"`
 	CapturedAt        time.Time `gorm:"not null;index" json:"captured_at"`
 
 	CreatedAt time.Time `json:"created_at"`

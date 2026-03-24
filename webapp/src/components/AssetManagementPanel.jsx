@@ -105,6 +105,60 @@ function errorText(err) {
   return String(err?.message || err || '').trim();
 }
 
+function hasTransferMarker(item) {
+  return Boolean(item?.has_transfer_in || item?.has_transfer_out || Number(item?.transfer_in_count || 0) > 0 || Number(item?.transfer_out_count || 0) > 0);
+}
+
+function TransferBadges({ item, compact = false }) {
+  const inCount = Number(item?.transfer_in_count || 0);
+  const outCount = Number(item?.transfer_out_count || 0);
+  const badges = [];
+  if (item?.has_transfer_in || inCount > 0) {
+    badges.push({
+      key: 'in',
+      label: compact ? '入' : `转入${inCount > 0 ? ` ${inCount}` : ''}`,
+      color: '#16a34a',
+      background: 'rgba(22, 163, 74, 0.12)',
+      border: 'rgba(22, 163, 74, 0.22)',
+    });
+  }
+  if (item?.has_transfer_out || outCount > 0) {
+    badges.push({
+      key: 'out',
+      label: compact ? '出' : `转出${outCount > 0 ? ` ${outCount}` : ''}`,
+      color: '#ea580c',
+      background: 'rgba(234, 88, 12, 0.12)',
+      border: 'rgba(234, 88, 12, 0.22)',
+    });
+  }
+  if (!badges.length) return null;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: compact ? 'center' : 'flex-start', gap: 4, flexWrap: 'wrap', minHeight: compact ? 12 : 'auto' }}>
+      {badges.map((badge) => (
+        <span
+          key={badge.key}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minWidth: compact ? 14 : 0,
+            padding: compact ? '0 4px' : '1px 6px',
+            borderRadius: 999,
+            border: `1px solid ${badge.border}`,
+            background: badge.background,
+            color: badge.color,
+            fontSize: compact ? 9 : 10,
+            fontWeight: 700,
+            lineHeight: compact ? '12px' : '14px',
+          }}
+        >
+          {badge.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function isIgnorableSmartMoneyDataError(err) {
   const message = errorText(err).toLowerCase();
   return message.includes("unknown column 'open_lp_usd'") || message.includes("unknown column `open_lp_usd`");
@@ -233,7 +287,7 @@ function LWAreaChart({ points, stroke = '#52d1ff', height = 220 }) {
 
 /* ─── PnL Calendar (盈亏日历) ─── */
 const PNL_CAL_WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
-function PnLCalendar({ data, loading = false }) {
+function PnLCalendar({ data, loading = false, note = '' }) {
   const [viewDate, setViewDate] = useState(() => new Date());
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
@@ -265,6 +319,7 @@ function PnLCalendar({ data, loading = false }) {
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const entry = pnlMap[dateStr];
     const pnl = entry ? Number(entry.realized_pnl_usd || 0) : null;
+    const hasTransfer = hasTransferMarker(entry);
     const isToday = dateStr === todayStr;
     const isFuture = new Date(year, month, day) > now;
     const cls = ['pnl-cal-cell'];
@@ -277,6 +332,7 @@ function PnLCalendar({ data, loading = false }) {
         <div className="pnl-cal-value">
           {pnl !== null ? `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}` : '0'}
         </div>
+        {hasTransfer ? <TransferBadges item={entry} compact /> : <div style={{ minHeight: 12 }} />}
       </div>
     );
   }
@@ -307,6 +363,12 @@ function PnLCalendar({ data, loading = false }) {
         ))}
         {cells}
       </div>
+      {note ? (
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 8, fontSize: 10, lineHeight: 1.45, color: 'var(--text-muted)' }}>
+          <ArrowRightLeft size={12} style={{ flexShrink: 0, marginTop: 1, opacity: 0.7 }} />
+          <span>{note}</span>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -946,6 +1008,10 @@ export default function AssetManagementPanel({
     return history.slice(1).map((item, i) => ({
       day: item.day,
       realized_pnl_usd: Number(item.total_usd || 0) - Number(history[i].total_usd || 0),
+      has_transfer_in: Boolean(item.has_transfer_in),
+      has_transfer_out: Boolean(item.has_transfer_out),
+      transfer_in_count: Number(item.transfer_in_count || 0),
+      transfer_out_count: Number(item.transfer_out_count || 0),
     }));
   }, [smartMoneyWallet?.history]);
 
@@ -1346,7 +1412,10 @@ export default function AssetManagementPanel({
                   })()}
 
                   {/* PnL calendar (daily balance diff) */}
-                  <PnLCalendar data={smartMoneyPnlCalData} />
+                  <PnLCalendar
+                    data={smartMoneyPnlCalData}
+                    note="按日资产快照差额估算；若出现“转入/转出”标记，说明该日检测到资金划转，当天盈亏会受划转影响。"
+                  />
 
                   {/* window stats */}
                   <div className="am-stat-grid am-stat-grid-3">
@@ -1379,7 +1448,7 @@ export default function AssetManagementPanel({
           {smSubTab === 'leaderboard' ? (
             <div className="am-card">
               <div className="am-card-header">
-                <div className="am-card-title">昨日排行</div>
+                <div className="am-card-title">昨日快照排行</div>
                 <div className="am-pill-group">
                   {LEADERBOARD_METRICS.map((item) => (
                     <button key={item.key} type="button" className={`am-pill ${leaderboardMetric === item.key ? 'active' : ''}`} onClick={() => setLeaderboardMetric(item.key)}>
@@ -1388,9 +1457,14 @@ export default function AssetManagementPanel({
                   ))}
                 </div>
               </div>
-              {smartMoneyLeaderboard?.description && (
-                <div style={{ fontSize: 10, opacity: 0.4, marginTop: 4 }}>{smartMoneyLeaderboard.description} · {smartMoneyLeaderboard.start_day} ~ {smartMoneyLeaderboard.end_day}</div>
-              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 10, opacity: 0.55, marginTop: 4 }}>
+                <ArrowRightLeft size={11} />
+                <span>
+                  {smartMoneyLeaderboard?.snapshot_day && (smartMoneyLeaderboard?.compared_day || smartMoneyLeaderboard?.start_day)
+                    ? `榜单基于 ${smartMoneyLeaderboard.snapshot_day} 相对 ${smartMoneyLeaderboard.compared_day || smartMoneyLeaderboard.start_day} 的资产快照`
+                    : '榜单基于昨日资产快照'}
+                </span>
+              </div>
               <div style={{ position: 'relative', marginTop: 8 }}>
                 <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', opacity: 0.35 }} />
                 <input
@@ -1414,6 +1488,7 @@ export default function AssetManagementPanel({
                         <div>
                           <div className="am-item-title">{item.label || `${item.address.slice(0, 6)}...${item.address.slice(-4)}`}</div>
                           <div className="am-item-sub">{formatChain(item.chain_id)} · {Number(item.active_pool_count || 0)} 池 · {Number(item.participation_count || 0)} 次操作</div>
+                          {hasTransferMarker(item) ? <div style={{ marginTop: 4 }}><TransferBadges item={item} /></div> : null}
                         </div>
                       </div>
                       <div className="am-list-end" style={{ flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
