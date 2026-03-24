@@ -3318,9 +3318,40 @@ body {
   flex-wrap: wrap;
 }
 
+.sm-position-card-main {
+  width: 100%;
+  min-width: 0;
+}
+
 .sm-position-card .pos-card-title-wrap {
   min-width: 0;
   flex: 1 1 260px;
+}
+
+.sm-position-card-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sm-position-card-head-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sm-position-card-head-top .pos-pair-row {
+  min-width: 0;
+  flex: 1;
+  flex-wrap: nowrap;
+}
+
+.sm-position-card-head-top .pos-pair-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sm-position-card .pos-card-right-block {
@@ -3329,7 +3360,7 @@ body {
 }
 
 .sm-position-card--inline-detail .sm-position-card-head-actions {
-  margin-left: auto;
+  margin-left: 0;
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -6880,6 +6911,10 @@ body {
 .smd-pos-card-metric strong {
   font-weight: 700;
   color: var(--text);
+}
+.smd-pos-card-metric.positive strong,
+.smd-pos-card-metric.negative strong {
+  color: inherit;
 }
 .smd-pos-card-metric.positive {
   border-color: rgba(74, 222, 128, 0.24);

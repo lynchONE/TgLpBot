@@ -483,20 +483,27 @@ function ConfirmDialog({ open, title, description, confirmLabel = '确认', busy
 
 function PositionPreviewMetrics({ position, preview, compact = false }) {
     const runningText = formatDuration(preview?.runningSince || position?.opened_at) || '--';
-    const feeText = Number.isFinite(Number(preview?.feeUsd)) ? formatUsd(preview.feeUsd) : '--';
+    const feeValue = Number(preview?.feeUsd);
+    const feeText = Number.isFinite(feeValue) ? formatUsd(preview.feeUsd) : '--';
+    const feeTone = Number.isFinite(feeValue)
+        ? (feeValue > 0 ? ' positive' : feeValue < 0 ? ' negative' : '')
+        : '';
+    const pnlValue = Number(preview?.absolutePnlUsd || 0);
+    const pnlTone = preview?.hasPnl ? (pnlValue >= 0 ? ' positive' : ' negative') : '';
+    const runtimeTone = runningText !== '--' ? ' positive' : '';
     const pnlText = formatSignedUsd(preview?.absolutePnlUsd, Boolean(preview?.hasPnl));
 
     return (
         <div className={`smd-pos-card-preview${compact ? ' compact' : ''}`}>
-            <span className="smd-pos-card-metric">
+            <span className={`smd-pos-card-metric${feeTone}`}>
                 <strong>手续费</strong>
                 <span>{feeText}</span>
             </span>
-            <span className={`smd-pos-card-metric${preview?.hasPnl ? (Number(preview?.absolutePnlUsd || 0) >= 0 ? ' positive' : ' negative') : ''}`}>
+            <span className={`smd-pos-card-metric${pnlTone}`}>
                 <strong>绝对收益</strong>
                 <span>{pnlText}</span>
             </span>
-            <span className="smd-pos-card-metric">
+            <span className={`smd-pos-card-metric${runtimeTone}`}>
                 <strong>运行时间</strong>
                 <span>{runningText}</span>
             </span>
@@ -580,15 +587,32 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
             ) : detail ? (
                 <div className="pos-card sm-position-card sm-position-card--inline-detail">
                         <div className="pos-card-header">
-                            <div className="pos-card-main">
-                                <div className="pos-card-title-wrap">
-                                    <div className="pos-pair-row">
-                                        <span className="pos-pair-name">{detail?.title || shortAddress(detail?.pool_id || '')}</span>
-                                        {detail?.tick_spacing ? (
-                                            <span className="badge badge-fee">
-                                                {{ 1: '0.01%', 10: '0.05%', 50: '0.25%', 60: '0.30%', 100: '0.50%', 200: '1%', 2000: '2%' }[Number(detail.tick_spacing)] || ''}
-                                            </span>
-                                        ) : null}
+                            <div className="pos-card-main sm-position-card-main">
+                                <div className="pos-card-title-wrap sm-position-card-title-wrap">
+                                    <div className="sm-position-card-head-top">
+                                        <div className="pos-pair-row">
+                                            <span className="pos-pair-name">{detail?.title || shortAddress(detail?.pool_id || '')}</span>
+                                            {detail?.tick_spacing ? (
+                                                <span className="badge badge-fee">
+                                                    {{ 1: '0.01%', 10: '0.05%', 50: '0.25%', 60: '0.30%', 100: '0.50%', 200: '1%', 2000: '2%' }[Number(detail.tick_spacing)] || ''}
+                                                </span>
+                                            ) : null}
+                                        </div>
+                                        <div className="sm-position-card-head-actions">
+                                            <div className="pos-card-right-block">
+                                                <div className="pos-metrics">
+                                                    <div className="pos-total">{formatUsd(totalVal)}</div>
+                                                    {hasPnl ? (
+                                                        <div className={`pos-pnl ${pnl >= 0 ? 'positive' : 'negative'}`}>
+                                                            {pnl >= 0 ? '+' : ''}{formatNumber(pnl, 2)}
+                                                        </div>
+                                                    ) : null}
+                                                </div>
+                                            </div>
+                                            <button type="button" onClick={onClose} className="smd-pos-inline-panel-close" aria-label="收起详情">
+                                                <X size={16} />
+                                            </button>
+                                        </div>
                                     </div>
                                     <div className="pos-status-row">
                                         <span className="status-pill">
@@ -600,21 +624,6 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
                                             {detail?.in_range ? 'In Range' : 'Out'}
                                         </span>
                                     </div>
-                                </div>
-                                <div className="sm-position-card-head-actions">
-                                    <div className="pos-card-right-block">
-                                        <div className="pos-metrics">
-                                            <div className="pos-total">{formatUsd(totalVal)}</div>
-                                            {hasPnl ? (
-                                                <div className={`pos-pnl ${pnl >= 0 ? 'positive' : 'negative'}`}>
-                                                    {pnl >= 0 ? '+' : ''}{formatNumber(pnl, 2)}
-                                                </div>
-                                            ) : null}
-                                        </div>
-                                    </div>
-                                    <button type="button" onClick={onClose} className="smd-pos-inline-panel-close" aria-label="收起详情">
-                                        <X size={16} />
-                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -895,6 +904,7 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
         if (positions.some((pos) => getPositionSelectionKey(pos) === selectedKey)) return;
         setSelectedPosition(null);
     }, [positions, selectedPosition]);
+    const selectedPositionKey = selectedPosition ? getPositionSelectionKey(selectedPosition) : '';
 
     return (
         <div>
@@ -952,58 +962,64 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
                 <div className="smd-empty">{status === 'open' ? '当前没有进行中的仓位，切换到“全部”查看历史' : '暂无仓位'}</div>
             ) : (
                 <div className="smd-pos-list">
-                    {positions.map(pos => (
-                        <div key={pos.id} className={`smd-pos-card${pos.status === 'closed' ? ' closed' : ''}`} onClick={() => setSelectedPosition(pos)}>
-                            <div className="smd-pos-card-top">
-                                <WalletIdentity
-                                    address={pos.wallet_address}
-                                    color={pos.wallet_color}
-                                    label={pos.wallet_label || pos.wallet_address}
-                                    size={28}
-                                    onClick={() => onSelectWallet(pos.wallet_address)}
-                                />
-                                <div className="smd-pos-card-top-right">
-                                    <span className="smd-pos-card-amount">{formatUSDCompact(pos.position_amount_usd)}</span>
-                                    <Badge cls={pos.status === 'open' ? 'status-open' : 'status-closed'}>
-                                        {pos.status === 'open' ? '持仓中' : '已关闭'}
-                                    </Badge>
+                    {positions.map(pos => {
+                        const positionKey = getPositionSelectionKey(pos) || String(pos.id || '');
+                        const isSelected = Boolean(positionKey) && positionKey === selectedPositionKey;
+                        return (
+                            <div key={positionKey || pos.id} className="smd-pos-row">
+                                <div className={`smd-pos-card${pos.status === 'closed' ? ' closed' : ''}`} onClick={() => setSelectedPosition(pos)}>
+                                    <div className="smd-pos-card-top">
+                                        <WalletIdentity
+                                            address={pos.wallet_address}
+                                            color={pos.wallet_color}
+                                            label={pos.wallet_label || pos.wallet_address}
+                                            size={28}
+                                            onClick={() => onSelectWallet(pos.wallet_address)}
+                                        />
+                                        <div className="smd-pos-card-top-right">
+                                            <span className="smd-pos-card-amount">{formatUSDCompact(pos.position_amount_usd)}</span>
+                                            <Badge cls={pos.status === 'open' ? 'status-open' : 'status-closed'}>
+                                                {pos.status === 'open' ? '持仓中' : '已关闭'}
+                                            </Badge>
+                                        </div>
+                                    </div>
+                                    <div className="smd-pos-card-range smd-pos-card-range--detail">
+                                        <span className={`smd-pos-card-prices${pos.status === 'closed' ? ' is-closed' : ''}`}> 
+                                            {pos.price_lower && pos.price_upper ? `${pos.price_lower} - ${pos.price_upper}` : '--'}
+                                        </span>
+                                        <div className="smd-pos-card-meta">
+                                            <span>NFT #{pos.nft_token_id || '--'}</span>
+                                            {pos.range_percent > 0 && <span>{formatRangePercent(pos.range_percent)}</span>}
+                                        </div>
+                                        {pos.bscscan_url ? (
+                                            <a
+                                                href={pos.bscscan_url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="smd-link smd-pos-card-link"
+                                                onClick={(event) => event.stopPropagation()}
+                                            >
+                                                查看交易 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
+                                            </a>
+                                        ) : null}
+                                    </div>
+                                    <PositionPreviewMetrics
+                                        position={pos}
+                                        preview={positionPreviews[getPositionSelectionKey(pos)]}
+                                    />
                                 </div>
-                            </div>
-                            <div className="smd-pos-card-range smd-pos-card-range--detail">
-                                <span className={`smd-pos-card-prices${pos.status === 'closed' ? ' is-closed' : ''}`}> 
-                                    {pos.price_lower && pos.price_upper ? `${pos.price_lower} - ${pos.price_upper}` : '--'}
-                                </span>
-                                <div className="smd-pos-card-meta">
-                                    <span>NFT #{pos.nft_token_id || '--'}</span>
-                                    {pos.range_percent > 0 && <span>{formatRangePercent(pos.range_percent)}</span>}
-                                </div>
-                                {pos.bscscan_url ? (
-                                    <a
-                                        href={pos.bscscan_url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="smd-link smd-pos-card-link"
-                                        onClick={(event) => event.stopPropagation()}
-                                    >
-                                        查看交易 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
-                                    </a>
+                                {isSelected ? (
+                                    <SmartMoneyPositionDetailPanel
+                                        apiBaseUrl={apiBaseUrl}
+                                        position={selectedPosition}
+                                        onClose={() => setSelectedPosition(null)}
+                                    />
                                 ) : null}
                             </div>
-                            <PositionPreviewMetrics
-                                position={pos}
-                                preview={positionPreviews[getPositionSelectionKey(pos)]}
-                            />
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
             )}
-            {selectedPosition ? (
-                <SmartMoneyPositionDetailPanel
-                    apiBaseUrl={apiBaseUrl}
-                    position={selectedPosition}
-                    onClose={() => setSelectedPosition(null)}
-                />
-            ) : null}
         </div>
     );
 }
@@ -1212,6 +1228,7 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
         if (positions.some((pos) => getPositionSelectionKey(pos) === selectedKey)) return;
         setSelectedPosition(null);
     }, [positions, selectedPosition]);
+    const selectedPositionKey = selectedPosition ? getPositionSelectionKey(selectedPosition) : '';
 
     const groups = useMemo(() => {
         const m = {};
@@ -1290,32 +1307,38 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
                         })}>池子详情 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} /></button>
                     </div>
                     <div className="smd-pos-list smd-pos-list--compact">
-                        {g.positions.map(pos => (
-                            <div key={pos.id} className={`smd-pos-card smd-pos-card--compact${pos.status === 'closed' ? ' closed' : ''}`} onClick={() => setSelectedPosition(pos)}>
-                                <div className="smd-pos-card-compact-main">
-                                <span className="smd-pos-card-amount">{formatUSDCompact(pos.position_amount_usd)}</span>
-                                <span className={`smd-pos-card-prices${pos.status === 'closed' ? ' is-closed' : ''}`}> 
-                                    {pos.price_lower && pos.price_upper ? `${pos.price_lower} - ${pos.price_upper}` : '--'}
-                                </span>
-                                {pos.range_percent > 0 && <span className="smd-pos-card-pct">{formatRangePercent(pos.range_percent)}</span>}
+                        {g.positions.map(pos => {
+                            const positionKey = getPositionSelectionKey(pos) || String(pos.id || '');
+                            const isSelected = Boolean(positionKey) && positionKey === selectedPositionKey;
+                            return (
+                                <div key={positionKey || pos.id} className="smd-pos-row">
+                                    <div className={`smd-pos-card smd-pos-card--compact${pos.status === 'closed' ? ' closed' : ''}`} onClick={() => setSelectedPosition(pos)}>
+                                        <div className="smd-pos-card-compact-main">
+                                        <span className="smd-pos-card-amount">{formatUSDCompact(pos.position_amount_usd)}</span>
+                                        <span className={`smd-pos-card-prices${pos.status === 'closed' ? ' is-closed' : ''}`}> 
+                                            {pos.price_lower && pos.price_upper ? `${pos.price_lower} - ${pos.price_upper}` : '--'}
+                                        </span>
+                                        {pos.range_percent > 0 && <span className="smd-pos-card-pct">{formatRangePercent(pos.range_percent)}</span>}
+                                        </div>
+                                        <PositionPreviewMetrics
+                                            position={pos}
+                                            preview={positionPreviews[getPositionSelectionKey(pos)]}
+                                            compact
+                                        />
+                                    </div>
+                                    {isSelected ? (
+                                        <SmartMoneyPositionDetailPanel
+                                            apiBaseUrl={apiBaseUrl}
+                                            position={selectedPosition}
+                                            onClose={() => setSelectedPosition(null)}
+                                        />
+                                    ) : null}
                                 </div>
-                                <PositionPreviewMetrics
-                                    position={pos}
-                                    preview={positionPreviews[getPositionSelectionKey(pos)]}
-                                    compact
-                                />
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
             ))}
-            {selectedPosition ? (
-                <SmartMoneyPositionDetailPanel
-                    apiBaseUrl={apiBaseUrl}
-                    position={selectedPosition}
-                    onClose={() => setSelectedPosition(null)}
-                />
-            ) : null}
         </div>
     );
 }

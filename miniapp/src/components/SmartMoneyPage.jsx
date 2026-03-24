@@ -485,25 +485,45 @@ function MiniMetric({ label, value }) {
 
 function PositionPreviewMetrics({ position, preview, compact = false }) {
     const runningText = formatDurationFrom(preview?.runningSince || position?.opened_at) || '--';
-    const feeText = Number.isFinite(Number(preview?.feeUsd)) ? formatPreviewUsd(preview.feeUsd) : '--';
+    const feeValue = Number(preview?.feeUsd);
+    const feeText = Number.isFinite(feeValue) ? formatPreviewUsd(preview.feeUsd) : '--';
+    const feeMetricClass = Number.isFinite(feeValue)
+        ? (feeValue > 0
+            ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+            : feeValue < 0
+                ? 'border-red-500/20 bg-red-500/10 text-red-300'
+                : 'border-white/[0.05] bg-black/20 text-zinc-300')
+        : 'border-white/[0.05] bg-black/20 text-zinc-300';
+    const feeLabelClass = Number.isFinite(feeValue)
+        ? (feeValue > 0 ? 'text-emerald-200' : feeValue < 0 ? 'text-red-200' : 'text-zinc-100')
+        : 'text-zinc-100';
+    const pnlValue = Number(preview?.absolutePnlUsd || 0);
+    const pnlMetricClass = preview?.hasPnl
+        ? (pnlValue >= 0
+            ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+            : 'border-red-500/20 bg-red-500/10 text-red-300')
+        : 'border-white/[0.05] bg-black/20 text-zinc-300';
+    const pnlLabelClass = preview?.hasPnl
+        ? (pnlValue >= 0 ? 'text-emerald-200' : 'text-red-200')
+        : 'text-zinc-100';
+    const runtimeMetricClass = runningText !== '--'
+        ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+        : 'border-white/[0.05] bg-black/20 text-zinc-300';
+    const runtimeLabelClass = runningText !== '--' ? 'text-emerald-200' : 'text-zinc-100';
     const pnlText = formatSignedPreviewUsd(preview?.absolutePnlUsd, Boolean(preview?.hasPnl));
 
     return (
         <div className={`mt-2 flex flex-wrap gap-2 ${compact ? 'pt-2 border-t border-white/[0.05]' : ''}`}>
-            <span className="inline-flex items-center gap-1 rounded-full border border-white/[0.05] bg-black/20 px-2.5 py-1 text-[10px] text-zinc-300">
-                <strong className="font-semibold text-zinc-100">手续费</strong>
+            <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] ${feeMetricClass}`}>
+                <strong className={`font-semibold ${feeLabelClass}`}>手续费</strong>
                 <span>{feeText}</span>
             </span>
-            <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] ${preview?.hasPnl
-                ? Number(preview?.absolutePnlUsd || 0) >= 0
-                    ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
-                    : 'border-red-500/20 bg-red-500/10 text-red-300'
-                : 'border-white/[0.05] bg-black/20 text-zinc-300'}`}>
-                <strong className="font-semibold text-zinc-100">绝对收益</strong>
+            <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] ${pnlMetricClass}`}>
+                <strong className={`font-semibold ${pnlLabelClass}`}>绝对收益</strong>
                 <span>{pnlText}</span>
             </span>
-            <span className="inline-flex items-center gap-1 rounded-full border border-white/[0.05] bg-black/20 px-2.5 py-1 text-[10px] text-zinc-300">
-                <strong className="font-semibold text-zinc-100">运行时间</strong>
+            <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] ${runtimeMetricClass}`}>
+                <strong className={`font-semibold ${runtimeLabelClass}`}>运行时间</strong>
                 <span>{runningText}</span>
             </span>
         </div>
@@ -927,6 +947,7 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
         if (positions.some((pos) => getPositionSelectionKey(pos) === selectedKey)) return;
         setSelectedPosition(null);
     }, [positions, selectedPosition]);
+    const selectedPositionKey = selectedPosition ? getPositionSelectionKey(selectedPosition) : '';
 
     return (
         <div>
@@ -1007,70 +1028,75 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
                 </div>
             ) : (
                 <div className="space-y-3">
-                    {positions.map(pos => (
-                        <div
-                            key={pos.id}
-                            className={`rounded-[22px] border border-white/[0.04] bg-zinc-900/60 p-3 transition active:scale-[0.995] ${pos.status === 'closed' ? 'opacity-70' : ''}`}
-                            onClick={() => setSelectedPosition(pos)}
-                        >
-                            <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0 flex-1">
-                                    <WalletIdentity
-                                        address={pos.wallet_address}
-                                        color={pos.wallet_color}
-                                        label={pos.wallet_label || pos.wallet_address}
-                                        onClick={() => onSelectWallet(pos.wallet_address)}
+                    {positions.map(pos => {
+                        const positionKey = getPositionSelectionKey(pos) || String(pos.id || '');
+                        const isSelected = Boolean(positionKey) && positionKey === selectedPositionKey;
+                        return (
+                            <div key={positionKey || pos.id}>
+                                <div
+                                    className={`rounded-[22px] border border-white/[0.04] bg-zinc-900/60 p-3 transition active:scale-[0.995] ${pos.status === 'closed' ? 'opacity-70' : ''}`}
+                                    onClick={() => setSelectedPosition(pos)}
+                                >
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0 flex-1">
+                                            <WalletIdentity
+                                                address={pos.wallet_address}
+                                                color={pos.wallet_color}
+                                                label={pos.wallet_label || pos.wallet_address}
+                                                onClick={() => onSelectWallet(pos.wallet_address)}
+                                            />
+                                        </div>
+                                        <div className="flex flex-col items-end gap-1">
+                                            <div className="text-sm font-semibold text-zinc-100">{formatUSDCompact(pos.position_amount_usd)}</div>
+                                            <Badge className={pos.status === 'open'
+                                                ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+                                                : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>
+                                                {pos.status === 'open' ? '持仓中' : '已关闭'}
+                                            </Badge>
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-3 flex items-end justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <div className={`truncate font-mono text-[11px] text-zinc-300 ${pos.status === 'closed' ? 'line-through opacity-70' : ''}`}>
+                                                {pos.price_lower && pos.price_upper ? `${pos.price_lower} - ${pos.price_upper}` : '—'}
+                                            </div>
+                                            <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-zinc-500">
+                                                <span>NFT #{pos.nft_token_id || '--'}</span>
+                                                {Number(pos.range_percent) > 0 ? <span>{formatRangePercent(pos.range_percent)}</span> : null}
+                                            </div>
+                                        </div>
+                                        {pos.bscscan_url ? (
+                                            <a
+                                                href={pos.bscscan_url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className={`inline-flex items-center gap-1 text-xs ${getBrandLinkClass(brand)}`}
+                                                onClick={(event) => event.stopPropagation()}
+                                            >
+                                                查看交易
+                                                <ExternalLink size={10} />
+                                            </a>
+                                        ) : null}
+                                    </div>
+                                    <PositionPreviewMetrics
+                                        position={pos}
+                                        preview={positionPreviews[getPositionSelectionKey(pos)]}
                                     />
                                 </div>
-                                <div className="flex flex-col items-end gap-1">
-                                    <div className="text-sm font-semibold text-zinc-100">{formatUSDCompact(pos.position_amount_usd)}</div>
-                                    <Badge className={pos.status === 'open'
-                                        ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
-                                        : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>
-                                        {pos.status === 'open' ? '持仓中' : '已关闭'}
-                                    </Badge>
-                                </div>
-                            </div>
-
-                            <div className="mt-3 flex items-end justify-between gap-3">
-                                <div className="min-w-0">
-                                    <div className={`truncate font-mono text-[11px] text-zinc-300 ${pos.status === 'closed' ? 'line-through opacity-70' : ''}`}>
-                                        {pos.price_lower && pos.price_upper ? `${pos.price_lower} - ${pos.price_upper}` : '—'}
-                                    </div>
-                                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-zinc-500">
-                                        <span>NFT #{pos.nft_token_id || '--'}</span>
-                                        {Number(pos.range_percent) > 0 ? <span>{formatRangePercent(pos.range_percent)}</span> : null}
-                                    </div>
-                                </div>
-                                {pos.bscscan_url ? (
-                                    <a
-                                        href={pos.bscscan_url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className={`inline-flex items-center gap-1 text-xs ${getBrandLinkClass(brand)}`}
-                                        onClick={(event) => event.stopPropagation()}
-                                    >
-                                        查看交易
-                                        <ExternalLink size={10} />
-                                    </a>
+                                {isSelected ? (
+                                    <SmartMoneyPositionDetailPanel
+                                        apiBaseUrl={apiBaseUrl}
+                                        position={selectedPosition}
+                                        brand={brand}
+                                        onClose={() => setSelectedPosition(null)}
+                                    />
                                 ) : null}
                             </div>
-                            <PositionPreviewMetrics
-                                position={pos}
-                                preview={positionPreviews[getPositionSelectionKey(pos)]}
-                            />
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
             )}
-            {selectedPosition ? (
-                <SmartMoneyPositionDetailPanel
-                    apiBaseUrl={apiBaseUrl}
-                    position={selectedPosition}
-                    brand={brand}
-                    onClose={() => setSelectedPosition(null)}
-                />
-            ) : null}
         </div>
     );
 }
@@ -1309,6 +1335,7 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
         if (positions.some((pos) => getPositionSelectionKey(pos) === selectedKey)) return;
         setSelectedPosition(null);
     }, [positions, selectedPosition]);
+    const selectedPositionKey = selectedPosition ? getPositionSelectionKey(selectedPosition) : '';
 
     // Group positions by pool
     const poolGroups = useMemo(() => {
@@ -1414,7 +1441,16 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
                             group={group}
                             brand={brand}
                             positionPreviews={positionPreviews}
+                            selectedPositionKey={selectedPositionKey}
                             onOpenPositionDetail={setSelectedPosition}
+                            detailPanel={selectedPosition ? (
+                                <SmartMoneyPositionDetailPanel
+                                    apiBaseUrl={apiBaseUrl}
+                                    position={selectedPosition}
+                                    brand={brand}
+                                    onClose={() => setSelectedPosition(null)}
+                                />
+                            ) : null}
                             onSelectPool={() => onSelectPool({
                                 pool_address: group.pool_address,
                                 token0_symbol: group.token0_symbol,
@@ -1430,19 +1466,11 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
                     ))}
                 </div>
             )}
-            {selectedPosition ? (
-                <SmartMoneyPositionDetailPanel
-                    apiBaseUrl={apiBaseUrl}
-                    position={selectedPosition}
-                    brand={brand}
-                    onClose={() => setSelectedPosition(null)}
-                />
-            ) : null}
         </div>
     );
 }
 
-function PoolGroupCard({ group, onSelectPool, onOpenPositionDetail, brand, positionPreviews }) {
+function PoolGroupCard({ group, onSelectPool, onOpenPositionDetail, brand, positionPreviews, selectedPositionKey = '', detailPanel = null }) {
     const [collapsed, setCollapsed] = useState(!group.hasOpen);
     const openCount = group.positions.filter(p => p.status === 'open').length;
     const closedCount = group.positions.filter(p => p.status === 'closed').length;
@@ -1480,50 +1508,56 @@ function PoolGroupCard({ group, onSelectPool, onOpenPositionDetail, brand, posit
             </div>
             {!collapsed && (
                 <div className="px-3 pb-3 space-y-2">
-                    {group.positions.map(pos => (
-                        <div
-                            key={pos.id}
-                            className={`rounded-2xl border border-white/[0.04] bg-zinc-950/45 px-3 py-2.5 transition active:scale-[0.995] ${pos.status === 'closed' ? 'opacity-70' : ''}`}
-                            onClick={() => onOpenPositionDetail?.(pos)}
-                        >
-                            <div className="flex items-center justify-between gap-3">
-                                <span className="text-sm font-semibold text-zinc-100">{formatUSDCompact(pos.position_amount_usd)}</span>
-                                <Badge className={pos.status === 'open'
-                                    ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
-                                    : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>
-                                    {pos.status === 'open' ? '持仓中' : '已关闭'}
-                                </Badge>
-                            </div>
-                            <div className="mt-2 flex items-end justify-between gap-3">
-                                <div className="min-w-0">
-                                    <div className={`truncate font-mono text-[11px] text-zinc-300 ${pos.status === 'closed' ? 'line-through opacity-70' : ''}`}>
-                                        {pos.price_lower && pos.price_upper ? `${pos.price_lower} - ${pos.price_upper}` : '—'}
+                    {group.positions.map(pos => {
+                        const positionKey = getPositionSelectionKey(pos) || String(pos.id || '');
+                        const isSelected = Boolean(positionKey) && positionKey === selectedPositionKey;
+                        return (
+                            <div key={positionKey || pos.id}>
+                                <div
+                                    className={`rounded-2xl border border-white/[0.04] bg-zinc-950/45 px-3 py-2.5 transition active:scale-[0.995] ${pos.status === 'closed' ? 'opacity-70' : ''}`}
+                                    onClick={() => onOpenPositionDetail?.(pos)}
+                                >
+                                    <div className="flex items-center justify-between gap-3">
+                                        <span className="text-sm font-semibold text-zinc-100">{formatUSDCompact(pos.position_amount_usd)}</span>
+                                        <Badge className={pos.status === 'open'
+                                            ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+                                            : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>
+                                            {pos.status === 'open' ? '持仓中' : '已关闭'}
+                                        </Badge>
                                     </div>
-                                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-zinc-500">
-                                        <span>NFT #{pos.nft_token_id || '--'}</span>
-                                        {Number(pos.range_percent) > 0 ? <span>{formatRangePercent(pos.range_percent)}</span> : null}
+                                    <div className="mt-2 flex items-end justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <div className={`truncate font-mono text-[11px] text-zinc-300 ${pos.status === 'closed' ? 'line-through opacity-70' : ''}`}>
+                                                {pos.price_lower && pos.price_upper ? `${pos.price_lower} - ${pos.price_upper}` : '—'}
+                                            </div>
+                                            <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-zinc-500">
+                                                <span>NFT #{pos.nft_token_id || '--'}</span>
+                                                {Number(pos.range_percent) > 0 ? <span>{formatRangePercent(pos.range_percent)}</span> : null}
+                                            </div>
+                                        </div>
+                                        {pos.bscscan_url ? (
+                                            <a
+                                                href={pos.bscscan_url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className={`inline-flex items-center gap-1 text-xs ${getBrandLinkClass(brand)}`}
+                                                onClick={(event) => event.stopPropagation()}
+                                            >
+                                                查看交易
+                                                <ExternalLink size={10} />
+                                            </a>
+                                        ) : null}
                                     </div>
+                                    <PositionPreviewMetrics
+                                        position={pos}
+                                        preview={positionPreviews?.[getPositionSelectionKey(pos)]}
+                                        compact
+                                    />
                                 </div>
-                                {pos.bscscan_url ? (
-                                    <a
-                                        href={pos.bscscan_url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className={`inline-flex items-center gap-1 text-xs ${getBrandLinkClass(brand)}`}
-                                        onClick={(event) => event.stopPropagation()}
-                                    >
-                                        查看交易
-                                        <ExternalLink size={10} />
-                                    </a>
-                                ) : null}
+                                {isSelected ? detailPanel : null}
                             </div>
-                            <PositionPreviewMetrics
-                                position={pos}
-                                preview={positionPreviews?.[getPositionSelectionKey(pos)]}
-                                compact
-                            />
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
             )}
         </div>
