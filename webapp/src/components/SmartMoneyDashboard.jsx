@@ -493,11 +493,11 @@ function PositionPreviewMetrics({ position, preview, compact = false }) {
                 <span>{feeText}</span>
             </span>
             <span className={`smd-pos-card-metric${preview?.hasPnl ? (Number(preview?.absolutePnlUsd || 0) >= 0 ? ' positive' : ' negative') : ''}`}>
-                <strong>鏀剁泭</strong>
+                <strong>绝对收益</strong>
                 <span>{pnlText}</span>
             </span>
             <span className="smd-pos-card-metric">
-                <strong>杩愯</strong>
+                <strong>运行时间</strong>
                 <span>{runningText}</span>
             </span>
         </div>

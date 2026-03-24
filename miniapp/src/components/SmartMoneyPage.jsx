@@ -499,11 +499,11 @@ function PositionPreviewMetrics({ position, preview, compact = false }) {
                     ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
                     : 'border-red-500/20 bg-red-500/10 text-red-300'
                 : 'border-white/[0.05] bg-black/20 text-zinc-300'}`}>
-                <strong className="font-semibold text-zinc-100">收益</strong>
+                <strong className="font-semibold text-zinc-100">绝对收益</strong>
                 <span>{pnlText}</span>
             </span>
             <span className="inline-flex items-center gap-1 rounded-full border border-white/[0.05] bg-black/20 px-2.5 py-1 text-[10px] text-zinc-300">
-                <strong className="font-semibold text-zinc-100">运行</strong>
+                <strong className="font-semibold text-zinc-100">运行时间</strong>
                 <span>{runningText}</span>
             </span>
         </div>
