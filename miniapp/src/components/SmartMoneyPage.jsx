@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
     Eye, Wallet, Settings, Search, Plus, ExternalLink, X, Check,
     ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Flame, Pencil,
@@ -11,6 +11,7 @@ import {
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig,
 } from '../lib/smartMoneyApi';
 import { getBrandTheme } from '../lib/brand';
+import { formatDurationFrom } from '../lib/time';
 import FlashIcon from './FlashIcon.jsx';
 import PositionCard from './PositionCard.jsx';
 import uniswapIcon from '../image/uniswap.svg';
@@ -164,6 +165,108 @@ function formatRangePercentPlain(value) {
 }
 
 const POOL_CARD_RANGE_LIMIT = 5;
+const POSITION_PREVIEW_STALE_MS = 30000;
+const POSITION_PREVIEW_BATCH_SIZE = 4;
+const USD_PREVIEW_FORMATTER = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+});
+
+function getPositionSelectionKey(position) {
+    const positionRef = String(position?.position_ref || '').trim();
+    if (positionRef) return positionRef;
+    const id = String(position?.id || '').trim();
+    if (id) return id;
+    const wallet = String(position?.wallet_address || '').trim().toLowerCase();
+    const pool = String(position?.pool_address || '').trim().toLowerCase();
+    const nft = String(position?.nft_token_id || '').trim();
+    return [wallet, pool, nft].filter(Boolean).join(':');
+}
+
+function formatPreviewUsd(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '--';
+    return USD_PREVIEW_FORMATTER.format(num);
+}
+
+function formatSignedPreviewUsd(value, hasValue) {
+    const num = Number(value);
+    if (!hasValue || !Number.isFinite(num)) return '--';
+    const text = formatPreviewUsd(num);
+    return num > 0 ? `+${text}` : text;
+}
+
+function useSmartMoneyPositionPreviewMap(apiBaseUrl, positions) {
+    const [previewMap, setPreviewMap] = useState({});
+    const previewRef = useRef(previewMap);
+
+    useEffect(() => {
+        previewRef.current = previewMap;
+    }, [previewMap]);
+
+    useEffect(() => {
+        const rows = Array.isArray(positions) ? positions : [];
+        if (!apiBaseUrl || rows.length === 0) return undefined;
+
+        const now = Date.now();
+        const pending = rows.filter((position) => {
+            const key = getPositionSelectionKey(position);
+            if (!key) return false;
+            const cached = previewRef.current[key];
+            return !cached || now - Number(cached.fetchedAt || 0) >= POSITION_PREVIEW_STALE_MS;
+        });
+        if (pending.length === 0) return undefined;
+
+        let cancelled = false;
+
+        const loadPreview = async (position) => {
+            const key = getPositionSelectionKey(position);
+            if (!key) return;
+            try {
+                const data = await fetchSMPositionDetail({
+                    apiBaseUrl,
+                    positionRef: position.position_ref,
+                    positionId: position.id,
+                });
+                if (cancelled) return;
+                setPreviewMap((prev) => ({
+                    ...prev,
+                    [key]: {
+                        fetchedAt: Date.now(),
+                        feeUsd: Number(data?.totals?.fee_usd ?? 0),
+                        absolutePnlUsd: Number(data?.absolute_pnl_usd ?? 0),
+                        hasPnl: Boolean(data?.has_pnl) && Number.isFinite(Number(data?.absolute_pnl_usd ?? 0)),
+                        runningSince: String(data?.running_since || position?.opened_at || '').trim(),
+                    },
+                }));
+            } catch (error) {
+                if (cancelled) return;
+                setPreviewMap((prev) => ({
+                    ...prev,
+                    [key]: {
+                        ...(prev[key] || {}),
+                        fetchedAt: Date.now(),
+                        runningSince: String(prev[key]?.runningSince || position?.opened_at || '').trim(),
+                    },
+                }));
+            }
+        };
+
+        (async () => {
+            for (let index = 0; index < pending.length && !cancelled; index += POSITION_PREVIEW_BATCH_SIZE) {
+                const batch = pending.slice(index, index + POSITION_PREVIEW_BATCH_SIZE);
+                await Promise.all(batch.map((position) => loadPreview(position)));
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [apiBaseUrl, positions]);
+
+    return previewMap;
+}
 
 function getPoolCardRangeGroups(pool) {
     const groups = Array.isArray(pool?.range_groups)
@@ -380,7 +483,34 @@ function MiniMetric({ label, value }) {
     );
 }
 
-function SmartMoneyPositionDetailModal({ apiBaseUrl, position, brand, onClose }) {
+function PositionPreviewMetrics({ position, preview, compact = false }) {
+    const runningText = formatDurationFrom(preview?.runningSince || position?.opened_at) || '--';
+    const feeText = Number.isFinite(Number(preview?.feeUsd)) ? formatPreviewUsd(preview.feeUsd) : '--';
+    const pnlText = formatSignedPreviewUsd(preview?.absolutePnlUsd, Boolean(preview?.hasPnl));
+
+    return (
+        <div className={`mt-2 flex flex-wrap gap-2 ${compact ? 'pt-2 border-t border-white/[0.05]' : ''}`}>
+            <span className="inline-flex items-center gap-1 rounded-full border border-white/[0.05] bg-black/20 px-2.5 py-1 text-[10px] text-zinc-300">
+                <strong className="font-semibold text-zinc-100">手续费</strong>
+                <span>{feeText}</span>
+            </span>
+            <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] ${preview?.hasPnl
+                ? Number(preview?.absolutePnlUsd || 0) >= 0
+                    ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+                    : 'border-red-500/20 bg-red-500/10 text-red-300'
+                : 'border-white/[0.05] bg-black/20 text-zinc-300'}`}>
+                <strong className="font-semibold text-zinc-100">收益</strong>
+                <span>{pnlText}</span>
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-full border border-white/[0.05] bg-black/20 px-2.5 py-1 text-[10px] text-zinc-300">
+                <strong className="font-semibold text-zinc-100">运行</strong>
+                <span>{runningText}</span>
+            </span>
+        </div>
+    );
+}
+
+function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, brand, onClose }) {
     const [detail, setDetail] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -433,8 +563,7 @@ function SmartMoneyPositionDetailModal({ apiBaseUrl, position, brand, onClose })
     if (!position) return null;
 
     return (
-        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/70 p-3 sm:items-center" onClick={onClose}>
-            <div className="w-full max-w-2xl rounded-[30px] border border-white/[0.05] bg-zinc-950/95 p-3 shadow-[0_30px_100px_-40px_rgba(0,0,0,0.98)]" onClick={(event) => event.stopPropagation()}>
+        <div className="mt-3 rounded-[28px] border border-white/[0.05] bg-zinc-950/82 p-3 shadow-[0_24px_80px_-42px_rgba(0,0,0,0.95)]">
                 <div className="mb-3 flex items-start justify-between gap-3 px-1">
                     <div>
                         <div className="text-base font-semibold text-zinc-100">聪明钱实时仓位</div>
@@ -476,7 +605,6 @@ function SmartMoneyPositionDetailModal({ apiBaseUrl, position, brand, onClose })
                         allowTaskActions={false}
                     />
                 ) : null}
-            </div>
         </div>
     );
 }
@@ -785,6 +913,7 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
     const [status, setStatus] = useState('open');
     const [loading, setLoading] = useState(true);
     const [selectedPosition, setSelectedPosition] = useState(null);
+    const positionPreviews = useSmartMoneyPositionPreviewMap(apiBaseUrl, positions);
 
     useEffect(() => {
         fetchSMPoolStats({ apiBaseUrl, poolAddress: pool.pool_address }).then(setPoolStats).catch(() => {});
@@ -797,6 +926,13 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
             .catch(() => {})
             .finally(() => setLoading(false));
     }, [apiBaseUrl, pool.pool_address, status]);
+
+    useEffect(() => {
+        if (!selectedPosition) return;
+        const selectedKey = getPositionSelectionKey(selectedPosition);
+        if (positions.some((pos) => getPositionSelectionKey(pos) === selectedKey)) return;
+        setSelectedPosition(null);
+    }, [positions, selectedPosition]);
 
     return (
         <div>
@@ -925,12 +1061,16 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
                                     </a>
                                 ) : null}
                             </div>
+                            <PositionPreviewMetrics
+                                position={pos}
+                                preview={positionPreviews[getPositionSelectionKey(pos)]}
+                            />
                         </div>
                     ))}
                 </div>
             )}
             {selectedPosition ? (
-                <SmartMoneyPositionDetailModal
+                <SmartMoneyPositionDetailPanel
                     apiBaseUrl={apiBaseUrl}
                     position={selectedPosition}
                     brand={brand}
@@ -1155,6 +1295,7 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
     const [status, setStatus] = useState('open');
     const [loading, setLoading] = useState(true);
     const [selectedPosition, setSelectedPosition] = useState(null);
+    const positionPreviews = useSmartMoneyPositionPreviewMap(apiBaseUrl, positions);
 
     useEffect(() => {
         fetchSMStats({ apiBaseUrl, address: walletAddress }).then(setWalletInfo).catch(() => {});
@@ -1167,6 +1308,13 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
             .catch(() => {})
             .finally(() => setLoading(false));
     }, [apiBaseUrl, walletAddress, status]);
+
+    useEffect(() => {
+        if (!selectedPosition) return;
+        const selectedKey = getPositionSelectionKey(selectedPosition);
+        if (positions.some((pos) => getPositionSelectionKey(pos) === selectedKey)) return;
+        setSelectedPosition(null);
+    }, [positions, selectedPosition]);
 
     // Group positions by pool
     const poolGroups = useMemo(() => {
@@ -1271,6 +1419,7 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
                             key={group.pool_address}
                             group={group}
                             brand={brand}
+                            positionPreviews={positionPreviews}
                             onOpenPositionDetail={setSelectedPosition}
                             onSelectPool={() => onSelectPool({
                                 pool_address: group.pool_address,
@@ -1288,7 +1437,7 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
                 </div>
             )}
             {selectedPosition ? (
-                <SmartMoneyPositionDetailModal
+                <SmartMoneyPositionDetailPanel
                     apiBaseUrl={apiBaseUrl}
                     position={selectedPosition}
                     brand={brand}
@@ -1299,7 +1448,7 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
     );
 }
 
-function PoolGroupCard({ group, onSelectPool, onOpenPositionDetail, brand }) {
+function PoolGroupCard({ group, onSelectPool, onOpenPositionDetail, brand, positionPreviews }) {
     const [collapsed, setCollapsed] = useState(!group.hasOpen);
     const openCount = group.positions.filter(p => p.status === 'open').length;
     const closedCount = group.positions.filter(p => p.status === 'closed').length;
@@ -1374,6 +1523,11 @@ function PoolGroupCard({ group, onSelectPool, onOpenPositionDetail, brand }) {
                                     </a>
                                 ) : null}
                             </div>
+                            <PositionPreviewMetrics
+                                position={pos}
+                                preview={positionPreviews?.[getPositionSelectionKey(pos)]}
+                                compact
+                            />
                         </div>
                     ))}
                 </div>

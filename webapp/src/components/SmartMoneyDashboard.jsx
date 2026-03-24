@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+﻿import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
     Eye, Wallet, Settings, Search, Plus, ExternalLink, X, Check,
     ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Brain, Flame, Pencil,
@@ -9,7 +9,7 @@ import {
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig,
 } from '../smartMoneyApi';
-import { compactPrice, computePriceRange, formatNumber, formatUsd, shortAddress } from '../utils';
+import { compactPrice, computePriceRange, formatDuration, formatNumber, formatUsd, shortAddress } from '../utils';
 import uniswapLogo from '../img/uniswap.svg';
 import pancakeLogo from '../img/pancake.svg';
 import flashIcon from '../img/flash.svg';
@@ -54,7 +54,7 @@ function getPairLabel(value) {
     if (left && right) return `${left}/${right}`;
     if (left) return left;
     if (right) return right;
-    return '未识别交易对';
+    return '鏈瘑鍒氦鏄撳';
 }
 
 function getPoolIdentifier(value) {
@@ -91,7 +91,7 @@ function formatFeeTier(fee) {
 
 function formatUSDCompact(value) {
     const num = Number(value);
-    if (!Number.isFinite(num) || num <= 0) return '—';
+    if (!Number.isFinite(num) || num <= 0) return '--';
     const abs = Math.abs(num);
     if (abs >= 1000000) return `$${(num / 1000000).toFixed(abs >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M`;
     if (abs >= 1000) return `$${(num / 1000).toFixed(abs >= 10000 ? 0 : 1).replace(/\.0$/, '')}K`;
@@ -102,10 +102,10 @@ function formatUSDCompact(value) {
 
 function formatRangePercent(value) {
     const num = Number(value);
-    if (!Number.isFinite(num) || num <= 0) return '—';
-    if (num >= 100) return `±${Math.round(num)}%`;
-    if (num >= 10) return `±${num.toFixed(1).replace(/\.0$/, '')}%`;
-    return `±${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
+    if (!Number.isFinite(num) || num <= 0) return '--';
+    if (num >= 100) return `卤${Math.round(num)}%`;
+    if (num >= 10) return `卤${num.toFixed(1).replace(/\.0$/, '')}%`;
+    return `卤${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
 }
 
 function formatRangePercentPlain(value) {
@@ -117,6 +117,97 @@ function formatRangePercentPlain(value) {
 }
 
 const POOL_CARD_RANGE_LIMIT = 5;
+const POSITION_PREVIEW_STALE_MS = 30000;
+const POSITION_PREVIEW_BATCH_SIZE = 4;
+
+function getPositionSelectionKey(position) {
+    const positionRef = String(position?.position_ref || '').trim();
+    if (positionRef) return positionRef;
+    const id = String(position?.id || '').trim();
+    if (id) return id;
+    const wallet = String(position?.wallet_address || '').trim().toLowerCase();
+    const pool = String(position?.pool_address || '').trim().toLowerCase();
+    const nft = String(position?.nft_token_id || '').trim();
+    return [wallet, pool, nft].filter(Boolean).join(':');
+}
+
+function formatSignedUsd(value, hasValue) {
+    const num = Number(value);
+    if (!hasValue || !Number.isFinite(num)) return '--';
+    const text = formatUsd(num);
+    return num > 0 ? `+${text}` : text;
+}
+
+function useSmartMoneyPositionPreviewMap(apiBaseUrl, positions) {
+    const [previewMap, setPreviewMap] = useState({});
+    const previewRef = useRef(previewMap);
+
+    useEffect(() => {
+        previewRef.current = previewMap;
+    }, [previewMap]);
+
+    useEffect(() => {
+        const rows = Array.isArray(positions) ? positions : [];
+        if (!apiBaseUrl || rows.length === 0) return undefined;
+
+        const now = Date.now();
+        const pending = rows.filter((position) => {
+            const key = getPositionSelectionKey(position);
+            if (!key) return false;
+            const cached = previewRef.current[key];
+            return !cached || now - Number(cached.fetchedAt || 0) >= POSITION_PREVIEW_STALE_MS;
+        });
+        if (pending.length === 0) return undefined;
+
+        let cancelled = false;
+
+        const loadPreview = async (position) => {
+            const key = getPositionSelectionKey(position);
+            if (!key) return;
+            try {
+                const data = await fetchSMPositionDetail({
+                    apiBaseUrl,
+                    positionRef: position.position_ref,
+                    positionId: position.id,
+                });
+                if (cancelled) return;
+                setPreviewMap((prev) => ({
+                    ...prev,
+                    [key]: {
+                        fetchedAt: Date.now(),
+                        feeUsd: Number(data?.totals?.fee_usd ?? 0),
+                        absolutePnlUsd: Number(data?.absolute_pnl_usd ?? 0),
+                        hasPnl: Boolean(data?.has_pnl) && Number.isFinite(Number(data?.absolute_pnl_usd ?? 0)),
+                        runningSince: String(data?.running_since || position?.opened_at || '').trim(),
+                    },
+                }));
+            } catch (error) {
+                if (cancelled) return;
+                setPreviewMap((prev) => ({
+                    ...prev,
+                    [key]: {
+                        ...(prev[key] || {}),
+                        fetchedAt: Date.now(),
+                        runningSince: String(prev[key]?.runningSince || position?.opened_at || '').trim(),
+                    },
+                }));
+            }
+        };
+
+        (async () => {
+            for (let index = 0; index < pending.length && !cancelled; index += POSITION_PREVIEW_BATCH_SIZE) {
+                const batch = pending.slice(index, index + POSITION_PREVIEW_BATCH_SIZE);
+                await Promise.all(batch.map((position) => loadPreview(position)));
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [apiBaseUrl, positions]);
+
+    return previewMap;
+}
 
 function getPoolCardRangeGroups(pool) {
     const groups = Array.isArray(pool?.range_groups)
@@ -139,7 +230,7 @@ function PoolCardRangeSummary({ pool }) {
                 <div key={`${pool?.pool_address || 'pool'}:${Number(group?.range_percent || 0)}:${index}`} className="smd-range-summary-line">
                     <span className="smd-range-summary-pct">{formatRangePercentPlain(group.range_percent)}</span>
                     {Math.max(0, Number(group?.position_count) || 0) > 1 ? (
-                        <span className="smd-range-summary-badge">{Number(group.position_count)}仓</span>
+                        <span className="smd-range-summary-badge">{Number(group.position_count)}个</span>
                     ) : null}
                     <span className="smd-range-summary-amount">{formatUSDCompact(group.total_amount_usd)}</span>
                 </div>
@@ -153,7 +244,7 @@ function PoolCardRangeSummary({ pool }) {
                         setExpanded((prev) => !prev);
                     }}
                 >
-                    {expanded ? '收起区间' : `展开全部区间${hiddenCount > 0 ? ` (+${hiddenCount})` : ''}`}
+                    {expanded ? '鏀惰捣鍖洪棿' : `灞曞紑鍏ㄩ儴鍖洪棿${hiddenCount > 0 ? ` (+${hiddenCount})` : ''}`}
                 </button>
             ) : null}
         </div>
@@ -170,10 +261,10 @@ function relativeTime(dateStr) {
     if (!dateStr) return '';
     const d = new Date(dateStr);
     const diff = (Date.now() - d.getTime()) / 1000;
-    if (diff < 60) return '刚刚';
+    if (diff < 60) return '鍒氬垰';
     if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`;
     if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`;
-    return `${Math.floor(diff / 86400)}天前`;
+    return `${Math.floor(diff / 86400)}澶╁墠`;
 }
 
 function CopyBtn({ text }) {
@@ -199,7 +290,7 @@ function CopyTinyBtn({ text }) {
             navigator.clipboard.writeText(text);
             setCopied(true);
             setTimeout(() => setCopied(false), 1200);
-        }} title="复制">
+        }} title="澶嶅埗">
             {copied ? <Check size={10} /> : <Copy size={10} />}
         </button>
     );
@@ -295,7 +386,7 @@ function StatCard({ label, value, color }) {
     return (
         <div className="smd-stat-card">
             <div className="smd-stat-label">{label}</div>
-            <div className={`smd-stat-value${color === 'red' ? ' red' : ''}`}>{value ?? '—'}</div>
+            <div className={`smd-stat-value${color === 'red' ? ' red' : ''}`}>{value ?? '--'}</div>
         </div>
     );
 }
@@ -366,7 +457,7 @@ function PriceRangeChart({ positions, currentPrice }) {
     );
 }
 
-function ConfirmDialog({ open, title, description, confirmLabel = '确认', busy = false, onConfirm, onCancel }) {
+function ConfirmDialog({ open, title, description, confirmLabel = '纭', busy = false, onConfirm, onCancel }) {
     if (!open) return null;
 
     return (
@@ -380,9 +471,9 @@ function ConfirmDialog({ open, title, description, confirmLabel = '确认', busy
                 </div>
                 <div className="smd-confirm-copy">{description}</div>
                 <div className="smd-modal-actions">
-                    <button type="button" onClick={onCancel} disabled={busy} className="smd-modal-cancel">取消</button>
+                    <button type="button" onClick={onCancel} disabled={busy} className="smd-modal-cancel">鍙栨秷</button>
                     <button type="button" onClick={onConfirm} disabled={busy} className="smd-modal-submit">
-                        {busy ? '处理中...' : confirmLabel}
+                        {busy ? '澶勭悊涓?..' : confirmLabel}
                     </button>
                 </div>
             </div>
@@ -390,7 +481,30 @@ function ConfirmDialog({ open, title, description, confirmLabel = '确认', busy
     );
 }
 
-function SmartMoneyPositionDetailModal({ apiBaseUrl, position, onClose }) {
+function PositionPreviewMetrics({ position, preview, compact = false }) {
+    const runningText = formatDuration(preview?.runningSince || position?.opened_at) || '--';
+    const feeText = Number.isFinite(Number(preview?.feeUsd)) ? formatUsd(preview.feeUsd) : '--';
+    const pnlText = formatSignedUsd(preview?.absolutePnlUsd, Boolean(preview?.hasPnl));
+
+    return (
+        <div className={`smd-pos-card-preview${compact ? ' compact' : ''}`}>
+            <span className="smd-pos-card-metric">
+                <strong>手续费</strong>
+                <span>{feeText}</span>
+            </span>
+            <span className={`smd-pos-card-metric${preview?.hasPnl ? (Number(preview?.absolutePnlUsd || 0) >= 0 ? ' positive' : ' negative') : ''}`}>
+                <strong>鏀剁泭</strong>
+                <span>{pnlText}</span>
+            </span>
+            <span className="smd-pos-card-metric">
+                <strong>杩愯</strong>
+                <span>{runningText}</span>
+            </span>
+        </div>
+    );
+}
+
+function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
     const [detail, setDetail] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -453,13 +567,21 @@ function SmartMoneyPositionDetailModal({ apiBaseUrl, position, onClose }) {
     const priceRange = detail ? computePriceRange(detail) : null;
 
     return (
-        <div className="smd-modal-overlay" onClick={onClose}>
-            <div className="smd-modal" style={{ maxWidth: 980, width: 'min(980px, 92vw)' }} onClick={(event) => event.stopPropagation()}>
-                <div className="smd-modal-header">
+        <div className="smd-pos-inline-panel">
+            <div className="smd-pos-inline-panel-head">
+                <div className="smd-pos-inline-panel-head-main">
+                    <div className="smd-pos-inline-panel-title">Smart Money 仓位详情</div>
+                    <div className="smd-pos-inline-panel-meta">
+                        {detail?.updated_at ? `鏇存柊 ${relativeTime(detail.updated_at)}` : '閾句笂瀹炴椂鍒锋柊'}
+                    </div>
+                </div>
+                <button type="button" onClick={onClose} className="smd-pos-inline-panel-close">
+                    <X size={16} />
+                </button>
                     <div>
-                        <h3 className="smd-modal-title">聪明钱实时仓位</h3>
+                        <h3 className="smd-modal-title">Smart Money 仓位详情</h3>
                         <div className="smd-confirm-copy" style={{ padding: 0, marginTop: 4 }}>
-                            {detail?.updated_at ? `更新 ${relativeTime(detail.updated_at)}` : '链上实时刷新'}
+                            {detail?.updated_at ? `鏇存柊 ${relativeTime(detail.updated_at)}` : '閾句笂瀹炴椂鍒锋柊'}
                         </div>
                     </div>
                     <button type="button" onClick={onClose} className="smd-modal-close">
@@ -475,9 +597,9 @@ function SmartMoneyPositionDetailModal({ apiBaseUrl, position, onClose }) {
                 ) : null}
 
                 {loading && !detail ? (
-                    <div className="smd-loading">读取链上仓位中...</div>
+                    <div className="smd-loading">璇诲彇閾句笂浠撲綅涓?..</div>
                 ) : detail ? (
-                    <div className="position-card">
+                    <div className="pos-card sm-position-card">
                         <div className="pos-card-header">
                             <div className="pos-card-main">
                                 <div className="pos-card-title-wrap">
@@ -494,7 +616,7 @@ function SmartMoneyPositionDetailModal({ apiBaseUrl, position, onClose }) {
                                             <span className="status-dot" />
                                             {statusLabel}
                                         </span>
-                                        <span className="pos-wallet-chip">钱包 {shortAddress(detail?.wallet_address || '')}</span>
+                                        <span className="pos-wallet-chip">閽卞寘 {shortAddress(detail?.wallet_address || '')}</span>
                                         <span className={`range-pill ${detail?.in_range ? 'in' : 'out'}`}>
                                             {detail?.in_range ? 'In Range' : 'Out'}
                                         </span>
@@ -539,7 +661,7 @@ function SmartMoneyPositionDetailModal({ apiBaseUrl, position, onClose }) {
                                     </div>
                                 ))}
                                 <div className="pos-token-foot">
-                                    <span>小计</span>
+                                    <span>灏忚</span>
                                     <span>{formatUsd(detail?.totals?.wallet_usd)}</span>
                                     <span>{formatUsd(detail?.totals?.position_usd)}</span>
                                     <span className="fee">{formatUsd(detail?.totals?.fee_usd)}</span>
@@ -577,7 +699,6 @@ function SmartMoneyPositionDetailModal({ apiBaseUrl, position, onClose }) {
                         ) : null}
                     </div>
                 ) : null}
-            </div>
         </div>
     );
 }
@@ -634,7 +755,7 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
             <div className="smd-search-row">
                 <div className="smd-search-input">
                     <Search size={14} />
-                    <input placeholder="搜索池子..." value={search} onChange={e => setSearch(e.target.value)} />
+                    <input placeholder="鎼滅储姹犲瓙..." value={search} onChange={e => setSearch(e.target.value)} />
                 </div>
                 <div className="smd-filter-group">
                     {['all', 'pancake_v3', 'uniswap_v3', 'uniswap_v4'].map(p => {
@@ -642,13 +763,13 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
                         return (
                             <button key={p} className={`smd-filter-btn${proto === p ? ' active' : ''}`} onClick={() => setProto(p)}>
                                 {info && <img src={info.icon} alt="" className="smd-proto-img" />}
-                                {p === 'all' ? '全部' : info?.version || p}
+                                {p === 'all' ? '鍏ㄩ儴' : info?.version || p}
                             </button>
                         );
                     })}
                 </div>
             </div>
-            {loading ? <div className="smd-loading">加载中...</div> : filtered.length === 0 ? (
+            {loading ? <div className="smd-loading">鍔犺浇涓?..</div> : filtered.length === 0 ? (
                 <div className="smd-empty">暂无活跃仓位的池子</div>
             ) : (
                 <div className="smd-pool-cards">
@@ -692,14 +813,14 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
                                         }}
                                     >
                                         <img src={flashIcon} alt="" className="open-lightning-icon" aria-hidden="true" />
-                                        跟单
+                                        璺熷崟
                                     </button>
                                 ) : null}
                             </div>
                             <div className="smd-pool-card-foot">
-                                <span>{p.wallet_count} 钱包</span>
-                                <span className="smd-dot-sep">·</span>
-                                <span>{p.open_position_count} 仓位</span>
+                                <span>{p.wallet_count} 閽卞寘</span>
+                                <span className="smd-dot-sep">路</span>
+                                <span>{p.open_position_count} 浠撲綅</span>
                                 <span className="smd-pool-card-time">
                                     <span className={`smd-status-dot ${p.latest_event_at && (Date.now() - new Date(p.latest_event_at).getTime()) < 120000 ? 'green' : 'muted'}`}>
                                         {relativeTime(p.latest_event_at)}
@@ -713,7 +834,7 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
                                         onOpenDetail?.(p);
                                     }}
                                 >
-                                    详情 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
+                                    璇︽儏 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
                                 </button>
                             </div>
                             </div>
@@ -728,8 +849,8 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
 function RangeSummary({ position }) {
     const isClosed = position.status === 'closed';
     const rangeText = position.price_lower && position.price_upper
-        ? `${position.price_lower} – ${position.price_upper}`
-        : '—';
+        ? `${position.price_lower} - ${position.price_upper}`
+        : '--';
 
     return (
         <div className="smd-range-cell">
@@ -752,6 +873,7 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
         () => getRefreshIntervalMs(refreshInterval),
         [refreshInterval]
     );
+    const positionPreviews = useSmartMoneyPositionPreviewMap(apiBaseUrl, positions);
 
     const loadStats = useCallback(() => (
         fetchSMPoolStats({ apiBaseUrl, poolAddress: pool.pool_address }).then(setStats).catch(() => {})
@@ -783,11 +905,18 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
         return () => clearInterval(timer);
     }, [loadPositions, loadStats, refreshIntervalMs]);
 
+    useEffect(() => {
+        if (!selectedPosition) return;
+        const selectedKey = getPositionSelectionKey(selectedPosition);
+        if (positions.some((pos) => getPositionSelectionKey(pos) === selectedKey)) return;
+        setSelectedPosition(null);
+    }, [positions, selectedPosition]);
+
     return (
         <div>
             <button onClick={onBack} className="smd-back-btn">
                 <ChevronLeft size={14} />
-                <span>返回池子列表</span>
+                <span>杩斿洖姹犲瓙鍒楄〃</span>
             </button>
             <div className="smd-detail-card">
                 <div className="smd-detail-header">
@@ -806,7 +935,7 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
                                 rel="noopener noreferrer"
                                 className="smd-link"
                             >
-                                查看池子 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
+                                鏌ョ湅姹犲瓙 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
                             </a>
                         </div>
                     </div>
@@ -815,7 +944,7 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
 
             {stats && (
                 <div className="smd-stats-grid smd-stats-grid--pool">
-                    <StatCard label="当前价格" value={stats.current_price || '—'} />
+                    <StatCard label="当前价格" value={stats.current_price || '--'} />
                     <StatCard label="钱包数" value={stats.wallet_count} />
                     <StatCard label="持仓笔数" value={stats.open_position_count} />
                     <StatCard label="今日关闭" value={stats.closed_today_count} color="red" />
@@ -825,7 +954,7 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
             <PriceRangeChart positions={positions} currentPrice={stats?.current_price} />
 
             <div className="smd-section-header">
-                <h4 className="smd-section-title">仓位列表</h4>
+                <h4 className="smd-section-title">浠撲綅鍒楄〃</h4>
                 <div className="smd-filter-group">
                     {['open', 'all'].map(s => (
                         <button key={s} className={`smd-filter-btn${status === s ? ' active' : ''}`} onClick={() => setStatus(s)}>
@@ -835,8 +964,8 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
                 </div>
             </div>
 
-            {loading ? <div className="smd-loading">加载中...</div> : positions.length === 0 ? (
-                <div className="smd-empty">{status === 'open' ? '全部已关闭，切换到"全部"查看' : '暂无仓位'}</div>
+            {loading ? <div className="smd-loading">鍔犺浇涓?..</div> : positions.length === 0 ? (
+                <div className="smd-empty">{status === 'open' ? '当前没有进行中的仓位，切换到“全部”查看历史' : '暂无仓位'}</div>
             ) : (
                 <div className="smd-pos-list">
                     {positions.map(pos => (
@@ -857,8 +986,8 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
                                 </div>
                             </div>
                             <div className="smd-pos-card-range smd-pos-card-range--detail">
-                                <span className={`smd-pos-card-prices${pos.status === 'closed' ? ' is-closed' : ''}`}>
-                                    {pos.price_lower && pos.price_upper ? `${pos.price_lower} – ${pos.price_upper}` : '—'}
+                                <span className={`smd-pos-card-prices${pos.status === 'closed' ? ' is-closed' : ''}`}> 
+                                    {pos.price_lower && pos.price_upper ? `${pos.price_lower} - ${pos.price_upper}` : '--'}
                                 </span>
                                 <div className="smd-pos-card-meta">
                                     <span>NFT #{pos.nft_token_id || '--'}</span>
@@ -872,16 +1001,20 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
                                         className="smd-link smd-pos-card-link"
                                         onClick={(event) => event.stopPropagation()}
                                     >
-                                        查看交易 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
+                                        鏌ョ湅浜ゆ槗 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
                                     </a>
                                 ) : null}
                             </div>
+                            <PositionPreviewMetrics
+                                position={pos}
+                                preview={positionPreviews[getPositionSelectionKey(pos)]}
+                            />
                         </div>
                     ))}
                 </div>
             )}
             {selectedPosition ? (
-                <SmartMoneyPositionDetailModal
+                <SmartMoneyPositionDetailPanel
                     apiBaseUrl={apiBaseUrl}
                     position={selectedPosition}
                     onClose={() => setSelectedPosition(null)}
@@ -934,7 +1067,7 @@ function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
             await action();
             await load();
         } catch (err) {
-            setActionError(String(err?.message || err || '操作失败'));
+            setActionError(String(err?.message || err || '鎿嶄綔澶辫触'));
         } finally {
             setBusyKey('');
         }
@@ -951,7 +1084,7 @@ function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
             setConfirmState(null);
         } catch (err) {
             setConfirmState(null);
-            setActionError(String(err?.message || err || '操作失败'));
+            setActionError(String(err?.message || err || '鎿嶄綔澶辫触'));
         } finally {
             setBusyKey('');
         }
@@ -962,25 +1095,25 @@ function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
             <div className="smd-search-row">
                 <div className="smd-search-input">
                     <Search size={14} />
-                    <input placeholder="搜索钱包..." value={search} onChange={e => setSearch(e.target.value)} />
+                    <input placeholder="鎼滅储閽卞寘..." value={search} onChange={e => setSearch(e.target.value)} />
                 </div>
                 <button onClick={onAdd} className="smd-add-btn">
-                    <Plus size={14} /> 添加钱包
+                    <Plus size={14} /> 娣诲姞閽卞寘
                 </button>
             </div>
             {actionError ? <div className="smd-inline-error">{actionError}</div> : null}
-            {loading ? <div className="smd-loading">加载中...</div> : filtered.length === 0 ? (
+            {loading ? <div className="smd-loading">鍔犺浇涓?..</div> : filtered.length === 0 ? (
                 <div className="smd-empty">暂无监控钱包，点击"添加钱包"开始</div>
             ) : (
                 <div className="smd-table-wrap">
                 <table className="smd-table smd-table--wallets">
                     <thead>
                     <tr>
-                        <th>钱包</th>
+                        <th>閽卞寘</th>
                         <th className="center">状态</th>
-                        <th className="right">持仓</th>
-                        <th className="right">池子</th>
-                        <th className="right">操作</th>
+                        <th className="right">鎸佷粨</th>
+                        <th className="right">姹犲瓙</th>
+                        <th className="right">鎿嶄綔</th>
                     </tr>
                     </thead>
                     <tbody>
@@ -1011,8 +1144,8 @@ function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
                                         setActionError('');
                                         setConfirmState({
                                             key: `wallet-delete:${w.address}`,
-                                            title: '删除钱包',
-                                            description: `确认删除钱包 ${shortAddr(w.address)} 吗？`,
+                                            title: '鍒犻櫎閽卞寘',
+                                            description: `纭鍒犻櫎閽卞寘 ${shortAddr(w.address)} 鍚楋紵`,
                                             action: () => deleteSMWallet({ apiBaseUrl, address: w.address }),
                                         });
                                     }}><Trash2 size={14} /></button>
@@ -1026,9 +1159,9 @@ function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
             )}
             <ConfirmDialog
                 open={Boolean(confirmState)}
-                title={confirmState?.title || '确认操作'}
+                title={confirmState?.title || '纭鎿嶄綔'}
                 description={confirmState?.description || ''}
-                confirmLabel="删除"
+                confirmLabel="鍒犻櫎"
                 busy={busyKey.startsWith('wallet-delete:')}
                 onCancel={() => { if (!busyKey.startsWith('wallet-delete:')) setConfirmState(null); }}
                 onConfirm={confirmDelete}
@@ -1057,6 +1190,7 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
         () => getRefreshIntervalMs(refreshInterval),
         [refreshInterval]
     );
+    const positionPreviews = useSmartMoneyPositionPreviewMap(apiBaseUrl, positions);
 
     const loadInfo = useCallback(() => (
         fetchSMStats({ apiBaseUrl, address: addr }).then(setInfo).catch(() => {})
@@ -1088,6 +1222,13 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
         return () => clearInterval(timer);
     }, [loadInfo, loadPositions, refreshIntervalMs]);
 
+    useEffect(() => {
+        if (!selectedPosition) return;
+        const selectedKey = getPositionSelectionKey(selectedPosition);
+        if (positions.some((pos) => getPositionSelectionKey(pos) === selectedKey)) return;
+        setSelectedPosition(null);
+    }, [positions, selectedPosition]);
+
     const groups = useMemo(() => {
         const m = {};
         (positions || []).forEach(p => {
@@ -1114,22 +1255,22 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
         <div>
             <button onClick={onBack} className="smd-back-btn">
                 <ChevronLeft size={14} />
-                <span>返回钱包列表</span>
+                <span>杩斿洖閽卞寘鍒楄〃</span>
             </button>
             {info && (
                 <div className="smd-detail-card" style={{ marginBottom: 16 }}>
                     <div className="smd-detail-header">
                         <WalletAvatar address={addr} color={info.color || '#7F77DD'} size={72} />
                         <div className="smd-detail-copy">
-                            <h3 className="smd-detail-title">{info.label || `钱包 ${tailAddr(addr)}`}</h3>
-                            <CompactIdentifier value={addr} label="钱包" />
+                            <h3 className="smd-detail-title">{info.label || `閽卞寘 ${tailAddr(addr)}`}</h3>
+                            <CompactIdentifier value={addr} label="閽卞寘" />
                         </div>
                     </div>
                     <div className="smd-stats-grid">
-                        <StatCard label="持仓笔数" value={info.open_position_count} />
-                        <StatCard label="活跃池子" value={info.active_pool_count} />
-                        <StatCard label="总添加次数" value={info.total_add_count} />
-                        <StatCard label="总移除次数" value={info.total_remove_count} />
+                        <StatCard label="鎸佷粨绗旀暟" value={info.open_position_count} />
+                        <StatCard label="娲昏穬姹犲瓙" value={info.active_pool_count} />
+                        <StatCard label="总加仓次数" value={info.total_add_count} />
+                        <StatCard label="总减仓次数" value={info.total_remove_count} />
                     </div>
                 </div>
             )}
@@ -1145,8 +1286,8 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
                 </div>
             </div>
 
-            {loading ? <div className="smd-loading">加载中...</div> : groups.length === 0 ? (
-                <div className="smd-empty">暂未检测到 LP 活动</div>
+            {loading ? <div className="smd-loading">鍔犺浇涓?..</div> : groups.length === 0 ? (
+                <div className="smd-empty">鏆傛湭妫€娴嬪埌 LP 娲诲姩</div>
             ) : groups.map(g => (
                 <div key={g.pool_address} className={`smd-pool-group${!g.hasOpen ? ' dim' : ''}`}>
                     <div className="smd-pool-group-header">
@@ -1162,23 +1303,30 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
                         </div>
                         <button className="smd-link" onClick={() => onSelectPool({
                             pool_address: g.pool_address, token0_symbol: g.token0_symbol, token1_symbol: g.token1_symbol, trading_pair: g.trading_pair, display_token_address: g.display_token_address, display_token_symbol: g.display_token_symbol, display_token_logo_url: g.display_token_logo_url, fee_tier: g.fee_tier, protocol: g.protocol,
-                        })}>池子详情 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} /></button>
+                        })}>姹犲瓙璇︽儏 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} /></button>
                     </div>
                     <div className="smd-pos-list smd-pos-list--compact">
                         {g.positions.map(pos => (
                             <div key={pos.id} className={`smd-pos-card smd-pos-card--compact${pos.status === 'closed' ? ' closed' : ''}`} onClick={() => setSelectedPosition(pos)}>
+                                <div className="smd-pos-card-compact-main">
                                 <span className="smd-pos-card-amount">{formatUSDCompact(pos.position_amount_usd)}</span>
-                                <span className={`smd-pos-card-prices${pos.status === 'closed' ? ' is-closed' : ''}`}>
-                                    {pos.price_lower && pos.price_upper ? `${pos.price_lower} – ${pos.price_upper}` : '—'}
+                                <span className={`smd-pos-card-prices${pos.status === 'closed' ? ' is-closed' : ''}`}> 
+                                    {pos.price_lower && pos.price_upper ? `${pos.price_lower} - ${pos.price_upper}` : '--'}
                                 </span>
                                 {pos.range_percent > 0 && <span className="smd-pos-card-pct">{formatRangePercent(pos.range_percent)}</span>}
+                                </div>
+                                <PositionPreviewMetrics
+                                    position={pos}
+                                    preview={positionPreviews[getPositionSelectionKey(pos)]}
+                                    compact
+                                />
                             </div>
                         ))}
                     </div>
                 </div>
             ))}
             {selectedPosition ? (
-                <SmartMoneyPositionDetailModal
+                <SmartMoneyPositionDetailPanel
                     apiBaseUrl={apiBaseUrl}
                     position={selectedPosition}
                     onClose={() => setSelectedPosition(null)}
@@ -1224,7 +1372,7 @@ function GoldenDogPanel({ apiBaseUrl, initData }) {
         try {
             applyResponse(await fetchSMGoldenDogConfig({ apiBaseUrl, initData, chain: 'bsc' }));
         } catch (err) {
-            setError(String(err?.message || err || '加载失败'));
+            setError(String(err?.message || err || '鍔犺浇澶辫触'));
         } finally {
             setLoading(false);
         }
@@ -1280,7 +1428,7 @@ function GoldenDogPanel({ apiBaseUrl, initData }) {
             applyResponse(resp);
             setSavedAt('配置已保存');
         } catch (err) {
-            setError(String(err?.message || err || '保存失败'));
+            setError(String(err?.message || err || '淇濆瓨澶辫触'));
         } finally {
             setSaving(false);
         }
@@ -1312,7 +1460,7 @@ function GoldenDogPanel({ apiBaseUrl, initData }) {
                             <Flame size={18} />
                         </div>
                         <div style={{ minWidth: 0 }}>
-                            <div className="smd-section-title" style={{ marginBottom: 8 }}>金狗通知</div>
+                            <div className="smd-section-title" style={{ marginBottom: 8 }}>閲戠嫍閫氱煡</div>
                             <div className="smd-pool-card-badges">
                                 <Badge style={draft.enabled
                                     ? { borderColor: 'rgba(251, 191, 36, 0.2)', background: 'rgba(251, 191, 36, 0.12)', color: '#fde68a' }
@@ -1330,14 +1478,13 @@ function GoldenDogPanel({ apiBaseUrl, initData }) {
                             className={`smd-filter-btn${draft.enabled ? ' active' : ''}`}
                             onClick={() => setDraft((prev) => ({ ...prev, enabled: true }))}
                         >
-                            开启
-                        </button>
+                            寮€鍚?                        </button>
                         <button
                             type="button"
                             className={`smd-filter-btn${!draft.enabled ? ' active' : ''}`}
                             onClick={() => setDraft((prev) => ({ ...prev, enabled: false }))}
                         >
-                            关闭
+                            鍏抽棴
                         </button>
                     </div>
                 </div>
@@ -1345,14 +1492,13 @@ function GoldenDogPanel({ apiBaseUrl, initData }) {
                     <StatCard label="通知状态" value={draft.enabled ? '运行中' : '暂停'} />
                     <StatCard label="Bark 状态" value={barkStatusText} />
                     <StatCard label="钱包阈值" value={`${draft.min_wallets || '--'} 个`} />
-                    <StatCard label="统计窗口" value={`${draft.window_minutes || '--'} 分钟`} />
+                    <StatCard label="缁熻绐楀彛" value={`${draft.window_minutes || '--'} 鍒嗛挓`} />
                 </div>
             </div>
 
             {!hasInitData ? (
                 <div className="smd-inline-error">
-                    Web 端需要先登录 Telegram 才能保存提醒配置。Bark Key 继续复用全局配置，不在这里单独设置。
-                </div>
+                    Web 绔渶瑕佸厛鐧诲綍 Telegram 鎵嶈兘淇濆瓨鎻愰啋閰嶇疆銆侭ark Key 缁х画澶嶇敤鍏ㄥ眬閰嶇疆锛屼笉鍦ㄨ繖閲屽崟鐙缃€?                </div>
             ) : null}
             {error ? <div className="smd-inline-error">{error}</div> : null}
             {!error && savedAt ? (
@@ -1361,10 +1507,10 @@ function GoldenDogPanel({ apiBaseUrl, initData }) {
                 </div>
             ) : null}
 
-            {loading ? <div className="smd-loading">加载中...</div> : (
+            {loading ? <div className="smd-loading">鍔犺浇涓?..</div> : (
                 <div className="smd-add-form" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12, alignItems: 'end' }}>
                     <label style={{ display: 'grid', gap: 6 }}>
-                        <span className="muted">钱包数量</span>
+                        <span className="muted">閽卞寘鏁伴噺</span>
                         <input
                             type="number"
                             min="1"
@@ -1374,7 +1520,7 @@ function GoldenDogPanel({ apiBaseUrl, initData }) {
                         />
                     </label>
                     <label style={{ display: 'grid', gap: 6 }}>
-                        <span className="muted">统计窗口(分钟)</span>
+                        <span className="muted">缁熻绐楀彛(鍒嗛挓)</span>
                         <input
                             type="number"
                             min="1"
@@ -1384,7 +1530,7 @@ function GoldenDogPanel({ apiBaseUrl, initData }) {
                         />
                     </label>
                     <label style={{ display: 'grid', gap: 6 }}>
-                        <span className="muted">冷却时间(分钟)</span>
+                        <span className="muted">鍐峰嵈鏃堕棿(鍒嗛挓)</span>
                         <input
                             type="number"
                             min="0"
@@ -1399,7 +1545,7 @@ function GoldenDogPanel({ apiBaseUrl, initData }) {
                         onClick={handleSave}
                         style={{ gridColumn: '1 / -1' }}
                     >
-                        {saving ? '保存中...' : '保存金狗通知配置'}
+                        {saving ? '淇濆瓨涓?..' : '淇濆瓨閲戠嫍閫氱煡閰嶇疆'}
                     </button>
                 </div>
             )}
@@ -1427,7 +1573,7 @@ function SettingsPanel({ apiBaseUrl }) {
     useEffect(() => {
         setLoading(true);
         loadContracts()
-            .catch((err) => setActionError(String(err?.message || err || '加载失败')))
+            .catch((err) => setActionError(String(err?.message || err || '鍔犺浇澶辫触')))
             .finally(() => setLoading(false));
     }, [loadContracts]);
 
@@ -1438,7 +1584,7 @@ function SettingsPanel({ apiBaseUrl }) {
             await action();
             await refresh();
         } catch (err) {
-            setActionError(String(err?.message || err || '操作失败'));
+            setActionError(String(err?.message || err || '鎿嶄綔澶辫触'));
         } finally {
             setBusyKey('');
         }
@@ -1448,7 +1594,7 @@ function SettingsPanel({ apiBaseUrl }) {
         await runAction('add-contract', async () => {
             const addr = String(newAddr || '').trim();
             if (!isHexAddressValue(addr)) {
-                throw new Error('请输入合法的合约地址');
+                throw new Error('璇疯緭鍏ュ悎娉曠殑鍚堢害鍦板潃');
             }
             await addSMContract({ apiBaseUrl, contract_address: addr, description: newDesc });
             setShowAdd(false);
@@ -1468,7 +1614,7 @@ function SettingsPanel({ apiBaseUrl }) {
             setConfirmState(null);
         } catch (err) {
             setConfirmState(null);
-            setActionError(String(err?.message || err || '操作失败'));
+            setActionError(String(err?.message || err || '鎿嶄綔澶辫触'));
         } finally {
             setBusyKey('');
         }
@@ -1485,9 +1631,9 @@ function SettingsPanel({ apiBaseUrl }) {
     return (
         <div>
             <div className="smd-search-row">
-                <div className="smd-section-title">合约管理</div>
+                <div className="smd-section-title">鍚堢害绠＄悊</div>
                 <button type="button" onClick={() => setShowAdd(!showAdd)} className="smd-add-btn" style={{ marginLeft: 'auto' }}>
-                    <Plus size={14} /> 添加合约
+                    <Plus size={14} /> 娣诲姞鍚堢害
                 </button>
             </div>
 
@@ -1495,24 +1641,24 @@ function SettingsPanel({ apiBaseUrl }) {
 
             {showAdd && (
                 <div className="smd-add-form">
-                    <input placeholder="合约地址" value={newAddr} onChange={e => setNewAddr(e.target.value)} />
-                    <input className="w-sm" placeholder="描述" value={newDesc} onChange={e => setNewDesc(e.target.value)} />
+                    <input placeholder="鍚堢害鍦板潃" value={newAddr} onChange={e => setNewAddr(e.target.value)} />
+                    <input className="w-sm" placeholder="鎻忚堪" value={newDesc} onChange={e => setNewDesc(e.target.value)} />
                     <div className="smd-add-form-hint">只需要填写监控合约地址，添加后会直接扫描发往该地址的交易。</div>
                     <button type="button" disabled={addBusy} onClick={handleAddContract}>
-                        {addBusy ? '处理中...' : '添加'}
+                        {addBusy ? '澶勭悊涓?..' : '娣诲姞'}
                     </button>
                 </div>
             )}
 
-            {loading ? <div className="smd-loading">加载中...</div> : (
+            {loading ? <div className="smd-loading">鍔犺浇涓?..</div> : (
                 <div className="smd-table-wrap">
                 <table className="smd-table smd-table--settings">
                     <thead><tr>
-                        <th>地址</th>
-                        <th>描述</th>
+                        <th>鍦板潃</th>
+                        <th>鎻忚堪</th>
                         <th className="center">状态</th>
-                        <th className="right">已扫描至区块</th>
-                        <th className="right">操作</th>
+                        <th className="right">宸叉壂鎻忚嚦鍖哄潡</th>
+                        <th className="right">鎿嶄綔</th>
                     </tr></thead>
                     <tbody>
                     {contracts.map(c => (
@@ -1545,8 +1691,8 @@ function SettingsPanel({ apiBaseUrl }) {
                                         disabled={busyKey === `contract-delete:${c.contract_address}` || busyKey === `contract-toggle:${c.contract_address}`}
                                         onClick={() => openDeleteConfirm({
                                             key: `contract-delete:${c.contract_address}`,
-                                            title: '删除合约',
-                                            description: `确认删除合约 ${shortAddr(c.contract_address)} 吗？`,
+                                            title: '鍒犻櫎鍚堢害',
+                                            description: `纭鍒犻櫎鍚堢害 ${shortAddr(c.contract_address)} 鍚楋紵`,
                                             action: () => deleteSMContract({ apiBaseUrl, address: c.contract_address }),
                                             refresh: loadContracts,
                                         })}
@@ -1563,9 +1709,9 @@ function SettingsPanel({ apiBaseUrl }) {
             )}
             <ConfirmDialog
                 open={Boolean(confirmState)}
-                title={confirmState?.title || '确认操作'}
+                title={confirmState?.title || '纭鎿嶄綔'}
                 description={confirmState?.description || ''}
-                confirmLabel="删除"
+                confirmLabel="鍒犻櫎"
                 busy={deleteBusy}
                 onCancel={() => { if (!deleteBusy) setConfirmState(null); }}
                 onConfirm={confirmAction}
@@ -1608,7 +1754,7 @@ function EditWalletModal({ open, apiBaseUrl, wallet, onClose, onSaved }) {
             });
             await onSaved?.();
         } catch (err) {
-            setError(String(err?.message || err || '保存失败'));
+            setError(String(err?.message || err || '淇濆瓨澶辫触'));
         } finally {
             setSaving(false);
         }
@@ -1620,22 +1766,22 @@ function EditWalletModal({ open, apiBaseUrl, wallet, onClose, onSaved }) {
         <div className="smd-modal-overlay" onClick={saving ? undefined : onClose}>
             <div className="smd-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="smd-modal-header">
-                    <h3 className="smd-modal-title">编辑钱包</h3>
+                    <h3 className="smd-modal-title">缂栬緫閽卞寘</h3>
                     <button type="button" onClick={onClose} disabled={saving} className="smd-modal-close">
                         <X size={18} />
                     </button>
                 </div>
                 <div style={{ marginBottom: 12 }}>
-                    <CompactIdentifier value={wallet.address} label="钱包" />
+                    <CompactIdentifier value={wallet.address} label="閽卞寘" />
                 </div>
                 {error ? <div className="smd-inline-error">{error}</div> : null}
                 <div className="smd-modal-form">
-                    <input placeholder="钱包标签" value={label} onChange={(e) => setLabel(e.target.value)} />
+                    <input placeholder="閽卞寘鏍囩" value={label} onChange={(e) => setLabel(e.target.value)} />
                 </div>
                 <div className="smd-modal-actions">
-                    <button type="button" onClick={onClose} disabled={saving} className="smd-modal-cancel">取消</button>
+                    <button type="button" onClick={onClose} disabled={saving} className="smd-modal-cancel">鍙栨秷</button>
                     <button type="button" onClick={handleSubmit} disabled={saving} className="smd-modal-submit">
-                        {saving ? '保存中...' : '保存'}
+                        {saving ? '淇濆瓨涓?..' : '淇濆瓨'}
                     </button>
                 </div>
             </div>
@@ -1667,7 +1813,7 @@ function EditContractModal({ open, apiBaseUrl, contract, onClose, onSaved }) {
             });
             await onSaved?.();
         } catch (err) {
-            setError(String(err?.message || err || '保存失败'));
+            setError(String(err?.message || err || '淇濆瓨澶辫触'));
         } finally {
             setSaving(false);
         }
@@ -1679,27 +1825,27 @@ function EditContractModal({ open, apiBaseUrl, contract, onClose, onSaved }) {
         <div className="smd-modal-overlay" onClick={saving ? undefined : onClose}>
             <div className="smd-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="smd-modal-header">
-                    <h3 className="smd-modal-title">编辑合约</h3>
+                    <h3 className="smd-modal-title">缂栬緫鍚堢害</h3>
                     <button type="button" onClick={onClose} disabled={saving} className="smd-modal-close">
                         <X size={18} />
                     </button>
                 </div>
                 <div style={{ marginBottom: 12 }}>
-                    <CompactIdentifier value={contract.contract_address} label="合约" />
+                    <CompactIdentifier value={contract.contract_address} label="鍚堢害" />
                 </div>
                 {error ? <div className="smd-inline-error">{error}</div> : null}
                 <div className="smd-modal-form">
                     <textarea
-                        placeholder="合约备注"
+                        placeholder="鍚堢害澶囨敞"
                         rows={4}
                         value={description}
                         onChange={(e) => setDescription(e.target.value)}
                     />
                 </div>
                 <div className="smd-modal-actions">
-                    <button type="button" onClick={onClose} disabled={saving} className="smd-modal-cancel">取消</button>
+                    <button type="button" onClick={onClose} disabled={saving} className="smd-modal-cancel">鍙栨秷</button>
                     <button type="button" onClick={handleSubmit} disabled={saving} className="smd-modal-submit">
-                        {saving ? '保存中...' : '保存'}
+                        {saving ? '淇濆瓨涓?..' : '淇濆瓨'}
                     </button>
                 </div>
             </div>
@@ -1772,7 +1918,7 @@ export default function SmartMoneyDashboard({
         }
 
         const channels = [];
-        if (watcherEnabled) channels.push(`LP 监听 ${activeWallets} 钱包`);
+        if (watcherEnabled) channels.push(`LP 鐩戝惉 ${activeWallets} 閽卞寘`);
         if (contractMonitorEnabled) channels.push(activeContracts > 0 ? `合约监控 ${activeContracts} 个` : '合约监控待配置');
 
         return {
@@ -1806,19 +1952,19 @@ export default function SmartMoneyDashboard({
 
                 {stats && !isDetail && (
                     <div className="smd-stats-grid">
-                        <StatCard label="活跃池子" value={stats.active_pool_count} />
-                        <StatCard label="监控钱包" value={stats.monitored_wallet_count} />
-                        <StatCard label="持仓笔数" value={stats.open_position_count} />
-                        <StatCard label="今日关闭" value={stats.closed_today_count} color="red" />
+                        <StatCard label="娲昏穬姹犲瓙" value={stats.active_pool_count} />
+                        <StatCard label="鐩戞帶閽卞寘" value={stats.monitored_wallet_count} />
+                        <StatCard label="鎸佷粨绗旀暟" value={stats.open_position_count} />
+                        <StatCard label="浠婃棩鍏抽棴" value={stats.closed_today_count} color="red" />
                     </div>
                 )}
 
                 {!isDetail && (
                     <div className="smd-tabs">
                         {[
-                            { key: 'pools', label: '池子视图', icon: Eye },
-                            { key: 'wallets', label: '钱包视图', icon: Wallet },
-                            { key: 'settings', label: '合约视图', icon: Settings },
+                            { key: 'pools', label: '姹犲瓙瑙嗗浘', icon: Eye },
+                            { key: 'wallets', label: '閽卞寘瑙嗗浘', icon: Wallet },
+                            { key: 'settings', label: '鍚堢害瑙嗗浘', icon: Settings },
                         ].map(({ key, label, icon: Icon }) => (
                             <button key={key} className={`smd-tab${view === key ? ' active' : ''}`} onClick={() => setView(key)}>
                                 <Icon size={16} /> {label}
@@ -1829,7 +1975,7 @@ export default function SmartMoneyDashboard({
                             className={`smd-tab${view === 'golden_dog' ? ' active' : ''}`}
                             onClick={() => setView('golden_dog')}
                         >
-                            <Flame size={16} /> 金狗通知
+                            <Flame size={16} /> 閲戠嫍閫氱煡
                         </button>
                     </div>
                 )}
@@ -1876,7 +2022,7 @@ export default function SmartMoneyDashboard({
                     <div className="smd-modal-overlay">
                         <div className="smd-modal">
                             <div className="smd-modal-header">
-                                <h3 className="smd-modal-title">添加钱包</h3>
+                                <h3 className="smd-modal-title">娣诲姞閽卞寘</h3>
                                 <button onClick={() => setShowAddModal(false)} className="smd-modal-close"><X size={18} /></button>
                             </div>
                             <AddWalletForm apiBaseUrl={apiBaseUrl} onDone={() => { setShowAddModal(false); }} />
@@ -1894,14 +2040,14 @@ function AddWalletForm({ apiBaseUrl, onDone }) {
     const [saving, setSaving] = useState(false);
     return (
         <div className="smd-modal-form">
-            <input placeholder="钱包地址 (0x...)" value={addr} onChange={e => setAddr(e.target.value)} />
-            <input placeholder="标签（可选）" value={label} onChange={e => setLabel(e.target.value)} />
+            <input placeholder="閽卞寘鍦板潃 (0x...)" value={addr} onChange={e => setAddr(e.target.value)} />
+            <input placeholder="鏍囩锛堝彲閫夛級" value={label} onChange={e => setLabel(e.target.value)} />
             <div className="smd-modal-actions">
-                <button onClick={onDone} className="smd-modal-cancel">取消</button>
+                <button onClick={onDone} className="smd-modal-cancel">鍙栨秷</button>
                 <button disabled={!addr || saving} className="smd-modal-submit" onClick={async () => {
                     setSaving(true);
                     try { await addSMWallet({ apiBaseUrl, address: addr, label }); onDone(); } catch (e) { alert(e.message); } finally { setSaving(false); }
-                }}>{saving ? '添加中...' : '添加'}</button>
+                }}>{saving ? '娣诲姞涓?..' : '娣诲姞'}</button>
             </div>
         </div>
     );
