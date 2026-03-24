@@ -45,6 +45,50 @@ function StatusIcon({ tone, brand }) {
     );
 }
 
+function CompactStatusIcon({ tone, brand }) {
+    if (tone === 'done') {
+        return (
+            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-[0_8px_20px_rgba(16,185,129,0.22)]">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M5 13l4 4L19 7" />
+                </svg>
+            </span>
+        );
+    }
+
+    if (tone === 'error') {
+        return (
+            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-red-500 to-orange-500 text-white shadow-[0_8px_20px_rgba(239,68,68,0.22)]">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M6 6l12 12M18 6 6 18" />
+                </svg>
+            </span>
+        );
+    }
+
+    const activeIconClass = brand?.key === 'emerald'
+        ? 'bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-[0_8px_20px_rgba(16,185,129,0.22)]'
+        : 'bg-gradient-to-br from-[#bcff2f] to-[#8fda21] text-[#182108] shadow-[0_8px_20px_rgba(188,255,47,0.18)]';
+
+    return (
+        <span className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${activeIconClass}`}>
+            <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ animation: 'spm-status-spin 1s linear infinite' }}
+            >
+                <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+            </svg>
+        </span>
+    );
+}
+
 function resolveView(operation, progress) {
     const tone = progress?.status === 'error' ? 'error' : progress?.status === 'done' ? 'done' : 'active';
     const currentStep = Number(progress?.currentStep || 0);
@@ -132,14 +176,20 @@ export default function StepProgressModal({ operation, progress, accentTheme = '
     const [allowClose, setAllowClose] = useState(false);
     const brand = useMemo(() => getBrandTheme(accentTheme), [accentTheme]);
     const view = useMemo(() => resolveView(operation, progress), [operation, progress]);
+    const isCompactClosePosition = operation === 'close_position';
 
     useEffect(() => {
+        if (isCompactClosePosition) {
+            setAllowClose(true);
+            return undefined;
+        }
+        setAllowClose(false);
         const timer = setTimeout(() => setAllowClose(true), 10000);
         return () => clearTimeout(timer);
-    }, []);
+    }, [isCompactClosePosition]);
 
     const isActive = view.tone === 'active';
-    const canClose = !isActive || allowClose;
+    const canClose = isCompactClosePosition ? true : !isActive || allowClose;
     const activeBadgeClass = brand.key === 'emerald'
         ? 'border border-emerald-500/25 bg-emerald-500/12 text-emerald-600 dark:text-emerald-300'
         : 'border border-[#bcff2f]/30 bg-[#bcff2f]/12 text-[#6f9616] dark:text-[#e3ffa0]';
@@ -152,6 +202,83 @@ export default function StepProgressModal({ operation, progress, accentTheme = '
         : view.tone === 'error'
             ? 'border border-red-500/25 bg-red-500/12 text-red-600 dark:text-red-300'
             : activeBadgeClass;
+    const toastShellClass = view.tone === 'done'
+        ? 'border-emerald-500/25 bg-white/95 dark:border-emerald-400/20 dark:bg-[#0f1318]/95'
+        : view.tone === 'error'
+            ? 'border-red-500/25 bg-white/95 dark:border-red-400/20 dark:bg-[#0f1318]/95'
+            : 'border-zinc-200/80 bg-white/95 dark:border-white/[0.08] dark:bg-[#0f1318]/95';
+    const toastBadgeClass = view.tone === 'done'
+        ? 'border border-emerald-500/25 bg-emerald-500/12 text-emerald-600 dark:text-emerald-300'
+        : view.tone === 'error'
+            ? 'border border-red-500/25 bg-red-500/12 text-red-600 dark:text-red-300'
+            : activeBadgeClass;
+    const toastHintClass = view.tone === 'done'
+        ? 'text-emerald-700 dark:text-emerald-300'
+        : view.tone === 'error'
+            ? 'text-red-600 dark:text-red-300'
+            : brand.key === 'emerald'
+                ? 'text-emerald-700 dark:text-emerald-200'
+                : 'text-[#6f9616] dark:text-[#e3ffa0]';
+
+    if (isCompactClosePosition) {
+        return (
+            <div
+                className="pointer-events-none fixed inset-x-0 z-[180] flex justify-center px-3"
+                style={{ bottom: 'calc(env(safe-area-inset-bottom) + 5.5rem)' }}
+            >
+                <div className={`pointer-events-auto w-full max-w-sm rounded-2xl border p-3 shadow-[0_16px_36px_rgba(0,0,0,0.24)] backdrop-blur ${toastShellClass}`}>
+                    <div className="flex items-center justify-between gap-3">
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-bold ${toastBadgeClass}`}>
+                            {view.badge}
+                        </span>
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-zinc-100 text-zinc-400 transition-colors hover:text-zinc-600 dark:bg-white/[0.06] dark:text-white/30 dark:hover:text-white/60"
+                            aria-label="关闭撤仓状态"
+                        >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                                <path d="M18 6 6 18M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div className="mt-3 flex items-start gap-3">
+                        <CompactStatusIcon tone={view.tone} brand={brand} />
+                        <div className="min-w-0 flex-1">
+                            <div className="text-[15px] font-bold leading-5 text-zinc-900 dark:text-white/95">
+                                {view.headline}
+                            </div>
+                            <div className="mt-1 text-[12px] leading-5 text-zinc-700 dark:text-white/80">
+                                {view.summary}
+                            </div>
+                            {progress?.taskId ? (
+                                <div className="mt-2 text-[11px] font-semibold text-zinc-500 dark:text-white/45">
+                                    任务 #{progress.taskId}
+                                </div>
+                            ) : null}
+                            <div className={`mt-2 flex items-center gap-1.5 text-[11px] leading-5 ${toastHintClass}`}>
+                                {isActive ? (
+                                    <>
+                                        <span className={`h-1.5 w-1.5 rounded-full animate-pulse ${brand.key === 'emerald' ? 'bg-emerald-500' : 'bg-[#bcff2f]'}`} />
+                                        后台继续撤仓中，你可以继续操作页面。
+                                    </>
+                                ) : view.tone === 'done' ? (
+                                    '撤仓已完成，不会再阻塞当前界面。'
+                                ) : (
+                                    '撤仓失败，可稍后重试或刷新列表确认状态。'
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <style>{`
+                    @keyframes spm-status-spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
+                `}</style>
+            </div>
+        );
+    }
 
     return (
         <div

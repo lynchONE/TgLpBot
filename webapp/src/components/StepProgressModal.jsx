@@ -40,6 +40,56 @@ function StatusIcon({ tone }) {
   );
 }
 
+function CompactStatusIcon({ tone }) {
+  const baseStyle = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 34,
+    height: 34,
+    borderRadius: '50%',
+    flexShrink: 0,
+  };
+
+  if (tone === 'done') {
+    return (
+      <span style={{ ...baseStyle, color: '#ffffff', background: 'linear-gradient(135deg, #16a34a, #059669)', boxShadow: '0 8px 18px rgba(22, 163, 74, 0.24)' }}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M5 13l4 4L19 7" />
+        </svg>
+      </span>
+    );
+  }
+
+  if (tone === 'error') {
+    return (
+      <span style={{ ...baseStyle, color: '#ffffff', background: 'linear-gradient(135deg, #dc2626, #f97316)', boxShadow: '0 8px 18px rgba(220, 38, 38, 0.24)' }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M6 6l12 12M18 6 6 18" />
+        </svg>
+      </span>
+    );
+  }
+
+  return (
+    <span style={{ ...baseStyle, color: '#f8fafc', background: 'linear-gradient(135deg, #2563eb, #0f766e)', boxShadow: '0 8px 18px rgba(37, 99, 235, 0.24)' }}>
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{ animation: 'spm-status-spin 1s linear infinite' }}
+      >
+        <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+      </svg>
+    </span>
+  );
+}
+
 function resolveView(operation, progress) {
   const tone = progress?.status === 'error' ? 'error' : progress?.status === 'done' ? 'done' : 'active';
   const currentStep = Number(progress?.currentStep || 0);
@@ -233,8 +283,10 @@ export default function StepProgressModal({ operation, progress, onClose }) {
   const [allowClose, setAllowClose] = useState(false);
   const overlayRef = useRef(null);
   const view = useMemo(() => resolveView(operation, progress), [operation, progress]);
+  const isCompactClosePosition = operation === 'close_position';
 
   useEffect(() => {
+    if (isCompactClosePosition) return undefined;
     const el = overlayRef.current;
     if (!el) return undefined;
     const parent = el.parentElement;
@@ -244,15 +296,69 @@ export default function StepProgressModal({ operation, progress, onClose }) {
     return () => {
       parent.style.minHeight = '';
     };
-  }, []);
+  }, [isCompactClosePosition]);
 
   useEffect(() => {
+    if (isCompactClosePosition) {
+      setAllowClose(true);
+      return undefined;
+    }
+    setAllowClose(false);
     const timer = setTimeout(() => setAllowClose(true), 10000);
     return () => clearTimeout(timer);
-  }, []);
+  }, [isCompactClosePosition]);
 
   const isActive = view.tone === 'active';
-  const canClose = !isActive || allowClose;
+  const canClose = isCompactClosePosition ? true : !isActive || allowClose;
+
+  if (isCompactClosePosition) {
+    return (
+      <div className="spm-toast-layer" aria-live="polite">
+        <div className={`spm-toast spm-toast--${view.tone}`}>
+          <div className="spm-toast-head">
+            <span className={`spm-toast-badge spm-toast-badge--${view.tone}`}>{view.badge}</span>
+            <button
+              type="button"
+              className="spm-close"
+              onClick={onClose}
+              aria-label="Close withdraw status"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div className="spm-toast-body">
+            <CompactStatusIcon tone={view.tone} />
+            <div className="spm-toast-copy">
+              <div className="spm-toast-title">{view.headline}</div>
+              <div className="spm-toast-summary">{view.summary}</div>
+              {progress?.taskId ? <div className="spm-toast-meta">任务 #{progress.taskId}</div> : null}
+              <div className="spm-toast-hint">
+                {isActive ? (
+                  <>
+                    <span className="spm-hint-dot" />
+                    后台继续撤仓中，你可以继续操作页面。
+                  </>
+                ) : view.tone === 'done' ? (
+                  '撤仓已完成，不会再阻塞当前界面。'
+                ) : (
+                  '撤仓失败，可稍后重试或刷新列表确认状态。'
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <style>{`
+          @keyframes spm-status-spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
+      </div>
+    );
+  }
 
   return (
     <div className="spm-overlay" ref={overlayRef} onClick={canClose ? onClose : undefined}>
