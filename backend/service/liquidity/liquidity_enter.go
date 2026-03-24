@@ -1161,6 +1161,34 @@ func (s *LiquidityService) calculateOptimalSwapPure(
 	return zeroForOne, swapAmt, nil
 }
 
+func estimateV4LiquidityForAmounts(
+	sqrtPriceX96 *big.Int,
+	tickLower, tickUpper int,
+	amount0In, amount1In *big.Int,
+) (*big.Int, error) {
+	if sqrtPriceX96 == nil || sqrtPriceX96.Sign() <= 0 {
+		return nil, fmt.Errorf("invalid sqrtPriceX96")
+	}
+
+	sqrtLower, err := pool.SqrtRatioAtTick(int32(tickLower))
+	if err != nil {
+		return nil, fmt.Errorf("sqrt ratio lower: %w", err)
+	}
+	sqrtUpper, err := pool.SqrtRatioAtTick(int32(tickUpper))
+	if err != nil {
+		return nil, fmt.Errorf("sqrt ratio upper: %w", err)
+	}
+
+	if amount0In == nil {
+		amount0In = big.NewInt(0)
+	}
+	if amount1In == nil {
+		amount1In = big.NewInt(0)
+	}
+
+	return pool.LiquidityForAmounts(sqrtPriceX96, sqrtLower, sqrtUpper, amount0In, amount1In), nil
+}
+
 // calculateOptimalSwapLocal calculates the optimal swap amount locally to match V3 pool ratio
 func (s *LiquidityService) calculateOptimalSwapLocal(client *ethclient.Client, poolAddr common.Address, tickLower, tickUpper int, amount0In, amount1In *big.Int) (bool, *big.Int, error) {
 	sqrtPriceX96, currentTick, err := blockchain.GetV3PoolSlot0WithClient(client, poolAddr)
@@ -1600,7 +1628,14 @@ func (s *LiquidityService) enterV4FromToken(
 	if swapAmount.Sign() > 0 {
 		sParams, okxExpectedOut, err := s.prepareOKXSwapParams(cc, zapAddr, tokenIn, tokenOut, swapAmount, task.SlippageTolerance)
 		if err != nil {
-			log.Printf("[Liquidity] Warning: prepare OKX swap failed, trying zero swap: %v", err)
+			estimatedLiquidity, liqErr := estimateV4LiquidityForAmounts(sqrtPriceX96, tickLower, tickUpper, amount0In, amount1In)
+			if liqErr != nil {
+				return nil, fmt.Errorf("prepare OKX swap failed: %w (estimate zero-swap liquidity failed: %v)", err, liqErr)
+			}
+			if estimatedLiquidity == nil || estimatedLiquidity.Sign() <= 0 {
+				return nil, fmt.Errorf("prepare OKX swap failed and zero-swap would mint zero liquidity: %w", err)
+			}
+			log.Printf("[Liquidity] Warning: prepare OKX swap failed, proceeding without swap because zero-swap liquidity=%s: %v", estimatedLiquidity.String(), err)
 		} else if sParams != nil {
 			swapParams = *sParams
 
@@ -1626,6 +1661,16 @@ func (s *LiquidityService) enterV4FromToken(
 		return nil, fmt.Errorf("check entry token balance failed: %w", balErr)
 	} else if balEntry.Cmp(amountIn) < 0 {
 		return nil, fmt.Errorf("V4 entry token balance insufficient: have=%s need=%s token=%s", balEntry.String(), amountIn.String(), tokenIn.Hex())
+	}
+
+	if swapParams.AmountIn == nil || swapParams.AmountIn.Sign() == 0 {
+		estimatedLiquidity, liqErr := estimateV4LiquidityForAmounts(sqrtPriceX96, tickLower, tickUpper, amount0In, amount1In)
+		if liqErr != nil {
+			return nil, fmt.Errorf("estimate V4 liquidity failed before zap: %w", liqErr)
+		}
+		if estimatedLiquidity == nil || estimatedLiquidity.Sign() <= 0 {
+			return nil, fmt.Errorf("V4 zero-swap entry would mint zero liquidity; tokenIn=%s amount=%s currentTick=%d range=[%d,%d]", tokenIn.Hex(), amountIn.String(), currentTick, tickLower, tickUpper)
+		}
 	}
 
 	poolKeySimple := blockchain.PoolKeySimple{
@@ -1690,7 +1735,7 @@ func (s *LiquidityService) enterV4FromToken(
 	log.Printf("[Liquidity] Swap.CallData Length: %d bytes", len(zapParams.Swap.CallData))
 	log.Printf("[Liquidity] ==========================================")
 
-	log.Printf("[Liquidity] Calling ZapInV4... PoolId=%s SwapAmt=%s", task.PoolId, swapAmount.String())
+	log.Printf("[Liquidity] Calling ZapInV4... PoolId=%s SwapAmt=%s", task.PoolId, zapParams.Swap.AmountIn.String())
 	tx, err := zap.ZapInV4(auth, zapParams)
 	if err != nil {
 		if hint := evmRevertHint(err); hint != "" {
