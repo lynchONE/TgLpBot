@@ -396,7 +396,7 @@ export default function PositionCard({
                     </div>
 
                     {/* 右侧：总价值 + 操作菜单 */}
-                    <div className="flex shrink-0 items-start gap-2">
+                    <div className="ml-auto flex shrink-0 items-start gap-2 pl-2">
                         {/* 总价值 + PnL */}
                         <div className="text-right">
                             <div className="text-[9px] font-medium text-zinc-400 dark:text-white/35 uppercase tracking-wide mb-0.5">总计</div>

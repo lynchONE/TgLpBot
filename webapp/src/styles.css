@@ -2755,6 +2755,11 @@ body {
     flex-direction: column;
   }
 
+  .sm-position-card .pos-card-main,
+  .sm-wallet-detail-panel .pos-card-main {
+    flex-direction: column;
+  }
+
   .sm-position-card .pos-card-right-block,
   .sm-wallet-detail-panel .pos-card-right-block {
     width: 100%;
@@ -3298,6 +3303,24 @@ body {
 
 .sm-position-card .pos-pnl {
   font-size: 11px;
+}
+
+.sm-position-card .pos-card-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.sm-position-card .pos-card-title-wrap {
+  min-width: 0;
+  flex: 1 1 260px;
+}
+
+.sm-position-card .pos-card-right-block {
+  margin-left: auto;
+  padding-left: 10px;
 }
 
 .sm-position-card-header {
@@ -6340,27 +6363,10 @@ body {
     radial-gradient(circle at top right, rgba(var(--accent-rgb), 0.08), transparent 36%),
     rgba(10, 15, 24, 0.56);
 }
-.smd-pos-inline-panel-head {
+.smd-pos-inline-panel-actions {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-.smd-pos-inline-panel-head .smd-modal-title,
-.smd-pos-inline-panel-head .smd-confirm-copy,
-.smd-pos-inline-panel-head .smd-modal-close {
-  display: none;
-}
-.smd-pos-inline-panel-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text);
-}
-.smd-pos-inline-panel-meta {
-  margin-top: 4px;
-  font-size: 11px;
-  color: var(--text-muted);
+  justify-content: flex-end;
+  margin-bottom: 8px;
 }
 .smd-pos-inline-panel-close {
   display: inline-flex;

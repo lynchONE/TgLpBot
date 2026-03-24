@@ -564,13 +564,7 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, brand, onClose })
 
     return (
         <div className="mt-3 rounded-[28px] border border-white/[0.05] bg-zinc-950/82 p-3 shadow-[0_24px_80px_-42px_rgba(0,0,0,0.95)]">
-                <div className="mb-3 flex items-start justify-between gap-3 px-1">
-                    <div>
-                        <div className="text-base font-semibold text-zinc-100">聪明钱实时仓位</div>
-                        <div className="mt-1 text-[11px] text-zinc-500">
-                            {detail?.updated_at ? `更新于 ${relativeTime(detail.updated_at)}` : '链上实时刷新'}
-                        </div>
-                    </div>
+                <div className="mb-2 flex justify-end">
                     <button
                         type="button"
                         onClick={onClose}

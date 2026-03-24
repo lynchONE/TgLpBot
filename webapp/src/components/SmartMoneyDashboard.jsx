@@ -568,13 +568,7 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
 
     return (
         <div className="smd-pos-inline-panel">
-            <div className="smd-pos-inline-panel-head">
-                <div className="smd-pos-inline-panel-head-main">
-                    <div className="smd-pos-inline-panel-title">Smart Money 仓位详情</div>
-                    <div className="smd-pos-inline-panel-meta">
-                        {detail?.updated_at ? `更新 ${relativeTime(detail.updated_at)}` : '链上实时刷新'}
-                    </div>
-                </div>
+            <div className="smd-pos-inline-panel-actions">
                 <button type="button" onClick={onClose} className="smd-pos-inline-panel-close">
                     <X size={16} />
                 </button>
@@ -652,7 +646,7 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
                                     </div>
                                 ))}
                                 <div className="pos-token-foot">
-                                    <span>灏忚</span>
+                                    <span>小计</span>
                                     <span>{formatUsd(detail?.totals?.wallet_usd)}</span>
                                     <span>{formatUsd(detail?.totals?.position_usd)}</span>
                                     <span className="fee">{formatUsd(detail?.totals?.fee_usd)}</span>
