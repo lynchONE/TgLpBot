@@ -9,10 +9,11 @@ import {
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig,
 } from '../smartMoneyApi';
-import { compactPrice, computePriceRange, formatDuration, formatNumber, formatUsd, shortAddress } from '../utils';
+import { buildGmgnUrl, compactPrice, computePriceRange, formatDuration, formatNumber, formatUsd, shortAddress } from '../utils';
 import uniswapLogo from '../img/uniswap.svg';
 import pancakeLogo from '../img/pancake.svg';
 import flashIcon from '../img/flash.svg';
+import gmgnIcon from '../img/gmgn.svg';
 
 const PROTOCOL_MAP = {
     pancake_v3: { version: 'V3', icon: pancakeLogo, color: '#d1884f' },
@@ -119,6 +120,7 @@ function formatRangePercentPlain(value) {
 const POOL_CARD_RANGE_LIMIT = 5;
 const POSITION_PREVIEW_STALE_MS = 30000;
 const POSITION_PREVIEW_BATCH_SIZE = 4;
+const POSITION_LIST_PAGE_SIZE = 6;
 
 function getPositionSelectionKey(position) {
     const positionRef = String(position?.position_ref || '').trim();
@@ -511,6 +513,24 @@ function PositionPreviewMetrics({ position, preview, compact = false }) {
     );
 }
 
+function PositionPagination({ page, total, pageSize = POSITION_LIST_PAGE_SIZE, onChange }) {
+    const totalPages = Math.max(1, Math.ceil(Number(total || 0) / pageSize));
+    if (totalPages <= 1) return null;
+    return (
+        <div className="smd-filter-group" style={{ justifyContent: 'center', marginTop: 12 }}>
+            <button type="button" className="smd-filter-btn" disabled={page <= 1} onClick={() => onChange(page - 1)}>
+                上一页
+            </button>
+            <span className="smd-filter-btn active" style={{ cursor: 'default' }}>
+                {page} / {totalPages}
+            </span>
+            <button type="button" className="smd-filter-btn" disabled={page >= totalPages} onClick={() => onChange(page + 1)}>
+                下一页
+            </button>
+        </div>
+    );
+}
+
 function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
     const [detail, setDetail] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -857,11 +877,15 @@ function RangeSummary({ position }) {
 
 function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval = 10 }) {
     const [positions, setPositions] = useState([]);
+    const [positionsTotal, setPositionsTotal] = useState(0);
     const [stats, setStats] = useState(null);
     const [status, setStatus] = useState('open');
+    const [page, setPage] = useState(1);
     const [loading, setLoading] = useState(true);
     const [selectedPosition, setSelectedPosition] = useState(null);
     const poolIdentifier = getPoolIdentifier(pool);
+    const poolChain = resolvePoolChain(pool);
+    const poolGmgnUrl = useMemo(() => buildGmgnUrl({ ...pool, chain: poolChain }, poolChain), [pool, poolChain]);
     const refreshIntervalMs = useMemo(
         () => getRefreshIntervalMs(refreshInterval),
         [refreshInterval]
@@ -874,13 +898,27 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
 
     const loadPositions = useCallback((silent = false) => {
         if (!silent) setLoading(true);
-        return fetchSMPositions({ apiBaseUrl, pool: pool.pool_address, status, size: 100 })
-            .then((d) => setPositions(d?.list || []))
+        return fetchSMPositions({
+            apiBaseUrl,
+            pool: pool.pool_address,
+            status,
+            page,
+            size: POSITION_LIST_PAGE_SIZE,
+            orderBy: 'position_amount_desc',
+        })
+            .then((d) => {
+                setPositions(d?.list || []);
+                setPositionsTotal(Number(d?.total || 0));
+            })
             .catch(() => {})
             .finally(() => {
                 if (!silent) setLoading(false);
             });
-    }, [apiBaseUrl, pool.pool_address, status]);
+    }, [apiBaseUrl, page, pool.pool_address, status]);
+
+    useEffect(() => {
+        setPage(1);
+    }, [pool.pool_address, status]);
 
     useEffect(() => {
         loadStats();
@@ -923,14 +961,18 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
                         </div>
                         <div className="smd-detail-meta">
                             <CompactIdentifier value={poolIdentifier} label={getPoolIdentifierLabel(poolIdentifier)} />
-                            <a
-                                href={`https://bscscan.com/address/${pool.pool_address}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="smd-link"
-                            >
-                                查看池子 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
-                            </a>
+                            {poolGmgnUrl ? (
+                                <a
+                                    href={poolGmgnUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="smd-link"
+                                    title="在 GMGN 查看池子代币"
+                                >
+                                    <img src={gmgnIcon} alt="GMGN" style={{ width: 14, height: 14, verticalAlign: 'middle' }} />
+                                    <span>GMGN</span>
+                                </a>
+                            ) : null}
                         </div>
                     </div>
                 </div>
@@ -1020,6 +1062,7 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
                     })}
                 </div>
             )}
+            <PositionPagination page={page} total={positionsTotal} onChange={setPage} />
         </div>
     );
 }
@@ -1182,8 +1225,10 @@ function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
 
 function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval = 10 }) {
     const [positions, setPositions] = useState([]);
+    const [positionsTotal, setPositionsTotal] = useState(0);
     const [info, setInfo] = useState(null);
     const [status, setStatus] = useState('open');
+    const [page, setPage] = useState(1);
     const [loading, setLoading] = useState(true);
     const [selectedPosition, setSelectedPosition] = useState(null);
     const refreshIntervalMs = useMemo(
@@ -1198,13 +1243,27 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
 
     const loadPositions = useCallback((silent = false) => {
         if (!silent) setLoading(true);
-        return fetchSMPositions({ apiBaseUrl, wallet: addr, status, size: 100 })
-            .then((d) => setPositions(d?.list || []))
+        return fetchSMPositions({
+            apiBaseUrl,
+            wallet: addr,
+            status,
+            page,
+            size: POSITION_LIST_PAGE_SIZE,
+            orderBy: 'position_amount_desc',
+        })
+            .then((d) => {
+                setPositions(d?.list || []);
+                setPositionsTotal(Number(d?.total || 0));
+            })
             .catch(() => {})
             .finally(() => {
                 if (!silent) setLoading(false);
             });
-    }, [apiBaseUrl, addr, status]);
+    }, [apiBaseUrl, addr, page, status]);
+
+    useEffect(() => {
+        setPage(1);
+    }, [addr, status]);
 
     useEffect(() => {
         loadInfo();
@@ -1289,7 +1348,9 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
 
             {loading ? <div className="smd-loading">加载中...</div> : groups.length === 0 ? (
                 <div className="smd-empty">暂未检测到 LP 活动</div>
-            ) : groups.map(g => (
+            ) : (
+                <>
+                    {groups.map(g => (
                 <div key={g.pool_address} className={`smd-pool-group${!g.hasOpen ? ' dim' : ''}`}>
                     <div className="smd-pool-group-header">
                         <div className="smd-pool-group-left">
@@ -1339,6 +1400,9 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
                     </div>
                 </div>
             ))}
+                    <PositionPagination page={page} total={positionsTotal} onChange={setPage} />
+                </>
+            )}
         </div>
     );
 }

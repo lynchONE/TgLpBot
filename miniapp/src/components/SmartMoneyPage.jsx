@@ -16,6 +16,7 @@ import FlashIcon from './FlashIcon.jsx';
 import PositionCard from './PositionCard.jsx';
 import uniswapIcon from '../image/uniswap.svg';
 import pancakeIcon from '../image/pancake.svg';
+import gmgnIcon from '../image/gmgn.svg';
 import avatar01 from '../../../webapp/src/icon/avatar_01.png';
 import avatar02 from '../../../webapp/src/icon/avatar_02.png';
 import avatar03 from '../../../webapp/src/icon/avatar_03.png';
@@ -56,6 +57,7 @@ const WALLET_AVATAR_ICONS = [
     avatar15,
     avatar16,
 ];
+const GMGN_STABLE_SYMBOLS = new Set(['usdc', 'usdt', 'busd', 'dai', 'frax', 'usdd', 'fdusd', 'wbnb', 'weth', 'wsol', 'bnb', 'eth', 'sol']);
 
 function getBrandLinkClass(brand) {
     return brand?.key === 'emerald'
@@ -123,6 +125,35 @@ function getPoolIdentifier(value) {
     return String(value?.pool_address || '').trim();
 }
 
+function resolvePoolChain(value) {
+    if (String(value?.chain || '').trim()) return String(value.chain).trim().toLowerCase();
+    return Number(value?.chain_id) === 8453 ? 'base' : 'bsc';
+}
+
+function pickGmgnTokenAddress(pool) {
+    const pair = String(pool?.trading_pair || '').trim();
+    const token0 = String(pool?.token0_address || '').trim();
+    const token1 = String(pool?.token1_address || '').trim();
+    if (!pair) return token0 || token1;
+
+    const symbols = pair.split('/').map((part) => String(part || '').trim().toLowerCase());
+    if (symbols.length !== 2) return token0 || token1;
+
+    const [leftSymbol, rightSymbol] = symbols;
+    const leftStable = GMGN_STABLE_SYMBOLS.has(leftSymbol);
+    const rightStable = GMGN_STABLE_SYMBOLS.has(rightSymbol);
+    if (leftStable && !rightStable) return token1 || token0;
+    if (rightStable && !leftStable) return token0 || token1;
+    return token0 || token1;
+}
+
+function buildGmgnUrl(pool, fallbackChain = 'bsc') {
+    const tokenAddress = pickGmgnTokenAddress(pool);
+    if (!tokenAddress) return '';
+    const chain = String(pool?.chain || fallbackChain || 'bsc').trim().toLowerCase() === 'base' ? 'base' : 'bsc';
+    return `https://gmgn.ai/${chain}/token/${tokenAddress}`;
+}
+
 function getPairInitials(value) {
     return getPairLabel(value)
         .split(/[/-]/)
@@ -167,6 +198,7 @@ function formatRangePercentPlain(value) {
 const POOL_CARD_RANGE_LIMIT = 5;
 const POSITION_PREVIEW_STALE_MS = 30000;
 const POSITION_PREVIEW_BATCH_SIZE = 4;
+const POSITION_LIST_PAGE_SIZE = 6;
 const USD_PREVIEW_FORMATTER = new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -526,6 +558,34 @@ function PositionPreviewMetrics({ position, preview, compact = false }) {
                 <strong className={`font-semibold ${runtimeLabelClass}`}>运行时间</strong>
                 <span className="text-right tabular-nums">{runningText}</span>
             </span>
+        </div>
+    );
+}
+
+function PositionPagination({ page, total, brand, pageSize = POSITION_LIST_PAGE_SIZE, onChange }) {
+    const totalPages = Math.max(1, Math.ceil(Number(total || 0) / pageSize));
+    if (totalPages <= 1) return null;
+    return (
+        <div className="mt-3 flex items-center justify-center gap-2">
+            <button
+                type="button"
+                className={`rounded-full px-3 py-1.5 text-[11px] ${getFilterButtonClass(false, brand)}`}
+                disabled={page <= 1}
+                onClick={() => onChange(page - 1)}
+            >
+                上一页
+            </button>
+            <span className={`rounded-full px-3 py-1.5 text-[11px] ${getFilterButtonClass(true, brand)}`}>
+                {page} / {totalPages}
+            </span>
+            <button
+                type="button"
+                className={`rounded-full px-3 py-1.5 text-[11px] ${getFilterButtonClass(false, brand)}`}
+                disabled={page >= totalPages}
+                onClick={() => onChange(page + 1)}
+            >
+                下一页
+            </button>
         </div>
     );
 }
@@ -923,10 +983,14 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand }) {
 
 function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
     const [positions, setPositions] = useState([]);
+    const [positionsTotal, setPositionsTotal] = useState(0);
     const [poolStats, setPoolStats] = useState(null);
     const [status, setStatus] = useState('open');
+    const [page, setPage] = useState(1);
     const [loading, setLoading] = useState(true);
     const [selectedPosition, setSelectedPosition] = useState(null);
+    const poolChain = resolvePoolChain(pool);
+    const poolGmgnUrl = useMemo(() => buildGmgnUrl({ ...pool, chain: poolChain }, poolChain), [pool, poolChain]);
     const positionPreviews = useSmartMoneyPositionPreviewMap(apiBaseUrl, positions);
 
     useEffect(() => {
@@ -935,11 +999,25 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
 
     useEffect(() => {
         setLoading(true);
-        fetchSMPositions({ apiBaseUrl, pool: pool.pool_address, status, size: 100 })
-            .then(d => setPositions(d?.list || []))
+        fetchSMPositions({
+            apiBaseUrl,
+            pool: pool.pool_address,
+            status,
+            page,
+            size: POSITION_LIST_PAGE_SIZE,
+            orderBy: 'position_amount_desc',
+        })
+            .then(d => {
+                setPositions(d?.list || []);
+                setPositionsTotal(Number(d?.total || 0));
+            })
             .catch(() => {})
             .finally(() => setLoading(false));
-    }, [apiBaseUrl, pool.pool_address, status]);
+    }, [apiBaseUrl, page, pool.pool_address, status]);
+
+    useEffect(() => {
+        setPage(1);
+    }, [pool.pool_address, status]);
 
     useEffect(() => {
         if (!selectedPosition) return;
@@ -971,15 +1049,18 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
                         </div>
                         <div className="mt-2 flex flex-wrap items-center gap-1.5">
                             <CompactIdentifier value={getPoolIdentifier(pool)} label="池子" />
-                            <a
-                                href={`https://bscscan.com/address/${pool.pool_address}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className={`inline-flex items-center gap-1 text-xs ${getBrandLinkClass(brand)}`}
-                            >
-                                查看池子
-                                <ExternalLink size={10} />
-                            </a>
+                            {poolGmgnUrl ? (
+                                <a
+                                    href={poolGmgnUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className={`inline-flex items-center gap-1 text-xs ${getBrandLinkClass(brand)}`}
+                                    title="GMGN"
+                                >
+                                    <img src={gmgnIcon} alt="GMGN" className="h-3.5 w-3.5" />
+                                    <span>GMGN</span>
+                                </a>
+                            ) : null}
                         </div>
                     </div>
                 </div>
@@ -1097,6 +1178,7 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
                     })}
                 </div>
             )}
+            <PositionPagination page={page} total={positionsTotal} brand={brand} onChange={setPage} />
         </div>
     );
 }
@@ -1311,8 +1393,10 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
 
 function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, brand }) {
     const [positions, setPositions] = useState([]);
+    const [positionsTotal, setPositionsTotal] = useState(0);
     const [walletInfo, setWalletInfo] = useState(null);
     const [status, setStatus] = useState('open');
+    const [page, setPage] = useState(1);
     const [loading, setLoading] = useState(true);
     const [selectedPosition, setSelectedPosition] = useState(null);
     const positionPreviews = useSmartMoneyPositionPreviewMap(apiBaseUrl, positions);
@@ -1323,11 +1407,25 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
 
     useEffect(() => {
         setLoading(true);
-        fetchSMPositions({ apiBaseUrl, wallet: walletAddress, status, size: 100 })
-            .then(d => setPositions(d?.list || []))
+        fetchSMPositions({
+            apiBaseUrl,
+            wallet: walletAddress,
+            status,
+            page,
+            size: POSITION_LIST_PAGE_SIZE,
+            orderBy: 'position_amount_desc',
+        })
+            .then(d => {
+                setPositions(d?.list || []);
+                setPositionsTotal(Number(d?.total || 0));
+            })
             .catch(() => {})
             .finally(() => setLoading(false));
-    }, [apiBaseUrl, walletAddress, status]);
+    }, [apiBaseUrl, page, walletAddress, status]);
+
+    useEffect(() => {
+        setPage(1);
+    }, [walletAddress, status]);
 
     useEffect(() => {
         if (!selectedPosition) return;
@@ -1466,6 +1564,7 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
                     ))}
                 </div>
             )}
+            <PositionPagination page={page} total={positionsTotal} brand={brand} onChange={setPage} />
         </div>
     );
 }

@@ -18,6 +18,30 @@ import (
 
 type Repository struct{}
 
+const smartMoneyNetAmountOrderJoin = `
+LEFT JOIN sm_lp_active_positions ap
+	ON ap.chain_id = sm_lp_positions.chain_id AND ap.nft_token_id = sm_lp_positions.nft_token_id
+LEFT JOIN (
+	SELECT
+		chain_id,
+		nft_token_id,
+		SUM(
+			CASE
+				WHEN event_type = 'add' THEN COALESCE(total_usd, COALESCE(token0_amount_usd, 0) + COALESCE(token1_amount_usd, 0), 0)
+				WHEN event_type = 'remove' THEN -COALESCE(total_usd, COALESCE(token0_amount_usd, 0) + COALESCE(token1_amount_usd, 0), 0)
+				ELSE 0
+			END
+		) AS net_amount_usd
+	FROM sm_lp_events
+	WHERE event_type IN ('add', 'remove')
+	GROUP BY chain_id, nft_token_id
+) evt_net
+	ON evt_net.chain_id = sm_lp_positions.chain_id
+	AND evt_net.nft_token_id = sm_lp_positions.nft_token_id
+`
+
+const smartMoneyNetAmountOrderExpr = "COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0)"
+
 func NewRepository() *Repository {
 	return &Repository{}
 }
@@ -463,6 +487,14 @@ func (r *Repository) ListPositions(ctx context.Context, status, wallet, pool, pr
 	switch orderBy {
 	case "opened_at_asc":
 		db = db.Order("opened_at ASC")
+	case "position_amount_asc", "net_amount_asc":
+		db = db.Joins(smartMoneyNetAmountOrderJoin).
+			Order(smartMoneyNetAmountOrderExpr + " ASC").
+			Order("opened_at DESC")
+	case "position_amount_desc", "net_amount_desc":
+		db = db.Joins(smartMoneyNetAmountOrderJoin).
+			Order(smartMoneyNetAmountOrderExpr + " DESC").
+			Order("opened_at DESC")
 	default:
 		db = db.Order("opened_at DESC")
 	}
@@ -494,6 +526,14 @@ func (r *Repository) ListAllPositions(ctx context.Context, status, wallet, pool,
 	switch orderBy {
 	case "opened_at_asc":
 		db = db.Order("opened_at ASC")
+	case "position_amount_asc", "net_amount_asc":
+		db = db.Joins(smartMoneyNetAmountOrderJoin).
+			Order(smartMoneyNetAmountOrderExpr + " ASC").
+			Order("opened_at DESC")
+	case "position_amount_desc", "net_amount_desc":
+		db = db.Joins(smartMoneyNetAmountOrderJoin).
+			Order(smartMoneyNetAmountOrderExpr + " DESC").
+			Order("opened_at DESC")
 	default:
 		db = db.Order("opened_at DESC")
 	}
