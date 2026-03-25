@@ -9,7 +9,7 @@ import {
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig,
 } from '../smartMoneyApi';
-import { buildGmgnUrl, compactPrice, computePriceRange, formatDuration, formatNumber, formatUsd, shortAddress } from '../utils';
+import { buildGmgnUrl, compactPrice, computePriceRange, formatDuration, formatUsd, shortAddress } from '../utils';
 import uniswapLogo from '../img/uniswap.svg';
 import pancakeLogo from '../img/pancake.svg';
 import flashIcon from '../img/flash.svg';
@@ -133,13 +133,6 @@ function getPositionSelectionKey(position) {
     return [wallet, pool, nft].filter(Boolean).join(':');
 }
 
-function formatSignedUsd(value, hasValue) {
-    const num = Number(value);
-    if (!hasValue || !Number.isFinite(num)) return '--';
-    const text = formatUsd(num);
-    return num > 0 ? `+${text}` : text;
-}
-
 function useSmartMoneyPositionPreviewMap(apiBaseUrl, positions) {
     const [previewMap, setPreviewMap] = useState({});
     const previewRef = useRef(previewMap);
@@ -178,8 +171,6 @@ function useSmartMoneyPositionPreviewMap(apiBaseUrl, positions) {
                     [key]: {
                         fetchedAt: Date.now(),
                         feeUsd: Number(data?.totals?.fee_usd ?? 0),
-                        absolutePnlUsd: Number(data?.absolute_pnl_usd ?? 0),
-                        hasPnl: Boolean(data?.has_pnl) && Number.isFinite(Number(data?.absolute_pnl_usd ?? 0)),
                         runningSince: String(data?.running_since || position?.opened_at || '').trim(),
                     },
                 }));
@@ -490,20 +481,13 @@ function PositionPreviewMetrics({ position, preview, compact = false }) {
     const feeTone = Number.isFinite(feeValue)
         ? (feeValue > 0 ? ' positive' : feeValue < 0 ? ' negative' : '')
         : '';
-    const pnlValue = Number(preview?.absolutePnlUsd || 0);
-    const pnlTone = preview?.hasPnl ? (pnlValue >= 0 ? ' positive' : ' negative') : '';
     const runtimeTone = runningText !== '--' ? ' positive' : '';
-    const pnlText = formatSignedUsd(preview?.absolutePnlUsd, Boolean(preview?.hasPnl));
 
     return (
         <div className={`smd-pos-card-preview${compact ? ' compact' : ''}`}>
             <span className={`smd-pos-card-metric${feeTone}`}>
                 <strong>手续费</strong>
                 <span>{feeText}</span>
-            </span>
-            <span className={`smd-pos-card-metric${pnlTone}`}>
-                <strong>绝对收益</strong>
-                <span>{pnlText}</span>
             </span>
             <span className={`smd-pos-card-metric${runtimeTone}`}>
                 <strong>运行时间</strong>
@@ -588,8 +572,6 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
     const totalVal = Number.isFinite(Number(detail?.current_value_usd))
         ? Number(detail.current_value_usd)
         : Number(detail?.totals?.position_usd || 0) + Number(detail?.totals?.fee_usd || 0);
-    const pnl = Number(detail?.absolute_pnl_usd || 0);
-    const hasPnl = Boolean(detail?.has_pnl) && Number.isFinite(pnl);
     const statusLabel = String(detail?.status_label || (detail?.has_liquidity ? 'Open' : 'Closed'));
     const priceRange = detail ? computePriceRange(detail) : null;
 
@@ -622,11 +604,6 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
                                             <div className="pos-card-right-block">
                                                 <div className="pos-metrics">
                                                     <div className="pos-total">{formatUsd(totalVal)}</div>
-                                                    {hasPnl ? (
-                                                        <div className={`pos-pnl ${pnl >= 0 ? 'positive' : 'negative'}`}>
-                                                            {pnl >= 0 ? '+' : ''}{formatNumber(pnl, 2)}
-                                                        </div>
-                                                    ) : null}
                                                 </div>
                                             </div>
                                             <button type="button" onClick={onClose} className="smd-pos-inline-panel-close" aria-label="收起详情">

@@ -222,13 +222,6 @@ function formatPreviewUsd(value) {
     return USD_PREVIEW_FORMATTER.format(num);
 }
 
-function formatSignedPreviewUsd(value, hasValue) {
-    const num = Number(value);
-    if (!hasValue || !Number.isFinite(num)) return '--';
-    const text = formatPreviewUsd(num);
-    return num > 0 ? `+${text}` : text;
-}
-
 function useSmartMoneyPositionPreviewMap(apiBaseUrl, positions) {
     const [previewMap, setPreviewMap] = useState({});
     const previewRef = useRef(previewMap);
@@ -267,8 +260,6 @@ function useSmartMoneyPositionPreviewMap(apiBaseUrl, positions) {
                     [key]: {
                         fetchedAt: Date.now(),
                         feeUsd: Number(data?.totals?.fee_usd ?? 0),
-                        absolutePnlUsd: Number(data?.absolute_pnl_usd ?? 0),
-                        hasPnl: Boolean(data?.has_pnl) && Number.isFinite(Number(data?.absolute_pnl_usd ?? 0)),
                         runningSince: String(data?.running_since || position?.opened_at || '').trim(),
                     },
                 }));
@@ -529,20 +520,13 @@ function PositionPreviewMetrics({ position, preview, compact = false }) {
     const feeLabelClass = Number.isFinite(feeValue)
         ? (feeValue > 0 ? 'text-emerald-200' : feeValue < 0 ? 'text-red-200' : 'text-zinc-100')
         : 'text-zinc-100';
-    const pnlValue = Number(preview?.absolutePnlUsd || 0);
-    const pnlMetricClass = preview?.hasPnl
-        ? (pnlValue >= 0
-            ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
-            : 'border-red-500/20 bg-red-500/10 text-red-300')
-        : 'border-white/[0.05] bg-black/20 text-zinc-300';
-    const pnlLabelClass = preview?.hasPnl
-        ? (pnlValue >= 0 ? 'text-emerald-200' : 'text-red-200')
-        : 'text-zinc-100';
+    const pnlMetricClass = 'hidden';
+    const pnlLabelClass = '';
+    const pnlText = '';
     const runtimeMetricClass = runningText !== '--'
         ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
         : 'border-white/[0.05] bg-black/20 text-zinc-300';
     const runtimeLabelClass = runningText !== '--' ? 'text-emerald-200' : 'text-zinc-100';
-    const pnlText = formatSignedPreviewUsd(preview?.absolutePnlUsd, Boolean(preview?.hasPnl));
 
     return (
         <div className={`mt-2 flex flex-wrap items-stretch gap-2 ${compact ? 'pt-2 border-t border-white/[0.05]' : ''}`}>
@@ -667,6 +651,7 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, brand, onClose })
                         updatedAt={detail.updated_at}
                         pollIntervalSec={detail.poll_interval_sec}
                         allowTaskActions={false}
+                        showAbsolutePnl={false}
                         headerAccessory={(
                             <button
                                 type="button"

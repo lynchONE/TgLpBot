@@ -128,6 +128,7 @@ export default function PositionCard({
     pollIntervalSec,
     updatedAt,
     allowTaskActions = true,
+    showAbsolutePnl = true,
     onSetTaskPaused,
     onStopTask,
     onDeleteTask,
@@ -404,7 +405,7 @@ export default function PositionCard({
                             <div className="text-lg font-extrabold text-zinc-900 dark:text-white/95 tabular-nums leading-none">
                                 <NumberFlowValue value={totalValue} formatter={(v) => formatUsd(v)} />
                             </div>
-                            {hasPnL && (
+                            {showAbsolutePnl && hasPnL && (
                                 <div className="mt-1.5">
                                     <div className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[11px] font-bold tabular-nums shadow-sm ${pnlPositive
                                         ? 'bg-emerald-500/15 text-emerald-500 dark:bg-emerald-500/20 dark:text-emerald-400 ring-1 ring-emerald-500/20'
