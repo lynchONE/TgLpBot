@@ -777,18 +777,28 @@ func (s *Service) loadSmartMoneyOpenLPState(ctx context.Context, address string,
 	err := database.DB.WithContext(ctx).
 		Raw(`
 			SELECT
-				COALESCE(SUM(COALESCE(e_agg.position_amount_usd, 0)), 0) AS open_lp_usd,
+				COALESCE(SUM(COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0)), 0) AS open_lp_usd,
 				COUNT(DISTINCT p.pool_address) AS active_pool_count
 			FROM sm_lp_positions p
+			LEFT JOIN sm_lp_active_positions ap
+				ON ap.chain_id = p.chain_id AND ap.nft_token_id = p.nft_token_id
 			LEFT JOIN (
 				SELECT
 					chain_id,
 					nft_token_id,
-					MAX(COALESCE(total_usd, COALESCE(token0_amount_usd, 0) + COALESCE(token1_amount_usd, 0), 0)) AS position_amount_usd
+					SUM(
+						CASE
+							WHEN event_type = 'add' THEN COALESCE(total_usd, COALESCE(token0_amount_usd, 0) + COALESCE(token1_amount_usd, 0), 0)
+							WHEN event_type = 'remove' THEN -COALESCE(total_usd, COALESCE(token0_amount_usd, 0) + COALESCE(token1_amount_usd, 0), 0)
+							ELSE 0
+						END
+					) AS net_amount_usd
 				FROM sm_lp_events
-				WHERE event_type = 'add'
+				WHERE event_type IN ('add', 'remove')
 				GROUP BY chain_id, nft_token_id
-			) e_agg ON e_agg.chain_id = p.chain_id AND e_agg.nft_token_id = p.nft_token_id
+			) evt_net
+				ON evt_net.chain_id = p.chain_id
+				AND evt_net.nft_token_id = p.nft_token_id
 			WHERE p.wallet_address = ?
 			  AND p.chain_id = ?
 			  AND p.status = 'open'
