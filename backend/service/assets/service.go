@@ -324,6 +324,11 @@ type SmartMoneyLeaderboardResponse struct {
 	ComparedDay string                       `json:"compared_day,omitempty"`
 	Timezone    string                       `json:"timezone"`
 	Description string                       `json:"description"`
+	Page        int                          `json:"page"`
+	PageSize    int                          `json:"page_size"`
+	Total       int                          `json:"total"`
+	TotalPages  int                          `json:"total_pages"`
+	Keyword     string                       `json:"keyword,omitempty"`
 	List        []SmartMoneyLeaderboardEntry `json:"list"`
 }
 

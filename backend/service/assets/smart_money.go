@@ -125,19 +125,56 @@ func shouldZeroSmartMoneyPnLForTransfer(snapshot *models.SmartMoneyWalletDailySn
 	return snapshot.HasTransferIn || snapshot.HasTransferOut || snapshot.TransferInCount > 0 || snapshot.TransferOutCount > 0
 }
 
-func cloneSmartMoneyLeaderboardResponse(resp *SmartMoneyLeaderboardResponse, limit int) *SmartMoneyLeaderboardResponse {
+func paginateSmartMoneyLeaderboardResponse(resp *SmartMoneyLeaderboardResponse, page int, pageSize int, keyword string) *SmartMoneyLeaderboardResponse {
 	if resp == nil {
 		return nil
 	}
-	if limit <= 0 || limit > len(resp.List) {
-		limit = len(resp.List)
+
+	pageSize = clampSmartMoneyPageSize(pageSize)
+	keyword = strings.TrimSpace(keyword)
+	filtered := resp.List
+	if keyword != "" {
+		query := strings.ToLower(keyword)
+		filtered = make([]SmartMoneyLeaderboardEntry, 0, len(resp.List))
+		for _, entry := range resp.List {
+			address := strings.ToLower(strings.TrimSpace(entry.Address))
+			label := strings.ToLower(strings.TrimSpace(entry.Label))
+			if strings.Contains(address, query) || strings.Contains(label, query) {
+				filtered = append(filtered, entry)
+			}
+		}
 	}
+
+	total := len(filtered)
+	totalPages := 1
+	if total > 0 {
+		totalPages = (total + pageSize - 1) / pageSize
+	}
+	if page <= 0 {
+		page = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+
 	cloned := *resp
-	cloned.List = make([]SmartMoneyLeaderboardEntry, 0, limit)
-	for i := 0; i < limit; i++ {
-		entry := resp.List[i]
-		entry.Rank = i + 1
-		cloned.List = append(cloned.List, entry)
+	cloned.Page = page
+	cloned.PageSize = pageSize
+	cloned.Total = total
+	cloned.TotalPages = totalPages
+	cloned.Keyword = keyword
+	cloned.List = make([]SmartMoneyLeaderboardEntry, 0, end-start)
+	for i := start; i < end; i++ {
+		cloned.List = append(cloned.List, filtered[i])
 	}
 	return &cloned
 }
@@ -357,10 +394,7 @@ func (s *Service) GetSmartMoneyWallet(ctx context.Context, address string, chain
 	}, nil
 }
 
-func (s *Service) GetSmartMoneyLeaderboard(ctx context.Context, metric string, days int, limit int, forceRefresh bool) (*SmartMoneyLeaderboardResponse, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
+func (s *Service) GetSmartMoneyLeaderboard(ctx context.Context, metric string, days int, page int, pageSize int, keyword string, forceRefresh bool) (*SmartMoneyLeaderboardResponse, error) {
 	metric = normalizeLeaderboardMetric(metric)
 	snapshotDay := dayStart(timeutil.Now()).AddDate(0, 0, -1)
 	comparedDay := snapshotDay.AddDate(0, 0, -1)
@@ -368,7 +402,7 @@ func (s *Service) GetSmartMoneyLeaderboard(ctx context.Context, metric string, d
 	if !forceRefresh {
 		if cached, ok := readCachedSmartMoneyLeaderboard(snapshotDay, metric); ok {
 			cached.Timezone = timeutil.LocationName()
-			return cloneSmartMoneyLeaderboardResponse(cached, limit), nil
+			return paginateSmartMoneyLeaderboardResponse(cached, page, pageSize, keyword), nil
 		}
 	}
 
@@ -384,7 +418,7 @@ func (s *Service) GetSmartMoneyLeaderboard(ctx context.Context, metric string, d
 	fullResp := buildSmartMoneySnapshotLeaderboard(metric, snapshotDay, comparedDay, 0, inputs)
 	fullResp.Timezone = timeutil.LocationName()
 	writeCachedSmartMoneyLeaderboard(snapshotDay, metric, fullResp)
-	return cloneSmartMoneyLeaderboardResponse(fullResp, limit), nil
+	return paginateSmartMoneyLeaderboardResponse(fullResp, page, pageSize, keyword), nil
 }
 
 func (s *Service) deleteCachedSmartMoneyLeaderboards(snapshotDay time.Time) {
@@ -533,6 +567,10 @@ func buildSmartMoneySnapshotLeaderboard(metric string, snapshotDay time.Time, co
 		SnapshotDay: formatDay(snapshotDay),
 		ComparedDay: formatDay(comparedDay),
 		Description: leaderboardDescription(metric),
+		Page:        1,
+		PageSize:    len(list),
+		Total:       len(list),
+		TotalPages:  1,
 		List:        make([]SmartMoneyLeaderboardEntry, 0, len(list)),
 	}
 	if limit <= 0 || limit > len(list) {

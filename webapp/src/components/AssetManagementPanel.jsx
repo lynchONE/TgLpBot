@@ -884,7 +884,16 @@ export default function AssetManagementPanel({
           keyword: smWalletSearch,
           forceRefresh,
         }),
-        fetchAdminSmartMoneyLeaderboard({ apiBaseUrl, initData, days: 1, metric: leaderboardMetric, limit: 20, forceRefresh }),
+        fetchAdminSmartMoneyLeaderboard({
+          apiBaseUrl,
+          initData,
+          days: 1,
+          metric: leaderboardMetric,
+          page: smLeaderPage + 1,
+          pageSize: SM_PAGE_SIZE,
+          keyword: smLeaderSearch,
+          forceRefresh,
+        }),
       ]);
       const overview = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
       const leaderboard = leaderboardResult.status === 'fulfilled' ? leaderboardResult.value : null;
@@ -925,6 +934,8 @@ export default function AssetManagementPanel({
     leaderboardMetric,
     selectSmartMoneyWallet,
     selectedWalletId,
+    smLeaderPage,
+    smLeaderSearch,
     smDrillWalletId,
     smWalletPage,
     smWalletSearch,
@@ -1138,26 +1149,27 @@ export default function AssetManagementPanel({
   const walletTotal = Math.max(0, Number(smartMoneyOverview?.wallet_total || 0) || overviewWallets.length);
   const walletTotalPages = Math.max(1, Number(smartMoneyOverview?.wallet_total_pages || 0) || 1);
   const pagedWallets = overviewWallets;
-
-  const filteredLeaderboard = useMemo(() => {
-    const list = Array.isArray(smartMoneyLeaderboard?.list) ? smartMoneyLeaderboard.list : [];
-    if (!smLeaderSearch.trim()) return list;
-    const q = smLeaderSearch.trim().toLowerCase();
-    return list.filter((item) => {
-      const addr = String(item.address || '').toLowerCase();
-      const label = String(item.label || '').toLowerCase();
-      return addr.includes(q) || label.includes(q);
-    });
-  }, [smartMoneyLeaderboard, smLeaderSearch]);
-
-  const leaderTotalPages = Math.max(1, Math.ceil(filteredLeaderboard.length / SM_PAGE_SIZE));
-  const pagedLeaderboard = useMemo(() => filteredLeaderboard.slice(smLeaderPage * SM_PAGE_SIZE, (smLeaderPage + 1) * SM_PAGE_SIZE), [filteredLeaderboard, smLeaderPage]);
+  const leaderboardRows = useMemo(
+    () => (Array.isArray(smartMoneyLeaderboard?.list) ? smartMoneyLeaderboard.list : []),
+    [smartMoneyLeaderboard]
+  );
+  const leaderTotalPages = Math.max(1, Number(smartMoneyLeaderboard?.total_pages || 0) || 1);
 
   useEffect(() => {
     if (smWalletPage > walletTotalPages - 1) {
       setSmWalletPage(Math.max(walletTotalPages - 1, 0));
     }
   }, [smWalletPage, walletTotalPages]);
+
+  useEffect(() => {
+    if (smLeaderPage > leaderTotalPages - 1) {
+      setSmLeaderPage(Math.max(leaderTotalPages - 1, 0));
+    }
+  }, [leaderTotalPages, smLeaderPage]);
+
+  useEffect(() => {
+    setSmLeaderPage(0);
+  }, [leaderboardMetric]);
 
   const isRefreshing = assetLoading || assetRefreshing || smartMoneyLoading || smartMoneyRefreshing || opsLoading || systemLoading;
 
@@ -1542,11 +1554,11 @@ export default function AssetManagementPanel({
                   style={{ width: '100%', padding: '7px 12px 7px 32px', borderRadius: 10, border: '1px solid rgba(136,157,191,0.12)', background: 'rgba(136,157,191,0.04)', fontSize: 12, outline: 'none', color: 'inherit' }}
                 />
               </div>
-              <div className="am-list">
-                {pagedLeaderboard.length > 0 ? pagedLeaderboard.map((item) => {
-                  const metricText = leaderboardMetric === 'yield_rate' ? formatPct(item.metric_value) : leaderboardMetric === 'participation' ? `${Number(item.metric_value || 0)} 次` : formatUsd(item.metric_value);
-                  const pnl = Number(item.estimated_realized_pnl_usd || 0);
-                  return (
+                <div className="am-list">
+                  {leaderboardRows.length > 0 ? leaderboardRows.map((item) => {
+                    const metricText = leaderboardMetric === 'yield_rate' ? formatPct(item.metric_value) : leaderboardMetric === 'participation' ? `${Number(item.metric_value || 0)} 次` : formatUsd(item.metric_value);
+                    const pnl = Number(item.estimated_realized_pnl_usd || 0);
+                    return (
                     <button
                       key={`${item.rank}:${item.address}`}
                       type="button"

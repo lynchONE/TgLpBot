@@ -968,7 +968,16 @@ export default function AssetManagementPage({
                     keyword: smWalletSearch,
                     forceRefresh,
                 }),
-                fetchAdminSmartMoneyLeaderboard({ apiBaseUrl, initData, days: 1, metric: leaderboardMetric, limit: 20, forceRefresh }),
+                fetchAdminSmartMoneyLeaderboard({
+                    apiBaseUrl,
+                    initData,
+                    days: 1,
+                    metric: leaderboardMetric,
+                    page: smLeaderPage + 1,
+                    pageSize: SM_PAGE_SIZE,
+                    keyword: smLeaderSearch,
+                    forceRefresh,
+                }),
             ]);
             const overview = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
             const leaderboard = leaderboardResult.status === 'fulfilled' ? leaderboardResult.value : null;
@@ -1008,6 +1017,8 @@ export default function AssetManagementPage({
         leaderboardMetric,
         selectSmartMoneyWallet,
         selectedWalletId,
+        smLeaderPage,
+        smLeaderSearch,
         smDrillWalletId,
         smWalletPage,
         smWalletSearch,
@@ -1100,20 +1111,21 @@ export default function AssetManagementPage({
             setSmWalletPage(Math.max(walletTotalPages - 1, 0));
         }
     }, [smWalletPage, walletTotalPages]);
+    const leaderboardRows = useMemo(
+        () => (Array.isArray(smartMoneyLeaderboard?.list) ? smartMoneyLeaderboard.list : []),
+        [smartMoneyLeaderboard]
+    );
+    const leaderTotalPages = Math.max(1, Number(smartMoneyLeaderboard?.total_pages || 0) || 1);
 
-    const filteredLeaderboard = useMemo(() => {
-        const list = Array.isArray(smartMoneyLeaderboard?.list) ? smartMoneyLeaderboard.list : [];
-        if (!smLeaderSearch.trim()) return list;
-        const q = smLeaderSearch.trim().toLowerCase();
-        return list.filter((item) => {
-            const addr = String(item.address || '').toLowerCase();
-            const label = String(item.label || '').toLowerCase();
-            return addr.includes(q) || label.includes(q);
-        });
-    }, [smartMoneyLeaderboard, smLeaderSearch]);
+    useEffect(() => {
+        if (smLeaderPage > leaderTotalPages - 1) {
+            setSmLeaderPage(Math.max(leaderTotalPages - 1, 0));
+        }
+    }, [leaderTotalPages, smLeaderPage]);
 
-    const leaderTotalPages = Math.max(1, Math.ceil(filteredLeaderboard.length / SM_PAGE_SIZE));
-    const pagedLeaderboard = useMemo(() => filteredLeaderboard.slice(smLeaderPage * SM_PAGE_SIZE, (smLeaderPage + 1) * SM_PAGE_SIZE), [filteredLeaderboard, smLeaderPage]);
+    useEffect(() => {
+        setSmLeaderPage(0);
+    }, [leaderboardMetric]);
 
     const isLoading = assetsLoading || assetsRefreshing || smartMoneyLoading || smartMoneyRefreshing;
     const canManualRefresh = hasInitData && (activeTab === 'my_assets' || activeTab === 'smart_money_assets');
@@ -1508,7 +1520,7 @@ export default function AssetManagementPage({
                                 <SmSearchInput value={smLeaderSearch} onChange={(v) => { setSmLeaderSearch(v); setSmLeaderPage(0); }} placeholder="搜索地址或标签" />
                             </div>
                             <div className="mt-2.5 flex flex-col gap-2">
-                                {pagedLeaderboard.length > 0 ? pagedLeaderboard.map((item) => {
+                                {leaderboardRows.length > 0 ? leaderboardRows.map((item) => {
                                     const metricText = leaderboardMetric === 'yield_rate' ? formatPct(item.metric_value) : leaderboardMetric === 'participation' ? `${Number(item.metric_value || 0)} 次` : formatUsd(item.metric_value);
                                     const pnl = Number(item.estimated_realized_pnl_usd || 0);
                                     const isTop3 = item.rank <= 3;
@@ -1538,7 +1550,7 @@ export default function AssetManagementPage({
                                                     <span>{Number(item.active_pool_count || 0)} 池</span>
                                                     <span>·</span>
                                                     <span>{Number(item.participation_count || 0)} 次操作</span>
-                                                    {Number(item.unmatched_remove_count || 0) > 0 && (
+                                                    {false && (
                                                         <>
                                                             <span>·</span>
                                                             <span className="text-amber-500">{item.unmatched_remove_count} 未匹配</span>

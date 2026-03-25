@@ -42,7 +42,10 @@ type adminSmartMoneyLeaderboardRequest struct {
 	InitData     string `json:"initData"`
 	Days         int    `json:"days"`
 	Metric       string `json:"metric"`
-	Limit        int    `json:"limit"`
+	Page         int    `json:"page"`
+	PageSize     int    `json:"page_size"`
+	Keyword      string `json:"keyword"`
+	Limit        int    `json:"limit,omitempty"`
 	ForceRefresh bool   `json:"force_refresh,omitempty"`
 }
 
@@ -278,9 +281,22 @@ func (s *Server) handleAdminSmartMoneyLeaderboard(w http.ResponseWriter, r *http
 		http.Error(w, msg, status)
 		return
 	}
-	key := assetResponseCacheKey("admin", fmt.Sprintf("%d", adminUserID), "smart-money-leaderboard", req.Metric, fmt.Sprintf("%d", req.Days), fmt.Sprintf("%d", req.Limit))
+	pageSize := req.PageSize
+	if pageSize <= 0 && req.Limit > 0 {
+		pageSize = req.Limit
+	}
+	key := assetResponseCacheKey(
+		"admin",
+		fmt.Sprintf("%d", adminUserID),
+		"smart-money-leaderboard",
+		req.Metric,
+		fmt.Sprintf("%d", req.Days),
+		fmt.Sprintf("%d", req.Page),
+		fmt.Sprintf("%d", pageSize),
+		req.Keyword,
+	)
 	if err := respondWithAssetCache(w, key, req.ForceRefresh, func() (interface{}, error) {
-		return s.Assets.GetSmartMoneyLeaderboard(r.Context(), req.Metric, req.Days, req.Limit, req.ForceRefresh)
+		return s.Assets.GetSmartMoneyLeaderboard(r.Context(), req.Metric, req.Days, req.Page, pageSize, req.Keyword, req.ForceRefresh)
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}

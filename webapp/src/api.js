@@ -327,13 +327,15 @@ export async function fetchAdminSmartMoneyLeaderboard({
   initData,
   days = 1,
   metric = 'pnl',
-  limit = 20,
+  page = 1,
+  pageSize = 10,
+  keyword = '',
   forceRefresh = false,
   signal,
 }) {
   const base = normalizeBaseUrl(apiBaseUrl);
   const url = `${base}/api/admin?endpoint=assets_smart_money_leaderboard`;
-  const cacheKey = `admin-smart-money-leaderboard:${base}:${initData}:${days}:${metric}:${limit}`;
+  const cacheKey = `admin-smart-money-leaderboard:${base}:${initData}:${days}:${metric}:${page}:${pageSize}:${keyword}`;
   return resolveAssetCachedPayload({
     cacheKey,
     forceRefresh,
@@ -341,7 +343,7 @@ export async function fetchAdminSmartMoneyLeaderboard({
       const payload = await requestJson(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initData, days, metric, limit, force_refresh: forceRefresh }),
+        body: JSON.stringify({ initData, days, metric, page, page_size: pageSize, keyword, force_refresh: forceRefresh }),
         signal,
       });
       return payload?.data ?? payload;

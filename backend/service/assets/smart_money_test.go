@@ -197,3 +197,43 @@ func TestBuildSmartMoneySnapshotLeaderboard_FallsBackToSnapshotDeltaWithoutDaily
 		t.Fatalf("fallback yield = %.4f, want %.4f", got, want)
 	}
 }
+
+func TestPaginateSmartMoneyLeaderboardResponse_FiltersAndSlicesFromBackend(t *testing.T) {
+	resp := &SmartMoneyLeaderboardResponse{
+		Metric: "pnl",
+		List: []SmartMoneyLeaderboardEntry{
+			{Rank: 1, Address: "0xaaa111", Label: "Alpha"},
+			{Rank: 2, Address: "0xbbb222", Label: "Beta"},
+			{Rank: 3, Address: "0xccc333", Label: "Alpha Two"},
+		},
+	}
+
+	got := paginateSmartMoneyLeaderboardResponse(resp, 2, 1, "alpha")
+	if got == nil {
+		t.Fatal("response is nil")
+	}
+	if got.Page != 2 {
+		t.Fatalf("page = %d, want 2", got.Page)
+	}
+	if got.PageSize != 1 {
+		t.Fatalf("page size = %d, want 1", got.PageSize)
+	}
+	if got.Total != 2 {
+		t.Fatalf("total = %d, want 2", got.Total)
+	}
+	if got.TotalPages != 2 {
+		t.Fatalf("total pages = %d, want 2", got.TotalPages)
+	}
+	if got.Keyword != "alpha" {
+		t.Fatalf("keyword = %q, want alpha", got.Keyword)
+	}
+	if len(got.List) != 1 {
+		t.Fatalf("list size = %d, want 1", len(got.List))
+	}
+	if got.List[0].Address != "0xccc333" {
+		t.Fatalf("page item address = %s, want 0xccc333", got.List[0].Address)
+	}
+	if got.List[0].Rank != 3 {
+		t.Fatalf("page item rank = %d, want 3", got.List[0].Rank)
+	}
+}
