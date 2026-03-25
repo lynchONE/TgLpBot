@@ -219,7 +219,7 @@ export default function OpenPositionModal({
                     );
                   })}
                 </div>
-                <div className="modal-range-hint">聪明钱近期开仓金额</div>
+                <div className="modal-range-hint">聪明钱当前净投入</div>
               </>
             ) : null}
             <div className="modal-range-picks modal-range-picks-default">
