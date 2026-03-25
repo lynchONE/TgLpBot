@@ -41,6 +41,7 @@ LEFT JOIN (
 `
 
 const smartMoneyNetAmountOrderExpr = "COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0)"
+const smartMoneyPositionTable = "sm_lp_positions"
 
 func NewRepository() *Repository {
 	return &Repository{}
@@ -465,19 +466,19 @@ func (r *Repository) ListPositions(ctx context.Context, status, wallet, pool, pr
 	db := database.DB.WithContext(ctx).Model(&models.SmartMoneyLPPosition{})
 	recentCutoff := time.Now().Add(-2 * time.Hour)
 	if status != "" && status != "all" {
-		db = db.Where("status = ?", status)
+		db = db.Where(smartMoneyPositionTable+".status = ?", status)
 		if status == "open" {
-			db = db.Where("opened_at >= ?", recentCutoff)
+			db = db.Where(smartMoneyPositionTable+".opened_at >= ?", recentCutoff)
 		}
 	}
 	if wallet != "" {
-		db = db.Where("LOWER(wallet_address) = ?", strings.ToLower(wallet))
+		db = db.Where("LOWER("+smartMoneyPositionTable+".wallet_address) = ?", strings.ToLower(wallet))
 	}
 	if pool != "" {
-		db = db.Where("LOWER(pool_address) = ?", strings.ToLower(pool))
+		db = db.Where("LOWER("+smartMoneyPositionTable+".pool_address) = ?", strings.ToLower(pool))
 	}
 	if protocol != "" {
-		db = db.Where("protocol = ?", protocol)
+		db = db.Where(smartMoneyPositionTable+".protocol = ?", protocol)
 	}
 	var total int64
 	if err := db.Count(&total).Error; err != nil {
@@ -486,17 +487,19 @@ func (r *Repository) ListPositions(ctx context.Context, status, wallet, pool, pr
 
 	switch orderBy {
 	case "opened_at_asc":
-		db = db.Order("opened_at ASC")
+		db = db.Order(smartMoneyPositionTable + ".opened_at ASC")
 	case "position_amount_asc", "net_amount_asc":
-		db = db.Joins(smartMoneyNetAmountOrderJoin).
+		db = db.Select(smartMoneyPositionTable + ".*").
+			Joins(smartMoneyNetAmountOrderJoin).
 			Order(smartMoneyNetAmountOrderExpr + " ASC").
-			Order("opened_at DESC")
+			Order(smartMoneyPositionTable + ".opened_at DESC")
 	case "position_amount_desc", "net_amount_desc":
-		db = db.Joins(smartMoneyNetAmountOrderJoin).
+		db = db.Select(smartMoneyPositionTable + ".*").
+			Joins(smartMoneyNetAmountOrderJoin).
 			Order(smartMoneyNetAmountOrderExpr + " DESC").
-			Order("opened_at DESC")
+			Order(smartMoneyPositionTable + ".opened_at DESC")
 	default:
-		db = db.Order("opened_at DESC")
+		db = db.Order(smartMoneyPositionTable + ".opened_at DESC")
 	}
 
 	var positions []models.SmartMoneyLPPosition
@@ -508,34 +511,36 @@ func (r *Repository) ListAllPositions(ctx context.Context, status, wallet, pool,
 	db := database.DB.WithContext(ctx).Model(&models.SmartMoneyLPPosition{})
 	recentCutoff := time.Now().Add(-2 * time.Hour)
 	if status != "" && status != "all" {
-		db = db.Where("status = ?", status)
+		db = db.Where(smartMoneyPositionTable+".status = ?", status)
 		if status == "open" {
-			db = db.Where("opened_at >= ?", recentCutoff)
+			db = db.Where(smartMoneyPositionTable+".opened_at >= ?", recentCutoff)
 		}
 	}
 	if wallet != "" {
-		db = db.Where("wallet_address = ?", strings.ToLower(wallet))
+		db = db.Where(smartMoneyPositionTable+".wallet_address = ?", strings.ToLower(wallet))
 	}
 	if pool != "" {
-		db = db.Where("pool_address = ?", strings.ToLower(pool))
+		db = db.Where(smartMoneyPositionTable+".pool_address = ?", strings.ToLower(pool))
 	}
 	if protocol != "" {
-		db = db.Where("protocol = ?", protocol)
+		db = db.Where(smartMoneyPositionTable+".protocol = ?", protocol)
 	}
 
 	switch orderBy {
 	case "opened_at_asc":
-		db = db.Order("opened_at ASC")
+		db = db.Order(smartMoneyPositionTable + ".opened_at ASC")
 	case "position_amount_asc", "net_amount_asc":
-		db = db.Joins(smartMoneyNetAmountOrderJoin).
+		db = db.Select(smartMoneyPositionTable + ".*").
+			Joins(smartMoneyNetAmountOrderJoin).
 			Order(smartMoneyNetAmountOrderExpr + " ASC").
-			Order("opened_at DESC")
+			Order(smartMoneyPositionTable + ".opened_at DESC")
 	case "position_amount_desc", "net_amount_desc":
-		db = db.Joins(smartMoneyNetAmountOrderJoin).
+		db = db.Select(smartMoneyPositionTable + ".*").
+			Joins(smartMoneyNetAmountOrderJoin).
 			Order(smartMoneyNetAmountOrderExpr + " DESC").
-			Order("opened_at DESC")
+			Order(smartMoneyPositionTable + ".opened_at DESC")
 	default:
-		db = db.Order("opened_at DESC")
+		db = db.Order(smartMoneyPositionTable + ".opened_at DESC")
 	}
 
 	var positions []models.SmartMoneyLPPosition

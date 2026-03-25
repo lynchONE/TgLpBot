@@ -150,7 +150,7 @@ function useSmartMoneyPositionPreviewMap(apiBaseUrl, positions) {
 
     useEffect(() => {
         const rows = Array.isArray(positions) ? positions : [];
-        if (!apiBaseUrl || rows.length === 0) return undefined;
+        if (rows.length === 0) return undefined;
 
         const now = Date.now();
         const pending = rows.filter((position) => {
