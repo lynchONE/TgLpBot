@@ -75,28 +75,30 @@ func TestCooldownActive(t *testing.T) {
 
 func TestPoolSignalsForConfigAppliesAllConfiguredThresholds(t *testing.T) {
 	now := time.Now()
+	// Pool AAA: fees=4200, tvl=250000 → feeRate=1.68%
+	//           fees=4200, activeLiqUSD=11053 → activeRate=38.0%
+	// Pool BBB: fees=5000, tvl=300000 → feeRate=1.667%
+	//           fees=5000, activeLiqUSD=25000 → activeRate=20.0%
 	pools := []models.Pool{
 		{
-			Address:              "0x0000000000000000000000000000000000000aaa",
-			Name:                 "AAA/USDT",
-			TotalFees:            4200,
-			TransactionCount:     120,
-			CurrentPoolValue:     250000,
-			TotalVolume:          1200000,
-			PoolMFeeRate:         3000,
-			ActiveLiquidityRatio: 0.38,
-			UpdatedAt:            now,
+			Address:            "0x0000000000000000000000000000000000000aaa",
+			Name:               "AAA/USDT",
+			TotalFees:          4200,
+			TransactionCount:   120,
+			CurrentPoolValue:   250000,
+			TotalVolume:        1200000,
+			ActiveLiquidityUSD: 11053,
+			UpdatedAt:          now,
 		},
 		{
-			Address:              "0x0000000000000000000000000000000000000bbb",
-			Name:                 "BBB/USDT",
-			TotalFees:            5000,
-			TransactionCount:     80,
-			CurrentPoolValue:     300000,
-			TotalVolume:          900000,
-			PoolMFeeRate:         500,
-			ActiveLiquidityRatio: 0.2,
-			UpdatedAt:            now,
+			Address:            "0x0000000000000000000000000000000000000bbb",
+			Name:               "BBB/USDT",
+			TotalFees:          5000,
+			TransactionCount:   80,
+			CurrentPoolValue:   300000,
+			TotalVolume:        900000,
+			ActiveLiquidityUSD: 25000,
+			UpdatedAt:          now,
 		},
 	}
 
@@ -105,8 +107,8 @@ func TestPoolSignalsForConfigAppliesAllConfiguredThresholds(t *testing.T) {
 		PoolMinTransactionCount:     100,
 		PoolMinTVL:                  200000,
 		PoolMinVolume:               1000000,
-		PoolMinFeeRate:              3000,
-		PoolMinActiveLiquidityRatio: 0.3,
+		PoolMinFeeRate:              1.5,  // 百分比：>=1.5%
+		PoolMinActiveLiquidityRatio: 30.0, // 百分比：>=30%
 	})
 	if len(signals) != 1 {
 		t.Fatalf("expected 1 pool signal, got %d", len(signals))

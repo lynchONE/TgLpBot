@@ -39,7 +39,7 @@ type smartMoneyGoldenDogPoolModePayload struct {
 	MinTransactionCount     *int     `json:"min_transaction_count"`
 	MinTVL                  *float64 `json:"min_tvl"`
 	MinVolume               *float64 `json:"min_volume"`
-	MinFeeRate              *int     `json:"min_fee_rate"`
+	MinFeeRate              *float64 `json:"min_fee_rate"`
 	MinActiveLiquidityRatio *float64 `json:"min_active_liquidity_ratio"`
 	Intensity               *string  `json:"intensity"`
 }
@@ -62,7 +62,7 @@ type smartMoneyGoldenDogUpdateRequest struct {
 	PoolMinTransactionCount     *int     `json:"pool_min_transaction_count"`
 	PoolMinTVL                  *float64 `json:"pool_min_tvl"`
 	PoolMinVolume               *float64 `json:"pool_min_volume"`
-	PoolMinFeeRate              *int     `json:"pool_min_fee_rate"`
+	PoolMinFeeRate              *float64 `json:"pool_min_fee_rate"`
 	PoolMinActiveLiquidityRatio *float64 `json:"pool_min_active_liquidity_ratio"`
 	PoolIntensity               *string  `json:"pool_intensity"`
 }
@@ -240,7 +240,7 @@ func applySmartMoneyGoldenDogFlatUpdates(updates map[string]any, req *smartMoney
 		updates["pool_min_volume"] = clampSmartMoneyGoldenDogMetricFloat(*req.PoolMinVolume)
 	}
 	if req.PoolMinFeeRate != nil {
-		updates["pool_min_fee_rate"] = clampSmartMoneyGoldenDogMetricCount(*req.PoolMinFeeRate)
+		updates["pool_min_fee_rate"] = clampSmartMoneyGoldenDogMetricFloat(*req.PoolMinFeeRate)
 	}
 	if req.PoolMinActiveLiquidityRatio != nil {
 		updates["pool_min_active_liquidity_ratio"] = clampSmartMoneyGoldenDogMetricFloat(*req.PoolMinActiveLiquidityRatio)
@@ -289,7 +289,7 @@ func applySmartMoneyGoldenDogNestedUpdates(updates map[string]any, walletMode *s
 			updates["pool_min_volume"] = clampSmartMoneyGoldenDogMetricFloat(*poolMode.MinVolume)
 		}
 		if poolMode.MinFeeRate != nil {
-			updates["pool_min_fee_rate"] = clampSmartMoneyGoldenDogMetricCount(*poolMode.MinFeeRate)
+			updates["pool_min_fee_rate"] = clampSmartMoneyGoldenDogMetricFloat(*poolMode.MinFeeRate)
 		}
 		if poolMode.MinActiveLiquidityRatio != nil {
 			updates["pool_min_active_liquidity_ratio"] = clampSmartMoneyGoldenDogMetricFloat(*poolMode.MinActiveLiquidityRatio)
@@ -330,7 +330,7 @@ func applySmartMoneyGoldenDogPreview(cfg *models.SmartMoneyGoldenDogConfig, upda
 		case "pool_min_volume":
 			cfg.PoolMinVolume = value.(float64)
 		case "pool_min_fee_rate":
-			cfg.PoolMinFeeRate = value.(int)
+			cfg.PoolMinFeeRate = value.(float64)
 		case "pool_min_active_liquidity_ratio":
 			cfg.PoolMinActiveLiquidityRatio = value.(float64)
 		case "pool_intensity":

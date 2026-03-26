@@ -590,7 +590,7 @@ func hasAnyPoolThreshold(cfg models.SmartMoneyGoldenDogConfig) bool {
 		clampPoolMetricCount(cfg.PoolMinTransactionCount) > 0 ||
 		clampPoolMetricThreshold(cfg.PoolMinTVL) > 0 ||
 		clampPoolMetricThreshold(cfg.PoolMinVolume) > 0 ||
-		clampPoolMetricCount(cfg.PoolMinFeeRate) > 0 ||
+		clampPoolMetricThreshold(cfg.PoolMinFeeRate) > 0 ||
 		clampPoolMetricThreshold(cfg.PoolMinActiveLiquidityRatio) > 0
 }
 
@@ -603,8 +603,8 @@ func poolSignalsForConfig(pools []models.Pool, cfg models.SmartMoneyGoldenDogCon
 	minTransactions := clampPoolMetricCount(cfg.PoolMinTransactionCount)
 	minTVL := clampPoolMetricThreshold(cfg.PoolMinTVL)
 	minVolume := clampPoolMetricThreshold(cfg.PoolMinVolume)
-	minFeeRate := clampPoolMetricCount(cfg.PoolMinFeeRate)
-	minActiveRatio := clampPoolMetricThreshold(cfg.PoolMinActiveLiquidityRatio)
+	minFeeRate := clampPoolMetricThreshold(cfg.PoolMinFeeRate)                  // 百分比，如 0.005 表示 0.005%
+	minActiveRatio := clampPoolMetricThreshold(cfg.PoolMinActiveLiquidityRatio) // 百分比，如 0.168 表示 0.168%
 
 	signals := make([]*poolSignal, 0, len(pools))
 	for _, pool := range pools {
@@ -623,11 +623,25 @@ func poolSignalsForConfig(pools []models.Pool, cfg models.SmartMoneyGoldenDogCon
 		if minVolume > 0 && pool.TotalVolume < minVolume {
 			continue
 		}
-		if minFeeRate > 0 && pool.PoolMFeeRate < minFeeRate {
-			continue
+		// 费率 = fees / tvl * 100（百分比），与热门池子计算方式一致
+		if minFeeRate > 0 {
+			poolFeeRate := 0.0
+			if pool.CurrentPoolValue > 0 && pool.TotalFees > 0 {
+				poolFeeRate = pool.TotalFees / pool.CurrentPoolValue * 100.0
+			}
+			if poolFeeRate < minFeeRate {
+				continue
+			}
 		}
-		if minActiveRatio > 0 && pool.ActiveLiquidityRatio < minActiveRatio {
-			continue
+		// 活跃费率 = fees / activeLiquidityUSD * 100（百分比），与热门池子计算方式一致
+		if minActiveRatio > 0 {
+			poolActiveRate := 0.0
+			if pool.ActiveLiquidityUSD > 0 && pool.TotalFees > 0 {
+				poolActiveRate = pool.TotalFees / pool.ActiveLiquidityUSD * 100.0
+			}
+			if poolActiveRate < minActiveRatio {
+				continue
+			}
 		}
 
 		signals = append(signals, &poolSignal{

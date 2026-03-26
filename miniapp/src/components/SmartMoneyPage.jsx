@@ -168,7 +168,7 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
                 min_tvl: poolMinTVL,
                 min_volume: poolMinVolume,
                 min_fee_rate: poolMinFeeRate,
-                min_active_liquidity_ratio: poolMinActiveLiquidityRatioPct / 100,
+                min_active_liquidity_ratio: poolMinActiveLiquidityRatioPct,
                 intensity: draft.pool_mode.intensity || 'ring',
             },
         };
@@ -345,21 +345,23 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
                                             <button type="button" className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(false, brand)}`} disabled={testingMode === 'pool' || !hasInitData} onClick={() => handleTest('pool')}>{testingMode === 'pool' ? '测试中...' : '测试'}</button>
                                         </div>
                                     </div>
-                                    <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                                        <StatCard label="条件数量" value={`${activePoolThresholdCount} 项`} compact />
-                                        <StatCard label="手续费" value={goldenDogThresholdText(draft.pool_mode.min_total_fees, '$')} compact />
+                                    <div className="mt-4 grid grid-cols-3 gap-2">
+                                        <StatCard label="TVL" value={goldenDogThresholdText(draft.pool_mode.min_tvl, '$')} compact />
+                                        <StatCard label="VOL" value={goldenDogThresholdText(draft.pool_mode.min_volume, '$')} compact />
                                         <StatCard label="交易笔数" value={goldenDogThresholdText(draft.pool_mode.min_transaction_count)} compact />
-                                        <StatCard label="冷却时间" value={`${draft.pool_mode.cooldown_minutes || '--'} 分钟`} compact />
+                                        <StatCard label="费率" value={goldenDogThresholdText(draft.pool_mode.min_fee_rate, '', '%')} compact />
+                                        <StatCard label="活跃费率" value={goldenDogThresholdText(draft.pool_mode.min_active_liquidity_ratio, '', '%')} compact />
                                     </div>
-                                    <div className="mt-3 text-xs leading-5 text-zinc-400">条件说明：手续费 = Total Fees，费率 = PoolM Fee Rate，活跃费率按 active_liquidity_ratio 的百分比输入。</div>
-                                    <div className="mt-4 grid gap-2 sm:grid-cols-4">
-                                        <input className={getInputClass(brand)} type="number" min="0" step="0.01" placeholder="最小手续费($)" value={draft.pool_mode.min_total_fees} onChange={(e) => updatePoolMode('min_total_fees', e.target.value)} />
-                                        <input className={getInputClass(brand)} type="number" min="0" step="1" placeholder="最小交易笔数" value={draft.pool_mode.min_transaction_count} onChange={(e) => updatePoolMode('min_transaction_count', e.target.value)} />
+                                    <div className="mt-3 text-xs leading-5 text-zinc-400">对应热门池子数据：TVL / VOL / 交易笔数 / 费率(=fees÷tvl) / 活跃费率(=fees÷活跃流动性)，留空不参与匹配</div>
+                                    <div className="mt-4 grid grid-cols-2 gap-2">
                                         <input className={getInputClass(brand)} type="number" min="0" step="0.01" placeholder="最小 TVL($)" value={draft.pool_mode.min_tvl} onChange={(e) => updatePoolMode('min_tvl', e.target.value)} />
                                         <input className={getInputClass(brand)} type="number" min="0" step="0.01" placeholder="最小 VOL($)" value={draft.pool_mode.min_volume} onChange={(e) => updatePoolMode('min_volume', e.target.value)} />
-                                        <select className={getInputClass(brand)} value={draft.pool_mode.min_fee_rate} onChange={(e) => updatePoolMode('min_fee_rate', e.target.value)}>{GOLDEN_DOG_FEE_RATE_OPTIONS.map((item) => <option key={item.label} value={item.value}>{item.label}</option>)}</select>
-                                        <input className={getInputClass(brand)} type="number" min="0" max="100" step="0.1" placeholder="最小活跃费率(%)" value={draft.pool_mode.min_active_liquidity_ratio} onChange={(e) => updatePoolMode('min_active_liquidity_ratio', e.target.value)} />
+                                        <input className={getInputClass(brand)} type="number" min="0" step="1" placeholder="最小交易笔数" value={draft.pool_mode.min_transaction_count} onChange={(e) => updatePoolMode('min_transaction_count', e.target.value)} />
+                                        <input className={getInputClass(brand)} type="number" min="0" step="0.001" placeholder="最小费率(%)" value={draft.pool_mode.min_fee_rate} onChange={(e) => updatePoolMode('min_fee_rate', e.target.value)} />
+                                        <input className={getInputClass(brand)} type="number" min="0" step="0.001" placeholder="最小活跃费率(%)" value={draft.pool_mode.min_active_liquidity_ratio} onChange={(e) => updatePoolMode('min_active_liquidity_ratio', e.target.value)} />
                                         <input className={getInputClass(brand)} type="number" min="0" step="1" placeholder="冷却时间(分钟)" value={draft.pool_mode.cooldown_minutes} onChange={(e) => updatePoolMode('cooldown_minutes', e.target.value)} />
+                                    </div>
+                                    <div className="mt-3 grid grid-cols-2 gap-2">
                                         <select className={getInputClass(brand)} value={draft.pool_mode.intensity} onChange={(e) => updatePoolMode('intensity', e.target.value)}>{intensityOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
                                     </div>
                                 </section>
@@ -440,7 +442,7 @@ function mapGoldenDogConfigToDraft(cfg) {
     next.pool_mode.min_tvl = formatGoldenDogDraftValue(source.pool_min_tvl, { emptyWhenZero: true });
     next.pool_mode.min_volume = formatGoldenDogDraftValue(source.pool_min_volume, { emptyWhenZero: true });
     next.pool_mode.min_fee_rate = formatGoldenDogDraftValue(source.pool_min_fee_rate, { emptyWhenZero: true });
-    next.pool_mode.min_active_liquidity_ratio = formatGoldenDogDraftValue(source.pool_min_active_liquidity_ratio, { emptyWhenZero: true, multiplier: 100 });
+    next.pool_mode.min_active_liquidity_ratio = formatGoldenDogDraftValue(source.pool_min_active_liquidity_ratio, { emptyWhenZero: true });
     next.pool_mode.intensity = String(source.pool_intensity || 'ring');
     return next;
 }

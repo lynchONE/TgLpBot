@@ -2166,7 +2166,7 @@ function mapGoldenDogConfigToDraft(cfg) {
     next.pool_mode.min_tvl = formatGoldenDogDraftValue(source.pool_min_tvl, { emptyWhenZero: true });
     next.pool_mode.min_volume = formatGoldenDogDraftValue(source.pool_min_volume, { emptyWhenZero: true });
     next.pool_mode.min_fee_rate = formatGoldenDogDraftValue(source.pool_min_fee_rate, { emptyWhenZero: true });
-    next.pool_mode.min_active_liquidity_ratio = formatGoldenDogDraftValue(source.pool_min_active_liquidity_ratio, { emptyWhenZero: true, multiplier: 100 });
+    next.pool_mode.min_active_liquidity_ratio = formatGoldenDogDraftValue(source.pool_min_active_liquidity_ratio, { emptyWhenZero: true });
     next.pool_mode.intensity = String(source.pool_intensity || 'ring');
     return next;
 }
@@ -2216,6 +2216,77 @@ function countGoldenDogPoolThresholds(poolMode) {
 function goldenDogThresholdText(value, prefix = '', suffix = '') {
     const raw = String(value || '').trim();
     return raw ? `${prefix}${raw}${suffix}` : '--';
+}
+
+/* ── 自定义下拉选择器 ── */
+function CustomSelect({ value, options, onChange, style }) {
+    const [open, setOpen] = useState(false);
+    const ref = useRef(null);
+    const selectedLabel = (options.find(o => String(o.value) === String(value)) || options[0])?.label || '';
+
+    useEffect(() => {
+        if (!open) return;
+        const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, [open]);
+
+    return (
+        <div ref={ref} style={{ position: 'relative', ...style }}>
+            <button
+                type="button"
+                onClick={() => setOpen(v => !v)}
+                style={{
+                    width: '100%', borderRadius: 10, border: '1px solid rgba(255,255,255,0.07)',
+                    background: 'rgba(0,0,0,0.35)', color: '#e4e4e7', padding: '8px 10px',
+                    fontSize: 13, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
+                    transition: 'border-color 0.2s',
+                    borderColor: open ? 'rgba(251,191,36,0.3)' : 'rgba(255,255,255,0.07)',
+                }}
+            >
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedLabel}</span>
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
+                    <path d="M2 3.5L5 6.5L8 3.5" stroke="#71717a" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+            </button>
+            {open && (
+                <div style={{
+                    position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
+                    zIndex: 50, borderRadius: 10, padding: 4,
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    background: 'rgba(15,15,18,0.96)',
+                    backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+                    boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
+                    animation: 'fadeIn 0.15s ease-out',
+                }}>
+                    {options.map((opt) => {
+                        const isSelected = String(opt.value) === String(value);
+                        return (
+                            <button
+                                key={opt.value}
+                                type="button"
+                                onClick={() => { onChange(opt.value); setOpen(false); }}
+                                style={{
+                                    width: '100%', border: 'none', borderRadius: 7,
+                                    padding: '7px 10px', fontSize: 13, fontFamily: 'inherit',
+                                    textAlign: 'left', cursor: 'pointer',
+                                    background: isSelected ? 'rgba(251,191,36,0.12)' : 'transparent',
+                                    color: isSelected ? '#fcd34d' : '#a1a1aa',
+                                    transition: 'background 0.15s, color 0.15s',
+                                    display: 'block',
+                                }}
+                                onMouseEnter={(e) => { if (!isSelected) { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.color = '#e4e4e7'; } }}
+                                onMouseLeave={(e) => { if (!isSelected) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#a1a1aa'; } }}
+                            >
+                                {opt.label}
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
 }
 
 function GoldenDogPanelContent({ apiBaseUrl, initData }) {
@@ -2291,12 +2362,6 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
         transition: 'border-color 0.2s, box-shadow 0.2s',
         WebkitAppearance: 'none', MozAppearance: 'none', appearance: 'none',
     };
-    const fieldSelectCss = {
-        ...fieldInputCss,
-        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' stroke='%2371717a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`,
-        backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center',
-        paddingRight: 28, cursor: 'pointer',
-    };
     const fieldLabelCss = { display: 'grid', gap: 5 };
     const fieldLabelTextCss = { fontSize: 11, fontWeight: 500, color: '#71717a', letterSpacing: '0.02em', textTransform: 'uppercase' };
 
@@ -2366,7 +2431,7 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
                 min_tvl: poolMinTVL,
                 min_volume: poolMinVolume,
                 min_fee_rate: poolMinFeeRate,
-                min_active_liquidity_ratio: poolMinActiveLiquidityRatioPct / 100,
+                min_active_liquidity_ratio: poolMinActiveLiquidityRatioPct,
                 intensity: draft.pool_mode.intensity || 'ring',
             },
         };
@@ -2554,12 +2619,10 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
                                     <span style={fieldLabelTextCss}>冷却 (分钟)</span>
                                     <input type="number" min="0" step="1" value={draft.wallet_mode.cooldown_minutes} onChange={(e) => updateWalletMode('cooldown_minutes', e.target.value)} style={fieldInputCss} />
                                 </label>
-                                <label style={fieldLabelCss}>
+                                <div style={fieldLabelCss}>
                                     <span style={fieldLabelTextCss}>通知强度</span>
-                                    <select value={draft.wallet_mode.intensity} onChange={(e) => updateWalletMode('intensity', e.target.value)} style={fieldSelectCss}>
-                                        {intensityOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                                    </select>
-                                </label>
+                                    <CustomSelect value={draft.wallet_mode.intensity} options={intensityOptions} onChange={(v) => updateWalletMode('intensity', v)} />
+                                </div>
                             </div>
                         </div>
                     )}
@@ -2590,20 +2653,21 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
                                 </div>
                             </div>
 
-                            {/* 紧凑指标行 */}
+                            {/* 紧凑指标行：5 个筛选条件 */}
                             <div style={{
                                 display: 'flex', gap: 0, borderRadius: 10, overflow: 'hidden', marginBottom: 14,
                                 border: '1px solid rgba(255,255,255,0.04)', background: 'rgba(0,0,0,0.2)',
                             }}>
                                 {[
-                                    { l: '启用条件', v: `${activePoolThresholdCount}项` },
-                                    { l: '手续费', v: goldenDogThresholdText(draft.pool_mode.min_total_fees, '$') },
-                                    { l: '交易笔数', v: goldenDogThresholdText(draft.pool_mode.min_transaction_count) },
-                                    { l: '冷却', v: `${draft.pool_mode.cooldown_minutes || '--'}分钟` },
+                                    { l: 'TVL', v: goldenDogThresholdText(draft.pool_mode.min_tvl, '$') },
+                                    { l: 'VOL', v: goldenDogThresholdText(draft.pool_mode.min_volume, '$') },
+                                    { l: '笔数', v: goldenDogThresholdText(draft.pool_mode.min_transaction_count) },
+                                    { l: '费率', v: goldenDogThresholdText(draft.pool_mode.min_fee_rate, '', '%') },
+                                    { l: '活跃', v: goldenDogThresholdText(draft.pool_mode.min_active_liquidity_ratio, '', '%') },
                                 ].map((s, i) => (
                                     <div key={s.l} style={{
                                         flex: 1, padding: '8px 10px', textAlign: 'center',
-                                        borderRight: i < 3 ? '1px solid rgba(255,255,255,0.04)' : 'none',
+                                        borderRight: i < 4 ? '1px solid rgba(255,255,255,0.04)' : 'none',
                                     }}>
                                         <div style={miniStatLabel}>{s.l}</div>
                                         <div style={miniStatValue}>{s.v}</div>
@@ -2611,16 +2675,8 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
                                 ))}
                             </div>
 
-                            {/* 表单 */}
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-                                <label style={fieldLabelCss}>
-                                    <span style={fieldLabelTextCss}>手续费 ($)</span>
-                                    <input type="number" min="0" step="0.01" placeholder="不限制" value={draft.pool_mode.min_total_fees} onChange={(e) => updatePoolMode('min_total_fees', e.target.value)} style={fieldInputCss} />
-                                </label>
-                                <label style={fieldLabelCss}>
-                                    <span style={fieldLabelTextCss}>交易笔数</span>
-                                    <input type="number" min="0" step="1" placeholder="不限制" value={draft.pool_mode.min_transaction_count} onChange={(e) => updatePoolMode('min_transaction_count', e.target.value)} style={fieldInputCss} />
-                                </label>
+                            {/* 筛选条件表单（5列） */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 10 }}>
                                 <label style={fieldLabelCss}>
                                     <span style={fieldLabelTextCss}>TVL ($)</span>
                                     <input type="number" min="0" step="0.01" placeholder="不限制" value={draft.pool_mode.min_tvl} onChange={(e) => updatePoolMode('min_tvl', e.target.value)} style={fieldInputCss} />
@@ -2630,6 +2686,10 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
                                     <input type="number" min="0" step="0.01" placeholder="不限制" value={draft.pool_mode.min_volume} onChange={(e) => updatePoolMode('min_volume', e.target.value)} style={fieldInputCss} />
                                 </label>
                                 <label style={fieldLabelCss}>
+                                    <span style={fieldLabelTextCss}>交易笔数</span>
+                                    <input type="number" min="0" step="1" placeholder="不限制" value={draft.pool_mode.min_transaction_count} onChange={(e) => updatePoolMode('min_transaction_count', e.target.value)} style={fieldInputCss} />
+                                </label>
+                                <label style={fieldLabelCss}>
                                     <span style={fieldLabelTextCss}>费率 (%)</span>
                                     <input type="number" min="0" step="0.01" placeholder="如1即1%" value={draft.pool_mode.min_fee_rate} onChange={(e) => updatePoolMode('min_fee_rate', e.target.value)} style={fieldInputCss} />
                                 </label>
@@ -2637,19 +2697,20 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
                                     <span style={fieldLabelTextCss}>活跃费率 (%)</span>
                                     <input type="number" min="0" max="100" step="0.1" placeholder="不限制" value={draft.pool_mode.min_active_liquidity_ratio} onChange={(e) => updatePoolMode('min_active_liquidity_ratio', e.target.value)} style={fieldInputCss} />
                                 </label>
+                            </div>
+                            {/* 冷却 + 通知强度 */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10 }}>
                                 <label style={fieldLabelCss}>
                                     <span style={fieldLabelTextCss}>冷却 (分钟)</span>
                                     <input type="number" min="0" step="1" value={draft.pool_mode.cooldown_minutes} onChange={(e) => updatePoolMode('cooldown_minutes', e.target.value)} style={fieldInputCss} />
                                 </label>
-                                <label style={fieldLabelCss}>
+                                <div style={fieldLabelCss}>
                                     <span style={fieldLabelTextCss}>通知强度</span>
-                                    <select value={draft.pool_mode.intensity} onChange={(e) => updatePoolMode('intensity', e.target.value)} style={fieldSelectCss}>
-                                        {intensityOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                                    </select>
-                                </label>
+                                    <CustomSelect value={draft.pool_mode.intensity} options={intensityOptions} onChange={(v) => updatePoolMode('intensity', v)} />
+                                </div>
                             </div>
                             <div style={{ marginTop: 10, fontSize: 11, color: '#3f3f46', lineHeight: 1.5 }}>
-                                手续费 = Total Fees · 费率 = PoolM Fee Rate · 活跃费率按 active_liquidity_ratio 百分比输入
+                                对应热门池子数据：TVL / VOL / 交易笔数 / 费率(Fee Rate) / 活跃费率(Active Ratio)，留空不参与匹配
                             </div>
                         </div>
                     )}
