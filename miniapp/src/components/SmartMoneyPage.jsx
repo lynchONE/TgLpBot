@@ -249,7 +249,7 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
                     </svg>
                 </button>
                 {open && (
-                    <div className="absolute left-0 right-0 top-[calc(100%+3px)] z-50 rounded-lg border border-white/[0.08] bg-[rgba(12,12,15,0.97)] p-1 shadow-[0_10px_36px_rgba(0,0,0,0.55)]"
+                    <div className="absolute left-0 right-0 bottom-[calc(100%+3px)] z-[60] rounded-lg border border-white/[0.08] bg-[rgba(12,12,15,0.97)] p-1 shadow-[0_-10px_36px_rgba(0,0,0,0.55)]"
                         style={{ backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)' }}>
                         {opts.map(opt => {
                             const sel = String(opt.value) === String(value);
@@ -272,7 +272,7 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
     const pillBtnTeal = (active) => `rounded-lg px-2 py-[5px] text-[10px] font-semibold transition-all ${active ? 'bg-emerald-400/15 text-emerald-200' : 'bg-white/[0.04] text-zinc-500'}`;
 
     return (
-        <div className="space-y-2.5">
+        <div className="space-y-2.5 pb-24">
             {/* ── 顶部标题行 ── */}
             <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
@@ -353,7 +353,6 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
                                 <span className="text-zinc-400">费率 <span className="text-zinc-100">{goldenDogThresholdText(draft.pool_mode.min_fee_rate, '', '%')}</span></span>
                                 <span className="text-zinc-400">活跃 <span className="text-zinc-100">{goldenDogThresholdText(draft.pool_mode.min_active_liquidity_ratio, '', '%')}</span></span>
                             </div>
-                            <div className="mt-2 text-[9px] text-zinc-400 leading-relaxed text-center">TVL / VOL / 笔数 / 费率(fees÷tvl) / 活跃(fees÷活跃流动性)，留空不匹配</div>
                             <div className="mt-2.5 grid grid-cols-2 gap-1.5">
                                 <input className={miniInputCls} type="number" min="0" step="0.01" placeholder="最小 TVL($)" value={draft.pool_mode.min_tvl} onChange={(e) => updatePoolMode('min_tvl', e.target.value)} />
                                 <input className={miniInputCls} type="number" min="0" step="0.01" placeholder="最小 VOL($)" value={draft.pool_mode.min_volume} onChange={(e) => updatePoolMode('min_volume', e.target.value)} />
@@ -373,17 +372,10 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
     );
 }
 
-const __BROKEN_GOLDEN_DOG_INTENSITY_OPTIONS = String.raw`
-    { value: 'ring', label: '响铃', description: '普通提醒' },
-    { value: 'persistent_ring', label: '持续响铃', description: '持续提醒' },
-    { value: 'critical_ring', label: '静音强提醒', description: '静音也响' },
-];
-
-`
 const GOLDEN_DOG_INTENSITY_OPTIONS = [
-    { value: 'ring', label: '鍝嶉搩', description: '鏅€氭彁閱?' },
-    { value: 'persistent_ring', label: '鎸佺画鍝嶉搩', description: '鎸佺画鎻愰啋' },
-    { value: 'critical_ring', label: '闈欓煶寮烘彁閱?', description: '闈欓煶涔熷搷' },
+    { value: 'ring', label: '\u54CD\u94C3', description: '\u666E\u901A\u63D0\u9192' },
+    { value: 'persistent_ring', label: '\u6301\u7EED\u54CD\u94C3', description: '\u6301\u7EED\u63D0\u9192' },
+    { value: 'critical_ring', label: '\u9759\u97F3\u5F3A\u63D0\u9192', description: '\u9759\u97F3\u4E5F\u54CD' },
 ];
 
 const GOLDEN_DOG_FEE_RATE_OPTIONS = [
@@ -2872,7 +2864,7 @@ function AddWalletModal({ apiBaseUrl, onClose, onAdded, brand }) {
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center" onClick={saving ? undefined : onClose}>
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60 p-4 sm:items-center" onClick={saving ? undefined : onClose}>
             <div className="w-full max-w-md rounded-[28px] border border-white/[0.05] bg-zinc-950/95 p-5 shadow-[0_24px_80px_-32px_rgba(0,0,0,0.95)]" onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-start justify-between gap-3">
                     <div>
@@ -2986,7 +2978,7 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', accentTheme 
     }, [stats]);
 
     return (
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-3xl mx-auto pb-24">
             <section className="rounded-[30px] border border-white/[0.04] bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.04),transparent_35%),linear-gradient(180deg,rgba(24,24,27,0.92),rgba(9,9,11,0.96))] p-4 shadow-[0_28px_90px_-42px_rgba(0,0,0,0.95)]">
                 {stats && !isDetailView && (
                     <div

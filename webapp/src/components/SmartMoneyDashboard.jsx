@@ -2710,9 +2710,6 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
                                     <CustomSelect value={draft.pool_mode.intensity} options={intensityOptions} onChange={(v) => updatePoolMode('intensity', v)} />
                                 </div>
                             </div>
-                            <div style={{ marginTop: 10, fontSize: 11, color: '#71717a', lineHeight: 1.5, textAlign: 'center' }}>
-                                对应热门池子数据：TVL / VOL / 交易笔数 / 费率(Fee Rate) / 活跃费率(Active Ratio)，留空不参与匹配
-                            </div>
                         </div>
                     )}
                 </>
