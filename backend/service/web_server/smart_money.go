@@ -63,6 +63,7 @@ func (s *Server) registerSmartMoneyRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/sm/events", s.handleSMEvents)
 	mux.HandleFunc("/api/sm/stats", s.handleSMStats)
 	mux.HandleFunc("/api/smart_money_golden_dog_config", s.handleSmartMoneyGoldenDogConfig)
+	mux.HandleFunc("/api/smart_money_golden_dog_test", s.handleSmartMoneyGoldenDogTest)
 	mux.HandleFunc("/ws/sm/events", smWSHub.HandleWS)
 }
 

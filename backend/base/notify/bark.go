@@ -19,6 +19,8 @@ type BarkConfig struct {
 	Sound   string
 	Icon    string
 	OpenURL string
+	Call    string
+	Level   string
 }
 
 func barkEndpointWithConfig(title string, body string, cfg BarkConfig) (string, bool) {
@@ -40,6 +42,12 @@ func barkEndpointWithConfig(title string, body string, cfg BarkConfig) (string, 
 	}
 	if v := strings.TrimSpace(cfg.Sound); v != "" {
 		q.Set("sound", v)
+	}
+	if v := strings.TrimSpace(cfg.Call); v != "" {
+		q.Set("call", v)
+	}
+	if v := strings.TrimSpace(cfg.Level); v != "" {
+		q.Set("level", v)
 	}
 	if v := strings.TrimSpace(cfg.Icon); v != "" {
 		q.Set("icon", v)

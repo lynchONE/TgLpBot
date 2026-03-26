@@ -198,3 +198,13 @@ export async function saveSMGoldenDogConfig({ apiBaseUrl, initData, chain = 'bsc
         signal,
     });
 }
+
+export async function testSMGoldenDogConfig({ apiBaseUrl, initData, chain = 'bsc', mode, intensity, signal }) {
+    const base = normalizeBase(apiBaseUrl);
+    return goldenDogRequest(`${base}/api/smart_money_golden_dog_test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, chain, mode, intensity }),
+        signal,
+    });
+}

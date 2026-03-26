@@ -32,12 +32,16 @@ func (r *Repository) GetOrCreateConfig(ctx context.Context, userID uint, chain s
 	}
 
 	cfg = models.SmartMoneyGoldenDogConfig{
-		UserID:          userID,
-		Chain:           chain,
-		Enabled:         false,
-		MinWallets:      DefaultMinWallets,
-		WindowMinutes:   DefaultWindowMinutes,
-		CooldownMinutes: DefaultCooldownMinutes,
+		UserID:              userID,
+		Chain:               chain,
+		Enabled:             false,
+		MinWallets:          DefaultMinWallets,
+		WindowMinutes:       DefaultWindowMinutes,
+		CooldownMinutes:     DefaultCooldownMinutes,
+		WalletIntensity:     BarkIntensityRing,
+		PoolEnabled:         false,
+		PoolCooldownMinutes: DefaultCooldownMinutes,
+		PoolIntensity:       BarkIntensityRing,
 	}
 	if err := database.DB.WithContext(ctx).Create(&cfg).Error; err != nil {
 		return nil, err
@@ -62,7 +66,7 @@ func (r *Repository) UpdateConfig(ctx context.Context, userID uint, chain string
 func (r *Repository) ListEnabledConfigs(ctx context.Context) ([]models.SmartMoneyGoldenDogConfig, error) {
 	var rows []models.SmartMoneyGoldenDogConfig
 	err := database.DB.WithContext(ctx).
-		Where("enabled = 1").
+		Where("enabled = 1 OR pool_enabled = 1").
 		Find(&rows).Error
 	return rows, err
 }
@@ -81,6 +85,35 @@ func (r *Repository) ListRecentAddEvents(ctx context.Context, chainID int, since
 		}).
 		Where("chain_id = ? AND event_type = ? AND tx_timestamp >= ?", chainID, "add", since).
 		Order("tx_timestamp DESC").
+		Find(&rows).Error
+	return rows, err
+}
+
+func (r *Repository) ListFreshPools(ctx context.Context, chain string, since time.Time) ([]models.Pool, error) {
+	chain = normalizeChain(chain)
+
+	var rows []models.Pool
+	err := database.DB.WithContext(ctx).
+		Model(&models.Pool{}).
+		Select([]string{
+			"address",
+			"name",
+			"dex_id",
+			"protocol_version",
+			"token0_symbol",
+			"token1_symbol",
+			"total_fees",
+			"transaction_count",
+			"total_volume",
+			"current_pool_value",
+			"poolm_fee_rate",
+			"active_liquidity_ratio",
+			"updated_at",
+			"chain",
+			"source_requested_chain",
+		}).
+		Where("(LOWER(chain) = ? OR LOWER(source_requested_chain) = ?) AND updated_at >= ?", chain, chain, since).
+		Order("updated_at DESC").
 		Find(&rows).Error
 	return rows, err
 }

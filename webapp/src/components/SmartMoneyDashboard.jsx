@@ -7,7 +7,7 @@ import {
     fetchSMPools, fetchSMPoolStats, fetchSMPositionDetail, fetchSMPositions, fetchSMWallets,
     fetchSMStats, addSMWallet, updateSMWallet, deleteSMWallet,
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
-    fetchSMGoldenDogConfig, saveSMGoldenDogConfig,
+    fetchSMGoldenDogConfig, saveSMGoldenDogConfig, testSMGoldenDogConfig,
 } from '../smartMoneyApi';
 import { buildGmgnUrl, compactPrice, computePriceRange, formatDuration, formatUsd, shortAddress } from '../utils';
 import uniswapLogo from '../img/uniswap.svg';
@@ -1385,6 +1385,8 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
 }
 
 function GoldenDogPanel({ apiBaseUrl, initData }) {
+    return <GoldenDogPanelContent apiBaseUrl={apiBaseUrl} initData={initData} />;
+
     const hasInitData = Boolean(String(initData || '').trim());
     const [loading, setLoading] = useState(hasInitData);
     const [saving, setSaving] = useState(false);
@@ -2099,6 +2101,474 @@ function AddWalletForm({ apiBaseUrl, onDone }) {
                     try { await addSMWallet({ apiBaseUrl, address: addr, label }); onDone(); } catch (e) { alert(e.message); } finally { setSaving(false); }
                 }}>{saving ? '添加中...' : '添加'}</button>
             </div>
+        </div>
+    );
+}
+
+const GOLDEN_DOG_INTENSITY_OPTIONS = [
+    { value: 'ring', label: '响铃', description: '普通提醒' },
+    { value: 'persistent_ring', label: '持续响铃', description: '持续提醒' },
+    { value: 'critical_ring', label: '静音强提醒', description: '静音也响' },
+];
+
+const GOLDEN_DOG_FEE_RATE_OPTIONS = [
+    { value: '', label: '不限' },
+    { value: '100', label: '0.01%' },
+    { value: '500', label: '0.05%' },
+    { value: '2500', label: '0.25%' },
+    { value: '3000', label: '0.30%' },
+    { value: '10000', label: '1%' },
+];
+
+function createGoldenDogDraft() {
+    return {
+        wallet_mode: {
+            enabled: false,
+            min_wallets: '3',
+            window_minutes: '10',
+            cooldown_minutes: '30',
+            intensity: 'ring',
+        },
+        pool_mode: {
+            enabled: false,
+            cooldown_minutes: '30',
+            min_total_fees: '',
+            min_transaction_count: '',
+            min_tvl: '',
+            min_volume: '',
+            min_fee_rate: '',
+            min_active_liquidity_ratio: '',
+            intensity: 'ring',
+        },
+    };
+}
+
+function formatGoldenDogDraftValue(value, { emptyWhenZero = false, multiplier = 1 } = {}) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return emptyWhenZero ? '' : '0';
+    const scaled = Number((num * multiplier).toFixed(4));
+    if (emptyWhenZero && Math.abs(scaled) < 0.000001) return '';
+    return String(scaled);
+}
+
+function mapGoldenDogConfigToDraft(cfg) {
+    const next = createGoldenDogDraft();
+    const source = cfg || {};
+    next.wallet_mode.enabled = Boolean(source.enabled);
+    next.wallet_mode.min_wallets = String(source.min_wallets ?? 3);
+    next.wallet_mode.window_minutes = String(source.window_minutes ?? 10);
+    next.wallet_mode.cooldown_minutes = String(source.cooldown_minutes ?? 30);
+    next.wallet_mode.intensity = String(source.wallet_intensity || 'ring');
+    next.pool_mode.enabled = Boolean(source.pool_enabled);
+    next.pool_mode.cooldown_minutes = String(source.pool_cooldown_minutes ?? 30);
+    next.pool_mode.min_total_fees = formatGoldenDogDraftValue(source.pool_min_total_fees, { emptyWhenZero: true });
+    next.pool_mode.min_transaction_count = formatGoldenDogDraftValue(source.pool_min_transaction_count, { emptyWhenZero: true });
+    next.pool_mode.min_tvl = formatGoldenDogDraftValue(source.pool_min_tvl, { emptyWhenZero: true });
+    next.pool_mode.min_volume = formatGoldenDogDraftValue(source.pool_min_volume, { emptyWhenZero: true });
+    next.pool_mode.min_fee_rate = formatGoldenDogDraftValue(source.pool_min_fee_rate, { emptyWhenZero: true });
+    next.pool_mode.min_active_liquidity_ratio = formatGoldenDogDraftValue(source.pool_min_active_liquidity_ratio, { emptyWhenZero: true, multiplier: 100 });
+    next.pool_mode.intensity = String(source.pool_intensity || 'ring');
+    return next;
+}
+
+function parseGoldenDogRequiredInt(value, label, { min = 1 } = {}) {
+    const num = Number.parseInt(String(value || '').trim(), 10);
+    if (!Number.isFinite(num) || num < min) {
+        throw new Error(`${label}必须大于等于 ${min}。`);
+    }
+    return num;
+}
+
+function parseGoldenDogOptionalNumber(value, label, { max = Number.MAX_SAFE_INTEGER } = {}) {
+    const raw = String(value || '').trim();
+    if (!raw) return 0;
+    const num = Number(raw);
+    if (!Number.isFinite(num) || num < 0) {
+        throw new Error(`${label}必须是大于等于 0 的数字。`);
+    }
+    if (num > max) {
+        throw new Error(`${label}不能大于 ${max}。`);
+    }
+    return num;
+}
+
+function goldenDogBarkStatusText(status) {
+    if (status?.bark_ready) return '已就绪';
+    if (status?.bark_configured) return status?.bark_enabled ? '已配置未就绪' : '已配置未开启';
+    return '未配置';
+}
+
+function goldenDogIntensityLabel(value) {
+    return GOLDEN_DOG_INTENSITY_OPTIONS.find((item) => item.value === value)?.label || '响铃';
+}
+
+function countGoldenDogPoolThresholds(poolMode) {
+    return [
+        'min_total_fees',
+        'min_transaction_count',
+        'min_tvl',
+        'min_volume',
+        'min_fee_rate',
+        'min_active_liquidity_ratio',
+    ].reduce((count, key) => count + (String(poolMode?.[key] || '').trim() ? 1 : 0), 0);
+}
+
+function goldenDogThresholdText(value, prefix = '', suffix = '') {
+    const raw = String(value || '').trim();
+    return raw ? `${prefix}${raw}${suffix}` : '--';
+}
+
+function GoldenDogPanelContent({ apiBaseUrl, initData }) {
+    const hasInitData = Boolean(String(initData || '').trim());
+    const [loading, setLoading] = useState(hasInitData);
+    const [saving, setSaving] = useState(false);
+    const [testingMode, setTestingMode] = useState('');
+    const [error, setError] = useState('');
+    const [notice, setNotice] = useState('');
+    const [status, setStatus] = useState(null);
+    const [draft, setDraft] = useState(() => createGoldenDogDraft());
+
+    const barkStatusText = useMemo(() => goldenDogBarkStatusText(status), [status]);
+    const intensityOptions = useMemo(
+        () => (Array.isArray(status?.available_intensities) && status.available_intensities.length > 0
+            ? status.available_intensities
+            : GOLDEN_DOG_INTENSITY_OPTIONS),
+        [status],
+    );
+    const activePoolThresholdCount = useMemo(
+        () => countGoldenDogPoolThresholds(draft.pool_mode),
+        [draft.pool_mode],
+    );
+
+    const applyResponse = useCallback((resp) => {
+        setStatus(resp || null);
+        setDraft(mapGoldenDogConfigToDraft(resp?.config));
+    }, []);
+
+    const loadConfig = useCallback(async () => {
+        if (!hasInitData) {
+            setLoading(false);
+            setStatus(null);
+            return;
+        }
+        setLoading(true);
+        setError('');
+        try {
+            applyResponse(await fetchSMGoldenDogConfig({ apiBaseUrl, initData, chain: 'bsc' }));
+        } catch (err) {
+            setError(String(err?.message || err || '加载失败'));
+        } finally {
+            setLoading(false);
+        }
+    }, [apiBaseUrl, applyResponse, hasInitData, initData]);
+
+    useEffect(() => {
+        loadConfig();
+    }, [loadConfig]);
+
+    const updateWalletMode = useCallback((key, value) => {
+        setDraft((prev) => ({
+            ...prev,
+            wallet_mode: { ...prev.wallet_mode, [key]: value },
+        }));
+    }, []);
+
+    const updatePoolMode = useCallback((key, value) => {
+        setDraft((prev) => ({
+            ...prev,
+            pool_mode: { ...prev.pool_mode, [key]: value },
+        }));
+    }, []);
+
+    const inputStyle = {
+        width: '100%',
+        borderRadius: 14,
+        border: '1px solid rgba(255,255,255,0.08)',
+        background: 'rgba(9,9,11,0.88)',
+        color: '#f4f4f5',
+        padding: '10px 12px',
+        outline: 'none',
+        fontSize: 13,
+    };
+    const modeCardStyle = {
+        padding: 16,
+        border: '1px solid rgba(255,255,255,0.06)',
+        background: 'linear-gradient(180deg, rgba(20,20,24,0.96), rgba(9,9,11,0.98))',
+        boxShadow: '0 22px 72px -46px rgba(0,0,0,0.95)',
+    };
+    const actionButtonStyle = {
+        borderRadius: 14,
+        border: '1px solid rgba(255,255,255,0.08)',
+        background: 'rgba(24,24,27,0.88)',
+        color: '#f4f4f5',
+        padding: '10px 14px',
+        fontSize: 13,
+        fontWeight: 600,
+        cursor: 'pointer',
+    };
+    const saveButtonStyle = {
+        ...actionButtonStyle,
+        borderColor: 'rgba(251,191,36,0.32)',
+        background: 'linear-gradient(135deg, rgba(251,191,36,0.18), rgba(245,158,11,0.12))',
+        color: '#fde68a',
+    };
+
+    const buildSavePayload = useCallback(() => {
+        const walletMinWallets = parseGoldenDogRequiredInt(draft.wallet_mode.min_wallets, '钱包数量');
+        const walletWindowMinutes = parseGoldenDogRequiredInt(draft.wallet_mode.window_minutes, '统计窗口');
+        const walletCooldownMinutes = parseGoldenDogRequiredInt(draft.wallet_mode.cooldown_minutes, '冷却时间', { min: 0 });
+        const poolCooldownMinutes = parseGoldenDogRequiredInt(draft.pool_mode.cooldown_minutes, '池子模式冷却时间', { min: 0 });
+        const poolMinTotalFees = parseGoldenDogOptionalNumber(draft.pool_mode.min_total_fees, '最小手续费');
+        const poolMinTransactionCount = parseGoldenDogOptionalNumber(draft.pool_mode.min_transaction_count, '最小交易笔数');
+        const poolMinTVL = parseGoldenDogOptionalNumber(draft.pool_mode.min_tvl, '最小 TVL');
+        const poolMinVolume = parseGoldenDogOptionalNumber(draft.pool_mode.min_volume, '最小 VOL');
+        const poolMinFeeRate = parseGoldenDogOptionalNumber(draft.pool_mode.min_fee_rate, '最小费率');
+        const poolMinActiveLiquidityRatioPct = parseGoldenDogOptionalNumber(draft.pool_mode.min_active_liquidity_ratio, '最小活跃费率', { max: 100 });
+
+        const thresholdCount = [
+            poolMinTotalFees,
+            poolMinTransactionCount,
+            poolMinTVL,
+            poolMinVolume,
+            poolMinFeeRate,
+            poolMinActiveLiquidityRatioPct,
+        ].filter((value) => Number(value) > 0).length;
+        if (draft.pool_mode.enabled && thresholdCount === 0) {
+            throw new Error('池子参数模式至少需要填写一个筛选阈值。');
+        }
+
+        return {
+            wallet_mode: {
+                enabled: Boolean(draft.wallet_mode.enabled),
+                min_wallets: walletMinWallets,
+                window_minutes: walletWindowMinutes,
+                cooldown_minutes: walletCooldownMinutes,
+                intensity: draft.wallet_mode.intensity || 'ring',
+            },
+            pool_mode: {
+                enabled: Boolean(draft.pool_mode.enabled),
+                cooldown_minutes: poolCooldownMinutes,
+                min_total_fees: poolMinTotalFees,
+                min_transaction_count: poolMinTransactionCount,
+                min_tvl: poolMinTVL,
+                min_volume: poolMinVolume,
+                min_fee_rate: poolMinFeeRate,
+                min_active_liquidity_ratio: poolMinActiveLiquidityRatioPct / 100,
+                intensity: draft.pool_mode.intensity || 'ring',
+            },
+        };
+    }, [draft]);
+
+    const handleSave = useCallback(async () => {
+        if (!hasInitData) {
+            setError('请先登录 WebApp，拿到 initData 后才能保存金狗通知。');
+            return;
+        }
+
+        setSaving(true);
+        setError('');
+        setNotice('');
+        try {
+            const resp = await saveSMGoldenDogConfig({
+                apiBaseUrl,
+                initData,
+                chain: 'bsc',
+                config: buildSavePayload(),
+            });
+            applyResponse(resp);
+            setNotice('配置已保存');
+        } catch (err) {
+            setError(String(err?.message || err || '保存失败'));
+        } finally {
+            setSaving(false);
+        }
+    }, [apiBaseUrl, applyResponse, buildSavePayload, hasInitData, initData]);
+
+    const handleTest = useCallback(async (mode) => {
+        if (!hasInitData) {
+            setError('请先登录 WebApp，拿到 initData 后才能测试金狗通知。');
+            return;
+        }
+
+        setTestingMode(mode);
+        setError('');
+        setNotice('');
+        try {
+            const intensity = mode === 'pool' ? draft.pool_mode.intensity : draft.wallet_mode.intensity;
+            const resp = await testSMGoldenDogConfig({
+                apiBaseUrl,
+                initData,
+                chain: 'bsc',
+                mode,
+                intensity,
+            });
+            setNotice(resp?.message || '测试通知已发送');
+        } catch (err) {
+            setError(String(err?.message || err || '测试失败'));
+        } finally {
+            setTestingMode('');
+        }
+    }, [apiBaseUrl, draft.pool_mode.intensity, draft.wallet_mode.intensity, hasInitData, initData]);
+
+    return (
+        <div>
+            <div className="smd-detail-card" style={{
+                marginBottom: 16,
+                padding: 18,
+                border: '1px solid rgba(251, 191, 36, 0.18)',
+                background: 'radial-gradient(circle at top left, rgba(251, 191, 36, 0.16), transparent 34%), linear-gradient(180deg, rgba(24, 24, 27, 0.94), rgba(9, 9, 11, 0.98))',
+                boxShadow: '0 28px 90px -42px rgba(0, 0, 0, 0.95)',
+            }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
+                        <div style={{
+                            width: 46,
+                            height: 46,
+                            borderRadius: 18,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            border: '1px solid rgba(251, 191, 36, 0.22)',
+                            background: 'rgba(251, 191, 36, 0.12)',
+                            color: '#fcd34d',
+                            flexShrink: 0,
+                        }}>
+                            <Flame size={18} />
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                            <div className="smd-section-title" style={{ marginBottom: 6 }}>金狗通知中心</div>
+                            <div style={{ color: '#a1a1aa', fontSize: 13, lineHeight: 1.6 }}>
+                                同时管理聪明钱聚集模式和 PoolM 池子参数模式，Bark Key 继续复用全局配置。
+                            </div>
+                            <div className="smd-pool-card-badges" style={{ marginTop: 10 }}>
+                                <Badge cls={draft.wallet_mode.enabled ? 'ok' : ''}>{draft.wallet_mode.enabled ? '钱包模式开启' : '钱包模式关闭'}</Badge>
+                                <Badge cls={draft.pool_mode.enabled ? 'ok' : ''}>{draft.pool_mode.enabled ? '池子模式开启' : '池子模式关闭'}</Badge>
+                                <Badge>Bark {barkStatusText}</Badge>
+                                <Badge>BSC</Badge>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" disabled={saving || !hasInitData} onClick={handleSave} style={saveButtonStyle}>
+                        {saving ? '保存中...' : '保存全部配置'}
+                    </button>
+                </div>
+                <div className="smd-stats-grid" style={{ marginTop: 16, marginBottom: 0 }}>
+                    <StatCard label="Bark 状态" value={barkStatusText} />
+                    <StatCard label="钱包模式" value={draft.wallet_mode.enabled ? '运行中' : '暂停'} />
+                    <StatCard label="池子模式" value={draft.pool_mode.enabled ? '运行中' : '暂停'} />
+                    <StatCard label="池子条件" value={`${activePoolThresholdCount} 项`} />
+                </div>
+            </div>
+
+            {!hasInitData ? (
+                <div className="smd-inline-error">
+                    Web 端需要先登录 Telegram 才能保存提醒配置。Bark Key 继续复用全局配置，不在这里单独设置。
+                </div>
+            ) : null}
+            {error ? <div className="smd-inline-error">{error}</div> : null}
+            {!error && notice ? (
+                <div className="smd-inline-error" style={{ color: '#86efac', borderColor: 'rgba(34,197,94,0.28)', background: 'rgba(34,197,94,0.10)' }}>
+                    {notice}
+                </div>
+            ) : null}
+
+            {loading ? <div className="smd-loading">加载中...</div> : (
+                <div style={{ display: 'grid', gap: 14 }}>
+                    <div className="smd-detail-card" style={{
+                        ...modeCardStyle,
+                        borderColor: 'rgba(251,191,36,0.16)',
+                        background: 'radial-gradient(circle at top left, rgba(251,191,36,0.12), transparent 36%), linear-gradient(180deg, rgba(20,20,24,0.96), rgba(9,9,11,0.98))',
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', gap: 12, minWidth: 0 }}>
+                                <div style={{ width: 40, height: 40, borderRadius: 14, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.18)', color: '#fde68a', flexShrink: 0 }}>
+                                    <Flame size={16} />
+                                </div>
+                                <div style={{ minWidth: 0 }}>
+                                    <div className="smd-section-title" style={{ marginBottom: 6 }}>聪明钱聚集模式</div>
+                                    <div style={{ color: '#a1a1aa', fontSize: 13, lineHeight: 1.6 }}>同一交易对在窗口内聚集足够多钱包时推送，适合抓早期 LP 异动。</div>
+                                    <div className="smd-pool-card-badges" style={{ marginTop: 10 }}>
+                                        <Badge cls={draft.wallet_mode.enabled ? 'ok' : ''}>{draft.wallet_mode.enabled ? '已开启' : '已关闭'}</Badge>
+                                        <Badge>强度 {goldenDogIntensityLabel(draft.wallet_mode.intensity)}</Badge>
+                                    </div>
+                                </div>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                <div className="smd-filter-group">
+                                    <button type="button" className={`smd-filter-btn${draft.wallet_mode.enabled ? ' active' : ''}`} onClick={() => updateWalletMode('enabled', true)}>开启</button>
+                                    <button type="button" className={`smd-filter-btn${!draft.wallet_mode.enabled ? ' active' : ''}`} onClick={() => updateWalletMode('enabled', false)}>关闭</button>
+                                </div>
+                                <button type="button" disabled={testingMode === 'wallet' || !hasInitData} onClick={() => handleTest('wallet')} style={actionButtonStyle}>
+                                    {testingMode === 'wallet' ? '测试中...' : '测试通知'}
+                                </button>
+                            </div>
+                        </div>
+                        <div className="smd-stats-grid" style={{ marginTop: 14, marginBottom: 0 }}>
+                            <StatCard label="触发钱包" value={`${draft.wallet_mode.min_wallets || '--'} 个`} />
+                            <StatCard label="统计窗口" value={`${draft.wallet_mode.window_minutes || '--'} 分钟`} />
+                            <StatCard label="冷却时间" value={`${draft.wallet_mode.cooldown_minutes || '--'} 分钟`} />
+                            <StatCard label="通知强度" value={goldenDogIntensityLabel(draft.wallet_mode.intensity)} />
+                        </div>
+                        <div className="smd-add-form" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, alignItems: 'end', marginTop: 16 }}>
+                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">钱包数量</span><input type="number" min="1" step="1" value={draft.wallet_mode.min_wallets} onChange={(e) => updateWalletMode('min_wallets', e.target.value)} style={inputStyle} /></label>
+                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">统计窗口(分钟)</span><input type="number" min="1" step="1" value={draft.wallet_mode.window_minutes} onChange={(e) => updateWalletMode('window_minutes', e.target.value)} style={inputStyle} /></label>
+                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">冷却时间(分钟)</span><input type="number" min="0" step="1" value={draft.wallet_mode.cooldown_minutes} onChange={(e) => updateWalletMode('cooldown_minutes', e.target.value)} style={inputStyle} /></label>
+                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">通知强度</span><select value={draft.wallet_mode.intensity} onChange={(e) => updateWalletMode('intensity', e.target.value)} style={inputStyle}>{intensityOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+                        </div>
+                    </div>
+
+                    <div className="smd-detail-card" style={{
+                        ...modeCardStyle,
+                        borderColor: 'rgba(94,234,212,0.16)',
+                        background: 'radial-gradient(circle at top left, rgba(45,212,191,0.12), transparent 36%), linear-gradient(180deg, rgba(18,24,27,0.96), rgba(9,11,14,0.98))',
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', gap: 12, minWidth: 0 }}>
+                                <div style={{ width: 40, height: 40, borderRadius: 14, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(45,212,191,0.1)', border: '1px solid rgba(45,212,191,0.18)', color: '#99f6e4', flexShrink: 0 }}>
+                                    <Brain size={16} />
+                                </div>
+                                <div style={{ minWidth: 0 }}>
+                                    <div className="smd-section-title" style={{ marginBottom: 6 }}>PoolM 池子参数模式</div>
+                                    <div style={{ color: '#a1a1aa', fontSize: 13, lineHeight: 1.6 }}>从 PoolM 最新池子数据里按 AND 条件筛选，留空的字段不会参与匹配。</div>
+                                    <div className="smd-pool-card-badges" style={{ marginTop: 10 }}>
+                                        <Badge cls={draft.pool_mode.enabled ? 'ok' : ''}>{draft.pool_mode.enabled ? '已开启' : '已关闭'}</Badge>
+                                        <Badge>已启用 {activePoolThresholdCount} 项</Badge>
+                                        <Badge>强度 {goldenDogIntensityLabel(draft.pool_mode.intensity)}</Badge>
+                                    </div>
+                                </div>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                <div className="smd-filter-group">
+                                    <button type="button" className={`smd-filter-btn${draft.pool_mode.enabled ? ' active' : ''}`} onClick={() => updatePoolMode('enabled', true)}>开启</button>
+                                    <button type="button" className={`smd-filter-btn${!draft.pool_mode.enabled ? ' active' : ''}`} onClick={() => updatePoolMode('enabled', false)}>关闭</button>
+                                </div>
+                                <button type="button" disabled={testingMode === 'pool' || !hasInitData} onClick={() => handleTest('pool')} style={actionButtonStyle}>
+                                    {testingMode === 'pool' ? '测试中...' : '测试通知'}
+                                </button>
+                            </div>
+                        </div>
+                        <div className="smd-stats-grid" style={{ marginTop: 14, marginBottom: 0 }}>
+                            <StatCard label="条件数量" value={`${activePoolThresholdCount} 项`} />
+                            <StatCard label="手续费" value={goldenDogThresholdText(draft.pool_mode.min_total_fees, '$')} />
+                            <StatCard label="交易笔数" value={goldenDogThresholdText(draft.pool_mode.min_transaction_count)} />
+                            <StatCard label="冷却时间" value={`${draft.pool_mode.cooldown_minutes || '--'} 分钟`} />
+                        </div>
+                        <div style={{ marginTop: 14, marginBottom: 2, color: '#94a3b8', fontSize: 12, lineHeight: 1.6 }}>
+                            条件说明：手续费 = Total Fees，费率 = PoolM Fee Rate，活跃费率按 active_liquidity_ratio 的百分比输入。
+                        </div>
+                        <div className="smd-add-form" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, alignItems: 'end', marginTop: 14 }}>
+                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小手续费($)</span><input type="number" min="0" step="0.01" placeholder="留空则不限制" value={draft.pool_mode.min_total_fees} onChange={(e) => updatePoolMode('min_total_fees', e.target.value)} style={inputStyle} /></label>
+                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小交易笔数</span><input type="number" min="0" step="1" placeholder="留空则不限制" value={draft.pool_mode.min_transaction_count} onChange={(e) => updatePoolMode('min_transaction_count', e.target.value)} style={inputStyle} /></label>
+                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小 TVL($)</span><input type="number" min="0" step="0.01" placeholder="留空则不限制" value={draft.pool_mode.min_tvl} onChange={(e) => updatePoolMode('min_tvl', e.target.value)} style={inputStyle} /></label>
+                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小 VOL($)</span><input type="number" min="0" step="0.01" placeholder="留空则不限制" value={draft.pool_mode.min_volume} onChange={(e) => updatePoolMode('min_volume', e.target.value)} style={inputStyle} /></label>
+                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小费率</span><select value={draft.pool_mode.min_fee_rate} onChange={(e) => updatePoolMode('min_fee_rate', e.target.value)} style={inputStyle}>{GOLDEN_DOG_FEE_RATE_OPTIONS.map((item) => <option key={item.label} value={item.value}>{item.label}</option>)}</select></label>
+                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小活跃费率(%)</span><input type="number" min="0" max="100" step="0.1" placeholder="留空则不限制" value={draft.pool_mode.min_active_liquidity_ratio} onChange={(e) => updatePoolMode('min_active_liquidity_ratio', e.target.value)} style={inputStyle} /></label>
+                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">冷却时间(分钟)</span><input type="number" min="0" step="1" value={draft.pool_mode.cooldown_minutes} onChange={(e) => updatePoolMode('cooldown_minutes', e.target.value)} style={inputStyle} /></label>
+                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">通知强度</span><select value={draft.pool_mode.intensity} onChange={(e) => updatePoolMode('intensity', e.target.value)} style={inputStyle}>{intensityOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

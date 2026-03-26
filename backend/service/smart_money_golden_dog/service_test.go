@@ -2,6 +2,7 @@ package smart_money_golden_dog
 
 import (
 	"TgLpBot/base/models"
+	"TgLpBot/base/notify"
 	"testing"
 	"time"
 )
@@ -69,5 +70,68 @@ func TestCooldownActive(t *testing.T) {
 	}
 	if cooldownActive(state, now, 3) {
 		t.Fatal("expected cooldown to be inactive")
+	}
+}
+
+func TestPoolSignalsForConfigAppliesAllConfiguredThresholds(t *testing.T) {
+	now := time.Now()
+	pools := []models.Pool{
+		{
+			Address:              "0x0000000000000000000000000000000000000aaa",
+			Name:                 "AAA/USDT",
+			TotalFees:            4200,
+			TransactionCount:     120,
+			CurrentPoolValue:     250000,
+			TotalVolume:          1200000,
+			PoolMFeeRate:         3000,
+			ActiveLiquidityRatio: 0.38,
+			UpdatedAt:            now,
+		},
+		{
+			Address:              "0x0000000000000000000000000000000000000bbb",
+			Name:                 "BBB/USDT",
+			TotalFees:            5000,
+			TransactionCount:     80,
+			CurrentPoolValue:     300000,
+			TotalVolume:          900000,
+			PoolMFeeRate:         500,
+			ActiveLiquidityRatio: 0.2,
+			UpdatedAt:            now,
+		},
+	}
+
+	signals := poolSignalsForConfig(pools, models.SmartMoneyGoldenDogConfig{
+		PoolMinTotalFees:            3000,
+		PoolMinTransactionCount:     100,
+		PoolMinTVL:                  200000,
+		PoolMinVolume:               1000000,
+		PoolMinFeeRate:              3000,
+		PoolMinActiveLiquidityRatio: 0.3,
+	})
+	if len(signals) != 1 {
+		t.Fatalf("expected 1 pool signal, got %d", len(signals))
+	}
+	if signals[0].Address != "0x0000000000000000000000000000000000000aaa" {
+		t.Fatalf("unexpected pool address %q", signals[0].Address)
+	}
+}
+
+func TestBarkConfigForIntensityMapsPersistentAndCritical(t *testing.T) {
+	base := notify.BarkConfig{Key: "abc", Sound: "alarm"}
+
+	persistent := BarkConfigForIntensity(base, BarkIntensityPersistentRing)
+	if persistent.Call != "1" {
+		t.Fatalf("expected call=1 for persistent ring, got %q", persistent.Call)
+	}
+	if persistent.Level != "" {
+		t.Fatalf("expected empty level for persistent ring, got %q", persistent.Level)
+	}
+
+	critical := BarkConfigForIntensity(base, BarkIntensityCriticalRing)
+	if critical.Level != "critical" {
+		t.Fatalf("expected level=critical, got %q", critical.Level)
+	}
+	if critical.Call != "" {
+		t.Fatalf("expected empty call for critical ring, got %q", critical.Call)
 	}
 }
