@@ -2359,11 +2359,12 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
         background: 'rgba(0,0,0,0.35)',
         color: '#e4e4e7', padding: '8px 10px',
         outline: 'none', fontSize: 13, fontFamily: 'inherit',
+        textAlign: 'center',
         transition: 'border-color 0.2s, box-shadow 0.2s',
         WebkitAppearance: 'none', MozAppearance: 'none', appearance: 'none',
     };
-    const fieldLabelCss = { display: 'grid', gap: 5 };
-    const fieldLabelTextCss = { fontSize: 11, fontWeight: 500, color: '#71717a', letterSpacing: '0.02em', textTransform: 'uppercase' };
+    const fieldLabelCss = { display: 'grid', gap: 5, textAlign: 'center' };
+    const fieldLabelTextCss = { fontSize: 11, fontWeight: 500, color: '#a1a1aa', letterSpacing: '0.02em', textTransform: 'uppercase' };
 
     const pillBtnBase = (isActive, accentRgb) => ({
         borderRadius: 8, border: 'none', padding: '6px 14px',
@@ -2388,8 +2389,8 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
     };
 
     const miniStatCss = { display: 'flex', alignItems: 'baseline', gap: 6, padding: '6px 0' };
-    const miniStatLabel = { fontSize: 11, color: '#52525b', fontWeight: 500 };
-    const miniStatValue = { fontSize: 13, color: '#d4d4d8', fontWeight: 600, fontVariantNumeric: 'tabular-nums' };
+    const miniStatLabel = { fontSize: 11, color: '#a1a1aa', fontWeight: 500 };
+    const miniStatValue = { fontSize: 13, color: '#e4e4e7', fontWeight: 600, fontVariantNumeric: 'tabular-nums' };
 
     const buildSavePayload = useCallback(() => {
         const walletMinWallets = parseGoldenDogRequiredInt(draft.wallet_mode.min_wallets, '钱包数量');
@@ -2709,7 +2710,7 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
                                     <CustomSelect value={draft.pool_mode.intensity} options={intensityOptions} onChange={(v) => updatePoolMode('intensity', v)} />
                                 </div>
                             </div>
-                            <div style={{ marginTop: 10, fontSize: 11, color: '#3f3f46', lineHeight: 1.5 }}>
+                            <div style={{ marginTop: 10, fontSize: 11, color: '#71717a', lineHeight: 1.5, textAlign: 'center' }}>
                                 对应热门池子数据：TVL / VOL / 交易笔数 / 费率(Fee Rate) / 活跃费率(Active Ratio)，留空不参与匹配
                             </div>
                         </div>

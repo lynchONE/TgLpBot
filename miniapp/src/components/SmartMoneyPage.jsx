@@ -225,149 +225,148 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
         }
     }, [apiBaseUrl, draft.pool_mode.intensity, draft.wallet_mode.intensity, hasInitData, initData]);
 
+    /* ── 自定义紧凑下拉 ── */
+    const MiniSelect = useCallback(({ value, options: opts, onChange: onChg }) => {
+        const [open, setOpen] = useState(false);
+        const ref = useRef(null);
+        const label = (opts.find(o => String(o.value) === String(value)) || opts[0])?.label || '';
+        useEffect(() => {
+            if (!open) return;
+            const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+            document.addEventListener('mousedown', h);
+            document.addEventListener('touchstart', h);
+            return () => { document.removeEventListener('mousedown', h); document.removeEventListener('touchstart', h); };
+        }, [open]);
+        return (
+            <div ref={ref} className="relative">
+                <button type="button" onClick={() => setOpen(v => !v)}
+                    className="flex w-full items-center justify-between gap-1 rounded-lg border border-white/[0.07] bg-black/30 px-2.5 py-[7px] text-[11px] text-zinc-200 transition-colors"
+                    style={{ borderColor: open ? 'rgba(251,191,36,0.3)' : undefined }}
+                >
+                    <span className="truncate">{label}</span>
+                    <svg width="8" height="8" viewBox="0 0 10 10" fill="none" className="shrink-0 transition-transform" style={{ transform: open ? 'rotate(180deg)' : 'none' }}>
+                        <path d="M2 3.5L5 6.5L8 3.5" stroke="#71717a" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                </button>
+                {open && (
+                    <div className="absolute left-0 right-0 top-[calc(100%+3px)] z-50 rounded-lg border border-white/[0.08] bg-[rgba(12,12,15,0.97)] p-1 shadow-[0_10px_36px_rgba(0,0,0,0.55)]"
+                        style={{ backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)' }}>
+                        {opts.map(opt => {
+                            const sel = String(opt.value) === String(value);
+                            return (
+                                <button key={opt.value} type="button"
+                                    onClick={() => { onChg(opt.value); setOpen(false); }}
+                                    className={`block w-full rounded-md px-2.5 py-[6px] text-left text-[11px] transition-colors
+                                        ${sel ? 'bg-amber-400/12 text-amber-300' : 'text-zinc-400 active:bg-white/5'}`}
+                                >{opt.label}</button>
+                            );
+                        })}
+                    </div>
+                )}
+            </div>
+        );
+    }, []);
+
+    const miniInputCls = "w-full rounded-lg border border-white/[0.07] bg-black/30 px-2.5 py-[7px] text-[11px] text-zinc-100 text-center placeholder-zinc-400 outline-none transition-colors focus:border-amber-400/40";
+    const pillBtn = (active) => `rounded-lg px-2 py-[5px] text-[10px] font-semibold transition-all ${active ? 'bg-amber-400/15 text-amber-200' : 'bg-white/[0.04] text-zinc-500'}`;
+    const pillBtnTeal = (active) => `rounded-lg px-2 py-[5px] text-[10px] font-semibold transition-all ${active ? 'bg-emerald-400/15 text-emerald-200' : 'bg-white/[0.04] text-zinc-500'}`;
+
     return (
-        <div className="space-y-4">
-            <section className="rounded-[30px] border border-amber-400/15 bg-[radial-gradient(circle_at_top_left,rgba(251,191,36,0.16),transparent_34%),linear-gradient(180deg,rgba(24,24,27,0.94),rgba(9,9,11,0.98))] p-4 shadow-[0_28px_90px_-42px_rgba(0,0,0,0.95)]">
-                <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 items-start gap-3">
-                        <div className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-400/20 bg-amber-400/10 text-amber-300">
-                            <Flame size={18} />
-                        </div>
-                        <div className="min-w-0">
-                            <div className="text-base font-semibold text-zinc-100">监控通知中心</div>
-                            <div className="mt-1 text-xs leading-5 text-zinc-400">同时管理聪明钱聚集模式和 PoolM 池子参数模式，Bark Key 继续复用全局配置。</div>
-                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                                <Badge className={draft.wallet_mode.enabled ? 'border-amber-400/20 bg-amber-400/12 text-amber-200' : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>{draft.wallet_mode.enabled ? '钱包模式开启' : '钱包模式关闭'}</Badge>
-                                <Badge className={draft.pool_mode.enabled ? 'border-emerald-400/20 bg-emerald-400/12 text-emerald-200' : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>{draft.pool_mode.enabled ? '池子模式开启' : '池子模式关闭'}</Badge>
-                                <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">Bark {barkStatusText}</Badge>
-                                <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">BSC</Badge>
-                            </div>
+        <div className="space-y-2.5">
+            {/* ── 顶部标题行 ── */}
+            <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-amber-400/20 bg-amber-400/10 text-amber-300"><Flame size={13} /></div>
+                    <div className="min-w-0">
+                        <div className="text-[13px] font-semibold text-zinc-100 leading-tight">监控通知</div>
+                        <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                            <span className={`inline-block rounded px-1 py-[1px] text-[9px] leading-none ${draft.wallet_mode.enabled ? 'bg-amber-400/12 text-amber-300' : 'bg-zinc-800 text-zinc-500'}`}>金狗{draft.wallet_mode.enabled ? '✓' : '✗'}</span>
+                            <span className={`inline-block rounded px-1 py-[1px] text-[9px] leading-none ${draft.pool_mode.enabled ? 'bg-emerald-400/12 text-emerald-300' : 'bg-zinc-800 text-zinc-500'}`}>池子{draft.pool_mode.enabled ? '✓' : '✗'}</span>
+                            <span className="inline-block rounded px-1 py-[1px] text-[9px] leading-none bg-zinc-800 text-zinc-400">Bark {barkStatusText}</span>
                         </div>
                     </div>
-                    <button type="button" onClick={handleSave} disabled={saving || !hasInitData} className={`rounded-2xl px-4 py-3 text-sm font-semibold disabled:opacity-50 ${brand.solidButtonClass}`}>
-                        {saving ? '保存中...' : '保存全部配置'}
-                    </button>
                 </div>
-                <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    <StatCard label="Bark 状态" value={barkStatusText} compact />
-                    <StatCard label="钱包模式" value={draft.wallet_mode.enabled ? '运行中' : '暂停'} compact />
-                    <StatCard label="池子模式" value={draft.pool_mode.enabled ? '运行中' : '暂停'} compact />
-                    <StatCard label="池子条件" value={`${activePoolThresholdCount} 项`} compact />
-                </div>
-            </section>
+                <button type="button" onClick={handleSave} disabled={saving || !hasInitData}
+                    className={`shrink-0 rounded-xl px-3 py-1.5 text-[11px] font-semibold disabled:opacity-40 ${brand.solidButtonClass}`}
+                >{saving ? '...' : '保存'}</button>
+            </div>
 
-            {!hasInitData ? <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">请先登录 Telegram 后再配置监控通知。</div> : null}
-            {error ? <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div> : null}
-            {!error && notice ? <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{notice}</div> : null}
+            {!hasInitData ? <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-200">请先登录 Telegram</div> : null}
+            {error ? <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-200">{error}</div> : null}
+            {!error && notice ? <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] text-emerald-200">{notice}</div> : null}
 
-            {loading ? <div className="py-8 text-center text-zinc-500">加载中...</div> : (
-                <div className="space-y-4">
-                    <div className="flex w-full items-center justify-center gap-1 auto-margins rounded-[20px] bg-zinc-900/60 p-1 border border-white/[0.03]">
-                        <button
-                            type="button"
-                            onClick={() => setActiveTab('wallet')}
-                            className={`flex-1 rounded-[16px] py-2.5 text-sm font-semibold transition-all duration-300 ${activeTab === 'wallet'
-                                ? 'bg-amber-400/15 text-amber-300 shadow-[0_2px_10px_rgba(251,191,36,0.1)]'
-                                : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
-                                }`}
-                        >
-                            金狗通知
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setActiveTab('pool')}
-                            className={`flex-1 rounded-[16px] py-2.5 text-sm font-semibold transition-all duration-300 ${activeTab === 'pool'
-                                ? 'bg-emerald-400/15 text-emerald-300 shadow-[0_2px_10px_rgba(52,211,153,0.1)]'
-                                : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
-                                }`}
-                        >
-                            池子监控
-                        </button>
+            {loading ? <div className="py-6 text-center text-[11px] text-zinc-500">加载中...</div> : (
+                <div className="space-y-2.5">
+                    {/* ── Tab 切换 ── */}
+                    <div className="flex items-center gap-0.5 rounded-xl bg-zinc-900/60 p-0.5 border border-white/[0.03]">
+                        <button type="button" onClick={() => setActiveTab('wallet')}
+                            className={`flex-1 rounded-[10px] py-1.5 text-[11px] font-semibold transition-all ${activeTab === 'wallet' ? 'bg-amber-400/15 text-amber-300' : 'text-zinc-500'}`}
+                        >金狗通知</button>
+                        <button type="button" onClick={() => setActiveTab('pool')}
+                            className={`flex-1 rounded-[10px] py-1.5 text-[11px] font-semibold transition-all ${activeTab === 'pool' ? 'bg-emerald-400/15 text-emerald-300' : 'text-zinc-500'}`}
+                        >池子监控</button>
                     </div>
 
-                    <div className="relative">
-                        {activeTab === 'wallet' && (
-                            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-                                <section className="rounded-[28px] border border-amber-400/15 bg-[radial-gradient(circle_at_top_left,rgba(251,191,36,0.12),transparent_34%),linear-gradient(180deg,rgba(20,20,24,0.96),rgba(9,9,11,0.98))] p-4 shadow-[0_22px_72px_-46px_rgba(0,0,0,0.95)]">
-                                    <div className="flex items-start justify-between gap-3">
-                                        <div className="flex min-w-0 items-start gap-3">
-                                            <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-amber-400/20 bg-amber-400/10 text-amber-200"><Flame size={16} /></div>
-                                            <div className="min-w-0">
-                                                <div className="text-sm font-semibold text-zinc-100">聪明钱聚集模式</div>
-                                                <div className="mt-1 text-xs leading-5 text-zinc-400">同一交易对在窗口内聚集足够多钱包时推送，适合抓早期 LP 异动。</div>
-                                                <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                                                    <Badge className={draft.wallet_mode.enabled ? 'border-amber-400/20 bg-amber-400/12 text-amber-200' : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>{draft.wallet_mode.enabled ? '已开启' : '已关闭'}</Badge>
-                                                    <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">强度 {goldenDogIntensityLabel(draft.wallet_mode.intensity)}</Badge>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div className="flex shrink-0 gap-2">
-                                            <button type="button" className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(draft.wallet_mode.enabled, brand)}`} onClick={() => updateWalletMode('enabled', true)}>开启</button>
-                                            <button type="button" className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(!draft.wallet_mode.enabled, brand)}`} onClick={() => updateWalletMode('enabled', false)}>关闭</button>
-                                            <button type="button" className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(false, brand)}`} disabled={testingMode === 'wallet' || !hasInitData} onClick={() => handleTest('wallet')}>{testingMode === 'wallet' ? '测试中...' : '测试'}</button>
-                                        </div>
-                                    </div>
-                                    <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                                        <StatCard label="触发钱包" value={`${draft.wallet_mode.min_wallets || '--'} 个`} compact />
-                                        <StatCard label="统计窗口" value={`${draft.wallet_mode.window_minutes || '--'} 分钟`} compact />
-                                        <StatCard label="冷却时间" value={`${draft.wallet_mode.cooldown_minutes || '--'} 分钟`} compact />
-                                        <StatCard label="通知强度" value={goldenDogIntensityLabel(draft.wallet_mode.intensity)} compact />
-                                    </div>
-                                    <div className="mt-4 grid gap-2 sm:grid-cols-4">
-                                        <input className={getInputClass(brand)} type="number" min="1" step="1" placeholder="钱包数量" value={draft.wallet_mode.min_wallets} onChange={(e) => updateWalletMode('min_wallets', e.target.value)} />
-                                        <input className={getInputClass(brand)} type="number" min="1" step="1" placeholder="统计窗口(分钟)" value={draft.wallet_mode.window_minutes} onChange={(e) => updateWalletMode('window_minutes', e.target.value)} />
-                                        <input className={getInputClass(brand)} type="number" min="0" step="1" placeholder="冷却时间(分钟)" value={draft.wallet_mode.cooldown_minutes} onChange={(e) => updateWalletMode('cooldown_minutes', e.target.value)} />
-                                        <select className={getInputClass(brand)} value={draft.wallet_mode.intensity} onChange={(e) => updateWalletMode('intensity', e.target.value)}>{intensityOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
-                                    </div>
-                                </section>
+                    {/* ── 金狗通知 Tab ── */}
+                    {activeTab === 'wallet' && (
+                        <section className="rounded-2xl border border-amber-400/10 bg-gradient-to-b from-[rgba(20,20,24,0.96)] to-[rgba(9,9,11,0.98)] p-3">
+                            <div className="flex items-center justify-between gap-2">
+                                <span className="text-[12px] font-semibold text-zinc-100">聪明钱聚集</span>
+                                <div className="flex items-center gap-1">
+                                    <button type="button" className={pillBtn(draft.wallet_mode.enabled)} onClick={() => updateWalletMode('enabled', true)}>开启</button>
+                                    <button type="button" className={pillBtn(!draft.wallet_mode.enabled)} onClick={() => updateWalletMode('enabled', false)}>关闭</button>
+                                    <button type="button" className={pillBtn(false)} disabled={testingMode === 'wallet' || !hasInitData} onClick={() => handleTest('wallet')}>{testingMode === 'wallet' ? '...' : '测试'}</button>
+                                </div>
                             </div>
-                        )}
+                            {/* inline 指标条 */}
+                            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] justify-center">
+                                <span className="text-zinc-400">钱包 <span className="text-zinc-100">{draft.wallet_mode.min_wallets || '--'}</span></span>
+                                <span className="text-zinc-400">窗口 <span className="text-zinc-100">{draft.wallet_mode.window_minutes || '--'}m</span></span>
+                                <span className="text-zinc-400">冷却 <span className="text-zinc-100">{draft.wallet_mode.cooldown_minutes || '--'}m</span></span>
+                                <span className="text-zinc-400">强度 <span className="text-zinc-100">{goldenDogIntensityLabel(draft.wallet_mode.intensity)}</span></span>
+                            </div>
+                            <div className="mt-3 grid grid-cols-2 gap-1.5">
+                                <input className={miniInputCls} type="number" min="1" step="1" placeholder="钱包数量" value={draft.wallet_mode.min_wallets} onChange={(e) => updateWalletMode('min_wallets', e.target.value)} />
+                                <input className={miniInputCls} type="number" min="1" step="1" placeholder="窗口(分钟)" value={draft.wallet_mode.window_minutes} onChange={(e) => updateWalletMode('window_minutes', e.target.value)} />
+                                <input className={miniInputCls} type="number" min="0" step="1" placeholder="冷却(分钟)" value={draft.wallet_mode.cooldown_minutes} onChange={(e) => updateWalletMode('cooldown_minutes', e.target.value)} />
+                                <MiniSelect value={draft.wallet_mode.intensity} options={intensityOptions} onChange={(v) => updateWalletMode('intensity', v)} />
+                            </div>
+                        </section>
+                    )}
 
-                        {activeTab === 'pool' && (
-                            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-                                <section className="rounded-[28px] border border-emerald-400/15 bg-[radial-gradient(circle_at_top_left,rgba(45,212,191,0.12),transparent_34%),linear-gradient(180deg,rgba(18,24,27,0.96),rgba(9,11,14,0.98))] p-4 shadow-[0_22px_72px_-46px_rgba(0,0,0,0.95)]">
-                                    <div className="flex items-start justify-between gap-3">
-                                        <div className="flex min-w-0 items-start gap-3">
-                                            <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10 text-emerald-200"><Eye size={16} /></div>
-                                            <div className="min-w-0">
-                                                <div className="text-sm font-semibold text-zinc-100">PoolM 池子参数模式</div>
-                                                <div className="mt-1 text-xs leading-5 text-zinc-400">从 PoolM 最新池子数据里按 AND 条件筛选，留空的字段不会参与匹配。</div>
-                                                <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                                                    <Badge className={draft.pool_mode.enabled ? 'border-emerald-400/20 bg-emerald-400/12 text-emerald-200' : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>{draft.pool_mode.enabled ? '已开启' : '已关闭'}</Badge>
-                                                    <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">已启用 {activePoolThresholdCount} 项</Badge>
-                                                    <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">强度 {goldenDogIntensityLabel(draft.pool_mode.intensity)}</Badge>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div className="flex shrink-0 gap-2">
-                                            <button type="button" className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(draft.pool_mode.enabled, brand)}`} onClick={() => updatePoolMode('enabled', true)}>开启</button>
-                                            <button type="button" className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(!draft.pool_mode.enabled, brand)}`} onClick={() => updatePoolMode('enabled', false)}>关闭</button>
-                                            <button type="button" className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(false, brand)}`} disabled={testingMode === 'pool' || !hasInitData} onClick={() => handleTest('pool')}>{testingMode === 'pool' ? '测试中...' : '测试'}</button>
-                                        </div>
-                                    </div>
-                                    <div className="mt-4 grid grid-cols-3 gap-2">
-                                        <StatCard label="TVL" value={goldenDogThresholdText(draft.pool_mode.min_tvl, '$')} compact />
-                                        <StatCard label="VOL" value={goldenDogThresholdText(draft.pool_mode.min_volume, '$')} compact />
-                                        <StatCard label="交易笔数" value={goldenDogThresholdText(draft.pool_mode.min_transaction_count)} compact />
-                                        <StatCard label="费率" value={goldenDogThresholdText(draft.pool_mode.min_fee_rate, '', '%')} compact />
-                                        <StatCard label="活跃费率" value={goldenDogThresholdText(draft.pool_mode.min_active_liquidity_ratio, '', '%')} compact />
-                                    </div>
-                                    <div className="mt-3 text-xs leading-5 text-zinc-400">对应热门池子数据：TVL / VOL / 交易笔数 / 费率(=fees÷tvl) / 活跃费率(=fees÷活跃流动性)，留空不参与匹配</div>
-                                    <div className="mt-4 grid grid-cols-2 gap-2">
-                                        <input className={getInputClass(brand)} type="number" min="0" step="0.01" placeholder="最小 TVL($)" value={draft.pool_mode.min_tvl} onChange={(e) => updatePoolMode('min_tvl', e.target.value)} />
-                                        <input className={getInputClass(brand)} type="number" min="0" step="0.01" placeholder="最小 VOL($)" value={draft.pool_mode.min_volume} onChange={(e) => updatePoolMode('min_volume', e.target.value)} />
-                                        <input className={getInputClass(brand)} type="number" min="0" step="1" placeholder="最小交易笔数" value={draft.pool_mode.min_transaction_count} onChange={(e) => updatePoolMode('min_transaction_count', e.target.value)} />
-                                        <input className={getInputClass(brand)} type="number" min="0" step="0.001" placeholder="最小费率(%)" value={draft.pool_mode.min_fee_rate} onChange={(e) => updatePoolMode('min_fee_rate', e.target.value)} />
-                                        <input className={getInputClass(brand)} type="number" min="0" step="0.001" placeholder="最小活跃费率(%)" value={draft.pool_mode.min_active_liquidity_ratio} onChange={(e) => updatePoolMode('min_active_liquidity_ratio', e.target.value)} />
-                                        <input className={getInputClass(brand)} type="number" min="0" step="1" placeholder="冷却时间(分钟)" value={draft.pool_mode.cooldown_minutes} onChange={(e) => updatePoolMode('cooldown_minutes', e.target.value)} />
-                                    </div>
-                                    <div className="mt-3 grid grid-cols-2 gap-2">
-                                        <select className={getInputClass(brand)} value={draft.pool_mode.intensity} onChange={(e) => updatePoolMode('intensity', e.target.value)}>{intensityOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
-                                    </div>
-                                </section>
+                    {/* ── 池子监控 Tab ── */}
+                    {activeTab === 'pool' && (
+                        <section className="rounded-2xl border border-emerald-400/10 bg-gradient-to-b from-[rgba(18,24,27,0.96)] to-[rgba(9,11,14,0.98)] p-3">
+                            <div className="flex items-center justify-between gap-2">
+                                <span className="text-[12px] font-semibold text-zinc-100">池子参数监控</span>
+                                <div className="flex items-center gap-1">
+                                    <button type="button" className={pillBtnTeal(draft.pool_mode.enabled)} onClick={() => updatePoolMode('enabled', true)}>开启</button>
+                                    <button type="button" className={pillBtnTeal(!draft.pool_mode.enabled)} onClick={() => updatePoolMode('enabled', false)}>关闭</button>
+                                    <button type="button" className={pillBtnTeal(false)} disabled={testingMode === 'pool' || !hasInitData} onClick={() => handleTest('pool')}>{testingMode === 'pool' ? '...' : '测试'}</button>
+                                </div>
                             </div>
-                        )}
-                    </div>
+                            {/* inline 指标条 */}
+                            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] justify-center">
+                                <span className="text-zinc-400">TVL <span className="text-zinc-100">{goldenDogThresholdText(draft.pool_mode.min_tvl, '$')}</span></span>
+                                <span className="text-zinc-400">VOL <span className="text-zinc-100">{goldenDogThresholdText(draft.pool_mode.min_volume, '$')}</span></span>
+                                <span className="text-zinc-400">笔数 <span className="text-zinc-100">{goldenDogThresholdText(draft.pool_mode.min_transaction_count)}</span></span>
+                                <span className="text-zinc-400">费率 <span className="text-zinc-100">{goldenDogThresholdText(draft.pool_mode.min_fee_rate, '', '%')}</span></span>
+                                <span className="text-zinc-400">活跃 <span className="text-zinc-100">{goldenDogThresholdText(draft.pool_mode.min_active_liquidity_ratio, '', '%')}</span></span>
+                            </div>
+                            <div className="mt-2 text-[9px] text-zinc-400 leading-relaxed text-center">TVL / VOL / 笔数 / 费率(fees÷tvl) / 活跃(fees÷活跃流动性)，留空不匹配</div>
+                            <div className="mt-2.5 grid grid-cols-2 gap-1.5">
+                                <input className={miniInputCls} type="number" min="0" step="0.01" placeholder="最小 TVL($)" value={draft.pool_mode.min_tvl} onChange={(e) => updatePoolMode('min_tvl', e.target.value)} />
+                                <input className={miniInputCls} type="number" min="0" step="0.01" placeholder="最小 VOL($)" value={draft.pool_mode.min_volume} onChange={(e) => updatePoolMode('min_volume', e.target.value)} />
+                                <input className={miniInputCls} type="number" min="0" step="1" placeholder="最小交易笔数" value={draft.pool_mode.min_transaction_count} onChange={(e) => updatePoolMode('min_transaction_count', e.target.value)} />
+                                <input className={miniInputCls} type="number" min="0" step="0.001" placeholder="费率(%)" value={draft.pool_mode.min_fee_rate} onChange={(e) => updatePoolMode('min_fee_rate', e.target.value)} />
+                                <input className={miniInputCls} type="number" min="0" step="0.001" placeholder="活跃费率(%)" value={draft.pool_mode.min_active_liquidity_ratio} onChange={(e) => updatePoolMode('min_active_liquidity_ratio', e.target.value)} />
+                                <input className={miniInputCls} type="number" min="0" step="1" placeholder="冷却(分钟)" value={draft.pool_mode.cooldown_minutes} onChange={(e) => updatePoolMode('cooldown_minutes', e.target.value)} />
+                            </div>
+                            <div className="mt-2">
+                                <MiniSelect value={draft.pool_mode.intensity} options={intensityOptions} onChange={(v) => updatePoolMode('intensity', v)} />
+                            </div>
+                        </section>
+                    )}
                 </div>
             )}
         </div>
