@@ -2281,38 +2281,50 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
         }));
     }, []);
 
-    const inputStyle = {
-        width: '100%',
-        borderRadius: 14,
-        border: '1px solid rgba(255,255,255,0.08)',
-        background: 'rgba(9,9,11,0.88)',
-        color: '#f4f4f5',
-        padding: '10px 12px',
-        outline: 'none',
-        fontSize: 13,
+    /* ── 精致化的统一样式 ── */
+    const fieldInputCss = {
+        width: '100%', borderRadius: 10,
+        border: '1px solid rgba(255,255,255,0.07)',
+        background: 'rgba(0,0,0,0.35)',
+        color: '#e4e4e7', padding: '8px 10px',
+        outline: 'none', fontSize: 13, fontFamily: 'inherit',
+        transition: 'border-color 0.2s, box-shadow 0.2s',
+        WebkitAppearance: 'none', MozAppearance: 'none', appearance: 'none',
     };
-    const modeCardStyle = {
-        padding: 16,
-        border: '1px solid rgba(255,255,255,0.06)',
-        background: 'linear-gradient(180deg, rgba(20,20,24,0.96), rgba(9,9,11,0.98))',
-        boxShadow: '0 22px 72px -46px rgba(0,0,0,0.95)',
+    const fieldSelectCss = {
+        ...fieldInputCss,
+        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' stroke='%2371717a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`,
+        backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center',
+        paddingRight: 28, cursor: 'pointer',
     };
-    const actionButtonStyle = {
-        borderRadius: 14,
-        border: '1px solid rgba(255,255,255,0.08)',
-        background: 'rgba(24,24,27,0.88)',
-        color: '#f4f4f5',
-        padding: '10px 14px',
-        fontSize: 13,
-        fontWeight: 600,
-        cursor: 'pointer',
+    const fieldLabelCss = { display: 'grid', gap: 5 };
+    const fieldLabelTextCss = { fontSize: 11, fontWeight: 500, color: '#71717a', letterSpacing: '0.02em', textTransform: 'uppercase' };
+
+    const pillBtnBase = (isActive, accentRgb) => ({
+        borderRadius: 8, border: 'none', padding: '6px 14px',
+        fontSize: 12, fontWeight: 600, cursor: 'pointer',
+        transition: 'all 0.2s',
+        background: isActive ? `rgba(${accentRgb},0.18)` : 'rgba(255,255,255,0.04)',
+        color: isActive ? '#f4f4f5' : '#52525b',
+        boxShadow: isActive ? `0 0 12px rgba(${accentRgb},0.12)` : 'none',
+    });
+
+    const actionBtnCss = {
+        borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)',
+        background: 'rgba(255,255,255,0.04)', color: '#a1a1aa',
+        padding: '6px 14px', fontSize: 12, fontWeight: 600,
+        cursor: 'pointer', transition: 'all 0.2s', fontFamily: 'inherit',
     };
-    const saveButtonStyle = {
-        ...actionButtonStyle,
-        borderColor: 'rgba(251,191,36,0.32)',
-        background: 'linear-gradient(135deg, rgba(251,191,36,0.18), rgba(245,158,11,0.12))',
-        color: '#fde68a',
+    const saveBtnCss = {
+        ...actionBtnCss,
+        borderColor: 'rgba(251,191,36,0.25)',
+        background: 'linear-gradient(135deg, rgba(251,191,36,0.14), rgba(245,158,11,0.08))',
+        color: '#fcd34d',
     };
+
+    const miniStatCss = { display: 'flex', alignItems: 'baseline', gap: 6, padding: '6px 0' };
+    const miniStatLabel = { fontSize: 11, color: '#52525b', fontWeight: 500 };
+    const miniStatValue = { fontSize: 13, color: '#d4d4d8', fontWeight: 600, fontVariantNumeric: 'tabular-nums' };
 
     const buildSavePayload = useCallback(() => {
         const walletMinWallets = parseGoldenDogRequiredInt(draft.wallet_mode.min_wallets, '钱包数量');
@@ -2365,15 +2377,12 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
             setError('请先登录 WebApp，拿到 initData 后才能保存监控通知。');
             return;
         }
-
         setSaving(true);
         setError('');
         setNotice('');
         try {
             const resp = await saveSMGoldenDogConfig({
-                apiBaseUrl,
-                initData,
-                chain: 'bsc',
+                apiBaseUrl, initData, chain: 'bsc',
                 config: buildSavePayload(),
             });
             applyResponse(resp);
@@ -2390,18 +2399,13 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
             setError('请先登录 WebApp，拿到 initData 后才能测试监控通知。');
             return;
         }
-
         setTestingMode(mode);
         setError('');
         setNotice('');
         try {
             const intensity = mode === 'pool' ? draft.pool_mode.intensity : draft.wallet_mode.intensity;
             const resp = await testSMGoldenDogConfig({
-                apiBaseUrl,
-                initData,
-                chain: 'bsc',
-                mode,
-                intensity,
+                apiBaseUrl, initData, chain: 'bsc', mode, intensity,
             });
             setNotice(resp?.message || '测试通知已发送');
         } catch (err) {
@@ -2411,204 +2415,245 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
         }
     }, [apiBaseUrl, draft.pool_mode.intensity, draft.wallet_mode.intensity, hasInitData, initData]);
 
+    /* ── 渲染 ── */
     return (
-        <div>
-            <div className="smd-detail-card" style={{
-                marginBottom: 16,
-                padding: 18,
-                border: '1px solid rgba(251, 191, 36, 0.18)',
-                background: 'radial-gradient(circle at top left, rgba(251, 191, 36, 0.16), transparent 34%), linear-gradient(180deg, rgba(24, 24, 27, 0.94), rgba(9, 9, 11, 0.98))',
-                boxShadow: '0 28px 90px -42px rgba(0, 0, 0, 0.95)',
+        <div style={{ display: 'grid', gap: 12 }}>
+            {/* ─── 紧凑标题行 ─── */}
+            <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                gap: 12, flexWrap: 'wrap', padding: '10px 14px',
+                borderRadius: 16,
+                border: '1px solid rgba(251,191,36,0.12)',
+                background: 'linear-gradient(135deg, rgba(251,191,36,0.06) 0%, transparent 60%), rgba(17,17,20,0.85)',
             }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
-                        <div style={{
-                            width: 46,
-                            height: 46,
-                            borderRadius: 18,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            border: '1px solid rgba(251, 191, 36, 0.22)',
-                            background: 'rgba(251, 191, 36, 0.12)',
-                            color: '#fcd34d',
-                            flexShrink: 0,
-                        }}>
-                            <Flame size={18} />
-                        </div>
-                        <div style={{ minWidth: 0 }}>
-                            <div className="smd-section-title" style={{ marginBottom: 6 }}>监控通知中心</div>
-                            <div style={{ color: '#a1a1aa', fontSize: 13, lineHeight: 1.6 }}>
-                                同时管理聪明钱聚集模式和 PoolM 池子参数模式，Bark Key 继续复用全局配置。
-                            </div>
-                            <div className="smd-pool-card-badges" style={{ marginTop: 10 }}>
-                                <Badge cls={draft.wallet_mode.enabled ? 'ok' : ''}>{draft.wallet_mode.enabled ? '钱包模式开启' : '钱包模式关闭'}</Badge>
-                                <Badge cls={draft.pool_mode.enabled ? 'ok' : ''}>{draft.pool_mode.enabled ? '池子模式开启' : '池子模式关闭'}</Badge>
-                                <Badge>Bark {barkStatusText}</Badge>
-                                <Badge>BSC</Badge>
-                            </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                    <div style={{
+                        width: 34, height: 34, borderRadius: 10,
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        background: 'rgba(251,191,36,0.10)', border: '1px solid rgba(251,191,36,0.18)',
+                        color: '#fcd34d', flexShrink: 0,
+                    }}>
+                        <Flame size={15} />
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: '#f4f4f5', letterSpacing: '-0.01em' }}>监控通知</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 11, padding: '1px 7px', borderRadius: 6, background: draft.wallet_mode.enabled ? 'rgba(52,211,153,0.12)' : 'rgba(255,255,255,0.04)', color: draft.wallet_mode.enabled ? '#6ee7b7' : '#52525b', fontWeight: 500 }}>
+                                钱包 {draft.wallet_mode.enabled ? 'ON' : 'OFF'}
+                            </span>
+                            <span style={{ fontSize: 11, padding: '1px 7px', borderRadius: 6, background: draft.pool_mode.enabled ? 'rgba(52,211,153,0.12)' : 'rgba(255,255,255,0.04)', color: draft.pool_mode.enabled ? '#6ee7b7' : '#52525b', fontWeight: 500 }}>
+                                池子 {draft.pool_mode.enabled ? 'ON' : 'OFF'}
+                            </span>
+                            <span style={{ fontSize: 11, padding: '1px 7px', borderRadius: 6, background: 'rgba(255,255,255,0.04)', color: '#71717a', fontWeight: 500 }}>
+                                Bark {barkStatusText}
+                            </span>
                         </div>
                     </div>
-                    <button type="button" disabled={saving || !hasInitData} onClick={handleSave} style={saveButtonStyle}>
-                        {saving ? '保存中...' : '保存全部配置'}
-                    </button>
                 </div>
-                <div className="smd-stats-grid" style={{ marginTop: 16, marginBottom: 0 }}>
-                    <StatCard label="Bark 状态" value={barkStatusText} />
-                    <StatCard label="钱包模式" value={draft.wallet_mode.enabled ? '运行中' : '暂停'} />
-                    <StatCard label="池子模式" value={draft.pool_mode.enabled ? '运行中' : '暂停'} />
-                    <StatCard label="池子条件" value={`${activePoolThresholdCount} 项`} />
-                </div>
+                <button type="button" disabled={saving || !hasInitData} onClick={handleSave} style={saveBtnCss}>
+                    {saving ? '保存中...' : '💾 保存配置'}
+                </button>
             </div>
 
-            {!hasInitData ? (
-                <div className="smd-inline-error">
-                    Web 端需要先登录 Telegram 才能保存提醒配置。Bark Key 继续复用全局配置，不在这里单独设置。
+            {/* ─── 消息提示 ─── */}
+            {!hasInitData && (
+                <div style={{ fontSize: 12, color: '#f87171', padding: '8px 12px', borderRadius: 10, background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.12)' }}>
+                    需要先登录 Telegram 才能保存配置
                 </div>
-            ) : null}
-            {error ? <div className="smd-inline-error">{error}</div> : null}
-            {!error && notice ? (
-                <div className="smd-inline-error" style={{ color: '#86efac', borderColor: 'rgba(34,197,94,0.28)', background: 'rgba(34,197,94,0.10)' }}>
-                    {notice}
-                </div>
-            ) : null}
+            )}
+            {error && <div style={{ fontSize: 12, color: '#f87171', padding: '8px 12px', borderRadius: 10, background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.12)' }}>{error}</div>}
+            {!error && notice && <div style={{ fontSize: 12, color: '#86efac', padding: '8px 12px', borderRadius: 10, background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.12)' }}>{notice}</div>}
 
-            {loading ? <div className="smd-loading">加载中...</div> : (
-                <div style={{ display: 'grid', gap: 14 }}>
+            {loading ? (
+                <div style={{ textAlign: 'center', padding: 32, color: '#52525b', fontSize: 13 }}>加载中...</div>
+            ) : (
+                <>
+                    {/* ─── Tab 切换（精致药丸） ─── */}
                     <div style={{
-                        display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'center', gap: 4,
-                        borderRadius: 20, background: 'rgba(24,24,27,0.6)', padding: 4, border: '1px solid rgba(255,255,255,0.03)'
+                        display: 'flex', gap: 2, padding: 3, borderRadius: 12,
+                        background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.04)',
                     }}>
-                        <button
-                            type="button"
-                            onClick={() => setActiveTab('wallet')}
-                            style={{
-                                flex: 1, borderRadius: 16, padding: '10px 0', fontSize: 14, fontWeight: 600,
-                                background: activeTab === 'wallet' ? 'rgba(251,191,36,0.15)' : 'transparent',
-                                color: activeTab === 'wallet' ? '#fcd34d' : '#71717a',
-                                border: 'none', cursor: 'pointer', transition: 'all 0.3s',
-                                boxShadow: activeTab === 'wallet' ? '0 2px 10px rgba(251,191,36,0.1)' : 'none'
-                            }}
-                        >
-                            金狗通知
+                        <button type="button" onClick={() => setActiveTab('wallet')} style={{
+                            flex: 1, borderRadius: 10, padding: '9px 0', fontSize: 13, fontWeight: 600,
+                            border: 'none', cursor: 'pointer', transition: 'all 0.25s ease',
+                            background: activeTab === 'wallet' ? 'rgba(251,191,36,0.12)' : 'transparent',
+                            color: activeTab === 'wallet' ? '#fcd34d' : '#52525b',
+                            boxShadow: activeTab === 'wallet' ? 'inset 0 1px 0 rgba(251,191,36,0.08)' : 'none',
+                        }}>
+                            🔥 金狗通知
                         </button>
-                        <button
-                            type="button"
-                            onClick={() => setActiveTab('pool')}
-                            style={{
-                                flex: 1, borderRadius: 16, padding: '10px 0', fontSize: 14, fontWeight: 600,
-                                background: activeTab === 'pool' ? 'rgba(52,211,153,0.15)' : 'transparent',
-                                color: activeTab === 'pool' ? '#6ee7b7' : '#71717a',
-                                border: 'none', cursor: 'pointer', transition: 'all 0.3s',
-                                boxShadow: activeTab === 'pool' ? '0 2px 10px rgba(52,211,153,0.1)' : 'none'
-                            }}
-                        >
-                            池子监控
+                        <button type="button" onClick={() => setActiveTab('pool')} style={{
+                            flex: 1, borderRadius: 10, padding: '9px 0', fontSize: 13, fontWeight: 600,
+                            border: 'none', cursor: 'pointer', transition: 'all 0.25s ease',
+                            background: activeTab === 'pool' ? 'rgba(45,212,191,0.12)' : 'transparent',
+                            color: activeTab === 'pool' ? '#5eead4' : '#52525b',
+                            boxShadow: activeTab === 'pool' ? 'inset 0 1px 0 rgba(45,212,191,0.08)' : 'none',
+                        }}>
+                            🧠 池子监控
                         </button>
                     </div>
 
-                    <div style={{ position: 'relative' }}>
-                        {activeTab === 'wallet' && (
-                            <div className="smd-detail-card" style={{
-                                ...modeCardStyle,
-                                borderColor: 'rgba(251,191,36,0.16)',
-                                background: 'radial-gradient(circle at top left, rgba(251,191,36,0.12), transparent 36%), linear-gradient(180deg, rgba(20,20,24,0.96), rgba(9,9,11,0.98))',
-                                animation: 'fadeIn 0.3s ease-out'
-                            }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                                    <div style={{ display: 'flex', gap: 12, minWidth: 0 }}>
-                                        <div style={{ width: 40, height: 40, borderRadius: 14, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.18)', color: '#fde68a', flexShrink: 0 }}>
-                                            <Flame size={16} />
-                                        </div>
-                                        <div style={{ minWidth: 0 }}>
-                                            <div className="smd-section-title" style={{ marginBottom: 6 }}>聪明钱聚集模式</div>
-                                            <div style={{ color: '#a1a1aa', fontSize: 13, lineHeight: 1.6 }}>同一交易对在窗口内聚集足够多钱包时推送，适合抓早期 LP 异动。</div>
-                                            <div className="smd-pool-card-badges" style={{ marginTop: 10 }}>
-                                                <Badge cls={draft.wallet_mode.enabled ? 'ok' : ''}>{draft.wallet_mode.enabled ? '已开启' : '已关闭'}</Badge>
-                                                <Badge>强度 {goldenDogIntensityLabel(draft.wallet_mode.intensity)}</Badge>
-                                            </div>
-                                        </div>
+                    {/* ─── 金狗通知 Tab ─── */}
+                    {activeTab === 'wallet' && (
+                        <div style={{
+                            borderRadius: 16, padding: 16,
+                            border: '1px solid rgba(251,191,36,0.10)',
+                            background: 'linear-gradient(160deg, rgba(251,191,36,0.05) 0%, transparent 40%), rgba(15,15,18,0.92)',
+                            animation: 'fadeIn 0.25s ease-out',
+                        }}>
+                            {/* 标题 + 操作行 */}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <div style={{ width: 28, height: 28, borderRadius: 8, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(251,191,36,0.10)', color: '#fde68a', fontSize: 13 }}>
+                                        <Flame size={13} />
                                     </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                                        <div className="smd-filter-group">
-                                            <button type="button" className={`smd-filter-btn${draft.wallet_mode.enabled ? ' active' : ''}`} onClick={() => updateWalletMode('enabled', true)}>开启</button>
-                                            <button type="button" className={`smd-filter-btn${!draft.wallet_mode.enabled ? ' active' : ''}`} onClick={() => updateWalletMode('enabled', false)}>关闭</button>
-                                        </div>
-                                        <button type="button" disabled={testingMode === 'wallet' || !hasInitData} onClick={() => handleTest('wallet')} style={actionButtonStyle}>
-                                            {testingMode === 'wallet' ? '测试中...' : '测试通知'}
-                                        </button>
-                                    </div>
+                                    <span style={{ fontSize: 14, fontWeight: 700, color: '#e4e4e7' }}>聪明钱聚集</span>
+                                    <span style={{ fontSize: 11, color: '#a1a1aa', fontWeight: 400 }}>— 窗口内钱包数达到阈值时推送</span>
                                 </div>
-                                <div className="smd-stats-grid" style={{ marginTop: 14, marginBottom: 0 }}>
-                                    <StatCard label="触发钱包" value={`${draft.wallet_mode.min_wallets || '--'} 个`} />
-                                    <StatCard label="统计窗口" value={`${draft.wallet_mode.window_minutes || '--'} 分钟`} />
-                                    <StatCard label="冷却时间" value={`${draft.wallet_mode.cooldown_minutes || '--'} 分钟`} />
-                                    <StatCard label="通知强度" value={goldenDogIntensityLabel(draft.wallet_mode.intensity)} />
-                                </div>
-                                <div className="smd-add-form" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, alignItems: 'end', marginTop: 16 }}>
-                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">钱包数量</span><input type="number" min="1" step="1" value={draft.wallet_mode.min_wallets} onChange={(e) => updateWalletMode('min_wallets', e.target.value)} style={inputStyle} /></label>
-                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">统计窗口(分钟)</span><input type="number" min="1" step="1" value={draft.wallet_mode.window_minutes} onChange={(e) => updateWalletMode('window_minutes', e.target.value)} style={inputStyle} /></label>
-                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">冷却时间(分钟)</span><input type="number" min="0" step="1" value={draft.wallet_mode.cooldown_minutes} onChange={(e) => updateWalletMode('cooldown_minutes', e.target.value)} style={inputStyle} /></label>
-                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">通知强度</span><select value={draft.wallet_mode.intensity} onChange={(e) => updateWalletMode('intensity', e.target.value)} style={inputStyle}>{intensityOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+                                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                    <button type="button" onClick={() => updateWalletMode('enabled', true)} style={pillBtnBase(draft.wallet_mode.enabled, '251,191,36')}>开启</button>
+                                    <button type="button" onClick={() => updateWalletMode('enabled', false)} style={pillBtnBase(!draft.wallet_mode.enabled, '161,161,170')}>关闭</button>
+                                    <button type="button" disabled={testingMode === 'wallet' || !hasInitData} onClick={() => handleTest('wallet')} style={actionBtnCss}>
+                                        {testingMode === 'wallet' ? '⏳' : '🔔'} 测试
+                                    </button>
                                 </div>
                             </div>
-                        )}
 
-                        {activeTab === 'pool' && (
-                            <div className="smd-detail-card" style={{
-                                ...modeCardStyle,
-                                borderColor: 'rgba(94,234,212,0.16)',
-                                background: 'radial-gradient(circle at top left, rgba(45,212,191,0.12), transparent 36%), linear-gradient(180deg, rgba(18,24,27,0.96), rgba(9,11,14,0.98))',
-                                animation: 'fadeIn 0.3s ease-out'
+                            {/* 紧凑指标行 */}
+                            <div style={{
+                                display: 'flex', gap: 0, borderRadius: 10, overflow: 'hidden', marginBottom: 14,
+                                border: '1px solid rgba(255,255,255,0.04)', background: 'rgba(0,0,0,0.2)',
                             }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                                    <div style={{ display: 'flex', gap: 12, minWidth: 0 }}>
-                                        <div style={{ width: 40, height: 40, borderRadius: 14, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(45,212,191,0.1)', border: '1px solid rgba(45,212,191,0.18)', color: '#99f6e4', flexShrink: 0 }}>
-                                            <Brain size={16} />
-                                        </div>
-                                        <div style={{ minWidth: 0 }}>
-                                            <div className="smd-section-title" style={{ marginBottom: 6 }}>PoolM 池子参数模式</div>
-                                            <div style={{ color: '#a1a1aa', fontSize: 13, lineHeight: 1.6 }}>从 PoolM 最新池子数据里按 AND 条件筛选，留空的字段不会参与匹配。</div>
-                                            <div className="smd-pool-card-badges" style={{ marginTop: 10 }}>
-                                                <Badge cls={draft.pool_mode.enabled ? 'ok' : ''}>{draft.pool_mode.enabled ? '已开启' : '已关闭'}</Badge>
-                                                <Badge>已启用 {activePoolThresholdCount} 项</Badge>
-                                                <Badge>强度 {goldenDogIntensityLabel(draft.pool_mode.intensity)}</Badge>
-                                            </div>
-                                        </div>
+                                {[
+                                    { l: '触发钱包', v: `${draft.wallet_mode.min_wallets || '--'}个` },
+                                    { l: '统计窗口', v: `${draft.wallet_mode.window_minutes || '--'}分钟` },
+                                    { l: '冷却', v: `${draft.wallet_mode.cooldown_minutes || '--'}分钟` },
+                                    { l: '强度', v: goldenDogIntensityLabel(draft.wallet_mode.intensity) },
+                                ].map((s, i) => (
+                                    <div key={s.l} style={{
+                                        flex: 1, padding: '8px 10px', textAlign: 'center',
+                                        borderRight: i < 3 ? '1px solid rgba(255,255,255,0.04)' : 'none',
+                                    }}>
+                                        <div style={miniStatLabel}>{s.l}</div>
+                                        <div style={miniStatValue}>{s.v}</div>
                                     </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                                        <div className="smd-filter-group">
-                                            <button type="button" className={`smd-filter-btn${draft.pool_mode.enabled ? ' active' : ''}`} onClick={() => updatePoolMode('enabled', true)}>开启</button>
-                                            <button type="button" className={`smd-filter-btn${!draft.pool_mode.enabled ? ' active' : ''}`} onClick={() => updatePoolMode('enabled', false)}>关闭</button>
-                                        </div>
-                                        <button type="button" disabled={testingMode === 'pool' || !hasInitData} onClick={() => handleTest('pool')} style={actionButtonStyle}>
-                                            {testingMode === 'pool' ? '测试中...' : '测试通知'}
-                                        </button>
+                                ))}
+                            </div>
+
+                            {/* 表单 */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+                                <label style={fieldLabelCss}>
+                                    <span style={fieldLabelTextCss}>钱包数量</span>
+                                    <input type="number" min="1" step="1" value={draft.wallet_mode.min_wallets} onChange={(e) => updateWalletMode('min_wallets', e.target.value)} style={fieldInputCss} />
+                                </label>
+                                <label style={fieldLabelCss}>
+                                    <span style={fieldLabelTextCss}>窗口 (分钟)</span>
+                                    <input type="number" min="1" step="1" value={draft.wallet_mode.window_minutes} onChange={(e) => updateWalletMode('window_minutes', e.target.value)} style={fieldInputCss} />
+                                </label>
+                                <label style={fieldLabelCss}>
+                                    <span style={fieldLabelTextCss}>冷却 (分钟)</span>
+                                    <input type="number" min="0" step="1" value={draft.wallet_mode.cooldown_minutes} onChange={(e) => updateWalletMode('cooldown_minutes', e.target.value)} style={fieldInputCss} />
+                                </label>
+                                <label style={fieldLabelCss}>
+                                    <span style={fieldLabelTextCss}>通知强度</span>
+                                    <select value={draft.wallet_mode.intensity} onChange={(e) => updateWalletMode('intensity', e.target.value)} style={fieldSelectCss}>
+                                        {intensityOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                                    </select>
+                                </label>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ─── 池子监控 Tab ─── */}
+                    {activeTab === 'pool' && (
+                        <div style={{
+                            borderRadius: 16, padding: 16,
+                            border: '1px solid rgba(45,212,191,0.10)',
+                            background: 'linear-gradient(160deg, rgba(45,212,191,0.05) 0%, transparent 40%), rgba(15,15,18,0.92)',
+                            animation: 'fadeIn 0.25s ease-out',
+                        }}>
+                            {/* 标题 + 操作行 */}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <div style={{ width: 28, height: 28, borderRadius: 8, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(45,212,191,0.10)', color: '#99f6e4', fontSize: 13 }}>
+                                        <Brain size={13} />
                                     </div>
+                                    <span style={{ fontSize: 14, fontWeight: 700, color: '#e4e4e7' }}>PoolM 池子参数</span>
+                                    <span style={{ fontSize: 11, color: '#a1a1aa', fontWeight: 400 }}>— AND 条件筛选，留空不参与匹配</span>
                                 </div>
-                                <div className="smd-stats-grid" style={{ marginTop: 14, marginBottom: 0 }}>
-                                    <StatCard label="条件数量" value={`${activePoolThresholdCount} 项`} />
-                                    <StatCard label="手续费" value={goldenDogThresholdText(draft.pool_mode.min_total_fees, '$')} />
-                                    <StatCard label="交易笔数" value={goldenDogThresholdText(draft.pool_mode.min_transaction_count)} />
-                                    <StatCard label="冷却时间" value={`${draft.pool_mode.cooldown_minutes || '--'} 分钟`} />
-                                </div>
-                                <div style={{ marginTop: 14, marginBottom: 2, color: '#94a3b8', fontSize: 12, lineHeight: 1.6 }}>
-                                    条件说明：手续费 = Total Fees，费率 = PoolM Fee Rate，活跃费率按 active_liquidity_ratio 的百分比输入。
-                                </div>
-                                <div className="smd-add-form" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, alignItems: 'end', marginTop: 14 }}>
-                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小手续费($)</span><input type="number" min="0" step="0.01" placeholder="留空则不限制" value={draft.pool_mode.min_total_fees} onChange={(e) => updatePoolMode('min_total_fees', e.target.value)} style={inputStyle} /></label>
-                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小交易笔数</span><input type="number" min="0" step="1" placeholder="留空则不限制" value={draft.pool_mode.min_transaction_count} onChange={(e) => updatePoolMode('min_transaction_count', e.target.value)} style={inputStyle} /></label>
-                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小 TVL($)</span><input type="number" min="0" step="0.01" placeholder="留空则不限制" value={draft.pool_mode.min_tvl} onChange={(e) => updatePoolMode('min_tvl', e.target.value)} style={inputStyle} /></label>
-                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小 VOL($)</span><input type="number" min="0" step="0.01" placeholder="留空则不限制" value={draft.pool_mode.min_volume} onChange={(e) => updatePoolMode('min_volume', e.target.value)} style={inputStyle} /></label>
-                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小费率</span><select value={draft.pool_mode.min_fee_rate} onChange={(e) => updatePoolMode('min_fee_rate', e.target.value)} style={inputStyle}>{GOLDEN_DOG_FEE_RATE_OPTIONS.map((item) => <option key={item.label} value={item.value}>{item.label}</option>)}</select></label>
-                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小活跃费率(%)</span><input type="number" min="0" max="100" step="0.1" placeholder="留空则不限制" value={draft.pool_mode.min_active_liquidity_ratio} onChange={(e) => updatePoolMode('min_active_liquidity_ratio', e.target.value)} style={inputStyle} /></label>
-                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">冷却时间(分钟)</span><input type="number" min="0" step="1" value={draft.pool_mode.cooldown_minutes} onChange={(e) => updatePoolMode('cooldown_minutes', e.target.value)} style={inputStyle} /></label>
-                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">通知强度</span><select value={draft.pool_mode.intensity} onChange={(e) => updatePoolMode('intensity', e.target.value)} style={inputStyle}>{intensityOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+                                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                    <button type="button" onClick={() => updatePoolMode('enabled', true)} style={pillBtnBase(draft.pool_mode.enabled, '45,212,191')}>开启</button>
+                                    <button type="button" onClick={() => updatePoolMode('enabled', false)} style={pillBtnBase(!draft.pool_mode.enabled, '161,161,170')}>关闭</button>
+                                    <button type="button" disabled={testingMode === 'pool' || !hasInitData} onClick={() => handleTest('pool')} style={actionBtnCss}>
+                                        {testingMode === 'pool' ? '⏳' : '🔔'} 测试
+                                    </button>
                                 </div>
                             </div>
-                        )}
-                    </div>
-                </div>
+
+                            {/* 紧凑指标行 */}
+                            <div style={{
+                                display: 'flex', gap: 0, borderRadius: 10, overflow: 'hidden', marginBottom: 14,
+                                border: '1px solid rgba(255,255,255,0.04)', background: 'rgba(0,0,0,0.2)',
+                            }}>
+                                {[
+                                    { l: '启用条件', v: `${activePoolThresholdCount}项` },
+                                    { l: '手续费', v: goldenDogThresholdText(draft.pool_mode.min_total_fees, '$') },
+                                    { l: '交易笔数', v: goldenDogThresholdText(draft.pool_mode.min_transaction_count) },
+                                    { l: '冷却', v: `${draft.pool_mode.cooldown_minutes || '--'}分钟` },
+                                ].map((s, i) => (
+                                    <div key={s.l} style={{
+                                        flex: 1, padding: '8px 10px', textAlign: 'center',
+                                        borderRight: i < 3 ? '1px solid rgba(255,255,255,0.04)' : 'none',
+                                    }}>
+                                        <div style={miniStatLabel}>{s.l}</div>
+                                        <div style={miniStatValue}>{s.v}</div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* 表单 */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+                                <label style={fieldLabelCss}>
+                                    <span style={fieldLabelTextCss}>手续费 ($)</span>
+                                    <input type="number" min="0" step="0.01" placeholder="不限制" value={draft.pool_mode.min_total_fees} onChange={(e) => updatePoolMode('min_total_fees', e.target.value)} style={fieldInputCss} />
+                                </label>
+                                <label style={fieldLabelCss}>
+                                    <span style={fieldLabelTextCss}>交易笔数</span>
+                                    <input type="number" min="0" step="1" placeholder="不限制" value={draft.pool_mode.min_transaction_count} onChange={(e) => updatePoolMode('min_transaction_count', e.target.value)} style={fieldInputCss} />
+                                </label>
+                                <label style={fieldLabelCss}>
+                                    <span style={fieldLabelTextCss}>TVL ($)</span>
+                                    <input type="number" min="0" step="0.01" placeholder="不限制" value={draft.pool_mode.min_tvl} onChange={(e) => updatePoolMode('min_tvl', e.target.value)} style={fieldInputCss} />
+                                </label>
+                                <label style={fieldLabelCss}>
+                                    <span style={fieldLabelTextCss}>VOL ($)</span>
+                                    <input type="number" min="0" step="0.01" placeholder="不限制" value={draft.pool_mode.min_volume} onChange={(e) => updatePoolMode('min_volume', e.target.value)} style={fieldInputCss} />
+                                </label>
+                                <label style={fieldLabelCss}>
+                                    <span style={fieldLabelTextCss}>费率 (%)</span>
+                                    <input type="number" min="0" step="0.01" placeholder="如1即1%" value={draft.pool_mode.min_fee_rate} onChange={(e) => updatePoolMode('min_fee_rate', e.target.value)} style={fieldInputCss} />
+                                </label>
+                                <label style={fieldLabelCss}>
+                                    <span style={fieldLabelTextCss}>活跃费率 (%)</span>
+                                    <input type="number" min="0" max="100" step="0.1" placeholder="不限制" value={draft.pool_mode.min_active_liquidity_ratio} onChange={(e) => updatePoolMode('min_active_liquidity_ratio', e.target.value)} style={fieldInputCss} />
+                                </label>
+                                <label style={fieldLabelCss}>
+                                    <span style={fieldLabelTextCss}>冷却 (分钟)</span>
+                                    <input type="number" min="0" step="1" value={draft.pool_mode.cooldown_minutes} onChange={(e) => updatePoolMode('cooldown_minutes', e.target.value)} style={fieldInputCss} />
+                                </label>
+                                <label style={fieldLabelCss}>
+                                    <span style={fieldLabelTextCss}>通知强度</span>
+                                    <select value={draft.pool_mode.intensity} onChange={(e) => updatePoolMode('intensity', e.target.value)} style={fieldSelectCss}>
+                                        {intensityOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                                    </select>
+                                </label>
+                            </div>
+                            <div style={{ marginTop: 10, fontSize: 11, color: '#3f3f46', lineHeight: 1.5 }}>
+                                手续费 = Total Fees · 费率 = PoolM Fee Rate · 活跃费率按 active_liquidity_ratio 百分比输入
+                            </div>
+                        </div>
+                    )}
+                </>
             )}
         </div>
     );
