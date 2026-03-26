@@ -248,7 +248,7 @@ func (s *Server) handleSMWallets(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, "invalid address", http.StatusBadRequest)
 			return
 		}
-		if err := repo.SoftDeleteMonitoredWallet(ctx, addr, chainID); err != nil {
+		if err := repo.DeleteMonitoredWallet(ctx, addr, chainID); err != nil {
 			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

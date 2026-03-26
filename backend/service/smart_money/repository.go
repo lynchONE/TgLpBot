@@ -125,10 +125,10 @@ func (r *Repository) UpdateMonitoredWallet(ctx context.Context, address string, 
 		Updates(updates).Error
 }
 
-func (r *Repository) SoftDeleteMonitoredWallet(ctx context.Context, address string, chainID int) error {
-	return database.DB.WithContext(ctx).Model(&models.MonitoredWallet{}).
+func (r *Repository) DeleteMonitoredWallet(ctx context.Context, address string, chainID int) error {
+	return database.DB.WithContext(ctx).
 		Where("address = ? AND chain_id = ?", strings.ToLower(address), chainID).
-		Update("is_active", false).Error
+		Delete(&models.MonitoredWallet{}).Error
 }
 
 // --- Scan State ---

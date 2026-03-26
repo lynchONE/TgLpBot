@@ -5,6 +5,7 @@ import (
 	userSvc "TgLpBot/service/user"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -49,17 +50,66 @@ type adminSmartMoneyLeaderboardRequest struct {
 	ForceRefresh bool   `json:"force_refresh,omitempty"`
 }
 
+type adminSmartMoneyLeaderboardRequestCompat struct {
+	InitData          string `json:"initData"`
+	Days              int    `json:"days"`
+	Metric            string `json:"metric"`
+	Page              int    `json:"page"`
+	PageSize          int    `json:"page_size"`
+	PageSizeCamel     int    `json:"pageSize"`
+	Keyword           string `json:"keyword"`
+	Limit             int    `json:"limit,omitempty"`
+	ForceRefresh      bool   `json:"force_refresh,omitempty"`
+	ForceRefreshCamel *bool  `json:"forceRefresh,omitempty"`
+}
+
 const assetResponseCacheTTL = time.Minute
 
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, dest interface{}) bool {
+	return decodeJSONBodyWithMode(w, r, dest, true)
+}
+
+func decodeJSONBodyLoose(w http.ResponseWriter, r *http.Request, dest interface{}) bool {
+	return decodeJSONBodyWithMode(w, r, dest, false)
+}
+
+func decodeJSONBodyWithMode(w http.ResponseWriter, r *http.Request, dest interface{}, disallowUnknownFields bool) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 32*1024)
 	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
+	if disallowUnknownFields {
+		dec.DisallowUnknownFields()
+	}
 	if err := dec.Decode(dest); err != nil {
+		log.Printf("web_server: decode JSON body failed for %s %s: %v", r.Method, r.URL.Path, err)
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return false
 	}
 	return true
+}
+
+func decodeAdminSmartMoneyLeaderboardRequest(w http.ResponseWriter, r *http.Request) (adminSmartMoneyLeaderboardRequest, bool) {
+	var raw adminSmartMoneyLeaderboardRequestCompat
+	if !decodeJSONBodyLoose(w, r, &raw) {
+		return adminSmartMoneyLeaderboardRequest{}, false
+	}
+
+	req := adminSmartMoneyLeaderboardRequest{
+		InitData:     raw.InitData,
+		Days:         raw.Days,
+		Metric:       raw.Metric,
+		Page:         raw.Page,
+		PageSize:     raw.PageSize,
+		Keyword:      raw.Keyword,
+		Limit:        raw.Limit,
+		ForceRefresh: raw.ForceRefresh,
+	}
+	if req.PageSize <= 0 && raw.PageSizeCamel > 0 {
+		req.PageSize = raw.PageSizeCamel
+	}
+	if raw.ForceRefreshCamel != nil {
+		req.ForceRefresh = *raw.ForceRefreshCamel
+	}
+	return req, true
 }
 
 func authenticateAssetUser(initData string) (uint, int, string) {
@@ -272,8 +322,8 @@ func (s *Server) handleAdminSmartMoneyLeaderboard(w http.ResponseWriter, r *http
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	var req adminSmartMoneyLeaderboardRequest
-	if !decodeJSONBody(w, r, &req) {
+	req, ok := decodeAdminSmartMoneyLeaderboardRequest(w, r)
+	if !ok {
 		return
 	}
 	adminUserID, status, msg := authenticateAssetAdmin(req.InitData)
