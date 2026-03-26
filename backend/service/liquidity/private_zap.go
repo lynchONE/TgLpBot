@@ -6,6 +6,7 @@ import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/service/chainexec"
+	"context"
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
@@ -18,11 +19,15 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/go-redis/redis/v8"
 	"gorm.io/gorm"
 )
 
 const walletChainContractKindZapSimple = "zap_simple"
+const walletChainContractStatusDeployed = "deployed"
+const walletChainContractStatusReady = "ready"
 const privateZapCacheTTL = time.Hour
 const privateZapCachePrefix = "private_zap:binding"
 
@@ -80,6 +85,41 @@ func (s *LiquidityService) resolveZapAddress(
 	}
 }
 
+func (s *LiquidityService) EnsureWalletPrivateZapReady(userID uint, chain string, walletID uint, walletAddress string, usage string) error {
+	if s == nil {
+		return fmt.Errorf("liquidity service is nil")
+	}
+	if config.AppConfig == nil {
+		return fmt.Errorf("config not loaded")
+	}
+	chain = config.NormalizeChain(chain)
+	exec, err := chainexec.GetEVM(chain)
+	if err != nil {
+		return err
+	}
+
+	wallet, err := s.walletService.ResolveTaskWallet(userID, walletID, walletAddress)
+	if err != nil {
+		return fmt.Errorf("failed to get wallet: %w", err)
+	}
+
+	privateKeyHex, err := s.walletService.GetPrivateKey(wallet)
+	if err != nil {
+		return fmt.Errorf("failed to get private key: %w", err)
+	}
+	privateKey, err := crypto.HexToECDSA(privateKeyHex)
+	if err != nil {
+		return fmt.Errorf("failed to parse private key: %w", err)
+	}
+
+	zapUse := zapUsageV3
+	if strings.EqualFold(strings.TrimSpace(usage), string(zapUsageV4)) {
+		zapUse = zapUsageV4
+	}
+	_, err = s.resolveZapAddress(exec, wallet, privateKey, s.walletService.GetWalletAddress(wallet), zapUse, TxOptions{})
+	return err
+}
+
 func privateZapCacheKey(chain string, walletID uint) string {
 	return fmt.Sprintf("%s:%s:%d:%s",
 		privateZapCachePrefix,
@@ -123,8 +163,46 @@ func writePrivateZapCache(chain string, walletID uint, zapAddr common.Address) {
 	}
 }
 
+func normalizePrivateZapBindingStatus(binding models.WalletChainContract) string {
+	status := strings.ToLower(strings.TrimSpace(binding.Status))
+	switch status {
+	case walletChainContractStatusDeployed, walletChainContractStatusReady:
+		return status
+	case "":
+		if common.IsHexAddress(strings.TrimSpace(binding.ContractAddress)) {
+			// Existing rows created before status tracking are treated as ready.
+			return walletChainContractStatusReady
+		}
+	}
+	return status
+}
+
 func isPrivateZapBindingUsable(binding models.WalletChainContract) bool {
-	return common.IsHexAddress(strings.TrimSpace(binding.ContractAddress))
+	if !common.IsHexAddress(strings.TrimSpace(binding.ContractAddress)) {
+		return false
+	}
+	return normalizePrivateZapBindingStatus(binding) == walletChainContractStatusReady
+}
+
+func isPrivateZapBindingConfigPending(binding models.WalletChainContract) bool {
+	if !common.IsHexAddress(strings.TrimSpace(binding.ContractAddress)) {
+		return false
+	}
+	return normalizePrivateZapBindingStatus(binding) == walletChainContractStatusDeployed
+}
+
+func privateZapHasBytecode(client *ethclient.Client, zapAddr common.Address) (bool, error) {
+	if client == nil {
+		return false, fmt.Errorf("blockchain client not initialized")
+	}
+	if zapAddr == (common.Address{}) {
+		return false, nil
+	}
+	code, err := client.CodeAt(context.Background(), zapAddr, nil)
+	if err != nil {
+		return false, err
+	}
+	return len(code) > 0, nil
 }
 
 func (s *LiquidityService) ensurePrivateZapSimple(
@@ -179,18 +257,96 @@ func (s *LiquidityService) ensurePrivateZapSimple(
 	findErr := database.DB.Where("wallet_id = ? AND chain = ? AND kind = ?", wallet.ID, chain, walletChainContractKindZapSimple).
 		First(&binding).Error
 	haveBinding := false
+	zapAddr := common.Address{}
+	deployHash := ""
 	if findErr == nil {
 		haveBinding = true
 		addrStr := strings.TrimSpace(binding.ContractAddress)
 		if isPrivateZapBindingUsable(binding) {
 			addr := common.HexToAddress(addrStr)
-			log.Printf("[PrivateZap] using existing binding chain=%s wallet_id=%d address=%s", chain, wallet.ID, addrStr)
-			writePrivateZapCache(chain, wallet.ID, addr)
-			return addr, nil
+			if deployed, derr := privateZapHasBytecode(client, addr); derr != nil {
+				log.Printf("[PrivateZap] warning: verify existing binding failed chain=%s wallet_id=%d address=%s err=%v", chain, wallet.ID, addrStr, derr)
+				writePrivateZapCache(chain, wallet.ID, addr)
+				return addr, nil
+			} else if deployed {
+				log.Printf("[PrivateZap] using existing binding chain=%s wallet_id=%d address=%s", chain, wallet.ID, addrStr)
+				writePrivateZapCache(chain, wallet.ID, addr)
+				return addr, nil
+			} else {
+				log.Printf("[PrivateZap] binding ready but bytecode missing: chain=%s wallet_id=%d address=%s -> will redeploy", chain, wallet.ID, addrStr)
+			}
+		} else if isPrivateZapBindingConfigPending(binding) {
+			addr := common.HexToAddress(addrStr)
+			if deployed, derr := privateZapHasBytecode(client, addr); derr != nil {
+				log.Printf("[PrivateZap] warning: verify pending binding failed chain=%s wallet_id=%d address=%s err=%v", chain, wallet.ID, addrStr, derr)
+				zapAddr = addr
+				deployHash = strings.TrimSpace(binding.DeployTxHash)
+			} else if deployed {
+				zapAddr = addr
+				deployHash = strings.TrimSpace(binding.DeployTxHash)
+				log.Printf("[PrivateZap] resuming config for deployed binding chain=%s wallet_id=%d address=%s", chain, wallet.ID, addrStr)
+			} else {
+				log.Printf("[PrivateZap] pending binding bytecode missing: chain=%s wallet_id=%d address=%s -> will redeploy", chain, wallet.ID, addrStr)
+			}
 		}
-		log.Printf("[PrivateZap] binding missing or invalid: chain=%s wallet_id=%d stored_address=%q -> will redeploy", chain, wallet.ID, addrStr)
+		if zapAddr == (common.Address{}) {
+			log.Printf("[PrivateZap] binding missing or invalid: chain=%s wallet_id=%d stored_address=%q status=%q -> will redeploy", chain, wallet.ID, addrStr, strings.TrimSpace(binding.Status))
+		}
 	} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
 		return common.Address{}, findErr
+	}
+
+	persistBinding := func(contractAddress, status, deployTxHash, configTxHash string) error {
+		updates := map[string]interface{}{
+			"status":           strings.TrimSpace(status),
+			"contract_address": strings.TrimSpace(contractAddress),
+			"version":          1,
+			"deploy_tx_hash":   strings.TrimSpace(deployTxHash),
+			"config_tx_hash":   strings.TrimSpace(configTxHash),
+		}
+
+		if haveBinding && binding.ID > 0 {
+			if err := database.DB.Model(&binding).Updates(updates).Error; err != nil {
+				return err
+			}
+			binding.Status = updates["status"].(string)
+			binding.ContractAddress = updates["contract_address"].(string)
+			binding.Version = updates["version"].(int)
+			binding.DeployTxHash = updates["deploy_tx_hash"].(string)
+			binding.ConfigTxHash = updates["config_tx_hash"].(string)
+			return nil
+		}
+
+		nowBinding := models.WalletChainContract{
+			WalletID:        wallet.ID,
+			Chain:           chain,
+			Kind:            walletChainContractKindZapSimple,
+			Status:          strings.TrimSpace(status),
+			ContractAddress: strings.TrimSpace(contractAddress),
+			Version:         1,
+			DeployTxHash:    strings.TrimSpace(deployTxHash),
+			ConfigTxHash:    strings.TrimSpace(configTxHash),
+		}
+		if err := database.DB.Create(&nowBinding).Error; err != nil {
+			var latest models.WalletChainContract
+			if rerr := database.DB.Where("wallet_id = ? AND chain = ? AND kind = ?", wallet.ID, chain, walletChainContractKindZapSimple).
+				First(&latest).Error; rerr == nil {
+				binding = latest
+				haveBinding = true
+				if uerr := database.DB.Model(&binding).Updates(updates).Error; uerr == nil {
+					binding.Status = updates["status"].(string)
+					binding.ContractAddress = updates["contract_address"].(string)
+					binding.Version = updates["version"].(int)
+					binding.DeployTxHash = updates["deploy_tx_hash"].(string)
+					binding.ConfigTxHash = updates["config_tx_hash"].(string)
+					return nil
+				}
+			}
+			return err
+		}
+		binding = nowBinding
+		haveBinding = true
+		return nil
 	}
 
 	// Validate required chain-scoped trusted addresses before deploying.
@@ -222,31 +378,39 @@ func (s *LiquidityService) ensurePrivateZapSimple(
 		v4pm = common.HexToAddress(cc.UniswapV4PositionManagerAddress)
 	}
 
-	log.Printf("[PrivateZap] deploying zap_simple chain=%s wallet_id=%d wallet=%s", chain, wallet.ID, walletAddr.Hex())
+	if zapAddr == (common.Address{}) {
+		log.Printf("[PrivateZap] deploying zap_simple chain=%s wallet_id=%d wallet=%s", chain, wallet.ID, walletAddr.Hex())
 
-	// 1) Deploy contract (nonce N)
-	nonce, err := blockchain.GetNonceWithClient(client, walletAddr)
-	if err != nil {
-		return common.Address{}, err
-	}
-	deployAuth, err := s.buildAuth(client, chainID, privateKey, nonce, big.NewInt(0), opts)
-	if err != nil {
-		return common.Address{}, err
-	}
-	tuneZapTxGasLimit("PrivateZap deploy ZapSimple", deployAuth, func(o *bind.TransactOpts) (*types.Transaction, error) {
-		_, tx, derr := blockchain.DeployZapSimple(o, client)
-		return tx, derr
-	})
+		// 1) Deploy contract (nonce N)
+		nonce, err := blockchain.GetNonceWithClient(client, walletAddr)
+		if err != nil {
+			return common.Address{}, err
+		}
+		deployAuth, err := s.buildAuth(client, chainID, privateKey, nonce, big.NewInt(0), opts)
+		if err != nil {
+			return common.Address{}, err
+		}
+		tuneZapTxGasLimit("PrivateZap deploy ZapSimple", deployAuth, func(o *bind.TransactOpts) (*types.Transaction, error) {
+			_, tx, derr := blockchain.DeployZapSimple(o, client)
+			return tx, derr
+		})
 
-	zapAddr, deployTx, err := blockchain.DeployZapSimple(deployAuth, client)
-	if err != nil {
-		return common.Address{}, fmt.Errorf("deploy ZapSimple failed: %w", err)
+		var deployTx *types.Transaction
+		zapAddr, deployTx, err = blockchain.DeployZapSimple(deployAuth, client)
+		if err != nil {
+			return common.Address{}, fmt.Errorf("deploy ZapSimple failed: %w", err)
+		}
+		deployHash = deployTx.Hash().Hex()
+		if _, werr := s.waitMined(client, chainID, deployTx); werr != nil {
+			return common.Address{}, fmt.Errorf("deploy ZapSimple tx failed: %w", werr)
+		}
+		log.Printf("[PrivateZap] deployed zap_simple chain=%s wallet_id=%d address=%s tx=%s", chain, wallet.ID, zapAddr.Hex(), deployHash)
+		if err := persistBinding(zapAddr.Hex(), walletChainContractStatusDeployed, deployHash, ""); err != nil {
+			return common.Address{}, fmt.Errorf("persist deployed private zap binding failed: %w", err)
+		}
+	} else {
+		log.Printf("[PrivateZap] configuring existing deployed zap_simple chain=%s wallet_id=%d address=%s", chain, wallet.ID, zapAddr.Hex())
 	}
-	deployHash := deployTx.Hash().Hex()
-	if _, werr := s.waitMined(client, chainID, deployTx); werr != nil {
-		return common.Address{}, fmt.Errorf("deploy ZapSimple tx failed: %w", werr)
-	}
-	log.Printf("[PrivateZap] deployed zap_simple chain=%s wallet_id=%d address=%s tx=%s", chain, wallet.ID, zapAddr.Hex(), deployHash)
 
 	// 2) Configure trusted addresses (nonce N+1 ...)
 	nonce2, err := blockchain.GetNonceWithClient(client, walletAddr)
@@ -309,39 +473,15 @@ func (s *LiquidityService) ensurePrivateZapSimple(
 		}
 	}
 
-	// 4) Persist binding (overwrite old binding on refresh).
-	nowBinding := models.WalletChainContract{
-		WalletID:        wallet.ID,
-		Chain:           chain,
-		Kind:            walletChainContractKindZapSimple,
-		ContractAddress: zapAddr.Hex(),
-		Version:         1,
-		DeployTxHash:    deployHash,
-		ConfigTxHash:    cfgHash,
-	}
-
-	// Update existing row if present, otherwise create.
-	if haveBinding && binding.ID > 0 {
-		if uerr := database.DB.Model(&binding).Updates(map[string]interface{}{
-			"contract_address": nowBinding.ContractAddress,
-			"version":          nowBinding.Version,
-			"deploy_tx_hash":   nowBinding.DeployTxHash,
-			"config_tx_hash":   nowBinding.ConfigTxHash,
-		}).Error; uerr != nil {
-			return common.Address{}, uerr
+	if err := persistBinding(zapAddr.Hex(), walletChainContractStatusReady, deployHash, cfgHash); err != nil {
+		var latest models.WalletChainContract
+		if rerr := database.DB.Where("wallet_id = ? AND chain = ? AND kind = ?", wallet.ID, chain, walletChainContractKindZapSimple).
+			First(&latest).Error; rerr == nil && isPrivateZapBindingUsable(latest) {
+			addr := common.HexToAddress(latest.ContractAddress)
+			writePrivateZapCache(chain, wallet.ID, addr)
+			return addr, nil
 		}
-	} else {
-		if cerr := database.DB.Create(&nowBinding).Error; cerr != nil {
-			// If another concurrent flow won the race and inserted, read and use that binding.
-			var latest models.WalletChainContract
-			if rerr := database.DB.Where("wallet_id = ? AND chain = ? AND kind = ?", wallet.ID, chain, walletChainContractKindZapSimple).
-				First(&latest).Error; rerr == nil && isPrivateZapBindingUsable(latest) {
-				addr := common.HexToAddress(latest.ContractAddress)
-				writePrivateZapCache(chain, wallet.ID, addr)
-				return addr, nil
-			}
-			return common.Address{}, cerr
-		}
+		return common.Address{}, err
 	}
 
 	log.Printf("[PrivateZap] bound zap_simple chain=%s wallet_id=%d address=%s", chain, wallet.ID, zapAddr.Hex())

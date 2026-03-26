@@ -89,10 +89,47 @@ function CompactStatusIcon({ tone, brand }) {
     );
 }
 
+function resolveOpenPositionView(tone, error) {
+    if (tone === 'done') {
+        return {
+            tone,
+            panelTitle: '开仓状态',
+            badge: '已完成',
+            headline: '开仓成功',
+            summary: '私有合约检查完成后，仓位已经创建完成。',
+            detail: '持仓列表刷新后会显示最新结果。',
+        };
+    }
+
+    if (tone === 'error') {
+        return {
+            tone,
+            panelTitle: '开仓状态',
+            badge: '失败',
+            headline: '开仓失败',
+            summary: error || '开仓请求执行失败。',
+            detail: '如果这是首次钱包开仓，系统会在下次重试时继续完成“部署私有合约 -> 绑定钱包 -> 开仓”，不会重复部署新的私有合约。',
+        };
+    }
+
+    return {
+        tone,
+        panelTitle: '开仓状态',
+        badge: '处理中',
+        headline: '正在处理开仓流程',
+        summary: '系统正在检查当前钱包的私有合约绑定状态。',
+        detail: '如果这是当前钱包首次开仓，会先部署私有合约，部署完成后绑定到当前钱包，再继续后续开仓步骤。处理完成前请勿重复提交相同请求。',
+    };
+}
+
 function resolveView(operation, progress) {
     const tone = progress?.status === 'error' ? 'error' : progress?.status === 'done' ? 'done' : 'active';
     const currentStep = Number(progress?.currentStep || 0);
     const error = String(progress?.error || '').trim();
+
+    if (operation === 'open_position') {
+        return resolveOpenPositionView(tone, error);
+    }
 
     if (operation === 'open_position') {
         if (tone === 'done') {

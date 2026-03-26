@@ -1534,7 +1534,7 @@ export default function App() {
 
         setOpenPositionLoading(true);
         setOpenPositionError('');
-        setOperationProgress({ operation: 'open_position', currentStep: 0, totalSteps: 5, status: 'active', error: '' });
+        setOperationProgress({ operation: 'open_position', currentStep: 1, totalSteps: 4, status: 'active', error: '' });
         try {
             const resp = await openPosition({
                 apiBaseUrl,
@@ -3187,6 +3187,11 @@ export default function App() {
                                     className={`mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                     placeholder="例如 0.5（可选）"
                                 />
+                            </div>
+
+                            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-xs leading-5 text-emerald-700 dark:text-emerald-200">
+                                如果这是当前钱包首次开仓，系统会先部署私有合约，部署完成后绑定到当前钱包，再继续正式开仓。
+                                首次流程失败后再次重试，会继续复用已部署地址完成绑定，不会重复部署新的私有合约。
                             </div>
 
                             {openPositionError ? (

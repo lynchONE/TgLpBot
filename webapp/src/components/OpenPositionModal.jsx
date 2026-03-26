@@ -138,6 +138,10 @@ export default function OpenPositionModal({
 
         <div className="modal-pair">{pair}</div>
         <div className="modal-addr">{addr ? `${addr.slice(0, 10)}...${addr.slice(-8)}` : '--'}</div>
+        <div className="modal-info-note">
+          如果这是当前钱包首次开仓，系统会先部署私有合约，部署完成后绑定到当前钱包，再继续正式开仓。
+          首次流程失败后再次重试，会继续复用已部署地址完成绑定，不会重复部署新的私有合约。
+        </div>
 
         {visibleError ? <div className="error-text">{visibleError}</div> : null}
 

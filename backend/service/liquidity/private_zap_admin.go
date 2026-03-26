@@ -59,6 +59,7 @@ func (s *LiquidityService) InvalidatePrivateZapBindingsByChain(ctx context.Conte
 	tx := database.DB.WithContext(ctx).Model(&models.WalletChainContract{}).
 		Where("chain = ? AND kind = ?", chain, walletChainContractKindZapSimple).
 		Updates(map[string]interface{}{
+			"status":           "",
 			"contract_address": "",
 			"deploy_tx_hash":   "",
 			"config_tx_hash":   "",

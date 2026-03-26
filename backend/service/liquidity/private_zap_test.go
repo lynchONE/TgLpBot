@@ -28,11 +28,27 @@ func TestIsPrivateZapBindingUsable(t *testing.T) {
 		want    bool
 	}{
 		{
-			name: "valid",
+			name: "legacy valid without status",
 			binding: models.WalletChainContract{
 				ContractAddress: "0x1111111111111111111111111111111111111111",
 			},
 			want: true,
+		},
+		{
+			name: "ready",
+			binding: models.WalletChainContract{
+				Status:          walletChainContractStatusReady,
+				ContractAddress: "0x1111111111111111111111111111111111111111",
+			},
+			want: true,
+		},
+		{
+			name: "deployed pending config",
+			binding: models.WalletChainContract{
+				Status:          walletChainContractStatusDeployed,
+				ContractAddress: "0x1111111111111111111111111111111111111111",
+			},
+			want: false,
 		},
 		{
 			name: "empty",
@@ -54,6 +70,46 @@ func TestIsPrivateZapBindingUsable(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := isPrivateZapBindingUsable(tc.binding); got != tc.want {
 				t.Fatalf("unexpected usable result: got=%v want=%v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsPrivateZapBindingConfigPending(t *testing.T) {
+	tests := []struct {
+		name    string
+		binding models.WalletChainContract
+		want    bool
+	}{
+		{
+			name: "pending deployed",
+			binding: models.WalletChainContract{
+				Status:          walletChainContractStatusDeployed,
+				ContractAddress: "0x1111111111111111111111111111111111111111",
+			},
+			want: true,
+		},
+		{
+			name: "legacy ready",
+			binding: models.WalletChainContract{
+				ContractAddress: "0x1111111111111111111111111111111111111111",
+			},
+			want: false,
+		},
+		{
+			name: "ready",
+			binding: models.WalletChainContract{
+				Status:          walletChainContractStatusReady,
+				ContractAddress: "0x1111111111111111111111111111111111111111",
+			},
+			want: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isPrivateZapBindingConfigPending(tc.binding); got != tc.want {
+				t.Fatalf("unexpected pending result: got=%v want=%v", got, tc.want)
 			}
 		})
 	}

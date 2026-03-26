@@ -1470,8 +1470,8 @@ export default function App() {
     setOperationProgress({
       panelKey,
       operation: 'open_position',
-      currentStep: 0,
-      totalSteps: 5,
+      currentStep: 1,
+      totalSteps: 4,
       status: 'active',
       error: '',
     });

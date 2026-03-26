@@ -74,6 +74,7 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
     const [notice, setNotice] = useState('');
     const [status, setStatus] = useState(null);
     const [draft, setDraft] = useState(() => createGoldenDogDraft());
+    const [activeTab, setActiveTab] = useState('wallet');
 
     const barkStatusText = useMemo(() => goldenDogBarkStatusText(status), [status]);
     const intensityOptions = useMemo(
@@ -175,7 +176,7 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
 
     const handleSave = useCallback(async () => {
         if (!hasInitData) {
-            setError('请先登录 Telegram 后再保存金狗通知。');
+            setError('请先登录 Telegram 后再保存监控通知。');
             return;
         }
 
@@ -200,7 +201,7 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
 
     const handleTest = useCallback(async (mode) => {
         if (!hasInitData) {
-            setError('请先登录 Telegram 后再测试金狗通知。');
+            setError('请先登录 Telegram 后再测试监控通知。');
             return;
         }
 
@@ -233,7 +234,7 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
                             <Flame size={18} />
                         </div>
                         <div className="min-w-0">
-                            <div className="text-base font-semibold text-zinc-100">金狗通知中心</div>
+                            <div className="text-base font-semibold text-zinc-100">监控通知中心</div>
                             <div className="mt-1 text-xs leading-5 text-zinc-400">同时管理聪明钱聚集模式和 PoolM 池子参数模式，Bark Key 继续复用全局配置。</div>
                             <div className="mt-2 flex flex-wrap items-center gap-1.5">
                                 <Badge className={draft.wallet_mode.enabled ? 'border-amber-400/20 bg-amber-400/12 text-amber-200' : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>{draft.wallet_mode.enabled ? '钱包模式开启' : '钱包模式关闭'}</Badge>
@@ -255,93 +256,133 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
                 </div>
             </section>
 
-            {!hasInitData ? <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">请先登录 Telegram 后再配置金狗通知。</div> : null}
+            {!hasInitData ? <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">请先登录 Telegram 后再配置监控通知。</div> : null}
             {error ? <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div> : null}
             {!error && notice ? <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{notice}</div> : null}
 
             {loading ? <div className="py-8 text-center text-zinc-500">加载中...</div> : (
-                <div className="space-y-3">
-                    <section className="rounded-[28px] border border-amber-400/15 bg-[radial-gradient(circle_at_top_left,rgba(251,191,36,0.12),transparent_34%),linear-gradient(180deg,rgba(20,20,24,0.96),rgba(9,9,11,0.98))] p-4 shadow-[0_22px_72px_-46px_rgba(0,0,0,0.95)]">
-                        <div className="flex items-start justify-between gap-3">
-                            <div className="flex min-w-0 items-start gap-3">
-                                <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-amber-400/20 bg-amber-400/10 text-amber-200"><Flame size={16} /></div>
-                                <div className="min-w-0">
-                                    <div className="text-sm font-semibold text-zinc-100">聪明钱聚集模式</div>
-                                    <div className="mt-1 text-xs leading-5 text-zinc-400">同一交易对在窗口内聚集足够多钱包时推送，适合抓早期 LP 异动。</div>
-                                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                                        <Badge className={draft.wallet_mode.enabled ? 'border-amber-400/20 bg-amber-400/12 text-amber-200' : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>{draft.wallet_mode.enabled ? '已开启' : '已关闭'}</Badge>
-                                        <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">强度 {goldenDogIntensityLabel(draft.wallet_mode.intensity)}</Badge>
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="flex shrink-0 gap-2">
-                                <button type="button" className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(draft.wallet_mode.enabled, brand)}`} onClick={() => updateWalletMode('enabled', true)}>开启</button>
-                                <button type="button" className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(!draft.wallet_mode.enabled, brand)}`} onClick={() => updateWalletMode('enabled', false)}>关闭</button>
-                                <button type="button" className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(false, brand)}`} disabled={testingMode === 'wallet' || !hasInitData} onClick={() => handleTest('wallet')}>{testingMode === 'wallet' ? '测试中...' : '测试'}</button>
-                            </div>
-                        </div>
-                        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                            <StatCard label="触发钱包" value={`${draft.wallet_mode.min_wallets || '--'} 个`} compact />
-                            <StatCard label="统计窗口" value={`${draft.wallet_mode.window_minutes || '--'} 分钟`} compact />
-                            <StatCard label="冷却时间" value={`${draft.wallet_mode.cooldown_minutes || '--'} 分钟`} compact />
-                            <StatCard label="通知强度" value={goldenDogIntensityLabel(draft.wallet_mode.intensity)} compact />
-                        </div>
-                        <div className="mt-4 grid gap-2 sm:grid-cols-4">
-                            <input className={getInputClass(brand)} type="number" min="1" step="1" placeholder="钱包数量" value={draft.wallet_mode.min_wallets} onChange={(e) => updateWalletMode('min_wallets', e.target.value)} />
-                            <input className={getInputClass(brand)} type="number" min="1" step="1" placeholder="统计窗口(分钟)" value={draft.wallet_mode.window_minutes} onChange={(e) => updateWalletMode('window_minutes', e.target.value)} />
-                            <input className={getInputClass(brand)} type="number" min="0" step="1" placeholder="冷却时间(分钟)" value={draft.wallet_mode.cooldown_minutes} onChange={(e) => updateWalletMode('cooldown_minutes', e.target.value)} />
-                            <select className={getInputClass(brand)} value={draft.wallet_mode.intensity} onChange={(e) => updateWalletMode('intensity', e.target.value)}>{intensityOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
-                        </div>
-                    </section>
+                <div className="space-y-4">
+                    <div className="flex w-full items-center justify-center gap-1 auto-margins rounded-[20px] bg-zinc-900/60 p-1 border border-white/[0.03]">
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('wallet')}
+                            className={`flex-1 rounded-[16px] py-2.5 text-sm font-semibold transition-all duration-300 ${activeTab === 'wallet'
+                                ? 'bg-amber-400/15 text-amber-300 shadow-[0_2px_10px_rgba(251,191,36,0.1)]'
+                                : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
+                                }`}
+                        >
+                            金狗通知
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('pool')}
+                            className={`flex-1 rounded-[16px] py-2.5 text-sm font-semibold transition-all duration-300 ${activeTab === 'pool'
+                                ? 'bg-emerald-400/15 text-emerald-300 shadow-[0_2px_10px_rgba(52,211,153,0.1)]'
+                                : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
+                                }`}
+                        >
+                            池子监控
+                        </button>
+                    </div>
 
-                    <section className="rounded-[28px] border border-emerald-400/15 bg-[radial-gradient(circle_at_top_left,rgba(45,212,191,0.12),transparent_34%),linear-gradient(180deg,rgba(18,24,27,0.96),rgba(9,11,14,0.98))] p-4 shadow-[0_22px_72px_-46px_rgba(0,0,0,0.95)]">
-                        <div className="flex items-start justify-between gap-3">
-                            <div className="flex min-w-0 items-start gap-3">
-                                <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10 text-emerald-200"><Eye size={16} /></div>
-                                <div className="min-w-0">
-                                    <div className="text-sm font-semibold text-zinc-100">PoolM 池子参数模式</div>
-                                    <div className="mt-1 text-xs leading-5 text-zinc-400">从 PoolM 最新池子数据里按 AND 条件筛选，留空的字段不会参与匹配。</div>
-                                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                                        <Badge className={draft.pool_mode.enabled ? 'border-emerald-400/20 bg-emerald-400/12 text-emerald-200' : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>{draft.pool_mode.enabled ? '已开启' : '已关闭'}</Badge>
-                                        <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">已启用 {activePoolThresholdCount} 项</Badge>
-                                        <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">强度 {goldenDogIntensityLabel(draft.pool_mode.intensity)}</Badge>
+                    <div className="relative">
+                        {activeTab === 'wallet' && (
+                            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                <section className="rounded-[28px] border border-amber-400/15 bg-[radial-gradient(circle_at_top_left,rgba(251,191,36,0.12),transparent_34%),linear-gradient(180deg,rgba(20,20,24,0.96),rgba(9,9,11,0.98))] p-4 shadow-[0_22px_72px_-46px_rgba(0,0,0,0.95)]">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="flex min-w-0 items-start gap-3">
+                                            <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-amber-400/20 bg-amber-400/10 text-amber-200"><Flame size={16} /></div>
+                                            <div className="min-w-0">
+                                                <div className="text-sm font-semibold text-zinc-100">聪明钱聚集模式</div>
+                                                <div className="mt-1 text-xs leading-5 text-zinc-400">同一交易对在窗口内聚集足够多钱包时推送，适合抓早期 LP 异动。</div>
+                                                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                                    <Badge className={draft.wallet_mode.enabled ? 'border-amber-400/20 bg-amber-400/12 text-amber-200' : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>{draft.wallet_mode.enabled ? '已开启' : '已关闭'}</Badge>
+                                                    <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">强度 {goldenDogIntensityLabel(draft.wallet_mode.intensity)}</Badge>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="flex shrink-0 gap-2">
+                                            <button type="button" className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(draft.wallet_mode.enabled, brand)}`} onClick={() => updateWalletMode('enabled', true)}>开启</button>
+                                            <button type="button" className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(!draft.wallet_mode.enabled, brand)}`} onClick={() => updateWalletMode('enabled', false)}>关闭</button>
+                                            <button type="button" className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(false, brand)}`} disabled={testingMode === 'wallet' || !hasInitData} onClick={() => handleTest('wallet')}>{testingMode === 'wallet' ? '测试中...' : '测试'}</button>
+                                        </div>
                                     </div>
-                                </div>
+                                    <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                        <StatCard label="触发钱包" value={`${draft.wallet_mode.min_wallets || '--'} 个`} compact />
+                                        <StatCard label="统计窗口" value={`${draft.wallet_mode.window_minutes || '--'} 分钟`} compact />
+                                        <StatCard label="冷却时间" value={`${draft.wallet_mode.cooldown_minutes || '--'} 分钟`} compact />
+                                        <StatCard label="通知强度" value={goldenDogIntensityLabel(draft.wallet_mode.intensity)} compact />
+                                    </div>
+                                    <div className="mt-4 grid gap-2 sm:grid-cols-4">
+                                        <input className={getInputClass(brand)} type="number" min="1" step="1" placeholder="钱包数量" value={draft.wallet_mode.min_wallets} onChange={(e) => updateWalletMode('min_wallets', e.target.value)} />
+                                        <input className={getInputClass(brand)} type="number" min="1" step="1" placeholder="统计窗口(分钟)" value={draft.wallet_mode.window_minutes} onChange={(e) => updateWalletMode('window_minutes', e.target.value)} />
+                                        <input className={getInputClass(brand)} type="number" min="0" step="1" placeholder="冷却时间(分钟)" value={draft.wallet_mode.cooldown_minutes} onChange={(e) => updateWalletMode('cooldown_minutes', e.target.value)} />
+                                        <select className={getInputClass(brand)} value={draft.wallet_mode.intensity} onChange={(e) => updateWalletMode('intensity', e.target.value)}>{intensityOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
+                                    </div>
+                                </section>
                             </div>
-                            <div className="flex shrink-0 gap-2">
-                                <button type="button" className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(draft.pool_mode.enabled, brand)}`} onClick={() => updatePoolMode('enabled', true)}>开启</button>
-                                <button type="button" className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(!draft.pool_mode.enabled, brand)}`} onClick={() => updatePoolMode('enabled', false)}>关闭</button>
-                                <button type="button" className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(false, brand)}`} disabled={testingMode === 'pool' || !hasInitData} onClick={() => handleTest('pool')}>{testingMode === 'pool' ? '测试中...' : '测试'}</button>
+                        )}
+
+                        {activeTab === 'pool' && (
+                            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                <section className="rounded-[28px] border border-emerald-400/15 bg-[radial-gradient(circle_at_top_left,rgba(45,212,191,0.12),transparent_34%),linear-gradient(180deg,rgba(18,24,27,0.96),rgba(9,11,14,0.98))] p-4 shadow-[0_22px_72px_-46px_rgba(0,0,0,0.95)]">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="flex min-w-0 items-start gap-3">
+                                            <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10 text-emerald-200"><Eye size={16} /></div>
+                                            <div className="min-w-0">
+                                                <div className="text-sm font-semibold text-zinc-100">PoolM 池子参数模式</div>
+                                                <div className="mt-1 text-xs leading-5 text-zinc-400">从 PoolM 最新池子数据里按 AND 条件筛选，留空的字段不会参与匹配。</div>
+                                                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                                    <Badge className={draft.pool_mode.enabled ? 'border-emerald-400/20 bg-emerald-400/12 text-emerald-200' : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>{draft.pool_mode.enabled ? '已开启' : '已关闭'}</Badge>
+                                                    <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">已启用 {activePoolThresholdCount} 项</Badge>
+                                                    <Badge className="border-white/10 bg-zinc-800/80 text-zinc-300">强度 {goldenDogIntensityLabel(draft.pool_mode.intensity)}</Badge>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="flex shrink-0 gap-2">
+                                            <button type="button" className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(draft.pool_mode.enabled, brand)}`} onClick={() => updatePoolMode('enabled', true)}>开启</button>
+                                            <button type="button" className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(!draft.pool_mode.enabled, brand)}`} onClick={() => updatePoolMode('enabled', false)}>关闭</button>
+                                            <button type="button" className={`rounded-2xl px-3 py-2 text-sm ${getFilterButtonClass(false, brand)}`} disabled={testingMode === 'pool' || !hasInitData} onClick={() => handleTest('pool')}>{testingMode === 'pool' ? '测试中...' : '测试'}</button>
+                                        </div>
+                                    </div>
+                                    <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                        <StatCard label="条件数量" value={`${activePoolThresholdCount} 项`} compact />
+                                        <StatCard label="手续费" value={goldenDogThresholdText(draft.pool_mode.min_total_fees, '$')} compact />
+                                        <StatCard label="交易笔数" value={goldenDogThresholdText(draft.pool_mode.min_transaction_count)} compact />
+                                        <StatCard label="冷却时间" value={`${draft.pool_mode.cooldown_minutes || '--'} 分钟`} compact />
+                                    </div>
+                                    <div className="mt-3 text-xs leading-5 text-zinc-400">条件说明：手续费 = Total Fees，费率 = PoolM Fee Rate，活跃费率按 active_liquidity_ratio 的百分比输入。</div>
+                                    <div className="mt-4 grid gap-2 sm:grid-cols-4">
+                                        <input className={getInputClass(brand)} type="number" min="0" step="0.01" placeholder="最小手续费($)" value={draft.pool_mode.min_total_fees} onChange={(e) => updatePoolMode('min_total_fees', e.target.value)} />
+                                        <input className={getInputClass(brand)} type="number" min="0" step="1" placeholder="最小交易笔数" value={draft.pool_mode.min_transaction_count} onChange={(e) => updatePoolMode('min_transaction_count', e.target.value)} />
+                                        <input className={getInputClass(brand)} type="number" min="0" step="0.01" placeholder="最小 TVL($)" value={draft.pool_mode.min_tvl} onChange={(e) => updatePoolMode('min_tvl', e.target.value)} />
+                                        <input className={getInputClass(brand)} type="number" min="0" step="0.01" placeholder="最小 VOL($)" value={draft.pool_mode.min_volume} onChange={(e) => updatePoolMode('min_volume', e.target.value)} />
+                                        <select className={getInputClass(brand)} value={draft.pool_mode.min_fee_rate} onChange={(e) => updatePoolMode('min_fee_rate', e.target.value)}>{GOLDEN_DOG_FEE_RATE_OPTIONS.map((item) => <option key={item.label} value={item.value}>{item.label}</option>)}</select>
+                                        <input className={getInputClass(brand)} type="number" min="0" max="100" step="0.1" placeholder="最小活跃费率(%)" value={draft.pool_mode.min_active_liquidity_ratio} onChange={(e) => updatePoolMode('min_active_liquidity_ratio', e.target.value)} />
+                                        <input className={getInputClass(brand)} type="number" min="0" step="1" placeholder="冷却时间(分钟)" value={draft.pool_mode.cooldown_minutes} onChange={(e) => updatePoolMode('cooldown_minutes', e.target.value)} />
+                                        <select className={getInputClass(brand)} value={draft.pool_mode.intensity} onChange={(e) => updatePoolMode('intensity', e.target.value)}>{intensityOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
+                                    </div>
+                                </section>
                             </div>
-                        </div>
-                        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                            <StatCard label="条件数量" value={`${activePoolThresholdCount} 项`} compact />
-                            <StatCard label="手续费" value={goldenDogThresholdText(draft.pool_mode.min_total_fees, '$')} compact />
-                            <StatCard label="交易笔数" value={goldenDogThresholdText(draft.pool_mode.min_transaction_count)} compact />
-                            <StatCard label="冷却时间" value={`${draft.pool_mode.cooldown_minutes || '--'} 分钟`} compact />
-                        </div>
-                        <div className="mt-3 text-xs leading-5 text-zinc-400">条件说明：手续费 = Total Fees，费率 = PoolM Fee Rate，活跃费率按 active_liquidity_ratio 的百分比输入。</div>
-                        <div className="mt-4 grid gap-2 sm:grid-cols-4">
-                            <input className={getInputClass(brand)} type="number" min="0" step="0.01" placeholder="最小手续费($)" value={draft.pool_mode.min_total_fees} onChange={(e) => updatePoolMode('min_total_fees', e.target.value)} />
-                            <input className={getInputClass(brand)} type="number" min="0" step="1" placeholder="最小交易笔数" value={draft.pool_mode.min_transaction_count} onChange={(e) => updatePoolMode('min_transaction_count', e.target.value)} />
-                            <input className={getInputClass(brand)} type="number" min="0" step="0.01" placeholder="最小 TVL($)" value={draft.pool_mode.min_tvl} onChange={(e) => updatePoolMode('min_tvl', e.target.value)} />
-                            <input className={getInputClass(brand)} type="number" min="0" step="0.01" placeholder="最小 VOL($)" value={draft.pool_mode.min_volume} onChange={(e) => updatePoolMode('min_volume', e.target.value)} />
-                            <select className={getInputClass(brand)} value={draft.pool_mode.min_fee_rate} onChange={(e) => updatePoolMode('min_fee_rate', e.target.value)}>{GOLDEN_DOG_FEE_RATE_OPTIONS.map((item) => <option key={item.label} value={item.value}>{item.label}</option>)}</select>
-                            <input className={getInputClass(brand)} type="number" min="0" max="100" step="0.1" placeholder="最小活跃费率(%)" value={draft.pool_mode.min_active_liquidity_ratio} onChange={(e) => updatePoolMode('min_active_liquidity_ratio', e.target.value)} />
-                            <input className={getInputClass(brand)} type="number" min="0" step="1" placeholder="冷却时间(分钟)" value={draft.pool_mode.cooldown_minutes} onChange={(e) => updatePoolMode('cooldown_minutes', e.target.value)} />
-                            <select className={getInputClass(brand)} value={draft.pool_mode.intensity} onChange={(e) => updatePoolMode('intensity', e.target.value)}>{intensityOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
-                        </div>
-                    </section>
+                        )}
+                    </div>
                 </div>
             )}
         </div>
     );
 }
 
-const GOLDEN_DOG_INTENSITY_OPTIONS = [
+const __BROKEN_GOLDEN_DOG_INTENSITY_OPTIONS = String.raw`
     { value: 'ring', label: '响铃', description: '普通提醒' },
     { value: 'persistent_ring', label: '持续响铃', description: '持续提醒' },
     { value: 'critical_ring', label: '静音强提醒', description: '静音也响' },
+];
+
+`
+const GOLDEN_DOG_INTENSITY_OPTIONS = [
+    { value: 'ring', label: '鍝嶉搩', description: '鏅€氭彁閱?' },
+    { value: 'persistent_ring', label: '鎸佺画鍝嶉搩', description: '鎸佺画鎻愰啋' },
+    { value: 'critical_ring', label: '闈欓煶寮烘彁閱?', description: '闈欓煶涔熷搷' },
 ];
 
 const GOLDEN_DOG_FEE_RATE_OPTIONS = [
@@ -1014,42 +1055,42 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, brand, onClose })
 
     return (
         <div className="mt-3 rounded-[28px] border border-white/[0.05] bg-zinc-950/82 p-3 shadow-[0_24px_80px_-42px_rgba(0,0,0,0.95)]">
-                {error ? (
-                    <div className="mb-3 rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-                        {error}
-                    </div>
-                ) : null}
+            {error ? (
+                <div className="mb-3 rounded-2xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                    {error}
+                </div>
+            ) : null}
 
-                {Array.isArray(detail?.warnings) && detail.warnings.length > 0 ? (
-                    <div className="mb-3 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                        {detail.warnings.join(' / ')}
-                    </div>
-                ) : null}
+            {Array.isArray(detail?.warnings) && detail.warnings.length > 0 ? (
+                <div className="mb-3 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                    {detail.warnings.join(' / ')}
+                </div>
+            ) : null}
 
-                {loading && !detail ? (
-                    <div className="rounded-[24px] border border-white/[0.04] bg-zinc-900/55 px-4 py-10 text-center text-sm text-zinc-500">
-                        正在读取链上仓位...
-                    </div>
-                ) : detail ? (
-                    <PositionCard
-                        position={detail}
-                        walletAddress={detail.wallet_address}
-                        updatedAt={detail.updated_at}
-                        pollIntervalSec={detail.poll_interval_sec}
-                        allowTaskActions={false}
-                        showAbsolutePnl={false}
-                        headerAccessory={(
-                            <button
-                                type="button"
-                                onClick={onClose}
-                                aria-label="收起详情"
-                                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/[0.06] bg-black/20 text-zinc-400 transition hover:bg-black/30 hover:text-zinc-200"
-                            >
-                                <X size={15} />
-                            </button>
-                        )}
-                    />
-                ) : null}
+            {loading && !detail ? (
+                <div className="rounded-[24px] border border-white/[0.04] bg-zinc-900/55 px-4 py-10 text-center text-sm text-zinc-500">
+                    正在读取链上仓位...
+                </div>
+            ) : detail ? (
+                <PositionCard
+                    position={detail}
+                    walletAddress={detail.wallet_address}
+                    updatedAt={detail.updated_at}
+                    pollIntervalSec={detail.poll_interval_sec}
+                    allowTaskActions={false}
+                    showAbsolutePnl={false}
+                    headerAccessory={(
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            aria-label="收起详情"
+                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/[0.06] bg-black/20 text-zinc-400 transition hover:bg-black/30 hover:text-zinc-200"
+                        >
+                            <X size={15} />
+                        </button>
+                    )}
+                />
+            ) : null}
         </div>
     );
 }
@@ -1227,7 +1268,7 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand }) {
         }
         fetchSMPools({ apiBaseUrl })
             .then(d => setPools(d?.list || []))
-            .catch(() => {})
+            .catch(() => { })
             .finally(() => {
                 if (!silent) {
                     setLoading(false);
@@ -1365,7 +1406,7 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
     const positionPreviews = useSmartMoneyPositionPreviewMap(apiBaseUrl, positions);
 
     useEffect(() => {
-        fetchSMPoolStats({ apiBaseUrl, poolAddress: pool.pool_address }).then(setPoolStats).catch(() => {});
+        fetchSMPoolStats({ apiBaseUrl, poolAddress: pool.pool_address }).then(setPoolStats).catch(() => { });
     }, [apiBaseUrl, pool.pool_address]);
 
     useEffect(() => {
@@ -1382,7 +1423,7 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
                 setPositions(d?.list || []);
                 setPositionsTotal(Number(d?.total || 0));
             })
-            .catch(() => {})
+            .catch(() => { })
             .finally(() => setLoading(false));
     }, [apiBaseUrl, page, pool.pool_address, status]);
 
@@ -1569,7 +1610,7 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
         }
         fetchSMWallets({ apiBaseUrl, size: 100 })
             .then(d => setWallets(d?.list || []))
-            .catch(() => {})
+            .catch(() => { })
             .finally(() => {
                 if (!silent) {
                     setLoading(false);
@@ -1773,7 +1814,7 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
     const positionPreviews = useSmartMoneyPositionPreviewMap(apiBaseUrl, positions);
 
     useEffect(() => {
-        fetchSMStats({ apiBaseUrl, address: walletAddress }).then(setWalletInfo).catch(() => {});
+        fetchSMStats({ apiBaseUrl, address: walletAddress }).then(setWalletInfo).catch(() => { });
     }, [apiBaseUrl, walletAddress]);
 
     useEffect(() => {
@@ -1790,7 +1831,7 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
                 setPositions(d?.list || []);
                 setPositionsTotal(Number(d?.total || 0));
             })
-            .catch(() => {})
+            .catch(() => { })
             .finally(() => setLoading(false));
     }, [apiBaseUrl, page, walletAddress, status]);
 
@@ -2321,7 +2362,7 @@ function WalletSettingsTab({ apiBaseUrl, brand }) {
         setLoading(true);
         fetchSMWallets({ apiBaseUrl, size: 100 })
             .then(d => setWallets(d?.list || []))
-            .catch(() => {})
+            .catch(() => { })
             .finally(() => setLoading(false));
     }, [apiBaseUrl]);
 
@@ -2450,7 +2491,7 @@ function ContractSettingsTab({ apiBaseUrl, brand }) {
         }
         fetchSMContracts({ apiBaseUrl })
             .then(d => setContracts(d?.list || []))
-            .catch(() => {})
+            .catch(() => { })
             .finally(() => {
                 if (!silent) {
                     setLoading(false);
@@ -2889,7 +2930,7 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', accentTheme 
     const [walletRefreshKey, setWalletRefreshKey] = useState(0);
 
     const refreshStats = useCallback(() => {
-        fetchSMStats({ apiBaseUrl }).then(setStats).catch(() => {});
+        fetchSMStats({ apiBaseUrl }).then(setStats).catch(() => { });
     }, [apiBaseUrl]);
 
     useEffect(() => {
@@ -2948,11 +2989,10 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', accentTheme 
             <section className="rounded-[30px] border border-white/[0.04] bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.04),transparent_35%),linear-gradient(180deg,rgba(24,24,27,0.92),rgba(9,9,11,0.96))] p-4 shadow-[0_28px_90px_-42px_rgba(0,0,0,0.95)]">
                 {stats && !isDetailView && (
                     <div
-                        className={`mb-4 rounded-[24px] border px-4 py-3 ${
-                            monitorSummary.enabled
-                                ? 'border-white/[0.05] bg-white/[0.02]'
-                                : 'border-white/[0.04] bg-zinc-900/55'
-                        }`}
+                        className={`mb-4 rounded-[24px] border px-4 py-3 ${monitorSummary.enabled
+                            ? 'border-white/[0.05] bg-white/[0.02]'
+                            : 'border-white/[0.04] bg-zinc-900/55'
+                            }`}
                     >
                         <div className="inline-flex items-center gap-2 rounded-full bg-zinc-900/70 px-3 py-1 text-[11px] font-medium text-zinc-100">
                             <span className={`inline-block h-2 w-2 rounded-full ${monitorSummary.enabled ? brand.dotClass : 'bg-zinc-500'}`} />
@@ -2994,7 +3034,7 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', accentTheme 
                             onClick={() => setView('golden_dog')}
                         >
                             <Flame size={13} className="shrink-0 sm:h-[14px] sm:w-[14px]" />
-                            <span className="text-center whitespace-normal break-words sm:truncate">金狗通知</span>
+                            <span className="text-center whitespace-normal break-words sm:truncate">监控通知</span>
                         </button>
                     </div>
                 )}

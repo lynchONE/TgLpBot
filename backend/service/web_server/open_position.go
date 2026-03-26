@@ -415,6 +415,22 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		hooksAddr = "0x0000000000000000000000000000000000000000"
 	}
 
+	liquidityService := liquidity.NewLiquidityService()
+	if err := liquidityService.EnsureWalletPrivateZapReady(user.ID, chain, selectedWallet.ID, selectedWallet.Address, poolVersion); err != nil {
+		errCode := "open_position_failed"
+		var zapSafetyErr *liquidity.ZapSafetyError
+		if errors.As(err, &zapSafetyErr) {
+			errCode = "zap_safety_check_failed"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(openPositionError{
+			Code:    errCode,
+			Message: err.Error(),
+		})
+		return
+	}
+
 	task := &models.StrategyTask{
 		UserID:               user.ID,
 		Chain:                chain,
@@ -454,7 +470,6 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	liquidityService := liquidity.NewLiquidityService()
 	enterRes, err := liquidityService.EnterTaskFromUSDT(user.ID, task)
 	if err != nil {
 		var swapErr *liquidity.EntrySwapRequiredError

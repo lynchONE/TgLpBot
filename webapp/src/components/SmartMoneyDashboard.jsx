@@ -588,106 +588,106 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
                 <div className="smd-loading">读取链上仓位中...</div>
             ) : detail ? (
                 <div className="pos-card sm-position-card sm-position-card--inline-detail">
-                        <div className="pos-card-header">
-                            <div className="pos-card-main sm-position-card-main">
-                                <div className="pos-card-title-wrap sm-position-card-title-wrap">
-                                    <div className="sm-position-card-head-top">
-                                        <div className="pos-pair-row">
-                                            <span className="pos-pair-name">{detail?.title || shortAddress(detail?.pool_id || '')}</span>
-                                            {detail?.tick_spacing ? (
-                                                <span className="badge badge-fee">
-                                                    {{ 1: '0.01%', 10: '0.05%', 50: '0.25%', 60: '0.30%', 100: '0.50%', 200: '1%', 2000: '2%' }[Number(detail.tick_spacing)] || ''}
-                                                </span>
-                                            ) : null}
-                                        </div>
-                                        <div className="sm-position-card-head-actions">
-                                            <div className="pos-card-right-block">
-                                                <div className="pos-metrics">
-                                                    <div className="pos-total">{formatUsd(totalVal)}</div>
-                                                </div>
+                    <div className="pos-card-header">
+                        <div className="pos-card-main sm-position-card-main">
+                            <div className="pos-card-title-wrap sm-position-card-title-wrap">
+                                <div className="sm-position-card-head-top">
+                                    <div className="pos-pair-row">
+                                        <span className="pos-pair-name">{detail?.title || shortAddress(detail?.pool_id || '')}</span>
+                                        {detail?.tick_spacing ? (
+                                            <span className="badge badge-fee">
+                                                {{ 1: '0.01%', 10: '0.05%', 50: '0.25%', 60: '0.30%', 100: '0.50%', 200: '1%', 2000: '2%' }[Number(detail.tick_spacing)] || ''}
+                                            </span>
+                                        ) : null}
+                                    </div>
+                                    <div className="sm-position-card-head-actions">
+                                        <div className="pos-card-right-block">
+                                            <div className="pos-metrics">
+                                                <div className="pos-total">{formatUsd(totalVal)}</div>
                                             </div>
-                                            <button type="button" onClick={onClose} className="smd-pos-inline-panel-close" aria-label="收起详情">
-                                                <X size={16} />
-                                            </button>
                                         </div>
+                                        <button type="button" onClick={onClose} className="smd-pos-inline-panel-close" aria-label="收起详情">
+                                            <X size={16} />
+                                        </button>
                                     </div>
-                                    <div className="pos-status-row">
-                                        <span className="status-pill">
-                                            <span className="status-dot" />
-                                            {statusLabel}
-                                        </span>
-                                        <span className="pos-wallet-chip">钱包 {shortAddress(detail?.wallet_address || '')}</span>
-                                        <span className={`range-pill ${detail?.in_range ? 'in' : 'out'}`}>
-                                            {detail?.in_range ? 'In Range' : 'Out'}
-                                        </span>
-                                    </div>
+                                </div>
+                                <div className="pos-status-row">
+                                    <span className="status-pill">
+                                        <span className="status-dot" />
+                                        {statusLabel}
+                                    </span>
+                                    <span className="pos-wallet-chip">钱包 {shortAddress(detail?.wallet_address || '')}</span>
+                                    <span className={`range-pill ${detail?.in_range ? 'in' : 'out'}`}>
+                                        {detail?.in_range ? 'In Range' : 'Out'}
+                                    </span>
                                 </div>
                             </div>
                         </div>
-
-                        {(token0 || token1) ? (
-                            <div className="pos-token-table">
-                                <div className="pos-token-head">
-                                    <span>Token</span><span>钱包</span><span>仓位</span><span>手续费</span>
-                                </div>
-                                {[token0, token1].filter(Boolean).map((tk) => (
-                                    <div key={tk.address || tk.symbol} className="pos-token-row">
-                                        <div className="pos-tk-name">
-                                            <div>{tk.symbol}</div>
-                                            <div className="pos-tk-price">${Number(tk.price_usd || 0).toFixed(4)}</div>
-                                        </div>
-                                        <div className="pos-tk-cell">
-                                            <div>{tk.wallet_amount ?? '--'}</div>
-                                            <div className="pos-tk-usd">{formatUsd(tk.wallet_usd)}</div>
-                                        </div>
-                                        <div className="pos-tk-cell">
-                                            <div>{tk.position_amount ?? '--'}</div>
-                                            <div className="pos-tk-usd">{formatUsd(tk.position_usd)}</div>
-                                        </div>
-                                        <div className="pos-tk-cell fee">
-                                            <div>{tk.fee_amount ?? '--'}</div>
-                                            <div className="pos-tk-usd">{formatUsd(tk.fee_usd)}</div>
-                                        </div>
-                                    </div>
-                                ))}
-                                <div className="pos-token-foot">
-                                    <span>小计</span>
-                                    <span>{formatUsd(detail?.totals?.wallet_usd)}</span>
-                                    <span>{formatUsd(detail?.totals?.position_usd)}</span>
-                                    <span className="fee">{formatUsd(detail?.totals?.fee_usd)}</span>
-                                </div>
-                            </div>
-                        ) : null}
-
-                        {priceRange ? (
-                            <div className="pos-price-range">
-                                <div className="pos-price-range-header">
-                                    <span className="pos-price-range-label">价格范围 ({priceRange.pairLabel}{priceRange.gridCount ? ` ${priceRange.gridCount}格` : ''})</span>
-                                    {Number.isFinite(priceRange.deviation) && priceRange.deviation > 0 ? (
-                                        <span className="pos-price-range-dev">{priceRange.deviation.toFixed(2)}%</span>
-                                    ) : null}
-                                </div>
-                                <div className="pos-price-range-bar-wrap">
-                                    <div className="pos-price-range-bar">
-                                        <div className="pos-price-range-limit lo" />
-                                        <div className="pos-price-range-limit hi" />
-                                        {priceRange.visibleGridLines?.map((pct, index) => (
-                                            <div key={index} className="pos-price-range-grid" style={{ left: `calc(3% + ${pct * 0.94}%)` }} />
-                                        ))}
-                                        <div
-                                            className={`pos-price-range-cursor ${priceRange.inRange ? 'in' : 'out'}`}
-                                            style={{ left: `calc(3% + ${priceRange.percent * 0.94}%)` }}
-                                        />
-                                    </div>
-                                </div>
-                                <div className="pos-price-range-labels">
-                                    <span className="lo">{compactPrice(priceRange.rangeMin)}</span>
-                                    <span className="cur">{compactPrice((priceRange.rangeMin + priceRange.rangeMax) / 2)}</span>
-                                    <span className="hi">{compactPrice(priceRange.rangeMax)}</span>
-                                </div>
-                            </div>
-                        ) : null}
                     </div>
+
+                    {(token0 || token1) ? (
+                        <div className="pos-token-table">
+                            <div className="pos-token-head">
+                                <span>Token</span><span>钱包</span><span>仓位</span><span>手续费</span>
+                            </div>
+                            {[token0, token1].filter(Boolean).map((tk) => (
+                                <div key={tk.address || tk.symbol} className="pos-token-row">
+                                    <div className="pos-tk-name">
+                                        <div>{tk.symbol}</div>
+                                        <div className="pos-tk-price">${Number(tk.price_usd || 0).toFixed(4)}</div>
+                                    </div>
+                                    <div className="pos-tk-cell">
+                                        <div>{tk.wallet_amount ?? '--'}</div>
+                                        <div className="pos-tk-usd">{formatUsd(tk.wallet_usd)}</div>
+                                    </div>
+                                    <div className="pos-tk-cell">
+                                        <div>{tk.position_amount ?? '--'}</div>
+                                        <div className="pos-tk-usd">{formatUsd(tk.position_usd)}</div>
+                                    </div>
+                                    <div className="pos-tk-cell fee">
+                                        <div>{tk.fee_amount ?? '--'}</div>
+                                        <div className="pos-tk-usd">{formatUsd(tk.fee_usd)}</div>
+                                    </div>
+                                </div>
+                            ))}
+                            <div className="pos-token-foot">
+                                <span>小计</span>
+                                <span>{formatUsd(detail?.totals?.wallet_usd)}</span>
+                                <span>{formatUsd(detail?.totals?.position_usd)}</span>
+                                <span className="fee">{formatUsd(detail?.totals?.fee_usd)}</span>
+                            </div>
+                        </div>
+                    ) : null}
+
+                    {priceRange ? (
+                        <div className="pos-price-range">
+                            <div className="pos-price-range-header">
+                                <span className="pos-price-range-label">价格范围 ({priceRange.pairLabel}{priceRange.gridCount ? ` ${priceRange.gridCount}格` : ''})</span>
+                                {Number.isFinite(priceRange.deviation) && priceRange.deviation > 0 ? (
+                                    <span className="pos-price-range-dev">{priceRange.deviation.toFixed(2)}%</span>
+                                ) : null}
+                            </div>
+                            <div className="pos-price-range-bar-wrap">
+                                <div className="pos-price-range-bar">
+                                    <div className="pos-price-range-limit lo" />
+                                    <div className="pos-price-range-limit hi" />
+                                    {priceRange.visibleGridLines?.map((pct, index) => (
+                                        <div key={index} className="pos-price-range-grid" style={{ left: `calc(3% + ${pct * 0.94}%)` }} />
+                                    ))}
+                                    <div
+                                        className={`pos-price-range-cursor ${priceRange.inRange ? 'in' : 'out'}`}
+                                        style={{ left: `calc(3% + ${priceRange.percent * 0.94}%)` }}
+                                    />
+                                </div>
+                            </div>
+                            <div className="pos-price-range-labels">
+                                <span className="lo">{compactPrice(priceRange.rangeMin)}</span>
+                                <span className="cur">{compactPrice((priceRange.rangeMin + priceRange.rangeMax) / 2)}</span>
+                                <span className="hi">{compactPrice(priceRange.rangeMax)}</span>
+                            </div>
+                        </div>
+                    ) : null}
+                </div>
             ) : null}
         </div>
     );
@@ -713,7 +713,7 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
         if (!silent) setLoading(true);
         return fetchSMPools({ apiBaseUrl })
             .then((d) => setPools(d?.list || []))
-            .catch(() => {})
+            .catch(() => { })
             .finally(() => {
                 if (!silent) setLoading(false);
             });
@@ -767,66 +767,66 @@ function PoolList({ apiBaseUrl, onSelect, onOpenDetail, onOpenPosition, activePo
                         const isActive = normalizedActivePoolAddress && normalizePoolSelectionId(p) === normalizedActivePoolAddress;
                         return (
                             <div
-                            key={p.pool_address}
-                            className={`smd-pool-card${isActive ? ' active' : ''}`}
-                            onClick={() => {
-                                if (typeof onSelect === 'function') {
-                                    onSelect(p);
-                                    return;
-                                }
-                                onOpenDetail?.(p);
-                            }}
-                        >
-                            <div className="smd-pool-card-head">
-                                <PairAvatar item={p} size="sm" />
-                                <span className="smd-pool-card-pair">{getPairLabel(p)}</span>
-                                <div className="smd-pool-card-badges">
-                                    <ProtocolBadge protocol={p.protocol} />
-                                    {p.fee_tier && <Badge cls="fee">{formatFeeTier(p.fee_tier)}</Badge>}
+                                key={p.pool_address}
+                                className={`smd-pool-card${isActive ? ' active' : ''}`}
+                                onClick={() => {
+                                    if (typeof onSelect === 'function') {
+                                        onSelect(p);
+                                        return;
+                                    }
+                                    onOpenDetail?.(p);
+                                }}
+                            >
+                                <div className="smd-pool-card-head">
+                                    <PairAvatar item={p} size="sm" />
+                                    <span className="smd-pool-card-pair">{getPairLabel(p)}</span>
+                                    <div className="smd-pool-card-badges">
+                                        <ProtocolBadge protocol={p.protocol} />
+                                        {p.fee_tier && <Badge cls="fee">{formatFeeTier(p.fee_tier)}</Badge>}
+                                    </div>
                                 </div>
-                            </div>
-                            <div className="smd-pool-card-meta">
-                                <CompactIdentifier value={getPoolIdentifier(p)} />
-                                {p.total_position_amount_usd > 0 && (
-                                    <span className="smd-pool-card-tvl">{formatUSDCompact(p.total_position_amount_usd)}</span>
-                                )}
-                            </div>
-                            <div className="smd-pool-card-range-row">
-                                <PoolCardRangeSummary pool={p} />
-                                {typeof onOpenPosition === 'function' ? (
+                                <div className="smd-pool-card-meta">
+                                    <CompactIdentifier value={getPoolIdentifier(p)} />
+                                    {p.total_position_amount_usd > 0 && (
+                                        <span className="smd-pool-card-tvl">{formatUSDCompact(p.total_position_amount_usd)}</span>
+                                    )}
+                                </div>
+                                <div className="smd-pool-card-range-row">
+                                    <PoolCardRangeSummary pool={p} />
+                                    {typeof onOpenPosition === 'function' ? (
+                                        <button
+                                            type="button"
+                                            className="pool-buy-btn smd-follow-open-btn"
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                onOpenPosition(p);
+                                            }}
+                                        >
+                                            <img src={flashIcon} alt="" className="open-lightning-icon" aria-hidden="true" />
+                                            跟单
+                                        </button>
+                                    ) : null}
+                                </div>
+                                <div className="smd-pool-card-foot">
+                                    <span>{p.wallet_count} 钱包</span>
+                                    <span className="smd-dot-sep">·</span>
+                                    <span>{p.open_position_count} 仓位</span>
+                                    <span className="smd-pool-card-time">
+                                        <span className={`smd-status-dot ${p.latest_event_at && (Date.now() - new Date(p.latest_event_at).getTime()) < 120000 ? 'green' : 'muted'}`}>
+                                            {relativeTime(p.latest_event_at)}
+                                        </span>
+                                    </span>
                                     <button
                                         type="button"
-                                        className="pool-buy-btn smd-follow-open-btn"
+                                        className="smd-link smd-pool-card-detail-btn"
                                         onClick={(event) => {
                                             event.stopPropagation();
-                                            onOpenPosition(p);
+                                            onOpenDetail?.(p);
                                         }}
                                     >
-                                        <img src={flashIcon} alt="" className="open-lightning-icon" aria-hidden="true" />
-                                        跟单
+                                        详情 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
                                     </button>
-                                ) : null}
-                            </div>
-                            <div className="smd-pool-card-foot">
-                                <span>{p.wallet_count} 钱包</span>
-                                <span className="smd-dot-sep">·</span>
-                                <span>{p.open_position_count} 仓位</span>
-                                <span className="smd-pool-card-time">
-                                    <span className={`smd-status-dot ${p.latest_event_at && (Date.now() - new Date(p.latest_event_at).getTime()) < 120000 ? 'green' : 'muted'}`}>
-                                        {relativeTime(p.latest_event_at)}
-                                    </span>
-                                </span>
-                                <button
-                                    type="button"
-                                    className="smd-link smd-pool-card-detail-btn"
-                                    onClick={(event) => {
-                                        event.stopPropagation();
-                                        onOpenDetail?.(p);
-                                    }}
-                                >
-                                    详情 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
-                                </button>
-                            </div>
+                                </div>
                             </div>
                         );
                     })}
@@ -870,7 +870,7 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
     const positionPreviews = useSmartMoneyPositionPreviewMap(apiBaseUrl, positions);
 
     const loadStats = useCallback(() => (
-        fetchSMPoolStats({ apiBaseUrl, poolAddress: pool.pool_address }).then(setStats).catch(() => {})
+        fetchSMPoolStats({ apiBaseUrl, poolAddress: pool.pool_address }).then(setStats).catch(() => { })
     ), [apiBaseUrl, pool.pool_address]);
 
     const loadPositions = useCallback((silent = false) => {
@@ -887,7 +887,7 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
                 setPositions(d?.list || []);
                 setPositionsTotal(Number(d?.total || 0));
             })
-            .catch(() => {})
+            .catch(() => { })
             .finally(() => {
                 if (!silent) setLoading(false);
             });
@@ -1003,7 +1003,7 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
                                         </div>
                                     </div>
                                     <div className="smd-pos-card-range smd-pos-card-range--detail">
-                                        <span className={`smd-pos-card-prices${pos.status === 'closed' ? ' is-closed' : ''}`}> 
+                                        <span className={`smd-pos-card-prices${pos.status === 'closed' ? ' is-closed' : ''}`}>
                                             {pos.price_lower && pos.price_upper ? `${pos.price_lower} - ${pos.price_upper}` : '--'}
                                         </span>
                                         <div className="smd-pos-card-meta">
@@ -1061,7 +1061,7 @@ function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
         if (!silent) setLoading(true);
         return fetchSMWallets({ apiBaseUrl, size: 100 })
             .then((d) => setWallets(d?.list || []))
-            .catch(() => {})
+            .catch(() => { })
             .finally(() => {
                 if (!silent) setLoading(false);
             });
@@ -1126,55 +1126,55 @@ function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
                 <div className="smd-empty">暂无监控钱包，点击"添加钱包"开始</div>
             ) : (
                 <div className="smd-table-wrap">
-                <table className="smd-table smd-table--wallets">
-                    <thead>
-                    <tr>
-                        <th>钱包</th>
-                        <th className="center">状态</th>
-                        <th className="right">持仓</th>
-                        <th className="right">池子</th>
-                        <th className="right">操作</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    {filtered.map(w => (
-                        <tr key={w.address} className="clickable" onClick={() => onSelect(w.address)}>
-                            <td>
-                                <WalletIdentity address={w.address} color={w.color} label={w.label || w.address} size={20} showCopy />
-                            </td>
-                            <td className="center">
-                                <span className={`smd-status-dot ${w.is_active ? 'green' : 'muted'}`}>
-                                    {w.is_active ? '监控中' : '已暂停'}
-                                </span>
-                            </td>
-                            <td className="right">{w.open_position_count}</td>
-                            <td className="right">{w.active_pool_count}</td>
-                            <td className="right">
-                                <div className="smd-action-row" style={{ justifyContent: 'flex-end' }}>
-                                    <button type="button" className="smd-icon-btn" disabled={busyKey === `wallet-toggle:${w.address}` || busyKey === `wallet-delete:${w.address}`} onClick={e => {
-                                        e.stopPropagation();
-                                        setEditingWallet(w);
-                                    }}><Pencil size={14} /></button>
-                                    <button type="button" className="smd-icon-btn" disabled={busyKey === `wallet-toggle:${w.address}` || busyKey === `wallet-delete:${w.address}`} onClick={e => {
-                                        e.stopPropagation();
-                                        runAction(`wallet-toggle:${w.address}`, () => updateSMWallet({ apiBaseUrl, address: w.address, updates: { is_active: !w.is_active } }));
-                                    }}>{w.is_active ? <Pause size={14} /> : <Play size={14} />}</button>
-                                    <button type="button" className="smd-icon-btn danger" disabled={busyKey === `wallet-delete:${w.address}` || busyKey === `wallet-toggle:${w.address}`} onClick={e => {
-                                        e.stopPropagation();
-                                        setActionError('');
-                                        setConfirmState({
-                                            key: `wallet-delete:${w.address}`,
-                                            title: '删除钱包',
-                                            description: `确认删除钱包 ${shortAddr(w.address)} 吗？`,
-                                            action: () => deleteSMWallet({ apiBaseUrl, address: w.address }),
-                                        });
-                                    }}><Trash2 size={14} /></button>
-                                </div>
-                            </td>
-                        </tr>
-                    ))}
-                    </tbody>
-                </table>
+                    <table className="smd-table smd-table--wallets">
+                        <thead>
+                            <tr>
+                                <th>钱包</th>
+                                <th className="center">状态</th>
+                                <th className="right">持仓</th>
+                                <th className="right">池子</th>
+                                <th className="right">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {filtered.map(w => (
+                                <tr key={w.address} className="clickable" onClick={() => onSelect(w.address)}>
+                                    <td>
+                                        <WalletIdentity address={w.address} color={w.color} label={w.label || w.address} size={20} showCopy />
+                                    </td>
+                                    <td className="center">
+                                        <span className={`smd-status-dot ${w.is_active ? 'green' : 'muted'}`}>
+                                            {w.is_active ? '监控中' : '已暂停'}
+                                        </span>
+                                    </td>
+                                    <td className="right">{w.open_position_count}</td>
+                                    <td className="right">{w.active_pool_count}</td>
+                                    <td className="right">
+                                        <div className="smd-action-row" style={{ justifyContent: 'flex-end' }}>
+                                            <button type="button" className="smd-icon-btn" disabled={busyKey === `wallet-toggle:${w.address}` || busyKey === `wallet-delete:${w.address}`} onClick={e => {
+                                                e.stopPropagation();
+                                                setEditingWallet(w);
+                                            }}><Pencil size={14} /></button>
+                                            <button type="button" className="smd-icon-btn" disabled={busyKey === `wallet-toggle:${w.address}` || busyKey === `wallet-delete:${w.address}`} onClick={e => {
+                                                e.stopPropagation();
+                                                runAction(`wallet-toggle:${w.address}`, () => updateSMWallet({ apiBaseUrl, address: w.address, updates: { is_active: !w.is_active } }));
+                                            }}>{w.is_active ? <Pause size={14} /> : <Play size={14} />}</button>
+                                            <button type="button" className="smd-icon-btn danger" disabled={busyKey === `wallet-delete:${w.address}` || busyKey === `wallet-toggle:${w.address}`} onClick={e => {
+                                                e.stopPropagation();
+                                                setActionError('');
+                                                setConfirmState({
+                                                    key: `wallet-delete:${w.address}`,
+                                                    title: '删除钱包',
+                                                    description: `确认删除钱包 ${shortAddr(w.address)} 吗？`,
+                                                    action: () => deleteSMWallet({ apiBaseUrl, address: w.address }),
+                                                });
+                                            }}><Trash2 size={14} /></button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
                 </div>
             )}
             <ConfirmDialog
@@ -1215,7 +1215,7 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
     const positionPreviews = useSmartMoneyPositionPreviewMap(apiBaseUrl, positions);
 
     const loadInfo = useCallback(() => (
-        fetchSMStats({ apiBaseUrl, address: addr }).then(setInfo).catch(() => {})
+        fetchSMStats({ apiBaseUrl, address: addr }).then(setInfo).catch(() => { })
     ), [apiBaseUrl, addr]);
 
     const loadPositions = useCallback((silent = false) => {
@@ -1232,7 +1232,7 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
                 setPositions(d?.list || []);
                 setPositionsTotal(Number(d?.total || 0));
             })
-            .catch(() => {})
+            .catch(() => { })
             .finally(() => {
                 if (!silent) setLoading(false);
             });
@@ -1328,55 +1328,55 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
             ) : (
                 <>
                     {groups.map(g => (
-                <div key={g.pool_address} className={`smd-pool-group${!g.hasOpen ? ' dim' : ''}`}>
-                    <div className="smd-pool-group-header">
-                        <div className="smd-pool-group-left">
-                            <div className="smd-pair-row smd-pair-row--group">
-                                <PairAvatar item={g} size="sm" />
-                                <span className="smd-pool-group-pair">{getPairLabel(g)}</span>
-                            </div>
-                            <CompactIdentifier value={g.pool_address} />
-                            {g.fee_tier && <Badge cls="fee">{formatFeeTier(g.fee_tier)}</Badge>}
-                            <ProtocolBadge protocol={g.protocol} />
-                            <span className="smd-pool-group-count">{g.positions.length} 个仓位</span>
-                        </div>
-                        <button className="smd-link" onClick={() => onSelectPool({
-                            pool_address: g.pool_address, token0_symbol: g.token0_symbol, token1_symbol: g.token1_symbol, trading_pair: g.trading_pair, display_token_address: g.display_token_address, display_token_symbol: g.display_token_symbol, display_token_logo_url: g.display_token_logo_url, fee_tier: g.fee_tier, protocol: g.protocol,
-                        })}>池子详情 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} /></button>
-                    </div>
-                    <div className="smd-pos-list smd-pos-list--compact">
-                        {g.positions.map(pos => {
-                            const positionKey = getPositionSelectionKey(pos) || String(pos.id || '');
-                            const isSelected = Boolean(positionKey) && positionKey === selectedPositionKey;
-                            return (
-                                <div key={positionKey || pos.id} className="smd-pos-row">
-                                    <div className={`smd-pos-card smd-pos-card--compact${pos.status === 'closed' ? ' closed' : ''}`} onClick={() => setSelectedPosition(pos)}>
-                                        <div className="smd-pos-card-compact-main">
-                                        <span className="smd-pos-card-amount">{formatUSDCompact(pos.position_amount_usd)}</span>
-                                        <span className={`smd-pos-card-prices${pos.status === 'closed' ? ' is-closed' : ''}`}> 
-                                            {pos.price_lower && pos.price_upper ? `${pos.price_lower} - ${pos.price_upper}` : '--'}
-                                        </span>
-                                        {pos.range_percent > 0 && <span className="smd-pos-card-pct">{formatRangePercent(pos.range_percent)}</span>}
-                                        </div>
-                                        <PositionPreviewMetrics
-                                            position={pos}
-                                            preview={positionPreviews[getPositionSelectionKey(pos)]}
-                                            compact
-                                        />
+                        <div key={g.pool_address} className={`smd-pool-group${!g.hasOpen ? ' dim' : ''}`}>
+                            <div className="smd-pool-group-header">
+                                <div className="smd-pool-group-left">
+                                    <div className="smd-pair-row smd-pair-row--group">
+                                        <PairAvatar item={g} size="sm" />
+                                        <span className="smd-pool-group-pair">{getPairLabel(g)}</span>
                                     </div>
-                                    {isSelected ? (
-                                        <SmartMoneyPositionDetailPanel
-                                            apiBaseUrl={apiBaseUrl}
-                                            position={selectedPosition}
-                                            onClose={() => setSelectedPosition(null)}
-                                        />
-                                    ) : null}
+                                    <CompactIdentifier value={g.pool_address} />
+                                    {g.fee_tier && <Badge cls="fee">{formatFeeTier(g.fee_tier)}</Badge>}
+                                    <ProtocolBadge protocol={g.protocol} />
+                                    <span className="smd-pool-group-count">{g.positions.length} 个仓位</span>
                                 </div>
-                            );
-                        })}
-                    </div>
-                </div>
-            ))}
+                                <button className="smd-link" onClick={() => onSelectPool({
+                                    pool_address: g.pool_address, token0_symbol: g.token0_symbol, token1_symbol: g.token1_symbol, trading_pair: g.trading_pair, display_token_address: g.display_token_address, display_token_symbol: g.display_token_symbol, display_token_logo_url: g.display_token_logo_url, fee_tier: g.fee_tier, protocol: g.protocol,
+                                })}>池子详情 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} /></button>
+                            </div>
+                            <div className="smd-pos-list smd-pos-list--compact">
+                                {g.positions.map(pos => {
+                                    const positionKey = getPositionSelectionKey(pos) || String(pos.id || '');
+                                    const isSelected = Boolean(positionKey) && positionKey === selectedPositionKey;
+                                    return (
+                                        <div key={positionKey || pos.id} className="smd-pos-row">
+                                            <div className={`smd-pos-card smd-pos-card--compact${pos.status === 'closed' ? ' closed' : ''}`} onClick={() => setSelectedPosition(pos)}>
+                                                <div className="smd-pos-card-compact-main">
+                                                    <span className="smd-pos-card-amount">{formatUSDCompact(pos.position_amount_usd)}</span>
+                                                    <span className={`smd-pos-card-prices${pos.status === 'closed' ? ' is-closed' : ''}`}>
+                                                        {pos.price_lower && pos.price_upper ? `${pos.price_lower} - ${pos.price_upper}` : '--'}
+                                                    </span>
+                                                    {pos.range_percent > 0 && <span className="smd-pos-card-pct">{formatRangePercent(pos.range_percent)}</span>}
+                                                </div>
+                                                <PositionPreviewMetrics
+                                                    position={pos}
+                                                    preview={positionPreviews[getPositionSelectionKey(pos)]}
+                                                    compact
+                                                />
+                                            </div>
+                                            {isSelected ? (
+                                                <SmartMoneyPositionDetailPanel
+                                                    apiBaseUrl={apiBaseUrl}
+                                                    position={selectedPosition}
+                                                    onClose={() => setSelectedPosition(null)}
+                                                />
+                                            ) : null}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    ))}
                     <PositionPagination page={page} total={positionsTotal} onChange={setPage} />
                 </>
             )}
@@ -1440,7 +1440,7 @@ function GoldenDogPanel({ apiBaseUrl, initData }) {
 
     const handleSave = useCallback(async () => {
         if (!hasInitData) {
-            setError('请先登录 WebApp，拿到 initData 后才能保存金狗通知。');
+            setError('请先登录 WebApp，拿到 initData 后才能保存监控通知。');
             return;
         }
 
@@ -1510,7 +1510,7 @@ function GoldenDogPanel({ apiBaseUrl, initData }) {
                             <Flame size={18} />
                         </div>
                         <div style={{ minWidth: 0 }}>
-                            <div className="smd-section-title" style={{ marginBottom: 8 }}>金狗通知</div>
+                            <div className="smd-section-title" style={{ marginBottom: 8 }}>监控通知</div>
                             <div className="smd-pool-card-badges">
                                 <Badge style={draft.enabled
                                     ? { borderColor: 'rgba(251, 191, 36, 0.2)', background: 'rgba(251, 191, 36, 0.12)', color: '#fde68a' }
@@ -1597,7 +1597,7 @@ function GoldenDogPanel({ apiBaseUrl, initData }) {
                         onClick={handleSave}
                         style={{ gridColumn: '1 / -1' }}
                     >
-                        {saving ? '保存中...' : '保存金狗通知配置'}
+                        {saving ? '保存中...' : '保存监控通知配置'}
                     </button>
                 </div>
             )}
@@ -1704,59 +1704,59 @@ function SettingsPanel({ apiBaseUrl }) {
 
             {loading ? <div className="smd-loading">加载中...</div> : (
                 <div className="smd-table-wrap">
-                <table className="smd-table smd-table--settings">
-                    <thead><tr>
-                        <th>地址</th>
-                        <th>描述</th>
-                        <th className="center">状态</th>
-                        <th className="right">已扫描至区块</th>
-                        <th className="right">操作</th>
-                    </tr></thead>
-                    <tbody>
-                    {contracts.map(c => (
-                        <tr key={c.contract_address}>
-                            <td className="mono">{shortAddr(c.contract_address)}</td>
-                            <td className="muted">{c.description || '-'}</td>
-                            <td className="center"><span className={`smd-status-dot ${c.is_active ? 'green' : 'muted'}`}>{c.is_active ? '活跃' : '已暂停'}</span></td>
-                            <td className="right mono muted">{c.last_scanned_block || '未扫描'}</td>
-                            <td className="right">
-                                <div className="smd-action-row" style={{ justifyContent: 'flex-end' }}>
-                                    <button
-                                        type="button"
-                                        className="smd-icon-btn"
-                                        disabled={busyKey === `contract-toggle:${c.contract_address}` || busyKey === `contract-delete:${c.contract_address}`}
-                                        onClick={() => setEditingContract(c)}
-                                    >
-                                        <Pencil size={14} />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        className="smd-icon-btn"
-                                        disabled={busyKey === `contract-toggle:${c.contract_address}` || busyKey === `contract-delete:${c.contract_address}`}
-                                        onClick={() => runAction(`contract-toggle:${c.contract_address}`, () => updateSMContract({ apiBaseUrl, address: c.contract_address, updates: { is_active: !c.is_active } }), loadContracts)}
-                                    >
-                                        {c.is_active ? <Pause size={14} /> : <Play size={14} />}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        className="smd-icon-btn danger"
-                                        disabled={busyKey === `contract-delete:${c.contract_address}` || busyKey === `contract-toggle:${c.contract_address}`}
-                                        onClick={() => openDeleteConfirm({
-                                            key: `contract-delete:${c.contract_address}`,
-                                            title: '删除合约',
-                                            description: `确认删除合约 ${shortAddr(c.contract_address)} 吗？`,
-                                            action: () => deleteSMContract({ apiBaseUrl, address: c.contract_address }),
-                                            refresh: loadContracts,
-                                        })}
-                                    >
-                                        <Trash2 size={14} />
-                                    </button>
-                                </div>
-                            </td>
-                        </tr>
-                    ))}
-                    </tbody>
-                </table>
+                    <table className="smd-table smd-table--settings">
+                        <thead><tr>
+                            <th>地址</th>
+                            <th>描述</th>
+                            <th className="center">状态</th>
+                            <th className="right">已扫描至区块</th>
+                            <th className="right">操作</th>
+                        </tr></thead>
+                        <tbody>
+                            {contracts.map(c => (
+                                <tr key={c.contract_address}>
+                                    <td className="mono">{shortAddr(c.contract_address)}</td>
+                                    <td className="muted">{c.description || '-'}</td>
+                                    <td className="center"><span className={`smd-status-dot ${c.is_active ? 'green' : 'muted'}`}>{c.is_active ? '活跃' : '已暂停'}</span></td>
+                                    <td className="right mono muted">{c.last_scanned_block || '未扫描'}</td>
+                                    <td className="right">
+                                        <div className="smd-action-row" style={{ justifyContent: 'flex-end' }}>
+                                            <button
+                                                type="button"
+                                                className="smd-icon-btn"
+                                                disabled={busyKey === `contract-toggle:${c.contract_address}` || busyKey === `contract-delete:${c.contract_address}`}
+                                                onClick={() => setEditingContract(c)}
+                                            >
+                                                <Pencil size={14} />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className="smd-icon-btn"
+                                                disabled={busyKey === `contract-toggle:${c.contract_address}` || busyKey === `contract-delete:${c.contract_address}`}
+                                                onClick={() => runAction(`contract-toggle:${c.contract_address}`, () => updateSMContract({ apiBaseUrl, address: c.contract_address, updates: { is_active: !c.is_active } }), loadContracts)}
+                                            >
+                                                {c.is_active ? <Pause size={14} /> : <Play size={14} />}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className="smd-icon-btn danger"
+                                                disabled={busyKey === `contract-delete:${c.contract_address}` || busyKey === `contract-toggle:${c.contract_address}`}
+                                                onClick={() => openDeleteConfirm({
+                                                    key: `contract-delete:${c.contract_address}`,
+                                                    title: '删除合约',
+                                                    description: `确认删除合约 ${shortAddr(c.contract_address)} 吗？`,
+                                                    action: () => deleteSMContract({ apiBaseUrl, address: c.contract_address }),
+                                                    refresh: loadContracts,
+                                                })}
+                                            >
+                                                <Trash2 size={14} />
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
                 </div>
             )}
             <ConfirmDialog
@@ -1926,7 +1926,7 @@ export default function SmartMoneyDashboard({
     );
 
     const loadStats = useCallback(() => (
-        fetchSMStats({ apiBaseUrl }).then(setStats).catch(() => {})
+        fetchSMStats({ apiBaseUrl }).then(setStats).catch(() => { })
     ), [apiBaseUrl]);
 
     useEffect(() => {
@@ -2027,7 +2027,7 @@ export default function SmartMoneyDashboard({
                             className={`smd-tab${view === 'golden_dog' ? ' active' : ''}`}
                             onClick={() => setView('golden_dog')}
                         >
-                            <Flame size={16} /> 金狗通知
+                            <Flame size={16} /> 监控通知
                         </button>
                     </div>
                 )}
@@ -2065,7 +2065,7 @@ export default function SmartMoneyDashboard({
                         refreshInterval={refreshInterval}
                     />
                 ) : view === 'golden_dog' ? (
-                    <GoldenDogPanel apiBaseUrl={apiBaseUrl} initData={initData} />
+                    <GoldenDogPanelContent apiBaseUrl={apiBaseUrl} initData={initData} />
                 ) : (
                     <SettingsPanel apiBaseUrl={apiBaseUrl} />
                 )}
@@ -2227,6 +2227,7 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
     const [notice, setNotice] = useState('');
     const [status, setStatus] = useState(null);
     const [draft, setDraft] = useState(() => createGoldenDogDraft());
+    const [activeTab, setActiveTab] = useState('wallet');
 
     const barkStatusText = useMemo(() => goldenDogBarkStatusText(status), [status]);
     const intensityOptions = useMemo(
@@ -2361,7 +2362,7 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
 
     const handleSave = useCallback(async () => {
         if (!hasInitData) {
-            setError('请先登录 WebApp，拿到 initData 后才能保存金狗通知。');
+            setError('请先登录 WebApp，拿到 initData 后才能保存监控通知。');
             return;
         }
 
@@ -2386,7 +2387,7 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
 
     const handleTest = useCallback(async (mode) => {
         if (!hasInitData) {
-            setError('请先登录 WebApp，拿到 initData 后才能测试金狗通知。');
+            setError('请先登录 WebApp，拿到 initData 后才能测试监控通知。');
             return;
         }
 
@@ -2436,7 +2437,7 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
                             <Flame size={18} />
                         </div>
                         <div style={{ minWidth: 0 }}>
-                            <div className="smd-section-title" style={{ marginBottom: 6 }}>金狗通知中心</div>
+                            <div className="smd-section-title" style={{ marginBottom: 6 }}>监控通知中心</div>
                             <div style={{ color: '#a1a1aa', fontSize: 13, lineHeight: 1.6 }}>
                                 同时管理聪明钱聚集模式和 PoolM 池子参数模式，Bark Key 继续复用全局配置。
                             </div>
@@ -2474,98 +2475,138 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
 
             {loading ? <div className="smd-loading">加载中...</div> : (
                 <div style={{ display: 'grid', gap: 14 }}>
-                    <div className="smd-detail-card" style={{
-                        ...modeCardStyle,
-                        borderColor: 'rgba(251,191,36,0.16)',
-                        background: 'radial-gradient(circle at top left, rgba(251,191,36,0.12), transparent 36%), linear-gradient(180deg, rgba(20,20,24,0.96), rgba(9,9,11,0.98))',
+                    <div style={{
+                        display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'center', gap: 4,
+                        borderRadius: 20, background: 'rgba(24,24,27,0.6)', padding: 4, border: '1px solid rgba(255,255,255,0.03)'
                     }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                            <div style={{ display: 'flex', gap: 12, minWidth: 0 }}>
-                                <div style={{ width: 40, height: 40, borderRadius: 14, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.18)', color: '#fde68a', flexShrink: 0 }}>
-                                    <Flame size={16} />
-                                </div>
-                                <div style={{ minWidth: 0 }}>
-                                    <div className="smd-section-title" style={{ marginBottom: 6 }}>聪明钱聚集模式</div>
-                                    <div style={{ color: '#a1a1aa', fontSize: 13, lineHeight: 1.6 }}>同一交易对在窗口内聚集足够多钱包时推送，适合抓早期 LP 异动。</div>
-                                    <div className="smd-pool-card-badges" style={{ marginTop: 10 }}>
-                                        <Badge cls={draft.wallet_mode.enabled ? 'ok' : ''}>{draft.wallet_mode.enabled ? '已开启' : '已关闭'}</Badge>
-                                        <Badge>强度 {goldenDogIntensityLabel(draft.wallet_mode.intensity)}</Badge>
-                                    </div>
-                                </div>
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                                <div className="smd-filter-group">
-                                    <button type="button" className={`smd-filter-btn${draft.wallet_mode.enabled ? ' active' : ''}`} onClick={() => updateWalletMode('enabled', true)}>开启</button>
-                                    <button type="button" className={`smd-filter-btn${!draft.wallet_mode.enabled ? ' active' : ''}`} onClick={() => updateWalletMode('enabled', false)}>关闭</button>
-                                </div>
-                                <button type="button" disabled={testingMode === 'wallet' || !hasInitData} onClick={() => handleTest('wallet')} style={actionButtonStyle}>
-                                    {testingMode === 'wallet' ? '测试中...' : '测试通知'}
-                                </button>
-                            </div>
-                        </div>
-                        <div className="smd-stats-grid" style={{ marginTop: 14, marginBottom: 0 }}>
-                            <StatCard label="触发钱包" value={`${draft.wallet_mode.min_wallets || '--'} 个`} />
-                            <StatCard label="统计窗口" value={`${draft.wallet_mode.window_minutes || '--'} 分钟`} />
-                            <StatCard label="冷却时间" value={`${draft.wallet_mode.cooldown_minutes || '--'} 分钟`} />
-                            <StatCard label="通知强度" value={goldenDogIntensityLabel(draft.wallet_mode.intensity)} />
-                        </div>
-                        <div className="smd-add-form" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, alignItems: 'end', marginTop: 16 }}>
-                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">钱包数量</span><input type="number" min="1" step="1" value={draft.wallet_mode.min_wallets} onChange={(e) => updateWalletMode('min_wallets', e.target.value)} style={inputStyle} /></label>
-                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">统计窗口(分钟)</span><input type="number" min="1" step="1" value={draft.wallet_mode.window_minutes} onChange={(e) => updateWalletMode('window_minutes', e.target.value)} style={inputStyle} /></label>
-                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">冷却时间(分钟)</span><input type="number" min="0" step="1" value={draft.wallet_mode.cooldown_minutes} onChange={(e) => updateWalletMode('cooldown_minutes', e.target.value)} style={inputStyle} /></label>
-                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">通知强度</span><select value={draft.wallet_mode.intensity} onChange={(e) => updateWalletMode('intensity', e.target.value)} style={inputStyle}>{intensityOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
-                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('wallet')}
+                            style={{
+                                flex: 1, borderRadius: 16, padding: '10px 0', fontSize: 14, fontWeight: 600,
+                                background: activeTab === 'wallet' ? 'rgba(251,191,36,0.15)' : 'transparent',
+                                color: activeTab === 'wallet' ? '#fcd34d' : '#71717a',
+                                border: 'none', cursor: 'pointer', transition: 'all 0.3s',
+                                boxShadow: activeTab === 'wallet' ? '0 2px 10px rgba(251,191,36,0.1)' : 'none'
+                            }}
+                        >
+                            金狗通知
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('pool')}
+                            style={{
+                                flex: 1, borderRadius: 16, padding: '10px 0', fontSize: 14, fontWeight: 600,
+                                background: activeTab === 'pool' ? 'rgba(52,211,153,0.15)' : 'transparent',
+                                color: activeTab === 'pool' ? '#6ee7b7' : '#71717a',
+                                border: 'none', cursor: 'pointer', transition: 'all 0.3s',
+                                boxShadow: activeTab === 'pool' ? '0 2px 10px rgba(52,211,153,0.1)' : 'none'
+                            }}
+                        >
+                            池子监控
+                        </button>
                     </div>
 
-                    <div className="smd-detail-card" style={{
-                        ...modeCardStyle,
-                        borderColor: 'rgba(94,234,212,0.16)',
-                        background: 'radial-gradient(circle at top left, rgba(45,212,191,0.12), transparent 36%), linear-gradient(180deg, rgba(18,24,27,0.96), rgba(9,11,14,0.98))',
-                    }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                            <div style={{ display: 'flex', gap: 12, minWidth: 0 }}>
-                                <div style={{ width: 40, height: 40, borderRadius: 14, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(45,212,191,0.1)', border: '1px solid rgba(45,212,191,0.18)', color: '#99f6e4', flexShrink: 0 }}>
-                                    <Brain size={16} />
-                                </div>
-                                <div style={{ minWidth: 0 }}>
-                                    <div className="smd-section-title" style={{ marginBottom: 6 }}>PoolM 池子参数模式</div>
-                                    <div style={{ color: '#a1a1aa', fontSize: 13, lineHeight: 1.6 }}>从 PoolM 最新池子数据里按 AND 条件筛选，留空的字段不会参与匹配。</div>
-                                    <div className="smd-pool-card-badges" style={{ marginTop: 10 }}>
-                                        <Badge cls={draft.pool_mode.enabled ? 'ok' : ''}>{draft.pool_mode.enabled ? '已开启' : '已关闭'}</Badge>
-                                        <Badge>已启用 {activePoolThresholdCount} 项</Badge>
-                                        <Badge>强度 {goldenDogIntensityLabel(draft.pool_mode.intensity)}</Badge>
+                    <div style={{ position: 'relative' }}>
+                        {activeTab === 'wallet' && (
+                            <div className="smd-detail-card" style={{
+                                ...modeCardStyle,
+                                borderColor: 'rgba(251,191,36,0.16)',
+                                background: 'radial-gradient(circle at top left, rgba(251,191,36,0.12), transparent 36%), linear-gradient(180deg, rgba(20,20,24,0.96), rgba(9,9,11,0.98))',
+                                animation: 'fadeIn 0.3s ease-out'
+                            }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                                    <div style={{ display: 'flex', gap: 12, minWidth: 0 }}>
+                                        <div style={{ width: 40, height: 40, borderRadius: 14, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.18)', color: '#fde68a', flexShrink: 0 }}>
+                                            <Flame size={16} />
+                                        </div>
+                                        <div style={{ minWidth: 0 }}>
+                                            <div className="smd-section-title" style={{ marginBottom: 6 }}>聪明钱聚集模式</div>
+                                            <div style={{ color: '#a1a1aa', fontSize: 13, lineHeight: 1.6 }}>同一交易对在窗口内聚集足够多钱包时推送，适合抓早期 LP 异动。</div>
+                                            <div className="smd-pool-card-badges" style={{ marginTop: 10 }}>
+                                                <Badge cls={draft.wallet_mode.enabled ? 'ok' : ''}>{draft.wallet_mode.enabled ? '已开启' : '已关闭'}</Badge>
+                                                <Badge>强度 {goldenDogIntensityLabel(draft.wallet_mode.intensity)}</Badge>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                        <div className="smd-filter-group">
+                                            <button type="button" className={`smd-filter-btn${draft.wallet_mode.enabled ? ' active' : ''}`} onClick={() => updateWalletMode('enabled', true)}>开启</button>
+                                            <button type="button" className={`smd-filter-btn${!draft.wallet_mode.enabled ? ' active' : ''}`} onClick={() => updateWalletMode('enabled', false)}>关闭</button>
+                                        </div>
+                                        <button type="button" disabled={testingMode === 'wallet' || !hasInitData} onClick={() => handleTest('wallet')} style={actionButtonStyle}>
+                                            {testingMode === 'wallet' ? '测试中...' : '测试通知'}
+                                        </button>
                                     </div>
                                 </div>
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                                <div className="smd-filter-group">
-                                    <button type="button" className={`smd-filter-btn${draft.pool_mode.enabled ? ' active' : ''}`} onClick={() => updatePoolMode('enabled', true)}>开启</button>
-                                    <button type="button" className={`smd-filter-btn${!draft.pool_mode.enabled ? ' active' : ''}`} onClick={() => updatePoolMode('enabled', false)}>关闭</button>
+                                <div className="smd-stats-grid" style={{ marginTop: 14, marginBottom: 0 }}>
+                                    <StatCard label="触发钱包" value={`${draft.wallet_mode.min_wallets || '--'} 个`} />
+                                    <StatCard label="统计窗口" value={`${draft.wallet_mode.window_minutes || '--'} 分钟`} />
+                                    <StatCard label="冷却时间" value={`${draft.wallet_mode.cooldown_minutes || '--'} 分钟`} />
+                                    <StatCard label="通知强度" value={goldenDogIntensityLabel(draft.wallet_mode.intensity)} />
                                 </div>
-                                <button type="button" disabled={testingMode === 'pool' || !hasInitData} onClick={() => handleTest('pool')} style={actionButtonStyle}>
-                                    {testingMode === 'pool' ? '测试中...' : '测试通知'}
-                                </button>
+                                <div className="smd-add-form" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, alignItems: 'end', marginTop: 16 }}>
+                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">钱包数量</span><input type="number" min="1" step="1" value={draft.wallet_mode.min_wallets} onChange={(e) => updateWalletMode('min_wallets', e.target.value)} style={inputStyle} /></label>
+                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">统计窗口(分钟)</span><input type="number" min="1" step="1" value={draft.wallet_mode.window_minutes} onChange={(e) => updateWalletMode('window_minutes', e.target.value)} style={inputStyle} /></label>
+                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">冷却时间(分钟)</span><input type="number" min="0" step="1" value={draft.wallet_mode.cooldown_minutes} onChange={(e) => updateWalletMode('cooldown_minutes', e.target.value)} style={inputStyle} /></label>
+                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">通知强度</span><select value={draft.wallet_mode.intensity} onChange={(e) => updateWalletMode('intensity', e.target.value)} style={inputStyle}>{intensityOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+                                </div>
                             </div>
-                        </div>
-                        <div className="smd-stats-grid" style={{ marginTop: 14, marginBottom: 0 }}>
-                            <StatCard label="条件数量" value={`${activePoolThresholdCount} 项`} />
-                            <StatCard label="手续费" value={goldenDogThresholdText(draft.pool_mode.min_total_fees, '$')} />
-                            <StatCard label="交易笔数" value={goldenDogThresholdText(draft.pool_mode.min_transaction_count)} />
-                            <StatCard label="冷却时间" value={`${draft.pool_mode.cooldown_minutes || '--'} 分钟`} />
-                        </div>
-                        <div style={{ marginTop: 14, marginBottom: 2, color: '#94a3b8', fontSize: 12, lineHeight: 1.6 }}>
-                            条件说明：手续费 = Total Fees，费率 = PoolM Fee Rate，活跃费率按 active_liquidity_ratio 的百分比输入。
-                        </div>
-                        <div className="smd-add-form" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, alignItems: 'end', marginTop: 14 }}>
-                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小手续费($)</span><input type="number" min="0" step="0.01" placeholder="留空则不限制" value={draft.pool_mode.min_total_fees} onChange={(e) => updatePoolMode('min_total_fees', e.target.value)} style={inputStyle} /></label>
-                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小交易笔数</span><input type="number" min="0" step="1" placeholder="留空则不限制" value={draft.pool_mode.min_transaction_count} onChange={(e) => updatePoolMode('min_transaction_count', e.target.value)} style={inputStyle} /></label>
-                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小 TVL($)</span><input type="number" min="0" step="0.01" placeholder="留空则不限制" value={draft.pool_mode.min_tvl} onChange={(e) => updatePoolMode('min_tvl', e.target.value)} style={inputStyle} /></label>
-                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小 VOL($)</span><input type="number" min="0" step="0.01" placeholder="留空则不限制" value={draft.pool_mode.min_volume} onChange={(e) => updatePoolMode('min_volume', e.target.value)} style={inputStyle} /></label>
-                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小费率</span><select value={draft.pool_mode.min_fee_rate} onChange={(e) => updatePoolMode('min_fee_rate', e.target.value)} style={inputStyle}>{GOLDEN_DOG_FEE_RATE_OPTIONS.map((item) => <option key={item.label} value={item.value}>{item.label}</option>)}</select></label>
-                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小活跃费率(%)</span><input type="number" min="0" max="100" step="0.1" placeholder="留空则不限制" value={draft.pool_mode.min_active_liquidity_ratio} onChange={(e) => updatePoolMode('min_active_liquidity_ratio', e.target.value)} style={inputStyle} /></label>
-                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">冷却时间(分钟)</span><input type="number" min="0" step="1" value={draft.pool_mode.cooldown_minutes} onChange={(e) => updatePoolMode('cooldown_minutes', e.target.value)} style={inputStyle} /></label>
-                            <label style={{ display: 'grid', gap: 6 }}><span className="muted">通知强度</span><select value={draft.pool_mode.intensity} onChange={(e) => updatePoolMode('intensity', e.target.value)} style={inputStyle}>{intensityOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
-                        </div>
+                        )}
+
+                        {activeTab === 'pool' && (
+                            <div className="smd-detail-card" style={{
+                                ...modeCardStyle,
+                                borderColor: 'rgba(94,234,212,0.16)',
+                                background: 'radial-gradient(circle at top left, rgba(45,212,191,0.12), transparent 36%), linear-gradient(180deg, rgba(18,24,27,0.96), rgba(9,11,14,0.98))',
+                                animation: 'fadeIn 0.3s ease-out'
+                            }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                                    <div style={{ display: 'flex', gap: 12, minWidth: 0 }}>
+                                        <div style={{ width: 40, height: 40, borderRadius: 14, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(45,212,191,0.1)', border: '1px solid rgba(45,212,191,0.18)', color: '#99f6e4', flexShrink: 0 }}>
+                                            <Brain size={16} />
+                                        </div>
+                                        <div style={{ minWidth: 0 }}>
+                                            <div className="smd-section-title" style={{ marginBottom: 6 }}>PoolM 池子参数模式</div>
+                                            <div style={{ color: '#a1a1aa', fontSize: 13, lineHeight: 1.6 }}>从 PoolM 最新池子数据里按 AND 条件筛选，留空的字段不会参与匹配。</div>
+                                            <div className="smd-pool-card-badges" style={{ marginTop: 10 }}>
+                                                <Badge cls={draft.pool_mode.enabled ? 'ok' : ''}>{draft.pool_mode.enabled ? '已开启' : '已关闭'}</Badge>
+                                                <Badge>已启用 {activePoolThresholdCount} 项</Badge>
+                                                <Badge>强度 {goldenDogIntensityLabel(draft.pool_mode.intensity)}</Badge>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                        <div className="smd-filter-group">
+                                            <button type="button" className={`smd-filter-btn${draft.pool_mode.enabled ? ' active' : ''}`} onClick={() => updatePoolMode('enabled', true)}>开启</button>
+                                            <button type="button" className={`smd-filter-btn${!draft.pool_mode.enabled ? ' active' : ''}`} onClick={() => updatePoolMode('enabled', false)}>关闭</button>
+                                        </div>
+                                        <button type="button" disabled={testingMode === 'pool' || !hasInitData} onClick={() => handleTest('pool')} style={actionButtonStyle}>
+                                            {testingMode === 'pool' ? '测试中...' : '测试通知'}
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="smd-stats-grid" style={{ marginTop: 14, marginBottom: 0 }}>
+                                    <StatCard label="条件数量" value={`${activePoolThresholdCount} 项`} />
+                                    <StatCard label="手续费" value={goldenDogThresholdText(draft.pool_mode.min_total_fees, '$')} />
+                                    <StatCard label="交易笔数" value={goldenDogThresholdText(draft.pool_mode.min_transaction_count)} />
+                                    <StatCard label="冷却时间" value={`${draft.pool_mode.cooldown_minutes || '--'} 分钟`} />
+                                </div>
+                                <div style={{ marginTop: 14, marginBottom: 2, color: '#94a3b8', fontSize: 12, lineHeight: 1.6 }}>
+                                    条件说明：手续费 = Total Fees，费率 = PoolM Fee Rate，活跃费率按 active_liquidity_ratio 的百分比输入。
+                                </div>
+                                <div className="smd-add-form" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, alignItems: 'end', marginTop: 14 }}>
+                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小手续费($)</span><input type="number" min="0" step="0.01" placeholder="留空则不限制" value={draft.pool_mode.min_total_fees} onChange={(e) => updatePoolMode('min_total_fees', e.target.value)} style={inputStyle} /></label>
+                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小交易笔数</span><input type="number" min="0" step="1" placeholder="留空则不限制" value={draft.pool_mode.min_transaction_count} onChange={(e) => updatePoolMode('min_transaction_count', e.target.value)} style={inputStyle} /></label>
+                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小 TVL($)</span><input type="number" min="0" step="0.01" placeholder="留空则不限制" value={draft.pool_mode.min_tvl} onChange={(e) => updatePoolMode('min_tvl', e.target.value)} style={inputStyle} /></label>
+                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小 VOL($)</span><input type="number" min="0" step="0.01" placeholder="留空则不限制" value={draft.pool_mode.min_volume} onChange={(e) => updatePoolMode('min_volume', e.target.value)} style={inputStyle} /></label>
+                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小费率</span><select value={draft.pool_mode.min_fee_rate} onChange={(e) => updatePoolMode('min_fee_rate', e.target.value)} style={inputStyle}>{GOLDEN_DOG_FEE_RATE_OPTIONS.map((item) => <option key={item.label} value={item.value}>{item.label}</option>)}</select></label>
+                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">最小活跃费率(%)</span><input type="number" min="0" max="100" step="0.1" placeholder="留空则不限制" value={draft.pool_mode.min_active_liquidity_ratio} onChange={(e) => updatePoolMode('min_active_liquidity_ratio', e.target.value)} style={inputStyle} /></label>
+                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">冷却时间(分钟)</span><input type="number" min="0" step="1" value={draft.pool_mode.cooldown_minutes} onChange={(e) => updatePoolMode('cooldown_minutes', e.target.value)} style={inputStyle} /></label>
+                                    <label style={{ display: 'grid', gap: 6 }}><span className="muted">通知强度</span><select value={draft.pool_mode.intensity} onChange={(e) => updatePoolMode('intensity', e.target.value)} style={inputStyle}>{intensityOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

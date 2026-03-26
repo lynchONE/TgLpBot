@@ -15,6 +15,8 @@ type WalletChainContract struct {
 	Chain    string `gorm:"size:10;not null;default:'bsc';index;uniqueIndex:uniq_wallet_chain_kind,priority:2" json:"chain"`
 	Kind     string `gorm:"size:32;not null;default:'zap_simple';uniqueIndex:uniq_wallet_chain_kind,priority:3" json:"kind"`
 
+	Status string `gorm:"size:16;not null;default:'ready';index" json:"status"`
+
 	ContractAddress string `gorm:"size:42;not null" json:"contract_address"`
 	Version         int    `gorm:"not null;default:1" json:"version"`
 
