@@ -762,12 +762,6 @@ func (s *Service) captureUserAssetSnapshots(ctx context.Context, day time.Time) 
 	}
 
 	dayKey := formatDay(day)
-	if err := database.DB.WithContext(ctx).
-		Where("snapshot_day = ? AND wallet_id = ? AND chain = ?", dayKey, aggregateWalletID, "").
-		Delete(&models.UserAssetDailySnapshot{}).Error; err != nil {
-		return err
-	}
-
 	for _, userID := range userIDs {
 		overview, err := s.GetUserOverview(ctx, userID)
 		if err != nil {
@@ -785,15 +779,8 @@ func (s *Service) captureUserAssetSnapshots(ctx context.Context, day time.Time) 
 			TotalUSD:    overview.Summary.TotalUSD,
 			CapturedAt:  timeutil.Now(),
 		}
-		if err := upsertByColumns(ctx, row,
-			[]string{"user_id", "wallet_id", "chain", "snapshot_day"},
-			map[string]interface{}{
-				"wallet_usd":   row.WalletUSD,
-				"position_usd": row.PositionUSD,
-				"fee_usd":      row.FeeUSD,
-				"total_usd":    row.TotalUSD,
-				"captured_at":  row.CapturedAt,
-			}); err != nil {
+		if err := insertIgnoreByColumns(ctx, row,
+			[]string{"user_id", "wallet_id", "chain", "snapshot_day"}); err != nil {
 			return err
 		}
 	}

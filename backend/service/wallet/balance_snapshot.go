@@ -5,6 +5,7 @@ import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	"TgLpBot/base/timeutil"
 	"fmt"
 	"log"
 	"math/big"
@@ -43,7 +44,7 @@ func (s *BalanceSnapshotService) CaptureTodayForUser(userID uint) error {
 	if err != nil {
 		return err
 	}
-	return s.CaptureForWallet(userID, wallet.Address, time.Now().Format("2006-01-02"))
+	return s.CaptureForWallet(userID, wallet.Address, timeutil.Now().Format("2006-01-02"))
 }
 
 func (s *BalanceSnapshotService) CaptureForWallet(userID uint, walletAddress string, day string) error {
@@ -91,7 +92,7 @@ func (s *BalanceSnapshotService) run() {
 		}
 		time.Sleep(5 * time.Second)
 	}
-	lastDay := time.Now().Format("2006-01-02")
+	lastDay := timeutil.Now().Format("2006-01-02")
 	if err := s.CaptureDayForAllUsers(lastDay); err != nil {
 		log.Printf("[BalanceSnapshot] capture day failed: %v", err)
 	}
@@ -100,7 +101,7 @@ func (s *BalanceSnapshotService) run() {
 		case <-s.stopChan:
 			return
 		case <-s.ticker.C:
-			day := time.Now().Format("2006-01-02")
+			day := timeutil.Now().Format("2006-01-02")
 			if day == lastDay {
 				continue
 			}

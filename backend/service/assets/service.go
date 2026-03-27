@@ -24,8 +24,10 @@ import (
 )
 
 const (
-	aggregateWalletID  = uint(0)
-	defaultHistoryDays = 30
+	aggregateWalletID             = uint(0)
+	defaultHistoryDays            = 30
+	userAssetSnapshotCaptureDelay = 30 * time.Second
+	dailyAggregationDelay         = 5 * time.Minute
 )
 
 type Service struct {
@@ -102,8 +104,10 @@ func (s *Service) RunDailyAggregation(day time.Time) error {
 func (s *Service) runScheduler() {
 	// Wait for blockchain clients to be ready before first aggregation
 	time.Sleep(90 * time.Second)
+	lastSnapshotDay := ""
 	lastCompleted := ""
 	for {
+		s.tryCapturePreviousDayUserAssetSnapshots(&lastSnapshotDay)
 		s.tryAggregatePreviousDay(&lastCompleted)
 		select {
 		case <-s.stopCh:
@@ -113,10 +117,34 @@ func (s *Service) runScheduler() {
 	}
 }
 
+func (s *Service) tryCapturePreviousDayUserAssetSnapshots(lastCompleted *string) {
+	now := timeutil.Now()
+	day := dayStart(now)
+	if now.Before(day.Add(userAssetSnapshotCaptureDelay)) {
+		return
+	}
+	target := day.AddDate(0, 0, -1)
+	targetKey := formatDay(target)
+	if lastCompleted != nil && *lastCompleted == targetKey {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	if err := s.captureUserAssetSnapshots(ctx, target); err != nil {
+		log.Printf("[Assets] user asset snapshot capture failed day=%s err=%v", targetKey, err)
+		return
+	}
+	if lastCompleted != nil {
+		*lastCompleted = targetKey
+	}
+	log.Printf("[Assets] user asset snapshots captured day=%s", targetKey)
+}
+
 func (s *Service) tryAggregatePreviousDay(lastCompleted *string) {
 	now := timeutil.Now()
 	day := dayStart(now)
-	if now.Before(day.Add(5 * time.Minute)) {
+	if now.Before(day.Add(dailyAggregationDelay)) {
 		return
 	}
 	target := day.AddDate(0, 0, -1)
@@ -526,6 +554,22 @@ func upsertByColumns(ctx context.Context, model interface{}, columns []string, v
 		Clauses(clause.OnConflict{
 			Columns:   conflictColumns,
 			DoUpdates: clause.Assignments(values),
+		}).
+		Create(model).Error
+}
+
+func insertIgnoreByColumns(ctx context.Context, model interface{}, columns []string) error {
+	if database.DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	conflictColumns := make([]clause.Column, 0, len(columns))
+	for _, name := range columns {
+		conflictColumns = append(conflictColumns, clause.Column{Name: name})
+	}
+	return database.DB.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns:   conflictColumns,
+			DoNothing: true,
 		}).
 		Create(model).Error
 }

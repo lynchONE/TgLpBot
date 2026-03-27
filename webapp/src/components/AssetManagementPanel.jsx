@@ -50,6 +50,7 @@ import {
 import PanelShell, { EmptyState, MetricCard } from './PanelShell';
 
 const HISTORY_WINDOWS = [7, 30, 90];
+const CHINA_TIME_ZONE = 'Asia/Shanghai';
 const HISTORY_METRICS = [
   { key: 'total_usd', label: '总资产', color: '#59f09d' },
   { key: 'wallet_usd', label: '钱包余额', color: '#52d1ff' },
@@ -84,6 +85,42 @@ function formatPct(value, digits = 2) {
   const num = Number(value || 0);
   if (!Number.isFinite(num)) return '--';
   return `${(num * 100).toFixed(digits).replace(/\.?0+$/, '')}%`;
+}
+
+function chinaDateParts(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: CHINA_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const map = {};
+  parts.forEach((part) => {
+    if (part.type !== 'literal') map[part.type] = part.value;
+  });
+  if (!map.year || !map.month || !map.day) return null;
+  return map;
+}
+
+function formatChinaDay(value = new Date()) {
+  const parts = chinaDateParts(value);
+  if (!parts) return '';
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function formatChinaTime(value) {
+  if (!value) return '';
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: CHINA_TIME_ZONE,
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(date);
 }
 
 function formatChain(chainId) {
@@ -316,11 +353,14 @@ function PnLCalendar({ data, loading = false, note = '' }) {
     return map;
   }, [data]);
 
-  const monthLabel = new Date(year, month).toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+  const monthLabel = new Intl.DateTimeFormat('en-US', {
+    timeZone: CHINA_TIME_ZONE,
+    year: 'numeric',
+    month: 'short',
+  }).format(new Date(Date.UTC(year, month, 1, 12, 0, 0)));
   const prevMonth = () => setViewDate(new Date(year, month - 1, 1));
   const nextMonth = () => setViewDate(new Date(year, month + 1, 1));
-  const now = new Date();
-  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const todayStr = formatChinaDay();
 
   if (loading) {
     return <div className="am-chart-empty">加载中...</div>;
@@ -336,7 +376,7 @@ function PnLCalendar({ data, loading = false, note = '' }) {
     const pnl = entry ? Number(entry.realized_pnl_usd || 0) : null;
     const hasTransfer = hasTransferMarker(entry);
     const isToday = dateStr === todayStr;
-    const isFuture = new Date(year, month, day) > now;
+    const isFuture = dateStr > todayStr;
     const cls = ['pnl-cal-cell'];
     if (isToday) cls.push('pnl-cal-today');
     else if (isFuture) cls.push('pnl-cal-future');
@@ -1257,7 +1297,7 @@ export default function AssetManagementPanel({
                 <div className="am-chart-label">钱包余额</div>
                 <div className="am-chart-value">{formatUsd(chartPoints[chartPoints.length - 1]?.value)}</div>
               </div>
-              <span className="am-badge">{assetState.overview?.updated_at ? new Date(assetState.overview.updated_at).toLocaleTimeString() : ''}</span>
+              <span className="am-badge">{formatChinaTime(assetState.overview?.updated_at)}</span>
             </div>
             <LWAreaChart points={chartPoints} stroke={metricColor} />
           </div>
