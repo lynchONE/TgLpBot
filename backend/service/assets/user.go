@@ -251,6 +251,143 @@ func buildUserLPStatsFromTrades(trades []userLPTradeRow, now time.Time) UserLPSt
 	}
 }
 
+func parseSnapshotDay(dayKey string) (time.Time, bool) {
+	dayKey = strings.TrimSpace(dayKey)
+	if dayKey == "" {
+		return time.Time{}, false
+	}
+	parsed, err := time.ParseInLocation("2006-01-02", dayKey, timeutil.Location())
+	if err != nil {
+		return time.Time{}, false
+	}
+	return dayStart(parsed), true
+}
+
+func isNextSnapshotDay(prevDayKey string, currDayKey string) bool {
+	prev, ok := parseSnapshotDay(prevDayKey)
+	if !ok {
+		return false
+	}
+	curr, ok := parseSnapshotDay(currDayKey)
+	if !ok {
+		return false
+	}
+	return curr.Equal(prev.Add(24 * time.Hour))
+}
+
+func dayKeyInRange(dayKey string, start time.Time, end time.Time) bool {
+	day, ok := parseSnapshotDay(dayKey)
+	if !ok {
+		return false
+	}
+	return !day.Before(dayStart(start)) && day.Before(dayStart(end))
+}
+
+func buildUserSnapshotPnLByDay(rows []models.UserAssetDailySnapshot) map[string]float64 {
+	out := make(map[string]float64)
+	if len(rows) < 2 {
+		return out
+	}
+	for i := 1; i < len(rows); i++ {
+		prev := rows[i-1]
+		curr := rows[i]
+		if !isNextSnapshotDay(prev.SnapshotDay, curr.SnapshotDay) {
+			continue
+		}
+		out[curr.SnapshotDay] = round2(curr.TotalUSD - prev.TotalUSD)
+	}
+	return out
+}
+
+func mergeUserDailyHistoryPnL(history []UserLPDailyPoint, snapshotPnLByDay map[string]float64, start time.Time, end time.Time) []UserLPDailyPoint {
+	merged := make(map[string]UserLPDailyPoint, len(history)+len(snapshotPnLByDay))
+	for _, item := range history {
+		if !dayKeyInRange(item.Day, start, end) {
+			continue
+		}
+		merged[item.Day] = item
+	}
+	for dayKey, pnl := range snapshotPnLByDay {
+		if !dayKeyInRange(dayKey, start, end) {
+			continue
+		}
+		item := merged[dayKey]
+		item.Day = dayKey
+		item.RealizedPnLUSD = round2(pnl)
+		merged[dayKey] = item
+	}
+
+	keys := make([]string, 0, len(merged))
+	for dayKey := range merged {
+		keys = append(keys, dayKey)
+	}
+	sort.Strings(keys)
+
+	out := make([]UserLPDailyPoint, 0, len(keys))
+	for _, dayKey := range keys {
+		item := merged[dayKey]
+		item.RealizedPnLUSD = round2(item.RealizedPnLUSD)
+		out = append(out, item)
+	}
+	return out
+}
+
+func sumUserDailyHistoryPnL(history []UserLPDailyPoint, start time.Time, end time.Time) float64 {
+	total := 0.0
+	for _, item := range history {
+		if !dayKeyInRange(item.Day, start, end) {
+			continue
+		}
+		total += item.RealizedPnLUSD
+	}
+	return round2(total)
+}
+
+func snapshotTodayPnL(rows []models.UserAssetDailySnapshot, liveTotalUSD float64, now time.Time) (float64, bool) {
+	yesterdayKey := formatDay(dayStart(now).AddDate(0, 0, -1))
+	for i := len(rows) - 1; i >= 0; i-- {
+		if rows[i].SnapshotDay != yesterdayKey {
+			continue
+		}
+		return round2(liveTotalUSD - rows[i].TotalUSD), true
+	}
+	return 0, false
+}
+
+func setUserLPWindowPnL(stats *UserLPWindowStats, pnl float64) {
+	if stats == nil {
+		return
+	}
+	stats.RealizedPnLUSD = round2(pnl)
+	if stats.ClosedCount > 0 {
+		stats.AvgPnLUSD = round2(stats.RealizedPnLUSD / float64(stats.ClosedCount))
+	} else {
+		stats.AvgPnLUSD = 0
+	}
+}
+
+func applyUserSnapshotPnL(base UserLPStatsResponse, snapshotRows []models.UserAssetDailySnapshot, liveTotalUSD *float64, now time.Time) UserLPStatsResponse {
+	startOfToday := dayStart(now)
+	historyStart := startOfToday.AddDate(0, 0, -30)
+	snapshotPnLByDay := buildUserSnapshotPnLByDay(snapshotRows)
+
+	base.DailyHistory = mergeUserDailyHistoryPnL(base.DailyHistory, snapshotPnLByDay, historyStart, startOfToday)
+
+	if liveTotalUSD != nil {
+		if pnl, ok := snapshotTodayPnL(snapshotRows, *liveTotalUSD, now); ok {
+			setUserLPWindowPnL(&base.Today, pnl)
+		}
+	}
+
+	for i := range base.Windows {
+		days := base.Windows[i].Days
+		windowStart := startOfToday.AddDate(0, 0, -days)
+		setUserLPWindowPnL(&base.Windows[i], sumUserDailyHistoryPnL(base.DailyHistory, windowStart, startOfToday))
+	}
+
+	return base
+}
+
 func (s *Service) loadUserLPTrades(ctx context.Context, userID uint, start, end time.Time) ([]userLPTradeRow, error) {
 	query := database.DB.WithContext(ctx).
 		Model(&models.TradeRecord{}).
@@ -262,6 +399,19 @@ func (s *Service) loadUserLPTrades(ctx context.Context, userID uint, start, end 
 
 	var rows []userLPTradeRow
 	if err := query.Order("closed_at ASC, id ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (s *Service) loadUserAssetSnapshotRows(ctx context.Context, userID uint, start, end time.Time) ([]models.UserAssetDailySnapshot, error) {
+	var rows []models.UserAssetDailySnapshot
+	err := database.DB.WithContext(ctx).
+		Where("user_id = ? AND wallet_id = ? AND chain = ? AND snapshot_day >= ? AND snapshot_day < ?",
+			userID, aggregateWalletID, "", formatDay(start), formatDay(end)).
+		Order("snapshot_day ASC").
+		Find(&rows).Error
+	if err != nil {
 		return nil, err
 	}
 	return rows, nil
@@ -579,6 +729,22 @@ func (s *Service) GetUserLPStats(ctx context.Context, userID uint) (*UserLPStats
 		return nil, err
 	}
 	resp := buildUserLPStatsFromTrades(trades, now)
+
+	snapshotRows, err := s.loadUserAssetSnapshotRows(ctx, userID, dayStart(now).AddDate(0, 0, -31), dayStart(now))
+	if err != nil {
+		return nil, err
+	}
+
+	var liveTotalUSD *float64
+	overview, err := s.GetUserOverview(ctx, userID)
+	if err != nil {
+		log.Printf("[Assets] user overview unavailable for live snapshot pnl user=%d err=%v", userID, err)
+	} else if overview != nil {
+		total := overview.Summary.TotalUSD
+		liveTotalUSD = &total
+	}
+
+	resp = applyUserSnapshotPnL(resp, snapshotRows, liveTotalUSD, now)
 	return &resp, nil
 }
 

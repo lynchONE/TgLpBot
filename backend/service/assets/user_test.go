@@ -2,6 +2,7 @@ package assets
 
 import (
 	"TgLpBot/base/convert"
+	"TgLpBot/base/models"
 	"TgLpBot/base/timeutil"
 	"testing"
 	"time"
@@ -160,5 +161,78 @@ func TestBuildUserLPStatsFromTrades(t *testing.T) {
 	}
 	if got, want := stats.DailyHistory[2].RealizedPnLUSD, 10.0; got != want {
 		t.Fatalf("third daily pnl = %.2f, want %.2f", got, want)
+	}
+}
+
+func TestApplyUserSnapshotPnL(t *testing.T) {
+	timeutil.Init()
+	now := time.Date(2026, time.March, 21, 16, 20, 0, 0, timeutil.Location())
+
+	base := UserLPStatsResponse{
+		Windows: []UserLPWindowStats{
+			{Days: 1, ClosedCount: 1, WinCount: 1, WinRate: 1, AvgPnLUSD: 5, RealizedPnLUSD: 5},
+			{Days: 7, ClosedCount: 2, WinCount: 1, LossCount: 1, WinRate: 0.5, AvgPnLUSD: 43.5, RealizedPnLUSD: 87},
+			{Days: 30, ClosedCount: 2, WinCount: 1, LossCount: 1, WinRate: 0.5, AvgPnLUSD: 43.5, RealizedPnLUSD: 87},
+		},
+		Today: UserLPWindowStats{
+			ClosedCount:    1,
+			WinCount:       1,
+			WinRate:        1,
+			AvgPnLUSD:      5,
+			RealizedPnLUSD: 5,
+		},
+		DailyHistory: []UserLPDailyPoint{
+			{Day: "2026-03-18", RealizedPnLUSD: 80, ClosedCount: 1, WinCount: 1},
+			{Day: "2026-03-19", RealizedPnLUSD: 7, ClosedCount: 1, LossCount: 1},
+		},
+	}
+
+	snapshots := []models.UserAssetDailySnapshot{
+		{SnapshotDay: "2026-03-17", TotalUSD: 100},
+		{SnapshotDay: "2026-03-18", TotalUSD: 102},
+		{SnapshotDay: "2026-03-19", TotalUSD: 99},
+		{SnapshotDay: "2026-03-20", TotalUSD: 109},
+	}
+	liveTotalUSD := 112.0
+
+	stats := applyUserSnapshotPnL(base, snapshots, &liveTotalUSD, now)
+
+	if got, want := stats.Today.RealizedPnLUSD, 3.0; got != want {
+		t.Fatalf("today snapshot pnl = %.2f, want %.2f", got, want)
+	}
+	if got, want := stats.Today.AvgPnLUSD, 3.0; got != want {
+		t.Fatalf("today avg pnl = %.2f, want %.2f", got, want)
+	}
+
+	if got, want := len(stats.DailyHistory), 3; got != want {
+		t.Fatalf("daily history size = %d, want %d", got, want)
+	}
+	if got, want := stats.DailyHistory[0].Day, "2026-03-18"; got != want {
+		t.Fatalf("first history day = %s, want %s", got, want)
+	}
+	if got, want := stats.DailyHistory[0].RealizedPnLUSD, 2.0; got != want {
+		t.Fatalf("2026-03-18 pnl = %.2f, want %.2f", got, want)
+	}
+	if got, want := stats.DailyHistory[1].RealizedPnLUSD, -3.0; got != want {
+		t.Fatalf("2026-03-19 pnl = %.2f, want %.2f", got, want)
+	}
+	if got, want := stats.DailyHistory[2].RealizedPnLUSD, 10.0; got != want {
+		t.Fatalf("2026-03-20 pnl = %.2f, want %.2f", got, want)
+	}
+
+	if got, want := stats.Windows[0].RealizedPnLUSD, 10.0; got != want {
+		t.Fatalf("1d pnl = %.2f, want %.2f", got, want)
+	}
+	if got, want := stats.Windows[0].AvgPnLUSD, 10.0; got != want {
+		t.Fatalf("1d avg pnl = %.2f, want %.2f", got, want)
+	}
+	if got, want := stats.Windows[1].RealizedPnLUSD, 9.0; got != want {
+		t.Fatalf("7d pnl = %.2f, want %.2f", got, want)
+	}
+	if got, want := stats.Windows[1].AvgPnLUSD, 4.5; got != want {
+		t.Fatalf("7d avg pnl = %.2f, want %.2f", got, want)
+	}
+	if got, want := stats.Windows[2].RealizedPnLUSD, 9.0; got != want {
+		t.Fatalf("30d pnl = %.2f, want %.2f", got, want)
 	}
 }

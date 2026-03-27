@@ -575,8 +575,8 @@ function TodayPoolPnL({ pools, brand }) {
         <div className="flex flex-col gap-2.5">
             <div className="flex items-start justify-between gap-2">
                 <div>
-                    <div className="text-[10px] font-medium text-zinc-500 dark:text-white/40">池子贡献</div>
-                    <div className="mt-0.5 text-[10px] text-zinc-400 dark:text-white/30">默认只看贡献榜，完整明细收进二级视图</div>
+                    <div className="text-[10px] font-medium text-zinc-500 dark:text-white/40">平仓池子贡献</div>
+                    <div className="mt-0.5 text-[10px] text-zinc-400 dark:text-white/30">仅统计今日平仓记录，不等于总资产快照盈亏</div>
                 </div>
                 <div className="flex gap-1.5">
                     <Pill active={view === 'leaders'} brand={brand} onClick={() => setView('leaders')}>贡献榜</Pill>
@@ -1277,7 +1277,11 @@ export default function AssetManagementPage({
 
                     {/* LP daily PnL calendar */}
                     <Card>
-                        <PnLCalendar data={assetsData.lp?.daily_history} loading={assetsLoading} />
+                        <PnLCalendar
+                            data={assetsData.lp?.daily_history}
+                            loading={assetsLoading}
+                            note="收益额按资产快照差值计算；今日盈亏按实时总资产对比今日 0 点快照。"
+                        />
                         {/* summary stats below chart */}
                         {Array.isArray(assetsData.lp?.windows) && assetsData.lp.windows.length > 0 && (
                             <div className="mt-2.5 grid grid-cols-3 gap-1.5">

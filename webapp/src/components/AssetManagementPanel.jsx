@@ -491,8 +491,8 @@ function TodayPoolPnL({ pools }) {
     <div className="am-pool-card am-pool-card-compact">
       <div className="am-pool-toolbar">
         <div>
-          <div className="am-card-title" style={{ fontSize: 12 }}>池子贡献</div>
-          <div className="am-item-sub" style={{ margin: 0 }}>默认看贡献榜，完整明细收进二级视图</div>
+          <div className="am-card-title" style={{ fontSize: 12 }}>平仓池子贡献</div>
+          <div className="am-item-sub" style={{ margin: 0 }}>仅统计今日平仓记录，不等于总资产快照盈亏</div>
         </div>
         <div className="am-pill-group">
           <button type="button" className={`am-pill ${view === 'leaders' ? 'active' : ''}`} onClick={() => setView('leaders')}>
@@ -1297,7 +1297,11 @@ export default function AssetManagementPanel({
             </div>
 
             <div className="am-card">
-              <PnLCalendar data={assetState.lp?.daily_history} loading={assetLoading} />
+              <PnLCalendar
+                data={assetState.lp?.daily_history}
+                loading={assetLoading}
+                note="收益额按资产快照差值计算；今日盈亏按实时总资产对比今日 0 点快照。"
+              />
               {Array.isArray(assetState.lp?.windows) && assetState.lp.windows.length > 0 && (
                 <div className="am-stat-grid am-stat-grid-3" style={{ marginTop: 10 }}>
                   {assetState.lp.windows.map((item) => (
