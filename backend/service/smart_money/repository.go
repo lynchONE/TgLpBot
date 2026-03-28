@@ -146,6 +146,20 @@ func (r *Repository) UpsertLPScanState(ctx context.Context, chainID int, blockNu
 		Create(state).Error
 }
 
+func (r *Repository) GetLPScanState(ctx context.Context, chainID int) (*models.SmartMoneyScanState, error) {
+	var state models.SmartMoneyScanState
+	err := database.DB.WithContext(ctx).
+		Where("chain_id = ?", chainID).
+		First(&state).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
 // --- WatchContract ---
 
 func (r *Repository) ListWatchContracts(ctx context.Context) ([]models.WatchContract, error) {
@@ -204,9 +218,16 @@ func (r *Repository) UpdateWatchContractLastBlock(ctx context.Context, id uint, 
 
 // --- SmartMoneyLPEvent ---
 
-func (r *Repository) InsertLPEvent(tx *gorm.DB, event *models.SmartMoneyLPEvent) error {
+func (r *Repository) InsertLPEvent(tx *gorm.DB, event *models.SmartMoneyLPEvent) (bool, error) {
+	if tx == nil || event == nil {
+		return false, nil
+	}
 	event.WalletAddress = strings.ToLower(event.WalletAddress)
-	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(event).Error
+	res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(event)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
 }
 
 func (r *Repository) ListLPEvents(ctx context.Context, wallet, pool string, page, size int) ([]models.SmartMoneyLPEvent, int64, error) {
@@ -581,6 +602,19 @@ func (r *Repository) ListPositionsNeedingMetadataRepair(ctx context.Context, poo
 	return positions, err
 }
 
+func (r *Repository) ListRecentOpenPositionsForStateRepair(ctx context.Context, since time.Time, limit int) ([]models.SmartMoneyLPPosition, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var positions []models.SmartMoneyLPPosition
+	err := database.DB.WithContext(ctx).
+		Where("status = ? AND opened_at >= ?", "open", since).
+		Order("updated_at DESC").
+		Limit(limit).
+		Find(&positions).Error
+	return positions, err
+}
+
 func (r *Repository) GetPositionByID(ctx context.Context, id uint) (*models.SmartMoneyLPPosition, error) {
 	var p models.SmartMoneyLPPosition
 	err := database.DB.WithContext(ctx).First(&p, id).Error
@@ -658,6 +692,13 @@ func (r *Repository) EnsureActivePositionFromPosition(ctx context.Context, pos *
 		if active.IsActive {
 			if liveLiquidity := r.loadCurrentLiquiditySnapshot(nil, active); liveLiquidity != nil {
 				active.CurrentLiquidity = liveLiquidity.String()
+				active.IsActive = liveLiquidity.Sign() > 0
+				if active.IsActive {
+					active.ClosedAt = nil
+				} else if active.ClosedAt == nil {
+					closedAt := time.Now()
+					active.ClosedAt = &closedAt
+				}
 			}
 		}
 		return tx.Create(active).Error

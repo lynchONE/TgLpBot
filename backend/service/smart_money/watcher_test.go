@@ -1,6 +1,7 @@
 package smart_money
 
 import (
+	"TgLpBot/base/models"
 	"math/big"
 	"strings"
 	"testing"
@@ -88,6 +89,44 @@ func TestParseModifyLiquidityDetectsRemove(t *testing.T) {
 	}
 	if event.NftTokenID == nil || *event.NftTokenID != tokenID {
 		t.Fatalf("expected nft token id %d, got %v", tokenID, event.NftTokenID)
+	}
+}
+
+func TestGroupLPEventsByPosition(t *testing.T) {
+	t.Parallel()
+
+	mkEvent := func(wallet string, nft uint64, tx string, logIndex int) *models.SmartMoneyLPEvent {
+		nftCopy := nft
+		return &models.SmartMoneyLPEvent{
+			WalletAddress: wallet,
+			ChainID:       56,
+			Protocol:      "uniswap_v3",
+			NftTokenID:    &nftCopy,
+			TxHash:        tx,
+			BlockNumber:   100,
+			LogIndex:      logIndex,
+		}
+	}
+
+	events := []*models.SmartMoneyLPEvent{
+		mkEvent("0x1111111111111111111111111111111111111111", 1, "0xaaa", 9),
+		mkEvent("0x1111111111111111111111111111111111111111", 1, "0xbbb", 3),
+		mkEvent("0x2222222222222222222222222222222222222222", 2, "0xccc", 5),
+	}
+
+	grouped := groupLPEventsByPosition(events)
+	if len(grouped) != 2 {
+		t.Fatalf("expected 2 groups, got %d", len(grouped))
+	}
+	if len(grouped[0]) != 2 {
+		t.Fatalf("expected first group size 2, got %d", len(grouped[0]))
+	}
+	if grouped[0][0].LogIndex != 3 || grouped[0][1].LogIndex != 9 {
+		t.Fatalf("expected same-position group sorted by log index, got [%d, %d]",
+			grouped[0][0].LogIndex, grouped[0][1].LogIndex)
+	}
+	if len(grouped[1]) != 1 || grouped[1][0].NftTokenID == nil || *grouped[1][0].NftTokenID != 2 {
+		t.Fatalf("expected second group to contain nft=2 event, got %+v", grouped[1])
 	}
 }
 

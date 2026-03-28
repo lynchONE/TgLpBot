@@ -3,6 +3,7 @@ package smart_money
 import (
 	"TgLpBot/base/blockchain"
 	"TgLpBot/base/config"
+	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/service/pricing"
 	"context"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"gorm.io/gorm"
 )
 
 type PositionMetadata struct {
@@ -50,6 +52,13 @@ func (m *PositionMetadata) TradingPair() string {
 var (
 	positionMetadataCache sync.Map
 	positionRepairMu      sync.Mutex
+	lastStateRepairAt     time.Time
+)
+
+const (
+	smartMoneyStateRepairInterval = 30 * time.Second
+	smartMoneyStateRepairLookback = 6 * time.Hour
+	smartMoneyStateRepairLimit    = 100
 )
 
 func RepairPositions(ctx context.Context, repo *Repository) error {
@@ -69,7 +78,117 @@ func RepairPositions(ctx context.Context, repo *Repository) error {
 			log.Printf("[SmartMoney] repair position metadata failed: id=%d nft=%d protocol=%s err=%v", pos.ID, pos.NftTokenID, pos.Protocol, err)
 		}
 	}
+
+	now := time.Now()
+	if lastStateRepairAt.IsZero() || now.Sub(lastStateRepairAt) >= smartMoneyStateRepairInterval {
+		lastStateRepairAt = now
+		repaired, err := repairRecentOpenPositionStates(ctx, repo, now)
+		if err != nil {
+			log.Printf("[SmartMoney] repair open position states failed: %v", err)
+		} else if repaired > 0 {
+			log.Printf("[SmartMoney] repaired stale open positions: %d", repaired)
+		}
+	}
 	return nil
+}
+
+func repairRecentOpenPositionStates(ctx context.Context, repo *Repository, now time.Time) (int, error) {
+	if repo == nil {
+		return 0, nil
+	}
+
+	positions, err := repo.ListRecentOpenPositionsForStateRepair(ctx, now.Add(-smartMoneyStateRepairLookback), smartMoneyStateRepairLimit)
+	if err != nil {
+		return 0, err
+	}
+
+	repaired := 0
+	for _, pos := range positions {
+		changed, err := repairOpenPositionState(ctx, repo, &pos, now)
+		if err != nil {
+			log.Printf("[SmartMoney] repair open position state failed: id=%d nft=%d protocol=%s err=%v", pos.ID, pos.NftTokenID, pos.Protocol, err)
+			continue
+		}
+		if changed {
+			repaired++
+		}
+	}
+	return repaired, nil
+}
+
+func repairOpenPositionState(ctx context.Context, repo *Repository, pos *models.SmartMoneyLPPosition, now time.Time) (bool, error) {
+	if repo == nil || pos == nil {
+		return false, nil
+	}
+
+	positionRef := BuildPositionRefFromPosition(pos)
+	if positionRef == "" {
+		return false, nil
+	}
+
+	active, err := repo.GetActivePositionByRef(ctx, positionRef)
+	if err != nil {
+		return false, err
+	}
+	if active == nil {
+		active, err = repo.EnsureActivePositionFromPosition(ctx, pos)
+		if err != nil {
+			return false, err
+		}
+	}
+	if active == nil {
+		return false, nil
+	}
+
+	applyManagerSnapshotToActive(active)
+	liveLiquidity := repo.loadCurrentLiquiditySnapshot(nil, active)
+	if liveLiquidity == nil {
+		return false, nil
+	}
+
+	if liveLiquidity.Sign() > 0 {
+		updates := map[string]interface{}{
+			"current_liquidity": liveLiquidity.String(),
+			"is_active":         true,
+			"closed_at":         nil,
+		}
+		return false, database.DB.WithContext(ctx).
+			Model(&models.SmartMoneyActivePosition{}).
+			Where("id = ?", active.ID).
+			Updates(updates).Error
+	}
+
+	closedAt := now
+	if active.LastRemoveAt != nil && !active.LastRemoveAt.IsZero() {
+		closedAt = *active.LastRemoveAt
+	} else if pos.ClosedAt != nil && !pos.ClosedAt.IsZero() {
+		closedAt = *pos.ClosedAt
+	}
+
+	err = repo.WithTx(ctx, func(tx *gorm.DB) error {
+		activeUpdates := map[string]interface{}{
+			"current_liquidity": "0",
+			"is_active":         false,
+			"closed_at":         &closedAt,
+		}
+		if err := tx.Model(&models.SmartMoneyActivePosition{}).
+			Where("id = ?", active.ID).
+			Updates(activeUpdates).Error; err != nil {
+			return err
+		}
+
+		positionUpdates := map[string]interface{}{
+			"status":    "closed",
+			"closed_at": &closedAt,
+		}
+		return tx.Model(&models.SmartMoneyLPPosition{}).
+			Where("id = ?", pos.ID).
+			Updates(positionUpdates).Error
+	})
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func RepairPositionMetadata(ctx context.Context, repo *Repository, pos models.SmartMoneyLPPosition) (models.SmartMoneyLPPosition, error) {

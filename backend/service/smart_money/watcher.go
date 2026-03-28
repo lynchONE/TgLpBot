@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"runtime"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -29,6 +32,7 @@ var (
 
 const (
 	smartMoneyMaxBlocksPerPoll = 25
+	smartMoneyMaxEventWorkers  = 8
 	smartMoneyBaseErrorDelay   = 5 * time.Second
 	smartMoneyRateLimitDelay   = 15 * time.Second
 	smartMoneyMaxRetryDelay    = time.Minute
@@ -42,6 +46,7 @@ type Watcher struct {
 	chainID          int64
 	pollIntervalSec  int
 	maxBlocksPerPoll int
+	eventWorkers     int
 	stopCh           chan struct{}
 }
 
@@ -135,8 +140,20 @@ func NewWatcher(repo *Repository, chainID int64, pancakeV3NPM, uniswapV3NPM, uni
 		chainID:          chainID,
 		pollIntervalSec:  pollIntervalSec,
 		maxBlocksPerPoll: smartMoneyMaxBlocksPerPoll,
+		eventWorkers:     defaultSmartMoneyEventWorkers(),
 		stopCh:           make(chan struct{}),
 	}
+}
+
+func defaultSmartMoneyEventWorkers() int {
+	workers := runtime.GOMAXPROCS(0)
+	if workers < 2 {
+		workers = 2
+	}
+	if workers > smartMoneyMaxEventWorkers {
+		workers = smartMoneyMaxEventWorkers
+	}
+	return workers
 }
 
 func (w *Watcher) hasLPContracts() bool {
@@ -209,8 +226,8 @@ func (w *Watcher) Start(ctx context.Context) {
 			}
 			initialized = true
 			rateLimitDelay = smartMoneyRateLimitDelay
-			log.Printf("[SmartMoney Watcher] started from latest block %d, mode=http-polling, interval=%s, lp_contracts=%d",
-				lastProcessed, pollDelay, len(w.lpContracts))
+			log.Printf("[SmartMoney Watcher] started from latest block %d, mode=http-polling, interval=%s, lp_contracts=%d, event_workers=%d",
+				lastProcessed, pollDelay, len(w.lpContracts), w.eventWorkers)
 		}
 
 		result, err := w.pollOnce(ctx, &lastProcessed)
@@ -609,6 +626,7 @@ func (w *Watcher) processLPLogsForBlock(ctx context.Context, block *blockSnapsho
 	}
 
 	blockTime := block.Timestamp
+	events := make([]*models.SmartMoneyLPEvent, 0, len(logs))
 	for _, vlog := range logs {
 		sender, ok := block.TxSenders[vlog.TxHash]
 		if !ok || sender == "" {
@@ -620,13 +638,22 @@ func (w *Watcher) processLPLogsForBlock(ctx context.Context, block *blockSnapsho
 		}
 		stats.ActiveWalletLogs++
 
-		if err := w.handleLPLog(ctx, vlog, sender, block.Number, blockTime); err != nil {
-			log.Printf("[SmartMoney Watcher] handle LP log error: tx=%s err=%v", shortAddr(vlog.TxHash.Hex()), err)
-			continue
+		event, err := w.buildLPEvent(vlog, sender, block.Number, blockTime)
+		if err != nil {
+			return stats, fmt.Errorf("parse lp log tx=%s log_index=%d: %w", vlog.TxHash.Hex(), vlog.Index, err)
 		}
-		stats.HandledEvents++
+		events = append(events, event)
+	}
+	if len(events) == 0 {
+		return stats, nil
 	}
 
+	groups := groupLPEventsByPosition(events)
+	handled, err := w.processLPEventGroups(ctx, groups)
+	stats.HandledEvents = handled
+	if err != nil {
+		return stats, err
+	}
 	return stats, nil
 }
 
@@ -649,10 +676,49 @@ func (s watcherScanStats) remaining() uint64 {
 	return s.LatestBlock - s.ToBlock
 }
 
-func (w *Watcher) handleLPLog(ctx context.Context, vlog types.Log, sender string, blockNum uint64, blockTime time.Time) error {
+func smartMoneyPositionGroupKey(event *models.SmartMoneyLPEvent) string {
+	if event == nil {
+		return ""
+	}
+	if positionRef := BuildPositionRefFromEvent(event); positionRef != "" {
+		return positionRef
+	}
+	return fmt.Sprintf("%d:%s:%d", event.BlockNumber, strings.ToLower(strings.TrimSpace(event.TxHash)), event.LogIndex)
+}
+
+func groupLPEventsByPosition(events []*models.SmartMoneyLPEvent) [][]*models.SmartMoneyLPEvent {
+	if len(events) == 0 {
+		return nil
+	}
+
+	byKey := make(map[string][]*models.SmartMoneyLPEvent, len(events))
+	order := make([]string, 0, len(events))
+	for _, event := range events {
+		key := smartMoneyPositionGroupKey(event)
+		if _, ok := byKey[key]; !ok {
+			order = append(order, key)
+		}
+		byKey[key] = append(byKey[key], event)
+	}
+
+	out := make([][]*models.SmartMoneyLPEvent, 0, len(order))
+	for _, key := range order {
+		group := byKey[key]
+		sort.SliceStable(group, func(i, j int) bool {
+			if group[i].BlockNumber != group[j].BlockNumber {
+				return group[i].BlockNumber < group[j].BlockNumber
+			}
+			return group[i].LogIndex < group[j].LogIndex
+		})
+		out = append(out, group)
+	}
+	return out
+}
+
+func (w *Watcher) buildLPEvent(vlog types.Log, sender string, blockNum uint64, blockTime time.Time) (*models.SmartMoneyLPEvent, error) {
 	event, err := w.parseLog(vlog)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	event.WalletAddress = sender
 	event.ChainID = int(w.chainID)
@@ -660,6 +726,93 @@ func (w *Watcher) handleLPLog(ctx context.Context, vlog types.Log, sender string
 	event.TxHash = vlog.TxHash.Hex()
 	event.LogIndex = int(vlog.Index)
 	event.TxTimestamp = blockTime
+	return event, nil
+}
+
+func (w *Watcher) processLPEventGroups(ctx context.Context, groups [][]*models.SmartMoneyLPEvent) (int, error) {
+	if len(groups) == 0 {
+		return 0, nil
+	}
+
+	workers := w.eventWorkers
+	if workers <= 1 || len(groups) == 1 {
+		handled := 0
+		for _, group := range groups {
+			if err := w.processLPEventGroup(ctx, group); err != nil {
+				return handled, err
+			}
+			handled += len(group)
+		}
+		return handled, nil
+	}
+	if workers > len(groups) {
+		workers = len(groups)
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	jobs := make(chan []*models.SmartMoneyLPEvent)
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		handled  int
+		firstErr error
+	)
+
+	workerFn := func() {
+		defer wg.Done()
+		for group := range jobs {
+			if runCtx.Err() != nil {
+				return
+			}
+			if err := w.processLPEventGroup(runCtx, group); err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+					cancel()
+				}
+				mu.Unlock()
+				return
+			}
+			mu.Lock()
+			handled += len(group)
+			mu.Unlock()
+		}
+	}
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go workerFn()
+	}
+	for _, group := range groups {
+		if runCtx.Err() != nil {
+			break
+		}
+		jobs <- group
+	}
+	close(jobs)
+	wg.Wait()
+
+	return handled, firstErr
+}
+
+func (w *Watcher) processLPEventGroup(ctx context.Context, group []*models.SmartMoneyLPEvent) error {
+	for _, event := range group {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err := w.handleParsedLPEvent(ctx, event); err != nil {
+			return fmt.Errorf("handle lp event tx=%s log_index=%d: %w", event.TxHash, event.LogIndex, err)
+		}
+	}
+	return nil
+}
+
+func (w *Watcher) handleParsedLPEvent(ctx context.Context, event *models.SmartMoneyLPEvent) error {
+	if event == nil {
+		return nil
+	}
 	if err := EnrichLPEvent(ctx, event); err != nil {
 		log.Printf("[SmartMoney Watcher] enrich LP event metadata failed: protocol=%s nft=%v tx=%s err=%v",
 			event.Protocol, event.NftTokenID, shortAddr(event.TxHash), err)
@@ -675,17 +828,26 @@ func (w *Watcher) handleLPLog(ctx context.Context, vlog types.Log, sender string
 	// Compute USD amounts via OKX/Gecko real prices
 	ComputeEventAmountUSD(ctx, event)
 
+	inserted := false
 	if err := w.repo.WithTx(ctx, func(tx *gorm.DB) error {
-		if err := w.repo.InsertLPEvent(tx, event); err != nil {
+		var err error
+		inserted, err = w.repo.InsertLPEvent(tx, event)
+		if err != nil {
 			return err
+		}
+		if !inserted {
+			return nil
 		}
 		return w.repo.UpsertLPPosition(tx, event)
 	}); err != nil {
 		return err
 	}
+	if !inserted {
+		return nil
+	}
 
 	log.Printf("[SmartMoney Watcher] %s LP event: wallet=%s pool=%s type=%s nft=%v tx=%s",
-		event.Protocol, shortAddr(sender), shortAddr(event.PoolAddress), event.EventType,
+		event.Protocol, shortAddr(event.WalletAddress), shortAddr(event.PoolAddress), event.EventType,
 		event.NftTokenID, shortAddr(event.TxHash))
 
 	if w.notifier != nil {

@@ -102,8 +102,12 @@ func (s *Service) Status() MonitorStatus {
 
 func (s *Service) WriteEventInTx(ctx context.Context, event *models.SmartMoneyLPEvent) error {
 	return s.repo.WithTx(ctx, func(tx *gorm.DB) error {
-		if err := s.repo.InsertLPEvent(tx, event); err != nil {
+		inserted, err := s.repo.InsertLPEvent(tx, event)
+		if err != nil {
 			return err
+		}
+		if !inserted {
+			return nil
 		}
 		return s.repo.UpsertLPPosition(tx, event)
 	})
