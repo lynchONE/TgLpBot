@@ -1528,7 +1528,7 @@ export default function AssetManagementPage({
                                     {/* PnL calendar (daily balance diff) */}
                                     <PnLCalendar
                                         data={smartMoneyPnlCalData}
-                                        note="日历按钱包总资产日变化展示；若出现转入或转出标记，会同步展示当天检测到的转账金额。"
+                                        note="日历优先展示 LP 已实现盈亏；若当天检测到转入或转出，则该日盈亏按 0 展示，并同步展示转账金额。"
                                     />
 
                                     {/* window stats */}
