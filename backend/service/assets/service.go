@@ -281,6 +281,7 @@ type SmartMoneyWindowStats struct {
 type SmartMoneyWalletSummary struct {
 	Address         string                   `json:"address"`
 	Label           string                   `json:"label,omitempty"`
+	AvatarURL       string                   `json:"avatar_url
 	ChainID         int                      `json:"chain_id"`
 	Assets          smartMoneyAssetBreakdown `json:"assets"`
 	ActivePoolCount int                      `json:"active_pool_count"`
@@ -328,6 +329,8 @@ type SmartMoneyLeaderboardEntry struct {
 	Rank                    int     `json:"rank"`
 	Address                 string  `json:"address"`
 	Label                   string  `json:"label,omitempty"`
+omitempty"`
+	AvatarURL               string  `json
 	ChainID                 int     `json:"chain_id"`
 	MetricValue             float64 `json:"metric_value"`
 	EstimatedRealizedPnLUSD float64 `json:"estimated_realized_pnl_usd"`

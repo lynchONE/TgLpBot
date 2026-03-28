@@ -11,15 +11,17 @@ func TestBuildSmartMoneySnapshotLeaderboard_UsesBalanceDeltaAndTransferAmounts(t
 	timeutil.Init()
 
 	label := "Alpha"
+	avatarURL := "http://minio.example/avatar/smart-money/a1.jpg"
 	snapshotDay := time.Date(2026, time.March, 23, 0, 0, 0, 0, timeutil.Location())
 	comparedDay := snapshotDay.AddDate(0, 0, -1)
 
 	resp := buildSmartMoneySnapshotLeaderboard("pnl", snapshotDay, comparedDay, 20, []smartMoneyLeaderboardSnapshotInput{
 		{
 			Wallet: models.MonitoredWallet{
-				Address: "0x00000000000000000000000000000000000000a1",
-				ChainID: 56,
-				Label:   &label,
+				Address:   "0x00000000000000000000000000000000000000a1",
+				ChainID:   56,
+				Label:     &label,
+				AvatarURL: &avatarURL,
 			},
 			Current: &models.SmartMoneyWalletDailySnapshot{
 				TotalUSD:        135,
@@ -85,6 +87,9 @@ func TestBuildSmartMoneySnapshotLeaderboard_UsesBalanceDeltaAndTransferAmounts(t
 	if got, want := first.Address, "0x00000000000000000000000000000000000000a1"; got != want {
 		t.Fatalf("first address = %s, want %s", got, want)
 	}
+	if got, want := first.AvatarURL, avatarURL; got != want {
+		t.Fatalf("first avatar url = %s, want %s", got, want)
+	}
 	if got, want := first.Rank, 1; got != want {
 		t.Fatalf("first rank = %d, want %d", got, want)
 	}
@@ -119,6 +124,36 @@ func TestBuildSmartMoneySnapshotLeaderboard_UsesBalanceDeltaAndTransferAmounts(t
 	}
 	if got, want := second.TransferOutUSD, 18.75; got != want {
 		t.Fatalf("second transfer out usd = %.2f, want %.2f", got, want)
+	}
+}
+
+func TestSmartMoneyWalletSummaryFromLive_IncludesAvatarURL(t *testing.T) {
+	avatarURL := "http://minio.example/avatar/smart-money/live.jpg"
+	label := "Alpha"
+
+	got := smartMoneyWalletSummaryFromLive(models.MonitoredWallet{
+		Address:   "0x00000000000000000000000000000000000000a1",
+		ChainID:   56,
+		Label:     &label,
+		AvatarURL: &avatarURL,
+	}, smartMoneyWalletLiveState{})
+
+	if got.AvatarURL != avatarURL {
+		t.Fatalf("avatar url = %s, want %s", got.AvatarURL, avatarURL)
+	}
+}
+
+func TestSmartMoneyWalletSummaryFromSnapshot_IncludesAvatarURL(t *testing.T) {
+	avatarURL := "http://minio.example/avatar/smart-money/snapshot.jpg"
+
+	got := smartMoneyWalletSummaryFromSnapshot(models.MonitoredWallet{
+		Address:   "0x00000000000000000000000000000000000000a1",
+		ChainID:   56,
+		AvatarURL: &avatarURL,
+	}, nil, nil)
+
+	if got.AvatarURL != avatarURL {
+		t.Fatalf("avatar url = %s, want %s", got.AvatarURL, avatarURL)
 	}
 }
 

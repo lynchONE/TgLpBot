@@ -47,6 +47,7 @@ import {
   switchAdminRPCEndpoint,
   updateSystemConfig,
 } from '../api';
+import { resolveSMAvatarAssetUrl } from '../smartMoneyApi';
 import PanelShell, { EmptyState, MetricCard } from './PanelShell';
 
 const HISTORY_WINDOWS = [7, 30, 90];
@@ -229,10 +230,30 @@ function walletAvatarUrl(address) {
   return AVATAR_URLS[Math.abs(hash) % AVATAR_URLS.length] || AVATAR_URLS[0] || '';
 }
 
-function WalletAvatar({ address, size = 28 }) {
-  const src = useMemo(() => walletAvatarUrl(address), [address]);
+function WalletAvatar({ address, size = 28, avatarUrl }) {
+  const fallbackSrc = useMemo(() => walletAvatarUrl(address), [address]);
+  const preferredSrc = resolveSMAvatarAssetUrl(avatarUrl) || fallbackSrc;
+  const [src, setSrc] = useState(preferredSrc);
+
+  useEffect(() => {
+    setSrc(preferredSrc);
+  }, [preferredSrc]);
+
   if (!src) return null;
-  return <img src={src} alt="" width={size} height={size} style={{ width: size, height: size, flexShrink: 0, borderRadius: size * 0.22, objectFit: 'cover' }} />;
+  return (
+    <img
+      src={src}
+      alt=""
+      width={size}
+      height={size}
+      style={{ width: size, height: size, flexShrink: 0, borderRadius: size * 0.22, objectFit: 'cover' }}
+      onError={() => {
+        if (src !== fallbackSrc) {
+          setSrc(fallbackSrc);
+        }
+      }}
+    />
+  );
 }
 
 /* ─── Rank badge for leaderboard ─── */
@@ -1426,7 +1447,7 @@ export default function AssetManagementPanel({
                   return (
                     <button key={walletKey(wallet)} type="button" className={`am-list-item am-list-btn ${walletKey(wallet) === selectedWalletId ? 'selected' : ''}`} onClick={() => selectSmartMoneyWallet(wallet, { openDetail: true })}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
-                        <WalletAvatar address={wallet.address} size={28} />
+                        <WalletAvatar address={wallet.address} avatarUrl={wallet.avatar_url} size={28} />
                         <div style={{ minWidth: 0 }}>
                           <div className="am-item-title">{walletLabel(wallet)}</div>
                           <div className="am-item-sub">{formatChain(wallet.chain_id)} · {Number(wallet.today_event_count || 0)} 事件 · {Number(wallet.active_pool_count || 0)} 池</div>
@@ -1470,7 +1491,7 @@ export default function AssetManagementPanel({
                 <div className="am-stack">
                   {/* wallet header */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0' }}>
-                    <WalletAvatar address={selectedWallet.address} size={36} />
+                    <WalletAvatar address={selectedWallet.address} avatarUrl={selectedWallet.avatar_url || smartMoneyWallet.wallet?.avatar_url} size={36} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div className="am-item-title" style={{ fontSize: 13 }}>{walletLabel(selectedWallet)}</div>
                       <div className="am-item-sub">{formatChain(selectedWallet.chain_id)} · 总资产 <strong>{formatUsdCompact(smartMoneyWallet.wallet?.assets?.total_usd)}</strong></div>
@@ -1611,7 +1632,7 @@ export default function AssetManagementPanel({
                     >
                       <div className="am-rank-row">
                         <RankBadge rank={Number(item.rank || 0)} />
-                        <WalletAvatar address={item.address} size={30} />
+                        <WalletAvatar address={item.address} avatarUrl={item.avatar_url} size={30} />
                         <div>
                           <div className="am-item-title">{item.label || `${item.address.slice(0, 6)}...${item.address.slice(-4)}`}</div>
                           <div className="am-item-sub">{formatChain(item.chain_id)} · {Number(item.active_pool_count || 0)} 池 · {Number(item.participation_count || 0)} 次操作</div>

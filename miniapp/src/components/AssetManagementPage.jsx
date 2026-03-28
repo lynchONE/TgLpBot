@@ -10,6 +10,7 @@ import {
     fetchAssetOverview,
 } from '../lib/api';
 import { getBrandTheme } from '../lib/brand';
+import { resolveSMAvatarAssetUrl } from '../lib/smartMoneyApi';
 import MiniChart from './MiniChart.jsx';
 import NumberFlowValue from './NumberFlowValue.jsx';
 
@@ -267,8 +268,15 @@ function walletAvatarUrl(address) {
     return AVATAR_URLS[Math.abs(hash) % AVATAR_URLS.length] || AVATAR_URLS[0] || '';
 }
 
-function WalletAvatar({ address, size = 28, className = '' }) {
-    const src = useMemo(() => walletAvatarUrl(address), [address]);
+function WalletAvatar({ address, size = 28, className = '', avatarUrl }) {
+    const fallbackSrc = useMemo(() => walletAvatarUrl(address), [address]);
+    const preferredSrc = resolveSMAvatarAssetUrl(avatarUrl) || fallbackSrc;
+    const [src, setSrc] = useState(preferredSrc);
+
+    useEffect(() => {
+        setSrc(preferredSrc);
+    }, [preferredSrc]);
+
     if (!src) return null;
     return (
         <img
@@ -278,6 +286,11 @@ function WalletAvatar({ address, size = 28, className = '' }) {
             height={size}
             className={`shrink-0 rounded-lg object-cover ${className}`.trim()}
             style={{ width: size, height: size }}
+            onError={() => {
+                if (src !== fallbackSrc) {
+                    setSrc(fallbackSrc);
+                }
+            }}
         />
     );
 }
@@ -1415,7 +1428,7 @@ export default function AssetManagementPage({
                                         >
                                             <div className="flex items-center justify-between gap-3 w-full">
                                                 <div className="flex items-center gap-2.5 min-w-0">
-                                                    <WalletAvatar address={wallet.address} size={28} />
+                                                    <WalletAvatar address={wallet.address} avatarUrl={wallet.avatar_url} size={28} />
                                                     <div className="min-w-0">
                                                         <div className="truncate text-[12px] font-semibold">{walletLabel(wallet)}</div>
                                                         <div className="mt-0.5 text-[10px] opacity-60">{formatChain(wallet.chain_id)} · {Number(wallet.today_event_count || 0)} 事件 · {Number(wallet.active_pool_count || 0)} 池</div>
@@ -1463,7 +1476,7 @@ export default function AssetManagementPage({
                                 <div className="flex flex-col gap-2.5">
                                     {/* wallet header */}
                                     <div className="flex items-center gap-3 rounded-xl bg-emerald-500/[0.06] ring-1 ring-emerald-500/20 dark:bg-emerald-500/[0.08] dark:ring-emerald-400/25 px-3 py-2.5">
-                                        <WalletAvatar address={selectedWallet.address} size={36} />
+                                        <WalletAvatar address={selectedWallet.address} avatarUrl={selectedWallet.avatar_url || smartMoneyWallet.wallet?.avatar_url} size={36} />
                                         <div className="flex-1 min-w-0">
                                             <div className="text-[12px] font-bold text-zinc-900 dark:text-white/95 truncate">{walletLabel(selectedWallet)}</div>
                                             <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">
@@ -1580,7 +1593,7 @@ export default function AssetManagementPage({
                                             }`}
                                         >
                                             <RankBadge rank={Number(item.rank || 0)} />
-                                            <WalletAvatar address={item.address} size={32} />
+                                            <WalletAvatar address={item.address} avatarUrl={item.avatar_url} size={32} />
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex items-center gap-1.5">
                                                     <span className="truncate text-[12px] font-semibold text-zinc-900 dark:text-white/90">
