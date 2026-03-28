@@ -37,6 +37,15 @@ func CalcV3UnclaimedFeesFromGrowths(
 
 	last0 := cloneBig(pos.FeeGrowthInside0LastX128)
 	last1 := cloneBig(pos.FeeGrowthInside1LastX128)
+	if inside0.Cmp(global0) > 0 || inside1.Cmp(global1) > 0 {
+		return owed0, owed1, fmt.Errorf(
+			"inconsistent V3 fee snapshot: inside exceeds global inside0=%s global0=%s inside1=%s global1=%s",
+			inside0.String(),
+			global0.String(),
+			inside1.String(),
+			global1.String(),
+		)
+	}
 
 	delta0 := new(big.Int).Sub(inside0, last0)
 	delta1 := new(big.Int).Sub(inside1, last1)

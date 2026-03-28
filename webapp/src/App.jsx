@@ -2458,6 +2458,27 @@ export default function App() {
           );
         })()}
 
+        {(() => {
+          const warnings = Array.from(
+            new Set(
+              (Array.isArray(positions?.warnings) ? positions.warnings : [])
+                .map((item) => String(item || '').trim())
+                .filter(Boolean),
+            ),
+          );
+          if (warnings.length === 0) return null;
+          return (
+            <div className="mt-3">
+              {warnings.map((warning, index) => (
+                <div key={`${warning}-${index}`} className="warning-box">
+                  <AlertTriangle size={14} />
+                  <span>{warning}</span>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+
         <div className="data-list">
           {positionsLoading && sortedPositions.length === 0 ? (
             <EmptyState text="正在加载仓位..." />

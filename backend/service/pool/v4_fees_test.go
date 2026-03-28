@@ -61,3 +61,32 @@ func TestCalcV4UnclaimedFeesFromGrowthsRejectsInconsistentSnapshot(t *testing.T)
 		t.Fatalf("fees1 = %s, want 12", fees1.String())
 	}
 }
+
+func TestCalcV4UnclaimedFeesFromGrowthsRejectsInsideGreaterThanGlobal(t *testing.T) {
+	pos := &blockchain.V4PositionInfo{
+		TickLower:                100,
+		TickUpper:                200,
+		Liquidity:                big.NewInt(10),
+		FeeGrowthInside0LastX128: big.NewInt(0),
+		FeeGrowthInside1LastX128: big.NewInt(0),
+		TokensOwed0:              big.NewInt(11),
+		TokensOwed1:              big.NewInt(12),
+	}
+
+	fees0, fees1, err := CalcV4UnclaimedFeesFromGrowths(
+		150,
+		pos,
+		big.NewInt(5), big.NewInt(7),
+		big.NewInt(7), big.NewInt(8),
+		big.NewInt(0), big.NewInt(0),
+	)
+	if err == nil {
+		t.Fatal("expected inside>global snapshot error")
+	}
+	if fees0.Cmp(big.NewInt(11)) != 0 {
+		t.Fatalf("fees0 = %s, want 11", fees0.String())
+	}
+	if fees1.Cmp(big.NewInt(12)) != 0 {
+		t.Fatalf("fees1 = %s, want 12", fees1.String())
+	}
+}

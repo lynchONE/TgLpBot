@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -89,7 +90,15 @@ func (s *RealtimePositionsService) buildSmartMoneyV3Position(active *models.Smar
 		if err != nil {
 			warnings = appendWarning(warnings, fmt.Sprintf("init v3 position manager failed: %v", err))
 		} else {
-			info, err := pm.Positions(nil, new(big.Int).SetUint64(active.NftTokenID))
+			snapshotBlock := uint64(0)
+			if blockNumber, blockErr := snapshotBlockNumber(client); blockErr == nil {
+				snapshotBlock = blockNumber
+			}
+			callOpts := &bind.CallOpts{}
+			if snapshotBlock > 0 {
+				callOpts.BlockNumber = new(big.Int).SetUint64(snapshotBlock)
+			}
+			info, err := pm.Positions(callOpts, new(big.Int).SetUint64(active.NftTokenID))
 			if err != nil {
 				if active.IsActive {
 					warnings = appendWarning(warnings, fmt.Sprintf("read v3 position failed: %v", err))
@@ -108,11 +117,20 @@ func (s *RealtimePositionsService) buildSmartMoneyV3Position(active *models.Smar
 				if info.Liquidity != nil {
 					liq = info.Liquidity
 				}
-				owed0 = cloneBig(info.TokensOwed0)
-				owed1 = cloneBig(info.TokensOwed1)
-
 				if poolAddr != (common.Address{}) {
-					sqrtP, currentTick, usedStale, age, err := s.getV3Slot0(chain, poolAddr)
+					var (
+						sqrtP       *big.Int
+						currentTick int
+						usedStale   bool
+						age         time.Duration
+						err         error
+					)
+					if snapshotBlock > 0 {
+						sqrtP, currentTick, err = blockchain.GetV3PoolSlot0AtBlockWithClient(client, poolAddr, snapshotBlock)
+					}
+					if err != nil || sqrtP == nil {
+						sqrtP, currentTick, usedStale, age, err = s.getV3Slot0(chain, poolAddr)
+					}
 					if err != nil && sqrtP == nil {
 						warnings = appendWarning(warnings, fmt.Sprintf("read v3 slot0 failed: %v", err))
 						return s.buildStaticSmartMoneyPosition(active, chain, "v3", smartMoneyExchange(active.Protocol), token0, token1, liq, 0, warnings), warnings, nil
@@ -121,15 +139,22 @@ func (s *RealtimePositionsService) buildSmartMoneyV3Position(active *models.Smar
 					if usedStale && err != nil {
 						warnings = appendWarning(warnings, fmt.Sprintf("v3 slot0 cache fallback (%ds)", int(age.Seconds())))
 					}
-					if fee0, fee1, feeStale, feeAge, feeErr := s.calcV3UnclaimedFeesCached(chain, poolAddr, currentTick, info); fee0 != nil && fee1 != nil {
+					if snapshotBlock > 0 {
+						if fee0, fee1, feeErr := pool.CalcV3UnclaimedFeesAtBlock(poolAddr, currentTick, info, snapshotBlock); feeErr == nil && fee0 != nil && fee1 != nil {
+							owed0 = fee0
+							owed1 = fee1
+						} else if feeErr != nil && !isTransientFeeCalcError(feeErr) {
+							warnings = appendWarning(warnings, fmt.Sprintf("v3 snapshot fee calculation failed: %v", feeErr))
+						}
+					} else if fee0, fee1, feeStale, feeAge, feeErr := s.calcV3UnclaimedFeesCached(chain, poolAddr, currentTick, info); fee0 != nil && fee1 != nil {
 						owed0 = fee0
 						owed1 = fee1
 						if feeStale && feeErr != nil {
 							warnings = appendWarning(warnings, fmt.Sprintf("v3 fee cache fallback (%ds)", int(feeAge.Seconds())))
-						} else if feeErr != nil {
-							warnings = appendWarning(warnings, fmt.Sprintf("v3 fee fallback: %v", feeErr))
+						} else if feeErr != nil && !isTransientFeeCalcError(feeErr) {
+							warnings = appendWarning(warnings, fmt.Sprintf("v3 fee calculation failed: %v", feeErr))
 						}
-					} else if feeErr != nil {
+					} else if feeErr != nil && !isTransientFeeCalcError(feeErr) {
 						warnings = appendWarning(warnings, fmt.Sprintf("v3 fee read failed: %v", feeErr))
 					}
 					return s.buildDynamicSmartMoneyPosition(active, chain, "v3", smartMoneyExchange(active.Protocol), token0, token1, liq, owed0, owed1, sqrtP, currentTick, tickLower, tickUpper, warnings), warnings, nil
@@ -178,8 +203,6 @@ func (s *RealtimePositionsService) buildSmartMoneyV4Position(active *models.Smar
 			if pos.Liquidity != nil {
 				liq = pos.Liquidity
 			}
-			owed0 = cloneBig(pos.TokensOwed0)
-			owed1 = cloneBig(pos.TokensOwed1)
 		}
 	}
 
@@ -203,10 +226,10 @@ func (s *RealtimePositionsService) buildSmartMoneyV4Position(active *models.Smar
 			owed1 = fee1
 			if feeStale && feeErr != nil {
 				warnings = appendWarning(warnings, fmt.Sprintf("v4 fee cache fallback (%ds)", int(feeAge.Seconds())))
-			} else if feeErr != nil {
-				warnings = appendWarning(warnings, fmt.Sprintf("v4 fee fallback: %v", feeErr))
+			} else if feeErr != nil && !isTransientFeeCalcError(feeErr) {
+				warnings = appendWarning(warnings, fmt.Sprintf("v4 fee calculation failed: %v", feeErr))
 			}
-		} else if feeErr != nil {
+		} else if feeErr != nil && !isTransientFeeCalcError(feeErr) {
 			warnings = appendWarning(warnings, fmt.Sprintf("v4 fee read failed: %v", feeErr))
 		}
 	}

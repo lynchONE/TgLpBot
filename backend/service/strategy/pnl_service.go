@@ -356,35 +356,35 @@ func (s *PnLService) getV3CurrentValue(task *models.StrategyTask) (totalVal, fee
 
 	amount0, amount1 := pool.AmountsForLiquidity(sqrtPriceX96, sqrtPriceA, sqrtPriceB, pos.Liquidity)
 
-	fees0 := cloneBig(pos.TokensOwed0)
-	fees1 := cloneBig(pos.TokensOwed1)
+	fees0 := big.NewInt(0)
+	fees1 := big.NewInt(0)
 	if snapshotBlock > 0 {
 		if fee0, fee1, feeErr := pool.CalcV3UnclaimedFeesAtBlock(poolAddr, currentTick, pos, snapshotBlock); feeErr == nil && fee0 != nil && fee1 != nil {
 			fees0 = fee0
 			fees1 = fee1
 			log.Printf("[PnL] V3 consistent snapshot fees tokenId=%s fees0=%s fees1=%s block=%d", task.V3TokenID, fees0.String(), fees1.String(), snapshotBlock)
 		} else if feeErr != nil {
-			log.Printf("[PnL] V3 consistent snapshot fee calc failed, fallback to TokensOwed: tokenId=%s err=%v", task.V3TokenID, feeErr)
+			log.Printf("[PnL] V3 consistent snapshot fee calc failed: tokenId=%s err=%v", task.V3TokenID, feeErr)
 		}
 	} else if fee0, fee1, usedStale, age, feeErr := s.calcV3UnclaimedFeesCached(chain, poolAddr, currentTick, pos); fee0 != nil && fee1 != nil {
 		fees0 = fee0
 		fees1 = fee1
 		if feeErr != nil {
 			if usedStale {
-				log.Printf("[PnL] V3 手续费 RPC 限流/失败，已使用缓存（%ds 前）。tokenId=%s err=%v", int(age.Seconds()), task.V3TokenID, feeErr)
+				log.Printf("[PnL] V3 fee cache fallback (%ds) tokenId=%s err=%v", int(age.Seconds()), task.V3TokenID, feeErr)
 			} else {
-				log.Printf("[PnL] V3 手续费计算失败(已回退 owed): tokenId=%s err=%v", task.V3TokenID, feeErr)
+				log.Printf("[PnL] V3 fee calculation failed: tokenId=%s err=%v", task.V3TokenID, feeErr)
 			}
 		}
 	} else if feeErr != nil {
-		log.Printf("[PnL] V3 手续费计算失败: tokenId=%s err=%v", task.V3TokenID, feeErr)
+		log.Printf("[PnL] V3 鎵嬬画璐硅绠楀け璐? tokenId=%s err=%v", task.V3TokenID, feeErr)
 	}
 
 	// 5. Total Amounts = Position + Unclaimed Fees
 	total0 := new(big.Int).Add(amount0, fees0)
 	total1 := new(big.Int).Add(amount1, fees1)
 
-	log.Printf("[PnL] V3 手续费: tokenId=%s owed0=%s owed1=%s amount0=%s amount1=%s",
+	log.Printf("[PnL] V3 鎵嬬画璐? tokenId=%s owed0=%s owed1=%s amount0=%s amount1=%s",
 		task.V3TokenID, fees0.String(), fees1.String(), amount0.String(), amount1.String())
 
 	// 6. Convert to USDT
@@ -444,12 +444,6 @@ func (s *PnLService) getV4CurrentValue(task *models.StrategyTask) (totalVal, fee
 			}
 			if pos != nil {
 				v4pos = pos
-				if pos.TokensOwed0 != nil {
-					fees0 = pos.TokensOwed0
-				}
-				if pos.TokensOwed1 != nil {
-					fees1 = pos.TokensOwed1
-				}
 				if pos.Liquidity != nil {
 					liquidity = pos.Liquidity
 				}
@@ -474,7 +468,7 @@ func (s *PnLService) getV4CurrentValue(task *models.StrategyTask) (totalVal, fee
 		return 0, 0, 0, nil, fmt.Errorf("get V4 slot0 failed: %w", err)
 	}
 
-	// 尝试计算实时手续费（如果有仓位信息）
+	// 灏濊瘯璁＄畻瀹炴椂鎵嬬画璐癸紙濡傛灉鏈変粨浣嶄俊鎭級
 	if v4pos != nil && v4pos.Liquidity != nil && v4pos.Liquidity.Sign() > 0 {
 		if snapshotBlock > 0 {
 			realFees0, realFees1, feeErr := pool.CalcV4UnclaimedFeesAtBlock(stateView, poolManager, task.PoolId, currentTick, v4pos, snapshotBlock)
@@ -483,20 +477,20 @@ func (s *PnLService) getV4CurrentValue(task *models.StrategyTask) (totalVal, fee
 				fees1 = realFees1
 				log.Printf("[PnL] V4 consistent snapshot fees tokenId=%s fees0=%s fees1=%s block=%d", task.V4TokenID, fees0.String(), fees1.String(), snapshotBlock)
 			} else if feeErr != nil {
-				log.Printf("[PnL] V4 consistent snapshot fee calc failed, fallback to TokensOwed: tokenId=%s err=%v", task.V4TokenID, feeErr)
+				log.Printf("[PnL] V4 consistent snapshot fee calc failed: tokenId=%s err=%v", task.V4TokenID, feeErr)
 			}
 		} else if realFees0, realFees1, usedStale, age, feeErr := s.calcV4UnclaimedFeesCachedUnified(stateView, poolManager, task.PoolId, currentTick, v4pos); realFees0 != nil && realFees1 != nil {
 			fees0 = realFees0
 			fees1 = realFees1
 			if feeErr == nil {
-				log.Printf("[PnL] V4 实时手续费: tokenId=%s fees0=%s fees1=%s", task.V4TokenID, fees0.String(), fees1.String())
+				log.Printf("[PnL] V4 realtime fees tokenId=%s fees0=%s fees1=%s", task.V4TokenID, fees0.String(), fees1.String())
 			} else if usedStale {
-				log.Printf("[PnL] V4 手续费 RPC 限流/失败，已使用缓存（%ds 前）。tokenId=%s err=%v", int(age.Seconds()), task.V4TokenID, feeErr)
+				log.Printf("[PnL] V4 fee cache fallback (%ds) tokenId=%s err=%v", int(age.Seconds()), task.V4TokenID, feeErr)
 			} else {
-				log.Printf("[PnL] V4 手续费计算失败(已回退 owed): tokenId=%s err=%v", task.V4TokenID, feeErr)
+				log.Printf("[PnL] V4 fee calculation failed: tokenId=%s err=%v", task.V4TokenID, feeErr)
 			}
 		} else if feeErr != nil {
-			log.Printf("[PnL] V4 手续费计算失败: %v，使用 TokensOwed", feeErr)
+			log.Printf("[PnL] V4 fee calculation failed: %v", feeErr)
 		}
 	}
 
@@ -631,7 +625,7 @@ func (s *PnLService) calculateUSDTValue(
 			totalUSDT = t0*bnbPriceUSDT + t1*priceT1InWBNB*bnbPriceUSDT
 			feesUSDT = f0*bnbPriceUSDT + f1*priceT1InWBNB*bnbPriceUSDT
 			holdUSDT = h0*bnbPriceUSDT + h1*priceT1InWBNB*bnbPriceUSDT
-			log.Printf("[PnL] 非稳定币对 %s/%s: 使用 WBNB(Token0) 价格估算, bnbPrice=%.2f", token0Symbol, token1Symbol, bnbPriceUSDT)
+			log.Printf("[PnL] 闈炵ǔ瀹氬竵瀵?%s/%s: 浣跨敤 WBNB(Token0) 浠锋牸浼扮畻, bnbPrice=%.2f", token0Symbol, token1Symbol, bnbPriceUSDT)
 		} else if isWBNB1 && !isWBNB0 {
 			// Token1 is WBNB
 			// priceToken1PerToken0 = amount of WBNB per 1 T0
@@ -640,10 +634,10 @@ func (s *PnLService) calculateUSDTValue(
 			totalUSDT = t1*bnbPriceUSDT + t0*priceT0InWBNB*bnbPriceUSDT
 			feesUSDT = f1*bnbPriceUSDT + f0*priceT0InWBNB*bnbPriceUSDT
 			holdUSDT = h1*bnbPriceUSDT + h0*priceT0InWBNB*bnbPriceUSDT
-			log.Printf("[PnL] 非稳定币对 %s/%s: 使用 WBNB(Token1) 价格估算, bnbPrice=%.2f", token0Symbol, token1Symbol, bnbPriceUSDT)
+			log.Printf("[PnL] 闈炵ǔ瀹氬竵瀵?%s/%s: 浣跨敤 WBNB(Token1) 浠锋牸浼扮畻, bnbPrice=%.2f", token0Symbol, token1Symbol, bnbPriceUSDT)
 		} else {
 			// Neither is WBNB or stable, cannot estimate
-			log.Printf("[PnL] 警告: 无法估算非稳定币对 %s/%s 的 USDT 价值 (Task #%d)", token0Symbol, token1Symbol, task.ID)
+			log.Printf("[PnL] 璀﹀憡: 鏃犳硶浼扮畻闈炵ǔ瀹氬竵瀵?%s/%s 鐨?USDT 浠峰€?(Task #%d)", token0Symbol, token1Symbol, task.ID)
 			return 0, 0, 0
 		}
 	}
@@ -651,7 +645,7 @@ func (s *PnLService) calculateUSDTValue(
 	return totalUSDT, feesUSDT, holdUSDT
 }
 
-// GetBNBPriceUSDT 从 PancakeSwap V3 WBNB/USDT 池子获取 BNB 实时价格
+// GetBNBPriceUSDT 浠?PancakeSwap V3 WBNB/USDT 姹犲瓙鑾峰彇 BNB 瀹炴椂浠锋牸
 func (s *PnLService) GetBNBPriceUSDT() float64 {
 	return pricing.GetBNBPriceUSDT()
 }
@@ -812,27 +806,24 @@ func (s *PnLService) calcV3UnclaimedFeesCached(chain string, poolAddr common.Add
 		return nil, nil, false, 0, fmt.Errorf("position info missing")
 	}
 
-	owed0 := cloneBig(pos.TokensOwed0)
-	owed1 := cloneBig(pos.TokensOwed1)
-
 	if pos.Liquidity == nil || pos.Liquidity.Sign() == 0 {
-		return owed0, owed1, false, 0, nil
+		return cloneBig(pos.TokensOwed0), cloneBig(pos.TokensOwed1), false, 0, nil
 	}
 	if poolAddr == (common.Address{}) {
-		return owed0, owed1, false, 0, fmt.Errorf("pool address missing")
+		return nil, nil, false, 0, fmt.Errorf("pool address missing")
 	}
 
 	global0, global1, staleG, ageG, errG := s.getV3FeeGrowthGlobalsCached(chain, poolAddr)
 	if errG != nil && (global0 == nil || global1 == nil) {
-		return owed0, owed1, false, 0, fmt.Errorf("read feeGrowthGlobal failed: %w", errG)
+		return nil, nil, false, 0, fmt.Errorf("read feeGrowthGlobal failed: %w", errG)
 	}
 	lower0, lower1, _, staleL, ageL, errL := s.getV3TickFeeGrowthOutsideCached(chain, poolAddr, pos.TickLower)
 	if errL != nil && (lower0 == nil || lower1 == nil) {
-		return owed0, owed1, false, 0, fmt.Errorf("read tickLower feeGrowthOutside failed: %w", errL)
+		return nil, nil, false, 0, fmt.Errorf("read tickLower feeGrowthOutside failed: %w", errL)
 	}
 	upper0, upper1, _, staleU, ageU, errU := s.getV3TickFeeGrowthOutsideCached(chain, poolAddr, pos.TickUpper)
 	if errU != nil && (upper0 == nil || upper1 == nil) {
-		return owed0, owed1, false, 0, fmt.Errorf("read tickUpper feeGrowthOutside failed: %w", errU)
+		return nil, nil, false, 0, fmt.Errorf("read tickUpper feeGrowthOutside failed: %w", errU)
 	}
 
 	usedStale := staleG || staleL || staleU
@@ -849,7 +840,7 @@ func (s *PnLService) calcV3UnclaimedFeesCached(chain string, poolAddr common.Add
 
 	fees0, fees1, calcErr := pool.CalcV3UnclaimedFeesFromGrowths(currentTick, pos, global0, global1, lower0, lower1, upper0, upper1)
 	if calcErr != nil {
-		return owed0, owed1, usedStale, age, calcErr
+		return nil, nil, usedStale, age, calcErr
 	}
 
 	var errOut error
@@ -863,40 +854,6 @@ func (s *PnLService) calcV3UnclaimedFeesCached(chain string, poolAddr common.Add
 		}
 	}
 	return fees0, fees1, usedStale, age, errOut
-
-	inside0 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global0, lower0, upper0)
-	inside1 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global1, lower1, upper1)
-	// 注意：由于 uint256 模运算特性和 RPC 调用时序差异，inside 可能暂时"看起来"大于 global。
-	// 这里不再报错退出，而是继续计算。delta 计算已有负值保护，不会产生负手续费。
-
-	last0 := cloneBig(pos.FeeGrowthInside0LastX128)
-	last1 := cloneBig(pos.FeeGrowthInside1LastX128)
-
-	delta0 := new(big.Int).Sub(inside0, last0)
-	if delta0.Sign() < 0 {
-		delta0 = big.NewInt(0)
-	}
-	delta1 := new(big.Int).Sub(inside1, last1)
-	if delta1.Sign() < 0 {
-		delta1 = big.NewInt(0)
-	}
-
-	extra0 := mulDivFloor(delta0, pos.Liquidity, q128)
-	extra1 := mulDivFloor(delta1, pos.Liquidity, q128)
-	owed0.Add(owed0, extra0)
-	owed1.Add(owed1, extra1)
-
-	var err error
-	if usedStale {
-		if errG != nil {
-			err = errG
-		} else if errL != nil {
-			err = errL
-		} else if errU != nil {
-			err = errU
-		}
-	}
-	return owed0, owed1, usedStale, age, err
 }
 
 func normalizePoolIDKey(poolID string) string {
@@ -1001,7 +958,6 @@ func (s *PnLService) calcV4UnclaimedFeesCached(stateView, poolManager common.Add
 	if pos == nil {
 		return nil, nil, false, 0, fmt.Errorf("position info missing")
 	}
-
 	owed0 := cloneBig(pos.TokensOwed0)
 	owed1 := cloneBig(pos.TokensOwed1)
 
@@ -1009,20 +965,20 @@ func (s *PnLService) calcV4UnclaimedFeesCached(stateView, poolManager common.Add
 		return owed0, owed1, false, 0, nil
 	}
 	if pos.FeeGrowthInside0LastX128 == nil || pos.FeeGrowthInside1LastX128 == nil {
-		return owed0, owed1, false, 0, fmt.Errorf("position feeGrowthInside last missing")
+		return nil, nil, false, 0, fmt.Errorf("position feeGrowthInside last missing")
 	}
 
 	global0, global1, staleG, ageG, errG := s.getV4FeeGrowthGlobalsCached(stateView, poolManager, poolID)
 	if errG != nil && (global0 == nil || global1 == nil) {
-		return owed0, owed1, false, 0, fmt.Errorf("read V4 feeGrowthGlobal failed: %w", errG)
+		return nil, nil, false, 0, fmt.Errorf("read V4 feeGrowthGlobal failed: %w", errG)
 	}
 	lower0, lower1, staleL, ageL, errL := s.getV4TickFeeGrowthOutsideCached(stateView, poolManager, poolID, pos.TickLower)
 	if errL != nil && (lower0 == nil || lower1 == nil) {
-		return owed0, owed1, false, 0, fmt.Errorf("read V4 tickLower feeGrowthOutside failed: %w", errL)
+		return nil, nil, false, 0, fmt.Errorf("read V4 tickLower feeGrowthOutside failed: %w", errL)
 	}
 	upper0, upper1, staleU, ageU, errU := s.getV4TickFeeGrowthOutsideCached(stateView, poolManager, poolID, pos.TickUpper)
 	if errU != nil && (upper0 == nil || upper1 == nil) {
-		return owed0, owed1, false, 0, fmt.Errorf("read V4 tickUpper feeGrowthOutside failed: %w", errU)
+		return nil, nil, false, 0, fmt.Errorf("read V4 tickUpper feeGrowthOutside failed: %w", errU)
 	}
 
 	usedStale := staleG || staleL || staleU
@@ -1040,7 +996,7 @@ func (s *PnLService) calcV4UnclaimedFeesCached(stateView, poolManager common.Add
 	inside0 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global0, lower0, upper0)
 	inside1 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global1, lower1, upper1)
 	if inside0.Cmp(global0) > 0 || inside1.Cmp(global1) > 0 {
-		return owed0, owed1, usedStale, age, fmt.Errorf("invalid feeGrowthInside (pool_id=%s)", poolID)
+		return nil, nil, usedStale, age, fmt.Errorf("invalid feeGrowthInside (pool_id=%s)", poolID)
 	}
 
 	last0 := cloneBig(pos.FeeGrowthInside0LastX128)
@@ -1085,20 +1041,20 @@ func (s *PnLService) calcV4UnclaimedFeesCachedUnified(stateView, poolManager com
 		return owed0, owed1, false, 0, nil
 	}
 	if pos.FeeGrowthInside0LastX128 == nil || pos.FeeGrowthInside1LastX128 == nil {
-		return owed0, owed1, false, 0, fmt.Errorf("position feeGrowthInside last missing")
+		return nil, nil, false, 0, fmt.Errorf("position feeGrowthInside last missing")
 	}
 
 	global0, global1, staleG, ageG, errG := s.getV4FeeGrowthGlobalsCached(stateView, poolManager, poolID)
 	if errG != nil && (global0 == nil || global1 == nil) {
-		return owed0, owed1, false, 0, fmt.Errorf("read V4 feeGrowthGlobal failed: %w", errG)
+		return nil, nil, false, 0, fmt.Errorf("read V4 feeGrowthGlobal failed: %w", errG)
 	}
 	lower0, lower1, staleL, ageL, errL := s.getV4TickFeeGrowthOutsideCached(stateView, poolManager, poolID, pos.TickLower)
 	if errL != nil && (lower0 == nil || lower1 == nil) {
-		return owed0, owed1, false, 0, fmt.Errorf("read V4 tickLower feeGrowthOutside failed: %w", errL)
+		return nil, nil, false, 0, fmt.Errorf("read V4 tickLower feeGrowthOutside failed: %w", errL)
 	}
 	upper0, upper1, staleU, ageU, errU := s.getV4TickFeeGrowthOutsideCached(stateView, poolManager, poolID, pos.TickUpper)
 	if errU != nil && (upper0 == nil || upper1 == nil) {
-		return owed0, owed1, false, 0, fmt.Errorf("read V4 tickUpper feeGrowthOutside failed: %w", errU)
+		return nil, nil, false, 0, fmt.Errorf("read V4 tickUpper feeGrowthOutside failed: %w", errU)
 	}
 
 	usedStale := staleG || staleL || staleU
@@ -1115,7 +1071,7 @@ func (s *PnLService) calcV4UnclaimedFeesCachedUnified(stateView, poolManager com
 
 	fees0, fees1, calcErr := pool.CalcV4UnclaimedFeesFromGrowths(currentTick, pos, global0, global1, lower0, lower1, upper0, upper1)
 	if calcErr != nil {
-		return owed0, owed1, usedStale, age, calcErr
+		return nil, nil, usedStale, age, calcErr
 	}
 
 	var err error
