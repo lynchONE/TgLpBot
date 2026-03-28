@@ -6856,6 +6856,23 @@ body {
   white-space: nowrap;
   flex-shrink: 0;
 }
+.smd-pos-card-amount-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+.smd-pos-card-amount-wrap.compact {
+  align-items: flex-start;
+  min-width: 60px;
+}
+.smd-pos-card-amount-label,
+.smd-pos-card-amount-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.2;
+  white-space: nowrap;
+}
 .smd-pos-card-range {
   display: flex;
   align-items: center;

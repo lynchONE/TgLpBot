@@ -117,6 +117,76 @@ function formatRangePercentPlain(value) {
     return `${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
 }
 
+function formatRangeDrift(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num < 0) return '--';
+    if (num >= 100) return `${Math.round(num)}%`;
+    if (num >= 10) return `${num.toFixed(1).replace(/\.0$/, '')}%`;
+    return `${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
+}
+
+function buildRangeStatusSummary(rangeState) {
+    if (!rangeState) return null;
+    if (rangeState.inRange) {
+        return { text: '区间内', tone: 'positive' };
+    }
+    if (rangeState.outOfRange?.direction) {
+        const direction = rangeState.outOfRange.direction === 'above' ? '高于区间' : '低于区间';
+        return { text: `${direction} ${formatRangeDrift(rangeState.outOfRange.pct)}`, tone: 'negative' };
+    }
+    if (rangeState.inRange === false) {
+        return { text: '已离开区间', tone: 'negative' };
+    }
+    return null;
+}
+
+function getDisplayedPriceRangeState(position, currentPrice) {
+    const current = Number(currentPrice);
+    const lower = Number(position?.price_lower);
+    const upper = Number(position?.price_upper);
+    if (!Number.isFinite(current) || !Number.isFinite(lower) || !Number.isFinite(upper)) return null;
+    const rangeMin = Math.min(lower, upper);
+    const rangeMax = Math.max(lower, upper);
+    if (current >= rangeMin && current <= rangeMax) {
+        return { inRange: true, outOfRange: null };
+    }
+    if (current > rangeMax) {
+        const base = Math.abs(rangeMax) > 0 ? Math.abs(rangeMax) : 1;
+        return {
+            inRange: false,
+            outOfRange: { direction: 'above', pct: ((current - rangeMax) / base) * 100 },
+        };
+    }
+    const base = Math.abs(rangeMin) > 0 ? Math.abs(rangeMin) : 1;
+    return {
+        inRange: false,
+        outOfRange: { direction: 'below', pct: ((rangeMin - current) / base) * 100 },
+    };
+}
+
+function resolvePositionRangeStatus(position, preview, currentPrice) {
+    return preview?.rangeStatus || buildRangeStatusSummary(getDisplayedPriceRangeState(position, currentPrice));
+}
+
+function getPositionAmountSummary(position, preview) {
+    const liveTotal = Number(preview?.currentValueUsd);
+    const netInvested = Number(preview?.netInvestedUsd ?? position?.position_amount_usd);
+    if (Number.isFinite(liveTotal) && liveTotal > 0) {
+        return {
+            primaryLabel: '仓位总计',
+            primaryValue: liveTotal,
+            secondaryLabel: Number.isFinite(netInvested) && netInvested > 0 ? '净投入' : '',
+            secondaryValue: Number.isFinite(netInvested) && netInvested > 0 ? netInvested : null,
+        };
+    }
+    return {
+        primaryLabel: '净投入',
+        primaryValue: netInvested,
+        secondaryLabel: '',
+        secondaryValue: null,
+    };
+}
+
 const POOL_CARD_RANGE_LIMIT = 5;
 const POSITION_PREVIEW_STALE_MS = 30000;
 const POSITION_PREVIEW_BATCH_SIZE = 4;
@@ -170,7 +240,14 @@ function useSmartMoneyPositionPreviewMap(apiBaseUrl, positions) {
                     ...prev,
                     [key]: {
                         fetchedAt: Date.now(),
+                        currentValueUsd: Number.isFinite(Number(data?.current_value_usd))
+                            ? Number(data.current_value_usd)
+                            : Number(data?.totals?.position_usd || 0) + Number(data?.totals?.fee_usd || 0),
                         feeUsd: Number(data?.totals?.fee_usd ?? 0),
+                        netInvestedUsd: Number(data?.net_invested_usd ?? position?.position_amount_usd ?? 0),
+                        rangeStatus: buildRangeStatusSummary(
+                            computePriceRange(data) || (data?.in_range === undefined ? null : { inRange: Boolean(data.in_range) })
+                        ),
                         runningSince: String(data?.running_since || position?.opened_at || '').trim(),
                     },
                 }));
@@ -474,7 +551,22 @@ function ConfirmDialog({ open, title, description, confirmLabel = '确认', busy
     );
 }
 
-function PositionPreviewMetrics({ position, preview, compact = false }) {
+function PositionAmountSummary({ position, preview, compact = false }) {
+    const summary = getPositionAmountSummary(position, preview);
+    return (
+        <div className={`smd-pos-card-amount-wrap${compact ? ' compact' : ''}`}>
+            <span className="smd-pos-card-amount-label">{summary.primaryLabel}</span>
+            <span className="smd-pos-card-amount">{formatUSDCompact(summary.primaryValue)}</span>
+            {!compact && summary.secondaryLabel && summary.secondaryValue !== null ? (
+                <span className="smd-pos-card-amount-sub">
+                    {summary.secondaryLabel} {formatUSDCompact(summary.secondaryValue)}
+                </span>
+            ) : null}
+        </div>
+    );
+}
+
+function PositionPreviewMetrics({ position, preview, currentPrice, compact = false }) {
     const runningText = formatDuration(preview?.runningSince || position?.opened_at) || '--';
     const feeValue = Number(preview?.feeUsd);
     const feeText = Number.isFinite(feeValue) ? formatUsd(preview.feeUsd) : '--';
@@ -482,9 +574,19 @@ function PositionPreviewMetrics({ position, preview, compact = false }) {
         ? (feeValue > 0 ? ' positive' : feeValue < 0 ? ' negative' : '')
         : '';
     const runtimeTone = runningText !== '--' ? ' positive' : '';
+    const rangeStatus = resolvePositionRangeStatus(position, preview, currentPrice);
+    const rangeTone = rangeStatus?.tone === 'positive'
+        ? ' positive'
+        : rangeStatus?.tone === 'negative'
+            ? ' negative'
+            : '';
 
     return (
         <div className={`smd-pos-card-preview${compact ? ' compact' : ''}`}>
+            <span className={`smd-pos-card-metric${rangeTone}`}>
+                <strong>区间状态</strong>
+                <span>{rangeStatus?.text || '--'}</span>
+            </span>
             <span className={`smd-pos-card-metric${feeTone}`}>
                 <strong>手续费</strong>
                 <span>{feeText}</span>
@@ -574,6 +676,9 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
         : Number(detail?.totals?.position_usd || 0) + Number(detail?.totals?.fee_usd || 0);
     const statusLabel = String(detail?.status_label || (detail?.has_liquidity ? 'Open' : 'Closed'));
     const priceRange = detail ? computePriceRange(detail) : null;
+    const detailRangeStatus = buildRangeStatusSummary(
+        priceRange || (detail?.in_range === undefined ? null : { inRange: Boolean(detail.in_range) })
+    );
 
     return (
         <div className="smd-pos-inline-panel">
@@ -617,8 +722,8 @@ function SmartMoneyPositionDetailPanel({ apiBaseUrl, position, onClose }) {
                                         {statusLabel}
                                     </span>
                                     <span className="pos-wallet-chip">钱包 {shortAddress(detail?.wallet_address || '')}</span>
-                                    <span className={`range-pill ${detail?.in_range ? 'in' : 'out'}`}>
-                                        {detail?.in_range ? 'In Range' : 'Out'}
+                                    <span className={`range-pill ${detailRangeStatus?.tone === 'positive' ? 'in' : 'out'}`}>
+                                        {detailRangeStatus?.text || '已离开区间'}
                                     </span>
                                 </div>
                             </div>
@@ -996,7 +1101,7 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
                                             onClick={() => onSelectWallet(pos.wallet_address)}
                                         />
                                         <div className="smd-pos-card-top-right">
-                                            <span className="smd-pos-card-amount">{formatUSDCompact(pos.position_amount_usd)}</span>
+                                            <PositionAmountSummary position={pos} preview={positionPreviews[getPositionSelectionKey(pos)]} />
                                             <Badge cls={pos.status === 'open' ? 'status-open' : 'status-closed'}>
                                                 {pos.status === 'open' ? '持仓中' : '已关闭'}
                                             </Badge>
@@ -1022,11 +1127,12 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
                                             </a>
                                         ) : null}
                                     </div>
-                                    <PositionPreviewMetrics
-                                        position={pos}
-                                        preview={positionPreviews[getPositionSelectionKey(pos)]}
-                                    />
-                                </div>
+                                        <PositionPreviewMetrics
+                                            position={pos}
+                                            preview={positionPreviews[getPositionSelectionKey(pos)]}
+                                            currentPrice={stats?.current_price}
+                                        />
+                                    </div>
                                 {isSelected ? (
                                     <SmartMoneyPositionDetailPanel
                                         apiBaseUrl={apiBaseUrl}
@@ -1352,7 +1458,11 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
                                         <div key={positionKey || pos.id} className="smd-pos-row">
                                             <div className={`smd-pos-card smd-pos-card--compact${pos.status === 'closed' ? ' closed' : ''}`} onClick={() => setSelectedPosition(pos)}>
                                                 <div className="smd-pos-card-compact-main">
-                                                    <span className="smd-pos-card-amount">{formatUSDCompact(pos.position_amount_usd)}</span>
+                                                    <PositionAmountSummary
+                                                        position={pos}
+                                                        preview={positionPreviews[getPositionSelectionKey(pos)]}
+                                                        compact
+                                                    />
                                                     <span className={`smd-pos-card-prices${pos.status === 'closed' ? ' is-closed' : ''}`}>
                                                         {pos.price_lower && pos.price_upper ? `${pos.price_lower} - ${pos.price_upper}` : '--'}
                                                     </span>
