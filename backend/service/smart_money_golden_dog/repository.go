@@ -13,6 +13,25 @@ import (
 
 type Repository struct{}
 
+var freshPoolSelectColumns = []string{
+	"address",
+	"name",
+	"dex_id",
+	"protocol_version",
+	"token0_symbol",
+	"token1_symbol",
+	"total_fees",
+	"transaction_count",
+	"total_volume",
+	"current_pool_value",
+	"poolm_fee_rate",
+	"active_liquidity_usd",
+	"active_liquidity_ratio",
+	"updated_at",
+	"chain",
+	"source_requested_chain",
+}
+
 func NewRepository() *Repository {
 	return &Repository{}
 }
@@ -95,23 +114,7 @@ func (r *Repository) ListFreshPools(ctx context.Context, chain string, since tim
 	var rows []models.Pool
 	err := database.DB.WithContext(ctx).
 		Model(&models.Pool{}).
-		Select([]string{
-			"address",
-			"name",
-			"dex_id",
-			"protocol_version",
-			"token0_symbol",
-			"token1_symbol",
-			"total_fees",
-			"transaction_count",
-			"total_volume",
-			"current_pool_value",
-			"poolm_fee_rate",
-			"active_liquidity_ratio",
-			"updated_at",
-			"chain",
-			"source_requested_chain",
-		}).
+		Select(freshPoolSelectColumns).
 		Where("(LOWER(chain) = ? OR LOWER(source_requested_chain) = ?) AND updated_at >= ?", chain, chain, since).
 		Order("updated_at DESC").
 		Find(&rows).Error
