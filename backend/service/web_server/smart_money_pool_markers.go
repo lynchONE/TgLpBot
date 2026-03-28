@@ -20,6 +20,7 @@ type smartMoneyPoolMarkerEvent struct {
 	BucketT                 int64    `json:"bucket_t"`
 	WalletAddress           string   `json:"wallet_address"`
 	WalletLabel             string   `json:"wallet_label,omitempty"`
+	WalletAvatarURL         string   `json:"wallet_avatar_url,omitempty"`
 	WalletColor             string   `json:"wallet_color,omitempty"`
 	Action                  string   `json:"action"`
 	TxHash                  string   `json:"tx_hash,omitempty"`
@@ -493,9 +494,13 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 
 		walletAddress := strings.ToLower(strings.TrimSpace(event.WalletAddress))
 		walletLabel := ""
+		walletAvatarURL := ""
 		if cached, ok := walletCache[walletAddress]; ok {
 			if cached != nil && cached.Label != nil {
 				walletLabel = strings.TrimSpace(*cached.Label)
+			}
+			if cached != nil && cached.AvatarURL != nil {
+				walletAvatarURL = strings.TrimSpace(*cached.AvatarURL)
 			}
 		} else {
 			wallet, err := repo.GetMonitoredWalletByAddress(ctx, walletAddress, event.ChainID)
@@ -503,6 +508,9 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 				walletCache[walletAddress] = wallet
 				if wallet != nil && wallet.Label != nil {
 					walletLabel = strings.TrimSpace(*wallet.Label)
+				}
+				if wallet != nil && wallet.AvatarURL != nil {
+					walletAvatarURL = strings.TrimSpace(*wallet.AvatarURL)
 				}
 			} else {
 				walletCache[walletAddress] = nil
@@ -557,23 +565,24 @@ func (s *Server) handleSmartMoneyPoolMarkers(w http.ResponseWriter, r *http.Requ
 		}
 
 		marker := smartMoneyPoolMarkerEvent{
-			EventID:       smartMoneyMarkerEventID(&event),
-			T:             event.TxTimestamp.Unix(),
-			BucketT:       bucketUnix(event.TxTimestamp.Unix(), bucketSec),
-			WalletAddress: walletAddress,
-			WalletLabel:   walletLabel,
-			WalletColor:   sm.WalletColor(walletAddress),
-			Action:        action,
-			TxHash:        strings.TrimSpace(event.TxHash),
-			TxURL:         txURL,
-			TickLower:     event.TickLower,
-			TickUpper:     event.TickUpper,
-			PriceLower:    priceLower,
-			PriceUpper:    priceUpper,
-			RangePercent:  smartMoneyRangePercentFromTicks(event.TickLower, event.TickUpper),
-			MidPrice:      midPrice,
-			AnchorPrice:   midPrice,
-			EstimatedUSD:  estimatedUSD,
+			EventID:         smartMoneyMarkerEventID(&event),
+			T:               event.TxTimestamp.Unix(),
+			BucketT:         bucketUnix(event.TxTimestamp.Unix(), bucketSec),
+			WalletAddress:   walletAddress,
+			WalletLabel:     walletLabel,
+			WalletAvatarURL: walletAvatarURL,
+			WalletColor:     sm.WalletColor(walletAddress),
+			Action:          action,
+			TxHash:          strings.TrimSpace(event.TxHash),
+			TxURL:           txURL,
+			TickLower:       event.TickLower,
+			TickUpper:       event.TickUpper,
+			PriceLower:      priceLower,
+			PriceUpper:      priceUpper,
+			RangePercent:    smartMoneyRangePercentFromTicks(event.TickLower, event.TickUpper),
+			MidPrice:        midPrice,
+			AnchorPrice:     midPrice,
+			EstimatedUSD:    estimatedUSD,
 		}
 		if estimate, ok := estimates[marker.EventID]; ok {
 			marker.MatchedOpenTxHash = estimate.MatchedOpenTxHash

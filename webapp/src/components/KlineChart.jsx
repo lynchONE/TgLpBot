@@ -18,10 +18,15 @@ function walletAvatarUrl(address) {
   return AVATAR_URLS[walletAvatarIndex(address)] || AVATAR_URLS[0];
 }
 
+function markerWalletAvatarUrl(marker) {
+  const uploaded = String(marker?.wallet_avatar_url || '').trim();
+  if (uploaded) return uploaded;
+  return walletAvatarUrl(marker?.wallet_address || '');
+}
+
 function getClusterAvatarUrl(cluster) {
   const items = Array.isArray(cluster?.items) ? cluster.items : [];
-  const addr = items[0]?.wallet_address || '';
-  return walletAvatarUrl(addr);
+  return markerWalletAvatarUrl(items[0]);
 }
 
 function normalizeWalletAddress(value) {
@@ -860,6 +865,7 @@ export default function KlineChart({
       walletAddress,
       walletName,
       walletLabelRaw,
+      walletAvatarUrl: c.isMyTrade ? String(tooltipCluster.label || '').trim() : markerWalletAvatarUrl(primary),
       lower,
       upper,
       hasRange,
@@ -1012,7 +1018,7 @@ export default function KlineChart({
             onMouseLeave={scheduleTooltipHide}
           >
             <div className="kmt-head">
-              <span className="kmt-emoji"><img src={tooltipCluster.label} alt="" /></span>
+              <span className="kmt-emoji"><img src={tooltipData.walletAvatarUrl || tooltipCluster.label} alt="" /></span>
               <span className="kmt-wallet-wrap">
                 <span className="kmt-wallet">{tooltipData.walletName}</span>
                 {tooltipData.walletAddress ? (

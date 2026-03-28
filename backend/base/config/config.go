@@ -111,6 +111,14 @@ type Config struct {
 	RedisPassword string
 	RedisDB       int
 
+	// MinIO
+	MinIOEndpoint      string
+	MinIOAccessKey     string
+	MinIOSecretKey     string
+	MinIOUseSSL        bool
+	MinIOPublicBaseURL string
+	MinIOAvatarBucket  string
+
 	// OKX DEX API
 	OKXDexAPIURL              string
 	OKXAPIKey                 string
@@ -295,6 +303,14 @@ func LoadConfig() error {
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),
 		RedisDB:       redisDB,
 
+		// MinIO
+		MinIOEndpoint:      strings.TrimSpace(getEnv("MINIO_ENDPOINT", "")),
+		MinIOAccessKey:     strings.TrimSpace(getEnv("MINIO_ACCESS_KEY", "")),
+		MinIOSecretKey:     strings.TrimSpace(getEnv("MINIO_SECRET_KEY", "")),
+		MinIOUseSSL:        getEnvBool("MINIO_USE_SSL", false),
+		MinIOPublicBaseURL: strings.TrimSpace(getEnv("MINIO_PUBLIC_BASE_URL", "")),
+		MinIOAvatarBucket:  strings.TrimSpace(getEnv("MINIO_AVATAR_BUCKET", "avatar")),
+
 		// OKX DEX API
 		OKXDexAPIURL:              getEnv("OKX_DEX_API_URL", "https://www.okx.com/api/v6/dex/aggregator"),
 		OKXAPIKey:                 getEnv("OKX_API_KEY", ""),
@@ -423,6 +439,12 @@ func LoadConfig() error {
 	}
 	log.Printf("   - MySQL: %s@%s:%s/%s", AppConfig.MySQLUser, AppConfig.MySQLHost, AppConfig.MySQLPort, AppConfig.MySQLDatabase)
 	log.Printf("   - Redis: %s:%s (DB: %d)", AppConfig.RedisHost, AppConfig.RedisPort, AppConfig.RedisDB)
+	log.Printf("   - MinIO Endpoint: %s", maskURL(AppConfig.MinIOEndpoint))
+	log.Printf("   - MinIO Use SSL: %v", AppConfig.MinIOUseSSL)
+	log.Printf("   - MinIO Public Base URL: %s", maskURL(AppConfig.MinIOPublicBaseURL))
+	log.Printf("   - MinIO Avatar Bucket: %s", AppConfig.MinIOAvatarBucket)
+	log.Printf("   - MinIO Access Key: %s", maskString(AppConfig.MinIOAccessKey))
+	log.Printf("   - MinIO Secret Key: %s", maskString(AppConfig.MinIOSecretKey))
 	log.Printf("   - V4 NFT Scan From Block: %d", AppConfig.V4NFTScanFromBlock)
 	log.Printf("   - Realtime V3 NFT Scan: %v", AppConfig.RealtimeV3NFTScan)
 	log.Printf("   - Realtime V3 NFT Scan Max: %d", AppConfig.RealtimeV3NFTScanMax)

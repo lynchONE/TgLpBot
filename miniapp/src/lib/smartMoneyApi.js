@@ -1,6 +1,7 @@
 // Smart Money API functions
 
 const SM_BASE = '/api/sm';
+const SM_UPLOAD_PROXY = '/api/sm_upload';
 
 function normalizeBase(apiBaseUrl) {
     return String(apiBaseUrl || '').replace(/\/$/, '');
@@ -19,6 +20,17 @@ function buildSMUrl(apiBaseUrl, endpoint, params) {
         const proxyParams = new URLSearchParams(params || '');
         proxyParams.set('endpoint', endpoint);
         return `${base}/api/sm?${proxyParams.toString()}`;
+    }
+    return `${base}${SM_BASE}/${endpoint}${search}`;
+}
+
+function buildSMUploadUrl(apiBaseUrl, endpoint, params) {
+    const base = normalizeBase(apiBaseUrl);
+    const search = params ? `?${params}` : '';
+    if (isSameOriginBase(base)) {
+        const proxyParams = new URLSearchParams(params || '');
+        proxyParams.set('endpoint', endpoint);
+        return `${base}${SM_UPLOAD_PROXY}?${proxyParams.toString()}`;
     }
     return `${base}${SM_BASE}/${endpoint}${search}`;
 }
@@ -95,6 +107,18 @@ export async function deleteSMWallet({ apiBaseUrl, address, signal }) {
     params.set('address', String(address));
     return smRequest(buildSMUrl(apiBaseUrl, 'wallets', params.toString()), {
         method: 'DELETE',
+        signal,
+    });
+}
+
+export async function uploadSMWalletAvatar({ apiBaseUrl, address, file, signal }) {
+    const params = new URLSearchParams();
+    params.set('address', String(address));
+    const formData = new FormData();
+    formData.set('avatar', file);
+    return smRequest(buildSMUploadUrl(apiBaseUrl, 'wallet_avatar', params.toString()), {
+        method: 'POST',
+        body: formData,
         signal,
     });
 }

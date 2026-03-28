@@ -56,6 +56,7 @@ func stopSmartMoney() {
 
 func (s *Server) registerSmartMoneyRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/sm/wallets", s.handleSMWallets)
+	mux.HandleFunc("/api/sm/wallet_avatar", s.handleSMWalletAvatar)
 	mux.HandleFunc("/api/sm/contracts", s.handleSMContracts)
 	mux.HandleFunc("/api/sm/pools", s.handleSMPools)
 	mux.HandleFunc("/api/sm/positions", s.handleSMPositions)
@@ -170,7 +171,7 @@ func (s *Server) handleSMWallets(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		allowed := map[string]bool{"label": true, "is_active": true}
+		allowed := map[string]bool{"label": true, "is_active": true, "avatar_url": true}
 		filtered := make(map[string]interface{})
 		for k, v := range updates {
 			if allowed[k] {
@@ -201,6 +202,26 @@ func (s *Server) handleSMWallets(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		if rawAvatarURL, ok := filtered["avatar_url"]; ok {
+			switch v := rawAvatarURL.(type) {
+			case nil:
+				filtered["avatar_url"] = nil
+			case string:
+				avatarURL := strings.TrimSpace(v)
+				if avatarURL == "" {
+					filtered["avatar_url"] = nil
+				} else {
+					filtered["avatar_url"] = avatarURL
+				}
+			default:
+				avatarURL := strings.TrimSpace(fmt.Sprint(v))
+				if avatarURL == "" {
+					filtered["avatar_url"] = nil
+				} else {
+					filtered["avatar_url"] = avatarURL
+				}
+			}
+		}
 
 		existing, err := repo.GetMonitoredWalletByAddress(ctx, addr, chainID)
 		if err != nil {
@@ -210,7 +231,8 @@ func (s *Server) handleSMWallets(w http.ResponseWriter, r *http.Request) {
 		if existing == nil {
 			labelValue, hasLabel := filtered["label"]
 			_, hasActive := filtered["is_active"]
-			if !hasLabel || hasActive {
+			_, hasAvatar := filtered["avatar_url"]
+			if !hasLabel || hasActive || hasAvatar {
 				jsonError(w, "wallet not found", http.StatusNotFound)
 				return
 			}
@@ -512,6 +534,7 @@ func (s *Server) handleSMPositions(w http.ResponseWriter, r *http.Request) {
 		models.SmartMoneyLPPosition
 		PositionRef         string  `json:"position_ref"`
 		WalletLabel         *string `json:"wallet_label"`
+		WalletAvatarURL     *string `json:"wallet_avatar_url"`
 		WalletColor         string  `json:"wallet_color"`
 		PriceLower          string  `json:"price_lower"`
 		PriceUpper          string  `json:"price_upper"`
@@ -551,12 +574,14 @@ func (s *Server) handleSMPositions(w http.ResponseWriter, r *http.Request) {
 		if w, ok := walletCache[p.WalletAddress]; ok {
 			if w != nil {
 				resp.WalletLabel = w.Label
+				resp.WalletAvatarURL = w.AvatarURL
 			}
 		} else {
 			w, _ := repo.GetMonitoredWalletByAddress(ctx, p.WalletAddress, p.ChainID)
 			walletCache[p.WalletAddress] = w
 			if w != nil {
 				resp.WalletLabel = w.Label
+				resp.WalletAvatarURL = w.AvatarURL
 			}
 		}
 

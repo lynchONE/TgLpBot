@@ -8,6 +8,7 @@ import {
     fetchSMPositionDetail,
     fetchSMStats, addSMWallet, updateSMWallet, deleteSMWallet,
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
+    uploadSMWalletAvatar,
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig, testSMGoldenDogConfig,
 } from '../lib/smartMoneyApi';
 import { getBrandTheme } from '../lib/brand';
@@ -57,6 +58,8 @@ const WALLET_AVATAR_ICONS = [
     avatar15,
     avatar16,
 ];
+const SMART_MONEY_AVATAR_ACCEPT = 'image/png,image/jpeg,image/webp';
+const SMART_MONEY_AVATAR_MAX_BYTES = 5 * 1024 * 1024;
 const GMGN_STABLE_SYMBOLS = new Set(['usdc', 'usdt', 'busd', 'dai', 'frax', 'usdd', 'fdusd', 'wbnb', 'weth', 'wsol', 'bnb', 'eth', 'sol']);
 
 function getBrandLinkClass(brand) {
@@ -515,6 +518,12 @@ function walletAvatarIdx(addr) {
     return parseInt(addr.slice(-4), 16) % WALLET_AVATAR_ICONS.length;
 }
 
+function resolveWalletAvatarSrc(address, avatarUrl) {
+    const preferred = String(avatarUrl || '').trim();
+    if (preferred) return preferred;
+    return WALLET_AVATAR_ICONS[walletAvatarIdx(address)] || WALLET_AVATAR_ICONS[0];
+}
+
 function shortAddr(addr) {
     if (!addr || addr.length < 10) return addr || '';
     return addr.slice(0, 6) + '...' + addr.slice(-4);
@@ -804,15 +813,31 @@ function Badge({ children, className = '', style }) {
     );
 }
 
-function WalletAvatar({ address, color, size = 36 }) {
-    const iconSrc = WALLET_AVATAR_ICONS[walletAvatarIdx(address)] || WALLET_AVATAR_ICONS[0];
+function WalletAvatar({ address, color, size = 36, avatarUrl }) {
+    const fallbackSrc = WALLET_AVATAR_ICONS[walletAvatarIdx(address)] || WALLET_AVATAR_ICONS[0];
+    const preferredSrc = resolveWalletAvatarSrc(address, avatarUrl);
+    const [iconSrc, setIconSrc] = useState(preferredSrc);
     const strokeColor = color || '#7F77DD';
+
+    useEffect(() => {
+        setIconSrc(preferredSrc);
+    }, [preferredSrc]);
+
     return (
         <span
             className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-[20px] border bg-zinc-950/80 p-px"
             style={{ width: size, height: size, borderColor: `${strokeColor}66` }}
         >
-            <img src={iconSrc} alt="" className="h-full w-full rounded-[18px] object-cover" />
+            <img
+                src={iconSrc}
+                alt=""
+                className="h-full w-full rounded-[18px] object-cover"
+                onError={() => {
+                    if (iconSrc !== fallbackSrc) {
+                        setIconSrc(fallbackSrc);
+                    }
+                }}
+            />
         </span>
     );
 }
@@ -828,10 +853,10 @@ function CompactIdentifier({ value, label = 'ID' }) {
     );
 }
 
-function WalletIdentity({ address, color, label, size = 40, onClick, showCopy = false }) {
+function WalletIdentity({ address, color, label, avatarUrl, size = 40, onClick, showCopy = false }) {
     const inner = (
         <>
-            <WalletAvatar address={address} color={color} size={size} />
+            <WalletAvatar address={address} color={color} avatarUrl={avatarUrl} size={size} />
             <span className="truncate text-left text-sm text-zinc-100">
                 {label && label !== address ? label : shortAddr(address)}
             </span>
@@ -1530,6 +1555,7 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
                                                 address={pos.wallet_address}
                                                 color={pos.wallet_color}
                                                 label={pos.wallet_label || pos.wallet_address}
+                                                avatarUrl={pos.wallet_avatar_url}
                                                 onClick={() => onSelectWallet(pos.wallet_address)}
                                             />
                                         </div>
@@ -1721,6 +1747,7 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
                                         address={w.address}
                                         color={w.color}
                                         label={w.label || w.address}
+                                        avatarUrl={w.avatar_url}
                                         size={44}
                                         showCopy
                                     />
@@ -1904,7 +1931,7 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
             {walletInfo && (
                 <div className="mb-4 rounded-[24px] border border-white/[0.04] bg-zinc-900/60 p-4">
                     <div className="flex items-start gap-3">
-                        <WalletAvatar address={walletAddress} color={walletInfo.color || '#7F77DD'} size={72} />
+                        <WalletAvatar address={walletAddress} color={walletInfo.color || '#7F77DD'} avatarUrl={walletInfo.avatar_url} size={72} />
                         <div className="min-w-0 flex-1">
                             <div className="truncate text-lg font-semibold text-zinc-100">
                                 {walletInfo.label || `钱包 ${tailAddr(walletAddress)}`}
@@ -2708,26 +2735,84 @@ function ContractSettingsTab({ apiBaseUrl, brand }) {
 
 function EditWalletModal({ open, apiBaseUrl, wallet, onClose, onSaved, brand }) {
     const [label, setLabel] = useState('');
+    const [avatarFile, setAvatarFile] = useState(null);
+    const [removeAvatar, setRemoveAvatar] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
+    const [avatarPreviewUrl, setAvatarPreviewUrl] = useState('');
 
     useEffect(() => {
         if (!open || !wallet) return;
         setLabel(String(wallet?.label || ''));
+        setAvatarFile(null);
+        setRemoveAvatar(false);
         setError('');
         setSaving(false);
     }, [open, wallet]);
+
+    useEffect(() => {
+        if (!open || !wallet) {
+            setAvatarPreviewUrl('');
+            return undefined;
+        }
+        if (avatarFile) {
+            const objectUrl = URL.createObjectURL(avatarFile);
+            setAvatarPreviewUrl(objectUrl);
+            return () => URL.revokeObjectURL(objectUrl);
+        }
+        setAvatarPreviewUrl(removeAvatar ? '' : String(wallet?.avatar_url || ''));
+        return undefined;
+    }, [avatarFile, open, removeAvatar, wallet]);
+
+    const handleAvatarFileChange = useCallback((event) => {
+        const nextFile = event.target.files?.[0];
+        event.target.value = '';
+        if (!nextFile) return;
+        if (!['image/png', 'image/jpeg', 'image/webp'].includes(String(nextFile.type || '').toLowerCase())) {
+            setError('头像仅支持 PNG、JPG、WEBP。');
+            return;
+        }
+        if (nextFile.size > SMART_MONEY_AVATAR_MAX_BYTES) {
+            setError('头像大小不能超过 5MB。');
+            return;
+        }
+        setAvatarFile(nextFile);
+        setRemoveAvatar(false);
+        setError('');
+    }, []);
 
     const handleSubmit = async () => {
         if (!wallet?.address) return;
         setSaving(true);
         setError('');
         try {
-            await updateSMWallet({
-                apiBaseUrl,
-                address: wallet.address,
-                updates: { label: String(label || '').trim() || null },
-            });
+            const nextLabel = String(label || '').trim();
+            const currentLabel = String(wallet?.label || '').trim();
+            const shouldClearAvatar = !avatarFile && removeAvatar && String(wallet?.avatar_url || '').trim();
+
+            if (avatarFile) {
+                await uploadSMWalletAvatar({
+                    apiBaseUrl,
+                    address: wallet.address,
+                    file: avatarFile,
+                });
+            }
+
+            const updates = {};
+            if (nextLabel !== currentLabel) {
+                updates.label = nextLabel || null;
+            }
+            if (shouldClearAvatar) {
+                updates.avatar_url = null;
+            }
+
+            if (Object.keys(updates).length > 0) {
+                await updateSMWallet({
+                    apiBaseUrl,
+                    address: wallet.address,
+                    updates,
+                });
+            }
             await onSaved?.();
         } catch (err) {
             setError(err?.message || '保存失败');
@@ -2760,6 +2845,42 @@ function EditWalletModal({ open, apiBaseUrl, wallet, onClose, onSaved, brand }) 
                 ) : null}
 
                 <div className="mt-4 space-y-3">
+                    <div className="flex items-center gap-3 rounded-2xl border border-white/[0.05] bg-zinc-900/65 px-3 py-3">
+                        <WalletAvatar
+                            address={wallet.address}
+                            color={wallet.color || '#7F77DD'}
+                            avatarUrl={avatarPreviewUrl}
+                            size={64}
+                        />
+                        <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap gap-2">
+                                <label className={`${brand.softButtonClass || 'border border-white/[0.06] bg-zinc-900/65 text-zinc-200'} inline-flex cursor-pointer items-center rounded-xl px-3 py-2 text-sm`}>
+                                    <input
+                                        type="file"
+                                        accept={SMART_MONEY_AVATAR_ACCEPT}
+                                        disabled={saving}
+                                        className="hidden"
+                                        onChange={handleAvatarFileChange}
+                                    />
+                                    上传头像
+                                </label>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setAvatarFile(null);
+                                        setRemoveAvatar(true);
+                                        setError('');
+                                    }}
+                                    disabled={saving || (!avatarFile && !String(wallet?.avatar_url || '').trim())}
+                                    className="inline-flex items-center rounded-xl border border-white/[0.06] bg-zinc-900/65 px-3 py-2 text-sm text-zinc-300 transition hover:bg-zinc-800/80 disabled:opacity-50"
+                                >
+                                    恢复默认
+                                </button>
+                            </div>
+                            <div className="mt-2 text-[11px] text-zinc-500">支持 PNG/JPG/WEBP，大小不超过 5MB。</div>
+                            {avatarFile ? <div className="mt-1 truncate text-[11px] text-zinc-400">{avatarFile.name}</div> : null}
+                        </div>
+                    </div>
                     <input
                         className={getInputClass(brand)}
                         placeholder="钱包标签"

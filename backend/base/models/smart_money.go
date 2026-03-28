@@ -9,6 +9,7 @@ type MonitoredWallet struct {
 	Source         string    `gorm:"size:30;not null" json:"source"`
 	SourceContract *string   `gorm:"size:42" json:"source_contract"`
 	Label          *string   `gorm:"size:100" json:"label"`
+	AvatarURL      *string   `gorm:"size:512" json:"avatar_url"`
 	IsActive       bool      `gorm:"not null;default:true" json:"is_active"`
 	CreatedAt      time.Time `gorm:"not null;autoCreateTime" json:"created_at"`
 	UpdatedAt      time.Time `gorm:"not null;autoUpdateTime" json:"updated_at"`

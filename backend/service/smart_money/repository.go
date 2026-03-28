@@ -1449,6 +1449,7 @@ func (r *Repository) GetGlobalStats(ctx context.Context) (*GlobalStats, error) {
 type WalletStatsRow struct {
 	Address                string     `json:"address"`
 	Label                  *string    `json:"label"`
+	AvatarURL              *string    `json:"avatar_url"`
 	Source                 string     `json:"source"`
 	SourceContract         *string    `json:"source_contract"`
 	IsActive               bool       `json:"is_active"`
@@ -1526,6 +1527,7 @@ func (r *Repository) ListWalletsWithStats(ctx context.Context, page, size int, k
 		Select(`
 			w.address,
 			w.label,
+			w.avatar_url,
 			w.source,
 			w.source_contract,
 			w.is_active,
