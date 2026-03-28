@@ -218,6 +218,7 @@ func smartMoneyWalletSummaryFromLive(walletRow models.MonitoredWallet, live smar
 	if walletRow.Label != nil {
 		summary.Label = strings.TrimSpace(*walletRow.Label)
 	}
+	if walletRow.Avat
 	return summary
 }
 
@@ -232,6 +233,13 @@ func smartMoneyWalletSummaryFromSnapshot(walletRow models.MonitoredWallet, snaps
 	}
 	if snapshot != nil {
 		summary.Assets = smartMoneyAssetBreakdown{
+w.Label)
+	}
+	if walletRow.AvatarURL != nil {
+		summary.AvatarURL = strings.TrimSpace(*walletRow.AvatarURL)
+	}
+	if snapshot != nil {
+		summary.Assets = smar
 			NativeUSD:         round2(snapshot.NativeUSD),
 			StableUSD:         round2(snapshot.StableUSD),
 			TrackedTokenUSD:   round2(snapshot.TrackedTokenUSD),
@@ -244,6 +252,27 @@ func smartMoneyWalletSummaryFromSnapshot(walletRow models.MonitoredWallet, snaps
 		summary.ActivePoolCount = dailyStat.ActivePoolCount
 	}
 	return summary
+}
+
+func (s *Service) GetSmartMoneyWalletBalance(ctx context.Context, address string, chainID int, forceRefresh bool) (*float64, error) {
+	address = normalizeAddress(address)
+	if address == "" {
+		return nil, fmt.Errorf("invalid wallet address")
+	}
+	if chainID <= 0 {
+		chainID = 56
+	}
+
+	live, err := s.loadSmartMoneyWalletLiveStateCached(ctx, models.MonitoredWallet{
+		Address: address,
+		ChainID: chainID,
+	}, forceRefresh)
+	if err != nil {
+		return nil, err
+	}
+
+	totalUSD := round2(live.assets.TotalUSD)
+	return &totalUSD, nil
 }
 
 func (s *Service) GetSmartMoneyOverview(ctx context.Context, days int, page int, size int, keyword string, forceRefresh bool) (*SmartMoneyOverview, error) {
@@ -531,6 +560,10 @@ func buildSmartMoneySnapshotLeaderboard(metric string, snapshotDay time.Time, co
 			TransferOutUSD:          round2(input.Current.TransferOutUSD),
 		}
 		if input.Wallet.Label != nil {
+allet.Label != nil {
+			entry.Label = strings.TrimSpace(*input.Wallet.Label)
+		}
+		if inp
 			entry.Label = strings.TrimSpace(*input.Wallet.Label)
 		}
 		if input.DailyStat != nil {

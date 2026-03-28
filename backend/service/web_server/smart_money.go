@@ -101,6 +101,7 @@ func (s *Server) handleSMWallets(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		s.attachSmartMoneyWalletBalances(ctx, rows)
 
 		type walletResp struct {
 			sm.WalletStatsRow
@@ -744,6 +745,7 @@ func (s *Server) handleSMStats(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, "stats not found", http.StatusNotFound)
 			return
 		}
+		s.attachSmartMoneyWalletBalances(ctx, rows)
 		jsonOK(w, rows[0])
 		return
 	}
@@ -1223,4 +1225,19 @@ func attachSmartMoneyRangeGroupsToPoolStats(ctx context.Context, repo *sm.Reposi
 	}
 	stats.RangeGroups = buildSmartMoneyPoolRangeGroups(rangeRows)[addr]
 	return nil
+}
+
+func (s *Server) attachSmartMoneyWalletBalances(ctx context.Context, rows []sm.WalletStatsRow) {
+	if s == nil || s.Assets == nil || len(rows) == 0 {
+		return
+	}
+
+	for i := range rows {
+		balance, err := s.Assets.GetSmartMoneyWalletBalance(ctx, rows[i].Address, rows[i].ChainID, false)
+		if err != nil {
+			log.Printf("[SmartMoney API] enrich wallet balance failed wallet=%s chain=%d err=%v", rows[i].Address, rows[i].ChainID, err)
+			continue
+		}
+		rows[i].WalletBalanceUSD = balance
+	}
 }

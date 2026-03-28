@@ -111,6 +111,13 @@ function formatUSDCompact(value) {
     return `$${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}`;
 }
 
+function formatWalletBalance(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '--';
+    if (num === 0) return '$0';
+    return formatUSDCompact(num);
+}
+
 function formatRangePercent(value) {
     const num = Number(value);
     if (!Number.isFinite(num) || num <= 0) return '--';
@@ -1287,6 +1294,7 @@ function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
                             <tr>
                                 <th>钱包</th>
                                 <th className="center">状态</th>
+                                <th className="right">余额</th>
                                 <th className="right">持仓</th>
                                 <th className="right">池子</th>
                                 <th className="right">操作</th>
@@ -1303,6 +1311,7 @@ function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
                                             {w.is_active ? '监控中' : '已暂停'}
                                         </span>
                                     </td>
+                                    <td className="right">{formatWalletBalance(w.wallet_balance_usd)}</td>
                                     <td className="right">{w.open_position_count}</td>
                                     <td className="right">{w.active_pool_count}</td>
                                     <td className="right">
@@ -1461,6 +1470,7 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
                         </div>
                     </div>
                     <div className="smd-stats-grid">
+                        <StatCard label="钱包余额" value={formatWalletBalance(info.wallet_balance_usd)} />
                         <StatCard label="持仓笔数" value={info.open_position_count} />
                         <StatCard label="活跃池子" value={info.active_pool_count} />
                         <StatCard label="总加仓次数" value={info.total_add_count} />

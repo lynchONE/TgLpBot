@@ -608,6 +608,13 @@ function formatUSDCompact(value) {
     return `$${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}`;
 }
 
+function formatWalletBalance(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '--';
+    if (num === 0) return '$0';
+    return formatUSDCompact(num);
+}
+
 function formatRangePercent(value) {
     const num = Number(value);
     if (!Number.isFinite(num) || num <= 0) return '—';
@@ -1806,7 +1813,8 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
                                 </div>
                             </div>
 
-                            <div className="mt-3 grid grid-cols-3 gap-2">
+                            <div className="mt-3 grid grid-cols-4 gap-2">
+                                <MiniMetric label="余额" value={formatWalletBalance(w.wallet_balance_usd)} />
                                 <MiniMetric label="持仓" value={w.open_position_count} />
                                 <MiniMetric label="池子" value={w.active_pool_count} />
                                 <MiniMetric label="末尾" value={tailAddr(w.address)} />
@@ -1951,6 +1959,7 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
                     </div>
 
                     <div className="grid grid-cols-2 gap-1.5 mt-3">
+                        <StatCard label="钱包余额" value={formatWalletBalance(walletInfo.wallet_balance_usd)} compact />
                         <StatCard label="持仓笔数" value={walletInfo.open_position_count} compact />
                         <StatCard label="活跃池子" value={walletInfo.active_pool_count} compact />
                         <StatCard label="总添加次数" value={walletInfo.total_add_count} compact />

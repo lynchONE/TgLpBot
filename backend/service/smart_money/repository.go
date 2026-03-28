@@ -1450,6 +1450,7 @@ type WalletStatsRow struct {
 	Address                string     `json:"address"`
 	Label                  *string    `json:"label"`
 	AvatarURL              *string    `json:"avatar_url"`
+	WalletBalanceUSD       *float64   `json:"wallet_balance_usd,omitempty"`
 	Source                 string     `json:"source"`
 	SourceContract         *string    `json:"source_contract"`
 	IsActive               bool       `json:"is_active"`
