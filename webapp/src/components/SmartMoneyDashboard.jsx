@@ -191,6 +191,7 @@ const POOL_CARD_RANGE_LIMIT = 5;
 const POSITION_PREVIEW_STALE_MS = 30000;
 const POSITION_PREVIEW_BATCH_SIZE = 4;
 const POSITION_LIST_PAGE_SIZE = 6;
+const WALLET_LIST_PAGE_SIZE = 10;
 
 function getPositionSelectionKey(position) {
     const positionRef = String(position?.position_ref || '').trim();
@@ -1152,26 +1153,47 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
 
 function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
     const [wallets, setWallets] = useState([]);
+    const [walletsTotal, setWalletsTotal] = useState(0);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
+    const [page, setPage] = useState(1);
     const [busyKey, setBusyKey] = useState('');
     const [actionError, setActionError] = useState('');
     const [confirmState, setConfirmState] = useState(null);
     const [editingWallet, setEditingWallet] = useState(null);
+    const loadSeqRef = useRef(0);
     const refreshIntervalMs = useMemo(
         () => getRefreshIntervalMs(refreshInterval),
         [refreshInterval]
     );
+    const searchKeyword = useMemo(() => String(search || '').trim(), [search]);
 
     const load = useCallback((silent = false) => {
+        const seq = ++loadSeqRef.current;
         if (!silent) setLoading(true);
-        return fetchSMWallets({ apiBaseUrl, size: 100 })
-            .then((d) => setWallets(d?.list || []))
+        return fetchSMWallets({
+            apiBaseUrl,
+            page,
+            size: WALLET_LIST_PAGE_SIZE,
+            keyword: searchKeyword || undefined,
+        })
+            .then((d) => {
+                if (seq !== loadSeqRef.current) return;
+                const total = Number(d?.total || 0);
+                const list = Array.isArray(d?.list) ? d.list : [];
+                const totalPages = Math.max(1, Math.ceil(total / WALLET_LIST_PAGE_SIZE));
+                if (page > totalPages) {
+                    setPage(totalPages);
+                    return;
+                }
+                setWallets(list);
+                setWalletsTotal(total);
+            })
             .catch(() => { })
             .finally(() => {
-                if (!silent) setLoading(false);
+                if (!silent && seq === loadSeqRef.current) setLoading(false);
             });
-    }, [apiBaseUrl]);
+    }, [apiBaseUrl, page, searchKeyword]);
     useEffect(() => { load(); }, [load]);
     useEffect(() => {
         const timer = setInterval(() => {
@@ -1179,12 +1201,6 @@ function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
         }, refreshIntervalMs);
         return () => clearInterval(timer);
     }, [load, refreshIntervalMs]);
-
-    const filtered = useMemo(() => {
-        if (!search) return wallets;
-        const q = search.toLowerCase();
-        return wallets.filter(w => w.address.toLowerCase().includes(q) || (w.label && w.label.toLowerCase().includes(q)));
-    }, [wallets, search]);
 
     const runAction = async (key, action) => {
         setBusyKey(key);
@@ -1221,14 +1237,21 @@ function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
             <div className="smd-search-row">
                 <div className="smd-search-input">
                     <Search size={14} />
-                    <input placeholder="搜索钱包..." value={search} onChange={e => setSearch(e.target.value)} />
+                    <input
+                        placeholder="搜索钱包..."
+                        value={search}
+                        onChange={e => {
+                            setSearch(e.target.value);
+                            setPage(1);
+                        }}
+                    />
                 </div>
                 <button onClick={onAdd} className="smd-add-btn">
                     <Plus size={14} /> 添加钱包
                 </button>
             </div>
             {actionError ? <div className="smd-inline-error">{actionError}</div> : null}
-            {loading ? <div className="smd-loading">加载中...</div> : filtered.length === 0 ? (
+            {loading ? <div className="smd-loading">加载中...</div> : wallets.length === 0 ? (
                 <div className="smd-empty">暂无监控钱包，点击"添加钱包"开始</div>
             ) : (
                 <div className="smd-table-wrap">
@@ -1243,7 +1266,7 @@ function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
                             </tr>
                         </thead>
                         <tbody>
-                            {filtered.map(w => (
+                            {wallets.map(w => (
                                 <tr key={w.address} className="clickable" onClick={() => onSelect(w.address)}>
                                     <td>
                                         <WalletIdentity address={w.address} color={w.color} label={w.label || w.address} size={20} showCopy />
@@ -1283,6 +1306,7 @@ function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
                     </table>
                 </div>
             )}
+            <PositionPagination page={page} total={walletsTotal} pageSize={WALLET_LIST_PAGE_SIZE} onChange={setPage} />
             <ConfirmDialog
                 open={Boolean(confirmState)}
                 title={confirmState?.title || '确认操作'}

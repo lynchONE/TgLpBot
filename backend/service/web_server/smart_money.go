@@ -84,7 +84,7 @@ func (s *Server) handleSMWallets(w http.ResponseWriter, r *http.Request) {
 			page = 1
 		}
 		if size <= 0 || size > 100 {
-			size = 20
+			size = 10
 		}
 		keyword := r.URL.Query().Get("keyword")
 		source := r.URL.Query().Get("source")

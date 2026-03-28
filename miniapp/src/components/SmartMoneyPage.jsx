@@ -619,6 +619,7 @@ const POOL_CARD_RANGE_LIMIT = 5;
 const POSITION_PREVIEW_STALE_MS = 30000;
 const POSITION_PREVIEW_BATCH_SIZE = 4;
 const POSITION_LIST_PAGE_SIZE = 6;
+const WALLET_LIST_PAGE_SIZE = 10;
 const USD_PREVIEW_FORMATTER = new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -1590,26 +1591,47 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
 
 function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refreshKey }) {
     const [wallets, setWallets] = useState([]);
+    const [walletsTotal, setWalletsTotal] = useState(0);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
+    const [page, setPage] = useState(1);
     const [busyKey, setBusyKey] = useState('');
     const [actionError, setActionError] = useState('');
     const [confirmState, setConfirmState] = useState(null);
     const [editingWallet, setEditingWallet] = useState(null);
+    const loadSeqRef = useRef(0);
+    const searchKeyword = useMemo(() => String(search || '').trim(), [search]);
 
     const load = useCallback((silent = false) => {
+        const seq = ++loadSeqRef.current;
         if (!silent) {
             setLoading(true);
         }
-        fetchSMWallets({ apiBaseUrl, size: 100 })
-            .then(d => setWallets(d?.list || []))
+        fetchSMWallets({
+            apiBaseUrl,
+            page,
+            size: WALLET_LIST_PAGE_SIZE,
+            keyword: searchKeyword || undefined,
+        })
+            .then(d => {
+                if (seq !== loadSeqRef.current) return;
+                const total = Number(d?.total || 0);
+                const list = Array.isArray(d?.list) ? d.list : [];
+                const totalPages = Math.max(1, Math.ceil(total / WALLET_LIST_PAGE_SIZE));
+                if (page > totalPages) {
+                    setPage(totalPages);
+                    return;
+                }
+                setWallets(list);
+                setWalletsTotal(total);
+            })
             .catch(() => { })
             .finally(() => {
-                if (!silent) {
+                if (!silent && seq === loadSeqRef.current) {
                     setLoading(false);
                 }
             });
-    }, [apiBaseUrl]);
+    }, [apiBaseUrl, page, searchKeyword]);
 
     useEffect(() => { load(); }, [load, refreshKey]);
 
@@ -1619,12 +1641,6 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
         }, 10000);
         return () => clearInterval(timer);
     }, [load]);
-
-    const filtered = useMemo(() => {
-        if (!search) return wallets;
-        const q = search.toLowerCase();
-        return wallets.filter(w => w.address.toLowerCase().includes(q) || (w.label && w.label.toLowerCase().includes(q)));
-    }, [wallets, search]);
 
     const handleToggle = async (wallet) => {
         setBusyKey(`wallet-toggle:${wallet.address}`);
@@ -1664,7 +1680,10 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
                         className={getInputClass(brand).replace('px-3', 'pl-9 pr-3')}
                         placeholder="搜索钱包..."
                         value={search}
-                        onChange={e => setSearch(e.target.value)}
+                        onChange={e => {
+                            setSearch(e.target.value);
+                            setPage(1);
+                        }}
                     />
                 </div>
                 <button
@@ -1683,13 +1702,13 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
 
             {loading ? (
                 <div className="py-8 text-center text-zinc-500">加载中...</div>
-            ) : filtered.length === 0 ? (
+            ) : wallets.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-white/[0.05] bg-zinc-900/45 px-4 py-8 text-center text-sm text-zinc-500">
                     暂无监控钱包，点击“添加”开始
                 </div>
             ) : (
                 <div className="space-y-3">
-                    {filtered.map(w => (
+                    {wallets.map(w => (
                         <button
                             key={w.address}
                             type="button"
@@ -1769,6 +1788,8 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
                     ))}
                 </div>
             )}
+
+            <PositionPagination page={page} total={walletsTotal} brand={brand} pageSize={WALLET_LIST_PAGE_SIZE} onChange={setPage} />
 
             <ConfirmDialog
                 open={Boolean(confirmState)}

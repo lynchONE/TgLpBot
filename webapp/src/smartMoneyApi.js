@@ -58,7 +58,7 @@ async function goldenDogRequest(url, options = {}) {
     return json;
 }
 
-export async function fetchSMWallets({ apiBaseUrl, page = 1, size = 20, keyword, source, active, signal }) {
+export async function fetchSMWallets({ apiBaseUrl, page = 1, size = 10, keyword, source, active, signal }) {
     const params = new URLSearchParams();
     params.set('page', String(page));
     params.set('size', String(size));

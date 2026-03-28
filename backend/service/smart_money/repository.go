@@ -1447,71 +1447,122 @@ func (r *Repository) GetGlobalStats(ctx context.Context) (*GlobalStats, error) {
 }
 
 type WalletStatsRow struct {
-	Address           string     `json:"address"`
-	Label             *string    `json:"label"`
-	Source            string     `json:"source"`
-	SourceContract    *string    `json:"source_contract"`
-	IsActive          bool       `json:"is_active"`
-	ChainID           int        `json:"chain_id"`
-	OpenPositionCount int        `json:"open_position_count"`
-	ActivePoolCount   int        `json:"active_pool_count"`
-	TotalAddCount     int        `json:"total_add_count"`
-	TotalRemoveCount  int        `json:"total_remove_count"`
-	LastActiveAt      *time.Time `json:"last_active_at"`
-	CreatedAt         time.Time  `json:"created_at"`
+	Address                string     `json:"address"`
+	Label                  *string    `json:"label"`
+	Source                 string     `json:"source"`
+	SourceContract         *string    `json:"source_contract"`
+	IsActive               bool       `json:"is_active"`
+	ChainID                int        `json:"chain_id"`
+	OpenPositionCount      int        `json:"open_position_count"`
+	ActivePoolCount        int        `json:"active_pool_count"`
+	TotalAddCount          int        `json:"total_add_count"`
+	TotalRemoveCount       int        `json:"total_remove_count"`
+	LastActiveAt           *time.Time `json:"last_active_at"`
+	CreatedAt              time.Time  `json:"created_at"`
+	TotalPositionAmountUSD float64    `json:"total_position_amount_usd"`
 }
 
 func (r *Repository) ListWalletsWithStats(ctx context.Context, page, size int, keyword, source string, activeOnly *bool) ([]WalletStatsRow, int64, error) {
-	wallets, total, err := r.ListMonitoredWallets(ctx, page, size, keyword, source, activeOnly)
-	if err != nil {
+	countDB := database.DB.WithContext(ctx).Model(&models.MonitoredWallet{})
+	if keyword != "" {
+		kw := "%" + strings.ToLower(strings.TrimSpace(keyword)) + "%"
+		countDB = countDB.Where("LOWER(address) LIKE ? OR LOWER(COALESCE(label, '')) LIKE ?", kw, kw)
+	}
+	if source != "" {
+		countDB = countDB.Where("source = ?", source)
+	}
+	if activeOnly != nil {
+		countDB = countDB.Where("is_active = ?", *activeOnly)
+	}
+
+	var total int64
+	if err := countDB.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
+
 	recentCutoff := time.Now().Add(-2 * time.Hour)
+	eventNetSubQuery := database.DB.WithContext(ctx).
+		Table("sm_lp_events").
+		Select(`
+			chain_id,
+			nft_token_id,
+			SUM(
+				CASE
+					WHEN event_type = 'add' THEN COALESCE(total_usd, COALESCE(token0_amount_usd, 0) + COALESCE(token1_amount_usd, 0), 0)
+					WHEN event_type = 'remove' THEN -COALESCE(total_usd, COALESCE(token0_amount_usd, 0) + COALESCE(token1_amount_usd, 0), 0)
+					ELSE 0
+				END
+			) AS net_amount_usd
+		`).
+		Where("event_type IN ?", []string{"add", "remove"}).
+		Group("chain_id, nft_token_id")
 
-	rows := make([]WalletStatsRow, 0, len(wallets))
-	for _, w := range wallets {
-		row := WalletStatsRow{
-			Address:        w.Address,
-			Label:          w.Label,
-			Source:         w.Source,
-			SourceContract: w.SourceContract,
-			IsActive:       w.IsActive,
-			ChainID:        w.ChainID,
-			CreatedAt:      w.CreatedAt,
-		}
+	walletStatsSubQuery := database.DB.WithContext(ctx).
+		Table("sm_lp_positions p").
+		Select(`
+			p.wallet_address,
+			p.chain_id,
+			SUM(CASE WHEN p.status = 'open' AND p.opened_at >= ? THEN 1 ELSE 0 END) AS open_position_count,
+			COUNT(DISTINCT CASE WHEN p.status = 'open' AND p.opened_at >= ? THEN p.pool_address END) AS active_pool_count,
+			COALESCE(SUM(CASE WHEN p.status = 'open' AND p.opened_at >= ? THEN COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0) ELSE 0 END), 0) AS total_position_amount_usd
+		`, recentCutoff, recentCutoff, recentCutoff).
+		Joins("LEFT JOIN sm_lp_active_positions ap ON ap.chain_id = p.chain_id AND ap.nft_token_id = p.nft_token_id").
+		Joins("LEFT JOIN (?) evt_net ON evt_net.chain_id = p.chain_id AND evt_net.nft_token_id = p.nft_token_id", eventNetSubQuery).
+		Group("p.wallet_address, p.chain_id")
 
-		addr := strings.ToLower(w.Address)
+	walletEventSubQuery := database.DB.WithContext(ctx).
+		Table("sm_lp_events e").
+		Select(`
+			e.wallet_address,
+			e.chain_id,
+			SUM(CASE WHEN e.event_type = 'add' THEN 1 ELSE 0 END) AS total_add_count,
+			SUM(CASE WHEN e.event_type = 'remove' THEN 1 ELSE 0 END) AS total_remove_count,
+			MAX(e.tx_timestamp) AS last_active_at
+		`).
+		Group("e.wallet_address, e.chain_id")
 
-		var openCount int64
-		database.DB.WithContext(ctx).Model(&models.SmartMoneyLPPosition{}).
-			Where("wallet_address = ? AND status = 'open' AND opened_at >= ?", addr, recentCutoff).Count(&openCount)
-		row.OpenPositionCount = int(openCount)
+	query := database.DB.WithContext(ctx).
+		Table("monitored_wallets w").
+		Select(`
+			w.address,
+			w.label,
+			w.source,
+			w.source_contract,
+			w.is_active,
+			w.chain_id,
+			COALESCE(ws.open_position_count, 0) AS open_position_count,
+			COALESCE(ws.active_pool_count, 0) AS active_pool_count,
+			COALESCE(we.total_add_count, 0) AS total_add_count,
+			COALESCE(we.total_remove_count, 0) AS total_remove_count,
+			we.last_active_at AS last_active_at,
+			w.created_at,
+			COALESCE(ws.total_position_amount_usd, 0) AS total_position_amount_usd
+		`).
+		Joins("LEFT JOIN (?) ws ON ws.wallet_address = w.address AND ws.chain_id = w.chain_id", walletStatsSubQuery).
+		Joins("LEFT JOIN (?) we ON we.wallet_address = w.address AND we.chain_id = w.chain_id", walletEventSubQuery)
 
-		var poolCount int64
-		database.DB.WithContext(ctx).Model(&models.SmartMoneyLPPosition{}).
-			Where("wallet_address = ? AND status = 'open' AND opened_at >= ?", addr, recentCutoff).
-			Distinct("pool_address").Count(&poolCount)
-		row.ActivePoolCount = int(poolCount)
+	if keyword != "" {
+		kw := "%" + strings.ToLower(strings.TrimSpace(keyword)) + "%"
+		query = query.Where("LOWER(w.address) LIKE ? OR LOWER(COALESCE(w.label, '')) LIKE ?", kw, kw)
+	}
+	if source != "" {
+		query = query.Where("w.source = ?", source)
+	}
+	if activeOnly != nil {
+		query = query.Where("w.is_active = ?", *activeOnly)
+	}
 
-		var addCount int64
-		database.DB.WithContext(ctx).Model(&models.SmartMoneyLPEvent{}).
-			Where("wallet_address = ? AND event_type = 'add'", addr).Count(&addCount)
-		row.TotalAddCount = int(addCount)
-
-		var removeCount int64
-		database.DB.WithContext(ctx).Model(&models.SmartMoneyLPEvent{}).
-			Where("wallet_address = ? AND event_type = 'remove'", addr).Count(&removeCount)
-		row.TotalRemoveCount = int(removeCount)
-
-		var lastEvent models.SmartMoneyLPEvent
-		if err := database.DB.WithContext(ctx).Model(&models.SmartMoneyLPEvent{}).
-			Where("wallet_address = ?", addr).
-			Order("tx_timestamp DESC").
-			First(&lastEvent).Error; err == nil {
-			row.LastActiveAt = &lastEvent.TxTimestamp
-		}
-
-		rows = append(rows, row)
+	rows := make([]WalletStatsRow, 0, size)
+	err := query.
+		Order("COALESCE(ws.total_position_amount_usd, 0) DESC").
+		Order("COALESCE(ws.open_position_count, 0) DESC").
+		Order("we.last_active_at DESC").
+		Order("w.created_at DESC").
+		Offset((page - 1) * size).
+		Limit(size).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, 0, err
 	}
 	return rows, total, nil
 }
