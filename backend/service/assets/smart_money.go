@@ -218,7 +218,9 @@ func smartMoneyWalletSummaryFromLive(walletRow models.MonitoredWallet, live smar
 	if walletRow.Label != nil {
 		summary.Label = strings.TrimSpace(*walletRow.Label)
 	}
-	if walletRow.Avat
+	if walletRow.AvatarURL != nil {
+		summary.AvatarURL = strings.TrimSpace(*walletRow.AvatarURL)
+	}
 	return summary
 }
 
@@ -231,15 +233,11 @@ func smartMoneyWalletSummaryFromSnapshot(walletRow models.MonitoredWallet, snaps
 	if walletRow.Label != nil {
 		summary.Label = strings.TrimSpace(*walletRow.Label)
 	}
-	if snapshot != nil {
-		summary.Assets = smartMoneyAssetBreakdown{
-w.Label)
-	}
 	if walletRow.AvatarURL != nil {
 		summary.AvatarURL = strings.TrimSpace(*walletRow.AvatarURL)
 	}
 	if snapshot != nil {
-		summary.Assets = smar
+		summary.Assets = smartMoneyAssetBreakdown{
 			NativeUSD:         round2(snapshot.NativeUSD),
 			StableUSD:         round2(snapshot.StableUSD),
 			TrackedTokenUSD:   round2(snapshot.TrackedTokenUSD),
@@ -560,11 +558,10 @@ func buildSmartMoneySnapshotLeaderboard(metric string, snapshotDay time.Time, co
 			TransferOutUSD:          round2(input.Current.TransferOutUSD),
 		}
 		if input.Wallet.Label != nil {
-allet.Label != nil {
 			entry.Label = strings.TrimSpace(*input.Wallet.Label)
 		}
-		if inp
-			entry.Label = strings.TrimSpace(*input.Wallet.Label)
+		if input.Wallet.AvatarURL != nil {
+			entry.AvatarURL = strings.TrimSpace(*input.Wallet.AvatarURL)
 		}
 		if input.DailyStat != nil {
 			entry.ParticipationCount = input.DailyStat.AddCount + input.DailyStat.RemoveCount
