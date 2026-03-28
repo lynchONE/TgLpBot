@@ -7,6 +7,31 @@ function normalizeBase(apiBaseUrl) {
     return String(apiBaseUrl || '').replace(/\/$/, '');
 }
 
+function shouldProxyAvatarAsset(rawUrl) {
+    const value = String(rawUrl || '').trim();
+    if (!value || typeof window === 'undefined') return false;
+
+    let parsed;
+    try {
+        parsed = new URL(value, window.location.origin);
+    } catch {
+        return false;
+    }
+
+    return window.location.protocol === 'https:' && parsed.protocol === 'http:';
+}
+
+export function resolveSMAvatarAssetUrl(avatarUrl) {
+    const value = String(avatarUrl || '').trim();
+    if (!value) return '';
+    if (!shouldProxyAvatarAsset(value)) return value;
+
+    const params = new URLSearchParams();
+    params.set('endpoint', 'avatar_asset');
+    params.set('url', value);
+    return `/api/sm?${params.toString()}`;
+}
+
 function isSameOriginBase(base) {
     if (!base) return true;
     if (typeof window === 'undefined') return false;

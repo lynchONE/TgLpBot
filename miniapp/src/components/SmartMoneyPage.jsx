@@ -8,7 +8,7 @@ import {
     fetchSMPositionDetail,
     fetchSMStats, addSMWallet, updateSMWallet, deleteSMWallet,
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
-    uploadSMWalletAvatar,
+    uploadSMWalletAvatar, resolveSMAvatarAssetUrl,
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig, testSMGoldenDogConfig,
 } from '../lib/smartMoneyApi';
 import { getBrandTheme } from '../lib/brand';
@@ -519,7 +519,7 @@ function walletAvatarIdx(addr) {
 }
 
 function resolveWalletAvatarSrc(address, avatarUrl) {
-    const preferred = String(avatarUrl || '').trim();
+    const preferred = resolveSMAvatarAssetUrl(avatarUrl);
     if (preferred) return preferred;
     return WALLET_AVATAR_ICONS[walletAvatarIdx(address)] || WALLET_AVATAR_ICONS[0];
 }

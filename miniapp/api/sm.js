@@ -24,6 +24,90 @@ function buildQueryString(query, excludeKeys = []) {
     return qs ? `?${qs}` : '';
 }
 
+function appendAllowedHost(targets, raw) {
+    const value = String(raw || '').trim();
+    if (!value) return;
+
+    try {
+        const parsed = new URL(/^https?:\/\//i.test(value) ? value : `http://${value}`);
+        if (parsed.hostname) {
+            targets.add(parsed.hostname.toLowerCase());
+        }
+    } catch {
+        // ignore invalid config values
+    }
+}
+
+function isAllowedAvatarTarget(targetUrl, backendBaseUrl) {
+    const value = String(targetUrl || '').trim();
+    if (!value) return false;
+
+    let parsed;
+    try {
+        parsed = new URL(value);
+    } catch {
+        return false;
+    }
+
+    if (!/^https?:$/i.test(parsed.protocol)) return false;
+    if (!parsed.pathname.startsWith('/avatar/')) return false;
+
+    const allowedHosts = new Set();
+    appendAllowedHost(allowedHosts, backendBaseUrl);
+    appendAllowedHost(allowedHosts, process.env.MINIO_PUBLIC_BASE_URL);
+
+    if (allowedHosts.size === 0) return false;
+    return allowedHosts.has(String(parsed.hostname || '').toLowerCase());
+}
+
+async function handleAvatarAssetProxy(req, res, backendBaseUrl) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+        res.statusCode = 405;
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.end('method not allowed');
+        return;
+    }
+
+    const targetUrl = String(req.query?.url || '').trim();
+    if (!isAllowedAvatarTarget(targetUrl, backendBaseUrl)) {
+        res.statusCode = 400;
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.end('invalid avatar url');
+        return;
+    }
+
+    try {
+        const upstream = await fetch(targetUrl, {
+            method: req.method || 'GET',
+            headers: { Accept: 'image/*,*/*;q=0.8' },
+        });
+
+        res.statusCode = upstream.status;
+        const contentType = upstream.headers.get('content-type');
+        const contentLength = upstream.headers.get('content-length');
+        const etag = upstream.headers.get('etag');
+        const lastModified = upstream.headers.get('last-modified');
+
+        if (contentType) res.setHeader('Content-Type', contentType);
+        if (contentLength) res.setHeader('Content-Length', contentLength);
+        if (etag) res.setHeader('ETag', etag);
+        if (lastModified) res.setHeader('Last-Modified', lastModified);
+        res.setHeader('Cache-Control', upstream.ok ? 'public, max-age=300' : 'no-store');
+
+        if (req.method === 'HEAD' || upstream.status === 204 || upstream.status === 304) {
+            res.end();
+            return;
+        }
+
+        const body = Buffer.from(await upstream.arrayBuffer());
+        res.end(body);
+    } catch (err) {
+        res.statusCode = 502;
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.end(String(err?.message || err || 'avatar proxy failed'));
+    }
+}
+
 export default async function handler(req, res) {
     const backendBaseUrl = normalizeBaseUrl(
         process.env.BACKEND_API_BASE_URL || process.env.VITE_API_BASE_URL,
@@ -42,6 +126,11 @@ export default async function handler(req, res) {
     }
 
     const endpoint = String(req.query?.endpoint || '').trim();
+    if (endpoint === 'avatar_asset') {
+        await handleAvatarAssetProxy(req, res, backendBaseUrl);
+        return;
+    }
+
     const validEndpoints = new Set(['wallets', 'contracts', 'pools', 'positions', 'position_detail', 'events', 'stats']);
     if (!validEndpoints.has(endpoint)) {
         res.statusCode = 400;

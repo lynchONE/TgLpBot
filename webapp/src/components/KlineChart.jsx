@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, CandlestickSeries, HistogramSeries } from 'lightweight-charts';
 import { Check, Copy, Pencil, X } from 'lucide-react';
+import { resolveSMAvatarAssetUrl } from '../smartMoneyApi';
 import { formatUtc8DateTime, formatUtc8TickMark, shortAddress, toUnixSeconds } from '../utils';
 
 /* ── Wallet avatar images ── */
@@ -19,7 +20,7 @@ function walletAvatarUrl(address) {
 }
 
 function markerWalletAvatarUrl(marker) {
-  const uploaded = String(marker?.wallet_avatar_url || '').trim();
+  const uploaded = resolveSMAvatarAssetUrl(marker?.wallet_avatar_url);
   if (uploaded) return uploaded;
   return walletAvatarUrl(marker?.wallet_address || '');
 }
