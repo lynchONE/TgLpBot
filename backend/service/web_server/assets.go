@@ -335,19 +335,11 @@ func (s *Server) handleAdminSmartMoneyLeaderboard(w http.ResponseWriter, r *http
 	if pageSize <= 0 && req.Limit > 0 {
 		pageSize = req.Limit
 	}
-	key := assetResponseCacheKey(
-		"admin",
-		fmt.Sprintf("%d", adminUserID),
-		"smart-money-leaderboard",
-		req.Metric,
-		fmt.Sprintf("%d", req.Days),
-		fmt.Sprintf("%d", req.Page),
-		fmt.Sprintf("%d", pageSize),
-		req.Keyword,
-	)
-	if err := respondWithAssetCache(w, key, req.ForceRefresh, func() (interface{}, error) {
-		return s.Assets.GetSmartMoneyLeaderboard(r.Context(), req.Metric, req.Days, req.Page, pageSize, req.Keyword, req.ForceRefresh)
-	}); err != nil {
+	_ = adminUserID
+	resp, err := s.Assets.GetSmartMoneyLeaderboard(r.Context(), req.Metric, req.Days, req.Page, pageSize, req.Keyword, req.ForceRefresh)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
+	writeJSON(w, http.StatusOK, resp)
 }

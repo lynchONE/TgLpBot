@@ -127,6 +127,37 @@ func TestBuildSmartMoneySnapshotLeaderboard_UsesBalanceDeltaAndTransferAmounts(t
 	}
 }
 
+func TestApplySmartMoneyLeaderboardWalletMeta_UsesCurrentWalletMetadata(t *testing.T) {
+	label := "Updated Alpha"
+	avatarURL := "http://minio.example/avatar/smart-money/current.jpg"
+	resp := &SmartMoneyLeaderboardResponse{
+		List: []SmartMoneyLeaderboardEntry{
+			{
+				Address:   "0x00000000000000000000000000000000000000a1",
+				ChainID:   56,
+				Label:     "Old Alpha",
+				AvatarURL: "http://minio.example/avatar/smart-money/old.jpg",
+			},
+		},
+	}
+
+	applySmartMoneyLeaderboardWalletMeta(resp, []models.MonitoredWallet{
+		{
+			Address:   "0x00000000000000000000000000000000000000a1",
+			ChainID:   56,
+			Label:     &label,
+			AvatarURL: &avatarURL,
+		},
+	})
+
+	if got, want := resp.List[0].Label, label; got != want {
+		t.Fatalf("label = %s, want %s", got, want)
+	}
+	if got, want := resp.List[0].AvatarURL, avatarURL; got != want {
+		t.Fatalf("avatar url = %s, want %s", got, want)
+	}
+}
+
 func TestSmartMoneyWalletSummaryFromLive_IncludesAvatarURL(t *testing.T) {
 	avatarURL := "http://minio.example/avatar/smart-money/live.jpg"
 	label := "Alpha"

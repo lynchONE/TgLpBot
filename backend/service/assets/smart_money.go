@@ -205,6 +205,35 @@ func writeCachedSmartMoneyLeaderboard(snapshotDay time.Time, metric string, resp
 	_ = database.SetCache(smartMoneyLeaderboardDailyCacheKey(snapshotDay, metric), string(body), smartMoneyLeaderboardCacheTTL)
 }
 
+func applySmartMoneyLeaderboardWalletMeta(resp *SmartMoneyLeaderboardResponse, wallets []models.MonitoredWallet) {
+	if resp == nil || len(resp.List) == 0 || len(wallets) == 0 {
+		return
+	}
+
+	metaByWallet := make(map[string]models.MonitoredWallet, len(wallets))
+	for _, wallet := range wallets {
+		metaByWallet[smartMoneyWalletKey(wallet.ChainID, wallet.Address)] = wallet
+	}
+
+	for i := range resp.List {
+		entry := &resp.List[i]
+		wallet, ok := metaByWallet[smartMoneyWalletKey(entry.ChainID, entry.Address)]
+		if !ok {
+			continue
+		}
+
+		entry.Label = ""
+		if wallet.Label != nil {
+			entry.Label = strings.TrimSpace(*wallet.Label)
+		}
+
+		entry.AvatarURL = ""
+		if wallet.AvatarURL != nil {
+			entry.AvatarURL = strings.TrimSpace(*wallet.AvatarURL)
+		}
+	}
+}
+
 func smartMoneyWalletSummaryFromLive(walletRow models.MonitoredWallet, live smartMoneyWalletLiveState) SmartMoneyWalletSummary {
 	summary := SmartMoneyWalletSummary{
 		Address:         walletRow.Address,
@@ -426,23 +455,26 @@ func (s *Service) GetSmartMoneyLeaderboard(ctx context.Context, metric string, d
 	snapshotDay := dayStart(timeutil.Now()).AddDate(0, 0, -1)
 	comparedDay := snapshotDay.AddDate(0, 0, -1)
 
+	wallets, err := s.loadActiveSmartMoneyWallets(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	if !forceRefresh {
 		if cached, ok := readCachedSmartMoneyLeaderboard(snapshotDay, metric); ok {
+			applySmartMoneyLeaderboardWalletMeta(cached, wallets)
 			cached.Timezone = timeutil.LocationName()
 			return paginateSmartMoneyLeaderboardResponse(cached, page, pageSize, keyword), nil
 		}
 	}
 
-	wallets, err := s.loadActiveSmartMoneyWallets(ctx)
-	if err != nil {
-		return nil, err
-	}
 	inputs, err := s.buildSmartMoneyLeaderboardSnapshotInputs(ctx, wallets, snapshotDay)
 	if err != nil {
 		return nil, err
 	}
 
 	fullResp := buildSmartMoneySnapshotLeaderboard(metric, snapshotDay, comparedDay, 0, inputs)
+	applySmartMoneyLeaderboardWalletMeta(fullResp, wallets)
 	fullResp.Timezone = timeutil.LocationName()
 	writeCachedSmartMoneyLeaderboard(snapshotDay, metric, fullResp)
 	return paginateSmartMoneyLeaderboardResponse(fullResp, page, pageSize, keyword), nil
