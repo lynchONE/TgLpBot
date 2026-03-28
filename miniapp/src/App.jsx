@@ -235,6 +235,7 @@ const defaultHotPoolsFilter = {
     keyword: '',
     minFees: 60,
     minFeeRate: 0.3,
+    minActiveFeeRate: null,
     minTvl: 1000,
     minVolume: 2000,
     minTxCount: null,
@@ -258,6 +259,15 @@ function parseMetricNumber(value) {
     return Number.isFinite(parsed) ? parsed : NaN;
 }
 
+function computeHotPoolActiveFeeRate(pool) {
+    const totalFees = Number(pool?.total_fees ?? 0);
+    const activeLiquidityUsd = Number(pool?.activeLiquidityUSD ?? pool?.active_liquidity_usd ?? 0);
+    if (!Number.isFinite(totalFees) || !Number.isFinite(activeLiquidityUsd) || activeLiquidityUsd <= 0) {
+        return null;
+    }
+    return (totalFees / activeLiquidityUsd) * 100;
+}
+
 function normalizeHotPoolsFilter(value) {
     const base = { ...defaultHotPoolsFilter };
     if (!value || typeof value !== 'object') return base;
@@ -273,6 +283,9 @@ function normalizeHotPoolsFilter(value) {
     }
     if (Object.prototype.hasOwnProperty.call(value, 'minFeeRate')) {
         base.minFeeRate = parseNullableNumber(value.minFeeRate);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'minActiveFeeRate')) {
+        base.minActiveFeeRate = parseNullableNumber(value.minActiveFeeRate);
     }
     if (Object.prototype.hasOwnProperty.call(value, 'minTvl')) {
         base.minTvl = parseNullableNumber(value.minTvl);
@@ -384,6 +397,7 @@ export default function App() {
         keyword: String(defaultHotPoolsFilter.keyword || ''),
         minFees: String(defaultHotPoolsFilter.minFees),
         minFeeRate: String(defaultHotPoolsFilter.minFeeRate),
+        minActiveFeeRate: formatDraftNumber(defaultHotPoolsFilter.minActiveFeeRate),
         minTvl: String(defaultHotPoolsFilter.minTvl),
         minVolume: String(defaultHotPoolsFilter.minVolume),
         minTxCount: formatDraftNumber(defaultHotPoolsFilter.minTxCount),
@@ -670,7 +684,7 @@ export default function App() {
     const hotPoolsFilterEnabled = useMemo(() => {
         if (!hotPoolsFilter.enabled) return false;
         const hasKeyword = String(hotPoolsFilter.keyword || '').trim().length > 0;
-        const hasNumbers = [hotPoolsFilter.minFees, hotPoolsFilter.minFeeRate, hotPoolsFilter.minTvl, hotPoolsFilter.minVolume, hotPoolsFilter.minTxCount].some((v) => Number.isFinite(v));
+        const hasNumbers = [hotPoolsFilter.minFees, hotPoolsFilter.minFeeRate, hotPoolsFilter.minActiveFeeRate, hotPoolsFilter.minTvl, hotPoolsFilter.minVolume, hotPoolsFilter.minTxCount].some((v) => Number.isFinite(v));
         return hasKeyword || hasNumbers;
     }, [hotPoolsFilter]);
 
@@ -680,6 +694,7 @@ export default function App() {
         if (hotPoolsFilterEnabled) {
             const minFees = hotPoolsFilter.minFees;
             const minFeeRate = hotPoolsFilter.minFeeRate;
+            const minActiveFeeRate = hotPoolsFilter.minActiveFeeRate;
             const minTvl = hotPoolsFilter.minTvl;
             const minVolume = hotPoolsFilter.minVolume;
             const minTxCount = hotPoolsFilter.minTxCount;
@@ -687,6 +702,7 @@ export default function App() {
             filtered = hotPoolsRows.filter((row) => {
                 const fees = parseMetricNumber(row?.total_fees);
                 const feeRate = parseMetricNumber(row?.fee_rate);
+                const activeFeeRate = computeHotPoolActiveFeeRate(row);
                 const tvl = parseMetricNumber(row?.current_pool_value);
                 const volume = parseMetricNumber(row?.total_volume);
                 const txCount = parseMetricNumber(row?.transaction_count);
@@ -703,6 +719,7 @@ export default function App() {
                 }
                 if (Number.isFinite(minFees) && fees < minFees) return false;
                 if (Number.isFinite(minFeeRate) && feeRate < minFeeRate) return false;
+                if (Number.isFinite(minActiveFeeRate) && (!Number.isFinite(activeFeeRate) || activeFeeRate < minActiveFeeRate)) return false;
                 if (Number.isFinite(minTvl) && tvl < minTvl) return false;
                 if (Number.isFinite(minVolume) && volume < minVolume) return false;
                 if (Number.isFinite(minTxCount) && txCount < minTxCount) return false;
@@ -880,6 +897,7 @@ export default function App() {
             keyword: String(hotPoolsFilter.keyword || ''),
             minFees: formatDraftNumber(hotPoolsFilter.minFees),
             minFeeRate: formatDraftNumber(hotPoolsFilter.minFeeRate),
+            minActiveFeeRate: formatDraftNumber(hotPoolsFilter.minActiveFeeRate),
             minTvl: formatDraftNumber(hotPoolsFilter.minTvl),
             minVolume: formatDraftNumber(hotPoolsFilter.minVolume),
             minTxCount: formatDraftNumber(hotPoolsFilter.minTxCount),
@@ -1138,6 +1156,7 @@ export default function App() {
             keyword,
             minFees: parseDraftNumber(hotPoolsFilterDraft.minFees),
             minFeeRate: parseDraftNumber(hotPoolsFilterDraft.minFeeRate),
+            minActiveFeeRate: parseDraftNumber(hotPoolsFilterDraft.minActiveFeeRate),
             minTvl: parseDraftNumber(hotPoolsFilterDraft.minTvl),
             minVolume: parseDraftNumber(hotPoolsFilterDraft.minVolume),
             minTxCount: parseDraftNumber(hotPoolsFilterDraft.minTxCount),
@@ -1159,6 +1178,7 @@ export default function App() {
             keyword: '',
             minFees: null,
             minFeeRate: null,
+            minActiveFeeRate: null,
             minTvl: null,
             minVolume: null,
             minTxCount: null,
@@ -2683,6 +2703,16 @@ export default function App() {
                                                 inputMode="decimal"
                                                 className={`mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                                 placeholder={String(defaultHotPoolsFilter.minFeeRate)}
+                                            />
+                                        </div>
+                                        <div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">活跃费率 ≥ (%)</div>
+                                            <input
+                                                value={hotPoolsFilterDraft.minActiveFeeRate}
+                                                onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minActiveFeeRate: e.target.value }))}
+                                                inputMode="decimal"
+                                                className={`mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
+                                                placeholder="可选"
                                             />
                                         </div>
                                         <div>
