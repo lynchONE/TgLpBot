@@ -37,27 +37,10 @@ func CalcV3UnclaimedFeesFromGrowths(
 
 	last0 := cloneBig(pos.FeeGrowthInside0LastX128)
 	last1 := cloneBig(pos.FeeGrowthInside1LastX128)
-	if inside0.Cmp(global0) > 0 || inside1.Cmp(global1) > 0 {
-		return owed0, owed1, fmt.Errorf(
-			"inconsistent V3 fee snapshot: inside exceeds global inside0=%s global0=%s inside1=%s global1=%s",
-			inside0.String(),
-			global0.String(),
-			inside1.String(),
-			global1.String(),
-		)
-	}
-
-	delta0 := new(big.Int).Sub(inside0, last0)
-	delta1 := new(big.Int).Sub(inside1, last1)
-	if delta0.Sign() < 0 || delta1.Sign() < 0 {
-		return owed0, owed1, fmt.Errorf(
-			"inconsistent V3 fee snapshot: inside0=%s last0=%s inside1=%s last1=%s",
-			inside0.String(),
-			last0.String(),
-			inside1.String(),
-			last1.String(),
-		)
-	}
+	// Uniswap V3 uses unchecked uint256 subtraction here. Both feeGrowthInside
+	// and feeGrowthInsideLastX128 can wrap modulo 2^256, so current < last is valid.
+	delta0 := subMod256(inside0, last0)
+	delta1 := subMod256(inside1, last1)
 
 	extra0 := mulDivFloor(delta0, pos.Liquidity, q128)
 	extra1 := mulDivFloor(delta1, pos.Liquidity, q128)
