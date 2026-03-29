@@ -69,7 +69,7 @@ type SmartMoneyWalletTransferEvent struct {
 	TokenAddress  string    `gorm:"size:42;not null;default:''" json:"token_address"`
 	TokenSymbol   string    `gorm:"size:32" json:"token_symbol"`
 	TokenDecimals int       `gorm:"not null;default:0" json:"token_decimals"`
-	AmountRaw     string    `gorm:"type:decimal(78,0);not null;default:0" json:"amount_raw"`
+	AmountRaw     string    `gorm:"type:varchar(78);not null;default:'0'" json:"amount_raw"`
 	AmountDecimal float64   `gorm:"type:decimal(36,18);not null;default:0" json:"amount_decimal"`
 	AmountUSD     float64   `gorm:"type:decimal(20,4);not null;default:0" json:"amount_usd"`
 	TxHash        string    `gorm:"size:66;not null;uniqueIndex:uq_sm_wallet_transfer_event,priority:3" json:"tx_hash"`
