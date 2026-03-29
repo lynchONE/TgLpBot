@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -127,6 +128,128 @@ func TestGroupLPEventsByPosition(t *testing.T) {
 	}
 	if len(grouped[1]) != 1 || grouped[1][0].NftTokenID == nil || *grouped[1][0].NftTokenID != 2 {
 		t.Fatalf("expected second group to contain nft=2 event, got %+v", grouped[1])
+	}
+}
+
+func TestBuildNativeTransferEventsByBlock_SkipsExcludedLPTx(t *testing.T) {
+	t.Parallel()
+
+	blockTime := time.Date(2026, time.March, 29, 12, 0, 0, 0, time.UTC)
+	blocks := []*blockSnapshot{
+		{
+			Number:    100,
+			Timestamp: blockTime,
+			Transactions: []blockTransaction{
+				{
+					Hash:  common.HexToHash("0x1"),
+					From:  "0x1111111111111111111111111111111111111111",
+					To:    "0x2222222222222222222222222222222222222222",
+					Value: "1000000000000000000",
+				},
+				{
+					Hash:  common.HexToHash("0x2"),
+					From:  "0x1111111111111111111111111111111111111111",
+					To:    "0x3333333333333333333333333333333333333333",
+					Value: "2000000000000000000",
+				},
+			},
+		},
+	}
+	activeWallets := map[string]struct{}{
+		"0x1111111111111111111111111111111111111111": {},
+		"0x2222222222222222222222222222222222222222": {},
+	}
+	excluded := map[uint64]map[string]struct{}{
+		100: {
+			"0x0000000000000000000000000000000000000000000000000000000000000002": {},
+		},
+	}
+
+	eventsByBlock := buildNativeTransferEventsByBlock(blocks, 56, activeWallets, excluded)
+	events := eventsByBlock[100]
+	if got, want := len(events), 2; got != want {
+		t.Fatalf("native transfer events = %d, want %d", got, want)
+	}
+	if got, want := events[0].Direction, models.SmartMoneyTransferDirectionOut; got != want {
+		t.Fatalf("first direction = %s, want %s", got, want)
+	}
+	if got, want := events[0].WalletAddress, "0x1111111111111111111111111111111111111111"; got != want {
+		t.Fatalf("first wallet = %s, want %s", got, want)
+	}
+	if got, want := events[1].Direction, models.SmartMoneyTransferDirectionIn; got != want {
+		t.Fatalf("second direction = %s, want %s", got, want)
+	}
+	if got, want := events[1].WalletAddress, "0x2222222222222222222222222222222222222222"; got != want {
+		t.Fatalf("second wallet = %s, want %s", got, want)
+	}
+	for _, event := range events {
+		if event.TxHash != "0x0000000000000000000000000000000000000000000000000000000000000001" {
+			t.Fatalf("unexpected tx hash in persisted native events: %s", event.TxHash)
+		}
+	}
+}
+
+func TestBuildERC20TransferEventsFromLogs_BuildsDirectionalEvents(t *testing.T) {
+	t.Parallel()
+
+	blockTime := time.Date(2026, time.March, 29, 12, 30, 0, 0, time.UTC)
+	activeWallets := map[string]struct{}{
+		"0x1111111111111111111111111111111111111111": {},
+		"0x2222222222222222222222222222222222222222": {},
+	}
+	blockTimeByNumber := map[uint64]time.Time{88: blockTime}
+	logs := []types.Log{
+		{
+			Address: common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+			Topics: []common.Hash{
+				TopicTransfer,
+				common.BytesToHash(common.LeftPadBytes(common.HexToAddress("0x1111111111111111111111111111111111111111").Bytes(), 32)),
+				common.BytesToHash(common.LeftPadBytes(common.HexToAddress("0x2222222222222222222222222222222222222222").Bytes(), 32)),
+			},
+			Data:        encodeUnsignedWord(big.NewInt(123)),
+			TxHash:      common.HexToHash("0x3"),
+			BlockNumber: 88,
+			Index:       7,
+		},
+		{
+			Address: common.HexToAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+			Topics: []common.Hash{
+				TopicTransfer,
+				common.BytesToHash(common.LeftPadBytes(common.HexToAddress("0x1111111111111111111111111111111111111111").Bytes(), 32)),
+				common.BytesToHash(common.LeftPadBytes(common.HexToAddress("0x3333333333333333333333333333333333333333").Bytes(), 32)),
+			},
+			Data:        encodeUnsignedWord(big.NewInt(999)),
+			TxHash:      common.HexToHash("0x4"),
+			BlockNumber: 88,
+			Index:       8,
+		},
+	}
+	excluded := map[uint64]map[string]struct{}{
+		88: {
+			"0x0000000000000000000000000000000000000000000000000000000000000004": {},
+		},
+	}
+
+	outEvents := buildERC20TransferEventsFromLogs(logs, 56, models.SmartMoneyTransferDirectionOut, activeWallets, blockTimeByNumber, excluded)
+	if got, want := len(outEvents), 1; got != want {
+		t.Fatalf("out events = %d, want %d", got, want)
+	}
+	if got, want := outEvents[0].WalletAddress, "0x1111111111111111111111111111111111111111"; got != want {
+		t.Fatalf("out wallet = %s, want %s", got, want)
+	}
+	if got, want := outEvents[0].AmountRaw, "123"; got != want {
+		t.Fatalf("out amount raw = %s, want %s", got, want)
+	}
+
+	inEvents := buildERC20TransferEventsFromLogs(logs, 56, models.SmartMoneyTransferDirectionIn, activeWallets, blockTimeByNumber, excluded)
+	if got, want := len(inEvents), 1; got != want {
+		t.Fatalf("in events = %d, want %d", got, want)
+	}
+	if got, want := inEvents[0].WalletAddress, "0x2222222222222222222222222222222222222222"; got != want {
+		t.Fatalf("in wallet = %s, want %s", got, want)
+	}
+	if got, want := inEvents[0].TxTimestamp, blockTime; !got.Equal(want) {
+		t.Fatalf("in timestamp = %v, want %v", got, want)
 	}
 }
 

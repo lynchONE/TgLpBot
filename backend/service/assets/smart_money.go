@@ -9,16 +9,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math/big"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 const (
@@ -550,9 +546,9 @@ func (s *Service) GetSmartMoneyWallet(ctx context.Context, address string, chain
 	walletKey := smartMoneyWalletKey(walletRow.ChainID, walletRow.Address)
 	todayStats := todayStatsByWallet[walletKey]
 
-	todayTransferByWallet, transferErr := s.detectSmartMoneyWalletTransferActivity(ctx, []models.MonitoredWallet{*walletRow}, now)
-	if transferErr != nil {
-		live.warnings = append(live.warnings, fmt.Sprintf("today transfer detection incomplete: %v", transferErr))
+	todayTransferByWallet, err := s.loadSmartMoneyTransferActivity(ctx, []models.MonitoredWallet{*walletRow}, dayStart(now), now)
+	if err != nil {
+		return nil, err
 	}
 	history = mergeSmartMoneyHistoryPoint(history, buildSmartMoneyTodayHistoryPoint(now, summary.Assets, todayStats.EstimatedRealizedPnLUSD, todayTransferByWallet[walletKey]))
 
@@ -1406,416 +1402,31 @@ func pointerString(value *string) string {
 	return *value
 }
 
-func (s *Service) detectSmartMoneyWalletTransferActivity(ctx context.Context, wallets []models.MonitoredWallet, day time.Time) (map[string]smartMoneyTransferActivity, error) {
+func (s *Service) loadSmartMoneyTransferActivity(ctx context.Context, wallets []models.MonitoredWallet, start time.Time, end time.Time) (map[string]smartMoneyTransferActivity, error) {
 	out := make(map[string]smartMoneyTransferActivity, len(wallets))
-	if len(wallets) == 0 {
+	if len(wallets) == 0 || !start.Before(end) {
 		return out, nil
 	}
-
-	byChain := make(map[int][]models.MonitoredWallet)
 	for _, wallet := range wallets {
-		key := smartMoneyWalletKey(wallet.ChainID, wallet.Address)
-		out[key] = smartMoneyTransferActivity{}
-		byChain[wallet.ChainID] = append(byChain[wallet.ChainID], wallet)
+		out[smartMoneyWalletKey(wallet.ChainID, wallet.Address)] = smartMoneyTransferActivity{}
 	}
 
-	var firstErr error
-	start := dayStart(day)
-	end := dayEnd(day)
-	for chainID, chainWallets := range byChain {
-		if err := s.detectSmartMoneyWalletTransferActivityForChain(ctx, chainID, chainWallets, start, end, out); err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			log.Printf("[Assets] smart money transfer detection failed chain=%d day=%s err=%v", chainID, formatDay(day), err)
-		}
-	}
-	return out, firstErr
-}
-
-func (s *Service) detectSmartMoneyWalletTransferActivityForChain(ctx context.Context, chainID int, wallets []models.MonitoredWallet, start time.Time, end time.Time, out map[string]smartMoneyTransferActivity) error {
-	if len(wallets) == 0 {
-		return nil
-	}
-
-	chain := smartMoneyChainFromID(chainID)
-	client, cc, err := s.getClientForChain(chain)
+	rows, err := s.smRepo.AggregateWalletTransferActivity(ctx, wallets, start, end)
 	if err != nil {
-		return err
-	}
-	fromBlock, toBlock, ok, err := s.findBlockRangeForTimeWindow(ctx, client, start, end)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return nil
-	}
-
-	baseTokens := []string{cc.StableAddress, cc.USDTAddress, cc.USDCAddress, cc.BUSDAddress, cc.WrappedNativeAddress}
-	tokenAddresses, err := s.loadSmartMoneyTransferTokenAddresses(ctx, wallets, chainID, baseTokens, start)
-	if err != nil {
-		return err
-	}
-	if len(tokenAddresses) == 0 {
-		return nil
-	}
-	stableAddr := normalizeAddress(cc.StableAddress)
-	usdtAddr := normalizeAddress(cc.USDTAddress)
-	usdcAddr := normalizeAddress(cc.USDCAddress)
-	busdAddr := normalizeAddress(cc.BUSDAddress)
-	wrappedNativeAddr := normalizeAddress(cc.WrappedNativeAddress)
-	tokenAddressStrings := make([]string, 0, len(tokenAddresses))
-	tokenMeta := make(map[string]struct {
-		decimals int
-		priceUSD float64
-	}, len(tokenAddresses))
-	for _, addr := range tokenAddresses {
-		normalized := normalizeAddress(addr.Hex())
-		if normalized == "" {
-			continue
-		}
-		tokenAddressStrings = append(tokenAddressStrings, normalized)
-	}
-	prices, _ := s.priceService.GetUSDPrices(chain, tokenAddressStrings)
-	nativePrice := s.nativePriceUSD(chain, cc)
-	for _, tokenAddress := range tokenAddressStrings {
-		priceUSD := round4(prices[tokenAddress])
-		switch tokenAddress {
-		case stableAddr, usdtAddr, usdcAddr, busdAddr:
-			if priceUSD <= 0 {
-				priceUSD = 1
-			}
-		case wrappedNativeAddr:
-			if priceUSD <= 0 {
-				priceUSD = nativePrice
-			}
-		}
-		decimals := s.tokenFallbackDecimals(cc, tokenAddress)
-		decimals = s.getTokenDecimals(chain, client, tokenAddress, decimals)
-		tokenMeta[tokenAddress] = struct {
-			decimals int
-			priceUSD float64
-		}{
-			decimals: decimals,
-			priceUSD: priceUSD,
-		}
-	}
-
-	excludedTxHashes, err := s.loadSmartMoneyLPEventTxHashes(ctx, wallets, chainID, start, end)
-	if err != nil {
-		return err
-	}
-
-	walletTopics := make([]common.Hash, 0, len(wallets))
-	for _, wallet := range wallets {
-		addr := normalizeAddress(wallet.Address)
-		if addr == "" {
-			continue
-		}
-		walletTopics = append(walletTopics, common.BytesToHash(common.HexToAddress(addr).Bytes()))
-	}
-	if len(walletTopics) == 0 {
-		return nil
-	}
-
-	transferSig := crypto.Keccak256Hash([]byte("Transfer(address,address,uint256)"))
-	inTxs := make(map[string]map[string]struct{}, len(wallets))
-	outTxs := make(map[string]map[string]struct{}, len(wallets))
-
-	const walletChunkSize = 32
-	const tokenChunkSize = 64
-
-	for walletStart := 0; walletStart < len(walletTopics); walletStart += walletChunkSize {
-		walletEnd := walletStart + walletChunkSize
-		if walletEnd > len(walletTopics) {
-			walletEnd = len(walletTopics)
-		}
-		walletChunk := walletTopics[walletStart:walletEnd]
-
-		for tokenStart := 0; tokenStart < len(tokenAddresses); tokenStart += tokenChunkSize {
-			tokenEnd := tokenStart + tokenChunkSize
-			if tokenEnd > len(tokenAddresses) {
-				tokenEnd = len(tokenAddresses)
-			}
-			tokenChunk := tokenAddresses[tokenStart:tokenEnd]
-
-			outLogs, err := client.FilterLogs(ctx, ethereum.FilterQuery{
-				FromBlock: new(big.Int).SetUint64(fromBlock),
-				ToBlock:   new(big.Int).SetUint64(toBlock),
-				Addresses: tokenChunk,
-				Topics:    [][]common.Hash{{transferSig}, walletChunk},
-			})
-			if err != nil {
-				return err
-			}
-			for _, lg := range outLogs {
-				if len(lg.Topics) < 3 {
-					continue
-				}
-				txHash := strings.ToLower(lg.TxHash.Hex())
-				if _, excluded := excludedTxHashes[txHash]; excluded {
-					continue
-				}
-				addr := normalizeAddress(common.BytesToAddress(lg.Topics[1].Bytes()).Hex())
-				key := smartMoneyWalletKey(chainID, addr)
-				if _, ok := out[key]; !ok {
-					continue
-				}
-				if outTxs[key] == nil {
-					outTxs[key] = make(map[string]struct{})
-				}
-				outTxs[key][txHash] = struct{}{}
-				tokenAddress := normalizeAddress(lg.Address.Hex())
-				meta, ok := tokenMeta[tokenAddress]
-				if ok && len(lg.Data) > 0 && meta.priceUSD > 0 {
-					amount := amountToFloat(new(big.Int).SetBytes(lg.Data).String(), meta.decimals)
-					if amount > 0 {
-						activity := out[key]
-						activity.TransferOutUSD += amount * meta.priceUSD
-						out[key] = activity
-					}
-				}
-			}
-
-			inLogs, err := client.FilterLogs(ctx, ethereum.FilterQuery{
-				FromBlock: new(big.Int).SetUint64(fromBlock),
-				ToBlock:   new(big.Int).SetUint64(toBlock),
-				Addresses: tokenChunk,
-				Topics:    [][]common.Hash{{transferSig}, nil, walletChunk},
-			})
-			if err != nil {
-				return err
-			}
-			for _, lg := range inLogs {
-				if len(lg.Topics) < 3 {
-					continue
-				}
-				txHash := strings.ToLower(lg.TxHash.Hex())
-				if _, excluded := excludedTxHashes[txHash]; excluded {
-					continue
-				}
-				addr := normalizeAddress(common.BytesToAddress(lg.Topics[2].Bytes()).Hex())
-				key := smartMoneyWalletKey(chainID, addr)
-				if _, ok := out[key]; !ok {
-					continue
-				}
-				if inTxs[key] == nil {
-					inTxs[key] = make(map[string]struct{})
-				}
-				inTxs[key][txHash] = struct{}{}
-				tokenAddress := normalizeAddress(lg.Address.Hex())
-				meta, ok := tokenMeta[tokenAddress]
-				if ok && len(lg.Data) > 0 && meta.priceUSD > 0 {
-					amount := amountToFloat(new(big.Int).SetBytes(lg.Data).String(), meta.decimals)
-					if amount > 0 {
-						activity := out[key]
-						activity.TransferInUSD += amount * meta.priceUSD
-						out[key] = activity
-					}
-				}
-			}
-		}
-	}
-
-	for key, txs := range inTxs {
-		activity := out[key]
-		activity.HasTransferIn = len(txs) > 0
-		activity.TransferInCount = len(txs)
-		activity.TransferInUSD = round2(activity.TransferInUSD)
-		out[key] = activity
-	}
-	for key, txs := range outTxs {
-		activity := out[key]
-		activity.HasTransferOut = len(txs) > 0
-		activity.TransferOutCount = len(txs)
-		activity.TransferOutUSD = round2(activity.TransferOutUSD)
-		out[key] = activity
-	}
-	return nil
-}
-
-func (s *Service) loadSmartMoneyTransferTokenAddresses(ctx context.Context, wallets []models.MonitoredWallet, chainID int, baseTokens []string, start time.Time) ([]common.Address, error) {
-	seen := make(map[string]common.Address)
-	for _, raw := range baseTokens {
-		addr := normalizeAddress(raw)
-		if addr == "" {
-			continue
-		}
-		seen[addr] = common.HexToAddress(addr)
-	}
-
-	addresses := make([]string, 0, len(wallets))
-	addrSeen := make(map[string]struct{}, len(wallets))
-	for _, wallet := range wallets {
-		addr := normalizeAddress(wallet.Address)
-		if addr == "" {
-			continue
-		}
-		if _, ok := addrSeen[addr]; ok {
-			continue
-		}
-		addrSeen[addr] = struct{}{}
-		addresses = append(addresses, addr)
-	}
-	if len(addresses) == 0 {
-		return nil, nil
-	}
-
-	cutoff := dayStart(start).AddDate(0, 0, -30)
-	type tokenRow struct {
-		TokenAddress string
-	}
-	var rows []tokenRow
-	if err := database.DB.WithContext(ctx).
-		Raw(`
-			SELECT token_address
-			FROM (
-				SELECT token0_address AS token_address
-				FROM sm_lp_events
-				WHERE wallet_address IN ? AND chain_id = ? AND tx_timestamp >= ?
-				UNION
-				SELECT token1_address AS token_address
-				FROM sm_lp_events
-				WHERE wallet_address IN ? AND chain_id = ? AND tx_timestamp >= ?
-				UNION
-				SELECT token0_address AS token_address
-				FROM sm_lp_positions
-				WHERE wallet_address IN ? AND chain_id = ? AND status = 'open'
-				UNION
-				SELECT token1_address AS token_address
-				FROM sm_lp_positions
-				WHERE wallet_address IN ? AND chain_id = ? AND status = 'open'
-			) tokens
-		`, addresses, chainID, cutoff, addresses, chainID, cutoff, addresses, chainID, addresses, chainID).
-		Scan(&rows).Error; err != nil {
-		return nil, err
-	}
-
-	for _, row := range rows {
-		addr := normalizeAddress(row.TokenAddress)
-		if addr == "" {
-			continue
-		}
-		seen[addr] = common.HexToAddress(addr)
-	}
-
-	keys := make([]string, 0, len(seen))
-	for key := range seen {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	out := make([]common.Address, 0, len(keys))
-	for _, key := range keys {
-		out = append(out, seen[key])
-	}
-	return out, nil
-}
-
-func (s *Service) loadSmartMoneyLPEventTxHashes(ctx context.Context, wallets []models.MonitoredWallet, chainID int, start time.Time, end time.Time) (map[string]struct{}, error) {
-	out := make(map[string]struct{})
-	if len(wallets) == 0 {
-		return out, nil
-	}
-
-	addresses := make([]string, 0, len(wallets))
-	seen := make(map[string]struct{}, len(wallets))
-	for _, wallet := range wallets {
-		addr := normalizeAddress(wallet.Address)
-		if addr == "" {
-			continue
-		}
-		if _, ok := seen[addr]; ok {
-			continue
-		}
-		seen[addr] = struct{}{}
-		addresses = append(addresses, addr)
-	}
-	if len(addresses) == 0 {
-		return out, nil
-	}
-
-	type txRow struct {
-		TxHash string
-	}
-	var rows []txRow
-	if err := database.DB.WithContext(ctx).
-		Model(&models.SmartMoneyLPEvent{}).
-		Select("DISTINCT tx_hash").
-		Where("chain_id = ? AND wallet_address IN ? AND tx_timestamp >= ? AND tx_timestamp < ?", chainID, addresses, start, end).
-		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	for _, row := range rows {
-		txHash := strings.ToLower(strings.TrimSpace(row.TxHash))
-		if txHash == "" {
-			continue
-		}
-		out[txHash] = struct{}{}
+		key := smartMoneyWalletKey(row.ChainID, row.WalletAddress)
+		activity := out[key]
+		activity.HasTransferIn = row.HasTransferIn > 0
+		activity.HasTransferOut = row.HasTransferOut > 0
+		activity.TransferInCount = row.TransferInCount
+		activity.TransferOutCount = row.TransferOutCount
+		activity.TransferInUSD = round2(row.TransferInUSD)
+		activity.TransferOutUSD = round2(row.TransferOutUSD)
+		out[key] = activity
 	}
 	return out, nil
-}
-
-func (s *Service) findBlockRangeForTimeWindow(ctx context.Context, client *ethclient.Client, start time.Time, end time.Time) (uint64, uint64, bool, error) {
-	if client == nil || !start.Before(end) {
-		return 0, 0, false, nil
-	}
-
-	latest, err := client.BlockNumber(ctx)
-	if err != nil {
-		return 0, 0, false, err
-	}
-	fromBlock, err := s.findFirstBlockAtOrAfter(ctx, client, latest, start)
-	if err != nil {
-		return 0, 0, false, err
-	}
-	if fromBlock > latest {
-		return 0, 0, false, nil
-	}
-
-	toExclusive, err := s.findFirstBlockAtOrAfter(ctx, client, latest, end)
-	if err != nil {
-		return 0, 0, false, err
-	}
-	if toExclusive <= fromBlock {
-		return 0, 0, false, nil
-	}
-	if toExclusive > latest {
-		return fromBlock, latest, true, nil
-	}
-	return fromBlock, toExclusive - 1, true, nil
-}
-
-func (s *Service) findFirstBlockAtOrAfter(ctx context.Context, client *ethclient.Client, latest uint64, target time.Time) (uint64, error) {
-	latestHeader, err := client.HeaderByNumber(ctx, new(big.Int).SetUint64(latest))
-	if err != nil {
-		return 0, err
-	}
-	if latestHeader == nil {
-		return 0, fmt.Errorf("latest header unavailable")
-	}
-	if time.Unix(int64(latestHeader.Time), 0).Before(target) {
-		return latest + 1, nil
-	}
-
-	low := uint64(0)
-	high := latest
-	for low < high {
-		mid := low + (high-low)/2
-		header, err := client.HeaderByNumber(ctx, new(big.Int).SetUint64(mid))
-		if err != nil {
-			return 0, err
-		}
-		if header == nil {
-			return 0, fmt.Errorf("header unavailable for block %d", mid)
-		}
-		if time.Unix(int64(header.Time), 0).Before(target) {
-			low = mid + 1
-		} else {
-			high = mid
-		}
-	}
-	return low, nil
 }
 
 func (s *Service) captureSmartMoneyWalletSnapshots(ctx context.Context, day time.Time) error {
@@ -1824,9 +1435,9 @@ func (s *Service) captureSmartMoneyWalletSnapshots(ctx context.Context, day time
 		return err
 	}
 	dayKey := formatDay(day)
-	transferActivity, transferErr := s.detectSmartMoneyWalletTransferActivity(ctx, wallets, day)
-	if transferErr != nil {
-		log.Printf("[Assets] smart money transfer detection incomplete day=%s err=%v", dayKey, transferErr)
+	transferActivity, err := s.loadSmartMoneyTransferActivity(ctx, wallets, dayStart(day), dayEnd(day))
+	if err != nil {
+		return err
 	}
 	if err := database.DB.WithContext(ctx).
 		Where("snapshot_day = ?", dayKey).

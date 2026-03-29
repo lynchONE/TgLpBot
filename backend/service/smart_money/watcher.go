@@ -2,6 +2,7 @@ package smart_money
 
 import (
 	"TgLpBot/base/blockchain"
+	"TgLpBot/base/config"
 	"TgLpBot/base/models"
 	"TgLpBot/base/rpcpool"
 	"context"
@@ -15,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"TgLpBot/service/pricing"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -28,14 +30,16 @@ var (
 	TopicIncreaseLiquidity = crypto.Keccak256Hash([]byte("IncreaseLiquidity(uint256,uint128,uint256,uint256)"))
 	TopicDecreaseLiquidity = crypto.Keccak256Hash([]byte("DecreaseLiquidity(uint256,uint128,uint256,uint256)"))
 	TopicModifyLiquidity   = crypto.Keccak256Hash([]byte("ModifyLiquidity(bytes32,address,int24,int24,int256,bytes32)"))
+	TopicTransfer          = crypto.Keccak256Hash([]byte("Transfer(address,address,uint256)"))
 )
 
 const (
-	smartMoneyMaxBlocksPerPoll = 25
-	smartMoneyMaxEventWorkers  = 8
-	smartMoneyBaseErrorDelay   = 5 * time.Second
-	smartMoneyRateLimitDelay   = 15 * time.Second
-	smartMoneyMaxRetryDelay    = time.Minute
+	smartMoneyMaxBlocksPerPoll        = 25
+	smartMoneyMaxEventWorkers         = 8
+	smartMoneyTransferWalletChunkSize = 32
+	smartMoneyBaseErrorDelay          = 5 * time.Second
+	smartMoneyRateLimitDelay          = 15 * time.Second
+	smartMoneyMaxRetryDelay           = time.Minute
 )
 
 type Watcher struct {
@@ -51,9 +55,10 @@ type Watcher struct {
 }
 
 type blockTransaction struct {
-	Hash common.Hash
-	From string
-	To   string
+	Hash  common.Hash
+	From  string
+	To    string
+	Value string
 }
 
 type blockSnapshot struct {
@@ -67,9 +72,10 @@ type rawBlockSnapshot struct {
 	Number       string `json:"number"`
 	Timestamp    string `json:"timestamp"`
 	Transactions []struct {
-		Hash string  `json:"hash"`
-		From string  `json:"from"`
-		To   *string `json:"to"`
+		Hash  string  `json:"hash"`
+		From  string  `json:"from"`
+		To    *string `json:"to"`
+		Value string  `json:"value"`
 	} `json:"transactions"`
 }
 
@@ -82,6 +88,13 @@ type lpLogStats struct {
 	TotalLogs        int
 	ActiveWalletLogs int
 	HandledEvents    int
+}
+
+type transferTokenMeta struct {
+	address  string
+	symbol   string
+	decimals int
+	priceUSD float64
 }
 
 type blockProcessStats struct {
@@ -325,7 +338,7 @@ func (w *Watcher) pollOnce(ctx context.Context, lastProcessed *uint64) (pollResu
 	}
 
 	activeWallets := make(map[string]struct{})
-	if len(w.lpContracts) > 0 {
+	if len(w.lpContracts) > 0 || len(contractByAddr) > 0 {
 		activeWallets, err = w.repo.GetAllActiveWalletAddresses(ctx, int(w.chainID))
 		if err != nil {
 			return pollResult{}, err
@@ -337,6 +350,11 @@ func (w *Watcher) pollOnce(ctx context.Context, lastProcessed *uint64) (pollResu
 		return pollResult{}, err
 	}
 	logsByBlock, err := w.loadLPLogsByBlock(ctx, httpClient, eff, fromBlock, toBlock)
+	if err != nil {
+		return pollResult{}, err
+	}
+	excludedLPTxHashesByBlock := collectActiveWalletLPTxHashes(blocks, logsByBlock, activeWallets)
+	transferEventsByBlock, err := w.loadWalletTransferEventsByBlock(ctx, httpClient, eff, blocks, activeWallets, excludedLPTxHashesByBlock)
 	if err != nil {
 		return pollResult{}, err
 	}
@@ -365,6 +383,14 @@ func (w *Watcher) pollOnce(ctx context.Context, lastProcessed *uint64) (pollResu
 			}
 			blockStats.LPActiveWalletLogs = lpStats.ActiveWalletLogs
 			blockStats.LPEventCount = lpStats.HandledEvents
+		}
+		if transferEvents := transferEventsByBlock[block.Number]; len(transferEvents) > 0 {
+			if err := w.repo.WithTx(ctx, func(tx *gorm.DB) error {
+				_, err := w.repo.InsertWalletTransferEvents(tx, transferEvents)
+				return err
+			}); err != nil {
+				return pollResult{}, fmt.Errorf("persist block %d transfer events: %w", block.Number, err)
+			}
 		}
 
 		stats.addBlock(blockStats)
@@ -517,11 +543,16 @@ func decodeRawBlockSnapshot(blockNum uint64, raw rawBlockSnapshot) (*blockSnapsh
 		if tx.To != nil {
 			to = normalizeHexAddress(*tx.To)
 		}
+		value := "0"
+		if amount, err := parseHexBigInt(tx.Value); err == nil && amount != nil && amount.Sign() > 0 {
+			value = amount.String()
+		}
 		hash := common.HexToHash(hashHex)
 		snapshot.Transactions = append(snapshot.Transactions, blockTransaction{
-			Hash: hash,
-			From: from,
-			To:   to,
+			Hash:  hash,
+			From:  from,
+			To:    to,
+			Value: value,
 		})
 		snapshot.TxSenders[hash] = from
 	}
@@ -615,6 +646,350 @@ func (w *Watcher) loadLPLogsByBlock(ctx context.Context, client *ethclient.Clien
 		logsByBlock[vlog.BlockNumber] = append(logsByBlock[vlog.BlockNumber], vlog)
 	}
 	return logsByBlock, nil
+}
+
+func collectActiveWalletLPTxHashes(blocks []*blockSnapshot, logsByBlock map[uint64][]types.Log, activeWallets map[string]struct{}) map[uint64]map[string]struct{} {
+	out := make(map[uint64]map[string]struct{})
+	if len(blocks) == 0 || len(logsByBlock) == 0 || len(activeWallets) == 0 {
+		return out
+	}
+
+	blockByNumber := make(map[uint64]*blockSnapshot, len(blocks))
+	for _, block := range blocks {
+		if block == nil {
+			continue
+		}
+		blockByNumber[block.Number] = block
+	}
+
+	for blockNumber, logs := range logsByBlock {
+		block := blockByNumber[blockNumber]
+		if block == nil {
+			continue
+		}
+		for _, vlog := range logs {
+			sender := block.TxSenders[vlog.TxHash]
+			if sender == "" {
+				continue
+			}
+			if _, ok := activeWallets[sender]; !ok {
+				continue
+			}
+			if out[blockNumber] == nil {
+				out[blockNumber] = make(map[string]struct{})
+			}
+			out[blockNumber][strings.ToLower(vlog.TxHash.Hex())] = struct{}{}
+		}
+	}
+	return out
+}
+
+func isExcludedWalletTransferTx(excluded map[uint64]map[string]struct{}, blockNumber uint64, txHash string) bool {
+	if len(excluded) == 0 || strings.TrimSpace(txHash) == "" {
+		return false
+	}
+	blockSet := excluded[blockNumber]
+	if len(blockSet) == 0 {
+		return false
+	}
+	_, ok := blockSet[strings.ToLower(strings.TrimSpace(txHash))]
+	return ok
+}
+
+func (w *Watcher) loadWalletTransferEventsByBlock(ctx context.Context, client *ethclient.Client, eff rpcpool.Effective, blocks []*blockSnapshot, activeWallets map[string]struct{}, excludedLPTxHashesByBlock map[uint64]map[string]struct{}) (map[uint64][]*models.SmartMoneyWalletTransferEvent, error) {
+	out := make(map[uint64][]*models.SmartMoneyWalletTransferEvent)
+	if len(blocks) == 0 || len(activeWallets) == 0 {
+		return out, nil
+	}
+
+	for blockNumber, events := range buildNativeTransferEventsByBlock(blocks, int(w.chainID), activeWallets, excludedLPTxHashesByBlock) {
+		out[blockNumber] = append(out[blockNumber], events...)
+	}
+
+	erc20ByBlock, err := w.loadERC20TransferEventsByBlock(ctx, client, eff, blocks, activeWallets, excludedLPTxHashesByBlock)
+	if err != nil {
+		return nil, err
+	}
+	for blockNumber, events := range erc20ByBlock {
+		out[blockNumber] = append(out[blockNumber], events...)
+	}
+	return out, nil
+}
+
+func buildNativeTransferEventsByBlock(blocks []*blockSnapshot, chainID int, activeWallets map[string]struct{}, excludedLPTxHashesByBlock map[uint64]map[string]struct{}) map[uint64][]*models.SmartMoneyWalletTransferEvent {
+	out := make(map[uint64][]*models.SmartMoneyWalletTransferEvent)
+	if len(blocks) == 0 || len(activeWallets) == 0 {
+		return out
+	}
+
+	chain := smartMoneyChainName(chainID)
+	priceUSD := pricing.GetNativePriceUSD(chain)
+	tokenAddress := ""
+	tokenSymbol := ""
+	if config.AppConfig != nil {
+		if cc, ok := config.AppConfig.GetChainConfig(chain); ok {
+			tokenAddress = strings.ToLower(strings.TrimSpace(cc.WrappedNativeAddress))
+			tokenSymbol = strings.TrimSpace(cc.WrappedNativeSymbol)
+		}
+	}
+
+	for _, block := range blocks {
+		if block == nil {
+			continue
+		}
+		for _, tx := range block.Transactions {
+			if tx.Value == "" || tx.Value == "0" {
+				continue
+			}
+			txHash := strings.ToLower(tx.Hash.Hex())
+			if isExcludedWalletTransferTx(excludedLPTxHashesByBlock, block.Number, txHash) {
+				continue
+			}
+			if tx.From != "" && tx.From == tx.To {
+				continue
+			}
+
+			amountDecimal := weiStringToFloat(tx.Value, 18)
+			if amountDecimal <= 0 {
+				continue
+			}
+			amountUSD := amountDecimal * priceUSD
+
+			if _, ok := activeWallets[tx.From]; ok {
+				out[block.Number] = append(out[block.Number], &models.SmartMoneyWalletTransferEvent{
+					WalletAddress: tx.From,
+					ChainID:       chainID,
+					Direction:     models.SmartMoneyTransferDirectionOut,
+					AssetType:     models.SmartMoneyTransferAssetNative,
+					TokenAddress:  tokenAddress,
+					TokenSymbol:   tokenSymbol,
+					TokenDecimals: 18,
+					AmountRaw:     tx.Value,
+					AmountDecimal: amountDecimal,
+					AmountUSD:     amountUSD,
+					TxHash:        txHash,
+					BlockNumber:   block.Number,
+					LogIndex:      -1,
+					TxTimestamp:   block.Timestamp,
+				})
+			}
+			if tx.To != "" {
+				if _, ok := activeWallets[tx.To]; ok {
+					out[block.Number] = append(out[block.Number], &models.SmartMoneyWalletTransferEvent{
+						WalletAddress: tx.To,
+						ChainID:       chainID,
+						Direction:     models.SmartMoneyTransferDirectionIn,
+						AssetType:     models.SmartMoneyTransferAssetNative,
+						TokenAddress:  tokenAddress,
+						TokenSymbol:   tokenSymbol,
+						TokenDecimals: 18,
+						AmountRaw:     tx.Value,
+						AmountDecimal: amountDecimal,
+						AmountUSD:     amountUSD,
+						TxHash:        txHash,
+						BlockNumber:   block.Number,
+						LogIndex:      -1,
+						TxTimestamp:   block.Timestamp,
+					})
+				}
+			}
+		}
+	}
+	return out
+}
+
+func (w *Watcher) loadERC20TransferEventsByBlock(ctx context.Context, client *ethclient.Client, eff rpcpool.Effective, blocks []*blockSnapshot, activeWallets map[string]struct{}, excludedLPTxHashesByBlock map[uint64]map[string]struct{}) (map[uint64][]*models.SmartMoneyWalletTransferEvent, error) {
+	out := make(map[uint64][]*models.SmartMoneyWalletTransferEvent)
+	if len(blocks) == 0 || len(activeWallets) == 0 {
+		return out, nil
+	}
+
+	blockTimeByNumber := make(map[uint64]time.Time, len(blocks))
+	fromBlock := blocks[0].Number
+	toBlock := blocks[len(blocks)-1].Number
+	walletAddresses := make([]string, 0, len(activeWallets))
+	for addr := range activeWallets {
+		if strings.TrimSpace(addr) == "" {
+			continue
+		}
+		walletAddresses = append(walletAddresses, addr)
+	}
+	sort.Strings(walletAddresses)
+	if len(walletAddresses) == 0 {
+		return out, nil
+	}
+	for _, block := range blocks {
+		if block == nil {
+			continue
+		}
+		blockTimeByNumber[block.Number] = block.Timestamp
+	}
+
+	walletTopics := make([]common.Hash, 0, len(walletAddresses))
+	for _, addr := range walletAddresses {
+		walletTopics = append(walletTopics, common.BytesToHash(common.HexToAddress(addr).Bytes()))
+	}
+
+	candidates := make([]*models.SmartMoneyWalletTransferEvent, 0)
+	for start := 0; start < len(walletTopics); start += smartMoneyTransferWalletChunkSize {
+		end := start + smartMoneyTransferWalletChunkSize
+		if end > len(walletTopics) {
+			end = len(walletTopics)
+		}
+		walletChunk := walletTopics[start:end]
+
+		outLogs, err := client.FilterLogs(ctx, ethereum.FilterQuery{
+			FromBlock: new(big.Int).SetUint64(fromBlock),
+			ToBlock:   new(big.Int).SetUint64(toBlock),
+			Topics:    [][]common.Hash{{TopicTransfer}, walletChunk},
+		})
+		if err != nil {
+			handleSmartMoneyRPCEndpointError(eff, err)
+			return nil, err
+		}
+		candidates = append(candidates, buildERC20TransferEventsFromLogs(outLogs, int(w.chainID), models.SmartMoneyTransferDirectionOut, activeWallets, blockTimeByNumber, excludedLPTxHashesByBlock)...)
+
+		inLogs, err := client.FilterLogs(ctx, ethereum.FilterQuery{
+			FromBlock: new(big.Int).SetUint64(fromBlock),
+			ToBlock:   new(big.Int).SetUint64(toBlock),
+			Topics:    [][]common.Hash{{TopicTransfer}, nil, walletChunk},
+		})
+		if err != nil {
+			handleSmartMoneyRPCEndpointError(eff, err)
+			return nil, err
+		}
+		candidates = append(candidates, buildERC20TransferEventsFromLogs(inLogs, int(w.chainID), models.SmartMoneyTransferDirectionIn, activeWallets, blockTimeByNumber, excludedLPTxHashesByBlock)...)
+	}
+
+	enrichERC20TransferEvents(ctx, client, int(w.chainID), candidates)
+	for _, event := range candidates {
+		if event == nil {
+			continue
+		}
+		out[event.BlockNumber] = append(out[event.BlockNumber], event)
+	}
+	return out, nil
+}
+
+func buildERC20TransferEventsFromLogs(logs []types.Log, chainID int, direction string, activeWallets map[string]struct{}, blockTimeByNumber map[uint64]time.Time, excludedLPTxHashesByBlock map[uint64]map[string]struct{}) []*models.SmartMoneyWalletTransferEvent {
+	out := make([]*models.SmartMoneyWalletTransferEvent, 0, len(logs))
+	for _, vlog := range logs {
+		if len(vlog.Topics) < 3 || len(vlog.Data) == 0 {
+			continue
+		}
+		txHash := strings.ToLower(vlog.TxHash.Hex())
+		if isExcludedWalletTransferTx(excludedLPTxHashesByBlock, vlog.BlockNumber, txHash) {
+			continue
+		}
+
+		from := normalizeHexAddress(common.BytesToAddress(vlog.Topics[1].Bytes()).Hex())
+		to := normalizeHexAddress(common.BytesToAddress(vlog.Topics[2].Bytes()).Hex())
+		if from == "" && to == "" {
+			continue
+		}
+		if from != "" && from == to {
+			continue
+		}
+
+		walletAddress := from
+		if direction == models.SmartMoneyTransferDirectionIn {
+			walletAddress = to
+		}
+		if _, ok := activeWallets[walletAddress]; !ok {
+			continue
+		}
+
+		amountRaw := new(big.Int).SetBytes(vlog.Data).String()
+		if amountRaw == "" || amountRaw == "0" {
+			continue
+		}
+		tokenAddress := strings.ToLower(strings.TrimSpace(vlog.Address.Hex()))
+
+		out = append(out, &models.SmartMoneyWalletTransferEvent{
+			WalletAddress: walletAddress,
+			ChainID:       chainID,
+			Direction:     direction,
+			AssetType:     models.SmartMoneyTransferAssetERC20,
+			TokenAddress:  tokenAddress,
+			AmountRaw:     amountRaw,
+			TxHash:        txHash,
+			BlockNumber:   vlog.BlockNumber,
+			LogIndex:      int(vlog.Index),
+			TxTimestamp:   blockTimeByNumber[vlog.BlockNumber],
+		})
+	}
+	return out
+}
+
+func enrichERC20TransferEvents(ctx context.Context, client *ethclient.Client, chainID int, events []*models.SmartMoneyWalletTransferEvent) {
+	if len(events) == 0 || client == nil {
+		return
+	}
+
+	chain := smartMoneyChainName(chainID)
+	network := smartMoneyChainSlugForPricing(chainID)
+	tokenAddresses := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, event := range events {
+		if event == nil || event.AssetType != models.SmartMoneyTransferAssetERC20 {
+			continue
+		}
+		addr := strings.ToLower(strings.TrimSpace(event.TokenAddress))
+		if addr == "" {
+			continue
+		}
+		if _, ok := seen[addr]; ok {
+			continue
+		}
+		seen[addr] = struct{}{}
+		tokenAddresses = append(tokenAddresses, addr)
+	}
+	if len(tokenAddresses) == 0 {
+		return
+	}
+
+	prices, err := smTokenPriceService.GetUSDPrices(network, tokenAddresses)
+	if err != nil {
+		log.Printf("[SmartMoney Watcher] erc20 transfer price lookup failed chain=%s err=%v", network, err)
+	}
+
+	wrappedNativeAddr := ""
+	if config.AppConfig != nil {
+		if cc, ok := config.AppConfig.GetChainConfig(chain); ok {
+			wrappedNativeAddr = strings.ToLower(strings.TrimSpace(cc.WrappedNativeAddress))
+		}
+	}
+	nativePriceUSD := pricing.GetNativePriceUSD(chain)
+
+	metaByToken := make(map[string]transferTokenMeta, len(tokenAddresses))
+	for _, tokenAddress := range tokenAddresses {
+		meta := transferTokenMeta{
+			address:  tokenAddress,
+			decimals: readTokenDecimalsWithClient(client, tokenAddress),
+			priceUSD: prices[tokenAddress],
+		}
+		if wrappedNativeAddr != "" && tokenAddress == wrappedNativeAddr && meta.priceUSD <= 0 {
+			meta.priceUSD = nativePriceUSD
+		}
+		if symbol, err := blockchain.GetTokenSymbolWithClient(client, common.HexToAddress(tokenAddress)); err == nil {
+			meta.symbol = strings.TrimSpace(symbol)
+		}
+		metaByToken[tokenAddress] = meta
+	}
+
+	for _, event := range events {
+		if event == nil || event.AssetType != models.SmartMoneyTransferAssetERC20 {
+			continue
+		}
+		meta := metaByToken[strings.ToLower(strings.TrimSpace(event.TokenAddress))]
+		if meta.decimals <= 0 {
+			meta.decimals = 18
+		}
+		event.TokenDecimals = meta.decimals
+		event.TokenSymbol = meta.symbol
+		event.AmountDecimal = weiStringToFloat(event.AmountRaw, meta.decimals)
+		event.AmountUSD = event.AmountDecimal * meta.priceUSD
+	}
 }
 
 func (w *Watcher) processLPLogsForBlock(ctx context.Context, block *blockSnapshot, logs []types.Log, activeWallets map[string]struct{}) (lpLogStats, error) {
@@ -1103,6 +1478,19 @@ func parseHexUint64(value string) (uint64, error) {
 		return 0, nil
 	}
 	return strconv.ParseUint(value, 16, 64)
+}
+
+func parseHexBigInt(value string) (*big.Int, error) {
+	value = strings.TrimSpace(value)
+	value = strings.TrimPrefix(strings.ToLower(value), "0x")
+	if value == "" {
+		return big.NewInt(0), nil
+	}
+	out, ok := new(big.Int).SetString(value, 16)
+	if !ok {
+		return nil, fmt.Errorf("invalid hex bigint: %s", value)
+	}
+	return out, nil
 }
 
 func normalizeHexAddress(value string) string {

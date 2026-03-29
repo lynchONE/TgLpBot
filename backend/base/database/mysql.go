@@ -85,6 +85,7 @@ func autoMigrate() error {
 		&models.SmartMoneyLPEvent{},
 		&models.SmartMoneyLPPosition{},
 		&models.SmartMoneyActivePosition{},
+		&models.SmartMoneyWalletTransferEvent{},
 		&models.SmartMoneyWalletDailySnapshot{},
 		&models.SmartMoneyLPDailyStat{},
 		&models.SmartMoneyGoldenDogConfig{},

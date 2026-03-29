@@ -18,6 +18,17 @@ import (
 
 type Repository struct{}
 
+type WalletTransferActivityRow struct {
+	WalletAddress    string
+	ChainID          int
+	HasTransferIn    int
+	HasTransferOut   int
+	TransferInCount  int
+	TransferOutCount int
+	TransferInUSD    float64
+	TransferOutUSD   float64
+}
+
 const smartMoneyNetAmountOrderJoin = `
 LEFT JOIN sm_lp_active_positions ap
 	ON ap.chain_id = sm_lp_positions.chain_id AND ap.nft_token_id = sm_lp_positions.nft_token_id
@@ -214,6 +225,89 @@ func (r *Repository) UpdateWatchContractLastBlock(ctx context.Context, id uint, 
 	return database.DB.WithContext(ctx).Model(&models.WatchContract{}).
 		Where("id = ?", id).
 		Update("last_scanned_block", blockNum).Error
+}
+
+// --- SmartMoneyWalletTransferEvent ---
+
+func (r *Repository) InsertWalletTransferEvents(tx *gorm.DB, events []*models.SmartMoneyWalletTransferEvent) (int64, error) {
+	if tx == nil || len(events) == 0 {
+		return 0, nil
+	}
+
+	items := make([]*models.SmartMoneyWalletTransferEvent, 0, len(events))
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+		event.WalletAddress = strings.ToLower(strings.TrimSpace(event.WalletAddress))
+		event.Direction = strings.ToLower(strings.TrimSpace(event.Direction))
+		event.AssetType = strings.ToLower(strings.TrimSpace(event.AssetType))
+		event.TokenAddress = strings.ToLower(strings.TrimSpace(event.TokenAddress))
+		event.TokenSymbol = strings.TrimSpace(event.TokenSymbol)
+		event.TxHash = strings.ToLower(strings.TrimSpace(event.TxHash))
+		items = append(items, event)
+	}
+	if len(items) == 0 {
+		return 0, nil
+	}
+
+	res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(items)
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	return res.RowsAffected, nil
+}
+
+func (r *Repository) AggregateWalletTransferActivity(ctx context.Context, wallets []models.MonitoredWallet, start time.Time, end time.Time) ([]WalletTransferActivityRow, error) {
+	if len(wallets) == 0 || !start.Before(end) {
+		return nil, nil
+	}
+
+	addresses := make([]string, 0, len(wallets))
+	chainIDs := make([]int, 0, len(wallets))
+	addrSeen := make(map[string]struct{}, len(wallets))
+	chainSeen := make(map[int]struct{}, len(wallets))
+	for _, wallet := range wallets {
+		addr := strings.ToLower(strings.TrimSpace(wallet.Address))
+		if addr != "" {
+			if _, ok := addrSeen[addr]; !ok {
+				addrSeen[addr] = struct{}{}
+				addresses = append(addresses, addr)
+			}
+		}
+		if _, ok := chainSeen[wallet.ChainID]; !ok {
+			chainSeen[wallet.ChainID] = struct{}{}
+			chainIDs = append(chainIDs, wallet.ChainID)
+		}
+	}
+	if len(addresses) == 0 || len(chainIDs) == 0 {
+		return nil, nil
+	}
+
+	var rows []WalletTransferActivityRow
+	err := database.DB.WithContext(ctx).
+		Raw(`
+			SELECT
+				wallet_address,
+				chain_id,
+				MAX(CASE WHEN direction = 'in' THEN 1 ELSE 0 END) AS has_transfer_in,
+				MAX(CASE WHEN direction = 'out' THEN 1 ELSE 0 END) AS has_transfer_out,
+				COALESCE(SUM(CASE WHEN direction = 'in' THEN 1 ELSE 0 END), 0) AS transfer_in_count,
+				COALESCE(SUM(CASE WHEN direction = 'out' THEN 1 ELSE 0 END), 0) AS transfer_out_count,
+				COALESCE(SUM(CASE WHEN direction = 'in' THEN amount_usd ELSE 0 END), 0) AS transfer_in_usd,
+				COALESCE(SUM(CASE WHEN direction = 'out' THEN amount_usd ELSE 0 END), 0) AS transfer_out_usd
+			FROM sm_wallet_transfer_events
+			WHERE wallet_address IN ?
+			  AND chain_id IN ?
+			  AND tx_timestamp >= ?
+			  AND tx_timestamp < ?
+			GROUP BY wallet_address, chain_id
+		`, addresses, chainIDs, start, end).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 // --- SmartMoneyLPEvent ---
