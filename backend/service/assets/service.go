@@ -226,11 +226,19 @@ type UserLPPoolPnL struct {
 }
 
 type UserLPDailyPoint struct {
-	Day            string  `json:"day"`
-	RealizedPnLUSD float64 `json:"realized_pnl_usd"`
-	ClosedCount    int     `json:"closed_count"`
-	WinCount       int     `json:"win_count"`
-	LossCount      int     `json:"loss_count"`
+	Day                string  `json:"day"`
+	RealizedPnLUSD     float64 `json:"realized_pnl_usd"`
+	ClosedCount        int     `json:"closed_count"`
+	WinCount           int     `json:"win_count"`
+	LossCount          int     `json:"loss_count"`
+	HasTransferIn      bool    `json:"has_transfer_in,omitempty"`
+	HasTransferOut     bool    `json:"has_transfer_out,omitempty"`
+	TransferInCount    int     `json:"transfer_in_count,omitempty"`
+	TransferOutCount   int     `json:"transfer_out_count,omitempty"`
+	TransferTotalCount int     `json:"transfer_total_count,omitempty"`
+	TransferInUSD      float64 `json:"transfer_in_usd,omitempty"`
+	TransferOutUSD     float64 `json:"transfer_out_usd,omitempty"`
+	TransferNetUSD     float64 `json:"transfer_net_usd,omitempty"`
 }
 
 type UserLPStatsResponse struct {
@@ -262,8 +270,10 @@ type SmartMoneyHistoryPoint struct {
 	HasTransferOut          bool    `json:"has_transfer_out,omitempty"`
 	TransferInCount         int     `json:"transfer_in_count,omitempty"`
 	TransferOutCount        int     `json:"transfer_out_count,omitempty"`
+	TransferTotalCount      int     `json:"transfer_total_count,omitempty"`
 	TransferInUSD           float64 `json:"transfer_in_usd,omitempty"`
 	TransferOutUSD          float64 `json:"transfer_out_usd,omitempty"`
+	TransferNetUSD          float64 `json:"transfer_net_usd,omitempty"`
 }
 
 type SmartMoneyWindowStats struct {
@@ -341,8 +351,10 @@ type SmartMoneyLeaderboardEntry struct {
 	HasTransferOut          bool    `json:"has_transfer_out,omitempty"`
 	TransferInCount         int     `json:"transfer_in_count,omitempty"`
 	TransferOutCount        int     `json:"transfer_out_count,omitempty"`
+	TransferTotalCount      int     `json:"transfer_total_count,omitempty"`
 	TransferInUSD           float64 `json:"transfer_in_usd,omitempty"`
 	TransferOutUSD          float64 `json:"transfer_out_usd,omitempty"`
+	TransferNetUSD          float64 `json:"transfer_net_usd,omitempty"`
 }
 
 type SmartMoneyLeaderboardResponse struct {

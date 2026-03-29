@@ -113,51 +113,50 @@ function hasTransferMarker(item) {
     return Boolean(
         item?.has_transfer_in ||
         item?.has_transfer_out ||
+        Number(item?.transfer_total_count || 0) > 0 ||
         Number(item?.transfer_in_count || 0) > 0 ||
         Number(item?.transfer_out_count || 0) > 0 ||
+        Number(item?.transfer_net_usd || 0) !== 0 ||
         Number(item?.transfer_in_usd || 0) > 0 ||
         Number(item?.transfer_out_usd || 0) > 0
     );
 }
 
 function TransferBadges({ item, compact = false }) {
+    const totalCount = Number(item?.transfer_total_count || 0) || (Number(item?.transfer_in_count || 0) + Number(item?.transfer_out_count || 0));
     const inCount = Number(item?.transfer_in_count || 0);
     const outCount = Number(item?.transfer_out_count || 0);
     const inUsd = Number(item?.transfer_in_usd || 0);
     const outUsd = Number(item?.transfer_out_usd || 0);
-    const badges = [];
-    if (item?.has_transfer_in || inCount > 0) {
-        badges.push({
-            key: 'in',
-            label: compact ? '入' : `转入${inCount > 0 ? ` ${inCount}` : ''}`,
-            className: 'border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-700 dark:text-emerald-300',
-        });
-        badges[badges.length - 1].label = compact
-            ? (inUsd > 0 ? `+${formatUsdCompact(inUsd).replace('$', '')}` : '转入')
-            : `转入${inUsd > 0 ? ` ${formatUsdCompact(inUsd)}` : ''}${inCount > 0 ? ` · ${inCount}笔` : ''}`;
-    }
-    if (item?.has_transfer_out || outCount > 0) {
-        badges.push({
-            key: 'out',
-            label: compact ? '出' : `转出${outCount > 0 ? ` ${outCount}` : ''}`,
-            className: 'border-amber-500/25 bg-amber-500/[0.10] text-amber-700 dark:text-amber-300',
-        });
-        badges[badges.length - 1].label = compact
-            ? (outUsd > 0 ? `-${formatUsdCompact(outUsd).replace('$', '')}` : '转出')
-            : `转出${outUsd > 0 ? ` ${formatUsdCompact(outUsd)}` : ''}${outCount > 0 ? ` · ${outCount}笔` : ''}`;
-    }
-    if (!badges.length) return null;
+    const rawNetUsd = item?.transfer_net_usd !== undefined && item?.transfer_net_usd !== null
+        ? Number(item.transfer_net_usd || 0)
+        : (inUsd - outUsd);
+    if (!hasTransferMarker(item)) return null;
+    const absNetUsd = Math.abs(rawNetUsd);
+    const isNetIn = rawNetUsd > 0;
+    const isNetOut = rawNetUsd < 0;
+    const badge = {
+        key: isNetIn ? 'net-in' : isNetOut ? 'net-out' : 'net-flat',
+        label: '',
+        className: isNetIn
+            ? 'border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-700 dark:text-emerald-300'
+            : isNetOut
+                ? 'border-amber-500/25 bg-amber-500/[0.10] text-amber-700 dark:text-amber-300'
+                : 'border-cyan-500/25 bg-cyan-500/[0.10] text-cyan-700 dark:text-cyan-300',
+    };
+    const amountText = absNetUsd > 0 ? formatUsdCompact(absNetUsd) : '';
+    badge.label = compact
+        ? (absNetUsd > 0 ? `${isNetOut ? '-' : '+'}${amountText.replace('$', '')}` : (totalCount > 0 ? `${totalCount}笔` : '转账'))
+        : `${isNetIn ? '净转入' : isNetOut ? '净转出' : '净转账'}${amountText ? ` ${amountText}` : ''}${totalCount > 0 ? ` · ${totalCount}笔` : ''}`;
     return (
         <div className={`flex flex-wrap gap-1 ${compact ? 'justify-center min-h-[12px]' : ''}`.trim()}>
-            {badges.map((badge) => (
-                <span
-                    key={badge.key}
-                    className={`inline-flex items-center justify-center rounded-full border px-1.5 py-0.5 font-bold leading-none ${badge.className}`}
-                    style={{ fontSize: compact ? 9 : 10 }}
-                >
-                    {badge.label}
-                </span>
-            ))}
+            <span
+                key={badge.key}
+                className={`inline-flex items-center justify-center rounded-full border px-1.5 py-0.5 font-bold leading-none ${badge.className}`}
+                style={{ fontSize: compact ? 9 : 10 }}
+            >
+                {badge.label}
+            </span>
         </div>
     );
 }
@@ -1146,8 +1145,10 @@ export default function AssetManagementPage({
             has_transfer_out: Boolean(item.has_transfer_out),
             transfer_in_count: Number(item.transfer_in_count || 0),
             transfer_out_count: Number(item.transfer_out_count || 0),
+            transfer_total_count: Number(item.transfer_total_count || 0),
             transfer_in_usd: Number(item.transfer_in_usd || 0),
             transfer_out_usd: Number(item.transfer_out_usd || 0),
+            transfer_net_usd: Number(item.transfer_net_usd || 0),
         }));
     }, [smartMoneyWallet?.history]);
 
@@ -1333,7 +1334,7 @@ export default function AssetManagementPage({
                         <PnLCalendar
                             data={assetsData.lp?.daily_history}
                             loading={assetsLoading}
-                            note="收益额按资产快照差值计算；今日盈亏按实时总资产对比今日 0 点快照。"
+                            note="收益额按当日总资产变化减去当日净转账计算；今日盈亏按实时总资产对比昨日快照，并剔除今日净转账。"
                         />
                         {/* summary stats below chart */}
                         {Array.isArray(assetsData.lp?.windows) && assetsData.lp.windows.length > 0 && (
@@ -1528,7 +1529,7 @@ export default function AssetManagementPage({
                                     {/* PnL calendar (daily balance diff) */}
                                     <PnLCalendar
                                         data={smartMoneyPnlCalData}
-                                        note="日历优先展示 LP 已实现盈亏；若当天检测到转入或转出，则该日盈亏按 0 展示，并同步展示转账金额。"
+                                        note="收益额按当日总资产变化减去当日净转账计算；若当天存在多笔转账，仅展示净转入或净转出的汇总说明。"
                                     />
 
                                     {/* window stats */}

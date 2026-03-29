@@ -337,12 +337,23 @@ func (w *Watcher) pollOnce(ctx context.Context, lastProcessed *uint64) (pollResu
 		contractByAddr[addr] = contract
 	}
 
-	activeWallets := make(map[string]struct{})
+	smartMoneyWallets := make(map[string]struct{})
 	if len(w.lpContracts) > 0 || len(contractByAddr) > 0 {
-		activeWallets, err = w.repo.GetAllActiveWalletAddresses(ctx, int(w.chainID))
+		smartMoneyWallets, err = w.repo.GetAllActiveWalletAddresses(ctx, int(w.chainID))
 		if err != nil {
 			return pollResult{}, err
 		}
+	}
+	userWalletRefsByAddress, err := w.repo.GetAllUserWalletRefs(ctx)
+	if err != nil {
+		return pollResult{}, err
+	}
+	trackedTransferWallets := make(map[string]struct{}, len(smartMoneyWallets)+len(userWalletRefsByAddress))
+	for addr := range smartMoneyWallets {
+		trackedTransferWallets[addr] = struct{}{}
+	}
+	for addr := range userWalletRefsByAddress {
+		trackedTransferWallets[addr] = struct{}{}
 	}
 
 	blocks, err := w.loadBlockSnapshots(ctx, rpcClient, eff, fromBlock, toBlock)
@@ -353,8 +364,8 @@ func (w *Watcher) pollOnce(ctx context.Context, lastProcessed *uint64) (pollResu
 	if err != nil {
 		return pollResult{}, err
 	}
-	excludedLPTxHashesByBlock := collectActiveWalletLPTxHashes(blocks, logsByBlock, activeWallets)
-	transferEventsByBlock, err := w.loadWalletTransferEventsByBlock(ctx, httpClient, eff, blocks, activeWallets, excludedLPTxHashesByBlock)
+	excludedLPTxHashesByBlock := collectActiveWalletLPTxHashes(blocks, logsByBlock, trackedTransferWallets)
+	transferEventsByBlock, err := w.loadWalletTransferEventsByBlock(ctx, httpClient, eff, blocks, trackedTransferWallets, excludedLPTxHashesByBlock)
 	if err != nil {
 		return pollResult{}, err
 	}
@@ -372,12 +383,13 @@ func (w *Watcher) pollOnce(ctx context.Context, lastProcessed *uint64) (pollResu
 			}
 			blockStats.ContractTxCount = contractStats.MatchedTxCount
 			for _, wallet := range newWallets {
-				activeWallets[wallet] = struct{}{}
+				smartMoneyWallets[wallet] = struct{}{}
+				trackedTransferWallets[wallet] = struct{}{}
 			}
 		}
 
 		if blockStats.LPLogCount > 0 {
-			lpStats, err := w.processLPLogsForBlock(ctx, block, logsByBlock[block.Number], activeWallets)
+			lpStats, err := w.processLPLogsForBlock(ctx, block, logsByBlock[block.Number], smartMoneyWallets)
 			if err != nil {
 				return pollResult{}, fmt.Errorf("process block %d lp logs: %w", block.Number, err)
 			}
@@ -385,11 +397,24 @@ func (w *Watcher) pollOnce(ctx context.Context, lastProcessed *uint64) (pollResu
 			blockStats.LPEventCount = lpStats.HandledEvents
 		}
 		if transferEvents := transferEventsByBlock[block.Number]; len(transferEvents) > 0 {
-			if err := w.repo.WithTx(ctx, func(tx *gorm.DB) error {
-				_, err := w.repo.InsertWalletTransferEvents(tx, transferEvents)
-				return err
-			}); err != nil {
-				return pollResult{}, fmt.Errorf("persist block %d transfer events: %w", block.Number, err)
+			smartMoneyTransferEvents := filterSmartMoneyTransferEvents(transferEvents, smartMoneyWallets)
+			userWalletTransferEvents := expandUserWalletTransferEvents(transferEvents, userWalletRefsByAddress, smartMoneyChainName(int(w.chainID)))
+			if len(smartMoneyTransferEvents) > 0 || len(userWalletTransferEvents) > 0 {
+				if err := w.repo.WithTx(ctx, func(tx *gorm.DB) error {
+					if len(smartMoneyTransferEvents) > 0 {
+						if _, err := w.repo.InsertWalletTransferEvents(tx, smartMoneyTransferEvents); err != nil {
+							return err
+						}
+					}
+					if len(userWalletTransferEvents) > 0 {
+						if _, err := w.repo.InsertUserWalletTransferEvents(tx, userWalletTransferEvents); err != nil {
+							return err
+						}
+					}
+					return nil
+				}); err != nil {
+					return pollResult{}, fmt.Errorf("persist block %d transfer events: %w", block.Number, err)
+				}
 			}
 		}
 
@@ -714,6 +739,65 @@ func (w *Watcher) loadWalletTransferEventsByBlock(ctx context.Context, client *e
 		out[blockNumber] = append(out[blockNumber], events...)
 	}
 	return out, nil
+}
+
+func filterSmartMoneyTransferEvents(events []*models.SmartMoneyWalletTransferEvent, activeWallets map[string]struct{}) []*models.SmartMoneyWalletTransferEvent {
+	if len(events) == 0 || len(activeWallets) == 0 {
+		return nil
+	}
+
+	out := make([]*models.SmartMoneyWalletTransferEvent, 0, len(events))
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+		addr := strings.ToLower(strings.TrimSpace(event.WalletAddress))
+		if _, ok := activeWallets[addr]; !ok {
+			continue
+		}
+		out = append(out, event)
+	}
+	return out
+}
+
+func expandUserWalletTransferEvents(events []*models.SmartMoneyWalletTransferEvent, walletRefsByAddress map[string][]UserWalletRef, chain string) []*models.UserWalletTransferEvent {
+	if len(events) == 0 || len(walletRefsByAddress) == 0 {
+		return nil
+	}
+
+	chain = strings.ToLower(strings.TrimSpace(chain))
+	out := make([]*models.UserWalletTransferEvent, 0, len(events))
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+		addr := strings.ToLower(strings.TrimSpace(event.WalletAddress))
+		refs := walletRefsByAddress[addr]
+		if len(refs) == 0 {
+			continue
+		}
+		for _, ref := range refs {
+			out = append(out, &models.UserWalletTransferEvent{
+				UserID:        ref.UserID,
+				WalletID:      ref.WalletID,
+				WalletAddress: ref.WalletAddress,
+				Chain:         chain,
+				Direction:     event.Direction,
+				AssetType:     event.AssetType,
+				TokenAddress:  event.TokenAddress,
+				TokenSymbol:   event.TokenSymbol,
+				TokenDecimals: event.TokenDecimals,
+				AmountRaw:     event.AmountRaw,
+				AmountDecimal: event.AmountDecimal,
+				AmountUSD:     event.AmountUSD,
+				TxHash:        event.TxHash,
+				BlockNumber:   event.BlockNumber,
+				LogIndex:      event.LogIndex,
+				TxTimestamp:   event.TxTimestamp,
+			})
+		}
+	}
+	return out
 }
 
 func buildNativeTransferEventsByBlock(blocks []*blockSnapshot, chainID int, activeWallets map[string]struct{}, excludedLPTxHashesByBlock map[uint64]map[string]struct{}) map[uint64][]*models.SmartMoneyWalletTransferEvent {

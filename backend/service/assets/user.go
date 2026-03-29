@@ -7,6 +7,7 @@ import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/base/timeutil"
+	sm "TgLpBot/service/smart_money"
 	"context"
 	"fmt"
 	"log"
@@ -57,6 +58,15 @@ type userLPPoolBucket struct {
 	Key         userLPPoolKey
 	ProfitWei   *big.Int
 	ClosedCount int
+}
+
+type userTransferActivity struct {
+	HasTransferIn    bool
+	HasTransferOut   bool
+	TransferInCount  int
+	TransferOutCount int
+	TransferInUSD    float64
+	TransferOutUSD   float64
 }
 
 func (b *userLPBucket) addProfit(profitWei *big.Int) {
@@ -283,8 +293,37 @@ func dayKeyInRange(dayKey string, start time.Time, end time.Time) bool {
 	return !day.Before(dayStart(start)) && day.Before(dayStart(end))
 }
 
-func buildUserSnapshotPnLByDay(rows []models.UserAssetDailySnapshot) map[string]float64 {
-	out := make(map[string]float64)
+func buildUserTransferActivityByDay(rows []sm.UserTransferActivityDayRow) map[string]userTransferActivity {
+	out := make(map[string]userTransferActivity, len(rows))
+	for _, row := range rows {
+		out[row.Day] = userTransferActivity{
+			HasTransferIn:    row.HasTransferIn > 0,
+			HasTransferOut:   row.HasTransferOut > 0,
+			TransferInCount:  row.TransferInCount,
+			TransferOutCount: row.TransferOutCount,
+			TransferInUSD:    round2(row.TransferInUSD),
+			TransferOutUSD:   round2(row.TransferOutUSD),
+		}
+	}
+	return out
+}
+
+func applyUserTransferActivity(point *UserLPDailyPoint, activity userTransferActivity) {
+	if point == nil {
+		return
+	}
+	point.HasTransferIn = activity.HasTransferIn
+	point.HasTransferOut = activity.HasTransferOut
+	point.TransferInCount = activity.TransferInCount
+	point.TransferOutCount = activity.TransferOutCount
+	point.TransferTotalCount = transferTotalCount(activity.TransferInCount, activity.TransferOutCount)
+	point.TransferInUSD = round2(activity.TransferInUSD)
+	point.TransferOutUSD = round2(activity.TransferOutUSD)
+	point.TransferNetUSD = transferNetUSD(activity.TransferInUSD, activity.TransferOutUSD)
+}
+
+func buildUserSnapshotPnLByDay(rows []models.UserAssetDailySnapshot, transferByDay map[string]userTransferActivity) map[string]UserLPDailyPoint {
+	out := make(map[string]UserLPDailyPoint)
 	if len(rows) < 2 {
 		return out
 	}
@@ -294,12 +333,18 @@ func buildUserSnapshotPnLByDay(rows []models.UserAssetDailySnapshot) map[string]
 		if !isNextSnapshotDay(prev.SnapshotDay, curr.SnapshotDay) {
 			continue
 		}
-		out[curr.SnapshotDay] = round2(curr.TotalUSD - prev.TotalUSD)
+		activity := transferByDay[curr.SnapshotDay]
+		point := UserLPDailyPoint{
+			Day:            curr.SnapshotDay,
+			RealizedPnLUSD: adjustedPnL(curr.TotalUSD-prev.TotalUSD, activity.TransferInUSD, activity.TransferOutUSD),
+		}
+		applyUserTransferActivity(&point, activity)
+		out[curr.SnapshotDay] = point
 	}
 	return out
 }
 
-func mergeUserDailyHistoryPnL(history []UserLPDailyPoint, snapshotPnLByDay map[string]float64, start time.Time, end time.Time) []UserLPDailyPoint {
+func mergeUserDailyHistoryPnL(history []UserLPDailyPoint, snapshotPnLByDay map[string]UserLPDailyPoint, start time.Time, end time.Time) []UserLPDailyPoint {
 	merged := make(map[string]UserLPDailyPoint, len(history)+len(snapshotPnLByDay))
 	for _, item := range history {
 		if !dayKeyInRange(item.Day, start, end) {
@@ -307,13 +352,21 @@ func mergeUserDailyHistoryPnL(history []UserLPDailyPoint, snapshotPnLByDay map[s
 		}
 		merged[item.Day] = item
 	}
-	for dayKey, pnl := range snapshotPnLByDay {
+	for dayKey, point := range snapshotPnLByDay {
 		if !dayKeyInRange(dayKey, start, end) {
 			continue
 		}
 		item := merged[dayKey]
 		item.Day = dayKey
-		item.RealizedPnLUSD = round2(pnl)
+		item.RealizedPnLUSD = round2(point.RealizedPnLUSD)
+		applyUserTransferActivity(&item, userTransferActivity{
+			HasTransferIn:    point.HasTransferIn,
+			HasTransferOut:   point.HasTransferOut,
+			TransferInCount:  point.TransferInCount,
+			TransferOutCount: point.TransferOutCount,
+			TransferInUSD:    point.TransferInUSD,
+			TransferOutUSD:   point.TransferOutUSD,
+		})
 		merged[dayKey] = item
 	}
 
@@ -343,13 +396,13 @@ func sumUserDailyHistoryPnL(history []UserLPDailyPoint, start time.Time, end tim
 	return round2(total)
 }
 
-func snapshotTodayPnL(rows []models.UserAssetDailySnapshot, liveTotalUSD float64, now time.Time) (float64, bool) {
+func snapshotTodayPnL(rows []models.UserAssetDailySnapshot, liveTotalUSD float64, now time.Time, activity userTransferActivity) (float64, bool) {
 	yesterdayKey := formatDay(dayStart(now).AddDate(0, 0, -1))
 	for i := len(rows) - 1; i >= 0; i-- {
 		if rows[i].SnapshotDay != yesterdayKey {
 			continue
 		}
-		return round2(liveTotalUSD - rows[i].TotalUSD), true
+		return adjustedPnL(liveTotalUSD-rows[i].TotalUSD, activity.TransferInUSD, activity.TransferOutUSD), true
 	}
 	return 0, false
 }
@@ -366,15 +419,15 @@ func setUserLPWindowPnL(stats *UserLPWindowStats, pnl float64) {
 	}
 }
 
-func applyUserSnapshotPnL(base UserLPStatsResponse, snapshotRows []models.UserAssetDailySnapshot, liveTotalUSD *float64, now time.Time) UserLPStatsResponse {
+func applyUserSnapshotPnL(base UserLPStatsResponse, snapshotRows []models.UserAssetDailySnapshot, transferByDay map[string]userTransferActivity, liveTotalUSD *float64, now time.Time) UserLPStatsResponse {
 	startOfToday := dayStart(now)
 	historyStart := startOfToday.AddDate(0, 0, -30)
-	snapshotPnLByDay := buildUserSnapshotPnLByDay(snapshotRows)
+	snapshotPnLByDay := buildUserSnapshotPnLByDay(snapshotRows, transferByDay)
 
 	base.DailyHistory = mergeUserDailyHistoryPnL(base.DailyHistory, snapshotPnLByDay, historyStart, startOfToday)
 
 	if liveTotalUSD != nil {
-		if pnl, ok := snapshotTodayPnL(snapshotRows, *liveTotalUSD, now); ok {
+		if pnl, ok := snapshotTodayPnL(snapshotRows, *liveTotalUSD, now, transferByDay[formatDay(now)]); ok {
 			setUserLPWindowPnL(&base.Today, pnl)
 		}
 	}
@@ -734,6 +787,11 @@ func (s *Service) GetUserLPStats(ctx context.Context, userID uint) (*UserLPStats
 	if err != nil {
 		return nil, err
 	}
+	transferRows, err := s.smRepo.AggregateUserTransferActivityByDay(ctx, userID, dayStart(now).AddDate(0, 0, -31), now)
+	if err != nil {
+		return nil, err
+	}
+	transferByDay := buildUserTransferActivityByDay(transferRows)
 
 	var liveTotalUSD *float64
 	overview, err := s.GetUserOverview(ctx, userID)
@@ -744,7 +802,7 @@ func (s *Service) GetUserLPStats(ctx context.Context, userID uint) (*UserLPStats
 		liveTotalUSD = &total
 	}
 
-	resp = applyUserSnapshotPnL(resp, snapshotRows, liveTotalUSD, now)
+	resp = applyUserSnapshotPnL(resp, snapshotRows, transferByDay, liveTotalUSD, now)
 	return &resp, nil
 }
 

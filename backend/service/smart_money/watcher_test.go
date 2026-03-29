@@ -253,6 +253,50 @@ func TestBuildERC20TransferEventsFromLogs_BuildsDirectionalEvents(t *testing.T) 
 	}
 }
 
+func TestExpandUserWalletTransferEvents_ExpandsPerTrackedWallet(t *testing.T) {
+	t.Parallel()
+
+	events := []*models.SmartMoneyWalletTransferEvent{
+		{
+			WalletAddress: "0x1111111111111111111111111111111111111111",
+			ChainID:       56,
+			Direction:     models.SmartMoneyTransferDirectionIn,
+			AssetType:     models.SmartMoneyTransferAssetERC20,
+			TokenAddress:  "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			AmountRaw:     "123",
+			AmountDecimal: 123,
+			AmountUSD:     123,
+			TxHash:        "0xabc",
+			BlockNumber:   88,
+			LogIndex:      7,
+			TxTimestamp:   time.Date(2026, time.March, 29, 13, 0, 0, 0, time.UTC),
+		},
+	}
+	walletRefsByAddress := map[string][]UserWalletRef{
+		"0x1111111111111111111111111111111111111111": {
+			{UserID: 1, WalletID: 11, WalletAddress: "0x1111111111111111111111111111111111111111"},
+			{UserID: 2, WalletID: 22, WalletAddress: "0x1111111111111111111111111111111111111111"},
+		},
+	}
+
+	out := expandUserWalletTransferEvents(events, walletRefsByAddress, "bsc")
+	if got, want := len(out), 2; got != want {
+		t.Fatalf("user wallet transfer events = %d, want %d", got, want)
+	}
+	if got, want := out[0].WalletID, uint(11); got != want {
+		t.Fatalf("first wallet id = %d, want %d", got, want)
+	}
+	if got, want := out[1].UserID, uint(2); got != want {
+		t.Fatalf("second user id = %d, want %d", got, want)
+	}
+	if got, want := out[0].Chain, "bsc"; got != want {
+		t.Fatalf("chain = %s, want %s", got, want)
+	}
+	if got, want := out[0].TxHash, "0xabc"; got != want {
+		t.Fatalf("tx hash = %s, want %s", got, want)
+	}
+}
+
 func joinWords(words ...[]byte) []byte {
 	total := 0
 	for _, word := range words {

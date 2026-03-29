@@ -129,18 +129,19 @@ func smartMoneyLeaderboardDailyCacheKey(snapshotDay time.Time, metric string) st
 	return fmt.Sprintf("assets:smart-money:leaderboard:v2:%s:%s", formatDay(snapshotDay), normalizeLeaderboardMetric(metric))
 }
 
-func shouldZeroSmartMoneyPnLForTransfer(snapshot *models.SmartMoneyWalletDailySnapshot) bool {
-	if snapshot == nil {
-		return false
-	}
-	return snapshot.HasTransferIn || snapshot.HasTransferOut || snapshot.TransferInCount > 0 || snapshot.TransferOutCount > 0
+func transferNetUSD(transferInUSD float64, transferOutUSD float64) float64 {
+	return round2(transferInUSD - transferOutUSD)
 }
 
-func smartMoneyHasTransferMarker(hasTransferIn bool, hasTransferOut bool, transferInCount int, transferOutCount int) bool {
-	return hasTransferIn || hasTransferOut || transferInCount > 0 || transferOutCount > 0
+func transferTotalCount(transferInCount int, transferOutCount int) int {
+	return transferInCount + transferOutCount
 }
 
-func buildSmartMoneyHistoryPoints(rows []smartMoneyHistoryDayRow, dailyPnLByDay map[string]float64) []SmartMoneyHistoryPoint {
+func adjustedPnL(delta float64, transferInUSD float64, transferOutUSD float64) float64 {
+	return round2(delta - (transferInUSD - transferOutUSD))
+}
+
+func buildSmartMoneyHistoryPoints(rows []smartMoneyHistoryDayRow) []SmartMoneyHistoryPoint {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -154,15 +155,8 @@ func buildSmartMoneyHistoryPoints(rows []smartMoneyHistoryDayRow, dailyPnLByDay 
 	hasPreviousTotal := false
 	for _, row := range rows {
 		estimatedPnL := 0.0
-		if pnl, ok := dailyPnLByDay[row.Day]; ok {
-			estimatedPnL = round2(pnl)
-		} else if hasPreviousTotal {
-			estimatedPnL = round2(row.TotalUSD - previousTotalUSD)
-		}
-
-		hasTransfer := smartMoneyHasTransferMarker(row.HasTransferIn > 0, row.HasTransferOut > 0, row.TransferInCount, row.TransferOutCount)
-		if hasTransfer {
-			estimatedPnL = 0
+		if hasPreviousTotal {
+			estimatedPnL = adjustedPnL(row.TotalUSD-previousTotalUSD, row.TransferInUSD, row.TransferOutUSD)
 		}
 
 		points = append(points, SmartMoneyHistoryPoint{
@@ -177,8 +171,10 @@ func buildSmartMoneyHistoryPoints(rows []smartMoneyHistoryDayRow, dailyPnLByDay 
 			HasTransferOut:          row.HasTransferOut > 0,
 			TransferInCount:         row.TransferInCount,
 			TransferOutCount:        row.TransferOutCount,
+			TransferTotalCount:      transferTotalCount(row.TransferInCount, row.TransferOutCount),
 			TransferInUSD:           round2(row.TransferInUSD),
 			TransferOutUSD:          round2(row.TransferOutUSD),
+			TransferNetUSD:          transferNetUSD(row.TransferInUSD, row.TransferOutUSD),
 		})
 		previousTotalUSD = row.TotalUSD
 		hasPreviousTotal = true
@@ -186,10 +182,10 @@ func buildSmartMoneyHistoryPoints(rows []smartMoneyHistoryDayRow, dailyPnLByDay 
 	return points
 }
 
-func buildSmartMoneyTodayHistoryPoint(day time.Time, assets smartMoneyAssetBreakdown, todayPnL float64, activity smartMoneyTransferActivity) SmartMoneyHistoryPoint {
-	pnl := round2(todayPnL)
-	if smartMoneyHasTransferMarker(activity.HasTransferIn, activity.HasTransferOut, activity.TransferInCount, activity.TransferOutCount) {
-		pnl = 0
+func buildSmartMoneyTodayHistoryPoint(day time.Time, assets smartMoneyAssetBreakdown, previousTotalUSD float64, hasPreviousTotal bool, activity smartMoneyTransferActivity) SmartMoneyHistoryPoint {
+	pnl := 0.0
+	if hasPreviousTotal {
+		pnl = adjustedPnL(assets.TotalUSD-previousTotalUSD, activity.TransferInUSD, activity.TransferOutUSD)
 	}
 	return SmartMoneyHistoryPoint{
 		Day:                     formatDay(day),
@@ -203,8 +199,10 @@ func buildSmartMoneyTodayHistoryPoint(day time.Time, assets smartMoneyAssetBreak
 		HasTransferOut:          activity.HasTransferOut,
 		TransferInCount:         activity.TransferInCount,
 		TransferOutCount:        activity.TransferOutCount,
+		TransferTotalCount:      transferTotalCount(activity.TransferInCount, activity.TransferOutCount),
 		TransferInUSD:           round2(activity.TransferInUSD),
 		TransferOutUSD:          round2(activity.TransferOutUSD),
+		TransferNetUSD:          transferNetUSD(activity.TransferInUSD, activity.TransferOutUSD),
 	}
 }
 
@@ -550,13 +548,21 @@ func (s *Service) GetSmartMoneyWallet(ctx context.Context, address string, chain
 	if err != nil {
 		return nil, err
 	}
-	history = mergeSmartMoneyHistoryPoint(history, buildSmartMoneyTodayHistoryPoint(now, summary.Assets, todayStats.EstimatedRealizedPnLUSD, todayTransferByWallet[walletKey]))
+	previousTotalUSD := 0.0
+	hasPreviousTotal := false
+	if len(history) > 0 {
+		last := history[len(history)-1]
+		previousTotalUSD = last.TotalUSD
+		hasPreviousTotal = true
+	}
+	todayPoint := buildSmartMoneyTodayHistoryPoint(now, summary.Assets, previousTotalUSD, hasPreviousTotal, todayTransferByWallet[walletKey])
+	history = mergeSmartMoneyHistoryPoint(history, todayPoint)
 
 	return &SmartMoneyWalletResponse{
 		Wallet:  summary,
 		History: history,
 		Today: SmartMoneyTodayActivity{
-			EstimatedRealizedPnLUSD: round2(todayStats.EstimatedRealizedPnLUSD),
+			EstimatedRealizedPnLUSD: round2(todayPoint.EstimatedRealizedPnLUSD),
 			AddCount:                todayStats.AddCount,
 			RemoveCount:             todayStats.RemoveCount,
 			MatchedRemoveCount:      todayStats.MatchedRemoveCount,
@@ -674,11 +680,11 @@ func normalizeLeaderboardMetric(metric string) string {
 func leaderboardDescription(metric string) string {
 	switch metric {
 	case "yield_rate":
-		return "按窗口内估算已实现收益率排序"
+		return "按剔除净转账后的资产变化收益率排序"
 	case "participation":
 		return "按窗口内 add/remove 参与次数排序"
 	default:
-		return "按窗口内估算已实现收益额排序"
+		return "按剔除净转账后的资产变化收益额排序"
 	}
 }
 
@@ -692,7 +698,7 @@ func buildSmartMoneySnapshotLeaderboard(metric string, snapshotDay time.Time, co
 		if input.Current == nil || input.Previous == nil {
 			continue
 		}
-		estimatedPnL := round2(input.Current.TotalUSD - input.Previous.TotalUSD)
+		estimatedPnL := adjustedPnL(input.Current.TotalUSD-input.Previous.TotalUSD, input.Current.TransferInUSD, input.Current.TransferOutUSD)
 		yieldRate := 0.0
 		if input.Previous.TotalUSD > 0 {
 			yieldRate = round4(estimatedPnL / input.Previous.TotalUSD)
@@ -706,8 +712,10 @@ func buildSmartMoneySnapshotLeaderboard(metric string, snapshotDay time.Time, co
 			HasTransferOut:          input.Current.HasTransferOut,
 			TransferInCount:         input.Current.TransferInCount,
 			TransferOutCount:        input.Current.TransferOutCount,
+			TransferTotalCount:      transferTotalCount(input.Current.TransferInCount, input.Current.TransferOutCount),
 			TransferInUSD:           round2(input.Current.TransferInUSD),
 			TransferOutUSD:          round2(input.Current.TransferOutUSD),
+			TransferNetUSD:          transferNetUSD(input.Current.TransferInUSD, input.Current.TransferOutUSD),
 		}
 		if input.Wallet.Label != nil {
 			entry.Label = strings.TrimSpace(*input.Wallet.Label)
@@ -1122,59 +1130,6 @@ func (s *Service) loadSmartMoneyDailyStatRows(ctx context.Context, wallets []mod
 	return rowsByKey, nil
 }
 
-func (s *Service) loadSmartMoneyDailyStatSeries(ctx context.Context, wallets []models.MonitoredWallet, start time.Time, end time.Time) (map[string]float64, error) {
-	out := make(map[string]float64)
-	if len(wallets) == 0 {
-		return out, nil
-	}
-
-	chainIDs := make([]int, 0, len(wallets))
-	addresses := make([]string, 0, len(wallets))
-	chainSeen := make(map[int]struct{}, len(wallets))
-	addrSeen := make(map[string]struct{}, len(wallets))
-	for _, wallet := range wallets {
-		if _, ok := chainSeen[wallet.ChainID]; !ok {
-			chainSeen[wallet.ChainID] = struct{}{}
-			chainIDs = append(chainIDs, wallet.ChainID)
-		}
-		addr := normalizeAddress(wallet.Address)
-		if addr == "" {
-			continue
-		}
-		if _, ok := addrSeen[addr]; ok {
-			continue
-		}
-		addrSeen[addr] = struct{}{}
-		addresses = append(addresses, addr)
-	}
-
-	type row struct {
-		Day                     string
-		EstimatedRealizedPnLUSD float64
-	}
-	var rows []row
-	if err := database.DB.WithContext(ctx).
-		Raw(`
-			SELECT
-				stat_day AS day,
-				COALESCE(SUM(estimated_realized_pnl_usd), 0) AS estimated_realized_pnl_usd
-			FROM sm_lp_daily_stats
-			WHERE chain_id IN ?
-			  AND wallet_address IN ?
-			  AND stat_day >= ?
-			  AND stat_day < ?
-			GROUP BY stat_day
-			ORDER BY stat_day ASC
-		`, chainIDs, addresses, formatDay(start), formatDay(end)).
-		Scan(&rows).Error; err != nil {
-		return nil, err
-	}
-	for _, row := range rows {
-		out[row.Day] = round2(row.EstimatedRealizedPnLUSD)
-	}
-	return out, nil
-}
-
 func (s *Service) loadSmartMoneyHistory(ctx context.Context, wallets []models.MonitoredWallet, start time.Time, end time.Time) ([]SmartMoneyHistoryPoint, error) {
 	if len(wallets) == 0 {
 		return nil, nil
@@ -1195,17 +1150,12 @@ func (s *Service) loadSmartMoneyHistory(ctx context.Context, wallets []models.Mo
 		}
 	}
 
-	dailyPnLByDay, err := s.loadSmartMoneyDailyStatSeries(ctx, wallets, start, end)
-	if err != nil {
-		return nil, err
-	}
-
 	var rows []smartMoneyHistoryDayRow
 	openLPSelect := "COALESCE(SUM(open_lp_usd), 0) AS open_lp_usd"
 	if database.DB != nil && !database.DB.Migrator().HasColumn(&models.SmartMoneyWalletDailySnapshot{}, "OpenLPUSD") {
 		openLPSelect = "0 AS open_lp_usd"
 	}
-	err = database.DB.WithContext(ctx).
+	err := database.DB.WithContext(ctx).
 		Raw(fmt.Sprintf(`
 			SELECT
 				snapshot_day AS day,
@@ -1232,7 +1182,7 @@ func (s *Service) loadSmartMoneyHistory(ctx context.Context, wallets []models.Mo
 	if err != nil {
 		return nil, err
 	}
-	return buildSmartMoneyHistoryPoints(rows, dailyPnLByDay), nil
+	return buildSmartMoneyHistoryPoints(rows), nil
 }
 
 func (s *Service) computeSmartMoneyStats(ctx context.Context, wallets []models.MonitoredWallet, windowStart time.Time, windowEnd time.Time) (map[string]smartMoneyEventStats, error) {

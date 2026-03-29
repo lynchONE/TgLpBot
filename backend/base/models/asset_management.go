@@ -58,6 +58,34 @@ const (
 	SmartMoneyTransferAssetERC20   = "erc20"
 )
 
+// UserWalletTransferEvent stores one persisted normal transfer event for a user wallet.
+type UserWalletTransferEvent struct {
+	ID uint `gorm:"primaryKey" json:"id"`
+
+	UserID        uint      `gorm:"not null;index:idx_user_wallet_transfer_user_time,priority:1" json:"user_id"`
+	WalletID      uint      `gorm:"not null;index:idx_user_wallet_transfer_wallet_time,priority:1;uniqueIndex:uq_user_wallet_transfer_event,priority:1" json:"wallet_id"`
+	WalletAddress string    `gorm:"size:42;not null;index:idx_user_wallet_transfer_wallet_time,priority:2" json:"wallet_address"`
+	Chain         string    `gorm:"size:16;not null;default:'';index:idx_user_wallet_transfer_wallet_time,priority:3;index:idx_user_wallet_transfer_user_time,priority:2;uniqueIndex:uq_user_wallet_transfer_event,priority:2" json:"chain"`
+	Direction     string    `gorm:"size:8;not null;uniqueIndex:uq_user_wallet_transfer_event,priority:5" json:"direction"`
+	AssetType     string    `gorm:"size:16;not null" json:"asset_type"`
+	TokenAddress  string    `gorm:"size:42;not null;default:''" json:"token_address"`
+	TokenSymbol   string    `gorm:"size:32" json:"token_symbol"`
+	TokenDecimals int       `gorm:"not null;default:0" json:"token_decimals"`
+	AmountRaw     string    `gorm:"type:varchar(78);not null;default:'0'" json:"amount_raw"`
+	AmountDecimal float64   `gorm:"type:decimal(36,18);not null;default:0" json:"amount_decimal"`
+	AmountUSD     float64   `gorm:"type:decimal(20,4);not null;default:0" json:"amount_usd"`
+	TxHash        string    `gorm:"size:66;not null;uniqueIndex:uq_user_wallet_transfer_event,priority:3" json:"tx_hash"`
+	BlockNumber   uint64    `gorm:"not null" json:"block_number"`
+	LogIndex      int       `gorm:"not null;default:-1;uniqueIndex:uq_user_wallet_transfer_event,priority:4" json:"log_index"`
+	TxTimestamp   time.Time `gorm:"not null;index:idx_user_wallet_transfer_wallet_time,priority:4;index:idx_user_wallet_transfer_user_time,priority:3" json:"tx_timestamp"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+func (UserWalletTransferEvent) TableName() string {
+	return "user_wallet_transfer_events"
+}
+
 // SmartMoneyWalletTransferEvent stores one persisted normal transfer event for a monitored smart money wallet.
 type SmartMoneyWalletTransferEvent struct {
 	ID uint `gorm:"primaryKey" json:"id"`

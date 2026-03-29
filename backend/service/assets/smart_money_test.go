@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestBuildSmartMoneySnapshotLeaderboard_UsesBalanceDeltaAndTransferAmounts(t *testing.T) {
+func TestBuildSmartMoneySnapshotLeaderboard_UsesTransferAdjustedBalanceDelta(t *testing.T) {
 	timeutil.Init()
 
 	label := "Alpha"
@@ -84,46 +84,46 @@ func TestBuildSmartMoneySnapshotLeaderboard_UsesBalanceDeltaAndTransferAmounts(t
 	}
 
 	first := resp.List[0]
-	if got, want := first.Address, "0x00000000000000000000000000000000000000a1"; got != want {
+	if got, want := first.Address, "0x00000000000000000000000000000000000000b2"; got != want {
 		t.Fatalf("first address = %s, want %s", got, want)
-	}
-	if got, want := first.AvatarURL, avatarURL; got != want {
-		t.Fatalf("first avatar url = %s, want %s", got, want)
 	}
 	if got, want := first.Rank, 1; got != want {
 		t.Fatalf("first rank = %d, want %d", got, want)
 	}
-	if got, want := first.EstimatedRealizedPnLUSD, 35.0; got != want {
+	if got, want := first.EstimatedRealizedPnLUSD, 38.75; got != want {
 		t.Fatalf("first pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := first.YieldRate, 0.35; got != want {
+	if got, want := first.YieldRate, 0.3875; got != want {
 		t.Fatalf("first yield = %.4f, want %.4f", got, want)
 	}
-	if got, want := first.ParticipationCount, 3; got != want {
-		t.Fatalf("first participation = %d, want %d", got, want)
+	if !first.HasTransferOut || first.TransferOutCount != 1 {
+		t.Fatalf("first transfer out flag/count = %v/%d, want true/1", first.HasTransferOut, first.TransferOutCount)
 	}
-	if !first.HasTransferIn || first.TransferInCount != 1 {
-		t.Fatalf("first transfer in flag/count = %v/%d, want true/1", first.HasTransferIn, first.TransferInCount)
-	}
-	if got, want := first.TransferInUSD, 9.5; got != want {
-		t.Fatalf("first transfer in usd = %.2f, want %.2f", got, want)
+	if got, want := first.TransferNetUSD, -18.75; got != want {
+		t.Fatalf("first transfer net usd = %.2f, want %.2f", got, want)
 	}
 
 	second := resp.List[1]
-	if got, want := second.Address, "0x00000000000000000000000000000000000000b2"; got != want {
+	if got, want := second.Address, "0x00000000000000000000000000000000000000a1"; got != want {
 		t.Fatalf("second address = %s, want %s", got, want)
 	}
-	if got, want := second.EstimatedRealizedPnLUSD, 20.0; got != want {
+	if got, want := second.AvatarURL, avatarURL; got != want {
+		t.Fatalf("second avatar url = %s, want %s", got, want)
+	}
+	if got, want := second.EstimatedRealizedPnLUSD, 25.5; got != want {
 		t.Fatalf("second pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := second.YieldRate, 0.2; got != want {
+	if got, want := second.YieldRate, 0.255; got != want {
 		t.Fatalf("second yield = %.4f, want %.4f", got, want)
 	}
-	if !second.HasTransferOut || second.TransferOutCount != 1 {
-		t.Fatalf("second transfer out flag/count = %v/%d, want true/1", second.HasTransferOut, second.TransferOutCount)
+	if got, want := second.ParticipationCount, 3; got != want {
+		t.Fatalf("second participation = %d, want %d", got, want)
 	}
-	if got, want := second.TransferOutUSD, 18.75; got != want {
-		t.Fatalf("second transfer out usd = %.2f, want %.2f", got, want)
+	if !second.HasTransferIn || second.TransferInCount != 1 {
+		t.Fatalf("second transfer in flag/count = %v/%d, want true/1", second.HasTransferIn, second.TransferInCount)
+	}
+	if got, want := second.TransferNetUSD, 9.5; got != want {
+		t.Fatalf("second transfer net usd = %.2f, want %.2f", got, want)
 	}
 }
 
@@ -304,36 +304,32 @@ func TestPaginateSmartMoneyLeaderboardResponse_FiltersAndSlicesFromBackend(t *te
 	}
 }
 
-func TestBuildSmartMoneyHistoryPoints_UsesDailyPnLAndZeroesTransferDays(t *testing.T) {
+func TestBuildSmartMoneyHistoryPoints_UsesTransferAdjustedBalanceDelta(t *testing.T) {
 	rows := []smartMoneyHistoryDayRow{
 		{Day: "2026-03-25", TotalUSD: 100, NativeUSD: 10},
 		{Day: "2026-03-26", TotalUSD: 140, NativeUSD: 11},
 		{Day: "2026-03-27", TotalUSD: 90, NativeUSD: 9, HasTransferOut: 1, TransferOutCount: 1, TransferOutUSD: 50},
 	}
-	dailyPnLByDay := map[string]float64{
-		"2026-03-26": 7.25,
-		"2026-03-27": -12.5,
-	}
 
-	points := buildSmartMoneyHistoryPoints(rows, dailyPnLByDay)
+	points := buildSmartMoneyHistoryPoints(rows)
 	if got, want := len(points), 3; got != want {
 		t.Fatalf("history points = %d, want %d", got, want)
 	}
 	if got, want := points[0].EstimatedRealizedPnLUSD, 0.0; got != want {
 		t.Fatalf("first day pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := points[1].EstimatedRealizedPnLUSD, 7.25; got != want {
+	if got, want := points[1].EstimatedRealizedPnLUSD, 40.0; got != want {
 		t.Fatalf("second day pnl = %.2f, want %.2f", got, want)
 	}
 	if got, want := points[2].EstimatedRealizedPnLUSD, 0.0; got != want {
-		t.Fatalf("transfer day pnl = %.2f, want %.2f", got, want)
+		t.Fatalf("transfer-adjusted day pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := points[2].TransferOutCount, 1; got != want {
-		t.Fatalf("transfer out count = %d, want %d", got, want)
+	if got, want := points[2].TransferNetUSD, -50.0; got != want {
+		t.Fatalf("transfer net usd = %.2f, want %.2f", got, want)
 	}
 }
 
-func TestBuildSmartMoneyTodayHistoryPoint_ZeroesPnLWhenTransferExists(t *testing.T) {
+func TestBuildSmartMoneyTodayHistoryPoint_AdjustsPnLByNetTransfer(t *testing.T) {
 	timeutil.Init()
 	now := time.Date(2026, time.March, 28, 19, 37, 0, 0, timeutil.Location())
 
@@ -343,7 +339,7 @@ func TestBuildSmartMoneyTodayHistoryPoint_ZeroesPnLWhenTransferExists(t *testing
 		TrackedTokenUSD: 75.5,
 		OpenLPUSD:       0,
 		TotalUSD:        2988.06,
-	}, 123.45, smartMoneyTransferActivity{
+	}, 2864.61, true, smartMoneyTransferActivity{
 		HasTransferIn:   true,
 		TransferInCount: 1,
 		TransferInUSD:   800,
@@ -352,10 +348,10 @@ func TestBuildSmartMoneyTodayHistoryPoint_ZeroesPnLWhenTransferExists(t *testing
 	if got, want := point.Day, "2026-03-28"; got != want {
 		t.Fatalf("today day = %s, want %s", got, want)
 	}
-	if got, want := point.EstimatedRealizedPnLUSD, 0.0; got != want {
+	if got, want := point.EstimatedRealizedPnLUSD, -676.55; got != want {
 		t.Fatalf("today pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := point.TransferInUSD, 800.0; got != want {
-		t.Fatalf("today transfer in usd = %.2f, want %.2f", got, want)
+	if got, want := point.TransferNetUSD, 800.0; got != want {
+		t.Fatalf("today transfer net usd = %.2f, want %.2f", got, want)
 	}
 }

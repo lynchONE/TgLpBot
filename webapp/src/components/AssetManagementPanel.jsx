@@ -147,67 +147,59 @@ function hasTransferMarker(item) {
   return Boolean(
     item?.has_transfer_in ||
     item?.has_transfer_out ||
+    Number(item?.transfer_total_count || 0) > 0 ||
     Number(item?.transfer_in_count || 0) > 0 ||
     Number(item?.transfer_out_count || 0) > 0 ||
+    Number(item?.transfer_net_usd || 0) !== 0 ||
     Number(item?.transfer_in_usd || 0) > 0 ||
     Number(item?.transfer_out_usd || 0) > 0
   );
 }
 
 function TransferBadges({ item, compact = false }) {
+  const totalCount = Number(item?.transfer_total_count || 0) || (Number(item?.transfer_in_count || 0) + Number(item?.transfer_out_count || 0));
   const inCount = Number(item?.transfer_in_count || 0);
   const outCount = Number(item?.transfer_out_count || 0);
   const inUsd = Number(item?.transfer_in_usd || 0);
   const outUsd = Number(item?.transfer_out_usd || 0);
-  const badges = [];
-  if (item?.has_transfer_in || inCount > 0) {
-    badges.push({
-      key: 'in',
-      label: compact ? '入' : `转入${inCount > 0 ? ` ${inCount}` : ''}`,
-      color: '#16a34a',
-      background: 'rgba(22, 163, 74, 0.12)',
-      border: 'rgba(22, 163, 74, 0.22)',
-    });
-    badges[badges.length - 1].label = compact
-      ? (inUsd > 0 ? `+${formatUsdCompact(inUsd).replace('$', '')}` : '转入')
-      : `转入${inUsd > 0 ? ` ${formatUsdCompact(inUsd)}` : ''}${inCount > 0 ? ` · ${inCount}笔` : ''}`;
-  }
-  if (item?.has_transfer_out || outCount > 0) {
-    badges.push({
-      key: 'out',
-      label: compact ? '出' : `转出${outCount > 0 ? ` ${outCount}` : ''}`,
-      color: '#ea580c',
-      background: 'rgba(234, 88, 12, 0.12)',
-      border: 'rgba(234, 88, 12, 0.22)',
-    });
-    badges[badges.length - 1].label = compact
-      ? (outUsd > 0 ? `-${formatUsdCompact(outUsd).replace('$', '')}` : '转出')
-      : `转出${outUsd > 0 ? ` ${formatUsdCompact(outUsd)}` : ''}${outCount > 0 ? ` · ${outCount}笔` : ''}`;
-  }
-  if (!badges.length) return null;
+  const rawNetUsd = item?.transfer_net_usd !== undefined && item?.transfer_net_usd !== null
+    ? Number(item.transfer_net_usd || 0)
+    : (inUsd - outUsd);
+  if (!hasTransferMarker(item)) return null;
+  const absNetUsd = Math.abs(rawNetUsd);
+  const isNetIn = rawNetUsd > 0;
+  const isNetOut = rawNetUsd < 0;
+  const badge = {
+    key: isNetIn ? 'net-in' : isNetOut ? 'net-out' : 'net-flat',
+    color: isNetIn ? '#16a34a' : isNetOut ? '#ea580c' : '#0891b2',
+    background: isNetIn ? 'rgba(22, 163, 74, 0.12)' : isNetOut ? 'rgba(234, 88, 12, 0.12)' : 'rgba(8, 145, 178, 0.12)',
+    border: isNetIn ? 'rgba(22, 163, 74, 0.22)' : isNetOut ? 'rgba(234, 88, 12, 0.22)' : 'rgba(8, 145, 178, 0.22)',
+  };
+  const amountText = absNetUsd > 0 ? formatUsdCompact(absNetUsd) : '';
+  badge.label = compact
+    ? (absNetUsd > 0 ? `${isNetOut ? '-' : '+'}${amountText.replace('$', '')}` : (totalCount > 0 ? `${totalCount}笔` : '转账'))
+    : `${isNetIn ? '净转入' : isNetOut ? '净转出' : '净转账'}${amountText ? ` ${amountText}` : ''}${totalCount > 0 ? ` · ${totalCount}笔` : ''}`;
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: compact ? 'center' : 'flex-start', gap: 4, flexWrap: 'wrap', minHeight: compact ? 12 : 'auto' }}>
-      {badges.map((badge) => (
-        <span
-          key={badge.key}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            minWidth: compact ? 14 : 0,
-            padding: compact ? '0 4px' : '1px 6px',
-            borderRadius: 999,
-            border: `1px solid ${badge.border}`,
-            background: badge.background,
-            color: badge.color,
-            fontSize: compact ? 9 : 10,
-            fontWeight: 700,
-            lineHeight: compact ? '12px' : '14px',
-          }}
-        >
-          {badge.label}
-        </span>
-      ))}
+      <span
+        key={badge.key}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minWidth: compact ? 14 : 0,
+          padding: compact ? '0 4px' : '1px 6px',
+          borderRadius: 999,
+          border: `1px solid ${badge.border}`,
+          background: badge.background,
+          color: badge.color,
+          fontSize: compact ? 9 : 10,
+          fontWeight: 700,
+          lineHeight: compact ? '12px' : '14px',
+        }}
+      >
+        {badge.label}
+      </span>
     </div>
   );
 }
@@ -1155,8 +1147,10 @@ export default function AssetManagementPanel({
       has_transfer_out: Boolean(item.has_transfer_out),
       transfer_in_count: Number(item.transfer_in_count || 0),
       transfer_out_count: Number(item.transfer_out_count || 0),
+      transfer_total_count: Number(item.transfer_total_count || 0),
       transfer_in_usd: Number(item.transfer_in_usd || 0),
       transfer_out_usd: Number(item.transfer_out_usd || 0),
+      transfer_net_usd: Number(item.transfer_net_usd || 0),
     }));
   }, [smartMoneyWallet?.history]);
 
@@ -1361,7 +1355,7 @@ export default function AssetManagementPanel({
               <PnLCalendar
                 data={assetState.lp?.daily_history}
                 loading={assetLoading}
-                note="收益额按资产快照差值计算；今日盈亏按实时总资产对比今日 0 点快照。"
+                note="收益额按当日总资产变化减去当日净转账计算；今日盈亏按实时总资产对比昨日快照，并剔除今日净转账。"
               />
               {Array.isArray(assetState.lp?.windows) && assetState.lp.windows.length > 0 && (
                 <div className="am-stat-grid am-stat-grid-3" style={{ marginTop: 10 }}>
@@ -1557,7 +1551,7 @@ export default function AssetManagementPanel({
                   {/* PnL calendar (daily balance diff) */}
                   <PnLCalendar
                     data={smartMoneyPnlCalData}
-                    note="日历优先展示 LP 已实现盈亏；若当天检测到转入或转出，则该日盈亏按 0 展示，并同步展示转账金额。"
+                    note="收益额按当日总资产变化减去当日净转账计算；若当天存在多笔转账，仅展示净转入或净转出的汇总说明。"
                   />
 
                   {/* window stats */}

@@ -29,6 +29,22 @@ type WalletTransferActivityRow struct {
 	TransferOutUSD   float64
 }
 
+type UserWalletRef struct {
+	UserID        uint
+	WalletID      uint
+	WalletAddress string
+}
+
+type UserTransferActivityDayRow struct {
+	Day              string
+	HasTransferIn    int
+	HasTransferOut   int
+	TransferInCount  int
+	TransferOutCount int
+	TransferInUSD    float64
+	TransferOutUSD   float64
+}
+
 const smartMoneyNetAmountOrderJoin = `
 LEFT JOIN sm_lp_active_positions ap
 	ON ap.chain_id = sm_lp_positions.chain_id AND ap.nft_token_id = sm_lp_positions.nft_token_id
@@ -113,6 +129,37 @@ func (r *Repository) GetAllActiveWalletAddresses(ctx context.Context, chainID in
 		m[strings.ToLower(a)] = struct{}{}
 	}
 	return m, nil
+}
+
+func (r *Repository) GetAllUserWalletRefs(ctx context.Context) (map[string][]UserWalletRef, error) {
+	type row struct {
+		UserID   uint
+		WalletID uint
+		Address  string
+	}
+
+	var rows []row
+	if err := database.DB.WithContext(ctx).
+		Model(&models.Wallet{}).
+		Select("user_id, id AS wallet_id, address").
+		Order("user_id ASC, id ASC").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	out := make(map[string][]UserWalletRef, len(rows))
+	for _, row := range rows {
+		addr := strings.ToLower(strings.TrimSpace(row.Address))
+		if addr == "" || row.UserID == 0 || row.WalletID == 0 {
+			continue
+		}
+		out[addr] = append(out[addr], UserWalletRef{
+			UserID:        row.UserID,
+			WalletID:      row.WalletID,
+			WalletAddress: addr,
+		})
+	}
+	return out, nil
 }
 
 func (r *Repository) UpsertMonitoredWallet(ctx context.Context, w *models.MonitoredWallet) error {
@@ -303,6 +350,68 @@ func (r *Repository) AggregateWalletTransferActivity(ctx context.Context, wallet
 			  AND tx_timestamp < ?
 			GROUP BY wallet_address, chain_id
 		`, addresses, chainIDs, start, end).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// --- UserWalletTransferEvent ---
+
+func (r *Repository) InsertUserWalletTransferEvents(tx *gorm.DB, events []*models.UserWalletTransferEvent) (int64, error) {
+	if tx == nil || len(events) == 0 {
+		return 0, nil
+	}
+
+	items := make([]*models.UserWalletTransferEvent, 0, len(events))
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+		event.WalletAddress = strings.ToLower(strings.TrimSpace(event.WalletAddress))
+		event.Chain = strings.ToLower(strings.TrimSpace(event.Chain))
+		event.Direction = strings.ToLower(strings.TrimSpace(event.Direction))
+		event.AssetType = strings.ToLower(strings.TrimSpace(event.AssetType))
+		event.TokenAddress = strings.ToLower(strings.TrimSpace(event.TokenAddress))
+		event.TokenSymbol = strings.TrimSpace(event.TokenSymbol)
+		event.TxHash = strings.ToLower(strings.TrimSpace(event.TxHash))
+		items = append(items, event)
+	}
+	if len(items) == 0 {
+		return 0, nil
+	}
+
+	res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(items)
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	return res.RowsAffected, nil
+}
+
+func (r *Repository) AggregateUserTransferActivityByDay(ctx context.Context, userID uint, start time.Time, end time.Time) ([]UserTransferActivityDayRow, error) {
+	if userID == 0 || !start.Before(end) {
+		return nil, nil
+	}
+
+	var rows []UserTransferActivityDayRow
+	err := database.DB.WithContext(ctx).
+		Raw(`
+			SELECT
+				DATE_FORMAT(tx_timestamp, '%Y-%m-%d') AS day,
+				MAX(CASE WHEN direction = 'in' THEN 1 ELSE 0 END) AS has_transfer_in,
+				MAX(CASE WHEN direction = 'out' THEN 1 ELSE 0 END) AS has_transfer_out,
+				COALESCE(SUM(CASE WHEN direction = 'in' THEN 1 ELSE 0 END), 0) AS transfer_in_count,
+				COALESCE(SUM(CASE WHEN direction = 'out' THEN 1 ELSE 0 END), 0) AS transfer_out_count,
+				COALESCE(SUM(CASE WHEN direction = 'in' THEN amount_usd ELSE 0 END), 0) AS transfer_in_usd,
+				COALESCE(SUM(CASE WHEN direction = 'out' THEN amount_usd ELSE 0 END), 0) AS transfer_out_usd
+			FROM user_wallet_transfer_events
+			WHERE user_id = ?
+			  AND tx_timestamp >= ?
+			  AND tx_timestamp < ?
+			GROUP BY DATE_FORMAT(tx_timestamp, '%Y-%m-%d')
+			ORDER BY day ASC
+		`, userID, start, end).
 		Scan(&rows).Error
 	if err != nil {
 		return nil, err

@@ -77,6 +77,7 @@ func autoMigrate() error {
 		&models.WalletBalanceSnapshot{},
 		&models.UserAssetDailySnapshot{},
 		&models.UserLPDailyStat{},
+		&models.UserWalletTransferEvent{},
 		&models.StrategyTask{},
 		&models.TokenMetadata{},
 		&models.MonitoredWallet{},
@@ -108,6 +109,7 @@ func autoMigrate() error {
 	DB.Exec("ALTER TABLE sm_lp_active_positions MODIFY COLUMN net_amount1 DECIMAL(65,0) NOT NULL DEFAULT 0")
 	DB.Exec("ALTER TABLE sm_lp_active_positions MODIFY COLUMN fee_amount0 DECIMAL(65,0) NOT NULL DEFAULT 0")
 	DB.Exec("ALTER TABLE sm_lp_active_positions MODIFY COLUMN fee_amount1 DECIMAL(65,0) NOT NULL DEFAULT 0")
+	DB.Exec("ALTER TABLE user_wallet_transfer_events MODIFY COLUMN amount_raw VARCHAR(78) NOT NULL DEFAULT '0'")
 	DB.Exec("ALTER TABLE sm_wallet_transfer_events MODIFY COLUMN amount_raw VARCHAR(78) NOT NULL DEFAULT '0'")
 
 	// Ensure new columns exist (AutoMigrate may skip if table already exists with old schema)
