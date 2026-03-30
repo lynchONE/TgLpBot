@@ -51,7 +51,13 @@
       "Bash(find /mnt/e/goProject/TgLpBot/webapp -type d \\\\\\(-name icon* -o -name img -o -name image* -o -name asset* -o -name public \\\\\\))",
       "Bash(curl -s \"https://api.bscscan.com/v2/api?chainid=56&module=proxy&action=eth_getTransactionReceipt&txhash=0xe9c347294e26b4e1d22313f78a42f3bccee32c0a4ac34a29f793b1ab2b40cba6\")",
       "Bash(python3 -m json.tool)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(find miniapp:*)",
+      "Bash(go version:*)",
+      "Bash(find /mnt/e/goProject/TgLpBot -type f \\\\\\(-name *.go -o -name *.js -o -name *.jsx -o -name *.md -o -name *.sql -o -name *.json \\\\\\))",
+      "Bash(GOTOOLCHAIN=local go build ./...)",
+      "Bash(python3:*)",
+      "Bash(npm run:*)"
     ]
   }
 }

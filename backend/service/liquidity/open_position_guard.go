@@ -567,6 +567,99 @@ func (s *LiquidityService) CheckOpenPositionSafety(task *models.StrategyTask, op
 	return nil
 }
 
+// CheckResult represents a single check item result for the open position checklist.
+type CheckResult struct {
+	Key    string                 `json:"key"`
+	Status string                 `json:"status"` // "pass", "warn", "fail"
+	Label  string                 `json:"label"`
+	Detail string                 `json:"detail,omitempty"`
+	Value  *float64               `json:"value,omitempty"`
+	Extra  map[string]interface{} `json:"extra,omitempty"`
+}
+
+// CollectOpenPositionChecks runs all safety checks and returns results for each item
+// instead of returning on the first error.
+func (s *LiquidityService) CollectOpenPositionChecks(task *models.StrategyTask, options OpenPositionRiskOptions) ([]CheckResult, error) {
+	state, cc, _, safety, err := readOpenPositionGuardState(task)
+	if err != nil {
+		return nil, fmt.Errorf("读取池子状态失败: %w", err)
+	}
+
+	var checks []CheckResult
+
+	// 1. Pool raw liquidity (on-chain zero check)
+	rawLiqErr := ensurePoolHasLiquidity(state.Version, state.RawLiquidity)
+	if rawLiqErr != nil {
+		checks = append(checks, CheckResult{
+			Key:    "liquidity",
+			Status: "fail",
+			Label:  "池子流动性",
+			Detail: rawLiqErr.Error(),
+		})
+		// If pool has zero liquidity, skip remaining checks
+		return checks, nil
+	}
+
+	// 2. Liquidity USD check
+	liqErr := evaluateLiquidityRisk(state.LiquidityUSD, safety.MinPoolLiquidityUSD, task.AmountUSDT, options)
+	if liqErr == nil {
+		liqVal := state.LiquidityUSD
+		checks = append(checks, CheckResult{
+			Key:    "liquidity",
+			Status: "pass",
+			Label:  "池子流动性",
+			Detail: fmt.Sprintf("TVL $%.0f", state.LiquidityUSD),
+			Value:  &liqVal,
+		})
+	} else {
+		liqVal := state.LiquidityUSD
+		item := CheckResult{
+			Key:   "liquidity",
+			Label: "池子流动性",
+			Value: &liqVal,
+		}
+		if liqErr.RiskAckRequired {
+			item.Status = "warn"
+			item.Detail = liqErr.Reason
+			item.Extra = map[string]interface{}{
+				"risk_ack_required": true,
+				"max_open_amount":   liqErr.MaxOpenAmount,
+			}
+		} else {
+			item.Status = "fail"
+			item.Detail = liqErr.Reason
+		}
+		checks = append(checks, item)
+	}
+
+	// 3. Price deviation check
+	devErr := evaluatePriceDeviation(task, state, cc, safety)
+	if devErr == nil {
+		checks = append(checks, CheckResult{
+			Key:    "price_deviation",
+			Status: "pass",
+			Label:  "价格偏差",
+			Detail: "正常",
+		})
+	} else {
+		devVal := devErr.PriceDeviationPercent
+		item := CheckResult{
+			Key:    "price_deviation",
+			Label:  "价格偏差",
+			Detail: devErr.Reason,
+			Value:  &devVal,
+			Extra: map[string]interface{}{
+				"price_deviation_max_percent": devErr.PriceDeviationMaxPercent,
+			},
+		}
+		// Price deviation is always a hard fail
+		item.Status = "fail"
+		checks = append(checks, item)
+	}
+
+	return checks, nil
+}
+
 func errorAs(err error, target interface{}) bool {
 	switch v := target.(type) {
 	case **ZapSafetyError:

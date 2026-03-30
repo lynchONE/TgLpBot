@@ -9,7 +9,7 @@ import NumberFlowValue from './components/NumberFlowValue.jsx';
 import StepProgressModal from './components/StepProgressModal.jsx';
 import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
 import SmartMoneyPage from './components/SmartMoneyPage.jsx';
-import { Bot, BarChart2, Filter, Search, Moon, Sun, Settings, X, Check, RotateCcw, AlertTriangle, Flame, Eye, Wallet } from 'lucide-react';
+import { Bot, BarChart2, Filter, Search, Moon, Sun, Settings, X, Check, RotateCcw, AlertTriangle, CheckCircle, XCircle, Flame, Eye, Wallet } from 'lucide-react';
 import {
     deleteTask,
     fetchAdminRealtimePositions,
@@ -25,11 +25,6 @@ import {
     updateTaskRange,
     setTaskPaused,
     stopTask,
-    addToBlacklist,
-    removeFromBlacklist,
-    fetchBlacklist,
-    fetchCooldowns,
-    removeCooldown,
     saveGlobalConfig,
 } from './lib/api';
 import { fetchSMPoolStats } from './lib/smartMoneyApi';
@@ -324,32 +319,6 @@ function parseOptionalPercent(raw) {
     return { valid: true, value: num };
 }
 
-function hasOpenPositionRiskPayload(value) {
-    return Boolean(
-        value &&
-        typeof value === 'object' &&
-        (
-            typeof value?.liquidity_usd === 'number' ||
-            typeof value?.max_open_amount === 'number' ||
-            typeof value?.price_deviation_percent === 'number' ||
-            Boolean(value?.risk_ack_required)
-        )
-    );
-}
-
-function buildOpenPositionRiskPayload(value, fallbackMessage = '') {
-    if (!hasOpenPositionRiskPayload(value)) return null;
-    return {
-        code: String(value?.code || ''),
-        message: String(value?.message || fallbackMessage || ''),
-        liquidity_usd: Number(value?.liquidity_usd),
-        min_liquidity_usd: Number(value?.min_liquidity_usd),
-        max_open_amount: Number(value?.max_open_amount),
-        risk_ack_required: Boolean(value?.risk_ack_required),
-        price_deviation_percent: Number(value?.price_deviation_percent),
-        price_deviation_max_percent: Number(value?.price_deviation_max_percent),
-    };
-}
 
 function buildEntrySwapConfirmKey(preview, entrySwapSlippage) {
     return [
@@ -472,7 +441,7 @@ export default function App() {
     const [openPositionSlippage, setOpenPositionSlippage] = useState('');
     const [openPositionAllowSwap, setOpenPositionAllowSwap] = useState(false);
     const [openPositionError, setOpenPositionError] = useState('');
-    const [openPositionRisk, setOpenPositionRisk] = useState(null);
+    const [openPositionChecks, setOpenPositionChecks] = useState([]);
     const [openPositionRiskAck, setOpenPositionRiskAck] = useState(false);
     const [openPositionEntrySwapPreview, setOpenPositionEntrySwapPreview] = useState(null);
     const [openPositionEntrySwapPreviewLoading, setOpenPositionEntrySwapPreviewLoading] = useState(false);
@@ -497,11 +466,6 @@ export default function App() {
     const [taskRangeError, setTaskRangeError] = useState('');
     const [taskRangeLoading, setTaskRangeLoading] = useState(false);
 
-    // 婵帗绋掗崹鐢稿箖閺囥垹纭€闁哄洨濮寸瑧闂?
-    const [blacklist, setBlacklist] = useState(new Set());
-    // 闂佸憡鍔曢崲鎻掔暤閸儱绀嗘俊銈呭閳ь剙鍟撮幃鈺呮嚋绾版ê浜?
-    const [cooldowns, setCooldowns] = useState([]);
-    const [cooldownRemovingPair, setCooldownRemovingPair] = useState('');
 
     const [adminUsers, setAdminUsers] = useState([]);
     const [adminUsersError, setAdminUsersError] = useState('');
@@ -523,8 +487,6 @@ export default function App() {
     const [pollDraftSec, setPollDraftSec] = useState('');
     const [confirmState, setConfirmState] = useState(null);
     const [notice, setNotice] = useState(null);
-    const [blacklistPrompt, setBlacklistPrompt] = useState(null);
-    const [blacklistPromptLoading, setBlacklistPromptLoading] = useState(false);
     const [globalConfigOpen, setGlobalConfigOpen] = useState(false);
     const [globalConfig, setGlobalConfig] = useState(null);
     const [globalConfigError, setGlobalConfigError] = useState('');
@@ -1430,17 +1392,11 @@ export default function App() {
         setOpenPositionEntrySwapConfirm(false);
 
         setOpenPositionError('');
-        setOpenPositionRisk(null);
+        setOpenPositionChecks([]);
         setOpenPositionRiskAck(false);
     };
 
     const openPositionModal = (pool) => {
-        const addr = String(pool?.pool_address || '').trim().toLowerCase();
-        if (addr && blacklist.has(addr)) {
-            hapticNotification('error');
-            showNotice('This pool is already blacklisted.', 'error');
-            return;
-        }
         let chain = String(pool?.chain || hotPoolsData?.chain || 'bsc').trim().toLowerCase() || 'bsc';
         if (!multiChainEnabled) chain = userDefaultChain;
         const poolVersion = String(pool?.protocol_version || pool?.pool_version || '').trim().toLowerCase();
@@ -1582,13 +1538,7 @@ export default function App() {
         }
 
         const poolAddr = String(openPositionPool?.pool_address || '').trim().toLowerCase();
-        if (poolAddr && blacklist.has(poolAddr)) {
-            setOpenPositionEntrySwapPreview(null);
-            setOpenPositionEntrySwapPreviewLoading(false);
-            setOpenPositionEntrySwapPreviewError('');
-            setOpenPositionRisk(null);
-            return undefined;
-        }
+        void poolAddr;
 
         const amount = Number(String(openPositionAmount || '').trim());
         const range = parseRangeInput(openPositionRangeLower, openPositionRangeUpper);
@@ -1598,7 +1548,7 @@ export default function App() {
             setOpenPositionEntrySwapPreview(null);
             setOpenPositionEntrySwapPreviewLoading(false);
             setOpenPositionEntrySwapPreviewError('');
-            setOpenPositionRisk(null);
+            setOpenPositionChecks([]);
             return undefined;
         }
 
@@ -1660,24 +1610,18 @@ export default function App() {
                     entrySwapSlippageTolerance: entrySwapSlippage.value,
                     allowEntrySwap: true,
                     walletId,
-                    ackLiquidityRisk: Boolean(openPositionRisk?.risk_ack_required && openPositionRiskAck),
+                    ackLiquidityRisk: openPositionRiskAck,
                     signal: controller.signal,
                 });
                 if (!active) return;
-                setOpenPositionRisk(null);
+                setOpenPositionChecks(Array.isArray(resp?.checks) ? resp.checks : []);
                 setOpenPositionEntrySwapPreview(resp?.entry_swap || { required: false });
             } catch (e) {
                 if (!active || controller.signal.aborted) return;
                 const msg = String(e?.message || e || '').trim();
-                const risk = buildOpenPositionRiskPayload(e, msg);
                 setOpenPositionEntrySwapPreview(null);
-                if (risk) {
-                    setOpenPositionRisk(risk);
-                    setOpenPositionEntrySwapPreviewError('');
-                } else {
-                    setOpenPositionRisk(null);
-                    setOpenPositionEntrySwapPreviewError(msg || '获取前置兑换预览失败');
-                }
+                setOpenPositionChecks([]);
+                setOpenPositionEntrySwapPreviewError(msg || '获取前置兑换预览失败');
             } finally {
                 if (active) {
                     setOpenPositionEntrySwapPreviewLoading(false);
@@ -1700,14 +1644,12 @@ export default function App() {
         openPositionRangeUpper,
         openPositionSlippage,
         openPositionEntrySwapSlippage,
-        Boolean(openPositionRisk?.risk_ack_required),
         openPositionRiskAck,
         multiWalletEnabled,
         walletsLoading,
         walletsError,
         walletsData,
         openPositionWalletId,
-        blacklist,
     ]);
 
     const handleOpenPosition = async () => {
@@ -1716,24 +1658,28 @@ export default function App() {
             setOpenPositionError('缺少 Telegram 身份信息，请从机器人重新打开小程序。');
             return;
         }
-        const poolAddr = String(openPositionPool?.pool_address || '').trim().toLowerCase();
-        if (poolAddr && blacklist.has(poolAddr)) {
-            setOpenPositionError('该池子已在黑名单中，禁止开仓。');
-            return;
-        }
         const amount = Number(String(openPositionAmount || '').trim());
         if (!Number.isFinite(amount) || amount <= 0) {
             setOpenPositionError('请输入有效的开仓金额。');
             return;
         }
-        const riskMaxOpenAmount = Number(openPositionRisk?.max_open_amount);
-        const riskRequiresAck = Boolean(openPositionRisk?.risk_ack_required);
-        if (Number.isFinite(riskMaxOpenAmount) && riskMaxOpenAmount > 0 && amount > riskMaxOpenAmount) {
-            setOpenPositionError(`当前池子单次开仓金额不能高于 ${riskMaxOpenAmount} USDT`);
+        const warnChecks = openPositionChecks.filter(c => c.status === 'warn');
+        const failChecks = openPositionChecks.filter(c => c.status === 'fail');
+        if (failChecks.length > 0) {
+            setOpenPositionError(failChecks.map(c => c.detail || c.label).join('; '));
             return;
         }
-        if (riskRequiresAck && !openPositionRiskAck) {
+        const requiresAck = warnChecks.some(c => c.extra?.risk_ack_required);
+        if (requiresAck && !openPositionRiskAck) {
             setOpenPositionError('请先确认低流动性风险。');
+            return;
+        }
+        const maxOpenAmount = warnChecks.reduce((m, c) => {
+            const v = Number(c.extra?.max_open_amount);
+            return (Number.isFinite(v) && v > 0 && (m === null || v < m)) ? v : m;
+        }, null);
+        if (maxOpenAmount !== null && amount > maxOpenAmount) {
+            setOpenPositionError(`当前池子单次开仓金额不能高于 ${maxOpenAmount} USDT`);
             return;
         }
         const range = parseRangeInput(openPositionRangeLower, openPositionRangeUpper);
@@ -1827,10 +1773,10 @@ export default function App() {
                 allowEntrySwap: true,
                 confirmEntrySwap: Boolean(openPositionEntrySwapPreview?.required && openPositionEntrySwapConfirm),
                 walletId,
-                ackLiquidityRisk: riskRequiresAck && openPositionRiskAck,
+                ackLiquidityRisk: requiresAck && openPositionRiskAck,
             });
             setOpenPositionError('');
-            setOpenPositionRisk(null);
+            setOpenPositionChecks([]);
             setOpenPositionEntrySwapPreview(null);
             setOpenPositionEntrySwapPreviewError('');
             setOpenPositionEntrySwapConfirm(false);
@@ -1840,17 +1786,12 @@ export default function App() {
             resetOpenPositionDraft();
         } catch (e) {
             const msg = String(e?.message || e || '').trim();
-            const risk = buildOpenPositionRiskPayload(e, msg);
             const entrySwapInfo = e && typeof e === 'object' && e?.entry_swap && typeof e.entry_swap === 'object'
                 ? e.entry_swap
                 : null;
-            setOpenPositionRisk(risk);
             if (entrySwapInfo) {
                 setOpenPositionEntrySwapPreview(entrySwapInfo);
                 setOpenPositionEntrySwapPreviewError('');
-            }
-            if (risk) {
-                queueMicrotask(() => setOpenPositionError(''));
             }
             setOpenPositionError(msg || '开仓失败。');
             setOperationProgress(prev => prev?.operation === 'open_position'
@@ -1861,118 +1802,10 @@ export default function App() {
     };
 
     // 婵帗绋掗崹鐢稿箖閺囥垹纭€闁哄洨鍠愰幆娆徝归敐鍡欑煀妞わ腹鏅犻幃?
-    const handleBlacklist = useCallback(async (pool, add) => {
-        if (!hasInitData || !pool?.pool_address) return;
-        const addr = String(pool.pool_address).trim().toLowerCase();
-        try {
-            if (add) {
-                await addToBlacklist({ apiBaseUrl, initData, poolAddress: addr });
-                setBlacklist(prev => new Set(prev).add(addr));
-                hapticNotification('success');
-                showNotice(`Added ${pool?.trading_pair || addr} to blacklist.`, 'warning');
-            } else {
-                await removeFromBlacklist({ apiBaseUrl, initData, poolAddress: addr });
-                setBlacklist(prev => {
-                    const next = new Set(prev);
-                    next.delete(addr);
-                    return next;
-                });
-                hapticNotification('success');
-                showNotice(`Removed ${pool?.trading_pair || addr} from blacklist.`, 'info');
-            }
-        } catch (e) {
-            hapticNotification('error');
-            showNotice(`黑名单操作失败: ${e?.message || e}`, 'error');
-        }
-    }, [apiBaseUrl, initData, hasInitData]);
 
-    const openBlacklistPrompt = useCallback((pool) => {
-        const addr = String(pool?.pool_address || '').trim().toLowerCase();
-        if (!addr) return;
-        if (!hasInitData) {
-            showNotice('缺少 Telegram 身份信息，请从机器人重新打开小程序。', 'error');
-            return;
-        }
-        if (blacklist.has(addr)) {
-            showNotice('This pool is already blacklisted.', 'info');
-            return;
-        }
-        setBlacklistPrompt({ pool, addr });
-    }, [blacklist, hasInitData, showNotice]);
 
-    const closeBlacklistPrompt = useCallback(() => {
-        if (blacklistPromptLoading) return;
-        setBlacklistPrompt(null);
-    }, [blacklistPromptLoading]);
-
-    const confirmBlacklistPrompt = useCallback(async () => {
-        if (!blacklistPrompt?.pool) return;
-        setBlacklistPromptLoading(true);
-        try {
-            await handleBlacklist(blacklistPrompt.pool, true);
-            setBlacklistPrompt(null);
-        } finally {
-            setBlacklistPromptLoading(false);
-        }
-    }, [blacklistPrompt, handleBlacklist]);
-
-    // 闂佸憡姊绘慨鎯归崶顭戞付闁瑰瓨绻冮崐鎶芥煕濡や焦绀€闁割煈浜為幃?
-    const loadBlacklist = useCallback(async () => {
-        if (!hasInitData) return;
-        try {
-            const resp = await fetchBlacklist({ apiBaseUrl, initData });
-            if (resp?.blacklist) {
-                setBlacklist(new Set(resp.blacklist.map(a => String(a).toLowerCase())));
-            }
-        } catch (e) {
-            console.error('[Blacklist] Load failed:', e);
-        }
-    }, [apiBaseUrl, initData, hasInitData]);
-
-    // 闂佸憡姊绘慨鎯归崶顒€绀冪€瑰嫭婢樼粊閬嶆煕閹烘搩娈欓柕?
-    const loadCooldowns = useCallback(async () => {
-        if (!hasInitData) return;
-        try {
-            const resp = await fetchCooldowns({ apiBaseUrl, initData });
-            if (resp?.cooldowns) {
-                setCooldowns(resp.cooldowns);
-            }
-        } catch (e) {
-            console.error('[Cooldowns] Load failed:', e);
-        }
-    }, [apiBaseUrl, initData, hasInitData]);
-
-    const handleRemoveCooldown = useCallback(async (tradingPair) => {
-        const pair = String(tradingPair || '').trim();
-        if (!hasInitData || !pair || cooldownRemovingPair) return;
-
-        const ok = await requestConfirm({
-            title: 'Remove cooldown',
-            message: `Remove cooldown for ${pair}?\nThis action cannot be undone.`,
-            confirmText: 'Remove',
-            tone: 'danger',
-        });
-        if (!ok) return;
-
-        setCooldownRemovingPair(pair);
-        try {
-            const resp = await removeCooldown({ apiBaseUrl, initData, tradingPair: pair });
-            showNotice(resp?.message || `已解除冷却: ${pair}`, 'success');
-            loadCooldowns();
-        } catch (e) {
-            showNotice(`解除冷却失败: ${String(e?.message || e)}`, 'error');
-        } finally {
-            setCooldownRemovingPair('');
-        }
-    }, [apiBaseUrl, initData, hasInitData, cooldownRemovingPair, loadCooldowns, requestConfirm]);
 
     // 闂佸憡甯楃换鍌烇綖閹版澘绀岄柡宥冨妽椤ρ囨煕閺冨倸鞋婵炴潙娲﹂—鈧柟瀛樼箖閸婃娊鏌涘Δ浣圭闁硅渹鍗冲畷妯虹暋閺夎法銈遍梺鍛婂笚椤ㄥ濡?
-    useEffect(() => {
-        if (hasInitData) {
-            loadBlacklist();
-            loadCooldowns();
-        }
-    }, [hasInitData, loadBlacklist, loadCooldowns]);
 
     const loadGlobalConfig = async () => {
         if (!hasInitData) {
@@ -2316,7 +2149,6 @@ export default function App() {
             : '该用户暂无仓位数据'
         : '请先选择一个管理员用户';
     const showEmptyPositions = isPositions && Boolean(activeData) && visiblePositions.length === 0;
-    const blacklistList = useMemo(() => Array.from(blacklist).sort(), [blacklist]);
     const hotPoolsPairMap = useMemo(() => {
         const m = new Map();
         for (const row of hotPoolsRows) {
@@ -2326,12 +2158,6 @@ export default function App() {
         }
         return m;
     }, [hotPoolsRows]);
-    const blacklistPromptPool = blacklistPrompt?.pool || null;
-    const blacklistPromptPair = String(blacklistPromptPool?.trading_pair || '').trim();
-    const blacklistPromptAddr = String(blacklistPromptPool?.pool_address || '').trim().toLowerCase();
-    const blacklistPromptAddrShort = blacklistPromptAddr.length > 12
-        ? `${blacklistPromptAddr.slice(0, 6)}...${blacklistPromptAddr.slice(-4)}`
-        : blacklistPromptAddr;
 
     const initDataMissing = viewMode !== 'hot_pools' && !hasInitData;
     const noticeClass = notice?.tone === 'error'
@@ -2720,10 +2546,8 @@ export default function App() {
                                 accentTheme={accentTheme}
                                 onOpenKline={setKlinePool}
                                 onOpenPosition={openPositionModal}
-                                onBlacklistRequest={openBlacklistPrompt}
                                 rank={index + 1}
                                 apiBaseUrl={apiBaseUrl}
-                                isBlacklisted={blacklist.has(addr)}
                                 chain={hotPoolsData?.chain || 'bsc'}
                             />
                         );
@@ -2877,7 +2701,6 @@ export default function App() {
                                         {poolSearchResults.map((pool, idx) => {
                                             const addr = String(pool?.pool_address || '').trim().toLowerCase();
                                             const key = `${String(pool?.protocol_version || '').trim()}:${addr || String(idx)}`;
-                                            const isBlacklisted = addr ? blacklist.has(addr) : false;
                                             return (
                                                 <HotPoolCard
                                                     key={key}
@@ -2887,10 +2710,8 @@ export default function App() {
                                                     rank={idx + 1}
                                                     accentTheme={accentTheme}
                                                     apiBaseUrl={apiBaseUrl}
-                                                    isBlacklisted={isBlacklisted}
                                                     onOpenKline={setKlinePool}
                                                     onOpenPosition={selectPoolFromSearch}
-                                                    onBlacklistRequest={openBlacklistPrompt}
                                                     chain={poolSearchChain}
                                                 />
                                             );
@@ -3495,119 +3316,85 @@ export default function App() {
                                 />
                             </div>
 
-                            {(openPositionEntrySwapPreviewLoading || openPositionEntrySwapPreview?.required || openPositionEntrySwapPreviewError) ? (
-                                <div className="rounded-xl border border-sky-500/20 bg-sky-500/10 p-3 text-xs leading-5 text-sky-700 dark:text-sky-200">
-                                    <div className="text-xs font-semibold">前置兑换</div>
+                            {(openPositionEntrySwapPreviewLoading || openPositionChecks.length > 0 || openPositionEntrySwapPreviewError) ? (
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80 mb-2">安全检查</div>
                                     {openPositionEntrySwapPreviewLoading ? (
-                                        <div className="mt-2">正在获取推荐滑点和预计到账数量...</div>
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">正在检查...</div>
                                     ) : null}
                                     {openPositionEntrySwapPreviewError ? (
-                                        <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-red-700 dark:text-red-200">
+                                        <div className="mt-1 rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-[11px] text-red-700 dark:text-red-200">
                                             {openPositionEntrySwapPreviewError}
                                         </div>
                                     ) : null}
-                                    {openPositionEntrySwapPreview?.required ? (
-                                        <>
-                                            <div className="mt-2">
-                                                推荐滑点：{Number(openPositionEntrySwapPreview?.recommended_slippage_tolerance).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}%
-                                            </div>
-                                            <div className="mt-1">
-                                                当前滑点：{Number(openPositionEntrySwapPreview?.current_slippage_tolerance).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}%
-                                            </div>
-                                            <div className="mt-1">
-                                                预计到账：{openPositionEntrySwapPreview?.expected_amount_out || '--'} {openPositionEntrySwapPreview?.to_token_symbol || ''}
-                                            </div>
-                                            <div className="mt-1">
-                                                兑换路径：{openPositionEntrySwapPreview?.amount_in || '--'} {openPositionEntrySwapPreview?.from_token_symbol || ''} 到 {openPositionEntrySwapPreview?.to_token_symbol || ''}
-                                            </div>
-                                            <input
-                                                value={openPositionEntrySwapSlippage}
-                                                onChange={(e) => {
-                                                    setOpenPositionEntrySwapSlippageDirty(true);
-                                                    setOpenPositionEntrySwapSlippage(e.target.value);
-                                                    setOpenPositionError('');
-                                                }}
-                                                inputMode="decimal"
-                                                className={`mt-3 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                                placeholder="本次前置兑换滑点"
-                                            />
-                                            <label className="mt-3 flex items-start gap-2">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={openPositionEntrySwapConfirm}
-                                                    onChange={(e) => {
-                                                        setOpenPositionEntrySwapConfirm(e.target.checked);
-                                                        setOpenPositionError('');
-                                                    }}
-                                                    disabled={openPositionLoading || openPositionEntrySwapPreviewLoading}
-                                                />
-                                                <span>我已确认本次前置兑换，先执行兑换，再继续后续开仓。</span>
-                                            </label>
-                                        </>
-                                    ) : null}
-                                </div>
-                            ) : null}
-
-                            <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 to-transparent p-4 shadow-sm text-emerald-800 dark:text-emerald-200">
-                                <div className="flex items-start gap-3">
-                                    <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400">
-                                        <Check className="h-3 w-3" strokeWidth={3} />
-                                    </div>
-                                    <div className="text-[12px] leading-relaxed">
-                                        <span className="font-semibold block mb-1">私有合约保驾护航</span>
-                                        <span className="opacity-90">首次开仓时会自动部署与您钱包绑定的专属合约，确保交易更安全私密。如遇网络中断，再次重试即可直接复用，不会重复产生部署消耗。</span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {openPositionRisk?.message ? (
-                                <div className={`rounded-2xl border p-4 shadow-sm ${openPositionRisk?.risk_ack_required
-                                    ? 'border-amber-500/40 bg-gradient-to-br from-amber-500/10 to-amber-500/5 text-amber-800 dark:border-amber-500/30 dark:from-amber-500/10 dark:to-transparent dark:text-amber-200'
-                                    : 'border-red-500/40 bg-gradient-to-br from-red-500/10 to-red-500/5 text-red-800 dark:border-red-500/30 dark:from-red-500/10 dark:to-transparent dark:text-red-200'
-                                    }`}
-                                >
-                                    <div className="flex items-start gap-3">
-                                        <AlertTriangle className={`mt-0.5 h-5 w-5 shrink-0 ${openPositionRisk?.risk_ack_required ? 'text-amber-500 dark:text-amber-400' : 'text-red-500 dark:text-red-400'}`} />
-                                        <div className="flex-1 space-y-2.5">
-                                            <div className="text-[13px] leading-relaxed font-semibold">
-                                                {openPositionRisk.message}
-                                            </div>
-                                            {(Number.isFinite(Number(openPositionRisk?.liquidity_usd)) || Number.isFinite(Number(openPositionRisk?.max_open_amount))) && (
-                                                <div className="mt-2 flex flex-col gap-1.5 rounded-xl bg-white/50 p-2.5 dark:bg-black/20">
-                                                    {Number.isFinite(Number(openPositionRisk?.liquidity_usd)) && (
-                                                        <div className="flex items-center justify-between text-xs">
-                                                            <span className="opacity-80">当前流动性</span>
-                                                            <span className="font-mono font-semibold">{formatUsdCompact(openPositionRisk.liquidity_usd)}</span>
+                                    {openPositionChecks.length > 0 ? (
+                                        <div className="space-y-2">
+                                            {openPositionChecks.map((item) => {
+                                                const isPass = item.status === 'pass';
+                                                const isWarn = item.status === 'warn';
+                                                const isFail = item.status === 'fail';
+                                                const isEntrySwap = item.key === 'entry_swap';
+                                                return (
+                                                    <div key={item.key} className="rounded-lg p-2 " style={{
+                                                        background: isFail ? 'rgba(239,68,68,0.07)' : isWarn ? 'rgba(234,179,8,0.07)' : 'rgba(34,197,94,0.07)'
+                                                    }}>
+                                                        <div className="flex items-start gap-2">
+                                                            <div className={`mt-0.5 shrink-0 ${isFail ? 'text-red-500' : isWarn ? 'text-amber-500' : 'text-emerald-500'}`}>
+                                                                {isFail ? <XCircle className="h-4 w-4" /> : isWarn ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
+                                                            </div>
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="flex items-center justify-between gap-2">
+                                                                    <span className={`text-[11px] font-semibold ${isFail ? 'text-red-700 dark:text-red-300' : isWarn ? 'text-amber-700 dark:text-amber-300' : 'text-emerald-700 dark:text-emerald-300'}`}>{item.label}</span>
+                                                                    {item.detail ? <span className="text-[10px] text-zinc-500 dark:text-white/40 text-right">{item.detail}</span> : null}
+                                                                </div>
+                                                                {isEntrySwap && openPositionEntrySwapPreview?.required ? (
+                                                                    <div className="mt-2 space-y-1 text-[11px] text-zinc-600 dark:text-white/60">
+                                                                        <div>兑换路径：{openPositionEntrySwapPreview?.amount_in || '--'} {openPositionEntrySwapPreview?.from_token_symbol || ''} → {openPositionEntrySwapPreview?.to_token_symbol || '--'}</div>
+                                                                        <div>预计到账：{openPositionEntrySwapPreview?.expected_amount_out || '--'} {openPositionEntrySwapPreview?.to_token_symbol || ''}</div>
+                                                                        <div>推荐滑点：{Number(openPositionEntrySwapPreview?.recommended_slippage_tolerance).toFixed(3).replace(/0+$/, '').replace(/\.$/, '' )}%</div>
+                                                                        <input
+                                                                            value={openPositionEntrySwapSlippage}
+                                                                            onChange={(e) => {
+                                                                                setOpenPositionEntrySwapSlippageDirty(true);
+                                                                                setOpenPositionEntrySwapSlippage(e.target.value);
+                                                                                setOpenPositionError('');
+                                                                            }}
+                                                                            inputMode="decimal"
+                                                                            className={`mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-1.5 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
+                                                                            placeholder="前置兑换滑点（可选）"
+                                                                        />
+                                                                        <label className="mt-2 flex items-start gap-2">
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                checked={openPositionEntrySwapConfirm}
+                                                                                onChange={(e) => {
+                                                                                    setOpenPositionEntrySwapConfirm(e.target.checked);
+                                                                                    setOpenPositionError('');
+                                                                                }}
+                                                                                disabled={openPositionLoading || openPositionEntrySwapPreviewLoading}
+                                                                            />
+                                                                            <span className="text-[11px] leading-tight">我已确认本次前置兑换</span>
+                                                                        </label>
+                                                                    </div>
+                                                                ) : null}
+                                                                {isWarn && item.extra?.risk_ack_required ? (
+                                                                    <label className="mt-2 flex items-start gap-2 cursor-pointer">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={openPositionRiskAck}
+                                                                            onChange={(e) => setOpenPositionRiskAck(e.target.checked)}
+                                                                            disabled={openPositionLoading}
+                                                                        />
+                                                                        <span className="text-[11px] leading-tight opacity-80">我已知悉当前池子流动性偏低，确认继续开仓</span>
+                                                                    </label>
+                                                                ) : null}
+                                                            </div>
                                                         </div>
-                                                    )}
-                                                    {Number.isFinite(Number(openPositionRisk?.max_open_amount)) && Number(openPositionRisk?.max_open_amount) > 0 && (
-                                                        <div className="flex items-center justify-between text-xs">
-                                                            <span className="opacity-80">最大允许开仓</span>
-                                                            <span className="font-mono font-semibold">{formatUsdCompact(openPositionRisk.max_open_amount)}</span>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
-                                            {openPositionRisk?.risk_ack_required && (
-                                                <label className="mt-3 flex items-start gap-2.5 cursor-pointer group">
-                                                    <div className="relative flex items-center justify-center mt-0.5 shrink-0">
-                                                        <input
-                                                            type="checkbox"
-                                                            className="peer sr-only"
-                                                            checked={openPositionRiskAck}
-                                                            onChange={(e) => setOpenPositionRiskAck(e.target.checked)}
-                                                            disabled={openPositionLoading}
-                                                        />
-                                                        <div className="h-4 w-4 rounded border-2 border-amber-500/50 bg-white/50 transition-all peer-checked:border-amber-500 peer-checked:bg-amber-500 dark:border-amber-500/40 dark:bg-black/20"></div>
-                                                        <Check className="absolute h-3 w-3 text-white opacity-0 transition-opacity peer-checked:opacity-100" strokeWidth={3} />
                                                     </div>
-                                                    <span className="text-[11px] leading-tight font-medium opacity-80 group-hover:opacity-100 transition-opacity">
-                                                        我已知悉当前池子流动性偏低，确认按限额继续开仓
-                                                    </span>
-                                                </label>
-                                            )}
+                                                );
+                                            })}
                                         </div>
-                                    </div>
+                                    ) : null}
                                 </div>
                             ) : null}
 
@@ -3732,88 +3519,6 @@ export default function App() {
                 ) : null
             }
 
-            {
-                blacklistPrompt ? (
-                    <div className="fixed inset-0 z-[65] flex items-end justify-center sm:items-center sm:p-4">
-                        <button
-                            type="button"
-                            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                            onClick={closeBlacklistPrompt}
-                            aria-label="取消拉黑"
-                        />
-                        <div className="relative w-full max-w-md overflow-hidden rounded-t-2xl sm:rounded-2xl border border-red-500/20 bg-white p-4 shadow-2xl dark:border-red-500/20 dark:bg-[#111318]">
-                            <div className="flex items-start gap-3">
-                                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-500/15 text-red-600 ring-1 ring-red-500/30 dark:text-red-200">
-                                    <Icon path={icons.alert} className="h-6 w-6" />
-                                </div>
-                                <div className="min-w-0">
-                                    <div className="text-base font-extrabold text-zinc-900 dark:text-white/90">加入黑名单</div>
-                                    <div className="mt-1 text-xs text-zinc-500 dark:text-white/50">
-                                        将池子加入黑名单后会阻止相关池子开仓
-                                    </div>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={closeBlacklistPrompt}
-                                    className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                    aria-label="关闭黑名单确认"
-                                >
-                                    <Icon path={icons.close} className="h-4 w-4" />
-                                </button>
-                            </div>
-
-                            <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 p-3">
-                                <div className="flex items-center justify-between gap-3">
-                                    <div className="min-w-0">
-                                        <div className="text-sm font-semibold text-red-800 dark:text-red-200 truncate">
-                                            {blacklistPromptPair || '未知池子'}
-                                        </div>
-                                        <div className="mt-0.5 text-[11px] text-red-700/70 dark:text-red-200/70">
-                                            {blacklistPromptAddrShort || '--'}
-                                        </div>
-                                    </div>
-                                    <div className="shrink-0 rounded-lg bg-red-500/15 px-2 py-1 text-[10px] font-semibold text-red-700 dark:text-red-200">
-                                        待确认
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="mt-3 space-y-2 text-xs text-zinc-600 dark:text-white/60">
-                                <div className="flex items-start gap-2">
-                                    <span className="mt-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-red-500/15 text-red-600 dark:text-red-200">1</span>
-                                    <span>加入黑名单后，将阻止该池子的后续开仓。</span>
-                                </div>
-                                <div className="flex items-start gap-2">
-                                    <span className="mt-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-zinc-500/15 text-zinc-600 dark:text-white/60">2</span>
-                                    <span>后续可在黑名单列表中移除。</span>
-                                </div>
-                            </div>
-
-                            <div className="mt-4 flex items-center gap-2">
-                                <button
-                                    type="button"
-                                    onClick={closeBlacklistPrompt}
-                                    disabled={blacklistPromptLoading}
-                                    className="flex-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 active:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                >
-                                    取消
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={confirmBlacklistPrompt}
-                                    disabled={blacklistPromptLoading}
-                                    className={`flex-1 rounded-xl px-3 py-2 text-sm font-semibold text-white shadow-sm transition ${blacklistPromptLoading
-                                        ? 'cursor-not-allowed bg-red-500/60'
-                                        : 'bg-red-500 hover:bg-red-600 active:bg-red-700'
-                                        }`}
-                                >
-                                    {blacklistPromptLoading ? '处理中...' : '确认加入'}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                ) : null
-            }
 
             {
                 confirmState ? (

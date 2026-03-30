@@ -12,7 +12,6 @@ import (
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
-	"TgLpBot/service/blacklist"
 	botSvc "TgLpBot/service/bot"
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/pool"
@@ -47,6 +46,7 @@ type openPositionResponse struct {
 
 type openPositionPreviewResponse struct {
 	Status    string                     `json:"status"`
+	Checks    []openPositionCheckItem    `json:"checks,omitempty"`
 	EntrySwap *openPositionEntrySwapInfo `json:"entry_swap,omitempty"`
 }
 
@@ -63,6 +63,15 @@ type openPositionEntrySwapInfo struct {
 	ExpectedAmountOutRaw         string  `json:"expected_amount_out_raw,omitempty"`
 	RecommendedSlippageTolerance float64 `json:"recommended_slippage_tolerance,omitempty"`
 	CurrentSlippageTolerance     float64 `json:"current_slippage_tolerance,omitempty"`
+}
+
+type openPositionCheckItem struct {
+	Key    string                 `json:"key"`
+	Status string                 `json:"status"`
+	Label  string                 `json:"label"`
+	Detail string                 `json:"detail,omitempty"`
+	Value  *float64               `json:"value,omitempty"`
+	Extra  map[string]interface{} `json:"extra,omitempty"`
 }
 
 type openPositionError struct {
@@ -376,14 +385,6 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 		selectedWallet = walletRec
 	}
 
-	blacklistSvc := blacklist.NewBlacklistService()
-	if blacklistSvc.IsBlacklisted(user.ID, req.PoolAddress) {
-		return nil, &openPositionError{
-			Code:    "blacklisted",
-			Message: "该池子已在黑名单中，禁止开仓",
-		}, http.StatusForbidden
-	}
-
 	poolAddress := normalizeHexPrefixed(req.PoolAddress)
 	poolVersion := req.PoolVersion
 	if poolVersion == "" {
@@ -577,6 +578,50 @@ func (s *Server) handleOpenPositionPreview(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Collect safety checks
+	checkResults, err := ctx.liquidityService.CollectOpenPositionChecks(ctx.task, liquidity.OpenPositionRiskOptions{
+		AckLiquidityRisk:    ctx.req.AckLiquidityRisk,
+		RequireLiquidityAck: true,
+	})
+	if err != nil {
+		writeOpenPositionError(w, http.StatusInternalServerError, openPositionError{
+			Code:    "open_position_failed",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	var checks []openPositionCheckItem
+	for _, cr := range checkResults {
+		checks = append(checks, openPositionCheckItem{
+			Key:    cr.Key,
+			Status: cr.Status,
+			Label:  cr.Label,
+			Detail: cr.Detail,
+			Value:  cr.Value,
+			Extra:  cr.Extra,
+		})
+	}
+
+	// Check for hard failures
+	hasFail := false
+	for _, c := range checks {
+		if c.Status == "fail" {
+			hasFail = true
+			break
+		}
+	}
+
+	if hasFail {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(openPositionPreviewResponse{
+			Status: "fail",
+			Checks: checks,
+		})
+		return
+	}
+
+	// Get entry swap preview
 	preview, err := ctx.liquidityService.PreviewEntrySwap(ctx.task, ctx.selectedWallet, ctx.task.SlippageTolerance, ctx.req.EntrySwapSlippage)
 	if err != nil {
 		writeOpenPositionError(w, http.StatusInternalServerError, openPositionError{
@@ -586,10 +631,31 @@ func (s *Server) handleOpenPositionPreview(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	entrySwapInfo := buildOpenPositionEntrySwapInfo(preview)
+	if entrySwapInfo != nil && entrySwapInfo.Required {
+		checks = append(checks, openPositionCheckItem{
+			Key:    "entry_swap",
+			Status: "warn",
+			Label:  "前置兑换",
+			Detail: fmt.Sprintf("%s %s → %s", entrySwapInfo.AmountIn, entrySwapInfo.FromTokenSymbol, entrySwapInfo.ToTokenSymbol),
+			Extra: map[string]interface{}{
+				"needs_confirmation": true,
+			},
+		})
+	} else {
+		checks = append(checks, openPositionCheckItem{
+			Key:    "entry_swap",
+			Status: "pass",
+			Label:  "前置兑换",
+			Detail: "无需兑换",
+		})
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(openPositionPreviewResponse{
 		Status:    "ok",
-		EntrySwap: buildOpenPositionEntrySwapInfo(preview),
+		Checks:    checks,
+		EntrySwap: entrySwapInfo,
 	})
 }
 

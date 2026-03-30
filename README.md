@@ -949,3 +949,9 @@ AutoLP 自动开仓的交易记录中，Gas 费显示为 `0.000000 BNB`。
   - 添加了 `bg-gradient-to-br` 以及毛玻璃面板。
   - 修改了复选框 Checkbox 的玻璃悬浮感，使交互更精致。
   - 显示出了具体开仓允许最高金额以及流动性限制文字，改善用户理解。
+
+### 2. 非 USDT 池子前置兑换漏判与开仓失败 (execution reverted) 修复
+- **问题**：在 `SIREN/WBNB` 等非 USDT 池子开仓时，如果用户钱包中碰巧留有极少量的残余目标代币（例如 `0.00001 WBNB` 的 dust 残余），系统会错误地认为“用户已有足够的 WBNB 可以直接开仓”，从而**跳过并且隐藏了前置兑换预览步骤**，并且在实际开仓时直接用这 `0.00001 WBNB` 去执行后续流程，最终导致 `EstimateGas failed: execution reverted`。
+- **修复方案**：
+  - 在 `backend/service/liquidity/entry_swap_preview.go` 和 `liquidity_enter.go` 中，将跳过前置兑换（`Entry swap skipped`）的条件从 `use.Sign() > 0` （有任意余额即可）修改为**需达到预算（budgetCap）的 95% 以上**。
+  - 此修复确保了针对非 USDT 目标代币的池子时，极小额的钱包残余不会再意外阻断正常的“USDT -> 目标代币”前置兑换验证流程，确保用户可以正确地预览并执行交换。

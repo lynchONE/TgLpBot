@@ -706,7 +706,6 @@ export async function updateSystemConfig({ apiBaseUrl, initData, config, signal 
     return resp.json();
 }
 
-// 黑名单 API
 
 // RPC Pool (Admin)
 
@@ -828,113 +827,6 @@ export async function invalidateAdminPrivateZap({ apiBaseUrl, initData, chain, s
         payload: { initData, action: 'invalidate', chain },
         signal,
     });
-}
-
-export async function fetchBlacklist({ apiBaseUrl, initData, signal }) {
-    const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/trading?endpoint=blacklist&initData=${encodeURIComponent(initData)}`;
-    const resp = await fetch(url, { method: 'GET', signal });
-    if (!resp.ok) {
-        const text = await resp.text().catch(() => '');
-        let detail = text;
-        try {
-            const parsed = text ? JSON.parse(text) : null;
-            if (parsed?.message) detail = parsed.message;
-        } catch {
-            // ignore JSON parse
-        }
-        throw new Error(detail || `HTTP ${resp.status}`);
-    }
-    return resp.json();
-}
-
-export async function addToBlacklist({ apiBaseUrl, initData, poolAddress, signal }) {
-    const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/trading?endpoint=blacklist`;
-    const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initData, pool_address: poolAddress, action: 'add' }),
-        signal,
-    });
-    if (!resp.ok) {
-        const text = await resp.text().catch(() => '');
-        let detail = text;
-        try {
-            const parsed = text ? JSON.parse(text) : null;
-            if (parsed?.message) detail = parsed.message;
-        } catch {
-            // ignore JSON parse
-        }
-        throw new Error(detail || `HTTP ${resp.status}`);
-    }
-    return resp.json();
-}
-
-export async function removeFromBlacklist({ apiBaseUrl, initData, poolAddress, signal }) {
-    const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/trading?endpoint=blacklist`;
-    const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initData, pool_address: poolAddress, action: 'remove' }),
-        signal,
-    });
-    if (!resp.ok) {
-        const text = await resp.text().catch(() => '');
-        let detail = text;
-        try {
-            const parsed = text ? JSON.parse(text) : null;
-            if (parsed?.message) detail = parsed.message;
-        } catch {
-            // ignore JSON parse
-        }
-        throw new Error(detail || `HTTP ${resp.status}`);
-    }
-    return resp.json();
-}
-
-// 冷却 API
-
-export async function fetchCooldowns({ apiBaseUrl, initData, signal }) {
-    const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/trading?endpoint=cooldowns&initData=${encodeURIComponent(initData)}`;
-    const resp = await fetch(url, { method: 'GET', signal });
-    if (!resp.ok) {
-        const text = await resp.text().catch(() => '');
-        let detail = text;
-        try {
-            const parsed = text ? JSON.parse(text) : null;
-            if (parsed?.message) detail = parsed.message;
-        } catch {
-            // ignore JSON parse
-        }
-        throw new Error(detail || `HTTP ${resp.status}`);
-    }
-    return resp.json();
-}
-
-export async function removeCooldown({ apiBaseUrl, initData, tradingPair, signal }) {
-    const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/trading?endpoint=cooldowns&initData=${encodeURIComponent(initData)}`;
-    const resp = await fetch(url, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trading_pair: tradingPair }),
-        signal,
-    });
-    if (!resp.ok) {
-        const text = await resp.text().catch(() => '');
-        let detail = text;
-        try {
-            const parsed = text ? JSON.parse(text) : null;
-            if (parsed?.message) detail = parsed.message;
-        } catch {
-            // ignore JSON parse
-        }
-        throw new Error(detail || `HTTP ${resp.status}`);
-    }
-    return resp.json();
 }
 
 export async function saveGlobalConfig({ apiBaseUrl, initData, config, signal }) {

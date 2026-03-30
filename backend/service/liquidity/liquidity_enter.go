@@ -9,6 +9,7 @@ import (
 	"TgLpBot/service/chainexec"
 	"TgLpBot/service/exchange"
 	"TgLpBot/service/pool"
+	"TgLpBot/service/pricing"
 	"TgLpBot/service/trade"
 	userSvc "TgLpBot/service/user"
 	"bytes"
@@ -387,9 +388,6 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	if err != nil {
 		return nil, err
 	}
-	if err := s.CheckOpenPositionSafety(task, OpenPositionRiskOptions{}); err != nil {
-		return nil, err
-	}
 	token0Addr := plan.Token0
 	token1Addr := plan.Token1
 
@@ -447,15 +445,23 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 				if capErr != nil {
 					log.Printf("[Liquidity] Entry budget cap lookup failed, skip existing %s priority: %v", plan.EntrySymbol, capErr)
 				} else if budgetCap != nil && budgetCap.Sign() > 0 {
-					use := new(big.Int).Set(entryBalance)
-					if use.Cmp(budgetCap) > 0 {
-						use = new(big.Int).Set(budgetCap)
-					}
-					if use.Sign() > 0 {
-						log.Printf("[Liquidity] Entry swap skipped: existing %s balance=%s use=%s budgetCap=%s",
+					// 只有当现有余额充足（达到 budgetCap 预估或极接近，设为 95%），才能跳过前置兑换。
+					// 防止钱包里有几分钱的残余代币时直接跳过 swap 导致用极小额金额去开仓。
+					threshold := new(big.Int).Mul(budgetCap, big.NewInt(95))
+					threshold.Div(threshold, big.NewInt(100))
+
+					if entryBalance.Cmp(threshold) >= 0 {
+						use := new(big.Int).Set(entryBalance)
+						if use.Cmp(budgetCap) > 0 {
+							use = new(big.Int).Set(budgetCap)
+						}
+						log.Printf("[Liquidity] Entry swap skipped: existing %s balance=%s is sufficient (use=%s budgetCap=%s)",
 							plan.EntrySymbol, entryBalance.String(), use.String(), budgetCap.String())
 						entryToken = plan.EntryToken
 						entryAmount = use
+					} else {
+						log.Printf("[Liquidity] Existing %s balance=%s is less than required budgetCap=%s (threshold=%s), will proceed with entry swap",
+							plan.EntrySymbol, entryBalance.String(), budgetCap.String(), threshold.String())
 					}
 				}
 			}
@@ -853,7 +859,7 @@ func (s *LiquidityService) enterV3FromToken(
 		}
 	}
 	if safeErr := s.checkZapSafety(client, sqrtPrice, swapTokenIn, swapTokenOut, swapAmount, okxExpectedOut,
-		token0, token1, tokenIn, entryDecimals, poolAddr); safeErr != nil {
+		token0, token1, tokenIn, entryDecimals, poolAddr, task.Chain); safeErr != nil {
 		return nil, safeErr
 	}
 
@@ -1332,6 +1338,7 @@ func (s *LiquidityService) checkZapSafety(
 	entryToken common.Address,
 	entryDecimals int,
 	poolAddr common.Address,
+	chain string,
 ) error {
 	sysConfigService := userSvc.NewSystemConfigService()
 	safety, err := sysConfigService.GetZapSafetyConfig()
@@ -1401,9 +1408,24 @@ func (s *LiquidityService) checkZapSafety(
 			balF, _ := new(big.Float).SetInt(entryBal).Float64()
 			divisor := math.Pow(10, float64(entryDecimals))
 			balF = balF / divisor
-			estimatedTVL := balF * 2
-			log.Printf("[Liquidity] Zap safety: pool entry token balance=%.2f estimatedTVL=%.2f threshold=%.2f",
-				balF, estimatedTVL, safety.MinPoolLiquidityUSD)
+
+			// 获取入场代币的 USD 价格
+			prices, pErr := pricing.NewTokenPriceService().GetUSDPrices(chain, []string{entryToken.Hex()})
+			if pErr != nil {
+				return &ZapSafetyError{
+					Reason: fmt.Sprintf("获取入场代币价格失败，无法评估池子流动性：%v", pErr),
+				}
+			}
+			tokenPriceUSD, ok := prices[strings.ToLower(entryToken.Hex())]
+			if !ok || tokenPriceUSD <= 0 {
+				return &ZapSafetyError{
+					Reason: fmt.Sprintf("无法获取入场代币 %s 的 USD 价格，无法评估池子流动性", entryToken.Hex()),
+				}
+			}
+
+			estimatedTVL := balF * tokenPriceUSD * 2
+			log.Printf("[Liquidity] Zap safety: pool entry token balance=%.2f tokenPriceUSD=%.4f estimatedTVL=%.2f threshold=%.2f",
+				balF, tokenPriceUSD, estimatedTVL, safety.MinPoolLiquidityUSD)
 			if estimatedTVL < safety.MinPoolLiquidityUSD {
 				return &ZapSafetyError{
 					Reason: fmt.Sprintf("池子流动性不足：预估 TVL %.2f USD 低于阈值 %.2f USD，取消开仓",
@@ -1482,6 +1504,20 @@ func (s *LiquidityService) prepareOKXSwapParams(
 	if baseOut.Sign() > 0 {
 		minOut = new(big.Int).Mul(baseOut, big.NewInt(95))
 		minOut = minOut.Div(minOut, big.NewInt(100))
+	}
+
+	// OKX 有时会返回需要原生币（msg.value）的 swap 路由（如 WBNB 先解包成 BNB 再交换），
+	// Zap 合约内部无法提供 native value，必须拒绝此类路由。
+	txValue := new(big.Int)
+	if vStr := strings.TrimSpace(okxData.Data[0].Tx.Value); vStr != "" {
+		if v, ok := new(big.Int).SetString(vStr, 10); ok {
+			txValue = v
+		} else if v, ok := new(big.Int).SetString(strings.TrimPrefix(vStr, "0x"), 16); ok {
+			txValue = v
+		}
+	}
+	if txValue.Sign() != 0 {
+		return nil, nil, fmt.Errorf("OKX swap(zap) 要求 native value=%s，Zap 合约不支持此路由", txValue.String())
 	}
 
 	callData := []byte{}
@@ -1757,7 +1793,7 @@ func (s *LiquidityService) enterV4FromToken(
 
 			// Zap 安全检查：价格偏差（V4 已有 sqrtPriceX96，流动性检查传零地址跳过）
 			if safeErr := s.checkZapSafety(client, sqrtPriceX96, tokenIn, tokenOut, swapAmount, okxExpectedOut,
-				c0, c1, tokenIn, cc.StableDecimals, common.Address{}); safeErr != nil {
+				c0, c1, tokenIn, cc.StableDecimals, common.Address{}, task.Chain); safeErr != nil {
 				return nil, safeErr
 			}
 		}

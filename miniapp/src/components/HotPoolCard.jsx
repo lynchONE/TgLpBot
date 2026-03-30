@@ -353,7 +353,7 @@ const CountChangeIndicator = ({ currentValue, previousValue, label = '变化' })
 
 const STABLE_COINS = ['usdc', 'usdt', 'busd', 'dai', 'frax', 'usdd', 'fdusd', 'wbnb', 'weth', 'wsol', 'bnb', 'eth', 'sol'];
 
-export default function HotPoolCard({ pool, metric, previousData, onOpenKline, onOpenPosition, onBlacklist, onBlacklistRequest, rank, apiBaseUrl, isBlacklisted = false, chain, accentTheme = 'lime' }) {
+export default function HotPoolCard({ pool, metric, previousData, onOpenKline, onOpenPosition, rank, apiBaseUrl, chain, accentTheme = 'lime' }) {
     const brand = getBrandTheme(accentTheme);
     const [copied, setCopied] = useState(false);
     const addr = String(pool?.pool_address || '').trim();
@@ -376,22 +376,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
         const dx = touch.clientX - swipeRef.current.x;
         const dy = touch.clientY - swipeRef.current.y;
         if (swipeRef.current.triggered) return;
-        if (dx < -swipeThreshold && Math.abs(dx) > Math.abs(dy) + swipeSlack) {
-            swipeRef.current.triggered = true;
-            hapticImpact('heavy');
-            if (onBlacklistRequest && typeof onBlacklistRequest === 'function') {
-                onBlacklistRequest(pool);
-                return;
-            }
-            if (isBlacklisted) {
-                hapticNotification('warning');
-                return;
-            }
-            if (onBlacklist && typeof onBlacklist === 'function') {
-                onBlacklist(pool, true);
-            }
-        }
-    }, [pool, onBlacklist, onBlacklistRequest, isBlacklisted]);
+    }, []);
 
     const handleTouchEnd = useCallback(() => {
         swipeRef.current = { x: 0, y: 0, triggered: false };
@@ -495,7 +480,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
 
     return (
         <div
-            className={`rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm transition-transform duration-200 active:scale-[0.98] dark:border-white/10 dark:bg-white/5 dark:shadow-none ${rankClass} ${isBlacklisted ? 'opacity-50 ring-2 ring-red-500/30' : ''}`}
+            className={`rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm transition-transform duration-200 active:scale-[0.98] dark:border-white/10 dark:bg-white/5 dark:shadow-none ${rankClass}`}
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
             onTouchMove={handleTouchMove}
@@ -661,20 +646,15 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
                         </span>
                     ))}
                     <PositionBadge pool={pool} />
-                    {isBlacklisted ? (
-                        <div className="inline-flex items-center gap-1 rounded-lg bg-red-500/15 px-2 py-0.5 text-[11px] font-bold text-red-700 ring-1 ring-red-500/25 dark:bg-red-500/20 dark:text-red-200 dark:ring-red-500/30">
-                            <span>🚫 黑名单</span>
-                        </div>
-                    ) : null}
                 </div>
                 <button
                     type="button"
                     onClick={() => onOpenPosition?.(pool)}
-                    disabled={typeof onOpenPosition !== 'function' || isBlacklisted}
+                    disabled={typeof onOpenPosition !== 'function'}
                     className={brand.actionPillButtonClass}
                 >
                     <FlashIcon className="h-3 w-3 shrink-0" />
-                    {isBlacklisted ? '黑名单' : '开仓'}
+                    开仓
                 </button>
             </div>
         </div >

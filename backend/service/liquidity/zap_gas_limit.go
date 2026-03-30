@@ -66,8 +66,11 @@ func tuneZapTxGasLimit(label string, auth *bind.TransactOpts, buildTx func(*bind
 				label, minLimit, mult, maxLimit, err)
 			return
 		}
-		log.Printf("[Liquidity] %s gasLimit: EstimateGas failed, using node estimation (mult=%.4f min=%d max=%d): %v",
-			label, mult, minLimit, maxLimit, err)
+		// 如果未配置 minLimit，使用安全默认值，避免后续交易也因估算失败而无法发送。
+		const defaultZapGasLimit = uint64(8_000_000)
+		auth.GasLimit = defaultZapGasLimit
+		log.Printf("[Liquidity] %s gasLimit: EstimateGas failed, using safe default=%d (mult=%.4f min=%d max=%d): %v",
+			label, defaultZapGasLimit, mult, minLimit, maxLimit, err)
 		return
 	}
 

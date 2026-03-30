@@ -1,4 +1,4 @@
-// 合并的交易 API: open_position, blacklist, cooldowns
+// 交易 API: open_position, open_position_preview
 // 通过 query 参数 endpoint 来区分端点
 function normalizeBaseUrl(value) {
     const trimmed = String(value || '').trim();
@@ -44,48 +44,16 @@ export default async function handler(req, res) {
 
     // 从 query 参数获取 endpoint
     const endpoint = String(req.query?.endpoint || '').trim();
-    const validEndpoints = ['open_position', 'blacklist', 'cooldowns'];
+    const validEndpoints = ['open_position', 'open_position_preview'];
 
     if (!validEndpoints.includes(endpoint)) {
         res.statusCode = 400;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.end(JSON.stringify({ error: '无效的端点，有效值: open_position, blacklist, cooldowns' }));
+        res.end(JSON.stringify({ error: '无效的端点，有效值: open_position, open_position_preview' }));
         return;
     }
 
     const method = String(req.method || 'GET').toUpperCase();
-
-    // cooldowns 支持 GET / DELETE
-    if (endpoint === 'cooldowns') {
-        if (method !== 'GET' && method !== 'DELETE') {
-            res.statusCode = 405;
-            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-            res.end('method not allowed');
-            return;
-        }
-        const url = `${backendBaseUrl}/api/cooldowns${buildQueryString(req.query)}`;
-        try {
-            const headers = {};
-            let body = undefined;
-            if (method === 'DELETE') {
-                headers['content-type'] = 'application/json';
-                body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body || {});
-            }
-
-            const upstream = await fetch(url, { method, headers, body });
-            const text = await upstream.text();
-            res.statusCode = upstream.status;
-            const contentType = upstream.headers.get('content-type');
-            if (contentType) res.setHeader('Content-Type', contentType);
-            res.setHeader('Cache-Control', 'no-store');
-            res.end(text);
-        } catch (err) {
-            res.statusCode = 502;
-            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-            res.end(String(err?.message || err || 'upstream fetch failed'));
-        }
-        return;
-    }
 
     // open_position 只支持 POST
     if (endpoint === 'open_position') {
@@ -114,23 +82,17 @@ export default async function handler(req, res) {
         return;
     }
 
-    // blacklist 支持 GET 和 POST
-    if (endpoint === 'blacklist') {
-        const isGet = method === 'GET';
-        const isPost = method === 'POST';
-        if (!isGet && !isPost) {
+    // open_position_preview 只支持 POST
+    if (endpoint === 'open_position_preview') {
+        if (method !== 'POST') {
             res.statusCode = 405;
             res.setHeader('Content-Type', 'text/plain; charset=utf-8');
             res.end('method not allowed');
             return;
         }
-        const url = isGet
-            ? `${backendBaseUrl}/api/blacklist${buildQueryString(req.query)}`
-            : `${backendBaseUrl}/api/blacklist`;
-        const headers = isPost ? { 'content-type': 'application/json' } : undefined;
-        const body = isPost
-            ? (typeof req.body === 'string' ? req.body : JSON.stringify(req.body || {}))
-            : undefined;
+        const url = `${backendBaseUrl}/api/open_position_preview`;
+        const headers = { 'content-type': 'application/json' };
+        const body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body || {});
         try {
             const upstream = await fetch(url, { method, headers, body });
             const text = await upstream.text();

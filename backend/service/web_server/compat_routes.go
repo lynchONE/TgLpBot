@@ -96,10 +96,6 @@ func (s *Server) handleTrading(w http.ResponseWriter, r *http.Request) {
 		s.handleCreatePoolPreview(w, r)
 	case "create_pool_execute":
 		s.handleCreatePoolExecute(w, r)
-	case "blacklist":
-		handleBlacklist(w, r)
-	case "cooldowns":
-		handleCooldowns(w, r)
 	default:
 		http.Error(w, "invalid endpoint", http.StatusBadRequest)
 	}

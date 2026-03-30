@@ -211,7 +211,9 @@ func (s *LiquidityService) PreviewEntrySwap(
 		if entryBalance != nil && entryBalance.Sign() > 0 {
 			budgetCap, capErr := tokenBudgetUnits(client, exec.Chain(), plan.EntryToken, plan.EntrySymbol, cc, task.AmountUSDT)
 			if capErr == nil && budgetCap != nil && budgetCap.Sign() > 0 {
-				if use := minBigInt(entryBalance, budgetCap); use != nil && use.Sign() > 0 {
+				threshold := new(big.Int).Mul(budgetCap, big.NewInt(95))
+				threshold.Div(threshold, big.NewInt(100))
+				if entryBalance.Cmp(threshold) >= 0 {
 					return &EntrySwapPreview{Required: false}, nil
 				}
 			}

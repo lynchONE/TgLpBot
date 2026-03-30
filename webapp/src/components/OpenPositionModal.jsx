@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Check, X } from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle, X, XCircle } from 'lucide-react';
 import { previewOpenPosition } from '../api';
 
 const PRESET_RANGES = [1, 2, 3, 5, 10, 20];
@@ -35,26 +35,6 @@ function formatPercent(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return '--';
   return `${num.toFixed(num >= 1 ? 2 : 3).replace(/0+$/, '').replace(/\.$/, '')}%`;
-}
-
-function extractRiskPayload(error) {
-  if (!error || typeof error !== 'object') return null;
-  const hasRisk =
-    typeof error?.liquidity_usd === 'number' ||
-    typeof error?.max_open_amount === 'number' ||
-    typeof error?.price_deviation_percent === 'number' ||
-    Boolean(error?.risk_ack_required);
-  if (!hasRisk) return null;
-  return {
-    code: String(error?.code || ''),
-    message: String(error?.message || ''),
-    liquidity_usd: Number(error?.liquidity_usd),
-    min_liquidity_usd: Number(error?.min_liquidity_usd),
-    max_open_amount: Number(error?.max_open_amount),
-    risk_ack_required: Boolean(error?.risk_ack_required),
-    price_deviation_percent: Number(error?.price_deviation_percent),
-    price_deviation_max_percent: Number(error?.price_deviation_max_percent),
-  };
 }
 
 function buildEntrySwapConfirmKey(preview, entrySwapSlippage) {
@@ -97,18 +77,28 @@ export default function OpenPositionModal({
   const [entrySwapPreview, setEntrySwapPreview] = useState(null);
   const [entrySwapPreviewLoading, setEntrySwapPreviewLoading] = useState(false);
   const [entrySwapPreviewError, setEntrySwapPreviewError] = useState('');
-  const [previewRisk, setPreviewRisk] = useState(null);
+  const [previewChecks, setPreviewChecks] = useState([]);
   const [error, setError] = useState('');
   const [riskAck, setRiskAck] = useState(false);
 
   const pair = pool?.trading_pair || '--';
   const addr = String(pool?.pool_address || '').trim();
   const version = String(pool?.protocol_version || pool?.factory_name || '').trim();
-  const activeRisk = previewRisk || submitRisk;
-  const riskMessage = String(activeRisk?.message || '').trim();
-  const riskLiquidityUsd = Number(activeRisk?.liquidity_usd);
-  const riskMaxOpenAmount = Number(activeRisk?.max_open_amount);
-  const riskRequiresAck = Boolean(activeRisk?.risk_ack_required);
+  const checks = previewChecks;
+  const warnChecks = checks.filter(c => c.status === 'warn');
+  const failChecks = checks.filter(c => c.status === 'fail');
+  const riskRequiresAck = warnChecks.some(c => c.extra?.risk_ack_required);
+  const riskMaxOpenAmount = warnChecks.reduce((m, c) => {
+    const v = Number(c.extra?.max_open_amount);
+    return (Number.isFinite(v) && v > 0 && (m === null || v < m)) ? v : m;
+  }, null);
+  const riskLiquidityUsd = warnChecks.reduce((m, c) => {
+    const v = Number(c.extra?.liquidity_usd);
+    return (Number.isFinite(v) && v >= 0 && m === null) ? v : m;
+  }, null);
+  const riskMessage = warnChecks.length > 0
+    ? (warnChecks.map(c => c.detail || c.label).filter(Boolean).join('；') || null)
+    : null;
 
   const showWalletPicker = Array.isArray(wallets) && wallets.length > 1;
   const visibleSmartRanges = useMemo(() => (
@@ -154,7 +144,7 @@ export default function OpenPositionModal({
       entrySwapSlippageTolerance: entrySwapSlippageValue.value,
       allowEntrySwap: true,
       walletId: resolvedWalletId || undefined,
-      ackLiquidityRisk: riskRequiresAck && riskAck,
+      ackLiquidityRisk: riskAck,
     };
   }, [
     apiBaseUrl,
@@ -181,7 +171,7 @@ export default function OpenPositionModal({
 
   useEffect(() => {
     setRiskAck(false);
-    setPreviewRisk(null);
+    setPreviewChecks([]);
     setEntrySwapPreview(null);
     setEntrySwapPreviewError('');
     setEntrySwapPreviewLoading(false);
@@ -212,7 +202,6 @@ export default function OpenPositionModal({
       setEntrySwapPreview(null);
       setEntrySwapPreviewLoading(false);
       setEntrySwapPreviewError('');
-      setPreviewRisk(null);
       return undefined;
     }
 
@@ -228,19 +217,13 @@ export default function OpenPositionModal({
           signal: controller.signal,
         });
         if (!active) return;
-        setPreviewRisk(null);
+        setPreviewChecks(Array.isArray(resp?.checks) ? resp.checks : []);
         setEntrySwapPreview(resp?.entry_swap || { required: false });
       } catch (e) {
         if (!active || controller.signal.aborted) return;
-        const risk = extractRiskPayload(e);
         setEntrySwapPreview(null);
-        if (risk) {
-          setPreviewRisk(risk);
-          setEntrySwapPreviewError('');
-        } else {
-          setPreviewRisk(null);
-          setEntrySwapPreviewError(String(e?.message || e || '获取前置兑换预览失败'));
-        }
+        setPreviewChecks([]);
+        setEntrySwapPreviewError(String(e?.message || e || '获取前置兑换预览失败'));
       } finally {
         if (active) {
           setEntrySwapPreviewLoading(false);
@@ -309,7 +292,11 @@ export default function OpenPositionModal({
       setError('请选择钱包。');
       return;
     }
-    if (Number.isFinite(riskMaxOpenAmount) && riskMaxOpenAmount > 0 && amountValue > riskMaxOpenAmount) {
+    if (failChecks.length > 0) {
+      setError(failChecks.map(c => c.detail || c.label).join('; '));
+      return;
+    }
+    if (riskMaxOpenAmount !== null && amountValue > riskMaxOpenAmount) {
       setError(`当前池子单次开仓金额不能高于 ${riskMaxOpenAmount} USDT。`);
       return;
     }
@@ -321,7 +308,7 @@ export default function OpenPositionModal({
       setError('前置兑换预览仍在加载，请稍后再试。');
       return;
     }
-    if (previewRequest && !entrySwapPreview && !riskMessage) {
+    if (previewRequest && !entrySwapPreview) {
       setError('前置兑换预览尚未就绪，请稍后再试。');
       return;
     }
@@ -343,7 +330,7 @@ export default function OpenPositionModal({
       allowEntrySwap: true,
       confirmEntrySwap: Boolean(entrySwapPreview?.required && entrySwapConfirmed),
       walletId: resolvedWalletId || undefined,
-      ackLiquidityRisk: riskRequiresAck && riskAck,
+      ackLiquidityRisk: riskAck,
     });
   }, [
     amountValue,
@@ -356,11 +343,11 @@ export default function OpenPositionModal({
     riskMaxOpenAmount,
     riskRequiresAck,
     riskAck,
+    failChecks,
     previewRequest,
     entrySwapPreviewLoading,
     entrySwapPreview,
     entrySwapConfirmed,
-    riskMessage,
     onSubmit,
     addr,
     version,
