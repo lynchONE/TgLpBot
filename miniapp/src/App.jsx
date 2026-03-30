@@ -3279,7 +3279,7 @@ export default function App() {
                         contentClassName="px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
                         title={
                             <div className="min-w-0">
-                                <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/90">买入</div>
+                                <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/90">开仓</div>
                                 <div className="mt-0.5 truncate text-[11px] font-medium text-zinc-500 dark:text-white/40">
                                     {openPositionPool?.trading_pair || '--'}
                                 </div>
@@ -3345,7 +3345,7 @@ export default function App() {
                                                                 </div>
                                                                 {w?.is_default ? (
                                                                     <span className="shrink-0 rounded-full bg-zinc-500/10 px-2 py-0.5 text-[10px] font-semibold text-zinc-600 dark:text-white/60">
-                                                                        Default
+                                                                        默认
                                                                     </span>
                                                                 ) : null}
                                                             </div>
@@ -3370,7 +3370,7 @@ export default function App() {
                             ) : null}
 
                             <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">Amount (USDT)</div>
+                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">开仓金额 (USDT)</div>
                                 <input
                                     value={openPositionAmount}
                                     onChange={(e) => {

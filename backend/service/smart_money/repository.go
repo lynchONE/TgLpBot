@@ -1560,18 +1560,18 @@ func (r *Repository) GetPoolStats(ctx context.Context, poolAddress string) (*Poo
 	recentCutoff := time.Now().Add(-2 * time.Hour)
 	err := database.DB.WithContext(ctx).Raw(`
 		SELECT
-			pool_address,
-			MAX(token0_symbol) AS token0_symbol,
-			MAX(token1_symbol) AS token1_symbol,
-			MAX(token0_address) AS token0_address,
-			MAX(token1_address) AS token1_address,
-			MAX(fee_tier) AS fee_tier,
-			MAX(protocol) AS protocol,
-			MAX(chain_id) AS chain_id,
-			SUM(CASE WHEN status='open' AND opened_at >= ? THEN 1 ELSE 0 END) AS open_position_count,
-			COUNT(DISTINCT CASE WHEN status='open' AND opened_at >= ? THEN wallet_address END) AS wallet_count,
-			SUM(CASE WHEN status='closed' AND closed_at >= ? THEN 1 ELSE 0 END) AS closed_today_count,
-			COALESCE(SUM(CASE WHEN status='open' AND opened_at >= ? THEN COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0) ELSE 0 END), 0) AS total_position_amount_usd
+			p.pool_address,
+			MAX(p.token0_symbol) AS token0_symbol,
+			MAX(p.token1_symbol) AS token1_symbol,
+			MAX(p.token0_address) AS token0_address,
+			MAX(p.token1_address) AS token1_address,
+			MAX(p.fee_tier) AS fee_tier,
+			MAX(p.protocol) AS protocol,
+			MAX(p.chain_id) AS chain_id,
+			SUM(CASE WHEN p.status='open' AND p.opened_at >= ? THEN 1 ELSE 0 END) AS open_position_count,
+			COUNT(DISTINCT CASE WHEN p.status='open' AND p.opened_at >= ? THEN p.wallet_address END) AS wallet_count,
+			SUM(CASE WHEN p.status='closed' AND p.closed_at >= ? THEN 1 ELSE 0 END) AS closed_today_count,
+			COALESCE(SUM(CASE WHEN p.status='open' AND p.opened_at >= ? THEN COALESCE(ap.net_total_usd, evt_net.net_amount_usd, 0) ELSE 0 END), 0) AS total_position_amount_usd
 		FROM sm_lp_positions p
 		LEFT JOIN sm_lp_active_positions ap
 			ON ap.chain_id = p.chain_id AND ap.nft_token_id = p.nft_token_id
@@ -1593,7 +1593,7 @@ func (r *Repository) GetPoolStats(ctx context.Context, poolAddress string) (*Poo
 			ON evt_net.chain_id = p.chain_id
 			AND evt_net.nft_token_id = p.nft_token_id
 		WHERE LOWER(p.pool_address) = ?
-		GROUP BY pool_address
+		GROUP BY p.pool_address
 	`, recentCutoff, recentCutoff, today, recentCutoff, poolAddress).Scan(&stats).Error
 	if err != nil {
 		return nil, err

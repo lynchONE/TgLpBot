@@ -370,14 +370,14 @@ export default function OpenPositionModal({
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>Open Position</h3>
+          <h3>开仓</h3>
           <button type="button" className="modal-close" onClick={onClose} disabled={busy}>&times;</button>
         </div>
 
         <div className="modal-pair">{pair}</div>
         <div className="modal-addr">{addr ? `${addr.slice(0, 10)}...${addr.slice(-8)}` : '--'}</div>
         <div className="modal-info-note">
-          If this wallet is opening a position for the first time, the bot may deploy and bind its private zap contract first.
+          如果这是当前钱包首次开仓，系统可能会先部署并绑定私有 Zap 合约，再继续后续开仓流程。
         </div>
 
         {riskMessage ? (
@@ -392,10 +392,10 @@ export default function OpenPositionModal({
           >
             <div>{riskMessage}</div>
             {Number.isFinite(riskLiquidityUsd) && riskLiquidityUsd >= 0 ? (
-              <div style={{ marginTop: 6 }}>Liquidity: {formatUsdCompact(riskLiquidityUsd)}</div>
+              <div style={{ marginTop: 6 }}>当前流动性：{formatUsdCompact(riskLiquidityUsd)}</div>
             ) : null}
             {Number.isFinite(riskMaxOpenAmount) && riskMaxOpenAmount > 0 ? (
-              <div style={{ marginTop: 4 }}>Max open amount: {formatUsdCompact(riskMaxOpenAmount)}</div>
+              <div style={{ marginTop: 4 }}>当前最大允许开仓金额：{formatUsdCompact(riskMaxOpenAmount)}</div>
             ) : null}
             {riskRequiresAck ? (
               <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 10, cursor: 'pointer' }}>
@@ -408,19 +408,19 @@ export default function OpenPositionModal({
                   }}
                   disabled={busy}
                 />
-                <span>I understand the liquidity risk and want to continue within the limit.</span>
+                <span>我已知悉当前池子流动性风险，并确认按限额继续开仓。</span>
               </label>
             ) : null}
           </div>
         ) : null}
 
         {walletsLoading ? (
-          <div className="wallet-picker-loading">Loading wallets...</div>
+          <div className="wallet-picker-loading">钱包加载中...</div>
         ) : null}
 
         {showWalletPicker && !walletsLoading ? (
           <div className="wallet-picker">
-            <span className="wallet-picker-label">Wallet</span>
+            <span className="wallet-picker-label">钱包</span>
             <div className="wallet-picker-list">
               {wallets.map((wallet) => {
                 const active = wallet.id === resolvedWalletId;
@@ -436,7 +436,7 @@ export default function OpenPositionModal({
                   >
                     <span className="wallet-chip-name">
                       {wallet.name || shortAddr(wallet.address)}
-                      {wallet.is_default ? <span className="wallet-chip-default">Default</span> : null}
+                      {wallet.is_default ? <span className="wallet-chip-default">默认</span> : null}
                     </span>
                     <span className="wallet-chip-addr">{shortAddr(wallet.address)}</span>
                     <span className="wallet-chip-bal">
@@ -452,7 +452,7 @@ export default function OpenPositionModal({
 
         <div className="modal-form">
           <label className="modal-field">
-            <span>Amount (USDT)</span>
+            <span>开仓金额 (USDT)</span>
             <input
               type="number"
               value={amount}
@@ -466,9 +466,9 @@ export default function OpenPositionModal({
           </label>
 
           <div className="modal-range-section">
-            <span className="modal-range-label">Quick Range</span>
+            <span className="modal-range-label">快捷区间</span>
             {smartRangesLoading ? (
-              <div className="modal-range-hint">Loading smart ranges...</div>
+              <div className="modal-range-hint">聪明钱区间加载中...</div>
             ) : null}
             {visibleSmartRanges.length > 0 ? (
               <>
@@ -492,7 +492,7 @@ export default function OpenPositionModal({
                     );
                   })}
                 </div>
-                <div className="modal-range-hint">Smart-money net amount recently opened.</div>
+                <div className="modal-range-hint">聪明钱近期开仓净额。</div>
               </>
             ) : null}
             <div className="modal-range-picks modal-range-picks-default">
@@ -516,7 +516,7 @@ export default function OpenPositionModal({
 
           <div className="modal-row">
             <label className="modal-field">
-              <span>Lower %</span>
+              <span>下限 %</span>
               <input
                 type="number"
                 value={rangeLower}
@@ -526,7 +526,7 @@ export default function OpenPositionModal({
               />
             </label>
             <label className="modal-field">
-              <span>Upper %</span>
+              <span>上限 %</span>
               <input
                 type="number"
                 value={rangeUpper}
@@ -538,7 +538,7 @@ export default function OpenPositionModal({
           </div>
 
           <label className="modal-field">
-            <span>Task Slippage %</span>
+            <span>任务滑点 %</span>
             <input
               type="number"
               value={slippage}
@@ -548,7 +548,7 @@ export default function OpenPositionModal({
               }}
               min="0"
               step="0.1"
-              placeholder="Leave empty to use global settings"
+              placeholder="留空则使用全局设置"
             />
           </label>
         </div>
@@ -610,9 +610,9 @@ export default function OpenPositionModal({
         {visibleError ? <div className="error-text">{visibleError}</div> : null}
 
         <div className="modal-actions">
-          <button type="button" className="ghost-chip" onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="button" className="ghost-chip" onClick={onClose} disabled={busy}>取消</button>
           <button type="button" className="accent-btn" onClick={handleSubmit} disabled={busy}>
-            {busy ? 'Submitting...' : 'Open Position'}
+            {busy ? '提交中...' : '确认开仓'}
           </button>
         </div>
       </div>
