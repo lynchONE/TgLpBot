@@ -1626,14 +1626,12 @@ export default function App() {
             if (list.length > 1) {
                 const wid = Number(openPositionWalletId);
                 walletId = wid;
-                walletId = wid;
                 if (!Number.isFinite(wid) || wid <= 0) {
                     setOpenPositionEntrySwapPreview(null);
                     setOpenPositionEntrySwapPreviewLoading(false);
                     setOpenPositionEntrySwapPreviewError('');
                     return undefined;
                 }
-                walletId = wid;
             } else {
                 const onlyId = Number(list[0]?.id);
                 if (Number.isFinite(onlyId) && onlyId > 0) {
@@ -1678,7 +1676,7 @@ export default function App() {
                     setOpenPositionEntrySwapPreviewError('');
                 } else {
                     setOpenPositionRisk(null);
-                    setOpenPositionEntrySwapPreviewError(msg || 'Failed to load entry swap preview.');
+                    setOpenPositionEntrySwapPreviewError(msg || '获取前置兑换预览失败');
                 }
             } finally {
                 if (active) {
@@ -1715,17 +1713,17 @@ export default function App() {
     const handleOpenPosition = async () => {
         if (!openPositionPool) return;
         if (!hasInitData) {
-            setOpenPositionError('Telegram initData is required.');
+            setOpenPositionError('缺少 Telegram 身份信息，请从机器人重新打开小程序。');
             return;
         }
         const poolAddr = String(openPositionPool?.pool_address || '').trim().toLowerCase();
         if (poolAddr && blacklist.has(poolAddr)) {
-            setOpenPositionError('This pool is blacklisted.');
+            setOpenPositionError('该池子已在黑名单中，禁止开仓。');
             return;
         }
         const amount = Number(String(openPositionAmount || '').trim());
         if (!Number.isFinite(amount) || amount <= 0) {
-            setOpenPositionError('Enter a valid amount.');
+            setOpenPositionError('请输入有效的开仓金额。');
             return;
         }
         const riskMaxOpenAmount = Number(openPositionRisk?.max_open_amount);
@@ -1757,12 +1755,12 @@ export default function App() {
 
         const slippageParsed = parseOptionalPercent(openPositionSlippage);
         if (!slippageParsed.valid) {
-            setOpenPositionError('Task slippage must be between 0 and 100.');
+            setOpenPositionError('任务滑点必须在 0 到 100 之间。');
             return;
         }
         const entrySwapSlippageParsed = parseOptionalPercent(openPositionEntrySwapSlippage);
         if (!entrySwapSlippageParsed.valid) {
-            setOpenPositionError('Entry swap slippage must be between 0 and 100.');
+            setOpenPositionError('前置兑换滑点必须在 0 到 100 之间。');
             return;
         }
         let walletId = openPositionWalletId;
@@ -1783,6 +1781,7 @@ export default function App() {
             }
             if (list.length > 1) {
                 const wid = Number(openPositionWalletId);
+                walletId = wid;
                 if (!Number.isFinite(wid) || wid <= 0) {
                     setOpenPositionError('请选择钱包。');
                     return;
@@ -1798,7 +1797,7 @@ export default function App() {
         }
 
         if (openPositionEntrySwapPreviewLoading) {
-            setOpenPositionError('Entry swap preview is still loading.');
+            setOpenPositionError('前置兑换预览仍在加载，请稍后再试。');
             return;
         }
         if (openPositionEntrySwapPreviewError) {
@@ -1806,7 +1805,7 @@ export default function App() {
             return;
         }
         if (openPositionEntrySwapPreview?.required && !openPositionEntrySwapConfirm) {
-            setOpenPositionError('Confirm the entry swap before opening.');
+            setOpenPositionError('请先确认前置兑换，再继续开仓。');
             return;
         }
 
@@ -1891,7 +1890,7 @@ export default function App() {
         const addr = String(pool?.pool_address || '').trim().toLowerCase();
         if (!addr) return;
         if (!hasInitData) {
-            showNotice('Telegram initData is required.', 'error');
+            showNotice('缺少 Telegram 身份信息，请从机器人重新打开小程序。', 'error');
             return;
         }
         if (blacklist.has(addr)) {
@@ -1977,7 +1976,7 @@ export default function App() {
 
     const loadGlobalConfig = async () => {
         if (!hasInitData) {
-            setGlobalConfigError('Telegram initData is required.');
+            setGlobalConfigError('缺少 Telegram 身份信息，请从机器人重新打开小程序。');
             return;
         }
         setGlobalConfigLoading(true);
@@ -3498,9 +3497,9 @@ export default function App() {
 
                             {(openPositionEntrySwapPreviewLoading || openPositionEntrySwapPreview?.required || openPositionEntrySwapPreviewError) ? (
                                 <div className="rounded-xl border border-sky-500/20 bg-sky-500/10 p-3 text-xs leading-5 text-sky-700 dark:text-sky-200">
-                                    <div className="text-xs font-semibold">Entry Swap</div>
+                                    <div className="text-xs font-semibold">前置兑换</div>
                                     {openPositionEntrySwapPreviewLoading ? (
-                                        <div className="mt-2">Checking recommended slippage and expected receive amount...</div>
+                                        <div className="mt-2">正在获取推荐滑点和预计到账数量...</div>
                                     ) : null}
                                     {openPositionEntrySwapPreviewError ? (
                                         <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-red-700 dark:text-red-200">
@@ -3510,16 +3509,16 @@ export default function App() {
                                     {openPositionEntrySwapPreview?.required ? (
                                         <>
                                             <div className="mt-2">
-                                                Recommended slippage: {Number(openPositionEntrySwapPreview?.recommended_slippage_tolerance).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}%
+                                                推荐滑点：{Number(openPositionEntrySwapPreview?.recommended_slippage_tolerance).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}%
                                             </div>
                                             <div className="mt-1">
-                                                Current slippage: {Number(openPositionEntrySwapPreview?.current_slippage_tolerance).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}%
+                                                当前滑点：{Number(openPositionEntrySwapPreview?.current_slippage_tolerance).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}%
                                             </div>
                                             <div className="mt-1">
-                                                Estimated receive: {openPositionEntrySwapPreview?.expected_amount_out || '--'} {openPositionEntrySwapPreview?.to_token_symbol || ''}
+                                                预计到账：{openPositionEntrySwapPreview?.expected_amount_out || '--'} {openPositionEntrySwapPreview?.to_token_symbol || ''}
                                             </div>
                                             <div className="mt-1">
-                                                Route: {openPositionEntrySwapPreview?.amount_in || '--'} {openPositionEntrySwapPreview?.from_token_symbol || ''} to {openPositionEntrySwapPreview?.to_token_symbol || ''}
+                                                兑换路径：{openPositionEntrySwapPreview?.amount_in || '--'} {openPositionEntrySwapPreview?.from_token_symbol || ''} 到 {openPositionEntrySwapPreview?.to_token_symbol || ''}
                                             </div>
                                             <input
                                                 value={openPositionEntrySwapSlippage}
@@ -3530,7 +3529,7 @@ export default function App() {
                                                 }}
                                                 inputMode="decimal"
                                                 className={`mt-3 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                                placeholder="Entry swap slippage %"
+                                                placeholder="本次前置兑换滑点"
                                             />
                                             <label className="mt-3 flex items-start gap-2">
                                                 <input
@@ -3542,7 +3541,7 @@ export default function App() {
                                                     }}
                                                     disabled={openPositionLoading || openPositionEntrySwapPreviewLoading}
                                                 />
-                                                <span>Confirm this entry swap first, then continue opening the position.</span>
+                                                <span>我已确认本次前置兑换，先执行兑换，再继续后续开仓。</span>
                                             </label>
                                         </>
                                     ) : null}

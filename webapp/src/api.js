@@ -627,7 +627,6 @@ export async function previewOpenPosition({
   signal,
 }) {
   const base = normalizeBaseUrl(apiBaseUrl);
-  const url = `${base}/api/trading?endpoint=open_position_preview`;
   const payload = buildOpenPositionPayload({
     initData,
     chain,
@@ -642,12 +641,39 @@ export async function previewOpenPosition({
     walletId,
     ackLiquidityRisk,
   });
-  return requestJson(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-    signal,
-  });
+  const urls = [
+    `${base}/api/open_position_preview`,
+    `${base}/api/trading?endpoint=open_position_preview`,
+  ];
+  let lastError = null;
+  for (let i = 0; i < urls.length; i += 1) {
+    try {
+      return await requestJson(urls[i], {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+      });
+    } catch (error) {
+      lastError = error;
+      const message = String(error?.message || '').trim();
+      const status = Number(error?.status);
+      if ((message === `HTTP ${status}` || message === '') && error) {
+        error.message = `获取前置兑换预览失败（HTTP ${status}）`;
+      }
+      const canFallback = i < urls.length - 1 && (
+        message === `HTTP ${status}` ||
+        message === '' ||
+        status === 404 ||
+        status === 405
+      );
+      if (canFallback) {
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError || new Error('获取前置兑换预览失败');
 }
 
 export async function previewCreatePool({

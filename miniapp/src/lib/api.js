@@ -565,7 +565,6 @@ export async function previewOpenPosition({
     signal,
 }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/trading?endpoint=open_position_preview`;
     const payload = buildOpenPositionPayload({
         initData,
         chain,
@@ -580,23 +579,45 @@ export async function previewOpenPosition({
         walletId,
         ackLiquidityRisk,
     });
-    const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal,
-    });
-    if (!resp.ok) {
+    const urls = [
+        `${base}/api/open_position_preview`,
+        `${base}/api/trading?endpoint=open_position_preview`,
+    ];
+    let lastError = null;
+    for (let i = 0; i < urls.length; i += 1) {
+        const resp = await fetch(urls[i], {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal,
+        });
+        if (resp.ok) {
+            return resp.json();
+        }
         const detail = await readErrorDetails(resp);
-        const err = new Error(detail.message);
+        const rawMessage = String(detail.message || '').trim();
+        const displayMessage = rawMessage === `HTTP ${resp.status}` || rawMessage === ''
+            ? `获取前置兑换预览失败（HTTP ${resp.status}）`
+            : rawMessage;
+        const err = new Error(displayMessage);
         err.status = resp.status;
         if (detail.payload && typeof detail.payload === 'object') {
             err.payload = detail.payload;
             Object.assign(err, detail.payload);
         }
+        lastError = err;
+        const canFallback = i < urls.length - 1 && (
+            rawMessage === `HTTP ${resp.status}` ||
+            rawMessage === '' ||
+            resp.status === 404 ||
+            resp.status === 405
+        );
+        if (canFallback) {
+            continue;
+        }
         throw err;
     }
-    return resp.json();
+    throw lastError || new Error('获取前置兑换预览失败');
 }
 
 export async function openPosition({

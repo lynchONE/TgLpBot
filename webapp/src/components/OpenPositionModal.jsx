@@ -238,7 +238,7 @@ export default function OpenPositionModal({
           setEntrySwapPreviewError('');
         } else {
           setPreviewRisk(null);
-          setEntrySwapPreviewError(String(e?.message || e || 'Failed to load entry swap preview.'));
+          setEntrySwapPreviewError(String(e?.message || e || '获取前置兑换预览失败'));
         }
       } finally {
         if (active) {
@@ -285,47 +285,47 @@ export default function OpenPositionModal({
 
   const handleSubmit = useCallback(() => {
     if (!Number.isFinite(amountValue) || amountValue <= 0) {
-      setError('Enter a valid amount.');
+      setError('请输入有效的开仓金额。');
       return;
     }
     if (!Number.isFinite(rangeLowerValue) || rangeLowerValue <= 0 || rangeLowerValue >= 100) {
-      setError('Enter a valid lower range.');
+      setError('请输入有效的下限范围。');
       return;
     }
     if (!Number.isFinite(rangeUpperValue) || rangeUpperValue <= 0 || rangeUpperValue >= 100) {
-      setError('Enter a valid upper range.');
+      setError('请输入有效的上限范围。');
       return;
     }
     if (!taskSlippage.valid) {
-      setError('Task slippage must be between 0 and 100.');
+      setError('任务滑点必须在 0 到 100 之间。');
       return;
     }
     if (!entrySwapSlippageValue.valid) {
-      setError('Entry swap slippage must be between 0 and 100.');
+      setError('前置兑换滑点必须在 0 到 100 之间。');
       return;
     }
     if (showWalletPicker && !resolvedWalletId) {
-      setError('Select a wallet.');
+      setError('请选择钱包。');
       return;
     }
     if (Number.isFinite(riskMaxOpenAmount) && riskMaxOpenAmount > 0 && amountValue > riskMaxOpenAmount) {
-      setError(`Max open amount is ${riskMaxOpenAmount} USDT.`);
+      setError(`当前池子单次开仓金额不能高于 ${riskMaxOpenAmount} USDT。`);
       return;
     }
     if (riskRequiresAck && !riskAck) {
-      setError('Confirm the liquidity risk first.');
+      setError('请先确认低流动性风险。');
       return;
     }
     if (previewRequest && entrySwapPreviewLoading) {
-      setError('Entry swap preview is still loading.');
+      setError('前置兑换预览仍在加载，请稍后再试。');
       return;
     }
     if (previewRequest && !entrySwapPreview && !riskMessage) {
-      setError('Entry swap preview is not ready yet.');
+      setError('前置兑换预览尚未就绪，请稍后再试。');
       return;
     }
     if (entrySwapPreview?.required && !entrySwapConfirmed) {
-      setError('Confirm the entry swap before opening.');
+      setError('请先确认前置兑换，再继续开仓。');
       return;
     }
 
@@ -555,27 +555,27 @@ export default function OpenPositionModal({
 
         {(entrySwapPreviewLoading || entrySwapPreview?.required) ? (
           <div className="modal-info-note" style={{ marginTop: 12 }}>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>Entry Swap</div>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>前置兑换</div>
             {entrySwapPreviewLoading ? (
-              <div>Checking recommended slippage and expected receive amount...</div>
+              <div>正在获取推荐滑点和预计到账数量...</div>
             ) : null}
             {entrySwapPreview?.required ? (
               <>
                 <div style={{ marginTop: 6 }}>
-                  Recommended slippage: {formatPercent(entrySwapPreview?.recommended_slippage_tolerance)}
+                  推荐滑点：{formatPercent(entrySwapPreview?.recommended_slippage_tolerance)}
                 </div>
                 <div style={{ marginTop: 4 }}>
-                  Current slippage: {formatPercent(entrySwapPreview?.current_slippage_tolerance)}
+                  当前滑点：{formatPercent(entrySwapPreview?.current_slippage_tolerance)}
                 </div>
                 <div style={{ marginTop: 4 }}>
-                  Estimated receive: {entrySwapPreview?.expected_amount_out || '--'} {entrySwapPreview?.to_token_symbol || ''}
+                  预计到账：{entrySwapPreview?.expected_amount_out || '--'} {entrySwapPreview?.to_token_symbol || ''}
                 </div>
                 <div style={{ marginTop: 4 }}>
-                  Route: {entrySwapPreview?.amount_in || '--'} {entrySwapPreview?.from_token_symbol || ''} to {entrySwapPreview?.to_token_symbol || ''}
+                  兑换路径：{entrySwapPreview?.amount_in || '--'} {entrySwapPreview?.from_token_symbol || ''} 到 {entrySwapPreview?.to_token_symbol || ''}
                 </div>
 
                 <label className="modal-field" style={{ marginTop: 12 }}>
-                  <span>Entry Swap Slippage %</span>
+                  <span>前置兑换滑点 %</span>
                   <input
                     type="number"
                     value={entrySwapSlippage}
@@ -586,7 +586,7 @@ export default function OpenPositionModal({
                     }}
                     min="0"
                     step="0.1"
-                    placeholder="Adjust only for this entry swap"
+                    placeholder="仅作用于本次前置兑换"
                   />
                 </label>
 
@@ -600,7 +600,7 @@ export default function OpenPositionModal({
                     }}
                     disabled={busy || entrySwapPreviewLoading}
                   />
-                  <span>Confirm this entry swap first, then continue opening the position.</span>
+                  <span>我已确认本次前置兑换，先执行兑换，再继续后续开仓。</span>
                 </label>
               </>
             ) : null}

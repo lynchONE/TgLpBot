@@ -96,12 +96,23 @@ func buildOpenPositionErrorFromSafety(err *liquidity.ZapSafetyError) openPositio
 	if err == nil {
 		return openPositionError{
 			Code:    "zap_safety_check_failed",
-			Message: "zap safety check failed",
+			Message: "开仓风控校验失败",
+		}
+	}
+	message := strings.TrimSpace(err.Error())
+	if message == "" {
+		switch {
+		case err.PriceDeviationPercent > 0:
+			message = "池子价格偏离过大，已拦截开仓"
+		case err.MaxOpenAmount > 0 || err.MinLiquidityUSD > 0:
+			message = "池子流动性不满足开仓要求"
+		default:
+			message = "开仓风控校验失败"
 		}
 	}
 	resp := openPositionError{
 		Code:    "zap_safety_check_failed",
-		Message: err.Error(),
+		Message: message,
 	}
 	if strings.TrimSpace(err.Code) != "" {
 		resp.Code = strings.TrimSpace(err.Code)
@@ -206,7 +217,7 @@ func writeOpenPositionError(w http.ResponseWriter, status int, resp openPosition
 
 func decodeOpenPositionRequest(w http.ResponseWriter, r *http.Request) (*openPositionRequest, bool) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "请求方法不支持", http.StatusMethodNotAllowed)
 		return nil, false
 	}
 
@@ -215,7 +226,7 @@ func decodeOpenPositionRequest(w http.ResponseWriter, r *http.Request) (*openPos
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		http.Error(w, "请求参数格式错误", http.StatusBadRequest)
 		return nil, false
 	}
 
@@ -225,27 +236,27 @@ func decodeOpenPositionRequest(w http.ResponseWriter, r *http.Request) (*openPos
 	req.PoolVersion = strings.ToLower(strings.TrimSpace(req.PoolVersion))
 
 	if req.PoolAddress == "" {
-		http.Error(w, "missing pool_address", http.StatusBadRequest)
+		http.Error(w, "缺少池子地址", http.StatusBadRequest)
 		return nil, false
 	}
 	if req.Amount <= 0 {
-		http.Error(w, "invalid amount", http.StatusBadRequest)
+		http.Error(w, "开仓金额无效", http.StatusBadRequest)
 		return nil, false
 	}
 	if req.RangeLowerPct <= 0 || req.RangeUpperPct <= 0 || req.RangeLowerPct >= 100 || req.RangeUpperPct >= 100 {
-		http.Error(w, "invalid range", http.StatusBadRequest)
+		http.Error(w, "区间参数无效", http.StatusBadRequest)
 		return nil, false
 	}
 	if req.Slippage != nil && (*req.Slippage < 0 || *req.Slippage > 100) {
-		http.Error(w, "invalid slippage_tolerance", http.StatusBadRequest)
+		http.Error(w, "任务滑点参数无效", http.StatusBadRequest)
 		return nil, false
 	}
 	if req.EntrySwapSlippage != nil && (*req.EntrySwapSlippage < 0 || *req.EntrySwapSlippage > 100) {
-		http.Error(w, "invalid entry_swap_slippage_tolerance", http.StatusBadRequest)
+		http.Error(w, "前置兑换滑点参数无效", http.StatusBadRequest)
 		return nil, false
 	}
 	if config.AppConfig == nil {
-		http.Error(w, "config not loaded", http.StatusInternalServerError)
+		http.Error(w, "系统配置未加载", http.StatusInternalServerError)
 		return nil, false
 	}
 
@@ -295,7 +306,7 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 	cfgService := userSvc.NewGlobalConfigService()
 	cfg, err := cfgService.GetOrCreate(user.ID)
 	if err != nil {
-		return nil, &openPositionError{Code: "open_position_failed", Message: "failed to load config"}, http.StatusInternalServerError
+		return nil, &openPositionError{Code: "open_position_failed", Message: "加载全局配置失败"}, http.StatusInternalServerError
 	}
 
 	var chain string
@@ -311,7 +322,7 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 	if !ok || strings.TrimSpace(cc.Chain) == "" {
 		return nil, &openPositionError{
 			Code:    "invalid_chain",
-			Message: "unsupported chain (enable it via CHAINS env)",
+			Message: "当前链不支持开仓",
 		}, http.StatusBadRequest
 	}
 
@@ -320,13 +331,13 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 		if countErr != nil {
 			return nil, &openPositionError{
 				Code:    "open_position_failed",
-				Message: "failed to check task quota",
+				Message: "检查任务额度失败",
 			}, http.StatusInternalServerError
 		}
 		if taskCount >= int64(check.Access.MaxActiveTasks) {
 			return nil, &openPositionError{
 				Code:    "task_quota_exceeded",
-				Message: "active task quota exceeded",
+				Message: "已达到活跃任务数量上限",
 			}, http.StatusForbidden
 		}
 	}
@@ -336,7 +347,7 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 	if err != nil || len(wallets) == 0 {
 		return nil, &openPositionError{
 			Code:    "wallet_required",
-			Message: "no wallet found",
+			Message: "未找到可用钱包",
 		}, http.StatusBadRequest
 	}
 	selectedWallet := &wallets[0]
@@ -351,7 +362,7 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 	if requireSelection && req.WalletID == 0 {
 		return nil, &openPositionError{
 			Code:    "wallet_required",
-			Message: "wallet selection required",
+			Message: "请选择钱包",
 		}, http.StatusBadRequest
 	}
 	if requireSelection {
@@ -359,7 +370,7 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 		if werr != nil || walletRec == nil {
 			return nil, &openPositionError{
 				Code:    "invalid_wallet",
-				Message: "invalid wallet",
+				Message: "钱包无效",
 			}, http.StatusBadRequest
 		}
 		selectedWallet = walletRec
@@ -369,7 +380,7 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 	if blacklistSvc.IsBlacklisted(user.ID, req.PoolAddress) {
 		return nil, &openPositionError{
 			Code:    "blacklisted",
-			Message: "this pool is blacklisted",
+			Message: "该池子已在黑名单中，禁止开仓",
 		}, http.StatusForbidden
 	}
 
@@ -390,7 +401,7 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 		if chain != "bsc" {
 			return nil, &openPositionError{
 				Code:    "invalid_chain",
-				Message: "V4 not supported on this chain yet",
+				Message: "当前链暂不支持 V4 池子",
 			}, http.StatusBadRequest
 		}
 		poolInfo, err = poolService.GetPoolInfoForVersionCached(chain, "v4", poolAddress)
@@ -398,7 +409,7 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 		poolInfo, err = poolService.GetPoolInfoForVersionCached(chain, "v3", poolAddress)
 	}
 	if err != nil || poolInfo == nil {
-		message := "failed to load pool info"
+		message := "加载池子信息失败"
 		if err != nil {
 			message = strings.TrimSpace(err.Error())
 		}
@@ -410,7 +421,7 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 	if poolInfo.TickSpacing <= 0 {
 		return nil, &openPositionError{
 			Code:    "pool_info_error",
-			Message: "invalid tick spacing",
+			Message: "池子 TickSpacing 无效",
 		}, http.StatusInternalServerError
 	}
 
@@ -423,7 +434,7 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 			if token0 != stableAddr && token1 != stableAddr {
 				return nil, &openPositionError{
 					Code:    "entry_swap_required",
-					Message: fmt.Sprintf("pool does not contain %s", strings.TrimSpace(cc.StableSymbol)),
+					Message: fmt.Sprintf("当前池子不包含 %s，需要先兑换", strings.TrimSpace(cc.StableSymbol)),
 				}, http.StatusConflict
 			}
 		}
@@ -444,7 +455,7 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 	if tickLowerPctReq <= 0 || tickUpperPctReq <= 0 {
 		return nil, &openPositionError{
 			Code:    "invalid_range",
-			Message: "invalid range",
+			Message: "区间参数无效",
 		}, http.StatusBadRequest
 	}
 
@@ -452,17 +463,17 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 	switch poolVersion {
 	case "v4":
 		if !common.IsHexAddress(config.AppConfig.UniswapV4PoolManagerAddress) {
-			return nil, &openPositionError{Code: "open_position_failed", Message: "UNISWAP_V4_POOL_MANAGER_ADDRESS not configured"}, http.StatusInternalServerError
+			return nil, &openPositionError{Code: "open_position_failed", Message: "未配置 UNISWAP_V4_POOL_MANAGER_ADDRESS"}, http.StatusInternalServerError
 		}
 		if !common.IsHexAddress(config.AppConfig.UniswapV4StateViewAddress) {
-			return nil, &openPositionError{Code: "open_position_failed", Message: "UNISWAP_V4_STATE_VIEW_ADDRESS not configured"}, http.StatusInternalServerError
+			return nil, &openPositionError{Code: "open_position_failed", Message: "未配置 UNISWAP_V4_STATE_VIEW_ADDRESS"}, http.StatusInternalServerError
 		}
 		poolManager := common.HexToAddress(config.AppConfig.UniswapV4PoolManagerAddress)
 		stateView := common.HexToAddress(config.AppConfig.UniswapV4StateViewAddress)
 		currentTick, err = blockchain.GetUniswapV4PoolCurrentTickViaStateView(stateView, poolManager, poolAddress)
 	default:
 		if !common.IsHexAddress(poolAddress) {
-			return nil, &openPositionError{Code: "invalid_pool_address", Message: "invalid pool address"}, http.StatusBadRequest
+			return nil, &openPositionError{Code: "invalid_pool_address", Message: "池子地址无效"}, http.StatusBadRequest
 		}
 		client, _, cerr := blockchain.GetEVMClient(chain)
 		if cerr != nil {
@@ -473,7 +484,7 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 	if err != nil {
 		return nil, &openPositionError{
 			Code:    "open_position_failed",
-			Message: "failed to read current tick",
+			Message: "读取当前 Tick 失败",
 		}, http.StatusInternalServerError
 	}
 
@@ -607,7 +618,7 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		if !ctx.req.AllowEntrySwap {
 			writeOpenPositionError(w, http.StatusConflict, openPositionError{
 				Code:      "entry_swap_required",
-				Message:   fmt.Sprintf("pool does not contain %s", strings.TrimSpace(ctx.cc.StableSymbol)),
+				Message:   fmt.Sprintf("当前池子不包含 %s，需要先兑换", strings.TrimSpace(ctx.cc.StableSymbol)),
 				EntrySwap: buildOpenPositionEntrySwapInfo(entrySwapPreview),
 			})
 			return
@@ -615,7 +626,7 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		if !ctx.req.ConfirmEntrySwap {
 			writeOpenPositionError(w, http.StatusConflict, openPositionError{
 				Code:      "entry_swap_confirmation_required",
-				Message:   "entry swap confirmation required",
+				Message:   "请先确认前置兑换",
 				EntrySwap: buildOpenPositionEntrySwapInfo(entrySwapPreview),
 			})
 			return
@@ -637,7 +648,7 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := database.DB.Create(ctx.task).Error; err != nil {
-		http.Error(w, "failed to create task", http.StatusInternalServerError)
+		http.Error(w, "创建任务失败", http.StatusInternalServerError)
 		return
 	}
 
@@ -676,7 +687,7 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := applyEnterResult(ctx.task, enterRes); err != nil {
-		http.Error(w, "failed to update task", http.StatusInternalServerError)
+		http.Error(w, "更新任务状态失败", http.StatusInternalServerError)
 		return
 	}
 

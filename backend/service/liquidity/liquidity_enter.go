@@ -60,7 +60,14 @@ func (e *ZapSafetyError) Error() string {
 	if e == nil {
 		return "zap safety check failed"
 	}
-	return e.Reason
+	reason := strings.TrimSpace(e.Reason)
+	if reason != "" {
+		return reason
+	}
+	if code := strings.TrimSpace(e.Code); code != "" {
+		return strings.ReplaceAll(code, "_", " ")
+	}
+	return "开仓风控校验失败"
 }
 
 type EntrySwapRequiredError struct {
@@ -70,17 +77,17 @@ type EntrySwapRequiredError struct {
 
 func (e *EntrySwapRequiredError) Error() string {
 	if e == nil {
-		return "entry swap required"
+		return "需要先执行前置兑换"
 	}
 	token := strings.TrimSpace(e.TokenSymbol)
 	if token == "" {
-		return "entry swap required"
+		return "需要先执行前置兑换"
 	}
 	stable := strings.ToUpper(strings.TrimSpace(e.StableSymbol))
 	if stable == "" {
-		stable = "stable token"
+		stable = "稳定币"
 	}
-	return fmt.Sprintf("entry swap required: pool does not contain %s (need %s)", stable, token)
+	return fmt.Sprintf("当前池子不包含 %s，需要先兑换为 %s", stable, token)
 }
 
 func parseERC721MintedTokenIDFromReceipt(receipt *types.Receipt, nftAddr common.Address, to common.Address) (*big.Int, bool) {
