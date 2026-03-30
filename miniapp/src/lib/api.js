@@ -504,9 +504,21 @@ export async function fetchSearchPools({ apiBaseUrl, initData, q, chain, limit, 
     return resp.json();
 }
 
-export async function openPosition({ apiBaseUrl, initData, chain, poolAddress, poolVersion, amount, rangeLowerPct, rangeUpperPct, slippageTolerance, allowEntrySwap, walletId, ackLiquidityRisk, signal }) {
-    const base = String(apiBaseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/trading?endpoint=open_position`;
+function buildOpenPositionPayload({
+    initData,
+    chain,
+    poolAddress,
+    poolVersion,
+    amount,
+    rangeLowerPct,
+    rangeUpperPct,
+    slippageTolerance,
+    entrySwapSlippageTolerance,
+    allowEntrySwap,
+    confirmEntrySwap,
+    walletId,
+    ackLiquidityRisk,
+}) {
     const payload = {
         initData,
         chain,
@@ -524,9 +536,103 @@ export async function openPosition({ apiBaseUrl, initData, chain, poolAddress, p
     if (Number.isFinite(slippageTolerance)) {
         payload.slippage_tolerance = slippageTolerance;
     }
+    if (Number.isFinite(entrySwapSlippageTolerance)) {
+        payload.entry_swap_slippage_tolerance = entrySwapSlippageTolerance;
+    }
+    if (confirmEntrySwap) {
+        payload.confirm_entry_swap = true;
+    }
     if (ackLiquidityRisk) {
         payload.ack_liquidity_risk = true;
     }
+    return payload;
+}
+
+export async function previewOpenPosition({
+    apiBaseUrl,
+    initData,
+    chain,
+    poolAddress,
+    poolVersion,
+    amount,
+    rangeLowerPct,
+    rangeUpperPct,
+    slippageTolerance,
+    entrySwapSlippageTolerance,
+    allowEntrySwap,
+    walletId,
+    ackLiquidityRisk,
+    signal,
+}) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/trading?endpoint=open_position_preview`;
+    const payload = buildOpenPositionPayload({
+        initData,
+        chain,
+        poolAddress,
+        poolVersion,
+        amount,
+        rangeLowerPct,
+        rangeUpperPct,
+        slippageTolerance,
+        entrySwapSlippageTolerance,
+        allowEntrySwap,
+        walletId,
+        ackLiquidityRisk,
+    });
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+    });
+    if (!resp.ok) {
+        const detail = await readErrorDetails(resp);
+        const err = new Error(detail.message);
+        err.status = resp.status;
+        if (detail.payload && typeof detail.payload === 'object') {
+            err.payload = detail.payload;
+            Object.assign(err, detail.payload);
+        }
+        throw err;
+    }
+    return resp.json();
+}
+
+export async function openPosition({
+    apiBaseUrl,
+    initData,
+    chain,
+    poolAddress,
+    poolVersion,
+    amount,
+    rangeLowerPct,
+    rangeUpperPct,
+    slippageTolerance,
+    entrySwapSlippageTolerance,
+    allowEntrySwap,
+    confirmEntrySwap,
+    walletId,
+    ackLiquidityRisk,
+    signal,
+}) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/trading?endpoint=open_position`;
+    const payload = buildOpenPositionPayload({
+        initData,
+        chain,
+        poolAddress,
+        poolVersion,
+        amount,
+        rangeLowerPct,
+        rangeUpperPct,
+        slippageTolerance,
+        entrySwapSlippageTolerance,
+        allowEntrySwap,
+        confirmEntrySwap,
+        walletId,
+        ackLiquidityRisk,
+    });
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

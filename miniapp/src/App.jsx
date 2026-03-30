@@ -21,6 +21,7 @@ import {
     fetchMe,
     fetchRealtimePositions,
     openPosition,
+    previewOpenPosition,
     updateTaskRange,
     setTaskPaused,
     stopTask,
@@ -313,6 +314,54 @@ function formatDraftNumber(value) {
     return Number.isFinite(value) ? String(value) : '';
 }
 
+function parseOptionalPercent(raw) {
+    const text = String(raw || '').trim();
+    if (!text) return { valid: true, value: undefined };
+    const num = Number(text);
+    if (!Number.isFinite(num) || num < 0 || num > 100) {
+        return { valid: false, value: undefined };
+    }
+    return { valid: true, value: num };
+}
+
+function hasOpenPositionRiskPayload(value) {
+    return Boolean(
+        value &&
+        typeof value === 'object' &&
+        (
+            typeof value?.liquidity_usd === 'number' ||
+            typeof value?.max_open_amount === 'number' ||
+            typeof value?.price_deviation_percent === 'number' ||
+            Boolean(value?.risk_ack_required)
+        )
+    );
+}
+
+function buildOpenPositionRiskPayload(value, fallbackMessage = '') {
+    if (!hasOpenPositionRiskPayload(value)) return null;
+    return {
+        code: String(value?.code || ''),
+        message: String(value?.message || fallbackMessage || ''),
+        liquidity_usd: Number(value?.liquidity_usd),
+        min_liquidity_usd: Number(value?.min_liquidity_usd),
+        max_open_amount: Number(value?.max_open_amount),
+        risk_ack_required: Boolean(value?.risk_ack_required),
+        price_deviation_percent: Number(value?.price_deviation_percent),
+        price_deviation_max_percent: Number(value?.price_deviation_max_percent),
+    };
+}
+
+function buildEntrySwapConfirmKey(preview, entrySwapSlippage) {
+    return [
+        preview?.required ? '1' : '0',
+        preview?.from_token_address || '',
+        preview?.to_token_address || '',
+        preview?.amount_in_raw || '',
+        preview?.expected_amount_out_raw || '',
+        String(entrySwapSlippage || '').trim(),
+    ].join('|');
+}
+
 function formatUserLabel(user) {
     if (!user) return '未知用户';
     const username = String(user.username || '').trim();
@@ -425,6 +474,12 @@ export default function App() {
     const [openPositionError, setOpenPositionError] = useState('');
     const [openPositionRisk, setOpenPositionRisk] = useState(null);
     const [openPositionRiskAck, setOpenPositionRiskAck] = useState(false);
+    const [openPositionEntrySwapPreview, setOpenPositionEntrySwapPreview] = useState(null);
+    const [openPositionEntrySwapPreviewLoading, setOpenPositionEntrySwapPreviewLoading] = useState(false);
+    const [openPositionEntrySwapPreviewError, setOpenPositionEntrySwapPreviewError] = useState('');
+    const [openPositionEntrySwapSlippage, setOpenPositionEntrySwapSlippage] = useState('');
+    const [openPositionEntrySwapSlippageDirty, setOpenPositionEntrySwapSlippageDirty] = useState(false);
+    const [openPositionEntrySwapConfirm, setOpenPositionEntrySwapConfirm] = useState(false);
     const [openPositionLoading, setOpenPositionLoading] = useState(false);
     const [openPositionSmartRanges, setOpenPositionSmartRanges] = useState([]);
     const [openPositionSmartRangesLoading, setOpenPositionSmartRangesLoading] = useState(false);
@@ -1316,6 +1371,11 @@ export default function App() {
         return { lower: Math.abs(lower), upper: Math.abs(upper) };
     };
 
+    const openPositionEntrySwapConfirmKey = useMemo(
+        () => buildEntrySwapConfirmKey(openPositionEntrySwapPreview, openPositionEntrySwapSlippage),
+        [openPositionEntrySwapPreview, openPositionEntrySwapSlippage],
+    );
+
     const handleOpenPositionRangeLowerChange = useCallback((value) => {
         setOpenPositionRangeLower((prevLower) => {
             if (
@@ -1362,6 +1422,12 @@ export default function App() {
         setOpenPositionRangeUpper('');
         setOpenPositionRangeUpperAuto(true);
         setOpenPositionSlippage('');
+        setOpenPositionEntrySwapPreview(null);
+        setOpenPositionEntrySwapPreviewLoading(false);
+        setOpenPositionEntrySwapPreviewError('');
+        setOpenPositionEntrySwapSlippage('');
+        setOpenPositionEntrySwapSlippageDirty(false);
+        setOpenPositionEntrySwapConfirm(false);
 
         setOpenPositionError('');
         setOpenPositionRisk(null);
@@ -1494,6 +1560,158 @@ export default function App() {
         };
     }, [apiBaseUrl, initData, hasInitData, multiWalletEnabled, openPositionPool]);
 
+    useEffect(() => {
+        if (!openPositionEntrySwapPreview?.required || openPositionEntrySwapSlippageDirty) return;
+        const recommended = Number(openPositionEntrySwapPreview?.recommended_slippage_tolerance);
+        const current = Number(openPositionEntrySwapPreview?.current_slippage_tolerance);
+        const next = Number.isFinite(recommended) ? recommended : current;
+        if (!Number.isFinite(next)) return;
+        setOpenPositionEntrySwapSlippage(String(next));
+    }, [openPositionEntrySwapPreview, openPositionEntrySwapSlippageDirty]);
+
+    useEffect(() => {
+        setOpenPositionEntrySwapConfirm(false);
+    }, [openPositionEntrySwapConfirmKey]);
+
+    useEffect(() => {
+        if (!openPositionPool || !hasInitData) {
+            setOpenPositionEntrySwapPreview(null);
+            setOpenPositionEntrySwapPreviewLoading(false);
+            setOpenPositionEntrySwapPreviewError('');
+            return undefined;
+        }
+
+        const poolAddr = String(openPositionPool?.pool_address || '').trim().toLowerCase();
+        if (poolAddr && blacklist.has(poolAddr)) {
+            setOpenPositionEntrySwapPreview(null);
+            setOpenPositionEntrySwapPreviewLoading(false);
+            setOpenPositionEntrySwapPreviewError('');
+            setOpenPositionRisk(null);
+            return undefined;
+        }
+
+        const amount = Number(String(openPositionAmount || '').trim());
+        const range = parseRangeInput(openPositionRangeLower, openPositionRangeUpper);
+        const taskSlippage = parseOptionalPercent(openPositionSlippage);
+        const entrySwapSlippage = parseOptionalPercent(openPositionEntrySwapSlippage);
+        if (!Number.isFinite(amount) || amount <= 0 || !range || range.lower <= 0 || range.upper <= 0 || range.lower >= 100 || range.upper >= 100 || !taskSlippage.valid || !entrySwapSlippage.valid) {
+            setOpenPositionEntrySwapPreview(null);
+            setOpenPositionEntrySwapPreviewLoading(false);
+            setOpenPositionEntrySwapPreviewError('');
+            setOpenPositionRisk(null);
+            return undefined;
+        }
+
+        let walletId = openPositionWalletId;
+        if (multiWalletEnabled) {
+            if (walletsLoading) {
+                setOpenPositionEntrySwapPreview(null);
+                setOpenPositionEntrySwapPreviewLoading(false);
+                setOpenPositionEntrySwapPreviewError('');
+                return undefined;
+            }
+            if (walletsError) {
+                setOpenPositionEntrySwapPreview(null);
+                setOpenPositionEntrySwapPreviewLoading(false);
+                setOpenPositionEntrySwapPreviewError('');
+                return undefined;
+            }
+            const list = Array.isArray(walletsData?.wallets) ? walletsData.wallets : [];
+            if (list.length === 0) {
+                setOpenPositionEntrySwapPreview(null);
+                setOpenPositionEntrySwapPreviewLoading(false);
+                setOpenPositionEntrySwapPreviewError('');
+                return undefined;
+            }
+            if (list.length > 1) {
+                const wid = Number(openPositionWalletId);
+                walletId = wid;
+                walletId = wid;
+                if (!Number.isFinite(wid) || wid <= 0) {
+                    setOpenPositionEntrySwapPreview(null);
+                    setOpenPositionEntrySwapPreviewLoading(false);
+                    setOpenPositionEntrySwapPreviewError('');
+                    return undefined;
+                }
+                walletId = wid;
+            } else {
+                const onlyId = Number(list[0]?.id);
+                if (Number.isFinite(onlyId) && onlyId > 0) {
+                    walletId = onlyId;
+                }
+            }
+        }
+
+        let active = true;
+        const controller = new AbortController();
+        setOpenPositionEntrySwapPreviewLoading(true);
+        setOpenPositionEntrySwapPreviewError('');
+
+        const timer = setTimeout(async () => {
+            try {
+                const resp = await previewOpenPosition({
+                    apiBaseUrl,
+                    initData,
+                    chain: openPositionPool?.chain || 'bsc',
+                    poolAddress: openPositionPool?.pool_address,
+                    poolVersion: openPositionPool?.protocol_version,
+                    amount,
+                    rangeLowerPct: range.lower,
+                    rangeUpperPct: range.upper,
+                    slippageTolerance: taskSlippage.value,
+                    entrySwapSlippageTolerance: entrySwapSlippage.value,
+                    allowEntrySwap: true,
+                    walletId,
+                    ackLiquidityRisk: Boolean(openPositionRisk?.risk_ack_required && openPositionRiskAck),
+                    signal: controller.signal,
+                });
+                if (!active) return;
+                setOpenPositionRisk(null);
+                setOpenPositionEntrySwapPreview(resp?.entry_swap || { required: false });
+            } catch (e) {
+                if (!active || controller.signal.aborted) return;
+                const msg = String(e?.message || e || '').trim();
+                const risk = buildOpenPositionRiskPayload(e, msg);
+                setOpenPositionEntrySwapPreview(null);
+                if (risk) {
+                    setOpenPositionRisk(risk);
+                    setOpenPositionEntrySwapPreviewError('');
+                } else {
+                    setOpenPositionRisk(null);
+                    setOpenPositionEntrySwapPreviewError(msg || 'Failed to load entry swap preview.');
+                }
+            } finally {
+                if (active) {
+                    setOpenPositionEntrySwapPreviewLoading(false);
+                }
+            }
+        }, 350);
+
+        return () => {
+            active = false;
+            clearTimeout(timer);
+            controller.abort();
+        };
+    }, [
+        apiBaseUrl,
+        initData,
+        hasInitData,
+        openPositionPool,
+        openPositionAmount,
+        openPositionRangeLower,
+        openPositionRangeUpper,
+        openPositionSlippage,
+        openPositionEntrySwapSlippage,
+        Boolean(openPositionRisk?.risk_ack_required),
+        openPositionRiskAck,
+        multiWalletEnabled,
+        walletsLoading,
+        walletsError,
+        walletsData,
+        openPositionWalletId,
+        blacklist,
+    ]);
+
     const handleOpenPosition = async () => {
         if (!openPositionPool) return;
         if (!hasInitData) {
@@ -1537,6 +1755,18 @@ export default function App() {
             slippage = v;
         }
 
+        const slippageParsed = parseOptionalPercent(openPositionSlippage);
+        if (!slippageParsed.valid) {
+            setOpenPositionError('Task slippage must be between 0 and 100.');
+            return;
+        }
+        const entrySwapSlippageParsed = parseOptionalPercent(openPositionEntrySwapSlippage);
+        if (!entrySwapSlippageParsed.valid) {
+            setOpenPositionError('Entry swap slippage must be between 0 and 100.');
+            return;
+        }
+        let walletId = openPositionWalletId;
+
         if (multiWalletEnabled) {
             if (walletsLoading) {
                 setOpenPositionError('钱包列表仍在加载，请稍后再试。');
@@ -1559,6 +1789,7 @@ export default function App() {
                 }
             } else {
                 const onlyId = String(list[0]?.id || '').trim();
+                walletId = onlyId;
                 if (onlyId && String(openPositionWalletId || '') !== onlyId) {
                     setOpenPositionWalletId(onlyId);
                     storage.set(STORAGE_OPEN_POSITION_WALLET_ID, onlyId);
@@ -1566,11 +1797,24 @@ export default function App() {
             }
         }
 
+        if (openPositionEntrySwapPreviewLoading) {
+            setOpenPositionError('Entry swap preview is still loading.');
+            return;
+        }
+        if (openPositionEntrySwapPreviewError) {
+            setOpenPositionError(openPositionEntrySwapPreviewError);
+            return;
+        }
+        if (openPositionEntrySwapPreview?.required && !openPositionEntrySwapConfirm) {
+            setOpenPositionError('Confirm the entry swap before opening.');
+            return;
+        }
+
         setOpenPositionLoading(true);
         setOpenPositionError('');
         setOperationProgress({ operation: 'open_position', currentStep: 1, totalSteps: 4, status: 'active', error: '' });
         try {
-            const resp = await openPosition({
+            await openPosition({
                 apiBaseUrl,
                 initData,
                 chain: openPositionPool?.chain || 'bsc',
@@ -1579,37 +1823,33 @@ export default function App() {
                 amount,
                 rangeLowerPct: range.lower,
                 rangeUpperPct: range.upper,
-                slippageTolerance: slippage,
+                slippageTolerance: slippageParsed.value,
+                entrySwapSlippageTolerance: openPositionEntrySwapPreview?.required ? entrySwapSlippageParsed.value : undefined,
                 allowEntrySwap: true,
-                walletId: openPositionWalletId,
+                confirmEntrySwap: Boolean(openPositionEntrySwapPreview?.required && openPositionEntrySwapConfirm),
+                walletId,
                 ackLiquidityRisk: riskRequiresAck && openPositionRiskAck,
             });
-            // Ensure done state even if WS event was missed
-            if (risk) {
-                setOpenPositionError('');
-            }
+            setOpenPositionError('');
+            setOpenPositionRisk(null);
+            setOpenPositionEntrySwapPreview(null);
+            setOpenPositionEntrySwapPreviewError('');
+            setOpenPositionEntrySwapConfirm(false);
             setOperationProgress(prev => prev?.operation === 'open_position'
                 ? { ...prev, currentStep: 4, status: 'done' } : prev);
             setOpenPositionPool(null);
             resetOpenPositionDraft();
         } catch (e) {
             const msg = String(e?.message || e || '').trim();
-            const risk = e && typeof e === 'object' && (
-                typeof e?.liquidity_usd === 'number' ||
-                typeof e?.max_open_amount === 'number' ||
-                Boolean(e?.risk_ack_required) ||
-                typeof e?.price_deviation_percent === 'number'
-            ) ? {
-                code: String(e?.code || ''),
-                message: msg,
-                liquidity_usd: Number(e?.liquidity_usd),
-                min_liquidity_usd: Number(e?.min_liquidity_usd),
-                max_open_amount: Number(e?.max_open_amount),
-                risk_ack_required: Boolean(e?.risk_ack_required),
-                price_deviation_percent: Number(e?.price_deviation_percent),
-                price_deviation_max_percent: Number(e?.price_deviation_max_percent),
-            } : null;
+            const risk = buildOpenPositionRiskPayload(e, msg);
+            const entrySwapInfo = e && typeof e === 'object' && e?.entry_swap && typeof e.entry_swap === 'object'
+                ? e.entry_swap
+                : null;
             setOpenPositionRisk(risk);
+            if (entrySwapInfo) {
+                setOpenPositionEntrySwapPreview(entrySwapInfo);
+                setOpenPositionEntrySwapPreviewError('');
+            }
             if (risk) {
                 queueMicrotask(() => setOpenPositionError(''));
             }
@@ -3255,6 +3495,59 @@ export default function App() {
                                     placeholder="例如 0.5（可选）"
                                 />
                             </div>
+
+                            {(openPositionEntrySwapPreviewLoading || openPositionEntrySwapPreview?.required || openPositionEntrySwapPreviewError) ? (
+                                <div className="rounded-xl border border-sky-500/20 bg-sky-500/10 p-3 text-xs leading-5 text-sky-700 dark:text-sky-200">
+                                    <div className="text-xs font-semibold">Entry Swap</div>
+                                    {openPositionEntrySwapPreviewLoading ? (
+                                        <div className="mt-2">Checking recommended slippage and expected receive amount...</div>
+                                    ) : null}
+                                    {openPositionEntrySwapPreviewError ? (
+                                        <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-red-700 dark:text-red-200">
+                                            {openPositionEntrySwapPreviewError}
+                                        </div>
+                                    ) : null}
+                                    {openPositionEntrySwapPreview?.required ? (
+                                        <>
+                                            <div className="mt-2">
+                                                Recommended slippage: {Number(openPositionEntrySwapPreview?.recommended_slippage_tolerance).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}%
+                                            </div>
+                                            <div className="mt-1">
+                                                Current slippage: {Number(openPositionEntrySwapPreview?.current_slippage_tolerance).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}%
+                                            </div>
+                                            <div className="mt-1">
+                                                Estimated receive: {openPositionEntrySwapPreview?.expected_amount_out || '--'} {openPositionEntrySwapPreview?.to_token_symbol || ''}
+                                            </div>
+                                            <div className="mt-1">
+                                                Route: {openPositionEntrySwapPreview?.amount_in || '--'} {openPositionEntrySwapPreview?.from_token_symbol || ''} to {openPositionEntrySwapPreview?.to_token_symbol || ''}
+                                            </div>
+                                            <input
+                                                value={openPositionEntrySwapSlippage}
+                                                onChange={(e) => {
+                                                    setOpenPositionEntrySwapSlippageDirty(true);
+                                                    setOpenPositionEntrySwapSlippage(e.target.value);
+                                                    setOpenPositionError('');
+                                                }}
+                                                inputMode="decimal"
+                                                className={`mt-3 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
+                                                placeholder="Entry swap slippage %"
+                                            />
+                                            <label className="mt-3 flex items-start gap-2">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={openPositionEntrySwapConfirm}
+                                                    onChange={(e) => {
+                                                        setOpenPositionEntrySwapConfirm(e.target.checked);
+                                                        setOpenPositionError('');
+                                                    }}
+                                                    disabled={openPositionLoading || openPositionEntrySwapPreviewLoading}
+                                                />
+                                                <span>Confirm this entry swap first, then continue opening the position.</span>
+                                            </label>
+                                        </>
+                                    ) : null}
+                                </div>
+                            ) : null}
 
                             <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-xs leading-5 text-emerald-700 dark:text-emerald-200">
                                 如果这是当前钱包首次开仓，系统会先部署私有合约，部署完成后绑定到当前钱包，再继续正式开仓。

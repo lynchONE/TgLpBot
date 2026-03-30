@@ -2959,6 +2959,8 @@ export default function App() {
 
       {openPosPool && (
         <OpenPositionModal
+          apiBaseUrl={apiBaseUrl}
+          initData={initData}
           pool={openPosPool}
           chain={openPosPool?.chain || chain}
           wallets={openPosWallets}
@@ -2968,7 +2970,10 @@ export default function App() {
           selectedWalletId={openPosWalletId}
           submitError={openPosSubmitError}
           submitRisk={openPosRisk}
-          onClearSubmitError={() => setOpenPosSubmitError('')}
+          onClearSubmitError={() => {
+            setOpenPosSubmitError('');
+            setOpenPosRisk(null);
+          }}
           onWalletSelect={(id) => {
             setOpenPosSubmitError('');
             setOpenPosWalletId(id);

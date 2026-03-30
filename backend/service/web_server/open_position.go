@@ -24,17 +24,19 @@ import (
 )
 
 type openPositionRequest struct {
-	InitData         string   `json:"initData"`
-	WalletID         uint     `json:"wallet_id,omitempty"`
-	Chain            string   `json:"chain"`
-	PoolAddress      string   `json:"pool_address"`
-	PoolVersion      string   `json:"pool_version"`
-	Amount           float64  `json:"amount"`
-	RangeLowerPct    float64  `json:"range_lower_pct"`
-	RangeUpperPct    float64  `json:"range_upper_pct"`
-	Slippage         *float64 `json:"slippage_tolerance,omitempty"`
-	AllowEntrySwap   bool     `json:"allow_entry_swap"`
-	AckLiquidityRisk bool     `json:"ack_liquidity_risk,omitempty"`
+	InitData          string   `json:"initData"`
+	WalletID          uint     `json:"wallet_id,omitempty"`
+	Chain             string   `json:"chain"`
+	PoolAddress       string   `json:"pool_address"`
+	PoolVersion       string   `json:"pool_version"`
+	Amount            float64  `json:"amount"`
+	RangeLowerPct     float64  `json:"range_lower_pct"`
+	RangeUpperPct     float64  `json:"range_upper_pct"`
+	Slippage          *float64 `json:"slippage_tolerance,omitempty"`
+	EntrySwapSlippage *float64 `json:"entry_swap_slippage_tolerance,omitempty"`
+	AllowEntrySwap    bool     `json:"allow_entry_swap"`
+	ConfirmEntrySwap  bool     `json:"confirm_entry_swap,omitempty"`
+	AckLiquidityRisk  bool     `json:"ack_liquidity_risk,omitempty"`
 }
 
 type openPositionResponse struct {
@@ -43,15 +45,47 @@ type openPositionResponse struct {
 	Status string `json:"status"`
 }
 
+type openPositionPreviewResponse struct {
+	Status    string                     `json:"status"`
+	EntrySwap *openPositionEntrySwapInfo `json:"entry_swap,omitempty"`
+}
+
+type openPositionEntrySwapInfo struct {
+	Required                     bool    `json:"required"`
+	NeedsConfirmation            bool    `json:"needs_confirmation,omitempty"`
+	FromTokenAddress             string  `json:"from_token_address,omitempty"`
+	FromTokenSymbol              string  `json:"from_token_symbol,omitempty"`
+	ToTokenAddress               string  `json:"to_token_address,omitempty"`
+	ToTokenSymbol                string  `json:"to_token_symbol,omitempty"`
+	AmountIn                     string  `json:"amount_in,omitempty"`
+	AmountInRaw                  string  `json:"amount_in_raw,omitempty"`
+	ExpectedAmountOut            string  `json:"expected_amount_out,omitempty"`
+	ExpectedAmountOutRaw         string  `json:"expected_amount_out_raw,omitempty"`
+	RecommendedSlippageTolerance float64 `json:"recommended_slippage_tolerance,omitempty"`
+	CurrentSlippageTolerance     float64 `json:"current_slippage_tolerance,omitempty"`
+}
+
 type openPositionError struct {
-	Code                     string   `json:"code"`
-	Message                  string   `json:"message"`
-	LiquidityUSD             *float64 `json:"liquidity_usd,omitempty"`
-	MinLiquidityUSD          *float64 `json:"min_liquidity_usd,omitempty"`
-	MaxOpenAmount            *float64 `json:"max_open_amount,omitempty"`
-	RiskAckRequired          bool     `json:"risk_ack_required,omitempty"`
-	PriceDeviationPercent    *float64 `json:"price_deviation_percent,omitempty"`
-	PriceDeviationMaxPercent *float64 `json:"price_deviation_max_percent,omitempty"`
+	Code                     string                     `json:"code"`
+	Message                  string                     `json:"message"`
+	LiquidityUSD             *float64                   `json:"liquidity_usd,omitempty"`
+	MinLiquidityUSD          *float64                   `json:"min_liquidity_usd,omitempty"`
+	MaxOpenAmount            *float64                   `json:"max_open_amount,omitempty"`
+	RiskAckRequired          bool                       `json:"risk_ack_required,omitempty"`
+	PriceDeviationPercent    *float64                   `json:"price_deviation_percent,omitempty"`
+	PriceDeviationMaxPercent *float64                   `json:"price_deviation_max_percent,omitempty"`
+	EntrySwap                *openPositionEntrySwapInfo `json:"entry_swap,omitempty"`
+}
+
+type openPositionContext struct {
+	user             *models.User
+	req              openPositionRequest
+	chain            string
+	cc               config.ChainConfig
+	selectedWallet   *models.Wallet
+	poolVersion      string
+	liquidityService *liquidity.LiquidityService
+	task             *models.StrategyTask
 }
 
 func float64Ptr(v float64) *float64 {
@@ -161,10 +195,19 @@ func applyEnterResult(task *models.StrategyTask, enterRes *liquidity.EnterResult
 	return nil
 }
 
-func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
+func writeOpenPositionError(w http.ResponseWriter, status int, resp openPositionError) {
+	if status <= 0 {
+		status = http.StatusInternalServerError
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func decodeOpenPositionRequest(w http.ResponseWriter, r *http.Request) (*openPositionRequest, bool) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
+		return nil, false
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, 12*1024)
@@ -173,7 +216,7 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
-		return
+		return nil, false
 	}
 
 	req.InitData = strings.TrimSpace(req.InitData)
@@ -183,164 +226,155 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 
 	if req.PoolAddress == "" {
 		http.Error(w, "missing pool_address", http.StatusBadRequest)
-		return
+		return nil, false
 	}
 	if req.Amount <= 0 {
 		http.Error(w, "invalid amount", http.StatusBadRequest)
-		return
+		return nil, false
 	}
 	if req.RangeLowerPct <= 0 || req.RangeUpperPct <= 0 || req.RangeLowerPct >= 100 || req.RangeUpperPct >= 100 {
 		http.Error(w, "invalid range", http.StatusBadRequest)
-		return
+		return nil, false
 	}
-	if req.Slippage != nil {
-		if *req.Slippage < 0 || *req.Slippage > 100 {
-			http.Error(w, "invalid slippage_tolerance", http.StatusBadRequest)
-			return
-		}
+	if req.Slippage != nil && (*req.Slippage < 0 || *req.Slippage > 100) {
+		http.Error(w, "invalid slippage_tolerance", http.StatusBadRequest)
+		return nil, false
+	}
+	if req.EntrySwapSlippage != nil && (*req.EntrySwapSlippage < 0 || *req.EntrySwapSlippage > 100) {
+		http.Error(w, "invalid entry_swap_slippage_tolerance", http.StatusBadRequest)
+		return nil, false
 	}
 	if config.AppConfig == nil {
 		http.Error(w, "config not loaded", http.StatusInternalServerError)
-		return
+		return nil, false
 	}
 
-	var (
-		chain string
-		cc    config.ChainConfig
-	)
+	return &req, true
+}
 
+func buildOpenPositionEntrySwapInfo(preview *liquidity.EntrySwapPreview) *openPositionEntrySwapInfo {
+	if preview == nil {
+		return nil
+	}
+	return &openPositionEntrySwapInfo{
+		Required:                     preview.Required,
+		NeedsConfirmation:            preview.Required,
+		FromTokenAddress:             strings.TrimSpace(preview.FromTokenAddress),
+		FromTokenSymbol:              strings.TrimSpace(preview.FromTokenSymbol),
+		ToTokenAddress:               strings.TrimSpace(preview.ToTokenAddress),
+		ToTokenSymbol:                strings.TrimSpace(preview.ToTokenSymbol),
+		AmountIn:                     strings.TrimSpace(preview.AmountIn),
+		AmountInRaw:                  strings.TrimSpace(preview.AmountInRaw),
+		ExpectedAmountOut:            strings.TrimSpace(preview.ExpectedAmountOut),
+		ExpectedAmountOutRaw:         strings.TrimSpace(preview.ExpectedAmountOutRaw),
+		RecommendedSlippageTolerance: preview.RecommendedSlippageTolerance,
+		CurrentSlippageTolerance:     preview.CurrentSlippageTolerance,
+	}
+}
+
+func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPositionContext, *openPositionError, int) {
 	user, status, msg := authenticateTelegramWebAppUser(req.InitData)
 	if status != 0 {
-		http.Error(w, msg, status)
-		return
+		return nil, &openPositionError{Code: "unauthorized", Message: msg}, status
 	}
 
 	check, status, msg, err := requireUserAccess(user.ID)
 	if err != nil {
-		http.Error(w, msg, status)
-		return
+		if status == 0 {
+			status = http.StatusInternalServerError
+		}
+		return nil, &openPositionError{Code: "access_check_failed", Message: msg}, status
 	}
 	if status != 0 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(openPositionError{
-			Code:    "forbidden",
-			Message: msg,
-		})
-		return
+		return nil, &openPositionError{Code: "forbidden", Message: msg}, http.StatusForbidden
 	}
 	if status, msg := requireMiniAppPermission(check); status != 0 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(openPositionError{
-			Code:    "miniapp_forbidden",
-			Message: msg,
-		})
-		return
+		return nil, &openPositionError{Code: "miniapp_forbidden", Message: msg}, status
 	}
 
-	// 检查任务额度
 	cfgService := userSvc.NewGlobalConfigService()
-	cfg, cfgErr := cfgService.GetOrCreate(user.ID)
-	if cfgErr != nil {
-		http.Error(w, "failed to load config", http.StatusInternalServerError)
-		return
+	cfg, err := cfgService.GetOrCreate(user.ID)
+	if err != nil {
+		return nil, &openPositionError{Code: "open_position_failed", Message: "failed to load config"}, http.StatusInternalServerError
 	}
 
-	// Resolve effective chain based on user's chain mode.
-	requestedChain := strings.TrimSpace(req.Chain)
+	var chain string
 	if cfg != nil && !cfg.MultiChainEnabled {
 		chain = config.PickEnabledChain(cfg.DefaultChain)
-	} else if requestedChain != "" {
-		chain = config.NormalizeChain(requestedChain)
+	} else if strings.TrimSpace(req.Chain) != "" {
+		chain = config.NormalizeChain(req.Chain)
 	} else {
-		// Backwards-compatible default for older clients.
 		chain = config.PickEnabledChain("bsc")
 	}
 
-	var ok bool
-	cc, ok = config.AppConfig.GetChainConfig(chain)
+	cc, ok := config.AppConfig.GetChainConfig(chain)
 	if !ok || strings.TrimSpace(cc.Chain) == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(openPositionError{
+		return nil, &openPositionError{
 			Code:    "invalid_chain",
 			Message: "unsupported chain (enable it via CHAINS env)",
-		})
-		return
+		}, http.StatusBadRequest
 	}
 
 	if !check.IsAdmin && check.Access != nil {
 		taskCount, countErr := userSvc.NewAccessService().CountUserActiveTasks(user.ID)
 		if countErr != nil {
-			http.Error(w, "failed to check task quota", http.StatusInternalServerError)
-			return
+			return nil, &openPositionError{
+				Code:    "open_position_failed",
+				Message: "failed to check task quota",
+			}, http.StatusInternalServerError
 		}
 		if taskCount >= int64(check.Access.MaxActiveTasks) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusForbidden)
-			_ = json.NewEncoder(w).Encode(openPositionError{
+			return nil, &openPositionError{
 				Code:    "task_quota_exceeded",
-				Message: "已达到活跃任务数量上限，请先停止其他任务或联系管理员提升额度",
-			})
-			return
+				Message: "active task quota exceeded",
+			}, http.StatusForbidden
 		}
 	}
 
 	walletService := wallet.NewWalletService()
 	wallets, err := walletService.GetUserWallets(user.ID)
 	if err != nil || len(wallets) == 0 {
-		http.Error(w, "no wallet found", http.StatusBadRequest)
-		return
+		return nil, &openPositionError{
+			Code:    "wallet_required",
+			Message: "no wallet found",
+		}, http.StatusBadRequest
 	}
-	defaultWallet := &wallets[0]
+	selectedWallet := &wallets[0]
 	for i := range wallets {
 		if wallets[i].IsDefault {
-			defaultWallet = &wallets[i]
+			selectedWallet = &wallets[i]
 			break
 		}
 	}
 
 	requireSelection := cfg != nil && cfg.MultiWalletEnabled && len(wallets) > 1
 	if requireSelection && req.WalletID == 0 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(openPositionError{
+		return nil, &openPositionError{
 			Code:    "wallet_required",
-			Message: "请选择钱包",
-		})
-		return
+			Message: "wallet selection required",
+		}, http.StatusBadRequest
 	}
-
-	selectedWallet := defaultWallet
 	if requireSelection {
 		walletRec, werr := walletService.GetWalletByID(user.ID, req.WalletID)
 		if werr != nil || walletRec == nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(openPositionError{
+			return nil, &openPositionError{
 				Code:    "invalid_wallet",
-				Message: "无效的钱包",
-			})
-			return
+				Message: "invalid wallet",
+			}, http.StatusBadRequest
 		}
 		selectedWallet = walletRec
 	}
 
 	blacklistSvc := blacklist.NewBlacklistService()
 	if blacklistSvc.IsBlacklisted(user.ID, req.PoolAddress) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(openPositionError{
+		return nil, &openPositionError{
 			Code:    "blacklisted",
-			Message: "该池子已加入黑名单，禁止开仓",
-		})
-		return
+			Message: "this pool is blacklisted",
+		}, http.StatusForbidden
 	}
 
 	poolAddress := normalizeHexPrefixed(req.PoolAddress)
 	poolVersion := req.PoolVersion
-
 	if poolVersion == "" {
 		if isV4PoolId(poolAddress) {
 			poolVersion = "v4"
@@ -354,30 +388,32 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 	switch poolVersion {
 	case "v4":
 		if chain != "bsc" {
-			http.Error(w, "V4 not supported on this chain yet", http.StatusBadRequest)
-			return
+			return nil, &openPositionError{
+				Code:    "invalid_chain",
+				Message: "V4 not supported on this chain yet",
+			}, http.StatusBadRequest
 		}
 		poolInfo, err = poolService.GetPoolInfoForVersionCached(chain, "v4", poolAddress)
 	default:
 		poolInfo, err = poolService.GetPoolInfoForVersionCached(chain, "v3", poolAddress)
 	}
 	if err != nil || poolInfo == nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Header().Set("Content-Type", "application/json")
 		message := "failed to load pool info"
 		if err != nil {
 			message = strings.TrimSpace(err.Error())
 		}
-		_ = json.NewEncoder(w).Encode(openPositionError{
+		return nil, &openPositionError{
 			Code:    "pool_info_error",
 			Message: message,
-		})
-		return
+		}, http.StatusInternalServerError
 	}
 	if poolInfo.TickSpacing <= 0 {
-		http.Error(w, "invalid tick spacing", http.StatusInternalServerError)
-		return
+		return nil, &openPositionError{
+			Code:    "pool_info_error",
+			Message: "invalid tick spacing",
+		}, http.StatusInternalServerError
 	}
+
 	if !req.AllowEntrySwap {
 		stableAddrStr := strings.TrimSpace(cc.StableAddress)
 		if common.IsHexAddress(stableAddrStr) {
@@ -385,13 +421,10 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 			token0 := strings.ToLower(strings.TrimSpace(poolInfo.Token0))
 			token1 := strings.ToLower(strings.TrimSpace(poolInfo.Token1))
 			if token0 != stableAddr && token1 != stableAddr {
-				w.WriteHeader(http.StatusConflict)
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(openPositionError{
+				return nil, &openPositionError{
 					Code:    "entry_swap_required",
 					Message: fmt.Sprintf("pool does not contain %s", strings.TrimSpace(cc.StableSymbol)),
-				})
-				return
+				}, http.StatusConflict
 			}
 		}
 	}
@@ -409,55 +442,49 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 
 	tickLowerPctReq, tickUpperPctReq := pricing.TickPercentagesFromStablePercentages(tmpTask, req.RangeLowerPct, req.RangeUpperPct)
 	if tickLowerPctReq <= 0 || tickUpperPctReq <= 0 {
-		http.Error(w, "invalid range", http.StatusBadRequest)
-		return
+		return nil, &openPositionError{
+			Code:    "invalid_range",
+			Message: "invalid range",
+		}, http.StatusBadRequest
 	}
 
 	var currentTick int
 	switch poolVersion {
 	case "v4":
 		if !common.IsHexAddress(config.AppConfig.UniswapV4PoolManagerAddress) {
-			http.Error(w, "UNISWAP_V4_POOL_MANAGER_ADDRESS not configured", http.StatusInternalServerError)
-			return
+			return nil, &openPositionError{Code: "open_position_failed", Message: "UNISWAP_V4_POOL_MANAGER_ADDRESS not configured"}, http.StatusInternalServerError
 		}
 		if !common.IsHexAddress(config.AppConfig.UniswapV4StateViewAddress) {
-			http.Error(w, "UNISWAP_V4_STATE_VIEW_ADDRESS not configured", http.StatusInternalServerError)
-			return
+			return nil, &openPositionError{Code: "open_position_failed", Message: "UNISWAP_V4_STATE_VIEW_ADDRESS not configured"}, http.StatusInternalServerError
 		}
 		poolManager := common.HexToAddress(config.AppConfig.UniswapV4PoolManagerAddress)
 		stateView := common.HexToAddress(config.AppConfig.UniswapV4StateViewAddress)
 		currentTick, err = blockchain.GetUniswapV4PoolCurrentTickViaStateView(stateView, poolManager, poolAddress)
 	default:
 		if !common.IsHexAddress(poolAddress) {
-			http.Error(w, "invalid pool address", http.StatusBadRequest)
-			return
+			return nil, &openPositionError{Code: "invalid_pool_address", Message: "invalid pool address"}, http.StatusBadRequest
 		}
 		client, _, cerr := blockchain.GetEVMClient(chain)
 		if cerr != nil {
-			http.Error(w, cerr.Error(), http.StatusInternalServerError)
-			return
+			return nil, &openPositionError{Code: "open_position_failed", Message: cerr.Error()}, http.StatusInternalServerError
 		}
 		currentTick, err = blockchain.GetV3PoolCurrentTickWithClient(client, common.HexToAddress(poolAddress))
 	}
 	if err != nil {
-		http.Error(w, "failed to read current tick", http.StatusInternalServerError)
-		return
+		return nil, &openPositionError{
+			Code:    "open_position_failed",
+			Message: "failed to read current tick",
+		}, http.StatusInternalServerError
 	}
 
 	tc := pool.NewTickCalculator()
 	tickLower, tickUpper := tc.CalculateTickFromPercentagesBestFit(currentTick, tickLowerPctReq, tickUpperPctReq, poolInfo.TickSpacing)
-
 	tickLowerPctEff, tickUpperPctEff := tc.CalculatePercentagesFromTicks(currentTick, tickLower, tickUpper)
 	rangePctEff := (tickLowerPctEff + tickUpperPctEff) / 2.0
 
-	slippage := cfg.SlippageTolerance
+	taskSlippage := cfg.SlippageTolerance
 	if req.Slippage != nil {
-		slippage = *req.Slippage
-	}
-
-	hooksAddr := normalizeHexPrefixed(poolInfo.HooksAddress)
-	if !common.IsHexAddress(hooksAddr) {
-		hooksAddr = "0x0000000000000000000000000000000000000000"
+		taskSlippage = *req.Slippage
 	}
 
 	liquidityService := liquidity.NewLiquidityService()
@@ -467,35 +494,18 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		var zapSafetyErr *liquidity.ZapSafetyError
 		if errors.As(err, &zapSafetyErr) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
-			_ = json.NewEncoder(w).Encode(buildOpenPositionErrorFromSafety(zapSafetyErr))
-			return
+			resp := buildOpenPositionErrorFromSafety(zapSafetyErr)
+			return nil, &resp, http.StatusConflict
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(openPositionError{
+		return nil, &openPositionError{
 			Code:    "open_position_failed",
 			Message: err.Error(),
-		})
-		return
+		}, http.StatusInternalServerError
 	}
-	if err := liquidityService.EnsureWalletPrivateZapReady(user.ID, chain, selectedWallet.ID, selectedWallet.Address, poolVersion); err != nil {
-		errCode := "open_position_failed"
-		var zapSafetyErr *liquidity.ZapSafetyError
-		if errors.As(err, &zapSafetyErr) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
-			_ = json.NewEncoder(w).Encode(buildOpenPositionErrorFromSafety(zapSafetyErr))
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(openPositionError{
-			Code:    errCode,
-			Message: err.Error(),
-		})
-		return
+
+	hooksAddr := normalizeHexPrefixed(poolInfo.HooksAddress)
+	if !common.IsHexAddress(hooksAddr) {
+		hooksAddr = "0x0000000000000000000000000000000000000000"
 	}
 
 	task := &models.StrategyTask{
@@ -521,7 +531,7 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		AmountUSDT:           req.Amount,
 		CurrentLiquidity:     "0",
 		ReopenDelaySeconds:   cfg.RebalanceTimeout,
-		SlippageTolerance:    slippage,
+		SlippageTolerance:    taskSlippage,
 		AutoReinvest:         cfg.AutoReinvest,
 		ResidualTolerance:    cfg.ResidualTolerance,
 		ZapLossTolerance:     cfg.ZapLossTolerance,
@@ -532,60 +542,151 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		LastCheckTime:        time.Now(),
 	}
 
-	if err := database.DB.Create(task).Error; err != nil {
-		http.Error(w, "failed to create task", http.StatusInternalServerError)
+	return &openPositionContext{
+		user:             user,
+		req:              req,
+		chain:            chain,
+		cc:               cc,
+		selectedWallet:   selectedWallet,
+		poolVersion:      poolVersion,
+		liquidityService: liquidityService,
+		task:             task,
+	}, nil, 0
+}
+
+func (s *Server) handleOpenPositionPreview(w http.ResponseWriter, r *http.Request) {
+	req, ok := decodeOpenPositionRequest(w, r)
+	if !ok {
 		return
 	}
 
-	enterRes, err := liquidityService.EnterTaskFromUSDT(user.ID, task)
-	if err != nil {
-		var swapErr *liquidity.EntrySwapRequiredError
-		if errors.As(err, &swapErr) {
-			_ = database.DB.Model(task).Updates(map[string]interface{}{
-				"status":        models.StrategyStatusWaiting,
-				"error_message": "entry swap required",
-			}).Error
-			w.WriteHeader(http.StatusConflict)
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(openPositionError{
-				Code:    "entry_swap_required",
-				Message: swapErr.Error(),
-			})
-			return
-		}
-		_ = database.DB.Model(task).Updates(map[string]interface{}{
-			"status":        models.StrategyStatusError,
-			"error_message": err.Error(),
-		}).Error
+	ctx, errResp, status := s.prepareOpenPositionContext(*req)
+	if errResp != nil {
+		writeOpenPositionError(w, status, *errResp)
+		return
+	}
 
-		var zapSafetyErr *liquidity.ZapSafetyError
-		if errors.As(err, &zapSafetyErr) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
-			_ = json.NewEncoder(w).Encode(buildOpenPositionErrorFromSafety(zapSafetyErr))
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(openPositionError{
+	preview, err := ctx.liquidityService.PreviewEntrySwap(ctx.task, ctx.selectedWallet, ctx.task.SlippageTolerance, ctx.req.EntrySwapSlippage)
+	if err != nil {
+		writeOpenPositionError(w, http.StatusInternalServerError, openPositionError{
 			Code:    "open_position_failed",
 			Message: err.Error(),
 		})
 		return
 	}
 
-	if err := applyEnterResult(task, enterRes); err != nil {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(openPositionPreviewResponse{
+		Status:    "ok",
+		EntrySwap: buildOpenPositionEntrySwapInfo(preview),
+	})
+}
+
+func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
+	req, ok := decodeOpenPositionRequest(w, r)
+	if !ok {
+		return
+	}
+
+	ctx, errResp, status := s.prepareOpenPositionContext(*req)
+	if errResp != nil {
+		writeOpenPositionError(w, status, *errResp)
+		return
+	}
+
+	entrySwapPreview, err := ctx.liquidityService.PreviewEntrySwap(ctx.task, ctx.selectedWallet, ctx.task.SlippageTolerance, ctx.req.EntrySwapSlippage)
+	if err != nil {
+		writeOpenPositionError(w, http.StatusInternalServerError, openPositionError{
+			Code:    "open_position_failed",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	if entrySwapPreview != nil && entrySwapPreview.Required {
+		if !ctx.req.AllowEntrySwap {
+			writeOpenPositionError(w, http.StatusConflict, openPositionError{
+				Code:      "entry_swap_required",
+				Message:   fmt.Sprintf("pool does not contain %s", strings.TrimSpace(ctx.cc.StableSymbol)),
+				EntrySwap: buildOpenPositionEntrySwapInfo(entrySwapPreview),
+			})
+			return
+		}
+		if !ctx.req.ConfirmEntrySwap {
+			writeOpenPositionError(w, http.StatusConflict, openPositionError{
+				Code:      "entry_swap_confirmation_required",
+				Message:   "entry swap confirmation required",
+				EntrySwap: buildOpenPositionEntrySwapInfo(entrySwapPreview),
+			})
+			return
+		}
+	}
+
+	if err := ctx.liquidityService.EnsureWalletPrivateZapReady(ctx.user.ID, ctx.chain, ctx.selectedWallet.ID, ctx.selectedWallet.Address, ctx.poolVersion); err != nil {
+		var zapSafetyErr *liquidity.ZapSafetyError
+		if errors.As(err, &zapSafetyErr) {
+			resp := buildOpenPositionErrorFromSafety(zapSafetyErr)
+			writeOpenPositionError(w, http.StatusConflict, resp)
+			return
+		}
+		writeOpenPositionError(w, http.StatusInternalServerError, openPositionError{
+			Code:    "open_position_failed",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	if err := database.DB.Create(ctx.task).Error; err != nil {
+		http.Error(w, "failed to create task", http.StatusInternalServerError)
+		return
+	}
+
+	enterRes, err := ctx.liquidityService.EnterTaskFromUSDTWithOptions(ctx.user.ID, ctx.task, liquidity.TxOptions{
+		EntrySwapSlippageOverride: ctx.req.EntrySwapSlippage,
+	})
+	if err != nil {
+		var swapErr *liquidity.EntrySwapRequiredError
+		if errors.As(err, &swapErr) {
+			_ = database.DB.Model(ctx.task).Updates(map[string]interface{}{
+				"status":        models.StrategyStatusWaiting,
+				"error_message": "entry swap required",
+			}).Error
+			writeOpenPositionError(w, http.StatusConflict, openPositionError{
+				Code:    "entry_swap_required",
+				Message: swapErr.Error(),
+			})
+			return
+		}
+		_ = database.DB.Model(ctx.task).Updates(map[string]interface{}{
+			"status":        models.StrategyStatusError,
+			"error_message": err.Error(),
+		}).Error
+
+		var zapSafetyErr *liquidity.ZapSafetyError
+		if errors.As(err, &zapSafetyErr) {
+			resp := buildOpenPositionErrorFromSafety(zapSafetyErr)
+			writeOpenPositionError(w, http.StatusConflict, resp)
+			return
+		}
+		writeOpenPositionError(w, http.StatusInternalServerError, openPositionError{
+			Code:    "open_position_failed",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	if err := applyEnterResult(ctx.task, enterRes); err != nil {
 		http.Error(w, "failed to update task", http.StatusInternalServerError)
 		return
 	}
 
 	go func() {
-		_ = botSvc.SendTaskCardForUser(user.ID, task.ID)
+		_ = botSvc.SendTaskCardForUser(ctx.user.ID, ctx.task.ID)
 	}()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(openPositionResponse{
-		TaskID: task.ID,
+		TaskID: ctx.task.ID,
 		TxHash: enterRes.TxHash,
 		Status: "ok",
 	})

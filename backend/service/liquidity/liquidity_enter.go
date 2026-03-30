@@ -419,6 +419,15 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	entryAmount := new(big.Int).Set(usdtAmount)
 	allowEntrySwap := task.AllowEntrySwap
 	if plan.RequiresSwap {
+		entrySwapSlippage := resolveEntrySwapSlippage(
+			task.SlippageTolerance,
+			opts.EntrySwapSlippageOverride,
+			usdtAddr,
+			plan.EntryToken,
+			cc.StableSymbol,
+			plan.EntrySymbol,
+			cc,
+		)
 		usdtAmount = new(big.Int).Set(requestedUSDTAmount)
 		entryAmount = new(big.Int).Set(usdtAmount)
 		if plan.EntryToken != (common.Address{}) {
@@ -451,7 +460,7 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 			if usdcBal == nil {
 				usdcBal = big.NewInt(0)
 			}
-			slippagePct := task.SlippageTolerance
+			slippagePct := entrySwapSlippage
 			if slippagePct < 0 {
 				slippagePct = 0.5
 			}
@@ -496,7 +505,7 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 				}
 			}
 			log.Printf("[Liquidity] Entry swap: USDT -> %s amount=%s", plan.EntrySymbol, usdtAmount.String())
-			swapped, err := s.swapExactInViaOKX(exec, privateKey, walletAddr, usdtAddr, plan.EntryToken, usdtAmount, task.SlippageTolerance)
+			swapped, err := s.swapExactInViaOKX(exec, privateKey, walletAddr, usdtAddr, plan.EntryToken, usdtAmount, entrySwapSlippage)
 			if err != nil {
 				return nil, fmt.Errorf("swap USDT to %s failed: %w", plan.EntrySymbol, err)
 			}

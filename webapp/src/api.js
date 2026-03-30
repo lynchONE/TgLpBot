@@ -542,13 +542,53 @@ export async function openPosition({
   rangeLowerPct,
   rangeUpperPct,
   slippageTolerance,
+  entrySwapSlippageTolerance,
   allowEntrySwap,
+  confirmEntrySwap,
   walletId,
   ackLiquidityRisk,
   signal,
 }) {
   const base = normalizeBaseUrl(apiBaseUrl);
   const url = `${base}/api/trading?endpoint=open_position`;
+  const payload = buildOpenPositionPayload({
+    initData,
+    chain,
+    poolAddress,
+    poolVersion,
+    amount,
+    rangeLowerPct,
+    rangeUpperPct,
+    slippageTolerance,
+    entrySwapSlippageTolerance,
+    allowEntrySwap,
+    confirmEntrySwap,
+    walletId,
+    ackLiquidityRisk,
+  });
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+function buildOpenPositionPayload({
+  initData,
+  chain,
+  poolAddress,
+  poolVersion,
+  amount,
+  rangeLowerPct,
+  rangeUpperPct,
+  slippageTolerance,
+  entrySwapSlippageTolerance,
+  allowEntrySwap,
+  confirmEntrySwap,
+  walletId,
+  ackLiquidityRisk,
+}) {
   const payload = {
     initData,
     chain,
@@ -560,9 +600,48 @@ export async function openPosition({
     allow_entry_swap: Boolean(allowEntrySwap),
   };
   if (Number.isFinite(slippageTolerance)) payload.slippage_tolerance = slippageTolerance;
+  if (Number.isFinite(entrySwapSlippageTolerance)) {
+    payload.entry_swap_slippage_tolerance = entrySwapSlippageTolerance;
+  }
+  if (confirmEntrySwap) payload.confirm_entry_swap = true;
   const wid = Number(walletId);
   if (Number.isFinite(wid) && wid > 0) payload.wallet_id = wid;
   if (ackLiquidityRisk) payload.ack_liquidity_risk = true;
+  return payload;
+}
+
+export async function previewOpenPosition({
+  apiBaseUrl,
+  initData,
+  chain,
+  poolAddress,
+  poolVersion,
+  amount,
+  rangeLowerPct,
+  rangeUpperPct,
+  slippageTolerance,
+  entrySwapSlippageTolerance,
+  allowEntrySwap,
+  walletId,
+  ackLiquidityRisk,
+  signal,
+}) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/trading?endpoint=open_position_preview`;
+  const payload = buildOpenPositionPayload({
+    initData,
+    chain,
+    poolAddress,
+    poolVersion,
+    amount,
+    rangeLowerPct,
+    rangeUpperPct,
+    slippageTolerance,
+    entrySwapSlippageTolerance,
+    allowEntrySwap,
+    walletId,
+    ackLiquidityRisk,
+  });
   return requestJson(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
