@@ -931,7 +931,21 @@ AutoLP 自动开仓的交易记录中，Gas 费显示为 `0.000000 BNB`。
 
 ### 修复方案
 - **全局文案更名**: 将各个主入口、标题栏从 金狗通知 全面更名为 监控通知 或 监控通知中心。
-- **状态分离与 Tab 拆分**: 引入 ctiveTab 状态，将监控细分为 金狗通知 (聪明钱聚集模式) 和 池子监控 (PoolM 参数模式) 两个并列的独立配置选项卡。
+- **status Separation**: 把监控细分为 "智能狗通知 (聪明的钱)" 和 "池子监控 (PoolM)" 两个并列选项卡。
 - **UI 质感升级**:
-  - miniapp: 重构了顶层 Layout，改用带圆角的现代过滤按钮组与 TailwindCSS nimate-in 入场动画。
-  - webapp: 手写平滑的 	ransition 与渐变背景框，实现了沉浸式的深色主题选项卡，并修复了历史遗留的组件重复挂载问题。
+  - miniapp: 重构了顶层 Layout，改用带圆角的现代过滤按钮组与 TailwindCSS animate-in 入场动画。
+  - webapp: 手写平滑的 transition 与渐变背景框，实现了沉浸式的深色主题选项卡，并修复了历史遗留的组件重复挂载问题。
+
+## 2026-03 开仓风控校验与界面UI优化
+
+### 问题描述
+- **报错宽泛不明确**: 当用户打开开仓界面时，无论是流动性不足还是价格偏离异常，经常出现弹窗宽泛地提示“开仓风控校验失败”，没有任何详情说明。
+- **视觉层板正**: 报警块等 UI 设计传统死板、缺乏层级感。
+
+### 修复方案
+- **Golang Typed Nil 拆箱吞噬 Bug 修复**: 在 `backend/service/liquidity/open_position_guard.go` 中，防范检查（`CheckOpenPositionSafety`）在返回具体的 `*ZapSafetyError(nil)` 时由于 Go 语言机制变成了非 nil 的 `error` interface 抛出。这导致后端 `open_position.go` API 无法正确还原真实错误，直接输出了没有任何 `liquidity_usd` 等元数据的 Fallback "开仓风控校验失败"。此时已显式拦截并修复该错误。
+- **UI 毛玻璃高级化重构**: 在 `miniapp/src/App.jsx` 及 `webapp/src/components/OpenPositionModal.jsx` 对双端的开仓流程错误和警告元素进行了重置：
+  - 引入了 `lucide-react` 的 `AlertTriangle`、`Check`、`X` 结构化功能图标。
+  - 添加了 `bg-gradient-to-br` 以及毛玻璃面板。
+  - 修改了复选框 Checkbox 的玻璃悬浮感，使交互更精致。
+  - 显示出了具体开仓允许最高金额以及流动性限制文字，改善用户理解。

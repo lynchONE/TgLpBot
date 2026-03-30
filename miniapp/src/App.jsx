@@ -156,7 +156,7 @@ const WEB_WORKBENCH_WIDGETS = [
     { key: 'hot_pools', label: '热门池子' },
     { key: 'gmgn_kline', label: 'K线' },
     { key: 'positions', label: '仓位' },
-];const DEFAULT_WEB_WORKBENCH_WIDGETS = WEB_WORKBENCH_WIDGETS.map((item) => item.key);
+]; const DEFAULT_WEB_WORKBENCH_WIDGETS = WEB_WORKBENCH_WIDGETS.map((item) => item.key);
 
 const GMGN_STABLE_SYMBOLS = new Set(['usdc', 'usdt', 'busd', 'dai', 'frax', 'usdd', 'fdusd', 'wbnb', 'weth', 'wsol', 'bnb', 'eth', 'sol']);
 
@@ -2728,37 +2728,37 @@ export default function App() {
                             />
                         );
                     })
-                        : !showAdmin && activeData
-                                ? (
-                                    <>
-                                        {visibleTaskPositions.map((p) => (
-                                            <PositionCard
-                                                key={[
-                                                    String(p?.chain || ''),
-                                                    String(p?.version || ''),
-                                                    String(p?.exchange || ''),
-                                                    String(p?.pool_id || ''),
-                                                    String(p?.position_id || ''),
-                                                    String(p?.task_id || ''),
-                                                ].join(':')}
-                                                position={p}
-                                                walletAddress={walletAddress}
-                                                bnbBalance={bnbBalance}
-                                                pollIntervalSec={pollIntervalSec}
-                                                updatedAt={updatedAt}
-                                                allowTaskActions={!showAdmin && hasInitData}
-                                                onSetTaskPaused={handleSetTaskPaused}
-                                                onStopTask={handleStopTask}
-                                                onDeleteTask={handleDeleteTask}
-                                                onUpdateTaskRange={openTaskRangeModal}
-                                                batchMode={batchMode}
-                                                isSelected={selectedTaskIds.has(p.task_id)}
-                                                onToggleSelect={() => toggleTaskSelection(p.task_id)}
-                                            />
-                                        ))}
-                                    </>
-                                )
-                                : null}
+                    : !showAdmin && activeData
+                        ? (
+                            <>
+                                {visibleTaskPositions.map((p) => (
+                                    <PositionCard
+                                        key={[
+                                            String(p?.chain || ''),
+                                            String(p?.version || ''),
+                                            String(p?.exchange || ''),
+                                            String(p?.pool_id || ''),
+                                            String(p?.position_id || ''),
+                                            String(p?.task_id || ''),
+                                        ].join(':')}
+                                        position={p}
+                                        walletAddress={walletAddress}
+                                        bnbBalance={bnbBalance}
+                                        pollIntervalSec={pollIntervalSec}
+                                        updatedAt={updatedAt}
+                                        allowTaskActions={!showAdmin && hasInitData}
+                                        onSetTaskPaused={handleSetTaskPaused}
+                                        onStopTask={handleStopTask}
+                                        onDeleteTask={handleDeleteTask}
+                                        onUpdateTaskRange={openTaskRangeModal}
+                                        batchMode={batchMode}
+                                        isSelected={selectedTaskIds.has(p.task_id)}
+                                        onToggleSelect={() => toggleTaskSelection(p.task_id)}
+                                    />
+                                ))}
+                            </>
+                        )
+                        : null}
             </div>
 
             {
@@ -3222,7 +3222,7 @@ export default function App() {
                                                 key={sec}
                                                 type="button"
                                                 onClick={() => setQuickPoll(sec)}
-                                            className={`rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 ${pollOverrideSec === sec
+                                                className={`rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 ${pollOverrideSec === sec
                                                     ? brand.softButtonClass
                                                     : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
                                                     }`}
@@ -3548,41 +3548,79 @@ export default function App() {
                                 </div>
                             ) : null}
 
-                            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-xs leading-5 text-emerald-700 dark:text-emerald-200">
-                                如果这是当前钱包首次开仓，系统会先部署私有合约，部署完成后绑定到当前钱包，再继续正式开仓。
-                                首次流程失败后再次重试，会继续复用已部署地址完成绑定，不会重复部署新的私有合约。
+                            <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 to-transparent p-4 shadow-sm text-emerald-800 dark:text-emerald-200">
+                                <div className="flex items-start gap-3">
+                                    <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400">
+                                        <Check className="h-3 w-3" strokeWidth={3} />
+                                    </div>
+                                    <div className="text-[12px] leading-relaxed">
+                                        <span className="font-semibold block mb-1">私有合约保驾护航</span>
+                                        <span className="opacity-90">首次开仓时会自动部署与您钱包绑定的专属合约，确保交易更安全私密。如遇网络中断，再次重试即可直接复用，不会重复产生部署消耗。</span>
+                                    </div>
+                                </div>
                             </div>
 
                             {openPositionRisk?.message ? (
-                                <div className={`rounded-xl border p-3 text-xs ${openPositionRisk?.risk_ack_required
-                                    ? 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200'
-                                    : 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-200'
+                                <div className={`rounded-2xl border p-4 shadow-sm ${openPositionRisk?.risk_ack_required
+                                    ? 'border-amber-500/40 bg-gradient-to-br from-amber-500/10 to-amber-500/5 text-amber-800 dark:border-amber-500/30 dark:from-amber-500/10 dark:to-transparent dark:text-amber-200'
+                                    : 'border-red-500/40 bg-gradient-to-br from-red-500/10 to-red-500/5 text-red-800 dark:border-red-500/30 dark:from-red-500/10 dark:to-transparent dark:text-red-200'
                                     }`}
                                 >
-                                    <div>{openPositionRisk.message}</div>
-                                    {Number.isFinite(Number(openPositionRisk?.liquidity_usd)) ? (
-                                        <div className="mt-2">当前流动性: {formatUsdCompact(openPositionRisk.liquidity_usd)}</div>
-                                    ) : null}
-                                    {Number.isFinite(Number(openPositionRisk?.max_open_amount)) && Number(openPositionRisk?.max_open_amount) > 0 ? (
-                                        <div className="mt-1">当前最大允许开仓金额: {formatUsdCompact(openPositionRisk.max_open_amount)}</div>
-                                    ) : null}
-                                    {openPositionRisk?.risk_ack_required ? (
-                                        <label className="mt-3 flex items-start gap-2">
-                                            <input
-                                                type="checkbox"
-                                                checked={openPositionRiskAck}
-                                                onChange={(e) => setOpenPositionRiskAck(e.target.checked)}
-                                                disabled={openPositionLoading}
-                                            />
-                                            <span>我已知悉当前池子流动性偏低，确认按限额继续开仓</span>
-                                        </label>
-                                    ) : null}
+                                    <div className="flex items-start gap-3">
+                                        <AlertTriangle className={`mt-0.5 h-5 w-5 shrink-0 ${openPositionRisk?.risk_ack_required ? 'text-amber-500 dark:text-amber-400' : 'text-red-500 dark:text-red-400'}`} />
+                                        <div className="flex-1 space-y-2.5">
+                                            <div className="text-[13px] leading-relaxed font-semibold">
+                                                {openPositionRisk.message}
+                                            </div>
+                                            {(Number.isFinite(Number(openPositionRisk?.liquidity_usd)) || Number.isFinite(Number(openPositionRisk?.max_open_amount))) && (
+                                                <div className="mt-2 flex flex-col gap-1.5 rounded-xl bg-white/50 p-2.5 dark:bg-black/20">
+                                                    {Number.isFinite(Number(openPositionRisk?.liquidity_usd)) && (
+                                                        <div className="flex items-center justify-between text-xs">
+                                                            <span className="opacity-80">当前流动性</span>
+                                                            <span className="font-mono font-semibold">{formatUsdCompact(openPositionRisk.liquidity_usd)}</span>
+                                                        </div>
+                                                    )}
+                                                    {Number.isFinite(Number(openPositionRisk?.max_open_amount)) && Number(openPositionRisk?.max_open_amount) > 0 && (
+                                                        <div className="flex items-center justify-between text-xs">
+                                                            <span className="opacity-80">最大允许开仓</span>
+                                                            <span className="font-mono font-semibold">{formatUsdCompact(openPositionRisk.max_open_amount)}</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {openPositionRisk?.risk_ack_required && (
+                                                <label className="mt-3 flex items-start gap-2.5 cursor-pointer group">
+                                                    <div className="relative flex items-center justify-center mt-0.5 shrink-0">
+                                                        <input
+                                                            type="checkbox"
+                                                            className="peer sr-only"
+                                                            checked={openPositionRiskAck}
+                                                            onChange={(e) => setOpenPositionRiskAck(e.target.checked)}
+                                                            disabled={openPositionLoading}
+                                                        />
+                                                        <div className="h-4 w-4 rounded border-2 border-amber-500/50 bg-white/50 transition-all peer-checked:border-amber-500 peer-checked:bg-amber-500 dark:border-amber-500/40 dark:bg-black/20"></div>
+                                                        <Check className="absolute h-3 w-3 text-white opacity-0 transition-opacity peer-checked:opacity-100" strokeWidth={3} />
+                                                    </div>
+                                                    <span className="text-[11px] leading-tight font-medium opacity-80 group-hover:opacity-100 transition-opacity">
+                                                        我已知悉当前池子流动性偏低，确认按限额继续开仓
+                                                    </span>
+                                                </label>
+                                            )}
+                                        </div>
+                                    </div>
                                 </div>
                             ) : null}
 
                             {openPositionError ? (
-                                <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
-                                    {openPositionError}
+                                <div className="rounded-2xl border border-red-500/40 bg-gradient-to-br from-red-500/10 to-transparent p-4 shadow-sm text-red-800 dark:border-red-500/30 dark:text-red-200">
+                                    <div className="flex items-start gap-3">
+                                        <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-500/20 text-red-600 dark:text-red-400">
+                                            <X className="h-3 w-3" strokeWidth={3} />
+                                        </div>
+                                        <div className="text-[12px] font-medium leading-relaxed">
+                                            {openPositionError}
+                                        </div>
+                                    </div>
                                 </div>
                             ) : null}
                             <button

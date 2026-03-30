@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, Check, X } from 'lucide-react';
 import { previewOpenPosition } from '../api';
 
 const PRESET_RANGES = [1, 2, 3, 5, 10, 20];
@@ -376,41 +377,73 @@ export default function OpenPositionModal({
 
         <div className="modal-pair">{pair}</div>
         <div className="modal-addr">{addr ? `${addr.slice(0, 10)}...${addr.slice(-8)}` : '--'}</div>
-        <div className="modal-info-note">
-          如果这是当前钱包首次开仓，系统可能会先部署并绑定私有 Zap 合约，再继续后续开仓流程。
+        <div className="modal-info-note" style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', padding: '14px', borderRadius: '16px', border: '1px solid rgba(16, 185, 129, 0.3)', background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1), transparent)' }}>
+          <div style={{ marginTop: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(16, 185, 129, 0.2)', color: '#10b981', flexShrink: 0 }}>
+            <Check size={12} strokeWidth={3} />
+          </div>
+          <div style={{ fontSize: '12px', lineHeight: 1.6, color: 'var(--text-hint, rgba(255, 255, 255, 0.8))' }}>
+            <strong style={{ display: 'block', marginBottom: '4px' }}>私有合约保驾护航</strong>
+            首次开仓时会自动部署与您钱包绑定的专属合约，确保交易更安全私密。如遇网络中断，再次重试即可直接复用，不会重复产生部署消耗。
+          </div>
         </div>
 
         {riskMessage ? (
           <div
-            className="modal-info-note"
             style={{
               marginTop: 12,
-              borderColor: riskRequiresAck ? 'rgba(245, 158, 11, 0.35)' : 'rgba(239, 68, 68, 0.35)',
-              background: riskRequiresAck ? 'rgba(245, 158, 11, 0.10)' : 'rgba(239, 68, 68, 0.10)',
-              color: riskRequiresAck ? '#b45309' : '#b91c1c',
+              padding: 16,
+              borderRadius: 16,
+              border: '1px solid',
+              borderColor: riskRequiresAck ? 'rgba(245, 158, 11, 0.4)' : 'rgba(239, 68, 68, 0.4)',
+              background: riskRequiresAck ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(245, 158, 11, 0.05))' : 'linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(239, 68, 68, 0.05))',
+              color: 'var(--text-color)',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+              display: 'flex',
+              gap: 12,
+              alignItems: 'flex-start',
             }}
           >
-            <div>{riskMessage}</div>
-            {Number.isFinite(riskLiquidityUsd) && riskLiquidityUsd >= 0 ? (
-              <div style={{ marginTop: 6 }}>当前流动性：{formatUsdCompact(riskLiquidityUsd)}</div>
-            ) : null}
-            {Number.isFinite(riskMaxOpenAmount) && riskMaxOpenAmount > 0 ? (
-              <div style={{ marginTop: 4 }}>当前最大允许开仓金额：{formatUsdCompact(riskMaxOpenAmount)}</div>
-            ) : null}
-            {riskRequiresAck ? (
-              <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 10, cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={riskAck}
-                  onChange={(e) => {
-                    clearErrors();
-                    setRiskAck(e.target.checked);
-                  }}
-                  disabled={busy}
-                />
-                <span>我已知悉当前池子流动性风险，并确认按限额继续开仓。</span>
-              </label>
-            ) : null}
+            <AlertTriangle size={20} style={{ color: riskRequiresAck ? '#f59e0b' : '#ef4444', flexShrink: 0, marginTop: 2 }} />
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontSize: 13, lineHeight: 1.5, fontWeight: 600, color: riskRequiresAck ? '#d97706' : '#dc2626' }}>{riskMessage}</div>
+              {((Number.isFinite(riskLiquidityUsd) && riskLiquidityUsd >= 0) || (Number.isFinite(riskMaxOpenAmount) && riskMaxOpenAmount > 0)) && (
+                <div style={{ backgroundColor: 'var(--bg-card-hover, rgba(255,255,255,0.08))', borderRadius: 12, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {Number.isFinite(riskLiquidityUsd) && riskLiquidityUsd >= 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                      <span style={{ opacity: 0.8 }}>当前流动性</span>
+                      <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{formatUsdCompact(riskLiquidityUsd)}</span>
+                    </div>
+                  )}
+                  {Number.isFinite(riskMaxOpenAmount) && riskMaxOpenAmount > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                      <span style={{ opacity: 0.8 }}>最大允许开仓</span>
+                      <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{formatUsdCompact(riskMaxOpenAmount)}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+              {riskRequiresAck && (
+                <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginTop: 4, cursor: 'pointer' }}>
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 2, flexShrink: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={riskAck}
+                      style={{ opacity: 0, position: 'absolute', width: 16, height: 16, cursor: 'pointer', zIndex: 10 }}
+                      onChange={(e) => {
+                        clearErrors();
+                        setRiskAck(e.target.checked);
+                      }}
+                      disabled={busy}
+                    />
+                    <div style={{ width: 16, height: 16, borderRadius: 4, border: '2px solid rgba(245, 158, 11, 0.5)', backgroundColor: riskAck ? '#f59e0b' : 'var(--bg-card, rgba(255,255,255,0.2))', transition: 'all 0.2s' }}></div>
+                    <Check size={12} strokeWidth={3} style={{ position: 'absolute', color: '#fff', opacity: riskAck ? 1 : 0, transition: 'opacity 0.2s', pointerEvents: 'none' }} />
+                  </div>
+                  <span style={{ fontSize: 11, lineHeight: 1.4, fontWeight: 500, opacity: 0.9 }}>
+                    我已知悉当前池子流动性偏低，确认按限额继续开仓
+                  </span>
+                </label>
+              )}
+            </div>
           </div>
         ) : null}
 
@@ -607,7 +640,25 @@ export default function OpenPositionModal({
           </div>
         ) : null}
 
-        {visibleError ? <div className="error-text">{visibleError}</div> : null}
+        {visibleError ? (
+          <div style={{
+            marginTop: 16,
+            padding: 16,
+            borderRadius: 16,
+            border: '1px solid rgba(239, 68, 68, 0.4)',
+            background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(239, 68, 68, 0.05))',
+            color: 'var(--text-error, #fca5a5)',
+            display: 'flex',
+            gap: 12,
+            alignItems: 'flex-start',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+          }}>
+            <div style={{ marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', borderRadius: '50%', backgroundColor: 'rgba(239, 68, 68, 0.2)', color: '#ef4444', flexShrink: 0 }}>
+              <X size={12} strokeWidth={3} />
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.5 }}>{visibleError}</div>
+          </div>
+        ) : null}
 
         <div className="modal-actions">
           <button type="button" className="ghost-chip" onClick={onClose} disabled={busy}>取消</button>

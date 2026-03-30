@@ -561,7 +561,10 @@ func (s *LiquidityService) CheckOpenPositionSafety(task *models.StrategyTask, op
 		return err
 	}
 
-	return evaluatePriceDeviation(task, state, cc, safety)
+	if devErr := evaluatePriceDeviation(task, state, cc, safety); devErr != nil {
+		return devErr
+	}
+	return nil
 }
 
 func errorAs(err error, target interface{}) bool {
@@ -571,7 +574,7 @@ func errorAs(err error, target interface{}) bool {
 			return false
 		}
 		typed, ok := err.(*ZapSafetyError)
-		if ok {
+		if ok && typed != nil {
 			*v = typed
 			return true
 		}
