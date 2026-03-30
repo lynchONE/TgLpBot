@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	recognizedAssetBasis          = "原生币 + 稳定币 + 近30天参与LP的代币余额 + 当前open LP估算持仓"
-	smartMoneyWalletLiveCacheTTL  = 30 * time.Minute
+	recognizedAssetBasis = "原生币 + 稳定币 + 近30天参与LP的代币余额 + 当前open LP估算持仓"
+	// Reuse one short-lived Redis entry for all smart-money wallet balance reads.
+	smartMoneyWalletLiveCacheTTL  = 5 * time.Minute
 	smartMoneyLeaderboardCacheTTL = 72 * time.Hour
 	smartMoneyDefaultPageSize     = 10
 	smartMoneyMaxPageSize         = 50
@@ -1395,6 +1396,8 @@ func (s *Service) captureSmartMoneyWalletSnapshots(ctx context.Context, day time
 		return err
 	}
 	for _, walletRow := range wallets {
+		// Daily snapshots intentionally bypass the short-lived Redis cache used by
+		// interactive smart-money wallet balance reads.
 		live, err := s.loadSmartMoneyWalletLiveStateLive(ctx, walletRow)
 		if err != nil {
 			log.Printf("[Assets] skip smart money snapshot wallet=%s chain=%d err=%v", walletRow.Address, walletRow.ChainID, err)

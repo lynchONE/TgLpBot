@@ -355,3 +355,9 @@ func TestBuildSmartMoneyTodayHistoryPoint_AdjustsPnLByNetTransfer(t *testing.T) 
 		t.Fatalf("today transfer net usd = %.2f, want %.2f", got, want)
 	}
 }
+
+func TestSmartMoneyWalletLiveCacheTTL_IsFiveMinutes(t *testing.T) {
+	if got, want := smartMoneyWalletLiveCacheTTL, 5*time.Minute; got != want {
+		t.Fatalf("smart money wallet live cache ttl = %s, want %s", got, want)
+	}
+}
