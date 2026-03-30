@@ -24,16 +24,17 @@ import (
 )
 
 type openPositionRequest struct {
-	InitData       string   `json:"initData"`
-	WalletID       uint     `json:"wallet_id,omitempty"`
-	Chain          string   `json:"chain"`
-	PoolAddress    string   `json:"pool_address"`
-	PoolVersion    string   `json:"pool_version"`
-	Amount         float64  `json:"amount"`
-	RangeLowerPct  float64  `json:"range_lower_pct"`
-	RangeUpperPct  float64  `json:"range_upper_pct"`
-	Slippage       *float64 `json:"slippage_tolerance,omitempty"`
-	AllowEntrySwap bool     `json:"allow_entry_swap"`
+	InitData         string   `json:"initData"`
+	WalletID         uint     `json:"wallet_id,omitempty"`
+	Chain            string   `json:"chain"`
+	PoolAddress      string   `json:"pool_address"`
+	PoolVersion      string   `json:"pool_version"`
+	Amount           float64  `json:"amount"`
+	RangeLowerPct    float64  `json:"range_lower_pct"`
+	RangeUpperPct    float64  `json:"range_upper_pct"`
+	Slippage         *float64 `json:"slippage_tolerance,omitempty"`
+	AllowEntrySwap   bool     `json:"allow_entry_swap"`
+	AckLiquidityRisk bool     `json:"ack_liquidity_risk,omitempty"`
 }
 
 type openPositionResponse struct {
@@ -43,8 +44,51 @@ type openPositionResponse struct {
 }
 
 type openPositionError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code                     string   `json:"code"`
+	Message                  string   `json:"message"`
+	LiquidityUSD             *float64 `json:"liquidity_usd,omitempty"`
+	MinLiquidityUSD          *float64 `json:"min_liquidity_usd,omitempty"`
+	MaxOpenAmount            *float64 `json:"max_open_amount,omitempty"`
+	RiskAckRequired          bool     `json:"risk_ack_required,omitempty"`
+	PriceDeviationPercent    *float64 `json:"price_deviation_percent,omitempty"`
+	PriceDeviationMaxPercent *float64 `json:"price_deviation_max_percent,omitempty"`
+}
+
+func float64Ptr(v float64) *float64 {
+	return &v
+}
+
+func buildOpenPositionErrorFromSafety(err *liquidity.ZapSafetyError) openPositionError {
+	if err == nil {
+		return openPositionError{
+			Code:    "zap_safety_check_failed",
+			Message: "zap safety check failed",
+		}
+	}
+	resp := openPositionError{
+		Code:    "zap_safety_check_failed",
+		Message: err.Error(),
+	}
+	if strings.TrimSpace(err.Code) != "" {
+		resp.Code = strings.TrimSpace(err.Code)
+	}
+	if err.LiquidityUSD >= 0 {
+		resp.LiquidityUSD = float64Ptr(err.LiquidityUSD)
+	}
+	if err.MinLiquidityUSD > 0 {
+		resp.MinLiquidityUSD = float64Ptr(err.MinLiquidityUSD)
+	}
+	if err.MaxOpenAmount > 0 {
+		resp.MaxOpenAmount = float64Ptr(err.MaxOpenAmount)
+	}
+	if err.PriceDeviationPercent > 0 {
+		resp.PriceDeviationPercent = float64Ptr(err.PriceDeviationPercent)
+	}
+	if err.PriceDeviationMaxPercent > 0 {
+		resp.PriceDeviationMaxPercent = float64Ptr(err.PriceDeviationMaxPercent)
+	}
+	resp.RiskAckRequired = err.RiskAckRequired
+	return resp
 }
 
 func isV4PoolId(text string) bool {
@@ -360,6 +404,7 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		Token1Symbol:  poolInfo.Token1Symbol,
 		Token0Address: poolInfo.Token0,
 		Token1Address: poolInfo.Token1,
+		AmountUSDT:    req.Amount,
 	}
 
 	tickLowerPctReq, tickUpperPctReq := pricing.TickPercentagesFromStablePercentages(tmpTask, req.RangeLowerPct, req.RangeUpperPct)
@@ -416,11 +461,33 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 	}
 
 	liquidityService := liquidity.NewLiquidityService()
+	if err := liquidityService.CheckOpenPositionSafety(tmpTask, liquidity.OpenPositionRiskOptions{
+		AckLiquidityRisk:    req.AckLiquidityRisk,
+		RequireLiquidityAck: true,
+	}); err != nil {
+		var zapSafetyErr *liquidity.ZapSafetyError
+		if errors.As(err, &zapSafetyErr) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(buildOpenPositionErrorFromSafety(zapSafetyErr))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(openPositionError{
+			Code:    "open_position_failed",
+			Message: err.Error(),
+		})
+		return
+	}
 	if err := liquidityService.EnsureWalletPrivateZapReady(user.ID, chain, selectedWallet.ID, selectedWallet.Address, poolVersion); err != nil {
 		errCode := "open_position_failed"
 		var zapSafetyErr *liquidity.ZapSafetyError
 		if errors.As(err, &zapSafetyErr) {
-			errCode = "zap_safety_check_failed"
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(buildOpenPositionErrorFromSafety(zapSafetyErr))
+			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -491,15 +558,17 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 			"error_message": err.Error(),
 		}).Error
 
-		errCode := "open_position_failed"
 		var zapSafetyErr *liquidity.ZapSafetyError
 		if errors.As(err, &zapSafetyErr) {
-			errCode = "zap_safety_check_failed"
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(buildOpenPositionErrorFromSafety(zapSafetyErr))
+			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(openPositionError{
-			Code:    errCode,
+			Code:    "open_position_failed",
 			Message: err.Error(),
 		})
 		return

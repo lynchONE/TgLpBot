@@ -43,23 +43,35 @@ async function resolveAssetCachedPayload({ cacheKey, ttlMs = ASSET_CACHE_TTL_MS,
   return cloneCachedPayload(payload);
 }
 
-async function readErrorMessage(resp) {
+async function readErrorDetails(resp) {
   const text = await resp.text().catch(() => '');
-  if (!text) return `HTTP ${resp.status}`;
+  if (!text) {
+    return { message: `HTTP ${resp.status}`, payload: null };
+  }
   try {
     const parsed = JSON.parse(text);
-    if (parsed?.message) return String(parsed.message);
+    if (parsed && typeof parsed === 'object') {
+      return {
+        message: parsed?.message ? String(parsed.message) : `HTTP ${resp.status}`,
+        payload: parsed,
+      };
+    }
   } catch {
     // ignore JSON parse errors
   }
-  return text;
+  return { message: text, payload: null };
 }
 
 async function requestJson(url, options) {
   const resp = await fetch(url, options);
   if (!resp.ok) {
-    const err = new Error(await readErrorMessage(resp));
+    const detail = await readErrorDetails(resp);
+    const err = new Error(detail.message);
     err.status = resp.status;
+    if (detail.payload && typeof detail.payload === 'object') {
+      err.payload = detail.payload;
+      Object.assign(err, detail.payload);
+    }
     throw err;
   }
   return resp.json();
@@ -532,6 +544,7 @@ export async function openPosition({
   slippageTolerance,
   allowEntrySwap,
   walletId,
+  ackLiquidityRisk,
   signal,
 }) {
   const base = normalizeBaseUrl(apiBaseUrl);
@@ -549,6 +562,7 @@ export async function openPosition({
   if (Number.isFinite(slippageTolerance)) payload.slippage_tolerance = slippageTolerance;
   const wid = Number(walletId);
   if (Number.isFinite(wid) && wid > 0) payload.wallet_id = wid;
+  if (ackLiquidityRisk) payload.ack_liquidity_risk = true;
   return requestJson(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

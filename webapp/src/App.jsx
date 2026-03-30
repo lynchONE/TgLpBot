@@ -1409,6 +1409,7 @@ export default function App() {
   const [openPosPool, setOpenPosPool] = useState(null);
   const [openPosBusy, setOpenPosBusy] = useState(false);
   const [openPosSubmitError, setOpenPosSubmitError] = useState('');
+  const [openPosRisk, setOpenPosRisk] = useState(null);
   const [openPosWallets, setOpenPosWallets] = useState(null);
   const [openPosWalletsLoading, setOpenPosWalletsLoading] = useState(false);
   const [openPosSmartRanges, setOpenPosSmartRanges] = useState([]);
@@ -1463,6 +1464,7 @@ export default function App() {
     const normalizedPoolAddress = normalizePoolAddress(pool?.pool_address || pool?.pool_id);
 
     setOpenPosSubmitError('');
+    setOpenPosRisk(null);
     setOpenPosSmartRanges(Array.isArray(pool?.range_groups) ? pool.range_groups : []);
     setOpenPosSmartRangesLoading(Boolean(normalizedPoolAddress));
     setOpenPosPool({
@@ -1491,14 +1493,33 @@ export default function App() {
       setOperationProgress(prev => prev?.operation === 'open_position'
         ? { ...prev, currentStep: 4, status: 'done' } : prev);
       setOpenPosSubmitError('');
+      setOpenPosRisk(null);
       setOpenPosSmartRanges([]);
       setOpenPosSmartRangesLoading(false);
       setOpenPosPool(null);
       loadPositions();
     } catch (e) {
       const msg = String(e?.message || e);
+      const risk = e && typeof e === 'object' && (
+        typeof e?.liquidity_usd === 'number' ||
+        typeof e?.max_open_amount === 'number' ||
+        Boolean(e?.risk_ack_required) ||
+        typeof e?.price_deviation_percent === 'number'
+      )
+        ? {
+          code: String(e?.code || ''),
+          message: msg,
+          liquidity_usd: Number(e?.liquidity_usd),
+          min_liquidity_usd: Number(e?.min_liquidity_usd),
+          max_open_amount: Number(e?.max_open_amount),
+          risk_ack_required: Boolean(e?.risk_ack_required),
+          price_deviation_percent: Number(e?.price_deviation_percent),
+          price_deviation_max_percent: Number(e?.price_deviation_max_percent),
+        }
+        : null;
       setOperationProgress((prev) => (prev?.operation === 'open_position' ? null : prev));
-      setOpenPosSubmitError(msg);
+      setOpenPosRisk(risk);
+      setOpenPosSubmitError(risk ? '' : msg);
     } finally {
       setOpenPosBusy(false);
     }
@@ -2946,6 +2967,7 @@ export default function App() {
           smartRangesLoading={openPosSmartRangesLoading}
           selectedWalletId={openPosWalletId}
           submitError={openPosSubmitError}
+          submitRisk={openPosRisk}
           onClearSubmitError={() => setOpenPosSubmitError('')}
           onWalletSelect={(id) => {
             setOpenPosSubmitError('');
@@ -2955,6 +2977,7 @@ export default function App() {
           onSubmit={handleOpenPosition}
           onClose={() => {
             setOpenPosSubmitError('');
+            setOpenPosRisk(null);
             setOpenPosSmartRanges([]);
             setOpenPosSmartRangesLoading(false);
             setOpenPosPool(null);

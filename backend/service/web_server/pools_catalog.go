@@ -193,6 +193,9 @@ func buildPoolCatalogResponse(rows []models.Pool, opts poolCatalogOptions) poolC
 		Data:                []HotPoolResponse{},
 	}
 	for _, row := range rows {
+		if poolCatalogLiquidityUSD(row) < 100 {
+			continue
+		}
 		if row.UpdatedAt.After(updatedAt) {
 			updatedAt = row.UpdatedAt
 			meta.Timeframe = strings.TrimSpace(row.SourceTimeframe)
@@ -248,6 +251,16 @@ func buildPoolCatalogResponse(rows []models.Pool, opts poolCatalogOptions) poolC
 	meta.UpdatedAt = updatedAt
 	meta.Data = items
 	return meta
+}
+
+func poolCatalogLiquidityUSD(row models.Pool) float64 {
+	if liq := sanitizeFloat(row.ActiveLiquidityUSD); liq > 0 {
+		return liq
+	}
+	if liq := sanitizeFloat(row.CurrentPoolValue); liq > 0 {
+		return liq
+	}
+	return sanitizeFloat(row.ReserveInUSD)
 }
 
 func buildPoolCatalogItem(row models.Pool, opts poolCatalogOptions) HotPoolResponse {

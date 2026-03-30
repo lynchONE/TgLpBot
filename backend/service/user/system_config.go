@@ -1,6 +1,7 @@
 package user
 
 import (
+	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"errors"
@@ -51,9 +52,20 @@ func (s *SystemConfigService) GetZapSafetyConfig() (*models.ZapSafetyConfig, err
 		return nil, err
 	}
 
+	priceDeviationDefault := 1.0
+	minLiquidityDefault := 1000.0
+	if config.AppConfig != nil {
+		if config.AppConfig.ZapPriceDeviationMaxPercent > 0 {
+			priceDeviationDefault = config.AppConfig.ZapPriceDeviationMaxPercent
+		}
+		if config.AppConfig.ZapMinPoolLiquidityUSD > 0 {
+			minLiquidityDefault = config.AppConfig.ZapMinPoolLiquidityUSD
+		}
+	}
+
 	out := &models.ZapSafetyConfig{
-		PriceDeviationMaxPercent: 1.0,
-		MinPoolLiquidityUSD:      1000.0,
+		PriceDeviationMaxPercent: priceDeviationDefault,
+		MinPoolLiquidityUSD:      minLiquidityDefault,
 	}
 	if cfg.ZapPriceDeviationMaxPercent > 0 {
 		out.PriceDeviationMaxPercent = cfg.ZapPriceDeviationMaxPercent

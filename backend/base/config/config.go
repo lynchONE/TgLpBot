@@ -132,9 +132,11 @@ type Config struct {
 	OKXSwapGasLimitMax        uint64
 
 	// Zap (V3/V4): GasLimit safety buffer (avoid out of gas / reentrancy sentry)
-	ZapGasLimitMultiplier float64
-	ZapGasLimitMin        uint64
-	ZapGasLimitMax        uint64
+	ZapGasLimitMultiplier       float64
+	ZapGasLimitMin              uint64
+	ZapGasLimitMax              uint64
+	ZapPriceDeviationMaxPercent float64
+	ZapMinPoolLiquidityUSD      float64
 
 	// Private per-wallet Zap contracts (deploy + bind).
 	PrivateZapEnabled bool
@@ -324,9 +326,11 @@ func LoadConfig() error {
 		OKXSwapGasLimitMax:        okxSwapGasLimitMax,
 
 		// Zap (V3/V4): GasLimit safety buffer
-		ZapGasLimitMultiplier: zapGasLimitMult,
-		ZapGasLimitMin:        zapGasLimitMin,
-		ZapGasLimitMax:        zapGasLimitMax,
+		ZapGasLimitMultiplier:       zapGasLimitMult,
+		ZapGasLimitMin:              zapGasLimitMin,
+		ZapGasLimitMax:              zapGasLimitMax,
+		ZapPriceDeviationMaxPercent: getEnvFloat("ZAP_PRICE_DEVIATION_MAX_PERCENT", 1.0),
+		ZapMinPoolLiquidityUSD:      getEnvFloat("ZAP_MIN_POOL_LIQUIDITY_USD", 1000.0),
 
 		// Private per-wallet Zap contracts
 		PrivateZapEnabled: getEnvBool("PRIVATE_ZAP_ENABLED", false),
@@ -419,6 +423,8 @@ func LoadConfig() error {
 	log.Printf("   - OKX Swap GasLimit Min/Max: %d/%d", AppConfig.OKXSwapGasLimitMin, AppConfig.OKXSwapGasLimitMax)
 	log.Printf("   - Zap GasLimit Multiplier: %.4f", AppConfig.ZapGasLimitMultiplier)
 	log.Printf("   - Zap GasLimit Min/Max: %d/%d", AppConfig.ZapGasLimitMin, AppConfig.ZapGasLimitMax)
+	log.Printf("   - Zap Price Deviation Max Percent: %.4f", AppConfig.ZapPriceDeviationMaxPercent)
+	log.Printf("   - Zap Min Pool Liquidity USD: %.4f", AppConfig.ZapMinPoolLiquidityUSD)
 	log.Printf("   - Private Zap Enabled: %v", AppConfig.PrivateZapEnabled)
 	log.Printf("   - Private Zap Version (legacy/ignored): %d", AppConfig.PrivateZapVersion)
 	log.Printf("   - Pancake V3 NPM: %s", AppConfig.PancakeV3PositionManagerAddress)
@@ -567,6 +573,18 @@ func getEnvInt64(key string, defaultValue int64) int64 {
 		return defaultValue
 	}
 	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return defaultValue
+	}
+	return n
+}
+
+func getEnvFloat(key string, defaultValue float64) float64 {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return defaultValue
+	}
+	n, err := strconv.ParseFloat(raw, 64)
 	if err != nil {
 		return defaultValue
 	}

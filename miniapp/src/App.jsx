@@ -423,6 +423,8 @@ export default function App() {
     const [openPositionSlippage, setOpenPositionSlippage] = useState('');
     const [openPositionAllowSwap, setOpenPositionAllowSwap] = useState(false);
     const [openPositionError, setOpenPositionError] = useState('');
+    const [openPositionRisk, setOpenPositionRisk] = useState(null);
+    const [openPositionRiskAck, setOpenPositionRiskAck] = useState(false);
     const [openPositionLoading, setOpenPositionLoading] = useState(false);
     const [openPositionSmartRanges, setOpenPositionSmartRanges] = useState([]);
     const [openPositionSmartRangesLoading, setOpenPositionSmartRangesLoading] = useState(false);
@@ -1362,6 +1364,8 @@ export default function App() {
         setOpenPositionSlippage('');
 
         setOpenPositionError('');
+        setOpenPositionRisk(null);
+        setOpenPositionRiskAck(false);
     };
 
     const openPositionModal = (pool) => {
@@ -1506,6 +1510,16 @@ export default function App() {
             setOpenPositionError('Enter a valid amount.');
             return;
         }
+        const riskMaxOpenAmount = Number(openPositionRisk?.max_open_amount);
+        const riskRequiresAck = Boolean(openPositionRisk?.risk_ack_required);
+        if (Number.isFinite(riskMaxOpenAmount) && riskMaxOpenAmount > 0 && amount > riskMaxOpenAmount) {
+            setOpenPositionError(`当前池子单次开仓金额不能高于 ${riskMaxOpenAmount} USDT`);
+            return;
+        }
+        if (riskRequiresAck && !openPositionRiskAck) {
+            setOpenPositionError('请先确认低流动性风险。');
+            return;
+        }
         const range = parseRangeInput(openPositionRangeLower, openPositionRangeUpper);
         if (!range || range.lower <= 0 || range.upper <= 0 || range.lower >= 100 || range.upper >= 100) {
             setOpenPositionError('区间必须在 0 到 100 之间。');
@@ -1568,14 +1582,37 @@ export default function App() {
                 slippageTolerance: slippage,
                 allowEntrySwap: true,
                 walletId: openPositionWalletId,
+                ackLiquidityRisk: riskRequiresAck && openPositionRiskAck,
             });
             // Ensure done state even if WS event was missed
+            if (risk) {
+                setOpenPositionError('');
+            }
             setOperationProgress(prev => prev?.operation === 'open_position'
                 ? { ...prev, currentStep: 4, status: 'done' } : prev);
             setOpenPositionPool(null);
             resetOpenPositionDraft();
         } catch (e) {
             const msg = String(e?.message || e || '').trim();
+            const risk = e && typeof e === 'object' && (
+                typeof e?.liquidity_usd === 'number' ||
+                typeof e?.max_open_amount === 'number' ||
+                Boolean(e?.risk_ack_required) ||
+                typeof e?.price_deviation_percent === 'number'
+            ) ? {
+                code: String(e?.code || ''),
+                message: msg,
+                liquidity_usd: Number(e?.liquidity_usd),
+                min_liquidity_usd: Number(e?.min_liquidity_usd),
+                max_open_amount: Number(e?.max_open_amount),
+                risk_ack_required: Boolean(e?.risk_ack_required),
+                price_deviation_percent: Number(e?.price_deviation_percent),
+                price_deviation_max_percent: Number(e?.price_deviation_max_percent),
+            } : null;
+            setOpenPositionRisk(risk);
+            if (risk) {
+                queueMicrotask(() => setOpenPositionError(''));
+            }
             setOpenPositionError(msg || '开仓失败。');
             setOperationProgress(prev => prev?.operation === 'open_position'
                 ? { ...prev, status: 'error', error: msg || '开仓失败。' } : prev);
@@ -3223,6 +3260,33 @@ export default function App() {
                                 如果这是当前钱包首次开仓，系统会先部署私有合约，部署完成后绑定到当前钱包，再继续正式开仓。
                                 首次流程失败后再次重试，会继续复用已部署地址完成绑定，不会重复部署新的私有合约。
                             </div>
+
+                            {openPositionRisk?.message ? (
+                                <div className={`rounded-xl border p-3 text-xs ${openPositionRisk?.risk_ack_required
+                                    ? 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200'
+                                    : 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-200'
+                                    }`}
+                                >
+                                    <div>{openPositionRisk.message}</div>
+                                    {Number.isFinite(Number(openPositionRisk?.liquidity_usd)) ? (
+                                        <div className="mt-2">当前流动性: {formatUsdCompact(openPositionRisk.liquidity_usd)}</div>
+                                    ) : null}
+                                    {Number.isFinite(Number(openPositionRisk?.max_open_amount)) && Number(openPositionRisk?.max_open_amount) > 0 ? (
+                                        <div className="mt-1">当前最大允许开仓金额: {formatUsdCompact(openPositionRisk.max_open_amount)}</div>
+                                    ) : null}
+                                    {openPositionRisk?.risk_ack_required ? (
+                                        <label className="mt-3 flex items-start gap-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={openPositionRiskAck}
+                                                onChange={(e) => setOpenPositionRiskAck(e.target.checked)}
+                                                disabled={openPositionLoading}
+                                            />
+                                            <span>我已知悉当前池子流动性偏低，确认按限额继续开仓</span>
+                                        </label>
+                                    ) : null}
+                                </div>
+                            ) : null}
 
                             {openPositionError ? (
                                 <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">

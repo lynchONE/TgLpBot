@@ -74,6 +74,17 @@ const uniswapV4StateViewABISingleArg = `[
     ],
     "stateMutability": "view",
     "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "bytes32", "name": "poolId", "type": "bytes32" }
+    ],
+    "name": "getLiquidity",
+    "outputs": [
+      { "internalType": "uint128", "name": "", "type": "uint128" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
   }
 ]`
 
@@ -708,6 +719,56 @@ func GetUniswapV4PoolSlot0ViaStateView(stateView common.Address, poolManager com
 		return nil, 0, fmt.Errorf("pool not initialized (sqrtPriceX96=0)")
 	}
 	return sqrtPriceX96, int(tickBig.Int64()), nil
+}
+
+// GetUniswapV4PoolLiquidityViaStateView reads the current in-range liquidity using StateView.getLiquidity(poolId).
+func GetUniswapV4PoolLiquidityViaStateView(stateView common.Address, poolManager common.Address, poolID string) (*big.Int, error) {
+	if Client == nil {
+		return nil, fmt.Errorf("blockchain client not initialized")
+	}
+	if (stateView == common.Address{}) {
+		return nil, fmt.Errorf("uniswap v4 state view address not configured")
+	}
+	if (poolManager == common.Address{}) {
+		return nil, fmt.Errorf("uniswap v4 pool manager address not configured")
+	}
+
+	id, err := normalizePoolID(poolID)
+	if err != nil {
+		return nil, err
+	}
+
+	parsedABI, err := abi.JSON(strings.NewReader(uniswapV4StateViewABISingleArg))
+	if err != nil {
+		return nil, fmt.Errorf("parse state view ABI failed: %w", err)
+	}
+
+	data, err := parsedABI.Pack("getLiquidity", id)
+	if err != nil {
+		return nil, fmt.Errorf("pack state view getLiquidity failed: %w", err)
+	}
+
+	msg := ethereum.CallMsg{To: &stateView, Data: data}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	raw, err := callContractWithRetry(Client, ctx, msg)
+	if err != nil {
+		return nil, fmt.Errorf("call state view getLiquidity failed: %w", err)
+	}
+
+	out, err := parsedABI.Unpack("getLiquidity", raw)
+	if err != nil {
+		return nil, fmt.Errorf("unpack state view getLiquidity failed: %w", err)
+	}
+	if len(out) != 1 {
+		return nil, fmt.Errorf("unexpected state view getLiquidity return length: %d", len(out))
+	}
+
+	liq, ok := out[0].(*big.Int)
+	if !ok || liq == nil {
+		return nil, fmt.Errorf("unexpected state view getLiquidity type: %T", out[0])
+	}
+	return liq, nil
 }
 
 // GetUniswapV4PoolTickSpacing reads tickSpacing from PoolManager.poolKeys(poolId).

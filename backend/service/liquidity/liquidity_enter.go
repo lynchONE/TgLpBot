@@ -45,6 +45,24 @@ type EnterResult struct {
 	Dust1 *big.Int
 }
 
+type ZapSafetyError struct {
+	Code                     string
+	Reason                   string
+	LiquidityUSD             float64
+	MinLiquidityUSD          float64
+	MaxOpenAmount            float64
+	RiskAckRequired          bool
+	PriceDeviationPercent    float64
+	PriceDeviationMaxPercent float64
+}
+
+func (e *ZapSafetyError) Error() string {
+	if e == nil {
+		return "zap safety check failed"
+	}
+	return e.Reason
+}
+
 type EntrySwapRequiredError struct {
 	TokenSymbol  string
 	StableSymbol string
@@ -352,6 +370,7 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	if err != nil {
 		return nil, err
 	}
+	requestedUSDTAmount := new(big.Int).Set(usdtAmount)
 
 	if !common.IsHexAddress(cc.StableAddress) {
 		return nil, fmt.Errorf("stable address not set for chain=%s", exec.Chain())
@@ -359,6 +378,9 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	usdtAddr := common.HexToAddress(cc.StableAddress)
 	plan, err := s.planEntryToken(task)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.CheckOpenPositionSafety(task, OpenPositionRiskOptions{}); err != nil {
 		return nil, err
 	}
 	token0Addr := plan.Token0
@@ -394,9 +416,34 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	}
 
 	entryToken := usdtAddr
-	entryAmount := usdtAmount
+	entryAmount := new(big.Int).Set(usdtAmount)
 	allowEntrySwap := task.AllowEntrySwap
 	if plan.RequiresSwap {
+		usdtAmount = new(big.Int).Set(requestedUSDTAmount)
+		entryAmount = new(big.Int).Set(usdtAmount)
+		if plan.EntryToken != (common.Address{}) {
+			entryBalance, _ := blockchain.GetTokenBalanceWithClient(client, plan.EntryToken, walletAddr)
+			if entryBalance == nil {
+				entryBalance = big.NewInt(0)
+			}
+			if entryBalance.Sign() > 0 {
+				budgetCap, capErr := tokenBudgetUnits(client, exec.Chain(), plan.EntryToken, plan.EntrySymbol, cc, task.AmountUSDT)
+				if capErr != nil {
+					log.Printf("[Liquidity] Entry budget cap lookup failed, skip existing %s priority: %v", plan.EntrySymbol, capErr)
+				} else if budgetCap != nil && budgetCap.Sign() > 0 {
+					use := new(big.Int).Set(entryBalance)
+					if use.Cmp(budgetCap) > 0 {
+						use = new(big.Int).Set(budgetCap)
+					}
+					if use.Sign() > 0 {
+						log.Printf("[Liquidity] Entry swap skipped: existing %s balance=%s use=%s budgetCap=%s",
+							plan.EntrySymbol, entryBalance.String(), use.String(), budgetCap.String())
+						entryToken = plan.EntryToken
+						entryAmount = use
+					}
+				}
+			}
+		}
 		// 如果用户账户里已经有足够的入场代币（典型场景：上次 swap 成功但 bot 误判返回 0），直接用余额开仓，避免重复提示/重复兑换。
 		// 目前仅对 USDC 做“USDT 金额≈USDC 数量”的安全处理；WBNB 等非稳定币不适用该等价关系。
 		if strings.EqualFold(plan.EntrySymbol, "USDC") && plan.EntryToken != (common.Address{}) {
@@ -436,6 +483,12 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 
 		// 仍然需要 swap 才能使用 USDT 入场
 		if entryToken == usdtAddr {
+			if usdtBefore.Sign() > 0 && usdtBefore.Cmp(usdtAmount) < 0 {
+				log.Printf("[Liquidity] Entry amount capped to stable balance before swap: configured=%s actual=%s stable=%s",
+					usdtAmount.String(), usdtBefore.String(), usdtAddr.Hex())
+				usdtAmount = new(big.Int).Set(usdtBefore)
+				entryAmount = new(big.Int).Set(usdtAmount)
+			}
 			if !allowEntrySwap {
 				return nil, &EntrySwapRequiredError{
 					TokenSymbol:  plan.EntrySymbol,
@@ -560,22 +613,29 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	// If RPC returns stale balances, actualSpent can be 0 (or otherwise invalid) even when the tx succeeded.
 	// We can recover a best-effort "actual spent" from the input amount and refunded USDT dust (when applicable).
 	if actualSpent.Sign() <= 0 || actualSpent.Cmp(usdtAmount) > 0 {
-		expectedSpent := new(big.Int).Set(usdtAmount)
-		if !plan.RequiresSwap {
-			usdtDust := big.NewInt(0)
-			if token0Addr == usdtAddr {
-				usdtDust = dust0
-			} else if token1Addr == usdtAddr {
-				usdtDust = dust1
-			}
-			if usdtDust.Sign() > 0 {
-				expectedSpent.Sub(expectedSpent, usdtDust)
-				if expectedSpent.Sign() < 0 {
-					expectedSpent = big.NewInt(0)
-				}
+		if entryToken != usdtAddr {
+			if estimatedSpent, estimateErr := tokenValueInStableUnits(client, exec.Chain(), entryToken, plan.EntrySymbol, cc, entryAmount); estimateErr == nil && estimatedSpent != nil && estimatedSpent.Sign() > 0 {
+				actualSpent = estimatedSpent
 			}
 		}
-		actualSpent = expectedSpent
+		if actualSpent.Sign() <= 0 || actualSpent.Cmp(usdtAmount) > 0 {
+			expectedSpent := new(big.Int).Set(usdtAmount)
+			if !plan.RequiresSwap {
+				usdtDust := big.NewInt(0)
+				if token0Addr == usdtAddr {
+					usdtDust = dust0
+				} else if token1Addr == usdtAddr {
+					usdtDust = dust1
+				}
+				if usdtDust.Sign() > 0 {
+					expectedSpent.Sub(expectedSpent, usdtDust)
+					if expectedSpent.Sign() < 0 {
+						expectedSpent = big.NewInt(0)
+					}
+				}
+			}
+			actualSpent = expectedSpent
+		}
 	}
 
 	actualSpentWei, err := convert.ScaleDecimals(actualSpent, cc.StableDecimals, 18)
@@ -747,26 +807,38 @@ func (s *LiquidityService) enterV3FromToken(
 		MinAmountOut:  big.NewInt(0),
 		CallData:      []byte{},
 	}
+	var okxExpectedOut *big.Int
 	if swapAmount != nil && swapAmount.Sign() > 0 {
-		p, okxExpectedOut, err := s.prepareOKXSwapParams(cc, zapAddr, swapTokenIn, swapTokenOut, swapAmount, task.SlippageTolerance)
+		p, out, err := s.prepareOKXSwapParams(cc, zapAddr, swapTokenIn, swapTokenOut, swapAmount, task.SlippageTolerance)
 		if err != nil {
 			return nil, err
 		}
+		okxExpectedOut = out
 		if p != nil {
 			swapParams = *p
 			log.Printf("[Liquidity] V3 enter: OKX swap target=%s minOut=%s", swapParams.Target.Hex(), swapParams.MinAmountOut.String())
-
-			// Zap 安全检查：价格偏差 + 池子流动性
-			sqrtPrice, _, slot0Err := blockchain.GetV3PoolSlot0WithClient(client, poolAddr)
-			if slot0Err != nil {
-				log.Printf("[Liquidity] V3 enter: read slot0 for safety check failed: %v, skipping", slot0Err)
-			} else if sqrtPrice != nil {
-				if safeErr := s.checkZapSafety(client, sqrtPrice, swapTokenIn, swapTokenOut, swapAmount, okxExpectedOut,
-					token0, token1, tokenIn, cc.StableDecimals, poolAddr); safeErr != nil {
-					return nil, safeErr
-				}
-			}
 		}
+	}
+
+	entryDecimals := cc.StableDecimals
+	if decimals, decErr := blockchain.GetTokenDecimalsWithClient(client, tokenIn); decErr != nil {
+		log.Printf("[Liquidity] V3 enter: read entry token decimals failed: %v, fallback=%d", decErr, entryDecimals)
+	} else if decimals > 0 {
+		entryDecimals = int(decimals)
+	}
+
+	var sqrtPrice *big.Int
+	if swapAmount != nil && swapAmount.Sign() > 0 {
+		var slot0Err error
+		sqrtPrice, _, slot0Err = blockchain.GetV3PoolSlot0WithClient(client, poolAddr)
+		if slot0Err != nil {
+			log.Printf("[Liquidity] V3 enter: read slot0 for safety check failed: %v, continuing with liquidity-only checks", slot0Err)
+			sqrtPrice = nil
+		}
+	}
+	if safeErr := s.checkZapSafety(client, sqrtPrice, swapTokenIn, swapTokenOut, swapAmount, okxExpectedOut,
+		token0, token1, tokenIn, entryDecimals, poolAddr); safeErr != nil {
+		return nil, safeErr
 	}
 
 	// 3. Approve 代币给 Zap 合约
@@ -1210,12 +1282,19 @@ func getSqrtRatioAtTick(tick int) *big.Int {
 }
 
 // ZapSafetyError 表示 Zap 安全检查未通过
-type ZapSafetyError struct {
-	Reason string
-}
+func ensurePoolHasLiquidity(version string, liquidity *big.Int) error {
+	if liquidity != nil && liquidity.Sign() > 0 {
+		return nil
+	}
 
-func (e *ZapSafetyError) Error() string {
-	return e.Reason
+	version = strings.ToUpper(strings.TrimSpace(version))
+	if version == "" {
+		version = "POOL"
+	}
+	return &ZapSafetyError{
+		Code:   "pool_zero_liquidity",
+		Reason: fmt.Sprintf("%s 池子当前链上流动性为 0，取消开仓", version),
+	}
 }
 
 // checkZapSafety 在执行 Zap 交易前检查 OKX 报价偏差和池子流动性
@@ -1243,6 +1322,18 @@ func (s *LiquidityService) checkZapSafety(
 	if err != nil {
 		log.Printf("[Liquidity] Warning: get zap safety config failed: %v, skipping pre-check", err)
 		return nil
+	}
+
+	if poolAddr != (common.Address{}) {
+		poolLiquidity, liqErr := blockchain.GetV3PoolLiquidityWithClient(client, poolAddr)
+		if liqErr != nil {
+			return &ZapSafetyError{
+				Reason: fmt.Sprintf("读取 V3 池子流动性失败：%v", liqErr),
+			}
+		}
+		if err := ensurePoolHasLiquidity("v3", poolLiquidity); err != nil {
+			return err
+		}
 	}
 
 	// 1. 价格偏差检查：比较 OKX 报价与池子价格
@@ -1552,6 +1643,15 @@ func (s *LiquidityService) enterV4FromToken(
 	sqrtPriceX96, currentTick, slot0Err = blockchain.GetUniswapV4PoolSlot0ViaStateView(stateView, poolManager, task.PoolId)
 	if slot0Err != nil {
 		return nil, fmt.Errorf("get v4 slot0 via StateView failed: %w", slot0Err)
+	}
+	currentLiquidity, liqErr := blockchain.GetUniswapV4PoolLiquidityViaStateView(stateView, poolManager, task.PoolId)
+	if liqErr != nil {
+		return nil, &ZapSafetyError{
+			Reason: fmt.Sprintf("读取 V4 池子流动性失败：%v", liqErr),
+		}
+	}
+	if safeErr := ensurePoolHasLiquidity("v4", currentLiquidity); safeErr != nil {
+		return nil, safeErr
 	}
 
 	// Validate tick range against the actual tickSpacing.

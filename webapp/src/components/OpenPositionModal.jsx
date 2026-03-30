@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 const PRESET_RANGES = [1, 2, 3, 5, 10, 20];
 
@@ -28,6 +28,7 @@ export default function OpenPositionModal({
   smartRangesLoading,
   selectedWalletId,
   submitError,
+  submitRisk,
   onClearSubmitError,
   onWalletSelect,
   onSubmit,
@@ -40,10 +41,15 @@ export default function OpenPositionModal({
   const [rangeUpperAuto, setRangeUpperAuto] = useState(true);
   const [slippage, setSlippage] = useState('');
   const [error, setError] = useState('');
+  const [riskAck, setRiskAck] = useState(false);
 
   const pair = pool?.trading_pair || '--';
   const addr = String(pool?.pool_address || '').trim();
   const version = String(pool?.protocol_version || pool?.factory_name || '').trim();
+  const riskMessage = String(submitRisk?.message || '').trim();
+  const riskLiquidityUsd = Number(submitRisk?.liquidity_usd);
+  const riskMaxOpenAmount = Number(submitRisk?.max_open_amount);
+  const riskRequiresAck = Boolean(submitRisk?.risk_ack_required);
 
   const showWalletPicker = Array.isArray(wallets) && wallets.length > 1;
   const visibleSmartRanges = useMemo(() => (
@@ -62,6 +68,14 @@ export default function OpenPositionModal({
   }, [wallets, selectedWalletId]);
 
   const visibleError = error || String(submitError || '').trim();
+
+  useEffect(() => {
+    setRiskAck(false);
+  }, [addr]);
+
+  useEffect(() => {
+    if (!riskRequiresAck) setRiskAck(false);
+  }, [riskRequiresAck]);
 
   const clearErrors = useCallback(() => {
     if (error) setError('');
@@ -113,6 +127,14 @@ export default function OpenPositionModal({
       setError('请选择钱包');
       return;
     }
+    if (Number.isFinite(riskMaxOpenAmount) && riskMaxOpenAmount > 0 && amt > riskMaxOpenAmount) {
+      setError(`当前池子单次开仓金额不能高于 ${riskMaxOpenAmount} USDT`);
+      return;
+    }
+    if (riskRequiresAck && !riskAck) {
+      setError('请先确认低流动性风险');
+      return;
+    }
 
     setError('');
     onSubmit({
@@ -125,8 +147,23 @@ export default function OpenPositionModal({
       slippageTolerance: Number.isFinite(sl) && sl > 0 ? sl : undefined,
       allowEntrySwap: true,
       walletId: resolvedWalletId || undefined,
+      ackLiquidityRisk: riskRequiresAck && riskAck,
     });
-  }, [amount, rangeLower, rangeUpper, slippage, showWalletPicker, resolvedWalletId, onSubmit, addr, version, chain]);
+  }, [
+    amount,
+    rangeLower,
+    rangeUpper,
+    slippage,
+    showWalletPicker,
+    resolvedWalletId,
+    riskMaxOpenAmount,
+    riskRequiresAck,
+    riskAck,
+    onSubmit,
+    addr,
+    version,
+    chain,
+  ]);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -142,6 +179,40 @@ export default function OpenPositionModal({
           如果这是当前钱包首次开仓，系统会先部署私有合约，部署完成后绑定到当前钱包，再继续正式开仓。
           首次流程失败后再次重试，会继续复用已部署地址完成绑定，不会重复部署新的私有合约。
         </div>
+
+        {riskMessage ? (
+          <div
+            className="modal-info-note"
+            style={{
+              marginTop: 12,
+              borderColor: riskRequiresAck ? 'rgba(245, 158, 11, 0.35)' : 'rgba(239, 68, 68, 0.35)',
+              background: riskRequiresAck ? 'rgba(245, 158, 11, 0.10)' : 'rgba(239, 68, 68, 0.10)',
+              color: riskRequiresAck ? '#b45309' : '#b91c1c',
+            }}
+          >
+            <div>{riskMessage}</div>
+            {Number.isFinite(riskLiquidityUsd) && riskLiquidityUsd >= 0 ? (
+              <div style={{ marginTop: 6 }}>当前流动性: {formatUsdCompact(riskLiquidityUsd)}</div>
+            ) : null}
+            {Number.isFinite(riskMaxOpenAmount) && riskMaxOpenAmount > 0 ? (
+              <div style={{ marginTop: 4 }}>当前最大允许开仓金额: {formatUsdCompact(riskMaxOpenAmount)}</div>
+            ) : null}
+            {riskRequiresAck ? (
+              <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 10, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={riskAck}
+                  onChange={(e) => {
+                    clearErrors();
+                    setRiskAck(e.target.checked);
+                  }}
+                  disabled={busy}
+                />
+                <span>我已知悉当前池子流动性偏低，确认按限额继续开仓</span>
+              </label>
+            ) : null}
+          </div>
+        ) : null}
 
         {visibleError ? <div className="error-text">{visibleError}</div> : null}
 
@@ -289,7 +360,7 @@ export default function OpenPositionModal({
         <div className="modal-actions">
           <button type="button" className="ghost-chip" onClick={onClose} disabled={busy}>取消</button>
           <button type="button" className="accent-btn" onClick={handleSubmit} disabled={busy}>
-            {busy ? '提交中...' : visibleError ? '重试开仓' : '确认开仓'}
+            {busy ? '提交中...' : visibleError || riskMessage ? '重试开仓' : '确认开仓'}
           </button>
         </div>
       </div>

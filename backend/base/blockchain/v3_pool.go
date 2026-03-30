@@ -74,6 +74,18 @@ const v3PoolSlot0MinABI = `[
   }
 ]`
 
+const v3PoolLiquidityMinABI = `[
+  {
+    "inputs": [],
+    "name": "liquidity",
+    "outputs": [
+      { "internalType": "uint128", "name": "", "type": "uint128" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]`
+
 const v3PoolFeeGrowthABI = `[
   {
     "inputs": [],
@@ -313,6 +325,52 @@ func GetV3PoolSlot0AtBlockWithClient(client *ethclient.Client, poolAddress commo
 	}
 
 	return sqrtPriceX96, int(tickBig.Int64()), nil
+}
+
+// GetV3PoolLiquidity returns the current in-range liquidity from a V3 pool.
+func GetV3PoolLiquidity(poolAddress common.Address) (*big.Int, error) {
+	return GetV3PoolLiquidityWithClient(Client, poolAddress)
+}
+
+func GetV3PoolLiquidityWithClient(client *ethclient.Client, poolAddress common.Address) (*big.Int, error) {
+	if client == nil {
+		return nil, fmt.Errorf("blockchain client not initialized")
+	}
+
+	parsedABI, err := abi.JSON(strings.NewReader(v3PoolLiquidityMinABI))
+	if err != nil {
+		return nil, fmt.Errorf("parse pool liquidity ABI failed: %w", err)
+	}
+
+	data, err := parsedABI.Pack("liquidity")
+	if err != nil {
+		return nil, fmt.Errorf("pack liquidity failed: %w", err)
+	}
+
+	msg := ethereum.CallMsg{To: &poolAddress, Data: data}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	raw, err := callContractWithRetry(client, ctx, msg)
+	if err != nil {
+		return nil, fmt.Errorf("call liquidity failed: %w", err)
+	}
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("call liquidity returned empty result (wrong chain or not a V3 pool)")
+	}
+
+	out, err := parsedABI.Unpack("liquidity", raw)
+	if err != nil {
+		return nil, fmt.Errorf("unpack liquidity failed: %w", err)
+	}
+	if len(out) != 1 {
+		return nil, fmt.Errorf("unexpected liquidity return length: %d", len(out))
+	}
+
+	liq, ok := out[0].(*big.Int)
+	if !ok || liq == nil {
+		return nil, fmt.Errorf("unexpected liquidity type: %T", out[0])
+	}
+	return liq, nil
 }
 
 // GetV3PoolTokens returns (token0, token1) from a UniswapV3/PancakeV3-style pool.

@@ -129,8 +129,18 @@ func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request)
 }
 
 func getZapSafetyDefaults() *models.ZapSafetyConfig {
+	priceDeviationDefault := 1.0
+	minLiquidityDefault := 1000.0
+	if config.AppConfig != nil {
+		if config.AppConfig.ZapPriceDeviationMaxPercent > 0 {
+			priceDeviationDefault = config.AppConfig.ZapPriceDeviationMaxPercent
+		}
+		if config.AppConfig.ZapMinPoolLiquidityUSD > 0 {
+			minLiquidityDefault = config.AppConfig.ZapMinPoolLiquidityUSD
+		}
+	}
 	return &models.ZapSafetyConfig{
-		PriceDeviationMaxPercent: 1.0,
-		MinPoolLiquidityUSD:      1000.0,
+		PriceDeviationMaxPercent: priceDeviationDefault,
+		MinPoolLiquidityUSD:      minLiquidityDefault,
 	}
 }

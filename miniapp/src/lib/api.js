@@ -39,6 +39,25 @@ async function resolveAssetCachedPayload({ cacheKey, ttlMs = ASSET_CACHE_TTL_MS,
     return cloneCachedPayload(payload);
 }
 
+async function readErrorDetails(resp) {
+    const text = await resp.text().catch(() => '');
+    if (!text) {
+        return { message: `HTTP ${resp.status}`, payload: null };
+    }
+    try {
+        const parsed = JSON.parse(text);
+        if (parsed && typeof parsed === 'object') {
+            return {
+                message: parsed?.message ? String(parsed.message) : `HTTP ${resp.status}`,
+                payload: parsed,
+            };
+        }
+    } catch {
+        // ignore JSON parse errors
+    }
+    return { message: text, payload: null };
+}
+
 export async function fetchRealtimePositions({ apiBaseUrl, initData, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/positions?endpoint=realtime_positions`;
@@ -485,7 +504,7 @@ export async function fetchSearchPools({ apiBaseUrl, initData, q, chain, limit, 
     return resp.json();
 }
 
-export async function openPosition({ apiBaseUrl, initData, chain, poolAddress, poolVersion, amount, rangeLowerPct, rangeUpperPct, slippageTolerance, allowEntrySwap, walletId, signal }) {
+export async function openPosition({ apiBaseUrl, initData, chain, poolAddress, poolVersion, amount, rangeLowerPct, rangeUpperPct, slippageTolerance, allowEntrySwap, walletId, ackLiquidityRisk, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/trading?endpoint=open_position`;
     const payload = {
@@ -505,6 +524,9 @@ export async function openPosition({ apiBaseUrl, initData, chain, poolAddress, p
     if (Number.isFinite(slippageTolerance)) {
         payload.slippage_tolerance = slippageTolerance;
     }
+    if (ackLiquidityRisk) {
+        payload.ack_liquidity_risk = true;
+    }
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -512,15 +534,14 @@ export async function openPosition({ apiBaseUrl, initData, chain, poolAddress, p
         signal,
     });
     if (!resp.ok) {
-        const text = await resp.text().catch(() => '');
-        let detail = text;
-        try {
-            const parsed = text ? JSON.parse(text) : null;
-            if (parsed?.message) detail = parsed.message;
-        } catch {
-            // ignore JSON parse
+        const detail = await readErrorDetails(resp);
+        const err = new Error(detail.message);
+        err.status = resp.status;
+        if (detail.payload && typeof detail.payload === 'object') {
+            err.payload = detail.payload;
+            Object.assign(err, detail.payload);
         }
-        throw new Error(detail || `HTTP ${resp.status}`);
+        throw err;
     }
     return resp.json();
 }
