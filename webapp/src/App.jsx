@@ -1500,14 +1500,18 @@ export default function App() {
       loadPositions();
     } catch (e) {
       const msg = String(e?.message || e);
-      const risk = e && typeof e === 'object' && (
+      const errorCode = String(e?.code || '').trim();
+      const isSafetyFailure = e && typeof e === 'object' && (
         typeof e?.liquidity_usd === 'number' ||
         typeof e?.max_open_amount === 'number' ||
         Boolean(e?.risk_ack_required) ||
-        typeof e?.price_deviation_percent === 'number'
-      )
+        typeof e?.price_deviation_percent === 'number' ||
+        errorCode === 'zap_safety_check_failed' ||
+        errorCode.startsWith('pool_')
+      );
+      const risk = isSafetyFailure
         ? {
-          code: String(e?.code || ''),
+          code: errorCode,
           message: msg,
           liquidity_usd: Number(e?.liquidity_usd),
           min_liquidity_usd: Number(e?.min_liquidity_usd),

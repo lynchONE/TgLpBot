@@ -331,6 +331,43 @@ function buildEntrySwapConfirmKey(preview, entrySwapSlippage) {
     ].join('|');
 }
 
+function resolveOpenPositionErrorPayload(error) {
+    if (!error || typeof error !== 'object') return null;
+    if (error.payload && typeof error.payload === 'object') return error.payload;
+    return error;
+}
+
+function isOpenPositionSafetyError(error) {
+    const payload = resolveOpenPositionErrorPayload(error);
+    if (!payload) return false;
+    const code = String(payload?.code || '').trim();
+    return Boolean(
+        code === 'zap_safety_check_failed' ||
+        code.startsWith('pool_') ||
+        typeof payload?.liquidity_usd === 'number' ||
+        typeof payload?.max_open_amount === 'number' ||
+        typeof payload?.price_deviation_percent === 'number' ||
+        Boolean(payload?.risk_ack_required)
+    );
+}
+
+function extractOpenPositionErrorChecks(error, fallbackKey = 'submit_safety') {
+    const payload = resolveOpenPositionErrorPayload(error);
+    if (Array.isArray(payload?.checks) && payload.checks.length > 0) {
+        return payload.checks;
+    }
+    if (!isOpenPositionSafetyError(payload)) {
+        return [];
+    }
+    const detail = String(error?.message || payload?.message || '').trim() || '安全检查未通过';
+    return [{
+        key: fallbackKey,
+        status: 'fail',
+        label: '安全检查',
+        detail,
+    }];
+}
+
 function formatUserLabel(user) {
     if (!user) return '未知用户';
     const username = String(user.username || '').trim();
@@ -1623,9 +1660,14 @@ export default function App() {
             } catch (e) {
                 if (!active || controller.signal.aborted) return;
                 const msg = String(e?.message || e || '').trim();
-                setOpenPositionEntrySwapPreview(null);
-                setOpenPositionChecks([]);
-                setOpenPositionEntrySwapPreviewError(msg || '获取前置兑换预览失败');
+                const payload = resolveOpenPositionErrorPayload(e);
+                const failChecks = extractOpenPositionErrorChecks(e, 'preview_safety');
+                const entrySwapInfo = payload?.entry_swap && typeof payload.entry_swap === 'object'
+                    ? payload.entry_swap
+                    : null;
+                setOpenPositionEntrySwapPreview(entrySwapInfo);
+                setOpenPositionChecks(failChecks);
+                setOpenPositionEntrySwapPreviewError(failChecks.length > 0 ? '' : (msg || '获取前置兑换预览失败'));
             } finally {
                 if (active) {
                     setOpenPositionEntrySwapPreviewLoading(false);
@@ -1790,36 +1832,21 @@ export default function App() {
             resetOpenPositionDraft();
         } catch (e) {
             const msg = String(e?.message || e || '').trim();
-            const entrySwapInfo = e && typeof e === 'object' && e?.entry_swap && typeof e.entry_swap === 'object'
-                ? e.entry_swap
+            const payload = resolveOpenPositionErrorPayload(e);
+            const entrySwapInfo = payload?.entry_swap && typeof payload.entry_swap === 'object'
+                ? payload.entry_swap
                 : null;
-            const errorCode = String(e?.code || '').trim();
-            const isSafetyFailure = Boolean(
-                (e && typeof e === 'object' && (
-                    typeof e?.liquidity_usd === 'number' ||
-                    typeof e?.max_open_amount === 'number' ||
-                    typeof e?.price_deviation_percent === 'number'
-                )) ||
-                errorCode === 'zap_safety_check_failed' ||
-                errorCode.startsWith('pool_')
-            );
+            const failChecks = extractOpenPositionErrorChecks(e, 'submit_safety');
             if (entrySwapInfo) {
                 setOpenPositionEntrySwapPreview(entrySwapInfo);
                 setOpenPositionEntrySwapPreviewError('');
             }
-            if (isSafetyFailure) {
+            if (failChecks.length > 0) {
                 setOpenPositionChecks((prev) => {
-                    const base = Array.isArray(prev) ? prev.filter((item) => item?.key !== 'submit_safety') : [];
-                    if (base.some((item) => item?.status === 'fail')) return base;
-                    return [
-                        ...base,
-                        {
-                            key: 'submit_safety',
-                            status: 'fail',
-                            label: '安全检查',
-                            detail: msg || '安全检查未通过',
-                        },
-                    ];
+                    const merged = Array.isArray(prev)
+                        ? prev.filter((item) => !failChecks.some((next) => next?.key === item?.key))
+                        : [];
+                    return [...merged, ...failChecks];
                 });
             }
             setOpenPositionError(msg || '开仓失败。');

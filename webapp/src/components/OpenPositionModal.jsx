@@ -48,6 +48,43 @@ function buildEntrySwapConfirmKey(preview, entrySwapSlippage) {
   ].join('|');
 }
 
+function resolveOpenPositionErrorPayload(error) {
+  if (!error || typeof error !== 'object') return null;
+  if (error.payload && typeof error.payload === 'object') return error.payload;
+  return error;
+}
+
+function isOpenPositionSafetyError(error) {
+  const payload = resolveOpenPositionErrorPayload(error);
+  if (!payload) return false;
+  const code = String(payload?.code || '').trim();
+  return Boolean(
+    code === 'zap_safety_check_failed' ||
+    code.startsWith('pool_') ||
+    typeof payload?.liquidity_usd === 'number' ||
+    typeof payload?.max_open_amount === 'number' ||
+    typeof payload?.price_deviation_percent === 'number' ||
+    Boolean(payload?.risk_ack_required)
+  );
+}
+
+function extractOpenPositionErrorChecks(error, fallbackKey = 'preview_safety') {
+  const payload = resolveOpenPositionErrorPayload(error);
+  if (Array.isArray(payload?.checks) && payload.checks.length > 0) {
+    return payload.checks;
+  }
+  if (!isOpenPositionSafetyError(payload)) {
+    return [];
+  }
+  const detail = String(error?.message || payload?.message || '').trim() || '安全检查未通过';
+  return [{
+    key: fallbackKey,
+    status: 'fail',
+    label: '安全检查',
+    detail,
+  }];
+}
+
 export default function OpenPositionModal({
   apiBaseUrl,
   initData,
@@ -228,9 +265,14 @@ export default function OpenPositionModal({
         setEntrySwapPreview(resp?.entry_swap || { required: false });
       } catch (e) {
         if (!active || controller.signal.aborted) return;
-        setEntrySwapPreview(null);
-        setPreviewChecks([]);
-        setEntrySwapPreviewError(String(e?.message || e || '获取前置兑换预览失败'));
+        const payload = resolveOpenPositionErrorPayload(e);
+        const failChecks = extractOpenPositionErrorChecks(e);
+        const entrySwapInfo = payload?.entry_swap && typeof payload.entry_swap === 'object'
+          ? payload.entry_swap
+          : null;
+        setEntrySwapPreview(entrySwapInfo);
+        setPreviewChecks(failChecks);
+        setEntrySwapPreviewError(failChecks.length > 0 ? '' : String(e?.message || e || '获取前置兑换预览失败'));
       } finally {
         if (active) {
           setEntrySwapPreviewLoading(false);
