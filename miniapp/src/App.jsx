@@ -1399,6 +1399,7 @@ export default function App() {
     const openPositionModal = (pool) => {
         let chain = String(pool?.chain || hotPoolsData?.chain || 'bsc').trim().toLowerCase() || 'bsc';
         if (!multiChainEnabled) chain = userDefaultChain;
+        const poolAddress = String(pool?.pool_address || '').trim();
         const poolVersion = String(pool?.protocol_version || pool?.pool_version || '').trim().toLowerCase();
         setOpenPositionPool({
             ...pool,
@@ -1406,7 +1407,7 @@ export default function App() {
             ...(poolVersion ? { protocol_version: poolVersion, pool_version: poolVersion } : {}),
         });
         setOpenPositionSmartRanges(Array.isArray(pool?.range_groups) ? pool.range_groups : []);
-        setOpenPositionSmartRangesLoading(Boolean(addr));
+        setOpenPositionSmartRangesLoading(Boolean(poolAddress));
         resetOpenPositionDraft();
     };
 

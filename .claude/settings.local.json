@@ -57,7 +57,8 @@
       "Bash(find /mnt/e/goProject/TgLpBot -type f \\\\\\(-name *.go -o -name *.js -o -name *.jsx -o -name *.md -o -name *.sql -o -name *.json \\\\\\))",
       "Bash(GOTOOLCHAIN=local go build ./...)",
       "Bash(python3:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(node_modules/.bin/vite build:*)"
     ]
   }
 }
