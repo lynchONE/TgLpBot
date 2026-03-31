@@ -87,10 +87,10 @@ export default function OpenPositionModal({
   const checks = previewChecks;
   const warnChecks = checks.filter(c => c.status === 'warn');
   const failChecks = checks.filter(c => c.status === 'fail');
-  const liquidityFailChecks = failChecks.filter(c => c.key === 'liquidity');
-  const hasBlockingLiquidityFailure = liquidityFailChecks.length > 0;
-  const blockingLiquidityMessage = hasBlockingLiquidityFailure
-    ? liquidityFailChecks.map(c => c.detail || c.label).filter(Boolean).join('; ')
+  const blockingFailChecks = failChecks;
+  const hasBlockingSafetyFailure = blockingFailChecks.length > 0 || Boolean(submitRisk?.message);
+  const blockingSafetyMessage = blockingFailChecks.length > 0
+    ? blockingFailChecks.map(c => c.detail || c.label).filter(Boolean).join('; ')
     : '';
   const riskRequiresAck = warnChecks.some(c => c.extra?.risk_ack_required);
   const riskMaxOpenAmount = warnChecks.reduce((m, c) => {
@@ -127,7 +127,7 @@ export default function OpenPositionModal({
   const rangeLowerValue = Number(rangeLower);
   const rangeUpperValue = Number(rangeUpper);
   const submitRiskMessage = String(submitRisk?.message || '').trim();
-  const visibleError = error || entrySwapPreviewError || blockingLiquidityMessage || submitRiskMessage || String(submitError || '').trim();
+  const visibleError = error || entrySwapPreviewError || blockingSafetyMessage || submitRiskMessage || String(submitError || '').trim();
 
   const previewRequest = useMemo(() => {
     if (!apiBaseUrl || !initData || !addr || !version) return null;
@@ -656,7 +656,7 @@ export default function OpenPositionModal({
 
         <div className="modal-actions">
           <button type="button" className="ghost-chip" onClick={onClose} disabled={busy}>取消</button>
-          <button type="button" className={`accent-btn ${hasBlockingLiquidityFailure ? 'is-blocked' : ''}`} onClick={handleSubmit} disabled={busy || hasBlockingLiquidityFailure}>
+          <button type="button" className={`accent-btn ${hasBlockingSafetyFailure ? 'is-blocked' : ''}`} onClick={handleSubmit} disabled={busy || entrySwapPreviewLoading || hasBlockingSafetyFailure}>
             {busy ? '提交中...' : '确认开仓'}
           </button>
         </div>

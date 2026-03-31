@@ -510,8 +510,8 @@ export default function App() {
     const multiChainEnabled = globalConfig?.multi_chain_enabled ?? true;
     const multiWalletEnabled = globalConfig?.multi_wallet_enabled ?? false;
     const openPositionFailChecks = openPositionChecks.filter((item) => item.status === 'fail');
-    const openPositionHasBlockingLiquidityFailure = openPositionFailChecks.some((item) => item.key === 'liquidity');
-    const openPositionSubmitDisabled = openPositionLoading || openPositionHasBlockingLiquidityFailure;
+    const openPositionHasBlockingSafetyFailure = openPositionFailChecks.length > 0;
+    const openPositionSubmitDisabled = openPositionLoading || openPositionEntrySwapPreviewLoading || openPositionHasBlockingSafetyFailure;
     const [posWalletBalances, setPosWalletBalances] = useState(null);
     const userDefaultChain = useMemo(() => {
         const raw = String(globalConfig?.default_chain || 'bsc').trim().toLowerCase();
@@ -1793,9 +1793,34 @@ export default function App() {
             const entrySwapInfo = e && typeof e === 'object' && e?.entry_swap && typeof e.entry_swap === 'object'
                 ? e.entry_swap
                 : null;
+            const errorCode = String(e?.code || '').trim();
+            const isSafetyFailure = Boolean(
+                (e && typeof e === 'object' && (
+                    typeof e?.liquidity_usd === 'number' ||
+                    typeof e?.max_open_amount === 'number' ||
+                    typeof e?.price_deviation_percent === 'number'
+                )) ||
+                errorCode === 'zap_safety_check_failed' ||
+                errorCode.startsWith('pool_')
+            );
             if (entrySwapInfo) {
                 setOpenPositionEntrySwapPreview(entrySwapInfo);
                 setOpenPositionEntrySwapPreviewError('');
+            }
+            if (isSafetyFailure) {
+                setOpenPositionChecks((prev) => {
+                    const base = Array.isArray(prev) ? prev.filter((item) => item?.key !== 'submit_safety') : [];
+                    if (base.some((item) => item?.status === 'fail')) return base;
+                    return [
+                        ...base,
+                        {
+                            key: 'submit_safety',
+                            status: 'fail',
+                            label: '安全检查',
+                            detail: msg || '安全检查未通过',
+                        },
+                    ];
+                });
             }
             setOpenPositionError(msg || '开仓失败。');
             setOperationProgress(prev => prev?.operation === 'open_position'
