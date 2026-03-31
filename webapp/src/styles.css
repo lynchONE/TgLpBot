@@ -5264,6 +5264,13 @@ body {
 }
 .accent-btn:hover { opacity: 0.85; }
 .accent-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.accent-btn.is-blocked,
+.accent-btn.is-blocked:disabled {
+  background: rgba(148, 163, 184, 0.28);
+  color: rgba(241, 245, 249, 0.82);
+  box-shadow: none;
+  opacity: 1;
+}
 
 /* Task action menu — inline popover */
 .pos-action-anchor {

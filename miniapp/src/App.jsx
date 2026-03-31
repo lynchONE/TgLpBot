@@ -509,6 +509,9 @@ export default function App() {
 
     const multiChainEnabled = globalConfig?.multi_chain_enabled ?? true;
     const multiWalletEnabled = globalConfig?.multi_wallet_enabled ?? false;
+    const openPositionFailChecks = openPositionChecks.filter((item) => item.status === 'fail');
+    const openPositionHasBlockingLiquidityFailure = openPositionFailChecks.some((item) => item.key === 'liquidity');
+    const openPositionSubmitDisabled = openPositionLoading || openPositionHasBlockingLiquidityFailure;
     const [posWalletBalances, setPosWalletBalances] = useState(null);
     const userDefaultChain = useMemo(() => {
         const raw = String(globalConfig?.default_chain || 'bsc').trim().toLowerCase();
@@ -3414,9 +3417,9 @@ export default function App() {
                             <button
                                 type="button"
                                 onClick={handleOpenPosition}
-                                disabled={openPositionLoading}
-                                className={`w-full rounded-xl px-3 py-2 text-sm font-semibold shadow-sm transition ${openPositionLoading
-                                    ? 'cursor-not-allowed bg-[#bcff2f]/55 text-[#182108]'
+                                disabled={openPositionSubmitDisabled}
+                                className={`w-full rounded-xl px-3 py-2 text-sm font-semibold shadow-sm transition ${openPositionSubmitDisabled
+                                    ? 'cursor-not-allowed bg-zinc-200 text-zinc-500 shadow-none dark:bg-white/10 dark:text-white/30'
                                     : brand.solidButtonClass
                                     }`}
                             >
