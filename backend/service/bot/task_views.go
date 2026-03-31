@@ -335,8 +335,7 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 📊 滑点：%.2f%%
 ⚡ 秒止损：%s
 ⏲️ 秒止损阈值：%d 秒
-🔁 复投：%s
-🧾 剩余资产容忍度：%.2f%%`,
+🔁 复投：%s`,
 		emoji,
 		task.ID,
 		statusText,
@@ -353,7 +352,6 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 		boolToOnOff(task.StopLossEnabled),
 		task.StopLossDelaySeconds,
 		boolToOnOff(task.AutoReinvest),
-		task.ResidualTolerance,
 	)
 }
 

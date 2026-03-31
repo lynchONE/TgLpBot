@@ -707,7 +707,6 @@ func (b *Bot) createPositionTask(chatID int64, user *models.User) {
 		ReopenDelaySeconds:   cfg.RebalanceTimeout,
 		SlippageTolerance:    slippage,
 		AutoReinvest:         cfg.AutoReinvest,
-		ResidualTolerance:    cfg.ResidualTolerance,
 		StopLossEnabled:      cfg.StopLossEnabled,
 		StopLossDelaySeconds: cfg.StopLossDelaySeconds,
 		Status:               models.StrategyStatusRunning,

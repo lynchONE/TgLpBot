@@ -1059,9 +1059,7 @@ func (s *Server) executeCreatePoolPlanLegacy(plan *createPoolPlan) (*createPoolE
 				MinAmountOut:  big.NewInt(0),
 				CallData:      []byte{},
 			},
-			SqrtPriceX96:   plan.sqrtPriceX96,
-			MaxDustBps:     big.NewInt(0),
-			MaxSwapLossBps: big.NewInt(0),
+			SqrtPriceX96: plan.sqrtPriceX96,
 		}
 		seedTx, err := zap.ZapInV4(auth, zapParams)
 		if err != nil {

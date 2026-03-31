@@ -2204,9 +2204,6 @@ export default function App() {
     const slippageText = Number.isFinite(Number(globalCfg.slippage_tolerance))
         ? `${Number(globalCfg.slippage_tolerance).toFixed(2)}%`
         : '--';
-    const residualText = Number.isFinite(Number(globalCfg.residual_tolerance))
-        ? `${Number(globalCfg.residual_tolerance).toFixed(2)}%`
-        : '--';
     const confirmButtonClass = confirmState?.tone === 'danger'
         ? 'bg-red-500 text-white hover:bg-red-600 active:bg-red-700'
         : brand.solidButtonClass;
@@ -2973,12 +2970,6 @@ export default function App() {
                                             <div>
                                                 <div>复投</div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.auto_reinvest)}</div>
-                                            </div>
-                                            <div>
-                                                <div>剩余资产容忍度</div>
-                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">
-                                                    <NumberFlowValue value={residualText} formatter={() => residualText} />
-                                                </div>
                                             </div>
                                             <div>
                                                 <div>日志通知</div>

@@ -265,9 +265,7 @@ func (s *Server) executeCreatePoolPlan(plan *createPoolPlan) (*createPoolExecute
 				MinAmountOut:  big.NewInt(0),
 				CallData:      []byte{},
 			},
-			SqrtPriceX96:   plan.sqrtPriceX96,
-			MaxDustBps:     big.NewInt(0),
-			MaxSwapLossBps: big.NewInt(0),
+			SqrtPriceX96: plan.sqrtPriceX96,
 		}
 		seedTx, err := zap.ZapInV4(auth, zapParams)
 		if err != nil {
@@ -316,8 +314,6 @@ func createPoolStrategyTask(plan *createPoolPlan, poolRef string) *models.Strate
 		TickLower:         plan.tickLower,
 		TickUpper:         plan.tickUpper,
 		SlippageTolerance: plan.slippagePct,
-		ResidualTolerance: 1.0,
-		ZapLossTolerance:  plan.slippagePct,
 	}
 	switch plan.protocol {
 	case createPoolProtocolUniV3:

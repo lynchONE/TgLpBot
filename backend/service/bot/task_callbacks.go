@@ -612,12 +612,6 @@ func (b *Bot) handleTaskSetStopLossDelay(query *tgbotapi.CallbackQuery, user *mo
 
 func (b *Bot) handleTaskSetResidualTolerance(query *tgbotapi.CallbackQuery, user *models.User) {
 	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
-	taskID, err := parseTaskID("task_set_residual_", query.Data)
-	if err != nil {
-		b.sendMessage(query.Message.Chat.ID, "无效的任务ID")
-		return
-	}
-	database.SetUserSession(user.TelegramID, "task_edit_id", fmt.Sprintf("%d", taskID), 30*time.Minute)
-	database.SetUserSession(user.TelegramID, "state", "awaiting_task_residual_tolerance", 30*time.Minute)
-	b.sendMessage(query.Message.Chat.ID, "🧾 请输入该任务的剩余资产容忍度（百分比），例如：`1` 表示最多允许 1% 的剩余资产未投入")
+	database.ClearUserSession(user.TelegramID)
+	b.sendMessage(query.Message.Chat.ID, "该配置已下线，不再进行剩余资产容忍度校验。")
 }

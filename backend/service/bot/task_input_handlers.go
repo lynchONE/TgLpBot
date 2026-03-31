@@ -231,24 +231,6 @@ func (b *Bot) handleTaskStopLossDelayInput(chatID int64, user *models.User, text
 }
 
 func (b *Bot) handleTaskResidualToleranceInput(chatID int64, user *models.User, text string) {
-	taskID, err := b.taskIDFromSession(user)
-	if err != nil {
-		b.sendMessage(chatID, "会话已过期，请重新打开任务卡片。")
-		database.ClearUserSession(user.TelegramID)
-		return
-	}
-	value, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(text, "%")), 64)
-	if err != nil || value < 0 || value > 100 {
-		b.sendMessage(chatID, "数值无效。请输入 0-100 之间的百分比，例如：`1` 表示 1%")
-		return
-	}
-	if err := b.taskService.Update(user.ID, taskID, map[string]interface{}{
-		"residual_tolerance": value,
-	}); err != nil {
-		b.sendMessage(chatID, fmt.Sprintf("更新任务失败：%v", err))
-		return
-	}
 	database.ClearUserSession(user.TelegramID)
-	task, _ := b.taskService.GetByID(user.ID, taskID)
-	b.sendMessageWithKeyboard(chatID, b.formatTaskCard(task), b.taskKeyboard(task))
+	b.sendMessage(chatID, "该配置已下线，不再进行剩余资产容忍度校验。")
 }

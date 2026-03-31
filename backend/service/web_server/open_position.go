@@ -545,8 +545,6 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 		ReopenDelaySeconds:   cfg.RebalanceTimeout,
 		SlippageTolerance:    taskSlippage,
 		AutoReinvest:         cfg.AutoReinvest,
-		ResidualTolerance:    cfg.ResidualTolerance,
-		ZapLossTolerance:     cfg.ZapLossTolerance,
 		AllowEntrySwap:       req.AllowEntrySwap,
 		StopLossEnabled:      cfg.StopLossEnabled,
 		StopLossDelaySeconds: cfg.StopLossDelaySeconds,

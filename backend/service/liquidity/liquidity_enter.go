@@ -937,8 +937,6 @@ func (s *LiquidityService) enterV3FromToken(
 	}
 
 	// 4. 构建 zapInV3 参数
-	// Zap 合约侧会用 slippageBps 作为“剩余资产容忍度”(maxDustBps) 进行 dust 校验；swap 的价格安全由 minAmountOut 保证。
-	mintSlippageBps := percentageToBps(task.ResidualTolerance)
 	params := blockchain.ZapInV3ParamsSimple{
 		Pool:            poolAddr,
 		PositionManager: pmAddr,
@@ -949,12 +947,10 @@ func (s *LiquidityService) enterV3FromToken(
 		Recipient:       walletAddr,
 		Amount0In:       amount0In,
 		Amount1In:       amount1In,
-		SlippageBps:     mintSlippageBps,
 		Swap:            swapParams,
-		MaxSwapLossBps:  percentageToBpsReal(task.ZapLossTolerance),
 	}
 
-	log.Printf("[Liquidity] V3 enter 参数: pool=%s tick=%d..%d mintSlippage(dust)=%s", poolAddr.Hex(), task.TickLower, task.TickUpper, mintSlippageBps.String())
+	log.Printf("[Liquidity] V3 enter 参数: pool=%s tick=%d..%d", poolAddr.Hex(), task.TickLower, task.TickUpper)
 
 	// 5. 发送交易
 	nonce, err := blockchain.GetNonceWithClient(client, walletAddr)
@@ -1844,9 +1840,7 @@ func (s *LiquidityService) enterV4FromToken(
 		Amount1In:       amount1In,
 		SlippageBps:     percentageToBps(task.SlippageTolerance),
 		Swap:            swapParams,
-		SqrtPriceX96:    sqrtPriceX96,                               // 传入从链上获取的价格，避免合约重复调用
-		MaxDustBps:      percentageToBps(task.ResidualTolerance),    // 剩余资产容忍度 (dust)
-		MaxSwapLossBps:  percentageToBpsReal(task.ZapLossTolerance), // Swap 亏损容忍度
+		SqrtPriceX96:    sqrtPriceX96, // 传入从链上获取的价格，避免合约重复调用
 	}
 
 	// 6. Call ZapInV4
@@ -1882,7 +1876,6 @@ func (s *LiquidityService) enterV4FromToken(
 	log.Printf("[Liquidity] Amount0In: %s, Amount1In: %s", zapParams.Amount0In.String(), zapParams.Amount1In.String())
 	log.Printf("[Liquidity] SlippageBps: %s", zapParams.SlippageBps.String())
 	log.Printf("[Liquidity] SqrtPriceX96: %s", zapParams.SqrtPriceX96.String())
-	log.Printf("[Liquidity] MaxDustBps: %s", zapParams.MaxDustBps.String())
 	log.Printf("[Liquidity] Swap.Target: %s, Swap.AmountIn: %s", zapParams.Swap.Target.Hex(), zapParams.Swap.AmountIn.String())
 	log.Printf("[Liquidity] Swap.CallData Length: %d bytes", len(zapParams.Swap.CallData))
 	log.Printf("[Liquidity] ==========================================")
@@ -2079,15 +2072,6 @@ func parseZapSwapExecutedEvent(receipt *types.Receipt, zapAddr common.Address) (
 
 // percentageToBps converts float percent (e.g. 0.5) to bps (e.g. 50)
 func percentageToBps(p float64) *big.Int {
-	// 临时禁用 dust 校验，避免 PancakeSwap V3 因 swap 精度问题 revert
-	// slippageBps = 0 表示不校验 dust，剩余代币会被退回用户
-	// TODO: 优化 swap 计算逻辑后，可以改回用户配置的值
-	return big.NewInt(0) // 禁用 dust 校验
-	// return big.NewInt(int64(p * 100))
-}
-
-// percentageToBpsReal converts float percent (e.g. 0.5) to bps (e.g. 50), 0 = disabled
-func percentageToBpsReal(p float64) *big.Int {
 	if p <= 0 {
 		return big.NewInt(0)
 	}

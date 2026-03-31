@@ -75,14 +75,14 @@ func (b *Bot) handleConfigReinvestToggle(query *tgbotapi.CallbackQuery, user *mo
 
 func (b *Bot) handleConfigResidualTolerance(query *tgbotapi.CallbackQuery, user *models.User) {
 	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
-	database.SetUserSession(user.TelegramID, "state", "awaiting_global_residual_tolerance", 30*time.Minute)
-	b.sendMessage(query.Message.Chat.ID, "🧾 请输入剩余资产容忍度（百分比），例如：`1` 表示最多允许 1% 的剩余资产未投入")
+	database.ClearUserSession(user.TelegramID)
+	b.sendMessage(query.Message.Chat.ID, "该配置已下线，不再进行剩余资产容忍度校验。")
 }
 
 func (b *Bot) handleConfigZapLossTolerance(query *tgbotapi.CallbackQuery, user *models.User) {
 	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
-	database.SetUserSession(user.TelegramID, "state", "awaiting_global_zap_loss_tolerance", 30*time.Minute)
-	b.sendMessage(query.Message.Chat.ID, "💰 请输入开仓亏损容忍度（百分比），例如：`0.5` 表示开仓后价差亏损超过 0.5% 时交易自动 revert\n\n输入 `0` 关闭此校验")
+	database.ClearUserSession(user.TelegramID)
+	b.sendMessage(query.Message.Chat.ID, "该配置已下线，不再进行开仓亏损校验。")
 }
 
 func (b *Bot) handleConfigExtraNotificationsToggle(query *tgbotapi.CallbackQuery, user *models.User) {

@@ -28,15 +28,6 @@ import "./libraries/FullMath.sol";
  */
 
 interface IUniswapV3Pool {
-    function slot0() external view returns (
-        uint160 sqrtPriceX96,
-        int24 tick,
-        uint16 observationIndex,
-        uint16 observationCardinality,
-        uint16 observationCardinalityNext,
-        uint8 feeProtocol,
-        bool unlocked
-    );
     function fee() external view returns (uint24);
     function token0() external view returns (address);
     function token1() external view returns (address);
@@ -112,6 +103,8 @@ contract ZapSimple is ReentrancyGuard, Ownable {
     uint256 private constant Q96 = 2**96;
 
     uint256 private constant BPS_DENOMINATOR = 10_000;
+
+    bytes4 private constant SLOT0_SELECTOR = 0x3850c7bd;
 
     /// @dev Custom error selector: Permit2AllowanceIsFixedAtInfinity()
     /// Some Permit2 deployments revert on approve() once allowance is set to infinity.
@@ -222,9 +215,7 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         address recipient;
         uint256 amount0In;        // 用户输入的 token0 数量
         uint256 amount1In;        // 用户输入的 token1 数量
-        uint256 slippageBps;      // 作为 maxDustBps 使用(100=1%, 0=不校验); swap 滑点由 swap.minAmountOut 保护
         SwapParams swap;          // OKX swap 参数
-        uint256 maxSwapLossBps;   // Swap 最大亏损容忍度 (50 = 0.5%, 0 = 不校验)
     }
 
     /// @notice V4 PoolKey (简化版，使用 address)
@@ -250,8 +241,6 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         uint256 slippageBps;      // 滑点保护 (100 = 1%)
         SwapParams swap;          // OKX swap 参数
         uint160 sqrtPriceX96;     // 当前价格提示 (用于链上价格偏差校验)
-        uint256 maxDustBps;       // 最大 dust 容忍度 (100 = 1%, 0 = 不校验)
-        uint256 maxSwapLossBps;   // Swap 最大亏损容忍度 (50 = 0.5%, 0 = 不校验)；用目标池价格校验 swap 前后总价值损失
     }
 
     /// @notice Zap 结果
@@ -317,7 +306,7 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         uint256 amount0In,
         uint256 amount1In
     ) external view returns (bool zeroForOne, uint256 amountToSwap) {
-        (uint160 sqrtPriceX96, , , , , , ) = IUniswapV3Pool(pool).slot0();
+        uint160 sqrtPriceX96 = _getPoolSqrtPriceX96(pool);
         require(sqrtPriceX96 > 0, "Invalid SqrtPrice");
         
         // 计算 tick 范围的 sqrt 价格
@@ -381,7 +370,6 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         require(params.token0 < params.token1, "Tokens not sorted");
         require(params.pool != address(0), "Invalid pool");
         require(params.amount0In > 0 || params.amount1In > 0, "Zero amount");
-        require(params.slippageBps <= BPS_DENOMINATOR, "Slippage too high");
         require(params.positionManager != address(0), "Invalid PM address");
         require(v3PositionManager != address(0), "V3 PM not set");
         require(
@@ -439,21 +427,12 @@ contract ZapSimple is ReentrancyGuard, Ownable {
             recipient: params.recipient
         }));
 
-        // 5. Dust 校验 + 总价值校验
+        // 5. Track dust for reporting/refund.
         {
             uint256 dust0 = IERC20(params.token0).balanceOf(address(this)) - token0BalBefore;
             uint256 dust1 = IERC20(params.token1).balanceOf(address(this)) - token1BalBefore;
             result.dust0 = dust0;
             result.dust1 = dust1;
-        }
-
-        {
-            (uint160 sqrtPriceX96Pool, , , , , , ) = IUniswapV3Pool(params.pool).slot0();
-            _verifyDustAndLoss(
-                bal0, bal1, result, sqrtPriceX96Pool,
-                params.slippageBps, params.maxSwapLossBps,
-                params.amount0In, params.amount1In
-            );
         }
 
         // 6. 返还剩余代币
@@ -749,8 +728,6 @@ contract ZapSimple is ReentrancyGuard, Ownable {
         require(poolKey.currency0 < poolKey.currency1, "Tokens not sorted");
         require(params.amount0In > 0 || params.amount1In > 0, "Zero amount");
         require(params.slippageBps <= BPS_DENOMINATOR, "Slippage too high");
-        require(params.maxDustBps <= BPS_DENOMINATOR, "MaxDust too high");
-        require(params.maxSwapLossBps <= BPS_DENOMINATOR, "MaxSwapLoss too high");
         require(params.positionManager != address(0), "Invalid PM address");
         require(v4PositionManager != address(0), "V4 PM not set");
         require(params.positionManager == v4PositionManager, "Untrusted PM");
@@ -833,14 +810,7 @@ contract ZapSimple is ReentrancyGuard, Ownable {
             result.amount1Used = bal1 - dust1;
         }
 
-        // 8. Dust 验证 + 总价值校验
-        _verifyDustAndLoss(
-            bal0, bal1, result, sqrtPriceX96,
-            params.maxDustBps, params.maxSwapLossBps,
-            params.amount0In, params.amount1In
-        );
-
-        // 9. 退还 dust
+        // 8. 退还 dust
         _refundDelta(poolKey.currency0, msg.sender, token0BalBefore);
         _refundDelta(poolKey.currency1, msg.sender, token1BalBefore);
 
@@ -1043,41 +1013,19 @@ contract ZapSimple is ReentrancyGuard, Ownable {
     }
 
     /**
-     * @notice 统一校验 dust 和 swap 亏损
+     * @notice Read sqrtPriceX96 from a V3-style pool without decoding fork-specific tail fields.
+     * @dev Pancake V3 slot0() packs later fields differently from Uniswap V3, so only the first word is trusted here.
      */
-    function _verifyDustAndLoss(
-        uint256 bal0,
-        uint256 bal1,
-        ZapResult memory result,
-        uint160 sqrtPriceX96,
-        uint256 maxDustBps,
-        uint256 maxSwapLossBps,
-        uint256 amount0In,
-        uint256 amount1In
-    ) internal pure {
-        // Dust 校验
-        if (maxDustBps > 0) {
-            uint256 inputValue = _calculateValueInToken1(bal0, bal1, sqrtPriceX96);
-            uint256 dustValue = _calculateValueInToken1(result.dust0, result.dust1, sqrtPriceX96);
-            if (inputValue > 0) {
-                uint256 dustBps = FullMath.mulDiv(dustValue, BPS_DENOMINATOR, inputValue);
-                require(dustBps <= maxDustBps, "Dust exceeds limit");
-            }
-        }
-        // 总价值校验：投入 vs (LP价值 + 退款)
-        if (maxSwapLossBps > 0) {
-            uint256 inputValue = _calculateValueInToken1(amount0In, amount1In, sqrtPriceX96);
-            uint256 outputValue = _calculateValueInToken1(result.amount0Used + result.dust0, result.amount1Used + result.dust1, sqrtPriceX96);
-            if (inputValue > outputValue) {
-                uint256 lossBps = FullMath.mulDiv(inputValue - outputValue, BPS_DENOMINATOR, inputValue);
-                require(lossBps <= maxSwapLossBps, "Zap loss exceeds limit");
-            }
-        }
+    function _getPoolSqrtPriceX96(address pool) internal view returns (uint160 sqrtPriceX96) {
+        (bool ok, bytes memory data) = pool.staticcall(abi.encodeWithSelector(SLOT0_SELECTOR));
+        require(ok, "slot0 call failed");
+        require(data.length >= 32, "slot0 return too short");
+        sqrtPriceX96 = abi.decode(data, (uint160));
     }
 
     /**
      * @notice 将 token0 和 token1 的价值转换为以 token1 为单位的统一价值
-     * @dev 用于 dust 验证
+     * @dev Used for V3 optimal-swap calculation.
      */
     function _calculateValueInToken1(
         uint256 amount0,

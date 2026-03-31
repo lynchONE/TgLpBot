@@ -36,7 +36,6 @@ func (s *GlobalConfigService) GetOrCreate(userID uint) (*models.GlobalConfig, er
 		StopLossDelaySeconds:      0,
 		SlippageTolerance:         0.5,
 		AutoReinvest:              false,
-		ResidualTolerance:         1.0,
 		ExtraNotificationsEnabled: true,
 		FilterChineseTokens:       false,
 		BarkEnabled:               false,
