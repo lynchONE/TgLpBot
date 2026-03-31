@@ -107,6 +107,90 @@ const HOT_POOL_SORT_OPTIONS = [
   { key: 'fee_rate', label: 'Fee Rate', serverKey: 'fee_rate' },
   { key: 'active_fee_rate', label: 'Active', serverKey: 'fee_rate' },
 ];
+const POSITION_SM_RANGE_LIMIT = 4;
+const POSITION_SM_RANGE_STALE_MS = 60_000;
+const POSITION_SM_RANGE_BATCH_SIZE = 8;
+const FEE_TIER_BY_TICK_SPACING = {
+  1: 100,
+  10: 500,
+  50: 2500,
+  60: 3000,
+  100: 5000,
+  200: 10000,
+  2000: 20000,
+};
+
+function normalizePositionSmartMoneyGroups(groups) {
+  return Array.isArray(groups)
+    ? groups.filter((item) => Number(item?.range_percent) > 0)
+    : [];
+}
+
+function formatPositionSmartMoneyRangePercent(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return '--';
+  if (num >= 100) return `${Math.round(num)}%`;
+  if (num >= 10) return `${num.toFixed(1).replace(/\.0$/, '')}%`;
+  return `${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
+}
+
+function formatFixedFeePercent(value) {
+  const num = Number(value || 0);
+  if (!Number.isFinite(num) || num <= 0) return '';
+  return `${num.toFixed(4)}%`;
+}
+
+function formatFeeTierPercent(feeTier, tickSpacing) {
+  const bps = Number(feeTier || 0) || FEE_TIER_BY_TICK_SPACING[Number(tickSpacing)] || 0;
+  if (!Number.isFinite(bps) || bps <= 0) return '';
+  return formatFixedFeePercent(bps / 10000);
+}
+
+function buildPositionPairTitle(position, token0, token1) {
+  const left = String(token0?.symbol || '').trim();
+  const right = String(token1?.symbol || '').trim();
+  if (left && right) return `${left}-${right}`;
+  const rawTitle = String(position?.title || '').trim();
+  if (!rawTitle) return '--';
+  const parts = rawTitle.split('-').map((item) => String(item || '').trim()).filter(Boolean);
+  if (parts.length >= 3) return parts.slice(1, -1).join('-');
+  return rawTitle;
+}
+
+function PositionSmartMoneyRangeSummary({ groups }) {
+  const [expanded, setExpanded] = useState(false);
+  const validGroups = useMemo(() => normalizePositionSmartMoneyGroups(groups), [groups]);
+  const visibleGroups = expanded ? validGroups : validGroups.slice(0, POSITION_SM_RANGE_LIMIT);
+  const hiddenCount = Math.max(0, validGroups.length - visibleGroups.length);
+  if (!validGroups.length) return null;
+  return (
+    <div className="pos-sm-ranges">
+      <div className="pos-sm-ranges-head">
+        <span className="pos-sm-ranges-title">聪明钱金额区间</span>
+        <span className="pos-sm-ranges-count">{validGroups.length}档</span>
+      </div>
+      <div className="pos-sm-ranges-list">
+        {visibleGroups.map((group, index) => (
+          <div
+            key={`${Number(group?.range_percent || 0)}:${Number(group?.position_count || 0)}:${index}`}
+            className="pos-sm-range-chip"
+          >
+            <span className="pos-sm-range-chip-pct">{formatPositionSmartMoneyRangePercent(group?.range_percent)}</span>
+            {Math.max(0, Number(group?.position_count) || 0) > 1 ? (
+              <span className="pos-sm-range-chip-badge">{Number(group.position_count)}个</span>
+            ) : null}
+            <span className="pos-sm-range-chip-amount">{formatUsdCompact(group?.total_amount_usd)}</span>
+          </div>
+        ))}
+      </div>
+      {hiddenCount > 0 ? (
+        <button type="button" className="pos-sm-ranges-toggle" onClick={() => setExpanded((prev) => !prev)}>
+          {expanded ? '收起区间' : `更多区间 +${hiddenCount}`}
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
 function getKlineIntervalMeta(bar) {
   return KLINE_INTERVALS.find((item) => item.key === bar) || KLINE_INTERVALS[0];
@@ -494,6 +578,8 @@ export default function App() {
   const [positions, setPositions] = useState(null);
   const [positionsLoading, setPositionsLoading] = useState(false);
   const [positionsError, setPositionsError] = useState('');
+  const [positionSmartMoneyRanges, setPositionSmartMoneyRanges] = useState({});
+  const positionSmartMoneyRangesRef = useRef(positionSmartMoneyRanges);
 
   const [walletBalances, setWalletBalances] = useState(null);
   const [walletBalancesChain, setWalletBalancesChain] = useState('');
@@ -695,6 +781,18 @@ export default function App() {
       (a, b) => Number(b?.totals?.total_usd || 0) - Number(a?.totals?.total_usd || 0)
     );
   }, [positions]);
+  const positionSmartMoneyPoolAddresses = useMemo(() => {
+    const seen = new Set();
+    sortedPositions.forEach((row) => {
+      const poolId = normalizePoolAddress(row?.pool_id || row?.pool_address);
+      if (poolId) seen.add(poolId);
+    });
+    return Array.from(seen).sort();
+  }, [sortedPositions]);
+  const positionSmartMoneyPoolKey = useMemo(
+    () => positionSmartMoneyPoolAddresses.join(','),
+    [positionSmartMoneyPoolAddresses]
+  );
   const walletMetaByKey = useMemo(() => {
     const map = new Map();
     (Array.isArray(walletBalances) ? walletBalances : []).forEach((wallet, index) => {
@@ -707,6 +805,64 @@ export default function App() {
     });
     return map;
   }, [walletBalances]);
+
+  useEffect(() => {
+    positionSmartMoneyRangesRef.current = positionSmartMoneyRanges;
+  }, [positionSmartMoneyRanges]);
+
+  useEffect(() => {
+    if (positionSmartMoneyPoolAddresses.length === 0) return undefined;
+
+    const now = Date.now();
+    const pending = positionSmartMoneyPoolAddresses.filter((poolAddress) => {
+      const cached = positionSmartMoneyRangesRef.current[poolAddress];
+      return !cached || now - Number(cached.fetchedAt || 0) >= POSITION_SM_RANGE_STALE_MS;
+    });
+    if (pending.length === 0) return undefined;
+
+    const controller = new AbortController();
+    let cancelled = false;
+
+    const loadPoolStats = async (poolAddress) => {
+      try {
+        const resp = await fetchSMPoolStats({
+          apiBaseUrl,
+          poolAddress,
+          signal: controller.signal,
+        });
+        if (cancelled) return;
+        setPositionSmartMoneyRanges((prev) => ({
+          ...prev,
+          [poolAddress]: {
+            fetchedAt: Date.now(),
+            groups: normalizePositionSmartMoneyGroups(resp?.range_groups),
+          },
+        }));
+      } catch {
+        if (cancelled || controller.signal.aborted) return;
+        setPositionSmartMoneyRanges((prev) => ({
+          ...prev,
+          [poolAddress]: {
+            ...(prev[poolAddress] || {}),
+            fetchedAt: Date.now(),
+            groups: [],
+          },
+        }));
+      }
+    };
+
+    (async () => {
+      for (let index = 0; index < pending.length && !cancelled; index += POSITION_SM_RANGE_BATCH_SIZE) {
+        const batch = pending.slice(index, index + POSITION_SM_RANGE_BATCH_SIZE);
+        await Promise.all(batch.map((poolAddress) => loadPoolStats(poolAddress)));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [apiBaseUrl, positionSmartMoneyPoolKey, positionSmartMoneyPoolAddresses]);
 
   const klineChartHeightCustomized = klineChartHeight !== DEFAULT_KLINE_CHART_HEIGHT;
   const hotPoolsPanelHeightCustomized = hotPoolsPanelHeight !== hotPoolsDefaultHeightRef.current;
@@ -1970,7 +2126,7 @@ export default function App() {
                       <button type="button" className="copy-tiny" onClick={(e) => { e.stopPropagation(); copyAddr(addr); }} title="复制地址">
                         <svg viewBox="0 0 24 24" fill="currentColor" width="11" height="11"><path d="M16 1H4a2 2 0 00-2 2v14h2V3h12V1zm3 4H8a2 2 0 00-2 2v14a2 2 0 002 2h11a2 2 0 002-2V7a2 2 0 00-2-2zm0 16H8V7h11v14z"/></svg>
                       </button>
-                      {feePct > 0 && <span className="tag tag-blue"><NumberFlowValue value={feePct} formatter={(v) => `${Number(v).toFixed(2).replace(/\.?0+$/, '')}%`} /></span>}
+                      {feePct > 0 && <span className="tag tag-blue"><NumberFlowValue value={feePct} formatter={(v) => formatFixedFeePercent(v)} /></span>}
                       {protocolTagText && (
                         <span className="tag tag-dex tag-dex-inline">
                           {dex?.src ? <img src={dex.src} alt="" /> : null}
@@ -2544,11 +2700,18 @@ export default function App() {
               const taskRangeUp = Number(p?.task_range_upper_pct);
               const taskAmount = Number(p?.task_amount_usdt);
               const priceRange = computePriceRange(p);
+              const poolAddress = normalizePoolAddress(p?.pool_id || p?.pool_address);
+              const smartMoneyRangeGroups = poolAddress
+                ? positionSmartMoneyRanges[poolAddress]?.groups
+                : [];
               const positionWalletMeta = walletMetaByKey.get(`id:${Number(p?.wallet_id || 0)}`) ||
                 walletMetaByKey.get(`addr:${normalizeWalletAddress(p?.wallet_address)}`);
               const positionWalletText = positionWalletMeta?.label ||
                 shortAddress(normalizeWalletAddress(p?.wallet_address) || '', 6, 4) ||
                 '默认钱包';
+              const pairTitle = buildPositionPairTitle(p, token0, token1);
+              const feeLabel = formatFeeTierPercent(p?.fee_tier, p?.tick_spacing);
+              const dex = getDexIcon(`${String(p?.exchange || '').trim()} ${String(p?.version || '').trim()}`);
 
               const statusClass = statusLabel.includes('错误') ? 'st-error' :
                 statusLabel.includes('暂停') || statusLabel.includes('停止') || statusLabel.includes('撤出') ? 'st-warn' :
@@ -2561,22 +2724,26 @@ export default function App() {
                       onClick={() => selectPool({
                         pool_id: p?.pool_id,
                         pool_address: p?.pool_id,
-                        trading_pair: p?.title,
+                        trading_pair: pairTitle,
                         protocol_version: p?.version,
                         factory_name: p?.exchange,
                         token0_address: token0?.address,
                         token1_address: token1?.address,
                         token0_symbol: token0?.symbol,
                         token1_symbol: token1?.symbol,
+                        fee_tier: p?.fee_tier,
+                        fee_percentage: Number(p?.fee_tier || 0) > 0 ? Number(p.fee_tier) / 10000 : 0,
                         chain: p?.chain || chain,
                       }, p?.chain || chain)}>
                       <div className="pos-pair-row">
-                        <span className="pos-pair-name">{p?.title || shortAddress(p?.pool_id || '')}</span>
-                        {p?.tick_spacing && (
-                          <span className="badge badge-fee">{
-                            { 1: '0.01%', 10: '0.05%', 50: '0.25%', 60: '0.30%', 100: '0.50%', 200: '1%' }[Number(p.tick_spacing)] || ''
-                          }</span>
-                        )}
+                        {dex?.src ? (
+                          <span className="badge badge-dex pos-dex-tag" style={dex.color ? { '--pos-dex-color': dex.color } : undefined}>
+                            <img src={dex.src} alt="" />
+                            {dex.label ? <span>{dex.label}</span> : null}
+                          </span>
+                        ) : null}
+                        <span className="pos-pair-name">{pairTitle || shortAddress(p?.pool_id || '')}</span>
+                        {feeLabel ? <span className="badge badge-fee">{feeLabel}</span> : null}
                       </div>
                       <div className="pos-status-row">
                         <span className={`status-pill ${statusClass}`}>
@@ -2626,6 +2793,10 @@ export default function App() {
                       )}
                     </div>
                   </div>
+
+                  {Array.isArray(smartMoneyRangeGroups) && smartMoneyRangeGroups.length > 0 ? (
+                    <PositionSmartMoneyRangeSummary groups={smartMoneyRangeGroups} />
+                  ) : null}
 
                   {(token0 || token1) && (
                     <div className="pos-token-table">

@@ -25,7 +25,7 @@ export default function KlineModal({ open, onClose, theme, pool, chain }) {
     const title = useMemo(() => {
         const pair = String(pool?.trading_pair || '').trim() || 'K线图';
         if (pool?.fee_percentage !== undefined && pool?.fee_percentage !== null) {
-            return `${pair} (${Number(pool.fee_percentage).toFixed(2)}%)`;
+            return `${pair} (${Number(pool.fee_percentage).toFixed(4)}%)`;
         }
         return pair;
     }, [pool?.trading_pair, pool?.fee_percentage]);

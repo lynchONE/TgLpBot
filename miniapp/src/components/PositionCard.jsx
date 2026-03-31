@@ -3,6 +3,8 @@ import { openLink } from '../lib/telegram';
 import { useDurationFrom, useRelativeTime } from '../lib/time';
 import PriceRangeVisualizer from './PriceRangeVisualizer';
 import NumberFlowValue from './NumberFlowValue.jsx';
+import uniswapIcon from '../image/uniswap.svg';
+import pancakeIcon from '../image/pancake.svg';
 
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -18,6 +20,33 @@ const icons = {
     arrowUp: 'M7 14l5-5 5 5',
     arrowDown: 'M7 10l5 5 5-5',
 };
+
+function getDexIconConfig(exchangeName, versionText) {
+    const text = `${String(exchangeName || '').trim()} ${String(versionText || '').trim()}`.toLowerCase();
+    const versionMatch = text.match(/v(\d+)/i);
+    const label = versionMatch ? `V${versionMatch[1]}` : String(versionText || '').trim().toUpperCase();
+    if (text.includes('uniswap')) {
+        return {
+            src: uniswapIcon,
+            alt: 'Uniswap',
+            label,
+            bgClass: 'bg-pink-500/15',
+            textClass: 'text-pink-600 dark:text-pink-300',
+            ringClass: 'ring-pink-500/25 dark:ring-pink-500/30',
+        };
+    }
+    if (text.includes('pancake') || text.includes('pcs')) {
+        return {
+            src: pancakeIcon,
+            alt: 'PancakeSwap',
+            label,
+            bgClass: 'bg-amber-500/15',
+            textClass: 'text-amber-700 dark:text-amber-300',
+            ringClass: 'ring-amber-500/25 dark:ring-amber-500/30',
+        };
+    }
+    return null;
+}
 
 const USD_DISPLAY_LIMIT = 1e15;
 const usdFormatter = new Intl.NumberFormat('en-US', {
@@ -52,6 +81,74 @@ const formatBotAmount = (v) => {
     if (Math.abs(n) < 0.005) return '0.00';
     return botAmountFormatter.format(n);
 };
+
+const formatUsdCompact = (v) => {
+    const n = Number(v ?? 0);
+    if (!Number.isFinite(n) || n <= 0 || Math.abs(n) > USD_DISPLAY_LIMIT) return '$--';
+    const abs = Math.abs(n);
+    if (abs >= 1000000) return `$${(n / 1000000).toFixed(abs >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M`;
+    if (abs >= 1000) return `$${(n / 1000).toFixed(abs >= 10000 ? 0 : 1).replace(/\.0$/, '')}K`;
+    if (abs >= 100) return `$${n.toFixed(0)}`;
+    if (abs >= 10) return `$${n.toFixed(1).replace(/\.0$/, '')}`;
+    return `$${n.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}`;
+};
+
+const formatRangePercentPlain = (value) => {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return '--';
+    if (num >= 100) return `${Math.round(num)}%`;
+    if (num >= 10) return `${num.toFixed(1).replace(/\.0$/, '')}%`;
+    return `${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
+};
+
+const SMART_MONEY_RANGE_LIMIT = 4;
+
+function normalizeSmartMoneyRangeGroups(groups) {
+    return Array.isArray(groups)
+        ? groups.filter((item) => Number(item?.range_percent) > 0)
+        : [];
+}
+
+function SmartMoneyRangeSummary({ groups }) {
+    const [expanded, setExpanded] = useState(false);
+    const validGroups = useMemo(() => normalizeSmartMoneyRangeGroups(groups), [groups]);
+    const visibleGroups = expanded ? validGroups : validGroups.slice(0, SMART_MONEY_RANGE_LIMIT);
+    const hiddenCount = Math.max(0, validGroups.length - visibleGroups.length);
+    if (!validGroups.length) return null;
+    return (
+        <div className="rounded-lg border border-lime-500/20 bg-lime-500/[0.08] px-2.5 py-2">
+            <div className="flex items-center justify-between gap-2">
+                <div className="text-[10px] font-bold tracking-wide text-lime-700 dark:text-lime-300">聪明钱金额区间</div>
+                <div className="text-[10px] text-lime-700/70 dark:text-lime-300/70">{validGroups.length}档</div>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+                {visibleGroups.map((group, index) => (
+                    <div
+                        key={`${Number(group?.range_percent || 0)}:${Number(group?.position_count || 0)}:${index}`}
+                        className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-lime-500/15 bg-black/10 px-2 py-1 text-[10px] text-zinc-600 dark:text-zinc-200"
+                    >
+                        <span className="shrink-0 font-semibold text-zinc-900 dark:text-white/95">{formatRangePercentPlain(group?.range_percent)}</span>
+                        {Math.max(0, Number(group?.position_count) || 0) > 1 ? (
+                            <span className="shrink-0 rounded-full bg-white/70 px-1.5 py-0.5 text-[9px] font-semibold text-zinc-600 dark:bg-white/10 dark:text-zinc-300">
+                                {Number(group.position_count)}个
+                            </span>
+                        ) : null}
+                        <span className="truncate text-zinc-500 dark:text-white/55">{formatUsdCompact(group?.total_amount_usd)}</span>
+                    </div>
+                ))}
+            </div>
+            {hiddenCount > 0 ? (
+                <button
+                    type="button"
+                    onClick={() => setExpanded((prev) => !prev)}
+                    className="mt-2 text-[10px] font-semibold text-lime-700 transition hover:text-lime-800 dark:text-lime-300 dark:hover:text-lime-200"
+                >
+                    {expanded ? '收起区间' : `更多区间 +${hiddenCount}`}
+                </button>
+            ) : null}
+        </div>
+    );
+}
 
 const STABLE_SYMBOLS = new Set(['USDT', 'USDC', 'BUSD', 'DAI']);
 const normalizeSymbol = (value) => String(value || '').trim().toUpperCase();
@@ -116,10 +213,36 @@ const normalizeHexPrefixed = (v) => {
 };
 
 // 由 tickSpacing 推导费率标签
-const feeRateFromTickSpacing = (ts) => {
-    const map = { 1: '0.01%', 10: '0.05%', 50: '0.25%', 60: '0.30%', 100: '0.50%', 200: '1%', 2000: '2%' };
-    return map[Number(ts)] ?? null;
+const FEE_TIER_BY_TICK_SPACING = {
+    1: 100,
+    10: 500,
+    50: 2500,
+    60: 3000,
+    100: 5000,
+    200: 10000,
+    2000: 20000,
 };
+
+function inferFeeTierFromTickSpacing(tickSpacing) {
+    return FEE_TIER_BY_TICK_SPACING[Number(tickSpacing)] || 0;
+}
+
+function formatFeeTierPercent(feeTier) {
+    const n = Number(feeTier || 0);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return `${(n / 10000).toFixed(4)}%`;
+}
+
+function buildPositionPairTitle(position, token0, token1) {
+    const left = String(token0?.symbol || '').trim();
+    const right = String(token1?.symbol || '').trim();
+    if (left && right) return `${left}-${right}`;
+    const rawTitle = String(position?.title || '').trim();
+    if (!rawTitle) return '--';
+    const parts = rawTitle.split('-').map((item) => String(item || '').trim()).filter(Boolean);
+    if (parts.length >= 3) return parts.slice(1, -1).join('-');
+    return rawTitle;
+}
 
 export default function PositionCard({
     position,
@@ -137,6 +260,7 @@ export default function PositionCard({
     isSelected = false,
     onToggleSelect,
     headerAccessory = null,
+    smartMoneyRangeGroups = [],
 }) {
     const [expanded, setExpanded] = useState(true);
 
@@ -160,15 +284,14 @@ export default function PositionCard({
     const quoteSymbol = stableIndex === 0 ? token0?.symbol : token1?.symbol;
     const pairLabel = baseSymbol && quoteSymbol ? `${baseSymbol}/${quoteSymbol}` : baseSymbol || quoteSymbol || '';
 
-    const displayTitle = useMemo(() => {
-        if (!position?.title) return pairLabel || '--';
-        const parts = position.title.split('-');
-        if (parts.length >= 3) {
-            // "panv3-USDT-POWER-1.0%" -> "USDT-POWER"
-            return parts.slice(1, -1).join('-');
-        }
-        return position.title;
-    }, [position?.title, pairLabel]);
+    const displayTitle = useMemo(
+        () => buildPositionPairTitle(position, token0, token1),
+        [position, token0, token1]
+    );
+    const dexConfig = useMemo(
+        () => getDexIconConfig(position?.exchange, position?.version),
+        [position?.exchange, position?.version]
+    );
 
     const { totalValue, pnlAbsolute, hasPnL } = useMemo(() => {
         const backendCurrentValue = Number(position?.current_value_usd);
@@ -341,9 +464,9 @@ export default function PositionCard({
 
     // 费率标签（从 tickSpacing 推导）
     const feeLabel = useMemo(() => {
-        const ts = position?.pool?.tickSpacing ?? position?.tick_spacing;
-        return feeRateFromTickSpacing(ts);
-    }, [position?.pool?.tickSpacing, position?.tick_spacing]);
+        const feeTier = Number(position?.fee_tier || 0) || inferFeeTierFromTickSpacing(position?.pool?.tickSpacing ?? position?.tick_spacing);
+        return formatFeeTierPercent(feeTier);
+    }, [position?.fee_tier, position?.pool?.tickSpacing, position?.tick_spacing]);
 
     return (
         <div className="relative rounded-2xl border border-zinc-200/80 bg-white dark:border-white/5 dark:bg-[#131518] shadow-sm overflow-hidden transition-all duration-200 active:scale-[0.985]">
@@ -368,12 +491,18 @@ export default function PositionCard({
                         <div className="flex flex-col gap-1 min-w-0 flex-1">
                             {/* 交易对名称 + 费率 */}
                             <div className="flex items-center gap-1.5 flex-wrap pr-1">
+                                {dexConfig ? (
+                                    <span className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-1.5 py-0.5 text-[10px] font-bold ring-1 ${dexConfig.bgClass} ${dexConfig.textClass} ${dexConfig.ringClass}`}>
+                                        <img src={dexConfig.src} alt={dexConfig.alt} className="h-3.5 w-3.5" />
+                                        {dexConfig.label ? <span>{dexConfig.label}</span> : null}
+                                    </span>
+                                ) : null}
                                 <span className="text-[15px] font-bold text-zinc-900 dark:text-white/95 leading-tight truncate max-w-full">
                                     {displayTitle}
                                 </span>
                                 {feeLabel && (
                                     <span className="inline-flex items-center rounded bg-violet-500/12 px-1.5 py-0.5 text-[10px] font-bold text-violet-600 dark:bg-violet-500/18 dark:text-violet-300 ring-1 ring-violet-500/20 dark:ring-violet-400/25 shrink-0">
-                                        <NumberFlowValue value={feeLabel} formatter={() => feeLabel} />
+                                        {feeLabel}
                                     </span>
                                 )}
                             </div>
@@ -470,6 +599,10 @@ export default function PositionCard({
                 {/* ══════════════════════════════════════════
                     区域 2：余额明细（可折叠）
                 ══════════════════════════════════════════ */}
+                {Array.isArray(smartMoneyRangeGroups) && smartMoneyRangeGroups.length > 0 ? (
+                    <SmartMoneyRangeSummary groups={smartMoneyRangeGroups} />
+                ) : null}
+
                 <div className="rounded-lg border border-zinc-100 bg-zinc-50/50 dark:border-white/5 dark:bg-[#1a1c20]">
                     <button type="button" onClick={() => setExpanded(!expanded)}
                         className="w-full flex items-center justify-between px-2.5 py-1.5">

@@ -319,6 +319,25 @@ function parseOptionalPercent(raw) {
     return { valid: true, value: num };
 }
 
+const POSITION_SM_RANGE_STALE_MS = 60_000;
+const POSITION_SM_RANGE_BATCH_SIZE = 8;
+
+function normalizePoolKey(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const body = raw.startsWith('0x') || raw.startsWith('0X') ? raw.slice(2) : raw;
+    if (!/^[a-fA-F0-9]{40}$/.test(body) && !/^[a-fA-F0-9]{64}$/.test(body)) {
+        return '';
+    }
+    return `0x${body.toLowerCase()}`;
+}
+
+function normalizePositionSmartMoneyGroups(groups) {
+    return Array.isArray(groups)
+        ? groups.filter((item) => Number(item?.range_percent) > 0)
+        : [];
+}
+
 
 function buildEntrySwapConfirmKey(preview, entrySwapSlippage) {
     return [
@@ -573,6 +592,8 @@ export default function App() {
     const [batchMode, setBatchMode] = useState(false);
     const [selectedTaskIds, setSelectedTaskIds] = useState(new Set());
     const [batchLoading, setBatchLoading] = useState(false);
+    const [positionSmartMoneyRanges, setPositionSmartMoneyRanges] = useState({});
+    const positionSmartMoneyRangesRef = useRef(positionSmartMoneyRanges);
 
     const serverPollIntervalSec = Math.max(1, Number(data?.poll_interval_sec || adminPositions?.poll_interval_sec || 1));
     const pollIntervalSec = Math.max(1, Number(pollOverrideSec || serverPollIntervalSec || 1));
@@ -717,6 +738,18 @@ export default function App() {
     }, [positions]);
 
     const visibleTaskPositions = visiblePositions;
+    const visibleTaskPositionPoolAddresses = useMemo(() => {
+        const seen = new Set();
+        visibleTaskPositions.forEach((position) => {
+            const poolId = normalizePoolKey(position?.pool_id || position?.pool_address);
+            if (poolId) seen.add(poolId);
+        });
+        return Array.from(seen).sort();
+    }, [visibleTaskPositions]);
+    const visibleTaskPositionPoolKey = useMemo(
+        () => visibleTaskPositionPoolAddresses.join(','),
+        [visibleTaskPositionPoolAddresses]
+    );
 
     // 婵炲濮寸花鑲╁垝閵婏附濯寸€广儱妫涢埀顒夊灠椤?pool_address -> position_usd 闂佸搫瀚慨鎾儍閻樼粯鏅柛顐犲灪閺嗗繐霉濠婂啴顎楁繝鈧鍫熷€绘い鎾卞灪閿涘本鎱ㄩ崷顓炐㈤柣鈩冪懄缁嬪绻濋崘鈹炬灃缂備讲鍋撻柣鎴灻惁顔济归悩铏鞍闁绘牭绲跨划鐢稿箻閸涱垳顦?
     const positionsPoolMap = useMemo(() => {
@@ -814,6 +847,64 @@ export default function App() {
     const apiBaseUrl = useMemo(() => resolveApiBaseUrl(), []);
     const allowEmptyInitData = useMemo(() => resolveAllowEmptyInitData(), []);
     const hasInitData = Boolean(initData) || allowEmptyInitData;
+
+    useEffect(() => {
+        positionSmartMoneyRangesRef.current = positionSmartMoneyRanges;
+    }, [positionSmartMoneyRanges]);
+
+    useEffect(() => {
+        if (showAdmin || !isPositions || visibleTaskPositionPoolAddresses.length === 0) return undefined;
+
+        const now = Date.now();
+        const pending = visibleTaskPositionPoolAddresses.filter((poolAddress) => {
+            const cached = positionSmartMoneyRangesRef.current[poolAddress];
+            return !cached || now - Number(cached.fetchedAt || 0) >= POSITION_SM_RANGE_STALE_MS;
+        });
+        if (pending.length === 0) return undefined;
+
+        const controller = new AbortController();
+        let cancelled = false;
+
+        const loadPoolStats = async (poolAddress) => {
+            try {
+                const resp = await fetchSMPoolStats({
+                    apiBaseUrl,
+                    poolAddress,
+                    signal: controller.signal,
+                });
+                if (cancelled) return;
+                setPositionSmartMoneyRanges((prev) => ({
+                    ...prev,
+                    [poolAddress]: {
+                        fetchedAt: Date.now(),
+                        groups: normalizePositionSmartMoneyGroups(resp?.range_groups),
+                    },
+                }));
+            } catch {
+                if (cancelled || controller.signal.aborted) return;
+                setPositionSmartMoneyRanges((prev) => ({
+                    ...prev,
+                    [poolAddress]: {
+                        ...(prev[poolAddress] || {}),
+                        fetchedAt: Date.now(),
+                        groups: [],
+                    },
+                }));
+            }
+        };
+
+        (async () => {
+            for (let index = 0; index < pending.length && !cancelled; index += POSITION_SM_RANGE_BATCH_SIZE) {
+                const batch = pending.slice(index, index + POSITION_SM_RANGE_BATCH_SIZE);
+                await Promise.all(batch.map((poolAddress) => loadPoolStats(poolAddress)));
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+            controller.abort();
+        };
+    }, [apiBaseUrl, isPositions, showAdmin, visibleTaskPositionPoolKey, visibleTaskPositionPoolAddresses]);
 
     const requestConfirm = (options) => new Promise((resolve) => {
         confirmResolveRef.current = resolve;
@@ -2631,6 +2722,9 @@ export default function App() {
                                         batchMode={batchMode}
                                         isSelected={selectedTaskIds.has(p.task_id)}
                                         onToggleSelect={() => toggleTaskSelection(p.task_id)}
+                                        smartMoneyRangeGroups={
+                                            positionSmartMoneyRanges[normalizePoolKey(p?.pool_id || p?.pool_address)]?.groups || []
+                                        }
                                     />
                                 ))}
                             </>

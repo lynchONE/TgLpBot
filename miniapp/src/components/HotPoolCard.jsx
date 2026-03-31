@@ -127,7 +127,7 @@ const PositionBadge = ({ pool }) => {
 function formatFeePercent(v) {
     const n = Number(v || 0);
     if (!Number.isFinite(n) || n <= 0) return '';
-    return `${n.toFixed(2).replace(/\.?0+$/, '')}%`;
+    return `${n.toFixed(4)}%`;
 }
 
 function formatRatePct(v) {

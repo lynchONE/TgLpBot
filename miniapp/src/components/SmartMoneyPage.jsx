@@ -383,11 +383,11 @@ const GOLDEN_DOG_INTENSITY_OPTIONS = [
 
 const GOLDEN_DOG_FEE_RATE_OPTIONS = [
     { value: '', label: '不限' },
-    { value: '100', label: '0.01%' },
-    { value: '500', label: '0.05%' },
-    { value: '2500', label: '0.25%' },
-    { value: '3000', label: '0.30%' },
-    { value: '10000', label: '1%' },
+    { value: '100', label: '0.0100%' },
+    { value: '500', label: '0.0500%' },
+    { value: '2500', label: '0.2500%' },
+    { value: '3000', label: '0.3000%' },
+    { value: '10000', label: '1.0000%' },
 ];
 
 function createGoldenDogDraft() {
@@ -593,8 +593,7 @@ function getPairInitials(value) {
 
 function formatFeeTier(fee) {
     if (!fee) return '';
-    const map = { 100: '0.01%', 500: '0.05%', 2500: '0.25%', 3000: '0.3%', 10000: '1%' };
-    return map[fee] || `${(fee / 10000).toFixed(2)}%`;
+    return `${(Number(fee) / 10000).toFixed(4)}%`;
 }
 
 function formatUSDCompact(value) {

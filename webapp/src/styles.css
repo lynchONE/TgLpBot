@@ -3617,6 +3617,20 @@ body {
   gap: 6px;
   flex-wrap: wrap;
 }
+.pos-dex-tag {
+  --pos-dex-color: var(--accent);
+  gap: 5px;
+  padding: 2px 8px 2px 6px;
+  color: var(--pos-dex-color);
+  background: color-mix(in srgb, var(--pos-dex-color) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--pos-dex-color) 24%, transparent);
+}
+.pos-dex-tag img {
+  width: 12px;
+  height: 12px;
+  display: block;
+  object-fit: contain;
+}
 .pos-pair-name {
   font-size: 14px;
   font-weight: 700;
@@ -3715,6 +3729,78 @@ body {
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
+}
+
+.pos-sm-ranges {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(163, 230, 53, 0.16);
+  background: linear-gradient(135deg, rgba(132, 204, 22, 0.1), rgba(132, 204, 22, 0.03));
+}
+.pos-sm-ranges-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.pos-sm-ranges-title {
+  font-size: 10px;
+  font-weight: 800;
+  color: #d9f99d;
+  letter-spacing: 0.03em;
+}
+.pos-sm-ranges-count {
+  font-size: 10px;
+  color: rgba(217, 249, 157, 0.74);
+}
+.pos-sm-ranges-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pos-sm-range-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(163, 230, 53, 0.14);
+  background: rgba(11, 17, 27, 0.28);
+  color: #edf7cf;
+  font-size: 10px;
+  line-height: 1;
+}
+.pos-sm-range-chip-pct {
+  font-weight: 800;
+  color: #f7fee7;
+}
+.pos-sm-range-chip-badge {
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(237, 247, 207, 0.84);
+  font-size: 9px;
+  font-weight: 700;
+}
+.pos-sm-range-chip-amount {
+  color: rgba(237, 247, 207, 0.78);
+  font-variant-numeric: tabular-nums;
+}
+.pos-sm-ranges-toggle {
+  margin-top: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #bef264;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.pos-sm-ranges-toggle:hover {
+  color: #d9f99d;
 }
 
 /* Token table */

@@ -202,6 +202,7 @@ type RealtimePosition struct {
 	Version           string     `json:"version"`
 	Exchange          string     `json:"exchange"`
 	Title             string     `json:"title"`
+	FeeTier           uint64     `json:"fee_tier,omitempty"`
 	PoolID            string     `json:"pool_id"`
 	PositionID        string     `json:"position_id"`
 	WalletID          uint       `json:"wallet_id,omitempty"`
@@ -1223,7 +1224,7 @@ func (s *RealtimePositionsService) buildV3Position(
 	}
 	totals.TotalUSD = totals.WalletUSD + totals.PositionUSD + totals.FeeUSD
 
-	title := fmt.Sprintf("%s-%s-%s-%.2f%%", exchangeShort(exchange, "UniV3"), row0.Symbol, row1.Symbol, fee)
+	title := fmt.Sprintf("%s-%s-%s-%.4f%%", exchangeShort(exchange, "UniV3"), row0.Symbol, row1.Symbol, fee)
 	if strings.TrimSpace(exchange) == "" {
 		exchange = "V3"
 	}
@@ -1272,6 +1273,7 @@ func (s *RealtimePositionsService) buildV3Position(
 		Version:    "v3",
 		Exchange:   exchange,
 		Title:      title,
+		FeeTier:    uint64(info.Fee),
 		PoolID:     poolID,
 		PositionID: tokenId.String(),
 		WalletID: func() uint {
@@ -1565,7 +1567,7 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 	if exchange == "" {
 		exchange = "Uniswap V4"
 	}
-	title := fmt.Sprintf("%s-%s-%s-%.2f%%", exchangeShort(exchange, "UniV4"), row0.Symbol, row1.Symbol, float64(task.Fee)/10000.0)
+	title := fmt.Sprintf("%s-%s-%s-%.4f%%", exchangeShort(exchange, "UniV4"), row0.Symbol, row1.Symbol, float64(task.Fee)/10000.0)
 
 	hasLiquidity := liq != nil && liq.Sign() > 0
 	taskRangeLowerPct := 0.0
@@ -1600,6 +1602,7 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		Version:    "v4",
 		Exchange:   exchange,
 		Title:      title,
+		FeeTier:    uint64(task.Fee),
 		PoolID:     strings.TrimSpace(task.PoolId),
 		PositionID: tokenId,
 		WalletID:   task.WalletID,
@@ -1807,7 +1810,7 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 	if version == "v4" {
 		short = "UniV4"
 	}
-	title := fmt.Sprintf("%s-%s-%s-%.2f%%", exchangeShort(exchange, short), row0.Symbol, row1.Symbol, feePct)
+	title := fmt.Sprintf("%s-%s-%s-%.4f%%", exchangeShort(exchange, short), row0.Symbol, row1.Symbol, feePct)
 
 	taskRangeLowerPct := 0.0
 	taskRangeUpperPct := 0.0
@@ -1841,6 +1844,7 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 		Version:    version,
 		Exchange:   exchange,
 		Title:      title,
+		FeeTier:    uint64(task.Fee),
 		PoolID:     poolID,
 		PositionID: fmt.Sprintf("task-%d", task.ID),
 		WalletID:   task.WalletID,

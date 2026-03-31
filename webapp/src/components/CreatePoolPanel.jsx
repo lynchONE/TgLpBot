@@ -67,9 +67,7 @@ const PRICE_RE = /^1\s+([A-Za-z0-9._-]+)\s*=\s*([0-9.]+)\s*([A-Za-z0-9._-]+)$/i;
 function formatFeeTier(feeTier) {
   const n = Number(feeTier || 0);
   if (!Number.isFinite(n) || n <= 0) return '--';
-  const pct = n / 10000;
-  const digits = pct < 0.01 ? 4 : pct < 0.1 ? 3 : 2;
-  return `${pct.toFixed(digits).replace(/\.?0+$/, '')}%`;
+  return `${(n / 10000).toFixed(4)}%`;
 }
 
 function getProtocolOption(protocol) {
@@ -870,8 +868,8 @@ export default function CreatePoolPanel({ apiBaseUrl, initData, hasInitData }) {
                 ) : (
                   <small className="cp-field-hint">
                     {protocol === 'pcsv3'
-                      ? 'PancakeSwap V3 固定支持 0.01% / 0.05% / 0.25% / 1%。'
-                      : 'Uniswap V3 固定支持 0.01% / 0.05% / 0.3% / 1%。'}
+                      ? 'PancakeSwap V3 固定支持 0.0100% / 0.0500% / 0.2500% / 1.0000%。'
+                      : 'Uniswap V3 固定支持 0.0100% / 0.0500% / 0.3000% / 1.0000%。'}
                   </small>
                 )}
               </div>
