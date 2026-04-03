@@ -443,12 +443,47 @@ func reduceOneSidedSwapAmount(currentSwap *big.Int, sim *blockchain.ZapResultSim
 	return next, true
 }
 
+func dustSignalsMateriallyDiffer(walletDust, parsedDust *big.Int) bool {
+	if walletDust == nil || parsedDust == nil || walletDust.Sign() <= 0 || parsedDust.Sign() <= 0 {
+		return false
+	}
+	diff := new(big.Int).Sub(walletDust, parsedDust)
+	if diff.Sign() < 0 {
+		diff.Neg(diff)
+	}
+	larger := cloneBig(walletDust)
+	if parsedDust.Cmp(larger) > 0 {
+		larger = cloneBig(parsedDust)
+	}
+	if larger.Sign() <= 0 {
+		return false
+	}
+	// If the two dust signals differ by 20%+ of the larger value, treat the wallet read as suspicious.
+	return new(big.Int).Mul(diff, big.NewInt(100)).Cmp(new(big.Int).Mul(larger, big.NewInt(20))) >= 0
+}
+
+func shouldRetryDustRead(walletDust, parsedDust *big.Int) bool {
+	if parsedDust == nil || parsedDust.Sign() <= 0 {
+		return false
+	}
+	if walletDust == nil || walletDust.Sign() <= 0 {
+		return true
+	}
+	return dustSignalsMateriallyDiffer(walletDust, parsedDust)
+}
+
 func pickRecordedOpenDust(walletDust, parsedDust *big.Int) *big.Int {
-	if walletDust != nil && walletDust.Sign() > 0 {
+	if parsedDust != nil && parsedDust.Sign() > 0 {
+		if walletDust == nil || walletDust.Sign() <= 0 {
+			return cloneBig(parsedDust)
+		}
+		if dustSignalsMateriallyDiffer(walletDust, parsedDust) {
+			return cloneBig(parsedDust)
+		}
 		return cloneBig(walletDust)
 	}
-	if parsedDust != nil && parsedDust.Sign() > 0 {
-		return cloneBig(parsedDust)
+	if walletDust != nil && walletDust.Sign() > 0 {
+		return cloneBig(walletDust)
 	}
 	return big.NewInt(0)
 }
@@ -971,8 +1006,8 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	log.Printf("[Liquidity] Enter gas tracking: bnbBefore=%s bnbAfter=%s gasSpent=%s", bnbBefore.String(), bnbAfter.String(), gasSpent.String())
 
 	if res != nil {
-		needDustRetry := (walletDust0.Sign() <= 0 && res.Dust0 != nil && res.Dust0.Sign() > 0) ||
-			(walletDust1.Sign() <= 0 && res.Dust1 != nil && res.Dust1.Sign() > 0)
+		needDustRetry := shouldRetryDustRead(walletDust0, res.Dust0) ||
+			shouldRetryDustRead(walletDust1, res.Dust1)
 		if needDustRetry {
 			time.Sleep(750 * time.Millisecond)
 			if token0Addr != (common.Address{}) {

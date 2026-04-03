@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -45,9 +46,10 @@ type openPositionResponse struct {
 }
 
 type openPositionPreviewResponse struct {
-	Status    string                     `json:"status"`
-	Checks    []openPositionCheckItem    `json:"checks,omitempty"`
-	EntrySwap *openPositionEntrySwapInfo `json:"entry_swap,omitempty"`
+	Status     string                     `json:"status"`
+	Checks     []openPositionCheckItem    `json:"checks,omitempty"`
+	EntrySwap  *openPositionEntrySwapInfo `json:"entry_swap,omitempty"`
+	PrivateZap openPositionPrivateZapInfo `json:"private_zap"`
 }
 
 type openPositionEntrySwapInfo struct {
@@ -63,6 +65,10 @@ type openPositionEntrySwapInfo struct {
 	ExpectedAmountOutRaw         string  `json:"expected_amount_out_raw,omitempty"`
 	RecommendedSlippageTolerance float64 `json:"recommended_slippage_tolerance,omitempty"`
 	CurrentSlippageTolerance     float64 `json:"current_slippage_tolerance,omitempty"`
+}
+
+type openPositionPrivateZapInfo struct {
+	ShowProtectionHint bool `json:"show_protection_hint"`
 }
 
 type openPositionCheckItem struct {
@@ -290,6 +296,20 @@ func buildOpenPositionEntrySwapInfo(preview *liquidity.EntrySwapPreview) *openPo
 		RecommendedSlippageTolerance: preview.RecommendedSlippageTolerance,
 		CurrentSlippageTolerance:     preview.CurrentSlippageTolerance,
 	}
+}
+
+func buildOpenPositionPrivateZapInfo(liquidityService *liquidity.LiquidityService, chain string, walletID uint) openPositionPrivateZapInfo {
+	info := openPositionPrivateZapInfo{}
+	if liquidityService == nil || walletID == 0 {
+		return info
+	}
+	showHint, err := liquidityService.ShouldShowWalletPrivateZapProtectionHint(chain, walletID)
+	if err != nil {
+		log.Printf("[OpenPosition] private zap hint check failed: chain=%s wallet_id=%d err=%v", chain, walletID, err)
+		return info
+	}
+	info.ShowProtectionHint = showHint
+	return info
 }
 
 func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPositionContext, *openPositionError, int) {
@@ -613,8 +633,9 @@ func (s *Server) handleOpenPositionPreview(w http.ResponseWriter, r *http.Reques
 	if hasFail {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(openPositionPreviewResponse{
-			Status: "fail",
-			Checks: checks,
+			Status:     "fail",
+			Checks:     checks,
+			PrivateZap: buildOpenPositionPrivateZapInfo(ctx.liquidityService, ctx.chain, ctx.selectedWallet.ID),
 		})
 		return
 	}
@@ -651,9 +672,10 @@ func (s *Server) handleOpenPositionPreview(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(openPositionPreviewResponse{
-		Status:    "ok",
-		Checks:    checks,
-		EntrySwap: entrySwapInfo,
+		Status:     "ok",
+		Checks:     checks,
+		EntrySwap:  entrySwapInfo,
+		PrivateZap: buildOpenPositionPrivateZapInfo(ctx.liquidityService, ctx.chain, ctx.selectedWallet.ID),
 	})
 }
 

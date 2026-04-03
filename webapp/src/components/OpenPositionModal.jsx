@@ -114,6 +114,7 @@ export default function OpenPositionModal({
   const [entrySwapPreview, setEntrySwapPreview] = useState(null);
   const [entrySwapPreviewLoading, setEntrySwapPreviewLoading] = useState(false);
   const [entrySwapPreviewError, setEntrySwapPreviewError] = useState('');
+  const [privateZapInfo, setPrivateZapInfo] = useState(null);
   const [previewChecks, setPreviewChecks] = useState([]);
   const [error, setError] = useState('');
   const [riskAck, setRiskAck] = useState(false);
@@ -121,7 +122,11 @@ export default function OpenPositionModal({
   const pair = pool?.trading_pair || '--';
   const addr = String(pool?.pool_address || '').trim();
   const version = String(pool?.protocol_version || pool?.factory_name || '').trim();
-  const checks = previewChecks;
+  const checks = useMemo(() => (
+    Array.isArray(previewChecks)
+      ? previewChecks.filter((item) => String(item?.key || '').trim() !== 'entry_swap')
+      : []
+  ), [previewChecks]);
   const warnChecks = checks.filter(c => c.status === 'warn');
   const failChecks = checks.filter(c => c.status === 'fail');
   const blockingFailChecks = failChecks;
@@ -165,6 +170,7 @@ export default function OpenPositionModal({
   const rangeUpperValue = Number(rangeUpper);
   const submitRiskMessage = String(submitRisk?.message || '').trim();
   const visibleError = error || entrySwapPreviewError || blockingSafetyMessage || submitRiskMessage || String(submitError || '').trim();
+  const showPrivateZapProtectionHint = Boolean(privateZapInfo?.show_protection_hint);
 
   const previewRequest = useMemo(() => {
     if (!apiBaseUrl || !initData || !addr || !version) return null;
@@ -218,6 +224,7 @@ export default function OpenPositionModal({
     setEntrySwapPreview(null);
     setEntrySwapPreviewError('');
     setEntrySwapPreviewLoading(false);
+    setPrivateZapInfo(null);
     setEntrySwapSlippage('');
     setEntrySwapSlippageDirty(false);
     setEntrySwapConfirmed(false);
@@ -245,6 +252,7 @@ export default function OpenPositionModal({
       setEntrySwapPreview(null);
       setEntrySwapPreviewLoading(false);
       setEntrySwapPreviewError('');
+      setPrivateZapInfo(null);
       setPreviewChecks([]);
       return undefined;
     }
@@ -253,6 +261,7 @@ export default function OpenPositionModal({
     const controller = new AbortController();
     setEntrySwapPreviewLoading(true);
     setEntrySwapPreviewError('');
+    setPrivateZapInfo(null);
 
     const timer = window.setTimeout(async () => {
       try {
@@ -263,6 +272,7 @@ export default function OpenPositionModal({
         if (!active) return;
         setPreviewChecks(Array.isArray(resp?.checks) ? resp.checks : []);
         setEntrySwapPreview(resp?.entry_swap || { required: false });
+        setPrivateZapInfo(resp?.private_zap && typeof resp.private_zap === 'object' ? resp.private_zap : null);
       } catch (e) {
         if (!active || controller.signal.aborted) return;
         const payload = resolveOpenPositionErrorPayload(e);
@@ -271,6 +281,7 @@ export default function OpenPositionModal({
           ? payload.entry_swap
           : null;
         setEntrySwapPreview(entrySwapInfo);
+        setPrivateZapInfo(payload?.private_zap && typeof payload.private_zap === 'object' ? payload.private_zap : null);
         setPreviewChecks(failChecks);
         setEntrySwapPreviewError(failChecks.length > 0 ? '' : String(e?.message || e || '获取前置兑换预览失败'));
       } finally {
@@ -413,15 +424,17 @@ export default function OpenPositionModal({
 
         <div className="modal-pair">{pair}</div>
         <div className="modal-addr">{addr ? `${addr.slice(0, 10)}...${addr.slice(-8)}` : '--'}</div>
-        <div className="modal-info-note" style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', padding: '14px', borderRadius: '16px', border: '1px solid rgba(16, 185, 129, 0.3)', background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1), transparent)' }}>
-          <div style={{ marginTop: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(16, 185, 129, 0.2)', color: '#10b981', flexShrink: 0 }}>
-            <Check size={12} strokeWidth={3} />
+        {showPrivateZapProtectionHint ? (
+          <div className="modal-info-note" style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', padding: '14px', borderRadius: '16px', border: '1px solid rgba(16, 185, 129, 0.3)', background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1), transparent)' }}>
+            <div style={{ marginTop: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(16, 185, 129, 0.2)', color: '#10b981', flexShrink: 0 }}>
+              <Check size={12} strokeWidth={3} />
+            </div>
+            <div style={{ fontSize: '12px', lineHeight: 1.6, color: 'var(--text-hint, rgba(255, 255, 255, 0.8))' }}>
+              <strong style={{ display: 'block', marginBottom: '4px' }}>私有合约保驾护航</strong>
+              首次开仓时会自动部署与您钱包绑定的专属合约，确保交易更安全私密。如遇网络中断，再次重试即可直接复用，不会重复产生部署消耗。
+            </div>
           </div>
-          <div style={{ fontSize: '12px', lineHeight: 1.6, color: 'var(--text-hint, rgba(255, 255, 255, 0.8))' }}>
-            <strong style={{ display: 'block', marginBottom: '4px' }}>私有合约保驾护航</strong>
-            首次开仓时会自动部署与您钱包绑定的专属合约，确保交易更安全私密。如遇网络中断，再次重试即可直接复用，不会重复产生部署消耗。
-          </div>
-        </div>
+        ) : null}
 
         {riskMessage ? (
           <div

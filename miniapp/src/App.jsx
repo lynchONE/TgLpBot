@@ -502,6 +502,7 @@ export default function App() {
     const [openPositionEntrySwapPreview, setOpenPositionEntrySwapPreview] = useState(null);
     const [openPositionEntrySwapPreviewLoading, setOpenPositionEntrySwapPreviewLoading] = useState(false);
     const [openPositionEntrySwapPreviewError, setOpenPositionEntrySwapPreviewError] = useState('');
+    const [openPositionPrivateZapInfo, setOpenPositionPrivateZapInfo] = useState(null);
     const [openPositionEntrySwapSlippage, setOpenPositionEntrySwapSlippage] = useState('');
     const [openPositionEntrySwapSlippageDirty, setOpenPositionEntrySwapSlippageDirty] = useState(false);
     const [openPositionEntrySwapConfirm, setOpenPositionEntrySwapConfirm] = useState(false);
@@ -568,6 +569,12 @@ export default function App() {
     const openPositionFailChecks = openPositionChecks.filter((item) => item.status === 'fail');
     const openPositionHasBlockingSafetyFailure = openPositionFailChecks.length > 0;
     const openPositionSubmitDisabled = openPositionLoading || openPositionEntrySwapPreviewLoading || openPositionHasBlockingSafetyFailure;
+    const openPositionDisplayChecks = useMemo(() => (
+        Array.isArray(openPositionChecks)
+            ? openPositionChecks.filter((item) => String(item?.key || '').trim() !== 'entry_swap')
+            : []
+    ), [openPositionChecks]);
+    const openPositionShowPrivateZapProtectionHint = Boolean(openPositionPrivateZapInfo?.show_protection_hint);
     const [posWalletBalances, setPosWalletBalances] = useState(null);
     const userDefaultChain = useMemo(() => {
         const raw = String(globalConfig?.default_chain || 'bsc').trim().toLowerCase();
@@ -1518,6 +1525,7 @@ export default function App() {
         setOpenPositionEntrySwapPreview(null);
         setOpenPositionEntrySwapPreviewLoading(false);
         setOpenPositionEntrySwapPreviewError('');
+        setOpenPositionPrivateZapInfo(null);
         setOpenPositionEntrySwapSlippage('');
         setOpenPositionEntrySwapSlippageDirty(false);
         setOpenPositionEntrySwapConfirm(false);
@@ -1666,6 +1674,7 @@ export default function App() {
             setOpenPositionEntrySwapPreview(null);
             setOpenPositionEntrySwapPreviewLoading(false);
             setOpenPositionEntrySwapPreviewError('');
+            setOpenPositionPrivateZapInfo(null);
             return undefined;
         }
 
@@ -1680,6 +1689,7 @@ export default function App() {
             setOpenPositionEntrySwapPreview(null);
             setOpenPositionEntrySwapPreviewLoading(false);
             setOpenPositionEntrySwapPreviewError('');
+            setOpenPositionPrivateZapInfo(null);
             setOpenPositionChecks([]);
             return undefined;
         }
@@ -1690,12 +1700,14 @@ export default function App() {
                 setOpenPositionEntrySwapPreview(null);
                 setOpenPositionEntrySwapPreviewLoading(false);
                 setOpenPositionEntrySwapPreviewError('');
+                setOpenPositionPrivateZapInfo(null);
                 return undefined;
             }
             if (walletsError) {
                 setOpenPositionEntrySwapPreview(null);
                 setOpenPositionEntrySwapPreviewLoading(false);
                 setOpenPositionEntrySwapPreviewError('');
+                setOpenPositionPrivateZapInfo(null);
                 return undefined;
             }
             const list = Array.isArray(walletsData?.wallets) ? walletsData.wallets : [];
@@ -1703,6 +1715,7 @@ export default function App() {
                 setOpenPositionEntrySwapPreview(null);
                 setOpenPositionEntrySwapPreviewLoading(false);
                 setOpenPositionEntrySwapPreviewError('');
+                setOpenPositionPrivateZapInfo(null);
                 return undefined;
             }
             if (list.length > 1) {
@@ -1712,6 +1725,7 @@ export default function App() {
                     setOpenPositionEntrySwapPreview(null);
                     setOpenPositionEntrySwapPreviewLoading(false);
                     setOpenPositionEntrySwapPreviewError('');
+                    setOpenPositionPrivateZapInfo(null);
                     return undefined;
                 }
             } else {
@@ -1726,6 +1740,7 @@ export default function App() {
         const controller = new AbortController();
         setOpenPositionEntrySwapPreviewLoading(true);
         setOpenPositionEntrySwapPreviewError('');
+        setOpenPositionPrivateZapInfo(null);
 
         const timer = setTimeout(async () => {
             try {
@@ -1748,6 +1763,7 @@ export default function App() {
                 if (!active) return;
                 setOpenPositionChecks(Array.isArray(resp?.checks) ? resp.checks : []);
                 setOpenPositionEntrySwapPreview(resp?.entry_swap || { required: false });
+                setOpenPositionPrivateZapInfo(resp?.private_zap && typeof resp.private_zap === 'object' ? resp.private_zap : null);
             } catch (e) {
                 if (!active || controller.signal.aborted) return;
                 const msg = String(e?.message || e || '').trim();
@@ -1757,6 +1773,7 @@ export default function App() {
                     ? payload.entry_swap
                     : null;
                 setOpenPositionEntrySwapPreview(entrySwapInfo);
+                setOpenPositionPrivateZapInfo(payload?.private_zap && typeof payload.private_zap === 'object' ? payload.private_zap : null);
                 setOpenPositionChecks(failChecks);
                 setOpenPositionEntrySwapPreviewError(failChecks.length > 0 ? '' : (msg || '获取前置兑换预览失败'));
             } finally {
@@ -3331,6 +3348,22 @@ export default function App() {
                                 </div>
                             ) : null}
 
+                            {openPositionShowPrivateZapProtectionHint ? (
+                                <div className="rounded-xl border border-emerald-500/25 bg-gradient-to-br from-emerald-500/12 to-transparent p-3 dark:border-emerald-400/20 dark:from-emerald-400/10">
+                                    <div className="flex items-start gap-3">
+                                        <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-300">
+                                            <Check className="h-3 w-3" strokeWidth={3} />
+                                        </div>
+                                        <div className="min-w-0">
+                                            <div className="text-xs font-semibold text-zinc-900 dark:text-white/85">私有合约保驾护航</div>
+                                            <div className="mt-1 text-[11px] leading-5 text-zinc-600 dark:text-white/60">
+                                                首次开仓会自动部署与当前钱包绑定的专属合约。部署成功后可直接复用，不会重复产生部署消耗。
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : null}
+
                             <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                 <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">开仓金额 (USDT)</div>
                                 <input
@@ -3457,7 +3490,7 @@ export default function App() {
                                 />
                             </div>
 
-                            {(openPositionEntrySwapPreviewLoading || openPositionChecks.length > 0 || openPositionEntrySwapPreviewError) ? (
+                            {(openPositionEntrySwapPreviewLoading || openPositionDisplayChecks.length > 0 || openPositionEntrySwapPreviewError) ? (
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="text-xs font-semibold text-zinc-900 dark:text-white/80 mb-2">安全检查</div>
                                     {openPositionEntrySwapPreviewLoading ? (
@@ -3468,13 +3501,12 @@ export default function App() {
                                             {openPositionEntrySwapPreviewError}
                                         </div>
                                     ) : null}
-                                    {openPositionChecks.length > 0 ? (
+                                    {openPositionDisplayChecks.length > 0 ? (
                                         <div className="space-y-2">
-                                            {openPositionChecks.map((item) => {
+                                            {openPositionDisplayChecks.map((item) => {
                                                 const isPass = item.status === 'pass';
                                                 const isWarn = item.status === 'warn';
                                                 const isFail = item.status === 'fail';
-                                                const isEntrySwap = item.key === 'entry_swap';
                                                 return (
                                                     <div key={item.key} className="rounded-lg p-2 " style={{
                                                         background: isFail ? 'rgba(239,68,68,0.07)' : isWarn ? 'rgba(234,179,8,0.07)' : 'rgba(34,197,94,0.07)'
@@ -3488,7 +3520,7 @@ export default function App() {
                                                                     <span className={`text-[11px] font-semibold ${isFail ? 'text-red-700 dark:text-red-300' : isWarn ? 'text-amber-700 dark:text-amber-300' : 'text-emerald-700 dark:text-emerald-300'}`}>{item.label}</span>
                                                                     {item.detail ? <span className="text-[10px] text-zinc-500 dark:text-white/40 text-right">{item.detail}</span> : null}
                                                                 </div>
-                                                                {isEntrySwap && openPositionEntrySwapPreview?.required ? (
+                                                                {false && openPositionEntrySwapPreview?.required ? (
                                                                     <div className="mt-2 space-y-1 text-[11px] text-zinc-600 dark:text-white/60">
                                                                         <div>兑换路径：{openPositionEntrySwapPreview?.amount_in || '--'} {openPositionEntrySwapPreview?.from_token_symbol || ''} → {openPositionEntrySwapPreview?.to_token_symbol || '--'}</div>
                                                                         <div>预计到账：{openPositionEntrySwapPreview?.expected_amount_out || '--'} {openPositionEntrySwapPreview?.to_token_symbol || ''}</div>
@@ -3534,6 +3566,46 @@ export default function App() {
                                                     </div>
                                                 );
                                             })}
+                                        </div>
+                                    ) : null}
+                                </div>
+                            ) : null}
+
+                            {(openPositionEntrySwapPreviewLoading || openPositionEntrySwapPreview?.required) ? (
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80 mb-2">前置兑换</div>
+                                    {openPositionEntrySwapPreviewLoading ? (
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">正在获取推荐滑点和预计到账...</div>
+                                    ) : null}
+                                    {openPositionEntrySwapPreview?.required ? (
+                                        <div className="space-y-1 text-[11px] text-zinc-600 dark:text-white/60">
+                                            <div>推荐滑点：{Number(openPositionEntrySwapPreview?.recommended_slippage_tolerance).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}%</div>
+                                            <div>当前滑点：{Number(openPositionEntrySwapPreview?.current_slippage_tolerance).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}%</div>
+                                            <div>预计到账：{openPositionEntrySwapPreview?.expected_amount_out || '--'} {openPositionEntrySwapPreview?.to_token_symbol || ''}</div>
+                                            <div>兑换路径：{openPositionEntrySwapPreview?.amount_in || '--'} {openPositionEntrySwapPreview?.from_token_symbol || ''} → {openPositionEntrySwapPreview?.to_token_symbol || '--'}</div>
+                                            <input
+                                                value={openPositionEntrySwapSlippage}
+                                                onChange={(e) => {
+                                                    setOpenPositionEntrySwapSlippageDirty(true);
+                                                    setOpenPositionEntrySwapSlippage(e.target.value);
+                                                    setOpenPositionError('');
+                                                }}
+                                                inputMode="decimal"
+                                                className={`mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
+                                                placeholder="前置兑换滑点（可选）"
+                                            />
+                                            <label className="mt-2 flex items-start gap-2">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={openPositionEntrySwapConfirm}
+                                                    onChange={(e) => {
+                                                        setOpenPositionEntrySwapConfirm(e.target.checked);
+                                                        setOpenPositionError('');
+                                                    }}
+                                                    disabled={openPositionLoading || openPositionEntrySwapPreviewLoading}
+                                                />
+                                                <span className="text-[11px] leading-tight">我已确认本次前置兑换，先执行兑换，再继续后续开仓。</span>
+                                            </label>
                                         </div>
                                     ) : null}
                                 </div>

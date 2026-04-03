@@ -121,6 +121,33 @@ func (s *LiquidityService) EnsureWalletPrivateZapReady(userID uint, chain string
 	return err
 }
 
+func (s *LiquidityService) ShouldShowWalletPrivateZapProtectionHint(chain string, walletID uint) (bool, error) {
+	if !config.AppConfig.PrivateZapEnabled || walletID == 0 {
+		return false, nil
+	}
+	if database.DB == nil {
+		return false, fmt.Errorf("database not initialized")
+	}
+	chain = config.NormalizeChain(chain)
+	if cachedAddr, ok := readPrivateZapCache(chain, walletID); ok && cachedAddr != (common.Address{}) {
+		return false, nil
+	}
+
+	var binding models.WalletChainContract
+	err := database.DB.Where("wallet_id = ? AND chain = ? AND kind = ?", walletID, chain, walletChainContractKindZapSimple).
+		First(&binding).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return true, nil
+		}
+		return false, err
+	}
+	if isPrivateZapBindingUsable(binding) || isPrivateZapBindingConfigPending(binding) {
+		return false, nil
+	}
+	return true, nil
+}
+
 func privateZapCacheKey(chain string, walletID uint) string {
 	return fmt.Sprintf("%s:%s:%d:%s",
 		privateZapCachePrefix,

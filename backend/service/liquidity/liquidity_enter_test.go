@@ -224,12 +224,21 @@ func TestBuildZapInV4ParamsPreservesCoreFields(t *testing.T) {
 	}
 }
 
-func TestPickRecordedOpenDustPrefersWalletDelta(t *testing.T) {
+func TestPickRecordedOpenDustPrefersParsedDustWhenSignalsDiverge(t *testing.T) {
 	t.Parallel()
 
-	got := pickRecordedOpenDust(big.NewInt(12), big.NewInt(99))
-	if got.Cmp(big.NewInt(12)) != 0 {
-		t.Fatalf("pickRecordedOpenDust() = %s, want 12", got.String())
+	got := pickRecordedOpenDust(big.NewInt(1000), big.NewInt(90))
+	if got.Cmp(big.NewInt(90)) != 0 {
+		t.Fatalf("pickRecordedOpenDust() = %s, want 90", got.String())
+	}
+}
+
+func TestPickRecordedOpenDustPrefersWalletWhenSignalsClose(t *testing.T) {
+	t.Parallel()
+
+	got := pickRecordedOpenDust(big.NewInt(95), big.NewInt(90))
+	if got.Cmp(big.NewInt(95)) != 0 {
+		t.Fatalf("pickRecordedOpenDust() = %s, want 95", got.String())
 	}
 }
 
@@ -248,5 +257,13 @@ func TestPickRecordedOpenDustReturnsZeroWhenMissing(t *testing.T) {
 	got := pickRecordedOpenDust(nil, nil)
 	if got.Sign() != 0 {
 		t.Fatalf("pickRecordedOpenDust() = %s, want 0", got.String())
+	}
+}
+
+func TestShouldRetryDustReadWhenSignalsDiverge(t *testing.T) {
+	t.Parallel()
+
+	if !shouldRetryDustRead(big.NewInt(1000), big.NewInt(90)) {
+		t.Fatal("shouldRetryDustRead() = false, want true")
 	}
 }
