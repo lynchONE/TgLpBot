@@ -1356,6 +1356,7 @@ type taskPnLViewMetrics struct {
 	currentValue float64
 	absolutePnL  float64
 	hasPnL       bool
+	dustTracked  bool
 }
 
 // getTaskPnLViewMetrics uses the exact same PnL service as bot task cards.
@@ -1379,8 +1380,9 @@ func (s *RealtimePositionsService) getTaskPnLViewMetrics(task *models.StrategyTa
 			if pnl.InitialCostUSDT > 0 {
 				metrics.initialCost = pnl.InitialCostUSDT
 			}
-			if pnl.NetInvestedUSDT > 0 {
+			if pnl.NetInvestedUSDT > 0 || pnl.DustValueUSDT > 0 {
 				metrics.netInvested = pnl.NetInvestedUSDT
+				metrics.dustTracked = pnl.DustValueUSDT > 0
 			}
 			if !math.IsNaN(pnl.CurrentValueUSDT) && !math.IsInf(pnl.CurrentValueUSDT, 0) {
 				metrics.currentValue = pnl.CurrentValueUSDT
@@ -1395,8 +1397,15 @@ func (s *RealtimePositionsService) getTaskPnLViewMetrics(task *models.StrategyTa
 	if metrics.initialCost <= 0 {
 		metrics.initialCost = fallback
 	}
-	if metrics.netInvested <= 0 {
+	if metrics.netInvested < 0 {
+		metrics.netInvested = 0
+	}
+	if metrics.netInvested <= 0 && !metrics.dustTracked {
 		metrics.netInvested = metrics.initialCost
+	}
+	if metrics.netInvested > 0 {
+		metrics.absolutePnL = metrics.currentValue - metrics.netInvested
+		metrics.hasPnL = true
 	}
 	return metrics
 }

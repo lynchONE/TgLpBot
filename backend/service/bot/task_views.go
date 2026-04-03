@@ -237,9 +237,9 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 				if pnl.AbsolutePnLUSDT < 0 {
 					sign = ""
 				}
-				emojiStr := "🟢"
+				emojiStr := "\U0001F7E2"
 				if pnl.AbsolutePnLUSDT < 0 {
-					emojiStr = "🔴"
+					emojiStr = "\U0001F534"
 				}
 
 				dustLine := ""
@@ -262,8 +262,23 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 
 				// 使用 NetInvestedUSDT（净投入 = 实际支出 - 残余价值）更准确反映仓位内金额
 				actualInvested := pnl.NetInvestedUSDT
-				if actualInvested <= 0 {
-					actualInvested = task.AmountUSDT
+				if actualInvested < 0 {
+					actualInvested = 0
+				}
+				if actualInvested <= 0 && pnl.DustValueUSDT <= 0 {
+					actualInvested = pnl.InitialCostUSDT
+					if actualInvested <= 0 {
+						actualInvested = task.AmountUSDT
+					}
+				}
+				displayAbsolutePnL := pnl.CurrentValueUSDT - actualInvested
+				sign = "+"
+				if displayAbsolutePnL < 0 {
+					sign = ""
+				}
+				emojiStr = "\U0001F7E2"
+				if displayAbsolutePnL < 0 {
+					emojiStr = "\U0001F534"
 				}
 
 				feesText := fmt.Sprintf("%.2f", pnl.UnclaimedFeesUSDT)
@@ -273,7 +288,7 @@ func (b *Bot) formatTaskCard(task *models.StrategyTask) string {
 
 				amountLine = fmt.Sprintf(
 					"📊 资产状况：\n📈 绝对盈亏：%s%.2f %s %s\n💵 当前价值：%.2f %s\n🎁 未领手续费：%s %s\n💰 实际投入：%.2f %s (预期 %.2f %s)%s",
-					sign, pnl.AbsolutePnLUSDT, stableSym, emojiStr,
+					sign, displayAbsolutePnL, stableSym, emojiStr,
 					pnl.HoldingsUSDT, stableSym,
 					feesText, stableSym,
 					actualInvested, stableSym,

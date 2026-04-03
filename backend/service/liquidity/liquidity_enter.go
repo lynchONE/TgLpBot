@@ -337,6 +337,355 @@ func splitTotalAmount(total *big.Int, needNonZero0 bool, needNonZero1 bool) (*bi
 	return a0, a1, nil
 }
 
+const (
+	v3OneSidedSwapDustRatioThresholdBps = int64(2500)
+	v3OneSidedSwapRefineMaxRounds       = 2
+)
+
+func buildZapInV3Params(
+	poolAddr common.Address,
+	pmAddr common.Address,
+	token0 common.Address,
+	token1 common.Address,
+	walletAddr common.Address,
+	tickLower int,
+	tickUpper int,
+	amount0In *big.Int,
+	amount1In *big.Int,
+	swapParams blockchain.SwapParamsSimple,
+) blockchain.ZapInV3ParamsSimple {
+	return blockchain.ZapInV3ParamsSimple{
+		Pool:            poolAddr,
+		PositionManager: pmAddr,
+		Token0:          token0,
+		Token1:          token1,
+		TickLower:       big.NewInt(int64(tickLower)),
+		TickUpper:       big.NewInt(int64(tickUpper)),
+		Recipient:       walletAddr,
+		Amount0In:       amount0In,
+		Amount1In:       amount1In,
+		Swap:            swapParams,
+	}
+}
+
+func buildZapInV4Params(
+	poolKey blockchain.PoolKeySimple,
+	stateView common.Address,
+	positionManager common.Address,
+	walletAddr common.Address,
+	tickLower int,
+	tickUpper int,
+	amount0In *big.Int,
+	amount1In *big.Int,
+	slippageBps *big.Int,
+	swapParams blockchain.SwapParamsSimple,
+	sqrtPriceX96 *big.Int,
+) blockchain.ZapInV4ParamsSimple {
+	return blockchain.ZapInV4ParamsSimple{
+		PoolKey:         poolKey,
+		StateView:       stateView,
+		PositionManager: positionManager,
+		TickLower:       big.NewInt(int64(tickLower)),
+		TickUpper:       big.NewInt(int64(tickUpper)),
+		Recipient:       walletAddr,
+		Amount0In:       amount0In,
+		Amount1In:       amount1In,
+		SlippageBps:     slippageBps,
+		Swap:            swapParams,
+		SqrtPriceX96:    sqrtPriceX96,
+	}
+}
+
+func swapOutputDustRatioBps(sim *blockchain.ZapResultSimple, zeroForOne bool) int64 {
+	if sim == nil {
+		return 0
+	}
+	used := cloneBig(sim.Amount0Used)
+	dust := cloneBig(sim.Dust0)
+	if zeroForOne {
+		used = cloneBig(sim.Amount1Used)
+		dust = cloneBig(sim.Dust1)
+	}
+	if used.Sign() <= 0 && dust.Sign() <= 0 {
+		return 0
+	}
+	total := new(big.Int).Add(used, dust)
+	if total.Sign() <= 0 {
+		return 0
+	}
+	numerator := new(big.Int).Mul(dust, big.NewInt(10000))
+	return numerator.Div(numerator, total).Int64()
+}
+
+func reduceOneSidedSwapAmount(currentSwap *big.Int, sim *blockchain.ZapResultSimple, zeroForOne bool) (*big.Int, bool) {
+	if currentSwap == nil || currentSwap.Sign() <= 0 || sim == nil {
+		return nil, false
+	}
+	used := cloneBig(sim.Amount0Used)
+	dust := cloneBig(sim.Dust0)
+	if zeroForOne {
+		used = cloneBig(sim.Amount1Used)
+		dust = cloneBig(sim.Dust1)
+	}
+	if used.Sign() <= 0 || dust.Sign() <= 0 {
+		return nil, false
+	}
+	total := new(big.Int).Add(used, dust)
+	if total.Sign() <= 0 {
+		return nil, false
+	}
+
+	next := new(big.Int).Mul(currentSwap, used)
+	next.Div(next, total)
+	if next.Sign() <= 0 || next.Cmp(currentSwap) >= 0 {
+		return nil, false
+	}
+	return next, true
+}
+
+func pickRecordedOpenDust(walletDust, parsedDust *big.Int) *big.Int {
+	if walletDust != nil && walletDust.Sign() > 0 {
+		return cloneBig(walletDust)
+	}
+	if parsedDust != nil && parsedDust.Sign() > 0 {
+		return cloneBig(parsedDust)
+	}
+	return big.NewInt(0)
+}
+
+func (s *LiquidityService) maybeRefineV3OneSidedSwap(
+	client *ethclient.Client,
+	zap *blockchain.ZapSimple,
+	walletAddr common.Address,
+	cc config.ChainConfig,
+	poolAddr common.Address,
+	pmAddr common.Address,
+	token0 common.Address,
+	token1 common.Address,
+	amount0In *big.Int,
+	amount1In *big.Int,
+	task *models.StrategyTask,
+	swapTokenIn common.Address,
+	swapTokenOut common.Address,
+	swapAmount *big.Int,
+	swapParams blockchain.SwapParamsSimple,
+	okxExpectedOut *big.Int,
+	zeroForOne bool,
+	entryToken common.Address,
+	entryDecimals int,
+) (*big.Int, blockchain.SwapParamsSimple, *big.Int) {
+	if s == nil || client == nil || zap == nil || task == nil {
+		return swapAmount, swapParams, okxExpectedOut
+	}
+	if swapAmount == nil || swapAmount.Sign() <= 0 {
+		return swapAmount, swapParams, okxExpectedOut
+	}
+	if (amount0In.Sign() > 0 && amount1In.Sign() > 0) || (amount0In.Sign() <= 0 && amount1In.Sign() <= 0) {
+		return swapAmount, swapParams, okxExpectedOut
+	}
+
+	currentSwapAmount := cloneBig(swapAmount)
+	currentSwapParams := swapParams
+	currentExpectedOut := cloneBig(okxExpectedOut)
+
+	for round := 0; round < v3OneSidedSwapRefineMaxRounds; round++ {
+		params := buildZapInV3Params(
+			poolAddr,
+			pmAddr,
+			token0,
+			token1,
+			walletAddr,
+			task.TickLower,
+			task.TickUpper,
+			amount0In,
+			amount1In,
+			currentSwapParams,
+		)
+		sim, err := zap.SimulateZapInV3(&bind.CallOpts{From: walletAddr}, params)
+		if err != nil {
+			log.Printf("[Liquidity] V3 enter: skip one-sided swap refinement, zap simulation failed: %v", err)
+			break
+		}
+
+		dustRatioBps := swapOutputDustRatioBps(sim, zeroForOne)
+		log.Printf(
+			"[Liquidity] V3 enter: simulated zap round=%d swap=%s liquidity=%s used0=%s used1=%s dust0=%s dust1=%s outputDustRatio=%d bps",
+			round+1,
+			currentSwapAmount.String(),
+			cloneBig(sim.Liquidity).String(),
+			cloneBig(sim.Amount0Used).String(),
+			cloneBig(sim.Amount1Used).String(),
+			cloneBig(sim.Dust0).String(),
+			cloneBig(sim.Dust1).String(),
+			dustRatioBps,
+		)
+		if dustRatioBps <= v3OneSidedSwapDustRatioThresholdBps {
+			break
+		}
+
+		nextSwapAmount, ok := reduceOneSidedSwapAmount(currentSwapAmount, sim, zeroForOne)
+		if !ok {
+			break
+		}
+		if nextSwapAmount.Cmp(currentSwapAmount) == 0 {
+			break
+		}
+
+		nextParams, nextExpectedOut, err := s.prepareOKXSwapParams(cc, zap.Address(), swapTokenIn, swapTokenOut, nextSwapAmount, task.SlippageTolerance)
+		if err != nil {
+			log.Printf("[Liquidity] V3 enter: swap refinement requote failed: %v", err)
+			break
+		}
+		if nextParams == nil {
+			break
+		}
+
+		var sqrtPrice *big.Int
+		if p, _, slotErr := blockchain.GetV3PoolSlot0WithClient(client, poolAddr); slotErr != nil {
+			log.Printf("[Liquidity] V3 enter: swap refinement slot0 check skipped: %v", slotErr)
+		} else {
+			sqrtPrice = p
+		}
+		if safeErr := s.checkZapSafety(
+			client,
+			sqrtPrice,
+			swapTokenIn,
+			swapTokenOut,
+			nextSwapAmount,
+			nextExpectedOut,
+			token0,
+			token1,
+			entryToken,
+			entryDecimals,
+			poolAddr,
+			task.Chain,
+		); safeErr != nil {
+			log.Printf("[Liquidity] V3 enter: swap refinement rejected by safety check: %v", safeErr)
+			break
+		}
+
+		currentSwapAmount = nextSwapAmount
+		currentSwapParams = *nextParams
+		currentExpectedOut = cloneBig(nextExpectedOut)
+	}
+
+	return currentSwapAmount, currentSwapParams, currentExpectedOut
+}
+
+func (s *LiquidityService) maybeRefineV4OneSidedSwap(
+	client *ethclient.Client,
+	zap *blockchain.ZapSimple,
+	walletAddr common.Address,
+	cc config.ChainConfig,
+	poolKey blockchain.PoolKeySimple,
+	stateView common.Address,
+	positionManager common.Address,
+	amount0In *big.Int,
+	amount1In *big.Int,
+	tickLower int,
+	tickUpper int,
+	slippageBps *big.Int,
+	swapTokenIn common.Address,
+	swapTokenOut common.Address,
+	swapAmount *big.Int,
+	swapParams blockchain.SwapParamsSimple,
+	okxExpectedOut *big.Int,
+	zeroForOne bool,
+	sqrtPriceX96 *big.Int,
+	entryToken common.Address,
+	entryDecimals int,
+	chain string,
+	slippageTolerance float64,
+) (*big.Int, blockchain.SwapParamsSimple, *big.Int) {
+	if s == nil || client == nil || zap == nil {
+		return swapAmount, swapParams, okxExpectedOut
+	}
+	if swapAmount == nil || swapAmount.Sign() <= 0 {
+		return swapAmount, swapParams, okxExpectedOut
+	}
+	if (amount0In.Sign() > 0 && amount1In.Sign() > 0) || (amount0In.Sign() <= 0 && amount1In.Sign() <= 0) {
+		return swapAmount, swapParams, okxExpectedOut
+	}
+
+	currentSwapAmount := cloneBig(swapAmount)
+	currentSwapParams := swapParams
+	currentExpectedOut := cloneBig(okxExpectedOut)
+
+	for round := 0; round < v3OneSidedSwapRefineMaxRounds; round++ {
+		params := buildZapInV4Params(
+			poolKey,
+			stateView,
+			positionManager,
+			walletAddr,
+			tickLower,
+			tickUpper,
+			amount0In,
+			amount1In,
+			slippageBps,
+			currentSwapParams,
+			sqrtPriceX96,
+		)
+		sim, err := zap.SimulateZapInV4(&bind.CallOpts{From: walletAddr}, params)
+		if err != nil {
+			log.Printf("[Liquidity] V4 enter: skip one-sided swap refinement, zap simulation failed: %v", err)
+			break
+		}
+
+		dustRatioBps := swapOutputDustRatioBps(sim, zeroForOne)
+		log.Printf(
+			"[Liquidity] V4 enter: simulated zap round=%d swap=%s liquidity=%s used0=%s used1=%s dust0=%s dust1=%s outputDustRatio=%d bps",
+			round+1,
+			currentSwapAmount.String(),
+			cloneBig(sim.Liquidity).String(),
+			cloneBig(sim.Amount0Used).String(),
+			cloneBig(sim.Amount1Used).String(),
+			cloneBig(sim.Dust0).String(),
+			cloneBig(sim.Dust1).String(),
+			dustRatioBps,
+		)
+		if dustRatioBps <= v3OneSidedSwapDustRatioThresholdBps {
+			break
+		}
+
+		nextSwapAmount, ok := reduceOneSidedSwapAmount(currentSwapAmount, sim, zeroForOne)
+		if !ok || nextSwapAmount.Cmp(currentSwapAmount) == 0 {
+			break
+		}
+
+		nextParams, nextExpectedOut, err := s.prepareOKXSwapParams(cc, zap.Address(), swapTokenIn, swapTokenOut, nextSwapAmount, slippageTolerance)
+		if err != nil {
+			log.Printf("[Liquidity] V4 enter: swap refinement requote failed: %v", err)
+			break
+		}
+		if nextParams == nil {
+			break
+		}
+		if safeErr := s.checkZapSafety(
+			client,
+			sqrtPriceX96,
+			swapTokenIn,
+			swapTokenOut,
+			nextSwapAmount,
+			nextExpectedOut,
+			poolKey.Currency0,
+			poolKey.Currency1,
+			entryToken,
+			entryDecimals,
+			common.Address{},
+			chain,
+		); safeErr != nil {
+			log.Printf("[Liquidity] V4 enter: swap refinement rejected by safety check: %v", safeErr)
+			break
+		}
+
+		currentSwapAmount = nextSwapAmount
+		currentSwapParams = *nextParams
+		currentExpectedOut = cloneBig(nextExpectedOut)
+	}
+
+	return currentSwapAmount, currentSwapParams, currentExpectedOut
+}
+
 func (s *LiquidityService) EnterTaskFromUSDT(userID uint, task *models.StrategyTask) (*EnterResult, error) {
 	return s.EnterTaskFromUSDTWithOptions(userID, task, TxOptions{})
 }
@@ -621,16 +970,29 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	}
 	log.Printf("[Liquidity] Enter gas tracking: bnbBefore=%s bnbAfter=%s gasSpent=%s", bnbBefore.String(), bnbAfter.String(), gasSpent.String())
 
-	dust0 := walletDust0
-	dust1 := walletDust1
 	if res != nil {
-		if res.Dust0 != nil && res.Dust0.Cmp(dust0) > 0 {
-			dust0 = res.Dust0
-		}
-		if res.Dust1 != nil && res.Dust1.Cmp(dust1) > 0 {
-			dust1 = res.Dust1
+		needDustRetry := (walletDust0.Sign() <= 0 && res.Dust0 != nil && res.Dust0.Sign() > 0) ||
+			(walletDust1.Sign() <= 0 && res.Dust1 != nil && res.Dust1.Sign() > 0)
+		if needDustRetry {
+			time.Sleep(750 * time.Millisecond)
+			if token0Addr != (common.Address{}) {
+				if bal, _ := blockchain.GetTokenBalanceWithClient(client, token0Addr, walletAddr); bal != nil {
+					if delta := new(big.Int).Sub(bal, t0Before); delta.Sign() > 0 {
+						walletDust0 = delta
+					}
+				}
+			}
+			if token1Addr != (common.Address{}) {
+				if bal, _ := blockchain.GetTokenBalanceWithClient(client, token1Addr, walletAddr); bal != nil {
+					if delta := new(big.Int).Sub(bal, t1Before); delta.Sign() > 0 {
+						walletDust1 = delta
+					}
+				}
+			}
 		}
 	}
+	dust0 := pickRecordedOpenDust(walletDust0, res.Dust0)
+	dust1 := pickRecordedOpenDust(walletDust1, res.Dust1)
 
 	// If RPC returns stale balances, actualSpent can be 0 (or otherwise invalid) even when the tx succeeded.
 	// We can recover a best-effort "actual spent" from the input amount and refunded USDT dust (when applicable).
@@ -937,18 +1299,41 @@ func (s *LiquidityService) enterV3FromToken(
 	}
 
 	// 4. 构建 zapInV3 参数
-	params := blockchain.ZapInV3ParamsSimple{
-		Pool:            poolAddr,
-		PositionManager: pmAddr,
-		Token0:          token0,
-		Token1:          token1,
-		TickLower:       big.NewInt(int64(task.TickLower)),
-		TickUpper:       big.NewInt(int64(task.TickUpper)),
-		Recipient:       walletAddr,
-		Amount0In:       amount0In,
-		Amount1In:       amount1In,
-		Swap:            swapParams,
-	}
+	swapAmount, swapParams, okxExpectedOut = s.maybeRefineV3OneSidedSwap(
+		client,
+		zap,
+		walletAddr,
+		cc,
+		poolAddr,
+		pmAddr,
+		token0,
+		token1,
+		amount0In,
+		amount1In,
+		task,
+		swapTokenIn,
+		swapTokenOut,
+		swapAmount,
+		swapParams,
+		okxExpectedOut,
+		zeroForOne,
+		tokenIn,
+		entryDecimals,
+	)
+	log.Printf("[Liquidity] V3 enter: final swap after refinement: zeroForOne=%v swapAmount=%s", zeroForOne, cloneBig(swapAmount).String())
+
+	params := buildZapInV3Params(
+		poolAddr,
+		pmAddr,
+		token0,
+		token1,
+		walletAddr,
+		task.TickLower,
+		task.TickUpper,
+		amount0In,
+		amount1In,
+		swapParams,
+	)
 
 	log.Printf("[Liquidity] V3 enter 参数: pool=%s tick=%d..%d", poolAddr.Hex(), task.TickLower, task.TickUpper)
 
@@ -1760,8 +2145,27 @@ func (s *LiquidityService) enterV4FromToken(
 		return nil, fmt.Errorf("V4 pool does not contain entry token")
 	}
 
+	zap, err := blockchain.NewZapSimple(zapAddr, client)
+	if err != nil {
+		return nil, err
+	}
+	poolKeySimple := blockchain.PoolKeySimple{
+		Currency0:   c0,
+		Currency1:   c1,
+		Fee:         big.NewInt(int64(fee)),
+		TickSpacing: big.NewInt(int64(tickSpacing)),
+		Hooks:       hooks,
+	}
+	entryDecimals := cc.StableDecimals
+	if decimals, decErr := blockchain.GetTokenDecimalsWithClient(client, tokenIn); decErr != nil {
+		log.Printf("[Liquidity] V4 enter: read entry token decimals failed: %v, fallback=%d", decErr, entryDecimals)
+	} else if decimals > 0 {
+		entryDecimals = int(decimals)
+	}
+	slippageBps := percentageToBps(task.SlippageTolerance)
+
 	// 3. Calculate Optimal Swap
-	_, swapAmount, err := s.calculateOptimalSwapPure(sqrtPriceX96, currentTick, tickLower, tickUpper, amount0In, amount1In)
+	zeroForOne, swapAmount, err := s.calculateOptimalSwapPure(sqrtPriceX96, currentTick, tickLower, tickUpper, amount0In, amount1In)
 	if err != nil {
 		return nil, fmt.Errorf("calc optimal swap failed: %w", err)
 	}
@@ -1772,9 +2176,10 @@ func (s *LiquidityService) enterV4FromToken(
 	swapParams.AmountIn = big.NewInt(0)
 	swapParams.MinAmountOut = big.NewInt(0)
 	swapParams.CallData = []byte{}
+	var okxExpectedOut *big.Int
 
 	if swapAmount.Sign() > 0 {
-		sParams, okxExpectedOut, err := s.prepareOKXSwapParams(cc, zapAddr, tokenIn, tokenOut, swapAmount, task.SlippageTolerance)
+		sParams, out, err := s.prepareOKXSwapParams(cc, zapAddr, tokenIn, tokenOut, swapAmount, task.SlippageTolerance)
 		if err != nil {
 			estimatedLiquidity, liqErr := estimateV4LiquidityForAmounts(sqrtPriceX96, tickLower, tickUpper, amount0In, amount1In)
 			if liqErr != nil {
@@ -1785,13 +2190,40 @@ func (s *LiquidityService) enterV4FromToken(
 			}
 			log.Printf("[Liquidity] Warning: prepare OKX swap failed, proceeding without swap because zero-swap liquidity=%s: %v", estimatedLiquidity.String(), err)
 		} else if sParams != nil {
+			okxExpectedOut = out
 			swapParams = *sParams
 
 			// Zap 安全检查：价格偏差（V4 已有 sqrtPriceX96，流动性检查传零地址跳过）
 			if safeErr := s.checkZapSafety(client, sqrtPriceX96, tokenIn, tokenOut, swapAmount, okxExpectedOut,
-				c0, c1, tokenIn, cc.StableDecimals, common.Address{}, task.Chain); safeErr != nil {
+				c0, c1, tokenIn, entryDecimals, common.Address{}, task.Chain); safeErr != nil {
 				return nil, safeErr
 			}
+			swapAmount, swapParams, okxExpectedOut = s.maybeRefineV4OneSidedSwap(
+				client,
+				zap,
+				walletAddr,
+				cc,
+				poolKeySimple,
+				common.HexToAddress(cc.UniswapV4StateViewAddress),
+				positionManager,
+				amount0In,
+				amount1In,
+				tickLower,
+				tickUpper,
+				slippageBps,
+				tokenIn,
+				tokenOut,
+				swapAmount,
+				swapParams,
+				okxExpectedOut,
+				zeroForOne,
+				sqrtPriceX96,
+				tokenIn,
+				entryDecimals,
+				task.Chain,
+				task.SlippageTolerance,
+			)
+			log.Printf("[Liquidity] V4 enter: final swap after refinement: zeroForOne=%v swapAmount=%s", zeroForOne, cloneBig(swapAmount).String())
 		}
 	}
 
@@ -1821,34 +2253,21 @@ func (s *LiquidityService) enterV4FromToken(
 		}
 	}
 
-	poolKeySimple := blockchain.PoolKeySimple{
-		Currency0:   c0,
-		Currency1:   c1,
-		Fee:         big.NewInt(int64(fee)),
-		TickSpacing: big.NewInt(int64(tickSpacing)),
-		Hooks:       hooks,
-	}
-
-	zapParams := blockchain.ZapInV4ParamsSimple{
-		PoolKey:         poolKeySimple,
-		StateView:       common.HexToAddress(cc.UniswapV4StateViewAddress),
-		PositionManager: common.HexToAddress(cc.UniswapV4PositionManagerAddress),
-		TickLower:       big.NewInt(int64(tickLower)),
-		TickUpper:       big.NewInt(int64(tickUpper)),
-		Recipient:       walletAddr,
-		Amount0In:       amount0In,
-		Amount1In:       amount1In,
-		SlippageBps:     percentageToBps(task.SlippageTolerance),
-		Swap:            swapParams,
-		SqrtPriceX96:    sqrtPriceX96, // 传入从链上获取的价格，避免合约重复调用
-	}
+	zapParams := buildZapInV4Params(
+		poolKeySimple,
+		common.HexToAddress(cc.UniswapV4StateViewAddress),
+		common.HexToAddress(cc.UniswapV4PositionManagerAddress),
+		walletAddr,
+		tickLower,
+		tickUpper,
+		amount0In,
+		amount1In,
+		slippageBps,
+		swapParams,
+		sqrtPriceX96,
+	)
 
 	// 6. Call ZapInV4
-	zap, err := blockchain.NewZapSimple(zapAddr, client)
-	if err != nil {
-		return nil, err
-	}
-
 	nonce, err := blockchain.GetNonceWithClient(client, walletAddr)
 	if err != nil {
 		return nil, err

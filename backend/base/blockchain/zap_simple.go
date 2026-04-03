@@ -1,7 +1,9 @@
 package blockchain
 
 import (
+	"fmt"
 	"math/big"
+	"reflect"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -330,4 +332,93 @@ func (z *ZapSimple) ZapInV4(opts *bind.TransactOpts, params ZapInV4ParamsSimple)
 // ZapOutV3 V3 撤仓
 func (z *ZapSimple) ZapOutV3(opts *bind.TransactOpts, positionManager common.Address, tokenId *big.Int, recipient common.Address, amount0Min *big.Int, amount1Min *big.Int) (*types.Transaction, error) {
 	return z.contract.Transact(opts, "zapOutV3", positionManager, tokenId, recipient, amount0Min, amount1Min)
+}
+
+func decodeZapResultSimple(value interface{}) (*ZapResultSimple, error) {
+	if value == nil {
+		return nil, fmt.Errorf("zap result is nil")
+	}
+	rv := reflect.ValueOf(value)
+	if rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return nil, fmt.Errorf("zap result pointer is nil")
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("unexpected zap result type: %T", value)
+	}
+
+	readBig := func(field string) (*big.Int, error) {
+		fv := rv.FieldByName(field)
+		if !fv.IsValid() {
+			return nil, fmt.Errorf("zap result missing field %s", field)
+		}
+		if fv.Kind() != reflect.Pointer || fv.IsNil() {
+			return big.NewInt(0), nil
+		}
+		v, ok := fv.Interface().(*big.Int)
+		if !ok || v == nil {
+			return nil, fmt.Errorf("zap result field %s has type %T", field, fv.Interface())
+		}
+		return new(big.Int).Set(v), nil
+	}
+
+	tokenID, err := readBig("TokenId")
+	if err != nil {
+		return nil, err
+	}
+	liquidity, err := readBig("Liquidity")
+	if err != nil {
+		return nil, err
+	}
+	amount0Used, err := readBig("Amount0Used")
+	if err != nil {
+		return nil, err
+	}
+	amount1Used, err := readBig("Amount1Used")
+	if err != nil {
+		return nil, err
+	}
+	dust0, err := readBig("Dust0")
+	if err != nil {
+		return nil, err
+	}
+	dust1, err := readBig("Dust1")
+	if err != nil {
+		return nil, err
+	}
+
+	return &ZapResultSimple{
+		TokenId:     tokenID,
+		Liquidity:   liquidity,
+		Amount0Used: amount0Used,
+		Amount1Used: amount1Used,
+		Dust0:       dust0,
+		Dust1:       dust1,
+	}, nil
+}
+
+// SimulateZapInV3 runs zapInV3 via eth_call and decodes the returned ZapResult.
+func (z *ZapSimple) SimulateZapInV3(opts *bind.CallOpts, params ZapInV3ParamsSimple) (*ZapResultSimple, error) {
+	var out []interface{}
+	if err := z.contract.Call(opts, &out, "zapInV3", params); err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("empty zapInV3 call result")
+	}
+	return decodeZapResultSimple(out[0])
+}
+
+// SimulateZapInV4 runs zapInV4 via eth_call and decodes the returned ZapResult.
+func (z *ZapSimple) SimulateZapInV4(opts *bind.CallOpts, params ZapInV4ParamsSimple) (*ZapResultSimple, error) {
+	var out []interface{}
+	if err := z.contract.Call(opts, &out, "zapInV4", params); err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("empty zapInV4 call result")
+	}
+	return decodeZapResultSimple(out[0])
 }

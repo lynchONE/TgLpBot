@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"TgLpBot/base/blockchain"
 	"TgLpBot/service/pool"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 func mustBigIntFromString(t *testing.T, raw string) *big.Int {
@@ -132,5 +134,119 @@ func TestEvaluateLiquidityRiskAllowsAckedWarningBand(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("expected acknowledged warning-band liquidity to pass, got %v", err)
+	}
+}
+
+func TestSwapOutputDustRatioBpsUsesSwapOutputSide(t *testing.T) {
+	t.Parallel()
+
+	sim := &blockchain.ZapResultSimple{
+		Amount0Used: big.NewInt(200),
+		Amount1Used: big.NewInt(20),
+		Dust0:       big.NewInt(800),
+		Dust1:       big.NewInt(80),
+	}
+
+	if got := swapOutputDustRatioBps(sim, true); got != 8000 {
+		t.Fatalf("zeroForOne ratio = %d, want 8000", got)
+	}
+	if got := swapOutputDustRatioBps(sim, false); got != 8000 {
+		t.Fatalf("oneForZero ratio = %d, want 8000", got)
+	}
+}
+
+func TestReduceOneSidedSwapAmountScalesByUsedOutputShare(t *testing.T) {
+	t.Parallel()
+
+	next, ok := reduceOneSidedSwapAmount(
+		big.NewInt(1000),
+		&blockchain.ZapResultSimple{
+			Amount1Used: big.NewInt(25),
+			Dust1:       big.NewInt(75),
+		},
+		true,
+	)
+	if !ok {
+		t.Fatal("expected reduction to be accepted")
+	}
+	if next.Cmp(big.NewInt(250)) != 0 {
+		t.Fatalf("reduced swap = %s, want 250", next.String())
+	}
+}
+
+func TestBuildZapInV4ParamsPreservesCoreFields(t *testing.T) {
+	t.Parallel()
+
+	poolKey := blockchain.PoolKeySimple{
+		Currency0:   common.HexToAddress("0x0000000000000000000000000000000000000001"),
+		Currency1:   common.HexToAddress("0x0000000000000000000000000000000000000002"),
+		Fee:         big.NewInt(3000),
+		TickSpacing: big.NewInt(60),
+		Hooks:       common.HexToAddress("0x0000000000000000000000000000000000000003"),
+	}
+	swap := blockchain.SwapParamsSimple{
+		Target:       common.HexToAddress("0x0000000000000000000000000000000000000004"),
+		TokenIn:      poolKey.Currency0,
+		TokenOut:     poolKey.Currency1,
+		AmountIn:     big.NewInt(123),
+		MinAmountOut: big.NewInt(456),
+		CallData:     []byte{0xaa, 0xbb},
+	}
+
+	params := buildZapInV4Params(
+		poolKey,
+		common.HexToAddress("0x0000000000000000000000000000000000000005"),
+		common.HexToAddress("0x0000000000000000000000000000000000000006"),
+		common.HexToAddress("0x0000000000000000000000000000000000000007"),
+		-120,
+		120,
+		big.NewInt(1000),
+		big.NewInt(0),
+		big.NewInt(50),
+		swap,
+		big.NewInt(789),
+	)
+
+	if params.PoolKey.Currency0 != poolKey.Currency0 || params.PoolKey.Currency1 != poolKey.Currency1 {
+		t.Fatalf("pool key currencies not preserved: %+v", params.PoolKey)
+	}
+	if params.Swap.Target != swap.Target || params.Swap.TokenIn != swap.TokenIn || params.Swap.TokenOut != swap.TokenOut {
+		t.Fatalf("swap addresses not preserved: %+v", params.Swap)
+	}
+	if params.Swap.AmountIn.Cmp(swap.AmountIn) != 0 || params.Swap.MinAmountOut.Cmp(swap.MinAmountOut) != 0 {
+		t.Fatalf("swap amounts not preserved: %+v", params.Swap)
+	}
+	if params.TickLower.Cmp(big.NewInt(-120)) != 0 || params.TickUpper.Cmp(big.NewInt(120)) != 0 {
+		t.Fatalf("tick range not preserved: lower=%s upper=%s", params.TickLower.String(), params.TickUpper.String())
+	}
+	if params.SqrtPriceX96.Cmp(big.NewInt(789)) != 0 {
+		t.Fatalf("sqrtPriceX96 = %s, want 789", params.SqrtPriceX96.String())
+	}
+}
+
+func TestPickRecordedOpenDustPrefersWalletDelta(t *testing.T) {
+	t.Parallel()
+
+	got := pickRecordedOpenDust(big.NewInt(12), big.NewInt(99))
+	if got.Cmp(big.NewInt(12)) != 0 {
+		t.Fatalf("pickRecordedOpenDust() = %s, want 12", got.String())
+	}
+}
+
+func TestPickRecordedOpenDustFallsBackToParsedDust(t *testing.T) {
+	t.Parallel()
+
+	got := pickRecordedOpenDust(big.NewInt(0), big.NewInt(99))
+	if got.Cmp(big.NewInt(99)) != 0 {
+		t.Fatalf("pickRecordedOpenDust() = %s, want 99", got.String())
+	}
+}
+
+func TestPickRecordedOpenDustReturnsZeroWhenMissing(t *testing.T) {
+	t.Parallel()
+
+	got := pickRecordedOpenDust(nil, nil)
+	if got.Sign() != 0 {
+		t.Fatalf("pickRecordedOpenDust() = %s, want 0", got.String())
 	}
 }
