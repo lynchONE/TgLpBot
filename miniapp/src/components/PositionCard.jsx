@@ -628,11 +628,11 @@ export default function PositionCard({
                         {typeof onSetTaskPaused === 'function' && (
                             <button type="button" onClick={togglePause} disabled={!canPauseAction || Boolean(actionPending)}
                                 title={taskPaused ? '恢复任务' : '暂停任务'}
-                                className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-semibold transition-all active:scale-95 disabled:opacity-40 ${taskPaused
-                                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 dark:border-emerald-500/20'
-                                    : 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400 dark:border-amber-500/20'
+                                className={`inline-flex h-7 items-center gap-1 rounded-xl border px-2.5 text-[10.5px] font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-40 ${taskPaused
+                                    ? 'border-emerald-400/40 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/25 dark:hover:bg-emerald-500/25'
+                                    : 'border-amber-400/40 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-400 dark:border-amber-500/25 dark:hover:bg-amber-500/25'
                                 }`}>
-                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3 w-3" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
                                     {taskPaused
                                         ? <path d="M8 5v14l11-7z" />
                                         : <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
@@ -645,8 +645,8 @@ export default function PositionCard({
                         {typeof onWithdrawLiquidity === 'function' && (
                             <button type="button" onClick={withdrawLiquidity} disabled={!canWithdraw || Boolean(actionPending)}
                                 title="取回流动性"
-                                className="inline-flex items-center gap-1 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-[10px] font-semibold text-sky-600 transition-all active:scale-95 disabled:opacity-40 dark:text-sky-400 dark:border-sky-500/20">
-                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3 w-3" aria-hidden="true">
+                                className="inline-flex h-7 items-center gap-1 rounded-xl border border-sky-400/40 bg-sky-50 px-2.5 text-[10.5px] font-semibold text-sky-700 shadow-sm transition-all active:scale-95 disabled:opacity-40 hover:bg-sky-100 dark:bg-sky-500/15 dark:text-sky-400 dark:border-sky-500/25 dark:hover:bg-sky-500/25">
+                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
                                     <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
                                 </svg>
                                 <span>{actionPending === 'withdraw' ? '...' : '取回'}</span>
@@ -656,8 +656,8 @@ export default function PositionCard({
                         {typeof onSwapDust === 'function' && (
                             <button type="button" onClick={swapDust} disabled={!canSwapDust || Boolean(actionPending)}
                                 title="兑换残余"
-                                className="inline-flex items-center gap-1 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2 py-1 text-[10px] font-semibold text-violet-600 transition-all active:scale-95 disabled:opacity-40 dark:text-violet-400 dark:border-violet-500/20">
-                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3 w-3" aria-hidden="true">
+                                className="inline-flex h-7 items-center gap-1 rounded-xl border border-violet-400/40 bg-violet-50 px-2.5 text-[10.5px] font-semibold text-violet-700 shadow-sm transition-all active:scale-95 disabled:opacity-40 hover:bg-violet-100 dark:bg-violet-500/15 dark:text-violet-400 dark:border-violet-500/25 dark:hover:bg-violet-500/25">
+                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
                                     <path d="M7.5 21H2V9h5.5v12zm7.25-18h-5.5v18h5.5V3zM22 11h-5.5v10H22V11z" />
                                 </svg>
                                 <span>{actionPending === 'dust' ? '...' : '兑残'}</span>
@@ -667,8 +667,8 @@ export default function PositionCard({
                         {typeof onTriggerRebalance === 'function' && (
                             <button type="button" onClick={triggerRebalance} disabled={!canTriggerRebalance || Boolean(actionPending)}
                                 title="立即触发再平衡"
-                                className="inline-flex items-center gap-1 rounded-lg border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[10px] font-semibold text-blue-600 transition-all active:scale-95 disabled:opacity-40 dark:text-blue-400 dark:border-blue-500/20">
-                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3 w-3" aria-hidden="true">
+                                className="inline-flex h-7 items-center gap-1 rounded-xl border border-blue-400/40 bg-blue-50 px-2.5 text-[10.5px] font-semibold text-blue-700 shadow-sm transition-all active:scale-95 disabled:opacity-40 hover:bg-blue-100 dark:bg-blue-500/15 dark:text-blue-400 dark:border-blue-500/25 dark:hover:bg-blue-500/25">
+                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
                                     <path d="M12 6V1.5l-4.5 4.5L12 10.5V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 9.74C4.46 10.97 4 12.43 4 14c0 4.42 3.58 8 8 8v4.5l4.5-4.5L12 17.5V20z" />
                                 </svg>
                                 <span>{actionPending === 'rebalance' ? '...' : '再平衡'}</span>
@@ -678,11 +678,11 @@ export default function PositionCard({
                         {typeof onToggleRebalance === 'function' && (
                             <button type="button" onClick={toggleRebalanceSwitch} disabled={!canToggleRebalance || Boolean(actionPending)}
                                 title={taskRebalanceEnabled ? '关闭再平衡（超区间直接停止）' : '开启再平衡'}
-                                className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-semibold transition-all active:scale-95 disabled:opacity-40 ${taskRebalanceEnabled
-                                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 dark:border-emerald-500/20'
-                                    : 'border-zinc-400/30 bg-zinc-400/10 text-zinc-500 dark:text-zinc-400 dark:border-zinc-500/20'
+                                className={`inline-flex h-7 items-center gap-1 rounded-xl border px-2.5 text-[10.5px] font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-40 ${taskRebalanceEnabled
+                                    ? 'border-emerald-400/40 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/25 dark:hover:bg-emerald-500/25'
+                                    : 'border-zinc-300/60 bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-white/5 dark:text-zinc-400 dark:border-white/10 dark:hover:bg-white/10'
                                 }`}>
-                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3 w-3" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
                                     {taskRebalanceEnabled
                                         ? <path d="M17 7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h10c2.76 0 5-2.24 5-5s-2.24-5-5-5zm0 8c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z" />
                                         : <path d="M17 7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h10c2.76 0 5-2.24 5-5s-2.24-5-5-5zM7 15c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z" />

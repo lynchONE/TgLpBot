@@ -47,6 +47,7 @@ import SmartMoneyDashboard from './components/SmartMoneyDashboard';
 import OpenPositionModal from './components/OpenPositionModal';
 import StepProgressModal from './components/StepProgressModal';
 import TaskActionMenu from './components/TaskActionMenu';
+import AddLiquidityModal from './components/AddLiquidityModal';
 import NumberFlowValue from './components/NumberFlowValue';
 import { fetchSMPoolStats, updateSMWallet } from './smartMoneyApi';
 import telegramLogo from './img/telegram.svg';
@@ -2837,30 +2838,49 @@ export default function App() {
                   {/* 操作按钮行 */}
                   {taskId > 0 && (
                     <div className="pos-action-bar">
-                      <button className="pos-action-btn pause" title={p?.task_paused ? '恢复任务' : '暂停任务'}
+                      <button className={`pos-action-btn ${p?.task_paused ? 'resume' : 'pause'}`} title={p?.task_paused ? '恢复任务' : '暂停任务'}
                         onClick={() => handleTaskPause(taskId, !p?.task_paused)}>
-                        {p?.task_paused ? '▶ 恢复' : '⏸ 暂停'}
+                        <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+                          {p?.task_paused
+                            ? <path d="M8 5v14l11-7z" />
+                            : <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />}
+                        </svg>
+                        <span>{p?.task_paused ? '恢复' : '暂停'}</span>
                       </button>
                       <button className="pos-action-btn withdraw" title="取回流动性"
                         onClick={() => handleWithdrawLiquidity(taskId)}
                         disabled={!p?.has_liquidity || statusLabel.includes('停止中') || statusLabel.includes('撤出中')}>
-                        ↓ 取回
+                        <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+                          <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
+                        </svg>
+                        <span>取回</span>
                       </button>
                       <button className="pos-action-btn dust" title="兑换残余"
                         onClick={() => handleSwapDust(taskId)}
                         disabled={statusLabel.includes('停止中') || statusLabel.includes('撤出中')}>
-                        ⇄ 兑残
+                        <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+                          <path d="M7.5 21H2V9h5.5v12zm7.25-18h-5.5v18h5.5V3zM22 11h-5.5v10H22V11z" />
+                        </svg>
+                        <span>兑残</span>
                       </button>
                       <button className="pos-action-btn rebalance" title="立即触发再平衡"
                         onClick={() => handleTriggerRebalance(taskId)}
                         disabled={!p?.has_liquidity || statusLabel.includes('已停止') || statusLabel.includes('停止中') || statusLabel.includes('撤出中')}>
-                        🔄 再平衡
+                        <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+                          <path d="M12 6V1.5l-4.5 4.5L12 10.5V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 9.74C4.46 10.97 4 12.43 4 14c0 4.42 3.58 8 8 8v4.5l4.5-4.5L12 17.5V20z" />
+                        </svg>
+                        <span>再平衡</span>
                       </button>
                       <button className={`pos-action-btn toggle ${p?.task_rebalance_enabled !== false ? 'on' : 'off'}`}
                         title={p?.task_rebalance_enabled !== false ? '关闭再平衡（超区间直接停止）' : '开启再平衡'}
                         onClick={() => handleToggleRebalance(taskId, p?.task_rebalance_enabled === false)}
                         disabled={statusLabel.includes('已停止') || statusLabel.includes('停止中') || statusLabel.includes('撤出中')}>
-                        {p?.task_rebalance_enabled !== false ? '🟢 自动' : '⚪ 手动'}
+                        <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+                          {p?.task_rebalance_enabled !== false
+                            ? <path d="M17 7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h10c2.76 0 5-2.24 5-5s-2.24-5-5-5zm0 8c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z" />
+                            : <path d="M17 7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h10c2.76 0 5-2.24 5-5s-2.24-5-5-5zM7 15c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z" />}
+                        </svg>
+                        <span>{p?.task_rebalance_enabled !== false ? '自动' : '手动'}</span>
                       </button>
                     </div>
                   )}

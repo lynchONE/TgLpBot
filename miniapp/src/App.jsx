@@ -528,6 +528,11 @@ export default function App() {
     const [taskRangeError, setTaskRangeError] = useState('');
     const [taskRangeLoading, setTaskRangeLoading] = useState(false);
 
+    const [addLiqModal, setAddLiqModal] = useState(null); // { taskId, title }
+    const [addLiqAmount, setAddLiqAmount] = useState('');
+    const [addLiqError, setAddLiqError] = useState('');
+    const [addLiqLoading, setAddLiqLoading] = useState(false);
+
 
     const [adminUsers, setAdminUsers] = useState([]);
     const [adminUsersError, setAdminUsersError] = useState('');
@@ -2185,22 +2190,43 @@ export default function App() {
         }
     };
 
-    const handleAddLiquidity = async (taskId, position) => {
+    const handleAddLiquidity = (taskId, position) => {
         if (!hasInitData || showAdmin) return;
         const id = Number(taskId);
         if (!Number.isFinite(id) || id <= 0) return;
-        const input = prompt('请输入补充金额 (USDT):');
-        if (!input) return;
-        const amount = Number(input);
+        setAddLiqModal({
+            taskId: id,
+            title: String(position?.title || '').trim() || `任务 #${id}`,
+        });
+        setAddLiqAmount('');
+        setAddLiqError('');
+    };
+
+    const closeAddLiqModal = () => {
+        if (addLiqLoading) return;
+        setAddLiqModal(null);
+        setAddLiqAmount('');
+        setAddLiqError('');
+    };
+
+    const submitAddLiquidity = async () => {
+        if (!addLiqModal) return;
+        const amount = Number(addLiqAmount);
         if (!Number.isFinite(amount) || amount <= 0) {
-            showNotice('请输入有效的金额', 'error');
+            setAddLiqError('请输入有效的金额');
             return;
         }
+        setAddLiqLoading(true);
+        setAddLiqError('');
         try {
-            const resp = await addLiquidity({ apiBaseUrl, initData, taskId: id, amountUsdt: amount });
-            showNotice(resp?.message || '流动性已补充', 'success');
+            const resp = await addLiquidity({ apiBaseUrl, initData, taskId: addLiqModal.taskId, amountUsdt: amount });
+            setAddLiqModal(null);
+            setAddLiqAmount('');
+            showNotice(resp?.message || '补充流动性成功', 'success');
         } catch (e) {
-            showNotice(String(e?.message || e), 'error');
+            setAddLiqError(String(e?.message || e));
+        } finally {
+            setAddLiqLoading(false);
         }
     };
 
@@ -3816,6 +3842,79 @@ export default function App() {
                 ) : null
             }
 
+            {/* ─── 补充流动性 Modal ─────────────────────────────── */}
+            {addLiqModal ? (
+                <div className="fixed inset-0 z-[60]">
+                    <button
+                        type="button"
+                        className="absolute inset-0 bg-black/40"
+                        onClick={closeAddLiqModal}
+                        aria-label="关闭"
+                    />
+                    <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
+                        <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">补充流动性</div>
+                                <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40 truncate">
+                                    {addLiqModal.title}
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={closeAddLiqModal}
+                                disabled={addLiqLoading}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
+                                aria-label="关闭"
+                            >
+                                <Icon path={icons.close} className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <div className="mt-4 space-y-3">
+                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80 mb-2">补充金额 (USDT)</div>
+                                <input
+                                    value={addLiqAmount}
+                                    onChange={(e) => { setAddLiqAmount(e.target.value); setAddLiqError(''); }}
+                                    inputMode="decimal"
+                                    placeholder="请输入 USDT 金额"
+                                    disabled={addLiqLoading}
+                                    className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
+                                />
+                                <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
+                                    将使用 USDT 按当前池价买入并补充至现有仓位。
+                                </div>
+                            </div>
+
+                            {addLiqError ? (
+                                <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-200">
+                                    {addLiqError}
+                                </div>
+                            ) : null}
+
+                            <button
+                                type="button"
+                                onClick={submitAddLiquidity}
+                                disabled={addLiqLoading}
+                                className={`w-full rounded-xl px-3 py-2.5 text-sm font-semibold shadow-sm transition ${addLiqLoading
+                                    ? `${brand.solidButtonClass} cursor-not-allowed opacity-60`
+                                    : brand.solidButtonClass
+                                }`}
+                            >
+                                {addLiqLoading ? (
+                                    <span className="flex items-center justify-center gap-2">
+                                        <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                                        </svg>
+                                        处理中，请稍候...
+                                    </span>
+                                ) : '确认补充'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
 
             {
                 confirmState ? (

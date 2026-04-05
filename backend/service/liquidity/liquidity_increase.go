@@ -316,28 +316,42 @@ func (s *LiquidityService) increaseV4Liquidity(
 		return nil, fmt.Errorf("V4 pool does not contain entry token")
 	}
 
-	// Determine input amounts and optimal swap
+	// Determine input amounts
 	amount0In := big.NewInt(0)
 	amount1In := big.NewInt(0)
-	var tokenOut common.Address
 	if c0 == tokenIn {
 		amount0In = new(big.Int).Set(amountIn)
-		tokenOut = c1
 	} else {
 		amount1In = new(big.Int).Set(amountIn)
-		tokenOut = c0
 	}
 
-	// For V4, use half split as swap (simple approach since we don't have V4 calculateOptimalSwap on-chain)
-	swapAmount := new(big.Int).Div(amountIn, big.NewInt(2))
-	if swapAmount.Sign() > 0 {
-		swapped, swapErr := s.swapExactInViaOKX(exec, privateKey, walletAddr, tokenIn, tokenOut, swapAmount, task.SlippageTolerance)
+	// Read pool sqrtPriceX96 via V4 StateView to compute optimal swap ratio
+	if !common.IsHexAddress(cc.UniswapV4StateViewAddress) || !common.IsHexAddress(cc.UniswapV4PoolManagerAddress) {
+		return nil, fmt.Errorf("V4 StateView or PoolManager address not configured")
+	}
+	stateViewAddr := common.HexToAddress(cc.UniswapV4StateViewAddress)
+	poolManagerAddr := common.HexToAddress(cc.UniswapV4PoolManagerAddress)
+	sqrtPriceX96, currentTick, slotErr := blockchain.GetUniswapV4PoolSlot0ViaStateView(stateViewAddr, poolManagerAddr, task.PoolId)
+	if slotErr != nil {
+		return nil, fmt.Errorf("read V4 pool sqrtPriceX96 failed: %w", slotErr)
+	}
+
+	// Use optimal swap calculation based on actual pool price
+	zeroForOne, swapAmount, _ := s.calculateOptimalSwapPure(sqrtPriceX96, currentTick, task.TickLower, task.TickUpper, amount0In, amount1In)
+	if swapAmount != nil && swapAmount.Sign() > 0 {
+		var swapFrom, swapTo common.Address
+		if zeroForOne {
+			swapFrom, swapTo = c0, c1
+		} else {
+			swapFrom, swapTo = c1, c0
+		}
+		swapped, swapErr := s.swapExactInViaOKX(exec, privateKey, walletAddr, swapFrom, swapTo, swapAmount, task.SlippageTolerance)
 		if swapErr != nil {
 			return nil, fmt.Errorf("V4 optimal swap failed: %w", swapErr)
 		}
 		time.Sleep(500 * time.Millisecond)
 		if swapped != nil && swapped.Sign() > 0 {
-			if c0 == tokenIn {
+			if zeroForOne {
 				amount0In.Sub(amount0In, swapAmount)
 				amount1In.Add(amount1In, swapped)
 			} else {
@@ -345,6 +359,12 @@ func (s *LiquidityService) increaseV4Liquidity(
 				amount0In.Add(amount0In, swapped)
 			}
 		}
+	}
+
+	// Re-read pool price after swap for accurate liquidity calculation
+	sqrtPriceX96After, _, slotErrAfter := blockchain.GetUniswapV4PoolSlot0ViaStateView(stateViewAddr, poolManagerAddr, task.PoolId)
+	if slotErrAfter == nil && sqrtPriceX96After != nil && sqrtPriceX96After.Sign() > 0 {
+		sqrtPriceX96 = sqrtPriceX96After
 	}
 
 	if amount0In.Sign() <= 0 && amount1In.Sign() <= 0 {
@@ -363,10 +383,16 @@ func (s *LiquidityService) increaseV4Liquidity(
 		}
 	}
 
+	// Compute actual liquidityDelta from token amounts and pool price
+	liquidityDelta, liqErr := estimateV4LiquidityForAmounts(sqrtPriceX96, task.TickLower, task.TickUpper, amount0In, amount1In)
+	if liqErr != nil || liquidityDelta == nil || liquidityDelta.Sign() <= 0 {
+		return nil, fmt.Errorf("V4 compute liquidityDelta failed: %w", liqErr)
+	}
+	log.Printf("[Liquidity] V4 INCREASE_LIQUIDITY computed: liquidityDelta=%s sqrtPriceX96=%s tick=%d/%d",
+		liquidityDelta.String(), sqrtPriceX96.String(), task.TickLower, task.TickUpper)
+
 	// Build INCREASE_LIQUIDITY + SETTLE_PAIR actions via ABI encoding
 	// INCREASE_LIQUIDITY (0x00): (tokenId, liquidityDelta, amount0Max, amount1Max, hookData)
-	// Use type(uint128).max for liquidityDelta to add as much as possible given the token amounts.
-	maxUint128 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 128), big.NewInt(1))
 
 	actions := []byte{0x00, 0x0d} // INCREASE_LIQUIDITY=0x00, SETTLE_PAIR=0x0d
 
@@ -383,7 +409,7 @@ func (s *LiquidityService) increaseV4Liquidity(
 		{Type: uint128Ty}, // amount1Max
 		{Type: bytesTy},   // hookData
 	}
-	increaseLiqParams, err := increaseArgs.Pack(tokenId, maxUint128, amount0In, amount1In, []byte{})
+	increaseLiqParams, err := increaseArgs.Pack(tokenId, liquidityDelta, amount0In, amount1In, []byte{})
 	if err != nil {
 		return nil, fmt.Errorf("encode V4 INCREASE_LIQUIDITY params failed: %w", err)
 	}
