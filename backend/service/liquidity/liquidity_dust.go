@@ -261,8 +261,12 @@ func (s *LiquidityService) resolveTaskTokenAddresses(task *models.StrategyTask) 
 			tokenId, _ := convert.ParseBigInt(task.V4TokenID)
 			if tokenId.Sign() > 0 {
 				v4pmAddr := common.HexToAddress(pmAddrStr)
-				if v4pm, err := blockchain.NewV4PositionManager(v4pmAddr, client); err == nil {
-					if pos, err := v4pm.Positions(nil, tokenId); err == nil && pos != nil {
+				poolMgrStr := strings.TrimSpace(cc.UniswapV4PoolManagerAddress)
+				if !common.IsHexAddress(poolMgrStr) && config.AppConfig != nil {
+					poolMgrStr = strings.TrimSpace(config.AppConfig.UniswapV4PoolManagerAddress)
+				}
+				if common.IsHexAddress(poolMgrStr) {
+					if pos, err := blockchain.GetV4PositionInfo(v4pmAddr, common.HexToAddress(poolMgrStr), task.PoolId, tokenId); err == nil && pos != nil {
 						if token0Addr == (common.Address{}) {
 							token0Addr = pos.Token0
 						}

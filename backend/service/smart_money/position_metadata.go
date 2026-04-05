@@ -407,11 +407,7 @@ func resolveV4PositionMetadata(ctx context.Context, chain string, nftTokenID uin
 	}
 
 	tokenID := new(big.Int).SetUint64(nftTokenID)
-	pos, posErr := pm.Positions(nil, tokenID)
 	raw, rawErr := pm.PositionInfoPacked(nil, tokenID)
-	if posErr != nil && rawErr != nil {
-		return nil, fmt.Errorf("read v4 position %d failed: positions=%v positionInfo=%v", nftTokenID, posErr, rawErr)
-	}
 	if rawErr != nil {
 		return nil, fmt.Errorf("read v4 positionInfo for %d: %w", nftTokenID, rawErr)
 	}
@@ -428,15 +424,6 @@ func resolveV4PositionMetadata(ctx context.Context, chain string, nftTokenID uin
 
 	tickLower := packedTickLower
 	tickUpper := packedTickUpper
-	if posErr == nil && pos != nil {
-		token0 = pos.Token0
-		token1 = pos.Token1
-		if pos.Fee > 0 {
-			fee = pos.Fee
-		}
-		tickLower = pos.TickLower
-		tickUpper = pos.TickUpper
-	}
 	feeTier := int(fee)
 
 	return &PositionMetadata{

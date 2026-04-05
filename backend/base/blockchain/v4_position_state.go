@@ -70,16 +70,8 @@ func GetV4PositionInfo(positionManager common.Address, poolManager common.Addres
 		return nil, err
 	}
 
-	pos, posErr := pm.Positions(nil, tokenId)
-	if posErr == nil && pos != nil {
-		return pos, nil
-	}
-
 	raw, infoErr := pm.PositionInfoPacked(nil, tokenId)
 	if infoErr != nil {
-		if posErr != nil {
-			return nil, fmt.Errorf("positions failed: %v; positionInfo failed: %w", posErr, infoErr)
-		}
 		return nil, infoErr
 	}
 
@@ -88,7 +80,7 @@ func GetV4PositionInfo(positionManager common.Address, poolManager common.Addres
 		return nil, err
 	}
 
-	pos = &V4PositionInfo{
+	pos := &V4PositionInfo{
 		TickLower:     packed.TickLower,
 		TickUpper:     packed.TickUpper,
 		Liquidity:     big.NewInt(0),
@@ -99,25 +91,32 @@ func GetV4PositionInfo(positionManager common.Address, poolManager common.Addres
 		PositionRaw:   []interface{}{raw},
 	}
 
-	if poolID != "" {
-		if c0, c1, fee, _, _, keyErr := GetUniswapV4PoolKeyFromPositionManager(positionManager, poolID); keyErr == nil {
+	var fullPoolID common.Hash
+	var resolvedPoolID bool
+	if len(packed.PoolId25) == 25 {
+		var poolID25 [25]byte
+		copy(poolID25[:], packed.PoolId25)
+		if derivedID, c0, c1, fee, _, _, keyErr := GetUniswapV4PoolKeyFromPositionManagerBytes25(positionManager, poolID25); keyErr == nil {
 			pos.Token0 = c0
 			pos.Token1 = c1
 			pos.Fee = fee
+			fullPoolID = derivedID
+			resolvedPoolID = true
+		}
+	}
+	if poolID != "" {
+		if parsedPoolID, perr := parsePoolID(poolID); perr == nil {
+			if resolvedPoolID && fullPoolID != parsedPoolID {
+				log.Printf("[V4PM] poolId mismatch: task=%s derived=%s tokenId=%s", parsedPoolID.Hex(), fullPoolID.Hex(), tokenId.String())
+			} else if !resolvedPoolID {
+				fullPoolID = parsedPoolID
+				resolvedPoolID = true
+			}
 		}
 	}
 
-	if posErr != nil {
-		log.Printf("[V4PM] positions() failed for tokenId=%s: %v; using positionInfo+extsload", tokenId.String(), posErr)
-	}
-
-	if poolID == "" || poolManager == (common.Address{}) {
+	if !resolvedPoolID || poolManager == (common.Address{}) {
 		return pos, fmt.Errorf("poolId/poolManager missing for V4 position state")
-	}
-
-	fullPoolID, perr := parsePoolID(poolID)
-	if perr != nil {
-		return pos, perr
 	}
 	if len(packed.PoolId25) == 25 {
 		if !bytes.Equal(fullPoolID.Bytes()[:25], packed.PoolId25) {
@@ -155,16 +154,8 @@ func GetV4PositionInfoAtBlock(positionManager common.Address, poolManager common
 	}
 
 	opts := &bind.CallOpts{BlockNumber: new(big.Int).SetUint64(blockNumber)}
-	pos, posErr := pm.Positions(opts, tokenId)
-	if posErr == nil && pos != nil {
-		return pos, nil
-	}
-
 	raw, infoErr := pm.PositionInfoPacked(opts, tokenId)
 	if infoErr != nil {
-		if posErr != nil {
-			return nil, fmt.Errorf("positions failed: %v; positionInfo failed: %w", posErr, infoErr)
-		}
 		return nil, infoErr
 	}
 
@@ -173,7 +164,7 @@ func GetV4PositionInfoAtBlock(positionManager common.Address, poolManager common
 		return nil, err
 	}
 
-	pos = &V4PositionInfo{
+	pos := &V4PositionInfo{
 		TickLower:     packed.TickLower,
 		TickUpper:     packed.TickUpper,
 		Liquidity:     big.NewInt(0),
@@ -184,25 +175,32 @@ func GetV4PositionInfoAtBlock(positionManager common.Address, poolManager common
 		PositionRaw:   []interface{}{raw},
 	}
 
-	if poolID != "" {
-		if c0, c1, fee, _, _, keyErr := GetUniswapV4PoolKeyFromPositionManager(positionManager, poolID); keyErr == nil {
+	var fullPoolID common.Hash
+	var resolvedPoolID bool
+	if len(packed.PoolId25) == 25 {
+		var poolID25 [25]byte
+		copy(poolID25[:], packed.PoolId25)
+		if derivedID, c0, c1, fee, _, _, keyErr := GetUniswapV4PoolKeyFromPositionManagerBytes25(positionManager, poolID25); keyErr == nil {
 			pos.Token0 = c0
 			pos.Token1 = c1
 			pos.Fee = fee
+			fullPoolID = derivedID
+			resolvedPoolID = true
+		}
+	}
+	if poolID != "" {
+		if parsedPoolID, perr := parsePoolID(poolID); perr == nil {
+			if resolvedPoolID && fullPoolID != parsedPoolID {
+				log.Printf("[V4PM] poolId mismatch at block=%d: task=%s derived=%s tokenId=%s", blockNumber, parsedPoolID.Hex(), fullPoolID.Hex(), tokenId.String())
+			} else if !resolvedPoolID {
+				fullPoolID = parsedPoolID
+				resolvedPoolID = true
+			}
 		}
 	}
 
-	if posErr != nil {
-		log.Printf("[V4PM] positions() failed for tokenId=%s at block=%d: %v; using positionInfo+extsload", tokenId.String(), blockNumber, posErr)
-	}
-
-	if poolID == "" || poolManager == (common.Address{}) {
+	if !resolvedPoolID || poolManager == (common.Address{}) {
 		return pos, fmt.Errorf("poolId/poolManager missing for V4 position state")
-	}
-
-	fullPoolID, perr := parsePoolID(poolID)
-	if perr != nil {
-		return pos, perr
 	}
 	if len(packed.PoolId25) == 25 {
 		if !bytes.Equal(fullPoolID.Bytes()[:25], packed.PoolId25) {

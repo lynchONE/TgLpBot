@@ -53,6 +53,19 @@ func spentBalanceDelta(before, after *big.Int) *big.Int {
 	return new(big.Int).Sub(before, after)
 }
 
+func normalizeSwapParamsSimple(params blockchain.SwapParamsSimple) blockchain.SwapParamsSimple {
+	if params.AmountIn == nil {
+		params.AmountIn = big.NewInt(0)
+	}
+	if params.MinAmountOut == nil {
+		params.MinAmountOut = big.NewInt(0)
+	}
+	if params.CallData == nil {
+		params.CallData = []byte{}
+	}
+	return params
+}
+
 func decodeEventBigInt(value interface{}) (*big.Int, error) {
 	switch v := value.(type) {
 	case *big.Int:
@@ -230,8 +243,8 @@ func buildAtomicIncreaseV3Params(
 			Token:  fundingToken,
 			Amount: fundingAmount,
 		},
-		EntrySwap:     entrySwap,
-		RebalanceSwap: rebalanceSwap,
+		EntrySwap:     normalizeSwapParamsSimple(entrySwap),
+		RebalanceSwap: normalizeSwapParamsSimple(rebalanceSwap),
 	}
 }
 
@@ -261,8 +274,8 @@ func buildAtomicIncreaseV4Params(
 			Token:  fundingToken,
 			Amount: fundingAmount,
 		},
-		EntrySwap:     entrySwap,
-		RebalanceSwap: rebalanceSwap,
+		EntrySwap:     normalizeSwapParamsSimple(entrySwap),
+		RebalanceSwap: normalizeSwapParamsSimple(rebalanceSwap),
 		SqrtPriceX96:  sqrtPriceX96,
 	}
 }

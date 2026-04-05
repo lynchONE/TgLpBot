@@ -155,29 +155,10 @@ func bestEffortReadV4PositionInfo(
 	poolID string,
 	tokenId *big.Int,
 ) (*blockchain.V4PositionInfo, error) {
-	pm, err := blockchain.NewV4PositionManager(positionManager, client.Client())
-	if err != nil {
-		return nil, fmt.Errorf("init V4 PM failed: %w", err)
-	}
-
-	pos, err := pm.Positions(nil, tokenId)
-	if err == nil && pos != nil {
-		return pos, nil
-	}
-
-	readErr := err
 	if config.NormalizeChain(client.Chain()) == "bsc" && blockchain.Client != nil {
-		fallbackPos, fallbackErr := blockchain.GetV4PositionInfo(positionManager, poolManager, poolID, tokenId)
-		if fallbackErr == nil && fallbackPos != nil {
-			return fallbackPos, nil
-		}
-		if readErr != nil {
-			return nil, fmt.Errorf("positions failed: %v; fallback getV4PositionInfo failed: %w", readErr, fallbackErr)
-		}
-		return nil, fallbackErr
+		return blockchain.GetV4PositionInfo(positionManager, poolManager, poolID, tokenId)
 	}
-
-	return nil, readErr
+	return nil, fmt.Errorf("v4 position read requires supported chain client")
 }
 
 func (s *LiquidityService) increaseV3Liquidity(

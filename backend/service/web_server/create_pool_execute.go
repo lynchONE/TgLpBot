@@ -289,7 +289,11 @@ func (s *Server) executeCreatePoolPlan(plan *createPoolPlan) (*createPoolExecute
 			}
 		} else if tokenID := parseCreatePoolMintedTokenID(seedReceipt, plan.positionManager, walletAddr); tokenID != nil {
 			resp.TokenID = tokenID.String()
-			if pos, err := v4pm.Positions(&bind.CallOpts{}, tokenID); err == nil && pos != nil && pos.Liquidity != nil {
+			poolManagerAddr := common.Address{}
+			if common.IsHexAddress(plan.ctx.cc.UniswapV4PoolManagerAddress) {
+				poolManagerAddr = common.HexToAddress(plan.ctx.cc.UniswapV4PoolManagerAddress)
+			}
+			if pos, err := blockchain.GetV4PositionInfo(plan.positionManager, poolManagerAddr, plan.predictedPoolID.Hex(), tokenID); err == nil && pos != nil && pos.Liquidity != nil {
 				resp.Liquidity = pos.Liquidity.String()
 			}
 		}

@@ -2,6 +2,7 @@ package web_server
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"math/big"
 	"net/http"
@@ -105,6 +106,16 @@ func (s *Server) handleTaskAddLiquidity(w http.ResponseWriter, r *http.Request) 
 
 	resultCh := make(chan taskAddLiquidityRunResult, 1)
 	ok, tryErr := exec.TryRunTask(task.UserID, task.WalletID, task.WalletAddress, func(_ string) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[WebAPI] add_liquidity panic: task_id=%d panic=%v", taskID, r)
+				select {
+				case resultCh <- taskAddLiquidityRunResult{err: fmt.Errorf("internal panic during add liquidity: %v", r)}:
+				default:
+				}
+			}
+		}()
+
 		liqSvc := liquidity.NewLiquidityService()
 		increaseRes, increaseErr := liqSvc.IncreaseLiquidityForTask(userID, task, amountUSDT)
 		if increaseErr != nil {

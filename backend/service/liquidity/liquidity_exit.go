@@ -1386,26 +1386,12 @@ func (s *LiquidityService) exitV4ToUSDT(exec chainexec.EVMExecutor, privateKey *
 		return nil, fmt.Errorf("init v4 position manager failed: %w", err)
 	}
 
-	pos, posErr := v4pm.Positions(nil, tokenId)
+	pos, posErr := blockchain.GetV4PositionInfo(v4pmAddr, common.HexToAddress(cc.UniswapV4PoolManagerAddress), task.PoolId, tokenId)
 	liq := big.NewInt(0)
-	owed0 := big.NewInt(0)
-	owed1 := big.NewInt(0)
 	if posErr == nil && pos != nil {
 		if pos.Liquidity != nil {
 			liq = pos.Liquidity
 		}
-		if pos.TokensOwed0 != nil {
-			owed0 = pos.TokensOwed0
-		}
-		if pos.TokensOwed1 != nil {
-			owed1 = pos.TokensOwed1
-		}
-	}
-
-	// If on-chain says the position is already empty, skip remove to make exit retry-safe.
-	if posErr == nil && liq.Sign() <= 0 && owed0.Sign() <= 0 && owed1.Sign() <= 0 {
-		log.Printf("[Liquidity] V4 exit: position already empty, skipping remove tokenId=%s", tokenId.String())
-		return txHashes, nil
 	}
 
 	// If we couldn't query on-chain position, fall back to task.current_liquidity.

@@ -2358,10 +2358,12 @@ func (s *LiquidityService) enterV4FromToken(
 			tokenId = recovered
 			parsedViaTransferFallback = true
 			liq = big.NewInt(0)
-			if v4pm, perr := blockchain.NewV4PositionManager(positionManager, client); perr == nil {
-				if pos, qerr := v4pm.Positions(nil, tokenId); qerr == nil && pos != nil && pos.Liquidity != nil {
-					liq = cloneBig(pos.Liquidity)
-				}
+			poolManagerAddr := common.Address{}
+			if common.IsHexAddress(cc.UniswapV4PoolManagerAddress) {
+				poolManagerAddr = common.HexToAddress(cc.UniswapV4PoolManagerAddress)
+			}
+			if pos, qerr := blockchain.GetV4PositionInfo(positionManager, poolManagerAddr, task.PoolId, tokenId); qerr == nil && pos != nil && pos.Liquidity != nil {
+				liq = cloneBig(pos.Liquidity)
 			}
 			used0 = big.NewInt(0)
 			used1 = big.NewInt(0)

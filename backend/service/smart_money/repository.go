@@ -1108,18 +1108,10 @@ func (r *Repository) loadCurrentLiquiditySnapshot(event *models.SmartMoneyLPEven
 		if !common.IsHexAddress(managerAddress) {
 			return nil
 		}
-		pm, err := blockchain.NewV4PositionManager(common.HexToAddress(managerAddress), client)
-		if err != nil {
-			return nil
-		}
-		info, err := pm.Positions(nil, tokenID)
-		if err == nil && info != nil && info.Liquidity != nil {
-			return new(big.Int).Set(info.Liquidity)
-		}
 		if !common.IsHexAddress(strings.TrimSpace(active.PoolManagerAddress)) || strings.TrimSpace(active.PoolAddress) == "" {
 			return nil
 		}
-		info, err = blockchain.GetV4PositionInfo(
+		info, err := blockchain.GetV4PositionInfo(
 			common.HexToAddress(managerAddress),
 			common.HexToAddress(strings.TrimSpace(active.PoolManagerAddress)),
 			strings.TrimSpace(active.PoolAddress),
