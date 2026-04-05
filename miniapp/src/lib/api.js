@@ -901,10 +901,10 @@ export async function fetchAdminPrivateZap({ apiBaseUrl, initData, signal }) {
     });
 }
 
-export async function invalidateAdminPrivateZap({ apiBaseUrl, initData, chain, signal }) {
+export async function invalidateAdminPrivateZap({ apiBaseUrl, initData, chain, kind, signal }) {
     return adminPrivateZapRequest({
         apiBaseUrl,
-        payload: { initData, action: 'invalidate', chain },
+        payload: { initData, action: 'invalidate', chain, kind },
         signal,
     });
 }

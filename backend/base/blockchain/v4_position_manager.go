@@ -79,6 +79,30 @@ const v4PositionManagerABI = `[
     "outputs": [{ "internalType": "uint256", "name": "info", "type": "uint256" }],
     "stateMutability": "view",
     "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "address", "name": "to", "type": "address" },
+      { "internalType": "uint256", "name": "tokenId", "type": "uint256" }
+    ],
+    "name": "approve",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "uint256", "name": "tokenId", "type": "uint256" }],
+    "name": "getApproved",
+    "outputs": [{ "internalType": "address", "name": "", "type": "address" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "uint256", "name": "tokenId", "type": "uint256" }],
+    "name": "ownerOf",
+    "outputs": [{ "internalType": "address", "name": "", "type": "address" }],
+    "stateMutability": "view",
+    "type": "function"
   }
 ]`
 
@@ -221,4 +245,38 @@ func (m *V4PositionManager) PositionInfoPacked(opts *bind.CallOpts, tokenId *big
 		return nil, fmt.Errorf("unexpected positionInfo return type: %T", result[0])
 	}
 	return raw, nil
+}
+
+func (m *V4PositionManager) Approve(opts *bind.TransactOpts, to common.Address, tokenId *big.Int) (*types.Transaction, error) {
+	return m.contract.Transact(opts, "approve", to, tokenId)
+}
+
+func (m *V4PositionManager) GetApproved(opts *bind.CallOpts, tokenId *big.Int) (common.Address, error) {
+	var result []interface{}
+	if err := m.contract.Call(opts, &result, "getApproved", tokenId); err != nil {
+		return common.Address{}, err
+	}
+	if len(result) < 1 {
+		return common.Address{}, fmt.Errorf("unexpected getApproved return length: %d", len(result))
+	}
+	addr, ok := result[0].(common.Address)
+	if !ok {
+		return common.Address{}, fmt.Errorf("unexpected getApproved return type: %T", result[0])
+	}
+	return addr, nil
+}
+
+func (m *V4PositionManager) OwnerOf(opts *bind.CallOpts, tokenId *big.Int) (common.Address, error) {
+	var result []interface{}
+	if err := m.contract.Call(opts, &result, "ownerOf", tokenId); err != nil {
+		return common.Address{}, err
+	}
+	if len(result) < 1 {
+		return common.Address{}, fmt.Errorf("unexpected ownerOf return length: %d", len(result))
+	}
+	addr, ok := result[0].(common.Address)
+	if !ok {
+		return common.Address{}, fmt.Errorf("unexpected ownerOf return type: %T", result[0])
+	}
+	return addr, nil
 }

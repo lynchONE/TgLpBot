@@ -21,9 +21,18 @@ import (
 
 // IncreaseLiquidityResult holds the result of an increase-liquidity operation.
 type IncreaseLiquidityResult struct {
-	TxHash           string
-	AddedLiquidity   string
-	CurrentLiquidity string
+	TxHash               string
+	AddedLiquidity       string
+	CurrentLiquidity     string
+	TickLower            *int
+	TickUpper            *int
+	ActualStableSpent    float64
+	ActualStableSpentWei *big.Int
+	Dust0Wei             *big.Int
+	Dust1Wei             *big.Int
+	Token0               common.Address
+	Token1               common.Address
+	GasSpentWei          *big.Int
 }
 
 // IncreaseLiquidityForTask adds liquidity to an existing V3/V4 position.
@@ -82,6 +91,16 @@ func (s *LiquidityService) IncreaseLiquidityForTask(userID uint, task *models.St
 		return nil, fmt.Errorf("insufficient USDT balance")
 	}
 
+	version := strings.ToLower(strings.TrimSpace(task.PoolVersion))
+	if config.AppConfig.AtomicAddLiquidityEnabled && config.AppConfig.PrivateZapEnabled {
+		switch version {
+		case "v4":
+			return s.increaseV4LiquidityAtomic(exec, wallet, privateKey, walletAddr, usdtAddr, usdtAmount, task, TxOptions{})
+		default:
+			return s.increaseV3LiquidityAtomic(exec, wallet, privateKey, walletAddr, usdtAddr, usdtAmount, task, TxOptions{})
+		}
+	}
+
 	// Convert USDT to entry token if needed (same logic as EnterTaskFromUSDT)
 	plan, err := s.planEntryToken(task)
 	if err != nil {
@@ -105,13 +124,60 @@ func (s *LiquidityService) IncreaseLiquidityForTask(userID uint, task *models.St
 		entryAmount = swapped
 	}
 
-	version := strings.ToLower(strings.TrimSpace(task.PoolVersion))
+	var res *IncreaseLiquidityResult
 	switch version {
 	case "v4":
-		return s.increaseV4Liquidity(exec, wallet, privateKey, walletAddr, entryToken, entryAmount, task, TxOptions{})
+		res, err = s.increaseV4Liquidity(exec, wallet, privateKey, walletAddr, entryToken, entryAmount, task, TxOptions{})
 	default:
-		return s.increaseV3Liquidity(exec, wallet, privateKey, walletAddr, entryToken, entryAmount, task, TxOptions{})
+		res, err = s.increaseV3Liquidity(exec, wallet, privateKey, walletAddr, entryToken, entryAmount, task, TxOptions{})
 	}
+	if err != nil {
+		return nil, err
+	}
+	if res != nil && (res.ActualStableSpentWei == nil || res.ActualStableSpentWei.Sign() <= 0) {
+		res.ActualStableSpentWei = new(big.Int).Set(usdtAmount)
+		res.ActualStableSpent = amountToFloat(usdtAmount, cc.StableDecimals)
+	}
+	return res, nil
+}
+
+func pickIncreasePositionRange(taskTickLower, taskTickUpper int, onchainTickLower, onchainTickUpper int) (int, int, bool) {
+	if onchainTickLower < onchainTickUpper {
+		return onchainTickLower, onchainTickUpper, onchainTickLower != taskTickLower || onchainTickUpper != taskTickUpper
+	}
+	return taskTickLower, taskTickUpper, false
+}
+
+func bestEffortReadV4PositionInfo(
+	client chainexec.EVMExecutor,
+	positionManager common.Address,
+	poolManager common.Address,
+	poolID string,
+	tokenId *big.Int,
+) (*blockchain.V4PositionInfo, error) {
+	pm, err := blockchain.NewV4PositionManager(positionManager, client.Client())
+	if err != nil {
+		return nil, fmt.Errorf("init V4 PM failed: %w", err)
+	}
+
+	pos, err := pm.Positions(nil, tokenId)
+	if err == nil && pos != nil {
+		return pos, nil
+	}
+
+	readErr := err
+	if config.NormalizeChain(client.Chain()) == "bsc" && blockchain.Client != nil {
+		fallbackPos, fallbackErr := blockchain.GetV4PositionInfo(positionManager, poolManager, poolID, tokenId)
+		if fallbackErr == nil && fallbackPos != nil {
+			return fallbackPos, nil
+		}
+		if readErr != nil {
+			return nil, fmt.Errorf("positions failed: %v; fallback getV4PositionInfo failed: %w", readErr, fallbackErr)
+		}
+		return nil, fallbackErr
+	}
+
+	return nil, readErr
 }
 
 func (s *LiquidityService) increaseV3Liquidity(
@@ -141,6 +207,25 @@ func (s *LiquidityService) increaseV3Liquidity(
 		return nil, fmt.Errorf("task has no V3 position manager address")
 	}
 	pmAddr := common.HexToAddress(pmAddrStr)
+	pm, err := blockchain.NewV3PositionManager(pmAddr, client)
+	if err != nil {
+		return nil, fmt.Errorf("init V3 PM failed: %w", err)
+	}
+
+	posInfo, err := pm.Positions(nil, tokenId)
+	if err != nil {
+		return nil, fmt.Errorf("read V3 position failed: %w", err)
+	}
+	onchainTickLower, onchainTickUpper := 0, 0
+	if posInfo != nil {
+		onchainTickLower = posInfo.TickLower
+		onchainTickUpper = posInfo.TickUpper
+	}
+	rangeLower, rangeUpper, rangeSynced := pickIncreasePositionRange(task.TickLower, task.TickUpper, onchainTickLower, onchainTickUpper)
+	if rangeSynced {
+		log.Printf("[Liquidity] V3 increase: use on-chain position range tick=%d/%d instead of task tick=%d/%d (tokenId=%s)",
+			rangeLower, rangeUpper, task.TickLower, task.TickUpper, tokenId.String())
+	}
 
 	if !common.IsHexAddress(task.PoolId) {
 		return nil, fmt.Errorf("invalid V3 pool address: %s", task.PoolId)
@@ -153,6 +238,13 @@ func (s *LiquidityService) increaseV3Liquidity(
 	}
 	if bytes.Compare(token0.Bytes(), token1.Bytes()) >= 0 {
 		return nil, fmt.Errorf("unexpected v3 token ordering")
+	}
+	if posInfo != nil {
+		if posInfo.Token0 != (common.Address{}) && posInfo.Token1 != (common.Address{}) &&
+			(posInfo.Token0 != token0 || posInfo.Token1 != token1) {
+			return nil, fmt.Errorf("V3 position token mismatch with task pool: position=%s/%s pool=%s/%s",
+				posInfo.Token0.Hex(), posInfo.Token1.Hex(), token0.Hex(), token1.Hex())
+		}
 	}
 
 	if token0 != tokenIn && token1 != tokenIn {
@@ -169,7 +261,7 @@ func (s *LiquidityService) increaseV3Liquidity(
 	}
 
 	// Calculate optimal swap to split into token0/token1
-	zeroForOne, swapAmount, err := s.calculateOptimalSwapLocal(client, poolAddr, task.TickLower, task.TickUpper, amount0In, amount1In)
+	zeroForOne, swapAmount, err := s.calculateOptimalSwapLocal(client, poolAddr, rangeLower, rangeUpper, amount0In, amount1In)
 	if err != nil {
 		log.Printf("[Liquidity] V3 increase: calculateOptimalSwapLocal failed: %v, fallback to half", err)
 		swapAmount = new(big.Int).Div(amountIn, big.NewInt(2))
@@ -221,12 +313,6 @@ func (s *LiquidityService) increaseV3Liquidity(
 		}
 	}
 
-	// Call increaseLiquidity on the PositionManager
-	pm, err := blockchain.NewV3PositionManager(pmAddr, client)
-	if err != nil {
-		return nil, fmt.Errorf("init V3 PM failed: %w", err)
-	}
-
 	deadline := big.NewInt(time.Now().Add(5 * time.Minute).Unix())
 	params := blockchain.V3IncreaseLiquidityParams{
 		TokenId:        tokenId,
@@ -262,7 +348,7 @@ func (s *LiquidityService) increaseV3Liquidity(
 	_ = receipt
 
 	// Read updated position liquidity
-	posInfo, err := pm.Positions(nil, tokenId)
+	posInfo, err = pm.Positions(nil, tokenId)
 	var currentLiq string
 	if err == nil && posInfo != nil && posInfo.Liquidity != nil {
 		currentLiq = posInfo.Liquidity.String()
@@ -274,7 +360,137 @@ func (s *LiquidityService) increaseV3Liquidity(
 	return &IncreaseLiquidityResult{
 		TxHash:           tx.Hash().Hex(),
 		CurrentLiquidity: currentLiq,
+		TickLower:        &rangeLower,
+		TickUpper:        &rangeUpper,
 	}, nil
+}
+
+func buildV4IncreaseUnlockData(
+	tokenId *big.Int,
+	liquidityDelta *big.Int,
+	amount0Max *big.Int,
+	amount1Max *big.Int,
+	c0 common.Address,
+	c1 common.Address,
+) ([]byte, error) {
+	actions := []byte{0x00, 0x0d} // INCREASE_LIQUIDITY=0x00, SETTLE_PAIR=0x0d
+
+	uint256Ty, _ := abi.NewType("uint256", "", nil)
+	uint128Ty, _ := abi.NewType("uint128", "", nil)
+	addressTy, _ := abi.NewType("address", "", nil)
+	bytesTy, _ := abi.NewType("bytes", "", nil)
+	bytesArrTy, _ := abi.NewType("bytes[]", "", nil)
+
+	increaseArgs := abi.Arguments{
+		{Type: uint256Ty}, // tokenId
+		{Type: uint256Ty}, // liquidityDelta
+		{Type: uint128Ty}, // amount0Max
+		{Type: uint128Ty}, // amount1Max
+		{Type: bytesTy},   // hookData
+	}
+	increaseLiqParams, err := increaseArgs.Pack(tokenId, liquidityDelta, amount0Max, amount1Max, []byte{})
+	if err != nil {
+		return nil, fmt.Errorf("encode V4 INCREASE_LIQUIDITY params failed: %w", err)
+	}
+
+	settlePairArgs := abi.Arguments{
+		{Type: addressTy}, // currency0
+		{Type: addressTy}, // currency1
+	}
+	settlePairParams, err := settlePairArgs.Pack(c0, c1)
+	if err != nil {
+		return nil, fmt.Errorf("encode V4 SETTLE_PAIR params failed: %w", err)
+	}
+
+	unlockArgs := abi.Arguments{
+		{Type: bytesTy},    // actions
+		{Type: bytesArrTy}, // params[]
+	}
+	unlockData, err := unlockArgs.Pack(actions, [][]byte{increaseLiqParams, settlePairParams})
+	if err != nil {
+		return nil, fmt.Errorf("encode V4 unlockData failed: %w", err)
+	}
+	return unlockData, nil
+}
+
+func (s *LiquidityService) simulateV4ModifyLiquidities(
+	pm *blockchain.V4PositionManager,
+	client chainexec.EVMExecutor,
+	privateKey *ecdsa.PrivateKey,
+	nonce uint64,
+	unlockData []byte,
+	deadline *big.Int,
+	opts TxOptions,
+) error {
+	if pm == nil {
+		return fmt.Errorf("V4 position manager is nil")
+	}
+	auth, err := s.buildAuth(client.Client(), client.ChainID(), privateKey, nonce, big.NewInt(0), opts)
+	if err != nil {
+		return err
+	}
+	auth.NoSend = true
+	_, err = pm.ModifyLiquidities(auth, unlockData, deadline)
+	return err
+}
+
+func (s *LiquidityService) fitV4IncreaseLiquidityDelta(
+	pm *blockchain.V4PositionManager,
+	exec chainexec.EVMExecutor,
+	privateKey *ecdsa.PrivateKey,
+	nonce uint64,
+	deadline *big.Int,
+	tokenId *big.Int,
+	amount0Max *big.Int,
+	amount1Max *big.Int,
+	c0 common.Address,
+	c1 common.Address,
+	initialLiquidityDelta *big.Int,
+	opts TxOptions,
+) (*big.Int, []byte, error) {
+	if initialLiquidityDelta == nil || initialLiquidityDelta.Sign() <= 0 {
+		return nil, nil, fmt.Errorf("initial liquidityDelta invalid")
+	}
+
+	one := big.NewInt(1)
+	lo := big.NewInt(1)
+	hi := new(big.Int).Set(initialLiquidityDelta)
+	var best *big.Int
+	var bestUnlockData []byte
+
+	for lo.Cmp(hi) <= 0 {
+		mid := new(big.Int).Add(lo, hi)
+		mid.Rsh(mid, 1)
+		if mid.Sign() <= 0 {
+			break
+		}
+
+		unlockData, err := buildV4IncreaseUnlockData(tokenId, mid, amount0Max, amount1Max, c0, c1)
+		if err != nil {
+			return nil, nil, err
+		}
+		simErr := s.simulateV4ModifyLiquidities(pm, exec, privateKey, nonce, unlockData, deadline, opts)
+		if simErr == nil {
+			best = new(big.Int).Set(mid)
+			bestUnlockData = unlockData
+			lo = new(big.Int).Add(mid, one)
+			continue
+		}
+		if strings.Contains(simErr.Error(), maximumAmountExceededSelector) {
+			hi = new(big.Int).Sub(mid, one)
+			continue
+		}
+		if hint := evmRevertHint(simErr); hint != "" {
+			return nil, nil, fmt.Errorf("simulate V4 INCREASE_LIQUIDITY failed at liquidityDelta=%s: %s: %w", mid.String(), hint, simErr)
+		}
+		return nil, nil, fmt.Errorf("simulate V4 INCREASE_LIQUIDITY failed at liquidityDelta=%s: %w", mid.String(), simErr)
+	}
+
+	if best == nil || len(bestUnlockData) == 0 {
+		return nil, nil, fmt.Errorf("no V4 liquidityDelta fits amount0Max=%s amount1Max=%s", amount0Max.String(), amount1Max.String())
+	}
+
+	return best, bestUnlockData, nil
 }
 
 func (s *LiquidityService) increaseV4Liquidity(
@@ -304,12 +520,43 @@ func (s *LiquidityService) increaseV4Liquidity(
 		return nil, fmt.Errorf("V4 PositionManager address not configured")
 	}
 	positionManager := common.HexToAddress(cc.UniswapV4PositionManagerAddress)
+	pm, err := blockchain.NewV4PositionManager(positionManager, client)
+	if err != nil {
+		return nil, fmt.Errorf("init V4 PM failed: %w", err)
+	}
+	poolManager := common.Address{}
+	if common.IsHexAddress(cc.UniswapV4PoolManagerAddress) {
+		poolManager = common.HexToAddress(cc.UniswapV4PoolManagerAddress)
+	}
+	posInfo, err := bestEffortReadV4PositionInfo(exec, positionManager, poolManager, task.PoolId, tokenId)
+	if err != nil {
+		log.Printf("[Liquidity] Warning: read V4 position failed, fallback to task snapshot: tokenId=%s err=%v", tokenId.String(), err)
+		posInfo = nil
+	}
 
 	// Resolve token addresses
 	c0 := common.HexToAddress(task.Token0Address)
 	c1 := common.HexToAddress(task.Token1Address)
+	if posInfo != nil {
+		if posInfo.Token0 != (common.Address{}) {
+			c0 = posInfo.Token0
+		}
+		if posInfo.Token1 != (common.Address{}) {
+			c1 = posInfo.Token1
+		}
+	}
 	if bytes.Compare(c0.Bytes(), c1.Bytes()) >= 0 {
 		return nil, fmt.Errorf("unexpected V4 token ordering")
+	}
+	onchainTickLower, onchainTickUpper := 0, 0
+	if posInfo != nil {
+		onchainTickLower = posInfo.TickLower
+		onchainTickUpper = posInfo.TickUpper
+	}
+	rangeLower, rangeUpper, rangeSynced := pickIncreasePositionRange(task.TickLower, task.TickUpper, onchainTickLower, onchainTickUpper)
+	if rangeSynced {
+		log.Printf("[Liquidity] V4 increase: use on-chain position range tick=%d/%d instead of task tick=%d/%d (tokenId=%s)",
+			rangeLower, rangeUpper, task.TickLower, task.TickUpper, tokenId.String())
 	}
 
 	if c0 != tokenIn && c1 != tokenIn {
@@ -330,14 +577,14 @@ func (s *LiquidityService) increaseV4Liquidity(
 		return nil, fmt.Errorf("V4 StateView or PoolManager address not configured")
 	}
 	stateViewAddr := common.HexToAddress(cc.UniswapV4StateViewAddress)
-	poolManagerAddr := common.HexToAddress(cc.UniswapV4PoolManagerAddress)
+	poolManagerAddr := poolManager
 	sqrtPriceX96, currentTick, slotErr := blockchain.GetUniswapV4PoolSlot0ViaStateView(stateViewAddr, poolManagerAddr, task.PoolId)
 	if slotErr != nil {
 		return nil, fmt.Errorf("read V4 pool sqrtPriceX96 failed: %w", slotErr)
 	}
 
 	// Use optimal swap calculation based on actual pool price
-	zeroForOne, swapAmount, _ := s.calculateOptimalSwapPure(sqrtPriceX96, currentTick, task.TickLower, task.TickUpper, amount0In, amount1In)
+	zeroForOne, swapAmount, _ := s.calculateOptimalSwapPure(sqrtPriceX96, currentTick, rangeLower, rangeUpper, amount0In, amount1In)
 	if swapAmount != nil && swapAmount.Sign() > 0 {
 		var swapFrom, swapTo common.Address
 		if zeroForOne {
@@ -371,70 +618,40 @@ func (s *LiquidityService) increaseV4Liquidity(
 		return nil, fmt.Errorf("both token amounts are zero after swap")
 	}
 
+	amount0Max := new(big.Int).Set(amount0In)
+	amount1Max := new(big.Int).Set(amount1In)
+	if bal0, balErr := blockchain.GetTokenBalanceWithClient(client, c0, walletAddr); balErr == nil && bal0 != nil && bal0.Cmp(amount0Max) > 0 {
+		amount0Max = bal0
+	}
+	if bal1, balErr := blockchain.GetTokenBalanceWithClient(client, c1, walletAddr); balErr == nil && bal1 != nil && bal1.Cmp(amount1Max) > 0 {
+		amount1Max = bal1
+	}
+	log.Printf("[Liquidity] V4 increase spend caps: tokenId=%s amount0In=%s amount1In=%s amount0Max=%s amount1Max=%s",
+		tokenId.String(), amount0In.String(), amount1In.String(), amount0Max.String(), amount1Max.String())
+
 	// Approve tokens via Permit2 to PositionManager
-	if amount0In.Sign() > 0 {
-		if err := s.approveTokenViaPermit2(client, chainID, privateKey, walletAddr, c0, positionManager, amount0In, opts); err != nil {
+	if amount0Max.Sign() > 0 {
+		if err := s.approveTokenViaPermit2(client, chainID, privateKey, walletAddr, c0, positionManager, amount0Max, opts); err != nil {
 			return nil, fmt.Errorf("approve token0 via Permit2 failed: %w", err)
 		}
 	}
-	if amount1In.Sign() > 0 {
-		if err := s.approveTokenViaPermit2(client, chainID, privateKey, walletAddr, c1, positionManager, amount1In, opts); err != nil {
+	if amount1Max.Sign() > 0 {
+		if err := s.approveTokenViaPermit2(client, chainID, privateKey, walletAddr, c1, positionManager, amount1Max, opts); err != nil {
 			return nil, fmt.Errorf("approve token1 via Permit2 failed: %w", err)
 		}
 	}
 
 	// Compute actual liquidityDelta from token amounts and pool price
-	liquidityDelta, liqErr := estimateV4LiquidityForAmounts(sqrtPriceX96, task.TickLower, task.TickUpper, amount0In, amount1In)
+	liquidityDelta, liqErr := estimateV4LiquidityForAmounts(sqrtPriceX96, rangeLower, rangeUpper, amount0In, amount1In)
 	if liqErr != nil || liquidityDelta == nil || liquidityDelta.Sign() <= 0 {
 		return nil, fmt.Errorf("V4 compute liquidityDelta failed: %w", liqErr)
 	}
 	log.Printf("[Liquidity] V4 INCREASE_LIQUIDITY computed: liquidityDelta=%s sqrtPriceX96=%s tick=%d/%d",
-		liquidityDelta.String(), sqrtPriceX96.String(), task.TickLower, task.TickUpper)
+		liquidityDelta.String(), sqrtPriceX96.String(), rangeLower, rangeUpper)
 
-	// Build INCREASE_LIQUIDITY + SETTLE_PAIR actions via ABI encoding
-	// INCREASE_LIQUIDITY (0x00): (tokenId, liquidityDelta, amount0Max, amount1Max, hookData)
-
-	actions := []byte{0x00, 0x0d} // INCREASE_LIQUIDITY=0x00, SETTLE_PAIR=0x0d
-
-	uint256Ty, _ := abi.NewType("uint256", "", nil)
-	uint128Ty, _ := abi.NewType("uint128", "", nil)
-	addressTy, _ := abi.NewType("address", "", nil)
-	bytesTy, _ := abi.NewType("bytes", "", nil)
-	bytesArrTy, _ := abi.NewType("bytes[]", "", nil)
-
-	increaseArgs := abi.Arguments{
-		{Type: uint256Ty}, // tokenId
-		{Type: uint256Ty}, // liquidityDelta
-		{Type: uint128Ty}, // amount0Max
-		{Type: uint128Ty}, // amount1Max
-		{Type: bytesTy},   // hookData
-	}
-	increaseLiqParams, err := increaseArgs.Pack(tokenId, liquidityDelta, amount0In, amount1In, []byte{})
+	unlockData, err := buildV4IncreaseUnlockData(tokenId, liquidityDelta, amount0Max, amount1Max, c0, c1)
 	if err != nil {
-		return nil, fmt.Errorf("encode V4 INCREASE_LIQUIDITY params failed: %w", err)
-	}
-
-	settlePairArgs := abi.Arguments{
-		{Type: addressTy}, // currency0
-		{Type: addressTy}, // currency1
-	}
-	settlePairParams, err := settlePairArgs.Pack(c0, c1)
-	if err != nil {
-		return nil, fmt.Errorf("encode V4 SETTLE_PAIR params failed: %w", err)
-	}
-
-	unlockArgs := abi.Arguments{
-		{Type: bytesTy},    // actions
-		{Type: bytesArrTy}, // params[]
-	}
-	unlockData, err := unlockArgs.Pack(actions, [][]byte{increaseLiqParams, settlePairParams})
-	if err != nil {
-		return nil, fmt.Errorf("encode V4 unlockData failed: %w", err)
-	}
-
-	pm, err := blockchain.NewV4PositionManager(positionManager, client)
-	if err != nil {
-		return nil, fmt.Errorf("init V4 PM failed: %w", err)
+		return nil, err
 	}
 
 	deadline := big.NewInt(time.Now().Add(5 * time.Minute).Unix())
@@ -447,12 +664,50 @@ func (s *LiquidityService) increaseV4Liquidity(
 		return nil, err
 	}
 
-	log.Printf("[Liquidity] V4 INCREASE_LIQUIDITY: tokenId=%s amount0=%s amount1=%s pm=%s",
-		tokenId.String(), amount0In.String(), amount1In.String(), positionManager.Hex())
+	selectedLiquidityDelta := new(big.Int).Set(liquidityDelta)
+	log.Printf("[Liquidity] V4 INCREASE_LIQUIDITY: tokenId=%s amount0=%s amount1=%s amount0Max=%s amount1Max=%s liquidityDelta=%s pm=%s",
+		tokenId.String(), amount0In.String(), amount1In.String(), amount0Max.String(), amount1Max.String(), selectedLiquidityDelta.String(), positionManager.Hex())
 
 	tx, err := pm.ModifyLiquidities(auth, unlockData, deadline)
 	if err != nil {
-		return nil, fmt.Errorf("V4 modifyLiquidities (INCREASE_LIQUIDITY) failed: %w", err)
+		if strings.Contains(err.Error(), maximumAmountExceededSelector) {
+			adjustedLiquidityDelta, adjustedUnlockData, fitErr := s.fitV4IncreaseLiquidityDelta(
+				pm,
+				exec,
+				privateKey,
+				nonce,
+				deadline,
+				tokenId,
+				amount0Max,
+				amount1Max,
+				c0,
+				c1,
+				liquidityDelta,
+				opts,
+			)
+			if fitErr != nil {
+				if hint := evmRevertHint(err); hint != "" {
+					return nil, fmt.Errorf("V4 modifyLiquidities (INCREASE_LIQUIDITY) failed: %s; fit retry failed: %v; original: %w", hint, fitErr, err)
+				}
+				return nil, fmt.Errorf("V4 modifyLiquidities (INCREASE_LIQUIDITY) failed: fit retry failed: %v; original: %w", fitErr, err)
+			}
+			selectedLiquidityDelta = adjustedLiquidityDelta
+			unlockData = adjustedUnlockData
+			log.Printf("[Liquidity] V4 INCREASE_LIQUIDITY retry: shrink liquidityDelta from %s to %s (tokenId=%s)",
+				liquidityDelta.String(), selectedLiquidityDelta.String(), tokenId.String())
+
+			auth, err = s.buildAuth(client, chainID, privateKey, nonce, big.NewInt(0), opts)
+			if err != nil {
+				return nil, err
+			}
+			tx, err = pm.ModifyLiquidities(auth, unlockData, deadline)
+		}
+		if err != nil {
+			if hint := evmRevertHint(err); hint != "" {
+				return nil, fmt.Errorf("V4 modifyLiquidities (INCREASE_LIQUIDITY) failed: %s: %w", hint, err)
+			}
+			return nil, fmt.Errorf("V4 modifyLiquidities (INCREASE_LIQUIDITY) failed: %w", err)
+		}
 	}
 	log.Printf("[Liquidity] V4 INCREASE_LIQUIDITY tx sent: %s", tx.Hash().Hex())
 
@@ -463,17 +718,19 @@ func (s *LiquidityService) increaseV4Liquidity(
 	_ = receipt
 
 	// Read updated position liquidity
-	posInfo, err := pm.Positions(nil, tokenId)
+	posInfo, err = bestEffortReadV4PositionInfo(exec, positionManager, poolManager, task.PoolId, tokenId)
 	var currentLiq string
 	if err == nil && posInfo != nil && posInfo.Liquidity != nil {
 		currentLiq = posInfo.Liquidity.String()
 	} else {
-		currentLiq = "0"
+		currentLiq = ""
 		log.Printf("[Liquidity] V4 INCREASE_LIQUIDITY: failed to read updated position: %v", err)
 	}
 
 	return &IncreaseLiquidityResult{
 		TxHash:           tx.Hash().Hex(),
 		CurrentLiquidity: currentLiq,
+		TickLower:        &rangeLower,
+		TickUpper:        &rangeUpper,
 	}, nil
 }

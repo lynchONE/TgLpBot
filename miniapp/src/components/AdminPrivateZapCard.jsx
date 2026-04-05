@@ -8,11 +8,21 @@ function formatChain(chain) {
     return String(chain || '--').toUpperCase();
 }
 
+function formatKind(kind) {
+    const v = String(kind || '').toLowerCase();
+    if (v === 'atomic_increase_zap') return 'Atomic Increase Zap';
+    if (v === 'zap_simple') return 'Zap Simple';
+    return String(kind || '--');
+}
+
+const DEFAULT_KINDS = ['zap_simple', 'atomic_increase_zap'];
+
 export default function AdminPrivateZapCard({ apiBaseUrl, initData, hasInitData, onNotice }) {
     const [chains, setChains] = useState([]);
+    const [kinds, setKinds] = useState(DEFAULT_KINDS);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
-    const [invalidatingChain, setInvalidatingChain] = useState('');
+    const [invalidatingKey, setInvalidatingKey] = useState('');
     const [lastResult, setLastResult] = useState(null);
 
     const loadChains = useCallback(async () => {
@@ -22,6 +32,7 @@ export default function AdminPrivateZapCard({ apiBaseUrl, initData, hasInitData,
         try {
             const data = await fetchAdminPrivateZap({ apiBaseUrl, initData });
             setChains(Array.isArray(data?.chains) ? data.chains : []);
+            setKinds(Array.isArray(data?.kinds) && data.kinds.length > 0 ? data.kinds : DEFAULT_KINDS);
         } catch (e) {
             setError(String(e?.message || e));
         } finally {
@@ -33,23 +44,26 @@ export default function AdminPrivateZapCard({ apiBaseUrl, initData, hasInitData,
         loadChains();
     }, [loadChains]);
 
-    const handleInvalidate = useCallback(async (chain) => {
-        const normalized = String(chain || '').trim().toLowerCase();
-        if (!normalized) return;
+    const handleInvalidate = useCallback(async (chain, kind) => {
+        const normalizedChain = String(chain || '').trim().toLowerCase();
+        const normalizedKind = String(kind || '').trim().toLowerCase();
+        if (!normalizedChain || !normalizedKind) return;
         if (typeof window !== 'undefined') {
-            const ok = window.confirm(`Invalidate existing Private Zap bindings on ${formatChain(normalized)}? Users will redeploy on next open.`);
+            const ok = window.confirm(`Invalidate ${formatKind(normalizedKind)} bindings on ${formatChain(normalizedChain)}? Users will redeploy this contract kind on next use.`);
             if (!ok) return;
         }
-        setInvalidatingChain(normalized);
+        const busyKey = `${normalizedChain}:${normalizedKind}`;
+        setInvalidatingKey(busyKey);
         setError('');
         try {
-            const data = await invalidateAdminPrivateZap({ apiBaseUrl, initData, chain: normalized });
+            const data = await invalidateAdminPrivateZap({ apiBaseUrl, initData, chain: normalizedChain, kind: normalizedKind });
             setChains(Array.isArray(data?.chains) ? data.chains : []);
+            setKinds(Array.isArray(data?.kinds) && data.kinds.length > 0 ? data.kinds : DEFAULT_KINDS);
             setLastResult(data?.result || null);
             const clearedBindings = Number(data?.result?.cleared_bindings || 0);
             const clearedCacheKeys = Number(data?.result?.cleared_cache_keys || 0);
             onNotice?.(
-                `${formatChain(normalized)} Private Zap invalidated: ${clearedBindings} bindings cleared, ${clearedCacheKeys} cache keys deleted`,
+                `${formatChain(normalizedChain)} ${formatKind(normalizedKind)} invalidated: ${clearedBindings} bindings cleared, ${clearedCacheKeys} cache keys deleted`,
                 'success',
             );
         } catch (e) {
@@ -57,11 +71,12 @@ export default function AdminPrivateZapCard({ apiBaseUrl, initData, hasInitData,
             setError(msg);
             onNotice?.(msg, 'error');
         } finally {
-            setInvalidatingChain('');
+            setInvalidatingKey('');
         }
     }, [apiBaseUrl, initData, onNotice]);
 
     const chainList = useMemo(() => Array.isArray(chains) ? chains : [], [chains]);
+    const kindList = useMemo(() => Array.isArray(kinds) && kinds.length > 0 ? kinds : DEFAULT_KINDS, [kinds]);
 
     return (
         <div className="rounded-2xl border border-zinc-200 bg-white/40 p-4 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-white/5 dark:shadow-none">
@@ -69,7 +84,7 @@ export default function AdminPrivateZapCard({ apiBaseUrl, initData, hasInitData,
                 <div>
                     <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">Private Zap</div>
                     <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/45">
-                        Invalidate bindings by chain. Users will deploy and bind a fresh Private Zap on the next open.
+                        Invalidate bindings by chain and contract kind. The selected kind will redeploy on next use.
                     </div>
                 </div>
                 <button
@@ -93,7 +108,7 @@ export default function AdminPrivateZapCard({ apiBaseUrl, initData, hasInitData,
 
             {lastResult && (
                 <div className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-200">
-                    Last action: {formatChain(lastResult.chain)}, {Number(lastResult.cleared_bindings || 0)} bindings cleared, {Number(lastResult.cleared_cache_keys || 0)} cache keys deleted.
+                    Last action: {formatChain(lastResult.chain)}, {formatKind(lastResult.kind)}, {Number(lastResult.cleared_bindings || 0)} bindings cleared, {Number(lastResult.cleared_cache_keys || 0)} cache keys deleted.
                 </div>
             )}
 
@@ -111,32 +126,42 @@ export default function AdminPrivateZapCard({ apiBaseUrl, initData, hasInitData,
                 )}
 
                 {chainList.map((chain) => {
-                    const normalized = String(chain || '').trim().toLowerCase();
-                    const busy = invalidatingChain === normalized;
+                    const normalizedChain = String(chain || '').trim().toLowerCase();
                     return (
                         <div
-                            key={normalized}
-                            className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white/60 px-3 py-3 dark:border-white/10 dark:bg-white/5"
+                            key={normalizedChain}
+                            className="rounded-xl border border-zinc-200 bg-white/60 px-3 py-3 dark:border-white/10 dark:bg-white/5"
                         >
-                            <div>
-                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">
-                                    {formatChain(normalized)}
-                                </div>
-                                <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/45">
-                                    Clear stored bound address and Redis cache for this chain.
+                            <div className="flex items-center justify-between gap-3">
+                                <div>
+                                    <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">
+                                        {formatChain(normalizedChain)}
+                                    </div>
+                                    <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/45">
+                                        Clear stored bound address and Redis cache for the selected contract kind.
+                                    </div>
                                 </div>
                             </div>
-                            <button
-                                type="button"
-                                onClick={() => handleInvalidate(normalized)}
-                                disabled={busy}
-                                className={`rounded-xl px-3 py-2 text-xs font-semibold ring-1 transition ${busy
-                                    ? 'cursor-not-allowed bg-amber-500/10 text-amber-700/70 ring-amber-500/20 dark:text-amber-200/60'
-                                    : 'bg-amber-500/15 text-amber-700 ring-amber-500/25 hover:bg-amber-500/20 dark:text-amber-200'
-                                    }`}
-                            >
-                                {busy ? 'Invalidating...' : 'Invalidate'}
-                            </button>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                                {kindList.map((kind) => {
+                                    const normalizedKind = String(kind || '').trim().toLowerCase();
+                                    const busy = invalidatingKey === `${normalizedChain}:${normalizedKind}`;
+                                    return (
+                                        <button
+                                            key={`${normalizedChain}:${normalizedKind}`}
+                                            type="button"
+                                            onClick={() => handleInvalidate(normalizedChain, normalizedKind)}
+                                            disabled={busy}
+                                            className={`rounded-xl px-3 py-2 text-xs font-semibold ring-1 transition ${busy
+                                                ? 'cursor-not-allowed bg-amber-500/10 text-amber-700/70 ring-amber-500/20 dark:text-amber-200/60'
+                                                : 'bg-amber-500/15 text-amber-700 ring-amber-500/25 hover:bg-amber-500/20 dark:text-amber-200'
+                                                }`}
+                                        >
+                                            {busy ? `Invalidating ${formatKind(normalizedKind)}...` : `Invalidate ${formatKind(normalizedKind)}`}
+                                        </button>
+                                    );
+                                })}
+                            </div>
                         </div>
                     );
                 })}

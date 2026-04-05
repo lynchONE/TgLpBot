@@ -1,0 +1,801 @@
+[
+    {
+        "inputs":  [
+
+                   ],
+        "stateMutability":  "nonpayable",
+        "type":  "constructor"
+    },
+    {
+        "inputs":  [
+                       {
+                           "internalType":  "address",
+                           "name":  "owner",
+                           "type":  "address"
+                       }
+                   ],
+        "name":  "OwnableInvalidOwner",
+        "type":  "error"
+    },
+    {
+        "inputs":  [
+                       {
+                           "internalType":  "address",
+                           "name":  "account",
+                           "type":  "address"
+                       }
+                   ],
+        "name":  "OwnableUnauthorizedAccount",
+        "type":  "error"
+    },
+    {
+        "inputs":  [
+
+                   ],
+        "name":  "ReentrancyGuardReentrantCall",
+        "type":  "error"
+    },
+    {
+        "inputs":  [
+                       {
+                           "internalType":  "address",
+                           "name":  "token",
+                           "type":  "address"
+                       }
+                   ],
+        "name":  "SafeERC20FailedOperation",
+        "type":  "error"
+    },
+    {
+        "anonymous":  false,
+        "inputs":  [
+                       {
+                           "indexed":  true,
+                           "internalType":  "address",
+                           "name":  "previousOwner",
+                           "type":  "address"
+                       },
+                       {
+                           "indexed":  true,
+                           "internalType":  "address",
+                           "name":  "newOwner",
+                           "type":  "address"
+                       }
+                   ],
+        "name":  "OwnershipTransferred",
+        "type":  "event"
+    },
+    {
+        "anonymous":  false,
+        "inputs":  [
+                       {
+                           "indexed":  true,
+                           "internalType":  "address",
+                           "name":  "target",
+                           "type":  "address"
+                       },
+                       {
+                           "indexed":  false,
+                           "internalType":  "address",
+                           "name":  "tokenIn",
+                           "type":  "address"
+                       },
+                       {
+                           "indexed":  false,
+                           "internalType":  "address",
+                           "name":  "tokenOut",
+                           "type":  "address"
+                       },
+                       {
+                           "indexed":  false,
+                           "internalType":  "uint256",
+                           "name":  "amountIn",
+                           "type":  "uint256"
+                       },
+                       {
+                           "indexed":  false,
+                           "internalType":  "uint256",
+                           "name":  "amountOut",
+                           "type":  "uint256"
+                       }
+                   ],
+        "name":  "SwapExecuted",
+        "type":  "event"
+    },
+    {
+        "anonymous":  false,
+        "inputs":  [
+                       {
+                           "indexed":  false,
+                           "internalType":  "address",
+                           "name":  "okxSwapRouter",
+                           "type":  "address"
+                       },
+                       {
+                           "indexed":  false,
+                           "internalType":  "address",
+                           "name":  "okxTokenApprove",
+                           "type":  "address"
+                       },
+                       {
+                           "indexed":  false,
+                           "internalType":  "address",
+                           "name":  "v3PositionManager",
+                           "type":  "address"
+                       },
+                       {
+                           "indexed":  false,
+                           "internalType":  "address",
+                           "name":  "v4PositionManager",
+                           "type":  "address"
+                       }
+                   ],
+        "name":  "TrustedAddressesUpdated",
+        "type":  "event"
+    },
+    {
+        "anonymous":  false,
+        "inputs":  [
+                       {
+                           "indexed":  true,
+                           "internalType":  "address",
+                           "name":  "positionManager",
+                           "type":  "address"
+                       },
+                       {
+                           "indexed":  false,
+                           "internalType":  "bool",
+                           "name":  "trusted",
+                           "type":  "bool"
+                       }
+                   ],
+        "name":  "TrustedV3PositionManagerUpdated",
+        "type":  "event"
+    },
+    {
+        "anonymous":  false,
+        "inputs":  [
+                       {
+                           "indexed":  true,
+                           "internalType":  "address",
+                           "name":  "user",
+                           "type":  "address"
+                       },
+                       {
+                           "indexed":  true,
+                           "internalType":  "address",
+                           "name":  "pool",
+                           "type":  "address"
+                       },
+                       {
+                           "indexed":  true,
+                           "internalType":  "uint256",
+                           "name":  "tokenId",
+                           "type":  "uint256"
+                       },
+                       {
+                           "indexed":  false,
+                           "internalType":  "uint256",
+                           "name":  "amount0",
+                           "type":  "uint256"
+                       },
+                       {
+                           "indexed":  false,
+                           "internalType":  "uint256",
+                           "name":  "amount1",
+                           "type":  "uint256"
+                       },
+                       {
+                           "indexed":  false,
+                           "internalType":  "uint128",
+                           "name":  "liquidity",
+                           "type":  "uint128"
+                       }
+                   ],
+        "name":  "ZapIncreaseV3",
+        "type":  "event"
+    },
+    {
+        "anonymous":  false,
+        "inputs":  [
+                       {
+                           "indexed":  true,
+                           "internalType":  "address",
+                           "name":  "user",
+                           "type":  "address"
+                       },
+                       {
+                           "indexed":  true,
+                           "internalType":  "bytes32",
+                           "name":  "poolId",
+                           "type":  "bytes32"
+                       },
+                       {
+                           "indexed":  true,
+                           "internalType":  "uint256",
+                           "name":  "tokenId",
+                           "type":  "uint256"
+                       },
+                       {
+                           "indexed":  false,
+                           "internalType":  "uint256",
+                           "name":  "amount0",
+                           "type":  "uint256"
+                       },
+                       {
+                           "indexed":  false,
+                           "internalType":  "uint256",
+                           "name":  "amount1",
+                           "type":  "uint256"
+                       },
+                       {
+                           "indexed":  false,
+                           "internalType":  "uint128",
+                           "name":  "liquidity",
+                           "type":  "uint128"
+                       }
+                   ],
+        "name":  "ZapIncreaseV4",
+        "type":  "event"
+    },
+    {
+        "inputs":  [
+
+                   ],
+        "name":  "okxSwapRouter",
+        "outputs":  [
+                        {
+                            "internalType":  "address",
+                            "name":  "",
+                            "type":  "address"
+                        }
+                    ],
+        "stateMutability":  "view",
+        "type":  "function"
+    },
+    {
+        "inputs":  [
+
+                   ],
+        "name":  "okxTokenApprove",
+        "outputs":  [
+                        {
+                            "internalType":  "address",
+                            "name":  "",
+                            "type":  "address"
+                        }
+                    ],
+        "stateMutability":  "view",
+        "type":  "function"
+    },
+    {
+        "inputs":  [
+
+                   ],
+        "name":  "owner",
+        "outputs":  [
+                        {
+                            "internalType":  "address",
+                            "name":  "",
+                            "type":  "address"
+                        }
+                    ],
+        "stateMutability":  "view",
+        "type":  "function"
+    },
+    {
+        "inputs":  [
+
+                   ],
+        "name":  "renounceOwnership",
+        "outputs":  [
+
+                    ],
+        "stateMutability":  "nonpayable",
+        "type":  "function"
+    },
+    {
+        "inputs":  [
+                       {
+                           "internalType":  "address",
+                           "name":  "_okxSwapRouter",
+                           "type":  "address"
+                       },
+                       {
+                           "internalType":  "address",
+                           "name":  "_okxTokenApprove",
+                           "type":  "address"
+                       },
+                       {
+                           "internalType":  "address",
+                           "name":  "_v3PositionManager",
+                           "type":  "address"
+                       },
+                       {
+                           "internalType":  "address",
+                           "name":  "_v4PositionManager",
+                           "type":  "address"
+                       }
+                   ],
+        "name":  "setTrustedAddresses",
+        "outputs":  [
+
+                    ],
+        "stateMutability":  "nonpayable",
+        "type":  "function"
+    },
+    {
+        "inputs":  [
+                       {
+                           "internalType":  "address[]",
+                           "name":  "positionManagers",
+                           "type":  "address[]"
+                       },
+                       {
+                           "internalType":  "bool",
+                           "name":  "trusted",
+                           "type":  "bool"
+                       }
+                   ],
+        "name":  "setTrustedV3PositionManagers",
+        "outputs":  [
+
+                    ],
+        "stateMutability":  "nonpayable",
+        "type":  "function"
+    },
+    {
+        "inputs":  [
+                       {
+                           "internalType":  "address",
+                           "name":  "newOwner",
+                           "type":  "address"
+                       }
+                   ],
+        "name":  "transferOwnership",
+        "outputs":  [
+
+                    ],
+        "stateMutability":  "nonpayable",
+        "type":  "function"
+    },
+    {
+        "inputs":  [
+                       {
+                           "internalType":  "address",
+                           "name":  "",
+                           "type":  "address"
+                       }
+                   ],
+        "name":  "trustedV3PositionManagers",
+        "outputs":  [
+                        {
+                            "internalType":  "bool",
+                            "name":  "",
+                            "type":  "bool"
+                        }
+                    ],
+        "stateMutability":  "view",
+        "type":  "function"
+    },
+    {
+        "inputs":  [
+
+                   ],
+        "name":  "v3PositionManager",
+        "outputs":  [
+                        {
+                            "internalType":  "address",
+                            "name":  "",
+                            "type":  "address"
+                        }
+                    ],
+        "stateMutability":  "view",
+        "type":  "function"
+    },
+    {
+        "inputs":  [
+
+                   ],
+        "name":  "v4PositionManager",
+        "outputs":  [
+                        {
+                            "internalType":  "address",
+                            "name":  "",
+                            "type":  "address"
+                        }
+                    ],
+        "stateMutability":  "view",
+        "type":  "function"
+    },
+    {
+        "inputs":  [
+                       {
+                           "components":  [
+                                              {
+                                                  "internalType":  "address",
+                                                  "name":  "pool",
+                                                  "type":  "address"
+                                              },
+                                              {
+                                                  "internalType":  "address",
+                                                  "name":  "positionManager",
+                                                  "type":  "address"
+                                              },
+                                              {
+                                                  "internalType":  "uint256",
+                                                  "name":  "tokenId",
+                                                  "type":  "uint256"
+                                              },
+                                              {
+                                                  "components":  [
+                                                                     {
+                                                                         "internalType":  "address",
+                                                                         "name":  "token",
+                                                                         "type":  "address"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "uint256",
+                                                                         "name":  "amount",
+                                                                         "type":  "uint256"
+                                                                     }
+                                                                 ],
+                                                  "internalType":  "struct AtomicIncreaseZap.FundingParams",
+                                                  "name":  "funding",
+                                                  "type":  "tuple"
+                                              },
+                                              {
+                                                  "components":  [
+                                                                     {
+                                                                         "internalType":  "address",
+                                                                         "name":  "target",
+                                                                         "type":  "address"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "address",
+                                                                         "name":  "approveTarget",
+                                                                         "type":  "address"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "address",
+                                                                         "name":  "tokenIn",
+                                                                         "type":  "address"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "address",
+                                                                         "name":  "tokenOut",
+                                                                         "type":  "address"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "uint256",
+                                                                         "name":  "amountIn",
+                                                                         "type":  "uint256"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "uint256",
+                                                                         "name":  "minAmountOut",
+                                                                         "type":  "uint256"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "bytes",
+                                                                         "name":  "callData",
+                                                                         "type":  "bytes"
+                                                                     }
+                                                                 ],
+                                                  "internalType":  "struct AtomicIncreaseZap.SwapParams",
+                                                  "name":  "entrySwap",
+                                                  "type":  "tuple"
+                                              },
+                                              {
+                                                  "components":  [
+                                                                     {
+                                                                         "internalType":  "address",
+                                                                         "name":  "target",
+                                                                         "type":  "address"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "address",
+                                                                         "name":  "approveTarget",
+                                                                         "type":  "address"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "address",
+                                                                         "name":  "tokenIn",
+                                                                         "type":  "address"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "address",
+                                                                         "name":  "tokenOut",
+                                                                         "type":  "address"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "uint256",
+                                                                         "name":  "amountIn",
+                                                                         "type":  "uint256"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "uint256",
+                                                                         "name":  "minAmountOut",
+                                                                         "type":  "uint256"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "bytes",
+                                                                         "name":  "callData",
+                                                                         "type":  "bytes"
+                                                                     }
+                                                                 ],
+                                                  "internalType":  "struct AtomicIncreaseZap.SwapParams",
+                                                  "name":  "rebalanceSwap",
+                                                  "type":  "tuple"
+                                              }
+                                          ],
+                           "internalType":  "struct AtomicIncreaseZap.ZapIncreaseV3Params",
+                           "name":  "params",
+                           "type":  "tuple"
+                       }
+                   ],
+        "name":  "zapIncreaseV3",
+        "outputs":  [
+                        {
+                            "components":  [
+                                               {
+                                                   "internalType":  "uint256",
+                                                   "name":  "tokenId",
+                                                   "type":  "uint256"
+                                               },
+                                               {
+                                                   "internalType":  "uint128",
+                                                   "name":  "liquidity",
+                                                   "type":  "uint128"
+                                               },
+                                               {
+                                                   "internalType":  "uint256",
+                                                   "name":  "amount0Used",
+                                                   "type":  "uint256"
+                                               },
+                                               {
+                                                   "internalType":  "uint256",
+                                                   "name":  "amount1Used",
+                                                   "type":  "uint256"
+                                               },
+                                               {
+                                                   "internalType":  "uint256",
+                                                   "name":  "dust0",
+                                                   "type":  "uint256"
+                                               },
+                                               {
+                                                   "internalType":  "uint256",
+                                                   "name":  "dust1",
+                                                   "type":  "uint256"
+                                               }
+                                           ],
+                            "internalType":  "struct AtomicIncreaseZap.ZapResult",
+                            "name":  "result",
+                            "type":  "tuple"
+                        }
+                    ],
+        "stateMutability":  "nonpayable",
+        "type":  "function"
+    },
+    {
+        "inputs":  [
+                       {
+                           "components":  [
+                                              {
+                                                  "components":  [
+                                                                     {
+                                                                         "internalType":  "address",
+                                                                         "name":  "currency0",
+                                                                         "type":  "address"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "address",
+                                                                         "name":  "currency1",
+                                                                         "type":  "address"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "uint24",
+                                                                         "name":  "fee",
+                                                                         "type":  "uint24"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "int24",
+                                                                         "name":  "tickSpacing",
+                                                                         "type":  "int24"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "address",
+                                                                         "name":  "hooks",
+                                                                         "type":  "address"
+                                                                     }
+                                                                 ],
+                                                  "internalType":  "struct AtomicIncreaseZap.PoolKeySimple",
+                                                  "name":  "poolKey",
+                                                  "type":  "tuple"
+                                              },
+                                              {
+                                                  "internalType":  "address",
+                                                  "name":  "stateView",
+                                                  "type":  "address"
+                                              },
+                                              {
+                                                  "internalType":  "address",
+                                                  "name":  "positionManager",
+                                                  "type":  "address"
+                                              },
+                                              {
+                                                  "internalType":  "uint256",
+                                                  "name":  "tokenId",
+                                                  "type":  "uint256"
+                                              },
+                                              {
+                                                  "internalType":  "int24",
+                                                  "name":  "tickLower",
+                                                  "type":  "int24"
+                                              },
+                                              {
+                                                  "internalType":  "int24",
+                                                  "name":  "tickUpper",
+                                                  "type":  "int24"
+                                              },
+                                              {
+                                                  "internalType":  "uint256",
+                                                  "name":  "slippageBps",
+                                                  "type":  "uint256"
+                                              },
+                                              {
+                                                  "components":  [
+                                                                     {
+                                                                         "internalType":  "address",
+                                                                         "name":  "token",
+                                                                         "type":  "address"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "uint256",
+                                                                         "name":  "amount",
+                                                                         "type":  "uint256"
+                                                                     }
+                                                                 ],
+                                                  "internalType":  "struct AtomicIncreaseZap.FundingParams",
+                                                  "name":  "funding",
+                                                  "type":  "tuple"
+                                              },
+                                              {
+                                                  "components":  [
+                                                                     {
+                                                                         "internalType":  "address",
+                                                                         "name":  "target",
+                                                                         "type":  "address"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "address",
+                                                                         "name":  "approveTarget",
+                                                                         "type":  "address"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "address",
+                                                                         "name":  "tokenIn",
+                                                                         "type":  "address"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "address",
+                                                                         "name":  "tokenOut",
+                                                                         "type":  "address"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "uint256",
+                                                                         "name":  "amountIn",
+                                                                         "type":  "uint256"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "uint256",
+                                                                         "name":  "minAmountOut",
+                                                                         "type":  "uint256"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "bytes",
+                                                                         "name":  "callData",
+                                                                         "type":  "bytes"
+                                                                     }
+                                                                 ],
+                                                  "internalType":  "struct AtomicIncreaseZap.SwapParams",
+                                                  "name":  "entrySwap",
+                                                  "type":  "tuple"
+                                              },
+                                              {
+                                                  "components":  [
+                                                                     {
+                                                                         "internalType":  "address",
+                                                                         "name":  "target",
+                                                                         "type":  "address"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "address",
+                                                                         "name":  "approveTarget",
+                                                                         "type":  "address"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "address",
+                                                                         "name":  "tokenIn",
+                                                                         "type":  "address"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "address",
+                                                                         "name":  "tokenOut",
+                                                                         "type":  "address"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "uint256",
+                                                                         "name":  "amountIn",
+                                                                         "type":  "uint256"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "uint256",
+                                                                         "name":  "minAmountOut",
+                                                                         "type":  "uint256"
+                                                                     },
+                                                                     {
+                                                                         "internalType":  "bytes",
+                                                                         "name":  "callData",
+                                                                         "type":  "bytes"
+                                                                     }
+                                                                 ],
+                                                  "internalType":  "struct AtomicIncreaseZap.SwapParams",
+                                                  "name":  "rebalanceSwap",
+                                                  "type":  "tuple"
+                                              },
+                                              {
+                                                  "internalType":  "uint160",
+                                                  "name":  "sqrtPriceX96",
+                                                  "type":  "uint160"
+                                              }
+                                          ],
+                           "internalType":  "struct AtomicIncreaseZap.ZapIncreaseV4Params",
+                           "name":  "params",
+                           "type":  "tuple"
+                       }
+                   ],
+        "name":  "zapIncreaseV4",
+        "outputs":  [
+                        {
+                            "components":  [
+                                               {
+                                                   "internalType":  "uint256",
+                                                   "name":  "tokenId",
+                                                   "type":  "uint256"
+                                               },
+                                               {
+                                                   "internalType":  "uint128",
+                                                   "name":  "liquidity",
+                                                   "type":  "uint128"
+                                               },
+                                               {
+                                                   "internalType":  "uint256",
+                                                   "name":  "amount0Used",
+                                                   "type":  "uint256"
+                                               },
+                                               {
+                                                   "internalType":  "uint256",
+                                                   "name":  "amount1Used",
+                                                   "type":  "uint256"
+                                               },
+                                               {
+                                                   "internalType":  "uint256",
+                                                   "name":  "dust0",
+                                                   "type":  "uint256"
+                                               },
+                                               {
+                                                   "internalType":  "uint256",
+                                                   "name":  "dust1",
+                                                   "type":  "uint256"
+                                               }
+                                           ],
+                            "internalType":  "struct AtomicIncreaseZap.ZapResult",
+                            "name":  "result",
+                            "type":  "tuple"
+                        }
+                    ],
+        "stateMutability":  "nonpayable",
+        "type":  "function"
+    }
+]

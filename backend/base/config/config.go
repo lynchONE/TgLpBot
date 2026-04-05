@@ -141,7 +141,8 @@ type Config struct {
 	// Private per-wallet Zap contracts (deploy + bind).
 	PrivateZapEnabled bool
 	// Legacy compatibility field; runtime no longer uses version comparison for invalidation.
-	PrivateZapVersion int
+	PrivateZapVersion         int
+	AtomicAddLiquidityEnabled bool
 
 	// Contracts
 	ZapV3Address string
@@ -333,8 +334,9 @@ func LoadConfig() error {
 		ZapMinPoolLiquidityUSD:      getEnvFloat("ZAP_MIN_POOL_LIQUIDITY_USD", 1000.0),
 
 		// Private per-wallet Zap contracts
-		PrivateZapEnabled: getEnvBool("PRIVATE_ZAP_ENABLED", false),
-		PrivateZapVersion: getEnvInt("PRIVATE_ZAP_VERSION", 1),
+		PrivateZapEnabled:         getEnvBool("PRIVATE_ZAP_ENABLED", false),
+		PrivateZapVersion:         getEnvInt("PRIVATE_ZAP_VERSION", 1),
+		AtomicAddLiquidityEnabled: getEnvBool("ATOMIC_ADD_LIQUIDITY_ENABLED", true),
 
 		// Contracts
 		ZapV3Address: getEnv("ZAP_V3_ADDRESS", ""),
@@ -427,6 +429,7 @@ func LoadConfig() error {
 	log.Printf("   - Zap Min Pool Liquidity USD: %.4f", AppConfig.ZapMinPoolLiquidityUSD)
 	log.Printf("   - Private Zap Enabled: %v", AppConfig.PrivateZapEnabled)
 	log.Printf("   - Private Zap Version (legacy/ignored): %d", AppConfig.PrivateZapVersion)
+	log.Printf("   - Atomic Add Liquidity Enabled: %v", AppConfig.AtomicAddLiquidityEnabled)
 	log.Printf("   - Pancake V3 NPM: %s", AppConfig.PancakeV3PositionManagerAddress)
 	log.Printf("   - Uniswap V3 NPM: %s", AppConfig.UniswapV3PositionManagerAddress)
 	log.Printf("   - BSC RPC URL: %s", maskURL(AppConfig.BSCRpcURL))

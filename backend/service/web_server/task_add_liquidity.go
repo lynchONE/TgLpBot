@@ -3,6 +3,7 @@ package web_server
 import (
 	"encoding/json"
 	"log"
+	"math/big"
 	"net/http"
 	"strings"
 	"time"
@@ -27,6 +28,11 @@ type taskAddLiquidityResponse struct {
 	TxHashes []string `json:"tx_hashes,omitempty"`
 	Pending  bool     `json:"pending"`
 	Message  string   `json:"message,omitempty"`
+}
+
+type taskAddLiquidityRunResult struct {
+	res *liquidity.IncreaseLiquidityResult
+	err error
 }
 
 func (s *Server) handleTaskAddLiquidity(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +91,6 @@ func (s *Server) handleTaskAddLiquidity(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Validate that the task has an existing position to increase
 	hasV3 := strings.TrimSpace(task.V3TokenID) != "" && strings.TrimSpace(task.V3TokenID) != "0"
 	hasV4 := strings.TrimSpace(task.V4TokenID) != "" && strings.TrimSpace(task.V4TokenID) != "0"
 	if !hasV3 && !hasV4 {
@@ -98,39 +103,69 @@ func (s *Server) handleTaskAddLiquidity(w http.ResponseWriter, r *http.Request) 
 	amountUSDT := req.AmountUSDT
 	exec := txexec.Default()
 
-	// Use a channel to capture the result so errors are returned to the caller.
-	resultCh := make(chan error, 1)
+	resultCh := make(chan taskAddLiquidityRunResult, 1)
 	ok, tryErr := exec.TryRunTask(task.UserID, task.WalletID, task.WalletAddress, func(_ string) {
 		liqSvc := liquidity.NewLiquidityService()
 		increaseRes, increaseErr := liqSvc.IncreaseLiquidityForTask(userID, task, amountUSDT)
-
 		if increaseErr != nil {
-			log.Printf("[WebAPI] add_liquidity (increase) failed: task_id=%d err=%v", taskID, increaseErr)
-			resultCh <- increaseErr
+			log.Printf("[WebAPI] add_liquidity failed: task_id=%d err=%v", taskID, increaseErr)
+			resultCh <- taskAddLiquidityRunResult{err: increaseErr}
 			return
 		}
 
-		// Update task with new liquidity info (no tokenId change since we're increasing existing position)
+		actualSpent := amountUSDT
+		if increaseRes != nil && increaseRes.ActualStableSpent > 0 {
+			actualSpent = increaseRes.ActualStableSpent
+		}
+
 		updates := map[string]interface{}{
-			"amount_usdt": task.AmountUSDT + amountUSDT,
+			"amount_usdt": task.AmountUSDT + actualSpent,
 		}
 		if increaseRes != nil && increaseRes.CurrentLiquidity != "" {
 			updates["current_liquidity"] = increaseRes.CurrentLiquidity
 		}
+		if increaseRes != nil && increaseRes.TickLower != nil && increaseRes.TickUpper != nil && *increaseRes.TickLower < *increaseRes.TickUpper {
+			updates["tick_lower"] = *increaseRes.TickLower
+			updates["tick_upper"] = *increaseRes.TickUpper
+		}
 		_ = taskService.Update(userID, taskID, updates)
 
-		// Update TradeRecord.OpenUSDTSpent so PnL calculations reflect the additional investment
-		deltaWei, convErr := convert.FloatUSDTToWei(amountUSDT)
-		if convErr == nil && deltaWei != nil && deltaWei.Sign() > 0 {
-			if tradeErr := trade.NewTradeRecordService().AddToOpenUSDTSpent(task, deltaWei); tradeErr != nil {
-				log.Printf("[WebAPI] add_liquidity: update trade record failed: task_id=%d err=%v", taskID, tradeErr)
-			}
+		var deltaWei *big.Int
+		if increaseRes != nil && increaseRes.ActualStableSpentWei != nil && increaseRes.ActualStableSpentWei.Sign() > 0 {
+			deltaWei = increaseRes.ActualStableSpentWei
+		} else if conv, convErr := convert.FloatUSDTToWei(actualSpent); convErr == nil && conv != nil && conv.Sign() > 0 {
+			deltaWei = conv
+		}
+
+		if tradeErr := trade.NewTradeRecordService().ApplyAddLiquidityDelta(
+			task,
+			deltaWei,
+			func() *big.Int {
+				if increaseRes != nil {
+					return increaseRes.GasSpentWei
+				}
+				return nil
+			}(),
+			func() *big.Int {
+				if increaseRes != nil {
+					return increaseRes.Dust0Wei
+				}
+				return nil
+			}(),
+			func() *big.Int {
+				if increaseRes != nil {
+					return increaseRes.Dust1Wei
+				}
+				return nil
+			}(),
+		); tradeErr != nil {
+			log.Printf("[WebAPI] add_liquidity: update trade record failed: task_id=%d err=%v", taskID, tradeErr)
 		}
 
 		if s != nil && s.Realtime != nil {
 			s.Realtime.InvalidateUser(userID)
 		}
-		resultCh <- nil
+		resultCh <- taskAddLiquidityRunResult{res: increaseRes}
 	})
 
 	if tryErr != nil {
@@ -142,30 +177,34 @@ func (s *Server) handleTaskAddLiquidity(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Wait for the goroutine to finish (up to 3 minutes) so we can return the real result.
+	var runRes taskAddLiquidityRunResult
 	select {
-	case opErr := <-resultCh:
-		if opErr != nil {
-			http.Error(w, "补充流动性失败: "+opErr.Error(), http.StatusBadRequest)
+	case runRes = <-resultCh:
+		if runRes.err != nil {
+			http.Error(w, "add liquidity failed: "+runRes.err.Error(), http.StatusBadRequest)
 			return
 		}
 	case <-time.After(3 * time.Minute):
-		// Still running — return a pending response
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(taskAddLiquidityResponse{
 			OK:      true,
 			TaskID:  req.TaskID,
 			Pending: true,
-			Message: "操作时间较长，请稍后刷新查看结果",
+			Message: "operation is still running, please refresh later",
 		})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(taskAddLiquidityResponse{
+	resp := taskAddLiquidityResponse{
 		OK:      true,
 		TaskID:  req.TaskID,
 		Pending: false,
-		Message: "补充流动性成功",
-	})
+		Message: "add liquidity succeeded",
+	}
+	if runRes.res != nil && strings.TrimSpace(runRes.res.TxHash) != "" {
+		resp.TxHashes = []string{strings.TrimSpace(runRes.res.TxHash)}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }

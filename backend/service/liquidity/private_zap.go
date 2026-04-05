@@ -28,9 +28,11 @@ import (
 const walletChainContractKindZapSimple = "zap_simple"
 const walletChainContractStatusDeployed = "deployed"
 const walletChainContractStatusReady = "ready"
-const privateZapBindingVersion = 2
+const privateZapSimpleBindingVersion = 2
+const privateAtomicIncreaseZapBindingVersion = 2
 const privateZapCacheTTL = time.Hour
-const privateZapCachePrefix = "private_zap:binding:v2"
+const privateZapSimpleCachePrefix = "private_zap:binding:v2"
+const privateAtomicIncreaseZapCachePrefix = "private_atomic_increase_zap:binding:v2"
 
 var privateZapMuByKey sync.Map // key=chain|walletID -> *sync.Mutex
 
@@ -38,6 +40,24 @@ func privateZapLock(chain string, walletID uint) *sync.Mutex {
 	key := fmt.Sprintf("%s|%d", config.NormalizeChain(chain), walletID)
 	v, _ := privateZapMuByKey.LoadOrStore(key, &sync.Mutex{})
 	return v.(*sync.Mutex)
+}
+
+func privateContractBindingVersion(kind string) int {
+	switch strings.TrimSpace(kind) {
+	case walletChainContractKindAtomicIncreaseZap:
+		return privateAtomicIncreaseZapBindingVersion
+	default:
+		return privateZapSimpleBindingVersion
+	}
+}
+
+func privateContractCachePrefix(kind string) string {
+	switch strings.TrimSpace(kind) {
+	case walletChainContractKindAtomicIncreaseZap:
+		return privateAtomicIncreaseZapCachePrefix
+	default:
+		return privateZapSimpleCachePrefix
+	}
 }
 
 type zapUsage string
@@ -150,7 +170,7 @@ func (s *LiquidityService) ShouldShowWalletPrivateZapProtectionHint(chain string
 
 func privateZapCacheKey(chain string, walletID uint) string {
 	return fmt.Sprintf("%s:%s:%d:%s",
-		privateZapCachePrefix,
+		privateZapSimpleCachePrefix,
 		config.NormalizeChain(chain),
 		walletID,
 		walletChainContractKindZapSimple,
@@ -158,7 +178,7 @@ func privateZapCacheKey(chain string, walletID uint) string {
 }
 
 func privateZapCacheScanPattern(chain string) string {
-	return fmt.Sprintf("%s:%s:*", privateZapCachePrefix, config.NormalizeChain(chain))
+	return fmt.Sprintf("%s:%s:*", privateZapSimpleCachePrefix, config.NormalizeChain(chain))
 }
 
 func readPrivateZapCache(chain string, walletID uint) (common.Address, bool) {
@@ -205,24 +225,32 @@ func normalizePrivateZapBindingStatus(binding models.WalletChainContract) string
 	return status
 }
 
-func isPrivateZapBindingUsable(binding models.WalletChainContract) bool {
+func isPrivateContractBindingUsable(binding models.WalletChainContract, requiredVersion int) bool {
 	if !common.IsHexAddress(strings.TrimSpace(binding.ContractAddress)) {
 		return false
 	}
-	if binding.Version < privateZapBindingVersion {
+	if binding.Version < requiredVersion {
 		return false
 	}
 	return normalizePrivateZapBindingStatus(binding) == walletChainContractStatusReady
 }
 
-func isPrivateZapBindingConfigPending(binding models.WalletChainContract) bool {
+func isPrivateContractBindingConfigPending(binding models.WalletChainContract, requiredVersion int) bool {
 	if !common.IsHexAddress(strings.TrimSpace(binding.ContractAddress)) {
 		return false
 	}
-	if binding.Version < privateZapBindingVersion {
+	if binding.Version < requiredVersion {
 		return false
 	}
 	return normalizePrivateZapBindingStatus(binding) == walletChainContractStatusDeployed
+}
+
+func isPrivateZapBindingUsable(binding models.WalletChainContract) bool {
+	return isPrivateContractBindingUsable(binding, privateZapSimpleBindingVersion)
+}
+
+func isPrivateZapBindingConfigPending(binding models.WalletChainContract) bool {
+	return isPrivateContractBindingConfigPending(binding, privateZapSimpleBindingVersion)
 }
 
 func privateZapHasBytecode(client *ethclient.Client, zapAddr common.Address) (bool, error) {
@@ -334,7 +362,7 @@ func (s *LiquidityService) ensurePrivateZapSimple(
 		updates := map[string]interface{}{
 			"status":           strings.TrimSpace(status),
 			"contract_address": strings.TrimSpace(contractAddress),
-			"version":          privateZapBindingVersion,
+			"version":          privateZapSimpleBindingVersion,
 			"deploy_tx_hash":   strings.TrimSpace(deployTxHash),
 			"config_tx_hash":   strings.TrimSpace(configTxHash),
 		}
@@ -357,7 +385,7 @@ func (s *LiquidityService) ensurePrivateZapSimple(
 			Kind:            walletChainContractKindZapSimple,
 			Status:          strings.TrimSpace(status),
 			ContractAddress: strings.TrimSpace(contractAddress),
-			Version:         privateZapBindingVersion,
+			Version:         privateZapSimpleBindingVersion,
 			DeployTxHash:    strings.TrimSpace(deployTxHash),
 			ConfigTxHash:    strings.TrimSpace(configTxHash),
 		}

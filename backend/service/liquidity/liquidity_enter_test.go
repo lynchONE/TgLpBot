@@ -69,6 +69,39 @@ func TestEvmRevertHintCannotUpdateEmptyPosition(t *testing.T) {
 	}
 }
 
+func TestEvmRevertHintMaximumAmountExceeded(t *testing.T) {
+	t.Parallel()
+
+	hint := evmRevertHint(errors.New("execution reverted: 0x31e30ad0"))
+	if !strings.Contains(hint, "MaximumAmountExceeded") {
+		t.Fatalf("expected MaximumAmountExceeded hint, got %q", hint)
+	}
+}
+
+func TestPickIncreasePositionRangePrefersOnchain(t *testing.T) {
+	t.Parallel()
+
+	lower, upper, synced := pickIncreasePositionRange(-100, 100, -120, 120)
+	if lower != -120 || upper != 120 {
+		t.Fatalf("range = %d/%d, want -120/120", lower, upper)
+	}
+	if !synced {
+		t.Fatal("expected synced=true")
+	}
+}
+
+func TestPickIncreasePositionRangeFallsBackToTaskWhenOnchainInvalid(t *testing.T) {
+	t.Parallel()
+
+	lower, upper, synced := pickIncreasePositionRange(-100, 100, 0, 0)
+	if lower != -100 || upper != 100 {
+		t.Fatalf("range = %d/%d, want -100/100", lower, upper)
+	}
+	if synced {
+		t.Fatal("expected synced=false")
+	}
+}
+
 func TestEnsurePoolHasLiquidityRejectsNilOrZero(t *testing.T) {
 	t.Parallel()
 

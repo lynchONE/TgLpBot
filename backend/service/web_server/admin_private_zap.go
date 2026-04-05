@@ -14,11 +14,13 @@ type adminPrivateZapRequest struct {
 	InitData string `json:"initData"`
 	Action   string `json:"action"` // list | invalidate
 	Chain    string `json:"chain,omitempty"`
+	Kind     string `json:"kind,omitempty"`
 }
 
 type adminPrivateZapResponse struct {
 	OK     bool                                    `json:"ok"`
 	Chains []string                                `json:"chains,omitempty"`
+	Kinds  []string                                `json:"kinds,omitempty"`
 	Result *liquidity.PrivateZapInvalidationResult `json:"result,omitempty"`
 }
 
@@ -87,6 +89,7 @@ func (s *Server) handleAdminPrivateZap(w http.ResponseWriter, r *http.Request) {
 	resp := adminPrivateZapResponse{
 		OK:     true,
 		Chains: liquidity.EnabledPrivateZapChains(),
+		Kinds:  liquidity.SupportedPrivateZapKinds(),
 	}
 
 	switch action {
@@ -99,7 +102,7 @@ func (s *Server) handleAdminPrivateZap(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		liq := liquidity.NewLiquidityService()
-		result, err := liq.InvalidatePrivateZapBindingsByChain(r.Context(), chain)
+		result, err := liq.InvalidatePrivateZapBindingsByChain(r.Context(), chain, req.Kind)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return

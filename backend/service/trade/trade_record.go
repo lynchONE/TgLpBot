@@ -9,6 +9,8 @@ import (
 	"math/big"
 	"strings"
 	"time"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 type TradeRecordService struct{}
@@ -113,6 +115,69 @@ func (s *TradeRecordService) AddToOpenUSDTSpent(task *models.StrategyTask, delta
 
 	return database.DB.Model(&models.TradeRecord{}).Where("id = ?", rec.ID).
 		Update("open_usdt_spent", safeBigIntString(newSpent)).Error
+}
+
+func (s *TradeRecordService) ApplyAddLiquidityDelta(
+	task *models.StrategyTask,
+	stableSpentWei *big.Int,
+	gasSpentWei *big.Int,
+	dust0Wei *big.Int,
+	dust1Wei *big.Int,
+) error {
+	if task == nil {
+		return fmt.Errorf("task is nil")
+	}
+
+	var rec models.TradeRecord
+	err := database.DB.
+		Where("user_id = ? AND task_id = ? AND status = ?", task.UserID, task.ID, models.TradeStatusOpen).
+		Order("opened_at DESC").
+		First(&rec).Error
+	if err != nil {
+		return nil
+	}
+
+	openSpent, _ := parseBigInt(rec.OpenUSDTSpent)
+	if openSpent == nil {
+		openSpent = big.NewInt(0)
+	}
+	openGas, _ := parseBigInt(rec.OpenGasSpentWei)
+	if openGas == nil {
+		openGas = big.NewInt(0)
+	}
+	openDust0, _ := parseBigInt(rec.OpenDust0)
+	if openDust0 == nil {
+		openDust0 = big.NewInt(0)
+	}
+	openDust1, _ := parseBigInt(rec.OpenDust1)
+	if openDust1 == nil {
+		openDust1 = big.NewInt(0)
+	}
+
+	nextSpent := new(big.Int).Add(openSpent, nonNilBigInt(stableSpentWei))
+	nextGas := new(big.Int).Add(openGas, nonNilBigInt(gasSpentWei))
+	nextDust0 := new(big.Int).Set(openDust0)
+	nextDust1 := new(big.Int).Set(openDust1)
+
+	primaryStable := common.HexToAddress("")
+	if config.AppConfig != nil {
+		if cc, ok := config.AppConfig.GetChainConfig(task.Chain); ok && common.IsHexAddress(cc.StableAddress) {
+			primaryStable = common.HexToAddress(cc.StableAddress)
+		}
+	}
+	if !common.IsHexAddress(task.Token0Address) || common.HexToAddress(task.Token0Address) != primaryStable {
+		nextDust0.Add(nextDust0, nonNilBigInt(dust0Wei))
+	}
+	if !common.IsHexAddress(task.Token1Address) || common.HexToAddress(task.Token1Address) != primaryStable {
+		nextDust1.Add(nextDust1, nonNilBigInt(dust1Wei))
+	}
+
+	return database.DB.Model(&models.TradeRecord{}).Where("id = ?", rec.ID).Updates(map[string]interface{}{
+		"open_usdt_spent":    safeBigIntString(nextSpent),
+		"open_gas_spent_wei": safeBigIntString(nextGas),
+		"open_dust0":         safeBigIntString(nextDust0),
+		"open_dust1":         safeBigIntString(nextDust1),
+	}).Error
 }
 
 func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, closeTxHash string, closeUSDTReceivedWei, closeGasSpentWei *big.Int, nativePriceUSD float64) error {

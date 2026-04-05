@@ -128,6 +128,13 @@ function formatChain(chainId) {
   return Number(chainId) === 8453 ? 'Base' : 'BSC';
 }
 
+function formatPrivateZapKind(kind) {
+  const normalized = String(kind || '').trim().toLowerCase();
+  if (normalized === 'atomic_increase_zap') return 'Atomic Increase Zap';
+  if (normalized === 'zap_simple') return 'Zap Simple';
+  return kind || '--';
+}
+
 function walletKey(wallet) {
   return `${Number(wallet?.chain_id || 0)}:${String(wallet?.address || '').toLowerCase()}`;
 }
@@ -1751,12 +1758,23 @@ export default function AssetManagementPanel({
               </div>
               <div className="am-list">
                 {Array.isArray(privateZap?.chains) && privateZap.chains.length > 0 ? privateZap.chains.map((chain) => (
-                  <div key={chain} className="am-list-item">
+                  <div key={chain} className="am-list-item" style={{ alignItems: 'flex-start' }}>
                     <div>
                       <div className="am-item-title">{String(chain || '').toUpperCase()}</div>
-                      <div className="am-item-sub">清空绑定地址与缓存</div>
+                      <div className="am-item-sub">按合约类型清空绑定地址与缓存</div>
                     </div>
-                    <button type="button" className="am-action-btn" onClick={() => refreshSystemAfter(() => invalidateAdminPrivateZap({ apiBaseUrl, initData, chain }))}>清空</button>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                      {(Array.isArray(privateZap?.kinds) && privateZap.kinds.length > 0 ? privateZap.kinds : ['zap_simple', 'atomic_increase_zap']).map((kind) => (
+                        <button
+                          key={`${chain}:${kind}`}
+                          type="button"
+                          className="am-action-btn"
+                          onClick={() => refreshSystemAfter(() => invalidateAdminPrivateZap({ apiBaseUrl, initData, chain, kind }))}
+                        >
+                          清空 {formatPrivateZapKind(kind)}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )) : <EmptyState text={systemLoading ? '正在加载...' : '暂无数据'} />}
               </div>
