@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
-export default function TaskActionMenu({ position, onPause, onStop, onDelete, onEditRange, onClose, anchorRef }) {
+export default function TaskActionMenu({ position, onPause, onStop, onDelete, onEditRange, onWithdrawLiquidity, onSwapDust, onTriggerRebalance, onToggleRebalance, onAddLiquidity, onClose, anchorRef }) {
   const [editMode, setEditMode] = useState(false);
   const [rangeLower, setRangeLower] = useState(String(position?.task_range_lower_pct || '2'));
   const [rangeUpper, setRangeUpper] = useState(String(position?.task_range_upper_pct || '2'));
@@ -11,6 +11,8 @@ export default function TaskActionMenu({ position, onPause, onStop, onDelete, on
 
   const taskId = Number(position?.task_id || 0);
   const taskPaused = Boolean(position?.task_paused);
+  const taskRebalanceEnabled = position?.task_rebalance_enabled !== false;
+  const hasLiquidity = Boolean(position?.has_liquidity);
   const statusLabel = String(position?.status_label || '');
   const isStopped = statusLabel.includes('已停止');
   const isStopping = statusLabel.includes('停止中') || statusLabel.includes('撤出中');
@@ -106,6 +108,11 @@ export default function TaskActionMenu({ position, onPause, onStop, onDelete, on
         {onEditRange && !isStopping && (
           <button type="button" className="task-action-item" onClick={() => setEditMode(true)} disabled={!!pending}>
             修改再平衡参数
+          </button>
+        )}
+        {onAddLiquidity && !isStopped && !isStopping && (
+          <button type="button" className="task-action-item" onClick={() => run('addLiq', () => onAddLiquidity(taskId, position))} disabled={!!pending}>
+            {pending === 'addLiq' ? '处理中...' : '补充流动性'}
           </button>
         )}
         {onStop && !isStopped && !isStopping && (

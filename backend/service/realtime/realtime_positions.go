@@ -198,35 +198,36 @@ type RealtimeSummary struct {
 }
 
 type RealtimePosition struct {
-	Chain             string     `json:"chain"`
-	Version           string     `json:"version"`
-	Exchange          string     `json:"exchange"`
-	Title             string     `json:"title"`
-	FeeTier           uint64     `json:"fee_tier,omitempty"`
-	PoolID            string     `json:"pool_id"`
-	PositionID        string     `json:"position_id"`
-	WalletID          uint       `json:"wallet_id,omitempty"`
-	WalletAddress     string     `json:"wallet_address,omitempty"`
-	TaskID            uint       `json:"task_id,omitempty"`
-	TaskPaused        bool       `json:"task_paused"`
-	TaskAmountUSDT    float64    `json:"task_amount_usdt,omitempty"`
-	StatusLabel       string     `json:"status_label"`
-	InRange           bool       `json:"in_range"`
-	CurrentTick       int        `json:"current_tick"`
-	TickLower         int        `json:"tick_lower"`
-	TickUpper         int        `json:"tick_upper"`
-	TickSpacing       int        `json:"tick_spacing,omitempty"`
-	RangePercent      float64    `json:"range_percent"`
-	TaskRangeLowerPct float64    `json:"task_range_lower_pct,omitempty"`
-	TaskRangeUpperPct float64    `json:"task_range_upper_pct,omitempty"`
-	OutOfRange        string     `json:"out_of_range"`
-	RunningSince      *time.Time `json:"running_since,omitempty"`
-	HasLiquidity      bool       `json:"has_liquidity"`
-	InitialCostUSD    float64    `json:"initial_cost_usd,omitempty"`
-	NetInvestedUSD    float64    `json:"net_invested_usd,omitempty"`
-	CurrentValueUSD   float64    `json:"current_value_usd,omitempty"`
-	AbsolutePnLUSD    float64    `json:"absolute_pnl_usd,omitempty"`
-	HasPnL            bool       `json:"has_pnl,omitempty"`
+	Chain                string     `json:"chain"`
+	Version              string     `json:"version"`
+	Exchange             string     `json:"exchange"`
+	Title                string     `json:"title"`
+	FeeTier              uint64     `json:"fee_tier,omitempty"`
+	PoolID               string     `json:"pool_id"`
+	PositionID           string     `json:"position_id"`
+	WalletID             uint       `json:"wallet_id,omitempty"`
+	WalletAddress        string     `json:"wallet_address,omitempty"`
+	TaskID               uint       `json:"task_id,omitempty"`
+	TaskPaused           bool       `json:"task_paused"`
+	TaskRebalanceEnabled bool       `json:"task_rebalance_enabled"`
+	TaskAmountUSDT       float64    `json:"task_amount_usdt,omitempty"`
+	StatusLabel          string     `json:"status_label"`
+	InRange              bool       `json:"in_range"`
+	CurrentTick          int        `json:"current_tick"`
+	TickLower            int        `json:"tick_lower"`
+	TickUpper            int        `json:"tick_upper"`
+	TickSpacing          int        `json:"tick_spacing,omitempty"`
+	RangePercent         float64    `json:"range_percent"`
+	TaskRangeLowerPct    float64    `json:"task_range_lower_pct,omitempty"`
+	TaskRangeUpperPct    float64    `json:"task_range_upper_pct,omitempty"`
+	OutOfRange           string     `json:"out_of_range"`
+	RunningSince         *time.Time `json:"running_since,omitempty"`
+	HasLiquidity         bool       `json:"has_liquidity"`
+	InitialCostUSD       float64    `json:"initial_cost_usd,omitempty"`
+	NetInvestedUSD       float64    `json:"net_invested_usd,omitempty"`
+	CurrentValueUSD      float64    `json:"current_value_usd,omitempty"`
+	AbsolutePnLUSD       float64    `json:"absolute_pnl_usd,omitempty"`
+	HasPnL               bool       `json:"has_pnl,omitempty"`
 
 	TokenRows []RealtimeTokenRow `json:"token_rows"`
 	Totals    RealtimeTotals     `json:"totals"`
@@ -1232,6 +1233,7 @@ func (s *RealtimePositionsService) buildV3Position(
 	hasLiquidity := liq != nil && liq.Sign() > 0
 	taskID := uint(0)
 	taskPaused := false
+	taskRebalanceEnabled := true
 	initialCostUSD := 0.0
 	netInvestedUSD := 0.0
 	currentValueUSD := 0.0
@@ -1242,6 +1244,7 @@ func (s *RealtimePositionsService) buildV3Position(
 	if task != nil {
 		taskID = task.ID
 		taskPaused = task.Paused
+		taskRebalanceEnabled = task.RebalanceEnabled
 		pnlMetrics := s.getTaskPnLViewMetrics(task)
 		initialCostUSD = pnlMetrics.initialCost
 		netInvestedUSD = pnlMetrics.netInvested
@@ -1288,8 +1291,9 @@ func (s *RealtimePositionsService) buildV3Position(
 			}
 			return walletAddr.Hex()
 		}(),
-		TaskID:     taskID,
-		TaskPaused: taskPaused,
+		TaskID:               taskID,
+		TaskPaused:           taskPaused,
+		TaskRebalanceEnabled: taskRebalanceEnabled,
 		TaskAmountUSDT: func() float64 {
 			if task == nil || task.AmountUSDT <= 0 {
 				return 0
@@ -1621,28 +1625,29 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 			}
 			return walletAddr.Hex()
 		}(),
-		TaskID:            task.ID,
-		TaskPaused:        task.Paused,
-		TaskAmountUSDT:    task.AmountUSDT,
-		StatusLabel:       statusLabelFromTask(task),
-		InRange:           inRange,
-		CurrentTick:       currentTick,
-		TickLower:         tickLower,
-		TickUpper:         tickUpper,
-		TickSpacing:       task.TickSpacing,
-		RangePercent:      rangePct,
-		TaskRangeLowerPct: taskRangeLowerPct,
-		TaskRangeUpperPct: taskRangeUpperPct,
-		OutOfRange:        formatOutOfRange(task, tickLower, tickUpper, currentTick),
-		RunningSince:      &task.CreatedAt,
-		HasLiquidity:      hasLiquidity,
-		InitialCostUSD:    initialCostUSD,
-		NetInvestedUSD:    netInvestedUSD,
-		CurrentValueUSD:   currentValueUSD,
-		AbsolutePnLUSD:    absolutePnLUSD,
-		HasPnL:            hasPnL,
-		TokenRows:         []RealtimeTokenRow{row0, row1},
-		Totals:            totals,
+		TaskID:               task.ID,
+		TaskPaused:           task.Paused,
+		TaskRebalanceEnabled: task.RebalanceEnabled,
+		TaskAmountUSDT:       task.AmountUSDT,
+		StatusLabel:          statusLabelFromTask(task),
+		InRange:              inRange,
+		CurrentTick:          currentTick,
+		TickLower:            tickLower,
+		TickUpper:            tickUpper,
+		TickSpacing:          task.TickSpacing,
+		RangePercent:         rangePct,
+		TaskRangeLowerPct:    taskRangeLowerPct,
+		TaskRangeUpperPct:    taskRangeUpperPct,
+		OutOfRange:           formatOutOfRange(task, tickLower, tickUpper, currentTick),
+		RunningSince:         &task.CreatedAt,
+		HasLiquidity:         hasLiquidity,
+		InitialCostUSD:       initialCostUSD,
+		NetInvestedUSD:       netInvestedUSD,
+		CurrentValueUSD:      currentValueUSD,
+		AbsolutePnLUSD:       absolutePnLUSD,
+		HasPnL:               hasPnL,
+		TokenRows:            []RealtimeTokenRow{row0, row1},
+		Totals:               totals,
 	}, warn
 }
 
@@ -1863,28 +1868,29 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 			}
 			return walletAddr.Hex()
 		}(),
-		TaskID:            task.ID,
-		TaskPaused:        task.Paused,
-		TaskAmountUSDT:    task.AmountUSDT,
-		StatusLabel:       statusLabelFromTask(task),
-		InRange:           inRange,
-		CurrentTick:       currentTick,
-		TickLower:         tickLower,
-		TickUpper:         tickUpper,
-		TickSpacing:       task.TickSpacing,
-		RangePercent:      rangePct,
-		TaskRangeLowerPct: taskRangeLowerPct,
-		TaskRangeUpperPct: taskRangeUpperPct,
-		OutOfRange:        formatOutOfRange(task, tickLower, tickUpper, currentTick),
-		RunningSince:      &task.CreatedAt,
-		HasLiquidity:      false,
-		InitialCostUSD:    initialCostUSD,
-		NetInvestedUSD:    netInvestedUSD,
-		CurrentValueUSD:   currentValueUSD,
-		AbsolutePnLUSD:    absolutePnLUSD,
-		HasPnL:            hasPnL,
-		TokenRows:         []RealtimeTokenRow{row0, row1},
-		Totals:            totals,
+		TaskID:               task.ID,
+		TaskPaused:           task.Paused,
+		TaskRebalanceEnabled: task.RebalanceEnabled,
+		TaskAmountUSDT:       task.AmountUSDT,
+		StatusLabel:          statusLabelFromTask(task),
+		InRange:              inRange,
+		CurrentTick:          currentTick,
+		TickLower:            tickLower,
+		TickUpper:            tickUpper,
+		TickSpacing:          task.TickSpacing,
+		RangePercent:         rangePct,
+		TaskRangeLowerPct:    taskRangeLowerPct,
+		TaskRangeUpperPct:    taskRangeUpperPct,
+		OutOfRange:           formatOutOfRange(task, tickLower, tickUpper, currentTick),
+		RunningSince:         &task.CreatedAt,
+		HasLiquidity:         false,
+		InitialCostUSD:       initialCostUSD,
+		NetInvestedUSD:       netInvestedUSD,
+		CurrentValueUSD:      currentValueUSD,
+		AbsolutePnLUSD:       absolutePnLUSD,
+		HasPnL:               hasPnL,
+		TokenRows:            []RealtimeTokenRow{row0, row1},
+		Totals:               totals,
 	}, ""
 }
 

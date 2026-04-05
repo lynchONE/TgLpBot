@@ -75,6 +75,7 @@ type StrategyTask struct {
 	AllowEntrySwap       bool    `gorm:"default:false" json:"allow_entry_swap"`                   // Allow swapping USDT to entry token when pool lacks USDT
 	StopLossEnabled      bool    `gorm:"default:false" json:"stop_loss_enabled"`
 	StopLossDelaySeconds int     `gorm:"default:0" json:"stop_loss_delay_seconds"` // Out-of-range seconds before stop-loss triggers (0 = immediately)
+	RebalanceEnabled     bool    `gorm:"default:true" json:"rebalance_enabled"`    // When false, out-of-range positions are stopped instead of rebalanced
 
 	// State
 	Paused          bool           `gorm:"default:false;index" json:"paused"`

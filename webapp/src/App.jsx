@@ -33,6 +33,11 @@ import {
   setTaskPaused,
   stopTask,
   updateTaskRange,
+  withdrawLiquidity,
+  swapDust,
+  triggerRebalance,
+  toggleRebalance,
+  addLiquidity,
 } from './api';
 import { WEBAPP_CONFIG } from './config';
 import PanelShell, { EmptyState, MetricCard } from './components/PanelShell';
@@ -1750,6 +1755,36 @@ export default function App() {
     loadPositions();
   }, [apiBaseUrl, initData, loadPositions]);
 
+  const handleWithdrawLiquidity = useCallback(async (taskId) => {
+    if (!window.confirm('确认要取回流动性并兑换为 USDT？\n该操作会撤出仓位并停止任务。')) return;
+    await withdrawLiquidity({ apiBaseUrl, initData, taskId });
+    loadPositions();
+  }, [apiBaseUrl, initData, loadPositions]);
+
+  const handleSwapDust = useCallback(async (taskId) => {
+    await swapDust({ apiBaseUrl, initData, taskId });
+    loadPositions();
+  }, [apiBaseUrl, initData, loadPositions]);
+
+  const handleTriggerRebalance = useCallback(async (taskId) => {
+    await triggerRebalance({ apiBaseUrl, initData, taskId });
+    loadPositions();
+  }, [apiBaseUrl, initData, loadPositions]);
+
+  const handleToggleRebalance = useCallback(async (taskId, enabled) => {
+    await toggleRebalance({ apiBaseUrl, initData, taskId, rebalanceEnabled: enabled });
+    loadPositions();
+  }, [apiBaseUrl, initData, loadPositions]);
+
+  const handleAddLiquidity = useCallback(async (taskId, position) => {
+    const input = prompt('请输入补充金额 (USDT):');
+    if (!input) return;
+    const amount = Number(input);
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    await addLiquidity({ apiBaseUrl, initData, taskId, amountUsdt: amount });
+    loadPositions();
+  }, [apiBaseUrl, initData, loadPositions]);
+
   const copyAddr = useCallback((addr) => {
     navigator.clipboard?.writeText(addr).catch(() => {});
   }, []);
@@ -2784,6 +2819,11 @@ export default function App() {
                                   onStop={handleTaskStop}
                                   onDelete={handleTaskDelete}
                                   onEditRange={handleTaskEditRange}
+                                  onWithdrawLiquidity={handleWithdrawLiquidity}
+                                  onSwapDust={handleSwapDust}
+                                  onTriggerRebalance={handleTriggerRebalance}
+                                  onToggleRebalance={handleToggleRebalance}
+                                  onAddLiquidity={handleAddLiquidity}
                                   onClose={() => setTaskActionPos(null)}
                                 />
                               )}
@@ -2793,6 +2833,37 @@ export default function App() {
                       )}
                     </div>
                   </div>
+
+                  {/* 操作按钮行 */}
+                  {taskId > 0 && (
+                    <div className="pos-action-bar">
+                      <button className="pos-action-btn pause" title={p?.task_paused ? '恢复任务' : '暂停任务'}
+                        onClick={() => handleTaskPause(taskId, !p?.task_paused)}>
+                        {p?.task_paused ? '▶ 恢复' : '⏸ 暂停'}
+                      </button>
+                      <button className="pos-action-btn withdraw" title="取回流动性"
+                        onClick={() => handleWithdrawLiquidity(taskId)}
+                        disabled={!p?.has_liquidity || statusLabel.includes('停止中') || statusLabel.includes('撤出中')}>
+                        ↓ 取回
+                      </button>
+                      <button className="pos-action-btn dust" title="兑换残余"
+                        onClick={() => handleSwapDust(taskId)}
+                        disabled={statusLabel.includes('停止中') || statusLabel.includes('撤出中')}>
+                        ⇄ 兑残
+                      </button>
+                      <button className="pos-action-btn rebalance" title="立即触发再平衡"
+                        onClick={() => handleTriggerRebalance(taskId)}
+                        disabled={!p?.has_liquidity || statusLabel.includes('已停止') || statusLabel.includes('停止中') || statusLabel.includes('撤出中')}>
+                        🔄 再平衡
+                      </button>
+                      <button className={`pos-action-btn toggle ${p?.task_rebalance_enabled !== false ? 'on' : 'off'}`}
+                        title={p?.task_rebalance_enabled !== false ? '关闭再平衡（超区间直接停止）' : '开启再平衡'}
+                        onClick={() => handleToggleRebalance(taskId, p?.task_rebalance_enabled === false)}
+                        disabled={statusLabel.includes('已停止') || statusLabel.includes('停止中') || statusLabel.includes('撤出中')}>
+                        {p?.task_rebalance_enabled !== false ? '🟢 自动' : '⚪ 手动'}
+                      </button>
+                    </div>
+                  )}
 
                   {Array.isArray(smartMoneyRangeGroups) && smartMoneyRangeGroups.length > 0 ? (
                     <PositionSmartMoneyRangeSummary groups={smartMoneyRangeGroups} />

@@ -26,6 +26,11 @@ import {
     setTaskPaused,
     stopTask,
     saveGlobalConfig,
+    withdrawLiquidity,
+    swapDust,
+    triggerRebalance,
+    toggleRebalance,
+    addLiquidity,
 } from './lib/api';
 import { fetchSMPoolStats } from './lib/smartMoneyApi';
 import { getTelegramWebApp, hapticImpact, hapticNotification, hapticSelection } from './lib/telegram';
@@ -2125,6 +2130,80 @@ export default function App() {
         }
     };
 
+    const handleWithdrawLiquidity = async (taskId) => {
+        if (!hasInitData || showAdmin) return;
+        const id = Number(taskId);
+        if (!Number.isFinite(id) || id <= 0) return;
+        const ok = await requestConfirm({
+            title: '取回流动性',
+            message: '确认要取回流动性并兑换为 USDT？\n该操作会撤出仓位并停止任务。',
+            confirmText: '确认取回',
+            tone: 'danger',
+        });
+        if (!ok) return;
+        try {
+            const resp = await withdrawLiquidity({ apiBaseUrl, initData, taskId: id });
+            showNotice(resp?.message || '流动性已取回', 'success');
+        } catch (e) {
+            showNotice(String(e?.message || e), 'error');
+        }
+    };
+
+    const handleSwapDust = async (taskId) => {
+        if (!hasInitData || showAdmin) return;
+        const id = Number(taskId);
+        if (!Number.isFinite(id) || id <= 0) return;
+        try {
+            const resp = await swapDust({ apiBaseUrl, initData, taskId: id });
+            showNotice(resp?.message || '残余已兑换', 'success');
+        } catch (e) {
+            showNotice(String(e?.message || e), 'error');
+        }
+    };
+
+    const handleTriggerRebalance = async (taskId) => {
+        if (!hasInitData || showAdmin) return;
+        const id = Number(taskId);
+        if (!Number.isFinite(id) || id <= 0) return;
+        try {
+            const resp = await triggerRebalance({ apiBaseUrl, initData, taskId: id });
+            showNotice(resp?.message || '再平衡已触发', 'success');
+        } catch (e) {
+            showNotice(String(e?.message || e), 'error');
+        }
+    };
+
+    const handleToggleRebalance = async (taskId, enabled) => {
+        if (!hasInitData || showAdmin) return;
+        const id = Number(taskId);
+        if (!Number.isFinite(id) || id <= 0) return;
+        try {
+            const resp = await toggleRebalance({ apiBaseUrl, initData, taskId: id, rebalanceEnabled: enabled });
+            showNotice(enabled ? '再平衡已开启' : '再平衡已关闭（超区间将直接停止）', 'success');
+        } catch (e) {
+            showNotice(String(e?.message || e), 'error');
+        }
+    };
+
+    const handleAddLiquidity = async (taskId, position) => {
+        if (!hasInitData || showAdmin) return;
+        const id = Number(taskId);
+        if (!Number.isFinite(id) || id <= 0) return;
+        const input = prompt('请输入补充金额 (USDT):');
+        if (!input) return;
+        const amount = Number(input);
+        if (!Number.isFinite(amount) || amount <= 0) {
+            showNotice('请输入有效的金额', 'error');
+            return;
+        }
+        try {
+            const resp = await addLiquidity({ apiBaseUrl, initData, taskId: id, amountUsdt: amount });
+            showNotice(resp?.message || '流动性已补充', 'success');
+        } catch (e) {
+            showNotice(String(e?.message || e), 'error');
+        }
+    };
+
     const openTaskRangeModal = useCallback((taskId, position) => {
         if (!hasInitData || showAdmin) return;
         const id = Number(taskId);
@@ -2736,6 +2815,11 @@ export default function App() {
                                         onStopTask={handleStopTask}
                                         onDeleteTask={handleDeleteTask}
                                         onUpdateTaskRange={openTaskRangeModal}
+                                        onWithdrawLiquidity={handleWithdrawLiquidity}
+                                        onSwapDust={handleSwapDust}
+                                        onTriggerRebalance={handleTriggerRebalance}
+                                        onToggleRebalance={handleToggleRebalance}
+                                        onAddLiquidity={handleAddLiquidity}
                                         batchMode={batchMode}
                                         isSelected={selectedTaskIds.has(p.task_id)}
                                         onToggleSelect={() => toggleTaskSelection(p.task_id)}

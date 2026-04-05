@@ -3731,6 +3731,37 @@ body {
   gap: 6px;
 }
 
+/* ── 操作按钮行 ── */
+.pos-action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 10px;
+}
+.pos-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 120ms;
+  white-space: nowrap;
+}
+.pos-action-btn:hover { background: rgba(255, 255, 255, 0.1); }
+.pos-action-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.pos-action-btn.pause { border-color: rgba(251, 191, 36, 0.25); color: #fbbf24; }
+.pos-action-btn.withdraw { border-color: rgba(56, 189, 248, 0.25); color: #38bdf8; }
+.pos-action-btn.dust { border-color: rgba(167, 139, 250, 0.25); color: #a78bfa; }
+.pos-action-btn.rebalance { border-color: rgba(96, 165, 250, 0.25); color: #60a5fa; }
+.pos-action-btn.toggle.on { border-color: rgba(52, 211, 153, 0.25); color: #34d399; }
+.pos-action-btn.toggle.off { border-color: rgba(161, 161, 170, 0.25); color: #a1a1aa; }
+
 .pos-sm-ranges {
   margin-top: 10px;
   padding: 8px 10px;

@@ -847,6 +847,61 @@ export async function updateTaskRange({ apiBaseUrl, initData, taskId, rangeLower
   });
 }
 
+export async function withdrawLiquidity({ apiBaseUrl, initData, taskId, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/task_action?action=withdraw_liquidity`;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData, taskId }),
+    signal,
+  });
+}
+
+export async function swapDust({ apiBaseUrl, initData, taskId, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/task_action?action=swap_dust`;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData, taskId }),
+    signal,
+  });
+}
+
+export async function triggerRebalance({ apiBaseUrl, initData, taskId, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/task_action?action=trigger_rebalance`;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData, taskId }),
+    signal,
+  });
+}
+
+export async function toggleRebalance({ apiBaseUrl, initData, taskId, rebalanceEnabled, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/task_action?action=toggle_rebalance`;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData, taskId, rebalanceEnabled: Boolean(rebalanceEnabled) }),
+    signal,
+  });
+}
+
+export async function addLiquidity({ apiBaseUrl, initData, taskId, amountUsdt, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/task_action?action=add_liquidity`;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initData, taskId, amountUsdt: Number(amountUsdt) }),
+    signal,
+  });
+}
+
 export async function fetchMyTradeMarkers({
   apiBaseUrl,
   initData,

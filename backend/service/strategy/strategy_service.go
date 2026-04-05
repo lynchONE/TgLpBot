@@ -717,6 +717,13 @@ func (s *StrategyService) executeRebalance(task *models.StrategyTask, currentTic
 		return
 	}
 
+	// When rebalance is disabled, stop the task instead of rebalancing
+	if !task.RebalanceEnabled {
+		log.Printf("[Strategy] 任务 #%d %s，再平衡已关闭，执行停止", task.ID, reason)
+		s.requestExitToUSDT(task, ExitActionManualStop, "🛑 超出区间且再平衡已关闭，自动停止")
+		return
+	}
+
 	log.Printf("[Strategy] 任务 #%d %s，执行再平衡", task.ID, reason)
 	s.requestExitToUSDT(task, ExitActionRebalance, reason)
 }

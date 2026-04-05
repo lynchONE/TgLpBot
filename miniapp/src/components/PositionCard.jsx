@@ -256,6 +256,11 @@ export default function PositionCard({
     onStopTask,
     onDeleteTask,
     onUpdateTaskRange,
+    onWithdrawLiquidity,
+    onSwapDust,
+    onTriggerRebalance,
+    onToggleRebalance,
+    onAddLiquidity,
     batchMode = false,
     isSelected = false,
     onToggleSelect,
@@ -420,6 +425,7 @@ export default function PositionCard({
     }, [position?.task_id]);
 
     const taskPaused = Boolean(position?.task_paused);
+    const taskRebalanceEnabled = position?.task_rebalance_enabled !== false;
     const statusLabel = String(position?.status_label || '');
     const isStopped = statusLabel.includes('已停止');
     const isStopping = statusLabel.includes('停止中') || statusLabel.includes('撤出中');
@@ -429,6 +435,12 @@ export default function PositionCard({
     const canUpdateRangeAction = canTaskAction && typeof onUpdateTaskRange === 'function' && !isStopping;
     const canStopAction = canTaskAction && typeof onStopTask === 'function' && !isStopped && !isStopping;
     const canDeleteAction = canTaskAction && typeof onDeleteTask === 'function' && !isStopping;
+    const hasLiquidity = Boolean(position?.has_liquidity);
+    const canWithdraw = canTaskAction && typeof onWithdrawLiquidity === 'function' && hasLiquidity && !isStopping;
+    const canSwapDust = canTaskAction && typeof onSwapDust === 'function' && !isStopping;
+    const canTriggerRebalance = canTaskAction && typeof onTriggerRebalance === 'function' && hasLiquidity && !isStopped && !isStopping;
+    const canToggleRebalance = canTaskAction && typeof onToggleRebalance === 'function' && !isStopped && !isStopping;
+    const canAddLiquidity = canTaskAction && typeof onAddLiquidity === 'function' && !isStopped && !isStopping;
 
     const [menuOpen, setMenuOpen] = useState(false);
     const [actionPending, setActionPending] = useState('');
@@ -458,6 +470,11 @@ export default function PositionCard({
     const editRange = () => runAction('range', () => onUpdateTaskRange?.(taskId, position));
     const stopTask = () => runAction('stop', () => onStopTask?.(taskId));
     const deleteTask = () => runAction('delete', () => onDeleteTask?.(taskId));
+    const withdrawLiquidity = () => runAction('withdraw', () => onWithdrawLiquidity?.(taskId));
+    const swapDust = () => runAction('dust', () => onSwapDust?.(taskId));
+    const triggerRebalance = () => runAction('rebalance', () => onTriggerRebalance?.(taskId));
+    const toggleRebalanceSwitch = () => runAction('rebalToggle', () => onToggleRebalance?.(taskId, !taskRebalanceEnabled));
+    const addLiquidity = () => runAction('addLiq', () => onAddLiquidity?.(taskId, position));
 
     const pnlPositive = pnlAbsolute >= 0;
     const statusTheme = getStatusTheme(statusLabel);
@@ -583,6 +600,12 @@ export default function PositionCard({
                                                 {actionPending === 'stop' ? '处理中...' : isStopping ? '停止中...' : '停止任务'}
                                             </button>
                                         )}
+                                        {typeof onAddLiquidity === 'function' && (
+                                            <button type="button" onClick={addLiquidity} disabled={!canAddLiquidity || Boolean(actionPending)}
+                                                className="w-full border-t border-zinc-100/80 px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:border-white/5 dark:text-white/70 dark:hover:bg-white/5">
+                                                {actionPending === 'addLiq' ? '处理中...' : '补充流动性'}
+                                            </button>
+                                        )}
                                         {typeof onDeleteTask === 'function' && (
                                             <button type="button" onClick={deleteTask} disabled={!canDeleteAction || Boolean(actionPending)}
                                                 className="w-full border-t border-zinc-100/80 px-3 py-2 text-left text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-40 transition-colors dark:border-white/5 dark:text-red-400 dark:hover:bg-red-500/10">
@@ -595,6 +618,81 @@ export default function PositionCard({
                         )}
                     </div>
                 </div>
+
+                {/* ══════════════════════════════════════════
+                    操作按钮行
+                ══════════════════════════════════════════ */}
+                {canTaskAction && (
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                        {/* 暂停/恢复 */}
+                        {typeof onSetTaskPaused === 'function' && (
+                            <button type="button" onClick={togglePause} disabled={!canPauseAction || Boolean(actionPending)}
+                                title={taskPaused ? '恢复任务' : '暂停任务'}
+                                className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-semibold transition-all active:scale-95 disabled:opacity-40 ${taskPaused
+                                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 dark:border-emerald-500/20'
+                                    : 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400 dark:border-amber-500/20'
+                                }`}>
+                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3 w-3" aria-hidden="true">
+                                    {taskPaused
+                                        ? <path d="M8 5v14l11-7z" />
+                                        : <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+                                    }
+                                </svg>
+                                <span>{actionPending === 'pause' ? '...' : taskPaused ? '恢复' : '暂停'}</span>
+                            </button>
+                        )}
+                        {/* 取回流动性 */}
+                        {typeof onWithdrawLiquidity === 'function' && (
+                            <button type="button" onClick={withdrawLiquidity} disabled={!canWithdraw || Boolean(actionPending)}
+                                title="取回流动性"
+                                className="inline-flex items-center gap-1 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-[10px] font-semibold text-sky-600 transition-all active:scale-95 disabled:opacity-40 dark:text-sky-400 dark:border-sky-500/20">
+                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3 w-3" aria-hidden="true">
+                                    <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
+                                </svg>
+                                <span>{actionPending === 'withdraw' ? '...' : '取回'}</span>
+                            </button>
+                        )}
+                        {/* 兑换残余 */}
+                        {typeof onSwapDust === 'function' && (
+                            <button type="button" onClick={swapDust} disabled={!canSwapDust || Boolean(actionPending)}
+                                title="兑换残余"
+                                className="inline-flex items-center gap-1 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2 py-1 text-[10px] font-semibold text-violet-600 transition-all active:scale-95 disabled:opacity-40 dark:text-violet-400 dark:border-violet-500/20">
+                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3 w-3" aria-hidden="true">
+                                    <path d="M7.5 21H2V9h5.5v12zm7.25-18h-5.5v18h5.5V3zM22 11h-5.5v10H22V11z" />
+                                </svg>
+                                <span>{actionPending === 'dust' ? '...' : '兑残'}</span>
+                            </button>
+                        )}
+                        {/* 触发再平衡 */}
+                        {typeof onTriggerRebalance === 'function' && (
+                            <button type="button" onClick={triggerRebalance} disabled={!canTriggerRebalance || Boolean(actionPending)}
+                                title="立即触发再平衡"
+                                className="inline-flex items-center gap-1 rounded-lg border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[10px] font-semibold text-blue-600 transition-all active:scale-95 disabled:opacity-40 dark:text-blue-400 dark:border-blue-500/20">
+                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3 w-3" aria-hidden="true">
+                                    <path d="M12 6V1.5l-4.5 4.5L12 10.5V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 9.74C4.46 10.97 4 12.43 4 14c0 4.42 3.58 8 8 8v4.5l4.5-4.5L12 17.5V20z" />
+                                </svg>
+                                <span>{actionPending === 'rebalance' ? '...' : '再平衡'}</span>
+                            </button>
+                        )}
+                        {/* 再平衡开关 */}
+                        {typeof onToggleRebalance === 'function' && (
+                            <button type="button" onClick={toggleRebalanceSwitch} disabled={!canToggleRebalance || Boolean(actionPending)}
+                                title={taskRebalanceEnabled ? '关闭再平衡（超区间直接停止）' : '开启再平衡'}
+                                className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-semibold transition-all active:scale-95 disabled:opacity-40 ${taskRebalanceEnabled
+                                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 dark:border-emerald-500/20'
+                                    : 'border-zinc-400/30 bg-zinc-400/10 text-zinc-500 dark:text-zinc-400 dark:border-zinc-500/20'
+                                }`}>
+                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3 w-3" aria-hidden="true">
+                                    {taskRebalanceEnabled
+                                        ? <path d="M17 7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h10c2.76 0 5-2.24 5-5s-2.24-5-5-5zm0 8c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z" />
+                                        : <path d="M17 7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h10c2.76 0 5-2.24 5-5s-2.24-5-5-5zM7 15c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z" />
+                                    }
+                                </svg>
+                                <span>{actionPending === 'rebalToggle' ? '...' : taskRebalanceEnabled ? '自动' : '手动'}</span>
+                            </button>
+                        )}
+                    </div>
+                )}
 
                 {/* ══════════════════════════════════════════
                     区域 2：余额明细（可折叠）

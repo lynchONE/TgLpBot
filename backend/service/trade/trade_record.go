@@ -84,6 +84,37 @@ func (s *TradeRecordService) CreateOpenRecord(
 	return database.DB.Create(rec).Error
 }
 
+// AddToOpenUSDTSpent adds deltaWei (1e18) to the latest open trade record's OpenUSDTSpent.
+// This is used when supplementing liquidity to an existing position so that PnL calculations
+// accurately reflect the total invested amount.
+func (s *TradeRecordService) AddToOpenUSDTSpent(task *models.StrategyTask, deltaWei *big.Int) error {
+	if task == nil {
+		return fmt.Errorf("task is nil")
+	}
+	if deltaWei == nil || deltaWei.Sign() <= 0 {
+		return nil // nothing to add
+	}
+
+	var rec models.TradeRecord
+	err := database.DB.
+		Where("user_id = ? AND task_id = ? AND status = ?", task.UserID, task.ID, models.TradeStatusOpen).
+		Order("opened_at DESC").
+		First(&rec).Error
+	if err != nil {
+		// No open record exists — nothing to update
+		return nil
+	}
+
+	existing, _ := parseBigInt(rec.OpenUSDTSpent)
+	if existing == nil {
+		existing = big.NewInt(0)
+	}
+	newSpent := new(big.Int).Add(existing, deltaWei)
+
+	return database.DB.Model(&models.TradeRecord{}).Where("id = ?", rec.ID).
+		Update("open_usdt_spent", safeBigIntString(newSpent)).Error
+}
+
 func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, closeTxHash string, closeUSDTReceivedWei, closeGasSpentWei *big.Int, nativePriceUSD float64) error {
 	if task == nil {
 		return fmt.Errorf("task is nil")

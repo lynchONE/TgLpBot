@@ -168,6 +168,31 @@ const v3PositionManagerABI = `[
   },
   {
     "inputs": [
+      {
+        "components": [
+          { "internalType": "uint256", "name": "tokenId", "type": "uint256" },
+          { "internalType": "uint256", "name": "amount0Desired", "type": "uint256" },
+          { "internalType": "uint256", "name": "amount1Desired", "type": "uint256" },
+          { "internalType": "uint256", "name": "amount0Min", "type": "uint256" },
+          { "internalType": "uint256", "name": "amount1Min", "type": "uint256" },
+          { "internalType": "uint256", "name": "deadline", "type": "uint256" }
+        ],
+        "internalType": "struct INonfungiblePositionManager.IncreaseLiquidityParams",
+        "name": "params",
+        "type": "tuple"
+      }
+    ],
+    "name": "increaseLiquidity",
+    "outputs": [
+      { "internalType": "uint128", "name": "liquidity", "type": "uint128" },
+      { "internalType": "uint256", "name": "amount0", "type": "uint256" },
+      { "internalType": "uint256", "name": "amount1", "type": "uint256" }
+    ],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
       { "internalType": "uint256", "name": "tokenId", "type": "uint256" }
     ],
     "name": "positions",
@@ -223,6 +248,15 @@ type V3CollectParams struct {
 	Recipient  common.Address `abi:"recipient"`
 	Amount0Max *big.Int       `abi:"amount0Max"` // uint128
 	Amount1Max *big.Int       `abi:"amount1Max"` // uint128
+}
+
+type V3IncreaseLiquidityParams struct {
+	TokenId        *big.Int `abi:"tokenId"`
+	Amount0Desired *big.Int `abi:"amount0Desired"`
+	Amount1Desired *big.Int `abi:"amount1Desired"`
+	Amount0Min     *big.Int `abi:"amount0Min"`
+	Amount1Min     *big.Int `abi:"amount1Min"`
+	Deadline       *big.Int `abi:"deadline"`
 }
 
 type V3MintParams struct {
@@ -332,6 +366,13 @@ func (m *V3PositionManager) DecreaseLiquidity(
 	params V3DecreaseLiquidityParams,
 ) (*types.Transaction, error) {
 	return m.contract.Transact(opts, "decreaseLiquidity", params)
+}
+
+func (m *V3PositionManager) IncreaseLiquidity(
+	opts *bind.TransactOpts,
+	params V3IncreaseLiquidityParams,
+) (*types.Transaction, error) {
+	return m.contract.Transact(opts, "increaseLiquidity", params)
 }
 
 func (m *V3PositionManager) Collect(

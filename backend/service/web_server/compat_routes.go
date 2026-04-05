@@ -52,6 +52,16 @@ func (s *Server) handleTaskAction(w http.ResponseWriter, r *http.Request) {
 		s.handleTaskDelete(w, r)
 	case "update_range":
 		s.handleTaskUpdateRange(w, r)
+	case "withdraw_liquidity":
+		s.handleTaskWithdrawLiquidity(w, r)
+	case "swap_dust":
+		s.handleTaskSwapDust(w, r)
+	case "trigger_rebalance":
+		s.handleTaskTriggerRebalance(w, r)
+	case "toggle_rebalance":
+		s.handleTaskToggleRebalance(w, r)
+	case "add_liquidity":
+		s.handleTaskAddLiquidity(w, r)
 	default:
 		http.Error(w, "invalid action", http.StatusBadRequest)
 	}
