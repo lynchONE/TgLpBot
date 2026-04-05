@@ -1581,6 +1581,7 @@ export default function App() {
     return Number.isFinite(saved) && saved > 0 ? saved : 0;
   });
   const [taskActionPos, setTaskActionPos] = useState(null);
+  const [addLiqPosition, setAddLiqPosition] = useState(null);
   const [operationProgress, setOperationProgress] = useState(null);
 
   const loadWalletsForModal = useCallback(async (posChain) => {
@@ -1785,6 +1786,21 @@ export default function App() {
     await addLiquidity({ apiBaseUrl, initData, taskId, amountUsdt: amount });
     loadPositions();
   }, [apiBaseUrl, initData, loadPositions]);
+
+  const openAddLiquidityModal = useCallback((taskId, position) => {
+    const resolvedTaskId = Number(taskId || position?.task_id || 0);
+    if (!Number.isFinite(resolvedTaskId) || resolvedTaskId <= 0) return;
+    setAddLiqPosition({ ...position, task_id: resolvedTaskId });
+  }, []);
+
+  const confirmAddLiquidity = useCallback(async (amount) => {
+    const taskId = Number(addLiqPosition?.task_id || 0);
+    if (!Number.isFinite(taskId) || taskId <= 0) {
+      throw new Error('Task is missing for add liquidity.');
+    }
+    await addLiquidity({ apiBaseUrl, initData, taskId, amountUsdt: amount });
+    loadPositions().catch(() => {});
+  }, [addLiqPosition, apiBaseUrl, initData, loadPositions]);
 
   const copyAddr = useCallback((addr) => {
     navigator.clipboard?.writeText(addr).catch(() => {});
@@ -2824,7 +2840,7 @@ export default function App() {
                                   onSwapDust={handleSwapDust}
                                   onTriggerRebalance={handleTriggerRebalance}
                                   onToggleRebalance={handleToggleRebalance}
-                                  onAddLiquidity={handleAddLiquidity}
+                                  onAddLiquidity={openAddLiquidityModal}
                                   onClose={() => setTaskActionPos(null)}
                                 />
                               )}
@@ -3256,6 +3272,14 @@ export default function App() {
           busy={openPosBusy}
         />
       )}
+
+      {addLiqPosition ? (
+        <AddLiquidityModal
+          position={addLiqPosition}
+          onConfirm={confirmAddLiquidity}
+          onClose={() => setAddLiqPosition(null)}
+        />
+      ) : null}
     </div>
   );
 }
