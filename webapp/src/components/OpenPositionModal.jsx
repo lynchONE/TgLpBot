@@ -422,6 +422,7 @@ export default function OpenPositionModal({
           <button type="button" className="modal-close" onClick={onClose} disabled={busy}>&times;</button>
         </div>
 
+        <div className="modal-content">
         <div className="modal-pair">{pair}</div>
         <div className="modal-addr">{addr ? `${addr.slice(0, 10)}...${addr.slice(-8)}` : '--'}</div>
         {showPrivateZapProtectionHint ? (
@@ -708,6 +709,7 @@ export default function OpenPositionModal({
             <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.5 }}>{visibleError}</div>
           </div>
         ) : null}
+        </div>
 
         <div className="modal-actions">
           <button type="button" className="ghost-chip" onClick={onClose} disabled={busy}>取消</button>
