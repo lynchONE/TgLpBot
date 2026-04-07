@@ -279,6 +279,18 @@ func (s *WalletService) MigratePlaintextPrivateKeys() (int, error) {
 	return migrated, nil
 }
 
+// RenameWallet renames a wallet
+func (s *WalletService) RenameWallet(userID uint, walletID uint, name string) error {
+	result := database.DB.Model(&models.Wallet{}).Where("id = ? AND user_id = ?", walletID, userID).Update("name", name)
+	if result.Error != nil {
+		return fmt.Errorf("failed to rename wallet: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("wallet not found")
+	}
+	return nil
+}
+
 // DeleteWallet deletes a wallet
 func (s *WalletService) DeleteWallet(userID uint, walletID uint) error {
 	result := database.DB.Where("id = ? AND user_id = ?", walletID, userID).Delete(&models.Wallet{})

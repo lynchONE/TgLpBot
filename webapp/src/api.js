@@ -997,3 +997,49 @@ export async function walletSwapExecute({ apiBaseUrl, initData, chain, slippageP
   });
 }
 
+// --- Wallet CRUD ---
+export async function walletCRUD({ apiBaseUrl, initData, action, privateKey, name, walletId, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/settings?endpoint=wallet_crud`;
+  const payload = { initData, action };
+  if (privateKey) payload.private_key = privateKey;
+  if (name) payload.name = name;
+  if (walletId) payload.wallet_id = Number(walletId);
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+// --- Single Token Swap ---
+export async function walletSwapSingleQuote({ apiBaseUrl, initData, chain, walletId, fromToken, toToken, amount, slippagePercent, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/settings?endpoint=wallet_swap_single`;
+  const payload = { initData, action: 'quote', from_token: fromToken, to_token: toToken, amount };
+  if (chain) payload.chain = String(chain);
+  if (walletId) payload.wallet_id = Number(walletId);
+  if (Number.isFinite(slippagePercent)) payload.slippage_percent = slippagePercent;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export async function walletSwapSingleExecute({ apiBaseUrl, initData, chain, walletId, fromToken, toToken, amount, slippagePercent, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/settings?endpoint=wallet_swap_single`;
+  const payload = { initData, action: 'swap', from_token: fromToken, to_token: toToken, amount };
+  if (chain) payload.chain = String(chain);
+  if (walletId) payload.wallet_id = Number(walletId);
+  if (Number.isFinite(slippagePercent)) payload.slippage_percent = slippagePercent;
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+}

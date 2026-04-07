@@ -923,8 +923,8 @@ export default function AssetManagementPanel({
   );
 
   return (
-    <PanelShell title="管理" subtitle={subtitle} icon={Wallet} actions={actions}>
-      {!hasInitData ? <EmptyState text="请先完成 Telegram 登录后查看管理数据" /> : null}
+    <PanelShell title="我的" subtitle={subtitle} icon={Wallet} actions={actions}>
+      {!hasInitData ? <EmptyState text="请先完成 Telegram 登录后查看数据" /> : null}
 
       {hasInitData && activeTab === 'my_assets' ? (
         <div className="am-stack">

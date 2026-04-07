@@ -42,6 +42,10 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		s.handleWalletSwapPreview(w, r)
 	case "wallet_swap_execute":
 		s.handleWalletSwapExecute(w, r)
+	case "wallet_crud":
+		s.handleWalletCRUD(w, r)
+	case "wallet_swap_single":
+		s.handleWalletSwapSingle(w, r)
 	default:
 		http.Error(w, "invalid endpoint", http.StatusBadRequest)
 	}

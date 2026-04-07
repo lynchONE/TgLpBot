@@ -3,7 +3,7 @@ export const WIDGETS = [
   { key: 'hot_pools', label: '热门池子' },
   { key: 'gmgn_kline', label: 'K线' },
   { key: 'positions', label: '仓位' },
-  { key: 'assets', label: '管理' },
+  { key: 'assets', label: '我的' },
   { key: 'smart_money', label: '聪明钱' },
   { key: 'swap', label: '一键兑换' },
   { key: 'admin_panel', label: '管理员' },

@@ -970,7 +970,7 @@ export default function AssetManagementPage({
                 <div className="px-3.5 pt-3 pb-2.5">
                     <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                            <div className="text-[14px] font-extrabold leading-tight text-zinc-900 dark:text-white/95">管理</div>
+                            <div className="text-[14px] font-extrabold leading-tight text-zinc-900 dark:text-white/95">我的</div>
                             <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">
                                 {hasInitData ? '资产快照 / 全局配置 / 钱包 / 交易历史' : '需要有效的 Telegram initData'}
                             </div>

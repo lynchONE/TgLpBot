@@ -7,6 +7,7 @@ import (
 	"TgLpBot/base/models"
 	"TgLpBot/service/chainexec"
 	"TgLpBot/service/exchange"
+	"crypto/ecdsa"
 	"fmt"
 	"log"
 	"math/big"
@@ -375,4 +376,17 @@ func (s *LiquidityService) getTokenValueInStable(exec chainexec.EVMExecutor, tok
 
 	// USDT 精度是 18
 	return toFloat64(toAmount, cc.StableDecimals)
+}
+
+// SwapSingleToken 执行单个代币兑换（任意代币对），返回交易哈希
+func (s *LiquidityService) SwapSingleToken(
+	exec chainexec.EVMExecutor,
+	privateKey *ecdsa.PrivateKey,
+	walletAddr common.Address,
+	tokenIn common.Address,
+	tokenOut common.Address,
+	amountIn *big.Int,
+	slippagePercent float64,
+) (string, error) {
+	return s.swapExactInViaOKXWithHash(exec, privateKey, walletAddr, tokenIn, tokenOut, amountIn, slippagePercent)
 }

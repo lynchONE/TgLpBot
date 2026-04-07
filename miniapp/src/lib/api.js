@@ -984,3 +984,64 @@ export async function walletSwapExecute({ apiBaseUrl, initData, chain, slippageP
     return resp.json();
 }
 
+// --- Wallet CRUD ---
+export async function walletCRUD({ apiBaseUrl, initData, action, privateKey, name, walletId, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = base + '/api/settings?endpoint=wallet_crud';
+    const payload = { initData, action };
+    if (privateKey) payload.private_key = privateKey;
+    if (name) payload.name = name;
+    if (walletId) payload.wallet_id = Number(walletId);
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
+// --- Single Token Swap ---
+export async function walletSwapSingleQuote({ apiBaseUrl, initData, chain, walletId, fromToken, toToken, amount, slippagePercent, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = base + '/api/settings?endpoint=wallet_swap_single';
+    const payload = { initData, action: 'quote', from_token: fromToken, to_token: toToken, amount };
+    if (chain) payload.chain = String(chain);
+    if (walletId) payload.wallet_id = Number(walletId);
+    if (Number.isFinite(slippagePercent)) payload.slippage_percent = slippagePercent;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
+export async function walletSwapSingleExecute({ apiBaseUrl, initData, chain, walletId, fromToken, toToken, amount, slippagePercent, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = base + '/api/settings?endpoint=wallet_swap_single';
+    const payload = { initData, action: 'swap', from_token: fromToken, to_token: toToken, amount };
+    if (chain) payload.chain = String(chain);
+    if (walletId) payload.wallet_id = Number(walletId);
+    if (Number.isFinite(slippagePercent)) payload.slippage_percent = slippagePercent;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}

@@ -3000,8 +3000,8 @@ export default function App() {
 
     assets: (
       <Suspense fallback={(
-        <PanelShell title="管理" subtitle="正在加载模块" icon={BriefcaseBusiness}>
-          <EmptyState text="正在加载管理模块..." />
+        <PanelShell title="我的" subtitle="正在加载模块" icon={BriefcaseBusiness}>
+          <EmptyState text="正在加载我的模块..." />
         </PanelShell>
       )}>
         <LazyAssetManagementPanel
