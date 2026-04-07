@@ -61,6 +61,26 @@ func (s *Server) handleGlobalConfig(w http.ResponseWriter, r *http.Request) {
 
 	cfgService := userSvc.NewGlobalConfigService()
 
+	// Check if this is a save request (has "action" field set to "save")
+	var actionStr string
+	if actionRaw, ok := raw["action"]; ok {
+		_ = json.Unmarshal(actionRaw, &actionStr)
+	}
+
+	if strings.TrimSpace(actionStr) == "save" {
+		updates := buildGlobalConfigUpdates(raw)
+		if len(updates) > 0 {
+			cfg, err := cfgService.Update(user.ID, updates)
+			if err != nil {
+				http.Error(w, "failed to save config", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(globalConfigResponse{OK: true, Config: cfg})
+			return
+		}
+	}
+
 	cfg, err := cfgService.GetOrCreate(user.ID)
 	if err != nil {
 		http.Error(w, "failed to load config", http.StatusInternalServerError)
@@ -72,4 +92,61 @@ func (s *Server) handleGlobalConfig(w http.ResponseWriter, r *http.Request) {
 		OK:     true,
 		Config: cfg,
 	})
+}
+
+// buildGlobalConfigUpdates extracts known config fields from the raw JSON body.
+func buildGlobalConfigUpdates(raw map[string]json.RawMessage) map[string]interface{} {
+	updates := make(map[string]interface{})
+
+	setBool := func(jsonKey, dbKey string) {
+		if v, ok := raw[jsonKey]; ok {
+			var b bool
+			if json.Unmarshal(v, &b) == nil {
+				updates[dbKey] = b
+			}
+		}
+	}
+	setInt := func(jsonKey, dbKey string) {
+		if v, ok := raw[jsonKey]; ok {
+			var n int
+			if json.Unmarshal(v, &n) == nil {
+				updates[dbKey] = n
+			}
+		}
+	}
+	setFloat := func(jsonKey, dbKey string) {
+		if v, ok := raw[jsonKey]; ok {
+			var f float64
+			if json.Unmarshal(v, &f) == nil {
+				updates[dbKey] = f
+			}
+		}
+	}
+	setString := func(jsonKey, dbKey string) {
+		if v, ok := raw[jsonKey]; ok {
+			var s string
+			if json.Unmarshal(v, &s) == nil {
+				updates[dbKey] = strings.TrimSpace(s)
+			}
+		}
+	}
+
+	setInt("rebalance_timeout", "rebalance_timeout")
+	setFloat("stop_loss_threshold", "stop_loss_threshold")
+	setBool("stop_loss_enabled", "stop_loss_enabled")
+	setInt("stop_loss_delay_seconds", "stop_loss_delay_seconds")
+	setFloat("slippage_tolerance", "slippage_tolerance")
+	setBool("auto_reinvest", "auto_reinvest")
+	setFloat("residual_tolerance", "residual_tolerance")
+	setFloat("zap_loss_tolerance", "zap_loss_tolerance")
+	setBool("extra_notifications_enabled", "extra_notifications_enabled")
+	setBool("filter_chinese_tokens", "filter_chinese_tokens")
+	setBool("multi_chain_enabled", "multi_chain_enabled")
+	setString("default_chain", "default_chain")
+	setBool("multi_wallet_enabled", "multi_wallet_enabled")
+	setBool("bark_enabled", "bark_enabled")
+	setString("bark_server", "bark_server")
+	setString("bark_group", "bark_group")
+
+	return updates
 }

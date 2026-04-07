@@ -49,6 +49,10 @@ import StepProgressModal from './components/StepProgressModal';
 import TaskActionMenu from './components/TaskActionMenu';
 import AddLiquidityModal from './components/AddLiquidityModal';
 import NumberFlowValue from './components/NumberFlowValue';
+import GlobalConfigPanel from './components/GlobalConfigPanel';
+import WalletManagePanel from './components/WalletManagePanel';
+import SwapPanel from './components/SwapPanel';
+import TradeHistoryPanel from './components/TradeHistoryPanel';
 import { fetchSMPoolStats, updateSMWallet } from './smartMoneyApi';
 import telegramLogo from './img/telegram.svg';
 import uniswapLogo from './img/uniswap.svg';
@@ -3015,6 +3019,40 @@ export default function App() {
           chain: String(pool?.chain || (Number(pool?.chain_id) === 8453 ? 'base' : chain)).toLowerCase(),
           panelKey: 'smart_money',
         })}
+      />
+    ),
+
+    global_config: (
+      <GlobalConfigPanel
+        apiBaseUrl={apiBaseUrl}
+        initData={initData}
+        hasInitData={hasInitData}
+      />
+    ),
+
+    wallet_manage: (
+      <WalletManagePanel
+        apiBaseUrl={apiBaseUrl}
+        initData={initData}
+        hasInitData={hasInitData}
+        chain={chain}
+      />
+    ),
+
+    swap: (
+      <SwapPanel
+        apiBaseUrl={apiBaseUrl}
+        initData={initData}
+        hasInitData={hasInitData}
+        chain={chain}
+      />
+    ),
+
+    trade_history: (
+      <TradeHistoryPanel
+        apiBaseUrl={apiBaseUrl}
+        initData={initData}
+        hasInitData={hasInitData}
       />
     ),
   };

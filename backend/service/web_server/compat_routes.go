@@ -22,6 +22,8 @@ func (s *Server) handlePositions(w http.ResponseWriter, r *http.Request) {
 		s.handleAssetHistory(w, r)
 	case "assets_lp_stats":
 		s.handleAssetLPStats(w, r)
+	case "trade_history":
+		s.handleTradeHistory(w, r)
 	default:
 		http.Error(w, "invalid endpoint", http.StatusBadRequest)
 	}
@@ -36,6 +38,10 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		s.handleGlobalConfig(w, r)
 	case "wallets":
 		s.handleWallets(w, r)
+	case "wallet_swap_preview":
+		s.handleWalletSwapPreview(w, r)
+	case "wallet_swap_execute":
+		s.handleWalletSwapExecute(w, r)
 	default:
 		http.Error(w, "invalid endpoint", http.StatusBadRequest)
 	}

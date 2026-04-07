@@ -23,7 +23,7 @@ export default async function handler(req, res) {
     }
 
     const endpoint = String(req.query?.endpoint || '').trim();
-    const validEndpoints = ['config', 'global_config', 'wallets'];
+    const validEndpoints = ['config', 'global_config', 'wallets', 'wallet_swap_preview', 'wallet_swap_execute'];
 
     if (!validEndpoints.includes(endpoint)) {
         res.statusCode = 400;

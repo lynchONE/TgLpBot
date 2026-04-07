@@ -915,7 +915,7 @@ export async function saveGlobalConfig({ apiBaseUrl, initData, config, signal })
     const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initData, ...config }),
+        body: JSON.stringify({ initData, action: 'save', ...config }),
         signal,
     });
     if (!resp.ok) {
@@ -924,3 +924,63 @@ export async function saveGlobalConfig({ apiBaseUrl, initData, config, signal })
     }
     return resp.json();
 }
+
+export async function fetchTradeHistory({ apiBaseUrl, initData, chain, status, limit, offset, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = base + '/api/positions?endpoint=trade_history';
+    const payload = { initData };
+    if (chain) payload.chain = String(chain);
+    if (status) payload.status = String(status);
+    if (Number.isFinite(limit)) payload.limit = limit;
+    if (Number.isFinite(offset)) payload.offset = offset;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
+export async function walletSwapPreview({ apiBaseUrl, initData, chain, minValueUsd, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = base + '/api/settings?endpoint=wallet_swap_preview';
+    const payload = { initData };
+    if (chain) payload.chain = String(chain);
+    if (Number.isFinite(minValueUsd)) payload.min_value_usd = minValueUsd;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
+export async function walletSwapExecute({ apiBaseUrl, initData, chain, slippagePercent, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = base + '/api/settings?endpoint=wallet_swap_execute';
+    const payload = { initData };
+    if (chain) payload.chain = String(chain);
+    if (Number.isFinite(slippagePercent)) payload.slippage_percent = slippagePercent;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+

@@ -5,6 +5,10 @@ export const WIDGETS = [
   { key: 'positions', label: '仓位' },
   { key: 'assets', label: '资产管理' },
   { key: 'smart_money', label: '聪明钱' },
+  { key: 'global_config', label: '全局配置' },
+  { key: 'wallet_manage', label: '钱包管理' },
+  { key: 'swap', label: '一键兑换' },
+  { key: 'trade_history', label: '交易历史' },
 ];
 
 export const DEFAULT_WIDGETS = WIDGETS.map((item) => item.key);
