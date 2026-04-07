@@ -132,27 +132,27 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
             actions={
                 <button 
                     type="button" 
-                    className="flex items-center gap-1.5 rounded-lg bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-white/10 dark:text-white/80 dark:hover:bg-white/20"
+                    className="panel-action-btn"
                     onClick={() => setShowSettings(!showSettings)}
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
                 >
                     <Settings size={14} /> 滑点 {slippage}%
                 </button>
             }
         >
-            <div className="mx-auto max-w-lg">
-                {/* Config & Wallet Select */}
+            <div style={{ maxWidth: '500px', margin: '0 auto' }}>
                 {showSettings && (
-                    <div className="mb-4 rounded-2xl bg-zinc-50 p-4 dark:bg-white/5">
-                        <div className="mb-3 flex justify-between gap-4">
-                            <div className="flex-1">
-                                <label className="mb-1 block text-xs font-semibold text-zinc-500 dark:text-zinc-400">选择钱包</label>
+                    <div style={{ marginBottom: '16px', background: 'rgba(18, 26, 40, 0.4)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(136, 157, 191, 0.18)' }}>
+                        <div style={{ display: 'flex', gap: '16px', justifyContent: 'space-between', marginBottom: '12px' }}>
+                            <div style={{ flex: 1 }}>
+                                <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px', fontWeight: 600 }}>选择钱包</label>
                                 {walletLoading ? (
-                                    <div className="text-xs text-zinc-400">加载钱包中...</div>
+                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>加载钱包中...</div>
                                 ) : (
                                     <select
                                         value={selectedWalletId}
                                         onChange={(e) => setSelectedWalletId(e.target.value)}
-                                        className="w-full appearance-none rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm outline-none dark:border-white/10 dark:bg-black/20 dark:text-white"
+                                        style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', background: 'rgba(9, 14, 22, 0.6)', border: '1px solid rgba(136, 157, 191, 0.2)', color: 'var(--text)', outline: 'none' }}
                                     >
                                         {wallets.map(w => (
                                             <option key={w.id} value={w.id}>{w.name || '钱包'} ({shortAddress(w.address)}) - {chain==='bsc'?'BNB':'ETH'}: {parseFloat(w.native_balance).toFixed(3)}</option>
@@ -160,13 +160,13 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                                     </select>
                                 )}
                             </div>
-                            <div className="flex-[0.7]">
-                                <label className="mb-1 block text-xs font-semibold text-zinc-500 dark:text-zinc-400">自定义滑点 (%)</label>
+                            <div style={{ flex: '0.7' }}>
+                                <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px', fontWeight: 600 }}>自定义滑点 (%)</label>
                                 <input
                                     type="number"
                                     value={slippage}
                                     onChange={(e) => setSlippage(e.target.value)}
-                                    className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-indigo-500 dark:border-white/10 dark:bg-black/20 dark:text-white"
+                                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', background: 'rgba(9, 14, 22, 0.6)', border: '1px solid rgba(136, 157, 191, 0.2)', color: 'var(--text)', outline: 'none' }}
                                     placeholder="默认 1.0"
                                 />
                             </div>
@@ -174,62 +174,58 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                     </div>
                 )}
 
-                {/* Swap Box */}
-                <div className="relative rounded-3xl bg-zinc-50 p-1 dark:bg-white/5">
-                    {/* From Box */}
-                    <div className="rounded-2xl bg-white p-4 shadow-sm transition-colors hover:border-zinc-200 dark:bg-[#131518] min-h-[110px]">
-                        <div className="mb-2 flex items-center justify-between text-sm text-zinc-500 dark:text-zinc-400">
-                            <span className="font-medium text-xs">支付</span>
+                <div style={{ position: 'relative', background: 'rgba(18, 26, 40, 0.3)', padding: '4px', borderRadius: '20px', border: '1px solid rgba(136, 157, 191, 0.15)' }}>
+                    <div style={{ background: 'rgba(9, 14, 22, 0.7)', padding: '16px', borderRadius: '16px', minHeight: '100px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '12px', fontWeight: 600 }}>
+                            <span>支付</span>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                             <input
                                 type="text"
                                 value={amount}
                                 onChange={(e) => setAmount(e.target.value)}
-                                className="w-[45%] bg-transparent text-3xl font-bold text-zinc-900 outline-none placeholder:text-zinc-300 dark:text-white dark:placeholder:text-zinc-700"
+                                style={{ width: '40%', background: 'transparent', fontSize: '24px', fontWeight: 'bold', color: 'var(--text)', outline: 'none', border: 'none' }}
                                 placeholder="0.0"
                             />
-                            <div className="flex-1">
+                            <div style={{ flex: 1 }}>
                                 <input
                                     type="text"
                                     value={fromToken}
                                     onChange={(e) => setFromToken(e.target.value)}
-                                    className="w-full rounded-xl border border-transparent bg-zinc-50 px-3 py-2.5 text-xs font-mono text-zinc-900 outline-none focus:bg-white focus:ring-1 focus:ring-indigo-500/50 dark:bg-white/5 dark:text-white dark:focus:bg-black/20 dark:focus:ring-indigo-500/50"
+                                    style={{ width: '100%', padding: '12px', borderRadius: '12px', background: 'rgba(18, 26, 40, 0.8)', border: '1px solid rgba(136, 157, 191, 0.2)', color: 'var(--text)', outline: 'none', fontFamily: 'monospace', fontSize: '12px' }}
                                     placeholder="输入代币合约地址..."
                                 />
                             </div>
                         </div>
                     </div>
 
-                    {/* Reverse Button (Absolute centered) */}
-                    <div className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
+                    <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', zIndex: 10 }}>
                         <button
                             onClick={handleReverse}
-                            className="flex h-10 w-10 items-center justify-center rounded-xl border-4 border-zinc-50 bg-white text-zinc-400 transition-colors hover:text-indigo-500 dark:border-[#1c1d22] dark:bg-[#282a31] dark:hover:text-indigo-400"
+                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '40px', height: '40px', borderRadius: '12px', background: 'var(--bg-card)', border: '4px solid var(--bg-body)', color: 'var(--text-muted)', cursor: 'pointer', transition: 'color 0.2s' }}
                         >
                             <ArrowDown size={18} strokeWidth={3} />
                         </button>
                     </div>
 
-                    {/* To Box */}
-                    <div className="mt-1 rounded-2xl bg-white p-4 shadow-sm transition-colors hover:border-zinc-200 dark:bg-[#131518] min-h-[110px]">
-                        <div className="mb-2 flex items-center justify-between text-sm text-zinc-500 dark:text-zinc-400">
-                            <span className="font-medium text-xs">获得</span>
+                    <div style={{ background: 'rgba(9, 14, 22, 0.7)', padding: '16px', borderRadius: '16px', marginTop: '4px', minHeight: '100px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '12px', fontWeight: 600 }}>
+                            <span>获得</span>
                         </div>
-                        <div className="flex items-center gap-3">
-                            <div className="w-[45%] text-3xl font-bold text-zinc-900 dark:text-white truncate">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <div style={{ width: '40%', fontSize: '24px', fontWeight: 'bold', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                 {quoting ? (
-                                    <span className="animate-pulse text-zinc-300 dark:text-zinc-700">...</span>
+                                    <span style={{ opacity: 0.5 }}>...</span>
                                 ) : (
                                     quoteInfo?.to_amount_float || '0.0'
                                 )}
                             </div>
-                            <div className="flex-1">
+                            <div style={{ flex: 1 }}>
                                 <input
                                     type="text"
                                     value={toToken}
                                     onChange={(e) => setToToken(e.target.value)}
-                                    className="w-full rounded-xl border border-transparent bg-zinc-50 px-3 py-2.5 text-xs font-mono text-zinc-900 outline-none focus:bg-white focus:ring-1 focus:ring-indigo-500/50 dark:bg-white/5 dark:text-white dark:focus:bg-black/20 dark:focus:ring-indigo-500/50"
+                                    style={{ width: '100%', padding: '12px', borderRadius: '12px', background: 'rgba(18, 26, 40, 0.8)', border: '1px solid rgba(136, 157, 191, 0.2)', color: 'var(--text)', outline: 'none', fontFamily: 'monospace', fontSize: '12px' }}
                                     placeholder="输入接收代币合约地址..."
                                 />
                             </div>
@@ -237,48 +233,47 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                     </div>
                 </div>
 
-                {/* State Messages */}
-                <div className="mt-4">
+                <div style={{ marginTop: '16px' }}>
                     {quoteError && (
-                        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-400">
+                        <div className="panel-error">
                             <strong>报价失败:</strong> {quoteError}
                         </div>
                     )}
                     {execError && (
-                        <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-xs text-red-700 dark:text-red-400">
+                        <div className="panel-error">
                             <strong>兑换失败:</strong> {execError}
                         </div>
                     )}
                     {execSuccess && (
-                        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs text-emerald-700 dark:text-emerald-400 break-all">
+                        <div className="panel-success" style={{ wordBreak: 'break-all' }}>
                             ✅ <strong>兑换请求已提交</strong><br/>
-                            TxHash: <span className="font-mono opacity-80">{execSuccess}</span>
+                            TxHash: <span style={{ opacity: 0.8, fontFamily: 'monospace' }}>{execSuccess}</span>
                         </div>
                     )}
                 </div>
 
-                {/* Confirm Dialog */}
                 {showConfirm ? (
-                    <div className="mt-4 rounded-xl border border-indigo-500/30 bg-indigo-500/5 p-4 text-sm">
-                        <p className="mb-4 text-zinc-700 dark:text-zinc-300">
+                    <div style={{ marginTop: '16px', padding: '16px', borderRadius: '12px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)', fontSize: '14px' }}>
+                        <p style={{ marginBottom: '16px', color: 'var(--text)' }}>
                             确认将支付 <strong>{amount}</strong> 个代币 <br/>
                             兑换为获得约 <strong>{quoteInfo?.to_amount_float || 0}</strong> 个目标代币？<br/>
-                            <span className="text-xs text-zinc-500">滑点: {slippage}%</span>
+                            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>滑点: {slippage}%</span>
                         </p>
-                        <div className="flex gap-3">
-                            <button className="panel-action-btn flex-1" onClick={() => setShowConfirm(false)}>取消</button>
-                            <button className="config-save-btn flex-1 bg-indigo-500 text-white hover:bg-indigo-600" onClick={handleSwap} disabled={executing}>
+                        <div style={{ display: 'flex', gap: '12px' }}>
+                            <button className="panel-action-btn" style={{ flex: 1 }} onClick={() => setShowConfirm(false)}>取消</button>
+                            <button className="config-save-btn" style={{ flex: 1 }} onClick={handleSwap} disabled={executing}>
                                 {executing ? '执行中...' : '提交交易'}
                             </button>
                         </div>
                     </div>
                 ) : (
-                    <div className="mt-4">
+                    <div style={{ marginTop: '16px' }}>
                         <button
                             type="button"
                             onClick={() => setShowConfirm(true)}
                             disabled={!isReadyToSwap}
-                            className={`w-full rounded-2xl py-4 text-base font-bold shadow-sm transition-all sm:py-4.5 ${!isReadyToSwap ? 'cursor-not-allowed bg-zinc-200 text-zinc-400 dark:bg-white/5 dark:text-white/30' : 'bg-indigo-500 text-white hover:bg-indigo-600'}`}
+                            className={!isReadyToSwap ? 'panel-action-btn' : 'config-save-btn'}
+                            style={{ width: '100%', padding: '16px', fontSize: '16px', borderRadius: '12px', fontWeight: 'bold' }}
                         >
                             {executing ? '执行中...' : !fromToken ? '需填入支付合约' : !amount ? '需输入支付数量' : quoting ? '获取最优报价中...' : !quoteInfo ? '无法兑换' : '确认兑换'}
                         </button>
