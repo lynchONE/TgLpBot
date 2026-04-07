@@ -16,6 +16,8 @@ import pancakeLogo from '../img/pancake.svg';
 import flashIcon from '../img/flash.svg';
 import gmgnIcon from '../img/gmgn.svg';
 
+const LazySmartMoneyAssetsPanel = React.lazy(() => import('./SmartMoneyAssetsPanel'));
+
 const PROTOCOL_MAP = {
     pancake_v3: { version: 'V3', icon: pancakeLogo, color: '#d1884f' },
     uniswap_v3: { version: 'V3', icon: uniswapLogo, color: '#ff007a' },
@@ -2177,6 +2179,7 @@ export default function SmartMoneyDashboard({
     activePoolAddress = '',
     refreshInterval = 10,
     onOpenPosition,
+    isAdmin = false,
 }) {
     const [view, setView] = useState('pools');
     const [stats, setStats] = useState(null);
@@ -2202,6 +2205,12 @@ export default function SmartMoneyDashboard({
         }, refreshIntervalMs);
         return () => clearInterval(timer);
     }, [loadStats, refreshIntervalMs]);
+
+    useEffect(() => {
+        if (!isAdmin && view === 'assets') {
+            setView('pools');
+        }
+    }, [isAdmin, view]);
 
     const isDetail = selectedPool || selectedWallet;
     const handlePoolCardSelect = useCallback((pool) => {
@@ -2249,8 +2258,8 @@ export default function SmartMoneyDashboard({
                 <div className="panel-title-wrap">
                     <div className="panel-icon-wrap"><Brain size={16} /></div>
                     <div className="panel-title-texts">
-                        <h2>聪明钱监控</h2>
-                        {!isDetail && <p>跟踪聪明钱 LP 仓位动态</p>}
+                        <h2>聪明钱</h2>
+                        {!isDetail && <p>{isAdmin ? '监控、钱包、合约、通知、资产' : '监控、钱包、合约、通知'}</p>}
                     </div>
                 </div>
             </header>
@@ -2292,6 +2301,15 @@ export default function SmartMoneyDashboard({
                         >
                             <Flame size={16} /> 监控通知
                         </button>
+                        {isAdmin ? (
+                            <button
+                                key="assets"
+                                className={`smd-tab${view === 'assets' ? ' active' : ''}`}
+                                onClick={() => setView('assets')}
+                            >
+                                <Wallet size={16} /> 聪明钱资产
+                            </button>
+                        ) : null}
                     </div>
                 )}
 
@@ -2329,6 +2347,16 @@ export default function SmartMoneyDashboard({
                     />
                 ) : view === 'golden_dog' ? (
                     <GoldenDogPanelContent apiBaseUrl={apiBaseUrl} initData={initData} />
+                ) : view === 'assets' && isAdmin ? (
+                    <React.Suspense fallback={<div className="panel-loading">正在加载聪明钱资产...</div>}>
+                        <LazySmartMoneyAssetsPanel
+                            apiBaseUrl={apiBaseUrl}
+                            initData={initData}
+                            hasInitData={Boolean(String(initData || '').trim())}
+                            isAdmin={isAdmin}
+                            refreshInterval={refreshInterval}
+                        />
+                    </React.Suspense>
                 ) : (
                     <SettingsPanel apiBaseUrl={apiBaseUrl} />
                 )}

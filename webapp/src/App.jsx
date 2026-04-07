@@ -13,6 +13,7 @@ import {
   MousePointer2,
   RefreshCw,
   Search,
+  Shield,
   Settings,
   Slash,
   SlidersHorizontal,
@@ -86,6 +87,7 @@ import {
 } from './utils';
 
 const LazyAssetManagementPanel = lazy(() => import('./components/AssetManagementPanel'));
+const LazyAdminPanel = lazy(() => import('./components/AdminPanel'));
 
 const KLINE_INTERVALS = [
   { key: '1m', label: '1m', bucketSec: 60, limit: 240, timeframe: 'minute', aggregate: 1, poolLimit: 300 },
@@ -640,10 +642,15 @@ export default function App() {
   const hotPoolsFilterRef = useRef(null);
 
   const hasInitData = Boolean(initData);
+  const isAdminUser = Boolean(positions?.is_admin);
+  const availableWidgets = useMemo(
+    () => WIDGETS.filter((item) => item.key !== 'admin_panel' || isAdminUser),
+    [isAdminUser]
+  );
   const activeWidgets = useMemo(() => {
-    const map = Object.fromEntries(WIDGETS.map((w) => [w.key, w]));
+    const map = Object.fromEntries(availableWidgets.map((w) => [w.key, w]));
     return widgets.map((k) => map[k]).filter(Boolean);
-  }, [widgets]);
+  }, [availableWidgets, widgets]);
   const layoutClass = moduleLayoutClass(activeWidgets.length);
   const workLayoutClass = workMode ? `work-mode layout-work-${Math.min(activeWidgets.length, 4)}` : layoutClass;
 
@@ -2993,15 +3000,15 @@ export default function App() {
 
     assets: (
       <Suspense fallback={(
-        <PanelShell title="资产管理" subtitle="正在加载模块" icon={BriefcaseBusiness}>
-          <EmptyState text="正在加载资产管理模块..." />
+        <PanelShell title="管理" subtitle="正在加载模块" icon={BriefcaseBusiness}>
+          <EmptyState text="正在加载管理模块..." />
         </PanelShell>
       )}>
         <LazyAssetManagementPanel
           apiBaseUrl={apiBaseUrl}
           initData={initData}
           hasInitData={hasInitData}
-          isAdmin={Boolean(positions?.is_admin)}
+          isAdmin={isAdminUser}
           refreshInterval={refreshInterval}
         />
       </Suspense>
@@ -3019,6 +3026,7 @@ export default function App() {
           chain: String(pool?.chain || (Number(pool?.chain_id) === 8453 ? 'base' : chain)).toLowerCase(),
           panelKey: 'smart_money',
         })}
+        isAdmin={isAdminUser}
       />
     ),
 
@@ -3054,6 +3062,22 @@ export default function App() {
         initData={initData}
         hasInitData={hasInitData}
       />
+    ),
+
+    admin_panel: (
+      <Suspense fallback={(
+        <PanelShell title="管理员" subtitle="正在加载模块" icon={Shield}>
+          <EmptyState text="正在加载管理员模块..." />
+        </PanelShell>
+      )}>
+        <LazyAdminPanel
+          apiBaseUrl={apiBaseUrl}
+          initData={initData}
+          hasInitData={hasInitData}
+          isAdmin={isAdminUser}
+          refreshInterval={refreshInterval}
+        />
+      </Suspense>
     ),
   };
 
@@ -3201,7 +3225,7 @@ export default function App() {
         </div>
 
         <div className="widget-toggles">
-          {WIDGETS.map((item) => (
+          {availableWidgets.map((item) => (
             <button
               type="button"
               key={item.key}

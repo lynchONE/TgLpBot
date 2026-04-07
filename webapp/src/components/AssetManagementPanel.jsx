@@ -49,6 +49,9 @@ import {
 } from '../api';
 import { resolveSMAvatarAssetUrl } from '../smartMoneyApi';
 import PanelShell, { EmptyState, MetricCard } from './PanelShell';
+import GlobalConfigPanel from './GlobalConfigPanel';
+import WalletManagePanel from './WalletManagePanel';
+import TradeHistoryPanel from './TradeHistoryPanel';
 
 const HISTORY_WINDOWS = [7, 30, 90];
 const CHINA_TIME_ZONE = 'Asia/Shanghai';
@@ -778,16 +781,14 @@ export default function AssetManagementPanel({
   refreshInterval = 10,
 }) {
   const tabs = useMemo(() => {
-    const list = [{ key: 'my_assets', label: '我的资产', icon: Wallet }];
-    if (isAdmin) {
-      list.push(
-        { key: 'smart_money', label: '聪明钱', icon: TrendingUp },
-        { key: 'operations', label: '运行管理', icon: Shield },
-        { key: 'system', label: '系统', icon: Settings2 }
-      );
-    }
+    const list = [
+      { key: 'my_assets', label: '我的资产', icon: Wallet },
+      { key: 'global_config', label: '全局配置', icon: Settings2 },
+      { key: 'wallet_manage', label: '钱包管理', icon: Wallet },
+      { key: 'trade_history', label: '交易历史', icon: Settings2 },
+    ];
     return list;
-  }, [isAdmin]);
+  }, []);
 
   const [activeTab, setActiveTab] = useState('my_assets');
   const [historyDays, setHistoryDays] = useState(30);
@@ -797,43 +798,6 @@ export default function AssetManagementPanel({
   const [assetRefreshing, setAssetRefreshing] = useState(false);
   const [assetError, setAssetError] = useState('');
 
-  const [smartMoneyDays, setSmartMoneyDays] = useState(7);
-  const [leaderboardMetric, setLeaderboardMetric] = useState('pnl');
-  const [smartMoneyOverview, setSmartMoneyOverview] = useState(null);
-  const [smartMoneyWallet, setSmartMoneyWallet] = useState(null);
-  const [smartMoneyLeaderboard, setSmartMoneyLeaderboard] = useState(null);
-  const [smartMoneyLoading, setSmartMoneyLoading] = useState(false);
-  const [smartMoneyRefreshing, setSmartMoneyRefreshing] = useState(false);
-  const [smartMoneyError, setSmartMoneyError] = useState('');
-  const [selectedWalletId, setSelectedWalletId] = useState('');
-  const [selectedWalletMeta, setSelectedWalletMeta] = useState(null);
-  const [smSubTab, setSmSubTab] = useState('wallets');
-  const [smWalletSearch, setSmWalletSearch] = useState('');
-  const [smWalletPage, setSmWalletPage] = useState(0);
-  const [smLeaderSearch, setSmLeaderSearch] = useState('');
-  const [smLeaderPage, setSmLeaderPage] = useState(0);
-  const [smDrillWalletId, setSmDrillWalletId] = useState('');
-
-  const SM_PAGE_SIZE = 10;
-
-  const [opsLoading, setOpsLoading] = useState(false);
-  const [opsError, setOpsError] = useState('');
-  const [onlineUsers, setOnlineUsers] = useState([]);
-  const [activeTasks, setActiveTasks] = useState([]);
-  const [selectedUser, setSelectedUser] = useState(null);
-  const [userPositions, setUserPositions] = useState(null);
-
-  const [systemLoading, setSystemLoading] = useState(false);
-  const [systemError, setSystemError] = useState('');
-  const [systemConfig, setSystemConfig] = useState(null);
-  const [configDraft, setConfigDraft] = useState({
-    zap_price_deviation_max_percent: '',
-    zap_min_pool_liquidity_usd: '',
-  });
-  const [rpcPool, setRpcPool] = useState(null);
-  const [privateZap, setPrivateZap] = useState(null);
-  const [rpcDraft, setRpcDraft] = useState({ chain: 'bsc', transport: 'http', url: '', name: '', setCurrent: false });
-
   useEffect(() => {
     if (!tabs.some((tab) => tab.key === activeTab)) {
       setActiveTab('my_assets');
@@ -841,37 +805,11 @@ export default function AssetManagementPanel({
   }, [activeTab, tabs]);
 
   const hasAssetData = Boolean(assetState.overview || assetState.history || assetState.lp);
-  const hasSmartMoneyData = Boolean(smartMoneyOverview || smartMoneyLeaderboard || smartMoneyWallet);
   const hasAssetDataRef = useRef(false);
-  const hasSmartMoneyDataRef = useRef(false);
 
   useEffect(() => {
     hasAssetDataRef.current = hasAssetData;
   }, [hasAssetData]);
-
-  useEffect(() => {
-    hasSmartMoneyDataRef.current = hasSmartMoneyData;
-  }, [hasSmartMoneyData]);
-
-  const selectSmartMoneyWallet = useCallback((wallet, { openDetail = false } = {}) => {
-    if (!wallet) return;
-    const nextWallet = {
-      address: wallet.address,
-      chain_id: wallet.chain_id,
-      label: wallet.label,
-      assets: wallet.assets,
-      active_pool_count: wallet.active_pool_count,
-      today_event_count: wallet.today_event_count,
-      last_active_at: wallet.last_active_at,
-    };
-    const nextWalletId = walletKey(nextWallet);
-    setSelectedWalletId(nextWalletId);
-    setSelectedWalletMeta(nextWallet);
-    if (openDetail) {
-      setSmSubTab('wallets');
-      setSmDrillWalletId(nextWalletId);
-    }
-  }, []);
 
   const loadAssets = useCallback(async ({ forceRefresh = false } = {}) => {
     if (!hasInitData) return;
@@ -928,138 +866,6 @@ export default function AssetManagementPanel({
     }
   }, [apiBaseUrl, hasInitData, historyDays, initData]);
 
-  const loadSmartMoney = useCallback(async ({ forceRefresh = false } = {}) => {
-    if (!hasInitData || !isAdmin) return;
-    if (hasSmartMoneyDataRef.current) setSmartMoneyRefreshing(true);
-    else setSmartMoneyLoading(true);
-    setSmartMoneyError('');
-    try {
-      const [overviewResult, leaderboardResult] = await Promise.allSettled([
-        fetchAdminSmartMoneyOverview({
-          apiBaseUrl,
-          initData,
-          days: smartMoneyDays,
-          page: smWalletPage + 1,
-          pageSize: SM_PAGE_SIZE,
-          keyword: smWalletSearch,
-          forceRefresh,
-        }),
-        fetchAdminSmartMoneyLeaderboard({
-          apiBaseUrl,
-          initData,
-          days: 1,
-          metric: leaderboardMetric,
-          page: smLeaderPage + 1,
-          pageSize: SM_PAGE_SIZE,
-          keyword: smLeaderSearch,
-          forceRefresh,
-        }),
-      ]);
-      const overview = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
-      const leaderboard = leaderboardResult.status === 'fulfilled' ? leaderboardResult.value : null;
-      const wallets = Array.isArray(overview?.wallets) ? overview.wallets : [];
-      startTransition(() => {
-        if (overviewResult.status === 'fulfilled') setSmartMoneyOverview(overview || null);
-        if (leaderboardResult.status === 'fulfilled') setSmartMoneyLeaderboard(leaderboard || null);
-      });
-      const current = wallets.find((item) => walletKey(item) === selectedWalletId);
-      if (current) {
-        setSelectedWalletMeta((prev) => ({ ...(prev || {}), ...current }));
-      } else if (!selectedWalletId && wallets[0]) {
-        selectSmartMoneyWallet(wallets[0]);
-      } else if (!wallets.length && !smDrillWalletId) {
-        setSelectedWalletId('');
-        setSelectedWalletMeta(null);
-        setSmartMoneyWallet(null);
-      }
-      const rejected = [overviewResult, leaderboardResult]
-        .filter((item) => item.status === 'rejected')
-        .map((item) => item.reason);
-      const fatalError = rejected.find((item) => !isIgnorableSmartMoneyDataError(item));
-      if (fatalError) {
-        setSmartMoneyError(errorText(fatalError));
-      }
-    } catch (err) {
-      setSmartMoneyError(errorText(err));
-    } finally {
-      setSmartMoneyLoading(false);
-      setSmartMoneyRefreshing(false);
-    }
-  }, [
-    SM_PAGE_SIZE,
-    apiBaseUrl,
-    hasInitData,
-    initData,
-    isAdmin,
-    leaderboardMetric,
-    selectSmartMoneyWallet,
-    selectedWalletId,
-    smLeaderPage,
-    smLeaderSearch,
-    smDrillWalletId,
-    smWalletPage,
-    smWalletSearch,
-    smartMoneyDays,
-  ]);
-
-  const loadOperations = useCallback(async () => {
-    if (!hasInitData || !isAdmin) return;
-    setOpsLoading(true);
-    setOpsError('');
-    try {
-      const [usersResp, tasksResp] = await Promise.all([
-        fetchAdminOnlineUsers({ apiBaseUrl, initData, limit: 50 }),
-        fetchAdminActiveTasks({ apiBaseUrl, initData, limit: 100 }),
-      ]);
-      setOnlineUsers(Array.isArray(usersResp?.users) ? usersResp.users : []);
-      setActiveTasks(Array.isArray(tasksResp?.tasks) ? tasksResp.tasks : []);
-    } catch (err) {
-      setOpsError(String(err?.message || err));
-    } finally {
-      setOpsLoading(false);
-    }
-  }, [apiBaseUrl, hasInitData, initData, isAdmin]);
-
-  const loadUserPositions = useCallback(async (user) => {
-    const userId = Number(user?.user_id || 0);
-    if (!hasInitData || !isAdmin || userId <= 0) {
-      setUserPositions(null);
-      return;
-    }
-    try {
-      const data = await fetchAdminRealtimePositions({ apiBaseUrl, initData, userId });
-      setUserPositions(data || null);
-      setSelectedUser(user || null);
-    } catch (err) {
-      setOpsError(String(err?.message || err));
-      setUserPositions(null);
-    }
-  }, [apiBaseUrl, hasInitData, initData, isAdmin]);
-
-  const loadSystem = useCallback(async () => {
-    if (!hasInitData || !isAdmin) return;
-    setSystemLoading(true);
-    setSystemError('');
-    try {
-      const [configResp, rpcResp, zapResp] = await Promise.all([
-        fetchSystemConfig({ apiBaseUrl, initData }),
-        fetchAdminRPCPool({ apiBaseUrl, initData }),
-        fetchAdminPrivateZap({ apiBaseUrl, initData }),
-      ]);
-      setSystemConfig(configResp || null);
-      setConfigDraft({
-        zap_price_deviation_max_percent: String(configResp?.config?.zap_price_deviation_max_percent ?? ''),
-        zap_min_pool_liquidity_usd: String(configResp?.config?.zap_min_pool_liquidity_usd ?? ''),
-      });
-      setRpcPool(rpcResp || null);
-      setPrivateZap(zapResp || null);
-    } catch (err) {
-      setSystemError(String(err?.message || err));
-    } finally {
-      setSystemLoading(false);
-    }
-  }, [apiBaseUrl, hasInitData, initData, isAdmin]);
-
   useEffect(() => {
     if (activeTab !== 'my_assets') return undefined;
     loadAssets();
@@ -1068,179 +874,20 @@ export default function AssetManagementPanel({
     return () => clearInterval(timer);
   }, [activeTab, hasInitData, loadAssets, refreshInterval]);
 
-  useEffect(() => {
-    if (activeTab !== 'smart_money') return undefined;
-    loadSmartMoney();
-    if (!hasInitData || !isAdmin) return undefined;
-    const timer = setInterval(() => loadSmartMoney(), Math.max(60, Number(refreshInterval || 10)) * 1000);
-    return () => clearInterval(timer);
-  }, [activeTab, hasInitData, isAdmin, loadSmartMoney, refreshInterval]);
-
-  const loadSmartMoneyWallet = useCallback(async ({ wallet, forceRefresh = false } = {}) => {
-    if (!wallet || !hasInitData || !isAdmin) return;
-    try {
-      const detail = await fetchAdminSmartMoneyWallet({
-        apiBaseUrl,
-        initData,
-        address: wallet.address,
-        chainId: wallet.chain_id,
-        days: smartMoneyDays,
-        forceRefresh,
-      });
-      startTransition(() => {
-        setSmartMoneyWallet(detail || null);
-      });
-      setSmartMoneyError('');
-    } catch (err) {
-      if (isIgnorableSmartMoneyDataError(err)) {
-        setSmartMoneyError('');
-      } else {
-        setSmartMoneyError(errorText(err));
-      }
-    }
-  }, [apiBaseUrl, hasInitData, initData, isAdmin, smartMoneyDays]);
-
-  const selectedWallet = useMemo(() => {
-    const wallets = Array.isArray(smartMoneyOverview?.wallets) ? smartMoneyOverview.wallets : [];
-    return wallets.find((item) => walletKey(item) === selectedWalletId) || selectedWalletMeta || null;
-  }, [selectedWalletId, selectedWalletMeta, smartMoneyOverview]);
-
-  useEffect(() => {
-    if (activeTab !== 'smart_money' || smSubTab !== 'wallets' || !smDrillWalletId || !selectedWallet || !hasInitData || !isAdmin) {
-      return undefined;
-    }
-    let disposed = false;
-    const run = async (forceRefresh = false) => {
-      await loadSmartMoneyWallet({ wallet: selectedWallet, forceRefresh });
-      if (disposed) return;
-    };
-    run();
-    const timer = setInterval(() => run(), Math.max(60, Number(refreshInterval || 10)) * 1000);
-    return () => {
-      disposed = true;
-      clearInterval(timer);
-    };
-  }, [activeTab, hasInitData, isAdmin, loadSmartMoneyWallet, refreshInterval, selectedWallet, smDrillWalletId, smSubTab]);
-
-  useEffect(() => {
-    if (activeTab !== 'operations') return undefined;
-    loadOperations();
-    if (!hasInitData || !isAdmin) return undefined;
-    const timer = setInterval(loadOperations, Math.max(60, Number(refreshInterval || 10)) * 1000);
-    return () => clearInterval(timer);
-  }, [activeTab, hasInitData, isAdmin, loadOperations, refreshInterval]);
-
-  useEffect(() => {
-    if (activeTab !== 'system') return undefined;
-    loadSystem();
-    if (!hasInitData || !isAdmin) return undefined;
-    const timer = setInterval(loadSystem, Math.max(60, Number(refreshInterval || 10)) * 1000);
-    return () => clearInterval(timer);
-  }, [activeTab, hasInitData, isAdmin, loadSystem, refreshInterval]);
-
   const chartPoints = useMemo(() => {
     const rows = Array.isArray(assetState?.history?.history) ? [...assetState.history.history] : [];
     if (assetState?.history?.today?.day) rows.push(assetState.history.today);
     return rows.map((item) => ({ day: item.day, value: Number(item?.[historyMetric] || 0) }));
   }, [assetState.history, historyMetric]);
 
-  const smartMoneyPnlCalData = useMemo(() => {
-    const history = Array.isArray(smartMoneyWallet?.history) ? [...smartMoneyWallet.history].sort((a, b) => a.day.localeCompare(b.day)) : [];
-    if (!history.length) return [];
-    return history.map((item) => ({
-      day: item.day,
-      realized_pnl_usd: Number(item.estimated_realized_pnl_usd || 0),
-      has_transfer_in: Boolean(item.has_transfer_in),
-      has_transfer_out: Boolean(item.has_transfer_out),
-      transfer_in_count: Number(item.transfer_in_count || 0),
-      transfer_out_count: Number(item.transfer_out_count || 0),
-      transfer_total_count: Number(item.transfer_total_count || 0),
-      transfer_in_usd: Number(item.transfer_in_usd || 0),
-      transfer_out_usd: Number(item.transfer_out_usd || 0),
-      transfer_net_usd: Number(item.transfer_net_usd || 0),
-    }));
-  }, [smartMoneyWallet?.history]);
+  const isRefreshing = assetLoading || assetRefreshing;
 
-  const handleSaveSystemConfig = useCallback(async () => {
-    try {
-      const payload = await updateSystemConfig({
-        apiBaseUrl,
-        initData,
-        config: {
-          zap_price_deviation_max_percent: Number(configDraft.zap_price_deviation_max_percent || 0),
-          zap_min_pool_liquidity_usd: Number(configDraft.zap_min_pool_liquidity_usd || 0),
-        },
-      });
-      setSystemConfig(payload || null);
-      setConfigDraft({
-        zap_price_deviation_max_percent: String(payload?.config?.zap_price_deviation_max_percent ?? ''),
-        zap_min_pool_liquidity_usd: String(payload?.config?.zap_min_pool_liquidity_usd ?? ''),
-      });
-    } catch (err) {
-      setSystemError(String(err?.message || err));
-    }
-  }, [apiBaseUrl, configDraft, initData]);
-
-  const refreshSystemAfter = useCallback(async (fn) => {
-    try {
-      await fn();
-      await loadSystem();
-    } catch (err) {
-      setSystemError(String(err?.message || err));
-    }
-  }, [loadSystem]);
-
-  const handleAddRPC = useCallback(async () => {
-    if (!String(rpcDraft.url || '').trim()) return;
-    await refreshSystemAfter(() => addAdminRPCEndpoint({
-      apiBaseUrl,
-      initData,
-      chain: rpcDraft.chain,
-      transport: rpcDraft.transport,
-      name: rpcDraft.name,
-      url: rpcDraft.url,
-      setCurrent: rpcDraft.setCurrent,
-    }));
-    setRpcDraft({ chain: 'bsc', transport: 'http', url: '', name: '', setCurrent: false });
-  }, [apiBaseUrl, initData, refreshSystemAfter, rpcDraft]);
-
-  const overviewWallets = useMemo(
-    () => (Array.isArray(smartMoneyOverview?.wallets) ? smartMoneyOverview.wallets : []),
-    [smartMoneyOverview]
-  );
-  const walletTotal = Math.max(0, Number(smartMoneyOverview?.wallet_total || 0) || overviewWallets.length);
-  const walletTotalPages = Math.max(1, Number(smartMoneyOverview?.wallet_total_pages || 0) || 1);
-  const pagedWallets = overviewWallets;
-  const leaderboardRows = useMemo(
-    () => (Array.isArray(smartMoneyLeaderboard?.list) ? smartMoneyLeaderboard.list : []),
-    [smartMoneyLeaderboard]
-  );
-  const leaderTotalPages = Math.max(1, Number(smartMoneyLeaderboard?.total_pages || 0) || 1);
-
-  useEffect(() => {
-    if (smWalletPage > walletTotalPages - 1) {
-      setSmWalletPage(Math.max(walletTotalPages - 1, 0));
-    }
-  }, [smWalletPage, walletTotalPages]);
-
-  useEffect(() => {
-    if (smLeaderPage > leaderTotalPages - 1) {
-      setSmLeaderPage(Math.max(leaderTotalPages - 1, 0));
-    }
-  }, [leaderTotalPages, smLeaderPage]);
-
-  useEffect(() => {
-    setSmLeaderPage(0);
-  }, [leaderboardMetric]);
-
-  const isRefreshing = assetLoading || assetRefreshing || smartMoneyLoading || smartMoneyRefreshing || opsLoading || systemLoading;
-
-  const subtitle = activeTab === 'smart_money'
-    ? '聪明钱资产、排行榜与钱包详情'
-    : activeTab === 'operations'
-      ? '在线用户、活跃任务与用户持仓'
-      : activeTab === 'system'
-        ? '系统配置、RPC 与 Private Zap'
+  const subtitle = activeTab === 'global_config'
+    ? '全局配置管理'
+    : activeTab === 'wallet_manage'
+      ? '钱包管理'
+      : activeTab === 'trade_history'
+        ? '交易历史记录'
         : '资产快照、历史趋势与 LP 统计';
 
   const metricColor = '#52d1ff';
@@ -1267,12 +914,6 @@ export default function AssetManagementPanel({
         disabled={isRefreshing}
         onClick={() => {
           if (activeTab === 'my_assets') loadAssets({ forceRefresh: true });
-          if (activeTab === 'smart_money') {
-            loadSmartMoney({ forceRefresh: true });
-            if (selectedWallet) loadSmartMoneyWallet({ wallet: selectedWallet, forceRefresh: true });
-          }
-          if (activeTab === 'operations') loadOperations();
-          if (activeTab === 'system') loadSystem();
         }}
       >
         <RefreshCw size={12} className={isRefreshing ? 'animate-spin' : undefined} />
@@ -1282,8 +923,8 @@ export default function AssetManagementPanel({
   );
 
   return (
-    <PanelShell title="资产管理" subtitle={subtitle} icon={activeTab === 'smart_money' ? TrendingUp : activeTab === 'operations' ? Shield : activeTab === 'system' ? Settings2 : Wallet} actions={actions}>
-      {!hasInitData ? <EmptyState text="请先完成 Telegram 登录后查看资产管理数据" /> : null}
+    <PanelShell title="管理" subtitle={subtitle} icon={Wallet} actions={actions}>
+      {!hasInitData ? <EmptyState text="请先完成 Telegram 登录后查看管理数据" /> : null}
 
       {hasInitData && activeTab === 'my_assets' ? (
         <div className="am-stack">
@@ -1394,500 +1035,16 @@ export default function AssetManagementPanel({
         </div>
       ) : null}
 
-      {hasInitData && activeTab === 'smart_money' ? (
-        <div className="am-stack">
-          {smartMoneyError ? <div className="am-error">{smartMoneyError}</div> : null}
-          <div className="am-pill-group">
-            {SMART_MONEY_WINDOWS.map((days) => (
-              <button key={days} type="button" className={`am-pill ${smartMoneyDays === days ? 'active' : ''}`} onClick={() => setSmartMoneyDays(days)}>
-                {days === 1 ? '昨日' : `${days}D`}
-              </button>
-            ))}
-          </div>
-          <div className="am-metric-row">
-            <MetricCard label="总资产" value={formatUsd(smartMoneyOverview?.summary?.total_usd)} tone="strong" />
-            <MetricCard label="原生币" value={formatUsd(smartMoneyOverview?.summary?.native_usd)} />
-            <MetricCard label="稳定币" value={formatUsd(smartMoneyOverview?.summary?.stable_usd)} />
-            <MetricCard label="代币持仓" value={formatUsd(smartMoneyOverview?.summary?.tracked_token_usd)} />
-            <MetricCard label="Open LP" value={formatUsd(smartMoneyOverview?.summary?.open_lp_usd)} />
-            <MetricCard label="代币种类" value={`${Number(smartMoneyOverview?.summary?.tracked_token_count || 0)} 个`} />
-          </div>
-
-          {/* sub-tab pills */}
-          <div className="am-pill-group">
-            <button type="button" className={`am-pill ${smSubTab === 'wallets' ? 'active' : ''}`} onClick={() => { setSmSubTab('wallets'); setSmDrillWalletId(''); }}>钱包总览</button>
-            <button type="button" className={`am-pill ${smSubTab === 'leaderboard' ? 'active' : ''}`} onClick={() => { setSmSubTab('leaderboard'); setSmDrillWalletId(''); }}>排行榜</button>
-          </div>
-
-          {/* ── wallets sub-tab ── */}
-          {smSubTab === 'wallets' && !smDrillWalletId ? (
-            <div className="am-card">
-              <div className="am-card-header">
-                <div className="am-card-title">钱包总览</div>
-                <span className="am-badge">{walletTotal} 个</span>
-              </div>
-              <div style={{ position: 'relative', marginTop: 8 }}>
-                <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', opacity: 0.35 }} />
-                <input
-                  type="text"
-                  value={smWalletSearch}
-                  onChange={(e) => { setSmWalletSearch(e.target.value); setSmWalletPage(0); }}
-                  placeholder="搜索地址或标签"
-                  className="am-search-input"
-                  style={{ width: '100%', padding: '7px 12px 7px 32px', borderRadius: 10, border: '1px solid rgba(136,157,191,0.12)', background: 'rgba(136,157,191,0.04)', fontSize: 12, outline: 'none', color: 'inherit' }}
-                />
-              </div>
-              <div className="am-list">
-                {pagedWallets.length > 0 ? pagedWallets.map((wallet) => {
-                  const assets = wallet.assets || {};
-                  const total = Number(assets.total_usd || 0);
-                  const nativePct = total > 0 ? (Number(assets.native_usd || 0) / total * 100) : 0;
-                  const stablePct = total > 0 ? (Number(assets.stable_usd || 0) / total * 100) : 0;
-                  const tokenPct = total > 0 ? (Number(assets.tracked_token_usd || 0) / total * 100) : 0;
-                  const lpPct = total > 0 ? (Number(assets.open_lp_usd || 0) / total * 100) : 0;
-                  return (
-                    <button key={walletKey(wallet)} type="button" className={`am-list-item am-list-btn ${walletKey(wallet) === selectedWalletId ? 'selected' : ''}`} onClick={() => selectSmartMoneyWallet(wallet, { openDetail: true })}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
-                        <WalletAvatar address={wallet.address} avatarUrl={wallet.avatar_url} size={28} />
-                        <div style={{ minWidth: 0 }}>
-                          <div className="am-item-title">{walletLabel(wallet)}</div>
-                          <div className="am-item-sub">{formatChain(wallet.chain_id)} · {Number(wallet.today_event_count || 0)} 事件 · {Number(wallet.active_pool_count || 0)} 池</div>
-                          {total > 0 && (
-                            <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2, width: '100%' }}>
-                              <div style={{ height: 4, borderRadius: 2, overflow: 'hidden', background: 'rgba(136,157,191,0.08)', width: '100%', display: 'flex' }}>
-                                {nativePct > 0 && <div style={{ width: `${nativePct}%`, height: '100%', background: '#52d1ff' }} />}
-                                {stablePct > 0 && <div style={{ width: `${stablePct}%`, height: '100%', background: '#59f09d' }} />}
-                                {tokenPct > 0 && <div style={{ width: `${tokenPct}%`, height: '100%', background: '#c792ff' }} />}
-                                {lpPct > 0 && <div style={{ width: `${lpPct}%`, height: '100%', background: '#ffae42' }} />}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <div className="am-list-end">
-                        <strong>{formatUsdCompact(wallet.assets?.total_usd)}</strong>
-                        <ChevronRight size={12} />
-                      </div>
-                    </button>
-                  );
-                }) : <EmptyState text={smartMoneyLoading ? '正在加载...' : '暂无钱包数据'} />}
-              </div>
-              {walletTotalPages > 1 && (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, paddingTop: 8 }}>
-                  <button type="button" disabled={smWalletPage <= 0} onClick={() => setSmWalletPage(smWalletPage - 1)} style={{ padding: '4px 10px', borderRadius: 8, border: '1px solid rgba(136,157,191,0.15)', background: 'transparent', fontSize: 11, cursor: smWalletPage <= 0 ? 'default' : 'pointer', opacity: smWalletPage <= 0 ? 0.3 : 1, color: 'inherit' }}>上一页</button>
-                  <span style={{ fontSize: 11, opacity: 0.5 }}>{smWalletPage + 1} / {walletTotalPages}</span>
-                  <button type="button" disabled={smWalletPage >= walletTotalPages - 1} onClick={() => setSmWalletPage(smWalletPage + 1)} style={{ padding: '4px 10px', borderRadius: 8, border: '1px solid rgba(136,157,191,0.15)', background: 'transparent', fontSize: 11, cursor: smWalletPage >= walletTotalPages - 1 ? 'default' : 'pointer', opacity: smWalletPage >= walletTotalPages - 1 ? 0.3 : 1, color: 'inherit' }}>下一页</button>
-                </div>
-              )}
-            </div>
-          ) : null}
-
-          {/* ── wallet drill-in detail ── */}
-          {smSubTab === 'wallets' && smDrillWalletId ? (
-            <div className="am-card">
-              <button type="button" onClick={() => setSmDrillWalletId('')} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginBottom: 8, opacity: 0.55, color: 'inherit' }}>
-                <ChevronLeft size={14} />返回列表
-              </button>
-              {selectedWallet && smartMoneyWallet ? (
-                <div className="am-stack">
-                  {/* wallet header */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0' }}>
-                    <WalletAvatar address={selectedWallet.address} avatarUrl={selectedWallet.avatar_url || smartMoneyWallet.wallet?.avatar_url} size={36} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="am-item-title" style={{ fontSize: 13 }}>{walletLabel(selectedWallet)}</div>
-                      <div className="am-item-sub">{formatChain(selectedWallet.chain_id)} · 总资产 <strong>{formatUsdCompact(smartMoneyWallet.wallet?.assets?.total_usd)}</strong></div>
-                    </div>
-                  </div>
-
-                  {/* today activity grid */}
-                  <div className="am-stat-grid am-stat-grid-3">
-                    <div className="am-stat">
-                      <div className="am-stat-label">今日收益</div>
-                      <div className="am-stat-value" style={{ color: Number(smartMoneyWallet.today?.estimated_realized_pnl_usd || 0) >= 0 ? '#59f09d' : '#ff6b6b' }}>{formatUsd(smartMoneyWallet.today?.estimated_realized_pnl_usd)}</div>
-                    </div>
-                    <div className="am-stat">
-                      <div className="am-stat-label">加仓次数</div>
-                      <div className="am-stat-value">{Number(smartMoneyWallet.today?.add_count || 0)} 次</div>
-                    </div>
-                    <div className="am-stat">
-                      <div className="am-stat-label">撤仓次数</div>
-                      <div className="am-stat-value">{Number(smartMoneyWallet.today?.remove_count || 0)} 次</div>
-                    </div>
-                    <div className="am-stat">
-                      <div className="am-stat-label">活跃池数</div>
-                      <div className="am-stat-value">{Number(smartMoneyWallet.today?.active_pool_count || 0)} 池</div>
-                    </div>
-                    <div className="am-stat">
-                      <div className="am-stat-label">已匹配</div>
-                      <div className="am-stat-value">{Number(smartMoneyWallet.today?.matched_remove_count || 0)} 次</div>
-                    </div>
-                    <div className="am-stat">
-                      <div className="am-stat-label">未匹配</div>
-                      <div className="am-stat-value" style={{ color: Number(smartMoneyWallet.today?.unmatched_remove_count || 0) > 0 ? '#ffae42' : undefined }}>{Number(smartMoneyWallet.today?.unmatched_remove_count || 0)} 次</div>
-                    </div>
-                  </div>
-
-                  {/* asset distribution bar */}
-                  {(() => {
-                    const wa = smartMoneyWallet.wallet?.assets || {};
-                    const total = Number(wa.total_usd || 0);
-                    if (total <= 0) return null;
-                    const nativePct = Number(wa.native_usd || 0) / total * 100;
-                    const stablePct = Number(wa.stable_usd || 0) / total * 100;
-                    const tokenPct = Number(wa.tracked_token_usd || 0) / total * 100;
-                    const lpPct = Number(wa.open_lp_usd || 0) / total * 100;
-                    return (
-                      <div style={{ borderRadius: 10, border: '1px solid rgba(136,157,191,0.08)', padding: '10px 12px', background: 'rgba(136,157,191,0.03)' }}>
-                        <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', opacity: 0.4, marginBottom: 8 }}>资产分布</div>
-                        <div style={{ height: 6, borderRadius: 3, overflow: 'hidden', background: 'rgba(136,157,191,0.08)', display: 'flex' }}>
-                          {nativePct > 0 && <div style={{ width: `${nativePct}%`, height: '100%', background: '#52d1ff' }} />}
-                          {stablePct > 0 && <div style={{ width: `${stablePct}%`, height: '100%', background: '#59f09d' }} />}
-                          {tokenPct > 0 && <div style={{ width: `${tokenPct}%`, height: '100%', background: '#c792ff' }} />}
-                          {lpPct > 0 && <div style={{ width: `${lpPct}%`, height: '100%', background: '#ffae42' }} />}
-                        </div>
-                        <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: '2px 12px', fontSize: 10, opacity: 0.5 }}>
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: 3, background: '#52d1ff', flexShrink: 0 }} />原生 {formatUsdCompact(wa.native_usd)}</span>
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: 3, background: '#59f09d', flexShrink: 0 }} />稳定 {formatUsdCompact(wa.stable_usd)}</span>
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: 3, background: '#c792ff', flexShrink: 0 }} />代币 {formatUsdCompact(wa.tracked_token_usd)}</span>
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: 3, background: '#ffae42', flexShrink: 0 }} />LP {formatUsdCompact(wa.open_lp_usd)}</span>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {/* PnL calendar (daily balance diff) */}
-                  <PnLCalendar
-                    data={smartMoneyPnlCalData}
-                    note="收益额按当日总资产变化减去当日净转账计算；若当天存在多笔转账，仅展示净转入或净转出的汇总说明。"
-                  />
-
-                  {/* window stats */}
-                  <div className="am-stat-grid am-stat-grid-3">
-                    {Array.isArray(smartMoneyWallet.windows) ? smartMoneyWallet.windows.map((item) => (
-                      <div key={item.days} className="am-stat">
-                        <div className="am-stat-label">{item.days}D</div>
-                        <div className="am-stat-value">{formatUsd(item.estimated_realized_pnl_usd)}</div>
-                        <div className="am-stat-sub">{formatPct(item.yield_rate)} · {Number(item.active_pool_count || 0)} 池</div>
-                      </div>
-                    )) : null}
-                  </div>
-
-                  {/* warnings */}
-                  {Array.isArray(smartMoneyWallet.warnings) && smartMoneyWallet.warnings.length > 0 && (
-                    <div className="am-stack" style={{ gap: 6 }}>
-                      {smartMoneyWallet.warnings.map((warn, i) => (
-                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, borderRadius: 10, border: '1px solid rgba(255,174,66,0.2)', background: 'rgba(255,174,66,0.06)', padding: '8px 12px' }}>
-                          <AlertTriangle size={14} style={{ flexShrink: 0, color: '#ffae42', marginTop: 1 }} />
-                          <span style={{ fontSize: 11, color: '#ffae42' }}>{typeof warn === 'string' ? warn : warn.message || JSON.stringify(warn)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ) : <EmptyState text={smartMoneyLoading ? '正在加载...' : '选择钱包查看明细'} />}
-            </div>
-          ) : null}
-
-          {/* ── leaderboard sub-tab ── */}
-          {smSubTab === 'leaderboard' ? (
-            <div className="am-card">
-              <div className="am-card-header">
-                <div className="am-card-title">昨日快照排行</div>
-                <div className="am-pill-group">
-                  {LEADERBOARD_METRICS.map((item) => (
-                    <button key={item.key} type="button" className={`am-pill ${leaderboardMetric === item.key ? 'active' : ''}`} onClick={() => setLeaderboardMetric(item.key)}>
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 10, opacity: 0.55, marginTop: 4 }}>
-                <ArrowRightLeft size={11} />
-                <span>
-                  {smartMoneyLeaderboard?.snapshot_day && (smartMoneyLeaderboard?.compared_day || smartMoneyLeaderboard?.start_day)
-                    ? `榜单基于 ${smartMoneyLeaderboard.snapshot_day} 相对 ${smartMoneyLeaderboard.compared_day || smartMoneyLeaderboard.start_day} 的资产快照`
-                    : '榜单基于昨日资产快照'}
-                </span>
-              </div>
-              <div style={{ position: 'relative', marginTop: 8 }}>
-                <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', opacity: 0.35 }} />
-                <input
-                  type="text"
-                  value={smLeaderSearch}
-                  onChange={(e) => { setSmLeaderSearch(e.target.value); setSmLeaderPage(0); }}
-                  placeholder="搜索地址或标签"
-                  className="am-search-input"
-                  style={{ width: '100%', padding: '7px 12px 7px 32px', borderRadius: 10, border: '1px solid rgba(136,157,191,0.12)', background: 'rgba(136,157,191,0.04)', fontSize: 12, outline: 'none', color: 'inherit' }}
-                />
-              </div>
-                <div className="am-list">
-                  {leaderboardRows.length > 0 ? leaderboardRows.map((item) => {
-                    const metricText = leaderboardMetric === 'yield_rate' ? formatPct(item.metric_value) : leaderboardMetric === 'participation' ? `${Number(item.metric_value || 0)} 次` : formatUsd(item.metric_value);
-                    const pnl = Number(item.estimated_realized_pnl_usd || 0);
-                    return (
-                    <button
-                      key={`${item.rank}:${item.address}`}
-                      type="button"
-                      className={`am-list-item am-list-btn ${item.rank <= 3 ? 'am-top-rank' : ''}`}
-                      onClick={() => selectSmartMoneyWallet(item, { openDetail: true })}
-                    >
-                      <div className="am-rank-row">
-                        <RankBadge rank={Number(item.rank || 0)} />
-                        <WalletAvatar address={item.address} avatarUrl={item.avatar_url} size={30} />
-                        <div>
-                          <div className="am-item-title">{item.label || `${item.address.slice(0, 6)}...${item.address.slice(-4)}`}</div>
-                          <div className="am-item-sub">{formatChain(item.chain_id)} · {Number(item.active_pool_count || 0)} 池 · {Number(item.participation_count || 0)} 次操作</div>
-                          {hasTransferMarker(item) ? <div style={{ marginTop: 4 }}><TransferBadges item={item} /></div> : null}
-                        </div>
-                      </div>
-                      <div className="am-list-end" style={{ flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
-                        <strong style={{ color: leaderboardMetric === 'pnl' ? (pnl >= 0 ? '#59f09d' : '#ff6b6b') : undefined }}>{metricText}</strong>
-                        {leaderboardMetric !== 'pnl' && <span className="am-item-sub" style={{ color: pnl >= 0 ? '#59f09d' : '#ff6b6b' }}>{pnl >= 0 ? '+' : ''}{formatUsdCompact(pnl)}</span>}
-                        {leaderboardMetric === 'pnl' && Number(item.yield_rate || 0) !== 0 && <span className="am-item-sub">{formatPct(item.yield_rate)}</span>}
-                      </div>
-                    </button>
-                  );
-                }) : <EmptyState text={smartMoneyLoading ? '正在加载...' : '暂无排行榜数据'} />}
-              </div>
-              {leaderTotalPages > 1 && (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, paddingTop: 8 }}>
-                  <button type="button" disabled={smLeaderPage <= 0} onClick={() => setSmLeaderPage(smLeaderPage - 1)} style={{ padding: '4px 10px', borderRadius: 8, border: '1px solid rgba(136,157,191,0.15)', background: 'transparent', fontSize: 11, cursor: smLeaderPage <= 0 ? 'default' : 'pointer', opacity: smLeaderPage <= 0 ? 0.3 : 1, color: 'inherit' }}>上一页</button>
-                  <span style={{ fontSize: 11, opacity: 0.5 }}>{smLeaderPage + 1} / {leaderTotalPages}</span>
-                  <button type="button" disabled={smLeaderPage >= leaderTotalPages - 1} onClick={() => setSmLeaderPage(smLeaderPage + 1)} style={{ padding: '4px 10px', borderRadius: 8, border: '1px solid rgba(136,157,191,0.15)', background: 'transparent', fontSize: 11, cursor: smLeaderPage >= leaderTotalPages - 1 ? 'default' : 'pointer', opacity: smLeaderPage >= leaderTotalPages - 1 ? 0.3 : 1, color: 'inherit' }}>下一页</button>
-                </div>
-              )}
-            </div>
-          ) : null}
-        </div>
+      {hasInitData && activeTab === 'global_config' ? (
+        <GlobalConfigPanel apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} />
       ) : null}
 
-      {hasInitData && activeTab === 'operations' ? (
-        <div className="am-stack">
-          {opsError ? <div className="am-error">{opsError}</div> : null}
-          <div className="am-two-col">
-            <div className="am-card">
-              <div className="am-card-header">
-                <div className="am-card-title"><Users size={14} /> 在线用户</div>
-                <span className="am-badge">{onlineUsers.length} 人</span>
-              </div>
-              <div className="am-list">
-                {onlineUsers.length > 0 ? onlineUsers.map((user) => (
-                  <button key={user.user_id} type="button" className={`am-list-item am-list-btn ${Number(selectedUser?.user_id || 0) === Number(user.user_id || 0) ? 'selected' : ''}`} onClick={() => loadUserPositions(user)}>
-                    <div>
-                      <div className="am-item-title">{user.username ? `@${user.username}` : `用户 ${user.user_id}`}</div>
-                      <div className="am-item-sub">TG {user.telegram_id || '--'} · 任务 {Number(user.total_tasks || 0)}</div>
-                    </div>
-                    <strong>{user.updated_at ? new Date(user.updated_at).toLocaleTimeString() : '--'}</strong>
-                  </button>
-                )) : <EmptyState text={opsLoading ? '正在加载...' : '暂无在线用户'} />}
-              </div>
-            </div>
-
-            <div className="am-card">
-              <div className="am-card-header">
-                <div className="am-card-title"><ClipboardList size={14} /> 活跃任务</div>
-                <span className="am-badge">{activeTasks.length} 条</span>
-              </div>
-              <div className="am-list">
-                {activeTasks.length > 0 ? activeTasks.map((task) => (
-                  <button
-                    key={task.task_id}
-                    type="button"
-                    className="am-list-item am-list-btn"
-                    onClick={() => loadUserPositions({ user_id: task.user_id, username: task.username, telegram_id: task.telegram_id })}
-                  >
-                    <div>
-                      <div className="am-item-title">{`${task.token0_symbol || '--'}/${task.token1_symbol || '--'}`}</div>
-                      <div className="am-item-sub">@{task.username || 'unknown'} · #{task.task_id}</div>
-                    </div>
-                    <strong>{Number(task.amount_usdt || 0).toFixed(2)} USDT</strong>
-                  </button>
-                )) : <EmptyState text={opsLoading ? '正在加载...' : '暂无活跃任务'} />}
-              </div>
-            </div>
-          </div>
-
-          <div className="am-card">
-            <div className="am-card-header">
-              <div className="am-card-title"><Activity size={14} /> 用户持仓</div>
-              <span className="am-badge">{selectedUser?.username ? `@${selectedUser.username}` : selectedUser?.user_id ? `用户 ${selectedUser.user_id}` : '未选择'}</span>
-            </div>
-            {Array.isArray(userPositions?.positions) && userPositions.positions.length > 0 ? (
-              <div className="am-list">
-                {userPositions.positions.map((position, index) => (
-                  <div key={`${position.position_id || index}:${position.pool_id || ''}`} className="am-list-item">
-                    <div>
-                      <div className="am-item-title">{position.title || position.pool_id || '--'}</div>
-                      <div className="am-item-sub">{position.status_label || '--'} · {position.chain || '--'} · 钱包 {position.wallet_id || '--'}</div>
-                    </div>
-                    <strong>{formatUsd(position.current_value_usd || position.totals?.total_usd)}</strong>
-                  </div>
-                ))}
-              </div>
-            ) : <EmptyState text={selectedUser ? '暂无活跃持仓' : '选择用户后查看持仓'} />}
-          </div>
-        </div>
+      {hasInitData && activeTab === 'wallet_manage' ? (
+        <WalletManagePanel apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} chain="bsc" />
       ) : null}
 
-      {hasInitData && activeTab === 'system' ? (
-        <div className="am-stack">
-          {systemError ? <div className="am-error">{systemError}</div> : null}
-          <div className="am-two-col">
-            <div className="am-card">
-              <div className="am-card-header">
-                <div className="am-card-title"><Settings2 size={14} /> 系统配置</div>
-                <button type="button" className="am-pill active" onClick={handleSaveSystemConfig}>保存</button>
-              </div>
-              <div className="am-form">
-                <label className="am-field">
-                  <span>最大报价偏差 (%)</span>
-                  <input value={configDraft.zap_price_deviation_max_percent} onChange={(e) => setConfigDraft((prev) => ({ ...prev, zap_price_deviation_max_percent: e.target.value }))} />
-                </label>
-                <label className="am-field">
-                  <span>最低池子流动性 (USD)</span>
-                  <input value={configDraft.zap_min_pool_liquidity_usd} onChange={(e) => setConfigDraft((prev) => ({ ...prev, zap_min_pool_liquidity_usd: e.target.value }))} />
-                </label>
-              </div>
-              <div className="am-item-sub" style={{ marginTop: 8 }}>当前: 偏差 {systemConfig?.config?.zap_price_deviation_max_percent ?? '--'}, 流动性 {systemConfig?.config?.zap_min_pool_liquidity_usd ?? '--'}</div>
-            </div>
-
-            <div className="am-card">
-              <div className="am-card-header">
-                <div className="am-card-title"><Zap size={14} /> 私有 Zap</div>
-                <span className="am-badge">{Array.isArray(privateZap?.chains) ? privateZap.chains.length : 0} 条链</span>
-              </div>
-              <div className="am-list">
-                {Array.isArray(privateZap?.chains) && privateZap.chains.length > 0 ? privateZap.chains.map((chain) => (
-                  <div key={chain} className="am-list-item" style={{ alignItems: 'flex-start' }}>
-                    <div>
-                      <div className="am-item-title">{String(chain || '').toUpperCase()}</div>
-                      <div className="am-item-sub">按合约类型清空绑定地址与缓存</div>
-                    </div>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                      {(Array.isArray(privateZap?.kinds) && privateZap.kinds.length > 0 ? privateZap.kinds : ['zap_simple', 'atomic_increase_zap']).map((kind) => (
-                        <button
-                          key={`${chain}:${kind}`}
-                          type="button"
-                          className="am-action-btn"
-                          onClick={() => refreshSystemAfter(() => invalidateAdminPrivateZap({ apiBaseUrl, initData, chain, kind }))}
-                        >
-                          清空 {formatPrivateZapKind(kind)}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )) : <EmptyState text={systemLoading ? '正在加载...' : '暂无数据'} />}
-              </div>
-            </div>
-          </div>
-
-          <div className="am-card">
-            <div className="am-card-header">
-              <div className="am-card-title"><Server size={14} /> RPC 池</div>
-              <button type="button" className="am-pill" onClick={loadSystem}>刷新</button>
-            </div>
-            <div className="am-form am-form-inline">
-              <label className="am-field">
-                <span>链</span>
-                <select value={rpcDraft.chain} onChange={(e) => setRpcDraft((prev) => ({ ...prev, chain: e.target.value }))}>
-                  <option value="bsc">BSC</option>
-                  <option value="base">Base</option>
-                </select>
-              </label>
-              <label className="am-field">
-                <span>协议</span>
-                <select value={rpcDraft.transport} onChange={(e) => setRpcDraft((prev) => ({ ...prev, transport: e.target.value }))}>
-                  <option value="http">HTTP</option>
-                  <option value="ws">WS</option>
-                </select>
-              </label>
-              <label className="am-field am-field-grow">
-                <span>URL</span>
-                <input value={rpcDraft.url} onChange={(e) => setRpcDraft((prev) => ({ ...prev, url: e.target.value }))} placeholder="https:// 或 wss://" />
-              </label>
-              <label className="am-field">
-                <span>名称</span>
-                <input value={rpcDraft.name} onChange={(e) => setRpcDraft((prev) => ({ ...prev, name: e.target.value }))} placeholder="可选" />
-              </label>
-              <label className="am-field am-field-check">
-                <input type="checkbox" checked={rpcDraft.setCurrent} onChange={(e) => setRpcDraft((prev) => ({ ...prev, setCurrent: e.target.checked }))} />
-                <span>设为当前</span>
-              </label>
-              <button type="button" className="am-action-btn" onClick={handleAddRPC}><Plus size={12} /> 添加</button>
-            </div>
-            <div className="am-list">
-              {Array.isArray(rpcPool?.groups) && rpcPool.groups.length > 0 ? rpcPool.groups.map((group) => (
-                <div key={`${group.chain}:${group.transport}`} className="am-rpc-group">
-                  <div className="am-rpc-group-head">
-                    <div className="am-item-title">{String(group.chain || '').toUpperCase()} / {String(group.transport || '').toUpperCase()}</div>
-                    <div className="am-item-sub">来源 {group.effective_source || '--'} · {group.effective_url_masked || '--'}</div>
-                  </div>
-                  <div className="am-list">
-                    {Array.isArray(group.endpoints) && group.endpoints.length > 0 ? group.endpoints.map((endpoint) => {
-                      const latency = Number(endpoint.last_latency_ms || 0);
-                      const failures = Number(endpoint.consecutive_failures || 0);
-                      const lastChecked = endpoint.last_checked_at ? new Date(endpoint.last_checked_at).toLocaleTimeString() : '';
-                      const lastError = String(endpoint.last_error || '').trim();
-                      const isAvailable = endpoint.status === 'available';
-                      const statusLabel = endpoint.is_current ? '使用中' : isAvailable ? '可用' : '不可用';
-                      const statusClass = endpoint.is_current ? 'am-badge-ok' : isAvailable ? '' : 'am-badge-warn';
-                      return (
-                        <div key={endpoint.id} className="am-list-item am-list-item-wrap">
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div className="am-item-title">{endpoint.name || `#${endpoint.id}`}</div>
-                            <div className="am-item-sub">{endpoint.url_masked || endpoint.url || '--'}</div>
-                            <div className="am-item-sub" style={{ marginTop: 3, display: 'flex', flexWrap: 'wrap', gap: '6px 12px', alignItems: 'center' }}>
-                              {latency > 0 && (
-                                <span style={{ color: latency < 200 ? '#59f09d' : latency < 500 ? '#ffae42' : '#ff6b6b', fontWeight: 600, fontSize: 11 }}>
-                                  {latency}ms
-                                </span>
-                              )}
-                              {lastChecked && <span>检测: {lastChecked}</span>}
-                              {failures > 0 && <span style={{ color: '#ff6b6b' }}>连续失败 {failures} 次</span>}
-                              {endpoint.disabled_until && <span style={{ color: '#ffae42' }}>停用至 {new Date(endpoint.disabled_until).toLocaleDateString()}</span>}
-                            </div>
-                            {lastError && (
-                              <div className="am-item-sub" style={{ marginTop: 2, color: '#ff6b6b', wordBreak: 'break-all' }}>
-                                {lastError.length > 80 ? lastError.slice(0, 80) + '...' : lastError}
-                              </div>
-                            )}
-                          </div>
-                          <div className="am-btn-group">
-                            <span className={`am-badge ${statusClass}`}>{statusLabel}</span>
-                            {!endpoint.is_current && <button type="button" className="am-icon-btn" title="切换为当前" onClick={() => refreshSystemAfter(() => switchAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: endpoint.id }))}><ArrowRightLeft size={13} /></button>}
-                            <button type="button" className="am-icon-btn" title="检测连通性" onClick={async (e) => {
-                              const btn = e.currentTarget;
-                              btn.disabled = true;
-                              btn.style.opacity = '0.5';
-                              try {
-                                await refreshSystemAfter(() => checkAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: endpoint.id }));
-                              } finally {
-                                btn.disabled = false;
-                                btn.style.opacity = '';
-                              }
-                            }}><CheckCircle2 size={13} /></button>
-                            {isAvailable && !endpoint.is_current && <button type="button" className="am-icon-btn" title="下月停用" onClick={() => refreshSystemAfter(() => disableAdminRPCEndpointNextMonth({ apiBaseUrl, initData, endpointId: endpoint.id }))}><Ban size={13} /></button>}
-                            {!isAvailable && <button type="button" className="am-icon-btn" title="启用" onClick={() => refreshSystemAfter(() => enableAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: endpoint.id }))}><CheckCircle2 size={13} /></button>}
-                            {!endpoint.is_current && <button type="button" className="am-icon-btn am-icon-btn-danger" title="删除" onClick={() => refreshSystemAfter(() => deleteAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: endpoint.id }))}><Trash2 size={13} /></button>}
-                          </div>
-                          <label className="am-rename">
-                            <span>改名</span>
-                            <input defaultValue={endpoint.name || ''} onBlur={(e) => {
-                              const nextName = String(e.target.value || '').trim();
-                              if (nextName && nextName !== String(endpoint.name || '').trim()) {
-                                refreshSystemAfter(() => renameAdminRPCEndpoint({ apiBaseUrl, initData, endpointId: endpoint.id, name: nextName }));
-                              }
-                            }} />
-                          </label>
-                        </div>
-                      );
-                    }) : <EmptyState text="暂无端点" />}
-                  </div>
-                </div>
-              )) : <EmptyState text={systemLoading ? '正在加载...' : '暂无 RPC 数据'} />}
-            </div>
-          </div>
-        </div>
+      {hasInitData && activeTab === 'trade_history' ? (
+        <TradeHistoryPanel apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} />
       ) : null}
     </PanelShell>
   );

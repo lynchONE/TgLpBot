@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from 'react';
 import {
     Eye, Wallet, Settings, Search, Plus, ExternalLink, X, Check,
     ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Flame, Pencil,
 } from 'lucide-react';
+
+const LazySmartMoneyAssetsPage = lazy(() => import('./SmartMoneyAssetsPage.jsx'));
 import {
     fetchSMPools, fetchSMPoolStats, fetchSMPositions, fetchSMWallets,
     fetchSMPositionDetail,
@@ -3063,7 +3065,7 @@ function AddWalletModal({ apiBaseUrl, onClose, onAdded, brand }) {
 }
 
 // ============ MAIN COMPONENT ============
-export default function SmartMoneyPage({ apiBaseUrl, initData = '', accentTheme = 'lime', onOpenPosition }) {
+export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData, isAdmin = false, accentTheme = 'lime', tick, pollIntervalSec = 15, onOpenPosition, onNotice }) {
     const brand = useMemo(() => getBrandTheme(accentTheme), [accentTheme]);
     const [view, setView] = useState('pools');
     const [stats, setStats] = useState(null);
@@ -3155,7 +3157,7 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', accentTheme 
                 )}
 
                 {!isDetailView && (
-                    <div className="grid grid-cols-4 gap-2 mb-4">
+                    <div className={`grid ${isAdmin ? 'grid-cols-5' : 'grid-cols-4'} gap-2 mb-4`}>
                         {[
                             { key: 'pools', label: '池子视图', icon: Eye },
                             { key: 'wallets', label: '钱包视图', icon: Wallet },
@@ -3179,6 +3181,16 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', accentTheme 
                             <Flame size={13} className="shrink-0 sm:h-[14px] sm:w-[14px]" />
                             <span className="text-center whitespace-normal break-words sm:truncate">监控通知</span>
                         </button>
+                        {isAdmin && (
+                            <button
+                                type="button"
+                                className={`inline-flex min-h-[60px] flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] leading-tight sm:min-h-0 sm:flex-row sm:gap-1.5 sm:px-3 sm:py-2.5 sm:text-sm ${getFilterButtonClass(view === 'assets', brand)}`}
+                                onClick={() => setView('assets')}
+                            >
+                                <Wallet size={13} className="shrink-0 sm:h-[14px] sm:w-[14px]" />
+                                <span className="text-center whitespace-normal break-words sm:truncate">聪明钱资产</span>
+                            </button>
+                        )}
                     </div>
                 )}
 
@@ -3219,6 +3231,19 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', accentTheme 
                         initData={initData}
                         brand={brand}
                     />
+                ) : view === 'assets' && isAdmin ? (
+                    <Suspense fallback={<div className="py-6 text-center text-[11px] text-zinc-500">加载聪明钱资产模块...</div>}>
+                        <LazySmartMoneyAssetsPage
+                            apiBaseUrl={apiBaseUrl}
+                            initData={initData}
+                            hasInitData={Boolean(String(initData || '').trim())}
+                            isAdmin={isAdmin}
+                            tick={tick}
+                            pollIntervalSec={pollIntervalSec}
+                            accentTheme={accentTheme}
+                            onNotice={onNotice}
+                        />
+                    </Suspense>
                 ) : (
                     <ContractSettingsPage apiBaseUrl={apiBaseUrl} brand={brand} />
                 )}

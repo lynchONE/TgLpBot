@@ -1,0 +1,668 @@
+import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight, Medal, RefreshCw, Search, Trophy } from 'lucide-react';
+import {
+  fetchAdminSmartMoneyLeaderboard,
+  fetchAdminSmartMoneyOverview,
+  fetchAdminSmartMoneyWallet,
+} from '../api';
+import { resolveSMAvatarAssetUrl } from '../smartMoneyApi';
+import { EmptyState, MetricCard } from './PanelShell';
+
+const WALLET_AVATAR_ICONS = Object.entries(
+  import.meta.glob('../icon/avatar_*.png', { eager: true, import: 'default' })
+)
+  .sort(([pathA], [pathB]) => pathA.localeCompare(pathB, undefined, { numeric: true }))
+  .map(([, src]) => src);
+
+const SMART_MONEY_WINDOWS = [1, 7, 30];
+const LEADERBOARD_METRICS = [
+  { key: 'pnl', label: '收益额' },
+  { key: 'yield_rate', label: '收益率' },
+  { key: 'participation', label: '参与次数' },
+];
+const PAGE_SIZE = 10;
+
+function errorText(err) {
+  return String(err?.message || err || '').trim();
+}
+
+function isIgnorableSmartMoneyDataError(err) {
+  const message = errorText(err).toLowerCase();
+  return message.includes("unknown column 'open_lp_usd'") || message.includes('unknown column `open_lp_usd`');
+}
+
+function formatUsd(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) return '$--';
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+  }).format(number);
+}
+
+function formatUsdCompact(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) return '$--';
+  const abs = Math.abs(number);
+  if (abs >= 1000000) return `$${(number / 1000000).toFixed(abs >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M`;
+  if (abs >= 1000) return `$${(number / 1000).toFixed(abs >= 10000 ? 0 : 1).replace(/\.0$/, '')}K`;
+  if (abs >= 100) return `$${number.toFixed(0)}`;
+  if (abs >= 10) return `$${number.toFixed(1).replace(/\.0$/, '')}`;
+  return `$${number.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}`;
+}
+
+function formatPct(value, digits = 2) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) return '--';
+  return `${(number * 100).toFixed(digits).replace(/\.?0+$/, '')}%`;
+}
+
+function formatChain(chainId) {
+  return Number(chainId) === 8453 ? 'Base' : 'BSC';
+}
+
+function walletKey(wallet) {
+  return `${Number(wallet?.chain_id || 0)}:${String(wallet?.address || '').toLowerCase()}`;
+}
+
+function walletLabel(wallet) {
+  const label = String(wallet?.label || '').trim();
+  if (label) return label;
+  const address = String(wallet?.address || '').trim();
+  return address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '--';
+}
+
+function walletAvatarIdx(address) {
+  const raw = String(address || '').trim();
+  if (!WALLET_AVATAR_ICONS.length || raw.length < 6) return 0;
+  return parseInt(raw.slice(-4), 16) % WALLET_AVATAR_ICONS.length;
+}
+
+function resolveWalletAvatarSrc(address, avatarUrl) {
+  const preferred = resolveSMAvatarAssetUrl(avatarUrl);
+  if (preferred) return preferred;
+  return WALLET_AVATAR_ICONS[walletAvatarIdx(address)] || WALLET_AVATAR_ICONS[0] || '';
+}
+
+function WalletAvatar({ address, avatarUrl }) {
+  const fallbackSrc = WALLET_AVATAR_ICONS[walletAvatarIdx(address)] || WALLET_AVATAR_ICONS[0] || '';
+  const preferredSrc = resolveWalletAvatarSrc(address, avatarUrl);
+  const [src, setSrc] = useState(preferredSrc);
+
+  useEffect(() => {
+    setSrc(preferredSrc);
+  }, [preferredSrc]);
+
+  if (!src) return null;
+
+  return (
+    <img
+      src={src}
+      alt=""
+      style={{
+        width: 30,
+        height: 30,
+        flexShrink: 0,
+        borderRadius: 10,
+        objectFit: 'cover',
+        border: '1px solid rgba(136, 157, 191, 0.16)',
+      }}
+      onError={() => {
+        if (src !== fallbackSrc) {
+          setSrc(fallbackSrc);
+        }
+      }}
+    />
+  );
+}
+
+function RankBadge({ rank }) {
+  if (rank === 1) {
+    return (
+      <span className="am-rank top">
+        <Trophy size={12} />
+      </span>
+    );
+  }
+  if (rank === 2 || rank === 3) {
+    return (
+      <span className="am-rank top">
+        <Medal size={12} />
+      </span>
+    );
+  }
+  return <span className="am-rank">{rank}</span>;
+}
+
+export default function SmartMoneyAssetsPanel({
+  apiBaseUrl,
+  initData,
+  hasInitData,
+  isAdmin = false,
+  refreshInterval = 10,
+}) {
+  const [days, setDays] = useState(7);
+  const [view, setView] = useState('wallets');
+  const [walletKeyword, setWalletKeyword] = useState('');
+  const [walletPage, setWalletPage] = useState(0);
+  const [leaderboardKeyword, setLeaderboardKeyword] = useState('');
+  const [leaderboardMetric, setLeaderboardMetric] = useState('pnl');
+  const [leaderboardPage, setLeaderboardPage] = useState(0);
+  const [selectedWalletId, setSelectedWalletId] = useState('');
+  const [selectedWalletMeta, setSelectedWalletMeta] = useState(null);
+  const [detailWalletId, setDetailWalletId] = useState('');
+  const [overview, setOverview] = useState(null);
+  const [leaderboard, setLeaderboard] = useState(null);
+  const [walletDetail, setWalletDetail] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const hasData = Boolean(overview || leaderboard || walletDetail);
+  const hasDataRef = useRef(false);
+
+  useEffect(() => {
+    hasDataRef.current = hasData;
+  }, [hasData]);
+
+  const selectWallet = useCallback((wallet, { openDetail = false } = {}) => {
+    if (!wallet) return;
+    const id = walletKey(wallet);
+    setSelectedWalletId(id);
+    setSelectedWalletMeta(wallet);
+    if (openDetail) {
+      setView('wallets');
+      setDetailWalletId(id);
+    }
+  }, []);
+
+  const loadSmartMoney = useCallback(async ({ forceRefresh = false } = {}) => {
+    if (!hasInitData || !isAdmin) return;
+    if (hasDataRef.current) setRefreshing(true);
+    else setLoading(true);
+    setError('');
+    try {
+      const [overviewResult, leaderboardResult] = await Promise.allSettled([
+        fetchAdminSmartMoneyOverview({
+          apiBaseUrl,
+          initData,
+          days,
+          page: walletPage + 1,
+          pageSize: PAGE_SIZE,
+          keyword: walletKeyword,
+          forceRefresh,
+        }),
+        fetchAdminSmartMoneyLeaderboard({
+          apiBaseUrl,
+          initData,
+          days: 1,
+          metric: leaderboardMetric,
+          page: leaderboardPage + 1,
+          pageSize: PAGE_SIZE,
+          keyword: leaderboardKeyword,
+          forceRefresh,
+        }),
+      ]);
+
+      const nextOverview = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
+      const nextLeaderboard = leaderboardResult.status === 'fulfilled' ? leaderboardResult.value : null;
+
+      startTransition(() => {
+        if (overviewResult.status === 'fulfilled') setOverview(nextOverview || null);
+        if (leaderboardResult.status === 'fulfilled') setLeaderboard(nextLeaderboard || null);
+      });
+
+      const walletRows = Array.isArray(nextOverview?.wallets) ? nextOverview.wallets : [];
+      if (!selectedWalletId && walletRows[0]) {
+        selectWallet(walletRows[0]);
+      } else {
+        const matchedWallet = walletRows.find((item) => walletKey(item) === selectedWalletId);
+        if (matchedWallet) setSelectedWalletMeta(matchedWallet);
+      }
+
+      const rejectedErrors = [overviewResult, leaderboardResult]
+        .filter((item) => item.status === 'rejected')
+        .map((item) => item.reason);
+      const fatal = rejectedErrors.find((item) => !isIgnorableSmartMoneyDataError(item));
+      if (fatal) setError(errorText(fatal));
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [
+    apiBaseUrl,
+    days,
+    hasInitData,
+    initData,
+    isAdmin,
+    leaderboardKeyword,
+    leaderboardMetric,
+    leaderboardPage,
+    selectWallet,
+    selectedWalletId,
+    walletKeyword,
+    walletPage,
+  ]);
+
+  const selectedWallet = useMemo(() => {
+    const rows = Array.isArray(overview?.wallets) ? overview.wallets : [];
+    return rows.find((item) => walletKey(item) === selectedWalletId) || selectedWalletMeta || null;
+  }, [overview?.wallets, selectedWalletId, selectedWalletMeta]);
+
+  const loadWalletDetail = useCallback(async ({ forceRefresh = false } = {}) => {
+    if (!selectedWallet || !hasInitData || !isAdmin) return;
+    setDetailLoading(true);
+    try {
+      const detail = await fetchAdminSmartMoneyWallet({
+        apiBaseUrl,
+        initData,
+        address: selectedWallet.address,
+        chainId: selectedWallet.chain_id,
+        days,
+        forceRefresh,
+      });
+      startTransition(() => {
+        setWalletDetail(detail || null);
+      });
+      setError('');
+    } catch (err) {
+      if (!isIgnorableSmartMoneyDataError(err)) {
+        setError(errorText(err));
+      }
+    } finally {
+      setDetailLoading(false);
+    }
+  }, [apiBaseUrl, days, hasInitData, initData, isAdmin, selectedWallet]);
+
+  useEffect(() => {
+    loadSmartMoney();
+  }, [loadSmartMoney]);
+
+  useEffect(() => {
+    if (!hasInitData || !isAdmin) return undefined;
+    const timer = setInterval(() => {
+      loadSmartMoney();
+      if (view === 'wallets' && detailWalletId && selectedWallet) {
+        loadWalletDetail();
+      }
+    }, Math.max(10, Number(refreshInterval || 10)) * 1000);
+    return () => clearInterval(timer);
+  }, [detailWalletId, hasInitData, isAdmin, loadSmartMoney, loadWalletDetail, refreshInterval, selectedWallet, view]);
+
+  useEffect(() => {
+    if (view !== 'wallets' || !detailWalletId || !selectedWallet) return;
+    loadWalletDetail();
+  }, [detailWalletId, loadWalletDetail, selectedWallet, view]);
+
+  useEffect(() => {
+    setWalletPage(0);
+  }, [days, walletKeyword]);
+
+  useEffect(() => {
+    setLeaderboardPage(0);
+  }, [leaderboardKeyword, leaderboardMetric]);
+
+  const walletRows = useMemo(
+    () => (Array.isArray(overview?.wallets) ? overview.wallets : []),
+    [overview?.wallets]
+  );
+  const walletTotalPages = Math.max(1, Number(overview?.wallet_total_pages || 1));
+  const leaderboardRows = useMemo(
+    () => (Array.isArray(leaderboard?.list) ? leaderboard.list : []),
+    [leaderboard?.list]
+  );
+  const leaderboardTotalPages = Math.max(1, Number(leaderboard?.total_pages || 1));
+  const historyRows = useMemo(() => {
+    const rows = Array.isArray(walletDetail?.history) ? [...walletDetail.history] : [];
+    rows.sort((left, right) => String(right?.day || '').localeCompare(String(left?.day || '')));
+    return rows.slice(0, 20);
+  }, [walletDetail?.history]);
+
+  const isBusy = loading || refreshing;
+
+  if (!hasInitData) {
+    return <EmptyState text="请先完成 Telegram 登录后查看聪明钱资产。" />;
+  }
+
+  if (!isAdmin) {
+    return <EmptyState text="聪明钱资产仅对管理员开放。" />;
+  }
+
+  return (
+    <div className="am-stack">
+      <div className="am-actions">
+        {SMART_MONEY_WINDOWS.map((value) => (
+          <button
+            type="button"
+            key={value}
+            className={`am-pill ${days === value ? 'active' : ''}`}
+            onClick={() => setDays(value)}
+          >
+            {value === 1 ? '昨日' : `${value}D`}
+          </button>
+        ))}
+        <button
+          type="button"
+          className="am-tab-btn"
+          disabled={isBusy}
+          onClick={() => {
+            loadSmartMoney({ forceRefresh: true });
+            if (detailWalletId && selectedWallet) {
+              loadWalletDetail({ forceRefresh: true });
+            }
+          }}
+        >
+          <RefreshCw size={12} className={isBusy ? 'animate-spin' : undefined} />
+          刷新
+        </button>
+      </div>
+
+      {error ? <div className="am-error">{error}</div> : null}
+
+      <div className="am-metric-row">
+        <MetricCard label="总资产" value={formatUsd(overview?.summary?.total_usd)} tone="strong" />
+        <MetricCard label="原生币" value={formatUsd(overview?.summary?.native_usd)} />
+        <MetricCard label="稳定币" value={formatUsd(overview?.summary?.stable_usd)} />
+        <MetricCard label="代币持仓" value={formatUsd(overview?.summary?.tracked_token_usd)} />
+        <MetricCard label="Open LP" value={formatUsd(overview?.summary?.open_lp_usd)} />
+        <MetricCard label="代币种类" value={String(Number(overview?.summary?.tracked_token_count || 0))} />
+      </div>
+
+      <div className="am-actions">
+        <button
+          type="button"
+          className={`am-tab-btn ${view === 'wallets' ? 'active' : ''}`}
+          onClick={() => {
+            setView('wallets');
+            if (!detailWalletId) setWalletDetail(null);
+          }}
+        >
+          钱包总览
+        </button>
+        <button
+          type="button"
+          className={`am-tab-btn ${view === 'leaderboard' ? 'active' : ''}`}
+          onClick={() => {
+            setView('leaderboard');
+            setDetailWalletId('');
+          }}
+        >
+          排行榜
+        </button>
+      </div>
+
+      {view === 'wallets' && !detailWalletId ? (
+        <div className="am-card">
+          <div className="am-card-header">
+            <div className="am-card-title">聪明钱钱包</div>
+            <div className="am-item-sub">共 {Number(overview?.wallet_total || walletRows.length || 0)} 个</div>
+          </div>
+          <div className="am-form" style={{ gridTemplateColumns: 'minmax(0, 1fr)' }}>
+            <label className="am-field">
+              <span>搜索地址或标签</span>
+              <div style={{ position: 'relative' }}>
+                <Search
+                  size={14}
+                  style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: 10,
+                    transform: 'translateY(-50%)',
+                    color: 'var(--text-muted)',
+                  }}
+                />
+                <input
+                  style={{ paddingLeft: 32 }}
+                  value={walletKeyword}
+                  onChange={(event) => setWalletKeyword(event.target.value)}
+                  placeholder="地址 / 标签"
+                />
+              </div>
+            </label>
+          </div>
+
+          <div className="am-list">
+            {walletRows.length > 0 ? walletRows.map((wallet) => {
+              const selected = walletKey(wallet) === selectedWalletId;
+              return (
+                <button
+                  type="button"
+                  key={walletKey(wallet)}
+                  className={`am-list-item am-list-btn ${selected ? 'selected' : ''}`}
+                  onClick={() => selectWallet(wallet, { openDetail: true })}
+                >
+                  <div className="am-rank-row" style={{ minWidth: 0 }}>
+                    <WalletAvatar address={wallet.address} avatarUrl={wallet.avatar_url} />
+                    <div style={{ minWidth: 0 }}>
+                      <div className="am-item-title">{walletLabel(wallet)}</div>
+                      <div className="am-item-sub">
+                        {formatChain(wallet.chain_id)} / {Number(wallet.active_pool_count || 0)} 池 / {Number(wallet.today_event_count || 0)} 事件
+                      </div>
+                    </div>
+                  </div>
+                  <div className="am-list-end">
+                    <strong>{formatUsdCompact(wallet?.assets?.total_usd)}</strong>
+                    <ChevronRight size={14} />
+                  </div>
+                </button>
+              );
+            }) : <EmptyState text={loading ? '正在加载聪明钱钱包...' : '暂无钱包数据'} />}
+          </div>
+
+          <div className="am-actions">
+            <button
+              type="button"
+              className="am-action-btn"
+              disabled={walletPage <= 0}
+              onClick={() => setWalletPage((value) => Math.max(0, value - 1))}
+            >
+              上一页
+            </button>
+            <span className="am-item-sub">第 {walletPage + 1} / {walletTotalPages} 页</span>
+            <button
+              type="button"
+              className="am-action-btn"
+              disabled={walletPage >= walletTotalPages - 1}
+              onClick={() => setWalletPage((value) => Math.min(walletTotalPages - 1, value + 1))}
+            >
+              下一页
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {view === 'wallets' && detailWalletId ? (
+        <div className="am-stack">
+          <div className="am-actions">
+            <button
+              type="button"
+              className="am-action-btn"
+              onClick={() => {
+                setDetailWalletId('');
+                setWalletDetail(null);
+              }}
+            >
+              <ChevronLeft size={12} />
+              返回列表
+            </button>
+          </div>
+
+          <div className="am-wallet-item">
+            <div className="am-wallet-head">
+              <div className="am-rank-row" style={{ minWidth: 0 }}>
+                <WalletAvatar
+                  address={selectedWallet?.address}
+                  avatarUrl={selectedWallet?.avatar_url || walletDetail?.wallet?.avatar_url}
+                />
+                <div style={{ minWidth: 0 }}>
+                  <div className="am-item-title">{walletLabel(selectedWallet)}</div>
+                  <div className="am-item-sub">
+                    {formatChain(selectedWallet?.chain_id)} / {selectedWallet?.address || '--'}
+                  </div>
+                </div>
+              </div>
+              <div className="am-wallet-total">
+                <div className="am-item-sub">总资产</div>
+                <strong>{formatUsdCompact(walletDetail?.wallet?.assets?.total_usd)}</strong>
+              </div>
+            </div>
+
+            <div className="am-wallet-breakdown">
+              <div className="am-wallet-cell">
+                <span>今日收益</span>
+                <strong>{formatUsd(walletDetail?.today?.estimated_realized_pnl_usd)}</strong>
+              </div>
+              <div className="am-wallet-cell">
+                <span>加仓次数</span>
+                <strong>{Number(walletDetail?.today?.add_count || 0)}</strong>
+              </div>
+              <div className="am-wallet-cell">
+                <span>减仓次数</span>
+                <strong>{Number(walletDetail?.today?.remove_count || 0)}</strong>
+              </div>
+            </div>
+          </div>
+
+          <div className="am-card">
+            <div className="am-card-header">
+              <div className="am-card-title">最近日记录</div>
+              <div className="am-item-sub">{detailLoading ? '加载中...' : `${historyRows.length} 条`}</div>
+            </div>
+            <div className="am-list">
+              {historyRows.length > 0 ? historyRows.map((item) => {
+                const pnl = Number(item?.estimated_realized_pnl_usd || 0);
+                const hasTransfer = Boolean(
+                  item?.has_transfer_in ||
+                  item?.has_transfer_out ||
+                  Number(item?.transfer_total_count || 0) > 0
+                );
+                return (
+                  <div key={item.day} className="am-list-item">
+                    <div style={{ minWidth: 0 }}>
+                      <div className="am-item-title">{item.day || '--'}</div>
+                      <div className="am-item-sub">
+                        总资产 {formatUsdCompact(item?.total_usd)} / 事件 {Number(item?.event_count || 0)}
+                      </div>
+                    </div>
+                    <div className="am-list-end" style={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                      {hasTransfer ? (
+                        <span className="am-badge am-badge-warn">
+                          转账 {Number(item?.transfer_total_count || 0)}
+                        </span>
+                      ) : null}
+                      <strong style={{ color: pnl >= 0 ? 'var(--positive)' : 'var(--negative)' }}>
+                        {pnl >= 0 ? '+' : ''}{formatUsdCompact(pnl)}
+                      </strong>
+                    </div>
+                  </div>
+                );
+              }) : <EmptyState text={detailLoading ? '正在加载钱包详情...' : '暂无日记录'} />}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {view === 'leaderboard' ? (
+        <div className="am-card">
+          <div className="am-card-header">
+            <div className="am-card-title">昨日排行榜</div>
+            <div className="am-actions" style={{ marginLeft: 'auto' }}>
+              {LEADERBOARD_METRICS.map((metric) => (
+                <button
+                  type="button"
+                  key={metric.key}
+                  className={`am-pill ${leaderboardMetric === metric.key ? 'active' : ''}`}
+                  onClick={() => setLeaderboardMetric(metric.key)}
+                >
+                  {metric.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="am-form" style={{ gridTemplateColumns: 'minmax(0, 1fr)' }}>
+            <label className="am-field">
+              <span>搜索地址或标签</span>
+              <div style={{ position: 'relative' }}>
+                <Search
+                  size={14}
+                  style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: 10,
+                    transform: 'translateY(-50%)',
+                    color: 'var(--text-muted)',
+                  }}
+                />
+                <input
+                  style={{ paddingLeft: 32 }}
+                  value={leaderboardKeyword}
+                  onChange={(event) => setLeaderboardKeyword(event.target.value)}
+                  placeholder="地址 / 标签"
+                />
+              </div>
+            </label>
+          </div>
+
+          <div className="am-list">
+            {leaderboardRows.length > 0 ? leaderboardRows.map((item, index) => {
+              const rank = leaderboardPage * PAGE_SIZE + index + 1;
+              const pnl = Number(item?.pnl || 0);
+              return (
+                <button
+                  type="button"
+                  key={`${item?.address || '--'}:${item?.chain_id || 0}`}
+                  className={`am-list-item am-list-btn ${rank <= 3 ? 'am-top-rank' : ''}`}
+                  onClick={() => selectWallet(item, { openDetail: true })}
+                >
+                  <div className="am-rank-row" style={{ minWidth: 0 }}>
+                    <RankBadge rank={rank} />
+                    <WalletAvatar address={item.address} avatarUrl={item.avatar_url} />
+                    <div style={{ minWidth: 0 }}>
+                      <div className="am-item-title">{walletLabel(item)}</div>
+                      <div className="am-item-sub">
+                        {formatChain(item.chain_id)} / 参与 {Number(item.participation_count || 0)} 次
+                      </div>
+                    </div>
+                  </div>
+                  <div className="am-list-end" style={{ flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                    <strong style={{ color: pnl >= 0 ? 'var(--positive)' : 'var(--negative)' }}>
+                      {pnl >= 0 ? '+' : ''}{formatUsdCompact(item?.pnl)}
+                    </strong>
+                    {leaderboardMetric === 'pnl' ? (
+                      <span className="am-item-sub">{formatPct(item?.yield_rate)}</span>
+                    ) : null}
+                  </div>
+                </button>
+              );
+            }) : <EmptyState text={loading ? '正在加载排行榜...' : '暂无排行榜数据'} />}
+          </div>
+
+          <div className="am-actions">
+            <button
+              type="button"
+              className="am-action-btn"
+              disabled={leaderboardPage <= 0}
+              onClick={() => setLeaderboardPage((value) => Math.max(0, value - 1))}
+            >
+              上一页
+            </button>
+            <span className="am-item-sub">第 {leaderboardPage + 1} / {leaderboardTotalPages} 页</span>
+            <button
+              type="button"
+              className="am-action-btn"
+              disabled={leaderboardPage >= leaderboardTotalPages - 1}
+              onClick={() => setLeaderboardPage((value) => Math.min(leaderboardTotalPages - 1, value + 1))}
+            >
+              下一页
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}

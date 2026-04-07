@@ -492,13 +492,16 @@ const Icon = ({ path: IconCmp, className = '' }) => {
 };
 
 function buildTopNavItems({ isAdmin }) {
-    void isAdmin;
-    return [
+    const items = [
         { key: 'hot_pools', label: '热门池子' },
         { key: 'positions', label: '仓位' },
-        { key: 'assets', label: '资产' },
+        { key: 'assets', label: '管理' },
         { key: 'smart_money', label: '聪明钱' },
     ];
+    if (isAdmin) {
+        items.push({ key: 'admin_page', label: '管理员' });
+    }
+    return items;
 }
 const HOT_POOL_SORT_TABS = [
     { key: 'fees', label: '手续费' },
@@ -680,11 +683,12 @@ export default function App() {
     const isPositions = viewMode === 'positions';
     const isAssets = viewMode === 'assets';
     const isSmartMoney = viewMode === 'smart_money';
+    const isAdminPage = isAdmin && viewMode === 'admin_page';
     const topNavItems = useMemo(
         () => buildTopNavItems({ isAdmin }),
         [isAdmin],
     );
-    const showWalletSummaryCard = !showAdmin && !isHotPools && !isAssets;
+    const showWalletSummaryCard = !showAdmin && !isHotPools && !isAssets && !isAdminPage;
     const hotPoolsDefaultPollSec = 10;
     const hotPoolsPollIntervalSec = Math.max(5, Number(pollOverrideSec || hotPoolsDefaultPollSec));
     const settingsPollIntervalSec = isHotPools ? hotPoolsPollIntervalSec : pollIntervalSec;
@@ -2454,14 +2458,19 @@ export default function App() {
             subtitle: walletAddress ? `钱包 ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '钱包未连接',
         },
         assets: {
-            title: '资产管理',
+            title: '管理',
             icon: icons.wallet,
-            subtitle: isAdmin ? '我的资产、聪明钱与管理入口' : '我的资产与历史统计',
+            subtitle: '我的资产 / 全局配置 / 钱包 / 交易历史',
         },
         smart_money: {
             title: '聪明钱',
             icon: icons.eye,
-            subtitle: '聪明钱监控',
+            subtitle: '聪明钱监控 / 聪明钱资产',
+        },
+        admin_page: {
+            title: '管理员',
+            icon: icons.gear,
+            subtitle: '运行管理 / 系统',
         },
         admin: {
             title: '管理',
@@ -2616,7 +2625,7 @@ export default function App() {
                     </ModuleHeader>
                 ) : isAssets ? (
                     <div className="mb-2">
-                        <Suspense fallback={<div className="rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">正在加载资产管理模块...</div>}>
+                        <Suspense fallback={<div className="rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">正在加载管理模块...</div>}>
                             <LazyAssetManagementPage
                                 apiBaseUrl={apiBaseUrl}
                                 initData={initData}
@@ -2634,9 +2643,28 @@ export default function App() {
                         <SmartMoneyPage
                             apiBaseUrl={apiBaseUrl}
                             initData={initData}
+                            hasInitData={hasInitData}
+                            isAdmin={isAdmin}
                             accentTheme={accentTheme}
+                            tick={tick}
+                            pollIntervalSec={pollIntervalSec}
                             onOpenPosition={openPositionModal}
+                            onNotice={showNotice}
                         />
+                    </div>
+                ) : isAdminPage ? (
+                    <div className="mb-2">
+                        <Suspense fallback={<div className="rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">正在加载管理员模块...</div>}>
+                            <LazyAdminPage
+                                apiBaseUrl={apiBaseUrl}
+                                initData={initData}
+                                hasInitData={hasInitData}
+                                tick={tick}
+                                pollIntervalSec={pollIntervalSec}
+                                accentTheme={accentTheme}
+                                onNotice={showNotice}
+                            />
+                        </Suspense>
                     </div>
                 ) : isHotPools ? (
                     <ModuleHeader
@@ -4123,6 +4151,7 @@ export default function App() {
                         if (item.key === 'assets') iconPath = icons.wallet;
                         if (item.key === 'smart_money') iconPath = icons.eye;
                         if (item.key === 'admin') iconPath = icons.gear;
+                        if (item.key === 'admin_page') iconPath = icons.gear;
 
                         return (
                             <button

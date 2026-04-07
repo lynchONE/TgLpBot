@@ -1,20 +1,18 @@
 import React, { Suspense, lazy, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowRightLeft, ChevronLeft, ChevronRight, Crown, Medal, RefreshCw, Search, Settings2, Shield, TrendingUp, Trophy, Wallet } from 'lucide-react';
+import { AlertTriangle, ArrowRightLeft, ChevronLeft, ChevronRight, Crown, History, Medal, RefreshCw, Search, Settings2, Shield, TrendingUp, Trophy, Wallet } from 'lucide-react';
 import { createChart, AreaSeries, HistogramSeries, ColorType } from 'lightweight-charts';
 import {
-    fetchAdminSmartMoneyLeaderboard,
-    fetchAdminSmartMoneyOverview,
-    fetchAdminSmartMoneyWallet,
     fetchAssetHistory,
     fetchAssetLPStats,
     fetchAssetOverview,
 } from '../lib/api';
 import { getBrandTheme } from '../lib/brand';
-import { resolveSMAvatarAssetUrl } from '../lib/smartMoneyApi';
 import MiniChart from './MiniChart.jsx';
 import NumberFlowValue from './NumberFlowValue.jsx';
 
-const LazyAdminPage = lazy(() => import('./AdminPage.jsx'));
+const LazyGlobalConfigPage = lazy(() => import('./GlobalConfigPage.jsx'));
+const LazyWalletManagePage = lazy(() => import('./WalletManagePage.jsx'));
+const LazyTradeHistoryPage = lazy(() => import('./TradeHistoryPage.jsx'));
 
 const AVATAR_URLS = Object.entries(
     import.meta.glob('../icon/avatar_*.png', { eager: true, import: 'default' })
@@ -867,16 +865,14 @@ export default function AssetManagementPage({
 }) {
     const brand = useMemo(() => getBrandTheme(accentTheme), [accentTheme]);
     const tabs = useMemo(() => {
-        const list = [{ key: 'my_assets', label: '我的资产', icon: Wallet }];
-        if (isAdmin) {
-            list.push(
-                { key: 'smart_money_assets', label: '聪明钱', icon: TrendingUp },
-                { key: 'operations', label: '运行管理', icon: Shield },
-                { key: 'system', label: '系统', icon: Settings2 },
-            );
-        }
+        const list = [
+            { key: 'my_assets', label: '我的资产', icon: Wallet },
+            { key: 'global_config', label: '全局配置', icon: Settings2 },
+            { key: 'wallet_manage', label: '钱包管理', icon: Wallet },
+            { key: 'trade_history', label: '交易历史', icon: History },
+        ];
         return list;
-    }, [isAdmin]);
+    }, []);
     const [activeTab, setActiveTab] = useState('my_assets');
 
     const [historyDays, setHistoryDays] = useState(30);
@@ -885,23 +881,6 @@ export default function AssetManagementPage({
     const [assetsRefreshing, setAssetsRefreshing] = useState(false);
     const [assetsError, setAssetsError] = useState('');
 
-    const [smartMoneyDays, setSmartMoneyDays] = useState(7);
-    const [leaderboardMetric, setLeaderboardMetric] = useState('pnl');
-    const [smartMoneyOverview, setSmartMoneyOverview] = useState(null);
-    const [smartMoneyWallet, setSmartMoneyWallet] = useState(null);
-    const [smartMoneyLeaderboard, setSmartMoneyLeaderboard] = useState(null);
-    const [smartMoneyLoading, setSmartMoneyLoading] = useState(false);
-    const [smartMoneyRefreshing, setSmartMoneyRefreshing] = useState(false);
-    const [smartMoneyError, setSmartMoneyError] = useState('');
-    const [selectedWalletId, setSelectedWalletId] = useState('');
-    const [selectedWalletMeta, setSelectedWalletMeta] = useState(null);
-    const [smSubTab, setSmSubTab] = useState('wallets');
-    const [smWalletSearch, setSmWalletSearch] = useState('');
-    const [smWalletPage, setSmWalletPage] = useState(0);
-    const [smLeaderSearch, setSmLeaderSearch] = useState('');
-    const [smLeaderPage, setSmLeaderPage] = useState(0);
-    const [smDrillWalletId, setSmDrillWalletId] = useState('');
-
     useEffect(() => {
         if (!tabs.some((tab) => tab.key === activeTab)) {
             setActiveTab('my_assets');
@@ -909,37 +888,12 @@ export default function AssetManagementPage({
     }, [activeTab, tabs]);
 
     const hasAssetData = Boolean(assetsData.overview || assetsData.history || assetsData.lp);
-    const hasSmartMoneyData = Boolean(smartMoneyOverview || smartMoneyLeaderboard || smartMoneyWallet);
     const hasAssetDataRef = useRef(false);
-    const hasSmartMoneyDataRef = useRef(false);
 
     useEffect(() => {
         hasAssetDataRef.current = hasAssetData;
     }, [hasAssetData]);
 
-    useEffect(() => {
-        hasSmartMoneyDataRef.current = hasSmartMoneyData;
-    }, [hasSmartMoneyData]);
-
-    const selectSmartMoneyWallet = useCallback((wallet, { openDetail = false } = {}) => {
-        if (!wallet) return;
-        const nextWallet = {
-            address: wallet.address,
-            chain_id: wallet.chain_id,
-            label: wallet.label,
-            assets: wallet.assets,
-            active_pool_count: wallet.active_pool_count,
-            today_event_count: wallet.today_event_count,
-            last_active_at: wallet.last_active_at,
-        };
-        const nextWalletId = walletKey(nextWallet);
-        setSelectedWalletId(nextWalletId);
-        setSelectedWalletMeta(nextWallet);
-        if (openDetail) {
-            setSmSubTab('wallets');
-            setSmDrillWalletId(nextWalletId);
-        }
-    }, []);
 
     const loadAssets = useCallback(async ({ forceRefresh = false } = {}) => {
         if (!hasInitData) return;
@@ -1004,185 +958,10 @@ export default function AssetManagementPage({
         return () => clearInterval(timer);
     }, [activeTab, hasInitData, loadAssets, pollIntervalSec]);
 
-    const loadSmartMoney = useCallback(async ({ forceRefresh = false } = {}) => {
-        if (!hasInitData || !isAdmin) return;
-        if (hasSmartMoneyDataRef.current) setSmartMoneyRefreshing(true);
-        else setSmartMoneyLoading(true);
-        setSmartMoneyError('');
-        try {
-            const [overviewResult, leaderboardResult] = await Promise.allSettled([
-                fetchAdminSmartMoneyOverview({
-                    apiBaseUrl,
-                    initData,
-                    days: smartMoneyDays,
-                    page: smWalletPage + 1,
-                    pageSize: SM_PAGE_SIZE,
-                    keyword: smWalletSearch,
-                    forceRefresh,
-                }),
-                fetchAdminSmartMoneyLeaderboard({
-                    apiBaseUrl,
-                    initData,
-                    days: 1,
-                    metric: leaderboardMetric,
-                    page: smLeaderPage + 1,
-                    pageSize: SM_PAGE_SIZE,
-                    keyword: smLeaderSearch,
-                    forceRefresh,
-                }),
-            ]);
-            const overview = overviewResult.status === 'fulfilled' ? overviewResult.value : null;
-            const leaderboard = leaderboardResult.status === 'fulfilled' ? leaderboardResult.value : null;
-            const wallets = Array.isArray(overview?.wallets) ? overview.wallets : [];
-            startTransition(() => {
-                if (overviewResult.status === 'fulfilled') setSmartMoneyOverview(overview || null);
-                if (leaderboardResult.status === 'fulfilled') setSmartMoneyLeaderboard(leaderboard || null);
-            });
-            const current = wallets.find((item) => walletKey(item) === selectedWalletId);
-            if (current) {
-                setSelectedWalletMeta((prev) => ({ ...(prev || {}), ...current }));
-            } else if (!selectedWalletId && wallets[0]) {
-                selectSmartMoneyWallet(wallets[0]);
-            } else if (!wallets.length && !smDrillWalletId) {
-                setSelectedWalletId('');
-                setSelectedWalletMeta(null);
-                setSmartMoneyWallet(null);
-            }
-            const rejected = [overviewResult, leaderboardResult]
-                .filter((item) => item.status === 'rejected')
-                .map((item) => item.reason);
-            const fatalError = rejected.find((item) => !isIgnorableSmartMoneyDataError(item));
-            if (fatalError) {
-                setSmartMoneyError(errorText(fatalError));
-            }
-        } catch (err) {
-            setSmartMoneyError(errorText(err));
-        } finally {
-            setSmartMoneyLoading(false);
-            setSmartMoneyRefreshing(false);
-        }
-    }, [
-        apiBaseUrl,
-        hasInitData,
-        initData,
-        isAdmin,
-        leaderboardMetric,
-        selectSmartMoneyWallet,
-        selectedWalletId,
-        smLeaderPage,
-        smLeaderSearch,
-        smDrillWalletId,
-        smWalletPage,
-        smWalletSearch,
-        smartMoneyDays,
-    ]);
-
-    useEffect(() => {
-        if (activeTab !== 'smart_money_assets') return undefined;
-        loadSmartMoney();
-        if (!hasInitData || !isAdmin) return undefined;
-        const timer = setInterval(() => loadSmartMoney(), Math.max(60, Number(pollIntervalSec || 15)) * 1000);
-        return () => clearInterval(timer);
-    }, [activeTab, hasInitData, isAdmin, loadSmartMoney, pollIntervalSec]);
-
-    const selectedWallet = useMemo(() => {
-        const wallets = Array.isArray(smartMoneyOverview?.wallets) ? smartMoneyOverview.wallets : [];
-        return wallets.find((item) => walletKey(item) === selectedWalletId) || selectedWalletMeta || null;
-    }, [selectedWalletId, selectedWalletMeta, smartMoneyOverview]);
-
-    const loadSmartMoneyWallet = useCallback(async ({ wallet, forceRefresh = false } = {}) => {
-        if (!wallet || !hasInitData || !isAdmin) return;
-        try {
-            const detail = await fetchAdminSmartMoneyWallet({
-                apiBaseUrl,
-                initData,
-                address: wallet.address,
-                chainId: wallet.chain_id,
-                days: smartMoneyDays,
-                forceRefresh,
-            });
-            startTransition(() => {
-                setSmartMoneyWallet(detail || null);
-            });
-            setSmartMoneyError('');
-        } catch (err) {
-            if (isIgnorableSmartMoneyDataError(err)) {
-                setSmartMoneyError('');
-            } else {
-                setSmartMoneyError(errorText(err));
-            }
-        }
-    }, [apiBaseUrl, hasInitData, initData, isAdmin, smartMoneyDays]);
-
-    useEffect(() => {
-        if (activeTab !== 'smart_money_assets' || smSubTab !== 'wallets' || !smDrillWalletId || !selectedWallet || !hasInitData || !isAdmin) return undefined;
-        let disposed = false;
-        const run = async (forceRefresh = false) => {
-            await loadSmartMoneyWallet({ wallet: selectedWallet, forceRefresh });
-            if (disposed) return;
-        };
-        run();
-        const timer = setInterval(() => run(), Math.max(60, Number(pollIntervalSec || 15)) * 1000);
-        return () => {
-            disposed = true;
-            clearInterval(timer);
-        };
-    }, [activeTab, hasInitData, isAdmin, loadSmartMoneyWallet, pollIntervalSec, selectedWallet, smDrillWalletId, smSubTab]);
-
     const chartRows = useMemo(() => seriesRows(assetsData.history, 'wallet_usd'), [assetsData.history]);
-    const smartMoneyRows = useMemo(
-        () => (Array.isArray(smartMoneyWallet?.history) ? smartMoneyWallet.history.map((item) => ({ close: Number(item?.total_usd || 0) })) : []),
-        [smartMoneyWallet],
-    );
 
-    const smartMoneyPnlCalData = useMemo(() => {
-        const history = Array.isArray(smartMoneyWallet?.history) ? [...smartMoneyWallet.history].sort((a, b) => a.day.localeCompare(b.day)) : [];
-        if (!history.length) return [];
-        return history.map((item) => ({
-            day: item.day,
-            realized_pnl_usd: Number(item.estimated_realized_pnl_usd || 0),
-            has_transfer_in: Boolean(item.has_transfer_in),
-            has_transfer_out: Boolean(item.has_transfer_out),
-            transfer_in_count: Number(item.transfer_in_count || 0),
-            transfer_out_count: Number(item.transfer_out_count || 0),
-            transfer_total_count: Number(item.transfer_total_count || 0),
-            transfer_in_usd: Number(item.transfer_in_usd || 0),
-            transfer_out_usd: Number(item.transfer_out_usd || 0),
-            transfer_net_usd: Number(item.transfer_net_usd || 0),
-        }));
-    }, [smartMoneyWallet?.history]);
-
-    const overviewWallets = useMemo(
-        () => (Array.isArray(smartMoneyOverview?.wallets) ? smartMoneyOverview.wallets : []),
-        [smartMoneyOverview],
-    );
-    const walletTotal = Math.max(0, Number(smartMoneyOverview?.wallet_total || 0) || overviewWallets.length);
-    const walletTotalPages = Math.max(1, Number(smartMoneyOverview?.wallet_total_pages || 0) || 1);
-    const pagedWallets = overviewWallets;
-
-    useEffect(() => {
-        if (smWalletPage > walletTotalPages - 1) {
-            setSmWalletPage(Math.max(walletTotalPages - 1, 0));
-        }
-    }, [smWalletPage, walletTotalPages]);
-    const leaderboardRows = useMemo(
-        () => (Array.isArray(smartMoneyLeaderboard?.list) ? smartMoneyLeaderboard.list : []),
-        [smartMoneyLeaderboard]
-    );
-    const leaderTotalPages = Math.max(1, Number(smartMoneyLeaderboard?.total_pages || 0) || 1);
-
-    useEffect(() => {
-        if (smLeaderPage > leaderTotalPages - 1) {
-            setSmLeaderPage(Math.max(leaderTotalPages - 1, 0));
-        }
-    }, [leaderTotalPages, smLeaderPage]);
-
-    useEffect(() => {
-        setSmLeaderPage(0);
-    }, [leaderboardMetric]);
-
-    const isLoading = assetsLoading || assetsRefreshing || smartMoneyLoading || smartMoneyRefreshing;
-    const canManualRefresh = hasInitData && (activeTab === 'my_assets' || activeTab === 'smart_money_assets');
+    const isLoading = assetsLoading || assetsRefreshing;
+    const canManualRefresh = hasInitData && activeTab === 'my_assets';
 
     return (
         <div className="flex flex-col gap-3">
@@ -1191,19 +970,15 @@ export default function AssetManagementPage({
                 <div className="px-3.5 pt-3 pb-2.5">
                     <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                            <div className="text-[14px] font-extrabold leading-tight text-zinc-900 dark:text-white/95">资产管理</div>
+                            <div className="text-[14px] font-extrabold leading-tight text-zinc-900 dark:text-white/95">管理</div>
                             <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">
-                                {hasInitData ? '资产快照 / 趋势 / LP 统计' : '需要有效的 Telegram initData'}
+                                {hasInitData ? '资产快照 / 全局配置 / 钱包 / 交易历史' : '需要有效的 Telegram initData'}
                             </div>
                         </div>
                         <button
                             type="button"
                             onClick={() => {
                                 if (activeTab === 'my_assets') loadAssets({ forceRefresh: true });
-                                if (activeTab === 'smart_money_assets') {
-                                    loadSmartMoney({ forceRefresh: true });
-                                    if (selectedWallet) loadSmartMoneyWallet({ wallet: selectedWallet, forceRefresh: true });
-                                }
                             }}
                             disabled={!canManualRefresh || isLoading}
                             className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-200/80 bg-zinc-50 text-zinc-500 transition active:scale-95 dark:border-white/5 dark:bg-[#1a1c20] dark:text-white/50 dark:hover:bg-white/5 disabled:opacity-40"
@@ -1367,296 +1142,24 @@ export default function AssetManagementPage({
                 </>
             )}
 
-            {/* ══════ Smart Money Tab ══════ */}
-            {activeTab === 'smart_money_assets' && (
-                <>
-                    {smartMoneyError && (
-                        <div className="rounded-xl border border-red-500/20 bg-red-500/[0.06] px-3 py-2.5 text-[11px] font-medium text-red-600 ring-1 ring-red-500/15 dark:text-red-300">{smartMoneyError}</div>
-                    )}
-
-                    <div className="flex flex-wrap gap-1.5">
-                        {SMART_MONEY_WINDOWS.map((d) => (
-                            <Pill key={d} active={smartMoneyDays === d} brand={brand} onClick={() => setSmartMoneyDays(d)}>{d === 1 ? '昨日' : `${d}D`}</Pill>
-                        ))}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                        <StatBlock label="总资产" value={formatUsd(smartMoneyOverview?.summary?.total_usd)} tone="accent" />
-                        <StatBlock label="原生币" value={formatUsd(smartMoneyOverview?.summary?.native_usd)} />
-                        <StatBlock label="稳定币" value={formatUsd(smartMoneyOverview?.summary?.stable_usd)} />
-                        <StatBlock label="代币持仓" value={formatUsd(smartMoneyOverview?.summary?.tracked_token_usd)} />
-                        <StatBlock label="Open LP" value={formatUsd(smartMoneyOverview?.summary?.open_lp_usd)} />
-                        <StatBlock label="代币种类" value={`${Number(smartMoneyOverview?.summary?.tracked_token_count || 0)} 个`} />
-                    </div>
-
-                    {/* sub-tab pills */}
-                    <div className="flex gap-1.5">
-                        <Pill active={smSubTab === 'wallets'} brand={brand} onClick={() => { setSmSubTab('wallets'); setSmDrillWalletId(''); }}>钱包总览</Pill>
-                        <Pill active={smSubTab === 'leaderboard'} brand={brand} onClick={() => { setSmSubTab('leaderboard'); setSmDrillWalletId(''); }}>排行榜</Pill>
-                    </div>
-
-                    {/* ── wallets sub-tab ── */}
-                    {smSubTab === 'wallets' && !smDrillWalletId && (
-                        <Card>
-                            <div className="flex items-center justify-between gap-2">
-                                <span className="text-[12px] font-bold text-zinc-900 dark:text-white/90">钱包总览</span>
-                                <span className="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-500 ring-1 ring-zinc-200 dark:bg-white/[0.04] dark:text-white/50 dark:ring-white/[0.06]">
-                                    {walletTotal} 个
-                                </span>
-                            </div>
-                            <div className="mt-2">
-                                <SmSearchInput value={smWalletSearch} onChange={(v) => { setSmWalletSearch(v); setSmWalletPage(0); }} placeholder="搜索地址或标签" />
-                            </div>
-                            <div className="mt-2.5 flex flex-col gap-2">
-                                {pagedWallets.length > 0 ? pagedWallets.map((wallet) => {
-                                    const selected = walletKey(wallet) === selectedWalletId;
-                                    const assets = wallet.assets || {};
-                                    const total = Number(assets.total_usd || 0);
-                                    const nativePct = total > 0 ? (Number(assets.native_usd || 0) / total * 100) : 0;
-                                    const stablePct = total > 0 ? (Number(assets.stable_usd || 0) / total * 100) : 0;
-                                    const tokenPct = total > 0 ? (Number(assets.tracked_token_usd || 0) / total * 100) : 0;
-                                    const lpPct = total > 0 ? (Number(assets.open_lp_usd || 0) / total * 100) : 0;
-                                    return (
-                                        <button
-                                            key={walletKey(wallet)}
-                                            type="button"
-                                            onClick={() => selectSmartMoneyWallet(wallet, { openDetail: true })}
-                                            className={`flex w-full flex-col gap-2 rounded-xl border px-3 py-2.5 text-left transition active:scale-[0.98] ${
-                                                selected
-                                                    ? `${brand.selectionClass} dark:text-white`
-                                                    : 'border-zinc-100 bg-zinc-50/60 text-zinc-700 hover:bg-white dark:border-white/[0.04] dark:bg-[#0d0f12] dark:text-white/75 dark:hover:bg-white/[0.06]'
-                                            }`}
-                                        >
-                                            <div className="flex items-center justify-between gap-3 w-full">
-                                                <div className="flex items-center gap-2.5 min-w-0">
-                                                    <WalletAvatar address={wallet.address} avatarUrl={wallet.avatar_url} size={28} />
-                                                    <div className="min-w-0">
-                                                        <div className="truncate text-[12px] font-semibold">{walletLabel(wallet)}</div>
-                                                        <div className="mt-0.5 text-[10px] opacity-60">{formatChain(wallet.chain_id)} · {Number(wallet.today_event_count || 0)} 事件 · {Number(wallet.active_pool_count || 0)} 池</div>
-                                                    </div>
-                                                </div>
-                                                <div className="flex items-center gap-1.5 shrink-0">
-                                                    <span className="text-[13px] font-bold tabular-nums">{formatUsdCompact(wallet.assets?.total_usd)}</span>
-                                                    <ChevronRight className="h-3 w-3 opacity-40" />
-                                                </div>
-                                            </div>
-                                            {/* asset breakdown bar */}
-                                            {total > 0 && (
-                                                <div className="w-full">
-                                                    <div className="h-1.5 w-full rounded-full overflow-hidden bg-zinc-200/60 dark:bg-white/[0.06]">
-                                                        <div className="flex h-full">
-                                                            {nativePct > 0 && <div className="h-full" style={{ width: `${nativePct}%`, backgroundColor: '#0ea5e9' }} />}
-                                                            {stablePct > 0 && <div className="h-full" style={{ width: `${stablePct}%`, backgroundColor: '#10b981' }} />}
-                                                            {tokenPct > 0 && <div className="h-full" style={{ width: `${tokenPct}%`, backgroundColor: '#8b5cf6' }} />}
-                                                            {lpPct > 0 && <div className="h-full" style={{ width: `${lpPct}%`, backgroundColor: '#f59e0b' }} />}
-                                                        </div>
-                                                    </div>
-                                                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
-                                                        {Number(assets.native_usd || 0) > 0 && <span className="flex items-center gap-1 text-[9px] text-zinc-400 dark:text-white/35"><span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#0ea5e9' }} />原生 {formatUsdCompact(assets.native_usd)}</span>}
-                                                        {Number(assets.stable_usd || 0) > 0 && <span className="flex items-center gap-1 text-[9px] text-zinc-400 dark:text-white/35"><span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#10b981' }} />稳定 {formatUsdCompact(assets.stable_usd)}</span>}
-                                                        {Number(assets.tracked_token_usd || 0) > 0 && <span className="flex items-center gap-1 text-[9px] text-zinc-400 dark:text-white/35"><span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#8b5cf6' }} />代币 {formatUsdCompact(assets.tracked_token_usd)}</span>}
-                                                        {Number(assets.open_lp_usd || 0) > 0 && <span className="flex items-center gap-1 text-[9px] text-zinc-400 dark:text-white/35"><span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#f59e0b' }} />LP {formatUsdCompact(assets.open_lp_usd)}</span>}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </button>
-                                    );
-                                }) : <Empty text={smartMoneyLoading ? '加载中...' : '暂无钱包数据'} />}
-                            </div>
-                            <SmPagination page={smWalletPage} totalPages={walletTotalPages} onPageChange={setSmWalletPage} />
-                        </Card>
-                    )}
-
-                    {/* ── wallet drill-in detail ── */}
-                    {smSubTab === 'wallets' && smDrillWalletId && (
-                        <Card>
-                            <button type="button" onClick={() => setSmDrillWalletId('')} className="inline-flex items-center gap-1 text-[11px] font-medium text-zinc-500 hover:text-zinc-700 dark:text-white/40 dark:hover:text-white/70 transition mb-2">
-                                <ChevronLeft className="h-3.5 w-3.5" />返回列表
-                            </button>
-                            {selectedWallet && smartMoneyWallet ? (
-                                <div className="flex flex-col gap-2.5">
-                                    {/* wallet header */}
-                                    <div className="flex items-center gap-3 rounded-xl bg-emerald-500/[0.06] ring-1 ring-emerald-500/20 dark:bg-emerald-500/[0.08] dark:ring-emerald-400/25 px-3 py-2.5">
-                                        <WalletAvatar address={selectedWallet.address} avatarUrl={selectedWallet.avatar_url || smartMoneyWallet.wallet?.avatar_url} size={36} />
-                                        <div className="flex-1 min-w-0">
-                                            <div className="text-[12px] font-bold text-zinc-900 dark:text-white/95 truncate">{walletLabel(selectedWallet)}</div>
-                                            <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">
-                                                {formatChain(selectedWallet.chain_id)} · 总资产 <span className="font-bold text-zinc-900 dark:text-white/90">{formatUsdCompact(smartMoneyWallet.wallet?.assets?.total_usd)}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* today activity grid */}
-                                    <div className="grid grid-cols-3 gap-1.5">
-                                        <StatBlock label="今日收益" value={formatUsd(smartMoneyWallet.today?.estimated_realized_pnl_usd)} tone={Number(smartMoneyWallet.today?.estimated_realized_pnl_usd || 0) >= 0 ? 'accent' : 'warn'} />
-                                        <StatBlock label="加仓次数" value={`${Number(smartMoneyWallet.today?.add_count || 0)} 次`} />
-                                        <StatBlock label="撤仓次数" value={`${Number(smartMoneyWallet.today?.remove_count || 0)} 次`} />
-                                        <StatBlock label="活跃池数" value={`${Number(smartMoneyWallet.today?.active_pool_count || 0)} 池`} />
-                                        <StatBlock label="已匹配" value={`${Number(smartMoneyWallet.today?.matched_remove_count || 0)} 次`} />
-                                        <StatBlock label="未匹配" value={`${Number(smartMoneyWallet.today?.unmatched_remove_count || 0)} 次`} tone={Number(smartMoneyWallet.today?.unmatched_remove_count || 0) > 0 ? 'warn' : 'default'} />
-                                    </div>
-
-                                    {/* asset distribution bar */}
-                                    {(() => {
-                                        const wa = smartMoneyWallet.wallet?.assets || {};
-                                        const total = Number(wa.total_usd || 0);
-                                        if (total <= 0) return null;
-                                        const nativePct = Number(wa.native_usd || 0) / total * 100;
-                                        const stablePct = Number(wa.stable_usd || 0) / total * 100;
-                                        const tokenPct = Number(wa.tracked_token_usd || 0) / total * 100;
-                                        const lpPct = Number(wa.open_lp_usd || 0) / total * 100;
-                                        return (
-                                            <div className="rounded-xl border border-zinc-100 bg-zinc-50/60 px-3 py-2.5 dark:border-white/[0.04] dark:bg-[#0d0f12]">
-                                                <div className="text-[9px] font-medium uppercase tracking-wide text-zinc-400 dark:text-white/35 mb-2">资产分布</div>
-                                                <div className="h-2 w-full rounded-full overflow-hidden bg-zinc-200/60 dark:bg-white/[0.06]">
-                                                    <div className="flex h-full">
-                                                        {nativePct > 0 && <div className="h-full" style={{ width: `${nativePct}%`, backgroundColor: '#0ea5e9' }} />}
-                                                        {stablePct > 0 && <div className="h-full" style={{ width: `${stablePct}%`, backgroundColor: '#10b981' }} />}
-                                                        {tokenPct > 0 && <div className="h-full" style={{ width: `${tokenPct}%`, backgroundColor: '#8b5cf6' }} />}
-                                                        {lpPct > 0 && <div className="h-full" style={{ width: `${lpPct}%`, backgroundColor: '#f59e0b' }} />}
-                                                    </div>
-                                                </div>
-                                                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5">
-                                                    <span className="flex items-center gap-1 text-[9px] text-zinc-400 dark:text-white/35"><span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#0ea5e9' }} />原生 {formatUsdCompact(wa.native_usd)}</span>
-                                                    <span className="flex items-center gap-1 text-[9px] text-zinc-400 dark:text-white/35"><span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#10b981' }} />稳定 {formatUsdCompact(wa.stable_usd)}</span>
-                                                    <span className="flex items-center gap-1 text-[9px] text-zinc-400 dark:text-white/35"><span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#8b5cf6' }} />代币 {formatUsdCompact(wa.tracked_token_usd)}</span>
-                                                    <span className="flex items-center gap-1 text-[9px] text-zinc-400 dark:text-white/35"><span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#f59e0b' }} />LP {formatUsdCompact(wa.open_lp_usd)}</span>
-                                                </div>
-                                            </div>
-                                        );
-                                    })()}
-
-                                    {/* PnL calendar (daily balance diff) */}
-                                    <PnLCalendar
-                                        data={smartMoneyPnlCalData}
-                                        note="收益额按当日总资产变化减去当日净转账计算；若当天存在多笔转账，仅展示净转入或净转出的汇总说明。"
-                                    />
-
-                                    {/* window stats */}
-                                    <div className="grid grid-cols-3 gap-1.5">
-                                        {Array.isArray(smartMoneyWallet.windows) && smartMoneyWallet.windows.map((item) => (
-                                            <StatBlock key={item.days} label={`${item.days}D`} value={formatUsd(item.estimated_realized_pnl_usd)} sub={`${formatPct(item.yield_rate)} · ${Number(item.active_pool_count || 0)} 池`} />
-                                        ))}
-                                    </div>
-
-                                    {/* warnings */}
-                                    {Array.isArray(smartMoneyWallet.warnings) && smartMoneyWallet.warnings.length > 0 && (
-                                        <div className="flex flex-col gap-1.5">
-                                            {smartMoneyWallet.warnings.map((warn, i) => (
-                                                <div key={i} className="flex items-start gap-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 dark:border-amber-400/15 dark:bg-amber-500/[0.08]">
-                                                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500 mt-0.5" />
-                                                    <span className="text-[10px] text-amber-700 dark:text-amber-300">{typeof warn === 'string' ? warn : warn.message || JSON.stringify(warn)}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            ) : <Empty text={smartMoneyLoading ? '加载中...' : '选择钱包查看明细'} />}
-                        </Card>
-                    )}
-
-                    {/* ── leaderboard sub-tab ── */}
-                    {smSubTab === 'leaderboard' && (
-                        <Card>
-                            <div className="flex items-center justify-between gap-2">
-                                    <span className="text-[12px] font-bold text-zinc-900 dark:text-white/90">昨日快照排行</span>
-                                    <div className="flex gap-1.5">
-                                        {LEADERBOARD_METRICS.map((m) => (
-                                            <Pill key={m.key} active={leaderboardMetric === m.key} brand={brand} onClick={() => setLeaderboardMetric(m.key)}>{m.label}</Pill>
-                                        ))}
-                                    </div>
-                                </div>
-                            <div className="mt-1.5 flex items-center gap-1.5 text-[9px] text-zinc-400 dark:text-white/30">
-                                <ArrowRightLeft className="h-3 w-3 shrink-0" />
-                                <span>
-                                    {smartMoneyLeaderboard?.snapshot_day && (smartMoneyLeaderboard?.compared_day || smartMoneyLeaderboard?.start_day)
-                                        ? `榜单基于 ${smartMoneyLeaderboard.snapshot_day} 相对 ${smartMoneyLeaderboard.compared_day || smartMoneyLeaderboard.start_day} 的资产快照`
-                                        : '榜单基于昨日资产快照'}
-                                </span>
-                            </div>
-                            <div className="mt-2">
-                                <SmSearchInput value={smLeaderSearch} onChange={(v) => { setSmLeaderSearch(v); setSmLeaderPage(0); }} placeholder="搜索地址或标签" />
-                            </div>
-                            <div className="mt-2.5 flex flex-col gap-2">
-                                {leaderboardRows.length > 0 ? leaderboardRows.map((item) => {
-                                    const metricText = leaderboardMetric === 'yield_rate' ? formatPct(item.metric_value) : leaderboardMetric === 'participation' ? `${Number(item.metric_value || 0)} 次` : formatUsd(item.metric_value);
-                                    const pnl = Number(item.estimated_realized_pnl_usd || 0);
-                                    const isTop3 = item.rank <= 3;
-                                    return (
-                                        <button
-                                            key={`${item.rank}:${item.address}`}
-                                            type="button"
-                                            onClick={() => selectSmartMoneyWallet(item, { openDetail: true })}
-                                            className={`flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left transition active:scale-[0.98] ${
-                                                isTop3
-                                                    ? 'border-amber-500/15 bg-gradient-to-r from-amber-500/[0.04] to-transparent dark:border-amber-400/10 dark:from-amber-500/[0.06]'
-                                                    : 'border-zinc-100 bg-zinc-50/60 dark:border-white/[0.04] dark:bg-[#0d0f12]'
-                                            }`}
-                                        >
-                                            <RankBadge rank={Number(item.rank || 0)} />
-                                            <WalletAvatar address={item.address} avatarUrl={item.avatar_url} size={32} />
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className="truncate text-[12px] font-semibold text-zinc-900 dark:text-white/90">
-                                                        {item.label || `${item.address.slice(0, 6)}...${item.address.slice(-4)}`}
-                                                    </span>
-                                                    <span className="shrink-0 rounded bg-zinc-100 px-1 py-0.5 text-[8px] font-medium text-zinc-500 dark:bg-white/[0.06] dark:text-white/40">
-                                                        {formatChain(item.chain_id)}
-                                                    </span>
-                                                </div>
-                                                <div className="mt-0.5 flex items-center gap-2 text-[10px] text-zinc-500 dark:text-white/40">
-                                                    <span>{Number(item.active_pool_count || 0)} 池</span>
-                                                    <span>·</span>
-                                                    <span>{Number(item.participation_count || 0)} 次操作</span>
-                                                    {false && (
-                                                        <>
-                                                            <span>·</span>
-                                                            <span className="text-amber-500">{item.unmatched_remove_count} 未匹配</span>
-                                                        </>
-                                                    )}
-                                                </div>
-                                                {hasTransferMarker(item) && (
-                                                    <div className="mt-1">
-                                                        <TransferBadges item={item} />
-                                                    </div>
-                                                )}
-                                            </div>
-                                            <div className="text-right shrink-0">
-                                                <div className={`text-[13px] font-bold tabular-nums ${
-                                                    leaderboardMetric === 'pnl'
-                                                        ? pnl >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'
-                                                        : 'text-zinc-900 dark:text-white'
-                                                }`}>{metricText}</div>
-                                                {leaderboardMetric !== 'pnl' && (
-                                                    <div className={`mt-0.5 text-[10px] tabular-nums ${pnl >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
-                                                        {pnl >= 0 ? '+' : ''}{formatUsdCompact(pnl)}
-                                                    </div>
-                                                )}
-                                                {leaderboardMetric === 'pnl' && Number(item.yield_rate || 0) !== 0 && (
-                                                    <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40 tabular-nums">
-                                                        {formatPct(item.yield_rate)}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </button>
-                                    );
-                                }) : <Empty text={smartMoneyLoading ? '加载中...' : '暂无排行榜数据'} />}
-                            </div>
-                            <SmPagination page={smLeaderPage} totalPages={leaderTotalPages} onPageChange={setSmLeaderPage} />
-                        </Card>
-                    )}
-                </>
-            )}
-
-            {/* ══════ Operations & System Tabs ══════ */}
-            {activeTab === 'operations' && (
-                <Suspense fallback={<Card><div className="text-[11px] text-zinc-400 dark:text-white/35">正在加载管理模块...</div></Card>}>
-                    <LazyAdminPage apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} tick={tick} pollIntervalSec={pollIntervalSec} accentTheme={accentTheme} visibleTabs={['online_users', 'active_tasks', 'user_detail']} initialTab="online_users" onNotice={onNotice} />
+            {/* ══════ Global Config Tab ══════ */}
+            {activeTab === 'global_config' && (
+                <Suspense fallback={<Card><div className="text-[11px] text-zinc-400 dark:text-white/35">正在加载全局配置...</div></Card>}>
+                    <LazyGlobalConfigPage open={true} onClose={() => setActiveTab('my_assets')} apiBaseUrl={apiBaseUrl} initData={initData} accentTheme={accentTheme} />
                 </Suspense>
             )}
-            {activeTab === 'system' && (
-                <Suspense fallback={<Card><div className="text-[11px] text-zinc-400 dark:text-white/35">正在加载系统模块...</div></Card>}>
-                    <LazyAdminPage apiBaseUrl={apiBaseUrl} initData={initData} hasInitData={hasInitData} tick={tick} pollIntervalSec={pollIntervalSec} accentTheme={accentTheme} visibleTabs={['system_config', 'rpc_pool']} initialTab="system_config" onNotice={onNotice} />
+
+            {/* ══════ Wallet Manage Tab ══════ */}
+            {activeTab === 'wallet_manage' && (
+                <Suspense fallback={<Card><div className="text-[11px] text-zinc-400 dark:text-white/35">正在加载钱包管理...</div></Card>}>
+                    <LazyWalletManagePage open={true} onClose={() => setActiveTab('my_assets')} apiBaseUrl={apiBaseUrl} initData={initData} accentTheme={accentTheme} />
+                </Suspense>
+            )}
+
+            {/* ══════ Trade History Tab ══════ */}
+            {activeTab === 'trade_history' && (
+                <Suspense fallback={<Card><div className="text-[11px] text-zinc-400 dark:text-white/35">正在加载交易历史...</div></Card>}>
+                    <LazyTradeHistoryPage open={true} onClose={() => setActiveTab('my_assets')} apiBaseUrl={apiBaseUrl} initData={initData} accentTheme={accentTheme} />
                 </Suspense>
             )}
         </div>
