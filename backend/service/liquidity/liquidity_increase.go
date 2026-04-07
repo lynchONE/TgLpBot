@@ -173,6 +173,7 @@ func (s *LiquidityService) increaseV3Liquidity(
 ) (*IncreaseLiquidityResult, error) {
 	client := exec.Client()
 	chainID := exec.ChainID()
+	cc := exec.Config()
 
 	tokenIdStr := strings.TrimSpace(task.V3TokenID)
 	if tokenIdStr == "" || tokenIdStr == "0" {
@@ -231,6 +232,15 @@ func (s *LiquidityService) increaseV3Liquidity(
 	if token0 != tokenIn && token1 != tokenIn {
 		return nil, fmt.Errorf("V3 pool does not contain entry token")
 	}
+
+	// Capture balances before any operation so we can measure actual stable spent and dust returned.
+	stableAddr := common.Address{}
+	if common.IsHexAddress(cc.StableAddress) {
+		stableAddr = common.HexToAddress(cc.StableAddress)
+	}
+	stableBefore := tokenBalanceOrZero(exec, stableAddr, walletAddr)
+	token0Before := tokenBalanceOrZero(exec, token0, walletAddr)
+	token1Before := tokenBalanceOrZero(exec, token1, walletAddr)
 
 	// Determine input amounts
 	amount0In := big.NewInt(0)
@@ -326,7 +336,6 @@ func (s *LiquidityService) increaseV3Liquidity(
 	if err != nil {
 		return nil, fmt.Errorf("increaseLiquidity tx failed: %w", err)
 	}
-	_ = receipt
 
 	// Read updated position liquidity
 	posInfo, err = pm.Positions(nil, tokenId)
@@ -338,11 +347,29 @@ func (s *LiquidityService) increaseV3Liquidity(
 		log.Printf("[Liquidity] V3 increaseLiquidity: failed to read updated position: %v", err)
 	}
 
+	// Capture balances after all operations to compute actual stable spent and dust returned.
+	stableAfter := tokenBalanceOrZero(exec, stableAddr, walletAddr)
+	token0After := tokenBalanceOrZero(exec, token0, walletAddr)
+	token1After := tokenBalanceOrZero(exec, token1, walletAddr)
+
+	actualStableSpentWei := spentBalanceDelta(stableBefore, stableAfter)
+	dust0Wei := positiveBalanceDelta(token0Before, token0After)
+	dust1Wei := positiveBalanceDelta(token1Before, token1After)
+	log.Printf("[Liquidity] V3 increaseLiquidity balance delta: tokenId=%s stableSpent=%s dust0=%s dust1=%s",
+		tokenId.String(), actualStableSpentWei.String(), dust0Wei.String(), dust1Wei.String())
+
 	return &IncreaseLiquidityResult{
-		TxHash:           tx.Hash().Hex(),
-		CurrentLiquidity: currentLiq,
-		TickLower:        &rangeLower,
-		TickUpper:        &rangeUpper,
+		TxHash:               tx.Hash().Hex(),
+		CurrentLiquidity:     currentLiq,
+		TickLower:            &rangeLower,
+		TickUpper:            &rangeUpper,
+		ActualStableSpentWei: actualStableSpentWei,
+		ActualStableSpent:    amountToFloat(actualStableSpentWei, cc.StableDecimals),
+		Dust0Wei:             dust0Wei,
+		Dust1Wei:             dust1Wei,
+		Token0:               token0,
+		Token1:               token1,
+		GasSpentWei:          s.gasCostWeiFromReceipt(client, tx.Hash(), receipt),
 	}, nil
 }
 
@@ -544,6 +571,15 @@ func (s *LiquidityService) increaseV4Liquidity(
 		return nil, fmt.Errorf("V4 pool does not contain entry token")
 	}
 
+	// Capture balances before any operation so we can measure actual stable spent and dust returned.
+	stableAddr := common.Address{}
+	if common.IsHexAddress(cc.StableAddress) {
+		stableAddr = common.HexToAddress(cc.StableAddress)
+	}
+	stableBefore := tokenBalanceOrZero(exec, stableAddr, walletAddr)
+	c0Before := tokenBalanceOrZero(exec, c0, walletAddr)
+	c1Before := tokenBalanceOrZero(exec, c1, walletAddr)
+
 	// Determine input amounts
 	amount0In := big.NewInt(0)
 	amount1In := big.NewInt(0)
@@ -696,7 +732,6 @@ func (s *LiquidityService) increaseV4Liquidity(
 	if err != nil {
 		return nil, fmt.Errorf("V4 INCREASE_LIQUIDITY tx failed: %w", err)
 	}
-	_ = receipt
 
 	// Read updated position liquidity
 	posInfo, err = bestEffortReadV4PositionInfo(exec, positionManager, poolManager, task.PoolId, tokenId)
@@ -708,10 +743,28 @@ func (s *LiquidityService) increaseV4Liquidity(
 		log.Printf("[Liquidity] V4 INCREASE_LIQUIDITY: failed to read updated position: %v", err)
 	}
 
+	// Capture balances after all operations to compute actual stable spent and dust returned.
+	stableAfter := tokenBalanceOrZero(exec, stableAddr, walletAddr)
+	c0After := tokenBalanceOrZero(exec, c0, walletAddr)
+	c1After := tokenBalanceOrZero(exec, c1, walletAddr)
+
+	actualStableSpentWei := spentBalanceDelta(stableBefore, stableAfter)
+	dust0Wei := positiveBalanceDelta(c0Before, c0After)
+	dust1Wei := positiveBalanceDelta(c1Before, c1After)
+	log.Printf("[Liquidity] V4 INCREASE_LIQUIDITY balance delta: tokenId=%s stableSpent=%s dust0=%s dust1=%s",
+		tokenId.String(), actualStableSpentWei.String(), dust0Wei.String(), dust1Wei.String())
+
 	return &IncreaseLiquidityResult{
-		TxHash:           tx.Hash().Hex(),
-		CurrentLiquidity: currentLiq,
-		TickLower:        &rangeLower,
-		TickUpper:        &rangeUpper,
+		TxHash:               tx.Hash().Hex(),
+		CurrentLiquidity:     currentLiq,
+		TickLower:            &rangeLower,
+		TickUpper:            &rangeUpper,
+		ActualStableSpentWei: actualStableSpentWei,
+		ActualStableSpent:    amountToFloat(actualStableSpentWei, cc.StableDecimals),
+		Dust0Wei:             dust0Wei,
+		Dust1Wei:             dust1Wei,
+		Token0:               c0,
+		Token1:               c1,
+		GasSpentWei:          s.gasCostWeiFromReceipt(client, tx.Hash(), receipt),
 	}, nil
 }

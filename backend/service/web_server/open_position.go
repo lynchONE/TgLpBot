@@ -568,6 +568,7 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 		AllowEntrySwap:       req.AllowEntrySwap,
 		StopLossEnabled:      cfg.StopLossEnabled,
 		StopLossDelaySeconds: cfg.StopLossDelaySeconds,
+		RebalanceEnabled:     false, // New positions default to rebalance disabled
 		Status:               models.StrategyStatusRunning,
 		LastCheckTime:        time.Now(),
 	}
@@ -736,6 +737,14 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 	if err := database.DB.Create(ctx.task).Error; err != nil {
 		http.Error(w, "创建任务失败", http.StatusInternalServerError)
 		return
+	}
+	// Explicitly write rebalance_enabled=false: GORM v2 skips bool zero-values when the column has a
+	// database default (default:true → default:false migration may not have applied on existing DBs).
+	if ctx.task.ID > 0 {
+		if upErr := database.DB.Model(ctx.task).Update("rebalance_enabled", false).Error; upErr != nil {
+			log.Printf("[OpenPosition] failed to force rebalance_enabled=false for task %d: %v", ctx.task.ID, upErr)
+		}
+		ctx.task.RebalanceEnabled = false
 	}
 
 	enterRes, err := ctx.liquidityService.EnterTaskFromUSDTWithOptions(ctx.user.ID, ctx.task, liquidity.TxOptions{

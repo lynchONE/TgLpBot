@@ -3,6 +3,7 @@ package smart_money
 import (
 	"TgLpBot/base/blockchain"
 	"TgLpBot/base/config"
+	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/base/rpcpool"
 	"context"
@@ -59,6 +60,7 @@ type blockTransaction struct {
 	From  string
 	To    string
 	Value string
+	Input string // hex-encoded tx input data; empty or "0x" means pure value transfer
 }
 
 type blockSnapshot struct {
@@ -76,6 +78,7 @@ type rawBlockSnapshot struct {
 		From  string  `json:"from"`
 		To    *string `json:"to"`
 		Value string  `json:"value"`
+		Input string  `json:"input"`
 	} `json:"transactions"`
 }
 
@@ -365,7 +368,16 @@ func (w *Watcher) pollOnce(ctx context.Context, lastProcessed *uint64) (pollResu
 		return pollResult{}, err
 	}
 	excludedLPTxHashesByBlock := collectActiveWalletLPTxHashes(blocks, logsByBlock, trackedTransferWallets)
-	transferEventsByBlock, err := w.loadWalletTransferEventsByBlock(ctx, httpClient, eff, blocks, trackedTransferWallets, excludedLPTxHashesByBlock)
+
+	// Build a set of known DeFi protocol addresses so that transfers to/from
+	// zap contracts, routers, position managers, etc. are not counted as
+	// external wallet transfers.
+	knownProtocolAddrs := buildKnownProtocolAddresses(int(w.chainID))
+	for addr := range loadPrivateZapAddresses(smartMoneyChainName(int(w.chainID))) {
+		knownProtocolAddrs[addr] = struct{}{}
+	}
+
+	transferEventsByBlock, err := w.loadWalletTransferEventsByBlock(ctx, httpClient, eff, blocks, trackedTransferWallets, excludedLPTxHashesByBlock, knownProtocolAddrs)
 	if err != nil {
 		return pollResult{}, err
 	}
@@ -573,11 +585,13 @@ func decodeRawBlockSnapshot(blockNum uint64, raw rawBlockSnapshot) (*blockSnapsh
 			value = amount.String()
 		}
 		hash := common.HexToHash(hashHex)
+		inputData := strings.TrimSpace(tx.Input)
 		snapshot.Transactions = append(snapshot.Transactions, blockTransaction{
 			Hash:  hash,
 			From:  from,
 			To:    to,
 			Value: value,
+			Input: inputData,
 		})
 		snapshot.TxSenders[hash] = from
 	}
@@ -721,7 +735,129 @@ func isExcludedWalletTransferTx(excluded map[uint64]map[string]struct{}, blockNu
 	return ok
 }
 
-func (w *Watcher) loadWalletTransferEventsByBlock(ctx context.Context, client *ethclient.Client, eff rpcpool.Effective, blocks []*blockSnapshot, activeWallets map[string]struct{}, excludedLPTxHashesByBlock map[uint64]map[string]struct{}) (map[uint64][]*models.SmartMoneyWalletTransferEvent, error) {
+// isPureValueTransfer returns true when the tx carries no calldata (a simple
+// native-token transfer between wallets). Contract calls always have ≥4 bytes
+// of calldata (function selector), so their hex-encoded input is "0x" + ≥8 chars.
+func isPureValueTransfer(input string) bool {
+	input = strings.TrimSpace(input)
+	return input == "" || input == "0x" || input == "0X"
+}
+
+// buildKnownProtocolAddresses collects all DeFi protocol addresses that should
+// NOT be counted as external transfer counterparties (zap, routers, position
+// managers, pool managers, factories, wrapped native, etc.).
+func buildKnownProtocolAddresses(chainID int) map[string]struct{} {
+	out := make(map[string]struct{}, 32)
+	chain := smartMoneyChainName(chainID)
+
+	addAddr := func(addr string) {
+		addr = strings.ToLower(strings.TrimSpace(addr))
+		if addr != "" && len(addr) == 42 {
+			out[addr] = struct{}{}
+		}
+	}
+
+	if config.AppConfig != nil {
+		cc, ok := config.AppConfig.GetChainConfig(chain)
+		if ok {
+			// Zap contracts
+			addAddr(cc.ZapV3Address)
+			addAddr(cc.ZapV4Address)
+
+			// Position managers (V3)
+			for _, dep := range cc.V3Deployments {
+				addAddr(dep.PositionManagerAddress)
+				addAddr(dep.FactoryAddress)
+			}
+			addAddr(cc.DefaultV3PositionManagerAddress)
+
+			// V4
+			addAddr(cc.UniswapV4PoolManagerAddress)
+			addAddr(cc.UniswapV4PositionManagerAddress)
+			addAddr(cc.UniswapV4StateViewAddress)
+
+			// DEX routers / approve helpers
+			addAddr(cc.OKXSwapRouter)
+			addAddr(cc.OKXTokenApproveAddress)
+
+			// Wrapped native token (wrap/unwrap is not a real transfer)
+			addAddr(cc.WrappedNativeAddress)
+		}
+
+		// Global-level addresses (also from Config)
+		addAddr(config.AppConfig.PancakeV3PositionManagerAddress)
+		addAddr(config.AppConfig.UniswapV3PositionManagerAddress)
+		addAddr(config.AppConfig.UniswapV4PoolManagerAddress)
+		addAddr(config.AppConfig.UniswapV4PositionManagerAddress)
+		addAddr(config.AppConfig.ZapV3Address)
+		addAddr(config.AppConfig.ZapV4Address)
+		addAddr(config.AppConfig.OKXSwapRouter)
+		addAddr(config.AppConfig.OKXTokenApproveAddress)
+		addAddr(config.AppConfig.PancakeV3SwapRouter)
+		addAddr(config.AppConfig.UniswapV3SwapRouter)
+		addAddr(config.AppConfig.PancakeRouterV2)
+		addAddr(config.AppConfig.PancakeFactoryV2)
+	}
+	return out
+}
+
+// loadPrivateZapAddresses queries all active private contract bindings for the
+// given chain and returns their lowercased contract addresses.
+func loadPrivateZapAddresses(chain string) map[string]struct{} {
+	out := make(map[string]struct{})
+	if database.DB == nil {
+		return out
+	}
+	chain = strings.ToLower(strings.TrimSpace(chain))
+	if chain == "" {
+		return out
+	}
+	var rows []struct {
+		ContractAddress string
+	}
+	if err := database.DB.
+		Table("wallet_chain_contracts").
+		Select("DISTINCT contract_address").
+		Where("chain = ? AND contract_address != '' AND deleted_at IS NULL", chain).
+		Find(&rows).Error; err != nil {
+		log.Printf("[SmartMoney Watcher] load private zap addresses failed chain=%s err=%v", chain, err)
+		return out
+	}
+	for _, row := range rows {
+		addr := strings.ToLower(strings.TrimSpace(row.ContractAddress))
+		if addr != "" && len(addr) == 42 {
+			out[addr] = struct{}{}
+		}
+	}
+	return out
+}
+
+// buildTxTargetByHash creates a mapping from tx hash → tx.To (the contract or
+// address the transaction calls) across all blocks.  Used to decide whether an
+// ERC-20 Transfer event is part of a DeFi contract interaction.
+func buildTxTargetByHash(blocks []*blockSnapshot) map[string]string {
+	size := 0
+	for _, b := range blocks {
+		if b != nil {
+			size += len(b.Transactions)
+		}
+	}
+	out := make(map[string]string, size)
+	for _, block := range blocks {
+		if block == nil {
+			continue
+		}
+		for _, tx := range block.Transactions {
+			if tx.To == "" {
+				continue
+			}
+			out[strings.ToLower(tx.Hash.Hex())] = tx.To
+		}
+	}
+	return out
+}
+
+func (w *Watcher) loadWalletTransferEventsByBlock(ctx context.Context, client *ethclient.Client, eff rpcpool.Effective, blocks []*blockSnapshot, activeWallets map[string]struct{}, excludedLPTxHashesByBlock map[uint64]map[string]struct{}, knownProtocolAddrs map[string]struct{}) (map[uint64][]*models.SmartMoneyWalletTransferEvent, error) {
 	out := make(map[uint64][]*models.SmartMoneyWalletTransferEvent)
 	if len(blocks) == 0 || len(activeWallets) == 0 {
 		return out, nil
@@ -731,7 +867,8 @@ func (w *Watcher) loadWalletTransferEventsByBlock(ctx context.Context, client *e
 		out[blockNumber] = append(out[blockNumber], events...)
 	}
 
-	erc20ByBlock, err := w.loadERC20TransferEventsByBlock(ctx, client, eff, blocks, activeWallets, excludedLPTxHashesByBlock)
+	txTargetByHash := buildTxTargetByHash(blocks)
+	erc20ByBlock, err := w.loadERC20TransferEventsByBlock(ctx, client, eff, blocks, activeWallets, excludedLPTxHashesByBlock, knownProtocolAddrs, txTargetByHash)
 	if err != nil {
 		return nil, err
 	}
@@ -832,6 +969,11 @@ func buildNativeTransferEventsByBlock(blocks []*blockSnapshot, chainID int, acti
 			if tx.From != "" && tx.From == tx.To {
 				continue
 			}
+			// Skip contract calls – only pure value transfers (empty calldata)
+			// count as normal wallet-to-wallet transfers.
+			if !isPureValueTransfer(tx.Input) {
+				continue
+			}
 
 			amountDecimal := weiStringToFloat(tx.Value, 18)
 			if amountDecimal <= 0 {
@@ -882,7 +1024,7 @@ func buildNativeTransferEventsByBlock(blocks []*blockSnapshot, chainID int, acti
 	return out
 }
 
-func (w *Watcher) loadERC20TransferEventsByBlock(ctx context.Context, client *ethclient.Client, eff rpcpool.Effective, blocks []*blockSnapshot, activeWallets map[string]struct{}, excludedLPTxHashesByBlock map[uint64]map[string]struct{}) (map[uint64][]*models.SmartMoneyWalletTransferEvent, error) {
+func (w *Watcher) loadERC20TransferEventsByBlock(ctx context.Context, client *ethclient.Client, eff rpcpool.Effective, blocks []*blockSnapshot, activeWallets map[string]struct{}, excludedLPTxHashesByBlock map[uint64]map[string]struct{}, knownProtocolAddrs map[string]struct{}, txTargetByHash map[string]string) (map[uint64][]*models.SmartMoneyWalletTransferEvent, error) {
 	out := make(map[uint64][]*models.SmartMoneyWalletTransferEvent)
 	if len(blocks) == 0 || len(activeWallets) == 0 {
 		return out, nil
@@ -931,7 +1073,7 @@ func (w *Watcher) loadERC20TransferEventsByBlock(ctx context.Context, client *et
 			handleSmartMoneyRPCEndpointError(eff, err)
 			return nil, err
 		}
-		candidates = append(candidates, buildERC20TransferEventsFromLogs(outLogs, int(w.chainID), models.SmartMoneyTransferDirectionOut, activeWallets, blockTimeByNumber, excludedLPTxHashesByBlock)...)
+		candidates = append(candidates, buildERC20TransferEventsFromLogs(outLogs, int(w.chainID), models.SmartMoneyTransferDirectionOut, activeWallets, blockTimeByNumber, excludedLPTxHashesByBlock, knownProtocolAddrs, txTargetByHash)...)
 
 		inLogs, err := client.FilterLogs(ctx, ethereum.FilterQuery{
 			FromBlock: new(big.Int).SetUint64(fromBlock),
@@ -942,7 +1084,7 @@ func (w *Watcher) loadERC20TransferEventsByBlock(ctx context.Context, client *et
 			handleSmartMoneyRPCEndpointError(eff, err)
 			return nil, err
 		}
-		candidates = append(candidates, buildERC20TransferEventsFromLogs(inLogs, int(w.chainID), models.SmartMoneyTransferDirectionIn, activeWallets, blockTimeByNumber, excludedLPTxHashesByBlock)...)
+		candidates = append(candidates, buildERC20TransferEventsFromLogs(inLogs, int(w.chainID), models.SmartMoneyTransferDirectionIn, activeWallets, blockTimeByNumber, excludedLPTxHashesByBlock, knownProtocolAddrs, txTargetByHash)...)
 	}
 
 	enrichERC20TransferEvents(ctx, client, int(w.chainID), candidates)
@@ -955,7 +1097,7 @@ func (w *Watcher) loadERC20TransferEventsByBlock(ctx context.Context, client *et
 	return out, nil
 }
 
-func buildERC20TransferEventsFromLogs(logs []types.Log, chainID int, direction string, activeWallets map[string]struct{}, blockTimeByNumber map[uint64]time.Time, excludedLPTxHashesByBlock map[uint64]map[string]struct{}) []*models.SmartMoneyWalletTransferEvent {
+func buildERC20TransferEventsFromLogs(logs []types.Log, chainID int, direction string, activeWallets map[string]struct{}, blockTimeByNumber map[uint64]time.Time, excludedLPTxHashesByBlock map[uint64]map[string]struct{}, knownProtocolAddrs map[string]struct{}, txTargetByHash map[string]string) []*models.SmartMoneyWalletTransferEvent {
 	out := make([]*models.SmartMoneyWalletTransferEvent, 0, len(logs))
 	for _, vlog := range logs {
 		if len(vlog.Topics) < 3 || len(vlog.Data) == 0 {
@@ -964,6 +1106,14 @@ func buildERC20TransferEventsFromLogs(logs []types.Log, chainID int, direction s
 		txHash := strings.ToLower(vlog.TxHash.Hex())
 		if isExcludedWalletTransferTx(excludedLPTxHashesByBlock, vlog.BlockNumber, txHash) {
 			continue
+		}
+
+		// Skip ERC-20 Transfer events that originate from a tx calling a known
+		// DeFi protocol contract (router, zap, position manager, etc.).
+		if txTarget := txTargetByHash[txHash]; txTarget != "" {
+			if _, isProtocol := knownProtocolAddrs[txTarget]; isProtocol {
+				continue
+			}
 		}
 
 		from := normalizeHexAddress(common.BytesToAddress(vlog.Topics[1].Bytes()).Hex())

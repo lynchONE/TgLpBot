@@ -145,12 +145,14 @@ func TestBuildNativeTransferEventsByBlock_SkipsExcludedLPTx(t *testing.T) {
 					From:  "0x1111111111111111111111111111111111111111",
 					To:    "0x2222222222222222222222222222222222222222",
 					Value: "1000000000000000000",
+					Input: "0x", // pure value transfer
 				},
 				{
 					Hash:  common.HexToHash("0x2"),
 					From:  "0x1111111111111111111111111111111111111111",
 					To:    "0x3333333333333333333333333333333333333333",
 					Value: "2000000000000000000",
+					Input: "0x", // pure value transfer
 				},
 			},
 		},
@@ -230,7 +232,7 @@ func TestBuildERC20TransferEventsFromLogs_BuildsDirectionalEvents(t *testing.T) 
 		},
 	}
 
-	outEvents := buildERC20TransferEventsFromLogs(logs, 56, models.SmartMoneyTransferDirectionOut, activeWallets, blockTimeByNumber, excluded)
+	outEvents := buildERC20TransferEventsFromLogs(logs, 56, models.SmartMoneyTransferDirectionOut, activeWallets, blockTimeByNumber, excluded, nil, nil)
 	if got, want := len(outEvents), 1; got != want {
 		t.Fatalf("out events = %d, want %d", got, want)
 	}
@@ -241,7 +243,7 @@ func TestBuildERC20TransferEventsFromLogs_BuildsDirectionalEvents(t *testing.T) 
 		t.Fatalf("out amount raw = %s, want %s", got, want)
 	}
 
-	inEvents := buildERC20TransferEventsFromLogs(logs, 56, models.SmartMoneyTransferDirectionIn, activeWallets, blockTimeByNumber, excluded)
+	inEvents := buildERC20TransferEventsFromLogs(logs, 56, models.SmartMoneyTransferDirectionIn, activeWallets, blockTimeByNumber, excluded, nil, nil)
 	if got, want := len(inEvents), 1; got != want {
 		t.Fatalf("in events = %d, want %d", got, want)
 	}
