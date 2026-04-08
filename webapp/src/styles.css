@@ -9208,6 +9208,10 @@ body {
   color: var(--text-muted);
 }
 
+.swap-quote-output.refreshing {
+  animation: swapQuoteBlink 1.05s ease-in-out infinite;
+}
+
 .swap-token-button {
   display: inline-flex;
   align-items: center;
@@ -9322,6 +9326,41 @@ img.swap-token-glyph {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.swap-summary-card.refreshing {
+  border-color: rgba(var(--accent-rgb), 0.38);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.08), 0 18px 38px rgba(var(--accent-rgb), 0.14);
+}
+
+.swap-summary-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.swap-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(138, 160, 194, 0.22);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.swap-live-badge.active {
+  border-color: rgba(var(--accent-rgb), 0.36);
+  color: var(--accent-text);
+  background: rgba(var(--accent-rgb), 0.12);
+  animation: swapRefreshPulse 1s ease-in-out infinite;
+}
+
+.swap-live-badge.active svg {
+  animation: swapRotate 1.1s linear infinite;
 }
 
 .swap-summary-empty {
@@ -9598,6 +9637,19 @@ img.swap-token-glyph {
   box-shadow: 0 14px 24px rgba(0, 0, 0, 0.3);
 }
 
+.swap-token-row:disabled,
+.swap-token-row.disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.swap-token-row:disabled:hover,
+.swap-token-row.disabled:hover {
+  transform: none;
+  border-color: rgba(139, 160, 194, 0.26);
+  box-shadow: none;
+}
+
 .swap-token-row-copy {
   flex: 1;
   min-width: 0;
@@ -9629,6 +9681,12 @@ img.swap-token-glyph {
   color: var(--accent-text);
   font-size: 11px;
   font-weight: 700;
+}
+
+.swap-token-tag.muted {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(148, 163, 184, 0.1);
+  color: #cbd5e1;
 }
 
 .swap-token-empty {
@@ -9733,6 +9791,21 @@ img.swap-token-glyph {
 .swap-confirm-cancel:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+@keyframes swapQuoteBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.48; }
+}
+
+@keyframes swapRefreshPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.08); }
+  50% { box-shadow: 0 0 0 7px rgba(var(--accent-rgb), 0.02); }
+}
+
+@keyframes swapRotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 @media (max-width: 640px) {
