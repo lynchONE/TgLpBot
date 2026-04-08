@@ -8806,7 +8806,8 @@ body {
 
 .swap-settings-card {
   position: relative;
-  overflow: hidden;
+  overflow: visible;
+  z-index: 2;
   padding: 16px;
   border-radius: 24px;
   border: 1px solid rgba(136, 157, 191, 0.22);
@@ -8828,6 +8829,7 @@ body {
 .swap-settings-grid {
   position: relative;
   z-index: 1;
+  overflow: visible;
   display: grid;
   grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
   gap: 14px;
@@ -8849,6 +8851,7 @@ body {
 /* 自定义下拉框 */
 .swap-custom-select-wrap {
   position: relative;
+  z-index: 3;
 }
 
 .swap-custom-select-trigger {
@@ -8901,6 +8904,7 @@ body {
   backdrop-filter: blur(12px);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
   padding: 6px;
+  isolation: isolate;
 }
 
 .swap-custom-select-option {
@@ -9162,7 +9166,7 @@ body {
 .swap-card-body {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .swap-amount-input,
@@ -9174,10 +9178,10 @@ body {
   background: transparent;
   color: var(--text);
   font-family: 'Space Grotesk', 'Noto Sans SC', sans-serif;
-  font-size: 52px;
+  font-size: clamp(30px, 5.4vw, 40px);
   font-weight: 700;
   letter-spacing: -0.04em;
-  line-height: 1;
+  line-height: 0.95;
 }
 
 .swap-amount-input::placeholder {
@@ -9207,9 +9211,9 @@ body {
 .swap-token-button {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  min-width: 180px;
-  padding: 10px 14px;
+  gap: 8px;
+  min-width: 152px;
+  padding: 8px 12px;
   border-radius: 999px;
   border: 1px solid rgba(138, 160, 194, 0.32);
   background: rgba(18, 26, 40, 0.9);
@@ -9235,12 +9239,12 @@ body {
 }
 
 .swap-token-button-copy strong {
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1.1;
 }
 
 .swap-token-button-copy small {
-  max-width: 120px;
+  max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -9431,8 +9435,6 @@ img.swap-token-glyph {
 
 .swap-token-modal,
 .swap-confirm-modal {
-  width: min(100%, 440px);
-  max-height: min(84vh, 760px);
   overflow: hidden;
   border-radius: 28px;
   border: 1px solid rgba(136, 157, 191, 0.22);
@@ -9441,6 +9443,16 @@ img.swap-token-glyph {
   backdrop-filter: blur(12px);
   display: flex;
   flex-direction: column;
+}
+
+.swap-token-modal {
+  width: min(100%, 392px);
+  max-height: min(78vh, 680px);
+}
+
+.swap-confirm-modal {
+  width: min(100%, 440px);
+  max-height: min(84vh, 760px);
 }
 
 .swap-modal-header {
@@ -9493,11 +9505,11 @@ img.swap-token-glyph {
 }
 
 .swap-token-search {
-  margin: 16px 20px 0;
+  margin: 14px 18px 0;
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 50px;
+  height: 46px;
   padding: 0 14px;
   border-radius: 16px;
   border: 1px solid rgba(139, 160, 196, 0.28);
@@ -9519,8 +9531,8 @@ img.swap-token-glyph {
 .swap-quick-picks {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  padding: 14px 20px 0;
+  gap: 8px;
+  padding: 12px 18px 0;
 }
 
 .swap-quick-pick {
@@ -9549,14 +9561,14 @@ img.swap-token-glyph {
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 18px 20px 20px;
+  gap: 14px;
+  padding: 14px 18px 18px;
 }
 
 .swap-token-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .swap-token-section-title {
@@ -9572,8 +9584,8 @@ img.swap-token-glyph {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 14px;
-  border-radius: 18px;
+  padding: 10px 12px;
+  border-radius: 16px;
   border: 1px solid rgba(139, 160, 194, 0.26);
   background: rgba(17, 24, 37, 0.85);
   cursor: pointer;
@@ -9596,12 +9608,12 @@ img.swap-token-glyph {
 }
 
 .swap-token-row-copy strong {
-  font-size: 16px;
+  font-size: 15px;
   color: var(--text);
 }
 
 .swap-token-row-copy span {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-muted);
   overflow: hidden;
   white-space: nowrap;
@@ -9755,7 +9767,7 @@ img.swap-token-glyph {
 
   .swap-amount-input,
   .swap-quote-output {
-    font-size: 42px;
+    font-size: 36px;
   }
 
   .swap-token-button {
