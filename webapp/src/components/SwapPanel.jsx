@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchWallets, walletSwapSingleExecute, walletSwapSingleQuote } from '../api';
+import { fetchWallets, walletSwapSingleExecute, walletSwapSingleQuote, walletSwapPreview } from '../api';
 import PanelShell from './PanelShell';
 import { normalizeHexAddress, shortAddress } from '../utils';
-import { ArrowDown, ChevronDown, RefreshCw, Search, Settings, Wallet, X } from 'lucide-react';
+import { ArrowDown, ChevronDown, RefreshCw, Search, Settings, Wallet, X, TrendingUp } from 'lucide-react';
 
 const CHAIN_META = {
   bsc: {
@@ -208,6 +208,9 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   const [tokenQuery, setTokenQuery] = useState('');
   const [recentTokens, setRecentTokens] = useState(() => loadRecentTokens());
 
+  const [walletTokens, setWalletTokens] = useState([]);
+  const [loadingWalletTokens, setLoadingWalletTokens] = useState(false);
+
   const quoteTimeout = useRef(null);
   const quoteAbortRef = useRef(null);
   const quoteSeqRef = useRef(0);
@@ -245,22 +248,60 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
 
   const pickerTokens = useMemo(() => {
     const keyword = String(tokenQuery || '').trim().toLowerCase();
-    const recent = recentChainTokens.filter((token) => matchesToken(token, keyword));
+
+    // 合并钱包余额信息到代币列表
+    const enrichToken = (token) => {
+      const walletToken = walletTokens.find((wt) => wt.address === token.address);
+      return {
+        ...token,
+        balance: walletToken?.balance || '0',
+        valueUSDT: walletToken?.valueUSDT || 0,
+      };
+    };
+
+    // 有余额的代币
+    const withBalance = walletTokens
+      .filter((wt) => matchesToken(wt, keyword))
+      .map((wt) => {
+        const existing = [...recentChainTokens, ...presetTokens].find((t) => t.address === wt.address);
+        return existing ? enrichToken(existing) : {
+          address: wt.address,
+          symbol: wt.symbol,
+          name: wt.symbol,
+          color: '#7c8aa6',
+          balance: wt.balance,
+          valueUSDT: wt.valueUSDT,
+        };
+      })
+      .sort((a, b) => (b.valueUSDT || 0) - (a.valueUSDT || 0));
+
+    // 最近使用的代币(排除已在余额列表中的)
+    const recent = recentChainTokens
+      .filter((token) => !withBalance.some((item) => item.address === token.address))
+      .filter((token) => matchesToken(token, keyword))
+      .map(enrichToken);
+
+    // 常用代币(排除已在余额和最近列表中的)
     const preset = presetTokens
+      .filter((token) => !withBalance.some((item) => item.address === token.address))
       .filter((token) => !recent.some((item) => item.address === token.address))
-      .filter((token) => matchesToken(token, keyword));
+      .filter((token) => matchesToken(token, keyword))
+      .map(enrichToken);
+
     const customCandidate = buildCustomToken(tokenQuery);
     return {
       customCandidate:
         customCandidate &&
+        !withBalance.some((item) => item.address === customCandidate.address) &&
         !recent.some((item) => item.address === customCandidate.address) &&
         !preset.some((item) => item.address === customCandidate.address)
           ? customCandidate
           : null,
+      withBalance,
       recent,
       preset,
     };
-  }, [tokenQuery, recentChainTokens, presetTokens]);
+  }, [tokenQuery, recentChainTokens, presetTokens, walletTokens]);
 
   const persistRecentToken = useCallback((token) => {
     const normalized = normalizeHexAddress(token?.address);
@@ -304,12 +345,37 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     }
   }, [apiBaseUrl, initData, chain]);
 
+  const loadWalletTokens = useCallback(async () => {
+    if (!initData || !selectedWalletId) return;
+    setLoadingWalletTokens(true);
+    try {
+      const resp = await walletSwapPreview({ apiBaseUrl, initData, chain, minValueUsd: 0.01 });
+      const tokens = (resp?.tokens || []).map((t) => ({
+        address: normalizeHexAddress(t.address),
+        symbol: t.symbol,
+        balance: t.balance,
+        valueUSDT: t.value_usdt,
+      }));
+      setWalletTokens(tokens);
+    } catch (error) {
+      console.error('loadWalletTokens failed', error);
+      setWalletTokens([]);
+    } finally {
+      setLoadingWalletTokens(false);
+    }
+  }, [apiBaseUrl, initData, chain, selectedWalletId]);
+
   useEffect(() => {
     if (!hasInitData) return;
     loadWallets();
     setExecError('');
     setExecSuccess('');
   }, [hasInitData, loadWallets]);
+
+  useEffect(() => {
+    if (!hasInitData || !selectedWalletId) return;
+    loadWalletTokens();
+  }, [hasInitData, selectedWalletId, loadWalletTokens]);
 
   const doQuote = useCallback(async ({
     amt,
@@ -449,6 +515,8 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       setShowConfirm(false);
       setAmount('');
       setQuoteInfo(null);
+      // 刷新钱包余额
+      loadWalletTokens();
     } catch (error) {
       setExecError(String(error?.message || error));
       setShowConfirm(false);
@@ -456,6 +524,20 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       setExecuting(false);
     }
   };
+
+  const handleMaxAmount = () => {
+    if (!normalizedFromToken) return;
+    const walletToken = walletTokens.find((t) => t.address === normalizedFromToken);
+    if (walletToken && walletToken.balance) {
+      setAmount(walletToken.balance);
+    }
+  };
+
+  const fromTokenBalance = useMemo(() => {
+    if (!normalizedFromToken) return null;
+    const walletToken = walletTokens.find((t) => t.address === normalizedFromToken);
+    return walletToken?.balance || '0';
+  }, [normalizedFromToken, walletTokens]);
 
   const handleReverse = () => {
     if (!normalizedFromToken && !normalizedToToken) return;
@@ -598,7 +680,34 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
               <div className="swap-card">
                 <div className="swap-card-head">
                   <span>出售</span>
-                  <small>{fromTokenMeta ? shortAddress(fromTokenMeta.address, 8, 6) : '支持粘贴任意合约地址'}</small>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {fromTokenBalance && Number(fromTokenBalance) > 0 ? (
+                      <button
+                        type="button"
+                        onClick={handleMaxAmount}
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: '8px',
+                          border: '1px solid rgba(255, 61, 156, 0.3)',
+                          background: 'rgba(255, 61, 156, 0.08)',
+                          color: '#d31f79',
+                          fontSize: '11px',
+                          fontWeight: '700',
+                          cursor: 'pointer',
+                          transition: 'all 0.18s ease',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = 'rgba(255, 61, 156, 0.15)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = 'rgba(255, 61, 156, 0.08)';
+                        }}
+                      >
+                        最大
+                      </button>
+                    ) : null}
+                    <small>{fromTokenMeta ? shortAddress(fromTokenMeta.address, 8, 6) : '支持粘贴任意合约地址'}</small>
+                  </div>
                 </div>
                 <div className="swap-card-body">
                   <input
@@ -621,7 +730,13 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                 </div>
                 <div className="swap-card-foot">
                   <span>{fromTokenMeta ? fromTokenMeta.name : '未选择卖出代币'}</span>
-                  <span>{selectedWallet ? `${chainConfig.nativeSymbol} ${formatNativeBalance(selectedWallet.native_balance)}` : '--'}</span>
+                  <span>
+                    {fromTokenBalance && Number(fromTokenBalance) > 0
+                      ? `余额: ${formatTokenAmount(fromTokenBalance)}`
+                      : selectedWallet
+                        ? `${chainConfig.nativeSymbol} ${formatNativeBalance(selectedWallet.native_balance)}`
+                        : '--'}
+                  </span>
                 </div>
               </div>
 
@@ -753,6 +868,12 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
               </div>
 
               <div className="swap-token-list">
+                {loadingWalletTokens ? (
+                  <div style={{ padding: '20px', textAlign: 'center', color: '#8a92a6', fontSize: '13px' }}>
+                    加载钱包余额中...
+                  </div>
+                ) : null}
+
                 {pickerTokens.customCandidate ? (
                   <div className="swap-token-section">
                     <div className="swap-token-section-title">自定义地址</div>
@@ -771,6 +892,38 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                   </div>
                 ) : null}
 
+                {pickerTokens.withBalance && pickerTokens.withBalance.length > 0 ? (
+                  <div className="swap-token-section">
+                    <div className="swap-token-section-title">钱包余额</div>
+                    {pickerTokens.withBalance.map((token) => (
+                      <button
+                        key={token.address}
+                        type="button"
+                        className="swap-token-row"
+                        onClick={() => handleSelectToken(token)}
+                      >
+                        <TokenGlyph token={token} />
+                        <div className="swap-token-row-copy">
+                          <strong>{token.symbol}</strong>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            {token.name}
+                            {token.valueUSDT > 0 ? (
+                              <span style={{ color: '#a0a8ba', fontSize: '11px' }}>
+                                ≈ ${token.valueUSDT.toFixed(2)}
+                              </span>
+                            ) : null}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                          <span className="swap-token-tag" style={{ background: 'rgba(34, 197, 94, 0.08)', borderColor: 'rgba(34, 197, 94, 0.22)', color: '#22c55e' }}>
+                            {formatTokenAmount(token.balance)}
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
                 {pickerTokens.recent.length ? (
                   <div className="swap-token-section">
                     <div className="swap-token-section-title">最近使用</div>
@@ -786,7 +939,14 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                           <strong>{token.symbol}</strong>
                           <span>{token.custom ? token.address : token.name}</span>
                         </div>
-                        <span className="swap-token-tag">最近</span>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                          {token.balance && Number(token.balance) > 0 ? (
+                            <span style={{ fontSize: '11px', color: '#22c55e', fontWeight: '600' }}>
+                              {formatTokenAmount(token.balance)}
+                            </span>
+                          ) : null}
+                          <span className="swap-token-tag">最近</span>
+                        </div>
                       </button>
                     ))}
                   </div>
@@ -807,13 +967,20 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                           <strong>{token.symbol}</strong>
                           <span>{token.name}</span>
                         </div>
-                        <span className="swap-token-tag">{shortAddress(token.address, 5, 4)}</span>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                          {token.balance && Number(token.balance) > 0 ? (
+                            <span style={{ fontSize: '11px', color: '#22c55e', fontWeight: '600' }}>
+                              {formatTokenAmount(token.balance)}
+                            </span>
+                          ) : null}
+                          <span className="swap-token-tag">{shortAddress(token.address, 5, 4)}</span>
+                        </div>
                       </button>
                     ))}
                   </div>
                 ) : null}
 
-                {!pickerTokens.customCandidate && !pickerTokens.recent.length && !pickerTokens.preset.length ? (
+                {!loadingWalletTokens && !pickerTokens.customCandidate && !pickerTokens.withBalance?.length && !pickerTokens.recent.length && !pickerTokens.preset.length ? (
                   <div className="swap-token-empty">
                     <strong>没有匹配结果</strong>
                     <span>可以直接粘贴 ERC-20 合约地址。</span>
