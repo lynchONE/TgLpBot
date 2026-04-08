@@ -181,6 +181,10 @@ func (s *TradeRecordService) ApplyAddLiquidityDelta(
 }
 
 func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, closeTxHash string, closeUSDTReceivedWei, closeGasSpentWei *big.Int, nativePriceUSD float64) error {
+	return s.CloseLatestOpenRecordWithCredit(task, closeTxHash, closeUSDTReceivedWei, closeGasSpentWei, nil, nativePriceUSD)
+}
+
+func (s *TradeRecordService) CloseLatestOpenRecordWithCredit(task *models.StrategyTask, closeTxHash string, closeUSDTReceivedWei, closeGasSpentWei, openCreditUSDTWei *big.Int, nativePriceUSD float64) error {
 	if task == nil {
 		return fmt.Errorf("task is nil")
 	}
@@ -207,9 +211,10 @@ func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, cl
 		totalGasWei := nonNilBigInt(closeGasSpentWei)
 		totalGasUSDT := calcGasUSDT(totalGasWei, nativePriceUSD)
 
-		profit := new(big.Int).Sub(nonNilBigInt(closeUSDTReceivedWei), openSpent)
+		effectiveOpenSpent := effectiveOpenSpentForPnL(openSpent, openCreditUSDTWei)
+		profit := new(big.Int).Sub(nonNilBigInt(closeUSDTReceivedWei), effectiveOpenSpent)
 		profit.Sub(profit, totalGasUSDT) // 扣除 Gas 费用
-		profitPct := calcProfitPct(profit, openSpent)
+		profitPct := calcProfitPct(profit, effectiveOpenSpent)
 
 		closed := &models.TradeRecord{
 			UserID:            task.UserID,
@@ -257,9 +262,10 @@ func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, cl
 	totalGasUSDT := calcGasUSDT(totalGasWei, nativePriceUSD)
 
 	// 收益 = 撤出USDT - 投入USDT - 总Gas(USDT)
-	profit := new(big.Int).Sub(nonNilBigInt(closeUSDTReceivedWei), openSpent)
+	effectiveOpenSpent := effectiveOpenSpentForPnL(openSpent, openCreditUSDTWei)
+	profit := new(big.Int).Sub(nonNilBigInt(closeUSDTReceivedWei), effectiveOpenSpent)
 	profit.Sub(profit, totalGasUSDT) // 扣除 Gas 费用
-	profitPct := calcProfitPct(profit, openSpent)
+	profitPct := calcProfitPct(profit, effectiveOpenSpent)
 
 	updates := map[string]interface{}{
 		"closed_at":           &now,
@@ -289,6 +295,7 @@ func (s *TradeRecordService) ApplyExitDelta(
 	closeTxHash string,
 	closeUSDTReceivedDeltaWei *big.Int,
 	closeGasSpentDeltaWei *big.Int,
+	openCreditUSDTWei *big.Int,
 	finalize bool,
 	nativePriceUSD float64,
 ) (*models.TradeRecord, error) {
@@ -380,9 +387,10 @@ func (s *TradeRecordService) ApplyExitDelta(
 		totalGasWei := new(big.Int).Add(openGasWei, newGas)
 		totalGasUSDT := calcGasUSDT(totalGasWei, nativePriceUSD)
 
-		profit := new(big.Int).Sub(newReceived, openSpent)
+		effectiveOpenSpent := effectiveOpenSpentForPnL(openSpent, openCreditUSDTWei)
+		profit := new(big.Int).Sub(newReceived, effectiveOpenSpent)
 		profit.Sub(profit, totalGasUSDT)
-		profitPct := calcProfitPct(profit, openSpent)
+		profitPct := calcProfitPct(profit, effectiveOpenSpent)
 
 		now := time.Now()
 		updates["closed_at"] = &now
@@ -421,6 +429,18 @@ func calcGasUSDT(gasWei *big.Int, nativePriceUSD float64) *big.Int {
 	result := new(big.Float).Mul(gasFloat, priceFloat)
 	resultInt, _ := result.Int(nil)
 	return resultInt
+}
+
+func effectiveOpenSpentForPnL(openSpent, openCreditUSDTWei *big.Int) *big.Int {
+	base := nonNilBigInt(openSpent)
+	credit := nonNilBigInt(openCreditUSDTWei)
+	if base.Sign() <= 0 || credit.Sign() <= 0 {
+		return new(big.Int).Set(base)
+	}
+	if credit.Cmp(base) >= 0 {
+		return big.NewInt(0)
+	}
+	return new(big.Int).Sub(base, credit)
 }
 
 func safeBigIntString(v *big.Int) string {

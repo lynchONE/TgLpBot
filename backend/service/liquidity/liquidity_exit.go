@@ -129,6 +129,61 @@ func (s *LiquidityService) quoteTokenValueInUSDT(exec chainexec.EVMExecutor, tok
 	return toFloat64(toAmount, cc.StableDecimals), true
 }
 
+func (s *LiquidityService) estimateOutstandingOpenDustCreditWei(exec chainexec.EVMExecutor, walletAddr common.Address, task *models.StrategyTask) *big.Int {
+	if s == nil || exec == nil || task == nil {
+		return big.NewInt(0)
+	}
+	rec, err := s.tradeRecordService.GetLatestOpenRecord(task.UserID, task.ID)
+	if err != nil || rec == nil {
+		return big.NewInt(0)
+	}
+
+	token0Addr, token1Addr, err := s.resolveTaskTokenAddresses(task)
+	if err != nil {
+		return big.NewInt(0)
+	}
+
+	cc := exec.Config()
+	stableAddr := common.Address{}
+	if common.IsHexAddress(cc.StableAddress) {
+		stableAddr = common.HexToAddress(cc.StableAddress)
+	}
+
+	totalCreditWei := big.NewInt(0)
+	addCredit := func(tokenAddr common.Address, symbol string, raw string) {
+		if tokenAddr == (common.Address{}) || tokenAddr == stableAddr {
+			return
+		}
+		recordedDust, err := convert.ParseBigInt(raw)
+		if err != nil || recordedDust == nil || recordedDust.Sign() <= 0 {
+			return
+		}
+		balance := tokenBalanceOrZero(exec, tokenAddr, walletAddr)
+		if balance == nil || balance.Sign() <= 0 {
+			return
+		}
+		if balance.Cmp(recordedDust) < 0 {
+			recordedDust = balance
+		}
+		if recordedDust.Sign() <= 0 {
+			return
+		}
+		stableValueRaw, err := tokenValueInStableUnits(exec.Client(), exec.Chain(), tokenAddr, symbol, cc, recordedDust)
+		if err != nil || stableValueRaw == nil || stableValueRaw.Sign() <= 0 {
+			return
+		}
+		stableValueWei, err := convert.ScaleDecimals(stableValueRaw, cc.StableDecimals, 18)
+		if err != nil || stableValueWei == nil || stableValueWei.Sign() <= 0 {
+			return
+		}
+		totalCreditWei.Add(totalCreditWei, stableValueWei)
+	}
+
+	addCredit(token0Addr, strings.TrimSpace(task.Token0Symbol), rec.OpenDust0)
+	addCredit(token1Addr, strings.TrimSpace(task.Token1Symbol), rec.OpenDust1)
+	return totalCreditWei
+}
+
 func (s *LiquidityService) shouldSkipExitSwapToUSDT(exec chainexec.EVMExecutor, tokenAddr common.Address, amountIn *big.Int, walletAddr common.Address, label string) (bool, float64) {
 	v, ok := s.quoteTokenValueInUSDT(exec, tokenAddr, amountIn, walletAddr)
 	if !ok {
@@ -598,15 +653,17 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 	if shouldUpdateRecords {
 		trSvc := trade.NewTradeRecordService()
 		nativePriceUSD := 0.0
+		openDustCreditWei := big.NewInt(0)
 		if finalizeTradeRecord {
 			// Only needed when finalizing the record (Profit/TotalGasUSDT computation).
 			nativePriceUSD = pricing.GetNativePriceUSD(exec.Chain())
+			openDustCreditWei = s.estimateOutstandingOpenDustCreditWei(exec, walletAddr, task)
 		}
-		if rec, err := trSvc.ApplyExitDelta(task, mainHash, actualReceivedWei, gasSpent, finalizeTradeRecord, nativePriceUSD); err == nil {
+		if rec, err := trSvc.ApplyExitDelta(task, mainHash, actualReceivedWei, gasSpent, openDustCreditWei, finalizeTradeRecord, nativePriceUSD); err == nil {
 			tradeRec = rec
 		} else if finalizeTradeRecord {
 			// Legacy fallback: create a closed record so we don't lose the exit summary.
-			_ = trSvc.CloseLatestOpenRecord(task, mainHash, actualReceivedWei, gasSpent, nativePriceUSD)
+			_ = trSvc.CloseLatestOpenRecordWithCredit(task, mainHash, actualReceivedWei, gasSpent, openDustCreditWei, nativePriceUSD)
 		}
 	}
 
