@@ -11,6 +11,7 @@ import (
 	"TgLpBot/service/exchange"
 	"TgLpBot/service/liquidity"
 	userSvc "TgLpBot/service/user"
+	"TgLpBot/service/wallet"
 )
 
 // --- Wallet Swap Preview (scan tokens) ---
@@ -26,6 +27,7 @@ type walletSwapTokenRow struct {
 	Symbol    string  `json:"symbol"`
 	Balance   string  `json:"balance"`
 	ValueUSDT float64 `json:"value_usdt"`
+	LogoURL   string  `json:"logo_url,omitempty"`
 }
 
 type walletSwapPreviewResponse struct {
@@ -121,9 +123,9 @@ func (s *Server) handleWalletSwapPreview(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) getTokenBalancesFromOKX(userID uint, chain string, minValueUSD float64) ([]walletSwapTokenRow, error) {
 	// 获取用户默认钱包地址
-	walletService := userSvc.NewWalletService()
-	wallet, err := walletService.GetDefaultWallet(userID)
-	if err != nil || wallet == nil {
+	walletService := wallet.NewWalletService()
+	wlt, err := walletService.GetDefaultWallet(userID)
+	if err != nil || wlt == nil {
 		return nil, fmt.Errorf("no default wallet")
 	}
 
@@ -135,7 +137,7 @@ func (s *Server) getTokenBalancesFromOKX(userID uint, chain string, minValueUSD 
 
 	// 调用 OKX API
 	okxService := exchange.NewOKXDexService()
-	resp, err := okxService.GetAllTokenBalances(chainIndex, wallet.Address)
+	resp, err := okxService.GetAllTokenBalances(chainIndex, wlt.Address)
 	if err != nil {
 		return nil, err
 	}
@@ -144,8 +146,10 @@ func (s *Server) getTokenBalancesFromOKX(userID uint, chain string, minValueUSD 
 		return []walletSwapTokenRow{}, nil
 	}
 
-	// 转换结果
+	// 转换结果并收集需要获取头像的代币
 	rows := make([]walletSwapTokenRow, 0)
+	tokenRequests := make([]exchange.MarketTokenBasicInfoRequest, 0)
+
 	for _, token := range resp.Data[0].TokenAssets {
 		// 解析余额和价格
 		balance := strings.TrimSpace(token.Balance)
@@ -165,12 +169,39 @@ func (s *Server) getTokenBalancesFromOKX(userID uint, chain string, minValueUSD 
 			continue
 		}
 
+		tokenAddr := strings.ToLower(strings.TrimSpace(token.TokenContractAddress))
 		rows = append(rows, walletSwapTokenRow{
-			Address:   strings.ToLower(strings.TrimSpace(token.TokenContractAddress)),
+			Address:   tokenAddr,
 			Symbol:    strings.TrimSpace(token.Symbol),
 			Balance:   balance,
 			ValueUSDT: valueUSD,
 		})
+
+		// 收集代币地址用于批量获取头像
+		tokenRequests = append(tokenRequests, exchange.MarketTokenBasicInfoRequest{
+			ChainIndex:           chainIndex,
+			TokenContractAddress: tokenAddr,
+		})
+	}
+
+	// 批量获取代币头像
+	if len(tokenRequests) > 0 {
+		logoResp, err := okxService.GetMarketTokenBasicInfos(tokenRequests)
+		if err == nil && len(logoResp.Data) > 0 {
+			// 创建地址到头像的映射
+			logoMap := make(map[string]string)
+			for _, info := range logoResp.Data {
+				addr := strings.ToLower(strings.TrimSpace(info.TokenContractAddress))
+				logoMap[addr] = strings.TrimSpace(info.TokenLogoURL)
+			}
+
+			// 填充头像 URL
+			for i := range rows {
+				if logoURL, ok := logoMap[rows[i].Address]; ok {
+					rows[i].LogoURL = logoURL
+				}
+			}
+		}
 	}
 
 	return rows, nil

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchWallets, walletSwapSingleExecute, walletSwapSingleQuote, walletSwapPreview } from '../api';
 import PanelShell from './PanelShell';
 import { normalizeHexAddress, shortAddress } from '../utils';
-import { ArrowDown, ChevronDown, RefreshCw, Search, Settings, Wallet, X, TrendingUp } from 'lucide-react';
+import { ArrowDown, ChevronDown, RefreshCw, Search, Settings, Wallet, X, TrendingUp, Check } from 'lucide-react';
 
 const CHAIN_META = {
   bsc: {
@@ -41,12 +41,10 @@ const CHAIN_META = {
 
 const RECENT_STORAGE_KEY = 'tg_lp_bot_swap_recent_tokens_v1';
 
-const TABS = [
-  { key: 'swap', label: '兑换', enabled: true },
-  { key: 'limit', label: '限额', enabled: false },
-  { key: 'buy', label: '购买', enabled: false },
-  { key: 'sell', label: '出售', enabled: false },
-];
+// 移除不需要的标签页，只保留兑换功能
+// const TABS = [
+//   { key: 'swap', label: '兑换', enabled: true },
+// ];
 
 const SLIPPAGE_PRESETS = ['0.5', '1.0', '2.0'];
 
@@ -63,6 +61,7 @@ function dedupeTokens(tokens) {
       name: String(token?.name || '自定义代币').trim() || '自定义代币',
       color: String(token?.color || '#7c8aa6').trim() || '#7c8aa6',
       custom: Boolean(token?.custom),
+      logoUrl: String(token?.logoUrl || '').trim(),
     });
   }
   return list;
@@ -146,6 +145,24 @@ function matchesToken(token, query) {
 function TokenGlyph({ token, size = 'md' }) {
   const symbol = String(token?.symbol || '?').trim();
   const color = String(token?.color || '#7c8aa6').trim() || '#7c8aa6';
+  const logoUrl = String(token?.logoUrl || '').trim();
+
+  if (logoUrl) {
+    return (
+      <img
+        src={logoUrl}
+        alt={symbol}
+        className={`swap-token-glyph size-${size}`}
+        style={{ objectFit: 'cover' }}
+        onError={(e) => {
+          // 如果图片加载失败，显示字母
+          e.target.style.display = 'none';
+          e.target.nextSibling.style.display = 'grid';
+        }}
+      />
+    );
+  }
+
   return (
     <span className={`swap-token-glyph size-${size}`} style={{ '--token-color': color }}>
       {symbol.slice(0, 1)}
@@ -193,6 +210,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   const [amount, setAmount] = useState('');
   const [slippage, setSlippage] = useState('1.0');
   const [showSettings, setShowSettings] = useState(false);
+  const [walletDropdownOpen, setWalletDropdownOpen] = useState(false);
 
   const [quoteInfo, setQuoteInfo] = useState(null);
   const [quoting, setQuoting] = useState(false);
@@ -271,6 +289,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
           color: '#7c8aa6',
           balance: wt.balance,
           valueUSDT: wt.valueUSDT,
+          logoUrl: wt.logoUrl || '',
         };
       })
       .sort((a, b) => (b.valueUSDT || 0) - (a.valueUSDT || 0));
@@ -361,6 +380,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
         symbol: t.symbol,
         balance: t.balance,
         valueUSDT: t.value_usdt || 0,
+        logoUrl: t.logo_url || '',
       }));
       console.log('loadWalletTokens: processed tokens', tokens);
       setWalletTokens(tokens);
@@ -484,18 +504,22 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   }, [amount, chain, doQuote, normalizedFromToken, normalizedToToken, selectedWalletId, slippage]);
 
   useEffect(() => {
-    if (!pickerOpen && !showConfirm) return undefined;
+    if (!pickerOpen && !showConfirm && !walletDropdownOpen) return undefined;
     const onKeyDown = (event) => {
       if (event.key !== 'Escape') return;
       if (pickerOpen) {
         setPickerOpen(false);
         return;
       }
+      if (walletDropdownOpen) {
+        setWalletDropdownOpen(false);
+        return;
+      }
       if (!executing) setShowConfirm(false);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [executing, pickerOpen, showConfirm]);
+  }, [executing, pickerOpen, showConfirm, walletDropdownOpen]);
 
   const handleSelectToken = useCallback((token) => {
     if (!token?.address) return;
@@ -586,23 +610,14 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   return (
     <PanelShell
       title="一键兑换"
-      subtitle="Uniswap 风格重构 · 单币闪兑由 OKX DEX 聚合路由"
+      subtitle="快速兑换任意代币"
       icon={RefreshCw}
     >
       <div className="swap-panel">
         <div className="swap-panel-shell">
           <div className="swap-panel-topbar">
-            <div className="swap-tabs" role="tablist" aria-label="swap modes">
-              {TABS.map((tab) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  className={`swap-tab${tab.enabled ? ' active' : ''}`}
-                  disabled={!tab.enabled}
-                >
-                  {tab.label}
-                </button>
-              ))}
+            <div style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)' }}>
+              兑换
             </div>
             <button
               type="button"
@@ -619,24 +634,54 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
               <div className="swap-settings-grid">
                 <label className="swap-settings-field">
                   <span>执行钱包</span>
-                  <div className="swap-select-wrap">
-                    <Wallet size={14} />
-                    <select
-                      value={selectedWalletId}
-                      onChange={(event) => setSelectedWalletId(event.target.value)}
+                  <div className="swap-custom-select-wrap">
+                    <button
+                      type="button"
+                      className="swap-custom-select-trigger"
+                      onClick={() => setWalletDropdownOpen(!walletDropdownOpen)}
                       disabled={walletLoading || !wallets.length}
-                      className="swap-select"
                     >
-                      {!wallets.length ? (
-                        <option value="">{walletLoading ? '加载钱包中...' : '暂无可用钱包'}</option>
-                      ) : null}
-                      {wallets.map((wallet) => (
-                        <option key={wallet.id} value={String(wallet.id)}>
-                          {wallet.name || '钱包'} · {shortAddress(wallet.address)} · {chainConfig.nativeSymbol}{' '}
-                          {formatNativeBalance(wallet.native_balance)}
-                        </option>
-                      ))}
-                    </select>
+                      <Wallet size={14} />
+                      <span className="swap-custom-select-value">
+                        {selectedWallet
+                          ? `${selectedWallet.name || '钱包'} · ${shortAddress(selectedWallet.address)}`
+                          : walletLoading
+                            ? '加载钱包中...'
+                            : '暂无可用钱包'}
+                      </span>
+                      <ChevronDown size={14} style={{ marginLeft: 'auto', opacity: 0.6 }} />
+                    </button>
+                    {walletDropdownOpen && wallets.length > 0 ? (
+                      <div className="swap-custom-select-dropdown">
+                        {wallets.map((wallet) => (
+                          <button
+                            key={wallet.id}
+                            type="button"
+                            className={`swap-custom-select-option${String(wallet.id) === String(selectedWalletId) ? ' active' : ''}`}
+                            onClick={() => {
+                              setSelectedWalletId(String(wallet.id));
+                              setWalletDropdownOpen(false);
+                            }}
+                          >
+                            <div className="swap-custom-select-option-main">
+                              <span className="swap-custom-select-option-name">
+                                {wallet.name || '钱包'}
+                              </span>
+                              <span className="swap-custom-select-option-address">
+                                {shortAddress(wallet.address)}
+                              </span>
+                            </div>
+                            <div className="swap-custom-select-option-balance">
+                              <span>{chainConfig.nativeSymbol}</span>
+                              <span>{formatNativeBalance(wallet.native_balance)}</span>
+                            </div>
+                            {String(wallet.id) === String(selectedWalletId) ? (
+                              <Check size={16} className="swap-custom-select-option-check" />
+                            ) : null}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 </label>
 
@@ -669,10 +714,6 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                     </div>
                   </div>
                 </label>
-              </div>
-
-              <div className="swap-settings-footnote">
-                钱包直接发起链上交易，报价由 OKX DEX 聚合返回。
               </div>
             </div>
           ) : null}
@@ -801,7 +842,6 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                     emphasis
                   />
                   <DetailRow label="最少到账" value={`${minReceived} ${toTokenMeta?.symbol || ''}`.trim()} />
-                  <DetailRow label="执行路径" value="OKX DEX Aggregator" />
                   <DetailRow label="预估 Gas" value={formatGas(quoteInfo?.estimated_gas)} />
                   <DetailRow label="滑点设置" value={`${slippage || '1.0'}%`} />
                 </>
@@ -840,15 +880,21 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
             >
               {executing ? '执行中...' : submitLabel}
             </button>
-
-            <div className="swap-footnote">
-              参考 Uniswap 的卡片式布局重构，保留你现有后端报价与执行链路。
-            </div>
           </div>
         </div>
 
+        {(pickerOpen || walletDropdownOpen) ? (
+          <div
+            className="swap-overlay-backdrop"
+            onClick={() => {
+              setPickerOpen(false);
+              setWalletDropdownOpen(false);
+            }}
+          />
+        ) : null}
+
         {pickerOpen ? (
-          <div className="swap-modal-overlay" onClick={() => setPickerOpen(false)}>
+          <div className="swap-modal-overlay" style={{ background: 'transparent' }}>
             <div className="swap-token-modal" onClick={(event) => event.stopPropagation()}>
               <div className="swap-modal-header">
                 <div>
@@ -1059,7 +1105,6 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                 <DetailRow label="最少到账" value={`${minReceived} ${toTokenMeta?.symbol || ''}`.trim()} />
                 <DetailRow label="滑点容忍" value={`${slippage || '1.0'}%`} />
                 <DetailRow label="预估 Gas" value={formatGas(quoteInfo?.estimated_gas)} />
-                <DetailRow label="聚合来源" value="OKX DEX Aggregator" />
               </div>
 
               <div className="swap-confirm-actions">
