@@ -346,24 +346,34 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   }, [apiBaseUrl, initData, chain]);
 
   const loadWalletTokens = useCallback(async () => {
-    if (!initData || !selectedWalletId) return;
+    if (!initData || !selectedWalletId) {
+      console.log('loadWalletTokens: missing initData or selectedWalletId', { initData: !!initData, selectedWalletId });
+      return;
+    }
     setLoadingWalletTokens(true);
+    console.log('loadWalletTokens: starting', { chain, selectedWalletId });
     try {
-      const resp = await walletSwapPreview({ apiBaseUrl, initData, chain, minValueUsd: 0.01 });
+      // 降低最小价值阈值，显示更多代币
+      const resp = await walletSwapPreview({ apiBaseUrl, initData, chain, minValueUsd: 0.001 });
+      console.log('loadWalletTokens: response', resp);
       const tokens = (resp?.tokens || []).map((t) => ({
         address: normalizeHexAddress(t.address),
         symbol: t.symbol,
         balance: t.balance,
-        valueUSDT: t.value_usdt,
+        valueUSDT: t.value_usdt || 0,
       }));
+      console.log('loadWalletTokens: processed tokens', tokens);
       setWalletTokens(tokens);
     } catch (error) {
       console.error('loadWalletTokens failed', error);
-      setWalletTokens([]);
+      // 失败时不清空，保留之前的数据
+      if (walletTokens.length === 0) {
+        setWalletTokens([]);
+      }
     } finally {
       setLoadingWalletTokens(false);
     }
-  }, [apiBaseUrl, initData, chain, selectedWalletId]);
+  }, [apiBaseUrl, initData, chain, selectedWalletId, walletTokens.length]);
 
   useEffect(() => {
     if (!hasInitData) return;
@@ -372,10 +382,13 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     setExecSuccess('');
   }, [hasInitData, loadWallets]);
 
+  // 只在打开代币选择器时加载余额，避免不必要的 API 调用
   useEffect(() => {
-    if (!hasInitData || !selectedWalletId) return;
+    if (!hasInitData || !selectedWalletId || !pickerOpen) return;
+    // 如果已经有数据，不重复加载
+    if (walletTokens.length > 0) return;
     loadWalletTokens();
-  }, [hasInitData, selectedWalletId, loadWalletTokens]);
+  }, [hasInitData, selectedWalletId, pickerOpen, walletTokens.length, loadWalletTokens]);
 
   const doQuote = useCallback(async ({
     amt,
@@ -515,8 +528,8 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       setShowConfirm(false);
       setAmount('');
       setQuoteInfo(null);
-      // 刷新钱包余额
-      loadWalletTokens();
+      // 清空余额缓存，下次打开选择器时重新加载
+      setWalletTokens([]);
     } catch (error) {
       setExecError(String(error?.message || error));
       setShowConfirm(false);
@@ -688,19 +701,19 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                         style={{
                           padding: '4px 10px',
                           borderRadius: '8px',
-                          border: '1px solid rgba(255, 61, 156, 0.3)',
-                          background: 'rgba(255, 61, 156, 0.08)',
-                          color: '#d31f79',
+                          border: '1px solid rgba(var(--accent-rgb), 0.4)',
+                          background: 'rgba(var(--accent-rgb), 0.12)',
+                          color: 'var(--accent-text)',
                           fontSize: '11px',
                           fontWeight: '700',
                           cursor: 'pointer',
                           transition: 'all 0.18s ease',
                         }}
                         onMouseEnter={(e) => {
-                          e.currentTarget.style.background = 'rgba(255, 61, 156, 0.15)';
+                          e.currentTarget.style.background = 'rgba(var(--accent-rgb), 0.2)';
                         }}
                         onMouseLeave={(e) => {
-                          e.currentTarget.style.background = 'rgba(255, 61, 156, 0.08)';
+                          e.currentTarget.style.background = 'rgba(var(--accent-rgb), 0.12)';
                         }}
                       >
                         最大
@@ -730,12 +743,17 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                 </div>
                 <div className="swap-card-foot">
                   <span>{fromTokenMeta ? fromTokenMeta.name : '未选择卖出代币'}</span>
-                  <span>
-                    {fromTokenBalance && Number(fromTokenBalance) > 0
-                      ? `余额: ${formatTokenAmount(fromTokenBalance)}`
-                      : selectedWallet
-                        ? `${chainConfig.nativeSymbol} ${formatNativeBalance(selectedWallet.native_balance)}`
-                        : '--'}
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {fromTokenBalance && Number(fromTokenBalance) > 0 ? (
+                      <>
+                        <span style={{ color: 'var(--positive)' }}>余额:</span>
+                        <span style={{ fontWeight: '700' }}>{formatTokenAmount(fromTokenBalance)}</span>
+                      </>
+                    ) : selectedWallet ? (
+                      `${chainConfig.nativeSymbol} ${formatNativeBalance(selectedWallet.native_balance)}`
+                    ) : (
+                      '--'
+                    )}
                   </span>
                 </div>
               </div>
@@ -851,6 +869,11 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                   placeholder="搜索符号，或粘贴合约地址"
                   autoFocus
                 />
+                {loadingWalletTokens && walletTokens.length > 0 ? (
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                    刷新中...
+                  </div>
+                ) : null}
               </div>
 
               <div className="swap-quick-picks">
@@ -868,9 +891,10 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
               </div>
 
               <div className="swap-token-list">
-                {loadingWalletTokens ? (
-                  <div style={{ padding: '20px', textAlign: 'center', color: '#8a92a6', fontSize: '13px' }}>
-                    加载钱包余额中...
+                {loadingWalletTokens && walletTokens.length === 0 ? (
+                  <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
+                    <div style={{ marginBottom: '8px' }}>🔄 加载钱包余额中...</div>
+                    <div style={{ fontSize: '11px', opacity: '0.7' }}>首次加载可能需要几秒钟</div>
                   </div>
                 ) : null}
 

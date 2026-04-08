@@ -608,6 +608,18 @@ func pickFirstNonEmpty(values ...string) string {
 	return ""
 }
 
+// ChainToOKXChainIndex 将内部链名称转换为 OKX API 的 chainIndex
+func ChainToOKXChainIndex(chain string) string {
+	switch NormalizeChain(chain) {
+	case "bsc":
+		return "56"
+	case "base":
+		return "8453"
+	default:
+		return ""
+	}
+}
+
 func buildV3Deployment(name, factoryAddr, npmAddr string) V3DeploymentConfig {
 	return V3DeploymentConfig{
 		Name:                   strings.TrimSpace(name),

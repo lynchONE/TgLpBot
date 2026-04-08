@@ -2,10 +2,13 @@ package web_server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"TgLpBot/base/config"
+	"TgLpBot/service/exchange"
 	"TgLpBot/service/liquidity"
 	userSvc "TgLpBot/service/user"
 )
@@ -84,24 +87,28 @@ func (s *Server) handleWalletSwapPreview(w http.ResponseWriter, r *http.Request)
 
 	minVal := req.MinValueUSD
 	if minVal <= 0 {
-		minVal = 0.1
+		minVal = 0.001
 	}
 
-	lpService := liquidity.NewLiquidityService()
-	tokens, err := lpService.ScanWalletTokensForSwapForChain(user.ID, chain, minVal)
+	// 优先使用 OKX API 获取余额（快速）
+	rows, err := s.getTokenBalancesFromOKX(user.ID, chain, minVal)
 	if err != nil {
-		http.Error(w, "scan failed: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	rows := make([]walletSwapTokenRow, 0, len(tokens))
-	for _, t := range tokens {
-		rows = append(rows, walletSwapTokenRow{
-			Address:   t.Address.Hex(),
-			Symbol:    t.Symbol,
-			Balance:   t.Balance,
-			ValueUSDT: t.ValueUSDT,
-		})
+		// 如果 OKX API 失败，回退到链上扫描
+		lpService := liquidity.NewLiquidityService()
+		tokens, scanErr := lpService.ScanWalletTokensForSwapForChain(user.ID, chain, minVal)
+		if scanErr != nil {
+			http.Error(w, "scan failed: "+scanErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		rows = make([]walletSwapTokenRow, 0, len(tokens))
+		for _, t := range tokens {
+			rows = append(rows, walletSwapTokenRow{
+				Address:   t.Address.Hex(),
+				Symbol:    t.Symbol,
+				Balance:   t.Balance,
+				ValueUSDT: t.ValueUSDT,
+			})
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -110,6 +117,63 @@ func (s *Server) handleWalletSwapPreview(w http.ResponseWriter, r *http.Request)
 		Chain:  chain,
 		Tokens: rows,
 	})
+}
+
+func (s *Server) getTokenBalancesFromOKX(userID uint, chain string, minValueUSD float64) ([]walletSwapTokenRow, error) {
+	// 获取用户默认钱包地址
+	walletService := userSvc.NewWalletService()
+	wallet, err := walletService.GetDefaultWallet(userID)
+	if err != nil || wallet == nil {
+		return nil, fmt.Errorf("no default wallet")
+	}
+
+	// 转换链 ID
+	chainIndex := config.ChainToOKXChainIndex(chain)
+	if chainIndex == "" {
+		return nil, fmt.Errorf("unsupported chain: %s", chain)
+	}
+
+	// 调用 OKX API
+	okxService := exchange.NewOKXDexService()
+	resp, err := okxService.GetAllTokenBalances(chainIndex, wallet.Address)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(resp.Data) == 0 {
+		return []walletSwapTokenRow{}, nil
+	}
+
+	// 转换结果
+	rows := make([]walletSwapTokenRow, 0)
+	for _, token := range resp.Data[0].TokenAssets {
+		// 解析余额和价格
+		balance := strings.TrimSpace(token.Balance)
+		priceStr := strings.TrimSpace(token.TokenPrice)
+
+		if balance == "" || balance == "0" {
+			continue
+		}
+
+		// 计算 USD 价值
+		balanceFloat, _ := strconv.ParseFloat(balance, 64)
+		priceFloat, _ := strconv.ParseFloat(priceStr, 64)
+		valueUSD := balanceFloat * priceFloat
+
+		// 过滤低价值代币
+		if valueUSD < minValueUSD {
+			continue
+		}
+
+		rows = append(rows, walletSwapTokenRow{
+			Address:   strings.ToLower(strings.TrimSpace(token.TokenContractAddress)),
+			Symbol:    strings.TrimSpace(token.Symbol),
+			Balance:   balance,
+			ValueUSDT: valueUSD,
+		})
+	}
+
+	return rows, nil
 }
 
 // --- Wallet Swap Execute ---

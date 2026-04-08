@@ -172,6 +172,24 @@ type MarketTokenBasicInfoResponse struct {
 	Data []MarketTokenBasicInfo `json:"data"`
 }
 
+// TokenBalance represents a token balance from OKX balance API
+type TokenBalance struct {
+	TokenContractAddress string `json:"tokenContractAddress"`
+	Symbol               string `json:"symbol"`
+	Balance              string `json:"balance"`
+	TokenPrice           string `json:"tokenPrice"`
+	TokenType            string `json:"tokenType"`
+}
+
+// AllTokenBalancesResponse represents the response from OKX balance API
+type AllTokenBalancesResponse struct {
+	Code string `json:"code"`
+	Msg  string `json:"msg"`
+	Data []struct {
+		TokenAssets []TokenBalance `json:"tokenAssets"`
+	} `json:"data"`
+}
+
 func (e *OKXAPIError) Error() string {
 	if e == nil {
 		return "OKX API error"
@@ -519,4 +537,48 @@ func (s *OKXDexService) GetApproveSpender(chainID string, tokenAddress string) (
 	}
 
 	return approveResp.Data[0].DexContractAddress, nil
+}
+
+// GetAllTokenBalances 获取钱包所有代币余额
+func (s *OKXDexService) GetAllTokenBalances(chainIndex, address string) (*AllTokenBalancesResponse, error) {
+	query := url.Values{}
+	query.Set(s.chainQueryKey(), strings.TrimSpace(chainIndex))
+	query.Set("address", strings.TrimSpace(address))
+
+	endpoint := fmt.Sprintf("https://web3.okx.com/api/v6/dex/balance/all-token-balances-by-address?%s", query.Encode())
+	if config.AppConfig != nil && config.AppConfig.OKXDebug {
+		log.Printf("[OKX Balance] request URL: %s", endpoint)
+	}
+
+	httpReq, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	s.addHeaders(httpReq, "", timestamp)
+
+	resp, err := s.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 5<<20))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if config.AppConfig != nil && config.AppConfig.OKXDebug {
+		log.Printf("[OKX Balance] raw response: %s", string(body))
+	}
+
+	var out AllTokenBalancesResponse
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+	if out.Code != "0" {
+		return nil, &OKXAPIError{Endpoint: "balance/all-token-balances-by-address", Code: out.Code, Msg: out.Msg}
+	}
+	return &out, nil
 }
