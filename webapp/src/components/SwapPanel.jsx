@@ -1,285 +1,898 @@
-import React, { useCallback, useEffect, useState, useRef } from 'react';
-import { fetchWallets, walletSwapSingleQuote, walletSwapSingleExecute } from '../api';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { fetchWallets, walletSwapSingleExecute, walletSwapSingleQuote } from '../api';
 import PanelShell from './PanelShell';
-import { ArrowDown, Settings, RefreshCw } from 'lucide-react';
-import { shortAddress } from '../utils';
+import { normalizeHexAddress, shortAddress } from '../utils';
+import { ArrowDown, ChevronDown, RefreshCw, Search, Settings, Wallet, X } from 'lucide-react';
 
-const STABLE_ADDRESSES = {
-    'bsc': '0x55d398326f99059fF775485246999027B3197955', // USDT
-    'base': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' // USDC
+const CHAIN_META = {
+  bsc: {
+    label: 'BNB Chain',
+    nativeSymbol: 'BNB',
+    stable: {
+      symbol: 'USDT',
+      name: 'Tether USD',
+      address: '0x55d398326f99059fF775485246999027B3197955',
+      color: '#26a17b',
+    },
+    presets: [
+      { symbol: 'USDT', name: 'Tether USD', address: '0x55d398326f99059fF775485246999027B3197955', color: '#26a17b' },
+      { symbol: 'WBNB', name: 'Wrapped BNB', address: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', color: '#f0b90b' },
+      { symbol: 'USDC', name: 'USD Coin', address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', color: '#2775ca' },
+      { symbol: 'BTCB', name: 'Bitcoin BEP20', address: '0x7130d2A12B9BCbfae4f2634d864A1Ee1Ce3Ead9c', color: '#f7931a' },
+      { symbol: 'ETH', name: 'Ethereum Token', address: '0x2170Ed0880ac9A755fd29B2688956BD959F933F8', color: '#627eea' },
+    ],
+  },
+  base: {
+    label: 'Base',
+    nativeSymbol: 'ETH',
+    stable: {
+      symbol: 'USDC',
+      name: 'USD Coin',
+      address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      color: '#2775ca',
+    },
+    presets: [
+      { symbol: 'USDC', name: 'USD Coin', address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', color: '#2775ca' },
+      { symbol: 'WETH', name: 'Wrapped Ether', address: '0x4200000000000000000000000000000000000006', color: '#627eea' },
+      { symbol: 'cbBTC', name: 'Coinbase Wrapped BTC', address: '0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf', color: '#f7931a' },
+    ],
+  },
 };
 
+const RECENT_STORAGE_KEY = 'tg_lp_bot_swap_recent_tokens_v1';
+
+const TABS = [
+  { key: 'swap', label: '兑换', enabled: true },
+  { key: 'limit', label: '限额', enabled: false },
+  { key: 'buy', label: '购买', enabled: false },
+  { key: 'sell', label: '出售', enabled: false },
+];
+
+const SLIPPAGE_PRESETS = ['0.5', '1.0', '2.0'];
+
+function dedupeTokens(tokens) {
+  const seen = new Set();
+  const list = [];
+  for (const token of tokens || []) {
+    const address = normalizeHexAddress(token?.address);
+    if (!address || seen.has(address)) continue;
+    seen.add(address);
+    list.push({
+      address,
+      symbol: String(token?.symbol || shortAddress(address, 4, 4)).trim() || shortAddress(address, 4, 4),
+      name: String(token?.name || '自定义代币').trim() || '自定义代币',
+      color: String(token?.color || '#7c8aa6').trim() || '#7c8aa6',
+      custom: Boolean(token?.custom),
+    });
+  }
+  return list;
+}
+
+function loadRecentTokens() {
+  try {
+    const raw = window.localStorage.getItem(RECENT_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+function saveRecentTokens(next) {
+  try {
+    window.localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function buildCustomToken(address) {
+  const normalized = normalizeHexAddress(address);
+  if (!normalized) return null;
+  return {
+    address: normalized,
+    symbol: shortAddress(normalized, 4, 4),
+    name: '自定义合约地址',
+    color: '#7c8aa6',
+    custom: true,
+  };
+}
+
+function getChainConfig(chain) {
+  return CHAIN_META[chain] || CHAIN_META.bsc;
+}
+
+function getPresetTokens(chain) {
+  return dedupeTokens(getChainConfig(chain).presets);
+}
+
+function resolveTokenMeta(chain, address, recentTokens) {
+  const normalized = normalizeHexAddress(address);
+  if (!normalized) return null;
+  const pool = dedupeTokens([...(recentTokens?.[chain] || []), ...getPresetTokens(chain)]);
+  return pool.find((item) => item.address === normalized) || buildCustomToken(normalized);
+}
+
+function formatTokenAmount(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return '0.0';
+  if (num >= 1000) return num.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  if (num >= 1) return num.toLocaleString('en-US', { maximumFractionDigits: 6 });
+  return num.toLocaleString('en-US', { maximumFractionDigits: 8 });
+}
+
+function formatGas(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return '--';
+  return num.toLocaleString('en-US', { maximumFractionDigits: 0 });
+}
+
+function formatNativeBalance(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '--';
+  return num.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+}
+
+function matchesToken(token, query) {
+  const keyword = String(query || '').trim().toLowerCase();
+  if (!keyword) return true;
+  return [token.symbol, token.name, token.address].some((value) =>
+    String(value || '').toLowerCase().includes(keyword)
+  );
+}
+
+function TokenGlyph({ token, size = 'md' }) {
+  const symbol = String(token?.symbol || '?').trim();
+  const color = String(token?.color || '#7c8aa6').trim() || '#7c8aa6';
+  return (
+    <span className={`swap-token-glyph size-${size}`} style={{ '--token-color': color }}>
+      {symbol.slice(0, 1)}
+    </span>
+  );
+}
+
+function TokenButton({ token, placeholder, onClick }) {
+  return (
+    <button type="button" className="swap-token-button" onClick={onClick}>
+      {token ? (
+        <>
+          <TokenGlyph token={token} />
+          <span className="swap-token-button-copy">
+            <strong>{token.symbol}</strong>
+            <small>{token.custom ? shortAddress(token.address, 6, 4) : token.name}</small>
+          </span>
+        </>
+      ) : (
+        <span className="swap-token-placeholder">{placeholder}</span>
+      )}
+      <ChevronDown size={16} />
+    </button>
+  );
+}
+
+function DetailRow({ label, value, emphasis = false }) {
+  return (
+    <div className={`swap-detail-row${emphasis ? ' emphasis' : ''}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
 export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = 'bsc' }) {
-    const [wallets, setWallets] = useState([]);
-    const [selectedWalletId, setSelectedWalletId] = useState('');
-    const [walletLoading, setWalletLoading] = useState(false);
+  const chainConfig = getChainConfig(chain);
 
-    const [fromToken, setFromToken] = useState('');
-    const [toToken, setToToken] = useState(STABLE_ADDRESSES['bsc']);
-    const [amount, setAmount] = useState('');
-    const [slippage, setSlippage] = useState('1.0');
-    const [showSettings, setShowSettings] = useState(false);
+  const [wallets, setWallets] = useState([]);
+  const [selectedWalletId, setSelectedWalletId] = useState('');
+  const [walletLoading, setWalletLoading] = useState(false);
 
-    const [quoteInfo, setQuoteInfo] = useState(null);
-    const [quoting, setQuoting] = useState(false);
-    const [quoteError, setQuoteError] = useState('');
-    
-    const [executing, setExecuting] = useState(false);
-    const [execError, setExecError] = useState('');
-    const [execSuccess, setExecSuccess] = useState('');
-    const [showConfirm, setShowConfirm] = useState(false);
+  const [fromToken, setFromToken] = useState('');
+  const [toToken, setToToken] = useState(() => chainConfig.stable.address);
+  const [amount, setAmount] = useState('');
+  const [slippage, setSlippage] = useState('1.0');
+  const [showSettings, setShowSettings] = useState(false);
 
-    const quoteTimeout = useRef(null);
+  const [quoteInfo, setQuoteInfo] = useState(null);
+  const [quoting, setQuoting] = useState(false);
+  const [quoteError, setQuoteError] = useState('');
 
-    // Update stable token default on chain change
-    useEffect(() => {
-        if (chain && STABLE_ADDRESSES[chain]) {
-            setToToken(STABLE_ADDRESSES[chain]);
-        }
-    }, [chain]);
+  const [executing, setExecuting] = useState(false);
+  const [execError, setExecError] = useState('');
+  const [execSuccess, setExecSuccess] = useState('');
+  const [showConfirm, setShowConfirm] = useState(false);
 
-    const loadWallets = useCallback(async () => {
-        if (!initData) return;
-        setWalletLoading(true);
-        try {
-            const resp = await fetchWallets({ apiBaseUrl, initData, chain });
-            const list = resp?.wallets || [];
-            setWallets(list);
-            if (list.length > 0 && !selectedWalletId) {
-                const def = list.find(w => w.is_default) || list[0];
-                setSelectedWalletId(def.id);
-            }
-        } catch (e) {
-            console.error("fetchWallets failed", e);
-        } finally {
-            setWalletLoading(false);
-        }
-    }, [apiBaseUrl, initData, chain, selectedWalletId]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerSide, setPickerSide] = useState('from');
+  const [tokenQuery, setTokenQuery] = useState('');
+  const [recentTokens, setRecentTokens] = useState(() => loadRecentTokens());
 
-    useEffect(() => {
-        if (hasInitData) {
-            loadWallets();
-            setExecError('');
-            setExecSuccess('');
-        }
-    }, [loadWallets, hasInitData]);
+  const quoteTimeout = useRef(null);
+  const quoteAbortRef = useRef(null);
+  const quoteSeqRef = useRef(0);
 
-    const doQuote = useCallback(async (amt, fToken, tToken, chainId, wId, slip) => {
-        if (!amt || parseFloat(amt) <= 0 || !fToken || !tToken || fToken.length !== 42 || tToken.length !== 42) {
-            setQuoteInfo(null);
-            setQuoteError('');
-            return;
-        }
-        setQuoting(true);
+  const normalizedFromToken = normalizeHexAddress(fromToken);
+  const normalizedToToken = normalizeHexAddress(toToken);
+  const fromTokenMeta = useMemo(
+    () => resolveTokenMeta(chain, fromToken, recentTokens),
+    [chain, fromToken, recentTokens]
+  );
+  const toTokenMeta = useMemo(
+    () => resolveTokenMeta(chain, toToken, recentTokens),
+    [chain, toToken, recentTokens]
+  );
+  const selectedWallet = useMemo(
+    () => wallets.find((item) => String(item.id) === String(selectedWalletId)) || null,
+    [wallets, selectedWalletId]
+  );
+  const presetTokens = useMemo(() => getPresetTokens(chain), [chain]);
+  const recentChainTokens = useMemo(
+    () => dedupeTokens(recentTokens?.[chain] || []),
+    [chain, recentTokens]
+  );
+
+  const selectedQuoteAmount = useMemo(
+    () => formatTokenAmount(quoteInfo?.to_amount_float),
+    [quoteInfo]
+  );
+  const minReceived = useMemo(() => {
+    const out = Number(quoteInfo?.to_amount_float);
+    const slip = Number(slippage);
+    if (!Number.isFinite(out) || out <= 0 || !Number.isFinite(slip) || slip < 0) return '--';
+    return formatTokenAmount(out * (1 - slip / 100));
+  }, [quoteInfo, slippage]);
+
+  const pickerTokens = useMemo(() => {
+    const keyword = String(tokenQuery || '').trim().toLowerCase();
+    const recent = recentChainTokens.filter((token) => matchesToken(token, keyword));
+    const preset = presetTokens
+      .filter((token) => !recent.some((item) => item.address === token.address))
+      .filter((token) => matchesToken(token, keyword));
+    const customCandidate = buildCustomToken(tokenQuery);
+    return {
+      customCandidate:
+        customCandidate &&
+        !recent.some((item) => item.address === customCandidate.address) &&
+        !preset.some((item) => item.address === customCandidate.address)
+          ? customCandidate
+          : null,
+      recent,
+      preset,
+    };
+  }, [tokenQuery, recentChainTokens, presetTokens]);
+
+  const persistRecentToken = useCallback((token) => {
+    const normalized = normalizeHexAddress(token?.address);
+    if (!normalized) return;
+    setRecentTokens((prev) => {
+      const current = dedupeTokens(prev?.[chain] || []);
+      const nextList = dedupeTokens([{ ...token, address: normalized }, ...current]).slice(0, 6);
+      const next = { ...(prev || {}), [chain]: nextList };
+      saveRecentTokens(next);
+      return next;
+    });
+  }, [chain]);
+
+  useEffect(() => {
+    setToToken(chainConfig.stable.address);
+    setFromToken('');
+    setAmount('');
+    setQuoteInfo(null);
+    setQuoteError('');
+    setExecError('');
+    setExecSuccess('');
+    setShowConfirm(false);
+  }, [chainConfig.stable.address]);
+
+  const loadWallets = useCallback(async () => {
+    if (!initData) return;
+    setWalletLoading(true);
+    try {
+      const resp = await fetchWallets({ apiBaseUrl, initData, chain });
+      const list = resp?.wallets || [];
+      setWallets(list);
+      setSelectedWalletId((current) => {
+        if (list.some((item) => String(item.id) === String(current))) return current;
+        const fallback = list.find((item) => item.is_default) || list[0];
+        return fallback ? String(fallback.id) : '';
+      });
+    } catch (error) {
+      console.error('fetchWallets failed', error);
+    } finally {
+      setWalletLoading(false);
+    }
+  }, [apiBaseUrl, initData, chain]);
+
+  useEffect(() => {
+    if (!hasInitData) return;
+    loadWallets();
+    setExecError('');
+    setExecSuccess('');
+  }, [hasInitData, loadWallets]);
+
+  const doQuote = useCallback(async ({
+    amt,
+    fromAddress,
+    toAddress,
+    walletId,
+    chainId,
+    slip,
+    signal,
+    seq,
+  }) => {
+    const amountNumber = Number(amt);
+    if (!walletId || !Number.isFinite(amountNumber) || amountNumber <= 0 || !fromAddress || !toAddress) {
+      setQuoteInfo(null);
+      setQuoteError('');
+      setQuoting(false);
+      return;
+    }
+    if (fromAddress === toAddress) {
+      setQuoteInfo(null);
+      setQuoteError('支付和接收代币不能相同');
+      setQuoting(false);
+      return;
+    }
+
+    setQuoting(true);
+    setQuoteError('');
+    setQuoteInfo(null);
+
+    try {
+      const resp = await walletSwapSingleQuote({
+        apiBaseUrl,
+        initData,
+        chain: chainId,
+        walletId,
+        fromToken: fromAddress,
+        toToken: toAddress,
+        amount: amt,
+        slippagePercent: Number.parseFloat(slip),
+        signal,
+      });
+      if (quoteSeqRef.current !== seq) return;
+      setQuoteInfo(resp);
+    } catch (error) {
+      if (signal?.aborted) return;
+      if (quoteSeqRef.current !== seq) return;
+      setQuoteInfo(null);
+      setQuoteError(String(error?.message || error));
+    } finally {
+      if (quoteSeqRef.current === seq) {
+        setQuoting(false);
+      }
+    }
+  }, [apiBaseUrl, initData]);
+
+  useEffect(() => {
+    if (quoteTimeout.current) clearTimeout(quoteTimeout.current);
+    if (quoteAbortRef.current) quoteAbortRef.current.abort();
+
+    const amountNumber = Number(amount);
+    if (!selectedWalletId || !Number.isFinite(amountNumber) || amountNumber <= 0 || !normalizedFromToken || !normalizedToToken) {
+      setQuoting(false);
+      setQuoteInfo(null);
+      if (normalizedFromToken && normalizedToToken && normalizedFromToken === normalizedToToken) {
+        setQuoteError('支付和接收代币不能相同');
+      } else {
         setQuoteError('');
-        setQuoteInfo(null);
-        try {
-            const resp = await walletSwapSingleQuote({
-                apiBaseUrl, initData, chain: chainId, walletId: wId, fromToken: fToken, toToken: tToken, amount: amt, slippagePercent: parseFloat(slip)
-            });
-            setQuoteInfo(resp);
-        } catch (e) {
-            setQuoteError(String(e?.message || e));
-            setQuoteInfo(null);
-        } finally {
-            setQuoting(false);
-        }
-    }, [apiBaseUrl, initData]);
+      }
+      return undefined;
+    }
 
-    useEffect(() => {
-        if (quoteTimeout.current) clearTimeout(quoteTimeout.current);
-        quoteTimeout.current = setTimeout(() => {
-            doQuote(amount, fromToken, toToken, chain, selectedWalletId, slippage);
-        }, 800);
-        return () => clearTimeout(quoteTimeout.current);
-    }, [amount, fromToken, toToken, chain, selectedWalletId, slippage, doQuote]);
+    quoteTimeout.current = setTimeout(() => {
+      const seq = quoteSeqRef.current + 1;
+      quoteSeqRef.current = seq;
+      const controller = new AbortController();
+      quoteAbortRef.current = controller;
+      doQuote({
+        amt: amount,
+        fromAddress: normalizedFromToken,
+        toAddress: normalizedToToken,
+        walletId: selectedWalletId,
+        chainId: chain,
+        slip: slippage,
+        signal: controller.signal,
+        seq,
+      });
+    }, 450);
 
-    const handleSwap = async () => {
-        if (!initData) return;
-        setExecuting(true);
-        setExecError('');
-        setExecSuccess('');
-        try {
-            const resp = await walletSwapSingleExecute({
-                apiBaseUrl, initData, chain, walletId: selectedWalletId, fromToken, toToken, amount, slippagePercent: parseFloat(slippage)
-            });
-            setExecSuccess(resp?.tx_hash || '交易已提交');
-            setShowConfirm(false);
-            setAmount('');
-            setQuoteInfo(null);
-        } catch (e) {
-            setExecError(String(e?.message || e));
-            setShowConfirm(false);
-        } finally {
-            setExecuting(false);
-        }
+    return () => {
+      if (quoteTimeout.current) clearTimeout(quoteTimeout.current);
+      if (quoteAbortRef.current) quoteAbortRef.current.abort();
     };
+  }, [amount, chain, doQuote, normalizedFromToken, normalizedToToken, selectedWalletId, slippage]);
 
-    const handleReverse = () => {
-        setFromToken(toToken);
-        setToToken(fromToken);
-        setAmount('');
-        setQuoteInfo(null);
+  useEffect(() => {
+    if (!pickerOpen && !showConfirm) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key !== 'Escape') return;
+      if (pickerOpen) {
+        setPickerOpen(false);
+        return;
+      }
+      if (!executing) setShowConfirm(false);
     };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [executing, pickerOpen, showConfirm]);
 
-    const isReadyToSwap = amount && fromToken && toToken && amount > 0 && quoteInfo && !quoting && !executing;
+  const handleSelectToken = useCallback((token) => {
+    if (!token?.address) return;
+    if (pickerSide === 'from') setFromToken(token.address);
+    else setToToken(token.address);
+    persistRecentToken(token);
+    setPickerOpen(false);
+    setTokenQuery('');
+    setExecError('');
+    setExecSuccess('');
+  }, [persistRecentToken, pickerSide]);
 
-    return (
-        <PanelShell 
-            title="代币兑换" 
-            subtitle="单代币闪兑 · 由 OKX DEX 路由" 
-            icon={RefreshCw}
-            actions={
-                <button 
-                    type="button" 
-                    className="panel-action-btn"
-                    onClick={() => setShowSettings(!showSettings)}
-                    style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+  const handleSwap = async () => {
+    if (!initData || !normalizedFromToken || !normalizedToToken) return;
+    setExecuting(true);
+    setExecError('');
+    setExecSuccess('');
+    try {
+      const resp = await walletSwapSingleExecute({
+        apiBaseUrl,
+        initData,
+        chain,
+        walletId: selectedWalletId,
+        fromToken: normalizedFromToken,
+        toToken: normalizedToToken,
+        amount,
+        slippagePercent: Number.parseFloat(slippage),
+      });
+      setExecSuccess(resp?.tx_hash || '交易已提交');
+      setShowConfirm(false);
+      setAmount('');
+      setQuoteInfo(null);
+    } catch (error) {
+      setExecError(String(error?.message || error));
+      setShowConfirm(false);
+    } finally {
+      setExecuting(false);
+    }
+  };
+
+  const handleReverse = () => {
+    if (!normalizedFromToken && !normalizedToToken) return;
+    setFromToken(toToken);
+    setToToken(fromToken);
+    setAmount('');
+    setQuoteInfo(null);
+    setQuoteError('');
+    setExecError('');
+    setExecSuccess('');
+  };
+
+  const isReadyToSwap = Boolean(
+    selectedWalletId &&
+    normalizedFromToken &&
+    normalizedToToken &&
+    normalizedFromToken !== normalizedToToken &&
+    Number(amount) > 0 &&
+    quoteInfo &&
+    !quoting &&
+    !executing
+  );
+
+  let submitLabel = '预览兑换';
+  if (!selectedWalletId) submitLabel = walletLoading ? '加载钱包中...' : '请先选择钱包';
+  else if (!normalizedFromToken) submitLabel = '选择卖出代币';
+  else if (!amount || Number(amount) <= 0) submitLabel = '输入卖出数量';
+  else if (!normalizedToToken) submitLabel = '选择买入代币';
+  else if (normalizedFromToken === normalizedToToken) submitLabel = '不能兑换同一代币';
+  else if (quoting) submitLabel = '获取最优报价中...';
+  else if (!quoteInfo) submitLabel = '等待报价';
+
+  return (
+    <PanelShell
+      title="一键兑换"
+      subtitle="Uniswap 风格重构 · 单币闪兑由 OKX DEX 聚合路由"
+      icon={RefreshCw}
+    >
+      <div className="swap-panel">
+        <div className="swap-panel-shell">
+          <div className="swap-panel-topbar">
+            <div className="swap-tabs" role="tablist" aria-label="swap modes">
+              {TABS.map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  className={`swap-tab${tab.enabled ? ' active' : ''}`}
+                  disabled={!tab.enabled}
                 >
-                    <Settings size={14} /> 滑点 {slippage}%
+                  {tab.label}
                 </button>
-            }
-        >
-            <div style={{ maxWidth: '500px', margin: '0 auto' }}>
-                {showSettings && (
-                    <div style={{ marginBottom: '16px', background: 'rgba(18, 26, 40, 0.4)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(136, 157, 191, 0.18)' }}>
-                        <div style={{ display: 'flex', gap: '16px', justifyContent: 'space-between', marginBottom: '12px' }}>
-                            <div style={{ flex: 1 }}>
-                                <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px', fontWeight: 600 }}>选择钱包</label>
-                                {walletLoading ? (
-                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>加载钱包中...</div>
-                                ) : (
-                                    <select
-                                        value={selectedWalletId}
-                                        onChange={(e) => setSelectedWalletId(e.target.value)}
-                                        style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', background: 'rgba(9, 14, 22, 0.6)', border: '1px solid rgba(136, 157, 191, 0.2)', color: 'var(--text)', outline: 'none' }}
-                                    >
-                                        {wallets.map(w => (
-                                            <option key={w.id} value={w.id}>{w.name || '钱包'} ({shortAddress(w.address)}) - {chain==='bsc'?'BNB':'ETH'}: {parseFloat(w.native_balance).toFixed(3)}</option>
-                                        ))}
-                                    </select>
-                                )}
-                            </div>
-                            <div style={{ flex: '0.7' }}>
-                                <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px', fontWeight: 600 }}>自定义滑点 (%)</label>
-                                <input
-                                    type="number"
-                                    value={slippage}
-                                    onChange={(e) => setSlippage(e.target.value)}
-                                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', background: 'rgba(9, 14, 22, 0.6)', border: '1px solid rgba(136, 157, 191, 0.2)', color: 'var(--text)', outline: 'none' }}
-                                    placeholder="默认 1.0"
-                                />
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                <div style={{ position: 'relative', background: 'rgba(18, 26, 40, 0.3)', padding: '4px', borderRadius: '20px', border: '1px solid rgba(136, 157, 191, 0.15)' }}>
-                    <div style={{ background: 'rgba(9, 14, 22, 0.7)', padding: '16px', borderRadius: '16px', minHeight: '100px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '12px', fontWeight: 600 }}>
-                            <span>支付</span>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                            <input
-                                type="text"
-                                value={amount}
-                                onChange={(e) => setAmount(e.target.value)}
-                                style={{ width: '40%', background: 'transparent', fontSize: '24px', fontWeight: 'bold', color: 'var(--text)', outline: 'none', border: 'none' }}
-                                placeholder="0.0"
-                            />
-                            <div style={{ flex: 1 }}>
-                                <input
-                                    type="text"
-                                    value={fromToken}
-                                    onChange={(e) => setFromToken(e.target.value)}
-                                    style={{ width: '100%', padding: '12px', borderRadius: '12px', background: 'rgba(18, 26, 40, 0.8)', border: '1px solid rgba(136, 157, 191, 0.2)', color: 'var(--text)', outline: 'none', fontFamily: 'monospace', fontSize: '12px' }}
-                                    placeholder="输入代币合约地址..."
-                                />
-                            </div>
-                        </div>
-                    </div>
-
-                    <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', zIndex: 10 }}>
-                        <button
-                            onClick={handleReverse}
-                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '40px', height: '40px', borderRadius: '12px', background: 'var(--bg-card)', border: '4px solid var(--bg-body)', color: 'var(--text-muted)', cursor: 'pointer', transition: 'color 0.2s' }}
-                        >
-                            <ArrowDown size={18} strokeWidth={3} />
-                        </button>
-                    </div>
-
-                    <div style={{ background: 'rgba(9, 14, 22, 0.7)', padding: '16px', borderRadius: '16px', marginTop: '4px', minHeight: '100px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '12px', fontWeight: 600 }}>
-                            <span>获得</span>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                            <div style={{ width: '40%', fontSize: '24px', fontWeight: 'bold', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                {quoting ? (
-                                    <span style={{ opacity: 0.5 }}>...</span>
-                                ) : (
-                                    quoteInfo?.to_amount_float || '0.0'
-                                )}
-                            </div>
-                            <div style={{ flex: 1 }}>
-                                <input
-                                    type="text"
-                                    value={toToken}
-                                    onChange={(e) => setToToken(e.target.value)}
-                                    style={{ width: '100%', padding: '12px', borderRadius: '12px', background: 'rgba(18, 26, 40, 0.8)', border: '1px solid rgba(136, 157, 191, 0.2)', color: 'var(--text)', outline: 'none', fontFamily: 'monospace', fontSize: '12px' }}
-                                    placeholder="输入接收代币合约地址..."
-                                />
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div style={{ marginTop: '16px' }}>
-                    {quoteError && (
-                        <div className="panel-error">
-                            <strong>报价失败:</strong> {quoteError}
-                        </div>
-                    )}
-                    {execError && (
-                        <div className="panel-error">
-                            <strong>兑换失败:</strong> {execError}
-                        </div>
-                    )}
-                    {execSuccess && (
-                        <div className="panel-success" style={{ wordBreak: 'break-all' }}>
-                            ✅ <strong>兑换请求已提交</strong><br/>
-                            TxHash: <span style={{ opacity: 0.8, fontFamily: 'monospace' }}>{execSuccess}</span>
-                        </div>
-                    )}
-                </div>
-
-                {showConfirm ? (
-                    <div style={{ marginTop: '16px', padding: '16px', borderRadius: '12px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)', fontSize: '14px' }}>
-                        <p style={{ marginBottom: '16px', color: 'var(--text)' }}>
-                            确认将支付 <strong>{amount}</strong> 个代币 <br/>
-                            兑换为获得约 <strong>{quoteInfo?.to_amount_float || 0}</strong> 个目标代币？<br/>
-                            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>滑点: {slippage}%</span>
-                        </p>
-                        <div style={{ display: 'flex', gap: '12px' }}>
-                            <button className="panel-action-btn" style={{ flex: 1 }} onClick={() => setShowConfirm(false)}>取消</button>
-                            <button className="config-save-btn" style={{ flex: 1 }} onClick={handleSwap} disabled={executing}>
-                                {executing ? '执行中...' : '提交交易'}
-                            </button>
-                        </div>
-                    </div>
-                ) : (
-                    <div style={{ marginTop: '16px' }}>
-                        <button
-                            type="button"
-                            onClick={() => setShowConfirm(true)}
-                            disabled={!isReadyToSwap}
-                            className={!isReadyToSwap ? 'panel-action-btn' : 'config-save-btn'}
-                            style={{ width: '100%', padding: '16px', fontSize: '16px', borderRadius: '12px', fontWeight: 'bold' }}
-                        >
-                            {executing ? '执行中...' : !fromToken ? '需填入支付合约' : !amount ? '需输入支付数量' : quoting ? '获取最优报价中...' : !quoteInfo ? '无法兑换' : '确认兑换'}
-                        </button>
-                    </div>
-                )}
+              ))}
             </div>
-        </PanelShell>
-    );
+            <button
+              type="button"
+              className={`swap-settings-trigger${showSettings ? ' active' : ''}`}
+              onClick={() => setShowSettings((current) => !current)}
+              aria-label="配置兑换参数"
+            >
+              <Settings size={17} />
+            </button>
+          </div>
+
+          {showSettings ? (
+            <div className="swap-settings-card">
+              <div className="swap-settings-grid">
+                <label className="swap-settings-field">
+                  <span>执行钱包</span>
+                  <div className="swap-select-wrap">
+                    <Wallet size={14} />
+                    <select
+                      value={selectedWalletId}
+                      onChange={(event) => setSelectedWalletId(event.target.value)}
+                      disabled={walletLoading || !wallets.length}
+                      className="swap-select"
+                    >
+                      {!wallets.length ? (
+                        <option value="">{walletLoading ? '加载钱包中...' : '暂无可用钱包'}</option>
+                      ) : null}
+                      {wallets.map((wallet) => (
+                        <option key={wallet.id} value={String(wallet.id)}>
+                          {wallet.name || '钱包'} · {shortAddress(wallet.address)} · {chainConfig.nativeSymbol}{' '}
+                          {formatNativeBalance(wallet.native_balance)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </label>
+
+                <label className="swap-settings-field">
+                  <span>滑点上限</span>
+                  <div className="swap-slippage-input-group">
+                    <div className="swap-slippage-pills">
+                      {SLIPPAGE_PRESETS.map((item) => (
+                        <button
+                          key={item}
+                          type="button"
+                          className={`swap-slippage-pill${String(slippage) === item ? ' active' : ''}`}
+                          onClick={() => setSlippage(item)}
+                        >
+                          {item}%
+                        </button>
+                      ))}
+                    </div>
+                    <div className="swap-slippage-input-wrap">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        value={slippage}
+                        onChange={(event) => setSlippage(event.target.value)}
+                        className="swap-slippage-input"
+                        placeholder="1.0"
+                      />
+                      <span>%</span>
+                    </div>
+                  </div>
+                </label>
+              </div>
+
+              <div className="swap-settings-footnote">
+                钱包直接发起链上交易，报价由 OKX DEX 聚合返回。
+              </div>
+            </div>
+          ) : null}
+
+          <div className="swap-surface">
+            <div className="swap-context-row">
+              <div className="swap-context-pill strong">{chainConfig.label}</div>
+              <div className="swap-context-pill">
+                {selectedWallet
+                  ? `${selectedWallet.name || '钱包'} · ${shortAddress(selectedWallet.address)}`
+                  : walletLoading
+                    ? '加载钱包中...'
+                    : '未选择钱包'}
+              </div>
+            </div>
+
+            <div className="swap-card-group">
+              <div className="swap-card">
+                <div className="swap-card-head">
+                  <span>出售</span>
+                  <small>{fromTokenMeta ? shortAddress(fromTokenMeta.address, 8, 6) : '支持粘贴任意合约地址'}</small>
+                </div>
+                <div className="swap-card-body">
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    className="swap-amount-input"
+                    value={amount}
+                    onChange={(event) => setAmount(event.target.value)}
+                    placeholder="0"
+                  />
+                  <TokenButton
+                    token={fromTokenMeta}
+                    placeholder="选择代币"
+                    onClick={() => {
+                      setPickerSide('from');
+                      setPickerOpen(true);
+                    }}
+                  />
+                </div>
+                <div className="swap-card-foot">
+                  <span>{fromTokenMeta ? fromTokenMeta.name : '未选择卖出代币'}</span>
+                  <span>{selectedWallet ? `${chainConfig.nativeSymbol} ${formatNativeBalance(selectedWallet.native_balance)}` : '--'}</span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="swap-switch-button"
+                onClick={handleReverse}
+                aria-label="切换兑换方向"
+              >
+                <ArrowDown size={18} strokeWidth={2.5} />
+              </button>
+
+              <div className="swap-card muted">
+                <div className="swap-card-head">
+                  <span>购买</span>
+                  <small>{toTokenMeta ? shortAddress(toTokenMeta.address, 8, 6) : '选择目标代币'}</small>
+                </div>
+                <div className="swap-card-body">
+                  <div className={`swap-quote-output${quoting ? ' loading' : ''}`}>
+                    {quoting ? '...' : selectedQuoteAmount}
+                  </div>
+                  <TokenButton
+                    token={toTokenMeta}
+                    placeholder="选择代币"
+                    onClick={() => {
+                      setPickerSide('to');
+                      setPickerOpen(true);
+                    }}
+                  />
+                </div>
+                <div className="swap-card-foot">
+                  <span>{toTokenMeta ? toTokenMeta.name : '未选择目标代币'}</span>
+                  <span>最少到账 {minReceived}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="swap-summary-card">
+              {quoteInfo ? (
+                <>
+                  <DetailRow
+                    label="预估到账"
+                    value={`${selectedQuoteAmount} ${toTokenMeta?.symbol || ''}`.trim()}
+                    emphasis
+                  />
+                  <DetailRow label="最少到账" value={`${minReceived} ${toTokenMeta?.symbol || ''}`.trim()} />
+                  <DetailRow label="执行路径" value="OKX DEX Aggregator" />
+                  <DetailRow label="预估 Gas" value={formatGas(quoteInfo?.estimated_gas)} />
+                  <DetailRow label="滑点设置" value={`${slippage || '1.0'}%`} />
+                </>
+              ) : (
+                <div className="swap-summary-empty">
+                  <strong>输入数量后自动报价</strong>
+                  <span>选择常用代币，或在选择器内直接粘贴 ERC-20 合约地址。</span>
+                </div>
+              )}
+            </div>
+
+            {quoteError ? (
+              <div className="panel-error">
+                <strong>报价失败:</strong> {quoteError}
+              </div>
+            ) : null}
+
+            {execError ? (
+              <div className="panel-error">
+                <strong>兑换失败:</strong> {execError}
+              </div>
+            ) : null}
+
+            {execSuccess ? (
+              <div className="panel-success swap-success-card">
+                <strong>兑换请求已提交</strong>
+                <span>{execSuccess}</span>
+              </div>
+            ) : null}
+
+            <button
+              type="button"
+              className="swap-submit-button"
+              disabled={!isReadyToSwap}
+              onClick={() => setShowConfirm(true)}
+            >
+              {executing ? '执行中...' : submitLabel}
+            </button>
+
+            <div className="swap-footnote">
+              参考 Uniswap 的卡片式布局重构，保留你现有后端报价与执行链路。
+            </div>
+          </div>
+        </div>
+
+        {pickerOpen ? (
+          <div className="swap-modal-overlay" onClick={() => setPickerOpen(false)}>
+            <div className="swap-token-modal" onClick={(event) => event.stopPropagation()}>
+              <div className="swap-modal-header">
+                <div>
+                  <div className="swap-modal-kicker">选择代币</div>
+                  <h3>{pickerSide === 'from' ? '选择卖出代币' : '选择买入代币'}</h3>
+                </div>
+                <button type="button" className="swap-modal-close" onClick={() => setPickerOpen(false)}>
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="swap-token-search">
+                <Search size={16} />
+                <input
+                  type="text"
+                  value={tokenQuery}
+                  onChange={(event) => setTokenQuery(event.target.value)}
+                  placeholder="搜索符号，或粘贴合约地址"
+                  autoFocus
+                />
+              </div>
+
+              <div className="swap-quick-picks">
+                {presetTokens.slice(0, 5).map((token) => (
+                  <button
+                    key={token.address}
+                    type="button"
+                    className="swap-quick-pick"
+                    onClick={() => handleSelectToken(token)}
+                  >
+                    <TokenGlyph token={token} size="sm" />
+                    <span>{token.symbol}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="swap-token-list">
+                {pickerTokens.customCandidate ? (
+                  <div className="swap-token-section">
+                    <div className="swap-token-section-title">自定义地址</div>
+                    <button
+                      type="button"
+                      className="swap-token-row"
+                      onClick={() => handleSelectToken(pickerTokens.customCandidate)}
+                    >
+                      <TokenGlyph token={pickerTokens.customCandidate} />
+                      <div className="swap-token-row-copy">
+                        <strong>{pickerTokens.customCandidate.symbol}</strong>
+                        <span>{pickerTokens.customCandidate.address}</span>
+                      </div>
+                      <span className="swap-token-tag">粘贴使用</span>
+                    </button>
+                  </div>
+                ) : null}
+
+                {pickerTokens.recent.length ? (
+                  <div className="swap-token-section">
+                    <div className="swap-token-section-title">最近使用</div>
+                    {pickerTokens.recent.map((token) => (
+                      <button
+                        key={token.address}
+                        type="button"
+                        className="swap-token-row"
+                        onClick={() => handleSelectToken(token)}
+                      >
+                        <TokenGlyph token={token} />
+                        <div className="swap-token-row-copy">
+                          <strong>{token.symbol}</strong>
+                          <span>{token.custom ? token.address : token.name}</span>
+                        </div>
+                        <span className="swap-token-tag">最近</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                {pickerTokens.preset.length ? (
+                  <div className="swap-token-section">
+                    <div className="swap-token-section-title">常用代币</div>
+                    {pickerTokens.preset.map((token) => (
+                      <button
+                        key={token.address}
+                        type="button"
+                        className="swap-token-row"
+                        onClick={() => handleSelectToken(token)}
+                      >
+                        <TokenGlyph token={token} />
+                        <div className="swap-token-row-copy">
+                          <strong>{token.symbol}</strong>
+                          <span>{token.name}</span>
+                        </div>
+                        <span className="swap-token-tag">{shortAddress(token.address, 5, 4)}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                {!pickerTokens.customCandidate && !pickerTokens.recent.length && !pickerTokens.preset.length ? (
+                  <div className="swap-token-empty">
+                    <strong>没有匹配结果</strong>
+                    <span>可以直接粘贴 ERC-20 合约地址。</span>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {showConfirm && quoteInfo ? (
+          <div className="swap-modal-overlay" onClick={() => (!executing ? setShowConfirm(false) : null)}>
+            <div className="swap-confirm-modal" onClick={(event) => event.stopPropagation()}>
+              <div className="swap-modal-header">
+                <div>
+                  <div className="swap-modal-kicker">Review swap</div>
+                  <h3>确认兑换</h3>
+                </div>
+                <button
+                  type="button"
+                  className="swap-modal-close"
+                  onClick={() => setShowConfirm(false)}
+                  disabled={executing}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="swap-confirm-route">
+                <div className="swap-confirm-flow">
+                  <div className="swap-confirm-token">
+                    <TokenGlyph token={fromTokenMeta || buildCustomToken(normalizedFromToken)} />
+                    <div>
+                      <span>支付</span>
+                      <strong>{amount} {fromTokenMeta?.symbol || shortAddress(normalizedFromToken, 4, 4)}</strong>
+                    </div>
+                  </div>
+                  <div className="swap-confirm-arrow">
+                    <ArrowDown size={16} />
+                  </div>
+                  <div className="swap-confirm-token">
+                    <TokenGlyph token={toTokenMeta || buildCustomToken(normalizedToToken)} />
+                    <div>
+                      <span>获得</span>
+                      <strong>{selectedQuoteAmount} {toTokenMeta?.symbol || shortAddress(normalizedToToken, 4, 4)}</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="swap-confirm-details">
+                <DetailRow label="最少到账" value={`${minReceived} ${toTokenMeta?.symbol || ''}`.trim()} />
+                <DetailRow label="滑点容忍" value={`${slippage || '1.0'}%`} />
+                <DetailRow label="预估 Gas" value={formatGas(quoteInfo?.estimated_gas)} />
+                <DetailRow label="聚合来源" value="OKX DEX Aggregator" />
+              </div>
+
+              <div className="swap-confirm-actions">
+                <button
+                  type="button"
+                  className="swap-confirm-cancel"
+                  onClick={() => setShowConfirm(false)}
+                  disabled={executing}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="swap-submit-button compact"
+                  onClick={handleSwap}
+                  disabled={executing}
+                >
+                  {executing ? '提交中...' : '提交交易'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </PanelShell>
+  );
 }
