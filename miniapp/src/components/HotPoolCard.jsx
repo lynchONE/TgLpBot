@@ -353,7 +353,7 @@ const CountChangeIndicator = ({ currentValue, previousValue, label = '变化' })
 
 const STABLE_COINS = ['usdc', 'usdt', 'busd', 'dai', 'frax', 'usdd', 'fdusd', 'wbnb', 'weth', 'wsol', 'bnb', 'eth', 'sol'];
 
-export default function HotPoolCard({ pool, metric, previousData, onOpenKline, onOpenPosition, rank, apiBaseUrl, chain, accentTheme = 'lime' }) {
+export default function HotPoolCard({ pool, metric, previousData, onOpenKline, onOpenPosition, apiBaseUrl, chain, accentTheme = 'lime' }) {
     const brand = getBrandTheme(accentTheme);
     const [copied, setCopied] = useState(false);
     const addr = String(pool?.pool_address || '').trim();
@@ -381,14 +381,6 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
     const handleTouchEnd = useCallback(() => {
         swipeRef.current = { x: 0, y: 0, triggered: false };
     }, []);
-
-    // 根据排名确定渐变背景类
-    const rankClass = useMemo(() => {
-        if (rank === 1) return 'rank-gold';
-        if (rank === 2) return 'rank-silver';
-        if (rank === 3) return 'rank-bronze';
-        return '';
-    }, [rank]);
 
     const gmgnNetwork = useMemo(() => (chain === 'base' ? 'base' : 'bsc'), [chain]);
 
@@ -480,7 +472,7 @@ export default function HotPoolCard({ pool, metric, previousData, onOpenKline, o
 
     return (
         <div
-            className={`rounded-2xl border border-zinc-200 bg-white/40 backdrop-blur-md p-4 shadow-sm transition-transform duration-200 active:scale-[0.98] dark:border-white/10 dark:bg-white/5 dark:shadow-none ${rankClass}`}
+            className="rounded-2xl border border-zinc-200 bg-white/40 p-4 shadow-sm backdrop-blur-md transition-transform duration-200 active:scale-[0.98] dark:border-white/10 dark:bg-white/5 dark:shadow-none"
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
             onTouchMove={handleTouchMove}

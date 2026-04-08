@@ -198,22 +198,6 @@ body {
     opacity: 1;
 }
 
-/* 热门池子排名渐变背景 */
-.rank-gold {
-    background: linear-gradient(135deg, rgba(255, 215, 0, 0.15) 0%, rgba(255, 193, 7, 0.08) 100%);
-    border-color: rgba(255, 193, 7, 0.3) !important;
-}
-
-.rank-silver {
-    background: linear-gradient(135deg, rgba(192, 192, 192, 0.15) 0%, rgba(158, 158, 158, 0.08) 100%);
-    border-color: rgba(158, 158, 158, 0.3) !important;
-}
-
-.rank-bronze {
-    background: linear-gradient(135deg, rgba(205, 127, 50, 0.15) 0%, rgba(176, 141, 87, 0.08) 100%);
-    border-color: rgba(176, 141, 87, 0.3) !important;
-}
-
 /* 深色模式对比度优化 */
 .dark {
     --text-primary: rgba(255, 255, 255, 0.95);

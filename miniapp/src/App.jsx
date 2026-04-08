@@ -1134,9 +1134,6 @@ export default function App() {
             lastPollTimeRef.current = Date.now();
             setPollProgress(0);
             // 闂備礁鎲￠悷顖涚濠婂喛鑰挎い蹇撶墛閸庢垿鏌ｉ弬鍨棌闁告柡鍋撻梻浣告惈閻楀棝藝娴兼潙钃熷┑鐘叉搐閺嬩線鏌ｅΔ鈧悧鍡欑矈閿曞倹鐓涢柛鎰ㄦ櫅閸斿墎鎮┑瀣厱婵炲棙鍔曢悘杈╂偖濠靛鍋℃繛鍡楁禋濡插摜鈧鍠涙慨銈夋晬?
-            if (lastUpdatedAtRef.current !== null) {
-                hapticSelection();
-            }
             lastUpdatedAtRef.current = currentUpdatedAt;
         }
     }, [data?.updated_at, hotPoolsData?.updated_at]);
@@ -2911,7 +2908,6 @@ export default function App() {
                                 accentTheme={accentTheme}
                                 onOpenKline={setKlinePool}
                                 onOpenPosition={openPositionModal}
-                                rank={index + 1}
                                 apiBaseUrl={apiBaseUrl}
                                 chain={hotPoolsData?.chain || 'bsc'}
                             />
@@ -3077,7 +3073,6 @@ export default function App() {
                                                     pool={pool}
                                                     metric={hotPoolsSort}
                                                     previousData={null}
-                                                    rank={idx + 1}
                                                     accentTheme={accentTheme}
                                                     apiBaseUrl={apiBaseUrl}
                                                     onOpenKline={setKlinePool}
