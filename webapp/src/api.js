@@ -1043,3 +1043,16 @@ export async function walletSwapSingleExecute({ apiBaseUrl, initData, chain, wal
     signal,
   });
 }
+
+export async function fetchWalletSwapTokenMetadata({ apiBaseUrl, initData, chain, addresses, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/settings?endpoint=wallet_swap_token_metadata`;
+  const payload = { initData, addresses: Array.isArray(addresses) ? addresses : [] };
+  if (chain) payload.chain = String(chain);
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
