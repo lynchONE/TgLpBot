@@ -47,8 +47,8 @@ const CHAIN_META = {
 
 const RECENT_STORAGE_KEY = 'tg_lp_bot_swap_recent_tokens_v1';
 
-// 绉婚櫎涓嶉渶瑕佺殑鏍囩椤碉紝鍙繚鐣欏厬鎹㈠姛鑳?// const TABS = [
-//   { key: 'swap', label: '鍏戞崲', enabled: true },
+// 缂備礁顦…宄扳枍鎼淬垻鈻旂€广儱顦版禒姗€鎮烽弴姘冲厡婵炲牊鍨垮浠嬪炊閳哄﹤濮版俊鐐€楅。顔炬濠靛鐭楁い蹇撳暟缁犱粙鏌ｉ敐鍡欐噧闁告﹩鍓熼獮鎴﹀閻樺樊娼梺?// const TABS = [
+//   { key: 'swap', label: '闂佺绻戦崹璺虹暦?, enabled: true },
 // ];
 
 const SLIPPAGE_PRESETS = ['0.5', '1.0', '2.0'];
@@ -63,7 +63,7 @@ function dedupeTokens(tokens) {
     list.push({
       address,
       symbol: String(token?.symbol || shortAddress(address, 4, 4)).trim() || shortAddress(address, 4, 4),
-      name: String(token?.name || 'Custom Token').trim() || 'Custom Token',
+      name: String(token?.name || '\u81ea\u5b9a\u4e49\u4ee3\u5e01').trim() || '\u81ea\u5b9a\u4e49\u4ee3\u5e01',
       color: String(token?.color || '#7c8aa6').trim() || '#7c8aa6',
       custom: Boolean(token?.custom),
       logoUrl: String(token?.logoUrl || '').trim(),
@@ -71,7 +71,6 @@ function dedupeTokens(tokens) {
   }
   return list;
 }
-
 function loadRecentTokens() {
   try {
     const raw = window.localStorage.getItem(RECENT_STORAGE_KEY);
@@ -93,17 +92,20 @@ function saveRecentTokens(next) {
 }
 
 function buildCustomToken(address) {
+  return makeCustomToken(address);
+}
+
+function makeCustomToken(address) {
   const normalized = normalizeHexAddress(address);
   if (!normalized) return null;
   return {
     address: normalized,
     symbol: shortAddress(normalized, 4, 4),
-    name: '鑷畾涔夊悎绾﹀湴鍧€',
+    name: '\u81ea\u5b9a\u4e49\u5408\u7ea6\u5730\u5740',
     color: '#7c8aa6',
     custom: true,
   };
 }
-
 function getChainConfig(chain) {
   return CHAIN_META[chain] || CHAIN_META.bsc;
 }
@@ -120,7 +122,7 @@ function resolveTokenMeta(address, tokens) {
   const normalized = normalizeHexAddress(address);
   if (!normalized) return null;
   const pool = buildTokenLookup(tokens);
-  return pool.find((item) => item.address === normalized) || buildCustomToken(normalized);
+  return pool.find((item) => item.address === normalized) || makeCustomToken(normalized);
 }
 
 function shouldFetchTokenMetadata(token) {
@@ -341,7 +343,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       };
     };
 
-    // 鏈変綑棰濈殑浠ｅ竵
+    // 闂佸搫鐗嗛ˇ顔剧礊閹寸儑绱ｆ繝闈涚墛閻ｅ崬霉閻欏懐鍒扮紒?
     const withBalance = enrichedWalletTokens
       .filter((wt) => matchesToken(wt, keyword))
       .map((wt) => {
@@ -358,20 +360,20 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       })
       .sort((a, b) => (b.valueUSDT || 0) - (a.valueUSDT || 0));
 
-    // 鏈€杩戜娇鐢ㄧ殑浠ｅ竵(鎺掗櫎宸插湪浣欓鍒楄〃涓殑)
+    // 闂佸搫鐗冮崑鎾诲级閳哄倸鐏ｅ┑鐐叉喘閹粙濡歌閻ｅ崬霉閻欏懐鍒扮紒?闂佸湱鍎ょ敮鈥斥枍鎼粹槅鍟呴柟缁樺笚闊剙霉閿濆棛鎳囨い銈呭€垮畷姘旈崟鈹惧亾閸愨晝鈻旀い鎾跺У閻?
     const recent = recentChainTokens
       .filter((token) => !withBalance.some((item) => item.address === token.address))
       .filter((token) => matchesToken(token, keyword))
       .map(enrichToken);
 
-    // 甯哥敤浠ｅ竵(鎺掗櫎宸插湪浣欓鍜屾渶杩戝垪琛ㄤ腑鐨?
+    // 闁汇埄鍨伴幗婊堝极閵堝棛顩烽柨婵嗘噽椤?闂佸湱鍎ょ敮鈥斥枍鎼粹槅鍟呴柟缁樺笚闊剙霉閿濆棛鎳囨い銈呭€垮畷顏嗕沪閻愵兛绮柡澶嗘櫆閸ㄧ敻宕归鍡樺仒闁靛鍊涢崢顒勬煟?
     const preset = presetTokens
       .filter((token) => !withBalance.some((item) => item.address === token.address))
       .filter((token) => !recent.some((item) => item.address === token.address))
       .filter((token) => matchesToken(token, keyword))
       .map(enrichToken);
 
-    const customCandidate = applyTokenMetadata(buildCustomToken(tokenQuery), tokenMetaMap);
+    const customCandidate = applyTokenMetadata(makeCustomToken(tokenQuery), tokenMetaMap);
     return {
       customCandidate:
         customCandidate &&
@@ -413,9 +415,9 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
 
   const metadataCandidates = useMemo(() => {
     const customTokens = [
-      buildCustomToken(normalizedFromToken),
-      buildCustomToken(normalizedToToken),
-      buildCustomToken(tokenQuery),
+      makeCustomToken(normalizedFromToken),
+      makeCustomToken(normalizedToToken),
+      makeCustomToken(tokenQuery),
     ].filter(Boolean);
     return buildTokenLookup([
       ...rawPresetTokens,
@@ -493,7 +495,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     setLoadingWalletTokens(true);
     console.log('loadWalletTokens: starting', { chain, selectedWalletId });
     try {
-      // 闄嶄綆鏈€灏忎环鍊奸槇鍊硷紝鏄剧ず鏇村浠ｅ竵
+      // 闂傚倸瀚粔宕囩礊閸℃稑瀚夐柍褜鍓涙禍姝岀疀鎼达絽绠氶梺绋匡工閵堢危閸ヮ剙纾圭痪顓㈩棑缁€澶愭煛閸曨偄鈷旈柕鍥ㄥ哺瀵挳寮堕幋顓熲柤婵炲濯寸徊鐣岀博?
       const resp = await walletSwapPreview({ apiBaseUrl, initData, chain, minValueUsd: 0.001 });
       console.log('loadWalletTokens: response', resp);
       const tokens = (resp?.tokens || []).map((t) => ({
@@ -508,7 +510,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       setWalletTokens(tokens);
     } catch (error) {
       console.error('loadWalletTokens failed', error);
-      // 澶辫触鏃朵笉娓呯┖锛屼繚鐣欎箣鍓嶇殑鏁版嵁
+      // 婵犮垺鍎肩划鍓ф喆閿曞倸绫嶉柡鍫㈡暩閻熸繃绻涢幘铏櫧闁宠鐗犻弫宥囦沪閼测晝顔旈梺浼欑稻閻熴倗绮婚敐澶婄鐎广儱娲﹂悾閬嶆煛娴ｅ搫顣肩€?
       if (walletTokens.length === 0) {
         setWalletTokens([]);
       }
@@ -524,7 +526,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     setExecSuccess('');
   }, [hasInitData, loadWallets]);
 
-  // 鍙湪鎵撳紑浠ｅ竵閫夋嫨鍣ㄦ椂鍔犺浇浣欓锛岄伩鍏嶄笉蹇呰鐨?API 璋冪敤
+  // 闂佸憡鐟禍婊冿耿椤忓牆绠ラ柟鎯х－绾捐霉閻欏懐鍒扮紒鏃傛暬閺屽懏寰勭€ｎ亶浠撮梺闈╃祷閸斿秴顪冮崒鐐茬闁绘鍎ょ粊鏉棵归敐鍡欐噰妞ゃ倕鍊块弫宥呯暆閸曨亞绱氶梺绋跨箰缁夊磭绮径搴ｇ杸闁告盯鍋婂ú锝夋煟?API 闁荤姴顑呴崯浼村极?
   useEffect(() => {
     if (!hasInitData || !selectedWalletId || !pickerOpen) return;
     // Avoid refetching while the current token cache is still valid.
@@ -551,11 +553,10 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     }
     if (fromAddress === toAddress) {
       setQuoteInfo(null);
-      setQuoteError('From and to tokens must be different.');
+      setQuoteError('\u5356\u51fa\u4ee3\u5e01\u548c\u4e70\u5165\u4ee3\u5e01\u4e0d\u80fd\u76f8\u540c');
       setQuoting(false);
       return;
     }
-
     setQuoting(true);
     setQuoteError('');
     setQuoteInfo(null);
@@ -595,7 +596,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       setQuoting(false);
       setQuoteInfo(null);
       if (normalizedFromToken && normalizedToToken && normalizedFromToken === normalizedToToken) {
-        setQuoteError('From and to tokens must be different.');
+        setQuoteError('\u5356\u51fa\u4ee3\u5e01\u548c\u4e70\u5165\u4ee3\u5e01\u4e0d\u80fd\u76f8\u540c');
       } else {
         setQuoteError('');
       }
@@ -670,11 +671,11 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
         amount,
         slippagePercent: Number.parseFloat(slippage),
       });
-      setExecSuccess(resp?.tx_hash || 'Transaction submitted');
+      setExecSuccess(resp?.tx_hash || '\\u4ea4\\u6613\\u5df2\\u63d0\\u4ea4');
       setShowConfirm(false);
       setAmount('');
       setQuoteInfo(null);
-      // 娓呯┖浣欓缂撳瓨锛屼笅娆℃墦寮€閫夋嫨鍣ㄦ椂閲嶆柊鍔犺浇
+      // 濠电偞鎸搁幊鎰板煘閺嶃劍濯存繛鍡樻惄閺夎櫣绱撻崒娑欏碍闁宦板姂閺佸秶浠﹂懖鈺冩啴濠电偛妫岄崜婵囨櫠閿曗偓椤曪綁鍩€椤掑嫭鐒诲璺侯儏椤忋儵鏌涢敐鍐ㄥ婵＄偛鍊块弻灞筋吋閸℃鍘愰梺鍛婃⒒婵儳霉?
       setWalletTokens([]);
     } catch (error) {
       setExecError(String(error?.message || error));
@@ -720,32 +721,32 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     !executing
   );
 
-  let submitLabel = '棰勮鍏戞崲';
-  if (!selectedWalletId) submitLabel = walletLoading ? '鍔犺浇閽卞寘涓?..' : '璇峰厛閫夋嫨閽卞寘';
-  else if (!normalizedFromToken) submitLabel = '閫夋嫨鍗栧嚭浠ｅ竵';
-  else if (!amount || Number(amount) <= 0) submitLabel = '杈撳叆鍗栧嚭鏁伴噺';
-  else if (!normalizedToToken) submitLabel = '閫夋嫨涔板叆浠ｅ竵';
-  else if (normalizedFromToken === normalizedToToken) submitLabel = '涓嶈兘鍏戞崲鍚屼竴浠ｅ竵';
-  else if (quoting) submitLabel = '鑾峰彇鏈€浼樻姤浠蜂腑...';
-  else if (!quoteInfo) submitLabel = '绛夊緟鎶ヤ环';
+  let submitLabel = '\u9884\u89c8\u5151\u6362';
+  if (!selectedWalletId) submitLabel = walletLoading ? '\u52a0\u8f7d\u94b1\u5305\u4e2d...' : '\u8bf7\u5148\u9009\u62e9\u94b1\u5305';
+  else if (!normalizedFromToken) submitLabel = '\u9009\u62e9\u5356\u51fa\u4ee3\u5e01';
+  else if (!amount || Number(amount) <= 0) submitLabel = '\u8f93\u5165\u5356\u51fa\u6570\u91cf';
+  else if (!normalizedToToken) submitLabel = '\u9009\u62e9\u4e70\u5165\u4ee3\u5e01';
+  else if (normalizedFromToken === normalizedToToken) submitLabel = '\u4e0d\u80fd\u5151\u6362\u540c\u4e00\u4ee3\u5e01';
+  else if (quoting) submitLabel = '\u83b7\u53d6\u6700\u4f18\u62a5\u4ef7\u4e2d...';
+  else if (!quoteInfo) submitLabel = '\u7b49\u5f85\u62a5\u4ef7';
 
   return (
     <PanelShell
-      title="Swap"
-      subtitle="Swap any supported token"
+      title={'\u4e00\u952e\u5151\u6362'}
+      subtitle={'\u5feb\u901f\u5151\u6362\u4efb\u610f\u652f\u6301\u7684\u4ee3\u5e01'}
       icon={RefreshCw}
     >
       <div className="swap-panel">
         <div className="swap-panel-shell">
           <div className="swap-panel-topbar">
             <div style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)' }}>
-              鍏戞崲
+              {'\u5151\u6362'}
             </div>
             <button
               type="button"
               className={`swap-settings-trigger${showSettings ? ' active' : ''}`}
               onClick={() => setShowSettings((current) => !current)}
-              aria-label="閰嶇疆鍏戞崲鍙傛暟"
+              aria-label={'\u914d\u7f6e\u5151\u6362\u53c2\u6570'}
             >
               <Settings size={17} />
             </button>
@@ -755,7 +756,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
             <div className="swap-settings-card">
               <div className="swap-settings-grid">
                 <label className="swap-settings-field">
-                  <span>鎵ц閽卞寘</span>
+                  <span>{'\u6267\u884c\u94b1\u5305'}</span>
                   <div className="swap-custom-select-wrap">
                     <button
                       type="button"
@@ -766,10 +767,10 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                       <Wallet size={14} />
                       <span className="swap-custom-select-value">
                         {selectedWallet
-                          ? `${selectedWallet.name || '閽卞寘'} 路 ${shortAddress(selectedWallet.address)}`
+                          ? `${selectedWallet.name || '\u94b1\u5305'} \u00b7 ${shortAddress(selectedWallet.address)}`
                           : walletLoading
-                            ? '鍔犺浇閽卞寘涓?..'
-                            : '鏆傛棤鍙敤閽卞寘'}
+                            ? '\u52a0\u8f7d\u94b1\u5305\u4e2d...'
+                            : '\u6682\u65e0\u53ef\u7528\u94b1\u5305'}
                       </span>
                       <ChevronDown size={14} style={{ marginLeft: 'auto', opacity: 0.6 }} />
                     </button>
@@ -787,7 +788,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                           >
                             <div className="swap-custom-select-option-main">
                               <span className="swap-custom-select-option-name">
-                                {wallet.name || '閽卞寘'}
+                                {wallet.name || '\u94b1\u5305'}
                               </span>
                               <span className="swap-custom-select-option-address">
                                 {shortAddress(wallet.address)}
@@ -808,7 +809,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                 </label>
 
                 <label className="swap-settings-field">
-                  <span>婊戠偣涓婇檺</span>
+                  <span>{'\u6ed1\u70b9\u4e0a\u9650'}</span>
                   <div className="swap-slippage-input-group">
                     <div className="swap-slippage-pills">
                       {SLIPPAGE_PRESETS.map((item) => (
@@ -845,17 +846,17 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
               <div className="swap-context-pill strong">{chainConfig.label}</div>
               <div className="swap-context-pill">
                 {selectedWallet
-                  ? `${selectedWallet.name || '閽卞寘'} 路 ${shortAddress(selectedWallet.address)}`
+                  ? `${selectedWallet.name || '\u94b1\u5305'} \u00b7 ${shortAddress(selectedWallet.address)}`
                   : walletLoading
-                    ? '鍔犺浇閽卞寘涓?..'
-                    : '鏈€夋嫨閽卞寘'}
+                    ? '\u52a0\u8f7d\u94b1\u5305\u4e2d...'
+                    : '\u672a\u9009\u62e9\u94b1\u5305'}
               </div>
             </div>
 
             <div className="swap-card-group">
               <div className="swap-card">
                 <div className="swap-card-head">
-                  <span>鍑哄敭</span>
+                  <span>{'\u5356\u51fa'}</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     {fromTokenBalance && Number(fromTokenBalance) > 0 ? (
                       <button
@@ -879,9 +880,10 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                           e.currentTarget.style.background = 'rgba(var(--accent-rgb), 0.12)';
                         }}
                       >
-                        鏈€澶?                      </button>
+                        {'\u6700\u5927'}
+                      </button>
                     ) : null}
-                    <small>{fromTokenMeta ? shortAddress(fromTokenMeta.address, 8, 6) : '鏀寔绮樿创浠绘剰鍚堢害鍦板潃'}</small>
+                    <small>{fromTokenMeta ? shortAddress(fromTokenMeta.address, 8, 6) : '\u652f\u6301\u7c98\u8d34\u4efb\u610f\u5408\u7ea6\u5730\u5740'}</small>
                   </div>
                 </div>
                 <div className="swap-card-body">
@@ -896,7 +898,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                   />
                   <TokenButton
                     token={fromTokenMeta}
-                    placeholder="閫夋嫨浠ｅ竵"
+                    placeholder={'\u9009\u62e9\u4ee3\u5e01'}
                     onClick={() => {
                       setPickerSide('from');
                       setPickerOpen(true);
@@ -904,11 +906,11 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                   />
                 </div>
                 <div className="swap-card-foot">
-                  <span>{fromTokenMeta ? fromTokenMeta.name : '鏈€夋嫨鍗栧嚭浠ｅ竵'}</span>
+                  <span>{fromTokenMeta ? fromTokenMeta.name : '\u672a\u9009\u62e9\u5356\u51fa\u4ee3\u5e01'}</span>
                   <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     {fromTokenBalance && Number(fromTokenBalance) > 0 ? (
                       <>
-                        <span style={{ color: 'var(--positive)' }}>浣欓:</span>
+                        <span style={{ color: 'var(--positive)' }}>{'\u4f59\u989d:'}</span>
                         <span style={{ fontWeight: '700' }}>{formatTokenAmount(fromTokenBalance)}</span>
                       </>
                     ) : selectedWallet ? (
@@ -924,15 +926,15 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                 type="button"
                 className="swap-switch-button"
                 onClick={handleReverse}
-                aria-label="鍒囨崲鍏戞崲鏂瑰悜"
+                aria-label={'\u5207\u6362\u5151\u6362\u65b9\u5411'}
               >
                 <ArrowDown size={18} strokeWidth={2.5} />
               </button>
 
               <div className="swap-card muted">
                 <div className="swap-card-head">
-                  <span>璐拱</span>
-                  <small>{toTokenMeta ? shortAddress(toTokenMeta.address, 8, 6) : '閫夋嫨鐩爣浠ｅ竵'}</small>
+                  <span>{'\u4e70\u5165'}</span>
+                  <small>{toTokenMeta ? shortAddress(toTokenMeta.address, 8, 6) : '\u9009\u62e9\u76ee\u6807\u4ee3\u5e01'}</small>
                 </div>
                 <div className="swap-card-body">
                   <div className={`swap-quote-output${quoting ? ' loading' : ''}`}>
@@ -940,7 +942,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                   </div>
                   <TokenButton
                     token={toTokenMeta}
-                    placeholder="閫夋嫨浠ｅ竵"
+                    placeholder={'\u9009\u62e9\u4ee3\u5e01'}
                     onClick={() => {
                       setPickerSide('to');
                       setPickerOpen(true);
@@ -948,8 +950,8 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                   />
                 </div>
                 <div className="swap-card-foot">
-                  <span>{toTokenMeta ? toTokenMeta.name : '鏈€夋嫨鐩爣浠ｅ竵'}</span>
-                  <span>鏈€灏戝埌璐?{minReceived}</span>
+                  <span>{toTokenMeta ? toTokenMeta.name : '\u672a\u9009\u62e9\u76ee\u6807\u4ee3\u5e01'}</span>
+                  <span>{`\u6700\u5c11\u5230\u8d26 ${minReceived}`}</span>
                 </div>
               </div>
             </div>
@@ -958,37 +960,37 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
               {quoteInfo ? (
                 <>
                   <DetailRow
-                    label="棰勪及鍒拌处"
+                    label={'\u9884\u4f30\u5230\u8d26'}
                     value={`${selectedQuoteAmount} ${toTokenMeta?.symbol || ''}`.trim()}
                     emphasis
                   />
-                  <DetailRow label="Minimum received" value={`${minReceived} ${toTokenMeta?.symbol || ''}`.trim()} />
-                  <DetailRow label="棰勪及 Gas" value={formatGas(quoteInfo?.estimated_gas)} />
-                  <DetailRow label="婊戠偣璁剧疆" value={`${slippage || '1.0'}%`} />
+                  <DetailRow label={'\u6700\u5c11\u5230\u8d26'} value={`${minReceived} ${toTokenMeta?.symbol || ''}`.trim()} />
+                  <DetailRow label={'\u9884\u4f30 Gas'} value={formatGas(quoteInfo?.estimated_gas)} />
+                  <DetailRow label={'\u6ed1\u70b9\u8bbe\u7f6e'} value={`${slippage || '1.0'}%`} />
                 </>
               ) : (
                 <div className="swap-summary-empty">
-                  <strong>Enter an amount to get a quote</strong>
-                  <span>Select a token or paste an ERC-20 contract address.</span>
+                  <strong>{'\u8f93\u5165\u6570\u91cf\u540e\u81ea\u52a8\u62a5\u4ef7'}</strong>
+                  <span>{'\u9009\u62e9\u4ee3\u5e01\uff0c\u6216\u76f4\u63a5\u7c98\u8d34 ERC-20 \u5408\u7ea6\u5730\u5740\u3002'}</span>
                 </div>
               )}
             </div>
 
             {quoteError ? (
               <div className="panel-error">
-                <strong>鎶ヤ环澶辫触:</strong> {quoteError}
+                <strong>{'\u62a5\u4ef7\u5931\u8d25:'}</strong> {quoteError}
               </div>
             ) : null}
 
             {execError ? (
               <div className="panel-error">
-                <strong>鍏戞崲澶辫触:</strong> {execError}
+                <strong>{'\u5151\u6362\u5931\u8d25:'}</strong> {execError}
               </div>
             ) : null}
 
             {execSuccess ? (
               <div className="panel-success swap-success-card">
-                <strong>Swap request submitted</strong>
+                <strong>{'\u5151\u6362\u8bf7\u6c42\u5df2\u63d0\u4ea4'}</strong>
                 <span>{execSuccess}</span>
               </div>
             ) : null}
@@ -999,7 +1001,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
               disabled={!isReadyToSwap}
               onClick={() => setShowConfirm(true)}
             >
-              {executing ? '鎵ц涓?..' : submitLabel}
+              {executing ? '\u6267\u884c\u4e2d...' : submitLabel}
             </button>
           </div>
         </div>
@@ -1019,8 +1021,8 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
             <div className="swap-token-modal" onClick={(event) => event.stopPropagation()}>
               <div className="swap-modal-header">
                 <div>
-                  <div className="swap-modal-kicker">閫夋嫨浠ｅ竵</div>
-                  <h3>{pickerSide === 'from' ? '閫夋嫨鍗栧嚭浠ｅ竵' : '閫夋嫨涔板叆浠ｅ竵'}</h3>
+                  <div className="swap-modal-kicker">{'\u9009\u62e9\u4ee3\u5e01'}</div>
+                  <h3>{pickerSide === 'from' ? '\u9009\u62e9\u5356\u51fa\u4ee3\u5e01' : '\u9009\u62e9\u4e70\u5165\u4ee3\u5e01'}</h3>
                 </div>
                 <button type="button" className="swap-modal-close" onClick={() => setPickerOpen(false)}>
                   <X size={18} />
@@ -1033,12 +1035,12 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                   type="text"
                   value={tokenQuery}
                   onChange={(event) => setTokenQuery(event.target.value)}
-                  placeholder="鎼滅储绗﹀彿锛屾垨绮樿创鍚堢害鍦板潃"
+                  placeholder={'\u641c\u7d22\u4ee3\u5e01\u540d\u79f0\u3001\u7b26\u53f7\uff0c\u6216\u7c98\u8d34\u5408\u7ea6\u5730\u5740'}
                   autoFocus
                 />
                 {loadingWalletTokens && walletTokens.length > 0 ? (
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                    鍒锋柊涓?..
+                    {'\u5237\u65b0\u4e2d...'}
                   </div>
                 ) : null}
               </div>
@@ -1060,14 +1062,14 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
               <div className="swap-token-list">
                 {loadingWalletTokens && walletTokens.length === 0 ? (
                   <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-                    <div style={{ marginBottom: '8px' }}>馃攧 鍔犺浇閽卞寘浣欓涓?..</div>
-                    <div style={{ fontSize: '11px', opacity: '0.7' }}>棣栨鍔犺浇鍙兘闇€瑕佸嚑绉掗挓</div>
+                    <div style={{ marginBottom: '8px' }}>{'\u6b63\u5728\u52a0\u8f7d\u94b1\u5305\u4f59\u989d...'}</div>
+                    <div style={{ fontSize: '11px', opacity: '0.7' }}>{'\u9996\u6b21\u52a0\u8f7d\u53ef\u80fd\u9700\u8981\u51e0\u79d2\u949f'}</div>
                   </div>
                 ) : null}
 
                 {pickerTokens.customCandidate ? (
                   <div className="swap-token-section">
-                    <div className="swap-token-section-title">鑷畾涔夊湴鍧€</div>
+                    <div className="swap-token-section-title">{'\u81ea\u5b9a\u4e49\u5730\u5740'}</div>
                     <button
                       type="button"
                       className="swap-token-row"
@@ -1078,14 +1080,14 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                         <strong>{pickerTokens.customCandidate.symbol}</strong>
                         <span>{pickerTokens.customCandidate.address}</span>
                       </div>
-                      <span className="swap-token-tag">绮樿创浣跨敤</span>
+                      <span className="swap-token-tag">{'\u7c98\u8d34\u4f7f\u7528'}</span>
                     </button>
                   </div>
                 ) : null}
 
                 {pickerTokens.withBalance && pickerTokens.withBalance.length > 0 ? (
                   <div className="swap-token-section">
-                    <div className="swap-token-section-title">閽卞寘浣欓</div>
+                    <div className="swap-token-section-title">{'\u94b1\u5305\u4f59\u989d'}</div>
                     {pickerTokens.withBalance.map((token) => (
                       <button
                         key={token.address}
@@ -1100,7 +1102,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                             {token.name}
                             {token.valueUSDT > 0 ? (
                               <span style={{ color: '#a0a8ba', fontSize: '11px' }}>
-                                鈮?${token.valueUSDT.toFixed(2)}
+                                {`\u2248 $${token.valueUSDT.toFixed(2)}`}
                               </span>
                             ) : null}
                           </span>
@@ -1117,7 +1119,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
 
                 {pickerTokens.recent.length ? (
                   <div className="swap-token-section">
-                    <div className="swap-token-section-title">Recent</div>
+                    <div className="swap-token-section-title">{'\u6700\u8fd1\u4f7f\u7528'}</div>
                     {pickerTokens.recent.map((token) => (
                       <button
                         key={token.address}
@@ -1136,7 +1138,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                               {formatTokenAmount(token.balance)}
                             </span>
                           ) : null}
-                          <span className="swap-token-tag">Recent</span>
+                          <span className="swap-token-tag">{'\u6700\u8fd1'}</span>
                         </div>
                       </button>
                     ))}
@@ -1145,7 +1147,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
 
                 {pickerTokens.preset.length ? (
                   <div className="swap-token-section">
-                    <div className="swap-token-section-title">甯哥敤浠ｅ竵</div>
+                    <div className="swap-token-section-title">{'\u5e38\u7528\u4ee3\u5e01'}</div>
                     {pickerTokens.preset.map((token) => (
                       <button
                         key={token.address}
@@ -1173,8 +1175,8 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
 
                 {!loadingWalletTokens && !pickerTokens.customCandidate && !pickerTokens.withBalance?.length && !pickerTokens.recent.length && !pickerTokens.preset.length ? (
                   <div className="swap-token-empty">
-                    <strong>娌℃湁鍖归厤缁撴灉</strong>
-                    <span>You can also paste an ERC-20 contract address.</span>
+                    <strong>{'\u6ca1\u6709\u5339\u914d\u7ed3\u679c'}</strong>
+                    <span>{'\u4e5f\u53ef\u4ee5\u76f4\u63a5\u7c98\u8d34 ERC-20 \u5408\u7ea6\u5730\u5740\u3002'}</span>
                   </div>
                 ) : null}
               </div>
@@ -1187,8 +1189,8 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
             <div className="swap-confirm-modal" onClick={(event) => event.stopPropagation()}>
               <div className="swap-modal-header">
                 <div>
-                  <div className="swap-modal-kicker">Review swap</div>
-                  <h3>纭鍏戞崲</h3>
+                  <div className="swap-modal-kicker">{'\u786e\u8ba4\u5151\u6362'}</div>
+                  <h3>{'\u786e\u8ba4\u5151\u6362'}</h3>
                 </div>
                 <button
                   type="button"
@@ -1203,9 +1205,9 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
               <div className="swap-confirm-route">
                 <div className="swap-confirm-flow">
                   <div className="swap-confirm-token">
-                    <TokenGlyph token={fromTokenMeta || buildCustomToken(normalizedFromToken)} />
+                    <TokenGlyph token={fromTokenMeta || makeCustomToken(normalizedFromToken)} />
                     <div>
-                      <span>鏀粯</span>
+                      <span>{'\u652f\u4ed8'}</span>
                       <strong>{amount} {fromTokenMeta?.symbol || shortAddress(normalizedFromToken, 4, 4)}</strong>
                     </div>
                   </div>
@@ -1213,9 +1215,9 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                     <ArrowDown size={16} />
                   </div>
                   <div className="swap-confirm-token">
-                    <TokenGlyph token={toTokenMeta || buildCustomToken(normalizedToToken)} />
+                    <TokenGlyph token={toTokenMeta || makeCustomToken(normalizedToToken)} />
                     <div>
-                      <span>鑾峰緱</span>
+                      <span>{'\u83b7\u5f97'}</span>
                       <strong>{selectedQuoteAmount} {toTokenMeta?.symbol || shortAddress(normalizedToToken, 4, 4)}</strong>
                     </div>
                   </div>
@@ -1223,9 +1225,9 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
               </div>
 
               <div className="swap-confirm-details">
-                <DetailRow label="Minimum received" value={`${minReceived} ${toTokenMeta?.symbol || ''}`.trim()} />
-                <DetailRow label="婊戠偣瀹瑰繊" value={`${slippage || '1.0'}%`} />
-                <DetailRow label="棰勪及 Gas" value={formatGas(quoteInfo?.estimated_gas)} />
+                <DetailRow label={'\u6700\u5c11\u5230\u8d26'} value={`${minReceived} ${toTokenMeta?.symbol || ''}`.trim()} />
+                <DetailRow label={'\u6ed1\u70b9\u5bb9\u5fcd'} value={`${slippage || '1.0'}%`} />
+                <DetailRow label={'\u9884\u4f30 Gas'} value={formatGas(quoteInfo?.estimated_gas)} />
               </div>
 
               <div className="swap-confirm-actions">
@@ -1235,7 +1237,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                   onClick={() => setShowConfirm(false)}
                   disabled={executing}
                 >
-                  鍙栨秷
+                  {'\u53d6\u6d88'}
                 </button>
                 <button
                   type="button"
@@ -1243,7 +1245,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                   onClick={handleSwap}
                   disabled={executing}
                 >
-                  {executing ? '鎻愪氦涓?..' : '鎻愪氦浜ゆ槗'}
+                  {executing ? '\u63d0\u4ea4\u4e2d...' : '\u63d0\u4ea4\u4ea4\u6613'}
                 </button>
               </div>
             </div>
