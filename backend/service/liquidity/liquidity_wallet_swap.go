@@ -227,6 +227,10 @@ func (s *LiquidityService) ScanWalletTokensForSwap(userID uint, minValueUSDT flo
 }
 
 func (s *LiquidityService) ScanWalletTokensForSwapForChain(userID uint, chain string, minValueUSDT float64) ([]WalletTokenInfo, error) {
+	return s.ScanWalletTokensForSwapForChainWithWallet(userID, 0, chain, minValueUSDT)
+}
+
+func (s *LiquidityService) ScanWalletTokensForSwapForChainWithWallet(userID uint, walletID uint, chain string, minValueUSDT float64) ([]WalletTokenInfo, error) {
 	if config.AppConfig == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
@@ -247,7 +251,7 @@ func (s *LiquidityService) ScanWalletTokensForSwapForChain(userID uint, chain st
 		return nil, fmt.Errorf("stable address not set for chain=%s", exec.Chain())
 	}
 
-	wallet, err := s.walletService.GetDefaultWallet(userID)
+	wallet, err := s.walletService.ResolveTaskWallet(userID, walletID, "")
 	if err != nil {
 		return nil, fmt.Errorf("获取钱包失败: %w", err)
 	}

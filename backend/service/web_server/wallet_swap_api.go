@@ -18,6 +18,7 @@ import (
 
 type walletSwapPreviewRequest struct {
 	InitData    string  `json:"initData"`
+	WalletID    uint    `json:"wallet_id,omitempty"`
 	Chain       string  `json:"chain,omitempty"`
 	MinValueUSD float64 `json:"min_value_usd,omitempty"`
 }
@@ -93,11 +94,11 @@ func (s *Server) handleWalletSwapPreview(w http.ResponseWriter, r *http.Request)
 	}
 
 	// 优先使用 OKX API 获取余额（快速）
-	rows, err := s.getTokenBalancesFromOKX(user.ID, chain, minVal)
+	rows, err := s.getTokenBalancesFromOKX(user.ID, req.WalletID, chain, minVal)
 	if err != nil {
 		// 如果 OKX API 失败，回退到链上扫描
 		lpService := liquidity.NewLiquidityService()
-		tokens, scanErr := lpService.ScanWalletTokensForSwapForChain(user.ID, chain, minVal)
+		tokens, scanErr := lpService.ScanWalletTokensForSwapForChainWithWallet(user.ID, req.WalletID, chain, minVal)
 		if scanErr != nil {
 			http.Error(w, "scan failed: "+scanErr.Error(), http.StatusInternalServerError)
 			return
@@ -121,12 +122,12 @@ func (s *Server) handleWalletSwapPreview(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-func (s *Server) getTokenBalancesFromOKX(userID uint, chain string, minValueUSD float64) ([]walletSwapTokenRow, error) {
+func (s *Server) getTokenBalancesFromOKX(userID uint, walletID uint, chain string, minValueUSD float64) ([]walletSwapTokenRow, error) {
 	// 获取用户默认钱包地址
 	walletService := wallet.NewWalletService()
-	wlt, err := walletService.GetDefaultWallet(userID)
+	wlt, err := walletService.ResolveTaskWallet(userID, walletID, "")
 	if err != nil || wlt == nil {
-		return nil, fmt.Errorf("no default wallet")
+		return nil, fmt.Errorf("wallet not found")
 	}
 
 	// 转换链 ID

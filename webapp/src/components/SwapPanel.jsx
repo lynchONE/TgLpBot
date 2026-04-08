@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  fetchGlobalConfig,
   fetchWallets,
   fetchWalletSwapTokenMetadata,
   walletSwapSingleExecute,
@@ -258,6 +259,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   const [toToken, setToToken] = useState(() => chainConfig.stable.address);
   const [amount, setAmount] = useState('');
   const [slippage, setSlippage] = useState('1.0');
+  const [slippageDirty, setSlippageDirty] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [walletDropdownOpen, setWalletDropdownOpen] = useState(false);
 
@@ -276,18 +278,26 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   const [recentTokens, setRecentTokens] = useState(() => loadRecentTokens());
 
   const [walletTokens, setWalletTokens] = useState([]);
+  const [walletTokensKey, setWalletTokensKey] = useState('');
   const [loadingWalletTokens, setLoadingWalletTokens] = useState(false);
   const [tokenMetaMap, setTokenMetaMap] = useState({});
 
   const quoteTimeout = useRef(null);
   const quoteAbortRef = useRef(null);
   const quoteSeqRef = useRef(0);
+  const walletSelectRef = useRef(null);
+  const walletTokensAbortRef = useRef(null);
+  const walletTokensSeqRef = useRef(0);
 
   const normalizedFromToken = normalizeHexAddress(fromToken);
   const normalizedToToken = normalizeHexAddress(toToken);
   const selectedWallet = useMemo(
     () => wallets.find((item) => String(item.id) === String(selectedWalletId)) || null,
     [wallets, selectedWalletId]
+  );
+  const currentWalletTokenKey = useMemo(
+    () => (selectedWalletId ? `${chain}:${selectedWalletId}` : ''),
+    [chain, selectedWalletId]
   );
   const rawPresetTokens = useMemo(() => getPresetTokens(chain), [chain]);
   const rawRecentChainTokens = useMemo(
@@ -410,8 +420,42 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     setExecSuccess('');
     setShowConfirm(false);
     setWalletTokens([]);
+    setWalletTokensKey('');
     setTokenMetaMap({});
   }, [chainConfig.stable.address]);
+
+  useEffect(() => {
+    setSlippageDirty(false);
+  }, [initData]);
+
+  useEffect(() => {
+    if (!showSettings) {
+      setWalletDropdownOpen(false);
+    }
+  }, [showSettings]);
+
+  useEffect(() => {
+    if (!hasInitData || !initData || slippageDirty) return undefined;
+    const controller = new AbortController();
+    fetchGlobalConfig({
+      apiBaseUrl,
+      initData,
+      signal: controller.signal,
+    })
+      .then((resp) => {
+        if (controller.signal.aborted) return;
+        const cfg = resp?.config || resp || {};
+        const nextSlippage = Number(cfg?.slippage_tolerance);
+        if (Number.isFinite(nextSlippage) && nextSlippage > 0) {
+          setSlippage(String(nextSlippage));
+        }
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        console.error('fetchGlobalConfig failed', error);
+      });
+    return () => controller.abort();
+  }, [apiBaseUrl, hasInitData, initData, slippageDirty]);
 
   const metadataCandidates = useMemo(() => {
     const customTokens = [
@@ -488,36 +532,56 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   }, [apiBaseUrl, initData, chain]);
 
   const loadWalletTokens = useCallback(async () => {
-    if (!initData || !selectedWalletId) {
-      console.log('loadWalletTokens: missing initData or selectedWalletId', { initData: !!initData, selectedWalletId });
-      return;
+    if (!initData || !selectedWalletId) return;
+    const requestKey = `${chain}:${selectedWalletId}`;
+    const seq = walletTokensSeqRef.current + 1;
+    walletTokensSeqRef.current = seq;
+    if (walletTokensAbortRef.current) {
+      walletTokensAbortRef.current.abort();
     }
+    const controller = new AbortController();
+    walletTokensAbortRef.current = controller;
     setLoadingWalletTokens(true);
-    console.log('loadWalletTokens: starting', { chain, selectedWalletId });
     try {
       // 闂傚倸瀚粔宕囩礊閸℃稑瀚夐柍褜鍓涙禍姝岀疀鎼达絽绠氶梺绋匡工閵堢危閸ヮ剙纾圭痪顓㈩棑缁€澶愭煛閸曨偄鈷旈柕鍥ㄥ哺瀵挳寮堕幋顓熲柤婵炲濯寸徊鐣岀博?
-      const resp = await walletSwapPreview({ apiBaseUrl, initData, chain, minValueUsd: 0.001 });
-      console.log('loadWalletTokens: response', resp);
-      const tokens = (resp?.tokens || []).map((t) => ({
-        address: normalizeHexAddress(t.address),
-        symbol: t.symbol,
-        name: t.symbol,
-        balance: t.balance,
-        valueUSDT: t.value_usdt || 0,
-        logoUrl: t.logo_url || '',
-      }));
-      console.log('loadWalletTokens: processed tokens', tokens);
+      const resp = await walletSwapPreview({
+        apiBaseUrl,
+        initData,
+        chain,
+        walletId: selectedWalletId,
+        minValueUsd: 0.001,
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted || walletTokensSeqRef.current !== seq) return;
+      const tokens = (resp?.tokens || []).map((t) => {
+        const address = normalizeHexAddress(t.address);
+        if (!address) return null;
+        return {
+          address,
+          symbol: t.symbol,
+          name: t.symbol,
+          balance: t.balance,
+          valueUSDT: t.value_usdt || 0,
+          logoUrl: t.logo_url || '',
+        };
+      }).filter(Boolean);
       setWalletTokens(tokens);
+      setWalletTokensKey(requestKey);
     } catch (error) {
+      if (controller.signal.aborted || walletTokensSeqRef.current !== seq) return;
       console.error('loadWalletTokens failed', error);
       // 婵犮垺鍎肩划鍓ф喆閿曞倸绫嶉柡鍫㈡暩閻熸繃绻涢幘铏櫧闁宠鐗犻弫宥囦沪閼测晝顔旈梺浼欑稻閻熴倗绮婚敐澶婄鐎广儱娲﹂悾閬嶆煛娴ｅ搫顣肩€?
-      if (walletTokens.length === 0) {
-        setWalletTokens([]);
-      }
+      setWalletTokens([]);
+      setWalletTokensKey(requestKey);
     } finally {
-      setLoadingWalletTokens(false);
+      if (walletTokensAbortRef.current === controller) {
+        walletTokensAbortRef.current = null;
+      }
+      if (walletTokensSeqRef.current === seq) {
+        setLoadingWalletTokens(false);
+      }
     }
-  }, [apiBaseUrl, initData, chain, selectedWalletId, walletTokens.length]);
+  }, [apiBaseUrl, initData, chain, selectedWalletId]);
 
   useEffect(() => {
     if (!hasInitData) return;
@@ -528,11 +592,37 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
 
   // 闂佸憡鐟禍婊冿耿椤忓牆绠ラ柟鎯х－绾捐霉閻欏懐鍒扮紒鏃傛暬閺屽懏寰勭€ｎ亶浠撮梺闈╃祷閸斿秴顪冮崒鐐茬闁绘鍎ょ粊鏉棵归敐鍡欐噰妞ゃ倕鍊块弫宥呯暆閸曨亞绱氶梺绋跨箰缁夊磭绮径搴ｇ杸闁告盯鍋婂ú锝夋煟?API 闁荤姴顑呴崯浼村极?
   useEffect(() => {
-    if (!hasInitData || !selectedWalletId || !pickerOpen) return;
-    // Avoid refetching while the current token cache is still valid.
-    if (walletTokens.length > 0) return;
+    if (walletTokensAbortRef.current) {
+      walletTokensAbortRef.current.abort();
+      walletTokensAbortRef.current = null;
+    }
+    setWalletDropdownOpen(false);
+    setWalletTokens([]);
+    setWalletTokensKey('');
+  }, [currentWalletTokenKey]);
+
+  useEffect(() => {
+    if (!hasInitData || !currentWalletTokenKey || loadingWalletTokens) return;
+    if (walletTokensKey === currentWalletTokenKey) return;
     loadWalletTokens();
-  }, [hasInitData, selectedWalletId, pickerOpen, walletTokens.length, loadWalletTokens]);
+  }, [currentWalletTokenKey, hasInitData, loadWalletTokens, loadingWalletTokens, walletTokensKey]);
+
+  useEffect(() => () => {
+    if (walletTokensAbortRef.current) {
+      walletTokensAbortRef.current.abort();
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!walletDropdownOpen) return undefined;
+    const handlePointerDown = (event) => {
+      if (walletSelectRef.current && !walletSelectRef.current.contains(event.target)) {
+        setWalletDropdownOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', handlePointerDown);
+    return () => window.removeEventListener('mousedown', handlePointerDown);
+  }, [walletDropdownOpen]);
 
   const doQuote = useCallback(async ({
     amt,
@@ -677,6 +767,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       setQuoteInfo(null);
       // 濠电偞鎸搁幊鎰板煘閺嶃劍濯存繛鍡樻惄閺夎櫣绱撻崒娑欏碍闁宦板姂閺佸秶浠﹂懖鈺冩啴濠电偛妫岄崜婵囨櫠閿曗偓椤曪綁鍩€椤掑嫭鐒诲璺侯儏椤忋儵鏌涢敐鍐ㄥ婵＄偛鍊块弻灞筋吋閸℃鍘愰梺鍛婃⒒婵儳霉?
       setWalletTokens([]);
+      setWalletTokensKey('');
     } catch (error) {
       setExecError(String(error?.message || error));
       setShowConfirm(false);
@@ -757,11 +848,11 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
               <div className="swap-settings-grid">
                 <label className="swap-settings-field">
                   <span>{'\u6267\u884c\u94b1\u5305'}</span>
-                  <div className="swap-custom-select-wrap">
+                  <div className="swap-custom-select-wrap" ref={walletSelectRef}>
                     <button
                       type="button"
                       className="swap-custom-select-trigger"
-                      onClick={() => setWalletDropdownOpen(!walletDropdownOpen)}
+                      onClick={() => setWalletDropdownOpen((current) => !current)}
                       disabled={walletLoading || !wallets.length}
                     >
                       <Wallet size={14} />
@@ -816,8 +907,11 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                         <button
                           key={item}
                           type="button"
-                          className={`swap-slippage-pill${String(slippage) === item ? ' active' : ''}`}
-                          onClick={() => setSlippage(item)}
+                          className={`swap-slippage-pill${Number(slippage) === Number(item) ? ' active' : ''}`}
+                          onClick={() => {
+                            setSlippage(item);
+                            setSlippageDirty(true);
+                          }}
                         >
                           {item}%
                         </button>
@@ -829,7 +923,10 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                         min="0"
                         step="0.1"
                         value={slippage}
-                        onChange={(event) => setSlippage(event.target.value)}
+                        onChange={(event) => {
+                          setSlippage(event.target.value);
+                          setSlippageDirty(true);
+                        }}
                         className="swap-slippage-input"
                         placeholder="1.0"
                       />
@@ -1006,12 +1103,11 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
           </div>
         </div>
 
-        {(pickerOpen || walletDropdownOpen) ? (
+        {pickerOpen ? (
           <div
             className="swap-overlay-backdrop"
             onClick={() => {
               setPickerOpen(false);
-              setWalletDropdownOpen(false);
             }}
           />
         ) : null}
