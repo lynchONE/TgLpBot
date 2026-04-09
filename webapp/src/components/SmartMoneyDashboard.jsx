@@ -206,7 +206,6 @@ function getPositionAmountSummary(position, preview) {
 }
 
 const POOL_CARD_RANGE_LIMIT = 5;
-const POSITION_PREVIEW_STALE_MS = 30000;
 const POSITION_PREVIEW_BATCH_SIZE = 4;
 const POSITION_LIST_PAGE_SIZE = 6;
 const WALLET_LIST_PAGE_SIZE = 10;
@@ -224,26 +223,16 @@ function getPositionSelectionKey(position) {
 
 function useSmartMoneyPositionPreviewMap(apiBaseUrl, positions) {
     const [previewMap, setPreviewMap] = useState({});
-    const previewRef = useRef(previewMap);
-
-    useEffect(() => {
-        previewRef.current = previewMap;
-    }, [previewMap]);
 
     useEffect(() => {
         const rows = Array.isArray(positions) ? positions : [];
-        if (rows.length === 0) return undefined;
-
-        const now = Date.now();
-        const pending = rows.filter((position) => {
-            const key = getPositionSelectionKey(position);
-            if (!key) return false;
-            const cached = previewRef.current[key];
-            return !cached || now - Number(cached.fetchedAt || 0) >= POSITION_PREVIEW_STALE_MS;
-        });
-        if (pending.length === 0) return undefined;
+        if (rows.length === 0) {
+            setPreviewMap({});
+            return undefined;
+        }
 
         let cancelled = false;
+        setPreviewMap({});
 
         const loadPreview = async (position) => {
             const key = getPositionSelectionKey(position);
@@ -284,8 +273,8 @@ function useSmartMoneyPositionPreviewMap(apiBaseUrl, positions) {
         };
 
         (async () => {
-            for (let index = 0; index < pending.length && !cancelled; index += POSITION_PREVIEW_BATCH_SIZE) {
-                const batch = pending.slice(index, index + POSITION_PREVIEW_BATCH_SIZE);
+            for (let index = 0; index < rows.length && !cancelled; index += POSITION_PREVIEW_BATCH_SIZE) {
+                const batch = rows.slice(index, index + POSITION_PREVIEW_BATCH_SIZE);
                 await Promise.all(batch.map((position) => loadPreview(position)));
             }
         })();
@@ -1377,6 +1366,7 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
         () => getRefreshIntervalMs(refreshInterval),
         [refreshInterval]
     );
+    const positionPreviews = useSmartMoneyPositionPreviewMap(apiBaseUrl, positions);
     const loadInfo = useCallback(() => (
         fetchSMStats({ apiBaseUrl, address: addr }).then(setInfo).catch(() => { })
     ), [apiBaseUrl, addr]);
@@ -1504,7 +1494,7 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
                                     <ProtocolBadge protocol={g.protocol} />
                                     <span className="smd-pool-group-count">{g.positions.length} 个仓位</span>
                                 </div>
-                                <button className="smd-link" onClick={() => onSelectPool({
+                                <button className="smd-link smd-action-chip" onClick={() => onSelectPool({
                                     pool_address: g.pool_address, token0_symbol: g.token0_symbol, token1_symbol: g.token1_symbol, trading_pair: g.trading_pair, display_token_address: g.display_token_address, display_token_symbol: g.display_token_symbol, display_token_logo_url: g.display_token_logo_url, fee_tier: g.fee_tier, protocol: g.protocol,
                                 })}>池子详情 <ExternalLink size={10} style={{ display: 'inline', verticalAlign: 'middle' }} /></button>
                             </div>
@@ -1518,6 +1508,7 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
                                                 <div className="smd-pos-card-compact-main">
                                                     <PositionAmountSummary
                                                         position={pos}
+                                                        preview={positionPreviews[getPositionSelectionKey(pos)]}
                                                         compact
                                                     />
                                                     <span className={`smd-pos-card-prices${pos.status === 'closed' ? ' is-closed' : ''}`}>
@@ -1527,6 +1518,7 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
                                                 </div>
                                                 <PositionPreviewMetrics
                                                     position={pos}
+                                                    preview={positionPreviews[getPositionSelectionKey(pos)]}
                                                     compact
                                                 />
                                             </div>

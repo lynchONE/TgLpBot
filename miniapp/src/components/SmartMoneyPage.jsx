@@ -70,6 +70,12 @@ function getBrandLinkClass(brand) {
         : 'text-[#dfff8b] hover:text-[#efffb8]';
 }
 
+function getBrandActionChipClass(brand) {
+    return brand?.key === 'emerald'
+        ? 'rounded-full border border-emerald-400/25 bg-emerald-500/12 px-2.5 py-1 font-semibold text-emerald-200 hover:bg-emerald-500/18'
+        : 'rounded-full border border-[#bcff2f]/25 bg-[#bcff2f]/14 px-2.5 py-1 font-semibold text-[#efffb8] hover:bg-[#bcff2f]/20';
+}
+
 function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
     const hasInitData = Boolean(String(initData || '').trim());
     const [loading, setLoading] = useState(hasInitData);
@@ -633,7 +639,6 @@ function formatRangePercentPlain(value) {
 }
 
 const POOL_CARD_RANGE_LIMIT = 5;
-const POSITION_PREVIEW_STALE_MS = 30000;
 const POSITION_PREVIEW_BATCH_SIZE = 4;
 const POSITION_LIST_PAGE_SIZE = 6;
 const WALLET_LIST_PAGE_SIZE = 10;
@@ -662,26 +667,16 @@ function formatPreviewUsd(value) {
 
 function useSmartMoneyPositionPreviewMap(apiBaseUrl, positions) {
     const [previewMap, setPreviewMap] = useState({});
-    const previewRef = useRef(previewMap);
-
-    useEffect(() => {
-        previewRef.current = previewMap;
-    }, [previewMap]);
 
     useEffect(() => {
         const rows = Array.isArray(positions) ? positions : [];
-        if (rows.length === 0) return undefined;
-
-        const now = Date.now();
-        const pending = rows.filter((position) => {
-            const key = getPositionSelectionKey(position);
-            if (!key) return false;
-            const cached = previewRef.current[key];
-            return !cached || now - Number(cached.fetchedAt || 0) >= POSITION_PREVIEW_STALE_MS;
-        });
-        if (pending.length === 0) return undefined;
+        if (rows.length === 0) {
+            setPreviewMap({});
+            return undefined;
+        }
 
         let cancelled = false;
+        setPreviewMap({});
 
         const loadPreview = async (position) => {
             const key = getPositionSelectionKey(position);
@@ -697,6 +692,7 @@ function useSmartMoneyPositionPreviewMap(apiBaseUrl, positions) {
                     ...prev,
                     [key]: {
                         fetchedAt: Date.now(),
+                        rangeText: data?.in_range === true ? '区间内' : data?.in_range === false ? '已离开区间' : '',
                         feeUsd: Number(data?.totals?.fee_usd ?? 0),
                         runningSince: String(data?.running_since || position?.opened_at || '').trim(),
                     },
@@ -715,8 +711,8 @@ function useSmartMoneyPositionPreviewMap(apiBaseUrl, positions) {
         };
 
         (async () => {
-            for (let index = 0; index < pending.length && !cancelled; index += POSITION_PREVIEW_BATCH_SIZE) {
-                const batch = pending.slice(index, index + POSITION_PREVIEW_BATCH_SIZE);
+            for (let index = 0; index < rows.length && !cancelled; index += POSITION_PREVIEW_BATCH_SIZE) {
+                const batch = rows.slice(index, index + POSITION_PREVIEW_BATCH_SIZE);
                 await Promise.all(batch.map((position) => loadPreview(position)));
             }
         })();
@@ -991,6 +987,54 @@ function PositionPreviewMetrics({ position, preview, compact = false }) {
             <span className={`inline-flex min-w-[104px] items-center justify-between gap-2 whitespace-nowrap rounded-full border px-2.5 py-1 text-[10px] ${pnlMetricClass}`}>
                 <strong className={`font-semibold ${pnlLabelClass}`}>绝对收益</strong>
                 <span className="text-right tabular-nums">{pnlText}</span>
+            </span>
+            <span className={`inline-flex min-w-[104px] items-center justify-between gap-2 whitespace-nowrap rounded-full border px-2.5 py-1 text-[10px] ${runtimeMetricClass}`}>
+                <strong className={`font-semibold ${runtimeLabelClass}`}>运行时间</strong>
+                <span className="text-right tabular-nums">{runningText}</span>
+            </span>
+        </div>
+    );
+}
+
+function PositionPreviewMetricsLite({ position, preview, compact = false }) {
+    const rangeText = String(preview?.rangeText || '').trim() || '--';
+    const rangeMetricClass = rangeText === '区间内'
+        ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+        : rangeText === '已离开区间'
+            ? 'border-red-500/20 bg-red-500/10 text-red-300'
+            : 'border-white/[0.05] bg-black/20 text-zinc-300';
+    const rangeLabelClass = rangeText === '区间内'
+        ? 'text-emerald-200'
+        : rangeText === '已离开区间'
+            ? 'text-red-200'
+            : 'text-zinc-100';
+    const feeValue = Number(preview?.feeUsd);
+    const feeText = Number.isFinite(feeValue) ? formatPreviewUsd(preview?.feeUsd) : '--';
+    const feeMetricClass = Number.isFinite(feeValue)
+        ? (feeValue > 0
+            ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+            : feeValue < 0
+                ? 'border-red-500/20 bg-red-500/10 text-red-300'
+                : 'border-white/[0.05] bg-black/20 text-zinc-300')
+        : 'border-white/[0.05] bg-black/20 text-zinc-300';
+    const feeLabelClass = Number.isFinite(feeValue)
+        ? (feeValue > 0 ? 'text-emerald-200' : feeValue < 0 ? 'text-red-200' : 'text-zinc-100')
+        : 'text-zinc-100';
+    const runningText = formatDurationFrom(preview?.runningSince || position?.opened_at) || '--';
+    const runtimeMetricClass = runningText !== '--'
+        ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+        : 'border-white/[0.05] bg-black/20 text-zinc-300';
+    const runtimeLabelClass = runningText !== '--' ? 'text-emerald-200' : 'text-zinc-100';
+
+    return (
+        <div className={`mt-2 flex flex-wrap items-stretch gap-2 ${compact ? 'pt-2 border-t border-white/[0.05]' : ''}`}>
+            <span className={`inline-flex min-w-[104px] items-center justify-between gap-2 whitespace-nowrap rounded-full border px-2.5 py-1 text-[10px] ${rangeMetricClass}`}>
+                <strong className={`font-semibold ${rangeLabelClass}`}>区间状态</strong>
+                <span className="text-right tabular-nums">{rangeText}</span>
+            </span>
+            <span className={`inline-flex min-w-[104px] items-center justify-between gap-2 whitespace-nowrap rounded-full border px-2.5 py-1 text-[10px] ${feeMetricClass}`}>
+                <strong className={`font-semibold ${feeLabelClass}`}>手续费</strong>
+                <span className="text-right tabular-nums">{feeText}</span>
             </span>
             <span className={`inline-flex min-w-[104px] items-center justify-between gap-2 whitespace-nowrap rounded-full border px-2.5 py-1 text-[10px] ${runtimeMetricClass}`}>
                 <strong className={`font-semibold ${runtimeLabelClass}`}>运行时间</strong>
@@ -1600,7 +1644,7 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
                                             </a>
                                         ) : null}
                                     </div>
-                                    <PositionPreviewMetrics
+                                    <PositionPreviewMetricsLite
                                         position={pos}
                                         preview={positionPreviews[getPositionSelectionKey(pos)]}
                                     />
@@ -1860,6 +1904,7 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
     const [page, setPage] = useState(1);
     const [loading, setLoading] = useState(true);
     const [selectedPosition, setSelectedPosition] = useState(null);
+    const positionPreviews = useSmartMoneyPositionPreviewMap(apiBaseUrl, positions);
     useEffect(() => {
         fetchSMStats({ apiBaseUrl, address: walletAddress }).then(setWalletInfo).catch(() => { });
     }, [apiBaseUrl, walletAddress]);
@@ -1998,6 +2043,7 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
                             key={group.pool_address}
                             group={group}
                             brand={brand}
+                            positionPreviews={positionPreviews}
                             selectedPositionKey={selectedPositionKey}
                             onOpenPositionDetail={setSelectedPosition}
                             detailPanel={selectedPosition ? (
@@ -2028,7 +2074,7 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
     );
 }
 
-function PoolGroupCard({ group, onSelectPool, onOpenPositionDetail, brand, selectedPositionKey = '', detailPanel = null }) {
+function PoolGroupCard({ group, onSelectPool, onOpenPositionDetail, brand, positionPreviews, selectedPositionKey = '', detailPanel = null }) {
     const [collapsed, setCollapsed] = useState(!group.hasOpen);
     const openCount = group.positions.filter(p => p.status === 'open').length;
     const closedCount = group.positions.filter(p => p.status === 'closed').length;
@@ -2057,7 +2103,7 @@ function PoolGroupCard({ group, onSelectPool, onOpenPositionDetail, brand, selec
                     </span>
                     <button
                         type="button"
-                        className={`inline-flex items-center gap-1 text-[11px] ${getBrandLinkClass(brand)}`}
+                        className={`inline-flex items-center gap-1 text-[11px] ${getBrandActionChipClass(brand)}`}
                         onClick={e => { e.stopPropagation(); onSelectPool(); }}
                     >
                         池子详情 <ExternalLink size={10} />
@@ -2106,8 +2152,9 @@ function PoolGroupCard({ group, onSelectPool, onOpenPositionDetail, brand, selec
                                             </a>
                                         ) : null}
                                     </div>
-                                    <PositionPreviewMetrics
+                                    <PositionPreviewMetricsLite
                                         position={pos}
+                                        preview={positionPreviews?.[getPositionSelectionKey(pos)]}
                                         compact
                                     />
                                 </div>
