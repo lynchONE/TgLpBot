@@ -9,12 +9,16 @@ import {
 } from '../api';
 import PanelShell from './PanelShell';
 import { normalizeHexAddress, shortAddress } from '../utils';
-import { ArrowDown, ChevronDown, RefreshCw, Search, Settings, Wallet, X, Check } from 'lucide-react';
+import { ArrowDown, ChevronDown, RefreshCw, Search, Wallet, X, Check } from 'lucide-react';
+import bnbLogo from '../img/bnb.svg';
+import baseLogo from '../img/base.svg';
 
 const CHAIN_META = {
   bsc: {
     label: 'BNB Chain',
     nativeSymbol: 'BNB',
+    icon: bnbLogo,
+    iconAlt: 'BNB Chain',
     stable: {
       symbol: 'USDT',
       name: 'Tether USD',
@@ -32,6 +36,8 @@ const CHAIN_META = {
   base: {
     label: 'Base',
     nativeSymbol: 'ETH',
+    icon: baseLogo,
+    iconAlt: 'Base',
     stable: {
       symbol: 'USDC',
       name: 'USD Coin',
@@ -50,6 +56,7 @@ const RECENT_STORAGE_KEY = 'tg_lp_bot_swap_recent_tokens_v1';
 const AUTO_QUOTE_REFRESH_MS = 8000;
 const NATIVE_PSEUDO_ADDRESS = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 const MIN_WALLET_TOKEN_VALUE_USD = 0.1;
+const NETWORK_KEYS = ['bsc', 'base'];
 
 // 缂備礁顦…宄扳枍鎼淬垻鈻旂€广儱顦版禒姗€鎮烽弴姘冲厡婵炲牊鍨垮浠嬪炊閳哄﹤濮版俊鐐€楅。顔炬濠靛鐭楁い蹇撳暟缁犱粙鏌ｉ敐鍡欐噧闁告﹩鍓熼獮鎴﹀閻樺樊娼梺?// const TABS = [
 //   { key: 'swap', label: '闂佺绻戦崹璺虹暦?, enabled: true },
@@ -293,7 +300,7 @@ function DetailRow({ label, value, emphasis = false }) {
   );
 }
 
-export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = 'bsc' }) {
+export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = 'bsc', onChainChange }) {
   const chainConfig = getChainConfig(chain);
 
   const [wallets, setWallets] = useState([]);
@@ -305,7 +312,6 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   const [amount, setAmount] = useState('');
   const [slippage, setSlippage] = useState('1.0');
   const [slippageDirty, setSlippageDirty] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [walletDropdownOpen, setWalletDropdownOpen] = useState(false);
 
   const [quoteInfo, setQuoteInfo] = useState(null);
@@ -348,6 +354,10 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   const currentWalletTokenKey = useMemo(
     () => (selectedWalletId ? `${chain}:${selectedWalletId}` : ''),
     [chain, selectedWalletId]
+  );
+  const chainOptions = useMemo(
+    () => NETWORK_KEYS.map((key) => ({ key, ...CHAIN_META[key] })).filter((item) => item?.key),
+    []
   );
   const hasLoadedWalletTokens = useMemo(
     () => walletTokensKey === currentWalletTokenKey,
@@ -418,6 +428,10 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   const quoteRequestKey = useMemo(
     () => [chain, selectedWalletId, normalizedFromToken, normalizedToToken, amount, slippage].join('|'),
     [amount, chain, normalizedFromToken, normalizedToToken, selectedWalletId, slippage]
+  );
+  const selectedWalletAddressLabel = useMemo(
+    () => (selectedWallet ? shortAddress(selectedWallet.address, 8, 6) : '\u672a\u9009\u62e9\u94b1\u5305'),
+    [selectedWallet]
   );
 
   const pickerTokens = useMemo(() => {
@@ -517,12 +531,6 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   useEffect(() => {
     setSlippageDirty(false);
   }, [initData]);
-
-  useEffect(() => {
-    if (!showSettings) {
-      setWalletDropdownOpen(false);
-    }
-  }, [showSettings]);
 
   useEffect(() => {
     if (!hasInitData || !initData || slippageDirty) return undefined;
@@ -948,6 +956,42 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     setExecSuccess('');
   };
 
+  const handleChainSelect = useCallback((nextChain) => {
+    if (!nextChain || nextChain === chain) return;
+    setWalletDropdownOpen(false);
+    if (typeof onChainChange === 'function') {
+      onChainChange(nextChain);
+    }
+  }, [chain, onChainChange]);
+
+  const renderNetworkButtons = useCallback((compact = false) => (
+    <div className={`swap-network-list${compact ? ' compact' : ''}`}>
+      {chainOptions.map((option) => {
+        const active = option.key === chain;
+        return (
+          <button
+            key={option.key}
+            type="button"
+            className={`swap-network-button${active ? ' active' : ''}${compact ? ' compact' : ''}`}
+            onClick={() => handleChainSelect(option.key)}
+            aria-pressed={active}
+            title={option.label}
+          >
+            <span className="swap-network-icon-wrap">
+              <img src={option.icon} alt={option.iconAlt || option.label} className="swap-network-icon" />
+            </span>
+            {!compact ? (
+              <span className="swap-network-copy">
+                <strong>{option.label}</strong>
+                <small>{option.nativeSymbol}</small>
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  ), [chain, chainOptions, handleChainSelect]);
+
   const isReadyToSwap = Boolean(
     selectedWalletId &&
     normalizedFromToken &&
@@ -980,130 +1024,125 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       <div className="swap-panel">
         <div className="swap-panel-shell">
           <div className="swap-panel-topbar">
-            <div style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)' }}>
-              {'\u5151\u6362'}
+            <div>
+              <div style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)' }}>
+                {'\u5151\u6362'}
+              </div>
+              <div className="swap-panel-topnote">
+                {'\u7f51\u7edc\u3001\u94b1\u5305\u4e0e\u6ed1\u70b9\u76f4\u63a5\u5728\u4e0b\u65b9\u8bbe\u7f6e'}
+              </div>
             </div>
-            <button
-              type="button"
-              className={`swap-settings-trigger${showSettings ? ' active' : ''}`}
-              onClick={() => setShowSettings((current) => !current)}
-              aria-label={'\u914d\u7f6e\u5151\u6362\u53c2\u6570'}
-            >
-              <Settings size={17} />
-            </button>
           </div>
 
-          {showSettings ? (
-            <div className="swap-settings-card">
-              <div className="swap-settings-grid">
-                <label className="swap-settings-field">
-                  <span>{'\u6267\u884c\u94b1\u5305'}</span>
-                  <div className="swap-custom-select-wrap" ref={walletSelectRef}>
-                    <button
-                      type="button"
-                      className="swap-custom-select-trigger"
-                      onClick={() => setWalletDropdownOpen((current) => !current)}
-                      disabled={walletLoading || !wallets.length}
-                    >
-                      <Wallet size={14} />
-                      <span className="swap-custom-select-value">
-                        {selectedWallet
-                          ? `${selectedWallet.name || '\u94b1\u5305'} \u00b7 ${shortAddress(selectedWallet.address)}`
-                          : walletLoading
-                            ? '\u52a0\u8f7d\u94b1\u5305\u4e2d...'
-                            : '\u6682\u65e0\u53ef\u7528\u94b1\u5305'}
-                      </span>
-                      <ChevronDown size={14} style={{ marginLeft: 'auto', opacity: 0.6 }} />
-                    </button>
-                    {walletDropdownOpen && wallets.length > 0 ? (
-                      <div className="swap-custom-select-dropdown">
-                        {wallets.map((wallet) => (
-                          <button
-                            key={wallet.id}
-                            type="button"
-                            className={`swap-custom-select-option${String(wallet.id) === String(selectedWalletId) ? ' active' : ''}`}
-                            onClick={() => {
-                              setSelectedWalletId(String(wallet.id));
-                              setWalletDropdownOpen(false);
-                            }}
-                          >
-                            <div className="swap-custom-select-option-main">
-                              <span className="swap-custom-select-option-name">
-                                {wallet.name || '\u94b1\u5305'}
-                              </span>
-                              <span className="swap-custom-select-option-address">
-                                {shortAddress(wallet.address)}
-                              </span>
-                            </div>
-                            <div className="swap-custom-select-option-balance">
-                              <span>{chainConfig.nativeSymbol}</span>
-                              <span>{formatNativeBalance(wallet.native_balance)}</span>
-                            </div>
-                            {String(wallet.id) === String(selectedWalletId) ? (
-                              <Check size={16} className="swap-custom-select-option-check" />
-                            ) : null}
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                </label>
+          <div className="swap-controls-card">
+            <div className="swap-control-block">
+              <div className="swap-control-label-row">
+                <span className="swap-control-label">{'\u7f51\u7edc'}</span>
+                <strong>{chainConfig.label}</strong>
+              </div>
+              {renderNetworkButtons(false)}
+            </div>
 
-                <label className="swap-settings-field">
-                  <span>{'\u6ed1\u70b9\u4e0a\u9650'}</span>
-                  <div className="swap-slippage-input-group">
-                    <div className="swap-slippage-pills">
-                      {SLIPPAGE_PRESETS.map((item) => (
+            <div className="swap-control-grid">
+              <div className="swap-control-block">
+                <span className="swap-control-label">{'\u6267\u884c\u94b1\u5305'}</span>
+                <div className="swap-custom-select-wrap" ref={walletSelectRef}>
+                  <button
+                    type="button"
+                    className="swap-custom-select-trigger"
+                    onClick={() => setWalletDropdownOpen((current) => !current)}
+                    disabled={walletLoading || !wallets.length}
+                  >
+                    <Wallet size={14} />
+                    <span className="swap-custom-select-value">
+                      {selectedWallet
+                        ? `${selectedWallet.name || '\u94b1\u5305'} \u00b7 ${shortAddress(selectedWallet.address, 8, 6)}`
+                        : walletLoading
+                          ? '\u52a0\u8f7d\u94b1\u5305\u4e2d...'
+                          : '\u6682\u65e0\u53ef\u7528\u94b1\u5305'}
+                    </span>
+                    <ChevronDown size={14} style={{ marginLeft: 'auto', opacity: 0.6 }} />
+                  </button>
+                  {walletDropdownOpen && wallets.length > 0 ? (
+                    <div className="swap-custom-select-dropdown">
+                      {wallets.map((wallet) => (
                         <button
-                          key={item}
+                          key={wallet.id}
                           type="button"
-                          className={`swap-slippage-pill${Number(slippage) === Number(item) ? ' active' : ''}`}
+                          className={`swap-custom-select-option${String(wallet.id) === String(selectedWalletId) ? ' active' : ''}`}
                           onClick={() => {
-                            setSlippage(item);
-                            setSlippageDirty(true);
+                            setSelectedWalletId(String(wallet.id));
+                            setWalletDropdownOpen(false);
                           }}
                         >
-                          {item}%
+                          <div className="swap-custom-select-option-main">
+                            <span className="swap-custom-select-option-name">
+                              {wallet.name || '\u94b1\u5305'}
+                            </span>
+                            <span className="swap-custom-select-option-address">
+                              {shortAddress(wallet.address, 8, 6)}
+                            </span>
+                          </div>
+                          <div className="swap-custom-select-option-balance">
+                            <span>{chainConfig.nativeSymbol}</span>
+                            <span>{formatNativeBalance(wallet.native_balance)}</span>
+                          </div>
+                          {String(wallet.id) === String(selectedWalletId) ? (
+                            <Check size={16} className="swap-custom-select-option-check" />
+                          ) : null}
                         </button>
                       ))}
                     </div>
-                    <div className="swap-slippage-input-wrap">
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.1"
-                        value={slippage}
-                        onChange={(event) => {
-                          setSlippage(event.target.value);
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="swap-control-block">
+                <div className="swap-control-label-row">
+                  <span className="swap-control-label">{'\u6ed1\u70b9'}</span>
+                  <strong>{`${slippage || '1.0'}%`}</strong>
+                </div>
+                <div className="swap-slippage-input-group">
+                  <div className="swap-slippage-pills">
+                    {SLIPPAGE_PRESETS.map((item) => (
+                      <button
+                        key={item}
+                        type="button"
+                        className={`swap-slippage-pill${Number(slippage) === Number(item) ? ' active' : ''}`}
+                        onClick={() => {
+                          setSlippage(item);
                           setSlippageDirty(true);
                         }}
-                        className="swap-slippage-input"
-                        placeholder="1.0"
-                      />
-                      <span>%</span>
-                    </div>
+                      >
+                        {item}%
+                      </button>
+                    ))}
                   </div>
-                </label>
+                  <div className="swap-slippage-input-wrap">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      value={slippage}
+                      onChange={(event) => {
+                        setSlippage(event.target.value);
+                        setSlippageDirty(true);
+                      }}
+                      className="swap-slippage-input"
+                      placeholder="1.0"
+                    />
+                    <span>%</span>
+                  </div>
+                </div>
               </div>
             </div>
-          ) : null}
+          </div>
 
           <div className="swap-surface">
-            <div className="swap-context-row">
-              <div className="swap-context-pill strong">{chainConfig.label}</div>
-              <div className="swap-context-pill">
-                {selectedWallet
-                  ? `${selectedWallet.name || '\u94b1\u5305'} \u00b7 ${shortAddress(selectedWallet.address)}`
-                  : walletLoading
-                    ? '\u52a0\u8f7d\u94b1\u5305\u4e2d...'
-                    : '\u672a\u9009\u62e9\u94b1\u5305'}
-              </div>
-            </div>
-
             <div className="swap-card-group">
               <div className="swap-card">
                 <div className="swap-card-head">
-                  <span>{'\u5356\u51fa'}</span>
+                  <span>{'From'}</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     {fromTokenBalance && Number(fromTokenBalance) > 0 ? (
                       <button
@@ -1130,7 +1169,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                         {'\u6700\u5927'}
                       </button>
                     ) : null}
-                    <small>{fromTokenMeta ? shortAddress(fromTokenMeta.address, 8, 6) : '\u652f\u6301\u7c98\u8d34\u4efb\u610f\u5408\u7ea6\u5730\u5740'}</small>
+                    <small>{selectedWalletAddressLabel}</small>
                   </div>
                 </div>
                 <div className="swap-card-body">
@@ -1180,8 +1219,8 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
 
               <div className="swap-card muted">
                 <div className="swap-card-head">
-                  <span>{'\u4e70\u5165'}</span>
-                  <small>{toTokenMeta ? shortAddress(toTokenMeta.address, 8, 6) : '\u9009\u62e9\u76ee\u6807\u4ee3\u5e01'}</small>
+                  <span>{'To'}</span>
+                  <small>{selectedWalletAddressLabel}</small>
                 </div>
                 <div className="swap-card-body">
                   <div className={`swap-quote-output${quoting ? ' loading' : ''}${refreshingQuote ? ' refreshing' : ''}`}>
@@ -1296,6 +1335,14 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                     {'\u5237\u65b0\u4e2d...'}
                   </div>
                 ) : null}
+              </div>
+
+              <div className="swap-picker-network-row">
+                <div className="swap-control-label-row">
+                  <span className="swap-control-label">{'\u70ed\u95e8\u94fe'}</span>
+                  <strong>{chainConfig.label}</strong>
+                </div>
+                {renderNetworkButtons(true)}
               </div>
 
               <div className="swap-quick-picks">

@@ -3053,6 +3053,7 @@ export default function App() {
         initData={initData}
         hasInitData={hasInitData}
         chain={chain}
+        onChainChange={setChain}
       />
     ),
 

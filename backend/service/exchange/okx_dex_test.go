@@ -99,3 +99,45 @@ func TestGetMarketTokenBasicInfos_UsesOfficialEndpoint(t *testing.T) {
 		t.Fatalf("unexpected response row: %+v", resp.Data[0])
 	}
 }
+
+func TestGetAllTokenBalances_UsesChainsParameter(t *testing.T) {
+	svc := &OKXDexService{
+		apiURL:     "https://www.okx.com/api/v6/dex/aggregator",
+		apiKey:     "test-key",
+		secretKey:  "test-secret",
+		passphrase: "test-pass",
+		client: &http.Client{Transport: stubTransport{fn: func(req *http.Request) (*http.Response, error) {
+			if req.Method != http.MethodGet {
+				t.Fatalf("expected GET request, got %s", req.Method)
+			}
+			if req.URL.Scheme != "https" || req.URL.Host != "web3.okx.com" {
+				t.Fatalf("unexpected request host: %s", req.URL.String())
+			}
+			if got := req.URL.Query().Get("chains"); got != "56" {
+				t.Fatalf("expected chains=56, got %q", got)
+			}
+			if got := req.URL.Query().Get("chainIndex"); got != "" {
+				t.Fatalf("expected chainIndex to be absent, got %q", got)
+			}
+			if got := req.URL.Query().Get("address"); got != "0x1111111111111111111111111111111111111111" {
+				t.Fatalf("unexpected address: %q", got)
+			}
+			if req.Header.Get("OK-ACCESS-SIGN") == "" {
+				t.Fatalf("expected OK-ACCESS-SIGN header")
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"code":"0","data":[{"tokenAssets":[]}]}`)),
+				Header:     make(http.Header),
+			}, nil
+		}}},
+	}
+
+	resp, err := svc.GetAllTokenBalances("56", "0x1111111111111111111111111111111111111111")
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if len(resp.Data) != 1 {
+		t.Fatalf("expected one data row, got %+v", resp.Data)
+	}
+}

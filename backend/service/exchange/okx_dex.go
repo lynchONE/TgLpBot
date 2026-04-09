@@ -540,9 +540,9 @@ func (s *OKXDexService) GetApproveSpender(chainID string, tokenAddress string) (
 }
 
 // GetAllTokenBalances 获取钱包所有代币余额
-func (s *OKXDexService) GetAllTokenBalances(chainIndex, address string) (*AllTokenBalancesResponse, error) {
+func (s *OKXDexService) GetAllTokenBalances(chains, address string) (*AllTokenBalancesResponse, error) {
 	query := url.Values{}
-	query.Set(s.chainQueryKey(), strings.TrimSpace(chainIndex))
+	query.Set("chains", strings.TrimSpace(chains))
 	query.Set("address", strings.TrimSpace(address))
 
 	endpoint := fmt.Sprintf("https://web3.okx.com/api/v6/dex/balance/all-token-balances-by-address?%s", query.Encode())
