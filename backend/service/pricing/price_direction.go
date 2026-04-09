@@ -23,6 +23,22 @@ var stableSymbols = map[string]struct{}{
 	"DAI":  {},
 }
 
+var quoteLikeSymbols = map[string]struct{}{
+	"USDT":  {},
+	"USDC":  {},
+	"BUSD":  {},
+	"DAI":   {},
+	"FRAX":  {},
+	"USDD":  {},
+	"FDUSD": {},
+	"WBNB":  {},
+	"WETH":  {},
+	"WSOL":  {},
+	"BNB":   {},
+	"ETH":   {},
+	"SOL":   {},
+}
+
 // StableSideFromTask returns which token is considered the stable quote.
 // -1: unknown, 0: token0, 1: token1.
 func StableSideFromTask(task *models.StrategyTask) int {
@@ -40,15 +56,15 @@ func TickPercentagesFromStablePercentages(task *models.StrategyTask, stableLower
 		return 0, 0
 	}
 
-	side := stableSideFromTask(task)
+	side := priceQuoteSideFromTask(task)
 	if side != 0 {
-		// Stable is token1 (or unknown): stable price direction matches tick price direction.
+		// Quote-like side is token1 (or unknown): displayed price direction matches tick price direction.
 		return stableLowerPct, stableUpperPct
 	}
 
-	// Stable is token0: stable price = 1 / tickPrice.
-	// When stable price goes UP by U, tickPrice goes DOWN by U/(100+U).
-	// When stable price goes DOWN by L, tickPrice goes UP by L/(100-L).
+	// Quote-like side is token0: displayed price = 1 / tickPrice.
+	// When displayed price goes UP by U, tickPrice goes DOWN by U/(100+U).
+	// When displayed price goes DOWN by L, tickPrice goes UP by L/(100-L).
 	tickLowerPct = (stableUpperPct / (100.0 + stableUpperPct)) * 100.0
 	tickUpperPct = (stableLowerPct / (100.0 - stableLowerPct)) * 100.0
 
@@ -66,15 +82,15 @@ func StablePercentagesFromTickPercentages(task *models.StrategyTask, tickLowerPc
 		return 0, 0
 	}
 
-	side := stableSideFromTask(task)
+	side := priceQuoteSideFromTask(task)
 	if side != 0 {
-		// Stable is token1 (or unknown): stable price direction matches tick price direction.
+		// Quote-like side is token1 (or unknown): displayed price direction matches tick price direction.
 		return tickLowerPct, tickUpperPct
 	}
 
-	// Stable is token0: stable price = 1 / tickPrice.
-	// When tickPrice goes UP by u, stable price goes DOWN by u/(100+u).
-	// When tickPrice goes DOWN by d, stable price goes UP by d/(100-d).
+	// Quote-like side is token0: displayed price = 1 / tickPrice.
+	// When tickPrice goes UP by u, displayed price goes DOWN by u/(100+u).
+	// When tickPrice goes DOWN by d, displayed price goes UP by d/(100-d).
 	stableLowerPct = (tickUpperPct / (100.0 + tickUpperPct)) * 100.0
 	if tickLowerPct >= 100 {
 		stableUpperPct = 0
@@ -97,6 +113,12 @@ func isStableSymbol(sym string) bool {
 // IsStableSymbol exposes stable-coin symbol checks to other packages.
 func IsStableSymbol(sym string) bool {
 	return isStableSymbol(sym)
+}
+
+func isQuoteLikeSymbol(sym string) bool {
+	sym = strings.ToUpper(strings.TrimSpace(sym))
+	_, ok := quoteLikeSymbols[sym]
+	return ok
 }
 
 func isStableAddress(chain string, addr string) bool {
@@ -132,6 +154,20 @@ func isStableAddress(chain string, addr string) bool {
 // IsStableAddress exposes stable-coin address checks to other packages.
 func IsStableAddress(chain string, addr string) bool {
 	return isStableAddress(chain, addr)
+}
+
+func isWrappedNativeAddress(chain string, addr string) bool {
+	if config.AppConfig == nil {
+		return false
+	}
+	chain = config.NormalizeChain(chain)
+	cc, ok := config.AppConfig.GetChainConfig(chain)
+	if !ok {
+		return false
+	}
+	addr = strings.ToLower(strings.TrimSpace(addr))
+	wrapped := strings.ToLower(strings.TrimSpace(cc.WrappedNativeAddress))
+	return wrapped != "" && common.IsHexAddress(wrapped) && addr == wrapped
 }
 
 const DefaultTokenDecimals = 18
@@ -193,6 +229,43 @@ func stableSideFromTask(task *models.StrategyTask) int {
 		return 1
 	}
 	return stableUnknown
+}
+
+func priceQuoteSideFromTask(task *models.StrategyTask) int {
+	if task == nil {
+		return stableUnknown
+	}
+
+	chain := config.NormalizeChain(task.Chain)
+	token0Addr, token1Addr := resolveTokenAddresses(task)
+	if isStableAddress(chain, token0Addr) {
+		return 0
+	}
+	if isStableAddress(chain, token1Addr) {
+		return 1
+	}
+
+	wrapped0 := isWrappedNativeAddress(chain, token0Addr)
+	wrapped1 := isWrappedNativeAddress(chain, token1Addr)
+	switch {
+	case wrapped0 && !wrapped1:
+		return 0
+	case wrapped1 && !wrapped0:
+		return 1
+	}
+
+	sym0 := strings.ToUpper(strings.TrimSpace(task.Token0Symbol))
+	sym1 := strings.ToUpper(strings.TrimSpace(task.Token1Symbol))
+	quote0 := isQuoteLikeSymbol(sym0)
+	quote1 := isQuoteLikeSymbol(sym1)
+	switch {
+	case quote0 && !quote1:
+		return 0
+	case quote1 && !quote0:
+		return 1
+	default:
+		return stableUnknown
+	}
 }
 
 func GetTokenDecimals(chain string, addr string) int {
@@ -317,7 +390,7 @@ func PriceDirectionFromTicks(task *models.StrategyTask, tickLower, tickUpper, cu
 	priceUp = isAbove
 	priceDown = isBelow
 
-	if stableSideFromTask(task) == 0 {
+	if priceQuoteSideFromTask(task) == 0 {
 		priceUp = isBelow
 		priceDown = isAbove
 	}
@@ -343,7 +416,7 @@ func getPriceDisplayContext(task *models.StrategyTask) priceDisplayContext {
 	dec0 := GetTokenDecimals(chain, token0Addr)
 	dec1 := GetTokenDecimals(chain, token1Addr)
 
-	side := stableSideFromTask(task)
+	side := priceQuoteSideFromTask(task)
 	base := strings.TrimSpace(task.Token0Symbol)
 	quote := strings.TrimSpace(task.Token1Symbol)
 	invert := false

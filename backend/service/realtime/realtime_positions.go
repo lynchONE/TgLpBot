@@ -1363,6 +1363,30 @@ type taskPnLViewMetrics struct {
 	dustTracked  bool
 }
 
+func finalizeTaskPnLViewMetrics(metrics taskPnLViewMetrics, fallback float64) taskPnLViewMetrics {
+	if metrics.initialCost <= 0 {
+		metrics.initialCost = fallback
+	}
+	if metrics.netInvested < 0 {
+		metrics.netInvested = 0
+	}
+	if metrics.netInvested <= 0 {
+		switch {
+		case metrics.initialCost > 0 && metrics.currentValue > 0:
+			// Display guard: if dust bookkeeping temporarily collapses netInvested to zero,
+			// avoid showing the full position value as pure profit right after opening.
+			metrics.netInvested = metrics.initialCost
+		case !metrics.dustTracked:
+			metrics.netInvested = metrics.initialCost
+		}
+	}
+	if metrics.netInvested > 0 {
+		metrics.absolutePnL = metrics.currentValue - metrics.netInvested
+		metrics.hasPnL = true
+	}
+	return metrics
+}
+
 // getTaskPnLViewMetrics uses the exact same PnL service as bot task cards.
 // It provides invested/current/PnL values for miniapp with unified semantics.
 func (s *RealtimePositionsService) getTaskPnLViewMetrics(task *models.StrategyTask) taskPnLViewMetrics {
@@ -1398,20 +1422,7 @@ func (s *RealtimePositionsService) getTaskPnLViewMetrics(task *models.StrategyTa
 		}
 	}
 
-	if metrics.initialCost <= 0 {
-		metrics.initialCost = fallback
-	}
-	if metrics.netInvested < 0 {
-		metrics.netInvested = 0
-	}
-	if metrics.netInvested <= 0 && !metrics.dustTracked {
-		metrics.netInvested = metrics.initialCost
-	}
-	if metrics.netInvested > 0 {
-		metrics.absolutePnL = metrics.currentValue - metrics.netInvested
-		metrics.hasPnL = true
-	}
-	return metrics
+	return finalizeTaskPnLViewMetrics(metrics, fallback)
 }
 
 func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, tokenId string, task *models.StrategyTask) (*RealtimePosition, string) {

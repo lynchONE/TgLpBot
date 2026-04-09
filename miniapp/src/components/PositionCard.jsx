@@ -150,9 +150,9 @@ function SmartMoneyRangeSummary({ groups }) {
     );
 }
 
-const STABLE_SYMBOLS = new Set(['USDT', 'USDC', 'BUSD', 'DAI']);
+const QUOTE_SYMBOLS = new Set(['USDT', 'USDC', 'BUSD', 'DAI', 'FRAX', 'USDD', 'FDUSD', 'WBNB', 'WETH', 'WSOL', 'BNB', 'ETH', 'SOL']);
 const normalizeSymbol = (value) => String(value || '').trim().toUpperCase();
-const isStableSymbol = (symbol) => STABLE_SYMBOLS.has(normalizeSymbol(symbol));
+const isQuoteLikeSymbol = (symbol) => QUOTE_SYMBOLS.has(normalizeSymbol(symbol));
 
 const priceFromTick = (tick, decimals0 = 18, decimals1 = 18) => {
     const n = Number(tick);
@@ -275,19 +275,17 @@ export default function PositionCard({
     const token0 = position?.token_rows?.[0];
     const token1 = position?.token_rows?.[1];
 
-    const stableIndex = useMemo(() => {
-        if (isStableSymbol(token0?.symbol)) return 0;
-        if (isStableSymbol(token1?.symbol)) return 1;
-        const p0 = Number(token0?.price_usd);
-        if (Number.isFinite(p0) && p0 > 0.98 && p0 < 1.02) return 0;
-        const p1 = Number(token1?.price_usd);
-        if (Number.isFinite(p1) && p1 > 0.98 && p1 < 1.02) return 1;
-        return -1;
-    }, [token0?.symbol, token1?.symbol, token0?.price_usd, token1?.price_usd]);
+    const displayTokenSide = useMemo(() => {
+        const quote0 = isQuoteLikeSymbol(token0?.symbol);
+        const quote1 = isQuoteLikeSymbol(token1?.symbol);
+        if (quote0 && !quote1) return 1;
+        return 0;
+    }, [token0?.symbol, token1?.symbol]);
 
-    const baseSymbol = stableIndex === 0 ? token1?.symbol : token0?.symbol;
-    const quoteSymbol = stableIndex === 0 ? token0?.symbol : token1?.symbol;
-    const pairLabel = baseSymbol && quoteSymbol ? `${baseSymbol}/${quoteSymbol}` : baseSymbol || quoteSymbol || '';
+    const displaySymbol = displayTokenSide === 0 ? token0?.symbol : token1?.symbol;
+    const quoteSymbol = displayTokenSide === 0 ? token1?.symbol : token0?.symbol;
+    const pairLabel = displaySymbol && quoteSymbol ? `${displaySymbol}/${quoteSymbol}` : displaySymbol || quoteSymbol || '';
+    const shouldInvertPrice = displayTokenSide === 1;
 
     const displayTitle = useMemo(
         () => buildPositionPairTitle(position, token0, token1),
@@ -361,7 +359,7 @@ export default function PositionCard({
     const tickSpacingRaw = Number(position?.pool?.tickSpacing ?? position?.tick_spacing);
 
     const currentPriceBase = useMemo(() => priceFromTick(currentTick, decimals0, decimals1), [currentTick, decimals0, decimals1]);
-    const currentPrice = stableIndex === 0 ? safeInvert(currentPriceBase) : currentPriceBase;
+    const currentPrice = shouldInvertPrice ? safeInvert(currentPriceBase) : currentPriceBase;
 
     const currentGridIndex = useMemo(() => {
         if (!Number.isFinite(currentTick) || !Number.isFinite(tickLowerRaw) || !tickSpacingRaw) return null;
@@ -375,11 +373,11 @@ export default function PositionCard({
         const p1Base = priceFromTick(t1, decimals0, decimals1);
         const p2Base = priceFromTick(t2, decimals0, decimals1);
         if (p1Base === null || p2Base === null) return { gridLower: null, gridUpper: null };
-        const p1 = stableIndex === 0 ? safeInvert(p1Base) : p1Base;
-        const p2 = stableIndex === 0 ? safeInvert(p2Base) : p2Base;
+        const p1 = shouldInvertPrice ? safeInvert(p1Base) : p1Base;
+        const p2 = shouldInvertPrice ? safeInvert(p2Base) : p2Base;
         if (p1 === null || p2 === null) return { gridLower: null, gridUpper: null };
         return { gridLower: Math.min(p1, p2), gridUpper: Math.max(p1, p2) };
-    }, [currentGridIndex, tickLowerRaw, tickSpacingRaw, decimals0, decimals1, stableIndex]);
+    }, [currentGridIndex, tickLowerRaw, tickSpacingRaw, decimals0, decimals1, shouldInvertPrice]);
 
     const gridCountRaw = useMemo(() => {
         if (!Number.isFinite(tickLowerRaw) || !Number.isFinite(tickUpperRaw)) return null;
@@ -390,8 +388,8 @@ export default function PositionCard({
 
     const rangeLowerBase = useMemo(() => priceFromTick(position?.tick_lower, decimals0, decimals1), [position?.tick_lower, decimals0, decimals1]);
     const rangeUpperBase = useMemo(() => priceFromTick(position?.tick_upper, decimals0, decimals1), [position?.tick_upper, decimals0, decimals1]);
-    const rangeLower = stableIndex === 0 ? safeInvert(rangeLowerBase) : rangeLowerBase;
-    const rangeUpper = stableIndex === 0 ? safeInvert(rangeUpperBase) : rangeUpperBase;
+    const rangeLower = shouldInvertPrice ? safeInvert(rangeLowerBase) : rangeLowerBase;
+    const rangeUpper = shouldInvertPrice ? safeInvert(rangeUpperBase) : rangeUpperBase;
     const rangeReady = Number.isFinite(rangeLower) && Number.isFinite(rangeUpper);
     const rangeMin = rangeReady ? Math.min(rangeLower, rangeUpper) : null;
     const rangeMax = rangeReady ? Math.max(rangeLower, rangeUpper) : null;
