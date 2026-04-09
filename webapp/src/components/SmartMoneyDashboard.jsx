@@ -1295,7 +1295,6 @@ function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
                             <tr>
                                 <th>钱包</th>
                                 <th className="center">状态</th>
-                                <th className="right">余额</th>
                                 <th className="right">持仓</th>
                                 <th className="right">池子</th>
                                 <th className="right">操作</th>
@@ -1312,7 +1311,6 @@ function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
                                             {w.is_active ? '监控中' : '已暂停'}
                                         </span>
                                     </td>
-                                    <td className="right">{formatWalletBalance(w.wallet_balance_usd)}</td>
                                     <td className="right">{w.open_position_count}</td>
                                     <td className="right">{w.active_pool_count}</td>
                                     <td className="right">
@@ -1379,8 +1377,6 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
         () => getRefreshIntervalMs(refreshInterval),
         [refreshInterval]
     );
-    const positionPreviews = useSmartMoneyPositionPreviewMap(apiBaseUrl, positions);
-
     const loadInfo = useCallback(() => (
         fetchSMStats({ apiBaseUrl, address: addr }).then(setInfo).catch(() => { })
     ), [apiBaseUrl, addr]);
@@ -1522,7 +1518,6 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
                                                 <div className="smd-pos-card-compact-main">
                                                     <PositionAmountSummary
                                                         position={pos}
-                                                        preview={positionPreviews[getPositionSelectionKey(pos)]}
                                                         compact
                                                     />
                                                     <span className={`smd-pos-card-prices${pos.status === 'closed' ? ' is-closed' : ''}`}>
@@ -1532,7 +1527,6 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
                                                 </div>
                                                 <PositionPreviewMetrics
                                                     position={pos}
-                                                    preview={positionPreviews[getPositionSelectionKey(pos)]}
                                                     compact
                                                 />
                                             </div>

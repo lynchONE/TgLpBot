@@ -1814,8 +1814,7 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
                                 </div>
                             </div>
 
-                            <div className="mt-3 grid grid-cols-4 gap-2">
-                                <MiniMetric label="余额" value={formatWalletBalance(w.wallet_balance_usd)} />
+                            <div className="mt-3 grid grid-cols-3 gap-2">
                                 <MiniMetric label="持仓" value={w.open_position_count} />
                                 <MiniMetric label="池子" value={w.active_pool_count} />
                                 <MiniMetric label="末尾" value={tailAddr(w.address)} />
@@ -1861,8 +1860,6 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
     const [page, setPage] = useState(1);
     const [loading, setLoading] = useState(true);
     const [selectedPosition, setSelectedPosition] = useState(null);
-    const positionPreviews = useSmartMoneyPositionPreviewMap(apiBaseUrl, positions);
-
     useEffect(() => {
         fetchSMStats({ apiBaseUrl, address: walletAddress }).then(setWalletInfo).catch(() => { });
     }, [apiBaseUrl, walletAddress]);
@@ -2001,7 +1998,6 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
                             key={group.pool_address}
                             group={group}
                             brand={brand}
-                            positionPreviews={positionPreviews}
                             selectedPositionKey={selectedPositionKey}
                             onOpenPositionDetail={setSelectedPosition}
                             detailPanel={selectedPosition ? (
@@ -2032,7 +2028,7 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
     );
 }
 
-function PoolGroupCard({ group, onSelectPool, onOpenPositionDetail, brand, positionPreviews, selectedPositionKey = '', detailPanel = null }) {
+function PoolGroupCard({ group, onSelectPool, onOpenPositionDetail, brand, selectedPositionKey = '', detailPanel = null }) {
     const [collapsed, setCollapsed] = useState(!group.hasOpen);
     const openCount = group.positions.filter(p => p.status === 'open').length;
     const closedCount = group.positions.filter(p => p.status === 'closed').length;
@@ -2112,7 +2108,6 @@ function PoolGroupCard({ group, onSelectPool, onOpenPositionDetail, brand, posit
                                     </div>
                                     <PositionPreviewMetrics
                                         position={pos}
-                                        preview={positionPreviews?.[getPositionSelectionKey(pos)]}
                                         compact
                                     />
                                 </div>

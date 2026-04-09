@@ -77,8 +77,6 @@ func (s *Server) handleSMWallets(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		repairSmartMoneyPositions(ctx, repo)
-
 		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 		size, _ := strconv.Atoi(r.URL.Query().Get("size"))
 		if page <= 0 {
@@ -101,7 +99,6 @@ func (s *Server) handleSMWallets(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		s.attachSmartMoneyWalletBalances(ctx, rows)
 
 		type walletResp struct {
 			sm.WalletStatsRow
@@ -730,7 +727,6 @@ func (s *Server) handleSMStats(w http.ResponseWriter, r *http.Request) {
 	}
 	repo := smService.Repo()
 	ctx := r.Context()
-	repairSmartMoneyPositions(ctx, repo)
 
 	// Single wallet stats
 	addr := r.URL.Query().Get("address")
@@ -745,7 +741,7 @@ func (s *Server) handleSMStats(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, "stats not found", http.StatusNotFound)
 			return
 		}
-		s.attachSmartMoneyWalletBalances(ctx, rows)
+		s.attachSmartMoneyWalletBalances(ctx, rows, true)
 		jsonOK(w, rows[0])
 		return
 	}
@@ -1227,13 +1223,13 @@ func attachSmartMoneyRangeGroupsToPoolStats(ctx context.Context, repo *sm.Reposi
 	return nil
 }
 
-func (s *Server) attachSmartMoneyWalletBalances(ctx context.Context, rows []sm.WalletStatsRow) {
+func (s *Server) attachSmartMoneyWalletBalances(ctx context.Context, rows []sm.WalletStatsRow, forceRefresh bool) {
 	if s == nil || s.Assets == nil || len(rows) == 0 {
 		return
 	}
 
 	for i := range rows {
-		balance, err := s.Assets.GetSmartMoneyWalletBalance(ctx, rows[i].Address, rows[i].ChainID, false)
+		balance, err := s.Assets.GetSmartMoneyWalletBalance(ctx, rows[i].Address, rows[i].ChainID, forceRefresh)
 		if err != nil {
 			log.Printf("[SmartMoney API] enrich wallet balance failed wallet=%s chain=%d err=%v", rows[i].Address, rows[i].ChainID, err)
 			continue
