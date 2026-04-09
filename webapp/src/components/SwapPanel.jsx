@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  fetchWalletSwapHistory,
   fetchGlobalConfig,
   fetchWallets,
   fetchWalletSwapTokenMetadata,
@@ -224,6 +225,18 @@ function applyTokenMetadata(token, tokenMetaMap, chain) {
   };
 }
 
+function buildHistoryTokenMeta(token, tokenMetaMap, chain) {
+  if (!token?.address) return null;
+  return applyTokenMetadata({
+    address: token.address,
+    symbol: String(token.symbol || '').trim() || shortAddress(token.address, 4, 4),
+    name: String(token.name || token.symbol || '').trim() || shortAddress(token.address, 4, 4),
+    logoUrl: String(token.logo_url || '').trim(),
+    native: Boolean(token.is_native),
+    color: '#7c8aa6',
+  }, tokenMetaMap, chain);
+}
+
 function formatTokenAmount(value) {
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0) return '0.0';
@@ -356,6 +369,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   const [executing, setExecuting] = useState(false);
   const [execError, setExecError] = useState('');
   const [execSuccess, setExecSuccess] = useState('');
+  const [execResult, setExecResult] = useState(null);
   const [showConfirm, setShowConfirm] = useState(false);
 
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -367,6 +381,9 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   const [walletTokensKey, setWalletTokensKey] = useState('');
   const [loadingWalletTokens, setLoadingWalletTokens] = useState(false);
   const [walletTokensError, setWalletTokensError] = useState('');
+  const [swapHistory, setSwapHistory] = useState([]);
+  const [loadingSwapHistory, setLoadingSwapHistory] = useState(false);
+  const [swapHistoryError, setSwapHistoryError] = useState('');
   const [tokenMetaMap, setTokenMetaMap] = useState({});
 
   const quoteTimeout = useRef(null);
@@ -376,6 +393,8 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   const walletSelectRef = useRef(null);
   const walletTokensAbortRef = useRef(null);
   const walletTokensSeqRef = useRef(0);
+  const swapHistoryAbortRef = useRef(null);
+  const swapHistorySeqRef = useRef(0);
 
   const normalizedFromToken = normalizeHexAddress(fromToken);
   const normalizedToToken = normalizeHexAddress(toToken);
@@ -441,6 +460,11 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     () => formatGasUSD(quoteInfo?.estimated_gas_usd),
     [quoteInfo]
   );
+  const clearExecutionFeedback = useCallback(() => {
+    setExecError('');
+    setExecSuccess('');
+    setExecResult(null);
+  }, []);
   const quoteStampText = useMemo(
     () => formatQuoteClock(lastQuoteAt),
     [lastQuoteAt]
@@ -553,9 +577,12 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     setLastQuoteAt(0);
     setExecError('');
     setExecSuccess('');
+    setExecResult(null);
     setShowConfirm(false);
     setWalletTokens([]);
     setWalletTokensKey('');
+    setSwapHistory([]);
+    setSwapHistoryError('');
     setTokenMetaMap({});
     lastRequestedQuoteKeyRef.current = '';
   }, [chainConfig.stable.address]);
@@ -718,12 +745,48 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     }
   }, [apiBaseUrl, initData, chain, selectedWalletId]);
 
+  const loadSwapHistory = useCallback(async () => {
+    if (!initData || !selectedWalletId) return;
+    const seq = swapHistorySeqRef.current + 1;
+    swapHistorySeqRef.current = seq;
+    if (swapHistoryAbortRef.current) {
+      swapHistoryAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    swapHistoryAbortRef.current = controller;
+    setLoadingSwapHistory(true);
+    setSwapHistoryError('');
+    try {
+      const resp = await fetchWalletSwapHistory({
+        apiBaseUrl,
+        initData,
+        chain,
+        walletId: selectedWalletId,
+        limit: 8,
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted || swapHistorySeqRef.current !== seq) return;
+      setSwapHistory(Array.isArray(resp?.records) ? resp.records : []);
+    } catch (error) {
+      if (controller.signal.aborted || swapHistorySeqRef.current !== seq) return;
+      console.error('loadSwapHistory failed', error);
+      setSwapHistory([]);
+      setSwapHistoryError(String(error?.message || error || '加载兑换历史失败'));
+    } finally {
+      if (swapHistoryAbortRef.current === controller) {
+        swapHistoryAbortRef.current = null;
+      }
+      if (swapHistorySeqRef.current === seq) {
+        setLoadingSwapHistory(false);
+      }
+    }
+  }, [apiBaseUrl, initData, chain, selectedWalletId]);
+
   useEffect(() => {
     if (!hasInitData) return;
     loadWallets();
-    setExecError('');
-    setExecSuccess('');
-  }, [hasInitData, loadWallets]);
+    clearExecutionFeedback();
+  }, [clearExecutionFeedback, hasInitData, loadWallets]);
 
   // 闂佸憡鐟禍婊冿耿椤忓牆绠ラ柟鎯х－绾捐霉閻欏懐鍒扮紒鏃傛暬閺屽懏寰勭€ｎ亶浠撮梺闈╃祷閸斿秴顪冮崒鐐茬闁绘鍎ょ粊鏉棵归敐鍡欐噰妞ゃ倕鍊块弫宥呯暆閸曨亞绱氶梺绋跨箰缁夊磭绮径搴ｇ杸闁告盯鍋婂ú锝夋煟?API 闁荤姴顑呴崯浼村极?
   useEffect(() => {
@@ -735,7 +798,10 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     setWalletTokens([]);
     setWalletTokensKey('');
     setWalletTokensError('');
-  }, [currentWalletTokenKey]);
+    setSwapHistory([]);
+    setSwapHistoryError('');
+    clearExecutionFeedback();
+  }, [clearExecutionFeedback, currentWalletTokenKey]);
 
   useEffect(() => {
     if (!hasInitData || !currentWalletTokenKey || loadingWalletTokens) return;
@@ -743,9 +809,17 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     loadWalletTokens();
   }, [currentWalletTokenKey, hasInitData, loadWalletTokens, loadingWalletTokens, walletTokensKey]);
 
+  useEffect(() => {
+    if (!hasInitData || !currentWalletTokenKey) return;
+    loadSwapHistory();
+  }, [currentWalletTokenKey, hasInitData, loadSwapHistory]);
+
   useEffect(() => () => {
     if (walletTokensAbortRef.current) {
       walletTokensAbortRef.current.abort();
+    }
+    if (swapHistoryAbortRef.current) {
+      swapHistoryAbortRef.current.abort();
     }
   }, []);
 
@@ -922,15 +996,17 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     persistRecentToken(token);
     setPickerOpen(false);
     setTokenQuery('');
-    setExecError('');
-    setExecSuccess('');
-  }, [persistRecentToken, pickerSide]);
+    clearExecutionFeedback();
+  }, [clearExecutionFeedback, persistRecentToken, pickerSide]);
 
   const handleSwap = async () => {
     if (!initData || !normalizedFromToken || !normalizedToToken) return;
+    if (quoteTimeout.current) clearTimeout(quoteTimeout.current);
+    if (quoteAbortRef.current) quoteAbortRef.current.abort();
     setExecuting(true);
     setExecError('');
     setExecSuccess('');
+    setExecResult(null);
     try {
       const resp = await walletSwapSingleExecute({
         apiBaseUrl,
@@ -942,16 +1018,18 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
         amount,
         slippagePercent: Number.parseFloat(slippage),
       });
-      setExecSuccess(resp?.tx_hash || '\\u4ea4\\u6613\\u5df2\\u63d0\\u4ea4');
+      setExecSuccess(resp?.message || '\\u5151\\u6362\\u5df2\\u5b8c\\u6210');
+      setExecResult(resp || null);
       setShowConfirm(false);
       setAmount('');
       setQuoteInfo(null);
+      setQuoting(false);
+      setQuoteError('');
       setRefreshingQuote(false);
       setLastQuoteAt(0);
       lastRequestedQuoteKeyRef.current = '';
       // 濠电偞鎸搁幊鎰板煘閺嶃劍濯存繛鍡樻惄閺夎櫣绱撻崒娑欏碍闁宦板姂閺佸秶浠﹂懖鈺冩啴濠电偛妫岄崜婵囨櫠閿曗偓椤曪綁鍩€椤掑嫭鐒诲璺侯儏椤忋儵鏌涢敐鍐ㄥ婵＄偛鍊块弻灞筋吋閸℃鍘愰梺鍛婃⒒婵儳霉?
-      setWalletTokens([]);
-      setWalletTokensKey('');
+      await Promise.allSettled([loadWallets(), loadWalletTokens(), loadSwapHistory()]);
     } catch (error) {
       setExecError(String(error?.message || error));
       setShowConfirm(false);
@@ -964,6 +1042,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     if (!normalizedFromToken) return;
     const walletToken = walletTokens.find((t) => t.address === normalizedFromToken);
     if (walletToken && walletToken.balance) {
+      clearExecutionFeedback();
       setAmount(walletToken.balance);
     }
   };
@@ -984,8 +1063,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     setRefreshingQuote(false);
     setLastQuoteAt(0);
     lastRequestedQuoteKeyRef.current = '';
-    setExecError('');
-    setExecSuccess('');
+    clearExecutionFeedback();
   };
 
   const handleChainSelect = useCallback((nextChain) => {
@@ -1097,6 +1175,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                           type="button"
                           className={`swap-custom-select-option${String(wallet.id) === String(selectedWalletId) ? ' active' : ''}`}
                           onClick={() => {
+                            clearExecutionFeedback();
                             setSelectedWalletId(String(wallet.id));
                             setWalletDropdownOpen(false);
                           }}
@@ -1205,7 +1284,10 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                     step="any"
                     className="swap-amount-input"
                     value={amount}
-                    onChange={(event) => setAmount(event.target.value)}
+                    onChange={(event) => {
+                      clearExecutionFeedback();
+                      setAmount(event.target.value);
+                    }}
                     placeholder="0"
                   />
                   <TokenButton
@@ -1309,10 +1391,86 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
 
             {execSuccess ? (
               <div className="panel-success swap-success-card">
-                <strong>{'\u5151\u6362\u8bf7\u6c42\u5df2\u63d0\u4ea4'}</strong>
-                <span>{execSuccess}</span>
+                <strong>{execSuccess}</strong>
+                {execResult?.to_amount_float ? (
+                  <span>{`\u5b9e\u9645\u5230\u8d26 ${execResult.to_amount_float} ${toTokenMeta?.symbol || ''}`.trim()}</span>
+                ) : null}
+                {execResult?.completed_at ? (
+                  <span>{`\u5b8c\u6210\u65f6\u95f4 ${execResult.completed_at}`}</span>
+                ) : null}
+                {execResult?.tx_hash ? (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span>{shortAddress(execResult.tx_hash, 10, 8)}</span>
+                    {execResult?.tx_url ? (
+                      <a href={execResult.tx_url} target="_blank" rel="noreferrer" className="swap-history-link">
+                        {'\u67e5\u770b Tx'}
+                      </a>
+                    ) : null}
+                  </span>
+                ) : null}
               </div>
             ) : null}
+
+            <div className="swap-history-card">
+              <div className="swap-history-head">
+                <div>
+                  <strong>{'\u6700\u8fd1\u5151\u6362'}</strong>
+                  <span>{selectedWallet ? shortAddress(selectedWallet.address, 8, 6) : '\u5f53\u524d\u94b1\u5305'}</span>
+                </div>
+                <button type="button" className="swap-history-refresh" onClick={() => loadSwapHistory()} disabled={loadingSwapHistory || !selectedWalletId}>
+                  {loadingSwapHistory ? '\u5237\u65b0\u4e2d...' : '\u5237\u65b0'}
+                </button>
+              </div>
+
+              {swapHistoryError ? (
+                <div className="swap-history-empty">{swapHistoryError}</div>
+              ) : null}
+
+              {!swapHistoryError && loadingSwapHistory && swapHistory.length === 0 ? (
+                <div className="swap-history-empty">{'\u6b63\u5728\u52a0\u8f7d\u5151\u6362\u5386\u53f2...'}</div>
+              ) : null}
+
+              {!swapHistoryError && !loadingSwapHistory && swapHistory.length === 0 ? (
+                <div className="swap-history-empty">{'\u5f53\u524d\u94b1\u5305\u6682\u65e0\u5151\u6362\u8bb0\u5f55'}</div>
+              ) : null}
+
+              {swapHistory.map((item) => {
+                const fromHistoryToken = buildHistoryTokenMeta(item.from_token, tokenMetaMap, chain);
+                const toHistoryToken = buildHistoryTokenMeta(item.to_token, tokenMetaMap, chain);
+                return (
+                  <div key={item.id || item.tx_hash} className="swap-history-row">
+                    <div className="swap-history-route">
+                      <div className="swap-history-token">
+                        <TokenGlyph token={fromHistoryToken || makeCustomToken(item?.from_token?.address)} size="sm" />
+                        <div>
+                          <strong>{`${item.amount_in_float || '--'} ${fromHistoryToken?.symbol || item?.from_token?.symbol || ''}`.trim()}</strong>
+                          <span>{fromHistoryToken?.name || item?.from_token?.name || item?.from_token?.address}</span>
+                        </div>
+                      </div>
+                      <ArrowDown size={14} />
+                      <div className="swap-history-token">
+                        <TokenGlyph token={toHistoryToken || makeCustomToken(item?.to_token?.address)} size="sm" />
+                        <div>
+                          <strong>{`${item.amount_out_float || '--'} ${toHistoryToken?.symbol || item?.to_token?.symbol || ''}`.trim()}</strong>
+                          <span>{toHistoryToken?.name || item?.to_token?.name || item?.to_token?.address}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="swap-history-meta">
+                      <span>{item.created_at || '--'}</span>
+                      <span className="swap-history-status">{item.status || 'confirmed'}</span>
+                      {item.tx_url ? (
+                        <a href={item.tx_url} target="_blank" rel="noreferrer" className="swap-history-link">
+                          {shortAddress(item.tx_hash, 8, 6)}
+                        </a>
+                      ) : (
+                        <span>{shortAddress(item.tx_hash, 8, 6)}</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
 
             <button
               type="button"

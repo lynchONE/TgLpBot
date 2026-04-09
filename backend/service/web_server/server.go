@@ -80,6 +80,7 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/wallet_swap_preview", s.handleWalletSwapPreview)
 	mux.HandleFunc("/api/wallet_swap_execute", s.handleWalletSwapExecute)
 	mux.HandleFunc("/api/wallet_swap_token_metadata", s.handleWalletSwapTokenMetadata)
+	mux.HandleFunc("/api/wallet_swap_history", s.handleWalletSwapHistory)
 	mux.HandleFunc("/api/admin/realtime_users", s.handleAdminRealtimeUsers)
 	mux.HandleFunc("/api/admin/realtime_positions", s.handleAdminRealtimePositions)
 	mux.HandleFunc("/api/admin/system_config", s.handleAdminSystemConfig)

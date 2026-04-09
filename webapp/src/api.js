@@ -1045,6 +1045,22 @@ export async function walletSwapSingleExecute({ apiBaseUrl, initData, chain, wal
   });
 }
 
+export async function fetchWalletSwapHistory({ apiBaseUrl, initData, chain, walletId, limit, offset, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const url = `${base}/api/settings?endpoint=wallet_swap_history`;
+  const payload = { initData };
+  if (chain) payload.chain = String(chain);
+  if (walletId) payload.wallet_id = Number(walletId);
+  if (Number.isFinite(limit)) payload.limit = Number(limit);
+  if (Number.isFinite(offset)) payload.offset = Number(offset);
+  return requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
 export async function fetchWalletSwapTokenMetadata({ apiBaseUrl, initData, chain, addresses, signal }) {
   const base = normalizeBaseUrl(apiBaseUrl);
   const url = `${base}/api/settings?endpoint=wallet_swap_token_metadata`;

@@ -93,6 +93,7 @@ type okxSwapExecutionResult struct {
 	TxHash   string
 	Receipt  *types.Receipt
 	DeltaOut *big.Int
+	To       common.Address
 }
 
 var okxNativePseudoToken = common.HexToAddress("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
@@ -357,7 +358,7 @@ func (s *LiquidityService) executeOKXSwapExactIn(
 
 	// Prefer receipt logs over balance reads to avoid public RPC stale reads.
 	if d := ReceiptTokenTransferDelta(receipt, tokenOut, walletAddr); d != nil && d.Sign() > 0 {
-		return &okxSwapExecutionResult{TxHash: txHash, Receipt: receipt, DeltaOut: d}, nil
+		return &okxSwapExecutionResult{TxHash: txHash, Receipt: receipt, DeltaOut: d, To: to}, nil
 	}
 
 	outAfter, _ := getOKXSwapAssetBalance(client, tokenOut, walletAddr)
@@ -398,7 +399,7 @@ func (s *LiquidityService) executeOKXSwapExactIn(
 			txHash, tokenOut.Hex(), expectedOut, outBefore.String(), outAfter.String())
 	}
 
-	return &okxSwapExecutionResult{TxHash: txHash, Receipt: receipt, DeltaOut: delta}, nil
+	return &okxSwapExecutionResult{TxHash: txHash, Receipt: receipt, DeltaOut: delta, To: to}, nil
 }
 
 // swapExactInViaOKX executes a swap transaction returned by OKX DEX /swap API from the user's wallet.

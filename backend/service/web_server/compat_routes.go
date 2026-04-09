@@ -44,6 +44,8 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		s.handleWalletSwapExecute(w, r)
 	case "wallet_swap_token_metadata":
 		s.handleWalletSwapTokenMetadata(w, r)
+	case "wallet_swap_history":
+		s.handleWalletSwapHistory(w, r)
 	case "wallet_crud":
 		s.handleWalletCRUD(w, r)
 	case "wallet_swap_single":

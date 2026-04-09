@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
@@ -24,6 +25,13 @@ type WalletSwapToUSDTReport struct {
 	CandidateCnt  int
 	Swapped       []string // "SYMBOL->USDT|txHash"
 	Failed        []string // "SYMBOL->USDT|error"
+}
+
+type SwapSingleTokenResult struct {
+	TxHash        string
+	AmountOut     *big.Int
+	Receipt       *types.Receipt
+	RouterAddress common.Address
 }
 
 // SwapWalletOtherTokensToUSDT swaps all known non-stable ERC20 tokens (excluding WBNB) in the default wallet to USDT.
@@ -397,4 +405,31 @@ func (s *LiquidityService) SwapSingleToken(
 		return "", err
 	}
 	return r.TxHash, err
+}
+
+func (s *LiquidityService) SwapSingleTokenDetailed(
+	exec chainexec.EVMExecutor,
+	privateKey *ecdsa.PrivateKey,
+	walletAddr common.Address,
+	tokenIn common.Address,
+	tokenOut common.Address,
+	amountIn *big.Int,
+	slippagePercent float64,
+) (*SwapSingleTokenResult, error) {
+	r, err := s.executeOKXSwapExactIn(exec, privateKey, walletAddr, tokenIn, tokenOut, amountIn, slippagePercent)
+	if r == nil {
+		return nil, err
+	}
+
+	amountOut := big.NewInt(0)
+	if r.DeltaOut != nil {
+		amountOut = new(big.Int).Set(r.DeltaOut)
+	}
+
+	return &SwapSingleTokenResult{
+		TxHash:        r.TxHash,
+		AmountOut:     amountOut,
+		Receipt:       r.Receipt,
+		RouterAddress: r.To,
+	}, err
 }

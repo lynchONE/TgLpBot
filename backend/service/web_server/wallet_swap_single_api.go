@@ -11,6 +11,7 @@ import (
 
 	"TgLpBot/base/blockchain"
 	"TgLpBot/base/config"
+	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/service/chainexec"
 	"TgLpBot/service/exchange"
@@ -50,12 +51,16 @@ type swapQuoteResponse struct {
 }
 
 type swapExecuteResponse struct {
-	OK        bool   `json:"ok"`
-	Chain     string `json:"chain"`
-	TxHash    string `json:"tx_hash"`
-	FromToken string `json:"from_token"`
-	ToToken   string `json:"to_token"`
-	Message   string `json:"message,omitempty"`
+	OK            bool   `json:"ok"`
+	Chain         string `json:"chain"`
+	TxHash        string `json:"tx_hash"`
+	TxURL         string `json:"tx_url,omitempty"`
+	FromToken     string `json:"from_token"`
+	ToToken       string `json:"to_token"`
+	ToAmount      string `json:"to_amount,omitempty"`
+	ToAmountFloat string `json:"to_amount_float,omitempty"`
+	CompletedAt   string `json:"completed_at,omitempty"`
+	Message       string `json:"message,omitempty"`
 }
 
 func tokenDecimals(client *ethclient.Client, token common.Address) uint8 {
@@ -114,6 +119,62 @@ func estimateGasCosts(
 		return 0, 0
 	}
 	return native, native * pricing.GetNativePriceUSD(chain)
+}
+
+func recordWalletSwapTransaction(
+	userID uint,
+	chain string,
+	walletAddr common.Address,
+	fromTokenAddress string,
+	toTokenAddress string,
+	amountIn *big.Int,
+	swapResult *liquidity.SwapSingleTokenResult,
+) {
+	if database.DB == nil || swapResult == nil || strings.TrimSpace(swapResult.TxHash) == "" {
+		return
+	}
+
+	var existing models.Transaction
+	if err := database.DB.Where("tx_hash = ?", strings.TrimSpace(swapResult.TxHash)).First(&existing).Error; err == nil {
+		return
+	}
+
+	amountInStr := "0"
+	if amountIn != nil {
+		amountInStr = amountIn.String()
+	}
+	amountOutStr := "0"
+	if swapResult.AmountOut != nil {
+		amountOutStr = swapResult.AmountOut.String()
+	}
+	blockNumber := uint64(0)
+	gasUsed := uint64(0)
+	if swapResult.Receipt != nil {
+		gasUsed = swapResult.Receipt.GasUsed
+		if swapResult.Receipt.BlockNumber != nil {
+			blockNumber = swapResult.Receipt.BlockNumber.Uint64()
+		}
+	}
+
+	txRecord := models.Transaction{
+		UserID:          userID,
+		Chain:           config.NormalizeChain(chain),
+		TxHash:          strings.TrimSpace(swapResult.TxHash),
+		Type:            models.TxTypeSwap,
+		Status:          models.TxStatusConfirmed,
+		FromAddress:     walletAddr.Hex(),
+		ToAddress:       swapResult.RouterAddress.Hex(),
+		TokenInAddress:  strings.TrimSpace(fromTokenAddress),
+		TokenOutAddress: strings.TrimSpace(toTokenAddress),
+		AmountIn:        amountInStr,
+		AmountOut:       amountOutStr,
+		GasUsed:         gasUsed,
+		BlockNumber:     blockNumber,
+		CreatedAt:       time.Now(),
+	}
+	if err := database.DB.Create(&txRecord).Error; err != nil {
+		fmt.Printf("[WalletSwap] record transaction failed: %v\n", err)
+	}
 }
 
 func (s *Server) handleWalletSwapSingle(w http.ResponseWriter, r *http.Request) {
@@ -306,11 +367,38 @@ func (s *Server) handleWalletSwapSingle(w http.ResponseWriter, r *http.Request) 
 		}
 
 		lpService := liquidity.NewLiquidityService()
-		txHash, err := lpService.SwapSingleToken(exec, privateKey, walletAddr, fromToken, toToken, amount, slippage)
+		swapResult, err := lpService.SwapSingleTokenDetailed(exec, privateKey, walletAddr, fromToken, toToken, amount, slippage)
 		if err != nil {
 			http.Error(w, "swap failed: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+		recordWalletSwapTransaction(user.ID, chain, walletAddr, okxFromTokenAddress, okxToTokenAddress, amount, swapResult)
+
+		txHash := ""
+		toAmount := ""
+		toAmountFloat := ""
+		if swapResult != nil {
+			txHash = strings.TrimSpace(swapResult.TxHash)
+			if swapResult.AmountOut != nil && swapResult.AmountOut.Sign() > 0 {
+				toAmount = swapResult.AmountOut.String()
+				toAmountFloat = fmt.Sprintf("%.6f", amountToFloat(toAmount, int(toDecimals)))
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(swapExecuteResponse{
+			OK:            true,
+			Chain:         chain,
+			TxHash:        txHash,
+			TxURL:         explorerTxURLHelper(chain, txHash),
+			FromToken:     okxFromTokenAddress,
+			ToToken:       okxToTokenAddress,
+			ToAmount:      toAmount,
+			ToAmountFloat: toAmountFloat,
+			CompletedAt:   time.Now().Format("2006-01-02 15:04:05"),
+			Message:       "兑换已完成",
+		})
+		return
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(swapExecuteResponse{
