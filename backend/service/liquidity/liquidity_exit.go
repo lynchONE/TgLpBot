@@ -1653,7 +1653,7 @@ func (s *LiquidityService) swapDeltaToUSDT(
 	}
 
 	// 检查实际余额
-	actualBalance, err := blockchain.GetTokenBalanceWithClient(client, tokenIn, walletAddr)
+	actualBalance, err := getOKXSwapAssetBalance(client, tokenIn, walletAddr)
 	if err != nil {
 		log.Printf("[Liquidity] Warning: failed to get token balance: %v", err)
 	} else {
@@ -1663,7 +1663,7 @@ func (s *LiquidityService) swapDeltaToUSDT(
 		log.Printf("[Liquidity] Token %s balance: %s, attempting to swap: %s", tokenIn.Hex(), actualBalance.String(), amountIn.String())
 		// 如果实际余额小于要 swap 的数量，先等待 RPC 同步再决定是否截断。
 		if actualBalance.Cmp(amountIn) < 0 {
-			synced, werr := s.waitTokenBalanceAtLeast(client, tokenIn, walletAddr, amountIn, tokenIn.Hex())
+			synced, werr := s.waitOKXSwapAssetBalanceAtLeast(client, tokenIn, walletAddr, amountIn, tokenIn.Hex())
 			if werr == nil && synced != nil && synced.Cmp(amountIn) >= 0 {
 				actualBalance = synced
 			} else if synced != nil && synced.Sign() > 0 && synced.Cmp(amountIn) < 0 {
@@ -1705,7 +1705,7 @@ func (s *LiquidityService) swapDeltaToUSDTWithHash(
 	}
 
 	// 检查实际余额
-	actualBalance, err := blockchain.GetTokenBalanceWithClient(client, tokenIn, walletAddr)
+	actualBalance, err := getOKXSwapAssetBalance(client, tokenIn, walletAddr)
 	if err != nil {
 		log.Printf("[Liquidity] Warning: failed to get token balance: %v", err)
 	} else {
@@ -1715,7 +1715,7 @@ func (s *LiquidityService) swapDeltaToUSDTWithHash(
 		log.Printf("[Liquidity] Token %s balance: %s, attempting to swap: %s", tokenIn.Hex(), actualBalance.String(), amountIn.String())
 		// 如果实际余额小于要 swap 的数量，先等待 RPC 同步再决定是否截断。
 		if actualBalance.Cmp(amountIn) < 0 {
-			synced, werr := s.waitTokenBalanceAtLeast(client, tokenIn, walletAddr, amountIn, tokenIn.Hex())
+			synced, werr := s.waitOKXSwapAssetBalanceAtLeast(client, tokenIn, walletAddr, amountIn, tokenIn.Hex())
 			if werr == nil && synced != nil && synced.Cmp(amountIn) >= 0 {
 				actualBalance = synced
 			} else if synced != nil && synced.Sign() > 0 && synced.Cmp(amountIn) < 0 {
@@ -1741,6 +1741,13 @@ func (s *LiquidityService) swapExactInViaOKXWithHash(
 	amountIn *big.Int,
 	slippagePercent float64,
 ) (string, error) {
+	if exec != nil {
+		r, err := s.executeOKXSwapExactIn(exec, privateKey, walletAddr, tokenIn, tokenOut, amountIn, slippagePercent)
+		if r == nil {
+			return "", err
+		}
+		return r.TxHash, err
+	}
 	if exec == nil {
 		return "", fmt.Errorf("executor is nil")
 	}

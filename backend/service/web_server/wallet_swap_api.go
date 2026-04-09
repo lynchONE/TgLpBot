@@ -166,7 +166,7 @@ func (s *Server) getTokenBalancesFromOKX(userID uint, walletID uint, chain strin
 
 		if isNative {
 			tokenAddr = nativePseudoTokenAddress
-			canSwap = false
+			canSwap = true
 			if symbol == "" {
 				symbol = nativeSymbol
 			}

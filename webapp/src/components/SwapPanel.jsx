@@ -124,8 +124,7 @@ function makeCustomToken(address) {
       color: '#7c8aa6',
       custom: true,
       native: true,
-      canSwap: false,
-      disabledReason: '\u539f\u751f\u5e01\u6682\u4e0d\u652f\u6301\u76f4\u63a5\u5151\u6362',
+      canSwap: true,
     };
   }
   return {
@@ -140,8 +139,25 @@ function getChainConfig(chain) {
   return CHAIN_META[chain] || CHAIN_META.bsc;
 }
 
+function getNativePresetToken(chain) {
+  const chainConfig = getChainConfig(chain);
+  const nativeSymbol = String(chainConfig?.nativeSymbol || 'NATIVE').trim() || 'NATIVE';
+  const wrappedToken = Array.isArray(chainConfig?.presets)
+    ? chainConfig.presets.find((token) => String(token?.symbol || '').trim().startsWith('W'))
+    : null;
+  return {
+    address: NATIVE_PSEUDO_ADDRESS,
+    symbol: nativeSymbol,
+    name: nativeSymbol,
+    color: String(wrappedToken?.color || '#7c8aa6').trim() || '#7c8aa6',
+    logoUrl: String(chainConfig?.nativeLogoUrl || '').trim(),
+    native: true,
+    canSwap: true,
+  };
+}
+
 function getPresetTokens(chain) {
-  return dedupeTokens(getChainConfig(chain).presets);
+  return dedupeTokens([getNativePresetToken(chain), ...getChainConfig(chain).presets]);
 }
 
 function buildTokenLookup(tokens) {

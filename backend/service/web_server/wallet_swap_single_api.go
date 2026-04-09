@@ -59,6 +59,9 @@ type swapExecuteResponse struct {
 }
 
 func tokenDecimals(client *ethclient.Client, token common.Address) uint8 {
+	if strings.EqualFold(token.Hex(), nativePseudoTokenAddress) {
+		return 18
+	}
 	decimals := uint8(18)
 	erc20, err := blockchain.NewERC20(token, client)
 	if err != nil {
@@ -69,6 +72,13 @@ func tokenDecimals(client *ethclient.Client, token common.Address) uint8 {
 		return decimals
 	}
 	return d
+}
+
+func okxWalletSwapTokenAddress(raw string, token common.Address) string {
+	if strings.EqualFold(strings.TrimSpace(raw), nativePseudoTokenAddress) {
+		return nativePseudoTokenAddress
+	}
+	return token.Hex()
 }
 
 func estimateGasCosts(
@@ -159,7 +169,7 @@ func (s *Server) handleWalletSwapSingle(w http.ResponseWriter, r *http.Request) 
 
 	fromTokenStr := strings.TrimSpace(req.FromToken)
 	toTokenStr := strings.TrimSpace(req.ToToken)
-	if strings.EqualFold(fromTokenStr, nativePseudoTokenAddress) || strings.EqualFold(toTokenStr, nativePseudoTokenAddress) {
+	if disallowNativeDirectSwap := false; disallowNativeDirectSwap && (strings.EqualFold(fromTokenStr, nativePseudoTokenAddress) || strings.EqualFold(toTokenStr, nativePseudoTokenAddress)) {
 		http.Error(w, "原生币暂不支持直接兑换，请先换成 WBNB/WETH 后再操作", http.StatusBadRequest)
 		return
 	}
@@ -235,13 +245,15 @@ func (s *Server) handleWalletSwapSingle(w http.ResponseWriter, r *http.Request) 
 	okxService := exchange.NewOKXDexService()
 	chainIDStr := fmt.Sprintf("%d", cc.ChainID)
 	action := strings.TrimSpace(strings.ToLower(req.Action))
+	okxFromTokenAddress := okxWalletSwapTokenAddress(fromTokenStr, fromToken)
+	okxToTokenAddress := okxWalletSwapTokenAddress(toTokenStr, toToken)
 
 	switch action {
 	case "quote":
 		swapReq := exchange.SwapRequest{
 			ChainID:           chainIDStr,
-			FromTokenAddress:  fromToken.Hex(),
-			ToTokenAddress:    toToken.Hex(),
+			FromTokenAddress:  okxFromTokenAddress,
+			ToTokenAddress:    okxToTokenAddress,
 			Amount:            amount.String(),
 			Slippage:          slippageDecimal,
 			UserWalletAddress: walletAddr.Hex(),

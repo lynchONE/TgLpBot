@@ -11,6 +11,7 @@ import (
 	"log"
 	"math/big"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -94,6 +95,82 @@ type okxSwapExecutionResult struct {
 	DeltaOut *big.Int
 }
 
+var okxNativePseudoToken = common.HexToAddress("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+
+func isOKXNativeToken(token common.Address) bool {
+	return strings.EqualFold(token.Hex(), okxNativePseudoToken.Hex())
+}
+
+func okxTokenAddressParam(token common.Address) string {
+	if isOKXNativeToken(token) {
+		return "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	}
+	return token.Hex()
+}
+
+func getOKXSwapAssetBalance(client *ethclient.Client, token common.Address, wallet common.Address) (*big.Int, error) {
+	if isOKXNativeToken(token) {
+		return blockchain.GetBalanceWithClient(client, wallet)
+	}
+	return blockchain.GetTokenBalanceWithClient(client, token, wallet)
+}
+
+func nativeBalanceDelta(before, after, gasCost *big.Int) *big.Int {
+	if before == nil {
+		before = big.NewInt(0)
+	}
+	if after == nil {
+		after = big.NewInt(0)
+	}
+	if gasCost == nil {
+		gasCost = big.NewInt(0)
+	}
+
+	delta := new(big.Int).Sub(after, before)
+	delta.Add(delta, gasCost)
+	if delta.Sign() < 0 {
+		return big.NewInt(0)
+	}
+	return delta
+}
+
+func (s *LiquidityService) waitOKXSwapAssetBalanceAtLeast(client *ethclient.Client, token common.Address, wallet common.Address, min *big.Int, label string) (*big.Int, error) {
+	if !isOKXNativeToken(token) {
+		return s.waitTokenBalanceAtLeast(client, token, wallet, min, label)
+	}
+
+	bal, err := blockchain.GetBalanceWithClient(client, wallet)
+	if bal == nil {
+		bal = big.NewInt(0)
+	}
+	if err != nil {
+		return bal, err
+	}
+	if min == nil || min.Sign() <= 0 || bal.Cmp(min) >= 0 {
+		return bal, nil
+	}
+
+	timeout, poll := s.exitTokenSyncDurations()
+	deadline := time.Now().Add(timeout)
+	log.Printf("[Liquidity] waiting native balance sync %s: have=%s want>=%s timeout=%s poll=%s", label, bal.String(), min.String(), timeout.String(), poll.String())
+
+	for time.Now().Before(deadline) {
+		time.Sleep(poll)
+		bal, err = blockchain.GetBalanceWithClient(client, wallet)
+		if bal == nil {
+			bal = big.NewInt(0)
+		}
+		if err == nil && bal.Cmp(min) >= 0 {
+			log.Printf("[Liquidity] native balance synced %s: %s", label, bal.String())
+			return bal, nil
+		}
+	}
+	if err != nil {
+		return bal, fmt.Errorf("wait native balance sync failed %s: %w", label, err)
+	}
+	return bal, fmt.Errorf("wait native balance sync timeout %s: have=%s want>=%s", label, bal.String(), min.String())
+}
+
 // executeOKXSwapExactIn executes a swap transaction returned by OKX DEX /swap API from the user's wallet.
 // It returns txHash + receipt + tokenOut balance delta (best-effort).
 func (s *LiquidityService) executeOKXSwapExactIn(
@@ -126,15 +203,18 @@ func (s *LiquidityService) executeOKXSwapExactIn(
 		s.okxService = exchange.NewOKXDexService()
 	}
 
-	outBefore, _ := blockchain.GetTokenBalanceWithClient(client, tokenOut, walletAddr)
+	tokenInIsNative := isOKXNativeToken(tokenIn)
+	tokenOutIsNative := isOKXNativeToken(tokenOut)
+
+	outBefore, _ := getOKXSwapAssetBalance(client, tokenOut, walletAddr)
 	if outBefore == nil {
 		outBefore = big.NewInt(0)
 	}
 
 	swapReq := exchange.SwapRequest{
 		ChainID:           fmt.Sprintf("%d", cc.ChainID),
-		FromTokenAddress:  tokenIn.Hex(),
-		ToTokenAddress:    tokenOut.Hex(),
+		FromTokenAddress:  okxTokenAddressParam(tokenIn),
+		ToTokenAddress:    okxTokenAddressParam(tokenOut),
 		Amount:            amountIn.String(),
 		Slippage:          s.okxSlippageDecimal(slippagePercent),
 		UserWalletAddress: walletAddr.Hex(),
@@ -179,8 +259,15 @@ func (s *LiquidityService) executeOKXSwapExactIn(
 			value = v
 		}
 	}
-	if value.Sign() != 0 {
-		return nil, fmt.Errorf("OKX swap requires native value; not supported")
+	if tokenInIsNative {
+		if value.Sign() <= 0 {
+			return nil, fmt.Errorf("OKX native swap missing tx.value")
+		}
+		if value.Cmp(amountIn) != 0 {
+			return nil, fmt.Errorf("OKX native swap tx.value=%s does not match amountIn=%s", value.String(), amountIn.String())
+		}
+	} else if value.Sign() != 0 {
+		return nil, fmt.Errorf("OKX ERC20 swap returned unexpected native value=%s", value.String())
 	}
 
 	var okxGasLimit uint64
@@ -196,38 +283,43 @@ func (s *LiquidityService) executeOKXSwapExactIn(
 		return nil, err
 	}
 
-	chainIDText := fmt.Sprintf("%d", cc.ChainID)
-	approveSpender, err := s.okxService.GetApproveSpender(chainIDText, tokenIn.Hex())
-	if err != nil {
-		log.Printf("[Liquidity] Warning: failed to get OKX approve spender, using router as fallback: %v", err)
-		approveSpender = to.Hex()
-	}
-	if !common.IsHexAddress(approveSpender) {
-		return nil, fmt.Errorf("OKX approve spender invalid: %s", approveSpender)
-	}
-	approveAddr := common.HexToAddress(approveSpender)
-
-	allowedSpenders := map[common.Address]struct{}{
-		to:                        {},
-		blockchain.Permit2Address: {},
-	}
-	if common.IsHexAddress(cc.OKXTokenApproveAddress) {
-		allowedSpenders[common.HexToAddress(cc.OKXTokenApproveAddress)] = struct{}{}
-	}
-	if _, ok := allowedSpenders[approveAddr]; !ok {
-		return nil, fmt.Errorf("OKX approve spender not allowed: %s (router=%s tokenApprove=%s)", approveAddr.Hex(), to.Hex(), strings.TrimSpace(cc.OKXTokenApproveAddress))
-	}
-
-	log.Printf("[Liquidity] OKX swap: chain=%s %s -> %s amount=%s router=%s approveTarget=%s",
-		exec.Chain(), tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), to.Hex(), approveAddr.Hex())
-
-	if approveAddr == blockchain.Permit2Address {
-		if err := s.approveTokenViaPermit2(client, chainID, privateKey, walletAddr, tokenIn, to, amountIn, TxOptions{}); err != nil {
-			return nil, fmt.Errorf("approve via Permit2 failed: %w", err)
-		}
+	if tokenInIsNative {
+		log.Printf("[Liquidity] OKX native swap: chain=%s %s -> %s amount=%s router=%s value=%s",
+			exec.Chain(), okxTokenAddressParam(tokenIn), okxTokenAddressParam(tokenOut), amountIn.String(), to.Hex(), value.String())
 	} else {
-		if err := s.approveToken(client, chainID, privateKey, walletAddr, tokenIn, approveAddr, amountIn, TxOptions{}); err != nil {
-			return nil, fmt.Errorf("approve spender failed: %w", err)
+		chainIDText := fmt.Sprintf("%d", cc.ChainID)
+		approveSpender, err := s.okxService.GetApproveSpender(chainIDText, okxTokenAddressParam(tokenIn))
+		if err != nil {
+			log.Printf("[Liquidity] Warning: failed to get OKX approve spender, using router as fallback: %v", err)
+			approveSpender = to.Hex()
+		}
+		if !common.IsHexAddress(approveSpender) {
+			return nil, fmt.Errorf("OKX approve spender invalid: %s", approveSpender)
+		}
+		approveAddr := common.HexToAddress(approveSpender)
+
+		allowedSpenders := map[common.Address]struct{}{
+			to:                        {},
+			blockchain.Permit2Address: {},
+		}
+		if common.IsHexAddress(cc.OKXTokenApproveAddress) {
+			allowedSpenders[common.HexToAddress(cc.OKXTokenApproveAddress)] = struct{}{}
+		}
+		if _, ok := allowedSpenders[approveAddr]; !ok {
+			return nil, fmt.Errorf("OKX approve spender not allowed: %s (router=%s tokenApprove=%s)", approveAddr.Hex(), to.Hex(), strings.TrimSpace(cc.OKXTokenApproveAddress))
+		}
+
+		log.Printf("[Liquidity] OKX swap: chain=%s %s -> %s amount=%s router=%s approveTarget=%s",
+			exec.Chain(), tokenIn.Hex(), tokenOut.Hex(), amountIn.String(), to.Hex(), approveAddr.Hex())
+
+		if approveAddr == blockchain.Permit2Address {
+			if err := s.approveTokenViaPermit2(client, chainID, privateKey, walletAddr, tokenIn, to, amountIn, TxOptions{}); err != nil {
+				return nil, fmt.Errorf("approve via Permit2 failed: %w", err)
+			}
+		} else {
+			if err := s.approveToken(client, chainID, privateKey, walletAddr, tokenIn, approveAddr, amountIn, TxOptions{}); err != nil {
+				return nil, fmt.Errorf("approve spender failed: %w", err)
+			}
 		}
 	}
 
@@ -268,16 +360,34 @@ func (s *LiquidityService) executeOKXSwapExactIn(
 		return &okxSwapExecutionResult{TxHash: txHash, Receipt: receipt, DeltaOut: d}, nil
 	}
 
-	outAfter, _ := blockchain.GetTokenBalanceWithClient(client, tokenOut, walletAddr)
+	outAfter, _ := getOKXSwapAssetBalance(client, tokenOut, walletAddr)
 	if outAfter == nil {
 		outAfter = big.NewInt(0)
 	}
-	delta := new(big.Int).Sub(outAfter, outBefore)
-	if delta.Sign() <= 0 {
-		minWanted := new(big.Int).Add(outBefore, big.NewInt(1))
-		if synced, werr := s.waitTokenBalanceAtLeast(client, tokenOut, walletAddr, minWanted, "OKX swap out"); werr == nil && synced != nil {
-			outAfter = synced
-			delta = new(big.Int).Sub(outAfter, outBefore)
+
+	var delta *big.Int
+	if tokenOutIsNative {
+		gasCostWei := s.gasCostWeiFromReceipt(client, signed.Hash(), receipt)
+		delta = nativeBalanceDelta(outBefore, outAfter, gasCostWei)
+		if delta.Sign() <= 0 {
+			minWanted := new(big.Int).Sub(new(big.Int).Set(outBefore), gasCostWei)
+			if minWanted.Sign() < 0 {
+				minWanted = big.NewInt(0)
+			}
+			minWanted.Add(minWanted, big.NewInt(1))
+			if synced, werr := s.waitOKXSwapAssetBalanceAtLeast(client, tokenOut, walletAddr, minWanted, "OKX swap native out"); werr == nil && synced != nil {
+				outAfter = synced
+				delta = nativeBalanceDelta(outBefore, outAfter, gasCostWei)
+			}
+		}
+	} else {
+		delta = new(big.Int).Sub(outAfter, outBefore)
+		if delta.Sign() <= 0 {
+			minWanted := new(big.Int).Add(outBefore, big.NewInt(1))
+			if synced, werr := s.waitOKXSwapAssetBalanceAtLeast(client, tokenOut, walletAddr, minWanted, "OKX swap out"); werr == nil && synced != nil {
+				outAfter = synced
+				delta = new(big.Int).Sub(outAfter, outBefore)
+			}
 		}
 	}
 	if delta.Sign() < 0 {

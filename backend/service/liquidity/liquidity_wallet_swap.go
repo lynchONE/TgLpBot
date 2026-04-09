@@ -392,5 +392,9 @@ func (s *LiquidityService) SwapSingleToken(
 	amountIn *big.Int,
 	slippagePercent float64,
 ) (string, error) {
-	return s.swapExactInViaOKXWithHash(exec, privateKey, walletAddr, tokenIn, tokenOut, amountIn, slippagePercent)
+	r, err := s.executeOKXSwapExactIn(exec, privateKey, walletAddr, tokenIn, tokenOut, amountIn, slippagePercent)
+	if r == nil {
+		return "", err
+	}
+	return r.TxHash, err
 }
