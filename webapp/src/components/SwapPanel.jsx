@@ -49,6 +49,7 @@ const CHAIN_META = {
 const RECENT_STORAGE_KEY = 'tg_lp_bot_swap_recent_tokens_v1';
 const AUTO_QUOTE_REFRESH_MS = 8000;
 const NATIVE_PSEUDO_ADDRESS = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+const MIN_WALLET_TOKEN_VALUE_USD = 0.1;
 
 // 缂備礁顦…宄扳枍鎼淬垻鈻旂€广儱顦版禒姗€鎮烽弴姘冲厡婵炲牊鍨垮浠嬪炊閳哄﹤濮版俊鐐€楅。顔炬濠靛鐭楁い蹇撳暟缁犱粙鏌ｉ敐鍡欐噧闁告﹩鍓熼獮鎴﹀閻樺樊娼梺?// const TABS = [
 //   { key: 'swap', label: '闂佺绻戦崹璺虹暦?, enabled: true },
@@ -327,6 +328,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   const [walletTokens, setWalletTokens] = useState([]);
   const [walletTokensKey, setWalletTokensKey] = useState('');
   const [loadingWalletTokens, setLoadingWalletTokens] = useState(false);
+  const [walletTokensError, setWalletTokensError] = useState('');
   const [tokenMetaMap, setTokenMetaMap] = useState({});
 
   const quoteTimeout = useRef(null);
@@ -346,6 +348,10 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   const currentWalletTokenKey = useMemo(
     () => (selectedWalletId ? `${chain}:${selectedWalletId}` : ''),
     [chain, selectedWalletId]
+  );
+  const hasLoadedWalletTokens = useMemo(
+    () => walletTokensKey === currentWalletTokenKey,
+    [currentWalletTokenKey, walletTokensKey]
   );
   const rawPresetTokens = useMemo(() => getPresetTokens(chain), [chain]);
   const rawRecentChainTokens = useMemo(
@@ -626,6 +632,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     const controller = new AbortController();
     walletTokensAbortRef.current = controller;
     setLoadingWalletTokens(true);
+    setWalletTokensError('');
     try {
       // 闂傚倸瀚粔宕囩礊閸℃稑瀚夐柍褜鍓涙禍姝岀疀鎼达絽绠氶梺绋匡工閵堢危閸ヮ剙纾圭痪顓㈩棑缁€澶愭煛閸曨偄鈷旈柕鍥ㄥ哺瀵挳寮堕幋顓熲柤婵炲濯寸徊鐣岀博?
       const resp = await walletSwapPreview({
@@ -633,7 +640,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
         initData,
         chain,
         walletId: selectedWalletId,
-        minValueUsd: 0.001,
+        minValueUsd: MIN_WALLET_TOKEN_VALUE_USD,
         signal: controller.signal,
       });
       if (controller.signal.aborted || walletTokensSeqRef.current !== seq) return;
@@ -660,6 +667,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       // 婵犮垺鍎肩划鍓ф喆閿曞倸绫嶉柡鍫㈡暩閻熸繃绻涢幘铏櫧闁宠鐗犻弫宥囦沪閼测晝顔旈梺浼欑稻閻熴倗绮婚敐澶婄鐎广儱娲﹂悾閬嶆煛娴ｅ搫顣肩€?
       setWalletTokens([]);
       setWalletTokensKey(requestKey);
+      setWalletTokensError(String(error?.message || error || '\u52a0\u8f7d\u94b1\u5305\u4f59\u989d\u5931\u8d25'));
     } finally {
       if (walletTokensAbortRef.current === controller) {
         walletTokensAbortRef.current = null;
@@ -686,6 +694,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     setWalletDropdownOpen(false);
     setWalletTokens([]);
     setWalletTokensKey('');
+    setWalletTokensError('');
   }, [currentWalletTokenKey]);
 
   useEffect(() => {
@@ -1308,6 +1317,59 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                   <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
                     <div style={{ marginBottom: '8px' }}>{'\u6b63\u5728\u52a0\u8f7d\u94b1\u5305\u4f59\u989d...'}</div>
                     <div style={{ fontSize: '11px', opacity: '0.7' }}>{'\u9996\u6b21\u52a0\u8f7d\u53ef\u80fd\u9700\u8981\u51e0\u79d2\u949f'}</div>
+                  </div>
+                ) : null}
+
+                {!loadingWalletTokens && walletTokensError ? (
+                  <div style={{
+                    margin: '0 0 12px',
+                    padding: '12px 14px',
+                    borderRadius: '16px',
+                    border: '1px solid rgba(248, 113, 113, 0.22)',
+                    background: 'rgba(127, 29, 29, 0.18)',
+                    color: '#fecaca',
+                  }}>
+                    <div style={{ fontSize: '12px', fontWeight: 700, marginBottom: '4px' }}>
+                      {'\u94b1\u5305\u4f59\u989d\u52a0\u8f7d\u5931\u8d25'}
+                    </div>
+                    <div style={{ fontSize: '12px', lineHeight: 1.6, color: '#fca5a5' }}>
+                      {walletTokensError}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => loadWalletTokens()}
+                      style={{
+                        marginTop: '10px',
+                        padding: '6px 10px',
+                        borderRadius: '10px',
+                        border: '1px solid rgba(254, 202, 202, 0.24)',
+                        background: 'rgba(254, 202, 202, 0.08)',
+                        color: '#fee2e2',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {'\u91cd\u8bd5 OKX \u67e5\u8be2'}
+                    </button>
+                  </div>
+                ) : null}
+
+                {!loadingWalletTokens && !walletTokensError && hasLoadedWalletTokens && walletTokens.length === 0 ? (
+                  <div style={{
+                    margin: '0 0 12px',
+                    padding: '12px 14px',
+                    borderRadius: '16px',
+                    border: '1px solid rgba(148, 163, 184, 0.16)',
+                    background: 'rgba(15, 23, 42, 0.42)',
+                    color: 'var(--text-muted)',
+                  }}>
+                    <div style={{ fontSize: '12px', fontWeight: 700, marginBottom: '4px', color: 'var(--text-primary)' }}>
+                      {'\u94b1\u5305\u4f59\u989d'}
+                    </div>
+                    <div style={{ fontSize: '12px', lineHeight: 1.6 }}>
+                      {`OKX \u672a\u8fd4\u56de\u5f53\u524d\u94b1\u5305\u4e2d\u4ef7\u503c >= $${MIN_WALLET_TOKEN_VALUE_USD.toFixed(1)} \u7684\u4ee3\u5e01\u4f59\u989d\u3002`}
+                    </div>
                   </div>
                 ) : null}
 

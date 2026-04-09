@@ -95,7 +95,7 @@ func (s *Server) handleWalletSwapPreview(w http.ResponseWriter, r *http.Request)
 
 	minVal := req.MinValueUSD
 	if minVal <= 0 {
-		minVal = 0.001
+		minVal = 0.1
 	}
 
 	rows, err := s.getTokenBalancesFromOKX(user.ID, req.WalletID, chain, minVal)
