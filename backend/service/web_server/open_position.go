@@ -522,7 +522,7 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 	liquidityService := liquidity.NewLiquidityService()
 	if err := liquidityService.CheckOpenPositionSafety(tmpTask, liquidity.OpenPositionRiskOptions{
 		AckLiquidityRisk:    req.AckLiquidityRisk,
-		RequireLiquidityAck: true,
+		RequireLiquidityAck: false,
 	}); err != nil {
 		var zapSafetyErr *liquidity.ZapSafetyError
 		if errors.As(err, &zapSafetyErr) {
@@ -600,7 +600,7 @@ func (s *Server) handleOpenPositionPreview(w http.ResponseWriter, r *http.Reques
 	// Collect safety checks
 	checkResults, err := ctx.liquidityService.CollectOpenPositionChecks(ctx.task, liquidity.OpenPositionRiskOptions{
 		AckLiquidityRisk:    ctx.req.AckLiquidityRisk,
-		RequireLiquidityAck: true,
+		RequireLiquidityAck: false,
 	})
 	if err != nil {
 		writeOpenPositionError(w, http.StatusInternalServerError, openPositionError{

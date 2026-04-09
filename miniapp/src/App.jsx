@@ -1911,10 +1911,6 @@ export default function App() {
             return;
         }
         const requiresAck = warnChecks.some(c => c.extra?.risk_ack_required);
-        if (requiresAck && !openPositionRiskAck) {
-            setOpenPositionError('请先确认低流动性风险。');
-            return;
-        }
         const maxOpenAmount = warnChecks.reduce((m, c) => {
             const v = Number(c.extra?.max_open_amount);
             return (Number.isFinite(v) && v > 0 && (m === null || v < m)) ? v : m;
@@ -3746,16 +3742,8 @@ export default function App() {
                                                                         </label>
                                                                     </div>
                                                                 ) : null}
-                                                                {isWarn && item.extra?.risk_ack_required ? (
-                                                                    <label className="mt-2 flex items-start gap-2 cursor-pointer">
-                                                                        <input
-                                                                            type="checkbox"
-                                                                            checked={openPositionRiskAck}
-                                                                            onChange={(e) => setOpenPositionRiskAck(e.target.checked)}
-                                                                            disabled={openPositionLoading}
-                                                                        />
-                                                                        <span className="text-[11px] leading-tight opacity-80">我已知悉当前池子流动性偏低，确认继续开仓。</span>
-                                                                    </label>
+                                                                {isWarn ? (
+                                                                    <div className="mt-2 text-[11px] leading-tight opacity-80">已提示风险，可直接继续；若要开仓，请留意滑点、成交波动和单次限额。</div>
                                                                 ) : null}
                                                             </div>
                                                         </div>

@@ -381,7 +381,6 @@ func evaluateLiquidityRisk(liquidityUSD float64, configuredMin float64, amountUS
 			LiquidityUSD:    liquidityUSD,
 			MinLiquidityUSD: minLiquidityUSD,
 			MaxOpenAmount:   softWarnMaxOpenAmountUSD,
-			RiskAckRequired: true,
 		}
 	}
 	if options.RequireLiquidityAck && !options.AckLiquidityRisk {
@@ -395,6 +394,23 @@ func evaluateLiquidityRisk(liquidityUSD float64, configuredMin float64, amountUS
 		}
 	}
 	return nil
+}
+
+func buildSoftLiquidityWarning(liquidityUSD float64, configuredMin float64, amountUSDT float64) *ZapSafetyError {
+	minLiquidityUSD := hardMinLiquidityUSD(configuredMin)
+	if liquidityUSD <= 0 || liquidityUSD < minLiquidityUSD || liquidityUSD >= softWarnMaxLiquidityUSD {
+		return nil
+	}
+	if amountUSDT > softWarnMaxOpenAmountUSD {
+		return nil
+	}
+	return &ZapSafetyError{
+		Code:            "pool_liquidity_warning",
+		Reason:          fmt.Sprintf("该池子当前流动性为 %.2fU，属于低流动性池，请留意滑点与成交波动（单次开仓限额 %.0fU）", liquidityUSD, softWarnMaxOpenAmountUSD),
+		LiquidityUSD:    liquidityUSD,
+		MinLiquidityUSD: minLiquidityUSD,
+		MaxOpenAmount:   softWarnMaxOpenAmountUSD,
+	}
 }
 
 func readOpenPositionGuardState(task *models.StrategyTask) (*openPositionGuardState, config.ChainConfig, *ethclient.Client, *models.ZapSafetyConfig, error) {
@@ -603,28 +619,44 @@ func (s *LiquidityService) CollectOpenPositionChecks(task *models.StrategyTask, 
 	// 2. Liquidity USD check
 	liqErr := evaluateLiquidityRisk(state.LiquidityUSD, safety.MinPoolLiquidityUSD, task.AmountUSDT, options)
 	if liqErr == nil {
-		liqVal := state.LiquidityUSD
-		checks = append(checks, CheckResult{
-			Key:    "liquidity",
-			Status: "pass",
-			Label:  "池子流动性",
-			Detail: fmt.Sprintf("TVL $%.0f", state.LiquidityUSD),
-			Value:  &liqVal,
-		})
+		if warn := buildSoftLiquidityWarning(state.LiquidityUSD, safety.MinPoolLiquidityUSD, task.AmountUSDT); warn != nil {
+			liqVal := state.LiquidityUSD
+			checks = append(checks, CheckResult{
+				Key:    "liquidity",
+				Status: "warn",
+				Label:  "池子流动性",
+				Detail: warn.Reason,
+				Value:  &liqVal,
+				Extra: map[string]interface{}{
+					"liquidity_usd":   warn.LiquidityUSD,
+					"max_open_amount": warn.MaxOpenAmount,
+				},
+			})
+		} else {
+			liqVal := state.LiquidityUSD
+			checks = append(checks, CheckResult{
+				Key:    "liquidity",
+				Status: "pass",
+				Label:  "池子流动性",
+				Detail: fmt.Sprintf("TVL $%.0f", state.LiquidityUSD),
+				Value:  &liqVal,
+			})
+		}
 	} else {
 		liqVal := state.LiquidityUSD
 		item := CheckResult{
 			Key:   "liquidity",
 			Label: "池子流动性",
 			Value: &liqVal,
+			Extra: map[string]interface{}{
+				"liquidity_usd":   liqErr.LiquidityUSD,
+				"max_open_amount": liqErr.MaxOpenAmount,
+			},
 		}
 		if liqErr.RiskAckRequired {
 			item.Status = "warn"
 			item.Detail = liqErr.Reason
-			item.Extra = map[string]interface{}{
-				"risk_ack_required": true,
-				"max_open_amount":   liqErr.MaxOpenAmount,
-			}
+			item.Extra["risk_ack_required"] = true
 		} else {
 			item.Status = "fail"
 			item.Detail = liqErr.Reason

@@ -170,6 +170,30 @@ func TestEvaluateLiquidityRiskAllowsAckedWarningBand(t *testing.T) {
 	}
 }
 
+func TestEvaluateLiquidityRiskAllowsWarningBandWithoutAckRequirement(t *testing.T) {
+	t.Parallel()
+
+	err := evaluateLiquidityRisk(650, 0, 180, OpenPositionRiskOptions{})
+	if err != nil {
+		t.Fatalf("expected warning-band liquidity to pass without forced acknowledgement, got %v", err)
+	}
+}
+
+func TestEvaluateLiquidityRiskRejectsExcessOpenAmountWithoutAckRequirement(t *testing.T) {
+	t.Parallel()
+
+	err := evaluateLiquidityRisk(650, 0, 220, OpenPositionRiskOptions{})
+	if err == nil {
+		t.Fatal("expected excess open amount to be rejected")
+	}
+	if err.Code != "pool_liquidity_warning" {
+		t.Fatalf("unexpected code: %s", err.Code)
+	}
+	if err.RiskAckRequired {
+		t.Fatal("expected excess open amount rejection to not require acknowledgement")
+	}
+}
+
 func TestSwapOutputDustRatioBpsUsesSwapOutputSide(t *testing.T) {
 	t.Parallel()
 

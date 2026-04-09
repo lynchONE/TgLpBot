@@ -360,10 +360,6 @@ export default function OpenPositionModal({
       setError(`当前池子单次开仓金额不能高于 ${riskMaxOpenAmount} USDT。`);
       return;
     }
-    if (riskRequiresAck && !riskAck) {
-      setError('请先确认低流动性风险。');
-      return;
-    }
     if (previewRequest && entrySwapPreviewLoading) {
       setError('前置兑换预览仍在加载，请稍后再试。');
       return;
@@ -472,27 +468,11 @@ export default function OpenPositionModal({
                   )}
                 </div>
               )}
-              {riskRequiresAck && (
-                <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginTop: 4, cursor: 'pointer' }}>
-                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 2, flexShrink: 0 }}>
-                    <input
-                      type="checkbox"
-                      checked={riskAck}
-                      style={{ opacity: 0, position: 'absolute', width: 16, height: 16, cursor: 'pointer', zIndex: 10 }}
-                      onChange={(e) => {
-                        clearErrors();
-                        setRiskAck(e.target.checked);
-                      }}
-                      disabled={busy}
-                    />
-                    <div style={{ width: 16, height: 16, borderRadius: 4, border: '2px solid rgba(245, 158, 11, 0.5)', backgroundColor: riskAck ? '#f59e0b' : 'var(--bg-card, rgba(255,255,255,0.2))', transition: 'all 0.2s' }}></div>
-                    <Check size={12} strokeWidth={3} style={{ position: 'absolute', color: '#fff', opacity: riskAck ? 1 : 0, transition: 'opacity 0.2s', pointerEvents: 'none' }} />
-                  </div>
-                  <span style={{ fontSize: 11, lineHeight: 1.4, fontWeight: 500, opacity: 0.9 }}>
-                    我已知悉当前池子流动性偏低，确认按限额继续开仓
-                  </span>
-                </label>
-              )}
+              {warnChecks.length > 0 ? (
+                <div style={{ fontSize: 11, lineHeight: 1.5, opacity: 0.85 }}>
+                  已提示风险，可直接继续；若要开仓，请留意滑点、成交波动和单次限额。
+                </div>
+              ) : null}
             </div>
           </div>
         ) : null}
