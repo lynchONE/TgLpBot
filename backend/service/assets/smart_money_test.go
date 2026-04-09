@@ -304,7 +304,7 @@ func TestPaginateSmartMoneyLeaderboardResponse_FiltersAndSlicesFromBackend(t *te
 	}
 }
 
-func TestBuildSmartMoneyHistoryPoints_UsesTransferAdjustedBalanceDelta(t *testing.T) {
+func TestBuildSmartMoneyHistoryPoints_UsesPreviousDayBalanceDelta(t *testing.T) {
 	rows := []smartMoneyHistoryDayRow{
 		{Day: "2026-03-25", TotalUSD: 100, NativeUSD: 10},
 		{Day: "2026-03-26", TotalUSD: 140, NativeUSD: 11},
@@ -321,15 +321,30 @@ func TestBuildSmartMoneyHistoryPoints_UsesTransferAdjustedBalanceDelta(t *testin
 	if got, want := points[1].EstimatedRealizedPnLUSD, 40.0; got != want {
 		t.Fatalf("second day pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := points[2].EstimatedRealizedPnLUSD, 0.0; got != want {
-		t.Fatalf("transfer-adjusted day pnl = %.2f, want %.2f", got, want)
+	if got, want := points[2].EstimatedRealizedPnLUSD, -50.0; got != want {
+		t.Fatalf("third day pnl = %.2f, want %.2f", got, want)
 	}
 	if got, want := points[2].TransferNetUSD, -50.0; got != want {
 		t.Fatalf("transfer net usd = %.2f, want %.2f", got, want)
 	}
 }
 
-func TestBuildSmartMoneyTodayHistoryPoint_AdjustsPnLByNetTransfer(t *testing.T) {
+func TestBuildSmartMoneyHistoryPoints_RequiresConsecutiveSnapshots(t *testing.T) {
+	rows := []smartMoneyHistoryDayRow{
+		{Day: "2026-03-25", TotalUSD: 100},
+		{Day: "2026-03-27", TotalUSD: 140},
+	}
+
+	points := buildSmartMoneyHistoryPoints(rows)
+	if got, want := len(points), 2; got != want {
+		t.Fatalf("history points = %d, want %d", got, want)
+	}
+	if got, want := points[1].EstimatedRealizedPnLUSD, 0.0; got != want {
+		t.Fatalf("gap day pnl = %.2f, want %.2f", got, want)
+	}
+}
+
+func TestBuildSmartMoneyTodayHistoryPoint_UsesPreviousDaySnapshotDelta(t *testing.T) {
 	timeutil.Init()
 	now := time.Date(2026, time.March, 28, 19, 37, 0, 0, timeutil.Location())
 
@@ -339,7 +354,7 @@ func TestBuildSmartMoneyTodayHistoryPoint_AdjustsPnLByNetTransfer(t *testing.T) 
 		TrackedTokenUSD: 75.5,
 		OpenLPUSD:       0,
 		TotalUSD:        2988.06,
-	}, 2864.61, true, smartMoneyTransferActivity{
+	}, "2026-03-27", 2864.61, true, smartMoneyTransferActivity{
 		HasTransferIn:   true,
 		TransferInCount: 1,
 		TransferInUSD:   800,
@@ -348,11 +363,24 @@ func TestBuildSmartMoneyTodayHistoryPoint_AdjustsPnLByNetTransfer(t *testing.T) 
 	if got, want := point.Day, "2026-03-28"; got != want {
 		t.Fatalf("today day = %s, want %s", got, want)
 	}
-	if got, want := point.EstimatedRealizedPnLUSD, -676.55; got != want {
+	if got, want := point.EstimatedRealizedPnLUSD, 123.45; got != want {
 		t.Fatalf("today pnl = %.2f, want %.2f", got, want)
 	}
 	if got, want := point.TransferNetUSD, 800.0; got != want {
 		t.Fatalf("today transfer net usd = %.2f, want %.2f", got, want)
+	}
+}
+
+func TestBuildSmartMoneyTodayHistoryPoint_RequiresYesterdaySnapshot(t *testing.T) {
+	timeutil.Init()
+	now := time.Date(2026, time.March, 28, 19, 37, 0, 0, timeutil.Location())
+
+	point := buildSmartMoneyTodayHistoryPoint(now, smartMoneyAssetBreakdown{
+		TotalUSD: 2988.06,
+	}, "2026-03-26", 2864.61, true, smartMoneyTransferActivity{})
+
+	if got, want := point.EstimatedRealizedPnLUSD, 0.0; got != want {
+		t.Fatalf("today pnl with stale snapshot = %.2f, want %.2f", got, want)
 	}
 }
 

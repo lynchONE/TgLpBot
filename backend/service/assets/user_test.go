@@ -202,10 +202,10 @@ func TestApplyUserSnapshotPnL(t *testing.T) {
 
 	stats := applyUserSnapshotPnL(base, snapshots, transferByDay, &liveTotalUSD, now)
 
-	if got, want := stats.Today.RealizedPnLUSD, 2.0; got != want {
+	if got, want := stats.Today.RealizedPnLUSD, 3.0; got != want {
 		t.Fatalf("today snapshot pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := stats.Today.AvgPnLUSD, 2.0; got != want {
+	if got, want := stats.Today.AvgPnLUSD, 3.0; got != want {
 		t.Fatalf("today avg pnl = %.2f, want %.2f", got, want)
 	}
 
@@ -215,32 +215,32 @@ func TestApplyUserSnapshotPnL(t *testing.T) {
 	if got, want := stats.DailyHistory[0].Day, "2026-03-18"; got != want {
 		t.Fatalf("first history day = %s, want %s", got, want)
 	}
-	if got, want := stats.DailyHistory[0].RealizedPnLUSD, -3.0; got != want {
+	if got, want := stats.DailyHistory[0].RealizedPnLUSD, 2.0; got != want {
 		t.Fatalf("2026-03-18 pnl = %.2f, want %.2f", got, want)
 	}
 	if got, want := stats.DailyHistory[1].RealizedPnLUSD, -3.0; got != want {
 		t.Fatalf("2026-03-19 pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := stats.DailyHistory[2].RealizedPnLUSD, 14.0; got != want {
+	if got, want := stats.DailyHistory[2].RealizedPnLUSD, 10.0; got != want {
 		t.Fatalf("2026-03-20 pnl = %.2f, want %.2f", got, want)
 	}
 	if got, want := stats.DailyHistory[2].TransferNetUSD, -4.0; got != want {
 		t.Fatalf("2026-03-20 transfer net = %.2f, want %.2f", got, want)
 	}
 
-	if got, want := stats.Windows[0].RealizedPnLUSD, 14.0; got != want {
+	if got, want := stats.Windows[0].RealizedPnLUSD, 10.0; got != want {
 		t.Fatalf("1d pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := stats.Windows[0].AvgPnLUSD, 14.0; got != want {
+	if got, want := stats.Windows[0].AvgPnLUSD, 10.0; got != want {
 		t.Fatalf("1d avg pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := stats.Windows[1].RealizedPnLUSD, 8.0; got != want {
+	if got, want := stats.Windows[1].RealizedPnLUSD, 9.0; got != want {
 		t.Fatalf("7d pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := stats.Windows[1].AvgPnLUSD, 4.0; got != want {
+	if got, want := stats.Windows[1].AvgPnLUSD, 4.5; got != want {
 		t.Fatalf("7d avg pnl = %.2f, want %.2f", got, want)
 	}
-	if got, want := stats.Windows[2].RealizedPnLUSD, 8.0; got != want {
+	if got, want := stats.Windows[2].RealizedPnLUSD, 9.0; got != want {
 		t.Fatalf("30d pnl = %.2f, want %.2f", got, want)
 	}
 }

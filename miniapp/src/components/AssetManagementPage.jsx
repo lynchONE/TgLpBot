@@ -1109,7 +1109,7 @@ export default function AssetManagementPage({
                         <PnLCalendar
                             data={assetsData.lp?.daily_history}
                             loading={assetsLoading}
-                            note="收益额按当日总资产变化减去当日净转账计算；今日盈亏按实时总资产对比昨日快照，并剔除今日净转账。"
+                            note="收益额按当日总资产相对前一日快照的变化计算；今日盈亏按实时总资产对比前一日快照计算；转入转出仅展示，不参与盈亏。"
                         />
                         {/* summary stats below chart */}
                         {Array.isArray(assetsData.lp?.windows) && assetsData.lp.windows.length > 0 && (

@@ -336,7 +336,7 @@ func buildUserSnapshotPnLByDay(rows []models.UserAssetDailySnapshot, transferByD
 		activity := transferByDay[curr.SnapshotDay]
 		point := UserLPDailyPoint{
 			Day:            curr.SnapshotDay,
-			RealizedPnLUSD: adjustedPnL(curr.TotalUSD-prev.TotalUSD, activity.TransferInUSD, activity.TransferOutUSD),
+			RealizedPnLUSD: round2(curr.TotalUSD - prev.TotalUSD),
 		}
 		applyUserTransferActivity(&point, activity)
 		out[curr.SnapshotDay] = point
@@ -396,13 +396,13 @@ func sumUserDailyHistoryPnL(history []UserLPDailyPoint, start time.Time, end tim
 	return round2(total)
 }
 
-func snapshotTodayPnL(rows []models.UserAssetDailySnapshot, liveTotalUSD float64, now time.Time, activity userTransferActivity) (float64, bool) {
+func snapshotTodayPnL(rows []models.UserAssetDailySnapshot, liveTotalUSD float64, now time.Time) (float64, bool) {
 	yesterdayKey := formatDay(dayStart(now).AddDate(0, 0, -1))
 	for i := len(rows) - 1; i >= 0; i-- {
 		if rows[i].SnapshotDay != yesterdayKey {
 			continue
 		}
-		return adjustedPnL(liveTotalUSD-rows[i].TotalUSD, activity.TransferInUSD, activity.TransferOutUSD), true
+		return round2(liveTotalUSD - rows[i].TotalUSD), true
 	}
 	return 0, false
 }
@@ -427,7 +427,7 @@ func applyUserSnapshotPnL(base UserLPStatsResponse, snapshotRows []models.UserAs
 	base.DailyHistory = mergeUserDailyHistoryPnL(base.DailyHistory, snapshotPnLByDay, historyStart, startOfToday)
 
 	if liveTotalUSD != nil {
-		if pnl, ok := snapshotTodayPnL(snapshotRows, *liveTotalUSD, now, transferByDay[formatDay(now)]); ok {
+		if pnl, ok := snapshotTodayPnL(snapshotRows, *liveTotalUSD, now); ok {
 			setUserLPWindowPnL(&base.Today, pnl)
 		}
 	}

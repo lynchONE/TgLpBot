@@ -1003,7 +1003,7 @@ export default function AssetManagementPanel({
               <PnLCalendar
                 data={assetState.lp?.daily_history}
                 loading={assetLoading}
-                note="收益额按当日总资产变化减去当日净转账计算；今日盈亏按实时总资产对比昨日快照，并剔除今日净转账。"
+                note="收益额按当日总资产相对前一日快照的变化计算；今日盈亏按实时总资产对比前一日快照计算；转入转出仅展示，不参与盈亏。"
               />
               {Array.isArray(assetState.lp?.windows) && assetState.lp.windows.length > 0 && (
                 <div className="am-stat-grid am-stat-grid-3" style={{ marginTop: 10 }}>

@@ -153,11 +153,12 @@ func buildSmartMoneyHistoryPoints(rows []smartMoneyHistoryDayRow) []SmartMoneyHi
 
 	points := make([]SmartMoneyHistoryPoint, 0, len(rows))
 	previousTotalUSD := 0.0
+	previousDay := ""
 	hasPreviousTotal := false
 	for _, row := range rows {
 		estimatedPnL := 0.0
-		if hasPreviousTotal {
-			estimatedPnL = adjustedPnL(row.TotalUSD-previousTotalUSD, row.TransferInUSD, row.TransferOutUSD)
+		if hasPreviousTotal && isNextSnapshotDay(previousDay, row.Day) {
+			estimatedPnL = round2(row.TotalUSD - previousTotalUSD)
 		}
 
 		points = append(points, SmartMoneyHistoryPoint{
@@ -178,15 +179,16 @@ func buildSmartMoneyHistoryPoints(rows []smartMoneyHistoryDayRow) []SmartMoneyHi
 			TransferNetUSD:          transferNetUSD(row.TransferInUSD, row.TransferOutUSD),
 		})
 		previousTotalUSD = row.TotalUSD
+		previousDay = row.Day
 		hasPreviousTotal = true
 	}
 	return points
 }
 
-func buildSmartMoneyTodayHistoryPoint(day time.Time, assets smartMoneyAssetBreakdown, previousTotalUSD float64, hasPreviousTotal bool, activity smartMoneyTransferActivity) SmartMoneyHistoryPoint {
+func buildSmartMoneyTodayHistoryPoint(day time.Time, assets smartMoneyAssetBreakdown, previousDay string, previousTotalUSD float64, hasPreviousTotal bool, activity smartMoneyTransferActivity) SmartMoneyHistoryPoint {
 	pnl := 0.0
-	if hasPreviousTotal {
-		pnl = adjustedPnL(assets.TotalUSD-previousTotalUSD, activity.TransferInUSD, activity.TransferOutUSD)
+	if hasPreviousTotal && isNextSnapshotDay(previousDay, formatDay(day)) {
+		pnl = round2(assets.TotalUSD - previousTotalUSD)
 	}
 	return SmartMoneyHistoryPoint{
 		Day:                     formatDay(day),
@@ -550,13 +552,15 @@ func (s *Service) GetSmartMoneyWallet(ctx context.Context, address string, chain
 		return nil, err
 	}
 	previousTotalUSD := 0.0
+	previousDay := ""
 	hasPreviousTotal := false
 	if len(history) > 0 {
 		last := history[len(history)-1]
+		previousDay = last.Day
 		previousTotalUSD = last.TotalUSD
 		hasPreviousTotal = true
 	}
-	todayPoint := buildSmartMoneyTodayHistoryPoint(now, summary.Assets, previousTotalUSD, hasPreviousTotal, todayTransferByWallet[walletKey])
+	todayPoint := buildSmartMoneyTodayHistoryPoint(now, summary.Assets, previousDay, previousTotalUSD, hasPreviousTotal, todayTransferByWallet[walletKey])
 	history = mergeSmartMoneyHistoryPoint(history, todayPoint)
 
 	return &SmartMoneyWalletResponse{
