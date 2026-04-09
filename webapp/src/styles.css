@@ -8751,21 +8751,15 @@ body {
   gap: 12px;
 }
 
-.swap-panel-topnote {
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
 .swap-controls-card {
   position: relative;
   overflow: visible;
   z-index: 2;
-  padding: 16px;
-  border-radius: 24px;
+  padding: 12px;
+  border-radius: 20px;
   border: 1px solid rgba(136, 157, 191, 0.22);
   background: linear-gradient(145deg, rgba(15, 21, 32, 0.95), rgba(11, 17, 27, 0.95));
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.26);
   backdrop-filter: blur(8px);
 }
 
@@ -8784,8 +8778,8 @@ body {
   z-index: 1;
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-  gap: 14px;
-  margin-top: 14px;
+  gap: 10px;
+  margin-top: 10px;
 }
 
 .swap-control-block {
@@ -8793,11 +8787,11 @@ body {
   z-index: 1;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .swap-control-label {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.02em;
   color: var(--text-muted);
@@ -8811,7 +8805,7 @@ body {
 }
 
 .swap-control-label-row strong {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--text);
 }
@@ -8819,20 +8813,16 @@ body {
 .swap-network-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-}
-
-.swap-network-list.compact {
   gap: 8px;
 }
 
 .swap-network-button {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
-  padding: 10px 12px;
-  border-radius: 18px;
+  padding: 8px 10px;
+  border-radius: 14px;
   border: 1px solid rgba(139, 160, 196, 0.24);
   background: rgba(18, 26, 40, 0.82);
   color: var(--text);
@@ -8853,27 +8843,19 @@ body {
   box-shadow: 0 10px 24px rgba(var(--accent-rgb), 0.12);
 }
 
-.swap-network-button.compact {
-  width: 46px;
-  height: 46px;
-  justify-content: center;
-  padding: 0;
-  border-radius: 14px;
-}
-
 .swap-network-icon-wrap {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   flex-shrink: 0;
 }
 
 .swap-network-icon {
   display: block;
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
 }
 
 .swap-network-copy {
@@ -8885,14 +8867,9 @@ body {
 }
 
 .swap-network-copy strong {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--text);
-}
-
-.swap-network-copy small {
-  font-size: 11px;
-  color: var(--text-muted);
 }
 
 .swap-tabs {
@@ -8992,12 +8969,6 @@ body {
   color: var(--text-muted);
 }
 
-.swap-picker-network-row {
-  margin-bottom: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
 
 /* 自定义下拉框 */
 .swap-custom-select-wrap {
@@ -9009,14 +8980,14 @@ body {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 10px;
-  height: 48px;
-  border-radius: 16px;
+  gap: 8px;
+  height: 42px;
+  border-radius: 14px;
   border: 1px solid rgba(139, 160, 196, 0.28);
   background: rgba(18, 26, 40, 0.85);
-  padding: 0 14px;
+  padding: 0 12px;
   color: var(--text);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -9127,12 +9098,12 @@ body {
 .swap-slippage-input-wrap {
   display: flex;
   align-items: center;
-  gap: 10px;
-  height: 48px;
-  border-radius: 16px;
+  gap: 8px;
+  height: 42px;
+  border-radius: 14px;
   border: 1px solid rgba(139, 160, 196, 0.28);
   background: rgba(18, 26, 40, 0.85);
-  padding: 0 14px;
+  padding: 0 12px;
   color: var(--text-muted);
   transition: all 0.2s ease;
 }
@@ -9149,7 +9120,7 @@ body {
   outline: none;
   background: transparent;
   color: var(--text);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   appearance: none;
 }
@@ -9157,23 +9128,23 @@ body {
 .swap-slippage-input-group {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .swap-slippage-pills {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .swap-slippage-pill {
-  min-width: 56px;
-  padding: 9px 12px;
-  border-radius: 12px;
+  min-width: 48px;
+  padding: 7px 10px;
+  border-radius: 10px;
   border: 1px solid rgba(138, 160, 194, 0.25);
   background: rgba(18, 26, 40, 0.7);
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.18s ease;
@@ -9199,7 +9170,7 @@ body {
   outline: none;
   background: transparent;
   color: var(--text);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
 }
 
@@ -9983,10 +9954,6 @@ img.swap-token-glyph {
 
   .swap-network-button {
     flex: 1 1 calc(50% - 8px);
-  }
-
-  .swap-network-button.compact {
-    flex: 0 0 auto;
   }
 
   .swap-card {

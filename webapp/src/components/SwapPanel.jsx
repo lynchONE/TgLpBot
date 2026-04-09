@@ -19,6 +19,8 @@ const CHAIN_META = {
     nativeSymbol: 'BNB',
     icon: bnbLogo,
     iconAlt: 'BNB Chain',
+    nativeLogoUrl: bnbLogo,
+    wrappedNativeAddress: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
     stable: {
       symbol: 'USDT',
       name: 'Tether USD',
@@ -38,6 +40,8 @@ const CHAIN_META = {
     nativeSymbol: 'ETH',
     icon: baseLogo,
     iconAlt: 'Base',
+    nativeLogoUrl: baseLogo,
+    wrappedNativeAddress: '0x4200000000000000000000000000000000000006',
     stable: {
       symbol: 'USDC',
       name: 'USD Coin',
@@ -163,12 +167,24 @@ function shouldFetchTokenMetadata(token) {
   return !symbol || !name || name === symbol;
 }
 
-function applyTokenMetadata(token, tokenMetaMap) {
+function resolveNativeLogoUrl(token, tokenMetaMap, chain) {
+  const chainConfig = getChainConfig(chain);
+  const wrappedAddress = normalizeHexAddress(chainConfig?.wrappedNativeAddress);
+  const wrappedLogoUrl = wrappedAddress ? String(tokenMetaMap?.[wrappedAddress]?.logoUrl || '').trim() : '';
+  const currentLogoUrl = String(token?.logoUrl || '').trim();
+  return wrappedLogoUrl || currentLogoUrl || String(chainConfig?.nativeLogoUrl || '').trim();
+}
+
+function applyTokenMetadata(token, tokenMetaMap, chain) {
   if (!token) return token;
   const address = normalizeHexAddress(token.address);
   if (!address) return token;
   if (Boolean(token.native)) {
-    return { ...token, address };
+    return {
+      ...token,
+      address,
+      logoUrl: resolveNativeLogoUrl(token, tokenMetaMap, chain),
+    };
   }
   const meta = tokenMetaMap?.[address];
   if (!meta) return token;
@@ -369,16 +385,16 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     [chain, recentTokens]
   );
   const presetTokens = useMemo(
-    () => rawPresetTokens.map((token) => applyTokenMetadata(token, tokenMetaMap)),
-    [rawPresetTokens, tokenMetaMap]
+    () => rawPresetTokens.map((token) => applyTokenMetadata(token, tokenMetaMap, chain)),
+    [chain, rawPresetTokens, tokenMetaMap]
   );
   const recentChainTokens = useMemo(
-    () => rawRecentChainTokens.map((token) => applyTokenMetadata(token, tokenMetaMap)),
-    [rawRecentChainTokens, tokenMetaMap]
+    () => rawRecentChainTokens.map((token) => applyTokenMetadata(token, tokenMetaMap, chain)),
+    [chain, rawRecentChainTokens, tokenMetaMap]
   );
   const enrichedWalletTokens = useMemo(
-    () => walletTokens.map((token) => applyTokenMetadata(token, tokenMetaMap)),
-    [walletTokens, tokenMetaMap]
+    () => walletTokens.map((token) => applyTokenMetadata(token, tokenMetaMap, chain)),
+    [chain, walletTokens, tokenMetaMap]
   );
   const tokenLookup = useMemo(
     () => buildTokenLookup([...enrichedWalletTokens, ...recentChainTokens, ...presetTokens]),
@@ -483,7 +499,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       .filter((token) => matchesToken(token, keyword))
       .map(enrichToken);
 
-    const customCandidate = applyTokenMetadata(makeCustomToken(tokenQuery), tokenMetaMap);
+    const customCandidate = applyTokenMetadata(makeCustomToken(tokenQuery), tokenMetaMap, chain);
     return {
       customCandidate:
         customCandidate &&
@@ -661,7 +677,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
           name: t.name || t.symbol,
           balance: t.balance,
           valueUSDT: t.value_usdt || 0,
-          logoUrl: t.logo_url || '',
+          logoUrl: t.logo_url || (t.is_native ? getChainConfig(chain).nativeLogoUrl || '' : ''),
           native: Boolean(t.is_native),
           canSwap: t.can_swap !== false,
           disabledReason: t.disabled_reason || '',
@@ -964,15 +980,15 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     }
   }, [chain, onChainChange]);
 
-  const renderNetworkButtons = useCallback((compact = false) => (
-    <div className={`swap-network-list${compact ? ' compact' : ''}`}>
+  const renderNetworkButtons = useCallback(() => (
+    <div className="swap-network-list">
       {chainOptions.map((option) => {
         const active = option.key === chain;
         return (
           <button
             key={option.key}
             type="button"
-            className={`swap-network-button${active ? ' active' : ''}${compact ? ' compact' : ''}`}
+            className={`swap-network-button${active ? ' active' : ''}`}
             onClick={() => handleChainSelect(option.key)}
             aria-pressed={active}
             title={option.label}
@@ -980,12 +996,9 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
             <span className="swap-network-icon-wrap">
               <img src={option.icon} alt={option.iconAlt || option.label} className="swap-network-icon" />
             </span>
-            {!compact ? (
-              <span className="swap-network-copy">
-                <strong>{option.label}</strong>
-                <small>{option.nativeSymbol}</small>
-              </span>
-            ) : null}
+            <span className="swap-network-copy">
+              <strong>{option.label}</strong>
+            </span>
           </button>
         );
       })}
@@ -1028,19 +1041,16 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
               <div style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)' }}>
                 {'\u5151\u6362'}
               </div>
-              <div className="swap-panel-topnote">
-                {'\u7f51\u7edc\u3001\u94b1\u5305\u4e0e\u6ed1\u70b9\u76f4\u63a5\u5728\u4e0b\u65b9\u8bbe\u7f6e'}
-              </div>
             </div>
           </div>
 
           <div className="swap-controls-card">
-            <div className="swap-control-block">
-              <div className="swap-control-label-row">
-                <span className="swap-control-label">{'\u7f51\u7edc'}</span>
-                <strong>{chainConfig.label}</strong>
-              </div>
-              {renderNetworkButtons(false)}
+              <div className="swap-control-block">
+                <div className="swap-control-label-row">
+                  <span className="swap-control-label">{'\u7f51\u7edc'}</span>
+                  <strong>{chainConfig.label}</strong>
+                </div>
+              {renderNetworkButtons()}
             </div>
 
             <div className="swap-control-grid">
@@ -1335,14 +1345,6 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                     {'\u5237\u65b0\u4e2d...'}
                   </div>
                 ) : null}
-              </div>
-
-              <div className="swap-picker-network-row">
-                <div className="swap-control-label-row">
-                  <span className="swap-control-label">{'\u70ed\u95e8\u94fe'}</span>
-                  <strong>{chainConfig.label}</strong>
-                </div>
-                {renderNetworkButtons(true)}
               </div>
 
               <div className="swap-quick-picks">
