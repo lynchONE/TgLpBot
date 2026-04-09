@@ -15,6 +15,7 @@ const WALLET_AVATAR_ICONS = Object.entries(
   .map(([, src]) => src);
 
 const SMART_MONEY_WINDOWS = [1, 7, 30];
+const CHINA_TIME_ZONE = 'Asia/Shanghai';
 const LEADERBOARD_METRICS = [
   { key: 'pnl', label: '收益额' },
   { key: 'yield_rate', label: '收益率' },
@@ -56,6 +57,29 @@ function formatPct(value, digits = 2) {
   const number = Number(value || 0);
   if (!Number.isFinite(number)) return '--';
   return `${(number * 100).toFixed(digits).replace(/\.?0+$/, '')}%`;
+}
+
+function chinaDateParts(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: CHINA_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const map = {};
+  parts.forEach((part) => {
+    if (part.type !== 'literal') map[part.type] = part.value;
+  });
+  if (!map.year || !map.month || !map.day) return null;
+  return map;
+}
+
+function formatChinaDay(value = new Date()) {
+  const parts = chinaDateParts(value);
+  if (!parts) return '';
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 function formatChain(chainId) {
@@ -133,6 +157,94 @@ function RankBadge({ rank }) {
     );
   }
   return <span className="am-rank">{rank}</span>;
+}
+
+const PNL_CAL_WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
+
+function PnLCalendar({ data, loading = false }) {
+  const [viewDate, setViewDate] = useState(() => new Date());
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstDayJS = new Date(year, month, 1).getDay();
+  const startOffset = firstDayJS === 0 ? 6 : firstDayJS - 1;
+
+  const pnlMap = useMemo(() => {
+    const map = {};
+    if (Array.isArray(data)) data.forEach((item) => {
+      if (item?.day) map[item.day] = item;
+    });
+    return map;
+  }, [data]);
+
+  const monthLabel = new Intl.DateTimeFormat('en-US', {
+    timeZone: CHINA_TIME_ZONE,
+    year: 'numeric',
+    month: 'short',
+  }).format(new Date(Date.UTC(year, month, 1, 12, 0, 0)));
+  const todayStr = formatChinaDay();
+
+  if (loading) {
+    return <div className="am-chart-empty">加载中...</div>;
+  }
+
+  const cells = [];
+  for (let i = 0; i < startOffset; i++) {
+    cells.push(<div key={`e-${i}`} className="pnl-cal-cell pnl-cal-empty" />);
+  }
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const entry = pnlMap[dateStr];
+    const pnl = entry ? Number(entry.realized_pnl_usd || 0) : null;
+    const isToday = dateStr === todayStr;
+    const isFuture = dateStr > todayStr;
+    const cls = ['pnl-cal-cell'];
+    if (isToday) cls.push('pnl-cal-today');
+    else if (isFuture) cls.push('pnl-cal-future');
+    if (pnl !== null) cls.push(pnl >= 0 ? 'pnl-cal-pos' : 'pnl-cal-neg');
+    cells.push(
+      <div key={day} className={cls.join(' ')}>
+        <div className="pnl-cal-day">{day}</div>
+        <div className="pnl-cal-value">
+          {pnl !== null ? `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}` : '0'}
+        </div>
+      </div>
+    );
+  }
+
+  const remainder = (startOffset + daysInMonth) % 7;
+  if (remainder > 0) {
+    for (let i = 0; i < 7 - remainder; i++) {
+      cells.push(<div key={`t-${i}`} className="pnl-cal-cell pnl-cal-empty" />);
+    }
+  }
+
+  return (
+    <div className="pnl-calendar">
+      <div className="pnl-cal-header">
+        <div className="pnl-cal-month">
+          <span>{monthLabel}</span>
+          <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <rect x="3" y="4" width="18" height="18" rx="2" />
+            <line x1="16" y1="2" x2="16" y2="6" />
+            <line x1="8" y1="2" x2="8" y2="6" />
+            <line x1="3" y1="10" x2="21" y2="10" />
+          </svg>
+        </div>
+        <div className="pnl-cal-nav">
+          <button type="button" onClick={() => setViewDate(new Date(year, month - 1, 1))}><ChevronLeft size={14} /></button>
+          <button type="button" onClick={() => setViewDate(new Date(year, month + 1, 1))}><ChevronRight size={14} /></button>
+        </div>
+      </div>
+      <div className="pnl-cal-grid">
+        {PNL_CAL_WEEKDAYS.map((dayLabel) => (
+          <div key={dayLabel} className="pnl-cal-weekday">{dayLabel}</div>
+        ))}
+        {cells}
+      </div>
+    </div>
+  );
 }
 
 export default function SmartMoneyAssetsPanel({
@@ -316,10 +428,14 @@ export default function SmartMoneyAssetsPanel({
     [leaderboard?.list]
   );
   const leaderboardTotalPages = Math.max(1, Number(leaderboard?.total_pages || 1));
-  const historyRows = useMemo(() => {
+  const historyCount = Array.isArray(walletDetail?.history) ? walletDetail.history.length : 0;
+  const pnlCalendarData = useMemo(() => {
     const rows = Array.isArray(walletDetail?.history) ? [...walletDetail.history] : [];
-    rows.sort((left, right) => String(right?.day || '').localeCompare(String(left?.day || '')));
-    return rows.slice(0, 20);
+    rows.sort((left, right) => String(left?.day || '').localeCompare(String(right?.day || '')));
+    return rows.map((item) => ({
+      day: item?.day,
+      realized_pnl_usd: Number(item?.estimated_realized_pnl_usd || 0),
+    }));
   }, [walletDetail?.history]);
 
   const isBusy = loading || refreshing;
@@ -529,39 +645,12 @@ export default function SmartMoneyAssetsPanel({
 
           <div className="am-card">
             <div className="am-card-header">
-              <div className="am-card-title">最近日记录</div>
-              <div className="am-item-sub">{detailLoading ? '加载中...' : `${historyRows.length} 条`}</div>
+              <div className="am-card-title">盈亏日历</div>
+              <div className="am-item-sub">{detailLoading ? '加载中...' : `${historyCount} 天`}</div>
             </div>
-            <div className="am-list">
-              {historyRows.length > 0 ? historyRows.map((item) => {
-                const pnl = Number(item?.estimated_realized_pnl_usd || 0);
-                const hasTransfer = Boolean(
-                  item?.has_transfer_in ||
-                  item?.has_transfer_out ||
-                  Number(item?.transfer_total_count || 0) > 0
-                );
-                return (
-                  <div key={item.day} className="am-list-item">
-                    <div style={{ minWidth: 0 }}>
-                      <div className="am-item-title">{item.day || '--'}</div>
-                      <div className="am-item-sub">
-                        总资产 {formatUsdCompact(item?.total_usd)} / 事件 {Number(item?.event_count || 0)}
-                      </div>
-                    </div>
-                    <div className="am-list-end" style={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                      {hasTransfer ? (
-                        <span className="am-badge am-badge-warn">
-                          转账 {Number(item?.transfer_total_count || 0)}
-                        </span>
-                      ) : null}
-                      <strong style={{ color: pnl >= 0 ? 'var(--positive)' : 'var(--negative)' }}>
-                        {pnl >= 0 ? '+' : ''}{formatUsdCompact(pnl)}
-                      </strong>
-                    </div>
-                  </div>
-                );
-              }) : <EmptyState text={detailLoading ? '正在加载钱包详情...' : '暂无日记录'} />}
-            </div>
+            {pnlCalendarData.length > 0 ? (
+              <PnLCalendar data={pnlCalendarData} loading={detailLoading} />
+            ) : <EmptyState text={detailLoading ? '正在加载钱包详情...' : '暂无盈亏日历'} />}
           </div>
         </div>
       ) : null}
@@ -611,7 +700,21 @@ export default function SmartMoneyAssetsPanel({
           <div className="am-list">
             {leaderboardRows.length > 0 ? leaderboardRows.map((item, index) => {
               const rank = leaderboardPage * PAGE_SIZE + index + 1;
-              const pnl = Number(item?.pnl || 0);
+              const pnl = Number(item?.estimated_realized_pnl_usd || 0);
+              const yieldRate = Number(item?.yield_rate || 0);
+              const participationCount = Number(item?.participation_count || 0);
+              const primaryColor = leaderboardMetric === 'participation'
+                ? 'var(--text-primary)'
+                : ((leaderboardMetric === 'yield_rate' ? yieldRate : pnl) >= 0 ? 'var(--positive)' : 'var(--negative)');
+              let primaryText = `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}`;
+              let secondaryText = formatPct(yieldRate);
+              if (leaderboardMetric === 'yield_rate') {
+                primaryText = formatPct(yieldRate);
+                secondaryText = `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}`;
+              } else if (leaderboardMetric === 'participation') {
+                primaryText = `${participationCount} 次`;
+                secondaryText = `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}`;
+              }
               return (
                 <button
                   type="button"
@@ -630,12 +733,10 @@ export default function SmartMoneyAssetsPanel({
                     </div>
                   </div>
                   <div className="am-list-end" style={{ flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
-                    <strong style={{ color: pnl >= 0 ? 'var(--positive)' : 'var(--negative)' }}>
-                      {pnl >= 0 ? '+' : ''}{formatUsdCompact(item?.pnl)}
+                    <strong style={{ color: primaryColor }}>
+                      {primaryText}
                     </strong>
-                    {leaderboardMetric === 'pnl' ? (
-                      <span className="am-item-sub">{formatPct(item?.yield_rate)}</span>
-                    ) : null}
+                    <span className="am-item-sub">{secondaryText}</span>
                   </div>
                 </button>
               );

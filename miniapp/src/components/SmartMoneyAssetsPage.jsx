@@ -45,39 +45,12 @@ function walletKey(w) { return `${Number(w?.chain_id||0)}:${String(w?.address||'
 function walletLabel(w) { const l=String(w?.label||'').trim(); if(l) return l; const a=String(w?.address||'').trim(); return a?`${a.slice(0,6)}...${a.slice(-4)}`:'--'; }
 function errorText(e) { return String(e?.message||e||'').trim(); }
 function isIgnorableSmartMoneyDataError(err) { const m=errorText(err).toLowerCase(); return m.includes("unknown column 'open_lp_usd'")||m.includes("unknown column `open_lp_usd`"); }
-function hasTransferMarker(item) {
-    return Boolean(item?.has_transfer_in||item?.has_transfer_out||Number(item?.transfer_total_count||0)>0||Number(item?.transfer_in_count||0)>0||Number(item?.transfer_out_count||0)>0||Number(item?.transfer_net_usd||0)!==0||Number(item?.transfer_in_usd||0)>0||Number(item?.transfer_out_usd||0)>0);
-}
-
 function chinaDateParts(v=new Date()) {
     const d=v instanceof Date?v:new Date(v); if(Number.isNaN(d.getTime())) return null;
     const parts=new Intl.DateTimeFormat('en-CA',{timeZone:CHINA_TIME_ZONE,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(d);
     const m={}; parts.forEach(p=>{if(p.type!=='literal')m[p.type]=p.value;}); return m.year&&m.month&&m.day?m:null;
 }
 function formatChinaDay(v=new Date()) { const p=chinaDateParts(v); return p?`${p.year}-${p.month}-${p.day}`:''; }
-
-function TransferBadges({ item, compact = false }) {
-    const totalCount = Number(item?.transfer_total_count || 0) || (Number(item?.transfer_in_count || 0) + Number(item?.transfer_out_count || 0));
-    const inUsd = Number(item?.transfer_in_usd || 0);
-    const outUsd = Number(item?.transfer_out_usd || 0);
-    const rawNetUsd = item?.transfer_net_usd !== undefined ? Number(item.transfer_net_usd || 0) : (inUsd - outUsd);
-    if (!hasTransferMarker(item)) return null;
-    const absNetUsd = Math.abs(rawNetUsd);
-    const isNetIn = rawNetUsd > 0;
-    const isNetOut = rawNetUsd < 0;
-    const cls = isNetIn ? 'border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-700 dark:text-emerald-300'
-        : isNetOut ? 'border-amber-500/25 bg-amber-500/[0.10] text-amber-700 dark:text-amber-300'
-        : 'border-cyan-500/25 bg-cyan-500/[0.10] text-cyan-700 dark:text-cyan-300';
-    const amountText = absNetUsd > 0 ? formatUsdCompact(absNetUsd) : '';
-    const label = compact
-        ? (absNetUsd > 0 ? `${isNetOut?'-':'+'}${amountText.replace('$','')}` : (totalCount > 0 ? `${totalCount}笔` : '转账'))
-        : `${isNetIn?'净转入':isNetOut?'净转出':'净转账'}${amountText?` ${amountText}`:''}${totalCount>0?` · ${totalCount}笔`:''}`;
-    return (
-        <div className={`flex flex-wrap gap-1 ${compact?'justify-center min-h-[12px]':''}`.trim()}>
-            <span className={`inline-flex items-center justify-center rounded-full border px-1.5 py-0.5 font-bold leading-none ${cls}`} style={{fontSize:compact?9:10}}>{label}</span>
-        </div>
-    );
-}
 
 /* ─── Pill ─── */
 function Pill({ active, brand, onClick, children }) {
@@ -167,14 +140,13 @@ function PnLCalendar({ data, loading=false }) {
     for(let day=1;day<=daysInMonth;day++){
         const dateStr=`${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
         const entry=pnlMap[dateStr]; const pnl=entry?Number(entry.realized_pnl_usd||0):null;
-        const hasTransfer=hasTransferMarker(entry); const isToday=dateStr===todayStr; const isFuture=dateStr>todayStr;
+        const isToday=dateStr===todayStr; const isFuture=dateStr>todayStr;
         const dayTone=isToday?'text-emerald-700 dark:text-emerald-300':isFuture?'text-zinc-300 dark:text-white/15':'text-zinc-400 dark:text-white/30';
         const valTone=pnl!==null?(pnl>=0?'text-emerald-600 dark:text-emerald-400':'text-red-500 dark:text-red-400'):'text-transparent';
         cells.push(
             <div key={day} className={`rounded-md px-1 py-1 ${isToday?'bg-emerald-500/15 ring-1 ring-emerald-500/30':isFuture?'bg-zinc-100/30 dark:bg-white/[0.015]':'bg-zinc-100/50 dark:bg-white/[0.03]'}`} style={{minHeight:38}}>
                 <div className={`text-[9px] leading-none ${dayTone}`}>{day}</div>
                 <div className={`flex min-h-[20px] items-center justify-center px-0.5 text-center text-[10px] font-semibold leading-tight tabular-nums ${valTone}`}>{pnl!==null?`${pnl>=0?'+':''}${formatUsdCompact(pnl)}`:'0'}</div>
-                {hasTransfer?<TransferBadges item={entry} compact />:<div className="min-h-[12px]" />}
             </div>
         );
     }
@@ -449,12 +421,33 @@ export default function SmartMoneyAssetsPage({
                                         <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40">{formatChain(item.chain_id)} · {Number(item.participation_count||0)} 笔</div>
                                     </div>
                                     <div className="text-right shrink-0">
-                                        <div className={`text-[12px] font-bold tabular-nums ${Number(item.pnl||0)>=0?'text-emerald-600 dark:text-emerald-300':'text-red-600 dark:text-red-300'}`}>
-                                            {Number(item.pnl||0)>=0?'+':''}{formatUsdCompact(item.pnl)}
-                                        </div>
-                                        {leaderboardMetric === 'pnl' && Number(item.yield_rate||0) !== 0 && (
-                                            <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40 tabular-nums">{formatPct(item.yield_rate)}</div>
-                                        )}
+                                        {(() => {
+                                            const pnl = Number(item.estimated_realized_pnl_usd || 0);
+                                            const yieldRate = Number(item.yield_rate || 0);
+                                            const participationCount = Number(item.participation_count || 0);
+                                            const primaryClass = leaderboardMetric === 'participation'
+                                                ? 'text-zinc-700 dark:text-white/80'
+                                                : ((leaderboardMetric === 'yield_rate' ? yieldRate : pnl) >= 0
+                                                    ? 'text-emerald-600 dark:text-emerald-300'
+                                                    : 'text-red-600 dark:text-red-300');
+                                            let primaryText = `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}`;
+                                            let secondaryText = formatPct(yieldRate);
+                                            if (leaderboardMetric === 'yield_rate') {
+                                                primaryText = formatPct(yieldRate);
+                                                secondaryText = `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}`;
+                                            } else if (leaderboardMetric === 'participation') {
+                                                primaryText = `${participationCount} 次`;
+                                                secondaryText = `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}`;
+                                            }
+                                            return (
+                                                <>
+                                                    <div className={`text-[12px] font-bold tabular-nums ${primaryClass}`}>
+                                                        {primaryText}
+                                                    </div>
+                                                    <div className="mt-0.5 text-[10px] text-zinc-500 dark:text-white/40 tabular-nums">{secondaryText}</div>
+                                                </>
+                                            );
+                                        })()}
                                     </div>
                                 </button>
                             );

@@ -153,67 +153,6 @@ function errorText(err) {
   return String(err?.message || err || '').trim();
 }
 
-function hasTransferMarker(item) {
-  return Boolean(
-    item?.has_transfer_in ||
-    item?.has_transfer_out ||
-    Number(item?.transfer_total_count || 0) > 0 ||
-    Number(item?.transfer_in_count || 0) > 0 ||
-    Number(item?.transfer_out_count || 0) > 0 ||
-    Number(item?.transfer_net_usd || 0) !== 0 ||
-    Number(item?.transfer_in_usd || 0) > 0 ||
-    Number(item?.transfer_out_usd || 0) > 0
-  );
-}
-
-function TransferBadges({ item, compact = false }) {
-  const totalCount = Number(item?.transfer_total_count || 0) || (Number(item?.transfer_in_count || 0) + Number(item?.transfer_out_count || 0));
-  const inCount = Number(item?.transfer_in_count || 0);
-  const outCount = Number(item?.transfer_out_count || 0);
-  const inUsd = Number(item?.transfer_in_usd || 0);
-  const outUsd = Number(item?.transfer_out_usd || 0);
-  const rawNetUsd = item?.transfer_net_usd !== undefined && item?.transfer_net_usd !== null
-    ? Number(item.transfer_net_usd || 0)
-    : (inUsd - outUsd);
-  if (!hasTransferMarker(item)) return null;
-  const absNetUsd = Math.abs(rawNetUsd);
-  const isNetIn = rawNetUsd > 0;
-  const isNetOut = rawNetUsd < 0;
-  const badge = {
-    key: isNetIn ? 'net-in' : isNetOut ? 'net-out' : 'net-flat',
-    color: isNetIn ? '#16a34a' : isNetOut ? '#ea580c' : '#0891b2',
-    background: isNetIn ? 'rgba(22, 163, 74, 0.12)' : isNetOut ? 'rgba(234, 88, 12, 0.12)' : 'rgba(8, 145, 178, 0.12)',
-    border: isNetIn ? 'rgba(22, 163, 74, 0.22)' : isNetOut ? 'rgba(234, 88, 12, 0.22)' : 'rgba(8, 145, 178, 0.22)',
-  };
-  const amountText = absNetUsd > 0 ? formatUsdCompact(absNetUsd) : '';
-  badge.label = compact
-    ? (absNetUsd > 0 ? `${isNetOut ? '-' : '+'}${amountText.replace('$', '')}` : (totalCount > 0 ? `${totalCount}笔` : '转账'))
-    : `${isNetIn ? '净转入' : isNetOut ? '净转出' : '净转账'}${amountText ? ` ${amountText}` : ''}${totalCount > 0 ? ` · ${totalCount}笔` : ''}`;
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: compact ? 'center' : 'flex-start', gap: 4, flexWrap: 'wrap', minHeight: compact ? 12 : 'auto' }}>
-      <span
-        key={badge.key}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          minWidth: compact ? 14 : 0,
-          padding: compact ? '0 4px' : '1px 6px',
-          borderRadius: 999,
-          border: `1px solid ${badge.border}`,
-          background: badge.background,
-          color: badge.color,
-          fontSize: compact ? 9 : 10,
-          fontWeight: 700,
-          lineHeight: compact ? '12px' : '14px',
-        }}
-      >
-        {badge.label}
-      </span>
-    </div>
-  );
-}
-
 function isIgnorableSmartMoneyDataError(err) {
   const message = errorText(err).toLowerCase();
   return message.includes("unknown column 'open_lp_usd'") || message.includes("unknown column `open_lp_usd`");
@@ -397,7 +336,6 @@ function PnLCalendar({ data, loading = false, note = '' }) {
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const entry = pnlMap[dateStr];
     const pnl = entry ? Number(entry.realized_pnl_usd || 0) : null;
-    const hasTransfer = hasTransferMarker(entry);
     const isToday = dateStr === todayStr;
     const isFuture = dateStr > todayStr;
     const cls = ['pnl-cal-cell'];
@@ -410,7 +348,6 @@ function PnLCalendar({ data, loading = false, note = '' }) {
         <div className="pnl-cal-value">
           {pnl !== null ? `${pnl >= 0 ? '+' : ''}${formatUsdCompact(pnl)}` : '0'}
         </div>
-        {hasTransfer ? <TransferBadges item={entry} compact /> : <div style={{ minHeight: 12 }} />}
       </div>
     );
   }
