@@ -112,6 +112,8 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleTrading(w http.ResponseWriter, r *http.Request) {
 	endpoint := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("endpoint")))
 	switch endpoint {
+	case "open_position_prepare":
+		s.handleOpenPositionPrepare(w, r)
 	case "open_position_preview":
 		s.handleOpenPositionPreview(w, r)
 	case "open_position":

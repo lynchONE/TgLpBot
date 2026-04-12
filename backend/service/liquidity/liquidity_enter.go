@@ -944,46 +944,58 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	}
 
 	// 等待 RPC 节点状态同步，避免读取到旧的余额值
-	time.Sleep(500 * time.Millisecond)
 
-	usdtAfter, _ := blockchain.GetTokenBalanceWithClient(client, usdtAddr, walletAddr)
-	if usdtAfter == nil {
-		usdtAfter = big.NewInt(0)
-	}
+	usdtAfter := big.NewInt(0)
 	t0After := big.NewInt(0)
 	t1After := big.NewInt(0)
-	if token0Addr != (common.Address{}) {
-		if bal, _ := blockchain.GetTokenBalanceWithClient(client, token0Addr, walletAddr); bal != nil {
-			t0After = bal
-		}
-	}
-	if token1Addr != (common.Address{}) {
-		if bal, _ := blockchain.GetTokenBalanceWithClient(client, token1Addr, walletAddr); bal != nil {
-			t1After = bal
-		}
-	}
-	bnbAfter, _ := blockchain.GetBalanceWithClient(client, walletAddr)
-	if bnbAfter == nil {
-		bnbAfter = big.NewInt(0)
-	}
-
-	// Actual USDT spent (delta) for this enter.
-	actualSpent := new(big.Int).Sub(usdtBefore, usdtAfter)
-	if actualSpent.Sign() < 0 {
-		actualSpent = big.NewInt(0)
-	}
+	bnbAfter := big.NewInt(0)
+	actualSpent := big.NewInt(0)
 	walletDust0 := big.NewInt(0)
 	walletDust1 := big.NewInt(0)
-	if token0Addr != (common.Address{}) {
-		if delta := new(big.Int).Sub(t0After, t0Before); delta.Sign() > 0 {
-			walletDust0 = delta
+	refreshPostEnterBalances := func() {
+		if bal, _ := blockchain.GetTokenBalanceWithClient(client, usdtAddr, walletAddr); bal != nil {
+			usdtAfter = bal
+		} else {
+			usdtAfter = big.NewInt(0)
+		}
+		if token0Addr != (common.Address{}) {
+			if bal, _ := blockchain.GetTokenBalanceWithClient(client, token0Addr, walletAddr); bal != nil {
+				t0After = bal
+			} else {
+				t0After = big.NewInt(0)
+			}
+		}
+		if token1Addr != (common.Address{}) {
+			if bal, _ := blockchain.GetTokenBalanceWithClient(client, token1Addr, walletAddr); bal != nil {
+				t1After = bal
+			} else {
+				t1After = big.NewInt(0)
+			}
+		}
+		if bal, _ := blockchain.GetBalanceWithClient(client, walletAddr); bal != nil {
+			bnbAfter = bal
+		} else {
+			bnbAfter = big.NewInt(0)
+		}
+
+		actualSpent = new(big.Int).Sub(usdtBefore, usdtAfter)
+		if actualSpent.Sign() < 0 {
+			actualSpent = big.NewInt(0)
+		}
+		walletDust0 = big.NewInt(0)
+		walletDust1 = big.NewInt(0)
+		if token0Addr != (common.Address{}) {
+			if delta := new(big.Int).Sub(t0After, t0Before); delta.Sign() > 0 {
+				walletDust0 = delta
+			}
+		}
+		if token1Addr != (common.Address{}) {
+			if delta := new(big.Int).Sub(t1After, t1Before); delta.Sign() > 0 {
+				walletDust1 = delta
+			}
 		}
 	}
-	if token1Addr != (common.Address{}) {
-		if delta := new(big.Int).Sub(t1After, t1Before); delta.Sign() > 0 {
-			walletDust1 = delta
-		}
-	}
+	refreshPostEnterBalances()
 	// 注意：不需要对 USDT 做特殊处理，因为上面的余额变化计算已经正确处理了所有 token 的 dust。
 	// 之前的逻辑 (usdtAmount - actualSpent) 是错误的，会导致 dust 显示为用户预期投入金额而非实际残余。
 	// Gas spent in native BNB (delta).
@@ -1006,22 +1018,19 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	log.Printf("[Liquidity] Enter gas tracking: bnbBefore=%s bnbAfter=%s gasSpent=%s", bnbBefore.String(), bnbAfter.String(), gasSpent.String())
 
 	if res != nil {
-		needDustRetry := shouldRetryDustRead(walletDust0, res.Dust0) ||
+		needFastRetry := actualSpent.Sign() <= 0 ||
+			actualSpent.Cmp(usdtAmount) > 0 ||
+			shouldRetryDustRead(walletDust0, res.Dust0) ||
 			shouldRetryDustRead(walletDust1, res.Dust1)
-		if needDustRetry {
-			time.Sleep(750 * time.Millisecond)
-			if token0Addr != (common.Address{}) {
-				if bal, _ := blockchain.GetTokenBalanceWithClient(client, token0Addr, walletAddr); bal != nil {
-					if delta := new(big.Int).Sub(bal, t0Before); delta.Sign() > 0 {
-						walletDust0 = delta
-					}
-				}
-			}
-			if token1Addr != (common.Address{}) {
-				if bal, _ := blockchain.GetTokenBalanceWithClient(client, token1Addr, walletAddr); bal != nil {
-					if delta := new(big.Int).Sub(bal, t1Before); delta.Sign() > 0 {
-						walletDust1 = delta
-					}
+		if needFastRetry {
+			for _, delay := range s.fastSyncDurations() {
+				time.Sleep(delay)
+				refreshPostEnterBalances()
+				if actualSpent.Sign() > 0 &&
+					actualSpent.Cmp(usdtAmount) <= 0 &&
+					!shouldRetryDustRead(walletDust0, res.Dust0) &&
+					!shouldRetryDustRead(walletDust1, res.Dust1) {
+					break
 				}
 			}
 		}
@@ -1061,7 +1070,11 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	if err != nil {
 		return nil, err
 	}
-	_ = trade.NewTradeRecordService().CreateOpenRecord(task, res.TxHash, actualSpentWei, gasSpent, dust0, dust1)
+	openStableBeforeWei, serr := convert.ScaleDecimals(usdtBefore, cc.StableDecimals, 18)
+	if serr != nil || openStableBeforeWei == nil {
+		openStableBeforeWei = new(big.Int).Set(usdtBefore)
+	}
+	_ = trade.NewTradeRecordService().CreateOpenRecord(task, res.TxHash, actualSpentWei, gasSpent, openStableBeforeWei, dust0, dust1)
 
 	return res, nil
 }
@@ -1277,16 +1290,17 @@ func (s *LiquidityService) enterV3FromToken(
 		}
 		// 如果 allowance 不足，可能是 RPC 节点状态未及时同步，等待后重试
 		if allow.Cmp(amount0In) < 0 {
-			log.Printf("[Liquidity] V3 enter: allowance token0 insufficient on first check (%s < %s), waiting 2s and retrying...", allow.String(), amount0In.String())
-			time.Sleep(2 * time.Second)
-			allow, err = t0.Allowance(nil, walletAddr, zapAddr)
+			log.Printf("[Liquidity] V3 enter: allowance token0 insufficient on first check (%s < %s), switching to fast polling...", allow.String(), amount0In.String())
+			allow, err = waitBigIntAtLeast(allow, nil, amount0In, s.fastAllowanceDurations(), func() (*big.Int, error) {
+				return t0.Allowance(nil, walletAddr, zapAddr)
+			})
 			if err != nil {
-				return nil, fmt.Errorf("check allowance token0 (retry) failed: %w", err)
+				return nil, fmt.Errorf("check allowance token0 (fast retry) failed: %w", err)
 			}
 			if allow.Cmp(amount0In) < 0 {
 				return nil, fmt.Errorf("allowance token0 insufficient: %s < %s", allow.String(), amount0In.String())
 			}
-			log.Printf("[Liquidity] V3 enter: allowance token0 OK after retry: %s", allow.String())
+			log.Printf("[Liquidity] V3 enter: allowance token0 OK after fast retry: %s", allow.String())
 		}
 		// Double check balance
 		bal0, err := blockchain.GetTokenBalanceWithClient(client, token0, walletAddr)
@@ -1313,16 +1327,17 @@ func (s *LiquidityService) enterV3FromToken(
 		}
 		// 如果 allowance 不足，可能是 RPC 节点状态未及时同步，等待后重试
 		if allow.Cmp(amount1In) < 0 {
-			log.Printf("[Liquidity] V3 enter: allowance token1 insufficient on first check (%s < %s), waiting 2s and retrying...", allow.String(), amount1In.String())
-			time.Sleep(2 * time.Second)
-			allow, err = t1.Allowance(nil, walletAddr, zapAddr)
+			log.Printf("[Liquidity] V3 enter: allowance token1 insufficient on first check (%s < %s), switching to fast polling...", allow.String(), amount1In.String())
+			allow, err = waitBigIntAtLeast(allow, nil, amount1In, s.fastAllowanceDurations(), func() (*big.Int, error) {
+				return t1.Allowance(nil, walletAddr, zapAddr)
+			})
 			if err != nil {
-				return nil, fmt.Errorf("check allowance token1 (retry) failed: %w", err)
+				return nil, fmt.Errorf("check allowance token1 (fast retry) failed: %w", err)
 			}
 			if allow.Cmp(amount1In) < 0 {
 				return nil, fmt.Errorf("allowance token1 insufficient: %s < %s", allow.String(), amount1In.String())
 			}
-			log.Printf("[Liquidity] V3 enter: allowance token1 OK after retry: %s", allow.String())
+			log.Printf("[Liquidity] V3 enter: allowance token1 OK after fast retry: %s", allow.String())
 		}
 		bal1, err := blockchain.GetTokenBalanceWithClient(client, token1, walletAddr)
 		if err != nil {
@@ -1449,9 +1464,7 @@ func (s *LiquidityService) enterV3FromToken(
 	}
 	// Record entry token and the opposite pool token for reference.
 
-	if err := database.DB.Create(&txRecord).Error; err != nil {
-		log.Printf("[Liquidity] Failed to record transaction: %v", err)
-	}
+	s.persistTransactionRecordAsync("enter_v3_tx_record", txRecord)
 
 	// NOTE: TradeRecord (for PnL tracking) is created by the top-level EnterTaskFromUSDT function
 	// using the actual USDT spent (delta of wallet balance before/after).
@@ -2391,7 +2404,7 @@ func (s *LiquidityService) enterV4FromToken(
 		GasUsed:         receipt.GasUsed,
 		CreatedAt:       time.Now(),
 	}
-	database.DB.Create(&txRecord)
+	s.persistTransactionRecordAsync("enter_v4_tx_record", txRecord)
 
 	// NOTE: TradeRecord (for PnL tracking) is created by the top-level EnterTaskFromUSDT function
 	// using the actual USDT spent (delta of wallet balance before/after).

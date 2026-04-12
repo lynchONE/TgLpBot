@@ -129,61 +129,6 @@ func (s *LiquidityService) quoteTokenValueInUSDT(exec chainexec.EVMExecutor, tok
 	return toFloat64(toAmount, cc.StableDecimals), true
 }
 
-func (s *LiquidityService) estimateOutstandingOpenDustCreditWei(exec chainexec.EVMExecutor, walletAddr common.Address, task *models.StrategyTask) *big.Int {
-	if s == nil || exec == nil || task == nil {
-		return big.NewInt(0)
-	}
-	rec, err := s.tradeRecordService.GetLatestOpenRecord(task.UserID, task.ID)
-	if err != nil || rec == nil {
-		return big.NewInt(0)
-	}
-
-	token0Addr, token1Addr, err := s.resolveTaskTokenAddresses(task)
-	if err != nil {
-		return big.NewInt(0)
-	}
-
-	cc := exec.Config()
-	stableAddr := common.Address{}
-	if common.IsHexAddress(cc.StableAddress) {
-		stableAddr = common.HexToAddress(cc.StableAddress)
-	}
-
-	totalCreditWei := big.NewInt(0)
-	addCredit := func(tokenAddr common.Address, symbol string, raw string) {
-		if tokenAddr == (common.Address{}) || tokenAddr == stableAddr {
-			return
-		}
-		recordedDust, err := convert.ParseBigInt(raw)
-		if err != nil || recordedDust == nil || recordedDust.Sign() <= 0 {
-			return
-		}
-		balance := tokenBalanceOrZero(exec, tokenAddr, walletAddr)
-		if balance == nil || balance.Sign() <= 0 {
-			return
-		}
-		if balance.Cmp(recordedDust) < 0 {
-			recordedDust = balance
-		}
-		if recordedDust.Sign() <= 0 {
-			return
-		}
-		stableValueRaw, err := tokenValueInStableUnits(exec.Client(), exec.Chain(), tokenAddr, symbol, cc, recordedDust)
-		if err != nil || stableValueRaw == nil || stableValueRaw.Sign() <= 0 {
-			return
-		}
-		stableValueWei, err := convert.ScaleDecimals(stableValueRaw, cc.StableDecimals, 18)
-		if err != nil || stableValueWei == nil || stableValueWei.Sign() <= 0 {
-			return
-		}
-		totalCreditWei.Add(totalCreditWei, stableValueWei)
-	}
-
-	addCredit(token0Addr, strings.TrimSpace(task.Token0Symbol), rec.OpenDust0)
-	addCredit(token1Addr, strings.TrimSpace(task.Token1Symbol), rec.OpenDust1)
-	return totalCreditWei
-}
-
 func (s *LiquidityService) shouldSkipExitSwapToUSDT(exec chainexec.EVMExecutor, tokenAddr common.Address, amountIn *big.Int, walletAddr common.Address, label string) (bool, float64) {
 	v, ok := s.quoteTokenValueInUSDT(exec, tokenAddr, amountIn, walletAddr)
 	if !ok {
@@ -380,14 +325,32 @@ func (s *LiquidityService) getReceiptWithRetry(client *ethclient.Client, txHash 
 	timeout, poll := s.exitTokenSyncDurations()
 	deadline := time.Now().Add(timeout)
 	var lastErr error
-	for {
+	readReceipt := func() (*types.Receipt, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		receipt, err := client.TransactionReceipt(ctx, txHash)
 		cancel()
+		return receipt, err
+	}
+
+	if receipt, err := readReceipt(); err == nil && receipt != nil {
+		return receipt, nil
+	} else {
+		lastErr = err
+	}
+
+	for _, delay := range s.fastSyncDurations() {
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(delay)
+		receipt, err := readReceipt()
 		if err == nil && receipt != nil {
 			return receipt, nil
 		}
 		lastErr = err
+	}
+
+	for {
 		if time.Now().After(deadline) {
 			if lastErr != nil {
 				return nil, fmt.Errorf("fetch tx receipt timeout %s: %w", txHash.Hex(), lastErr)
@@ -395,6 +358,11 @@ func (s *LiquidityService) getReceiptWithRetry(client *ethclient.Client, txHash 
 			return nil, fmt.Errorf("fetch tx receipt timeout %s", txHash.Hex())
 		}
 		time.Sleep(poll)
+		receipt, err := readReceipt()
+		if err == nil && receipt != nil {
+			return receipt, nil
+		}
+		lastErr = err
 	}
 }
 
@@ -413,6 +381,21 @@ func (s *LiquidityService) waitTokenBalanceAtLeast(client *ethclient.Client, tok
 	timeout, poll := s.exitTokenSyncDurations()
 	deadline := time.Now().Add(timeout)
 	log.Printf("[Liquidity] 等待 RPC 同步 %s 余额 (%s): have=%s want>=%s timeout=%s poll=%s", label, token.Hex(), bal.String(), min.String(), timeout.String(), poll.String())
+
+	for _, delay := range s.fastSyncDurations() {
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(delay)
+		bal, err = blockchain.GetTokenBalanceWithClient(client, token, wallet)
+		if bal == nil {
+			bal = big.NewInt(0)
+		}
+		if err == nil && bal.Cmp(min) >= 0 {
+			log.Printf("[Liquidity] RPC 鍚屾瀹屾垚 %s 浣欓 (%s): %s", label, token.Hex(), bal.String())
+			return bal, nil
+		}
+	}
 
 	for time.Now().Before(deadline) {
 		time.Sleep(poll)
@@ -635,6 +618,10 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 		log.Printf("[Liquidity] Warning: scale stable received failed: %v (chain=%s stableDecimals=%d)", cerr, exec.Chain(), cc.StableDecimals)
 		actualReceivedWei = new(big.Int).Set(actualReceived)
 	}
+	closeStableBeforeWei, berr := convert.ScaleDecimals(usdtBefore, cc.StableDecimals, 18)
+	if berr != nil || closeStableBeforeWei == nil {
+		closeStableBeforeWei = new(big.Int).Set(usdtBefore)
+	}
 
 	mainHash := ""
 	if len(txHashes) > 0 {
@@ -648,60 +635,42 @@ func (s *LiquidityService) ExitTaskToUSDTWithOptions(userID uint, task *models.S
 
 	finalizeTradeRecord := exitErr == nil && sweepErr == nil
 	shouldUpdateRecords := finalizeTradeRecord || actualReceived.Sign() > 0 || gasSpent.Sign() > 0 || mainHash != ""
-
-	var tradeRec *models.TradeRecord
 	if shouldUpdateRecords {
-		trSvc := trade.NewTradeRecordService()
+		taskCopy := *task
+		mainHashCopy := strings.TrimSpace(mainHash)
+		actualReceivedCopy := cloneBig(actualReceivedWei)
+		gasSpentCopy := cloneBig(gasSpent)
+		closeStableBeforeCopy := cloneBig(closeStableBeforeWei)
 		nativePriceUSD := 0.0
-		openDustCreditWei := big.NewInt(0)
 		if finalizeTradeRecord {
-			// Only needed when finalizing the record (Profit/TotalGasUSDT computation).
 			nativePriceUSD = pricing.GetNativePriceUSD(exec.Chain())
-			openDustCreditWei = s.estimateOutstandingOpenDustCreditWei(exec, walletAddr, task)
 		}
-		if rec, err := trSvc.ApplyExitDelta(task, mainHash, actualReceivedWei, gasSpent, openDustCreditWei, finalizeTradeRecord, nativePriceUSD); err == nil {
-			tradeRec = rec
-		} else if finalizeTradeRecord {
-			// Legacy fallback: create a closed record so we don't lose the exit summary.
-			_ = trSvc.CloseLatestOpenRecordWithCredit(task, mainHash, actualReceivedWei, gasSpent, openDustCreditWei, nativePriceUSD)
-		}
+		s.runAsync("exit_trade_record", func() error {
+			trSvc := trade.NewTradeRecordService()
+			if _, err := trSvc.ApplyExitDelta(&taskCopy, mainHashCopy, actualReceivedCopy, gasSpentCopy, closeStableBeforeCopy, finalizeTradeRecord, nativePriceUSD); err != nil && finalizeTradeRecord {
+				return trSvc.CloseLatestOpenRecord(&taskCopy, mainHashCopy, actualReceivedCopy, gasSpentCopy, closeStableBeforeCopy, nativePriceUSD)
+			} else {
+				return err
+			}
+		})
 	}
 
-	// Update/Create Transaction record (best-effort). Use cumulative amount when available.
 	txHash := strings.TrimSpace(mainHash)
 	amountOut := actualReceivedWei.String()
-	if tradeRec != nil {
-		if strings.TrimSpace(tradeRec.CloseTxHash) != "" {
-			txHash = strings.TrimSpace(tradeRec.CloseTxHash)
-		}
-		if strings.TrimSpace(tradeRec.CloseUSDTReceived) != "" {
-			amountOut = strings.TrimSpace(tradeRec.CloseUSDTReceived)
-		}
-	}
 	if txHash != "" && shouldUpdateRecords {
-		var existing models.Transaction
-		if err := database.DB.Where("tx_hash = ?", txHash).First(&existing).Error; err == nil {
-			if err := database.DB.Model(&existing).Updates(map[string]interface{}{"amount_out": amountOut}).Error; err != nil {
-				log.Printf("[Liquidity] Warning: update exit transaction amount_out failed: %v", err)
-			}
-		} else {
-			txRecord := models.Transaction{
-				UserID:          task.UserID,
-				Chain:           task.Chain,
-				TaskID:          task.ID,
-				TxHash:          txHash,
-				Type:            models.TxTypeRemoveLiquidity,
-				Status:          models.TxStatusConfirmed,
-				FromAddress:     walletAddr.Hex(),
-				TokenOutAddress: usdtAddr.Hex(),
-				AmountIn:        "0",
-				AmountOut:       amountOut,
-				CreatedAt:       time.Now(),
-			}
-			if err := database.DB.Create(&txRecord).Error; err != nil {
-				log.Printf("[Liquidity] Warning: create exit transaction record failed: %v", err)
-			}
-		}
+		s.persistTransactionRecordAsync("exit_tx_record", models.Transaction{
+			UserID:          task.UserID,
+			Chain:           task.Chain,
+			TaskID:          task.ID,
+			TxHash:          txHash,
+			Type:            models.TxTypeRemoveLiquidity,
+			Status:          models.TxStatusConfirmed,
+			FromAddress:     walletAddr.Hex(),
+			TokenOutAddress: usdtAddr.Hex(),
+			AmountIn:        "0",
+			AmountOut:       amountOut,
+			CreatedAt:       time.Now(),
+		})
 	}
 
 	// 如果有错误，在更新记录后再返回错误
@@ -1375,9 +1344,7 @@ func (s *LiquidityService) exitV3ToUSDT(exec chainexec.EVMExecutor, privateKey *
 			AmountOut:       totalUSDTReceived.String(),
 			CreatedAt:       time.Now(),
 		}
-		if err := database.DB.Create(&txRecord).Error; err != nil {
-			log.Printf("[Liquidity] Warning: failed to record exit transaction: %v", err)
-		}
+		s.persistTransactionRecordAsync("exit_v3_tx_record", txRecord)
 	}
 
 	if swapErr != nil {
@@ -1613,9 +1580,7 @@ func (s *LiquidityService) exitV4ToUSDT(exec chainexec.EVMExecutor, privateKey *
 		AmountOut:       totalUSDTReceived.String(),
 		CreatedAt:       time.Now(),
 	}
-	if err := database.DB.Create(&txRecord).Error; err != nil {
-		log.Printf("[Liquidity] Warning: failed to record V4 exit transaction: %v", err)
-	}
+	s.persistTransactionRecordAsync("exit_v4_tx_record", txRecord)
 
 	if swapErr != nil {
 		return txHashes, &SwapToUSDTError{Err: swapErr}

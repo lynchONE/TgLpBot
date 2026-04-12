@@ -1,11 +1,8 @@
 package strategy
 
 import (
-	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
-	"TgLpBot/base/notify"
-	"TgLpBot/base/security"
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/txexec"
 	"errors"
@@ -20,19 +17,92 @@ const (
 	ExitActionStopLoss   = "stoploss"
 	ExitActionRebalance  = "rebalance"
 	ExitActionSwitch     = "switch"
-
-	exitMaxAttempts = 3
 )
 
+var exitRetrySchedule = []time.Duration{
+	500 * time.Millisecond,
+	1 * time.Second,
+	2 * time.Second,
+	3 * time.Second,
+	5 * time.Second,
+	10 * time.Second,
+	30 * time.Second,
+}
+
 func exitRetryDelay(attempt int) time.Duration {
-	switch attempt {
-	case 1:
-		return 10 * time.Second
-	case 2:
+	if len(exitRetrySchedule) == 0 {
 		return 30 * time.Second
-	default:
-		return 60 * time.Second
 	}
+	if attempt <= 0 {
+		return exitRetrySchedule[0]
+	}
+	idx := attempt - 1
+	if idx >= len(exitRetrySchedule) {
+		return exitRetrySchedule[len(exitRetrySchedule)-1]
+	}
+	return exitRetrySchedule[idx]
+}
+
+func shouldRetryExitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var swapErr *liquidity.SwapToUSDTError
+	if errors.As(err, &swapErr) {
+		return true
+	}
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	if text == "" {
+		return true
+	}
+	unretryableMarkers := []string{
+		"task is nil",
+		"wallet is nil",
+		"failed to get wallet",
+		"failed to get private key",
+		"failed to parse private key",
+		"stable address not set",
+		"position manager address not configured",
+		"blockchain client not initialized",
+		"invalid v3 pool address",
+		"invalid pool address",
+		"task has no v3 tokenid",
+		"task has no v4 tokenid",
+		"missing/invalid current_liquidity",
+		"uniswap_v4_pool_manager_address not set",
+		"uniswap_v4_position_manager_address not set",
+	}
+	for _, marker := range unretryableMarkers {
+		if strings.Contains(text, marker) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *StrategyService) scheduleExitRetryWake(taskID uint, userID uint, delay time.Duration) {
+	if taskID == 0 || userID == 0 {
+		return
+	}
+	if delay < 0 {
+		delay = 0
+	}
+	go func() {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-s.stopChan:
+			return
+		}
+
+		var task models.StrategyTask
+		if err := database.DB.Where("id = ? AND user_id = ?", taskID, userID).First(&task).Error; err != nil {
+			log.Printf("[Strategy] load task for scheduled exit retry wake failed: task_id=%d user_id=%d err=%v", taskID, userID, err)
+			return
+		}
+		s.processExitRetry(&task)
+	}()
 }
 
 func rebalanceRetryDelay(attempt int) time.Duration {
@@ -120,11 +190,6 @@ func (s *StrategyService) processExitRetry(task *models.StrategyTask) bool {
 		return true
 	}
 
-	if task.ExitRetryCount >= exitMaxAttempts {
-		s.giveUpExitRetry(task, fmt.Errorf("max attempts reached"))
-		return true
-	}
-
 	// 检查内存锁：如果任务已在执行中，跳过本次提交
 	s.inflightTasksMu.Lock()
 	if submitTime, exists := s.inflightTasks[task.ID]; exists {
@@ -178,8 +243,11 @@ func (s *StrategyService) processExitRetry(task *models.StrategyTask) bool {
 		delete(s.inflightTasks, task.ID)
 		s.inflightTasksMu.Unlock()
 		// 恢复 exit_next_retry_at 为 nil，允许下次尝试
-		database.DB.Model(task).Update("exit_next_retry_at", nil)
-		task.ExitNextRetryAt = nil
+		delay := exitRetryDelay(task.ExitRetryCount + 1)
+		nextAt := now.Add(delay)
+		database.DB.Model(task).Update("exit_next_retry_at", &nextAt)
+		task.ExitNextRetryAt = &nextAt
+		s.scheduleExitRetryWake(task.ID, task.UserID, delay)
 	}
 
 	return true
@@ -211,11 +279,6 @@ func (s *StrategyService) runExitRetryAttempt(taskID uint, userID uint) {
 	// 而且这里的任务是刚从DB加载的，ExitNextRetryAt 是我们刚设置的5分钟锁，
 	// 如果在这里检查会导致直接返回而不执行撤退操作。
 
-	if task.ExitRetryCount >= exitMaxAttempts {
-		s.giveUpExitRetry(&task, fmt.Errorf("max attempts reached"))
-		return
-	}
-
 	attempt := task.ExitRetryCount + 1
 	pendingReason := strings.TrimSpace(task.ExitPendingReason)
 	reason := pendingReason
@@ -231,9 +294,9 @@ func (s *StrategyService) runExitRetryAttempt(taskID uint, userID uint) {
 		}
 	} else {
 		if task.ExitLiquidityRemoved {
-			s.notify(task.UserID, fmt.Sprintf("🔄 %s失败，正在第 %d/%d 次重试兑换 USDT...", reason, attempt, exitMaxAttempts))
+			s.notify(task.UserID, fmt.Sprintf("🔄 %s失败，正在第 %d 次重试兑换 USDT...", reason, attempt))
 		} else {
-			s.notify(task.UserID, fmt.Sprintf("🔄 %s失败，正在第 %d/%d 次重试撤出并兑换 USDT...", reason, attempt, exitMaxAttempts))
+			s.notify(task.UserID, fmt.Sprintf("🔄 %s失败，正在第 %d 次重试撤出并兑换 USDT...", reason, attempt))
 		}
 	}
 
@@ -605,86 +668,24 @@ func (s *StrategyService) onExitAttemptFailed(task *models.StrategyTask, attempt
 		}
 	}
 
-	if attempt >= exitMaxAttempts {
-		updates := map[string]interface{}{
-			"status":              models.StrategyStatusRunning,
-			"exit_pending_action": "",
-			"exit_pending_reason": "",
-			"exit_retry_count":    attempt,
-			"exit_next_retry_at":  nil,
-			"exit_last_error":     errText,
-			"exit_give_up_at":     &now,
-			"error_message":       "",
-		}
-		_ = database.DB.Model(task).Updates(updates).Error
-
-		task.Status = models.StrategyStatusRunning
-		task.ExitPendingAction = ""
-		task.ExitPendingReason = ""
-		task.ExitRetryCount = attempt
-		task.ExitNextRetryAt = nil
-		task.ExitLastError = errText
-		task.ExitGiveUpAt = &now
-
+	if !shouldRetryExitError(err) {
+		s.giveUpExitRetry(task, err)
 		if swapFailed {
-			s.notify(task.UserID, fmt.Sprintf("❌ 已撤出流动性，但兑换 USDT 连续失败 %d 次，已停止自动重试。\n任务保持运行中，可稍后手动停止再试。\n请到钱包手动把剩余 token 兑换成 USDT。\n最后错误：%v%s", attempt, err, txText))
-			go func(taskID uint, uid uint, errText string) {
-				if taskID == 0 || uid == 0 {
-					return
-				}
-				if config.AppConfig == nil || s.configService == nil {
-					return
-				}
-
-				userCfg, cfgErr := s.configService.GetOrCreate(uid)
-				if cfgErr != nil || userCfg == nil || !userCfg.BarkEnabled || strings.TrimSpace(userCfg.BarkKeyEncrypted) == "" {
-					return
-				}
-
-				keyBytes, kerr := security.DecodeHexKey32(config.AppConfig.EncryptionKey)
-				if kerr != nil {
-					return
-				}
-				plain, derr := security.DecryptAESGCMHex(keyBytes, userCfg.BarkKeyEncrypted)
-				if derr != nil {
-					return
-				}
-				barkKey := strings.TrimSpace(string(plain))
-				if barkKey == "" {
-					return
-				}
-
-				errText = strings.TrimSpace(errText)
-				if errText == "" {
-					errText = "unknown error"
-				}
-				// Bark content should be short and readable on mobile.
-				r := []rune(errText)
-				if len(r) > 300 {
-					errText = string(r[:300]) + "…"
-				}
-
-				_ = notify.SendBarkWithConfig("兑换 USDT 连续失败",
-					fmt.Sprintf("任务 #%d 兑换 USDT 连续失败 %d 次，已停止自动重试。\n最后错误：%s", taskID, exitMaxAttempts, errText),
-					notify.BarkConfig{
-						Server: userCfg.BarkServer,
-						Key:    barkKey,
-						Group:  userCfg.BarkGroup,
-					},
-				)
-			}(task.ID, task.UserID, errText)
+			s.notify(task.UserID, fmt.Sprintf("❌ 已撤出流动性，但兑换 USDT 失败且该错误不会自动重试。\n任务保持运行中，请到钱包手动处理剩余 token。\n最后错误：%v%s", err, txText))
 		} else {
-			s.notify(task.UserID, fmt.Sprintf("❌ 撤出/兑换连续失败 %d 次，已停止自动重试。\n任务保持运行中，可稍后手动停止再试。\n如果已撤出流动性但兑换失败，请到钱包手动把剩余 token 兑换成 USDT。\n最后错误：%v%s", attempt, err, txText))
+			s.notify(task.UserID, fmt.Sprintf("❌ 撤出/兑换失败，且该错误不会自动重试。\n任务保持运行中，请确认钱包、授权和链配置后再手动重试。\n最后错误：%v%s", err, txText))
 		}
 		return
 	}
 
-	nextAt := now.Add(exitRetryDelay(attempt))
+	delay := exitRetryDelay(attempt)
+	nextAt := now.Add(delay)
 	updates := map[string]interface{}{
 		"status":             models.StrategyStatusRunning,
 		"exit_retry_count":   attempt,
 		"exit_next_retry_at": &nextAt,
 		"exit_last_error":    errText,
+		"exit_give_up_at":    nil,
 		"error_message":      "",
 	}
 	_ = database.DB.Model(task).Updates(updates).Error
@@ -693,11 +694,14 @@ func (s *StrategyService) onExitAttemptFailed(task *models.StrategyTask, attempt
 	task.ExitRetryCount = attempt
 	task.ExitNextRetryAt = &nextAt
 	task.ExitLastError = errText
+	task.ExitGiveUpAt = nil
+
+	s.scheduleExitRetryWake(task.ID, task.UserID, delay)
 
 	if swapFailed {
-		s.notify(task.UserID, fmt.Sprintf("⚠️ 已撤出流动性，但兑换 USDT 失败（%d/%d）：%v\n将在 %ds 后重试兑换。%s", attempt, exitMaxAttempts, err, int(exitRetryDelay(attempt).Seconds()), txText))
+		s.notify(task.UserID, fmt.Sprintf("⚠️ 已撤出流动性，但兑换 USDT 失败（第 %d 次）：%v\n将在 %s 后重试兑换。%s", attempt, err, delay.String(), txText))
 	} else {
-		s.notify(task.UserID, fmt.Sprintf("❌ 撤出/兑换失败（%d/%d）：%v\n将在 %ds 后重试。%s", attempt, exitMaxAttempts, err, int(exitRetryDelay(attempt).Seconds()), txText))
+		s.notify(task.UserID, fmt.Sprintf("❌ 撤出/兑换失败（第 %d 次）：%v\n将在 %s 后重试。%s", attempt, err, delay.String(), txText))
 	}
 }
 

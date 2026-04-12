@@ -123,6 +123,11 @@ func autoMigrate() error {
 	ensureColumn("sm_wallet_daily_snapshots", "transfer_out_usd", "DECIMAL(20,4) NOT NULL DEFAULT 0 AFTER transfer_in_usd")
 	ensureColumn("sm_lp_events", "liquidity_delta", "DECIMAL(65,0) NOT NULL DEFAULT 0 AFTER token1_symbol")
 	ensureColumn("monitored_wallets", "avatar_url", "VARCHAR(512) NULL AFTER label")
+	ensureColumn("trade_records", "open_stable_before", "VARCHAR(78) NOT NULL DEFAULT '0' AFTER open_usdt_spent")
+	ensureColumn("trade_records", "open_stable_after", "VARCHAR(78) NOT NULL DEFAULT '0' AFTER open_stable_before")
+	ensureColumn("trade_records", "close_stable_before", "VARCHAR(78) NOT NULL DEFAULT '0' AFTER close_usdt_received")
+	ensureColumn("trade_records", "close_stable_after", "VARCHAR(78) NOT NULL DEFAULT '0' AFTER close_stable_before")
+	normalizeTradeRecordProfitFormula()
 
 	return nil
 }
@@ -139,6 +144,34 @@ func ensureColumn(table, column, definition string) {
 	if count == 0 {
 		DB.Exec(fmt.Sprintf("ALTER TABLE `%s` ADD COLUMN `%s` %s", table, column, definition))
 		log.Printf("[DB] added column %s.%s", table, column)
+	}
+}
+
+func normalizeTradeRecordProfitFormula() {
+	if DB == nil {
+		return
+	}
+
+	openExpr := "COALESCE(CAST(NULLIF(TRIM(open_usdt_spent), '') AS DECIMAL(65,0)), 0)"
+	closeExpr := "COALESCE(CAST(NULLIF(TRIM(close_usdt_received), '') AS DECIMAL(65,0)), 0)"
+	gasExpr := "COALESCE(CAST(NULLIF(TRIM(total_gas_usdt), '') AS DECIMAL(65,0)), 0)"
+	profitExpr := fmt.Sprintf("((%s) - (%s) - (%s))", closeExpr, openExpr, gasExpr)
+	profitPctExpr := fmt.Sprintf("CASE WHEN (%s) > 0 THEN ROUND(((%s) / (%s)) * 100, 4) ELSE 0 END", openExpr, profitExpr, openExpr)
+	query := fmt.Sprintf(
+		"UPDATE trade_records SET profit_usdt = CAST(%s AS CHAR), profit_pct = %s WHERE status = 'closed' AND (profit_usdt <> CAST(%s AS CHAR) OR ABS(COALESCE(profit_pct, 0) - (%s)) > 0.00005)",
+		profitExpr,
+		profitPctExpr,
+		profitExpr,
+		profitPctExpr,
+	)
+
+	tx := DB.Exec(query)
+	if tx.Error != nil {
+		log.Printf("[DB] normalize trade record profit formula failed: %v", tx.Error)
+		return
+	}
+	if tx.RowsAffected > 0 {
+		log.Printf("[DB] normalized %d trade_records to direct realized profit formula", tx.RowsAffected)
 	}
 }
 

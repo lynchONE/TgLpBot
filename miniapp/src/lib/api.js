@@ -700,6 +700,67 @@ export async function previewOpenPosition({
     throw lastError || new Error('获取前置兑换预览失败');
 }
 
+export async function prepareOpenPosition({
+    apiBaseUrl,
+    initData,
+    chain,
+    poolAddress,
+    poolVersion,
+    walletId,
+    signal,
+}) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const payload = {
+        initData,
+        chain,
+        pool_address: poolAddress,
+        pool_version: poolVersion,
+    };
+    const wid = Number(walletId);
+    if (Number.isFinite(wid) && wid > 0) {
+        payload.wallet_id = wid;
+    }
+    const urls = [
+        `${base}/api/open_position_prepare`,
+        `${base}/api/trading?endpoint=open_position_prepare`,
+    ];
+    let lastError = null;
+    for (let i = 0; i < urls.length; i += 1) {
+        const resp = await fetch(urls[i], {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal,
+        });
+        if (resp.ok) {
+            return resp.json();
+        }
+        const detail = await readErrorDetails(resp);
+        const rawMessage = String(detail.message || '').trim();
+        const displayMessage = rawMessage === `HTTP ${resp.status}` || rawMessage === ''
+            ? `è·åå¼ä»é¢æ£æµå¤±è´¥ï¼HTTP ${resp.status}ï¼`
+            : rawMessage;
+        const err = new Error(displayMessage);
+        err.status = resp.status;
+        if (detail.payload && typeof detail.payload === 'object') {
+            err.payload = detail.payload;
+            Object.assign(err, detail.payload);
+        }
+        lastError = err;
+        const canFallback = i < urls.length - 1 && (
+            rawMessage === `HTTP ${resp.status}` ||
+            rawMessage === '' ||
+            resp.status === 404 ||
+            resp.status === 405
+        );
+        if (canFallback) {
+            continue;
+        }
+        throw err;
+    }
+    throw lastError || new Error('è·åå¼ä»é¢æ£æµå¤±è´¥');
+}
+
 export async function openPosition({
     apiBaseUrl,
     initData,

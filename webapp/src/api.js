@@ -610,6 +610,24 @@ function buildOpenPositionPayload({
   return payload;
 }
 
+function buildOpenPositionPreparePayload({
+  initData,
+  chain,
+  poolAddress,
+  poolVersion,
+  walletId,
+}) {
+  const payload = {
+    initData,
+    chain,
+    pool_address: poolAddress,
+    pool_version: poolVersion,
+  };
+  const wid = Number(walletId);
+  if (Number.isFinite(wid) && wid > 0) payload.wallet_id = wid;
+  return payload;
+}
+
 export async function previewOpenPosition({
   apiBaseUrl,
   initData,
@@ -674,6 +692,58 @@ export async function previewOpenPosition({
     }
   }
   throw lastError || new Error('获取前置兑换预览失败');
+}
+
+export async function prepareOpenPosition({
+  apiBaseUrl,
+  initData,
+  chain,
+  poolAddress,
+  poolVersion,
+  walletId,
+  signal,
+}) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const payload = buildOpenPositionPreparePayload({
+    initData,
+    chain,
+    poolAddress,
+    poolVersion,
+    walletId,
+  });
+  const urls = [
+    `${base}/api/open_position_prepare`,
+    `${base}/api/trading?endpoint=open_position_prepare`,
+  ];
+  let lastError = null;
+  for (let i = 0; i < urls.length; i += 1) {
+    try {
+      return await requestJson(urls[i], {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+      });
+    } catch (error) {
+      lastError = error;
+      const message = String(error?.message || '').trim();
+      const status = Number(error?.status);
+      if ((message === `HTTP ${status}` || message === '') && error) {
+        error.message = `è·åå¼ä»é¢æ£æµå¤±è´¥ï¼HTTP ${status}ï¼`;
+      }
+      const canFallback = i < urls.length - 1 && (
+        message === `HTTP ${status}` ||
+        message === '' ||
+        status === 404 ||
+        status === 405
+      );
+      if (canFallback) {
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError || new Error('è·åå¼ä»é¢æ£æµå¤±è´¥');
 }
 
 export async function previewCreatePool({

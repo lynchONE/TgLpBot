@@ -21,6 +21,7 @@ import {
     fetchMe,
     fetchRealtimePositions,
     openPosition,
+    prepareOpenPosition,
     previewOpenPosition,
     updateTaskRange,
     setTaskPaused,
@@ -564,11 +565,13 @@ export default function App() {
     const [openPositionSlippage, setOpenPositionSlippage] = useState('');
     const [openPositionAllowSwap, setOpenPositionAllowSwap] = useState(false);
     const [openPositionError, setOpenPositionError] = useState('');
+    const [openPositionPrepareChecks, setOpenPositionPrepareChecks] = useState([]);
     const [openPositionChecks, setOpenPositionChecks] = useState([]);
     const [openPositionRiskAck, setOpenPositionRiskAck] = useState(false);
     const [openPositionEntrySwapPreview, setOpenPositionEntrySwapPreview] = useState(null);
     const [openPositionEntrySwapPreviewLoading, setOpenPositionEntrySwapPreviewLoading] = useState(false);
     const [openPositionEntrySwapPreviewError, setOpenPositionEntrySwapPreviewError] = useState('');
+    const [openPositionPreparePrivateZapInfo, setOpenPositionPreparePrivateZapInfo] = useState(null);
     const [openPositionPrivateZapInfo, setOpenPositionPrivateZapInfo] = useState(null);
     const [openPositionEntrySwapSlippage, setOpenPositionEntrySwapSlippage] = useState('');
     const [openPositionEntrySwapSlippageDirty, setOpenPositionEntrySwapSlippageDirty] = useState(false);
@@ -638,15 +641,21 @@ export default function App() {
 
     const multiChainEnabled = globalConfig?.multi_chain_enabled ?? true;
     const multiWalletEnabled = globalConfig?.multi_wallet_enabled ?? false;
-    const openPositionFailChecks = openPositionChecks.filter((item) => item.status === 'fail');
+    const activeOpenPositionChecks = useMemo(() => (
+        Array.isArray(openPositionChecks) && openPositionChecks.length > 0
+            ? openPositionChecks
+            : (Array.isArray(openPositionPrepareChecks) ? openPositionPrepareChecks : [])
+    ), [openPositionChecks, openPositionPrepareChecks]);
+    const activeOpenPositionPrivateZapInfo = openPositionPrivateZapInfo || openPositionPreparePrivateZapInfo;
+    const openPositionFailChecks = activeOpenPositionChecks.filter((item) => item.status === 'fail');
     const openPositionHasBlockingSafetyFailure = openPositionFailChecks.length > 0;
     const openPositionSubmitDisabled = openPositionLoading || openPositionEntrySwapPreviewLoading || openPositionHasBlockingSafetyFailure;
     const openPositionDisplayChecks = useMemo(() => (
-        Array.isArray(openPositionChecks)
-            ? openPositionChecks.filter((item) => String(item?.key || '').trim() !== 'entry_swap')
+        Array.isArray(activeOpenPositionChecks)
+            ? activeOpenPositionChecks.filter((item) => String(item?.key || '').trim() !== 'entry_swap')
             : []
-    ), [openPositionChecks]);
-    const openPositionShowPrivateZapProtectionHint = Boolean(openPositionPrivateZapInfo?.show_protection_hint);
+    ), [activeOpenPositionChecks]);
+    const openPositionShowPrivateZapProtectionHint = Boolean(activeOpenPositionPrivateZapInfo?.show_protection_hint);
     const [posWalletBalances, setPosWalletBalances] = useState(null);
     const userDefaultChain = useMemo(() => {
         const raw = String(globalConfig?.default_chain || 'bsc').trim().toLowerCase();
@@ -1609,9 +1618,11 @@ export default function App() {
         setOpenPositionRangeUpper('');
         setOpenPositionRangeUpperAuto(true);
         setOpenPositionSlippage('');
+        setOpenPositionPrepareChecks([]);
         setOpenPositionEntrySwapPreview(null);
         setOpenPositionEntrySwapPreviewLoading(false);
         setOpenPositionEntrySwapPreviewError('');
+        setOpenPositionPreparePrivateZapInfo(null);
         setOpenPositionPrivateZapInfo(null);
         setOpenPositionEntrySwapSlippage('');
         setOpenPositionEntrySwapSlippageDirty(false);
@@ -1742,6 +1753,67 @@ export default function App() {
             controller.abort();
         };
     }, [apiBaseUrl, initData, hasInitData, multiWalletEnabled, openPositionPool]);
+
+    useEffect(() => {
+        if (!openPositionPool || !hasInitData) {
+            setOpenPositionPrepareChecks([]);
+            setOpenPositionPreparePrivateZapInfo(null);
+            return undefined;
+        }
+
+        let walletId;
+        if (multiWalletEnabled && !walletsLoading && !walletsError) {
+            const list = Array.isArray(walletsData?.wallets) ? walletsData.wallets : [];
+            if (list.length === 1) {
+                const onlyId = Number(list[0]?.id);
+                if (Number.isFinite(onlyId) && onlyId > 0) {
+                    walletId = onlyId;
+                }
+            } else if (list.length > 1) {
+                const wid = Number(openPositionWalletId);
+                if (Number.isFinite(wid) && wid > 0) {
+                    walletId = wid;
+                }
+            }
+        }
+
+        let active = true;
+        const controller = new AbortController();
+        prepareOpenPosition({
+            apiBaseUrl,
+            initData,
+            chain: openPositionPool?.chain || 'bsc',
+            poolAddress: openPositionPool?.pool_address,
+            poolVersion: openPositionPool?.protocol_version,
+            walletId,
+            signal: controller.signal,
+        })
+            .then((resp) => {
+                if (!active) return;
+                setOpenPositionPrepareChecks(Array.isArray(resp?.checks) ? resp.checks : []);
+                setOpenPositionPreparePrivateZapInfo(resp?.private_zap && typeof resp.private_zap === 'object' ? resp.private_zap : null);
+            })
+            .catch(() => {
+                if (!active || controller.signal.aborted) return;
+                setOpenPositionPrepareChecks([]);
+                setOpenPositionPreparePrivateZapInfo(null);
+            });
+
+        return () => {
+            active = false;
+            controller.abort();
+        };
+    }, [
+        apiBaseUrl,
+        initData,
+        hasInitData,
+        openPositionPool,
+        multiWalletEnabled,
+        walletsLoading,
+        walletsError,
+        walletsData,
+        openPositionWalletId,
+    ]);
 
     useEffect(() => {
         if (!openPositionEntrySwapPreview?.required || openPositionEntrySwapSlippageDirty) return;
@@ -1904,8 +1976,8 @@ export default function App() {
             setOpenPositionError('请输入有效的开仓金额。');
             return;
         }
-        const warnChecks = openPositionChecks.filter(c => c.status === 'warn');
-        const failChecks = openPositionChecks.filter(c => c.status === 'fail');
+        const warnChecks = activeOpenPositionChecks.filter(c => c.status === 'warn');
+        const failChecks = activeOpenPositionChecks.filter(c => c.status === 'fail');
         if (failChecks.length > 0) {
             setOpenPositionError(failChecks.map(c => c.detail || c.label).join('; '));
             return;

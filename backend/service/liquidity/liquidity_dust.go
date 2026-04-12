@@ -80,6 +80,10 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 	if openSpentWei == nil {
 		openSpentWei = big.NewInt(0)
 	}
+	openStableBeforeWei, _ := convert.ParseBigInt(rec.OpenStableBefore)
+	if openStableBeforeWei == nil {
+		openStableBeforeWei = big.NewInt(0)
+	}
 	openGasWei, _ := convert.ParseBigInt(rec.OpenGasSpentWei)
 	if openGasWei == nil {
 		openGasWei = big.NewInt(0)
@@ -135,13 +139,19 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 						openSpentWei = big.NewInt(0)
 					}
 				}
+				openStableAfterWei := new(big.Int).Sub(new(big.Int).Set(openStableBeforeWei), openSpentWei)
+				if openStableAfterWei.Sign() < 0 {
+					openStableAfterWei = big.NewInt(0)
+				}
 				_ = database.DB.Model(&models.TradeRecord{}).Where("id = ?", rec.ID).Updates(map[string]interface{}{
 					"open_dust0":         "0",
 					"open_usdt_spent":    openSpentWei.String(),
+					"open_stable_after":  openStableAfterWei.String(),
 					"open_gas_spent_wei": openGasWei.String(),
 				}).Error
 				rec.OpenDust0 = "0"
 				rec.OpenUSDTSpent = openSpentWei.String()
+				rec.OpenStableAfter = openStableAfterWei.String()
 				rec.OpenGasSpentWei = openGasWei.String()
 				sym := strings.TrimSpace(task.Token0Symbol)
 				if sym == "" {
@@ -202,13 +212,19 @@ func (s *LiquidityService) SwapTaskDustToUSDT(userID uint, task *models.Strategy
 						openSpentWei = big.NewInt(0)
 					}
 				}
+				openStableAfterWei := new(big.Int).Sub(new(big.Int).Set(openStableBeforeWei), openSpentWei)
+				if openStableAfterWei.Sign() < 0 {
+					openStableAfterWei = big.NewInt(0)
+				}
 				_ = database.DB.Model(&models.TradeRecord{}).Where("id = ?", rec.ID).Updates(map[string]interface{}{
 					"open_dust1":         "0",
 					"open_usdt_spent":    openSpentWei.String(),
+					"open_stable_after":  openStableAfterWei.String(),
 					"open_gas_spent_wei": openGasWei.String(),
 				}).Error
 				rec.OpenDust1 = "0"
 				rec.OpenUSDTSpent = openSpentWei.String()
+				rec.OpenStableAfter = openStableAfterWei.String()
 				rec.OpenGasSpentWei = openGasWei.String()
 				sym := strings.TrimSpace(task.Token1Symbol)
 				if sym == "" {

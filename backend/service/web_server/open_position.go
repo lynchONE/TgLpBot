@@ -520,21 +520,6 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 	}
 
 	liquidityService := liquidity.NewLiquidityService()
-	if err := liquidityService.CheckOpenPositionSafety(tmpTask, liquidity.OpenPositionRiskOptions{
-		AckLiquidityRisk:    req.AckLiquidityRisk,
-		RequireLiquidityAck: false,
-	}); err != nil {
-		var zapSafetyErr *liquidity.ZapSafetyError
-		if errors.As(err, &zapSafetyErr) {
-			resp := buildOpenPositionErrorFromSafety(zapSafetyErr)
-			return nil, &resp, http.StatusConflict
-		}
-		return nil, &openPositionError{
-			Code:    "open_position_failed",
-			Message: err.Error(),
-		}, http.StatusInternalServerError
-	}
-
 	hooksAddr := normalizeHexPrefixed(poolInfo.HooksAddress)
 	if !common.IsHexAddress(hooksAddr) {
 		hooksAddr = "0x0000000000000000000000000000000000000000"
@@ -689,6 +674,23 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 	ctx, errResp, status := s.prepareOpenPositionContext(*req)
 	if errResp != nil {
 		writeOpenPositionError(w, status, *errResp)
+		return
+	}
+
+	if err := ctx.liquidityService.CheckOpenPositionSafety(ctx.task, liquidity.OpenPositionRiskOptions{
+		AckLiquidityRisk:    ctx.req.AckLiquidityRisk,
+		RequireLiquidityAck: false,
+	}); err != nil {
+		var zapSafetyErr *liquidity.ZapSafetyError
+		if errors.As(err, &zapSafetyErr) {
+			resp := buildOpenPositionErrorFromSafety(zapSafetyErr)
+			writeOpenPositionError(w, http.StatusConflict, resp)
+			return
+		}
+		writeOpenPositionError(w, http.StatusInternalServerError, openPositionError{
+			Code:    "open_position_failed",
+			Message: err.Error(),
+		})
 		return
 	}
 

@@ -36,6 +36,7 @@ func (s *TradeRecordService) CreateOpenRecord(
 	openTxHash string,
 	openUSDTSpentWei *big.Int,
 	openGasSpentWei *big.Int,
+	openStableBeforeWei *big.Int,
 	dust0Wei *big.Int,
 	dust1Wei *big.Int,
 ) error {
@@ -52,6 +53,8 @@ func (s *TradeRecordService) CreateOpenRecord(
 			openSpent = fallback
 		}
 	}
+	openStableBefore := nonNilBigInt(openStableBeforeWei)
+	openStableAfter := balanceAfterSpend(openStableBefore, openSpent)
 
 	// If there is any dangling open record for this task, mark it as orphaned.
 	_ = database.DB.Model(&models.TradeRecord{}).
@@ -73,11 +76,15 @@ func (s *TradeRecordService) CreateOpenRecord(
 		OpenedAt:          now,
 		OpenTxHash:        strings.TrimSpace(openTxHash),
 		OpenUSDTSpent:     safeBigIntString(openSpent),
+		OpenStableBefore:  safeBigIntString(openStableBefore),
+		OpenStableAfter:   safeBigIntString(openStableAfter),
 		OpenGasSpentWei:   safeBigIntString(openGasSpentWei),
 		OpenDust0:         safeBigIntString(dust0Wei),
 		OpenDust1:         safeBigIntString(dust1Wei),
 		Status:            models.TradeStatusOpen,
 		CloseUSDTReceived: "0",
+		CloseStableBefore: "0",
+		CloseStableAfter:  "0",
 		CloseGasSpentWei:  "0",
 		ProfitUSDT:        "0",
 		ProfitPct:         0,
@@ -94,7 +101,7 @@ func (s *TradeRecordService) AddToOpenUSDTSpent(task *models.StrategyTask, delta
 		return fmt.Errorf("task is nil")
 	}
 	if deltaWei == nil || deltaWei.Sign() <= 0 {
-		return nil // nothing to add
+		return nil
 	}
 
 	var rec models.TradeRecord
@@ -103,7 +110,6 @@ func (s *TradeRecordService) AddToOpenUSDTSpent(task *models.StrategyTask, delta
 		Order("opened_at DESC").
 		First(&rec).Error
 	if err != nil {
-		// No open record exists — nothing to update
 		return nil
 	}
 
@@ -112,9 +118,14 @@ func (s *TradeRecordService) AddToOpenUSDTSpent(task *models.StrategyTask, delta
 		existing = big.NewInt(0)
 	}
 	newSpent := new(big.Int).Add(existing, deltaWei)
+	openStableBefore, _ := parseBigInt(rec.OpenStableBefore)
+	openStableAfter := balanceAfterSpend(openStableBefore, newSpent)
 
 	return database.DB.Model(&models.TradeRecord{}).Where("id = ?", rec.ID).
-		Update("open_usdt_spent", safeBigIntString(newSpent)).Error
+		Updates(map[string]interface{}{
+			"open_usdt_spent":   safeBigIntString(newSpent),
+			"open_stable_after": safeBigIntString(openStableAfter),
+		}).Error
 }
 
 func (s *TradeRecordService) ApplyAddLiquidityDelta(
@@ -153,11 +164,13 @@ func (s *TradeRecordService) ApplyAddLiquidityDelta(
 	if openDust1 == nil {
 		openDust1 = big.NewInt(0)
 	}
+	openStableBefore, _ := parseBigInt(rec.OpenStableBefore)
 
 	nextSpent := new(big.Int).Add(openSpent, nonNilBigInt(stableSpentWei))
 	nextGas := new(big.Int).Add(openGas, nonNilBigInt(gasSpentWei))
 	nextDust0 := new(big.Int).Set(openDust0)
 	nextDust1 := new(big.Int).Set(openDust1)
+	nextStableAfter := balanceAfterSpend(openStableBefore, nextSpent)
 
 	primaryStable := common.HexToAddress("")
 	if config.AppConfig != nil {
@@ -174,17 +187,21 @@ func (s *TradeRecordService) ApplyAddLiquidityDelta(
 
 	return database.DB.Model(&models.TradeRecord{}).Where("id = ?", rec.ID).Updates(map[string]interface{}{
 		"open_usdt_spent":    safeBigIntString(nextSpent),
+		"open_stable_after":  safeBigIntString(nextStableAfter),
 		"open_gas_spent_wei": safeBigIntString(nextGas),
 		"open_dust0":         safeBigIntString(nextDust0),
 		"open_dust1":         safeBigIntString(nextDust1),
 	}).Error
 }
 
-func (s *TradeRecordService) CloseLatestOpenRecord(task *models.StrategyTask, closeTxHash string, closeUSDTReceivedWei, closeGasSpentWei *big.Int, nativePriceUSD float64) error {
-	return s.CloseLatestOpenRecordWithCredit(task, closeTxHash, closeUSDTReceivedWei, closeGasSpentWei, nil, nativePriceUSD)
-}
-
-func (s *TradeRecordService) CloseLatestOpenRecordWithCredit(task *models.StrategyTask, closeTxHash string, closeUSDTReceivedWei, closeGasSpentWei, openCreditUSDTWei *big.Int, nativePriceUSD float64) error {
+func (s *TradeRecordService) CloseLatestOpenRecord(
+	task *models.StrategyTask,
+	closeTxHash string,
+	closeUSDTReceivedWei *big.Int,
+	closeGasSpentWei *big.Int,
+	closeStableBeforeWei *big.Int,
+	nativePriceUSD float64,
+) error {
 	if task == nil {
 		return fmt.Errorf("task is nil")
 	}
@@ -198,8 +215,6 @@ func (s *TradeRecordService) CloseLatestOpenRecordWithCredit(task *models.Strate
 
 	now := time.Now()
 
-	// If no open record exists (e.g. legacy tasks created before this feature),
-	// create a closed record with unknown open fields to avoid losing the exit summary.
 	if err != nil {
 		openSpent := big.NewInt(0)
 		if task.AmountUSDT > 0 {
@@ -207,14 +222,12 @@ func (s *TradeRecordService) CloseLatestOpenRecordWithCredit(task *models.Strate
 				openSpent = fallback
 			}
 		}
-		// 计算 Gas 的 USDT 价值
 		totalGasWei := nonNilBigInt(closeGasSpentWei)
 		totalGasUSDT := calcGasUSDT(totalGasWei, nativePriceUSD)
-
-		effectiveOpenSpent := effectiveOpenSpentForPnL(openSpent, openCreditUSDTWei)
-		profit := new(big.Int).Sub(nonNilBigInt(closeUSDTReceivedWei), effectiveOpenSpent)
-		profit.Sub(profit, totalGasUSDT) // 扣除 Gas 费用
-		profitPct := calcProfitPct(profit, effectiveOpenSpent)
+		profit := tradeProfitUSDT(closeUSDTReceivedWei, openSpent, totalGasUSDT)
+		profitPct := calcProfitPct(profit, openSpent)
+		closeStableBefore := nonNilBigInt(closeStableBeforeWei)
+		closeStableAfter := balanceAfterReceive(closeStableBefore, closeUSDTReceivedWei)
 
 		closed := &models.TradeRecord{
 			UserID:            task.UserID,
@@ -228,10 +241,14 @@ func (s *TradeRecordService) CloseLatestOpenRecordWithCredit(task *models.Strate
 			OpenedAt:          now,
 			OpenTxHash:        "",
 			OpenUSDTSpent:     safeBigIntString(openSpent),
+			OpenStableBefore:  "0",
+			OpenStableAfter:   "0",
 			OpenGasSpentWei:   "0",
 			ClosedAt:          &now,
 			CloseTxHash:       strings.TrimSpace(closeTxHash),
 			CloseUSDTReceived: safeBigIntString(closeUSDTReceivedWei),
+			CloseStableBefore: safeBigIntString(closeStableBefore),
+			CloseStableAfter:  safeBigIntString(closeStableAfter),
 			CloseGasSpentWei:  safeBigIntString(closeGasSpentWei),
 			TotalGasUSDT:      safeBigIntString(totalGasUSDT),
 			ProfitUSDT:        profit.String(),
@@ -249,6 +266,8 @@ func (s *TradeRecordService) CloseLatestOpenRecordWithCredit(task *models.Strate
 	if openGasWei == nil {
 		openGasWei = big.NewInt(0)
 	}
+	openStableBefore, _ := parseBigInt(rec.OpenStableBefore)
+
 	fallbackOpen := false
 	if openSpent.Sign() <= 0 && task.AmountUSDT > 0 {
 		if fallback, err := convert.FloatUSDTToWei(task.AmountUSDT); err == nil && fallback.Sign() > 0 {
@@ -257,21 +276,20 @@ func (s *TradeRecordService) CloseLatestOpenRecordWithCredit(task *models.Strate
 		}
 	}
 
-	// 计算开仓+平仓 Gas 的 USDT 总价值
 	totalGasWei := new(big.Int).Add(openGasWei, nonNilBigInt(closeGasSpentWei))
 	totalGasUSDT := calcGasUSDT(totalGasWei, nativePriceUSD)
-
-	// 收益 = 撤出USDT - 投入USDT - 总Gas(USDT)
-	effectiveOpenSpent := effectiveOpenSpentForPnL(openSpent, openCreditUSDTWei)
-	profit := new(big.Int).Sub(nonNilBigInt(closeUSDTReceivedWei), effectiveOpenSpent)
-	profit.Sub(profit, totalGasUSDT) // 扣除 Gas 费用
-	profitPct := calcProfitPct(profit, effectiveOpenSpent)
+	profit := tradeProfitUSDT(closeUSDTReceivedWei, openSpent, totalGasUSDT)
+	profitPct := calcProfitPct(profit, openSpent)
+	closeStableBefore := nonNilBigInt(closeStableBeforeWei)
+	closeStableAfter := balanceAfterReceive(closeStableBefore, closeUSDTReceivedWei)
 
 	updates := map[string]interface{}{
 		"closed_at":           &now,
 		"chain":               chain,
 		"close_tx_hash":       strings.TrimSpace(closeTxHash),
 		"close_usdt_received": safeBigIntString(closeUSDTReceivedWei),
+		"close_stable_before": safeBigIntString(closeStableBefore),
+		"close_stable_after":  safeBigIntString(closeStableAfter),
 		"close_gas_spent_wei": safeBigIntString(closeGasSpentWei),
 		"total_gas_usdt":      safeBigIntString(totalGasUSDT),
 		"profit_usdt":         profit.String(),
@@ -280,6 +298,7 @@ func (s *TradeRecordService) CloseLatestOpenRecordWithCredit(task *models.Strate
 	}
 	if fallbackOpen {
 		updates["open_usdt_spent"] = openSpent.String()
+		updates["open_stable_after"] = safeBigIntString(balanceAfterSpend(openStableBefore, openSpent))
 	}
 
 	return database.DB.Model(&models.TradeRecord{}).Where("id = ?", rec.ID).Updates(updates).Error
@@ -295,7 +314,7 @@ func (s *TradeRecordService) ApplyExitDelta(
 	closeTxHash string,
 	closeUSDTReceivedDeltaWei *big.Int,
 	closeGasSpentDeltaWei *big.Int,
-	openCreditUSDTWei *big.Int,
+	closeStableBeforeWei *big.Int,
 	finalize bool,
 	nativePriceUSD float64,
 ) (*models.TradeRecord, error) {
@@ -310,7 +329,6 @@ func (s *TradeRecordService) ApplyExitDelta(
 		Order("opened_at DESC").
 		First(&rec).Error
 	if err != nil {
-		// Fallback for repairing already-closed records (e.g. swap failed then later retried).
 		err2 := database.DB.
 			Where("user_id = ? AND task_id = ?", task.UserID, task.ID).
 			Order("opened_at DESC").
@@ -366,6 +384,8 @@ func (s *TradeRecordService) ApplyExitDelta(
 	if openSpent == nil {
 		openSpent = big.NewInt(0)
 	}
+	openStableBefore, _ := parseBigInt(rec.OpenStableBefore)
+
 	fallbackOpen := false
 	if openSpent.Sign() <= 0 && task.AmountUSDT > 0 {
 		if fallback, err := convert.FloatUSDTToWei(task.AmountUSDT); err == nil && fallback.Sign() > 0 {
@@ -375,8 +395,21 @@ func (s *TradeRecordService) ApplyExitDelta(
 	}
 	if fallbackOpen {
 		updates["open_usdt_spent"] = openSpent.String()
+		updates["open_stable_after"] = safeBigIntString(balanceAfterSpend(openStableBefore, openSpent))
 		rec.OpenUSDTSpent = openSpent.String()
+		rec.OpenStableAfter = safeBigIntString(balanceAfterSpend(openStableBefore, openSpent))
 	}
+
+	existingCloseStableBefore, _ := parseBigInt(rec.CloseStableBefore)
+	if existingCloseStableBefore == nil {
+		existingCloseStableBefore = big.NewInt(0)
+	}
+	if existingCloseStableBefore.Sign() <= 0 && closeStableBeforeWei != nil && closeStableBeforeWei.Sign() > 0 {
+		existingCloseStableBefore = new(big.Int).Set(closeStableBeforeWei)
+	}
+	closeStableAfter := balanceAfterReceive(existingCloseStableBefore, newReceived)
+	updates["close_stable_before"] = safeBigIntString(existingCloseStableBefore)
+	updates["close_stable_after"] = safeBigIntString(closeStableAfter)
 
 	if finalize {
 		openGasWei, _ := parseBigInt(rec.OpenGasSpentWei)
@@ -386,11 +419,8 @@ func (s *TradeRecordService) ApplyExitDelta(
 
 		totalGasWei := new(big.Int).Add(openGasWei, newGas)
 		totalGasUSDT := calcGasUSDT(totalGasWei, nativePriceUSD)
-
-		effectiveOpenSpent := effectiveOpenSpentForPnL(openSpent, openCreditUSDTWei)
-		profit := new(big.Int).Sub(newReceived, effectiveOpenSpent)
-		profit.Sub(profit, totalGasUSDT)
-		profitPct := calcProfitPct(profit, effectiveOpenSpent)
+		profit := tradeProfitUSDT(newReceived, openSpent, totalGasUSDT)
+		profitPct := calcProfitPct(profit, openSpent)
 
 		now := time.Now()
 		updates["closed_at"] = &now
@@ -411,19 +441,17 @@ func (s *TradeRecordService) ApplyExitDelta(
 	}
 
 	rec.CloseUSDTReceived = newReceived.String()
+	rec.CloseStableBefore = safeBigIntString(existingCloseStableBefore)
+	rec.CloseStableAfter = safeBigIntString(closeStableAfter)
 	rec.CloseGasSpentWei = newGas.String()
 
 	return &rec, nil
 }
 
-// calcGasUSDT 将 BNB Gas (wei) 转换为 USDT (wei)
 func calcGasUSDT(gasWei *big.Int, nativePriceUSD float64) *big.Int {
 	if gasWei == nil || gasWei.Sign() <= 0 || nativePriceUSD <= 0 {
 		return big.NewInt(0)
 	}
-	// gasWei 是 BNB 的 wei 单位 (1e18)
-	// USDT 也是 1e18 精度
-	// USDT = gasWei * bnbPriceUSDT
 	gasFloat := new(big.Float).SetInt(gasWei)
 	priceFloat := new(big.Float).SetFloat64(nativePriceUSD)
 	result := new(big.Float).Mul(gasFloat, priceFloat)
@@ -431,16 +459,22 @@ func calcGasUSDT(gasWei *big.Int, nativePriceUSD float64) *big.Int {
 	return resultInt
 }
 
-func effectiveOpenSpentForPnL(openSpent, openCreditUSDTWei *big.Int) *big.Int {
-	base := nonNilBigInt(openSpent)
-	credit := nonNilBigInt(openCreditUSDTWei)
-	if base.Sign() <= 0 || credit.Sign() <= 0 {
-		return new(big.Int).Set(base)
-	}
-	if credit.Cmp(base) >= 0 {
+func tradeProfitUSDT(closeReceived, openSpent, totalGasUSDT *big.Int) *big.Int {
+	profit := new(big.Int).Sub(nonNilBigInt(closeReceived), nonNilBigInt(openSpent))
+	profit.Sub(profit, nonNilBigInt(totalGasUSDT))
+	return profit
+}
+
+func balanceAfterSpend(before, spent *big.Int) *big.Int {
+	after := new(big.Int).Sub(nonNilBigInt(before), nonNilBigInt(spent))
+	if after.Sign() < 0 {
 		return big.NewInt(0)
 	}
-	return new(big.Int).Sub(base, credit)
+	return after
+}
+
+func balanceAfterReceive(before, received *big.Int) *big.Int {
+	return new(big.Int).Add(nonNilBigInt(before), nonNilBigInt(received))
 }
 
 func safeBigIntString(v *big.Int) string {

@@ -28,16 +28,20 @@ type TradeRecord struct {
 	Token0Symbol string `gorm:"size:20" json:"token0_symbol"`
 	Token1Symbol string `gorm:"size:20" json:"token1_symbol"`
 
-	OpenedAt        time.Time `gorm:"index" json:"opened_at"`
-	OpenTxHash      string    `gorm:"size:66" json:"open_tx_hash"`
-	OpenUSDTSpent   string    `gorm:"type:varchar(78)" json:"open_usdt_spent"`    // wei (1e18)
-	OpenGasSpentWei string    `gorm:"type:varchar(78)" json:"open_gas_spent_wei"` // BNB wei (1e18)
-	OpenDust0       string    `gorm:"type:varchar(78)" json:"open_dust0"`         // token0 dust wei
-	OpenDust1       string    `gorm:"type:varchar(78)" json:"open_dust1"`         // token1 dust wei
+	OpenedAt         time.Time `gorm:"index" json:"opened_at"`
+	OpenTxHash       string    `gorm:"size:66" json:"open_tx_hash"`
+	OpenUSDTSpent    string    `gorm:"type:varchar(78)" json:"open_usdt_spent"`    // wei (1e18)
+	OpenStableBefore string    `gorm:"type:varchar(78)" json:"open_stable_before"` // stable balance before entry, normalized to 1e18
+	OpenStableAfter  string    `gorm:"type:varchar(78)" json:"open_stable_after"`  // stable balance after entry, normalized to 1e18
+	OpenGasSpentWei  string    `gorm:"type:varchar(78)" json:"open_gas_spent_wei"` // BNB wei (1e18)
+	OpenDust0        string    `gorm:"type:varchar(78)" json:"open_dust0"`         // token0 dust wei
+	OpenDust1        string    `gorm:"type:varchar(78)" json:"open_dust1"`         // token1 dust wei
 
 	ClosedAt          *time.Time        `gorm:"index" json:"closed_at"`
 	CloseTxHash       string            `gorm:"size:66" json:"close_tx_hash"`
 	CloseUSDTReceived string            `gorm:"type:varchar(78)" json:"close_usdt_received"`    // wei (1e18)
+	CloseStableBefore string            `gorm:"type:varchar(78)" json:"close_stable_before"`    // stable balance before exit, normalized to 1e18
+	CloseStableAfter  string            `gorm:"type:varchar(78)" json:"close_stable_after"`     // stable balance after exit, normalized to 1e18
 	CloseGasSpentWei  string            `gorm:"type:varchar(78)" json:"close_gas_spent_wei"`    // BNB wei (1e18)
 	TotalGasUSDT      string            `gorm:"type:varchar(78)" json:"total_gas_usdt"`         // 开仓+平仓 Gas 的 USDT 价值 (1e18)
 	ProfitUSDT        string            `gorm:"type:varchar(78)" json:"profit_usdt"`            // wei (may be negative), 已扣除 Gas
