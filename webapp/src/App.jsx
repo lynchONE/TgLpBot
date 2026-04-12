@@ -2965,7 +2965,7 @@ export default function App() {
                   {priceRange && (
                     <div className="pos-price-range">
                       <div className="pos-price-range-header">
-                        <span className="pos-price-range-label">价格范围 ({priceRange.pairLabel}{priceRange.gridCount ? ` ${priceRange.gridCount}格` : ''})</span>
+                        <span className="pos-price-range-label">价格范围 ({priceRange.pairLabel}{priceRange.gridCount ? ` 共${priceRange.gridCount}格` : ''})</span>
                         {hasTaskRange && Number.isFinite(taskRangeTotalWidth) && (
                           <span className="pos-price-range-dev">总宽 {taskRangeTotalWidth.toFixed(2)}%</span>
                         )}

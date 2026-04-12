@@ -67,8 +67,11 @@ export default function PriceRangeVisualizer({
 
     const gridInfoText = useMemo(() => {
         if (currentGridIndex === null || currentGridLower === null || currentGridUpper === null) return '当前网格 --';
-        return `第${currentGridIndex}格 | ${formatPrice(currentGridLower)} - ${formatPrice(currentGridUpper)}`;
-    }, [currentGridIndex, currentGridLower, currentGridUpper]);
+        const currentGridLabel = Number.isFinite(gridCount) && gridCount > 0
+            ? `第${currentGridIndex}/${gridCount}格`
+            : `第${currentGridIndex}格`;
+        return `${currentGridLabel} | ${formatPrice(currentGridLower)} - ${formatPrice(currentGridUpper)}`;
+    }, [currentGridIndex, currentGridLower, currentGridUpper, gridCount]);
 
     const gridLines = useMemo(() => {
         if (!gridCount || gridCount < 2 || gridCount > 200) return [];
@@ -88,7 +91,7 @@ export default function PriceRangeVisualizer({
             <div className="mb-2 flex items-center justify-between text-zinc-900 dark:text-zinc-100">
                 <div className="text-[10px] font-bold opacity-85">
                     价格范围 ({pairLabel || '未知'}{' '}
-                    {gridCount ? <><NumberFlowValue value={gridCount} formatOptions={{ maximumFractionDigits: 0 }} />格</> : ''})
+                    {gridCount ? <>共<NumberFlowValue value={gridCount} formatOptions={{ maximumFractionDigits: 0 }} />格</> : ''})
                 </div>
                 {rangeBadgeText ? (
                     <div className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-bold text-white dark:bg-black/50">
