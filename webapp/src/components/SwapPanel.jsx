@@ -466,13 +466,13 @@ function RouteDexIcons({ routeSummary, route }) {
     return summary.split(/\s*->\s*/).map((s) => s.trim()).filter(Boolean);
   }, [route, routeSummary]);
 
-  if (!dexNames.length) return <span className="swap-route-text-fallback">{'--'}</span>;
+  if (!dexNames.length) return null;
 
   return (
     <span className="swap-dex-route-icons">
       {dexNames.map((name, i) => (
         <React.Fragment key={`${name}-${i}`}>
-          {i > 0 ? <span className="swap-dex-arrow">→</span> : null}
+          {i > 0 ? <span className="swap-dex-arrow" /> : null}
           <DexIconBadge name={name} size={16} />
         </React.Fragment>
       ))}
@@ -643,6 +643,28 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     () => selectedQuote?.fee_summary || selectedQuote?.fee_rule || '--',
     [selectedQuote]
   );
+  const selectedQuoteFeeDisplay = useMemo(() => {
+    const rule = selectedQuote?.fee_rule || '';
+    const fees = Array.isArray(selectedQuote?.fees) ? selectedQuote.fees : [];
+    // Sum up unique fee amounts (deduplicate by amount+token to avoid counting the same fee twice)
+    const seen = new Set();
+    let totalFee = 0;
+    let feeSymbol = '';
+    for (const fee of fees) {
+      const amt = Number(fee?.amount_float);
+      if (!Number.isFinite(amt) || amt <= 0) continue;
+      const key = `${fee.amount_float}:${fee.token || ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      totalFee += amt;
+      if (!feeSymbol && fee.token_symbol) feeSymbol = fee.token_symbol;
+    }
+    if (totalFee > 0) {
+      const feeStr = totalFee.toLocaleString('en-US', { maximumFractionDigits: 4 });
+      return rule ? `${rule} ≈ ${feeStr} U` : `≈ ${feeStr} U`;
+    }
+    return rule || '--';
+  }, [selectedQuote]);
   const selectedQuoteRouteText = useMemo(
     () => selectedQuote?.route_summary || '--',
     [selectedQuote]
@@ -1475,7 +1497,9 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                         </div>
                         {quote?.status === 'available' ? (
                           <div className="swap-prov-row-bottom">
-                            <RouteDexIcons routeSummary={quote?.route_summary} route={quote?.route} />
+                            {quote?.route?.length || quote?.route_summary ? (
+                              <RouteDexIcons routeSummary={quote?.route_summary} route={quote?.route} />
+                            ) : <span />}
                             <span className="swap-prov-gas-text">{gasCostText}</span>
                           </div>
                         ) : (
@@ -1494,23 +1518,13 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                       <DetailRow label={'\u5f53\u524d Provider'} value={selectedQuote?.provider_label || '--'} />
                       <DetailRow label={'\u9884\u4f30\u5230\u8d26'} value={`${selectedQuoteAmount} ${toTokenMeta?.symbol || ''}`.trim()} emphasis />
                       <DetailRow label={'\u6700\u5c11\u5230\u8d26'} value={`${minReceived} ${toTokenMeta?.symbol || ''}`.trim()} />
-                      <DetailRow label={'\u624b\u7eed\u8d39'} value={selectedQuoteFeeText} />
+                      <DetailRow label={'\u624b\u7eed\u8d39'} value={selectedQuoteFeeDisplay} />
                       <DetailRow label={'\u9884\u4f30 Gas'} value={quoteGasUnits} />
                       <DetailRow label={'Gas \u8d39\u7528'} value={quoteGasCostText} />
-                      <DetailRow label={'\u8def\u5f84\u6458\u8981'} value={<RouteDexIcons routeSummary={selectedQuoteRouteText} route={selectedQuote?.route} />} />
-                      <DetailRow label={'\u6ed1\u70b9\u8bbe\u7f6e'} value={`${slippage || '1.0'}%`} />
-                      {selectedQuote?.fees?.length ? (
-                        <div className="swap-detail-sub">
-                          <div className="swap-detail-sub-title">{'\u624b\u7eed\u8d39\u660e\u7ec6'}</div>
-                          {selectedQuote.fees.map((item, i) => <FeeDetailRow key={`${selectedQuote.provider}-fee-${i}`} item={item} />)}
-                        </div>
-                      ) : null}
                       {selectedQuote?.route?.length ? (
-                        <div className="swap-detail-sub">
-                          <div className="swap-detail-sub-title">{'\u4ea4\u6613\u8def\u5f84'}</div>
-                          {selectedQuote.route.map((hop, i) => <RouteHopRow key={`${selectedQuote.provider}-hop-${i}`} hop={hop} />)}
-                        </div>
+                        <DetailRow label={'\u8def\u5f84\u6458\u8981'} value={<RouteDexIcons routeSummary={selectedQuoteRouteText} route={selectedQuote?.route} />} />
                       ) : null}
+                      <DetailRow label={'\u6ed1\u70b9\u8bbe\u7f6e'} value={`${slippage || '1.0'}%`} />
                     </div>
                   ) : (
                     <div className="swap-empty-hint">
@@ -1728,11 +1742,13 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
               <div className="swap-confirm-details">
                 <DetailRow label={'Provider'} value={selectedQuote?.provider_label || '--'} />
                 <DetailRow label={'\u6700\u5c11\u5230\u8d26'} value={`${minReceived} ${toTokenMeta?.symbol || ''}`.trim()} />
-                <DetailRow label={'\u624b\u7eed\u8d39'} value={selectedQuoteFeeText} />
+                <DetailRow label={'\u624b\u7eed\u8d39'} value={selectedQuoteFeeDisplay} />
                 <DetailRow label={'\u6ed1\u70b9\u5bb9\u5fcd'} value={`${slippage || '1.0'}%`} />
                 <DetailRow label={'\u9884\u4f30 Gas'} value={quoteGasUnits} />
                 <DetailRow label={'Gas \u8d39\u7528'} value={quoteGasCostText} />
-                <DetailRow label={'\u8def\u5f84\u6458\u8981'} value={<RouteDexIcons routeSummary={selectedQuoteRouteText} route={selectedQuote?.route} />} />
+                {selectedQuote?.route?.length ? (
+                  <DetailRow label={'\u8def\u5f84\u6458\u8981'} value={<RouteDexIcons routeSummary={selectedQuoteRouteText} route={selectedQuote?.route} />} />
+                ) : null}
               </div>
               <div className="swap-confirm-actions">
                 <button type="button" className="swap-confirm-cancel" onClick={() => setShowConfirm(false)} disabled={executing}>{'\u53d6\u6d88'}</button>
