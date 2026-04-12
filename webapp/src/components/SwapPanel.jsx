@@ -645,25 +645,22 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   );
   const selectedQuoteFeeDisplay = useMemo(() => {
     const rule = selectedQuote?.fee_rule || '';
-    const fees = Array.isArray(selectedQuote?.fees) ? selectedQuote.fees : [];
-    // Sum up unique fee amounts (deduplicate by amount+token to avoid counting the same fee twice)
-    const seen = new Set();
-    let totalFee = 0;
-    let feeSymbol = '';
-    for (const fee of fees) {
-      const amt = Number(fee?.amount_float);
-      if (!Number.isFinite(amt) || amt <= 0) continue;
-      const key = `${fee.amount_float}:${fee.token || ''}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      totalFee += amt;
-      if (!feeSymbol && fee.token_symbol) feeSymbol = fee.token_symbol;
+    if (!rule) return '--';
+    // Try to extract percentage from fee_rule like "交易额 0.15%" or "交易额 0.25%"
+    const pctMatch = rule.match(/([\d.]+)\s*%/);
+    if (pctMatch) {
+      const pct = Number(pctMatch[1]);
+      const netAmount = Number(selectedQuote?.net_to_amount_float);
+      if (Number.isFinite(pct) && pct > 0 && Number.isFinite(netAmount) && netAmount > 0) {
+        // fee ≈ netAmount * pct / (100 - pct)
+        const feeUsd = netAmount * pct / (100 - pct);
+        if (feeUsd > 0.001) {
+          const feeStr = feeUsd.toLocaleString('en-US', { maximumFractionDigits: feeUsd >= 1 ? 2 : 4 });
+          return `${rule} ≈ ${feeStr} U`;
+        }
+      }
     }
-    if (totalFee > 0) {
-      const feeStr = totalFee.toLocaleString('en-US', { maximumFractionDigits: 4 });
-      return rule ? `${rule} ≈ ${feeStr} U` : `≈ ${feeStr} U`;
-    }
-    return rule || '--';
+    return rule;
   }, [selectedQuote]);
   const selectedQuoteRouteText = useMemo(
     () => selectedQuote?.route_summary || '--',
