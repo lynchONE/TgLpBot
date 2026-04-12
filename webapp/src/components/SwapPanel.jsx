@@ -110,9 +110,6 @@ function saveRecentTokens(next) {
   }
 }
 
-function buildCustomToken(address) {
-  return makeCustomToken(address);
-}
 
 function makeCustomToken(address) {
   const normalized = normalizeHexAddress(address);
@@ -1156,31 +1153,6 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     }
   }, [chain, onChainChange]);
 
-  const renderNetworkButtons = useCallback(() => (
-    <div className="swap-network-list">
-      {chainOptions.map((option) => {
-        const active = option.key === chain;
-        return (
-          <button
-            key={option.key}
-            type="button"
-            className={`swap-network-button${active ? ' active' : ''}`}
-            onClick={() => handleChainSelect(option.key)}
-            aria-pressed={active}
-            title={option.label}
-          >
-            <span className="swap-network-icon-wrap">
-              <img src={option.icon} alt={option.iconAlt || option.label} className="swap-network-icon" />
-            </span>
-            <span className="swap-network-copy">
-              <strong>{option.label}</strong>
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  ), [chain, chainOptions, handleChainSelect]);
-
   const isReadyToSwap = Boolean(
     selectedWalletId &&
     normalizedFromToken &&
@@ -1216,724 +1188,431 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     >
       <div className="swap-panel">
         <div className="swap-panel-shell">
-          <div className="swap-panel-topbar">
-            <div>
-              <div style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text)' }}>
-                {'\u5151\u6362'}
-              </div>
-            </div>
-          </div>
 
-          <div className="swap-controls-card">
-              <div className="swap-control-block">
-                <div className="swap-control-label-row">
-                  <span className="swap-control-label">{'\u7f51\u7edc'}</span>
-                  <strong>{chainConfig.label}</strong>
-                </div>
-              {renderNetworkButtons()}
-            </div>
-
-            <div className="swap-control-grid">
-              <div className="swap-control-block">
-                <span className="swap-control-label">{'\u6267\u884c\u94b1\u5305'}</span>
-                <div className="swap-custom-select-wrap" ref={walletSelectRef}>
-                  <button
-                    type="button"
-                    className="swap-custom-select-trigger"
-                    onClick={() => setWalletDropdownOpen((current) => !current)}
-                    disabled={walletLoading || !wallets.length}
-                  >
-                    <Wallet size={14} />
-                    <span className="swap-custom-select-value">
-                      {selectedWallet
-                        ? `${selectedWallet.name || '\u94b1\u5305'} \u00b7 ${shortAddress(selectedWallet.address, 8, 6)}`
-                        : walletLoading
-                          ? '\u52a0\u8f7d\u94b1\u5305\u4e2d...'
-                          : '\u6682\u65e0\u53ef\u7528\u94b1\u5305'}
-                    </span>
-                    <ChevronDown size={14} style={{ marginLeft: 'auto', opacity: 0.6 }} />
-                  </button>
-                  {walletDropdownOpen && wallets.length > 0 ? (
-                    <div className="swap-custom-select-dropdown">
-                      {wallets.map((wallet) => (
-                        <button
-                          key={wallet.id}
-                          type="button"
-                          className={`swap-custom-select-option${String(wallet.id) === String(selectedWalletId) ? ' active' : ''}`}
-                          onClick={() => {
-                            clearExecutionFeedback();
-                            setSelectedWalletId(String(wallet.id));
-                            setWalletDropdownOpen(false);
-                          }}
-                        >
-                          <div className="swap-custom-select-option-main">
-                            <span className="swap-custom-select-option-name">
-                              {wallet.name || '\u94b1\u5305'}
-                            </span>
-                            <span className="swap-custom-select-option-address">
-                              {shortAddress(wallet.address, 8, 6)}
-                            </span>
-                          </div>
-                          <div className="swap-custom-select-option-balance">
-                            <span>{chainConfig.nativeSymbol}</span>
-                            <span>{formatNativeBalance(wallet.native_balance)}</span>
-                          </div>
-                          {String(wallet.id) === String(selectedWalletId) ? (
-                            <Check size={16} className="swap-custom-select-option-check" />
-                          ) : null}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="swap-control-block">
-                <div className="swap-control-label-row">
-                  <span className="swap-control-label">{'\u6ed1\u70b9'}</span>
-                  <strong>{`${slippage || '1.0'}%`}</strong>
-                </div>
-                <div className="swap-slippage-input-group">
-                  <div className="swap-slippage-pills">
-                    {SLIPPAGE_PRESETS.map((item) => (
-                      <button
-                        key={item}
-                        type="button"
-                        className={`swap-slippage-pill${Number(slippage) === Number(item) ? ' active' : ''}`}
-                        onClick={() => {
-                          setSlippage(item);
-                          setSlippageDirty(true);
-                        }}
-                      >
-                        {item}%
-                      </button>
-                    ))}
-                  </div>
-                  <div className="swap-slippage-input-wrap">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.1"
-                      value={slippage}
-                      onChange={(event) => {
-                        setSlippage(event.target.value);
-                        setSlippageDirty(true);
-                      }}
-                      className="swap-slippage-input"
-                      placeholder="1.0"
-                    />
-                    <span>%</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="swap-surface">
-            <div className="swap-card-group">
-              <div className="swap-card">
-                <div className="swap-card-head">
-                  <span>{'From'}</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {fromTokenBalance && Number(fromTokenBalance) > 0 ? (
-                      <button
-                        type="button"
-                        onClick={handleMaxAmount}
-                        style={{
-                          padding: '4px 10px',
-                          borderRadius: '8px',
-                          border: '1px solid rgba(var(--accent-rgb), 0.4)',
-                          background: 'rgba(var(--accent-rgb), 0.12)',
-                          color: 'var(--accent-text)',
-                          fontSize: '11px',
-                          fontWeight: '700',
-                          cursor: 'pointer',
-                          transition: 'all 0.18s ease',
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background = 'rgba(var(--accent-rgb), 0.2)';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.background = 'rgba(var(--accent-rgb), 0.12)';
-                        }}
-                      >
-                        {'\u6700\u5927'}
-                      </button>
-                    ) : null}
-                    <small>{selectedWalletAddressLabel}</small>
-                  </div>
-                </div>
-                <div className="swap-card-body">
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    className="swap-amount-input"
-                    value={amount}
-                    onChange={(event) => {
-                      clearExecutionFeedback();
-                      setAmount(event.target.value);
-                    }}
-                    placeholder="0"
-                  />
-                  <TokenButton
-                    token={fromTokenMeta}
-                    placeholder={'\u9009\u62e9\u4ee3\u5e01'}
-                    onClick={() => {
-                      setPickerSide('from');
-                      setPickerOpen(true);
-                    }}
-                  />
-                </div>
-                <div className="swap-card-foot">
-                  <span>{fromTokenMeta ? fromTokenMeta.name : '\u672a\u9009\u62e9\u5356\u51fa\u4ee3\u5e01'}</span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    {fromTokenBalance && Number(fromTokenBalance) > 0 ? (
-                      <>
-                        <span style={{ color: 'var(--positive)' }}>{'\u4f59\u989d:'}</span>
-                        <span style={{ fontWeight: '700' }}>{formatTokenAmount(fromTokenBalance)}</span>
-                      </>
-                    ) : selectedWallet ? (
-                      `${chainConfig.nativeSymbol} ${formatNativeBalance(selectedWallet.native_balance)}`
-                    ) : (
-                      '--'
-                    )}
-                  </span>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                className="swap-switch-button"
-                onClick={handleReverse}
-                aria-label={'\u5207\u6362\u5151\u6362\u65b9\u5411'}
-              >
-                <ArrowDown size={18} strokeWidth={2.5} />
-              </button>
-
-              <div className="swap-card muted">
-                <div className="swap-card-head">
-                  <span>{'To'}</span>
-                  <small>{selectedWalletAddressLabel}</small>
-                </div>
-                <div className="swap-card-body">
-                  <div className={`swap-quote-output${quoting ? ' loading' : ''}${refreshingQuote ? ' refreshing' : ''}`}>
-                    {quoting && !quoteInfo ? '...' : selectedQuoteAmount}
-                  </div>
-                  <TokenButton
-                    token={toTokenMeta}
-                    placeholder={'\u9009\u62e9\u4ee3\u5e01'}
-                    onClick={() => {
-                      setPickerSide('to');
-                      setPickerOpen(true);
-                    }}
-                  />
-                </div>
-                <div className="swap-card-foot">
-                  <span>{toTokenMeta ? toTokenMeta.name : '\u672a\u9009\u62e9\u76ee\u6807\u4ee3\u5e01'}</span>
-                  <span>{`\u6700\u5c11\u5230\u8d26 ${minReceived}`}</span>
-                </div>
-              </div>
-            </div>
-
-            <div className={`swap-summary-card${refreshingQuote ? ' refreshing' : ''}`}>
-              {quoteInfo ? (
-                <>
-                  <div className="swap-summary-toolbar">
-                    <div className={`swap-live-badge${refreshingQuote ? ' active' : ''}`}>
-                      <RefreshCw size={12} />
-                      <span>{refreshingQuote ? '\u62a5\u4ef7\u5237\u65b0\u4e2d' : quoteStampText ? `\u5df2\u66f4\u65b0 ${quoteStampText}` : '\u5b9e\u65f6\u62a5\u4ef7'}</span>
-                    </div>
-                  </div>
-                  <div className="swap-provider-grid">
-                    {providerQuotes.map((quote, index) => {
-                      const active = selectedQuote?.provider === quote?.provider;
-                      const gasCostText = formatQuoteGasCostSummary(quote, chainConfig.nativeSymbol);
-                      return (
-                        <button
-                          key={quote?.provider || `provider-${index}`}
-                          type="button"
-                          className={`swap-provider-card${active ? ' active' : ''}${quote?.status !== 'available' ? ' unavailable' : ''}`}
-                          onClick={() => setSelectedProvider(quote?.provider || '')}
-                        >
-                          <div className="swap-provider-card-head">
-                            <div>
-                              <strong>{quote?.provider_label || quote?.provider || '--'}</strong>
-                              <span>
-                                {quote?.recommended
-                                  ? '\u63a8\u8350\u62a5\u4ef7'
-                                  : (quote?.status === 'available' ? '\u53ef\u6267\u884c' : '\u4e0d\u53ef\u7528')}
-                              </span>
-                            </div>
-                            {quote?.status === 'available' ? (
-                              <span className="swap-provider-chip">
-                                {`${formatTokenAmount(quote?.net_to_amount_float)} ${toTokenMeta?.symbol || ''}`.trim()}
-                              </span>
-                            ) : (
-                              <span className="swap-provider-chip muted">{'\u65e0\u62a5\u4ef7'}</span>
-                            )}
-                          </div>
-                          {quote?.status === 'available' ? (
-                            <>
-                              <div className="swap-provider-card-amount">
-                                {`${formatTokenAmount(quote?.net_to_amount_float)} ${toTokenMeta?.symbol || ''}`.trim()}
-                              </div>
-                              <div className="swap-provider-card-meta">
-                                <span>{quote?.fee_summary || quote?.fee_rule || '--'}</span>
-                                <span>{gasCostText}</span>
-                              </div>
-                              <div className="swap-provider-card-route">
-                                {quote?.route_summary || '\u672a\u63d0\u4f9b\u8def\u5f84'}
-                              </div>
-                            </>
-                          ) : (
-                            <div className="swap-provider-card-error">
-                              {quote?.error || '\u8fd9\u4e2a provider \u6682\u65f6\u4e0d\u53ef\u7528'}
-                            </div>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {selectedQuote ? (
-                    selectedQuote?.status === 'available' ? (
-                      <>
-                        <DetailRow label={'\u5f53\u524d Provider'} value={selectedQuote?.provider_label || '--'} />
-                        <DetailRow
-                          label={'\u9884\u4f30\u5230\u8d26'}
-                          value={`${selectedQuoteAmount} ${toTokenMeta?.symbol || ''}`.trim()}
-                          emphasis
-                        />
-                        <DetailRow label={'\u6700\u5c11\u5230\u8d26'} value={`${minReceived} ${toTokenMeta?.symbol || ''}`.trim()} />
-                        <DetailRow label={'\u624b\u7eed\u8d39'} value={selectedQuoteFeeText} />
-                        <DetailRow label={'\u9884\u4f30 Gas'} value={quoteGasUnits} />
-                        <DetailRow label={'Gas \u8d39\u7528'} value={quoteGasCostText} />
-                        <DetailRow label={'\u8def\u5f84\u6458\u8981'} value={selectedQuoteRouteText} />
-                        <DetailRow label={'\u6ed1\u70b9\u8bbe\u7f6e'} value={`${slippage || '1.0'}%`} />
-
-                        {selectedQuote?.fees?.length ? (
-                          <div className="swap-provider-detail-block">
-                            <div className="swap-provider-detail-title">{'\u624b\u7eed\u8d39\u660e\u7ec6'}</div>
-                            {selectedQuote.fees.map((item, index) => (
-                              <FeeDetailRow key={`${selectedQuote.provider}-fee-${index}`} item={item} />
-                            ))}
-                          </div>
-                        ) : null}
-
-                        {selectedQuote?.route?.length ? (
-                          <div className="swap-provider-detail-block">
-                            <div className="swap-provider-detail-title">{'\u4ea4\u6613\u8def\u5f84'}</div>
-                            {selectedQuote.route.map((hop, index) => (
-                              <RouteHopRow key={`${selectedQuote.provider}-hop-${index}`} hop={hop} />
-                            ))}
-                          </div>
-                        ) : null}
-                      </>
-                    ) : (
-                      <div className="swap-summary-empty">
-                        <strong>{`${selectedQuote?.provider_label || '\u5f53\u524d'} \u6682\u65f6\u4e0d\u53ef\u7528`}</strong>
-                        <span>{selectedQuote?.error || '\u8bf7\u5207\u6362\u5176\u4ed6 provider \u6216\u7a0d\u540e\u91cd\u8bd5\u3002'}</span>
-                      </div>
-                    )
-                  ) : null}
-                </>
-              ) : (
-                <div className="swap-summary-empty">
-                  <strong>{'\u8f93\u5165\u6570\u91cf\u540e\u81ea\u52a8\u62a5\u4ef7'}</strong>
-                  <span>{'\u9009\u62e9\u4ee3\u5e01\uff0c\u6216\u76f4\u63a5\u7c98\u8d34 ERC-20 \u5408\u7ea6\u5730\u5740\u3002'}</span>
-                </div>
-              )}
-            </div>
-
-            {quoteError ? (
-              <div className="panel-error">
-                <strong>{'\u62a5\u4ef7\u5931\u8d25:'}</strong> {quoteError}
-              </div>
-            ) : null}
-
-            {execError ? (
-              <div className="panel-error">
-                <strong>{'\u5151\u6362\u5931\u8d25:'}</strong> {execError}
-              </div>
-            ) : null}
-
-            {execSuccess ? (
-              <div className="panel-success swap-success-card">
-                <strong>{execSuccess}</strong>
-                {execResult?.provider_label ? (
-                  <span>{`\u6267\u884c Provider ${execResult.provider_label}`}</span>
-                ) : null}
-                {execResult?.to_amount_float ? (
-                  <span>{`\u5b9e\u9645\u5230\u8d26 ${execResult.to_amount_float} ${toTokenMeta?.symbol || ''}`.trim()}</span>
-                ) : null}
-                {execResult?.completed_at ? (
-                  <span>{`\u5b8c\u6210\u65f6\u95f4 ${execResult.completed_at}`}</span>
-                ) : null}
-                {execResult?.tx_hash ? (
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                    <span>{shortAddress(execResult.tx_hash, 10, 8)}</span>
-                    {execResult?.tx_url ? (
-                      <a href={execResult.tx_url} target="_blank" rel="noreferrer" className="swap-history-link">
-                        {'\u67e5\u770b Tx'}
-                      </a>
-                    ) : null}
-                  </span>
-                ) : null}
-              </div>
-            ) : null}
-
-            <div className="swap-history-card">
-              <div className="swap-history-head">
-                <div>
-                  <strong>{'\u6700\u8fd1\u5151\u6362'}</strong>
-                  <span>{selectedWallet ? shortAddress(selectedWallet.address, 8, 6) : '\u5f53\u524d\u94b1\u5305'}</span>
-                </div>
-                <button type="button" className="swap-history-refresh" onClick={() => loadSwapHistory()} disabled={loadingSwapHistory || !selectedWalletId}>
-                  {loadingSwapHistory ? '\u5237\u65b0\u4e2d...' : '\u5237\u65b0'}
+          {/* ─── Top Strip: Chain pills + Slippage ─── */}
+          <div className="swap-top-strip">
+            <div className="swap-chain-pills">
+              {chainOptions.map((option) => (
+                <button
+                  key={option.key}
+                  type="button"
+                  className={`swap-chain-pill${option.key === chain ? ' active' : ''}`}
+                  onClick={() => handleChainSelect(option.key)}
+                  title={option.label}
+                >
+                  <img src={option.icon} alt={option.iconAlt || option.label} />
+                  <span>{option.label}</span>
                 </button>
-              </div>
-
-              {swapHistoryError ? (
-                <div className="swap-history-empty">{swapHistoryError}</div>
-              ) : null}
-
-              {!swapHistoryError && loadingSwapHistory && swapHistory.length === 0 ? (
-                <div className="swap-history-empty">{'\u6b63\u5728\u52a0\u8f7d\u5151\u6362\u5386\u53f2...'}</div>
-              ) : null}
-
-              {!swapHistoryError && !loadingSwapHistory && swapHistory.length === 0 ? (
-                <div className="swap-history-empty">{'\u5f53\u524d\u94b1\u5305\u6682\u65e0\u5151\u6362\u8bb0\u5f55'}</div>
-              ) : null}
-
-              {swapHistory.map((item) => {
-                const fromHistoryToken = buildHistoryTokenMeta(item.from_token, tokenMetaMap, chain);
-                const toHistoryToken = buildHistoryTokenMeta(item.to_token, tokenMetaMap, chain);
-                return (
-                  <div key={item.id || item.tx_hash} className="swap-history-row">
-                    <div className="swap-history-route">
-                      <div className="swap-history-token">
-                        <TokenGlyph token={fromHistoryToken || makeCustomToken(item?.from_token?.address)} size="sm" />
-                        <div>
-                          <strong>{`${item.amount_in_float || '--'} ${fromHistoryToken?.symbol || item?.from_token?.symbol || ''}`.trim()}</strong>
-                          <span>{fromHistoryToken?.name || item?.from_token?.name || item?.from_token?.address}</span>
-                        </div>
-                      </div>
-                      <ArrowDown size={14} />
-                      <div className="swap-history-token">
-                        <TokenGlyph token={toHistoryToken || makeCustomToken(item?.to_token?.address)} size="sm" />
-                        <div>
-                          <strong>{`${item.amount_out_float || '--'} ${toHistoryToken?.symbol || item?.to_token?.symbol || ''}`.trim()}</strong>
-                          <span>{toHistoryToken?.name || item?.to_token?.name || item?.to_token?.address}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="swap-history-meta">
-                      <span>{item.created_at || '--'}</span>
-                      {item.provider_label ? (
-                        <span className="swap-history-provider">{item.provider_label}</span>
-                      ) : null}
-                      <span className="swap-history-status">{item.status || 'confirmed'}</span>
-                      {item.tx_url ? (
-                        <a href={item.tx_url} target="_blank" rel="noreferrer" className="swap-history-link">
-                          {shortAddress(item.tx_hash, 8, 6)}
-                        </a>
-                      ) : (
-                        <span>{shortAddress(item.tx_hash, 8, 6)}</span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+              ))}
             </div>
+            <div className="swap-slip-strip">
+              {SLIPPAGE_PRESETS.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  className={`swap-slip-pill${Number(slippage) === Number(item) ? ' active' : ''}`}
+                  onClick={() => { setSlippage(item); setSlippageDirty(true); }}
+                >
+                  {item}%
+                </button>
+              ))}
+              <div className="swap-slip-custom">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={slippage}
+                  onChange={(event) => { setSlippage(event.target.value); setSlippageDirty(true); }}
+                  placeholder="1.0"
+                />
+                <span>%</span>
+              </div>
+            </div>
+          </div>
 
+          {/* ─── Wallet Selector ─── */}
+          <div className="swap-wallet-bar" ref={walletSelectRef}>
             <button
               type="button"
-              className="swap-submit-button"
-              disabled={!isReadyToSwap}
-              onClick={() => setShowConfirm(true)}
+              className="swap-wallet-trigger"
+              onClick={() => setWalletDropdownOpen((c) => !c)}
+              disabled={walletLoading || !wallets.length}
             >
-              {executing ? '\u6267\u884c\u4e2d...' : submitLabel}
+              <Wallet size={14} />
+              <span className="swap-wallet-trigger-text">
+                {selectedWallet
+                  ? `${selectedWallet.name || '\u94b1\u5305'} \u00b7 ${shortAddress(selectedWallet.address, 6, 4)}`
+                  : walletLoading ? '\u52a0\u8f7d\u94b1\u5305\u4e2d...' : '\u6682\u65e0\u53ef\u7528\u94b1\u5305'}
+              </span>
+              <ChevronDown size={14} style={{ marginLeft: 'auto', opacity: 0.5, transition: 'transform .2s' }} />
             </button>
+            {walletDropdownOpen && wallets.length > 0 ? (
+              <div className="swap-wallet-dropdown">
+                {wallets.map((wallet) => (
+                  <button
+                    key={wallet.id}
+                    type="button"
+                    className={`swap-wallet-option${String(wallet.id) === String(selectedWalletId) ? ' active' : ''}`}
+                    onClick={() => { clearExecutionFeedback(); setSelectedWalletId(String(wallet.id)); setWalletDropdownOpen(false); }}
+                  >
+                    <div className="swap-wallet-option-info">
+                      <strong>{wallet.name || '\u94b1\u5305'}</strong>
+                      <span>{shortAddress(wallet.address, 8, 6)}</span>
+                    </div>
+                    <div className="swap-wallet-option-bal">
+                      <span>{chainConfig.nativeSymbol}</span>
+                      <strong>{formatNativeBalance(wallet.native_balance)}</strong>
+                    </div>
+                    {String(wallet.id) === String(selectedWalletId) ? <Check size={14} className="swap-wallet-check" /> : null}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          {/* ─── Main Swap Cards ─── */}
+          <div className="swap-cards-container">
+            {/* From Card */}
+            <div className="swap-card swap-card--from">
+              <div className="swap-card-head">
+                <span className="swap-card-label">From</span>
+                <span className="swap-card-addr">{selectedWalletAddressLabel}</span>
+              </div>
+              <div className="swap-card-body">
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  className="swap-amount-input"
+                  value={amount}
+                  onChange={(event) => { clearExecutionFeedback(); setAmount(event.target.value); }}
+                  placeholder="0"
+                />
+                <TokenButton token={fromTokenMeta} placeholder={'\u9009\u62e9\u4ee3\u5e01'} onClick={() => { setPickerSide('from'); setPickerOpen(true); }} />
+              </div>
+              <div className="swap-card-foot">
+                <span className="swap-card-name">{fromTokenMeta ? fromTokenMeta.name : '\u672a\u9009\u62e9\u5356\u51fa\u4ee3\u5e01'}</span>
+                <div className="swap-card-balance-area">
+                  {fromTokenBalance && Number(fromTokenBalance) > 0 ? (
+                    <>
+                      <span className="swap-balance-text">{formatTokenAmount(fromTokenBalance)}</span>
+                      <button type="button" className="swap-max-btn" onClick={handleMaxAmount}>MAX</button>
+                    </>
+                  ) : selectedWallet ? (
+                    <span className="swap-native-text">{chainConfig.nativeSymbol} {formatNativeBalance(selectedWallet.native_balance)}</span>
+                  ) : <span className="swap-native-text">--</span>}
+                </div>
+              </div>
+            </div>
+
+            {/* Switch */}
+            <button type="button" className="swap-switch-button" onClick={handleReverse} aria-label={'\u5207\u6362\u5151\u6362\u65b9\u5411'}>
+              <ArrowDown size={16} strokeWidth={2.5} />
+            </button>
+
+            {/* To Card */}
+            <div className="swap-card swap-card--to">
+              <div className="swap-card-head">
+                <span className="swap-card-label">To</span>
+                <span className="swap-card-addr">{selectedWalletAddressLabel}</span>
+              </div>
+              <div className="swap-card-body">
+                <div className={`swap-quote-output${quoting ? ' loading' : ''}${refreshingQuote ? ' refreshing' : ''}`}>
+                  {quoting && !quoteInfo ? '...' : selectedQuoteAmount}
+                </div>
+                <TokenButton token={toTokenMeta} placeholder={'\u9009\u62e9\u4ee3\u5e01'} onClick={() => { setPickerSide('to'); setPickerOpen(true); }} />
+              </div>
+              <div className="swap-card-foot">
+                <span className="swap-card-name">{toTokenMeta ? toTokenMeta.name : '\u672a\u9009\u62e9\u76ee\u6807\u4ee3\u5e01'}</span>
+                <span className="swap-min-received">{`\u6700\u5c11\u5230\u8d26 ${minReceived}`}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* ─── Quote / Provider Section ─── */}
+          <div className={`swap-quote-section${refreshingQuote ? ' refreshing' : ''}`}>
+            {quoteInfo ? (
+              <>
+                <div className="swap-quote-toolbar">
+                  <div className={`swap-refresh-badge${refreshingQuote ? ' active' : ''}`}>
+                    <RefreshCw size={11} />
+                    <span>{refreshingQuote ? '\u62a5\u4ef7\u5237\u65b0\u4e2d' : quoteStampText ? `\u5df2\u66f4\u65b0 ${quoteStampText}` : '\u5b9e\u65f6\u62a5\u4ef7'}</span>
+                  </div>
+                </div>
+
+                <div className="swap-providers">
+                  {providerQuotes.map((quote, index) => {
+                    const active = selectedQuote?.provider === quote?.provider;
+                    const gasCostText = formatQuoteGasCostSummary(quote, chainConfig.nativeSymbol);
+                    return (
+                      <button
+                        key={quote?.provider || `provider-${index}`}
+                        type="button"
+                        className={`swap-prov-card${active ? ' active' : ''}${quote?.status !== 'available' ? ' unavailable' : ''}`}
+                        onClick={() => setSelectedProvider(quote?.provider || '')}
+                      >
+                        <div className="swap-prov-head">
+                          <div>
+                            <strong className="swap-prov-name">{quote?.provider_label || quote?.provider || '--'}</strong>
+                            <span className="swap-prov-tag">{quote?.recommended ? '\u63a8\u8350\u62a5\u4ef7' : (quote?.status === 'available' ? '\u53ef\u6267\u884c' : '\u4e0d\u53ef\u7528')}</span>
+                          </div>
+                          {quote?.status === 'available' ? (
+                            <span className="swap-prov-chip">{`${formatTokenAmount(quote?.net_to_amount_float)} ${toTokenMeta?.symbol || ''}`.trim()}</span>
+                          ) : (
+                            <span className="swap-prov-chip muted">{'\u65e0\u62a5\u4ef7'}</span>
+                          )}
+                        </div>
+                        {quote?.status === 'available' ? (
+                          <>
+                            <div className="swap-prov-amount"><span>{formatTokenAmount(quote?.net_to_amount_float)}</span><small>{toTokenMeta?.symbol || ''}</small></div>
+                            <div className="swap-prov-meta"><span>{quote?.fee_summary || quote?.fee_rule || '--'}</span><span>{gasCostText}</span></div>
+                            <div className="swap-prov-route">{quote?.route_summary || '\u672a\u63d0\u4f9b\u8def\u5f84'}</div>
+                          </>
+                        ) : (
+                          <div className="swap-prov-error">{quote?.error || '\u8be5 provider \u6682\u65f6\u4e0d\u53ef\u7528'}</div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {selectedQuote ? (
+                  selectedQuote?.status === 'available' ? (
+                    <div className="swap-detail-list">
+                      <DetailRow label={'\u5f53\u524d Provider'} value={selectedQuote?.provider_label || '--'} />
+                      <DetailRow label={'\u9884\u4f30\u5230\u8d26'} value={`${selectedQuoteAmount} ${toTokenMeta?.symbol || ''}`.trim()} emphasis />
+                      <DetailRow label={'\u6700\u5c11\u5230\u8d26'} value={`${minReceived} ${toTokenMeta?.symbol || ''}`.trim()} />
+                      <DetailRow label={'\u624b\u7eed\u8d39'} value={selectedQuoteFeeText} />
+                      <DetailRow label={'\u9884\u4f30 Gas'} value={quoteGasUnits} />
+                      <DetailRow label={'Gas \u8d39\u7528'} value={quoteGasCostText} />
+                      <DetailRow label={'\u8def\u5f84\u6458\u8981'} value={selectedQuoteRouteText} />
+                      <DetailRow label={'\u6ed1\u70b9\u8bbe\u7f6e'} value={`${slippage || '1.0'}%`} />
+                      {selectedQuote?.fees?.length ? (
+                        <div className="swap-detail-sub">
+                          <div className="swap-detail-sub-title">{'\u624b\u7eed\u8d39\u660e\u7ec6'}</div>
+                          {selectedQuote.fees.map((item, i) => <FeeDetailRow key={`${selectedQuote.provider}-fee-${i}`} item={item} />)}
+                        </div>
+                      ) : null}
+                      {selectedQuote?.route?.length ? (
+                        <div className="swap-detail-sub">
+                          <div className="swap-detail-sub-title">{'\u4ea4\u6613\u8def\u5f84'}</div>
+                          {selectedQuote.route.map((hop, i) => <RouteHopRow key={`${selectedQuote.provider}-hop-${i}`} hop={hop} />)}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="swap-empty-hint">
+                      <strong>{`${selectedQuote?.provider_label || '\u5f53\u524d'} \u6682\u65f6\u4e0d\u53ef\u7528`}</strong>
+                      <span>{selectedQuote?.error || '\u8bf7\u5207\u6362\u5176\u4ed6 provider \u6216\u7a0d\u540e\u91cd\u8bd5\u3002'}</span>
+                    </div>
+                  )
+                ) : null}
+              </>
+            ) : (
+              <div className="swap-empty-hint">
+                <strong>{'\u8f93\u5165\u6570\u91cf\u540e\u81ea\u52a8\u62a5\u4ef7'}</strong>
+                <span>{'\u9009\u62e9\u4ee3\u5e01\uff0c\u6216\u76f4\u63a5\u7c98\u8d34 ERC-20 \u5408\u7ea6\u5730\u5740\u3002'}</span>
+              </div>
+            )}
+          </div>
+
+          {/* ─── Messages ─── */}
+          {quoteError ? <div className="swap-msg swap-msg--error"><strong>{'\u62a5\u4ef7\u5931\u8d25:'}</strong> {quoteError}</div> : null}
+          {execError ? <div className="swap-msg swap-msg--error"><strong>{'\u5151\u6362\u5931\u8d25:'}</strong> {execError}</div> : null}
+          {execSuccess ? (
+            <div className="swap-msg swap-msg--success">
+              <strong>{execSuccess}</strong>
+              {execResult?.provider_label ? <span>{`\u6267\u884c Provider ${execResult.provider_label}`}</span> : null}
+              {execResult?.to_amount_float ? <span>{`\u5b9e\u9645\u5230\u8d26 ${execResult.to_amount_float} ${toTokenMeta?.symbol || ''}`.trim()}</span> : null}
+              {execResult?.completed_at ? <span>{`\u5b8c\u6210\u65f6\u95f4 ${execResult.completed_at}`}</span> : null}
+              {execResult?.tx_hash ? (
+                <span className="swap-msg-tx">
+                  <span>{shortAddress(execResult.tx_hash, 10, 8)}</span>
+                  {execResult?.tx_url ? <a href={execResult.tx_url} target="_blank" rel="noreferrer">{'\u67e5\u770b Tx'}</a> : null}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+
+          {/* ─── Submit ─── */}
+          <button type="button" className="swap-submit-button" disabled={!isReadyToSwap} onClick={() => setShowConfirm(true)}>
+            {executing ? '\u6267\u884c\u4e2d...' : submitLabel}
+          </button>
+
+          {/* ─── History ─── */}
+          <div className="swap-history-card">
+            <div className="swap-history-head">
+              <div>
+                <strong>{'\u6700\u8fd1\u5151\u6362'}</strong>
+                <span>{selectedWallet ? shortAddress(selectedWallet.address, 8, 6) : '\u5f53\u524d\u94b1\u5305'}</span>
+              </div>
+              <button type="button" className="swap-history-refresh" onClick={() => loadSwapHistory()} disabled={loadingSwapHistory || !selectedWalletId}>
+                {loadingSwapHistory ? '\u5237\u65b0\u4e2d...' : '\u5237\u65b0'}
+              </button>
+            </div>
+            {swapHistoryError ? <div className="swap-history-empty">{swapHistoryError}</div> : null}
+            {!swapHistoryError && loadingSwapHistory && swapHistory.length === 0 ? <div className="swap-history-empty">{'\u6b63\u5728\u52a0\u8f7d\u5151\u6362\u5386\u53f2...'}</div> : null}
+            {!swapHistoryError && !loadingSwapHistory && swapHistory.length === 0 ? <div className="swap-history-empty">{'\u5f53\u524d\u94b1\u5305\u6682\u65e0\u5151\u6362\u8bb0\u5f55'}</div> : null}
+            {swapHistory.map((item) => {
+              const fromHT = buildHistoryTokenMeta(item.from_token, tokenMetaMap, chain);
+              const toHT = buildHistoryTokenMeta(item.to_token, tokenMetaMap, chain);
+              return (
+                <div key={item.id || item.tx_hash} className="swap-history-row">
+                  <div className="swap-history-route">
+                    <div className="swap-history-token">
+                      <TokenGlyph token={fromHT || makeCustomToken(item?.from_token?.address)} size="sm" />
+                      <div>
+                        <strong>{`${item.amount_in_float || '--'} ${fromHT?.symbol || item?.from_token?.symbol || ''}`.trim()}</strong>
+                        <span>{fromHT?.name || item?.from_token?.name || item?.from_token?.address}</span>
+                      </div>
+                    </div>
+                    <ArrowDown size={14} />
+                    <div className="swap-history-token">
+                      <TokenGlyph token={toHT || makeCustomToken(item?.to_token?.address)} size="sm" />
+                      <div>
+                        <strong>{`${item.amount_out_float || '--'} ${toHT?.symbol || item?.to_token?.symbol || ''}`.trim()}</strong>
+                        <span>{toHT?.name || item?.to_token?.name || item?.to_token?.address}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="swap-history-meta">
+                    <span>{item.created_at || '--'}</span>
+                    {item.provider_label ? <span className="swap-history-provider">{item.provider_label}</span> : null}
+                    <span className="swap-history-status">{item.status || 'confirmed'}</span>
+                    {item.tx_url ? <a href={item.tx_url} target="_blank" rel="noreferrer" className="swap-history-link">{shortAddress(item.tx_hash, 8, 6)}</a> : <span>{shortAddress(item.tx_hash, 8, 6)}</span>}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
 
-        {pickerOpen ? (
-          <div
-            className="swap-overlay-backdrop"
-            onClick={() => {
-              setPickerOpen(false);
-            }}
-          />
-        ) : null}
+        {/* ─── Token Picker Backdrop ─── */}
+        {pickerOpen ? <div className="swap-overlay-backdrop" onClick={() => setPickerOpen(false)} /> : null}
 
+        {/* ─── Token Picker Modal ─── */}
         {pickerOpen ? (
           <div className="swap-modal-overlay" style={{ background: 'transparent' }}>
-            <div className="swap-token-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="swap-token-modal" onClick={(e) => e.stopPropagation()}>
               <div className="swap-modal-header">
-                <div>
-                  <div className="swap-modal-kicker">{'\u9009\u62e9\u4ee3\u5e01'}</div>
-                  <h3>{pickerSide === 'from' ? '\u9009\u62e9\u5356\u51fa\u4ee3\u5e01' : '\u9009\u62e9\u4e70\u5165\u4ee3\u5e01'}</h3>
-                </div>
-                <button type="button" className="swap-modal-close" onClick={() => setPickerOpen(false)}>
-                  <X size={18} />
-                </button>
+                <div><h3>{pickerSide === 'from' ? '\u9009\u62e9\u5356\u51fa\u4ee3\u5e01' : '\u9009\u62e9\u4e70\u5165\u4ee3\u5e01'}</h3></div>
+                <button type="button" className="swap-modal-close" onClick={() => setPickerOpen(false)}><X size={18} /></button>
               </div>
-
               <div className="swap-token-search">
                 <Search size={16} />
-                <input
-                  type="text"
-                  value={tokenQuery}
-                  onChange={(event) => setTokenQuery(event.target.value)}
-                  placeholder={'\u641c\u7d22\u4ee3\u5e01\u540d\u79f0\u3001\u7b26\u53f7\uff0c\u6216\u7c98\u8d34\u5408\u7ea6\u5730\u5740'}
-                  autoFocus
-                />
-                {loadingWalletTokens && walletTokens.length > 0 ? (
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                    {'\u5237\u65b0\u4e2d...'}
-                  </div>
-                ) : null}
+                <input type="text" value={tokenQuery} onChange={(e) => setTokenQuery(e.target.value)} placeholder={'\u641c\u7d22\u4ee3\u5e01\u540d\u79f0\u3001\u7b26\u53f7\uff0c\u6216\u7c98\u8d34\u5408\u7ea6\u5730\u5740'} autoFocus />
+                {loadingWalletTokens && walletTokens.length > 0 ? <div style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{'\u5237\u65b0\u4e2d...'}</div> : null}
               </div>
-
               <div className="swap-quick-picks">
                 {presetTokens.slice(0, 5).map((token) => (
-                  <button
-                    key={token.address}
-                    type="button"
-                    className="swap-quick-pick"
-                    onClick={() => handleSelectToken(token)}
-                  >
+                  <button key={token.address} type="button" className="swap-quick-pick" onClick={() => handleSelectToken(token)}>
                     <TokenGlyph token={token} size="sm" />
                     <span>{token.symbol}</span>
                   </button>
                 ))}
               </div>
-
               <div className="swap-token-list">
-                {loadingWalletTokens && walletTokens.length === 0 ? (
-                  <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-                    <div style={{ marginBottom: '8px' }}>{'\u6b63\u5728\u52a0\u8f7d\u94b1\u5305\u4f59\u989d...'}</div>
-                    <div style={{ fontSize: '11px', opacity: '0.7' }}>{'\u9996\u6b21\u52a0\u8f7d\u53ef\u80fd\u9700\u8981\u51e0\u79d2\u949f'}</div>
-                  </div>
-                ) : null}
-
+                {loadingWalletTokens && walletTokens.length === 0 ? <div className="swap-token-list-status"><div>{'\u6b63\u5728\u52a0\u8f7d\u94b1\u5305\u4f59\u989d...'}</div><small>{'\u9996\u6b21\u52a0\u8f7d\u53ef\u80fd\u9700\u8981\u51e0\u79d2\u949f'}</small></div> : null}
                 {!loadingWalletTokens && walletTokensError ? (
-                  <div style={{
-                    margin: '0 0 12px',
-                    padding: '12px 14px',
-                    borderRadius: '16px',
-                    border: '1px solid rgba(248, 113, 113, 0.22)',
-                    background: 'rgba(127, 29, 29, 0.18)',
-                    color: '#fecaca',
-                  }}>
-                    <div style={{ fontSize: '12px', fontWeight: 700, marginBottom: '4px' }}>
-                      {'\u94b1\u5305\u4f59\u989d\u52a0\u8f7d\u5931\u8d25'}
-                    </div>
-                    <div style={{ fontSize: '12px', lineHeight: 1.6, color: '#fca5a5' }}>
-                      {walletTokensError}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => loadWalletTokens()}
-                      style={{
-                        marginTop: '10px',
-                        padding: '6px 10px',
-                        borderRadius: '10px',
-                        border: '1px solid rgba(254, 202, 202, 0.24)',
-                        background: 'rgba(254, 202, 202, 0.08)',
-                        color: '#fee2e2',
-                        fontSize: '11px',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {'\u91cd\u8bd5 OKX \u67e5\u8be2'}
-                    </button>
+                  <div className="swap-token-list-error">
+                    <strong>{'\u94b1\u5305\u4f59\u989d\u52a0\u8f7d\u5931\u8d25'}</strong>
+                    <span>{walletTokensError}</span>
+                    <button type="button" onClick={() => loadWalletTokens()} className="swap-token-list-retry">{'\u91cd\u8bd5\u67e5\u8be2'}</button>
                   </div>
                 ) : null}
-
                 {!loadingWalletTokens && !walletTokensError && hasLoadedWalletTokens && walletTokens.length === 0 ? (
-                  <div style={{
-                    margin: '0 0 12px',
-                    padding: '12px 14px',
-                    borderRadius: '16px',
-                    border: '1px solid rgba(148, 163, 184, 0.16)',
-                    background: 'rgba(15, 23, 42, 0.42)',
-                    color: 'var(--text-muted)',
-                  }}>
-                    <div style={{ fontSize: '12px', fontWeight: 700, marginBottom: '4px', color: 'var(--text-primary)' }}>
-                      {'\u94b1\u5305\u4f59\u989d'}
-                    </div>
-                    <div style={{ fontSize: '12px', lineHeight: 1.6 }}>
-                      {`OKX \u672a\u8fd4\u56de\u5f53\u524d\u94b1\u5305\u4e2d\u4ef7\u503c >= $${MIN_WALLET_TOKEN_VALUE_USD.toFixed(1)} \u7684\u4ee3\u5e01\u4f59\u989d\u3002`}
-                    </div>
+                  <div className="swap-token-list-note">
+                    <strong>{'\u94b1\u5305\u4f59\u989d'}</strong>
+                    <span>{`\u672a\u8fd4\u56de\u5f53\u524d\u94b1\u5305\u4e2d\u4ef7\u503c >= $${MIN_WALLET_TOKEN_VALUE_USD.toFixed(1)} \u7684\u4ee3\u5e01\u4f59\u989d\u3002`}</span>
                   </div>
                 ) : null}
-
                 {pickerTokens.customCandidate ? (
                   <div className="swap-token-section">
                     <div className="swap-token-section-title">{'\u81ea\u5b9a\u4e49\u5730\u5740'}</div>
-                    <button
-                      type="button"
-                      className="swap-token-row"
-                      onClick={() => handleSelectToken(pickerTokens.customCandidate)}
-                    >
+                    <button type="button" className="swap-token-row" onClick={() => handleSelectToken(pickerTokens.customCandidate)}>
                       <TokenGlyph token={pickerTokens.customCandidate} />
-                      <div className="swap-token-row-copy">
-                        <strong>{pickerTokens.customCandidate.symbol}</strong>
-                        <span>{pickerTokens.customCandidate.address}</span>
-                      </div>
+                      <div className="swap-token-row-copy"><strong>{pickerTokens.customCandidate.symbol}</strong><span>{pickerTokens.customCandidate.address}</span></div>
                       <span className="swap-token-tag">{'\u7c98\u8d34\u4f7f\u7528'}</span>
                     </button>
                   </div>
                 ) : null}
-
                 {pickerTokens.withBalance && pickerTokens.withBalance.length > 0 ? (
                   <div className="swap-token-section">
                     <div className="swap-token-section-title">{'\u94b1\u5305\u4f59\u989d'}</div>
                     {pickerTokens.withBalance.map((token) => (
-                      <button
-                        key={token.address}
-                        type="button"
-                        className={`swap-token-row${token.canSwap === false ? ' disabled' : ''}`}
-                        onClick={() => handleSelectToken(token)}
-                        disabled={token.canSwap === false}
-                      >
+                      <button key={token.address} type="button" className={`swap-token-row${token.canSwap === false ? ' disabled' : ''}`} onClick={() => handleSelectToken(token)} disabled={token.canSwap === false}>
                         <TokenGlyph token={token} />
                         <div className="swap-token-row-copy">
                           <strong>{token.symbol}</strong>
-                          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            {token.canSwap === false ? (token.disabledReason || token.name) : token.name}
-                            {token.valueUSDT > 0 ? (
-                              <span style={{ color: '#a0a8ba', fontSize: '11px' }}>
-                                {`\u2248 $${token.valueUSDT.toFixed(2)}`}
-                              </span>
-                            ) : null}
-                          </span>
+                          <span>{token.canSwap === false ? (token.disabledReason || token.name) : token.name}{token.valueUSDT > 0 ? <small className="swap-token-usd">{` \u2248 $${token.valueUSDT.toFixed(2)}`}</small> : null}</span>
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                          <span className="swap-token-tag" style={{ background: 'rgba(34, 197, 94, 0.08)', borderColor: 'rgba(34, 197, 94, 0.22)', color: '#22c55e' }}>
-                            {formatTokenAmount(token.balance)}
-                          </span>
-                          {token.canSwap === false ? (
-                            <span className="swap-token-tag muted">{'\u539f\u751f\u5e01'}</span>
-                          ) : null}
+                        <div className="swap-token-row-right">
+                          <span className="swap-token-bal-tag">{formatTokenAmount(token.balance)}</span>
+                          {token.canSwap === false ? <span className="swap-token-tag muted">{'\u539f\u751f\u5e01'}</span> : null}
                         </div>
                       </button>
                     ))}
                   </div>
                 ) : null}
-
                 {pickerTokens.recent.length ? (
                   <div className="swap-token-section">
                     <div className="swap-token-section-title">{'\u6700\u8fd1\u4f7f\u7528'}</div>
                     {pickerTokens.recent.map((token) => (
-                      <button
-                        key={token.address}
-                        type="button"
-                        className={`swap-token-row${token.canSwap === false ? ' disabled' : ''}`}
-                        onClick={() => handleSelectToken(token)}
-                        disabled={token.canSwap === false}
-                      >
+                      <button key={token.address} type="button" className={`swap-token-row${token.canSwap === false ? ' disabled' : ''}`} onClick={() => handleSelectToken(token)} disabled={token.canSwap === false}>
                         <TokenGlyph token={token} />
-                        <div className="swap-token-row-copy">
-                          <strong>{token.symbol}</strong>
-                          <span>{token.custom ? token.address : token.name}</span>
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                          {token.balance && Number(token.balance) > 0 ? (
-                            <span style={{ fontSize: '11px', color: '#22c55e', fontWeight: '600' }}>
-                              {formatTokenAmount(token.balance)}
-                            </span>
-                          ) : null}
+                        <div className="swap-token-row-copy"><strong>{token.symbol}</strong><span>{token.custom ? token.address : token.name}</span></div>
+                        <div className="swap-token-row-right">
+                          {token.balance && Number(token.balance) > 0 ? <span className="swap-token-bal-inline">{formatTokenAmount(token.balance)}</span> : null}
                           <span className="swap-token-tag">{'\u6700\u8fd1'}</span>
                         </div>
                       </button>
                     ))}
                   </div>
                 ) : null}
-
                 {pickerTokens.preset.length ? (
                   <div className="swap-token-section">
                     <div className="swap-token-section-title">{'\u5e38\u7528\u4ee3\u5e01'}</div>
                     {pickerTokens.preset.map((token) => (
-                      <button
-                        key={token.address}
-                        type="button"
-                        className={`swap-token-row${token.canSwap === false ? ' disabled' : ''}`}
-                        onClick={() => handleSelectToken(token)}
-                        disabled={token.canSwap === false}
-                      >
+                      <button key={token.address} type="button" className={`swap-token-row${token.canSwap === false ? ' disabled' : ''}`} onClick={() => handleSelectToken(token)} disabled={token.canSwap === false}>
                         <TokenGlyph token={token} />
-                        <div className="swap-token-row-copy">
-                          <strong>{token.symbol}</strong>
-                          <span>{token.name}</span>
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                          {token.balance && Number(token.balance) > 0 ? (
-                            <span style={{ fontSize: '11px', color: '#22c55e', fontWeight: '600' }}>
-                              {formatTokenAmount(token.balance)}
-                            </span>
-                          ) : null}
-                          <span className="swap-token-tag">{shortAddress(token.address, 5, 4)}</span>
+                        <div className="swap-token-row-copy"><strong>{token.symbol}</strong><span>{token.name}</span></div>
+                        <div className="swap-token-row-right">
+                          {token.balance && Number(token.balance) > 0 ? <span className="swap-token-bal-inline">{formatTokenAmount(token.balance)}</span> : null}
+                          <span className="swap-token-tag subtle">{shortAddress(token.address, 5, 4)}</span>
                         </div>
                       </button>
                     ))}
                   </div>
                 ) : null}
-
                 {!loadingWalletTokens && !pickerTokens.customCandidate && !pickerTokens.withBalance?.length && !pickerTokens.recent.length && !pickerTokens.preset.length ? (
-                  <div className="swap-token-empty">
-                    <strong>{'\u6ca1\u6709\u5339\u914d\u7ed3\u679c'}</strong>
-                    <span>{'\u4e5f\u53ef\u4ee5\u76f4\u63a5\u7c98\u8d34 ERC-20 \u5408\u7ea6\u5730\u5740\u3002'}</span>
-                  </div>
+                  <div className="swap-token-empty"><strong>{'\u6ca1\u6709\u5339\u914d\u7ed3\u679c'}</strong><span>{'\u4e5f\u53ef\u4ee5\u76f4\u63a5\u7c98\u8d34 ERC-20 \u5408\u7ea6\u5730\u5740\u3002'}</span></div>
                 ) : null}
               </div>
             </div>
           </div>
         ) : null}
 
+        {/* ─── Confirm Modal ─── */}
         {showConfirm && selectedQuote ? (
           <div className="swap-modal-overlay" onClick={() => (!executing ? setShowConfirm(false) : null)}>
-            <div className="swap-confirm-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="swap-confirm-modal" onClick={(e) => e.stopPropagation()}>
               <div className="swap-modal-header">
-                <div>
-                  <div className="swap-modal-kicker">{'\u786e\u8ba4\u5151\u6362'}</div>
-                  <h3>{'\u786e\u8ba4\u5151\u6362'}</h3>
-                </div>
-                <button
-                  type="button"
-                  className="swap-modal-close"
-                  onClick={() => setShowConfirm(false)}
-                  disabled={executing}
-                >
-                  <X size={18} />
-                </button>
+                <div><h3>{'\u786e\u8ba4\u5151\u6362'}</h3></div>
+                <button type="button" className="swap-modal-close" onClick={() => setShowConfirm(false)} disabled={executing}><X size={18} /></button>
               </div>
-
               <div className="swap-confirm-route">
                 <div className="swap-confirm-flow">
                   <div className="swap-confirm-token">
                     <TokenGlyph token={fromTokenMeta || makeCustomToken(normalizedFromToken)} />
-                    <div>
-                      <span>{'\u652f\u4ed8'}</span>
-                      <strong>{amount} {fromTokenMeta?.symbol || shortAddress(normalizedFromToken, 4, 4)}</strong>
-                    </div>
+                    <div><span>{'\u652f\u4ed8'}</span><strong>{amount} {fromTokenMeta?.symbol || shortAddress(normalizedFromToken, 4, 4)}</strong></div>
                   </div>
-                  <div className="swap-confirm-arrow">
-                    <ArrowDown size={16} />
-                  </div>
+                  <div className="swap-confirm-arrow"><ArrowDown size={16} /></div>
                   <div className="swap-confirm-token">
                     <TokenGlyph token={toTokenMeta || makeCustomToken(normalizedToToken)} />
-                    <div>
-                      <span>{'\u83b7\u5f97'}</span>
-                      <strong>{selectedQuoteAmount} {toTokenMeta?.symbol || shortAddress(normalizedToToken, 4, 4)}</strong>
-                    </div>
+                    <div><span>{'\u83b7\u5f97'}</span><strong>{selectedQuoteAmount} {toTokenMeta?.symbol || shortAddress(normalizedToToken, 4, 4)}</strong></div>
                   </div>
                 </div>
               </div>
-
               <div className="swap-confirm-details">
                 <DetailRow label={'Provider'} value={selectedQuote?.provider_label || '--'} />
                 <DetailRow label={'\u6700\u5c11\u5230\u8d26'} value={`${minReceived} ${toTokenMeta?.symbol || ''}`.trim()} />
@@ -1943,22 +1622,9 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                 <DetailRow label={'Gas \u8d39\u7528'} value={quoteGasCostText} />
                 <DetailRow label={'\u8def\u5f84\u6458\u8981'} value={selectedQuoteRouteText} />
               </div>
-
               <div className="swap-confirm-actions">
-                <button
-                  type="button"
-                  className="swap-confirm-cancel"
-                  onClick={() => setShowConfirm(false)}
-                  disabled={executing}
-                >
-                  {'\u53d6\u6d88'}
-                </button>
-                <button
-                  type="button"
-                  className="swap-submit-button compact"
-                  onClick={handleSwap}
-                  disabled={executing || quoting || selectedQuote?.status !== 'available'}
-                >
+                <button type="button" className="swap-confirm-cancel" onClick={() => setShowConfirm(false)} disabled={executing}>{'\u53d6\u6d88'}</button>
+                <button type="button" className="swap-submit-button compact" onClick={handleSwap} disabled={executing || quoting || selectedQuote?.status !== 'available'}>
                   {executing ? '\u63d0\u4ea4\u4e2d...' : quoting ? '\u62a5\u4ef7\u5237\u65b0\u4e2d...' : '\u63d0\u4ea4\u4ea4\u6613'}
                 </button>
               </div>
