@@ -13,6 +13,11 @@ import { normalizeHexAddress, shortAddress } from '../utils';
 import { ArrowDown, ChevronDown, RefreshCw, Search, Wallet, X, Check } from 'lucide-react';
 import bnbLogo from '../img/bnb.svg';
 import baseLogo from '../img/base.svg';
+import pancakeLogo from '../img/pancake.svg';
+import uniswapLogo from '../img/uniswap.svg';
+import okxLogo from '../img/okx.svg';
+import zeroxLogo from '../img/zerox.svg';
+import lifiLogo from '../img/lifi.svg';
 
 const CHAIN_META = {
   bsc: {
@@ -376,6 +381,111 @@ function RouteHopRow({ hop }) {
       <strong>{pair || '--'}</strong>
     </div>
   );
+}
+
+const DEX_ICON_MAP = [
+  { match: ['pancake', 'pcs'], src: pancakeLogo, label: 'PancakeSwap', color: '#d1884f' },
+  { match: ['uniswap', 'uni v'], src: uniswapLogo, label: 'Uniswap', color: '#ff007a' },
+  { match: ['sushi'], src: null, label: 'SushiSwap', color: '#e05daa', fallbackLetter: 'S' },
+  { match: ['curve'], src: null, label: 'Curve', color: '#ff2d55', fallbackLetter: 'C' },
+  { match: ['balancer'], src: null, label: 'Balancer', color: '#1e1e1e', fallbackLetter: 'B' },
+  { match: ['1inch'], src: null, label: '1inch', color: '#1b314f', fallbackLetter: '1' },
+  { match: ['dodo'], src: null, label: 'DODO', color: '#ffe804', fallbackLetter: 'D' },
+  { match: ['kyber'], src: null, label: 'KyberSwap', color: '#31cb9e', fallbackLetter: 'K' },
+  { match: ['aerodrome'], src: null, label: 'Aerodrome', color: '#0052ff', fallbackLetter: 'A' },
+  { match: ['velodrome'], src: null, label: 'Velodrome', color: '#0052ff', fallbackLetter: 'V' },
+];
+
+const PROVIDER_ICON_MAP = {
+  okx: { src: okxLogo, color: '#000' },
+  '0x': { src: zeroxLogo, color: '#7B3FE4' },
+  'li.fi': { src: lifiLogo, color: '#9747FF' },
+  lifi: { src: lifiLogo, color: '#9747FF' },
+};
+
+function getDexIconInfo(name) {
+  const lower = String(name || '').toLowerCase();
+  for (const entry of DEX_ICON_MAP) {
+    if (entry.match.some((keyword) => lower.includes(keyword))) {
+      return entry;
+    }
+  }
+  return null;
+}
+
+function getProviderIcon(provider) {
+  const key = String(provider || '').toLowerCase().trim();
+  return PROVIDER_ICON_MAP[key] || null;
+}
+
+function DexIconBadge({ name, size = 16 }) {
+  const info = getDexIconInfo(name);
+  const versionMatch = String(name || '').match(/[vV](\d+)/);
+  const version = versionMatch ? `V${versionMatch[1]}` : '';
+  if (info?.src) {
+    return (
+      <span className="swap-dex-icon-badge" title={name}>
+        <img src={info.src} alt={info.label} style={{ width: size, height: size, borderRadius: 3 }} />
+        {version ? <small className="swap-dex-version">{version}</small> : null}
+      </span>
+    );
+  }
+  if (info) {
+    return (
+      <span className="swap-dex-icon-badge" title={name}>
+        <span className="swap-dex-icon-letter" style={{ '--dex-color': info.color, width: size, height: size }}>{info.fallbackLetter}</span>
+        {version ? <small className="swap-dex-version">{version}</small> : null}
+      </span>
+    );
+  }
+  // Unknown DEX - show first letter
+  const letter = String(name || '?').trim().charAt(0).toUpperCase();
+  return (
+    <span className="swap-dex-icon-badge" title={name}>
+      <span className="swap-dex-icon-letter" style={{ '--dex-color': '#4a5568', width: size, height: size }}>{letter}</span>
+      {version ? <small className="swap-dex-version">{version}</small> : null}
+    </span>
+  );
+}
+
+function RouteDexIcons({ routeSummary, route }) {
+  // Try to extract DEX names from route array first, fallback to route_summary text
+  const dexNames = useMemo(() => {
+    if (Array.isArray(route) && route.length > 0) {
+      const seen = new Set();
+      return route
+        .map((hop) => String(hop?.source || hop?.tool || '').trim())
+        .filter((name) => {
+          if (!name || seen.has(name)) return false;
+          seen.add(name);
+          return true;
+        });
+    }
+    const summary = String(routeSummary || '').trim();
+    if (!summary || summary === '--') return [];
+    return summary.split(/\s*->\s*/).map((s) => s.trim()).filter(Boolean);
+  }, [route, routeSummary]);
+
+  if (!dexNames.length) return <span className="swap-route-text-fallback">{'--'}</span>;
+
+  return (
+    <span className="swap-dex-route-icons">
+      {dexNames.map((name, i) => (
+        <React.Fragment key={`${name}-${i}`}>
+          {i > 0 ? <span className="swap-dex-arrow">→</span> : null}
+          <DexIconBadge name={name} size={16} />
+        </React.Fragment>
+      ))}
+    </span>
+  );
+}
+
+function ProviderIcon({ provider, size = 18 }) {
+  const icon = getProviderIcon(provider);
+  if (icon?.src) {
+    return <img src={icon.src} alt={provider} className="swap-prov-icon" style={{ width: size, height: size }} />;
+  }
+  return null;
 }
 
 export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = 'bsc', onChainChange }) {
@@ -1351,10 +1461,11 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                         className={`swap-prov-card${active ? ' active' : ''}${quote?.status !== 'available' ? ' unavailable' : ''}`}
                         onClick={() => setSelectedProvider(quote?.provider || '')}
                       >
-                        <div className="swap-prov-head">
-                          <div>
+                        <div className="swap-prov-row-top">
+                          <div className="swap-prov-identity">
+                            <ProviderIcon provider={quote?.provider} size={18} />
                             <strong className="swap-prov-name">{quote?.provider_label || quote?.provider || '--'}</strong>
-                            <span className="swap-prov-tag">{quote?.recommended ? '\u63a8\u8350\u62a5\u4ef7' : (quote?.status === 'available' ? '\u53ef\u6267\u884c' : '\u4e0d\u53ef\u7528')}</span>
+                            <span className="swap-prov-tag">{quote?.recommended ? '\u63a8\u8350' : (quote?.status === 'available' ? '\u53ef\u7528' : '\u4e0d\u53ef\u7528')}</span>
                           </div>
                           {quote?.status === 'available' ? (
                             <span className="swap-prov-chip">{`${formatTokenAmount(quote?.net_to_amount_float)} ${toTokenMeta?.symbol || ''}`.trim()}</span>
@@ -1363,13 +1474,14 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                           )}
                         </div>
                         {quote?.status === 'available' ? (
-                          <>
-                            <div className="swap-prov-amount"><span>{formatTokenAmount(quote?.net_to_amount_float)}</span><small>{toTokenMeta?.symbol || ''}</small></div>
-                            <div className="swap-prov-meta"><span>{quote?.fee_summary || quote?.fee_rule || '--'}</span><span>{gasCostText}</span></div>
-                            <div className="swap-prov-route">{quote?.route_summary || '\u672a\u63d0\u4f9b\u8def\u5f84'}</div>
-                          </>
+                          <div className="swap-prov-row-bottom">
+                            <RouteDexIcons routeSummary={quote?.route_summary} route={quote?.route} />
+                            <span className="swap-prov-gas-text">{gasCostText}</span>
+                          </div>
                         ) : (
-                          <div className="swap-prov-error">{quote?.error || '\u8be5 provider \u6682\u65f6\u4e0d\u53ef\u7528'}</div>
+                          <div className="swap-prov-row-bottom">
+                            <span className="swap-prov-error-inline">{quote?.error || '\u8be5 provider \u6682\u65f6\u4e0d\u53ef\u7528'}</span>
+                          </div>
                         )}
                       </button>
                     );
@@ -1385,7 +1497,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                       <DetailRow label={'\u624b\u7eed\u8d39'} value={selectedQuoteFeeText} />
                       <DetailRow label={'\u9884\u4f30 Gas'} value={quoteGasUnits} />
                       <DetailRow label={'Gas \u8d39\u7528'} value={quoteGasCostText} />
-                      <DetailRow label={'\u8def\u5f84\u6458\u8981'} value={selectedQuoteRouteText} />
+                      <DetailRow label={'\u8def\u5f84\u6458\u8981'} value={<RouteDexIcons routeSummary={selectedQuoteRouteText} route={selectedQuote?.route} />} />
                       <DetailRow label={'\u6ed1\u70b9\u8bbe\u7f6e'} value={`${slippage || '1.0'}%`} />
                       {selectedQuote?.fees?.length ? (
                         <div className="swap-detail-sub">
@@ -1620,7 +1732,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                 <DetailRow label={'\u6ed1\u70b9\u5bb9\u5fcd'} value={`${slippage || '1.0'}%`} />
                 <DetailRow label={'\u9884\u4f30 Gas'} value={quoteGasUnits} />
                 <DetailRow label={'Gas \u8d39\u7528'} value={quoteGasCostText} />
-                <DetailRow label={'\u8def\u5f84\u6458\u8981'} value={selectedQuoteRouteText} />
+                <DetailRow label={'\u8def\u5f84\u6458\u8981'} value={<RouteDexIcons routeSummary={selectedQuoteRouteText} route={selectedQuote?.route} />} />
               </div>
               <div className="swap-confirm-actions">
                 <button type="button" className="swap-confirm-cancel" onClick={() => setShowConfirm(false)} disabled={executing}>{'\u53d6\u6d88'}</button>
