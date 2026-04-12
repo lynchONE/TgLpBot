@@ -37,6 +37,8 @@ type walletSwapHistoryToken struct {
 type walletSwapHistoryRow struct {
 	ID             uint                   `json:"id"`
 	Chain          string                 `json:"chain"`
+	Provider       string                 `json:"provider,omitempty"`
+	ProviderLabel  string                 `json:"provider_label,omitempty"`
 	Status         string                 `json:"status"`
 	TxHash         string                 `json:"tx_hash"`
 	TxURL          string                 `json:"tx_url,omitempty"`
@@ -240,6 +242,8 @@ func (s *Server) handleWalletSwapHistory(w http.ResponseWriter, r *http.Request)
 		rows = append(rows, walletSwapHistoryRow{
 			ID:             rec.ID,
 			Chain:          rec.Chain,
+			Provider:       strings.TrimSpace(rec.Provider),
+			ProviderLabel:  swapProviderLabel(rec.Provider),
 			Status:         string(rec.Status),
 			TxHash:         rec.TxHash,
 			TxURL:          explorerTxURLHelper(rec.Chain, rec.TxHash),

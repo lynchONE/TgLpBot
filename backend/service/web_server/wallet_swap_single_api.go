@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"TgLpBot/base/blockchain"
@@ -14,7 +15,6 @@ import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/service/chainexec"
-	"TgLpBot/service/exchange"
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/pricing"
 	userSvc "TgLpBot/service/user"
@@ -34,25 +34,37 @@ type walletSwapSingleRequest struct {
 	Amount          string  `json:"amount"`
 	SlippagePercent float64 `json:"slippage_percent,omitempty"`
 	Action          string  `json:"action"`
+	Provider        string  `json:"provider,omitempty"`
 }
 
 type swapQuoteResponse struct {
-	OK                 bool    `json:"ok"`
-	Chain              string  `json:"chain"`
-	FromToken          string  `json:"from_token"`
-	ToToken            string  `json:"to_token"`
-	FromAmount         string  `json:"from_amount"`
-	ToAmount           string  `json:"to_amount"`
-	ToAmountFloat      string  `json:"to_amount_float"`
-	EstimatedGas       string  `json:"estimated_gas,omitempty"`
-	EstimatedGasNative float64 `json:"estimated_gas_native,omitempty"`
-	EstimatedGasUSD    float64 `json:"estimated_gas_usd,omitempty"`
-	EstimatedGasSymbol string  `json:"estimated_gas_symbol,omitempty"`
+	OK                 bool                `json:"ok"`
+	Chain              string              `json:"chain"`
+	FromToken          string              `json:"from_token"`
+	ToToken            string              `json:"to_token"`
+	FromAmount         string              `json:"from_amount"`
+	Provider           string              `json:"provider,omitempty"`
+	ProviderLabel      string              `json:"provider_label,omitempty"`
+	BestProvider       string              `json:"best_provider,omitempty"`
+	BestProviderLabel  string              `json:"best_provider_label,omitempty"`
+	ToAmount           string              `json:"to_amount,omitempty"`
+	ToAmountFloat      string              `json:"to_amount_float,omitempty"`
+	MinToAmount        string              `json:"min_to_amount,omitempty"`
+	MinToAmountFloat   string              `json:"min_to_amount_float,omitempty"`
+	EstimatedGas       string              `json:"estimated_gas,omitempty"`
+	EstimatedGasNative float64             `json:"estimated_gas_native,omitempty"`
+	EstimatedGasUSD    float64             `json:"estimated_gas_usd,omitempty"`
+	EstimatedGasSymbol string              `json:"estimated_gas_symbol,omitempty"`
+	AvailableCount     int                 `json:"available_count"`
+	Message            string              `json:"message,omitempty"`
+	Quotes             []swapProviderQuote `json:"quotes"`
 }
 
 type swapExecuteResponse struct {
 	OK            bool   `json:"ok"`
 	Chain         string `json:"chain"`
+	Provider      string `json:"provider,omitempty"`
+	ProviderLabel string `json:"provider_label,omitempty"`
 	TxHash        string `json:"tx_hash"`
 	TxURL         string `json:"tx_url,omitempty"`
 	FromToken     string `json:"from_token"`
@@ -94,13 +106,13 @@ func estimateGasCosts(
 		SuggestGasPrice(ctx context.Context) (*big.Int, error)
 	},
 ) (float64, float64) {
-	gasLimit, ok := new(big.Int).SetString(strings.TrimSpace(gasLimitRaw), 10)
-	if !ok || gasLimit.Sign() <= 0 {
+	gasLimit, ok := parseSwapBigInt(gasLimitRaw)
+	if !ok || gasLimit == nil || gasLimit.Sign() <= 0 {
 		return 0, 0
 	}
 
 	var gasPrice *big.Int
-	if parsed, ok := new(big.Int).SetString(strings.TrimSpace(gasPriceRaw), 10); ok && parsed.Sign() > 0 {
+	if parsed, ok := parseSwapBigInt(gasPriceRaw); ok && parsed != nil && parsed.Sign() > 0 {
 		gasPrice = parsed
 	} else if suggester != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -124,6 +136,7 @@ func estimateGasCosts(
 func recordWalletSwapTransaction(
 	userID uint,
 	chain string,
+	provider string,
 	walletAddr common.Address,
 	fromTokenAddress string,
 	toTokenAddress string,
@@ -159,6 +172,7 @@ func recordWalletSwapTransaction(
 	txRecord := models.Transaction{
 		UserID:          userID,
 		Chain:           config.NormalizeChain(chain),
+		Provider:        strings.TrimSpace(provider),
 		TxHash:          strings.TrimSpace(swapResult.TxHash),
 		Type:            models.TxTypeSwap,
 		Status:          models.TxStatusConfirmed,
@@ -175,6 +189,71 @@ func recordWalletSwapTransaction(
 	if err := database.DB.Create(&txRecord).Error; err != nil {
 		fmt.Printf("[WalletSwap] record transaction failed: %v\n", err)
 	}
+}
+
+func aggregateSwapProviderQuotes(
+	chain string,
+	cc config.ChainConfig,
+	client *ethclient.Client,
+	walletAddr common.Address,
+	fromTokenRaw string,
+	toTokenRaw string,
+	fromToken common.Address,
+	toToken common.Address,
+	amount *big.Int,
+	slippageDecimal string,
+	slippagePercent float64,
+	toDecimals int,
+) []swapProviderQuote {
+	type result struct {
+		quote swapProviderQuote
+	}
+
+	outCh := make(chan result, 3)
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	go func() {
+		defer wg.Done()
+		outCh <- result{quote: buildOKXProviderQuote(chain, cc, client, walletAddr, fromTokenRaw, toTokenRaw, fromToken, toToken, amount, slippageDecimal, slippagePercent, toDecimals)}
+	}()
+	go func() {
+		defer wg.Done()
+		outCh <- result{quote: buildZeroXProviderQuote(chain, cc, client, walletAddr, fromToken, toToken, amount, slippagePercent, toDecimals)}
+	}()
+	go func() {
+		defer wg.Done()
+		outCh <- result{quote: buildLIFIProviderQuote(chain, cc, walletAddr, fromToken, toToken, amount, slippagePercent, toDecimals)}
+	}()
+
+	go func() {
+		wg.Wait()
+		close(outCh)
+	}()
+
+	quotes := make([]swapProviderQuote, 0, 3)
+	for item := range outCh {
+		quotes = append(quotes, item.quote)
+	}
+	return quotes
+}
+
+func applyBestQuote(resp *swapQuoteResponse, best *swapProviderQuote) {
+	if resp == nil || best == nil {
+		return
+	}
+	resp.Provider = best.Provider
+	resp.ProviderLabel = best.ProviderLabel
+	resp.BestProvider = best.Provider
+	resp.BestProviderLabel = best.ProviderLabel
+	resp.ToAmount = best.NetToAmount
+	resp.ToAmountFloat = best.NetToAmountFloat
+	resp.MinToAmount = best.MinToAmount
+	resp.MinToAmountFloat = best.MinToAmountFloat
+	resp.EstimatedGas = best.EstimatedGas
+	resp.EstimatedGasNative = best.EstimatedGasNative
+	resp.EstimatedGasUSD = best.EstimatedGasUSD
+	resp.EstimatedGasSymbol = best.EstimatedGasSymbol
 }
 
 func (s *Server) handleWalletSwapSingle(w http.ResponseWriter, r *http.Request) {
@@ -230,10 +309,6 @@ func (s *Server) handleWalletSwapSingle(w http.ResponseWriter, r *http.Request) 
 
 	fromTokenStr := strings.TrimSpace(req.FromToken)
 	toTokenStr := strings.TrimSpace(req.ToToken)
-	if disallowNativeDirectSwap := false; disallowNativeDirectSwap && (strings.EqualFold(fromTokenStr, nativePseudoTokenAddress) || strings.EqualFold(toTokenStr, nativePseudoTokenAddress)) {
-		http.Error(w, "原生币暂不支持直接兑换，请先换成 WBNB/WETH 后再操作", http.StatusBadRequest)
-		return
-	}
 	if !common.IsHexAddress(fromTokenStr) || !common.IsHexAddress(toTokenStr) {
 		http.Error(w, "invalid token address", http.StatusBadRequest)
 		return
@@ -303,58 +378,58 @@ func (s *Server) handleWalletSwapSingle(w http.ResponseWriter, r *http.Request) 
 	}
 	slippageDecimal := fmt.Sprintf("%.4f", slippage/100)
 
-	okxService := exchange.NewOKXDexService()
-	chainIDStr := fmt.Sprintf("%d", cc.ChainID)
 	action := strings.TrimSpace(strings.ToLower(req.Action))
-	okxFromTokenAddress := okxWalletSwapTokenAddress(fromTokenStr, fromToken)
-	okxToTokenAddress := okxWalletSwapTokenAddress(toTokenStr, toToken)
-
 	switch action {
 	case "quote":
-		swapReq := exchange.SwapRequest{
-			ChainID:           chainIDStr,
-			FromTokenAddress:  okxFromTokenAddress,
-			ToTokenAddress:    okxToTokenAddress,
-			Amount:            amount.String(),
-			Slippage:          slippageDecimal,
-			UserWalletAddress: walletAddr.Hex(),
-		}
-		resp, err := okxService.GetSwapData(swapReq)
-		if err != nil {
-			http.Error(w, "get quote failed: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if resp == nil || len(resp.Data) == 0 {
-			http.Error(w, "empty quote response", http.StatusInternalServerError)
-			return
-		}
-
-		toAmount := strings.TrimSpace(resp.Data[0].RouterResult.ToTokenAmount)
-		estGas := strings.TrimSpace(resp.Data[0].Tx.Gas)
-		estGasPrice := strings.TrimSpace(resp.Data[0].Tx.GasPrice)
-
-		toAmountFloat := ""
-		if toBI, parseOK := new(big.Int).SetString(toAmount, 10); parseOK {
-			toAmountFloat = fmt.Sprintf("%.6f", amountToFloat(toBI.String(), int(toDecimals)))
+		quotes := aggregateSwapProviderQuotes(
+			chain,
+			cc,
+			client,
+			walletAddr,
+			fromTokenStr,
+			toTokenStr,
+			fromToken,
+			toToken,
+			amount,
+			slippageDecimal,
+			slippage,
+			int(toDecimals),
+		)
+		quotes, best := normalizeProviderQuotes(quotes)
+		availableCount := 0
+		for _, quote := range quotes {
+			if quote.Status == "available" {
+				availableCount++
+			}
 		}
 
-		gasNative, gasUSD := estimateGasCosts(chain, estGas, estGasPrice, client)
+		resp := swapQuoteResponse{
+			OK:             true,
+			Chain:          chain,
+			FromToken:      fromTokenStr,
+			ToToken:        toTokenStr,
+			FromAmount:     amount.String(),
+			AvailableCount: availableCount,
+			Quotes:         quotes,
+		}
+		if best != nil {
+			applyBestQuote(&resp, best)
+		} else {
+			resp.Message = "暂无可用报价，请稍后重试或切换代币"
+		}
+
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(swapQuoteResponse{
-			OK:                 true,
-			Chain:              chain,
-			FromToken:          fromToken.Hex(),
-			ToToken:            toToken.Hex(),
-			FromAmount:         amount.String(),
-			ToAmount:           toAmount,
-			ToAmountFloat:      toAmountFloat,
-			EstimatedGas:       estGas,
-			EstimatedGasNative: gasNative,
-			EstimatedGasUSD:    gasUSD,
-			EstimatedGasSymbol: nativeSymbolForChainConfig(chain, cc),
-		})
+		_ = json.NewEncoder(w).Encode(resp)
 
 	case "swap":
+		provider := strings.ToLower(strings.TrimSpace(req.Provider))
+		if provider == "" {
+			provider = "okx"
+		}
+		if provider == "lifi" {
+			provider = "li.fi"
+		}
+
 		pkHex, err := walletService.GetPrivateKey(wlt)
 		if err != nil {
 			http.Error(w, "load private key failed: "+err.Error(), http.StatusInternalServerError)
@@ -367,12 +442,12 @@ func (s *Server) handleWalletSwapSingle(w http.ResponseWriter, r *http.Request) 
 		}
 
 		lpService := liquidity.NewLiquidityService()
-		swapResult, err := lpService.SwapSingleTokenDetailed(exec, privateKey, walletAddr, fromToken, toToken, amount, slippage)
+		swapResult, err := lpService.SwapSingleTokenDetailedByProvider(provider, exec, privateKey, walletAddr, fromToken, toToken, amount, slippage)
 		if err != nil {
 			http.Error(w, "swap failed: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		recordWalletSwapTransaction(user.ID, chain, walletAddr, okxFromTokenAddress, okxToTokenAddress, amount, swapResult)
+		recordWalletSwapTransaction(user.ID, chain, provider, walletAddr, fromTokenStr, toTokenStr, amount, swapResult)
 
 		txHash := ""
 		toAmount := ""
@@ -383,31 +458,25 @@ func (s *Server) handleWalletSwapSingle(w http.ResponseWriter, r *http.Request) 
 				toAmount = swapResult.AmountOut.String()
 				toAmountFloat = fmt.Sprintf("%.6f", amountToFloat(toAmount, int(toDecimals)))
 			}
+			if strings.TrimSpace(swapResult.Provider) != "" {
+				provider = strings.TrimSpace(swapResult.Provider)
+			}
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(swapExecuteResponse{
 			OK:            true,
 			Chain:         chain,
+			Provider:      provider,
+			ProviderLabel: swapProviderLabel(provider),
 			TxHash:        txHash,
 			TxURL:         explorerTxURLHelper(chain, txHash),
-			FromToken:     okxFromTokenAddress,
-			ToToken:       okxToTokenAddress,
+			FromToken:     fromTokenStr,
+			ToToken:       toTokenStr,
 			ToAmount:      toAmount,
 			ToAmountFloat: toAmountFloat,
 			CompletedAt:   time.Now().Format("2006-01-02 15:04:05"),
-			Message:       "兑换已完成",
-		})
-		return
-
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(swapExecuteResponse{
-			OK:        true,
-			Chain:     chain,
-			TxHash:    txHash,
-			FromToken: fromToken.Hex(),
-			ToToken:   toToken.Hex(),
-			Message:   "兑换交易已提交",
+			Message:       fmt.Sprintf("已通过 %s 提交兑换", swapProviderLabel(provider)),
 		})
 
 	default:

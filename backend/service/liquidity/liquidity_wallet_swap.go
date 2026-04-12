@@ -28,6 +28,7 @@ type WalletSwapToUSDTReport struct {
 }
 
 type SwapSingleTokenResult struct {
+	Provider      string
 	TxHash        string
 	AmountOut     *big.Int
 	Receipt       *types.Receipt
@@ -427,6 +428,7 @@ func (s *LiquidityService) SwapSingleTokenDetailed(
 	}
 
 	return &SwapSingleTokenResult{
+		Provider:      "okx",
 		TxHash:        r.TxHash,
 		AmountOut:     amountOut,
 		Receipt:       r.Receipt,

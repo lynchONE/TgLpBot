@@ -114,8 +114,9 @@ type SwapResponse struct {
 			GasPrice string `json:"gasPrice"`
 		} `json:"tx"`
 		RouterResult struct {
-			FromTokenAmount string `json:"fromTokenAmount"`
-			ToTokenAmount   string `json:"toTokenAmount"`
+			FromTokenAmount string          `json:"fromTokenAmount"`
+			ToTokenAmount   string          `json:"toTokenAmount"`
+			DexRouterList   json.RawMessage `json:"dexRouterList"`
 		} `json:"routerResult"`
 	} `json:"data"`
 }

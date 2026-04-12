@@ -27,13 +27,14 @@ const (
 
 // Transaction represents a blockchain transaction
 type Transaction struct {
-	ID     uint              `gorm:"primaryKey" json:"id"`
-	UserID uint              `gorm:"not null;index" json:"user_id"`
-	Chain  string            `gorm:"size:10;not null;default:'bsc';index" json:"chain"`
-	TaskID uint              `gorm:"index" json:"task_id"`
-	TxHash string            `gorm:"size:66;uniqueIndex" json:"tx_hash"`
-	Type   TransactionType   `gorm:"size:20;not null;index" json:"type"`
-	Status TransactionStatus `gorm:"size:20;not null;index" json:"status"`
+	ID       uint              `gorm:"primaryKey" json:"id"`
+	UserID   uint              `gorm:"not null;index" json:"user_id"`
+	Chain    string            `gorm:"size:10;not null;default:'bsc';index" json:"chain"`
+	TaskID   uint              `gorm:"index" json:"task_id"`
+	TxHash   string            `gorm:"size:66;uniqueIndex" json:"tx_hash"`
+	Type     TransactionType   `gorm:"size:20;not null;index" json:"type"`
+	Status   TransactionStatus `gorm:"size:20;not null;index" json:"status"`
+	Provider string            `gorm:"size:32;index" json:"provider,omitempty"`
 
 	FromAddress string `gorm:"size:42;not null" json:"from_address"`
 	ToAddress   string `gorm:"size:42;not null" json:"to_address"`

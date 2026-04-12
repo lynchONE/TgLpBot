@@ -1030,13 +1030,14 @@ export async function walletSwapSingleQuote({ apiBaseUrl, initData, chain, walle
   });
 }
 
-export async function walletSwapSingleExecute({ apiBaseUrl, initData, chain, walletId, fromToken, toToken, amount, slippagePercent, signal }) {
+export async function walletSwapSingleExecute({ apiBaseUrl, initData, chain, walletId, fromToken, toToken, amount, slippagePercent, provider, signal }) {
   const base = normalizeBaseUrl(apiBaseUrl);
   const url = `${base}/api/settings?endpoint=wallet_swap_single`;
   const payload = { initData, action: 'swap', from_token: fromToken, to_token: toToken, amount };
   if (chain) payload.chain = String(chain);
   if (walletId) payload.wallet_id = Number(walletId);
   if (Number.isFinite(slippagePercent)) payload.slippage_percent = slippagePercent;
+  if (provider) payload.provider = String(provider);
   return requestJson(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

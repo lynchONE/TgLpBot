@@ -246,7 +246,8 @@ function formatTokenAmount(value) {
 }
 
 function formatGasUnits(value) {
-  const num = Number(value);
+  const raw = String(value ?? '').trim();
+  const num = raw.startsWith('0x') ? Number.parseInt(raw, 16) : Number(raw);
   if (!Number.isFinite(num) || num <= 0) return '--';
   return `${num.toLocaleString('en-US', { maximumFractionDigits: 0 })} gas`;
 }
@@ -278,6 +279,16 @@ function formatQuoteClock(value) {
     minute: '2-digit',
     second: '2-digit',
   });
+}
+
+function formatQuoteGasCostSummary(quote, nativeSymbol) {
+  if (!quote) return '--';
+  const gasNative = formatGasCost(quote?.estimated_gas_native, quote?.estimated_gas_symbol || nativeSymbol);
+  const gasUSD = formatGasUSD(quote?.estimated_gas_usd);
+  if (gasNative !== '--' && gasUSD !== '--') return `${gasNative} / ${gasUSD}`;
+  if (gasUSD !== '--') return gasUSD;
+  if (gasNative !== '--') return gasNative;
+  return '--';
 }
 
 function matchesToken(token, query) {
@@ -345,6 +356,31 @@ function DetailRow({ label, value, emphasis = false }) {
   );
 }
 
+function FeeDetailRow({ item }) {
+  if (!item) return null;
+  const amount = item.amount_float
+    ? `${item.amount_float}${item.token_symbol ? ` ${item.token_symbol}` : ''}`
+    : (item.rate || item.description || '--');
+  return (
+    <div className="swap-provider-detail-row">
+      <span>{item.label || 'Fee'}</span>
+      <strong>{amount}</strong>
+    </div>
+  );
+}
+
+function RouteHopRow({ hop }) {
+  if (!hop) return null;
+  const source = hop.source || hop.tool || 'Route';
+  const pair = [hop.from_symbol || hop.from_token, hop.to_symbol || hop.to_token].filter(Boolean).join(' -> ');
+  return (
+    <div className="swap-provider-detail-row">
+      <span>{source}</span>
+      <strong>{pair || '--'}</strong>
+    </div>
+  );
+}
+
 export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = 'bsc', onChainChange }) {
   const chainConfig = getChainConfig(chain);
 
@@ -360,6 +396,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   const [walletDropdownOpen, setWalletDropdownOpen] = useState(false);
 
   const [quoteInfo, setQuoteInfo] = useState(null);
+  const [selectedProvider, setSelectedProvider] = useState('');
   const [quoting, setQuoting] = useState(false);
   const [quoteError, setQuoteError] = useState('');
   const [refreshingQuote, setRefreshingQuote] = useState(false);
@@ -443,22 +480,42 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     () => resolveTokenMeta(toToken, tokenLookup),
     [toToken, tokenLookup]
   );
+  const providerQuotes = useMemo(
+    () => Array.isArray(quoteInfo?.quotes) ? quoteInfo.quotes : [],
+    [quoteInfo]
+  );
+  const selectedQuote = useMemo(() => {
+    if (!providerQuotes.length) return null;
+    if (selectedProvider) {
+      const hit = providerQuotes.find((item) => item?.provider === selectedProvider);
+      if (hit) return hit;
+    }
+    if (quoteInfo?.best_provider) {
+      const best = providerQuotes.find((item) => item?.provider === quoteInfo.best_provider);
+      if (best) return best;
+    }
+    return providerQuotes[0] || null;
+  }, [providerQuotes, quoteInfo, selectedProvider]);
+  const availableProviderCount = useMemo(
+    () => providerQuotes.filter((item) => item?.status === 'available').length,
+    [providerQuotes]
+  );
 
   const selectedQuoteAmount = useMemo(
-    () => formatTokenAmount(quoteInfo?.to_amount_float),
-    [quoteInfo]
+    () => formatTokenAmount(selectedQuote?.net_to_amount_float || quoteInfo?.to_amount_float),
+    [quoteInfo, selectedQuote]
   );
   const quoteGasUnits = useMemo(
-    () => formatGasUnits(quoteInfo?.estimated_gas),
-    [quoteInfo]
+    () => formatGasUnits(selectedQuote?.estimated_gas),
+    [selectedQuote]
   );
   const quoteGasNative = useMemo(
-    () => formatGasCost(quoteInfo?.estimated_gas_native, quoteInfo?.estimated_gas_symbol || chainConfig.nativeSymbol),
-    [chainConfig.nativeSymbol, quoteInfo]
+    () => formatGasCost(selectedQuote?.estimated_gas_native, selectedQuote?.estimated_gas_symbol || chainConfig.nativeSymbol),
+    [chainConfig.nativeSymbol, selectedQuote]
   );
   const quoteGasUSD = useMemo(
-    () => formatGasUSD(quoteInfo?.estimated_gas_usd),
-    [quoteInfo]
+    () => formatGasUSD(selectedQuote?.estimated_gas_usd),
+    [selectedQuote]
   );
   const clearExecutionFeedback = useCallback(() => {
     setExecError('');
@@ -475,12 +532,22 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     if (quoteGasNative !== '--') return quoteGasNative;
     return '--';
   }, [quoteGasNative, quoteGasUSD]);
+  const selectedQuoteFeeText = useMemo(
+    () => selectedQuote?.fee_summary || selectedQuote?.fee_rule || '--',
+    [selectedQuote]
+  );
+  const selectedQuoteRouteText = useMemo(
+    () => selectedQuote?.route_summary || '--',
+    [selectedQuote]
+  );
   const minReceived = useMemo(() => {
-    const out = Number(quoteInfo?.to_amount_float);
+    const fromQuote = Number(selectedQuote?.min_to_amount_float);
+    if (Number.isFinite(fromQuote) && fromQuote > 0) return formatTokenAmount(fromQuote);
+    const out = Number(selectedQuote?.net_to_amount_float || quoteInfo?.to_amount_float);
     const slip = Number(slippage);
     if (!Number.isFinite(out) || out <= 0 || !Number.isFinite(slip) || slip < 0) return '--';
     return formatTokenAmount(out * (1 - slip / 100));
-  }, [quoteInfo, slippage]);
+  }, [quoteInfo, selectedQuote, slippage]);
   const quoteRequestKey = useMemo(
     () => [chain, selectedWalletId, normalizedFromToken, normalizedToToken, amount, slippage].join('|'),
     [amount, chain, normalizedFromToken, normalizedToToken, selectedWalletId, slippage]
@@ -824,6 +891,19 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   }, []);
 
   useEffect(() => {
+    if (!providerQuotes.length) {
+      if (selectedProvider) setSelectedProvider('');
+      return;
+    }
+    const currentExists = selectedProvider && providerQuotes.some((item) => item?.provider === selectedProvider);
+    if (currentExists) return;
+    const nextProvider = quoteInfo?.best_provider || providerQuotes.find((item) => item?.status === 'available')?.provider || providerQuotes[0]?.provider || '';
+    if (nextProvider && nextProvider !== selectedProvider) {
+      setSelectedProvider(nextProvider);
+    }
+  }, [providerQuotes, quoteInfo, selectedProvider]);
+
+  useEffect(() => {
     if (!walletDropdownOpen) return undefined;
     const handlePointerDown = (event) => {
       if (walletSelectRef.current && !walletSelectRef.current.contains(event.target)) {
@@ -883,6 +963,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       });
       if (quoteSeqRef.current !== seq) return;
       setQuoteInfo(resp);
+      setQuoteError(resp?.available_count > 0 ? '' : String(resp?.message || '\u6682\u65e0\u53ef\u7528\u62a5\u4ef7'));
       setLastQuoteAt(Date.now());
     } catch (error) {
       if (signal?.aborted) return;
@@ -1000,7 +1081,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   }, [clearExecutionFeedback, persistRecentToken, pickerSide]);
 
   const handleSwap = async () => {
-    if (!initData || !normalizedFromToken || !normalizedToToken) return;
+    if (!initData || !normalizedFromToken || !normalizedToToken || !selectedQuote?.provider) return;
     if (quoteTimeout.current) clearTimeout(quoteTimeout.current);
     if (quoteAbortRef.current) quoteAbortRef.current.abort();
     setExecuting(true);
@@ -1017,6 +1098,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
         toToken: normalizedToToken,
         amount,
         slippagePercent: Number.parseFloat(slippage),
+        provider: selectedQuote.provider,
       });
       setExecSuccess(resp?.message || '\\u5151\\u6362\\u5df2\\u5b8c\\u6210');
       setExecResult(resp || null);
@@ -1107,7 +1189,9 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     toTokenMeta?.canSwap !== false &&
     normalizedFromToken !== normalizedToToken &&
     Number(amount) > 0 &&
-    quoteInfo &&
+    selectedQuote &&
+    selectedQuote?.status === 'available' &&
+    selectedQuote?.can_execute !== false &&
     !quoting &&
     !executing
   );
@@ -1121,6 +1205,8 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
   else if (normalizedFromToken === normalizedToToken) submitLabel = '\u4e0d\u80fd\u5151\u6362\u540c\u4e00\u4ee3\u5e01';
   else if (quoting) submitLabel = '\u83b7\u53d6\u6700\u4f18\u62a5\u4ef7\u4e2d...';
   else if (!quoteInfo) submitLabel = '\u7b49\u5f85\u62a5\u4ef7';
+  else if (!availableProviderCount) submitLabel = '\u6682\u65e0\u53ef\u7528\u62a5\u4ef7';
+  else if (!selectedQuote || selectedQuote?.status !== 'available') submitLabel = '\u9009\u62e9\u53ef\u7528\u62a5\u4ef7';
 
   return (
     <PanelShell
@@ -1359,15 +1445,98 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                       <span>{refreshingQuote ? '\u62a5\u4ef7\u5237\u65b0\u4e2d' : quoteStampText ? `\u5df2\u66f4\u65b0 ${quoteStampText}` : '\u5b9e\u65f6\u62a5\u4ef7'}</span>
                     </div>
                   </div>
-                  <DetailRow
-                    label={'\u9884\u4f30\u5230\u8d26'}
-                    value={`${selectedQuoteAmount} ${toTokenMeta?.symbol || ''}`.trim()}
-                    emphasis
-                  />
-                  <DetailRow label={'\u6700\u5c11\u5230\u8d26'} value={`${minReceived} ${toTokenMeta?.symbol || ''}`.trim()} />
-                  <DetailRow label={'\u9884\u4f30 Gas'} value={quoteGasUnits} />
-                  <DetailRow label={'Gas \u8d39\u7528'} value={quoteGasCostText} />
-                  <DetailRow label={'\u6ed1\u70b9\u8bbe\u7f6e'} value={`${slippage || '1.0'}%`} />
+                  <div className="swap-provider-grid">
+                    {providerQuotes.map((quote, index) => {
+                      const active = selectedQuote?.provider === quote?.provider;
+                      const gasCostText = formatQuoteGasCostSummary(quote, chainConfig.nativeSymbol);
+                      return (
+                        <button
+                          key={quote?.provider || `provider-${index}`}
+                          type="button"
+                          className={`swap-provider-card${active ? ' active' : ''}${quote?.status !== 'available' ? ' unavailable' : ''}`}
+                          onClick={() => setSelectedProvider(quote?.provider || '')}
+                        >
+                          <div className="swap-provider-card-head">
+                            <div>
+                              <strong>{quote?.provider_label || quote?.provider || '--'}</strong>
+                              <span>
+                                {quote?.recommended
+                                  ? '\u63a8\u8350\u62a5\u4ef7'
+                                  : (quote?.status === 'available' ? '\u53ef\u6267\u884c' : '\u4e0d\u53ef\u7528')}
+                              </span>
+                            </div>
+                            {quote?.status === 'available' ? (
+                              <span className="swap-provider-chip">
+                                {`${formatTokenAmount(quote?.net_to_amount_float)} ${toTokenMeta?.symbol || ''}`.trim()}
+                              </span>
+                            ) : (
+                              <span className="swap-provider-chip muted">{'\u65e0\u62a5\u4ef7'}</span>
+                            )}
+                          </div>
+                          {quote?.status === 'available' ? (
+                            <>
+                              <div className="swap-provider-card-amount">
+                                {`${formatTokenAmount(quote?.net_to_amount_float)} ${toTokenMeta?.symbol || ''}`.trim()}
+                              </div>
+                              <div className="swap-provider-card-meta">
+                                <span>{quote?.fee_summary || quote?.fee_rule || '--'}</span>
+                                <span>{gasCostText}</span>
+                              </div>
+                              <div className="swap-provider-card-route">
+                                {quote?.route_summary || '\u672a\u63d0\u4f9b\u8def\u5f84'}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="swap-provider-card-error">
+                              {quote?.error || '\u8fd9\u4e2a provider \u6682\u65f6\u4e0d\u53ef\u7528'}
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {selectedQuote ? (
+                    selectedQuote?.status === 'available' ? (
+                      <>
+                        <DetailRow label={'\u5f53\u524d Provider'} value={selectedQuote?.provider_label || '--'} />
+                        <DetailRow
+                          label={'\u9884\u4f30\u5230\u8d26'}
+                          value={`${selectedQuoteAmount} ${toTokenMeta?.symbol || ''}`.trim()}
+                          emphasis
+                        />
+                        <DetailRow label={'\u6700\u5c11\u5230\u8d26'} value={`${minReceived} ${toTokenMeta?.symbol || ''}`.trim()} />
+                        <DetailRow label={'\u624b\u7eed\u8d39'} value={selectedQuoteFeeText} />
+                        <DetailRow label={'\u9884\u4f30 Gas'} value={quoteGasUnits} />
+                        <DetailRow label={'Gas \u8d39\u7528'} value={quoteGasCostText} />
+                        <DetailRow label={'\u8def\u5f84\u6458\u8981'} value={selectedQuoteRouteText} />
+                        <DetailRow label={'\u6ed1\u70b9\u8bbe\u7f6e'} value={`${slippage || '1.0'}%`} />
+
+                        {selectedQuote?.fees?.length ? (
+                          <div className="swap-provider-detail-block">
+                            <div className="swap-provider-detail-title">{'\u624b\u7eed\u8d39\u660e\u7ec6'}</div>
+                            {selectedQuote.fees.map((item, index) => (
+                              <FeeDetailRow key={`${selectedQuote.provider}-fee-${index}`} item={item} />
+                            ))}
+                          </div>
+                        ) : null}
+
+                        {selectedQuote?.route?.length ? (
+                          <div className="swap-provider-detail-block">
+                            <div className="swap-provider-detail-title">{'\u4ea4\u6613\u8def\u5f84'}</div>
+                            {selectedQuote.route.map((hop, index) => (
+                              <RouteHopRow key={`${selectedQuote.provider}-hop-${index}`} hop={hop} />
+                            ))}
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <div className="swap-summary-empty">
+                        <strong>{`${selectedQuote?.provider_label || '\u5f53\u524d'} \u6682\u65f6\u4e0d\u53ef\u7528`}</strong>
+                        <span>{selectedQuote?.error || '\u8bf7\u5207\u6362\u5176\u4ed6 provider \u6216\u7a0d\u540e\u91cd\u8bd5\u3002'}</span>
+                      </div>
+                    )
+                  ) : null}
                 </>
               ) : (
                 <div className="swap-summary-empty">
@@ -1392,6 +1561,9 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
             {execSuccess ? (
               <div className="panel-success swap-success-card">
                 <strong>{execSuccess}</strong>
+                {execResult?.provider_label ? (
+                  <span>{`\u6267\u884c Provider ${execResult.provider_label}`}</span>
+                ) : null}
                 {execResult?.to_amount_float ? (
                   <span>{`\u5b9e\u9645\u5230\u8d26 ${execResult.to_amount_float} ${toTokenMeta?.symbol || ''}`.trim()}</span>
                 ) : null}
@@ -1458,6 +1630,9 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                     </div>
                     <div className="swap-history-meta">
                       <span>{item.created_at || '--'}</span>
+                      {item.provider_label ? (
+                        <span className="swap-history-provider">{item.provider_label}</span>
+                      ) : null}
                       <span className="swap-history-status">{item.status || 'confirmed'}</span>
                       {item.tx_url ? (
                         <a href={item.tx_url} target="_blank" rel="noreferrer" className="swap-history-link">
@@ -1719,7 +1894,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
           </div>
         ) : null}
 
-        {showConfirm && quoteInfo ? (
+        {showConfirm && selectedQuote ? (
           <div className="swap-modal-overlay" onClick={() => (!executing ? setShowConfirm(false) : null)}>
             <div className="swap-confirm-modal" onClick={(event) => event.stopPropagation()}>
               <div className="swap-modal-header">
@@ -1760,10 +1935,13 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
               </div>
 
               <div className="swap-confirm-details">
+                <DetailRow label={'Provider'} value={selectedQuote?.provider_label || '--'} />
                 <DetailRow label={'\u6700\u5c11\u5230\u8d26'} value={`${minReceived} ${toTokenMeta?.symbol || ''}`.trim()} />
+                <DetailRow label={'\u624b\u7eed\u8d39'} value={selectedQuoteFeeText} />
                 <DetailRow label={'\u6ed1\u70b9\u5bb9\u5fcd'} value={`${slippage || '1.0'}%`} />
                 <DetailRow label={'\u9884\u4f30 Gas'} value={quoteGasUnits} />
                 <DetailRow label={'Gas \u8d39\u7528'} value={quoteGasCostText} />
+                <DetailRow label={'\u8def\u5f84\u6458\u8981'} value={selectedQuoteRouteText} />
               </div>
 
               <div className="swap-confirm-actions">
@@ -1779,7 +1957,7 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
                   type="button"
                   className="swap-submit-button compact"
                   onClick={handleSwap}
-                  disabled={executing || quoting}
+                  disabled={executing || quoting || selectedQuote?.status !== 'available'}
                 >
                   {executing ? '\u63d0\u4ea4\u4e2d...' : quoting ? '\u62a5\u4ef7\u5237\u65b0\u4e2d...' : '\u63d0\u4ea4\u4ea4\u6613'}
                 </button>
