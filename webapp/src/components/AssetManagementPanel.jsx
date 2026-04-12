@@ -729,7 +729,7 @@ export default function AssetManagementPanel({
 
   const [activeTab, setActiveTab] = useState('my_assets');
   const [historyDays, setHistoryDays] = useState(30);
-  const [historyMetric] = useState('wallet_usd');
+  const historyMetric = 'total_usd';
   const [assetState, setAssetState] = useState({ overview: null, history: null, lp: null });
   const [assetLoading, setAssetLoading] = useState(false);
   const [assetRefreshing, setAssetRefreshing] = useState(false);
@@ -827,7 +827,7 @@ export default function AssetManagementPanel({
         ? '交易历史记录'
         : '资产快照、历史趋势与 LP 统计';
 
-  const metricColor = '#52d1ff';
+  const metricColor = '#59f09d';
 
   const actions = (
     <div className="am-actions">
@@ -883,7 +883,7 @@ export default function AssetManagementPanel({
 
           <div className="am-card">
             <div className="am-card-header">
-              <div className="am-card-title">资产趋势</div>
+              <div className="am-card-title">总资产趋势</div>
               <div className="am-pill-group">
                 {HISTORY_WINDOWS.map((days) => (
                   <button key={days} type="button" className={`am-pill ${historyDays === days ? 'active' : ''}`} onClick={() => setHistoryDays(days)}>
@@ -894,7 +894,7 @@ export default function AssetManagementPanel({
             </div>
             <div className="am-chart-header">
               <div>
-                <div className="am-chart-label">钱包余额</div>
+                <div className="am-chart-label">总资产</div>
                 <div className="am-chart-value">{formatUsd(chartPoints[chartPoints.length - 1]?.value)}</div>
               </div>
               <span className="am-badge">{formatChinaTime(assetState.overview?.updated_at)}</span>

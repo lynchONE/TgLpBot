@@ -23,7 +23,7 @@ export default function PriceRangeVisualizer({
     maxPrice,
     pairLabel,
     gridCount,
-    deviation,
+    rangeBadgeText = '',
     inRange,
     currentGridIndex,
     currentGridLower,
@@ -90,9 +90,9 @@ export default function PriceRangeVisualizer({
                     价格范围 ({pairLabel || '未知'}{' '}
                     {gridCount ? <><NumberFlowValue value={gridCount} formatOptions={{ maximumFractionDigits: 0 }} />格</> : ''})
                 </div>
-                {deviation !== null && deviation !== undefined ? (
+                {rangeBadgeText ? (
                     <div className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-bold text-white dark:bg-black/50">
-                        <NumberFlowValue value={deviation} formatter={(v) => `${Number(v).toFixed(2)}%`} />
+                        <NumberFlowValue value={rangeBadgeText} formatter={() => rangeBadgeText} />
                     </div>
                 ) : null}
             </div>
@@ -160,7 +160,7 @@ export default function PriceRangeVisualizer({
                 <div className={`mt-1.5 flex items-center gap-2 ${taskRangeText && runningDuration ? 'justify-between' : taskRangeText ? 'justify-start' : 'justify-end'}`}>
                     {taskRangeText ? (
                         <span className="inline-flex items-center rounded-md bg-sky-500/10 px-2 py-1 text-[10px] font-semibold text-sky-700 ring-1 ring-sky-500/20 dark:bg-sky-500/15 dark:text-sky-300">
-                            下次重平衡 <NumberFlowValue value={taskRangeText} formatter={() => taskRangeText} />
+                            任务区间 <NumberFlowValue value={taskRangeText} formatter={() => taskRangeText} />
                         </span>
                     ) : null}
                     {runningDuration ? (

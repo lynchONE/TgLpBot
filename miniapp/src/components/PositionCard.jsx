@@ -394,27 +394,20 @@ export default function PositionCard({
     const rangeMin = rangeReady ? Math.min(rangeLower, rangeUpper) : null;
     const rangeMax = rangeReady ? Math.max(rangeLower, rangeUpper) : null;
 
-    // 当前仓位实际区间宽度百分比（基于 tick_lower/tick_upper 和 currentPrice，不受再平衡参数影响）
-    const actualRangeDeviation = useMemo(() => {
-        if (!Number.isFinite(currentPrice) || !Number.isFinite(rangeMin) || !Number.isFinite(rangeMax) || currentPrice <= 0) return null;
-        const up = ((rangeMax / currentPrice) - 1) * 100;
-        const down = (1 - (rangeMin / currentPrice)) * 100;
-        const avg = (Math.max(0, up) + Math.max(0, down)) / 2;
-        return Number.isFinite(avg) && avg > 0 ? avg : null;
-    }, [currentPrice, rangeMin, rangeMax]);
-
     const taskRange = useMemo(() => {
         const low = Number(position?.task_range_lower_pct);
         const up = Number(position?.task_range_upper_pct);
         if (!Number.isFinite(low) || !Number.isFinite(up) || low <= 0 || up <= 0) return null;
         const asymmetric = Math.abs(low - up) >= 0.01;
         const avg = (low + up) / 2;
-        let text = asymmetric ? `下 ${low.toFixed(2)}% / 上 ${up.toFixed(2)}%` : `±${avg.toFixed(2)}%`;
+        const totalWidth = low + up;
+        const summaryText = asymmetric ? `下 ${low.toFixed(2)}% / 上 ${up.toFixed(2)}%` : `±${avg.toFixed(2)}%`;
+        let text = `${summaryText}（总宽 ${totalWidth.toFixed(2)}%）`;
         const amountUsdt = Number(position?.task_amount_usdt);
         if (Number.isFinite(amountUsdt) && amountUsdt > 0) {
             text += ` | $${amountUsdt.toFixed(2)}`;
         }
-        return { text, deviation: avg };
+        return { text, badgeText: `总宽 ${totalWidth.toFixed(2)}%` };
     }, [position?.task_range_lower_pct, position?.task_range_upper_pct, position?.task_amount_usdt]);
 
     const taskId = useMemo(() => {
@@ -811,7 +804,7 @@ export default function PositionCard({
                     maxPrice={rangeMax}
                     pairLabel={pairLabel}
                     gridCount={gridCountRaw}
-                    deviation={actualRangeDeviation}
+                    rangeBadgeText={taskRange?.badgeText || ''}
                     inRange={position?.in_range}
                     currentGridIndex={currentGridIndex}
                     currentGridLower={gridLower}

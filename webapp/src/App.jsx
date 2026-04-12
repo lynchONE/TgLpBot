@@ -2762,6 +2762,18 @@ export default function App() {
               const taskRangeLo = Number(p?.task_range_lower_pct);
               const taskRangeUp = Number(p?.task_range_upper_pct);
               const taskAmount = Number(p?.task_amount_usdt);
+              const hasTaskRange = Number.isFinite(taskRangeLo) && taskRangeLo > 0 && Number.isFinite(taskRangeUp) && taskRangeUp > 0;
+              const taskRangeSymmetric = hasTaskRange ? Math.abs(taskRangeLo - taskRangeUp) < 0.01 : false;
+              const taskRangeHalfWidth = hasTaskRange ? ((taskRangeLo + taskRangeUp) / 2) : null;
+              const taskRangeTotalWidth = hasTaskRange ? (taskRangeLo + taskRangeUp) : null;
+              const taskRangeLabel = hasTaskRange
+                ? (taskRangeSymmetric
+                  ? `±${taskRangeHalfWidth.toFixed(2)}%`
+                  : `下 ${taskRangeLo.toFixed(2)}% / 上 ${taskRangeUp.toFixed(2)}%`)
+                : '';
+              const taskRangeSummary = hasTaskRange && Number.isFinite(taskRangeTotalWidth)
+                ? `${taskRangeLabel}（总宽 ${taskRangeTotalWidth.toFixed(2)}%）`
+                : '';
               const priceRange = computePriceRange(p);
               const poolAddress = normalizePoolAddress(p?.pool_id || p?.pool_address);
               const smartMoneyRangeGroups = poolAddress
@@ -2954,8 +2966,8 @@ export default function App() {
                     <div className="pos-price-range">
                       <div className="pos-price-range-header">
                         <span className="pos-price-range-label">价格范围 ({priceRange.pairLabel}{priceRange.gridCount ? ` ${priceRange.gridCount}格` : ''})</span>
-                        {Number.isFinite(priceRange.deviation) && priceRange.deviation > 0 && (
-                          <span className="pos-price-range-dev">{priceRange.deviation.toFixed(2)}%</span>
+                        {hasTaskRange && Number.isFinite(taskRangeTotalWidth) && (
+                          <span className="pos-price-range-dev">总宽 {taskRangeTotalWidth.toFixed(2)}%</span>
                         )}
                       </div>
                       <div className="pos-price-range-bar-wrap">
@@ -2979,12 +2991,9 @@ export default function App() {
                     </div>
                   )}
 
-                  {Number.isFinite(taskRangeLo) && taskRangeLo > 0 && (
+                  {hasTaskRange && (
                     <div className="pos-range-info">
-                      <span>范围: {Math.abs(taskRangeLo - taskRangeUp) < 0.01
-                        ? `±${((taskRangeLo + taskRangeUp) / 2).toFixed(2)}%`
-                        : `下 ${taskRangeLo.toFixed(2)}% / 上 ${taskRangeUp.toFixed(2)}%`}
-                      </span>
+                      <span>任务区间: {taskRangeSummary}</span>
                       {Number.isFinite(taskAmount) && taskAmount > 0 && <span> | ${taskAmount.toFixed(2)}</span>}
                       {priceRange && <span className="pos-range-cur-price">当前价 {compactPrice(priceRange.currentPrice)}</span>}
                     </div>

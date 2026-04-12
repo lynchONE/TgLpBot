@@ -904,7 +904,7 @@ export default function AssetManagementPage({
         return () => clearInterval(timer);
     }, [activeTab, hasInitData, loadAssets, pollIntervalSec]);
 
-    const chartRows = useMemo(() => seriesRows(assetsData.history, 'wallet_usd'), [assetsData.history]);
+    const chartRows = useMemo(() => seriesRows(assetsData.history, 'total_usd'), [assetsData.history]);
 
     const isLoading = assetsLoading || assetsRefreshing;
     const canManualRefresh = hasInitData && activeTab === 'my_assets';
@@ -988,7 +988,7 @@ export default function AssetManagementPage({
                     {/* trend chart */}
                     <Card>
                         <div className="flex items-center justify-between gap-2">
-                            <span className="text-[12px] font-bold text-zinc-900 dark:text-white/90">钱包余额趋势</span>
+                            <span className="text-[12px] font-bold text-zinc-900 dark:text-white/90">总资产趋势</span>
                             <div className="flex gap-1.5">
                                 {HISTORY_WINDOWS.map((d) => (
                                     <Pill key={d} active={historyDays === d} brand={brand} onClick={() => setHistoryDays(d)}>{d}D</Pill>
@@ -999,7 +999,7 @@ export default function AssetManagementPage({
                             <div className="flex items-end justify-between gap-2">
                                 <div>
                                     <div className="text-[9px] font-medium uppercase tracking-wide text-zinc-400 dark:text-white/35">
-                                        钱包余额
+                                        总资产
                                     </div>
                                     <div className="mt-1 text-xl font-extrabold tabular-nums text-zinc-900 dark:text-white leading-none">
                                         <NumberFlowValue value={chartRows[chartRows.length - 1]?.value || 0} formatter={(v) => formatUsd(v)} />
@@ -1010,7 +1010,7 @@ export default function AssetManagementPage({
                                 </span>
                             </div>
                             <div className="mt-3">
-                                <LWAreaChart data={chartRows} color="#0ea5e9" loading={assetsLoading} />
+                                <LWAreaChart data={chartRows} color="#10b981" loading={assetsLoading} />
                             </div>
                         </div>
                     </Card>
