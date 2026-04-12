@@ -23,6 +23,7 @@ export default function PriceRangeVisualizer({
     maxPrice,
     pairLabel,
     gridCount,
+    gridStepPct = null,
     rangeBadgeText = '',
     inRange,
     currentGridIndex,
@@ -91,7 +92,8 @@ export default function PriceRangeVisualizer({
             <div className="mb-2 flex items-center justify-between text-zinc-900 dark:text-zinc-100">
                 <div className="text-[10px] font-bold opacity-85">
                     价格范围 ({pairLabel || '未知'}{' '}
-                    {gridCount ? <>共<NumberFlowValue value={gridCount} formatOptions={{ maximumFractionDigits: 0 }} />格</> : ''})
+                    {gridCount ? <>共<NumberFlowValue value={gridCount} formatOptions={{ maximumFractionDigits: 0 }} />格</> : ''}
+                    {Number.isFinite(gridStepPct) ? <> · 约<NumberFlowValue value={gridStepPct} formatter={(v) => `${Number(v).toFixed(2)}%/格`} /></> : ''})
                 </div>
                 {rangeBadgeText ? (
                     <div className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-bold text-white dark:bg-black/50">

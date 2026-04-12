@@ -386,6 +386,12 @@ export default function PositionCard({
         return null;
     }, [tickLowerRaw, tickUpperRaw, tickSpacingRaw]);
 
+    const gridStepPct = useMemo(() => {
+        if (!Number.isFinite(tickSpacingRaw) || tickSpacingRaw <= 0) return null;
+        const pct = (Math.pow(1.0001, tickSpacingRaw) - 1) * 100;
+        return Number.isFinite(pct) && pct > 0 ? pct : null;
+    }, [tickSpacingRaw]);
+
     const rangeLowerBase = useMemo(() => priceFromTick(position?.tick_lower, decimals0, decimals1), [position?.tick_lower, decimals0, decimals1]);
     const rangeUpperBase = useMemo(() => priceFromTick(position?.tick_upper, decimals0, decimals1), [position?.tick_upper, decimals0, decimals1]);
     const rangeLower = shouldInvertPrice ? safeInvert(rangeLowerBase) : rangeLowerBase;
@@ -804,6 +810,7 @@ export default function PositionCard({
                     maxPrice={rangeMax}
                     pairLabel={pairLabel}
                     gridCount={gridCountRaw}
+                    gridStepPct={gridStepPct}
                     rangeBadgeText={taskRange?.badgeText || ''}
                     inRange={position?.in_range}
                     currentGridIndex={currentGridIndex}

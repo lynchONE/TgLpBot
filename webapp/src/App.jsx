@@ -2766,6 +2766,10 @@ export default function App() {
               const taskRangeSymmetric = hasTaskRange ? Math.abs(taskRangeLo - taskRangeUp) < 0.01 : false;
               const taskRangeHalfWidth = hasTaskRange ? ((taskRangeLo + taskRangeUp) / 2) : null;
               const taskRangeTotalWidth = hasTaskRange ? (taskRangeLo + taskRangeUp) : null;
+              const tickSpacing = Number(p?.tick_spacing);
+              const gridStepPct = Number.isFinite(tickSpacing) && tickSpacing > 0
+                ? ((Math.pow(1.0001, tickSpacing) - 1) * 100)
+                : null;
               const taskRangeLabel = hasTaskRange
                 ? (taskRangeSymmetric
                   ? `±${taskRangeHalfWidth.toFixed(2)}%`
@@ -2965,7 +2969,7 @@ export default function App() {
                   {priceRange && (
                     <div className="pos-price-range">
                       <div className="pos-price-range-header">
-                        <span className="pos-price-range-label">价格范围 ({priceRange.pairLabel}{priceRange.gridCount ? ` 共${priceRange.gridCount}格` : ''})</span>
+                        <span className="pos-price-range-label">价格范围 ({priceRange.pairLabel}{priceRange.gridCount ? ` 共${priceRange.gridCount}格` : ''}{Number.isFinite(gridStepPct) ? ` · 约${gridStepPct.toFixed(2)}%/格` : ''})</span>
                         {hasTaskRange && Number.isFinite(taskRangeTotalWidth) && (
                           <span className="pos-price-range-dev">总宽 {taskRangeTotalWidth.toFixed(2)}%</span>
                         )}
