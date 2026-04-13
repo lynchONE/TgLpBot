@@ -57,6 +57,12 @@ function tailAddr(value) {
     return raw.slice(-4);
 }
 
+function normalizeWalletAddress(value) {
+    const raw = String(value || '').trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(raw)) return '';
+    return `0x${raw.slice(2).toLowerCase()}`;
+}
+
 function isHexAddressValue(value) {
     return /^0x[a-fA-F0-9]{40}$/.test(String(value || '').trim());
 }
@@ -1300,7 +1306,9 @@ function WalletList({
                             </tr>
                         </thead>
                         <tbody>
-                            {wallets.map(w => (
+                            {wallets.map(w => {
+                                const normalizedAddress = normalizeWalletAddress(w.address) || w.address;
+                                return (
                                 <tr key={w.address} className="clickable" onClick={() => onSelect(w.address)}>
                                     <td>
                                         <WalletIdentity address={w.address} color={w.color} label={w.label || w.address} avatarUrl={w.avatar_url} size={20} showCopy />
@@ -1317,19 +1325,19 @@ function WalletList({
                                             <button
                                                 type="button"
                                                 className="smd-icon-btn"
-                                                style={watchedWalletSet.has(w.address) ? {
+                                                style={watchedWalletSet.has(normalizedAddress) ? {
                                                     color: '#ff5d73',
                                                     borderColor: 'rgba(255, 93, 115, 0.35)',
                                                     background: 'rgba(255, 93, 115, 0.08)',
                                                 } : undefined}
-                                                disabled={Boolean(watchToggleMap[w.address])}
-                                                title={watchedWalletSet.has(w.address) ? '取消特别关注' : '加入特别关注'}
+                                                disabled={Boolean(watchToggleMap[normalizedAddress])}
+                                                title={watchedWalletSet.has(normalizedAddress) ? '取消特别关注' : '加入特别关注'}
                                                 onClick={e => {
                                                     e.stopPropagation();
                                                     onToggleWatchWallet?.(w.address);
                                                 }}
                                             >
-                                                {watchToggleMap[w.address] ? '…' : (watchedWalletSet.has(w.address) ? '♥' : '♡')}
+                                                {watchToggleMap[normalizedAddress] ? '…' : (watchedWalletSet.has(normalizedAddress) ? '♥' : '♡')}
                                             </button>
                                             <button type="button" className="smd-icon-btn" disabled={busyKey === `wallet-toggle:${w.address}` || busyKey === `wallet-delete:${w.address}`} onClick={e => {
                                                 e.stopPropagation();
@@ -1352,7 +1360,8 @@ function WalletList({
                                         </div>
                                     </td>
                                 </tr>
-                            ))}
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>
@@ -1476,6 +1485,7 @@ function WalletDetail({
         });
         return Object.values(m).sort((a, b) => (a.hasOpen ? -1 : 1) - (b.hasOpen ? -1 : 1));
     }, [positions]);
+    const normalizedAddr = normalizeWalletAddress(addr) || addr;
 
     return (
         <div>
@@ -1494,15 +1504,15 @@ function WalletDetail({
                                 <button
                                     type="button"
                                     className="smd-icon-btn"
-                                    style={watchedWalletSet.has(addr) ? {
+                                    style={watchedWalletSet.has(normalizedAddr) ? {
                                         color: '#ff5d73',
                                         borderColor: 'rgba(255, 93, 115, 0.35)',
                                         background: 'rgba(255, 93, 115, 0.08)',
                                     } : undefined}
-                                    disabled={Boolean(watchToggleMap[addr])}
+                                    disabled={Boolean(watchToggleMap[normalizedAddr])}
                                     onClick={() => onToggleWatchWallet?.(addr)}
                                 >
-                                    {watchToggleMap[addr] ? '处理中...' : (watchedWalletSet.has(addr) ? '♥ 已特别关注' : '♡ 加入特别关注')}
+                                    {watchToggleMap[normalizedAddr] ? '处理中...' : (watchedWalletSet.has(normalizedAddr) ? '♥ 已特别关注' : '♡ 加入特别关注')}
                                 </button>
                             </div>
                         </div>
