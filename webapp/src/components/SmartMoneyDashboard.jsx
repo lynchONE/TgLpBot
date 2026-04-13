@@ -2827,9 +2827,11 @@ function GoldenDogPanelContent({
                     token1_symbol: event?.token1_symbol,
                 }) || tailAddr(event?.pool_address);
                 setLastWatchEventText(`${walletName} 开仓 ${pairLabel}`);
-                await playSmartMoneyBeep();
-            } catch {
-                // ignore malformed ws payloads
+                console.log('[SmartMoney] 检测到开仓事件，准备播放音效:', walletName, pairLabel);
+                const played = await playSmartMoneyBeep();
+                console.log('[SmartMoney] 音效播放结果:', played ? '成功' : '失败');
+            } catch (err) {
+                console.error('[SmartMoney] WebSocket消息处理错误:', err);
             }
         };
 
