@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from 'react';
+﻿import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from 'react';
 import {
     Eye, Wallet, Settings, Search, Plus, ExternalLink, X, Check,
     ChevronRight, ChevronDown, ChevronLeft, Pause, Play, Trash2, Copy, Flame, Pencil,
@@ -12,6 +12,9 @@ import {
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
     uploadSMWalletAvatar, resolveSMAvatarAssetUrl,
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig, testSMGoldenDogConfig,
+    fetchSMWatchWallets, saveSMWatchWallets,
+    fetchSMWatchOpenAlertConfig, saveSMWatchOpenAlertConfig, testSMWatchOpenAlertConfig,
+    buildSMEventsWsUrl,
 } from '../lib/smartMoneyApi';
 import { getBrandTheme } from '../lib/brand';
 import { formatDurationFrom } from '../lib/time';
@@ -76,7 +79,15 @@ function getBrandActionChipClass(brand) {
         : 'rounded-full border border-[#bcff2f]/25 bg-[#bcff2f]/14 px-2.5 py-1 font-semibold text-[#efffb8] hover:bg-[#bcff2f]/20';
 }
 
-function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
+function GoldenDogPageContent({
+    apiBaseUrl,
+    initData,
+    brand,
+    watchedWallets = [],
+    watchedWalletSet = new Set(),
+    watchToggleMap = {},
+    onToggleWatchWallet,
+}) {
     const hasInitData = Boolean(String(initData || '').trim());
     const [loading, setLoading] = useState(hasInitData);
     const [saving, setSaving] = useState(false);
@@ -84,10 +95,14 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
     const [status, setStatus] = useState(null);
+    const [watchAlertStatus, setWatchAlertStatus] = useState(null);
     const [draft, setDraft] = useState(() => createGoldenDogDraft());
+    const [watchAlertDraft, setWatchAlertDraft] = useState(() => createWatchOpenAlertDraft());
     const [activeTab, setActiveTab] = useState('wallet');
+    const [lastWatchEventText, setLastWatchEventText] = useState('');
 
     const barkStatusText = useMemo(() => goldenDogBarkStatusText(status), [status]);
+    const watchBarkStatusText = useMemo(() => goldenDogBarkStatusText(watchAlertStatus), [watchAlertStatus]);
     const intensityOptions = useMemo(
         () => (Array.isArray(status?.available_intensities) && status.available_intensities.length > 0
             ? status.available_intensities
@@ -98,32 +113,96 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
         () => countGoldenDogPoolThresholds(draft.pool_mode),
         [draft.pool_mode],
     );
+    const watchedWalletList = useMemo(
+        () => Array.from(new Set((Array.isArray(watchedWallets) ? watchedWallets : [])
+            .map((item) => normalizeWalletAddress(item))
+            .filter(Boolean))).sort(),
+        [watchedWallets],
+    );
 
     const applyResponse = useCallback((resp) => {
         setStatus(resp || null);
         setDraft(mapGoldenDogConfigToDraft(resp?.config));
+    }, []);
+    const applyWatchAlertResponse = useCallback((resp) => {
+        setWatchAlertStatus(resp || null);
+        setWatchAlertDraft(mapWatchOpenAlertConfigToDraft(resp?.config));
     }, []);
 
     const loadConfig = useCallback(async () => {
         if (!hasInitData) {
             setLoading(false);
             setStatus(null);
+            setWatchAlertStatus(null);
             return;
         }
         setLoading(true);
         setError('');
         try {
-            applyResponse(await fetchSMGoldenDogConfig({ apiBaseUrl, initData, chain: 'bsc' }));
+            const [goldenDogResp, watchAlertResp] = await Promise.all([
+                fetchSMGoldenDogConfig({ apiBaseUrl, initData, chain: 'bsc' }),
+                fetchSMWatchOpenAlertConfig({ apiBaseUrl, initData, chain: 'bsc' }),
+            ]);
+            applyResponse(goldenDogResp);
+            applyWatchAlertResponse(watchAlertResp);
         } catch (err) {
             setError(String(err?.message || err || '加载失败'));
         } finally {
             setLoading(false);
         }
-    }, [apiBaseUrl, applyResponse, hasInitData, initData]);
+    }, [apiBaseUrl, applyResponse, applyWatchAlertResponse, hasInitData, initData]);
 
     useEffect(() => {
         loadConfig();
     }, [loadConfig]);
+
+    useEffect(() => {
+        if (!hasInitData || !watchAlertDraft.enabled || !watchAlertDraft.sound_enabled || !watchedWalletList.length) {
+            return undefined;
+        }
+
+        const wsUrl = buildSMEventsWsUrl(apiBaseUrl);
+        if (!wsUrl) return undefined;
+
+        let cancelled = false;
+        let socket;
+        try {
+            socket = new WebSocket(wsUrl);
+        } catch {
+            return undefined;
+        }
+
+        socket.onmessage = async (messageEvent) => {
+            if (cancelled) return;
+            if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+            try {
+                const payload = JSON.parse(messageEvent.data);
+                if (payload?.type !== 'lp_event') return;
+                const event = payload?.data || {};
+                const eventType = String(event?.event_type || '').trim().toLowerCase();
+                const walletAddress = normalizeWalletAddress(event?.wallet_address);
+                if (eventType !== 'add' || !walletAddress || !watchedWalletSet.has(walletAddress)) return;
+                const walletName = String(event?.wallet_label || '').trim() || shortAddr(walletAddress);
+                const pairLabel = getPairLabel({
+                    token0_symbol: event?.token0_symbol,
+                    token1_symbol: event?.token1_symbol,
+                }) || tailAddr(event?.pool_address);
+                setLastWatchEventText(`${walletName} 开仓 ${pairLabel}`);
+                await playSmartMoneyBeep();
+            } catch {
+                // ignore malformed ws payloads
+            }
+        };
+
+        return () => {
+            cancelled = true;
+            try {
+                socket?.close();
+            } catch {
+                // ignore close errors
+            }
+        };
+    }, [apiBaseUrl, hasInitData, watchAlertDraft.enabled, watchAlertDraft.sound_enabled, watchedWalletList, watchedWalletSet]);
 
     const updateWalletMode = useCallback((key, value) => {
         setDraft((prev) => ({
@@ -137,6 +216,9 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
             ...prev,
             pool_mode: { ...prev.pool_mode, [key]: value },
         }));
+    }, []);
+    const updateWatchAlertMode = useCallback((key, value) => {
+        setWatchAlertDraft((prev) => ({ ...prev, [key]: value }));
     }, []);
 
     const buildSavePayload = useCallback(() => {
@@ -195,23 +277,38 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
         setError('');
         setNotice('');
         try {
-            const resp = await saveSMGoldenDogConfig({
-                apiBaseUrl,
-                initData,
-                chain: 'bsc',
-                config: buildSavePayload(),
-            });
-            applyResponse(resp);
-            setNotice('配置已保存');
+            if (activeTab === 'watch_open') {
+                const resp = await saveSMWatchOpenAlertConfig({
+                    apiBaseUrl,
+                    initData,
+                    chain: 'bsc',
+                    config: {
+                        enabled: Boolean(watchAlertDraft.enabled),
+                        bark_enabled: Boolean(watchAlertDraft.bark_enabled),
+                        sound_enabled: Boolean(watchAlertDraft.sound_enabled),
+                    },
+                });
+                applyWatchAlertResponse(resp);
+                setNotice('特别关注开仓配置已保存');
+            } else {
+                const resp = await saveSMGoldenDogConfig({
+                    apiBaseUrl,
+                    initData,
+                    chain: 'bsc',
+                    config: buildSavePayload(),
+                });
+                applyResponse(resp);
+                setNotice('配置已保存');
+            }
         } catch (err) {
             setError(String(err?.message || err || '保存失败'));
         } finally {
             setSaving(false);
         }
-    }, [apiBaseUrl, applyResponse, buildSavePayload, hasInitData, initData]);
+    }, [activeTab, apiBaseUrl, applyResponse, applyWatchAlertResponse, buildSavePayload, hasInitData, initData, watchAlertDraft]);
 
     const handleTest = useCallback(async (mode) => {
-        if (!hasInitData) {
+        if (mode !== 'watch_sound' && !hasInitData) {
             setError('请先登录 Telegram 后再测试监控通知。');
             return;
         }
@@ -220,15 +317,26 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
         setError('');
         setNotice('');
         try {
-            const intensity = mode === 'pool' ? draft.pool_mode.intensity : draft.wallet_mode.intensity;
-            const resp = await testSMGoldenDogConfig({
-                apiBaseUrl,
-                initData,
-                chain: 'bsc',
-                mode,
-                intensity,
-            });
-            setNotice(resp?.message || '测试通知已发送');
+            if (mode === 'watch_bark') {
+                const resp = await testSMWatchOpenAlertConfig({ apiBaseUrl, initData, chain: 'bsc' });
+                setNotice(resp?.message || '特别关注开仓 Bark 测试已发送');
+            } else if (mode === 'watch_sound') {
+                const ok = await playSmartMoneyBeep();
+                if (!ok) {
+                    throw new Error('当前环境不支持提示音播放。');
+                }
+                setNotice('提示音已播放');
+            } else {
+                const intensity = mode === 'pool' ? draft.pool_mode.intensity : draft.wallet_mode.intensity;
+                const resp = await testSMGoldenDogConfig({
+                    apiBaseUrl,
+                    initData,
+                    chain: 'bsc',
+                    mode,
+                    intensity,
+                });
+                setNotice(resp?.message || '测试通知已发送');
+            }
         } catch (err) {
             setError(String(err?.message || err || '测试失败'));
         } finally {
@@ -281,6 +389,7 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
     const miniInputCls = "w-full rounded-lg border border-white/[0.07] bg-black/30 px-2.5 py-[7px] text-[11px] text-zinc-100 text-center placeholder-zinc-400 outline-none transition-colors focus:border-amber-400/40";
     const pillBtn = (active) => `rounded-lg px-2 py-[5px] text-[10px] font-semibold transition-all ${active ? 'bg-amber-400/15 text-amber-200' : 'bg-white/[0.04] text-zinc-500'}`;
     const pillBtnTeal = (active) => `rounded-lg px-2 py-[5px] text-[10px] font-semibold transition-all ${active ? 'bg-emerald-400/15 text-emerald-200' : 'bg-white/[0.04] text-zinc-500'}`;
+    const pillBtnBlue = (active) => `rounded-lg px-2 py-[5px] text-[10px] font-semibold transition-all ${active ? 'bg-sky-400/15 text-sky-200' : 'bg-white/[0.04] text-zinc-500'}`;
 
     return (
         <div className="space-y-2.5 pb-24">
@@ -293,6 +402,7 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
                         <div className="flex flex-wrap items-center gap-1 mt-0.5">
                             <span className={`inline-block rounded px-1 py-[1px] text-[9px] leading-none ${draft.wallet_mode.enabled ? 'bg-amber-400/12 text-amber-300' : 'bg-zinc-800 text-zinc-500'}`}>金狗{draft.wallet_mode.enabled ? '✓' : '✗'}</span>
                             <span className={`inline-block rounded px-1 py-[1px] text-[9px] leading-none ${draft.pool_mode.enabled ? 'bg-emerald-400/12 text-emerald-300' : 'bg-zinc-800 text-zinc-500'}`}>池子{draft.pool_mode.enabled ? '✓' : '✗'}</span>
+                            <span className={`inline-block rounded px-1 py-[1px] text-[9px] leading-none ${watchAlertDraft.enabled ? 'bg-sky-400/12 text-sky-300' : 'bg-zinc-800 text-zinc-500'}`}>特别关注{watchAlertDraft.enabled ? '✓' : '✗'}</span>
                             <span className="inline-block rounded px-1 py-[1px] text-[9px] leading-none bg-zinc-800 text-zinc-400">Bark {barkStatusText}</span>
                         </div>
                     </div>
@@ -304,6 +414,7 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
 
             {!hasInitData ? <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-200">请先登录 Telegram</div> : null}
             {error ? <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-200">{error}</div> : null}
+            {!error && lastWatchEventText ? <div className="rounded-lg border border-sky-500/20 bg-sky-500/10 px-2.5 py-1.5 text-[11px] text-sky-200">最近提醒：{lastWatchEventText}</div> : null}
             {!error && notice ? <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] text-emerald-200">{notice}</div> : null}
 
             {loading ? <div className="py-6 text-center text-[11px] text-zinc-500">加载中...</div> : (
@@ -316,6 +427,9 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
                         <button type="button" onClick={() => setActiveTab('pool')}
                             className={`flex-1 rounded-[10px] py-1.5 text-[11px] font-semibold transition-all ${activeTab === 'pool' ? 'bg-emerald-400/15 text-emerald-300' : 'text-zinc-500'}`}
                         >池子监控</button>
+                        <button type="button" onClick={() => setActiveTab('watch_open')}
+                            className={`flex-1 rounded-[10px] py-1.5 text-[11px] font-semibold transition-all ${activeTab === 'watch_open' ? 'bg-sky-400/15 text-sky-300' : 'text-zinc-500'}`}
+                        >特别关注开仓</button>
                     </div>
 
                     {/* ── 金狗通知 Tab ── */}
@@ -374,6 +488,101 @@ function GoldenDogPageContent({ apiBaseUrl, initData, brand }) {
                             </div>
                             <div className="mt-2">
                                 <MiniSelect value={draft.pool_mode.intensity} options={intensityOptions} onChange={(v) => updatePoolMode('intensity', v)} />
+                            </div>
+                        </section>
+                    )}
+
+                    {activeTab === 'watch_open' && (
+                        <section className="rounded-2xl border border-sky-400/10 bg-gradient-to-b from-[rgba(16,23,32,0.96)] to-[rgba(8,12,18,0.98)] p-3">
+                            <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                    <div className="text-[12px] font-semibold text-zinc-100">特别关注开仓</div>
+                                    <div className="text-[10px] text-zinc-500">特别关注的钱包一旦开仓，可发 Bark，页面前台可播放一声“滴”。</div>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                    <button type="button" className={pillBtnBlue(watchAlertDraft.enabled)} onClick={() => updateWatchAlertMode('enabled', true)}>开启</button>
+                                    <button type="button" className={pillBtnBlue(!watchAlertDraft.enabled)} onClick={() => updateWatchAlertMode('enabled', false)}>关闭</button>
+                                </div>
+                            </div>
+
+                            <div className="mt-3 grid grid-cols-2 gap-1.5">
+                                <div className="rounded-lg border border-white/[0.07] bg-black/20 px-2.5 py-2">
+                                    <div className="text-[10px] text-zinc-500">通知状态</div>
+                                    <div className="mt-1 text-[11px] font-semibold text-zinc-100">{smartMoneyWatchOpenStatusText(watchAlertDraft)}</div>
+                                </div>
+                                <div className="rounded-lg border border-white/[0.07] bg-black/20 px-2.5 py-2">
+                                    <div className="text-[10px] text-zinc-500">Bark 状态</div>
+                                    <div className="mt-1 text-[11px] font-semibold text-zinc-100">{watchBarkStatusText}</div>
+                                </div>
+                                <div className="rounded-lg border border-white/[0.07] bg-black/20 px-2.5 py-2">
+                                    <div className="text-[10px] text-zinc-500">特别关注钱包</div>
+                                    <div className="mt-1 text-[11px] font-semibold text-zinc-100">{watchedWalletList.length} 个</div>
+                                </div>
+                                <div className="rounded-lg border border-white/[0.07] bg-black/20 px-2.5 py-2">
+                                    <div className="text-[10px] text-zinc-500">前台音效</div>
+                                    <div className="mt-1 text-[11px] font-semibold text-zinc-100">{watchAlertDraft.sound_enabled ? '已开启' : '已关闭'}</div>
+                                </div>
+                            </div>
+
+                            <div className="mt-3 grid grid-cols-2 gap-1.5">
+                                <button
+                                    type="button"
+                                    className={`rounded-xl border px-3 py-2 text-[11px] font-semibold transition ${watchAlertDraft.bark_enabled ? 'border-sky-400/25 bg-sky-400/12 text-sky-200' : 'border-white/[0.05] bg-zinc-900/60 text-zinc-400'}`}
+                                    onClick={() => updateWatchAlertMode('bark_enabled', !watchAlertDraft.bark_enabled)}
+                                >
+                                    Bark 推送 {watchAlertDraft.bark_enabled ? '已开' : '已关'}
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`rounded-xl border px-3 py-2 text-[11px] font-semibold transition ${watchAlertDraft.sound_enabled ? 'border-sky-400/25 bg-sky-400/12 text-sky-200' : 'border-white/[0.05] bg-zinc-900/60 text-zinc-400'}`}
+                                    onClick={() => updateWatchAlertMode('sound_enabled', !watchAlertDraft.sound_enabled)}
+                                >
+                                    前台提示音 {watchAlertDraft.sound_enabled ? '已开' : '已关'}
+                                </button>
+                                <button
+                                    type="button"
+                                    className="rounded-xl border border-white/[0.05] bg-zinc-900/60 px-3 py-2 text-[11px] font-semibold text-zinc-200 transition disabled:opacity-50"
+                                    disabled={testingMode === 'watch_bark' || !hasInitData}
+                                    onClick={() => handleTest('watch_bark')}
+                                >
+                                    {testingMode === 'watch_bark' ? '测试中...' : '测试 Bark'}
+                                </button>
+                                <button
+                                    type="button"
+                                    className="rounded-xl border border-white/[0.05] bg-zinc-900/60 px-3 py-2 text-[11px] font-semibold text-zinc-200 transition disabled:opacity-50"
+                                    disabled={testingMode === 'watch_sound'}
+                                    onClick={() => handleTest('watch_sound')}
+                                >
+                                    {testingMode === 'watch_sound' ? '试听中...' : '试听提示音'}
+                                </button>
+                            </div>
+
+                            <div className="mt-3 rounded-xl border border-white/[0.05] bg-zinc-900/45 px-3 py-2 text-[10px] text-zinc-500">
+                                Bark Key / Server / Group 继续复用全局配置。
+                            </div>
+
+                            <div className="mt-3 space-y-2">
+                                <div className="text-[11px] font-semibold text-sky-200">特别关注列表</div>
+                                {watchedWalletList.length ? watchedWalletList.map((walletAddress) => (
+                                    <div key={walletAddress} className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.05] bg-black/20 px-3 py-2">
+                                        <div className="min-w-0">
+                                            <div className="text-[12px] font-semibold text-zinc-100">{shortAddr(walletAddress)}</div>
+                                            <div className="truncate text-[10px] text-zinc-500">{walletAddress}</div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            className="rounded-lg border border-red-500/20 bg-red-500/10 px-2.5 py-1.5 text-[10px] font-semibold text-red-200 transition disabled:opacity-50"
+                                            disabled={Boolean(watchToggleMap[walletAddress])}
+                                            onClick={() => onToggleWatchWallet?.(walletAddress)}
+                                        >
+                                            {watchToggleMap[walletAddress] ? '处理中...' : '移除'}
+                                        </button>
+                                    </div>
+                                )) : (
+                                    <div className="rounded-xl border border-dashed border-white/[0.08] bg-white/[0.02] px-3 py-3 text-[10px] text-zinc-500">
+                                        暂无特别关注钱包，可在钱包视图里点按钮加入。
+                                    </div>
+                                )}
                             </div>
                         </section>
                     )}
@@ -494,6 +703,67 @@ function countGoldenDogPoolThresholds(poolMode) {
 function goldenDogThresholdText(value, prefix = '', suffix = '') {
     const raw = String(value || '').trim();
     return raw ? `${prefix}${raw}${suffix}` : '--';
+}
+
+function createWatchOpenAlertDraft() {
+    return {
+        enabled: false,
+        bark_enabled: false,
+        sound_enabled: false,
+    };
+}
+
+function mapWatchOpenAlertConfigToDraft(cfg) {
+    const source = cfg || {};
+    return {
+        enabled: Boolean(source.enabled),
+        bark_enabled: Boolean(source.bark_enabled),
+        sound_enabled: Boolean(source.sound_enabled),
+    };
+}
+
+function smartMoneyWatchOpenStatusText(draft) {
+    if (draft?.enabled) return '运行中';
+    return '已暂停';
+}
+
+let smartMoneyBeepAudioContext = null;
+
+async function playSmartMoneyBeep() {
+    if (typeof window === 'undefined') return false;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return false;
+    if (!smartMoneyBeepAudioContext) {
+        smartMoneyBeepAudioContext = new AudioCtx();
+    }
+
+    const ctx = smartMoneyBeepAudioContext;
+    if (ctx.state === 'suspended') {
+        try {
+            await ctx.resume();
+        } catch {
+            return false;
+        }
+    }
+
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(988, ctx.currentTime);
+    gainNode.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.11, ctx.currentTime + 0.01);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.16);
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    oscillator.start();
+    oscillator.stop(ctx.currentTime + 0.16);
+    return true;
+}
+
+function normalizeWalletAddress(value) {
+    const raw = String(value || '').trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(raw)) return '';
+    return `0x${raw.slice(2).toLowerCase()}`;
 }
 
 function getBrandFocusRingClass(brand) {
@@ -1667,7 +1937,7 @@ function PoolDetailPage({ apiBaseUrl, pool, onBack, onSelectWallet, brand }) {
     );
 }
 
-function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refreshKey }) {
+function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refreshKey, watchedWalletSet = new Set(), watchToggleMap = {}, onToggleWatchWallet }) {
     const [wallets, setWallets] = useState([]);
     const [walletsTotal, setWalletsTotal] = useState(0);
     const [loading, setLoading] = useState(true);
@@ -1822,6 +2092,17 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
                                 <div className="flex shrink-0 gap-1">
                                     <button
                                         type="button"
+                                        className="inline-flex min-w-[56px] items-center justify-center rounded-xl border border-sky-400/20 bg-sky-400/10 px-2.5 text-[10px] font-semibold text-sky-100 transition disabled:opacity-50"
+                                        disabled={Boolean(watchToggleMap[normalizeWalletAddress(w.address)]) || busyKey === `wallet-toggle:${w.address}` || busyKey === `wallet-delete:${w.address}`}
+                                        onClick={e => {
+                                            e.stopPropagation();
+                                            onToggleWatchWallet?.(w.address);
+                                        }}
+                                    >
+                                        {watchToggleMap[normalizeWalletAddress(w.address)] ? '处理中' : (watchedWalletSet.has(normalizeWalletAddress(w.address)) ? '已关注' : '特别关注')}
+                                    </button>
+                                    <button
+                                        type="button"
                                         className={getIconButtonClass(false)}
                                         disabled={busyKey === `wallet-toggle:${w.address}` || busyKey === `wallet-delete:${w.address}`}
                                         onClick={e => {
@@ -1896,7 +2177,7 @@ function WalletListPage({ apiBaseUrl, onSelectWallet, onAddWallet, brand, refres
     );
 }
 
-function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, brand }) {
+function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, brand, watchedWalletSet = new Set(), watchToggleMap = {}, onToggleWatchWallet }) {
     const [positions, setPositions] = useState([]);
     const [positionsTotal, setPositionsTotal] = useState(0);
     const [walletInfo, setWalletInfo] = useState(null);
@@ -1997,6 +2278,18 @@ function WalletDetailPage({ apiBaseUrl, walletAddress, onBack, onSelectPool, bra
                                     : 'border-white/10 bg-zinc-800/80 text-zinc-400'}>
                                     {walletInfo.is_active ? '监控中' : '已暂停'}
                                 </Badge>
+                            </div>
+                            <div className="mt-3">
+                                <button
+                                    type="button"
+                                    className="inline-flex items-center gap-2 rounded-xl border border-sky-400/20 bg-sky-400/10 px-3 py-2 text-[11px] font-semibold text-sky-100 transition disabled:opacity-50"
+                                    disabled={Boolean(watchToggleMap[normalizeWalletAddress(walletAddress)])}
+                                    onClick={() => onToggleWatchWallet?.(walletAddress)}
+                                >
+                                    {watchToggleMap[normalizeWalletAddress(walletAddress)]
+                                        ? '处理中...'
+                                        : (watchedWalletSet.has(normalizeWalletAddress(walletAddress)) ? '已特别关注' : '加入特别关注')}
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -2197,8 +2490,18 @@ function ContractSettingsPage({ apiBaseUrl, brand }) {
     return <ContractSettingsTab apiBaseUrl={apiBaseUrl} brand={brand} />;
 }
 
-function GoldenDogPage({ apiBaseUrl, initData, brand }) {
-    return <GoldenDogPageContent apiBaseUrl={apiBaseUrl} initData={initData} brand={brand} />;
+function GoldenDogPage({ apiBaseUrl, initData, brand, watchedWallets = [], watchedWalletSet = new Set(), watchToggleMap = {}, onToggleWatchWallet }) {
+    return (
+        <GoldenDogPageContent
+            apiBaseUrl={apiBaseUrl}
+            initData={initData}
+            brand={brand}
+            watchedWallets={watchedWallets}
+            watchedWalletSet={watchedWalletSet}
+            watchToggleMap={watchToggleMap}
+            onToggleWatchWallet={onToggleWatchWallet}
+        />
+    );
 
     const hasInitData = Boolean(String(initData || '').trim());
     const [loading, setLoading] = useState(hasInitData);
@@ -3115,6 +3418,16 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
     const [selectedWallet, setSelectedWallet] = useState(null);
     const [showAddModal, setShowAddModal] = useState(false);
     const [walletRefreshKey, setWalletRefreshKey] = useState(0);
+    const [watchedWallets, setWatchedWallets] = useState([]);
+    const [watchToggleMap, setWatchToggleMap] = useState({});
+    const watchedWalletSet = useMemo(() => new Set(watchedWallets), [watchedWallets]);
+
+    const applyWatchWalletResponse = useCallback((resp) => {
+        const nextWallets = Array.isArray(resp?.wallets)
+            ? Array.from(new Set(resp.wallets.map((item) => normalizeWalletAddress(item)).filter(Boolean))).sort()
+            : [];
+        setWatchedWallets(nextWallets);
+    }, []);
 
     const refreshStats = useCallback(() => {
         fetchSMStats({ apiBaseUrl }).then(setStats).catch(() => { });
@@ -3127,6 +3440,23 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
         }, 30000);
         return () => clearInterval(interval);
     }, [refreshStats]);
+
+    useEffect(() => {
+        if (!hasInitData) return undefined;
+        let cancelled = false;
+        (async () => {
+            try {
+                const resp = await fetchSMWatchWallets({ apiBaseUrl, initData, chain: 'bsc' });
+                if (cancelled) return;
+                applyWatchWalletResponse(resp);
+            } catch {
+                // ignore watch wallet sync failures
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [apiBaseUrl, applyWatchWalletResponse, hasInitData, initData]);
 
     const handleSelectPool = useCallback((pool) => {
         setSelectedPool(pool);
@@ -3143,6 +3473,42 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
         setSelectedPool(null);
         setSelectedWallet(null);
     }, []);
+
+    const handleToggleWatchWallet = useCallback((walletAddress) => {
+        const address = normalizeWalletAddress(walletAddress);
+        if (!address) return;
+        setWatchToggleMap((prev) => ({ ...prev, [address]: true }));
+
+        const clearBusy = () => {
+            setWatchToggleMap((prev) => {
+                if (!prev[address]) return prev;
+                const next = { ...prev };
+                delete next[address];
+                return next;
+            });
+        };
+
+        if (!hasInitData) {
+            setWatchedWallets((prev) => {
+                const next = new Set(prev);
+                if (next.has(address)) next.delete(address);
+                else next.add(address);
+                return Array.from(next).sort();
+            });
+            window.setTimeout(clearBusy, 0);
+            return;
+        }
+
+        const watched = !watchedWalletSet.has(address);
+        saveSMWatchWallets({ apiBaseUrl, initData, chain: 'bsc', walletAddress: address, watched })
+            .then((resp) => {
+                applyWatchWalletResponse(resp);
+            })
+            .catch(() => {
+                // ignore remote persistence failures
+            })
+            .finally(clearBusy);
+    }, [apiBaseUrl, applyWatchWalletResponse, hasInitData, initData, watchedWalletSet]);
 
     const isDetailView = selectedPool || selectedWallet;
     const monitorSummary = useMemo(() => {
@@ -3251,6 +3617,9 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
                         onBack={handleBack}
                         onSelectPool={handleSelectPool}
                         brand={brand}
+                        watchedWalletSet={watchedWalletSet}
+                        watchToggleMap={watchToggleMap}
+                        onToggleWatchWallet={handleToggleWatchWallet}
                     />
                 ) : view === 'pools' ? (
                     <PoolListPage
@@ -3266,12 +3635,19 @@ export default function SmartMoneyPage({ apiBaseUrl, initData = '', hasInitData,
                         onAddWallet={() => setShowAddModal(true)}
                         brand={brand}
                         refreshKey={walletRefreshKey}
+                        watchedWalletSet={watchedWalletSet}
+                        watchToggleMap={watchToggleMap}
+                        onToggleWatchWallet={handleToggleWatchWallet}
                     />
                 ) : view === 'golden_dog' ? (
                     <GoldenDogPage
                         apiBaseUrl={apiBaseUrl}
                         initData={initData}
                         brand={brand}
+                        watchedWallets={watchedWallets}
+                        watchedWalletSet={watchedWalletSet}
+                        watchToggleMap={watchToggleMap}
+                        onToggleWatchWallet={handleToggleWatchWallet}
                     />
                 ) : view === 'assets' && isAdmin ? (
                     <Suspense fallback={<div className="py-6 text-center text-[11px] text-zinc-500">加载聪明钱资产模块...</div>}>

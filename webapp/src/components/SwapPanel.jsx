@@ -68,10 +68,6 @@ const NATIVE_PSEUDO_ADDRESS = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 const MIN_WALLET_TOKEN_VALUE_USD = 0.1;
 const NETWORK_KEYS = ['bsc', 'base'];
 
-// 缂備礁顦…宄扳枍鎼淬垻鈻旂€广儱顦版禒姗€鎮烽弴姘冲厡婵炲牊鍨垮浠嬪炊閳哄﹤濮版俊鐐€楅。顔炬濠靛鐭楁い蹇撳暟缁犱粙鏌ｉ敐鍡欐噧闁告﹩鍓熼獮鎴﹀閻樺樊娼梺?// const TABS = [
-//   { key: 'swap', label: '闂佺绻戦崹璺虹暦?, enabled: true },
-// ];
-
 const SLIPPAGE_PRESETS = ['0.5', '1.0', '2.0'];
 
 function dedupeTokens(tokens) {
@@ -699,7 +695,6 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       };
     };
 
-    // 闂佸搫鐗嗛ˇ顔剧礊閹寸儑绱ｆ繝闈涚墛閻ｅ崬霉閻欏懐鍒扮紒?
     const withBalance = enrichedWalletTokens
       .filter((wt) => matchesToken(wt, keyword))
       .map((wt) => {
@@ -719,13 +714,11 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
       })
       .sort((a, b) => (b.valueUSDT || 0) - (a.valueUSDT || 0));
 
-    // 闂佸搫鐗冮崑鎾诲级閳哄倸鐏ｅ┑鐐叉喘閹粙濡歌閻ｅ崬霉閻欏懐鍒扮紒?闂佸湱鍎ょ敮鈥斥枍鎼粹槅鍟呴柟缁樺笚闊剙霉閿濆棛鎳囨い銈呭€垮畷姘旈崟鈹惧亾閸愨晝鈻旀い鎾跺У閻?
     const recent = recentChainTokens
       .filter((token) => !withBalance.some((item) => item.address === token.address))
       .filter((token) => matchesToken(token, keyword))
       .map(enrichToken);
 
-    // 闁汇埄鍨伴幗婊堝极閵堝棛顩烽柨婵嗘噽椤?闂佸湱鍎ょ敮鈥斥枍鎼粹槅鍟呴柟缁樺笚闊剙霉閿濆棛鎳囨い銈呭€垮畷顏嗕沪閻愵兛绮柡澶嗘櫆閸ㄧ敻宕归鍡樺仒闁靛鍊涢崢顒勬煟?
     const preset = presetTokens
       .filter((token) => !withBalance.some((item) => item.address === token.address))
       .filter((token) => !recent.some((item) => item.address === token.address))
@@ -894,7 +887,6 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     setLoadingWalletTokens(true);
     setWalletTokensError('');
     try {
-      // 闂傚倸瀚粔宕囩礊閸℃稑瀚夐柍褜鍓涙禍姝岀疀鎼达絽绠氶梺绋匡工閵堢危閸ヮ剙纾圭痪顓㈩棑缁€澶愭煛閸曨偄鈷旈柕鍥ㄥ哺瀵挳寮堕幋顓熲柤婵炲濯寸徊鐣岀博?
       const resp = await walletSwapPreview({
         apiBaseUrl,
         initData,
@@ -981,7 +973,6 @@ export default function SwapPanel({ apiBaseUrl, initData, hasInitData, chain = '
     clearExecutionFeedback();
   }, [clearExecutionFeedback, hasInitData, loadWallets]);
 
-  // 闂佸憡鐟禍婊冿耿椤忓牆绠ラ柟鎯х－绾捐霉閻欏懐鍒扮紒鏃傛暬閺屽懏寰勭€ｎ亶浠撮梺闈╃祷閸斿秴顪冮崒鐐茬闁绘鍎ょ粊鏉棵归敐鍡欐噰妞ゃ倕鍊块弫宥呯暆閸曨亞绱氶梺绋跨箰缁夊磭绮径搴ｇ杸闁告盯鍋婂ú锝夋煟?API 闁荤姴顑呴崯浼村极?
   useEffect(() => {
     if (walletTokensAbortRef.current) {
       walletTokensAbortRef.current.abort();

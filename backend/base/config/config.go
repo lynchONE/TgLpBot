@@ -208,7 +208,7 @@ type Config struct {
 	SmartLPContractAddress     string
 	SmartLPScorePerWallet      float64
 	SmartLPMinWallets          int
-	SmartLPRecentWindowMinutes int // 鑷姩寮€鍗曟墍闇€鐨勬椂闂寸獥鍙ｏ紙鍒嗛挓锛夛紝榛樿10鍒嗛挓
+	SmartLPRecentWindowMinutes int // 自动开单所需的时间窗口（分钟），默认 10 分钟
 	SmartLPScanIntervalSeconds int
 	SmartLPMaxBlocksPerScan    int
 	SmartLPRPCTimeoutSeconds   int
@@ -431,7 +431,7 @@ func LoadConfig() error {
 		return fmt.Errorf("invalid ENCRYPTION_KEY: %w", err)
 	}
 
-	// 鎵撳嵃鍏抽敭閰嶇疆淇℃伅锛堥殣钘忔晱鎰熶俊鎭級
+	// 打印关键配置信息（隐藏敏感信息）
 	log.Println("配置如下")
 	log.Printf("   - Telegram Bot Token: %s", maskString(AppConfig.TelegramBotToken))
 	log.Printf("   - Telegram WebApp URL: %s", AppConfig.TelegramWebAppURL)

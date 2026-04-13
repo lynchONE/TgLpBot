@@ -510,7 +510,7 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 			}
 		}
 	} else {
-		resp.Warnings = append(resp.Warnings, "闂佸搫琚崕鎾敋濡や胶顩烽悹鍥ㄥ絻椤倕菐閸ワ絽澧插ù鐓庢噺瀵板嫭娼忛銉愭洟鏌ㄥ☉妯煎闁汇劊鍨虹粋鎺楀川椤撶姵缍岀紓浣插亾婵炲樊浜濋幊鐘测槈閹剧鏀婚柡鍡欏枛楠炴垿顢氶崱娆戭槴")
+		resp.Warnings = append(resp.Warnings, "加载 V3 任务信息失败，部分仓位增强信息可能不完整")
 	}
 
 	var v4Tasks []models.StrategyTask
@@ -554,7 +554,7 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 		for _, npmAddr := range npmAddrs {
 			pm, err := blockchain.NewV3PositionManager(npmAddr, blockchain.Client)
 			if err != nil {
-				resp.Warnings = append(resp.Warnings, fmt.Sprintf("闂佸憡甯楃换鍌烇綖閹版澘绀?V3 PositionManager 婵犮垺鍎肩划鍓ф喆? %s", npmAddr.Hex()))
+				resp.Warnings = append(resp.Warnings, fmt.Sprintf("创建 V3 PositionManager 失败: %s", npmAddr.Hex()))
 				continue
 			}
 
@@ -678,7 +678,7 @@ func (s *RealtimePositionsService) compute(userID uint) (*RealtimePositionsRespo
 					created, err := blockchain.NewV3PositionManager(npmAddr, client)
 					if err != nil {
 						mu.Lock()
-						resp.Warnings = append(resp.Warnings, fmt.Sprintf("闂佸憡甯楃换鍌烇綖閹版澘绀?V3 PositionManager 婵犮垺鍎肩划鍓ф喆? %s", npmAddr.Hex()))
+						resp.Warnings = append(resp.Warnings, fmt.Sprintf("创建 V3 PositionManager 失败: %s", npmAddr.Hex()))
 						mu.Unlock()
 						return nil
 					}
@@ -1508,9 +1508,9 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 	if err != nil && sqrtP == nil {
 		errMsg := strings.ToLower(err.Error())
 		if strings.Contains(errMsg, "429") || strings.Contains(errMsg, "too many requests") || strings.Contains(errMsg, "rate limit") {
-			return nil, fmt.Sprintf("闁荤姴娲╅褑銇?V4 slot0 婵犮垺鍎肩划鍓ф喆閿曞倹鏅柛锔绘箳C 闂傚倸瀚崝鏍矈?429闂佹寧绋戦¨鈧紒杈ㄧ箘閹风姵顦版惔妯伙紗闂佸憡鑹鹃柊锝夊闯閸濄儲瀚氶柡鍥╁枎閻忔鏌涢敂鍝勫妞ゆ梹娲滅槐鏃堫敋閳ь剟宕虫搴㈠闁告劑鍔婃禍锝夋煠婵傚绨诲┑顔规櫊瀹曟岸鏌ㄧ€ｎ偆鍘?闂佸搫娲ら悺銊ョ暦?BSC RPC闂佹寧绋掗鐣俴enId=%s", tokenId)
+			return nil, fmt.Sprintf("读取 V4 slot0 失败：RPC 返回 429 或触发限流，请稍后重试并检查当前链 RPC 配置。tokenId=%s", tokenId)
 		}
-		return nil, fmt.Sprintf("闁荤姴娲╅褑銇?V4 slot0 婵犮垺鍎肩划鍓ф喆? tokenId=%s err=%v", tokenId, err)
+		return nil, fmt.Sprintf("读取 V4 slot0 失败: tokenId=%s err=%v", tokenId, err)
 	}
 	if snapshotBlock == 0 && usedStale && err != nil {
 		warn = fmt.Sprintf("V4 slot0 RPC fallback (%ds) tokenId=%s", int(age.Seconds()), tokenId)
@@ -2486,7 +2486,8 @@ func (s *RealtimePositionsService) calcV4UnclaimedFeesCached(stateView common.Ad
 
 	inside0 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global0, lower0, upper0)
 	inside1 := feeGrowthInside(currentTick, pos.TickLower, pos.TickUpper, global1, lower1, upper1)
-	// 濠电偛顦崝宥夊礈娴煎瓨鏅慨妯块哺閺嗙姴霉?uint256 濠碘槅鍤妶鍥╊吋缂備胶濮甸〃鍫熺珶閹烘绠戠憸宥夊箯?RPC 闁荤姴顑呴崯浼村极閵堝绫嶉悹楦挎绾板秶鈧懓澹婇崰鏍閹剧粯鏅悗鍏夋殬side 闂佸憡鐟崹鐢稿礂濮椻偓瀵娊宕掑☉娆樻Н"闂佹椿浜滈鍫ュ箲閿濆绾?婵犮垹鐖㈤崒婊嗗 global闂?	// 闁哄鏅滈悷鈺呭闯闁垮鈻旂€广儱鎳庨弲娆撴煙闊彃鍔﹂柡浣革躬閺屽懘鍩€椤掑嫬绀勯柣姘嚟缁€澶愭煠閺夋寧婀版俊鎻掓憸缁辨帟顦撮柣銏ｅ吹閹峰鏁嶉崟顓熸瘓闂侀潧妫旈柈顡玪ta 闁荤姳绶ょ槐鏇㈡偩鐠囧樊鍟呴柛娆忣槹缁犳帡鎮归幇顔兼瀻闁逞屽墴濡法鎹㈠璺虹闁靛牆绻掔粈澶娾槈閹惧磭小缂佽京澧楃粋宥堫槾闁轰焦鎸鹃幏褰掓偄缁嬫鏉圭紓鍌欑贰閸欌偓闁搞劌鍊挎俊?
+	// Guard against inconsistent fee snapshots returned by RPC.
+	// If fee growth appears to go backwards, clamp the delta to zero.
 	last0 := cloneBig(pos.FeeGrowthInside0LastX128)
 	last1 := cloneBig(pos.FeeGrowthInside1LastX128)
 

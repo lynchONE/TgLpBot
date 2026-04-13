@@ -8,7 +8,9 @@ import {
     fetchSMStats, addSMWallet, updateSMWallet, deleteSMWallet,
     fetchSMContracts, addSMContract, updateSMContract, deleteSMContract,
     uploadSMWalletAvatar, resolveSMAvatarAssetUrl,
+    buildSMEventsWsUrl,
     fetchSMGoldenDogConfig, saveSMGoldenDogConfig, testSMGoldenDogConfig,
+    fetchSMWatchOpenAlertConfig, saveSMWatchOpenAlertConfig, testSMWatchOpenAlertConfig,
 } from '../smartMoneyApi';
 import { buildGmgnUrl, compactPrice, computePriceRange, formatDuration, formatUsd, shortAddress } from '../utils';
 import uniswapLogo from '../img/uniswap.svg';
@@ -1175,7 +1177,15 @@ function PoolDetail({ apiBaseUrl, pool, onBack, onSelectWallet, refreshInterval 
     );
 }
 
-function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
+function WalletList({
+    apiBaseUrl,
+    onSelect,
+    onAdd,
+    refreshInterval = 10,
+    watchedWalletSet = new Set(),
+    watchToggleMap = {},
+    onToggleWatchWallet,
+}) {
     const [wallets, setWallets] = useState([]);
     const [walletsTotal, setWalletsTotal] = useState(0);
     const [loading, setLoading] = useState(true);
@@ -1304,6 +1314,23 @@ function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
                                     <td className="right">{w.active_pool_count}</td>
                                     <td className="right">
                                         <div className="smd-action-row" style={{ justifyContent: 'flex-end' }}>
+                                            <button
+                                                type="button"
+                                                className="smd-icon-btn"
+                                                style={watchedWalletSet.has(w.address) ? {
+                                                    color: '#ff5d73',
+                                                    borderColor: 'rgba(255, 93, 115, 0.35)',
+                                                    background: 'rgba(255, 93, 115, 0.08)',
+                                                } : undefined}
+                                                disabled={Boolean(watchToggleMap[w.address])}
+                                                title={watchedWalletSet.has(w.address) ? '取消特别关注' : '加入特别关注'}
+                                                onClick={e => {
+                                                    e.stopPropagation();
+                                                    onToggleWatchWallet?.(w.address);
+                                                }}
+                                            >
+                                                {watchToggleMap[w.address] ? '…' : (watchedWalletSet.has(w.address) ? '♥' : '♡')}
+                                            </button>
                                             <button type="button" className="smd-icon-btn" disabled={busyKey === `wallet-toggle:${w.address}` || busyKey === `wallet-delete:${w.address}`} onClick={e => {
                                                 e.stopPropagation();
                                                 setEditingWallet(w);
@@ -1354,7 +1381,16 @@ function WalletList({ apiBaseUrl, onSelect, onAdd, refreshInterval = 10 }) {
     );
 }
 
-function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval = 10 }) {
+function WalletDetail({
+    apiBaseUrl,
+    addr,
+    onBack,
+    onSelectPool,
+    refreshInterval = 10,
+    watchedWalletSet = new Set(),
+    watchToggleMap = {},
+    onToggleWatchWallet,
+}) {
     const [positions, setPositions] = useState([]);
     const [positionsTotal, setPositionsTotal] = useState(0);
     const [info, setInfo] = useState(null);
@@ -1454,6 +1490,21 @@ function WalletDetail({ apiBaseUrl, addr, onBack, onSelectPool, refreshInterval 
                         <div className="smd-detail-copy">
                             <h3 className="smd-detail-title">{info.label || `钱包 ${tailAddr(addr)}`}</h3>
                             <CompactIdentifier value={addr} label="钱包" />
+                            <div style={{ marginTop: 10 }}>
+                                <button
+                                    type="button"
+                                    className="smd-icon-btn"
+                                    style={watchedWalletSet.has(addr) ? {
+                                        color: '#ff5d73',
+                                        borderColor: 'rgba(255, 93, 115, 0.35)',
+                                        background: 'rgba(255, 93, 115, 0.08)',
+                                    } : undefined}
+                                    disabled={Boolean(watchToggleMap[addr])}
+                                    onClick={() => onToggleWatchWallet?.(addr)}
+                                >
+                                    {watchToggleMap[addr] ? '处理中...' : (watchedWalletSet.has(addr) ? '♥ 已特别关注' : '♡ 加入特别关注')}
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div className="smd-stats-grid">
@@ -2161,6 +2212,10 @@ function EditContractModal({ open, apiBaseUrl, contract, onClose, onSaved }) {
 export default function SmartMoneyDashboard({
     apiBaseUrl,
     initData = '',
+    watchedWallets = [],
+    watchedWalletSet = new Set(),
+    watchToggleMap = {},
+    onToggleWatchWallet,
     onSelectPool,
     activePoolAddress = '',
     refreshInterval = 10,
@@ -2314,6 +2369,9 @@ export default function SmartMoneyDashboard({
                         onBack={() => setSelectedWallet(null)}
                         onSelectPool={p => { setSelectedPool(p); setSelectedWallet(null); }}
                         refreshInterval={refreshInterval}
+                        watchedWalletSet={watchedWalletSet}
+                        watchToggleMap={watchToggleMap}
+                        onToggleWatchWallet={onToggleWatchWallet}
                     />
                 ) : view === 'pools' ? (
                     <PoolList
@@ -2330,9 +2388,19 @@ export default function SmartMoneyDashboard({
                         onSelect={setSelectedWallet}
                         onAdd={() => setShowAddModal(true)}
                         refreshInterval={refreshInterval}
+                        watchedWalletSet={watchedWalletSet}
+                        watchToggleMap={watchToggleMap}
+                        onToggleWatchWallet={onToggleWatchWallet}
                     />
                 ) : view === 'golden_dog' ? (
-                    <GoldenDogPanelContent apiBaseUrl={apiBaseUrl} initData={initData} />
+                    <GoldenDogPanelContent
+                        apiBaseUrl={apiBaseUrl}
+                        initData={initData}
+                        watchedWallets={watchedWallets}
+                        watchedWalletSet={watchedWalletSet}
+                        watchToggleMap={watchToggleMap}
+                        onToggleWatchWallet={onToggleWatchWallet}
+                    />
                 ) : view === 'assets' && isAdmin ? (
                     <React.Suspense fallback={<div className="panel-loading">正在加载聪明钱资产...</div>}>
                         <LazySmartMoneyAssetsPanel
@@ -2495,6 +2563,61 @@ function goldenDogThresholdText(value, prefix = '', suffix = '') {
     return raw ? `${prefix}${raw}${suffix}` : '--';
 }
 
+function createWatchOpenAlertDraft() {
+    return {
+        enabled: false,
+        bark_enabled: false,
+        sound_enabled: false,
+    };
+}
+
+function mapWatchOpenAlertConfigToDraft(cfg) {
+    const source = cfg || {};
+    return {
+        enabled: Boolean(source.enabled),
+        bark_enabled: Boolean(source.bark_enabled),
+        sound_enabled: Boolean(source.sound_enabled),
+    };
+}
+
+function smartMoneyWatchOpenStatusText(draft) {
+    if (draft?.enabled) return '运行中';
+    return '已暂停';
+}
+
+let smartMoneyBeepAudioContext = null;
+
+async function playSmartMoneyBeep() {
+    if (typeof window === 'undefined') return false;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return false;
+    if (!smartMoneyBeepAudioContext) {
+        smartMoneyBeepAudioContext = new AudioCtx();
+    }
+
+    const ctx = smartMoneyBeepAudioContext;
+    if (ctx.state === 'suspended') {
+        try {
+            await ctx.resume();
+        } catch {
+            return false;
+        }
+    }
+
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(988, ctx.currentTime);
+    gainNode.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.11, ctx.currentTime + 0.01);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.16);
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    oscillator.start();
+    oscillator.stop(ctx.currentTime + 0.16);
+    return true;
+}
+
 /* ── 自定义下拉选择器 ── */
 function CustomSelect({ value, options, onChange, style }) {
     const [open, setOpen] = useState(false);
@@ -2566,7 +2689,14 @@ function CustomSelect({ value, options, onChange, style }) {
     );
 }
 
-function GoldenDogPanelContent({ apiBaseUrl, initData }) {
+function GoldenDogPanelContent({
+    apiBaseUrl,
+    initData,
+    watchedWallets = [],
+    watchedWalletSet = new Set(),
+    watchToggleMap = {},
+    onToggleWatchWallet,
+}) {
     const hasInitData = Boolean(String(initData || '').trim());
     const [loading, setLoading] = useState(hasInitData);
     const [saving, setSaving] = useState(false);
@@ -2574,10 +2704,14 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
     const [status, setStatus] = useState(null);
+    const [watchAlertStatus, setWatchAlertStatus] = useState(null);
     const [draft, setDraft] = useState(() => createGoldenDogDraft());
+    const [watchAlertDraft, setWatchAlertDraft] = useState(() => createWatchOpenAlertDraft());
     const [activeTab, setActiveTab] = useState('wallet');
+    const [lastWatchEventText, setLastWatchEventText] = useState('');
 
     const barkStatusText = useMemo(() => goldenDogBarkStatusText(status), [status]);
+    const watchBarkStatusText = useMemo(() => goldenDogBarkStatusText(watchAlertStatus), [watchAlertStatus]);
     const intensityOptions = useMemo(
         () => (Array.isArray(status?.available_intensities) && status.available_intensities.length > 0
             ? status.available_intensities
@@ -2588,32 +2722,98 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
         () => countGoldenDogPoolThresholds(draft.pool_mode),
         [draft.pool_mode],
     );
+    const watchedWalletList = useMemo(
+        () => Array.from(new Set((Array.isArray(watchedWallets) ? watchedWallets : [])
+            .map((item) => normalizeWalletAddress(item))
+            .filter(Boolean))).sort(),
+        [watchedWallets],
+    );
 
     const applyResponse = useCallback((resp) => {
         setStatus(resp || null);
         setDraft(mapGoldenDogConfigToDraft(resp?.config));
+    }, []);
+    const applyWatchAlertResponse = useCallback((resp) => {
+        setWatchAlertStatus(resp || null);
+        setWatchAlertDraft(mapWatchOpenAlertConfigToDraft(resp?.config));
     }, []);
 
     const loadConfig = useCallback(async () => {
         if (!hasInitData) {
             setLoading(false);
             setStatus(null);
+            setWatchAlertStatus(null);
             return;
         }
         setLoading(true);
         setError('');
         try {
-            applyResponse(await fetchSMGoldenDogConfig({ apiBaseUrl, initData, chain: 'bsc' }));
+            const [goldenDogResp, watchAlertResp] = await Promise.all([
+                fetchSMGoldenDogConfig({ apiBaseUrl, initData, chain: 'bsc' }),
+                fetchSMWatchOpenAlertConfig({ apiBaseUrl, initData, chain: 'bsc' }),
+            ]);
+            applyResponse(goldenDogResp);
+            applyWatchAlertResponse(watchAlertResp);
         } catch (err) {
             setError(String(err?.message || err || '加载失败'));
         } finally {
             setLoading(false);
         }
-    }, [apiBaseUrl, applyResponse, hasInitData, initData]);
+    }, [apiBaseUrl, applyResponse, applyWatchAlertResponse, hasInitData, initData]);
 
     useEffect(() => {
         loadConfig();
     }, [loadConfig]);
+
+    useEffect(() => {
+        if (!hasInitData || !watchAlertDraft.enabled || !watchAlertDraft.sound_enabled || !watchedWalletList.length) {
+            return undefined;
+        }
+
+        const wsUrl = buildSMEventsWsUrl(apiBaseUrl);
+        if (!wsUrl) return undefined;
+
+        let cancelled = false;
+        let socket;
+        try {
+            socket = new WebSocket(wsUrl);
+        } catch {
+            return undefined;
+        }
+
+        socket.onmessage = async (messageEvent) => {
+            if (cancelled) return;
+            if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+            try {
+                const payload = JSON.parse(messageEvent.data);
+                if (payload?.type !== 'lp_event') return;
+                const event = payload?.data || {};
+                const eventType = String(event?.event_type || '').trim().toLowerCase();
+                const walletAddress = normalizeWalletAddress(event?.wallet_address);
+                if (eventType !== 'add' || !walletAddress || !watchedWalletSet.has(walletAddress)) {
+                    return;
+                }
+                const walletName = String(event?.wallet_label || '').trim() || tailAddr(walletAddress);
+                const pairLabel = getPairLabel({
+                    token0_symbol: event?.token0_symbol,
+                    token1_symbol: event?.token1_symbol,
+                }) || tailAddr(event?.pool_address);
+                setLastWatchEventText(`${walletName} 开仓 ${pairLabel}`);
+                await playSmartMoneyBeep();
+            } catch {
+                // ignore malformed ws payloads
+            }
+        };
+
+        return () => {
+            cancelled = true;
+            try {
+                socket?.close();
+            } catch {
+                // ignore
+            }
+        };
+    }, [apiBaseUrl, hasInitData, watchAlertDraft.enabled, watchAlertDraft.sound_enabled, watchedWalletList, watchedWalletSet]);
 
     const updateWalletMode = useCallback((key, value) => {
         setDraft((prev) => ({
@@ -2627,6 +2827,9 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
             ...prev,
             pool_mode: { ...prev.pool_mode, [key]: value },
         }));
+    }, []);
+    const updateWatchAlertMode = useCallback((key, value) => {
+        setWatchAlertDraft((prev) => ({ ...prev, [key]: value }));
     }, []);
 
     /* ── 精致化的统一样式 ── */
@@ -2724,18 +2927,33 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
         setError('');
         setNotice('');
         try {
-            const resp = await saveSMGoldenDogConfig({
-                apiBaseUrl, initData, chain: 'bsc',
-                config: buildSavePayload(),
-            });
-            applyResponse(resp);
-            setNotice('配置已保存');
+            if (activeTab === 'watch_open') {
+                const resp = await saveSMWatchOpenAlertConfig({
+                    apiBaseUrl,
+                    initData,
+                    chain: 'bsc',
+                    config: {
+                        enabled: Boolean(watchAlertDraft.enabled),
+                        bark_enabled: Boolean(watchAlertDraft.bark_enabled),
+                        sound_enabled: Boolean(watchAlertDraft.sound_enabled),
+                    },
+                });
+                applyWatchAlertResponse(resp);
+                setNotice('特别关注开仓配置已保存');
+            } else {
+                const resp = await saveSMGoldenDogConfig({
+                    apiBaseUrl, initData, chain: 'bsc',
+                    config: buildSavePayload(),
+                });
+                applyResponse(resp);
+                setNotice(activeTab === 'pool' ? '池子监控配置已保存' : '金狗通知配置已保存');
+            }
         } catch (err) {
             setError(String(err?.message || err || '保存失败'));
         } finally {
             setSaving(false);
         }
-    }, [apiBaseUrl, applyResponse, buildSavePayload, hasInitData, initData]);
+    }, [activeTab, apiBaseUrl, applyResponse, applyWatchAlertResponse, buildSavePayload, hasInitData, initData, watchAlertDraft]);
 
     const handleTest = useCallback(async (mode) => {
         if (!hasInitData) {
@@ -2746,11 +2964,19 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
         setError('');
         setNotice('');
         try {
-            const intensity = mode === 'pool' ? draft.pool_mode.intensity : draft.wallet_mode.intensity;
-            const resp = await testSMGoldenDogConfig({
-                apiBaseUrl, initData, chain: 'bsc', mode, intensity,
-            });
-            setNotice(resp?.message || '测试通知已发送');
+            if (mode === 'watch_bark') {
+                const resp = await testSMWatchOpenAlertConfig({ apiBaseUrl, initData, chain: 'bsc' });
+                setNotice(resp?.message || '测试通知已发送');
+            } else if (mode === 'watch_sound') {
+                const ok = await playSmartMoneyBeep();
+                setNotice(ok ? '已播放一声提示音' : '当前环境不支持播放提示音');
+            } else {
+                const intensity = mode === 'pool' ? draft.pool_mode.intensity : draft.wallet_mode.intensity;
+                const resp = await testSMGoldenDogConfig({
+                    apiBaseUrl, initData, chain: 'bsc', mode, intensity,
+                });
+                setNotice(resp?.message || '测试通知已发送');
+            }
         } catch (err) {
             setError(String(err?.message || err || '测试失败'));
         } finally {
@@ -2782,19 +3008,22 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
                         <div style={{ fontSize: 14, fontWeight: 700, color: '#f4f4f5', letterSpacing: '-0.01em' }}>监控通知</div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
                             <span style={{ fontSize: 11, padding: '1px 7px', borderRadius: 6, background: draft.wallet_mode.enabled ? 'rgba(52,211,153,0.12)' : 'rgba(255,255,255,0.04)', color: draft.wallet_mode.enabled ? '#6ee7b7' : '#52525b', fontWeight: 500 }}>
-                                钱包 {draft.wallet_mode.enabled ? 'ON' : 'OFF'}
+                                金狗 {draft.wallet_mode.enabled ? 'ON' : 'OFF'}
                             </span>
                             <span style={{ fontSize: 11, padding: '1px 7px', borderRadius: 6, background: draft.pool_mode.enabled ? 'rgba(52,211,153,0.12)' : 'rgba(255,255,255,0.04)', color: draft.pool_mode.enabled ? '#6ee7b7' : '#52525b', fontWeight: 500 }}>
                                 池子 {draft.pool_mode.enabled ? 'ON' : 'OFF'}
                             </span>
+                            <span style={{ fontSize: 11, padding: '1px 7px', borderRadius: 6, background: watchAlertDraft.enabled ? 'rgba(59,130,246,0.12)' : 'rgba(255,255,255,0.04)', color: watchAlertDraft.enabled ? '#93c5fd' : '#52525b', fontWeight: 500 }}>
+                                特别关注 {watchAlertDraft.enabled ? 'ON' : 'OFF'}
+                            </span>
                             <span style={{ fontSize: 11, padding: '1px 7px', borderRadius: 6, background: 'rgba(255,255,255,0.04)', color: '#71717a', fontWeight: 500 }}>
-                                Bark {barkStatusText}
+                                Bark {activeTab === 'watch_open' ? watchBarkStatusText : barkStatusText}
                             </span>
                         </div>
                     </div>
                 </div>
                 <button type="button" disabled={saving || !hasInitData} onClick={handleSave} style={saveBtnCss}>
-                    {saving ? '保存中...' : '💾 保存配置'}
+                    {saving ? '保存中...' : '保存当前配置'}
                 </button>
             </div>
 
@@ -2806,6 +3035,7 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
             )}
             {error && <div style={{ fontSize: 12, color: '#f87171', padding: '8px 12px', borderRadius: 10, background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.12)' }}>{error}</div>}
             {!error && notice && <div style={{ fontSize: 12, color: '#86efac', padding: '8px 12px', borderRadius: 10, background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.12)' }}>{notice}</div>}
+            {!error && lastWatchEventText && <div style={{ fontSize: 12, color: '#93c5fd', padding: '8px 12px', borderRadius: 10, background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.16)' }}>最近提示: {lastWatchEventText}</div>}
 
             {loading ? (
                 <div style={{ textAlign: 'center', padding: 32, color: '#52525b', fontSize: 13 }}>加载中...</div>
@@ -2833,6 +3063,15 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
                             boxShadow: activeTab === 'pool' ? 'inset 0 1px 0 rgba(45,212,191,0.08)' : 'none',
                         }}>
                             🧠 池子监控
+                        </button>
+                        <button type="button" onClick={() => setActiveTab('watch_open')} style={{
+                            flex: 1, borderRadius: 10, padding: '9px 0', fontSize: 13, fontWeight: 600,
+                            border: 'none', cursor: 'pointer', transition: 'all 0.25s ease',
+                            background: activeTab === 'watch_open' ? 'rgba(59,130,246,0.12)' : 'transparent',
+                            color: activeTab === 'watch_open' ? '#93c5fd' : '#52525b',
+                            boxShadow: activeTab === 'watch_open' ? 'inset 0 1px 0 rgba(59,130,246,0.08)' : 'none',
+                        }}>
+                            🔔 特别关注开仓
                         </button>
                     </div>
 
@@ -2986,6 +3225,124 @@ function GoldenDogPanelContent({ apiBaseUrl, initData }) {
                                     <span style={fieldLabelTextCss}>通知强度</span>
                                     <CustomSelect value={draft.pool_mode.intensity} options={intensityOptions} onChange={(v) => updatePoolMode('intensity', v)} />
                                 </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'watch_open' && (
+                        <div style={{
+                            borderRadius: 16,
+                            padding: 16,
+                            border: '1px solid rgba(59,130,246,0.12)',
+                            background: 'linear-gradient(160deg, rgba(59,130,246,0.06) 0%, transparent 40%), rgba(15,15,18,0.92)',
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+                                <div style={{ display: 'grid', gap: 4 }}>
+                                    <div style={{ fontSize: 14, fontWeight: 700, color: '#e4e4e7' }}>特别关注开仓</div>
+                                    <div style={{ fontSize: 11, color: '#a1a1aa' }}>特别关注的钱包一旦开仓，可发 Bark，页面前台可播放一声“滴”。</div>
+                                </div>
+                                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <button type="button" onClick={() => updateWatchAlertMode('enabled', true)} style={pillBtnBase(watchAlertDraft.enabled, '59,130,246')}>开启</button>
+                                    <button type="button" onClick={() => updateWatchAlertMode('enabled', false)} style={pillBtnBase(!watchAlertDraft.enabled, '161,161,170')}>关闭</button>
+                                    <button type="button" disabled={testingMode === 'watch_bark' || !hasInitData} onClick={() => handleTest('watch_bark')} style={actionBtnCss}>
+                                        {testingMode === 'watch_bark' ? '测试中...' : '测试 Bark'}
+                                    </button>
+                                    <button type="button" disabled={testingMode === 'watch_sound'} onClick={() => handleTest('watch_sound')} style={actionBtnCss}>
+                                        {testingMode === 'watch_sound' ? '试听中...' : '试听提示音'}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 14 }}>
+                                <div style={{ padding: '10px 12px', borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                                    <div style={miniStatLabel}>通知状态</div>
+                                    <div style={{ ...miniStatValue, marginTop: 4 }}>{smartMoneyWatchOpenStatusText(watchAlertDraft)}</div>
+                                </div>
+                                <div style={{ padding: '10px 12px', borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                                    <div style={miniStatLabel}>Bark 状态</div>
+                                    <div style={{ ...miniStatValue, marginTop: 4 }}>{watchBarkStatusText}</div>
+                                </div>
+                                <div style={{ padding: '10px 12px', borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                                    <div style={miniStatLabel}>特别关注钱包</div>
+                                    <div style={{ ...miniStatValue, marginTop: 4 }}>{watchedWalletList.length} 个</div>
+                                </div>
+                                <div style={{ padding: '10px 12px', borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                                    <div style={miniStatLabel}>前台音效</div>
+                                    <div style={{ ...miniStatValue, marginTop: 4 }}>{watchAlertDraft.sound_enabled ? '已开启' : '已关闭'}</div>
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
+                                <button
+                                    type="button"
+                                    onClick={() => updateWatchAlertMode('bark_enabled', !watchAlertDraft.bark_enabled)}
+                                    style={{
+                                        ...actionBtnCss,
+                                        padding: '10px 12px',
+                                        color: watchAlertDraft.bark_enabled ? '#93c5fd' : '#a1a1aa',
+                                        borderColor: watchAlertDraft.bark_enabled ? 'rgba(59,130,246,0.26)' : 'rgba(255,255,255,0.06)',
+                                        background: watchAlertDraft.bark_enabled ? 'rgba(59,130,246,0.12)' : 'rgba(255,255,255,0.04)',
+                                    }}
+                                >
+                                    Bark 推送 {watchAlertDraft.bark_enabled ? '已开' : '已关'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => updateWatchAlertMode('sound_enabled', !watchAlertDraft.sound_enabled)}
+                                    style={{
+                                        ...actionBtnCss,
+                                        padding: '10px 12px',
+                                        color: watchAlertDraft.sound_enabled ? '#93c5fd' : '#a1a1aa',
+                                        borderColor: watchAlertDraft.sound_enabled ? 'rgba(59,130,246,0.26)' : 'rgba(255,255,255,0.06)',
+                                        background: watchAlertDraft.sound_enabled ? 'rgba(59,130,246,0.12)' : 'rgba(255,255,255,0.04)',
+                                    }}
+                                >
+                                    前台提示音 {watchAlertDraft.sound_enabled ? '已开' : '已关'}
+                                </button>
+                                <div style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)', color: '#a1a1aa', fontSize: 12 }}>
+                                    Bark Key / Server / Group 继续复用全局配置。
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'grid', gap: 8 }}>
+                                <div style={{ fontSize: 12, fontWeight: 600, color: '#dbeafe' }}>特别关注列表</div>
+                                {watchedWalletList.length ? watchedWalletList.map((walletAddress) => (
+                                    <div
+                                        key={walletAddress}
+                                        style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'space-between',
+                                            gap: 10,
+                                            padding: '10px 12px',
+                                            borderRadius: 12,
+                                            border: '1px solid rgba(255,255,255,0.05)',
+                                            background: 'rgba(255,255,255,0.03)',
+                                        }}
+                                    >
+                                        <div style={{ display: 'grid', gap: 4 }}>
+                                            <span style={{ fontSize: 13, color: '#e4e4e7', fontWeight: 600 }}>{shortAddr(walletAddress)}</span>
+                                            <span style={{ fontSize: 11, color: '#71717a' }}>{walletAddress}</span>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            disabled={Boolean(watchToggleMap[walletAddress])}
+                                            onClick={() => onToggleWatchWallet?.(walletAddress)}
+                                            style={{
+                                                ...actionBtnCss,
+                                                color: '#fda4af',
+                                                borderColor: 'rgba(244,63,94,0.24)',
+                                                background: 'rgba(244,63,94,0.08)',
+                                            }}
+                                        >
+                                            {watchToggleMap[walletAddress] ? '处理中...' : '移除'}
+                                        </button>
+                                    </div>
+                                )) : (
+                                    <div style={{ padding: '14px 16px', borderRadius: 12, border: '1px dashed rgba(255,255,255,0.08)', color: '#71717a', background: 'rgba(255,255,255,0.02)' }}>
+                                        暂无特别关注钱包。可在 K 线聪明钱标记弹层或钱包视图里点心形按钮加入。
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}

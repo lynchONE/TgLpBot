@@ -54,7 +54,12 @@ import GlobalConfigPanel from './components/GlobalConfigPanel';
 import WalletManagePanel from './components/WalletManagePanel';
 import SwapPanel from './components/SwapPanel';
 import TradeHistoryPanel from './components/TradeHistoryPanel';
-import { fetchSMPoolStats, updateSMWallet } from './smartMoneyApi';
+import {
+  fetchSMPoolStats,
+  fetchSMWatchWallets,
+  saveSMWatchWallets,
+  updateSMWallet,
+} from './smartMoneyApi';
 import telegramLogo from './img/telegram.svg';
 import uniswapLogo from './img/uniswap.svg';
 import pancakeLogo from './img/pancake.svg';
@@ -961,6 +966,12 @@ export default function App() {
     () => new Set(klineWatchedWallets),
     [klineWatchedWallets]
   );
+  const applyKlineWatchWalletResponse = useCallback((resp) => {
+    const nextWallets = Array.isArray(resp?.wallets)
+      ? Array.from(new Set(resp.wallets.map((item) => normalizeWalletAddress(item)).filter(Boolean))).sort()
+      : [];
+    setKlineWatchedWallets(nextWallets);
+  }, []);
   const klineRangeOverlays = useMemo(() => {
     if (!klineMarkers.length || !klineWatchedWallets.length) return [];
     const watched = new Set(klineWatchedWallets);
@@ -1106,6 +1117,34 @@ export default function App() {
       storageRemove(STORAGE.loginUser);
     }
   }, [accentTheme, chain, hotPoolsPanelHeight, hotSort, initData, klineChartHeight, klineWatchedWallets, loginUser, refreshInterval, widgets]);
+
+  useEffect(() => {
+    if (!hasInitData) return undefined;
+    let cancelled = false;
+    const localWallets = parseStoredWatchWallets(storageGet(STORAGE.smartMoneyWatchWallets));
+    (async () => {
+      try {
+        const resp = await fetchSMWatchWallets({ apiBaseUrl, initData, chain });
+        if (cancelled) return;
+        const remoteWallets = Array.isArray(resp?.wallets)
+          ? Array.from(new Set(resp.wallets.map((item) => normalizeWalletAddress(item)).filter(Boolean))).sort()
+          : [];
+        const mergedWallets = Array.from(new Set([...remoteWallets, ...localWallets])).sort();
+        if (mergedWallets.length !== remoteWallets.length) {
+          const synced = await saveSMWatchWallets({ apiBaseUrl, initData, chain, wallets: mergedWallets });
+          if (cancelled) return;
+          applyKlineWatchWalletResponse(synced);
+          return;
+        }
+        applyKlineWatchWalletResponse(resp);
+      } catch {
+        // Keep local fallback when backend sync is unavailable.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBaseUrl, applyKlineWatchWalletResponse, chain, hasInitData, initData]);
 
   useEffect(() => {
     if (!workMode) return;
@@ -1537,21 +1576,37 @@ export default function App() {
     const address = normalizeWalletAddress(walletAddress);
     if (!address) return;
     setKlineWatchToggleMap((prev) => ({ ...prev, [address]: true }));
-    setKlineWatchedWallets((prev) => {
-      const next = new Set(prev);
-      if (next.has(address)) next.delete(address);
-      else next.add(address);
-      return Array.from(next).sort();
-    });
-    window.setTimeout(() => {
+
+    const clearBusy = () => {
       setKlineWatchToggleMap((prev) => {
         if (!prev[address]) return prev;
         const next = { ...prev };
         delete next[address];
         return next;
       });
-    }, 0);
-  }, []);
+    };
+
+    if (!hasInitData) {
+      setKlineWatchedWallets((prev) => {
+        const next = new Set(prev);
+        if (next.has(address)) next.delete(address);
+        else next.add(address);
+        return Array.from(next).sort();
+      });
+      window.setTimeout(clearBusy, 0);
+      return;
+    }
+
+    const watched = !klineWatchedWalletSet.has(address);
+    saveSMWatchWallets({ apiBaseUrl, initData, chain, walletAddress: address, watched })
+      .then((resp) => {
+        applyKlineWatchWalletResponse(resp);
+      })
+      .catch(() => {
+        // Ignore and keep previous state if remote persistence fails.
+      })
+      .finally(clearBusy);
+  }, [apiBaseUrl, applyKlineWatchWalletResponse, chain, hasInitData, initData, klineWatchedWalletSet]);
 
   const handleSaveMarkerWalletLabel = useCallback(async (walletAddress, nextLabel) => {
     const address = normalizeWalletAddress(walletAddress);
@@ -3031,6 +3086,10 @@ export default function App() {
       <SmartMoneyDashboard
         apiBaseUrl={apiBaseUrl}
         initData={initData}
+        watchedWallets={klineWatchedWallets}
+        watchedWalletSet={klineWatchedWalletSet}
+        watchToggleMap={klineWatchToggleMap}
+        onToggleWatchWallet={handleToggleKlineWatch}
         onSelectPool={selectPool}
         activePoolAddress={selectedPoolAddress}
         refreshInterval={refreshInterval}

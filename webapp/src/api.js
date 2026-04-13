@@ -729,7 +729,7 @@ export async function prepareOpenPosition({
       const message = String(error?.message || '').trim();
       const status = Number(error?.status);
       if ((message === `HTTP ${status}` || message === '') && error) {
-        error.message = `è·åå¼ä»é¢æ£æµå¤±è´¥ï¼HTTP ${status}ï¼`;
+        error.message = `获取开仓预检测失败（HTTP ${status}）`;
       }
       const canFallback = i < urls.length - 1 && (
         message === `HTTP ${status}` ||
@@ -743,7 +743,7 @@ export async function prepareOpenPosition({
       throw error;
     }
   }
-  throw lastError || new Error('è·åå¼ä»é¢æ£æµå¤±è´¥');
+  throw lastError || new Error('获取开仓预检测失败');
 }
 
 export async function previewCreatePool({

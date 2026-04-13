@@ -738,7 +738,7 @@ export async function prepareOpenPosition({
         const detail = await readErrorDetails(resp);
         const rawMessage = String(detail.message || '').trim();
         const displayMessage = rawMessage === `HTTP ${resp.status}` || rawMessage === ''
-            ? `è·åå¼ä»é¢æ£æµå¤±è´¥ï¼HTTP ${resp.status}ï¼`
+            ? `获取开仓预检测失败（HTTP ${resp.status}）`
             : rawMessage;
         const err = new Error(displayMessage);
         err.status = resp.status;
@@ -758,7 +758,7 @@ export async function prepareOpenPosition({
         }
         throw err;
     }
-    throw lastError || new Error('è·åå¼ä»é¢æ£æµå¤±è´¥');
+    throw lastError || new Error('获取开仓预检测失败');
 }
 
 export async function openPosition({

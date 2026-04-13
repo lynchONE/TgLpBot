@@ -6,6 +6,7 @@ import (
 	"TgLpBot/base/models"
 	sm "TgLpBot/service/smart_money"
 	smgd "TgLpBot/service/smart_money_golden_dog"
+	smwoa "TgLpBot/service/smart_money_watch_open_alert"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -21,11 +22,13 @@ var (
 	smService      *sm.Service
 	smWSHub        *sm.WSHub
 	smGoldenDogSvc *smgd.Service
+	smWatchOpenSvc *smwoa.Service
 )
 
 func initSmartMoney() {
 	smService = sm.NewService()
 	smWSHub = sm.NewWSHub()
+	smWatchOpenSvc = smwoa.NewService()
 
 	smService.SetNotifier(func(event *models.SmartMoneyLPEvent) {
 		// Lookup wallet label
@@ -36,6 +39,9 @@ func initSmartMoney() {
 			label = w.Label
 		}
 		smWSHub.BroadcastLPEvent(event, label)
+		if smWatchOpenSvc != nil {
+			go smWatchOpenSvc.HandleEvent(context.Background(), event, label)
+		}
 	})
 
 	smService.Start()
@@ -65,6 +71,9 @@ func (s *Server) registerSmartMoneyRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/sm/stats", s.handleSMStats)
 	mux.HandleFunc("/api/smart_money_golden_dog_config", s.handleSmartMoneyGoldenDogConfig)
 	mux.HandleFunc("/api/smart_money_golden_dog_test", s.handleSmartMoneyGoldenDogTest)
+	mux.HandleFunc("/api/smart_money_watch_wallets", s.handleSmartMoneyWatchWallets)
+	mux.HandleFunc("/api/smart_money_watch_open_alert_config", s.handleSmartMoneyWatchOpenAlertConfig)
+	mux.HandleFunc("/api/smart_money_watch_open_alert_test", s.handleSmartMoneyWatchOpenAlertTest)
 	mux.HandleFunc("/ws/sm/events", smWSHub.HandleWS)
 }
 

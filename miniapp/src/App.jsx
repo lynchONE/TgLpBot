@@ -554,7 +554,6 @@ export default function App() {
     const [poolSearchLoading, setPoolSearchLoading] = useState(false);
     const poolSearchInputRef = useRef(null);
     const poolSearchControllerRef = useRef(null);
-    // 濠电儑绲藉ú锔炬崲閸岀偞鍋ら柕濠忓閳绘柨鈹戦悩杈厡妞ゅ繗椴哥换娑㈠幢椤撶姷锛熼梺绋块缂嶅﹤顫忔繝姘╅柨鏃傚亾瀵ゆ椽鏌ｆ惔銏⑩姇闁告梹鐗犲鎶芥偄閻撳海顔夊銈嗘礀濡稓绮堟径鎰厽妞ゎ偒鍓欐俊铏圭磼椤垵澧伴柟宄邦儔閺佸秹宕熼鐔哥槗闂備礁鎲￠悷锕傛晪闁?
     const previousHotPoolsDataRef = useRef({});
     const [klinePool, setKlinePool] = useState(null);
     const [openPositionPool, setOpenPositionPool] = useState(null);
@@ -670,13 +669,11 @@ export default function App() {
         }
     }, [multiChainEnabled, userDefaultChain]);
 
-    // 闂備礁鎲″缁樻叏閹灐褰掑炊閵婏缚姘﹀┑鐐村灦閿氭い鏂匡躬閺岋絽螣閸喚鍘梺?
     const [pollProgress, setPollProgress] = useState(0);
     const pollProgressRef = useRef(null);
     const lastPollTimeRef = useRef(Date.now());
     const brand = useMemo(() => getBrandTheme(accentTheme), [accentTheme]);
 
-    // 闂備礁缍婂褏绱炴繝鍥ч棷婵炲樊浜滅粻鑲┾偓骞垮劚鐎氼喚绮欐繝鍥ㄧ厽婵☆垰鐏濋悡鎰版煃?
     const [batchMode, setBatchMode] = useState(false);
     const [selectedTaskIds, setSelectedTaskIds] = useState(new Set());
     const [batchLoading, setBatchLoading] = useState(false);
@@ -866,7 +863,6 @@ export default function App() {
         [visibleTaskPositionPoolAddresses]
     );
 
-    // 濠电偛顕慨瀵歌姳閼测晛鍨濋柕濠忛檮婵鈧箍鍎卞Λ娑㈠焵椤掑鐏犳い?pool_address -> position_usd 闂備礁鎼€氼喗鎱ㄩ幘顔藉剭闁绘绮弲顒勬煕椤愮姴鐏柡鍡楃箰闇夋繝濠傚暣椤庢绻濋埀顒勵敂閸喎鈧粯銇勯幘鍗炵仾闁挎稑鏈幈銊╁捶椤撶倫銏ゆ煟閳╁啰鎳勭紒瀣槹缁绘繈宕橀埞鐐亙缂傚倷璁查崑鎾绘煟閹寸伝顏堟儊椤旀祹褰掓偐閾忣偄闉嶉梺缁樼壄缁茶法鍒掗悽绋跨闁告侗鍨抽ˇ?
     const positionsPoolMap = useMemo(() => {
         const map = new Map();
         for (const p of positions) {
@@ -879,7 +875,6 @@ export default function App() {
         return map;
     }, [positions]);
 
-    // 闂備礁鍚嬮崕鎶藉床閼艰翰浜归柛銉墯閸嬨劑鏌曟繝蹇曠暠闁绘挻娲栭湁闁绘娅曠亸顐ょ磽瀹ュ懏鍣虹紒瀣樀椤㈡﹢鎮╁畷鍥ㄦ婵犳鍠栧﹢杈ㄦ叏閹绢喗鍋ゆ繛鍡樻尭閹瑰爼鏌℃径瀣嚋缂佹彃顭烽弻娑㈠箳閹垮啯鐣介梺闈涙閸熸挳寮澶婇唶闁靛繆鍓濆▓銏＄箾鐎涙鐭婄紒銊ㄥ亹濡叉劙宕滄担铏癸紲?hot_pools API闂?
     const positionsPoolAddresses = useMemo(() => {
         return Array.from(positionsPoolMap.keys());
     }, [positionsPoolMap]);
@@ -896,7 +891,6 @@ export default function App() {
     }, [hotPoolsFilter]);
 
     const hotPoolsVisibleRows = useMemo(() => {
-        // 1. 闂備胶顭堢换鎰版偋閹邦喗宕叉俊顖氬悑閸嬫鈧厜鍋撻柍褜鍓熼悰顕€宕堕鈧€氬顭跨捄铏圭伇闁规枻缍佸?
         let filtered = hotPoolsRows;
         if (hotPoolsFilterEnabled) {
             const minFees = hotPoolsFilter.minFees;
@@ -913,7 +907,6 @@ export default function App() {
                 const tvl = parseMetricNumber(row?.current_pool_value);
                 const volume = parseMetricNumber(row?.total_volume);
                 const txCount = parseMetricNumber(row?.transaction_count);
-                // 濠电姷顣介埀顒€鍟块埀顒€缍婇幃妯诲緞閹邦厼浠洪梺闈涱煭缁犳垿鎮￠弴銏＄厸闁割偅绻嶅Σ椋庣磼椤斿搫濡介柟宄版噹椤撳ジ宕ㄩ鍨儓闂佸搫顦弲婊堟偡閵堝鐓傛繝濠傚敪瑜旈幃鈺呮嚑椤掍焦鍟㈤梻浣瑰缁嬫垿鎯屾笟鈧幃婊堟晜閼恒儰姘﹂梺鎼炲劗閺呮繈骞楅敐澶嬧拺妞ゆ劑鍩勫褏绱掓潏銊ф噭闁逛究鍔庨埀顒婄秵閸撴盯鎯岄幒妤佺厸闁告洦鍋勯埛鏃堟煏閸ャ劌鍝洪柡?
                 const poolAddr = String(row?.pool_address || '').toLowerCase();
                 if (positionsPoolMap.has(poolAddr)) return true;
                 if (keyword) {
@@ -934,7 +927,6 @@ export default function App() {
             });
         }
 
-        // 2. 濠电偞鍨堕幐楣冨磿閵堝鍎婇柍鈺佸暟閳绘梹銇勮箛鎾村櫧婵炵鍔戦幃妤€鈽夊▎蹇擃潔闂佺鍐胯含鐎?userPositionUsd 闂佽瀛╃粙鎺椼€冮崱娑辨晩?
         const enriched = filtered.map(pool => {
             const addr = String(pool?.pool_address || '').toLowerCase();
             return {
@@ -943,18 +935,16 @@ export default function App() {
             };
         });
 
-        // 3. 闂備礁婀遍崕銈囨暜閹烘棁濮虫い鎾卞灪閺咁剚鎱ㄥ鍡楀箺缂佺姵甯掗湁闁绘娅曠亸顐ょ磽瀹ュ懏鍤囬柟顖氬暣瀹曠喖顢橀悩宕団偓顓熶繆閻愵亜鈧盯顢欓幇顔筋潟婵犻潧顑呯粻鏉款熆鐠轰警妲烘繛澶堝灩闇夐柨婵嗘噽鏁堥梺闈╃悼閸嬫捇鏁嶉幇顑芥斀閻庯綆鍋掗埀顒佺墵楠炴牠寮堕幋锔惧椽缂備線浜舵禍璺虹暦濡ゅ懎瀚夐柣銏㈡暩閳诲繑绻涢敐鍛缂佽鍟伴埀顒€鐏氬Λ鍐ㄧ暦閵忋倖鍋勭紒妤勩€€閸嬫挻鎯旈姀鈥冲妳?
         return enriched.sort((a, b) => {
             if (a.userPositionUsd > 0 && b.userPositionUsd <= 0) return -1;
             if (b.userPositionUsd > 0 && a.userPositionUsd <= 0) return 1;
             if (a.userPositionUsd > 0 && b.userPositionUsd > 0) {
                 return b.userPositionUsd - a.userPositionUsd;
             }
-            return 0; // 濠电儑绲藉ú锔炬崲閸愵亖鍋撻崹顐ｎ棃鐎规洏鍨介幃銏㈢箔鐞涒€充壕閹兼番鍨洪崕?
+            return 0;
         });
     }, [hotPoolsFilter, hotPoolsFilterEnabled, hotPoolsRows, positionsPoolMap]);
 
-    // 闂備礁鎼鍛偓姘煎墰缁辨捇骞樼紒妯衡偓缁樸亜閹惧崬鐏柨娑樻湰閹便劑宕烽鐐愩垽鏌ｉ埄鍐噰闁诡垰鍟村畷鐔碱敃閵忕姵缍夐梻浣告啞閻熴儱顕ｉ崼鏇炴辈闁绘梻鍘х粻鍙夈亜閺冨洤袚鐞涘ジ鏌?(protocol_version:pool_address -> previous data)
     const previousHotPoolsMap = useMemo(() => {
         return previousHotPoolsDataRef.current;
     }, [hotPoolsRows]);
@@ -1081,7 +1071,6 @@ export default function App() {
         if (savedTheme === 'light' || savedTheme === 'dark') {
             setTheme(savedTheme);
         } else {
-            // 濠殿喗甯楃粙鎺椻€﹂崼銉晣缂備焦蓱婵挳鎮归幁鎺戝闁哄棗绻橀弻锟犲幢濮楀棙鐣芥繝銏㈡嚀閿曘儳绮欐径瀣瘈婵ê鍚嬪В?
             setTheme('dark');
         }
 
@@ -1113,7 +1102,6 @@ export default function App() {
         };
     }, []);
 
-    // 闂佸搫顦弲婊呯矙閹寸姭鍋撶憴鍕枙鐎殿喖鐖煎杈ㄣ亜閹惧瓨鍊愮€殿噮鍠氶幑鍕倻濡厧缍?- 闂備礁鎼€氼剚鏅舵禒瀣︽慨姗嗗幗婵粍銇勯弮鈧娆撳吹閸曨垱鐓曞┑鐘插暙缁椻晜銇勯幘瀛樺€愮€?
     useEffect(() => {
         const currentPollSec = isHotPools ? hotPoolsPollIntervalSec : pollIntervalSec;
 
@@ -1123,10 +1111,8 @@ export default function App() {
             setPollProgress(progress);
         };
 
-        // 缂傚倷鐒﹂弻銊╊敄閸涱厾鏆ら柛鈩冪☉閸楁娊鎮楀☉娅虫垿鎮￠埀顒佺箾閹寸偞灏ㄩ柛瀣尰缁?
         updateProgress();
 
-        // 婵?00ms闂備礁鎼ú銈夋偤閵娾晛钃熷┑鐘插暞娴溿倖绻涢幋鐏活亪顢?
         pollProgressRef.current = setInterval(updateProgress, 100);
 
         return () => {
@@ -1134,15 +1120,12 @@ export default function App() {
         };
     }, [isHotPools, hotPoolsPollIntervalSec, pollIntervalSec]);
 
-    // 闂佸搫顦遍崕鎰板窗濞戙埄鏁嬫俊銈呭暊閸嬫捇鎮烽悧鍫熸嫳闂佹悶鍔嶅畝绋款嚕椤曗偓瀹曞ジ寮撮悙鎼户缂傚倸鍊搁崰姘跺窗濞戞碍宕叉俊顖滅帛閸?
     const lastUpdatedAtRef = useRef(null);
     useEffect(() => {
-        // 濠电偠鎻紞鈧繛澶嬫礋瀵?updatedAt 闂備礁鎼ˇ顓㈠磿闁秴鍨傚ù鐘差儏濡ɑ銇勯幘璺烘瀾婵炲牆鐖奸弻鐔烘嫚閳ヨ櫕鐏嶅┑鈥冲级閹倸鐣烽妷鈺傛櫆闁绘劦鍓欓悞绋库攽椤旂晫绠扮紒鍙夊劤鐓ら柛褎顨呭Λ妯何涙０浣藉厡闁?
         const currentUpdatedAt = data?.updated_at || hotPoolsData?.updated_at;
         if (currentUpdatedAt && currentUpdatedAt !== lastUpdatedAtRef.current) {
             lastPollTimeRef.current = Date.now();
             setPollProgress(0);
-            // 闂備礁鎲￠悷顖涚濠婂喛鑰挎い蹇撶墛閸庢垿鏌ｉ弬鍨棌闁告柡鍋撻梻浣告惈閻楀棝藝娴兼潙钃熷┑鐘叉搐閺嬩線鏌ｅΔ鈧悧鍡欑矈閿曞倹鐓涢柛鎰ㄦ櫅閸斿墎鎮┑瀣厱婵炲棙鍔曢悘杈╂偖濠靛鍋℃繛鍡楁禋濡插摜鈧鍠涙慨銈夋晬?
             lastUpdatedAtRef.current = currentUpdatedAt;
         }
     }, [data?.updated_at, hotPoolsData?.updated_at]);
@@ -1320,7 +1303,6 @@ export default function App() {
         };
     }, [apiBaseUrl, initData, hasInitData, showAdmin, adminSelectedUserId, pollIntervalSec]);
 
-    // 闂備胶绮崺鍫ュ矗閸愩剮娑㈩敆閳ь剚鏅ラ梺缁橆焾鐏忔瑩骞楀澶嬬厸濞达絽鎼。鑲┾偓瑙勬尫閻掞箓骞堥妸褉鍋撻敐搴″闁活厽甯￠弻娑㈠籍閸屾顒佺箾閺夋垶鍠橀柡浣哥Ч瀹曞ジ濡烽鑺ヮ吙闂備礁鎲″缁樻叏閹灐褰掑炊椤掍焦娅?
     useEffect(() => {
         let aborted = false;
         const controller = new AbortController();
@@ -1348,7 +1330,6 @@ export default function App() {
                     signal: controller.signal,
                 });
                 if (aborted) return;
-                // 闂備線娼荤拹鐔煎礉瀹ュ悿娲锤濡も偓濡﹢鏌ｅΔ鈧悧濠傗枔閸洘鐓欓悹鍥ｂ偓铏亞缂備胶濯寸紞浣哥暦濠婂喚鍚嬮煫鍥ㄦ礈椤︻喗绻涢敐鍛缂佽鍊块幃娲Ω閵婏絼姹楅梺瑙勫劤閸熷潡路閸涘瓨鐓涘ù锝呮惈椤ｈ偐鈧鎸烽悞锕傚箯閸涱収鐓ラ柍褜鍓涢幏褰掓偄閻撳骸鍋嶉梺绯曞墲椤ㄥ懘鎷烘径鎰厸濞达絽鎼。鑲┾偓瑙勬尫缁舵岸寮澶婇唶婵犲﹤鍟犻弸蹇涙⒑?setState 闂備焦鎮堕崕鎶藉磻閻樼粯鍎嶉柣鏂垮悑閻掑ジ鏌涢…鎴濇灈閻㈩垱濞婂濠氬磼閵堝懎绠归柣搴＄仛閿曘垽鐛箛娑樺瀭妞ゆ棁鍋愰崢鎺楁⒑閸濆嫬鏁抽柛鏇ㄥ墯椤斿秹姊虹涵鍜佸殐闁革綆鍨冲Σ?
                 setHotPoolsData((prev) => {
                     if (prev?.data) {
                         const prevMap = {};
@@ -2120,12 +2101,6 @@ export default function App() {
         }
     };
 
-    // 濠殿喗甯楃粙鎺楀垂閻㈢绠栭柡鍥ュ灩绾偓闂佸搫娲ㄩ崰鎰板箚濞嗗緷褰掓晲閸℃瑧鐓€濡炪倧鑵归弲鐘诲箖?
-
-
-
-    // 闂備礁鎲＄敮妤冩崲閸岀儑缍栭柟鐗堟緲缁€宀勬煛瀹ュ啫濡芥い蟻鍥ㄧ厱闁哄啫鍊搁瀷濠电偞娼欏ú锕傗€旈埀顒勬煙鐎涙绠栭柛濠冨▕閺屾稑螖娴ｅ湱顦ラ梺纭呮腹閸楀啿鐣峰Ο铏规殝闁哄娉曢妶閬嶆⒑閸涘﹤绗氭い銊ヮ樀婵?
-
     const loadGlobalConfig = async () => {
         if (!hasInitData) {
             setGlobalConfigError('缺少 Telegram 身份信息，请从机器人重新打开小程序。');
@@ -2210,11 +2185,11 @@ export default function App() {
         try {
             const resp = await stopTask({ apiBaseUrl, initData, taskId: id });
             if (resp?.status === 'stopped' || resp?.pending === false) {
-                // Already stopped or immediate stop 闂?all done
+                // Already stopped or completed immediately.
                 setOperationProgress(prev => prev?.operation === 'close_position'
                     ? { ...prev, currentStep: 3, status: 'done' } : prev);
             } else {
-                // Async 闂?advance to step 1 only if WS hasn't already gone further
+                // Async path: advance to step 1 only if WS has not already moved forward.
                 setOperationProgress(prev => {
                     if (!prev || prev.operation !== 'close_position') return prev;
                     if (prev.status === 'done' || prev.status === 'error') return prev;
@@ -2454,7 +2429,6 @@ export default function App() {
         }
     };
 
-    // 闂備礁缍婂褏绱炴繝鍥ч棷婵炲樊浜滅粻鑲┾偓骞垮劚鐎氼喚绮欐繝鍥ㄧ厱闁硅揪绲借闂?
     const toggleTaskSelection = (taskId) => {
         const newSet = new Set(selectedTaskIds);
         if (newSet.has(taskId)) {
@@ -2505,7 +2479,6 @@ export default function App() {
         );
     };
 
-    // 闂佽崵濮崇欢銈囨閺囥垺鍋╁┑鐘宠壘鐎氬銇勯幒鍡椾壕濠电姭鍋撻柟缁㈠枛缁€鍡涙⒑閸噮鍎愰柣鎾亾闂備礁鎲￠懝鎯规搴″灊闁斥晛鍟禍銈夋煕閵夈垺娅嗛柣锝堜含缁辨帗寰勭€ｎ亞鐟查梺?
     const localUpdateSecAgo = useMemo(() => {
         const elapsed = tick - lastPollTimeRef.current;
         return Math.max(0, Math.floor(elapsed / 1000));
@@ -2906,7 +2879,6 @@ export default function App() {
                 ) : null
             }
 
-            {/* 闂備礁缍婂褏绱炴繝鍥ч棷婵炲樊浜滅粻鑲┾偓骞垮劚鐎氼喚绮欐繝鍕ㄥ亾鐟欏嫭鍋犻柛搴ㄤ憾瀹曪綁宕稿Δ鈧崘鈧?*/}
             {
                 isPositions && !showAdmin && visiblePositions.length > 1 && (
                     <div className="mb-4 flex items-center justify-between gap-2">
@@ -2935,7 +2907,7 @@ export default function App() {
                                     {selectedTaskIds.size === visiblePositions.length ? '取消全选' : '全选'}
                                 </button>
                                 <span className="text-xs text-zinc-500 dark:text-white/50">
-                                    宸查€?{selectedTaskIds.size}
+                                    已选 {selectedTaskIds.size}
                                 </span>
                                 <button
                                     type="button"
@@ -2951,14 +2923,13 @@ export default function App() {
                                     disabled={selectedTaskIds.size === 0 || batchLoading}
                                     className="inline-flex items-center rounded-xl bg-emerald-500/15 px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-500/25 disabled:opacity-50 dark:text-emerald-200"
                                 >
-                                    鎭㈠鎵€閫?                                </button>
+                                    恢复所选
+                                </button>
                             </div>
                         )}
                     </div>
                 )
             }
-
-            {/* 缂傚倷绀侀ˇ顖炩€﹀畡鎵虫瀺閹兼番鍨婚々?闂備礁鎼Λ妤呭磹閻熸嫈娑㈠Χ婢跺娈滃銈呯箰鐎氼剝顤勫┑鐐差嚟婵箖顢氳閹?闂備礁婀辩划顖炲礉濡ゅ懎桅?*/}
 
             <div className="space-y-4 animate-fade-in-up">
                 {isHotPools

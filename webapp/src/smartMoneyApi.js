@@ -255,3 +255,70 @@ export async function testSMGoldenDogConfig({ apiBaseUrl, initData, chain = 'bsc
         signal,
     });
 }
+
+export async function fetchSMWatchWallets({ apiBaseUrl, initData, chain = 'bsc', signal }) {
+    const base = normalizeBase(apiBaseUrl);
+    const params = new URLSearchParams();
+    if (initData) params.set('initData', initData);
+    if (chain) params.set('chain', chain);
+    return goldenDogRequest(`${base}/api/smart_money_watch_wallets?${params.toString()}`, { signal });
+}
+
+export async function saveSMWatchWallets({ apiBaseUrl, initData, chain = 'bsc', walletAddress, watched, wallets, signal }) {
+    const base = normalizeBase(apiBaseUrl);
+    return goldenDogRequest(`${base}/api/smart_money_watch_wallets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            initData,
+            chain,
+            wallet_address: walletAddress,
+            watched,
+            wallets,
+        }),
+        signal,
+    });
+}
+
+export async function fetchSMWatchOpenAlertConfig({ apiBaseUrl, initData, chain = 'bsc', signal }) {
+    const base = normalizeBase(apiBaseUrl);
+    const params = new URLSearchParams();
+    if (initData) params.set('initData', initData);
+    if (chain) params.set('chain', chain);
+    return goldenDogRequest(`${base}/api/smart_money_watch_open_alert_config?${params.toString()}`, { signal });
+}
+
+export async function saveSMWatchOpenAlertConfig({ apiBaseUrl, initData, chain = 'bsc', config, signal }) {
+    const base = normalizeBase(apiBaseUrl);
+    return goldenDogRequest(`${base}/api/smart_money_watch_open_alert_config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, chain, ...(config || {}) }),
+        signal,
+    });
+}
+
+export async function testSMWatchOpenAlertConfig({ apiBaseUrl, initData, chain = 'bsc', signal }) {
+    const base = normalizeBase(apiBaseUrl);
+    return goldenDogRequest(`${base}/api/smart_money_watch_open_alert_test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, chain }),
+        signal,
+    });
+}
+
+export function buildSMEventsWsUrl(apiBaseUrl) {
+    const base = normalizeBase(apiBaseUrl) || (typeof window !== 'undefined' ? window.location.origin : '');
+    if (!base) return '';
+    try {
+        const url = new URL(base, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+        url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+        url.pathname = '/ws/sm/events';
+        url.search = '';
+        url.hash = '';
+        return url.toString();
+    } catch {
+        return '';
+    }
+}
