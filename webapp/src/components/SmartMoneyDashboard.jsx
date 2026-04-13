@@ -2614,17 +2614,35 @@ async function playSmartMoneyBeep() {
         }
     }
 
-    const oscillator = ctx.createOscillator();
-    const gainNode = ctx.createGain();
-    oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(988, ctx.currentTime);
-    gainNode.gain.setValueAtTime(0.0001, ctx.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.11, ctx.currentTime + 0.01);
-    gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.16);
-    oscillator.connect(gainNode);
-    gainNode.connect(ctx.destination);
-    oscillator.start();
-    oscillator.stop(ctx.currentTime + 0.16);
+    // 创建一个更悦耳的三音符上升旋律
+    const notes = [
+        { freq: 523.25, start: 0, duration: 0.12 },      // C5
+        { freq: 659.25, start: 0.10, duration: 0.12 },   // E5
+        { freq: 783.99, start: 0.20, duration: 0.18 }    // G5
+    ];
+
+    const masterGain = ctx.createGain();
+    masterGain.gain.setValueAtTime(0.15, ctx.currentTime);
+    masterGain.connect(ctx.destination);
+
+    notes.forEach(note => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(note.freq, ctx.currentTime + note.start);
+
+        // 平滑的音量包络
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime + note.start);
+        gain.gain.exponentialRampToValueAtTime(1, ctx.currentTime + note.start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + note.start + note.duration);
+
+        osc.connect(gain);
+        gain.connect(masterGain);
+        osc.start(ctx.currentTime + note.start);
+        osc.stop(ctx.currentTime + note.start + note.duration);
+    });
+
     return true;
 }
 
@@ -3330,9 +3348,16 @@ function GoldenDogPanelContent({
                                             background: 'rgba(255,255,255,0.03)',
                                         }}
                                     >
-                                        <div style={{ display: 'grid', gap: 4 }}>
-                                            <span style={{ fontSize: 13, color: '#e4e4e7', fontWeight: 600 }}>{shortAddr(walletAddress)}</span>
-                                            <span style={{ fontSize: 11, color: '#71717a' }}>{walletAddress}</span>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                                            <img
+                                                src={resolveWalletAvatarSrc(walletAddress)}
+                                                alt=""
+                                                style={{ width: 36, height: 36, borderRadius: '50%', flexShrink: 0 }}
+                                            />
+                                            <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
+                                                <span style={{ fontSize: 13, color: '#e4e4e7', fontWeight: 600 }}>尾号 {tailAddr(walletAddress)}</span>
+                                                <span style={{ fontSize: 11, color: '#a1a1aa' }}>{shortAddr(walletAddress)}</span>
+                                            </div>
                                         </div>
                                         <button
                                             type="button"
