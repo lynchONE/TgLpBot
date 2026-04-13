@@ -55,9 +55,64 @@ func (s *GlobalConfigService) Update(userID uint, updates map[string]interface{}
 		return nil, err
 	}
 
-	if err := database.DB.Model(cfg).Updates(updates).Error; err != nil {
-		return nil, fmt.Errorf("update global config failed: %w", err)
+	oldRebalanceTimeout := cfg.RebalanceTimeout
+	newRebalanceTimeout, syncTaskRebalanceTimeout := rebalanceTimeoutUpdate(updates)
+
+	if err := database.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(cfg).Updates(updates).Error; err != nil {
+			return fmt.Errorf("update global config failed: %w", err)
+		}
+
+		if syncTaskRebalanceTimeout && newRebalanceTimeout != oldRebalanceTimeout {
+			if err := tx.Model(&models.StrategyTask{}).
+				Where("user_id = ? AND status <> ? AND reopen_delay_seconds = ?", userID, models.StrategyStatusStopped, oldRebalanceTimeout).
+				Update("reopen_delay_seconds", newRebalanceTimeout).Error; err != nil {
+				return fmt.Errorf("sync task rebalance timeout failed: %w", err)
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	return s.GetOrCreate(userID)
+}
+
+func rebalanceTimeoutUpdate(updates map[string]interface{}) (int, bool) {
+	if len(updates) == 0 {
+		return 0, false
+	}
+	raw, ok := updates["rebalance_timeout"]
+	if !ok {
+		return 0, false
+	}
+
+	switch v := raw.(type) {
+	case int:
+		return v, true
+	case int8:
+		return int(v), true
+	case int16:
+		return int(v), true
+	case int32:
+		return int(v), true
+	case int64:
+		return int(v), true
+	case uint:
+		return int(v), true
+	case uint8:
+		return int(v), true
+	case uint16:
+		return int(v), true
+	case uint32:
+		return int(v), true
+	case uint64:
+		return int(v), true
+	case float32:
+		return int(v), true
+	case float64:
+		return int(v), true
+	default:
+		return 0, false
+	}
 }

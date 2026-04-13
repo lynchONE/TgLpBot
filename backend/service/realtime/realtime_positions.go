@@ -2776,12 +2776,13 @@ func formatOutOfRange(task *models.StrategyTask, tickLower, tickUpper int, curre
 	if task.Paused && (task.Status == models.StrategyStatusRunning || task.Status == models.StrategyStatusWaiting) {
 		return "⏸"
 	}
+	_, _, priceUp, priceDown := pricing.PriceDirectionFromTicks(task, tickLower, tickUpper, currentTick)
+	if strategy.ShouldStopOutOfRangeImmediately(task, priceUp, priceDown) {
+		return "0/0"
+	}
 	threshold := task.ReopenDelaySeconds
-	if currentTick != 0 && task.StopLossEnabled && task.StopLossDelaySeconds > 0 {
-		_, _, _, priceDown := pricing.PriceDirectionFromTicks(task, tickLower, tickUpper, currentTick)
-		if priceDown {
-			threshold = task.StopLossDelaySeconds
-		}
+	if task.StopLossEnabled && task.StopLossDelaySeconds > 0 && priceDown {
+		threshold = task.StopLossDelaySeconds
 	}
 	if threshold <= 0 {
 		return "0/0"

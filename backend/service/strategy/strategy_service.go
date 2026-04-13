@@ -84,7 +84,10 @@ func (s *StrategyService) Stop() {
 
 // CreateTask creates a new strategy task
 func (s *StrategyService) CreateTask(task *models.StrategyTask) error {
-	return database.DB.Create(task).Error
+	if err := database.DB.Create(task).Error; err != nil {
+		return err
+	}
+	return ApplyTaskCreateOverrides(task)
 }
 
 // runLoop is the main monitoring loop
@@ -295,6 +298,18 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 
 	// 1. Price above range (涨破)
 	if isUp {
+		if ShouldStopOutOfRangeImmediately(task, isUp, isDown) {
+			if isFirstTimeOutOfRange {
+				if s.extraNotificationsEnabled(task.UserID) {
+					s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 涨破区间上界\n%s\n%s\n再平衡已关闭，已自动停止任务",
+						task.ID, alertLines.Current, alertLines.Upper))
+				}
+				log.Printf("[Strategy] 任务 #%d 涨破区间，再平衡已关闭，立即停止任务", task.ID)
+			}
+			s.executeRebalance(task, currentTick, now, "🛑 超出区间且再平衡已关闭，自动停止")
+			return
+		}
+
 		// 首次检测到涨破，立即通知用户
 		if isFirstTimeOutOfRange {
 			if s.extraNotificationsEnabled(task.UserID) {
@@ -346,6 +361,18 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 				s.executeStopLoss(task, now, "⚠️ 跌破区间触发止损")
 			}
 		} else {
+			if ShouldStopOutOfRangeImmediately(task, isUp, isDown) {
+				if isFirstTimeOutOfRange {
+					if s.extraNotificationsEnabled(task.UserID) {
+						s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 跌破区间下界\n%s\n%s\n再平衡已关闭，已自动停止任务",
+							task.ID, alertLines.Current, alertLines.Lower))
+					}
+					log.Printf("[Strategy] 任务 #%d 跌破区间，再平衡已关闭，立即停止任务", task.ID)
+				}
+				s.executeRebalance(task, currentTick, now, "🛑 超出区间且再平衡已关闭，自动停止")
+				return
+			}
+
 			// Case B: StopLoss Disabled -> Treat as Rebalance
 			// 首次检测到跌破，立即通知用户
 			if isFirstTimeOutOfRange {
@@ -367,6 +394,16 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 		}
 		return
 	}
+}
+
+func ShouldStopOutOfRangeImmediately(task *models.StrategyTask, isUp bool, isDown bool) bool {
+	if task == nil || task.RebalanceEnabled {
+		return false
+	}
+	if isUp {
+		return true
+	}
+	return isDown && !task.StopLossEnabled
 }
 
 // formatDelayTime 格式化延迟时间，小于60秒显示秒，否则显示分钟

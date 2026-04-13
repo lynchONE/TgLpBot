@@ -17,6 +17,7 @@ import (
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/pool"
 	"TgLpBot/service/pricing"
+	"TgLpBot/service/strategy"
 	userSvc "TgLpBot/service/user"
 	"TgLpBot/service/wallet"
 
@@ -740,13 +741,9 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "创建任务失败", http.StatusInternalServerError)
 		return
 	}
-	// Explicitly write rebalance_enabled=false: GORM v2 skips bool zero-values when the column has a
-	// database default (default:true → default:false migration may not have applied on existing DBs).
-	if ctx.task.ID > 0 {
-		if upErr := database.DB.Model(ctx.task).Update("rebalance_enabled", false).Error; upErr != nil {
-			log.Printf("[OpenPosition] failed to force rebalance_enabled=false for task %d: %v", ctx.task.ID, upErr)
-		}
-		ctx.task.RebalanceEnabled = false
+	// Ensure user-configured zero/false values are persisted instead of falling back to DB defaults.
+	if upErr := strategy.ApplyTaskCreateOverrides(ctx.task); upErr != nil {
+		log.Printf("[OpenPosition] failed to apply task create overrides for task %d: %v", ctx.task.ID, upErr)
 	}
 
 	enterRes, err := ctx.liquidityService.EnterTaskFromUSDTWithOptions(ctx.user.ID, ctx.task, liquidity.TxOptions{

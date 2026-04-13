@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PikPak 媒体整理器设置</title>
+    <link rel="stylesheet" href="popup.css" />
+    <style>
+      body {
+        max-width: 960px;
+        margin: 0 auto;
+      }
+
+      .options-page {
+        padding: 28px 20px 40px;
+      }
+
+      .field-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .field,
+      .textarea-field {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      label strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      input[type="number"],
+      input[type="text"],
+      textarea {
+        width: 100%;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        font: inherit;
+        color: var(--ink);
+        background: rgba(255, 255, 255, 0.8);
+      }
+
+      textarea {
+        min-height: 180px;
+        resize: vertical;
+      }
+
+      .checkbox {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .toolbar {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+    </style>
+  </head>
+  <body>
+    <main class="options-page">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">PikPak Media Organizer</p>
+          <h1>扩展设置</h1>
+          <p class="subtle">这里控制扫描范围、字幕识别、小文件阈值，以及番号到女优中文名的补充映射。</p>
+        </div>
+      </section>
+
+      <section class="toolbar">
+        <button class="primary" id="saveBtn" type="button">保存设置</button>
+        <button id="resetBtn" type="button">恢复默认</button>
+        <button id="exportBtn" type="button">导出 JSON</button>
+        <label class="ghost" style="text-align:center; cursor:pointer;">
+          导入 JSON
+          <input id="importInput" type="file" accept="application/json" style="display:none" />
+        </label>
+      </section>
+
+      <section class="summary-card">
+        <div class="field-grid">
+          <div class="field">
+            <label class="checkbox">
+              <input id="recursiveScan" type="checkbox" />
+              <span>递归扫描当前目录及其子目录</span>
+            </label>
+          </div>
+          <div class="field">
+            <label class="checkbox">
+              <input id="yearOnlyFallbackEnabled" type="checkbox" />
+              <span>缺少女优中文名时退化到仅按年份分类</span>
+            </label>
+          </div>
+          <div class="field">
+            <label class="checkbox">
+              <input id="requireChineseActressName" type="checkbox" />
+              <span>仅接受女优中文名作为目标目录</span>
+            </label>
+          </div>
+          <div class="field">
+            <label>
+              <strong>小文件阈值 MB</strong>
+              <input id="minVideoSizeMb" type="number" min="1" step="1" />
+            </label>
+          </div>
+          <div class="field">
+            <label>
+              <strong>元数据超时毫秒</strong>
+              <input id="providerTimeoutMs" type="number" min="1000" step="1000" />
+            </label>
+          </div>
+          <div class="field">
+            <label>
+              <strong>元数据并发数</strong>
+              <input id="maxMetadataConcurrency" type="number" min="1" max="4" step="1" />
+            </label>
+          </div>
+          <div class="field">
+            <label>
+              <strong>元数据缓存小时</strong>
+              <input id="metadataCacheTtlHours" type="number" min="1" step="1" />
+            </label>
+          </div>
+          <div class="field">
+            <label>
+              <strong>元数据源顺序</strong>
+              <input id="metadataProviders" type="text" />
+            </label>
+            <p class="subtle">用逗号分隔，例如 `missavJina,duckduckgoSearch,jableJina`。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="list-card">
+        <div class="summary-head">
+          <h2>字幕关键词</h2>
+        </div>
+        <div class="textarea-field">
+          <textarea id="subtitleKeywords"></textarea>
+          <p class="subtle">每行一个关键词，用于重复组优先保留中文字幕版本。</p>
+        </div>
+      </section>
+
+      <section class="list-card">
+        <div class="summary-head">
+          <h2>番号到女优中文名覆盖</h2>
+        </div>
+        <div class="textarea-field">
+          <textarea id="codeActressOverrides"></textarea>
+          <p class="subtle">JSON 对象，例如 `{ "SONE-001": "三田真铃" }`。</p>
+        </div>
+      </section>
+
+      <section class="summary-card">
+        <p class="subtle" id="statusLabel">设置尚未保存。</p>
+      </section>
+    </main>
+
+    <script src="shared.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

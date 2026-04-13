@@ -1,0 +1,53 @@
+{
+  "manifest_version": 3,
+  "name": "PikPak 媒体整理器",
+  "version": "0.1.0",
+  "description": "在已登录的 PikPak Web 页面中扫描视频、按番号去重、清理小文件，并按添加年份和女优中文名分类。",
+  "permissions": [
+    "storage",
+    "tabs",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://mypikpak.com/*",
+    "https://*.mypikpak.com/*",
+    "https://r.jina.ai/*",
+    "https://duckduckgo.com/*",
+    "https://jable.tv/*",
+    "https://*.jable.tv/*",
+    "https://www.javdatabase.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "PikPak 媒体整理器",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://mypikpak.com/*",
+        "https://*.mypikpak.com/*"
+      ],
+      "js": [
+        "page-hook.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://mypikpak.com/*",
+        "https://*.mypikpak.com/*"
+      ],
+      "js": [
+        "content-script.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ]
+}

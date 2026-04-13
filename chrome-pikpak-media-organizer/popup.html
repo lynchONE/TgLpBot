@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PikPak 媒体整理器</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="popup">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">PikPak Media Organizer</p>
+          <h1>PikPak 媒体整理器</h1>
+          <p class="subtle" id="pageStatusLabel">正在识别当前页面...</p>
+        </div>
+        <button class="ghost" id="openOptionsBtn" type="button">设置</button>
+      </header>
+
+      <section class="toolbar">
+        <button id="refreshStatusBtn" type="button">刷新状态</button>
+        <button id="reloadTabBtn" type="button">重载页面</button>
+        <button class="primary" id="scanBtn" type="button">扫描并生成预览</button>
+        <button class="danger" id="applyBtn" type="button">执行计划</button>
+        <button class="primary wide" id="quickOrganizeBtn" type="button">直接执行当前目录</button>
+      </section>
+
+      <section class="summary-card">
+        <div class="summary-head">
+          <h2>运行状态</h2>
+          <span class="subtle mono" id="progressValue">空闲</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <p class="subtle" id="progressText">等待开始。</p>
+      </section>
+
+      <section class="stats">
+        <article><span class="label">删除</span><strong id="deleteCount">0</strong></article>
+        <article><span class="label">移动</span><strong id="moveCount">0</strong></article>
+        <article><span class="label">跳过</span><strong id="skipCount">0</strong></article>
+        <article><span class="label">已就位</span><strong id="keepCount">0</strong></article>
+      </section>
+
+      <section class="settings-summary">
+        <div><span>递归扫描</span><strong id="recursiveValue">-</strong></div>
+        <div><span>小文件阈值</span><strong id="thresholdValue">-</strong></div>
+        <div><span>女优中文名</span><strong id="actressPolicyValue">-</strong></div>
+      </section>
+
+      <section class="summary-card">
+        <div class="summary-head">
+          <h2>预览摘要</h2>
+          <button class="ghost small" id="clearPlanBtn" type="button">清空预览</button>
+        </div>
+        <p class="subtle" id="summaryText">尚未生成计划。</p>
+        <p class="subtle mono" id="metadataText"></p>
+        <p class="subtle" id="breakdownText"></p>
+        <div class="mini-section">
+          <h3>待确保目录</h3>
+          <div class="tag-group" id="targetFolderList">
+            <div class="empty">还没有目标目录。</div>
+          </div>
+        </div>
+        <div class="mini-section">
+          <h3>待清理源目录</h3>
+          <div class="tag-group" id="sourceFolderList">
+            <div class="empty">杩樻病鏈夋簮鐩綍娓呯悊鍊欓€夈€?/div>
+          </div>
+        </div>
+        <div class="mini-section">
+          <h3>待删除空目录</h3>
+          <div class="tag-group" id="folderDeleteList">
+            <div class="empty">还没有目录删除候选。</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="list-card">
+        <div class="summary-head">
+          <h2>计划详情</h2>
+          <span class="subtle" id="updatedAtLabel">-</span>
+        </div>
+        <div class="list" id="actionList">
+          <div class="empty">打开 PikPak 网盘页面，刷新一次，再点击“扫描并生成预览”。</div>
+        </div>
+      </section>
+
+      <section class="list-card">
+        <div class="summary-head">
+          <h2>运行日志</h2>
+        </div>
+        <div class="list" id="executionList">
+          <div class="empty">还没有运行记录。</div>
+        </div>
+      </section>
+    </main>
+
+    <script src="shared.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
