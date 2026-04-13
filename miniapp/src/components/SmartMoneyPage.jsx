@@ -565,9 +565,16 @@ function GoldenDogPageContent({
                                 <div className="text-[11px] font-semibold text-sky-200">特别关注列表</div>
                                 {watchedWalletList.length ? watchedWalletList.map((walletAddress) => (
                                     <div key={walletAddress} className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.05] bg-black/20 px-3 py-2">
-                                        <div className="min-w-0">
-                                            <div className="text-[12px] font-semibold text-zinc-100">{shortAddr(walletAddress)}</div>
-                                            <div className="truncate text-[10px] text-zinc-500">{walletAddress}</div>
+                                        <div className="flex min-w-0 items-center gap-2.5">
+                                            <img
+                                                src={resolveWalletAvatarSrc(walletAddress)}
+                                                alt=""
+                                                className="h-9 w-9 flex-shrink-0 rounded-full"
+                                            />
+                                            <div className="min-w-0">
+                                                <div className="text-[12px] font-semibold text-zinc-100">尾号 {tailAddr(walletAddress)}</div>
+                                                <div className="text-[10px] text-zinc-400">{shortAddr(walletAddress)}</div>
+                                            </div>
                                         </div>
                                         <button
                                             type="button"
@@ -593,9 +600,9 @@ function GoldenDogPageContent({
 }
 
 const GOLDEN_DOG_INTENSITY_OPTIONS = [
-    { value: 'ring', label: '\u54CD\u94C3', description: '\u666E\u901A\u63D0\u9192' },
-    { value: 'persistent_ring', label: '\u6301\u7EED\u54CD\u94C3', description: '\u6301\u7EED\u63D0\u9192' },
-    { value: 'critical_ring', label: '\u9759\u97F3\u5F3A\u63D0\u9192', description: '\u9759\u97F3\u4E5F\u54CD' },
+    { value: 'ring', label: '响铃', description: '普通提醒' },
+    { value: 'persistent_ring', label: '持续响铃', description: '持续提醒' },
+    { value: 'critical_ring', label: '静音强提醒', description: '静音也响' },
 ];
 
 const GOLDEN_DOG_FEE_RATE_OPTIONS = [
@@ -746,17 +753,35 @@ async function playSmartMoneyBeep() {
         }
     }
 
-    const oscillator = ctx.createOscillator();
-    const gainNode = ctx.createGain();
-    oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(988, ctx.currentTime);
-    gainNode.gain.setValueAtTime(0.0001, ctx.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.11, ctx.currentTime + 0.01);
-    gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.16);
-    oscillator.connect(gainNode);
-    gainNode.connect(ctx.destination);
-    oscillator.start();
-    oscillator.stop(ctx.currentTime + 0.16);
+    // 创建一个更悦耳的三音符上升旋律
+    const notes = [
+        { freq: 523.25, start: 0, duration: 0.12 },      // C5
+        { freq: 659.25, start: 0.10, duration: 0.12 },   // E5
+        { freq: 783.99, start: 0.20, duration: 0.18 }    // G5
+    ];
+
+    const masterGain = ctx.createGain();
+    masterGain.gain.setValueAtTime(0.15, ctx.currentTime);
+    masterGain.connect(ctx.destination);
+
+    notes.forEach(note => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(note.freq, ctx.currentTime + note.start);
+
+        // 平滑的音量包络
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime + note.start);
+        gain.gain.exponentialRampToValueAtTime(1, ctx.currentTime + note.start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + note.start + note.duration);
+
+        osc.connect(gain);
+        gain.connect(masterGain);
+        osc.start(ctx.currentTime + note.start);
+        osc.stop(ctx.currentTime + note.start + note.duration);
+    });
+
     return true;
 }
 

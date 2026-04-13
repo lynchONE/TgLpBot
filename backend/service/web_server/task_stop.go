@@ -77,7 +77,7 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 			TaskID:  req.TaskID,
 			Status:  "stopped",
 			Pending: false,
-			Message: "\u4EFB\u52A1\u5DF2\u505C\u6B62",
+			Message: "任务已停止",
 		})
 		return
 	}
@@ -89,7 +89,7 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 			TaskID:  req.TaskID,
 			Status:  "stopping",
 			Pending: true,
-			Message: "\u4EFB\u52A1\u6B63\u5728\u505C\u6B62\u4E2D",
+			Message: "任务正在停止中",
 		})
 		return
 	}
@@ -98,7 +98,7 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 	if pendingAction != "" {
 		updates := map[string]interface{}{
 			"exit_pending_action":     strategy.ExitActionManualStop,
-			"exit_pending_reason":     "\U0001F6D1 \u624B\u52A8\u505C\u6B62",
+			"exit_pending_reason":     "🛑 手动停止",
 			"exit_retry_count":        0,
 			"exit_next_retry_at":      nil,
 			"exit_last_error":         "",
@@ -124,7 +124,7 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 			TaskID:  req.TaskID,
 			Status:  "stopping",
 			Pending: true,
-			Message: "\u4EFB\u52A1\u6B63\u5728\u64A4\u51FA\u4E2D",
+			Message: "任务正在撤出中",
 		})
 		return
 	}
@@ -164,7 +164,7 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 				TaskID:  req.TaskID,
 				Status:  "stopped",
 				Pending: false,
-				Message: "\u5DF2\u505C\u6B62:\u5F53\u524D\u5904\u4E8E\u518D\u5E73\u8861\u91CD\u8BD5\u4E2D\u4E14\u65E0\u53EF\u64A4\u51FA\u7684\u6D41\u52A8\u6027\u4ED3\u4F4D",
+				Message: "已停止:当前处于再平衡重试中且无可撤出的流动性仓位",
 			})
 			return
 		}
@@ -186,7 +186,7 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 				TaskID:  req.TaskID,
 				Status:  "stopped",
 				Pending: false,
-				Message: "\u5DF2\u505C\u6B62:\u5F53\u524D\u65E0\u53EF\u64A4\u51FA\u7684\u6D41\u52A8\u6027\u4ED3\u4F4D",
+				Message: "已停止:当前无可撤出的流动性仓位",
 			})
 			return
 		}
@@ -197,7 +197,7 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 
 	updates := map[string]interface{}{
 		"exit_pending_action":     strategy.ExitActionManualStop,
-		"exit_pending_reason":     "\U0001F6D1 \u624B\u52A8\u505C\u6B62",
+		"exit_pending_reason":     "🛑 手动停止",
 		"exit_retry_count":        0,
 		"exit_next_retry_at":      nil,
 		"exit_last_error":         "",
@@ -224,6 +224,6 @@ func (s *Server) handleTaskStop(w http.ResponseWriter, r *http.Request) {
 		TaskID:  req.TaskID,
 		Status:  "stopping",
 		Pending: true,
-		Message: "\u5DF2\u53D1\u8D77\u505C\u6B62, \u6B63\u5728\u64A4\u51FA\u6D41\u52A8\u6027\u5E76\u5151\u6362\u6210 USDT",
+		Message: "已发起停止, 正在撤出流动性并兑换成 USDT",
 	})
 }

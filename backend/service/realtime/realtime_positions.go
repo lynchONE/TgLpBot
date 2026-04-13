@@ -1071,7 +1071,7 @@ func (s *RealtimePositionsService) buildV3Position(
 	rangePct := 0.0
 	outOfRangeText := "0/0"
 	var runningSince *time.Time
-	statusLabel := "\u8fd0\u884c\u4e2d"
+	statusLabel := "运行中"
 	if task != nil {
 		poolID = strings.TrimSpace(task.PoolId)
 		exchange = strings.TrimSpace(task.Exchange)
@@ -2774,7 +2774,7 @@ func formatOutOfRange(task *models.StrategyTask, tickLower, tickUpper int, curre
 		return "0/0"
 	}
 	if task.Paused && (task.Status == models.StrategyStatusRunning || task.Status == models.StrategyStatusWaiting) {
-		return "\u23f8"
+		return "⏸"
 	}
 	threshold := task.ReopenDelaySeconds
 	if currentTick != 0 && task.StopLossEnabled && task.StopLossDelaySeconds > 0 {
@@ -2805,38 +2805,38 @@ func formatOutOfRange(task *models.StrategyTask, tickLower, tickUpper int, curre
 
 func statusLabelFromTask(task *models.StrategyTask) string {
 	if task == nil {
-		return "\u8fd0\u884c\u4e2d"
+		return "运行中"
 	}
 	if strings.TrimSpace(task.ExitPendingAction) != "" {
 		switch strings.TrimSpace(task.ExitPendingAction) {
 		case strategy.ExitActionManualStop:
-			return "\u505c\u6b62\u4e2d"
+			return "停止中"
 		case strategy.ExitActionStopLoss:
-			return "\u6b62\u635f\u4e2d"
+			return "止损中"
 		case strategy.ExitActionRebalance:
-			return "\u518d\u5e73\u8861\u4e2d"
+			return "再平衡中"
 		default:
-			return "\u64a4\u51fa\u4e2d"
+			return "撤出中"
 		}
 	}
 	if task.RebalancePending {
-		return "\u518d\u5e73\u8861\u4e2d"
+		return "再平衡中"
 	}
 	if task.Paused && (task.Status == models.StrategyStatusRunning || task.Status == models.StrategyStatusWaiting) {
-		return "\u5df2\u6682\u505c"
+		return "已暂停"
 	}
 	switch task.Status {
 	case models.StrategyStatusRunning:
-		return "\u8fd0\u884c\u4e2d"
+		return "运行中"
 	case models.StrategyStatusWaiting:
-		return "\u7b49\u5f85\u4e2d"
+		return "等待中"
 	case models.StrategyStatusStopping:
-		return "\u505c\u6b62\u4e2d"
+		return "停止中"
 	case models.StrategyStatusStopped:
-		return "\u5df2\u505c\u6b62"
+		return "已停止"
 	case models.StrategyStatusError:
-		return "\u9519\u8bef"
+		return "错误"
 	default:
-		return "\u8fd0\u884c\u4e2d"
+		return "运行中"
 	}
 }

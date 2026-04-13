@@ -74,6 +74,6 @@ func (s *Server) handleTaskDelete(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(taskDeleteResponse{
 		OK:      true,
 		TaskID:  req.TaskID,
-		Message: "\u4EFB\u52A1\u5DF2\u5220\u9664",
+		Message: "任务已删除",
 	})
 }

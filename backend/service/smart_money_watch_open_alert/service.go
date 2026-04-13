@@ -128,9 +128,15 @@ func buildWatchedOpenBarkMessage(event *models.SmartMoneyLPEvent, walletLabel *s
 		shortenAddress(event.PoolAddress),
 	)
 	chain := strings.ToUpper(normalizeChain(chainFromID(event.ChainID)))
-	txSuffix := shortenAddress(event.TxHash)
-	title := "Watched Smart Money Open"
-	body := fmt.Sprintf("%s opened %s | chain %s | tx %s", walletName, pairName, chain, txSuffix)
+
+	// 构建金额信息
+	amountInfo := ""
+	if event.TotalUSD != nil && *event.TotalUSD != "" {
+		amountInfo = fmt.Sprintf(" | 金额 $%s", *event.TotalUSD)
+	}
+
+	title := "特别关注开仓提醒"
+	body := fmt.Sprintf("聪明钱 %s 开仓 %s | 链 %s%s", walletName, pairName, chain, amountInfo)
 	return title, body
 }
 
