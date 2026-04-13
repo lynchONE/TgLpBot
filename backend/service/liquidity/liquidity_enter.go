@@ -2210,7 +2210,10 @@ func (s *LiquidityService) enterV4FromToken(
 	} else if decimals > 0 {
 		entryDecimals = int(decimals)
 	}
-	slippageBps := percentageToBps(task.SlippageTolerance)
+	slippageBps := V4PriceMoveToleranceBps(task.SlippageTolerance)
+	if effectiveV4PriceMoveTolerance := V4PriceMoveTolerancePercent(task.SlippageTolerance); math.Abs(effectiveV4PriceMoveTolerance-task.SlippageTolerance) > 1e-9 {
+		log.Printf("[Liquidity] V4 enter: widened on-chain price-move tolerance from %.4f%% to %.4f%%", task.SlippageTolerance, effectiveV4PriceMoveTolerance)
+	}
 
 	// 3. Calculate Optimal Swap
 	zeroForOne, swapAmount, err := s.calculateOptimalSwapPure(sqrtPriceX96, currentTick, tickLower, tickUpper, amount0In, amount1In)

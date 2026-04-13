@@ -662,7 +662,7 @@ func (s *LiquidityService) increaseV4LiquidityAtomic(
 		tokenId,
 		rangeLower,
 		rangeUpper,
-		percentageToBps(task.SlippageTolerance),
+		V4PriceMoveToleranceBps(task.SlippageTolerance),
 		stableToken,
 		stableAmount,
 		entrySwap,

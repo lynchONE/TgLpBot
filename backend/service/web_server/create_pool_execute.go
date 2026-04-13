@@ -255,7 +255,7 @@ func (s *Server) executeCreatePoolPlan(plan *createPoolPlan) (*createPoolExecute
 			Recipient:       walletAddr,
 			Amount0In:       plan.amount0Desired,
 			Amount1In:       plan.amount1Desired,
-			SlippageBps:     big.NewInt(int64(plan.slippagePct * 100)),
+			SlippageBps:     liquidity.V4PriceMoveToleranceBps(plan.slippagePct),
 			Swap: blockchain.SwapParamsSimple{
 				Target:        common.Address{},
 				ApproveTarget: common.Address{},

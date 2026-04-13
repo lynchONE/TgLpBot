@@ -281,6 +281,22 @@ func TestBuildZapInV4ParamsPreservesCoreFields(t *testing.T) {
 	}
 }
 
+func TestV4PriceMoveToleranceBpsUsesFloor(t *testing.T) {
+	t.Parallel()
+
+	if got := V4PriceMoveToleranceBps(0.5); got.Cmp(big.NewInt(100)) != 0 {
+		t.Fatalf("V4PriceMoveToleranceBps(0.5) = %s, want 100", got.String())
+	}
+}
+
+func TestV4PriceMoveToleranceBpsPreservesHigherUserSetting(t *testing.T) {
+	t.Parallel()
+
+	if got := V4PriceMoveToleranceBps(1.75); got.Cmp(big.NewInt(175)) != 0 {
+		t.Fatalf("V4PriceMoveToleranceBps(1.75) = %s, want 175", got.String())
+	}
+}
+
 func TestPickRecordedOpenDustPrefersParsedDustWhenSignalsDiverge(t *testing.T) {
 	t.Parallel()
 
