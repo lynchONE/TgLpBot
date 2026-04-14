@@ -84,10 +84,7 @@ func (s *StrategyService) Stop() {
 
 // CreateTask creates a new strategy task
 func (s *StrategyService) CreateTask(task *models.StrategyTask) error {
-	if err := database.DB.Create(task).Error; err != nil {
-		return err
-	}
-	return ApplyTaskCreateOverrides(task)
+	return CreateTaskRecord(task)
 }
 
 // runLoop is the main monitoring loop

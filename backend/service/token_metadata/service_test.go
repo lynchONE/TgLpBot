@@ -5,7 +5,9 @@ import (
 	"TgLpBot/base/models"
 	"TgLpBot/service/exchange"
 	"context"
+	"errors"
 	"testing"
+	"time"
 )
 
 type fakeOKXClient struct {
@@ -115,8 +117,71 @@ func TestShouldRefreshMetadata_RequiresLogoBackfill(t *testing.T) {
 	}
 
 	if shouldRefreshMetadata(models.TokenMetadata{
-		Status: statusNotFound,
+		Status:    statusNotFound,
+		FetchedAt: time.Now(),
 	}) {
-		t.Fatalf("expected negative cache metadata to skip refresh")
+		t.Fatalf("expected fresh negative cache metadata to skip refresh")
+	}
+
+	if !shouldRefreshMetadata(models.TokenMetadata{
+		Status:    statusNotFound,
+		FetchedAt: time.Now().Add(-negativeRetry).Add(-time.Minute),
+	}) {
+		t.Fatalf("expected stale negative cache metadata to refresh")
+	}
+
+	if !shouldRefreshMetadata(models.TokenMetadata{}) {
+		t.Fatalf("expected unknown-status metadata to refresh")
+	}
+}
+
+func TestGetBatch_ReturnsPartialDataWhenOKXRefreshFails(t *testing.T) {
+	prevCfg := config.AppConfig
+	config.AppConfig = &config.Config{
+		Chains: map[string]config.ChainConfig{
+			"bsc": {Chain: "bsc", ChainID: 56},
+		},
+	}
+	defer func() {
+		config.AppConfig = prevCfg
+	}()
+
+	svc := NewServiceWithClient(fakeOKXClient{
+		err: errors.New("okx unavailable"),
+	})
+
+	now := time.Now()
+	originalReadCacheBatch := readCacheBatchFn
+	readCacheBatchFn = func(chain string, addresses []string) (map[string]models.TokenMetadata, error) {
+		return map[string]models.TokenMetadata{
+			"0x1111111111111111111111111111111111111111": {
+				Chain:        chain,
+				TokenAddress: "0x1111111111111111111111111111111111111111",
+				Symbol:       "TEST",
+				Name:         "Test Token",
+				LogoURL:      "https://img.example/test.png",
+				Status:       statusOK,
+				FetchedAt:    now,
+				ExpiresAt:    now.Add(time.Hour),
+			},
+		}, nil
+	}
+	defer func() {
+		readCacheBatchFn = originalReadCacheBatch
+	}()
+
+	got, err := svc.GetBatch(context.Background(), "bsc", []string{
+		"0x1111111111111111111111111111111111111111",
+		"0x2222222222222222222222222222222222222222",
+	})
+	if err != nil {
+		t.Fatalf("GetBatch error: %v", err)
+	}
+	meta, ok := got["0x1111111111111111111111111111111111111111"]
+	if !ok {
+		t.Fatalf("expected cached metadata to be preserved, got %#v", got)
+	}
+	if meta.LogoURL != "https://img.example/test.png" {
+		t.Fatalf("unexpected cached logo url: %#v", meta)
 	}
 }

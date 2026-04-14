@@ -119,3 +119,50 @@ type StrategyTask struct {
 func (StrategyTask) TableName() string {
 	return "strategy_tasks"
 }
+
+// CreateOverrideUpdates returns the zero/false values that must be persisted
+// explicitly after create, otherwise MySQL defaults may overwrite them.
+func (t *StrategyTask) CreateOverrideUpdates() map[string]interface{} {
+	if t == nil {
+		return nil
+	}
+
+	updates := make(map[string]interface{})
+
+	if t.ReopenDelaySeconds == 0 {
+		updates["reopen_delay_seconds"] = 0
+	}
+	if t.SlippageTolerance == 0 {
+		updates["slippage_tolerance"] = 0
+	}
+	if t.ResidualTolerance == 0 {
+		updates["residual_tolerance"] = 0
+	}
+	if t.ZapLossTolerance == 0 {
+		updates["zap_loss_tolerance"] = 0
+	}
+	if !t.RebalanceEnabled {
+		updates["rebalance_enabled"] = false
+	}
+
+	return updates
+}
+
+// ApplyCreateOverrides persists zero/false values that GORM may skip on insert
+// when the column has a database default.
+func (t *StrategyTask) ApplyCreateOverrides(tx *gorm.DB) error {
+	if t == nil || t.ID == 0 || tx == nil {
+		return nil
+	}
+
+	updates := t.CreateOverrideUpdates()
+	if len(updates) == 0 {
+		return nil
+	}
+
+	return tx.Model(t).UpdateColumns(updates).Error
+}
+
+func (t *StrategyTask) AfterCreate(tx *gorm.DB) error {
+	return t.ApplyCreateOverrides(tx)
+}

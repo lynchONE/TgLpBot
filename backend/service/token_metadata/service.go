@@ -24,6 +24,7 @@ const (
 	statusNotFound = "not_found"
 	positiveTTL    = 7 * 24 * time.Hour
 	negativeTTL    = 6 * time.Hour
+	negativeRetry  = 30 * time.Minute
 )
 
 type okxMarketClient interface {
@@ -33,6 +34,8 @@ type okxMarketClient interface {
 type Service struct {
 	okx okxMarketClient
 }
+
+var readCacheBatchFn = readCacheBatch
 
 type cacheEntry struct {
 	Chain        string    `json:"chain"`
@@ -116,10 +119,18 @@ func cacheFromModel(meta models.TokenMetadata) cacheEntry {
 }
 
 func shouldRefreshMetadata(meta models.TokenMetadata) bool {
-	if !strings.EqualFold(strings.TrimSpace(meta.Status), statusOK) {
-		return false
+	status := strings.ToLower(strings.TrimSpace(meta.Status))
+	switch status {
+	case statusOK:
+		return strings.TrimSpace(meta.LogoURL) == ""
+	case statusNotFound:
+		if meta.FetchedAt.IsZero() {
+			return true
+		}
+		return time.Since(meta.FetchedAt) >= negativeRetry
+	default:
+		return true
 	}
-	return strings.TrimSpace(meta.LogoURL) == ""
 }
 
 func (s *Service) GetBatch(ctx context.Context, chain string, addresses []string) (map[string]models.TokenMetadata, error) {
@@ -135,7 +146,7 @@ func (s *Service) GetBatch(ctx context.Context, chain string, addresses []string
 		pending[addr] = struct{}{}
 	}
 
-	if cached, err := readCacheBatch(chain, list); err != nil {
+	if cached, err := readCacheBatchFn(chain, list); err != nil {
 		log.Printf("[TokenMetadata] warning: redis batch read failed chain=%s err=%v", chain, err)
 	} else {
 		for addr, meta := range cached {
@@ -181,6 +192,10 @@ func (s *Service) GetBatch(ctx context.Context, chain string, addresses []string
 
 	fetched, err := s.fetchFromOKX(chain, mapKeys(pending))
 	if err != nil {
+		if len(out) > 0 {
+			log.Printf("[TokenMetadata] warning: okx refresh failed chain=%s pending=%d cached=%d err=%v", chain, len(pending), len(out), err)
+			return out, nil
+		}
 		return out, err
 	}
 

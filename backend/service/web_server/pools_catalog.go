@@ -459,6 +459,8 @@ func (s *Server) enrichHotPoolDisplayTokens(ctx context.Context, chain string, i
 	meta, err := s.TokenMeta.GetBatch(ctx, chain, addresses)
 	if err != nil {
 		log.Printf("[Pools API] load token metadata failed chain=%s err=%v", chain, err)
+	}
+	if len(meta) == 0 {
 		return
 	}
 

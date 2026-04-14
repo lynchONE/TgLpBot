@@ -737,15 +737,10 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := database.DB.Create(ctx.task).Error; err != nil {
+	if err := strategy.CreateTaskRecord(ctx.task); err != nil {
 		http.Error(w, "创建任务失败", http.StatusInternalServerError)
 		return
 	}
-	// Ensure user-configured zero/false values are persisted instead of falling back to DB defaults.
-	if upErr := strategy.ApplyTaskCreateOverrides(ctx.task); upErr != nil {
-		log.Printf("[OpenPosition] failed to apply task create overrides for task %d: %v", ctx.task.ID, upErr)
-	}
-
 	enterRes, err := ctx.liquidityService.EnterTaskFromUSDTWithOptions(ctx.user.ID, ctx.task, liquidity.TxOptions{
 		EntrySwapSlippageOverride: ctx.req.EntrySwapSlippage,
 	})

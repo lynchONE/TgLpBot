@@ -1082,6 +1082,8 @@ func (s *Server) loadSmartMoneyTokenMetadataByChain(ctx context.Context, address
 		meta, err := s.TokenMeta.GetBatch(ctx, chain, normalized)
 		if err != nil {
 			log.Printf("[SmartMoney API] load token metadata failed chain=%s err=%v", chain, err)
+		}
+		if len(meta) == 0 {
 			continue
 		}
 		out[chain] = meta
