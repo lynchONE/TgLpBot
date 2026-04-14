@@ -789,14 +789,18 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	}
 	t0Before := big.NewInt(0)
 	t1Before := big.NewInt(0)
-	if token0Addr != (common.Address{}) {
-		if bal, _ := blockchain.GetTokenBalanceWithClient(client, token0Addr, walletAddr); bal != nil {
-			t0Before = bal
+	capturePoolTokenBalances := func() {
+		t0Before = big.NewInt(0)
+		t1Before = big.NewInt(0)
+		if token0Addr != (common.Address{}) {
+			if bal, _ := blockchain.GetTokenBalanceWithClient(client, token0Addr, walletAddr); bal != nil {
+				t0Before = bal
+			}
 		}
-	}
-	if token1Addr != (common.Address{}) {
-		if bal, _ := blockchain.GetTokenBalanceWithClient(client, token1Addr, walletAddr); bal != nil {
-			t1Before = bal
+		if token1Addr != (common.Address{}) {
+			if bal, _ := blockchain.GetTokenBalanceWithClient(client, token1Addr, walletAddr); bal != nil {
+				t1Before = bal
+			}
 		}
 	}
 	bnbBefore, _ := blockchain.GetBalanceWithClient(client, walletAddr)
@@ -932,6 +936,10 @@ func (s *LiquidityService) EnterTaskFromUSDTWithOptions(userID uint, task *model
 	}
 
 	version := strings.ToLower(strings.TrimSpace(task.PoolVersion))
+	// Capture token baselines immediately before the actual zap. If we capture them
+	// before a wallet-side entry swap, the swap output itself gets misclassified as
+	// "open dust" and can make residuals appear larger than the intended investment.
+	capturePoolTokenBalances()
 	var res *EnterResult
 	switch version {
 	case "v4":
