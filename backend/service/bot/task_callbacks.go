@@ -318,7 +318,7 @@ func (b *Bot) handleTaskStop(query *tgbotapi.CallbackQuery, user *models.User) {
 	b.sendMessage(query.Message.Chat.ID, fmt.Sprintf("🛑 已提交手动停止：后台将撤出流动性并兑换成 %s（最多重试 3 次）。", stableSym))
 
 	task, _ = b.taskService.GetByID(user.ID, taskID)
-	finalText := "🛑 *已提交停止请求* (后台处理中)\n\n" + b.formatTaskCard(task)
+	finalText := "🛑 *已提交停止请求* (后台处理中)\n\n" + rewriteRebalanceTimeoutText(b.formatTaskCard(task))
 	editMsg := tgbotapi.NewEditMessageText(query.Message.Chat.ID, query.Message.MessageID, finalText)
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
@@ -351,7 +351,7 @@ func (b *Bot) handleTaskToggleReinvest(query *tgbotapi.CallbackQuery, user *mode
 	editMsg := tgbotapi.NewEditMessageText(
 		query.Message.Chat.ID,
 		query.Message.MessageID,
-		b.formatTaskCard(task),
+		rewriteRebalanceTimeoutText(b.formatTaskCard(task)),
 	)
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
@@ -420,14 +420,14 @@ func (b *Bot) handleTaskTogglePause(query *tgbotapi.CallbackQuery, user *models.
 		cardText = b.formatTaskCardWithRefresh(task)
 		keyboard = b.taskKeyboardWithRefresh(task)
 	} else {
-		cardText = b.formatTaskCard(task)
+		cardText = rewriteRebalanceTimeoutText(b.formatTaskCard(task))
 		keyboard = b.taskKeyboard(task)
 	}
 
 	editMsg := tgbotapi.NewEditMessageText(
 		query.Message.Chat.ID,
 		query.Message.MessageID,
-		cardText,
+		rewriteRebalanceTimeoutText(cardText),
 	)
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
@@ -463,7 +463,7 @@ func (b *Bot) handleTaskToggleStopLoss(query *tgbotapi.CallbackQuery, user *mode
 	editMsg := tgbotapi.NewEditMessageText(
 		query.Message.Chat.ID,
 		query.Message.MessageID,
-		b.formatTaskCard(task),
+		rewriteRebalanceTimeoutText(b.formatTaskCard(task)),
 	)
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
@@ -529,7 +529,7 @@ func (b *Bot) handleTaskSetRebalanceTimeout(query *tgbotapi.CallbackQuery, user 
 
 	database.SetUserSession(user.TelegramID, "state", "awaiting_task_rebalance_timeout", 30*time.Minute)
 
-	promptMsg, _ := b.sendMessage(query.Message.Chat.ID, "⏱️ 请输入该任务的再平衡超时（秒），例如：`300`")
+	promptMsg, _ := b.sendMessage(query.Message.Chat.ID, "⏱️ 请输入该任务的再平衡超时（秒），`-1` 表示立即执行，例如：`-1` 或 `10`")
 	// Store prompt message ID to delete it later
 	if promptMsg.MessageID != 0 {
 		database.SetUserSession(user.TelegramID, "prompt_msg_id", fmt.Sprintf("%d", promptMsg.MessageID), 30*time.Minute)
@@ -587,7 +587,7 @@ func (b *Bot) handleTaskSwapDust(query *tgbotapi.CallbackQuery, user *models.Use
 	editMsg := tgbotapi.NewEditMessageText(
 		query.Message.Chat.ID,
 		query.Message.MessageID,
-		b.formatTaskCard(task),
+		rewriteRebalanceTimeoutText(b.formatTaskCard(task)),
 	)
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true

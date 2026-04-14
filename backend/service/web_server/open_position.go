@@ -548,7 +548,7 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 		RangeUpperPercentage: tickUpperPctEff,
 		AmountUSDT:           req.Amount,
 		CurrentLiquidity:     "0",
-		ReopenDelaySeconds:   cfg.RebalanceTimeout,
+		ReopenDelaySeconds:   strategy.NormalizeRebalanceTimeout(cfg.RebalanceTimeout),
 		SlippageTolerance:    taskSlippage,
 		AutoReinvest:         cfg.AutoReinvest,
 		AllowEntrySwap:       req.AllowEntrySwap,

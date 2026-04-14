@@ -147,7 +147,7 @@ func (b *Bot) refreshTaskCard(session *AutoRefreshSession) {
 	editMsg := tgbotapi.NewEditMessageText(
 		session.ChatID,
 		session.MessageID,
-		b.formatTaskCardWithRefresh(task),
+		rewriteRebalanceTimeoutText(b.formatTaskCardWithRefresh(task)),
 	)
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true

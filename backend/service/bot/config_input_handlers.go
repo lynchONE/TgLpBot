@@ -5,6 +5,7 @@ import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/base/security"
+	"TgLpBot/service/strategy"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -13,10 +14,11 @@ import (
 
 func (b *Bot) handleGlobalRebalanceTimeoutInput(messageChatID int64, user *models.User, text string) {
 	seconds, err := strconv.Atoi(strings.TrimSpace(text))
-	if err != nil || seconds < 0 || seconds > 86400 {
-		b.sendMessage(messageChatID, "数值无效。请输入 0-86400 之间的整数秒数，例如：`300`")
+	if err != nil || seconds < -1 || seconds > 86400 {
+		b.sendMessage(messageChatID, "数值无效。请输入 `-1` 或 1-86400 之间的整数秒数，`-1` 表示立即执行，例如：`-1` 或 `10`")
 		return
 	}
+	seconds = strategy.NormalizeRebalanceTimeout(seconds)
 	_, err = b.configService.Update(user.ID, map[string]interface{}{
 		"rebalance_timeout": seconds,
 	})
@@ -25,7 +27,7 @@ func (b *Bot) handleGlobalRebalanceTimeoutInput(messageChatID int64, user *model
 		return
 	}
 	database.ClearUserSession(user.TelegramID)
-	b.sendMessage(messageChatID, fmt.Sprintf("✅ 已更新再平衡超时：%d 秒", seconds))
+	b.sendMessage(messageChatID, fmt.Sprintf("✅ 已更新再平衡超时：%s", strategy.FormatDelayTime(seconds)))
 }
 
 func (b *Bot) handleGlobalStopLossDelayInput(messageChatID int64, user *models.User, text string) {

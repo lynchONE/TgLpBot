@@ -405,6 +405,9 @@ func ShouldStopOutOfRangeImmediately(task *models.StrategyTask, isUp bool, isDow
 
 // formatDelayTime 格式化延迟时间，小于60秒显示秒，否则显示分钟
 func formatDelayTime(seconds int) string {
+	if seconds <= 0 {
+		return "立即"
+	}
 	if seconds < 60 {
 		return fmt.Sprintf("%d 秒", seconds)
 	}

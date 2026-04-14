@@ -14,7 +14,7 @@ import (
 func (b *Bot) handleConfigRebalanceTimeout(query *tgbotapi.CallbackQuery, user *models.User) {
 	b.api.Send(tgbotapi.NewCallback(query.ID, ""))
 	database.SetUserSession(user.TelegramID, "state", "awaiting_global_rebalance_timeout", 30*time.Minute)
-	b.sendMessage(query.Message.Chat.ID, "⏱️ 请输入再平衡超时（秒），例如：`300`")
+	b.sendMessage(query.Message.Chat.ID, "⏱️ 请输入再平衡超时（秒），`-1` 表示立即执行，例如：`-1` 或 `10`")
 }
 
 func (b *Bot) handleConfigStopLossToggle(query *tgbotapi.CallbackQuery, user *models.User) {

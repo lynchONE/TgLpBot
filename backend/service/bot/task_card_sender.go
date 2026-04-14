@@ -7,6 +7,8 @@ import (
 )
 
 func (b *Bot) sendTaskCardMessage(chatID int64, text string, replyMarkup any) (tgbotapi.Message, error) {
+	text = rewriteRebalanceTimeoutText(text)
+	replyMarkup = rewriteReplyMarkupRebalanceTimeout(replyMarkup)
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = replyMarkup

@@ -8,6 +8,7 @@ import (
 	"TgLpBot/service/liquidity"
 	"TgLpBot/service/pool"
 	"TgLpBot/service/pricing"
+	"TgLpBot/service/strategy"
 	"errors"
 	"fmt"
 	"math"
@@ -704,7 +705,7 @@ func (b *Bot) createPositionTask(chatID int64, user *models.User) {
 		RangeUpperPercentage: rangeUpperPct,
 		AmountUSDT:           amount,
 		CurrentLiquidity:     "0", // Will be updated after zap in
-		ReopenDelaySeconds:   cfg.RebalanceTimeout,
+		ReopenDelaySeconds:   strategy.NormalizeRebalanceTimeout(cfg.RebalanceTimeout),
 		SlippageTolerance:    slippage,
 		AutoReinvest:         cfg.AutoReinvest,
 		StopLossEnabled:      cfg.StopLossEnabled,

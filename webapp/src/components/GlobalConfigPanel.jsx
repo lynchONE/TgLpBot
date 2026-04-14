@@ -8,6 +8,12 @@ const CHAIN_OPTIONS = [
     { value: 'base', label: 'Base' },
 ];
 
+function formatRebalanceTimeout(value) {
+    const seconds = Number(value);
+    if (!Number.isFinite(seconds)) return '--';
+    return seconds <= 0 ? 'Immediate' : `${seconds}s`;
+}
+
 export default function GlobalConfigPanel({ apiBaseUrl, initData, hasInitData }) {
     const [config, setConfig] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -25,7 +31,7 @@ export default function GlobalConfigPanel({ apiBaseUrl, initData, hasInitData })
             const cfg = resp?.config || resp || {};
             setConfig(cfg);
             setDraft({
-                rebalance_timeout: cfg.rebalance_timeout ?? 300,
+                rebalance_timeout: cfg.rebalance_timeout ?? 10,
                 stop_loss_enabled: cfg.stop_loss_enabled ?? false,
                 stop_loss_threshold: cfg.stop_loss_threshold ?? 10,
                 stop_loss_delay_seconds: cfg.stop_loss_delay_seconds ?? 0,
@@ -84,6 +90,7 @@ export default function GlobalConfigPanel({ apiBaseUrl, initData, hasInitData })
                         <div className="config-row">
                             <label>再平衡超时 (秒)</label>
                             <input type="number" value={draft.rebalance_timeout} onChange={e => updateDraft('rebalance_timeout', Number(e.target.value) || 0)} />
+                            <small>{`-1 means immediate. Current: ${formatRebalanceTimeout(draft.rebalance_timeout)}`}</small>
                         </div>
                         <div className="config-row">
                             <label>滑点容忍 (%)</label>

@@ -4,6 +4,7 @@ import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/service/pricing"
+	"TgLpBot/service/strategy"
 	"fmt"
 	"log"
 	"strconv"
@@ -58,8 +59,8 @@ func (b *Bot) handleTaskRebalanceTimeoutInput(message *tgbotapi.Message, user *m
 		return
 	}
 	seconds, err := strconv.Atoi(strings.TrimSpace(text))
-	if err != nil || seconds < 0 || seconds > 86400 {
-		b.sendMessage(chatID, "数值无效。请输入 0-86400 之间的整数秒数，例如：`300`")
+	if err != nil || seconds < -1 || seconds > 86400 {
+		b.sendMessage(chatID, "数值无效。请输入 `-1` 或 1-86400 之间的整数秒数，`-1` 表示立即执行，例如：`-1` 或 `10`")
 		return
 	}
 
@@ -73,6 +74,7 @@ func (b *Bot) handleTaskRebalanceTimeoutInput(message *tgbotapi.Message, user *m
 		}
 	}
 
+	seconds = strategy.NormalizeRebalanceTimeout(seconds)
 	if err := b.taskService.Update(user.ID, taskID, map[string]interface{}{
 		"reopen_delay_seconds": seconds,
 	}); err != nil {
@@ -89,7 +91,7 @@ func (b *Bot) handleTaskRebalanceTimeoutInput(message *tgbotapi.Message, user *m
 			editMsg := tgbotapi.NewEditMessageText(
 				chatID,
 				cardMsgID,
-				b.formatTaskCard(task),
+				rewriteRebalanceTimeoutText(b.formatTaskCard(task)),
 			)
 			editMsg.ParseMode = "Markdown"
 			editMsg.DisableWebPagePreview = true
@@ -191,7 +193,7 @@ func (b *Bot) handleTaskRangeInput(message *tgbotapi.Message, user *models.User)
 			editMsg := tgbotapi.NewEditMessageText(
 				chatID,
 				cardMsgID,
-				b.formatTaskCard(task),
+				rewriteRebalanceTimeoutText(b.formatTaskCard(task)),
 			)
 			editMsg.ParseMode = "Markdown"
 			editMsg.DisableWebPagePreview = true

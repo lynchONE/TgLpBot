@@ -30,6 +30,12 @@ func TestRebalanceTimeoutUpdate(t *testing.T) {
 			wantOK:  true,
 		},
 		{
+			name:    "negative immediate value",
+			updates: map[string]interface{}{"rebalance_timeout": -1},
+			want:    -1,
+			wantOK:  true,
+		},
+		{
 			name:    "unsupported type",
 			updates: map[string]interface{}{"rebalance_timeout": "20"},
 			want:    0,

@@ -13,7 +13,7 @@ const CHAIN_OPTIONS = [
 
 function buildDraft(cfg = {}) {
     return {
-        rebalance_timeout: cfg.rebalance_timeout ?? 300,
+        rebalance_timeout: cfg.rebalance_timeout ?? 10,
         stop_loss_enabled: cfg.stop_loss_enabled ?? false,
         stop_loss_threshold: cfg.stop_loss_threshold ?? 10,
         stop_loss_delay_seconds: cfg.stop_loss_delay_seconds ?? 0,
@@ -30,6 +30,12 @@ function buildDraft(cfg = {}) {
         bark_server: cfg.bark_server || '',
         bark_group: cfg.bark_group || '',
     };
+}
+
+function formatRebalanceTimeout(value) {
+    const seconds = Number(value);
+    if (!Number.isFinite(seconds)) return '--';
+    return seconds <= 0 ? 'Immediate' : `${seconds}s`;
 }
 
 function getChainLabel(value) {
@@ -188,9 +194,10 @@ export default function GlobalConfigPage({ open, onClose, apiBaseUrl, initData, 
                                     value={draft.rebalance_timeout}
                                     onChange={(e) => updateDraft('rebalance_timeout', Number(e.target.value) || 0)}
                                     className={inputClass}
-                                    placeholder="300"
+                                    placeholder="-1 / 10"
                                     suffix="秒"
                                 />
+                                <div className="text-[11px] text-zinc-500 dark:text-white/45">{`-1 means immediate. Current: ${formatRebalanceTimeout(draft.rebalance_timeout)}`}</div>
                             </FieldCard>
                             <FieldCard label="滑点容忍" hint="开仓、补仓时允许的价格偏差">
                                 <InputWithSuffix

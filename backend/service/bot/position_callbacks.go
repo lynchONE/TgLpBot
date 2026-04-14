@@ -4,6 +4,7 @@ import (
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
 	"TgLpBot/service/liquidity"
+	"TgLpBot/service/strategy"
 	"errors"
 	"fmt"
 	"strconv"
@@ -106,7 +107,7 @@ func (b *Bot) handleConfirmPosition(query *tgbotapi.CallbackQuery, user *models.
 		RangeUpperPercentage: rangeUpperPct,
 		AmountUSDT:           amount,
 		CurrentLiquidity:     "0", // Will be updated after zap in
-		ReopenDelaySeconds:   cfg.RebalanceTimeout,
+		ReopenDelaySeconds:   strategy.NormalizeRebalanceTimeout(cfg.RebalanceTimeout),
 		SlippageTolerance:    slippage,
 		AutoReinvest:         cfg.AutoReinvest,
 		StopLossEnabled:      cfg.StopLossEnabled,

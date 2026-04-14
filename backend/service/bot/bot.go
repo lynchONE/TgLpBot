@@ -282,6 +282,8 @@ func (b *Bot) sendMessage(chatID int64, text string) (tgbotapi.Message, error) {
 }
 
 func (b *Bot) sendMessageWithKeyboard(chatID int64, text string, replyMarkup any) {
+	text = rewriteRebalanceTimeoutText(text)
+	replyMarkup = rewriteReplyMarkupRebalanceTimeout(replyMarkup)
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = replyMarkup
@@ -297,6 +299,8 @@ func (b *Bot) sendMessageWithKeyboard(chatID int64, text string, replyMarkup any
 }
 
 func (b *Bot) sendMessageWithKeyboardRet(chatID int64, text string, replyMarkup any) (tgbotapi.Message, error) {
+	text = rewriteRebalanceTimeoutText(text)
+	replyMarkup = rewriteReplyMarkupRebalanceTimeout(replyMarkup)
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = replyMarkup
@@ -318,6 +322,7 @@ func (b *Bot) sendMessageWithKeyboardRet(chatID int64, text string, replyMarkup 
 }
 
 func (b *Bot) editMessageText(chatID int64, messageID int, text string) error {
+	text = rewriteRebalanceTimeoutText(text)
 	editMsg := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	editMsg.ParseMode = "Markdown"
 	editMsg.DisableWebPagePreview = true
@@ -341,6 +346,7 @@ func (b *Bot) editMessageText(chatID int64, messageID int, text string) error {
 }
 
 func (b *Bot) editMessageReplyMarkup(chatID int64, messageID int, replyMarkup any) error {
+	replyMarkup = rewriteReplyMarkupRebalanceTimeout(replyMarkup)
 	params := tgbotapi.Params{}
 	params.AddFirstValid("chat_id", chatID, "")
 	params.AddNonZero("message_id", messageID)

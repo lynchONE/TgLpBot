@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"TgLpBot/base/models"
+	"TgLpBot/service/strategy"
 	userSvc "TgLpBot/service/user"
 )
 
@@ -132,6 +133,9 @@ func buildGlobalConfigUpdates(raw map[string]json.RawMessage) map[string]interfa
 	}
 
 	setInt("rebalance_timeout", "rebalance_timeout")
+	if v, ok := updates["rebalance_timeout"].(int); ok {
+		updates["rebalance_timeout"] = strategy.NormalizeRebalanceTimeout(v)
+	}
 	setFloat("stop_loss_threshold", "stop_loss_threshold")
 	setBool("stop_loss_enabled", "stop_loss_enabled")
 	setInt("stop_loss_delay_seconds", "stop_loss_delay_seconds")

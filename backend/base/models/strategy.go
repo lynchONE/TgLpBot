@@ -67,7 +67,7 @@ type StrategyTask struct {
 	CurrentLiquidity string  `gorm:"type:varchar(78)" json:"current_liquidity"` // Current LP amount (uint128 string)
 
 	// Strategy Config (defaults from GlobalConfig, can be overridden per task)
-	ReopenDelaySeconds   int     `gorm:"default:300" json:"reopen_delay_seconds"` // Rebalance cooldown / wait seconds
+	ReopenDelaySeconds   int     `gorm:"default:10" json:"reopen_delay_seconds"` // Rebalance cooldown / wait seconds (-1 = immediate)
 	SlippageTolerance    float64 `gorm:"type:decimal(5,2);default:0.5" json:"slippage_tolerance"`
 	AutoReinvest         bool    `gorm:"default:false" json:"auto_reinvest"`
 	ResidualTolerance    float64 `gorm:"type:decimal(5,2);default:1.0" json:"residual_tolerance"`

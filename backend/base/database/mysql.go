@@ -114,6 +114,8 @@ func autoMigrate() error {
 	DB.Exec("ALTER TABLE sm_lp_active_positions MODIFY COLUMN fee_amount1 DECIMAL(65,0) NOT NULL DEFAULT 0")
 	DB.Exec("ALTER TABLE user_wallet_transfer_events MODIFY COLUMN amount_raw VARCHAR(78) NOT NULL DEFAULT '0'")
 	DB.Exec("ALTER TABLE sm_wallet_transfer_events MODIFY COLUMN amount_raw VARCHAR(78) NOT NULL DEFAULT '0'")
+	DB.Exec("ALTER TABLE global_configs ALTER COLUMN rebalance_timeout SET DEFAULT 10")
+	DB.Exec("ALTER TABLE strategy_tasks ALTER COLUMN reopen_delay_seconds SET DEFAULT 10")
 
 	// Ensure new columns exist (AutoMigrate may skip if table already exists with old schema)
 	ensureColumn("sm_wallet_daily_snapshots", "open_lp_usd", "DECIMAL(20,4) NOT NULL DEFAULT 0 AFTER tracked_token_usd")

@@ -18,7 +18,7 @@ type GlobalConfig struct {
 	BarkGroup        string `gorm:"size:100;default:''" json:"bark_group"`
 
 	// Rebalance settings
-	RebalanceTimeout int `gorm:"default:300" json:"rebalance_timeout"` // Rebalance timeout in seconds
+	RebalanceTimeout int `gorm:"default:10" json:"rebalance_timeout"` // Rebalance timeout in seconds (-1 = immediate)
 
 	// Stop loss settings
 	StopLossThreshold    float64 `gorm:"type:decimal(10,4);default:10.0" json:"stop_loss_threshold"` // Stop loss threshold (range width percentage)

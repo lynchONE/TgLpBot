@@ -2559,7 +2559,7 @@ export default function App() {
             : 'bg-zinc-900 text-white dark:bg-white/10 dark:text-white';
     const globalCfg = globalConfig || {};
     const rebalanceText = Number.isFinite(Number(globalCfg.rebalance_timeout))
-        ? `${Number(globalCfg.rebalance_timeout)} s`
+        ? (Number(globalCfg.rebalance_timeout) <= 0 ? '立即' : `${Number(globalCfg.rebalance_timeout)} s`)
         : '--';
     const stopLossDelayText = Number.isFinite(Number(globalCfg.stop_loss_delay_seconds))
         ? `${Number(globalCfg.stop_loss_delay_seconds)} s`
