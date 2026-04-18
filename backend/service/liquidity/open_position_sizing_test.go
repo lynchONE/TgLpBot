@@ -8,11 +8,8 @@ import (
 func TestCalculateOpenPositionSizingAdviceCapsHighTargetShare(t *testing.T) {
 	advice := CalculateOpenPositionSizingAdvice(OpenPositionSizingInputs{
 		ActiveLiquidityUSD: 1000,
-		CapitalTotal:       5000,
 		TargetShareMin:     0.90,
 		TargetShareMax:     0.95,
-		RiskCapUSD:         10000,
-		RiskCapRatio:       1,
 	})
 
 	if len(advice.RecommendedPositions) != 3 {
@@ -29,6 +26,9 @@ func TestCalculateOpenPositionSizingAdviceCapsHighTargetShare(t *testing.T) {
 	if aggressive.Calculation.TargetShareApplied != 0.8 {
 		t.Fatalf("expected aggressive target share applied to be 0.8, got %f", aggressive.Calculation.TargetShareApplied)
 	}
+	if aggressive.LiquidityToAdd != 4000 {
+		t.Fatalf("expected aggressive liquidity to add 4000, got %f", aggressive.LiquidityToAdd)
+	}
 
 	foundWarning := false
 	for _, warning := range advice.Warnings {
@@ -42,7 +42,7 @@ func TestCalculateOpenPositionSizingAdviceCapsHighTargetShare(t *testing.T) {
 	}
 }
 
-func TestCalculateOpenPositionSizingAdviceAppliesRiskCapAndRecomputesShare(t *testing.T) {
+func TestCalculateOpenPositionSizingAdviceUsesPoolLiquidityOnly(t *testing.T) {
 	advice := CalculateOpenPositionSizingAdvice(OpenPositionSizingInputs{
 		ActiveLiquidityUSD: 1000,
 		CapitalTotal:       2000,
@@ -52,16 +52,24 @@ func TestCalculateOpenPositionSizingAdviceAppliesRiskCapAndRecomputesShare(t *te
 		RiskCapRatio:       0.20,
 	})
 
-	if got := advice.Inputs.EffectiveRiskCapUSD; got != 400 {
-		t.Fatalf("expected effective risk cap 400, got %f", got)
+	if got := advice.Inputs.EffectiveRiskCapUSD; got != 0 {
+		t.Fatalf("expected effective risk cap to stay unused, got %f", got)
+	}
+
+	conservative := advice.RecommendedPositions[0]
+	if conservative.LiquidityToAdd != 250 {
+		t.Fatalf("expected conservative liquidity to add 250, got %f", conservative.LiquidityToAdd)
+	}
+	if conservative.ExpectedShare != 0.2 {
+		t.Fatalf("expected conservative share 0.2, got %f", conservative.ExpectedShare)
 	}
 
 	neutral := advice.RecommendedPositions[1]
-	if neutral.LiquidityToAdd != 400 {
-		t.Fatalf("expected neutral liquidity to add 400, got %f", neutral.LiquidityToAdd)
+	if neutral.LiquidityToAdd != 666.67 {
+		t.Fatalf("expected neutral liquidity to add 666.67, got %f", neutral.LiquidityToAdd)
 	}
-	if neutral.ExpectedShare != 0.285714 {
-		t.Fatalf("expected recomputed share 0.285714, got %f", neutral.ExpectedShare)
+	if neutral.ExpectedShare != 0.4 {
+		t.Fatalf("expected neutral share 0.4, got %f", neutral.ExpectedShare)
 	}
 	if neutral.Calculation == nil {
 		t.Fatalf("expected calculation details")
@@ -69,42 +77,39 @@ func TestCalculateOpenPositionSizingAdviceAppliesRiskCapAndRecomputesShare(t *te
 	if neutral.Calculation.TheoreticalLiquidityToAdd != 666.67 {
 		t.Fatalf("expected theoretical liquidity 666.67, got %f", neutral.Calculation.TheoreticalLiquidityToAdd)
 	}
-	if len(neutral.Calculation.AppliedConstraints) != 1 || neutral.Calculation.AppliedConstraints[0] != "risk_cap_ratio" {
-		t.Fatalf("expected risk_cap_ratio constraint, got %#v", neutral.Calculation.AppliedConstraints)
-	}
-}
-
-func TestCalculateOpenPositionSizingAdviceDoesNotExceedCapitalTotal(t *testing.T) {
-	advice := CalculateOpenPositionSizingAdvice(OpenPositionSizingInputs{
-		ActiveLiquidityUSD: 1000,
-		CapitalTotal:       100,
-		TargetShareMin:     0.20,
-		TargetShareMax:     0.65,
-		RiskCapUSD:         500,
-		RiskCapRatio:       2,
-	})
-
-	if got := advice.Inputs.EffectiveRiskCapUSD; got != 100 {
-		t.Fatalf("expected effective risk cap 100, got %f", got)
+	if len(neutral.Calculation.AppliedConstraints) != 0 {
+		t.Fatalf("expected no applied constraints, got %#v", neutral.Calculation.AppliedConstraints)
 	}
 
 	aggressive := advice.RecommendedPositions[2]
-	if aggressive.LiquidityToAdd != 100 {
-		t.Fatalf("expected aggressive liquidity to add 100, got %f", aggressive.LiquidityToAdd)
+	if aggressive.LiquidityToAdd != 1857.14 {
+		t.Fatalf("expected aggressive liquidity to add 1857.14, got %f", aggressive.LiquidityToAdd)
 	}
-	if aggressive.ExpectedShare != 0.090909 {
-		t.Fatalf("expected aggressive share 0.090909, got %f", aggressive.ExpectedShare)
+	if aggressive.ExpectedShare != 0.65 {
+		t.Fatalf("expected aggressive share 0.65, got %f", aggressive.ExpectedShare)
+	}
+}
+
+func TestCalculateOpenPositionSizingAdviceDoesNotRequireCapitalTotal(t *testing.T) {
+	advice := CalculateOpenPositionSizingAdvice(OpenPositionSizingInputs{
+		ActiveLiquidityUSD: 500,
+		TargetShareMin:     0.20,
+		TargetShareMax:     0.65,
+	})
+
+	if len(advice.RecommendedPositions) != 3 {
+		t.Fatalf("expected 3 positions, got %d", len(advice.RecommendedPositions))
+	}
+	if advice.RecommendedPositions[1].LiquidityToAdd != 333.33 {
+		t.Fatalf("expected neutral liquidity to add 333.33, got %f", advice.RecommendedPositions[1].LiquidityToAdd)
 	}
 }
 
 func TestCalculateOpenPositionSizingAdviceWarnsWhenTargetsCollapse(t *testing.T) {
 	advice := CalculateOpenPositionSizingAdvice(OpenPositionSizingInputs{
 		ActiveLiquidityUSD: 1000,
-		CapitalTotal:       5000,
 		TargetShareMin:     0.55,
 		TargetShareMax:     0.60,
-		RiskCapUSD:         5000,
-		RiskCapRatio:       1,
 	})
 
 	if len(advice.RecommendedPositions) != 3 {

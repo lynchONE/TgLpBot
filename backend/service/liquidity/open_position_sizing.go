@@ -1,8 +1,6 @@
 package liquidity
 
 import (
-	"TgLpBot/base/blockchain"
-	"TgLpBot/base/config"
 	"TgLpBot/base/models"
 	"TgLpBot/service/pricing"
 	userSvc "TgLpBot/service/user"
@@ -10,8 +8,6 @@ import (
 	"log"
 	"math"
 	"strings"
-
-	"github.com/ethereum/go-ethereum/common"
 )
 
 const (
@@ -68,21 +64,13 @@ type openPositionSizingTarget struct {
 	Target float64
 }
 
-type openPositionSizingConstraint struct {
-	Key   string
-	Limit float64
-}
-
 func BuildOpenPositionSizingAdvice(
 	task *models.StrategyTask,
-	wallet *models.Wallet,
+	_ *models.Wallet,
 	opts OpenPositionSizingBuildOptions,
 ) (*OpenPositionSizingAdvice, error) {
 	if task == nil {
 		return nil, fmt.Errorf("task is nil")
-	}
-	if wallet == nil {
-		return nil, fmt.Errorf("wallet is nil")
 	}
 
 	cfg, err := userSvc.NewGlobalConfigService().ResolveOpenPositionSizingConfig(task.UserID)
@@ -120,16 +108,6 @@ func BuildOpenPositionSizingAdvice(
 		}
 	}
 
-	capitalTotal, capitalSource, err := resolveSizingCapitalTotal(task.Chain, wallet)
-	if err != nil {
-		log.Printf("[Liquidity] sizing: resolve stable capital failed: chain=%s wallet=%s err=%v", task.Chain, wallet.Address, err)
-		warnings = append(warnings, "当前钱包 stable 余额暂时无法读取，已跳过加仓建议。")
-	}
-	if capitalTotal > 0 {
-		inputs.CapitalTotal = roundMoney(capitalTotal)
-		inputs.CapitalSource = capitalSource
-	}
-
 	advice := CalculateOpenPositionSizingAdvice(inputs)
 	advice.Warnings = append(advice.Warnings, warnings...)
 	advice.Warnings = dedupeSizingWarnings(advice.Warnings)
@@ -149,15 +127,6 @@ func CalculateOpenPositionSizingAdvice(inputs OpenPositionSizingInputs) *OpenPos
 		advice.Warnings = dedupeSizingWarnings(advice.Warnings)
 		return advice
 	}
-	if normalized.CapitalTotal <= 0 {
-		advice.Warnings = append(advice.Warnings, "当前钱包可用 stable 资金缺失，无法生成建议金额。")
-		advice.Warnings = dedupeSizingWarnings(advice.Warnings)
-		return advice
-	}
-
-	constraints, effectiveRiskCap := buildSizingConstraints(normalized)
-	normalized.EffectiveRiskCapUSD = roundMoney(effectiveRiskCap)
-	advice.Inputs = &normalized
 
 	targets := []openPositionSizingTarget{
 		{Mode: "conservative", Target: 0.20},
@@ -177,29 +146,17 @@ func CalculateOpenPositionSizingAdvice(inputs OpenPositionSizingInputs) *OpenPos
 		}
 
 		theoreticalLiquidity := reverseLiquidityForShare(normalized.ActiveLiquidityUSD, appliedTarget)
-		finalLiquidity := theoreticalLiquidity
-		appliedConstraints := make([]string, 0, len(constraints))
-		if effectiveRiskCap > 0 && finalLiquidity > effectiveRiskCap {
-			finalLiquidity = effectiveRiskCap
-			for _, constraint := range constraints {
-				if constraint.Limit > 0 && almostEqual(constraint.Limit, effectiveRiskCap) {
-					appliedConstraints = append(appliedConstraints, constraint.Key)
-				}
-			}
-		}
-
-		expectedShare := shareFromLiquidity(normalized.ActiveLiquidityUSD, finalLiquidity)
+		expectedShare := shareFromLiquidity(normalized.ActiveLiquidityUSD, theoreticalLiquidity)
 		advice.RecommendedPositions = append(advice.RecommendedPositions, OpenPositionSizingPosition{
 			Mode:           target.Mode,
-			LiquidityToAdd: roundMoney(finalLiquidity),
+			LiquidityToAdd: roundMoney(theoreticalLiquidity),
 			ExpectedShare:  roundValue(expectedShare, 6),
-			RiskExposure:   roundMoney(finalLiquidity),
+			RiskExposure:   roundMoney(theoreticalLiquidity),
 			Efficiency:     efficiency,
 			Calculation: &OpenPositionSizingCalculation{
 				TargetShareRequested:      roundValue(requestedTarget, 6),
 				TargetShareApplied:        roundValue(appliedTarget, 6),
 				TheoreticalLiquidityToAdd: roundMoney(theoreticalLiquidity),
-				AppliedConstraints:        appliedConstraints,
 				RiskExposureApproximation: "conservative_single_side_amount",
 			},
 		})
@@ -230,14 +187,6 @@ func normalizeOpenPositionSizingInputs(inputs OpenPositionSizingInputs) (OpenPos
 		out.TargetShareMin, out.TargetShareMax = out.TargetShareMax, out.TargetShareMin
 		warnings = append(warnings, "目标占比配置顺序无效，已自动交换上下限。")
 	}
-	if out.RiskCapUSD <= 0 {
-		out.RiskCapUSD = 500
-		warnings = append(warnings, "固定单仓风险上限缺失，已回退到 500U。")
-	}
-	if out.RiskCapRatio <= 0 {
-		out.RiskCapRatio = 0.20
-		warnings = append(warnings, "单仓风险比例上限缺失，已回退到 20%。")
-	}
 
 	out.ActiveLiquidityUSD = roundMoney(out.ActiveLiquidityUSD)
 	out.CapitalTotal = roundMoney(out.CapitalTotal)
@@ -258,77 +207,6 @@ func resolveSizingLiquidityUSD(chain string, poolID string) (float64, string, er
 		return 0, source, fmt.Errorf("liquidity usd is unavailable")
 	}
 	return liquidityUSD, source, nil
-}
-
-func resolveSizingCapitalTotal(chain string, wallet *models.Wallet) (float64, string, error) {
-	if wallet == nil {
-		return 0, "", fmt.Errorf("wallet is nil")
-	}
-	normalizedChain := config.NormalizeChain(chain)
-	if config.AppConfig == nil {
-		return 0, "", fmt.Errorf("config not loaded")
-	}
-	cc, ok := config.AppConfig.GetChainConfig(normalizedChain)
-	if !ok {
-		return 0, "", fmt.Errorf("chain config not found")
-	}
-	if !common.IsHexAddress(cc.StableAddress) {
-		return 0, "", fmt.Errorf("stable token not configured")
-	}
-	if !common.IsHexAddress(wallet.Address) {
-		return 0, "", fmt.Errorf("wallet address is invalid")
-	}
-
-	client, _, err := blockchain.GetEVMClient(normalizedChain)
-	if err != nil {
-		return 0, "", err
-	}
-	balance, err := blockchain.GetTokenBalanceWithClient(
-		client,
-		common.HexToAddress(cc.StableAddress),
-		common.HexToAddress(wallet.Address),
-	)
-	if err != nil {
-		return 0, "wallet_balance.stable_token", err
-	}
-	stableDecimals := cc.StableDecimals
-	if stableDecimals <= 0 {
-		stableDecimals = 18
-	}
-	return amountToFloat(balance, stableDecimals), "wallet_balance.stable_token", nil
-}
-
-func buildSizingConstraints(inputs OpenPositionSizingInputs) ([]openPositionSizingConstraint, float64) {
-	constraints := make([]openPositionSizingConstraint, 0, 3)
-	if inputs.RiskCapUSD > 0 {
-		constraints = append(constraints, openPositionSizingConstraint{
-			Key:   "risk_cap_usd",
-			Limit: inputs.RiskCapUSD,
-		})
-	}
-	if inputs.CapitalTotal > 0 && inputs.RiskCapRatio > 0 {
-		constraints = append(constraints, openPositionSizingConstraint{
-			Key:   "risk_cap_ratio",
-			Limit: inputs.CapitalTotal * inputs.RiskCapRatio,
-		})
-	}
-	if inputs.CapitalTotal > 0 {
-		constraints = append(constraints, openPositionSizingConstraint{
-			Key:   "capital_total",
-			Limit: inputs.CapitalTotal,
-		})
-	}
-
-	effective := 0.0
-	for _, constraint := range constraints {
-		if constraint.Limit <= 0 {
-			continue
-		}
-		if effective <= 0 || constraint.Limit < effective {
-			effective = constraint.Limit
-		}
-	}
-	return constraints, effective
 }
 
 func clampShare(value float64, minShare float64, maxShare float64) float64 {
@@ -412,8 +290,4 @@ func roundValue(value float64, precision int) float64 {
 	}
 	scale := math.Pow10(precision)
 	return math.Round(value*scale) / scale
-}
-
-func almostEqual(left float64, right float64) bool {
-	return math.Abs(left-right) <= 1e-9
 }

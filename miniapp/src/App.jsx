@@ -3787,10 +3787,10 @@ export default function App() {
                                 />
                             </div>
 
-                            {(openPositionRecommendedPositions.length > 0 || openPositionSizingWarnings.length > 0) ? (
+                            {openPositionRecommendedPositions.length > 0 ? (
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">最优加仓建议</div>
-                                    {openPositionSizingInputs ? (
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">加仓建议</div>
+                                    {false ? (
                                         <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-zinc-500 dark:text-white/45">
                                             {Number.isFinite(Number(openPositionSizingInputs?.active_liquidity_usd)) ? (
                                                 <span>活跃流动性 {formatUsdCompact(openPositionSizingInputs.active_liquidity_usd)}</span>
@@ -3805,41 +3805,26 @@ export default function App() {
                                     ) : null}
 
                                     {openPositionRecommendedPositions.length > 0 ? (
-                                        <div className="mt-3 space-y-2">
+                                        <div className="mt-3 grid grid-cols-3 gap-2">
                                             {openPositionRecommendedPositions.map((item, index) => {
-                                                const efficiencyMeta = getSizingEfficiencyMeta(item?.efficiency);
+                                                const tone = item?.mode === 'conservative'
+                                                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200'
+                                                    : item?.mode === 'neutral'
+                                                        ? 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200'
+                                                        : 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-200';
                                                 return (
                                                     <div
                                                         key={`${item?.mode || 'mode'}-${index}`}
-                                                        className="rounded-xl border border-zinc-200/80 bg-white/70 p-3 dark:border-white/10 dark:bg-white/[0.04]"
+                                                        className={`rounded-xl border p-3 ${tone}`}
                                                     >
-                                                        <div className="flex items-center justify-between gap-2">
-                                                            <div className="text-[13px] font-semibold text-zinc-900 dark:text-white/85">
-                                                                {formatSizingModeLabel(item?.mode)}
-                                                            </div>
-                                                            <span className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${efficiencyMeta.chipClass}`}>
-                                                                {efficiencyMeta.label}
-                                                            </span>
+                                                        <div className="text-[11px] font-bold">
+                                                            {formatSizingModeLabel(item?.mode)}
                                                         </div>
-                                                        <div className="mt-3 grid grid-cols-3 gap-2">
-                                                            <div>
-                                                                <div className="text-[11px] text-zinc-500 dark:text-white/45">推荐加仓</div>
-                                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/85">
-                                                                    {formatUsdCompact(item?.liquidity_to_add)}
-                                                                </div>
-                                                            </div>
-                                                            <div>
-                                                                <div className="text-[11px] text-zinc-500 dark:text-white/45">预期占比</div>
-                                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/85">
-                                                                    {formatSharePercent(item?.expected_share)}
-                                                                </div>
-                                                            </div>
-                                                            <div>
-                                                                <div className="text-[11px] text-zinc-500 dark:text-white/45">风险暴露</div>
-                                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/85">
-                                                                    {formatUsdCompact(item?.risk_exposure)}
-                                                                </div>
-                                                            </div>
+                                                        <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/85">
+                                                            {formatUsdCompact(item?.liquidity_to_add)}
+                                                        </div>
+                                                        <div className="mt-1 text-[11px] opacity-80">
+                                                            {formatSharePercent(item?.expected_share)}
                                                         </div>
                                                     </div>
                                                 );
@@ -3847,7 +3832,7 @@ export default function App() {
                                         </div>
                                     ) : null}
 
-                                    {openPositionSizingWarnings.length > 0 ? (
+                                    {false ? (
                                         <div className="mt-3 space-y-2">
                                             {openPositionSizingWarnings.map((warning, index) => (
                                                 <div

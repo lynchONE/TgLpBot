@@ -669,10 +669,10 @@ export default function OpenPositionModal({
           </label>
         </div>
 
-        {(recommendedPositions.length > 0 || sizingWarnings.length > 0) ? (
+        {recommendedPositions.length > 0 ? (
           <div className="modal-info-note" style={{ marginTop: 12 }}>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>最优加仓建议</div>
-            {sizingInputs ? (
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>加仓建议</div>
+            {false ? (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 10, fontSize: 11, opacity: 0.82 }}>
                 {Number.isFinite(Number(sizingInputs?.active_liquidity_usd)) ? (
                   <span>活跃流动性 {formatUsdCompact(sizingInputs.active_liquidity_usd)}</span>
@@ -687,48 +687,32 @@ export default function OpenPositionModal({
             ) : null}
 
             {recommendedPositions.length > 0 ? (
-              <div style={{ display: 'grid', gap: 10 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
                 {recommendedPositions.map((item, index) => {
-                  const efficiencyMeta = getSizingEfficiencyMeta(item?.efficiency);
+                  const tone = item?.mode === 'conservative'
+                    ? { color: '#047857', border: 'rgba(16, 185, 129, 0.35)', bg: 'rgba(16, 185, 129, 0.12)' }
+                    : item?.mode === 'neutral'
+                      ? { color: '#b45309', border: 'rgba(245, 158, 11, 0.35)', bg: 'rgba(245, 158, 11, 0.12)' }
+                      : { color: '#b91c1c', border: 'rgba(239, 68, 68, 0.35)', bg: 'rgba(239, 68, 68, 0.12)' };
                   return (
                     <div
                       key={`${item?.mode || 'mode'}-${index}`}
                       style={{
-                        borderRadius: 14,
-                        border: '1px solid rgba(148, 163, 184, 0.18)',
-                        background: 'rgba(15, 23, 42, 0.18)',
-                        padding: 12,
+                        borderRadius: 12,
+                        border: `1px solid ${tone.border}`,
+                        background: tone.bg,
+                        padding: '10px 12px',
+                        minWidth: 0,
                       }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>{formatSizingModeLabel(item?.mode)}</div>
-                        <span
-                          style={{
-                            borderRadius: 999,
-                            padding: '3px 8px',
-                            fontSize: 11,
-                            fontWeight: 600,
-                            color: efficiencyMeta.textColor,
-                            border: `1px solid ${efficiencyMeta.borderColor}`,
-                            background: efficiencyMeta.background,
-                          }}
-                        >
-                          {efficiencyMeta.label}
-                        </span>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: tone.color }}>
+                        {formatSizingModeLabel(item?.mode)}
                       </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginTop: 10 }}>
-                        <div>
-                          <div style={{ fontSize: 11, opacity: 0.72 }}>推荐加仓</div>
-                          <div style={{ marginTop: 4, fontSize: 15, fontWeight: 700 }}>{formatUsdCompact(item?.liquidity_to_add)}</div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 11, opacity: 0.72 }}>预期占比</div>
-                          <div style={{ marginTop: 4, fontSize: 15, fontWeight: 700 }}>{formatSharePercent(item?.expected_share)}</div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 11, opacity: 0.72 }}>风险暴露</div>
-                          <div style={{ marginTop: 4, fontSize: 15, fontWeight: 700 }}>{formatUsdCompact(item?.risk_exposure)}</div>
-                        </div>
+                      <div style={{ marginTop: 4, fontSize: 13, fontWeight: 700 }}>
+                        {formatUsdCompact(item?.liquidity_to_add)}
+                      </div>
+                      <div style={{ marginTop: 2, fontSize: 11, opacity: 0.78 }}>
+                        {formatSharePercent(item?.expected_share)}
                       </div>
                     </div>
                   );
@@ -736,7 +720,7 @@ export default function OpenPositionModal({
               </div>
             ) : null}
 
-            {sizingWarnings.length > 0 ? (
+            {false ? (
               <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
                 {sizingWarnings.map((warning, index) => (
                   <div
