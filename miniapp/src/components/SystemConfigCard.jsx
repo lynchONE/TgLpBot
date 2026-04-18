@@ -12,9 +12,14 @@ export default function SystemConfigCard({ apiBaseUrl, initData, accentTheme = '
     const inputClass = `w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:outline-none focus:ring-1 ${brand.inputFocusClass} ${brand.key === 'emerald' ? 'focus:ring-emerald-500' : 'focus:ring-[#bcff2f]'} dark:border-white/10 dark:bg-white/5 dark:text-white/90`;
     const [config, setConfig] = useState(null);
     const [defaults, setDefaults] = useState(null);
+    const [sizingDefaults, setSizingDefaults] = useState(null);
     const [draft, setDraft] = useState({
         zap_price_deviation_max_percent: '',
         zap_min_pool_liquidity_usd: '',
+        open_position_target_share_min: '',
+        open_position_target_share_max: '',
+        open_position_risk_cap_usd: '',
+        open_position_risk_cap_ratio: '',
     });
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -28,9 +33,14 @@ export default function SystemConfigCard({ apiBaseUrl, initData, accentTheme = '
             const resp = await fetchSystemConfig({ apiBaseUrl, initData });
             setConfig(resp?.config || null);
             setDefaults(resp?.zap_safety_defaults || null);
+            setSizingDefaults(resp?.open_position_sizing_defaults || null);
             setDraft({
                 zap_price_deviation_max_percent: toDraftValue(resp?.config?.zap_price_deviation_max_percent),
                 zap_min_pool_liquidity_usd: toDraftValue(resp?.config?.zap_min_pool_liquidity_usd),
+                open_position_target_share_min: toDraftValue(resp?.config?.open_position_target_share_min),
+                open_position_target_share_max: toDraftValue(resp?.config?.open_position_target_share_max),
+                open_position_risk_cap_usd: toDraftValue(resp?.config?.open_position_risk_cap_usd),
+                open_position_risk_cap_ratio: toDraftValue(resp?.config?.open_position_risk_cap_ratio),
             });
         } catch (e) {
             setError(String(e?.message || e));
@@ -58,10 +68,15 @@ export default function SystemConfigCard({ apiBaseUrl, initData, accentTheme = '
                 config: {
                     zap_price_deviation_max_percent: parseNumber(draft.zap_price_deviation_max_percent),
                     zap_min_pool_liquidity_usd: parseNumber(draft.zap_min_pool_liquidity_usd),
+                    open_position_target_share_min: parseNumber(draft.open_position_target_share_min),
+                    open_position_target_share_max: parseNumber(draft.open_position_target_share_max),
+                    open_position_risk_cap_usd: parseNumber(draft.open_position_risk_cap_usd),
+                    open_position_risk_cap_ratio: parseNumber(draft.open_position_risk_cap_ratio),
                 },
             });
             setConfig(resp?.config || null);
             setDefaults(resp?.zap_safety_defaults || null);
+            setSizingDefaults(resp?.open_position_sizing_defaults || null);
             onNotice?.('系统配置已保存', 'success');
         } catch (e) {
             const message = String(e?.message || e);
@@ -78,7 +93,7 @@ export default function SystemConfigCard({ apiBaseUrl, initData, accentTheme = '
                 <div>
                     <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">系统配置</div>
                     <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/45">
-                        当前仅保留 Zap 安全阈值。
+                        管理 Zap 安全阈值与开仓建议默认参数。
                     </div>
                 </div>
                 <button
@@ -143,6 +158,82 @@ export default function SystemConfigCard({ apiBaseUrl, initData, accentTheme = '
                         onChange={(e) => setDraft((prev) => ({ ...prev, zap_min_pool_liquidity_usd: e.target.value }))}
                         className={inputClass}
                         placeholder={defaults ? String(defaults.min_pool_liquidity_usd) : '1000'}
+                    />
+                </div>
+
+                <div>
+                    <label className="mb-1 block text-xs font-medium text-zinc-600 dark:text-white/60">
+                        开仓建议最小占比
+                        {sizingDefaults && (
+                            <span className="ml-1 text-zinc-400">
+                                默认 {sizingDefaults.target_share_min}
+                            </span>
+                        )}
+                    </label>
+                    <input
+                        type="number"
+                        step="0.01"
+                        value={draft.open_position_target_share_min}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, open_position_target_share_min: e.target.value }))}
+                        className={inputClass}
+                        placeholder={sizingDefaults ? String(sizingDefaults.target_share_min) : '0.2'}
+                    />
+                </div>
+
+                <div>
+                    <label className="mb-1 block text-xs font-medium text-zinc-600 dark:text-white/60">
+                        开仓建议最大占比
+                        {sizingDefaults && (
+                            <span className="ml-1 text-zinc-400">
+                                默认 {sizingDefaults.target_share_max}
+                            </span>
+                        )}
+                    </label>
+                    <input
+                        type="number"
+                        step="0.01"
+                        value={draft.open_position_target_share_max}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, open_position_target_share_max: e.target.value }))}
+                        className={inputClass}
+                        placeholder={sizingDefaults ? String(sizingDefaults.target_share_max) : '0.65'}
+                    />
+                </div>
+
+                <div>
+                    <label className="mb-1 block text-xs font-medium text-zinc-600 dark:text-white/60">
+                        开仓固定风险上限 (USD)
+                        {sizingDefaults && (
+                            <span className="ml-1 text-zinc-400">
+                                默认 {sizingDefaults.risk_cap_usd}
+                            </span>
+                        )}
+                    </label>
+                    <input
+                        type="number"
+                        step="10"
+                        value={draft.open_position_risk_cap_usd}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, open_position_risk_cap_usd: e.target.value }))}
+                        className={inputClass}
+                        placeholder={sizingDefaults ? String(sizingDefaults.risk_cap_usd) : '500'}
+                    />
+                </div>
+
+                <div>
+                    <label className="mb-1 block text-xs font-medium text-zinc-600 dark:text-white/60">
+                        开仓风险比例上限
+                        {sizingDefaults && (
+                            <span className="ml-1 text-zinc-400">
+                                默认 {sizingDefaults.risk_cap_ratio}
+                            </span>
+                        )}
+                    </label>
+                    <input
+                        type="number"
+                        step="0.01"
+                        value={draft.open_position_risk_cap_ratio}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, open_position_risk_cap_ratio: e.target.value }))}
+                        className={inputClass}
+                        placeholder={sizingDefaults ? String(sizingDefaults.risk_cap_ratio) : '0.2'}
                     />
                 </div>
             </div>

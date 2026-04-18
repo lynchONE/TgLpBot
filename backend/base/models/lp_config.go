@@ -51,6 +51,12 @@ type GlobalConfig struct {
 	// Wallet selection mode (per-user UX)
 	MultiWalletEnabled bool `gorm:"not null;default:false" json:"multi_wallet_enabled"`
 
+	// Open-position sizing overrides (0 = inherit system default)
+	OpenPositionTargetShareMin float64 `gorm:"type:decimal(6,4);default:0" json:"open_position_target_share_min"`
+	OpenPositionTargetShareMax float64 `gorm:"type:decimal(6,4);default:0" json:"open_position_target_share_max"`
+	OpenPositionRiskCapUSD     float64 `gorm:"type:decimal(20,4);default:0" json:"open_position_risk_cap_usd"`
+	OpenPositionRiskCapRatio   float64 `gorm:"type:decimal(6,4);default:0" json:"open_position_risk_cap_ratio"`
+
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`

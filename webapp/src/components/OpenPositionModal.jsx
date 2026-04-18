@@ -37,6 +37,51 @@ function formatPercent(value) {
   return `${num.toFixed(num >= 1 ? 2 : 3).replace(/0+$/, '').replace(/\.$/, '')}%`;
 }
 
+function formatSharePercent(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '--';
+  return formatPercent(num * 100);
+}
+
+function formatSizingModeLabel(mode) {
+  switch (String(mode || '').trim()) {
+    case 'conservative':
+      return '保守';
+    case 'neutral':
+      return '中性';
+    case 'aggressive':
+      return '激进';
+    default:
+      return '--';
+  }
+}
+
+function getSizingEfficiencyMeta(efficiency) {
+  switch (String(efficiency || '').trim()) {
+    case 'high':
+      return {
+        label: '高效率',
+        textColor: '#047857',
+        borderColor: 'rgba(16, 185, 129, 0.35)',
+        background: 'rgba(16, 185, 129, 0.12)',
+      };
+    case 'medium':
+      return {
+        label: '中效率',
+        textColor: '#b45309',
+        borderColor: 'rgba(245, 158, 11, 0.35)',
+        background: 'rgba(245, 158, 11, 0.12)',
+      };
+    default:
+      return {
+        label: '低效率',
+        textColor: '#b91c1c',
+        borderColor: 'rgba(239, 68, 68, 0.35)',
+        background: 'rgba(239, 68, 68, 0.12)',
+      };
+  }
+}
+
 function buildEntrySwapConfirmKey(preview, entrySwapSlippage) {
   return [
     preview?.required ? '1' : '0',
@@ -116,6 +161,7 @@ export default function OpenPositionModal({
   const [entrySwapPreviewError, setEntrySwapPreviewError] = useState('');
   const [privateZapInfo, setPrivateZapInfo] = useState(null);
   const [previewChecks, setPreviewChecks] = useState([]);
+  const [sizingAdvice, setSizingAdvice] = useState(null);
   const [error, setError] = useState('');
   const [riskAck, setRiskAck] = useState(false);
 
@@ -171,6 +217,9 @@ export default function OpenPositionModal({
   const submitRiskMessage = String(submitRisk?.message || '').trim();
   const visibleError = error || entrySwapPreviewError || blockingSafetyMessage || submitRiskMessage || String(submitError || '').trim();
   const showPrivateZapProtectionHint = Boolean(privateZapInfo?.show_protection_hint);
+  const recommendedPositions = Array.isArray(sizingAdvice?.recommended_positions) ? sizingAdvice.recommended_positions : [];
+  const sizingWarnings = Array.isArray(sizingAdvice?.warnings) ? sizingAdvice.warnings : [];
+  const sizingInputs = sizingAdvice?.inputs && typeof sizingAdvice.inputs === 'object' ? sizingAdvice.inputs : null;
 
   const previewRequest = useMemo(() => {
     if (!apiBaseUrl || !initData || !addr || !version) return null;
@@ -225,6 +274,7 @@ export default function OpenPositionModal({
     setEntrySwapPreviewError('');
     setEntrySwapPreviewLoading(false);
     setPrivateZapInfo(null);
+    setSizingAdvice(null);
     setEntrySwapSlippage('');
     setEntrySwapSlippageDirty(false);
     setEntrySwapConfirmed(false);
@@ -253,6 +303,7 @@ export default function OpenPositionModal({
       setEntrySwapPreviewLoading(false);
       setEntrySwapPreviewError('');
       setPrivateZapInfo(null);
+      setSizingAdvice(null);
       setPreviewChecks([]);
       return undefined;
     }
@@ -273,6 +324,7 @@ export default function OpenPositionModal({
         setPreviewChecks(Array.isArray(resp?.checks) ? resp.checks : []);
         setEntrySwapPreview(resp?.entry_swap || { required: false });
         setPrivateZapInfo(resp?.private_zap && typeof resp.private_zap === 'object' ? resp.private_zap : null);
+        setSizingAdvice(resp?.sizing_advice && typeof resp.sizing_advice === 'object' ? resp.sizing_advice : null);
       } catch (e) {
         if (!active || controller.signal.aborted) return;
         const payload = resolveOpenPositionErrorPayload(e);
@@ -282,6 +334,7 @@ export default function OpenPositionModal({
           : null;
         setEntrySwapPreview(entrySwapInfo);
         setPrivateZapInfo(payload?.private_zap && typeof payload.private_zap === 'object' ? payload.private_zap : null);
+        setSizingAdvice(payload?.sizing_advice && typeof payload.sizing_advice === 'object' ? payload.sizing_advice : null);
         setPreviewChecks(failChecks);
         setEntrySwapPreviewError(failChecks.length > 0 ? '' : String(e?.message || e || '获取前置兑换预览失败'));
       } finally {
@@ -615,6 +668,95 @@ export default function OpenPositionModal({
             />
           </label>
         </div>
+
+        {(recommendedPositions.length > 0 || sizingWarnings.length > 0) ? (
+          <div className="modal-info-note" style={{ marginTop: 12 }}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>最优加仓建议</div>
+            {sizingInputs ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 10, fontSize: 11, opacity: 0.82 }}>
+                {Number.isFinite(Number(sizingInputs?.active_liquidity_usd)) ? (
+                  <span>活跃流动性 {formatUsdCompact(sizingInputs.active_liquidity_usd)}</span>
+                ) : null}
+                {Number.isFinite(Number(sizingInputs?.capital_total)) ? (
+                  <span>钱包资金 {formatUsdCompact(sizingInputs.capital_total)}</span>
+                ) : null}
+                {Number.isFinite(Number(sizingInputs?.effective_risk_cap_usd)) ? (
+                  <span>有效上限 {formatUsdCompact(sizingInputs.effective_risk_cap_usd)}</span>
+                ) : null}
+              </div>
+            ) : null}
+
+            {recommendedPositions.length > 0 ? (
+              <div style={{ display: 'grid', gap: 10 }}>
+                {recommendedPositions.map((item, index) => {
+                  const efficiencyMeta = getSizingEfficiencyMeta(item?.efficiency);
+                  return (
+                    <div
+                      key={`${item?.mode || 'mode'}-${index}`}
+                      style={{
+                        borderRadius: 14,
+                        border: '1px solid rgba(148, 163, 184, 0.18)',
+                        background: 'rgba(15, 23, 42, 0.18)',
+                        padding: 12,
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{formatSizingModeLabel(item?.mode)}</div>
+                        <span
+                          style={{
+                            borderRadius: 999,
+                            padding: '3px 8px',
+                            fontSize: 11,
+                            fontWeight: 600,
+                            color: efficiencyMeta.textColor,
+                            border: `1px solid ${efficiencyMeta.borderColor}`,
+                            background: efficiencyMeta.background,
+                          }}
+                        >
+                          {efficiencyMeta.label}
+                        </span>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginTop: 10 }}>
+                        <div>
+                          <div style={{ fontSize: 11, opacity: 0.72 }}>推荐加仓</div>
+                          <div style={{ marginTop: 4, fontSize: 15, fontWeight: 700 }}>{formatUsdCompact(item?.liquidity_to_add)}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, opacity: 0.72 }}>预期占比</div>
+                          <div style={{ marginTop: 4, fontSize: 15, fontWeight: 700 }}>{formatSharePercent(item?.expected_share)}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, opacity: 0.72 }}>风险暴露</div>
+                          <div style={{ marginTop: 4, fontSize: 15, fontWeight: 700 }}>{formatUsdCompact(item?.risk_exposure)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {sizingWarnings.length > 0 ? (
+              <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
+                {sizingWarnings.map((warning, index) => (
+                  <div
+                    key={`${warning}-${index}`}
+                    style={{
+                      borderRadius: 12,
+                      border: '1px solid rgba(245, 158, 11, 0.25)',
+                      background: 'rgba(245, 158, 11, 0.08)',
+                      padding: '10px 12px',
+                      fontSize: 12,
+                      lineHeight: 1.55,
+                    }}
+                  >
+                    {warning}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         {(entrySwapPreviewLoading || entrySwapPreview?.required) ? (
           <div className="modal-info-note" style={{ marginTop: 12 }}>

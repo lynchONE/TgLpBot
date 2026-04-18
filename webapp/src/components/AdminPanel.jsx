@@ -224,9 +224,14 @@ export default function AdminPanel({
 
   const [systemConfig, setSystemConfig] = useState(null);
   const [systemDefaults, setSystemDefaults] = useState(null);
+  const [systemSizingDefaults, setSystemSizingDefaults] = useState(null);
   const [systemDraft, setSystemDraft] = useState({
     zap_price_deviation_max_percent: '',
     zap_min_pool_liquidity_usd: '',
+    open_position_target_share_min: '',
+    open_position_target_share_max: '',
+    open_position_risk_cap_usd: '',
+    open_position_risk_cap_ratio: '',
   });
   const [systemLoading, setSystemLoading] = useState(false);
   const [systemSaving, setSystemSaving] = useState(false);
@@ -310,9 +315,14 @@ export default function AdminPanel({
       const response = await fetchSystemConfig({ apiBaseUrl, initData });
       setSystemConfig(response?.config || null);
       setSystemDefaults(response?.zap_safety_defaults || null);
+      setSystemSizingDefaults(response?.open_position_sizing_defaults || null);
       setSystemDraft({
         zap_price_deviation_max_percent: String(response?.config?.zap_price_deviation_max_percent ?? ''),
         zap_min_pool_liquidity_usd: String(response?.config?.zap_min_pool_liquidity_usd ?? ''),
+        open_position_target_share_min: String(response?.config?.open_position_target_share_min ?? ''),
+        open_position_target_share_max: String(response?.config?.open_position_target_share_max ?? ''),
+        open_position_risk_cap_usd: String(response?.config?.open_position_risk_cap_usd ?? ''),
+        open_position_risk_cap_ratio: String(response?.config?.open_position_risk_cap_ratio ?? ''),
       });
     } catch (err) {
       setSystemError(errorText(err));
@@ -412,10 +422,15 @@ export default function AdminPanel({
         config: {
           zap_price_deviation_max_percent: parseNumber(systemDraft.zap_price_deviation_max_percent),
           zap_min_pool_liquidity_usd: parseNumber(systemDraft.zap_min_pool_liquidity_usd),
+          open_position_target_share_min: parseNumber(systemDraft.open_position_target_share_min),
+          open_position_target_share_max: parseNumber(systemDraft.open_position_target_share_max),
+          open_position_risk_cap_usd: parseNumber(systemDraft.open_position_risk_cap_usd),
+          open_position_risk_cap_ratio: parseNumber(systemDraft.open_position_risk_cap_ratio),
         },
       });
       setSystemConfig(response?.config || null);
       setSystemDefaults(response?.zap_safety_defaults || null);
+      setSystemSizingDefaults(response?.open_position_sizing_defaults || null);
       showNotice('系统配置已保存');
     } catch (err) {
       setSystemError(errorText(err));
@@ -723,10 +738,53 @@ export default function AdminPanel({
                           placeholder={systemDefaults ? String(systemDefaults.min_pool_liquidity_usd) : '1000'}
                         />
                       </label>
+                      <label className="am-field">
+                        <span>开仓建议最小占比</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={systemDraft.open_position_target_share_min}
+                          onChange={(event) => setSystemDraft((prev) => ({ ...prev, open_position_target_share_min: event.target.value }))}
+                          placeholder={systemSizingDefaults ? String(systemSizingDefaults.target_share_min) : '0.2'}
+                        />
+                      </label>
+                      <label className="am-field">
+                        <span>开仓建议最大占比</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={systemDraft.open_position_target_share_max}
+                          onChange={(event) => setSystemDraft((prev) => ({ ...prev, open_position_target_share_max: event.target.value }))}
+                          placeholder={systemSizingDefaults ? String(systemSizingDefaults.target_share_max) : '0.65'}
+                        />
+                      </label>
+                      <label className="am-field">
+                        <span>开仓固定风险上限 (USD)</span>
+                        <input
+                          type="number"
+                          step="10"
+                          value={systemDraft.open_position_risk_cap_usd}
+                          onChange={(event) => setSystemDraft((prev) => ({ ...prev, open_position_risk_cap_usd: event.target.value }))}
+                          placeholder={systemSizingDefaults ? String(systemSizingDefaults.risk_cap_usd) : '500'}
+                        />
+                      </label>
+                      <label className="am-field">
+                        <span>开仓风险比例上限</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={systemDraft.open_position_risk_cap_ratio}
+                          onChange={(event) => setSystemDraft((prev) => ({ ...prev, open_position_risk_cap_ratio: event.target.value }))}
+                          placeholder={systemSizingDefaults ? String(systemSizingDefaults.risk_cap_ratio) : '0.2'}
+                        />
+                      </label>
                     </div>
                     <div className="am-actions">
                       <span className="am-item-sub">
                         默认值: 偏差 {systemDefaults?.price_deviation_max_percent ?? '--'} / 流动性 {systemDefaults?.min_pool_liquidity_usd ?? '--'}
+                      </span>
+                      <span className="am-item-sub">
+                        建议默认值 占比 {systemSizingDefaults?.target_share_min ?? '--'} - {systemSizingDefaults?.target_share_max ?? '--'} / 风险 {systemSizingDefaults?.risk_cap_usd ?? '--'}U / {systemSizingDefaults?.risk_cap_ratio ?? '--'}
                       </span>
                       <button type="button" className="am-action-btn" disabled={systemSaving} onClick={handleSaveSystemConfig}>
                         {systemSaving ? '保存中...' : '保存配置'}

@@ -47,10 +47,11 @@ type openPositionResponse struct {
 }
 
 type openPositionPreviewResponse struct {
-	Status     string                     `json:"status"`
-	Checks     []openPositionCheckItem    `json:"checks,omitempty"`
-	EntrySwap  *openPositionEntrySwapInfo `json:"entry_swap,omitempty"`
-	PrivateZap openPositionPrivateZapInfo `json:"private_zap"`
+	Status       string                              `json:"status"`
+	Checks       []openPositionCheckItem             `json:"checks,omitempty"`
+	EntrySwap    *openPositionEntrySwapInfo          `json:"entry_swap,omitempty"`
+	PrivateZap   openPositionPrivateZapInfo          `json:"private_zap"`
+	SizingAdvice *liquidity.OpenPositionSizingAdvice `json:"sizing_advice,omitempty"`
 }
 
 type openPositionEntrySwapInfo struct {
@@ -102,6 +103,7 @@ type openPositionContext struct {
 	poolVersion      string
 	liquidityService *liquidity.LiquidityService
 	task             *models.StrategyTask
+	currentTick      int
 }
 
 func float64Ptr(v float64) *float64 {
@@ -311,6 +313,22 @@ func buildOpenPositionPrivateZapInfo(liquidityService *liquidity.LiquidityServic
 	}
 	info.ShowProtectionHint = showHint
 	return info
+}
+
+func buildOpenPositionSizingAdvice(ctx *openPositionContext) *liquidity.OpenPositionSizingAdvice {
+	if ctx == nil || ctx.task == nil || ctx.selectedWallet == nil {
+		return nil
+	}
+	advice, err := liquidity.BuildOpenPositionSizingAdvice(ctx.task, ctx.selectedWallet, liquidity.OpenPositionSizingBuildOptions{
+		CurrentTick: ctx.currentTick,
+	})
+	if err != nil {
+		log.Printf("[OpenPosition] sizing advice failed: chain=%s pool=%s wallet_id=%d err=%v", ctx.chain, ctx.task.PoolId, ctx.selectedWallet.ID, err)
+		return &liquidity.OpenPositionSizingAdvice{
+			Warnings: []string{"加仓建议暂时不可用。"},
+		}
+	}
+	return advice
 }
 
 func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPositionContext, *openPositionError, int) {
@@ -568,6 +586,7 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 		poolVersion:      poolVersion,
 		liquidityService: liquidityService,
 		task:             task,
+		currentTick:      currentTick,
 	}, nil, 0
 }
 
@@ -608,6 +627,8 @@ func (s *Server) handleOpenPositionPreview(w http.ResponseWriter, r *http.Reques
 		})
 	}
 
+	sizingAdvice := buildOpenPositionSizingAdvice(ctx)
+
 	// Check for hard failures
 	hasFail := false
 	for _, c := range checks {
@@ -620,9 +641,10 @@ func (s *Server) handleOpenPositionPreview(w http.ResponseWriter, r *http.Reques
 	if hasFail {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(openPositionPreviewResponse{
-			Status:     "fail",
-			Checks:     checks,
-			PrivateZap: buildOpenPositionPrivateZapInfo(ctx.liquidityService, ctx.chain, ctx.selectedWallet.ID),
+			Status:       "fail",
+			Checks:       checks,
+			PrivateZap:   buildOpenPositionPrivateZapInfo(ctx.liquidityService, ctx.chain, ctx.selectedWallet.ID),
+			SizingAdvice: sizingAdvice,
 		})
 		return
 	}
@@ -659,10 +681,11 @@ func (s *Server) handleOpenPositionPreview(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(openPositionPreviewResponse{
-		Status:     "ok",
-		Checks:     checks,
-		EntrySwap:  entrySwapInfo,
-		PrivateZap: buildOpenPositionPrivateZapInfo(ctx.liquidityService, ctx.chain, ctx.selectedWallet.ID),
+		Status:       "ok",
+		Checks:       checks,
+		EntrySwap:    entrySwapInfo,
+		PrivateZap:   buildOpenPositionPrivateZapInfo(ctx.liquidityService, ctx.chain, ctx.selectedWallet.ID),
+		SizingAdvice: sizingAdvice,
 	})
 }
 

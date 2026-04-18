@@ -116,3 +116,30 @@ func rebalanceTimeoutUpdate(updates map[string]interface{}) (int, bool) {
 		return 0, false
 	}
 }
+
+func (s *GlobalConfigService) ResolveOpenPositionSizingConfig(userID uint) (*models.OpenPositionSizingConfig, error) {
+	sysCfg, err := NewSystemConfigService().GetOpenPositionSizingConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	cfg, err := s.GetOrCreate(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	out := *sysCfg
+	if cfg.OpenPositionTargetShareMin > 0 {
+		out.TargetShareMin = cfg.OpenPositionTargetShareMin
+	}
+	if cfg.OpenPositionTargetShareMax > 0 {
+		out.TargetShareMax = cfg.OpenPositionTargetShareMax
+	}
+	if cfg.OpenPositionRiskCapUSD > 0 {
+		out.RiskCapUSD = cfg.OpenPositionRiskCapUSD
+	}
+	if cfg.OpenPositionRiskCapRatio > 0 {
+		out.RiskCapRatio = cfg.OpenPositionRiskCapRatio
+	}
+	return normalizeOpenPositionSizingConfig(&out), nil
+}

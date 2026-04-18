@@ -12,6 +12,10 @@ type SystemConfig struct {
 
 	ZapPriceDeviationMaxPercent float64 `gorm:"type:decimal(10,4);default:0" json:"zap_price_deviation_max_percent"`
 	ZapMinPoolLiquidityUSD      float64 `gorm:"type:decimal(20,4);default:0" json:"zap_min_pool_liquidity_usd"`
+	OpenPositionTargetShareMin  float64 `gorm:"type:decimal(6,4);default:0" json:"open_position_target_share_min"`
+	OpenPositionTargetShareMax  float64 `gorm:"type:decimal(6,4);default:0" json:"open_position_target_share_max"`
+	OpenPositionRiskCapUSD      float64 `gorm:"type:decimal(20,4);default:0" json:"open_position_risk_cap_usd"`
+	OpenPositionRiskCapRatio    float64 `gorm:"type:decimal(6,4);default:0" json:"open_position_risk_cap_ratio"`
 
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
@@ -25,4 +29,11 @@ func (SystemConfig) TableName() string {
 type ZapSafetyConfig struct {
 	PriceDeviationMaxPercent float64 `json:"price_deviation_max_percent"`
 	MinPoolLiquidityUSD      float64 `json:"min_pool_liquidity_usd"`
+}
+
+type OpenPositionSizingConfig struct {
+	TargetShareMin float64 `json:"target_share_min"`
+	TargetShareMax float64 `json:"target_share_max"`
+	RiskCapUSD     float64 `json:"risk_cap_usd"`
+	RiskCapRatio   float64 `json:"risk_cap_ratio"`
 }

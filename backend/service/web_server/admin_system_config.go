@@ -16,12 +16,17 @@ type adminSystemConfigRequest struct {
 
 	ZapPriceDeviationMaxPercent *float64 `json:"zap_price_deviation_max_percent,omitempty"`
 	ZapMinPoolLiquidityUSD      *float64 `json:"zap_min_pool_liquidity_usd,omitempty"`
+	OpenPositionTargetShareMin  *float64 `json:"open_position_target_share_min,omitempty"`
+	OpenPositionTargetShareMax  *float64 `json:"open_position_target_share_max,omitempty"`
+	OpenPositionRiskCapUSD      *float64 `json:"open_position_risk_cap_usd,omitempty"`
+	OpenPositionRiskCapRatio    *float64 `json:"open_position_risk_cap_ratio,omitempty"`
 }
 
 type adminSystemConfigResponse struct {
-	OK                bool                    `json:"ok"`
-	Config            *models.SystemConfig    `json:"config,omitempty"`
-	ZapSafetyDefaults *models.ZapSafetyConfig `json:"zap_safety_defaults,omitempty"`
+	OK                         bool                             `json:"ok"`
+	Config                     *models.SystemConfig             `json:"config,omitempty"`
+	ZapSafetyDefaults          *models.ZapSafetyConfig          `json:"zap_safety_defaults,omitempty"`
+	OpenPositionSizingDefaults *models.OpenPositionSizingConfig `json:"open_position_sizing_defaults,omitempty"`
 }
 
 func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request) {
@@ -68,6 +73,18 @@ func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request)
 		if req.ZapMinPoolLiquidityUSD != nil {
 			updates["ZapMinPoolLiquidityUSD"] = *req.ZapMinPoolLiquidityUSD
 		}
+		if req.OpenPositionTargetShareMin != nil {
+			updates["OpenPositionTargetShareMin"] = *req.OpenPositionTargetShareMin
+		}
+		if req.OpenPositionTargetShareMax != nil {
+			updates["OpenPositionTargetShareMax"] = *req.OpenPositionTargetShareMax
+		}
+		if req.OpenPositionRiskCapUSD != nil {
+			updates["OpenPositionRiskCapUSD"] = *req.OpenPositionRiskCapUSD
+		}
+		if req.OpenPositionRiskCapRatio != nil {
+			updates["OpenPositionRiskCapRatio"] = *req.OpenPositionRiskCapRatio
+		}
 
 		sysConfigService := userSvc.NewSystemConfigService()
 		cfg, err := func() (*models.SystemConfig, error) {
@@ -83,9 +100,10 @@ func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request)
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(adminSystemConfigResponse{
-			OK:                true,
-			Config:            cfg,
-			ZapSafetyDefaults: getZapSafetyDefaults(),
+			OK:                         true,
+			Config:                     cfg,
+			ZapSafetyDefaults:          getZapSafetyDefaults(),
+			OpenPositionSizingDefaults: getOpenPositionSizingDefaults(),
 		})
 		return
 	default:
@@ -122,9 +140,10 @@ func (s *Server) handleAdminSystemConfig(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(adminSystemConfigResponse{
-		OK:                true,
-		Config:            cfg,
-		ZapSafetyDefaults: getZapSafetyDefaults(),
+		OK:                         true,
+		Config:                     cfg,
+		ZapSafetyDefaults:          getZapSafetyDefaults(),
+		OpenPositionSizingDefaults: getOpenPositionSizingDefaults(),
 	})
 }
 
@@ -143,4 +162,8 @@ func getZapSafetyDefaults() *models.ZapSafetyConfig {
 		PriceDeviationMaxPercent: priceDeviationDefault,
 		MinPoolLiquidityUSD:      minLiquidityDefault,
 	}
+}
+
+func getOpenPositionSizingDefaults() *models.OpenPositionSizingConfig {
+	return userSvc.NewSystemConfigService().DefaultOpenPositionSizingConfig()
 }

@@ -12,6 +12,13 @@ import (
 
 type SystemConfigService struct{}
 
+const (
+	defaultOpenPositionTargetShareMin = 0.20
+	defaultOpenPositionTargetShareMax = 0.65
+	defaultOpenPositionRiskCapUSD     = 500.0
+	defaultOpenPositionRiskCapRatio   = 0.20
+)
+
 func NewSystemConfigService() *SystemConfigService {
 	return &SystemConfigService{}
 }
@@ -74,4 +81,66 @@ func (s *SystemConfigService) GetZapSafetyConfig() (*models.ZapSafetyConfig, err
 		out.MinPoolLiquidityUSD = cfg.ZapMinPoolLiquidityUSD
 	}
 	return out, nil
+}
+
+func (s *SystemConfigService) GetOpenPositionSizingConfig() (*models.OpenPositionSizingConfig, error) {
+	cfg, err := s.GetOrCreate()
+	if err != nil {
+		return nil, err
+	}
+
+	out := s.DefaultOpenPositionSizingConfig()
+	if cfg.OpenPositionTargetShareMin > 0 {
+		out.TargetShareMin = cfg.OpenPositionTargetShareMin
+	}
+	if cfg.OpenPositionTargetShareMax > 0 {
+		out.TargetShareMax = cfg.OpenPositionTargetShareMax
+	}
+	if cfg.OpenPositionRiskCapUSD > 0 {
+		out.RiskCapUSD = cfg.OpenPositionRiskCapUSD
+	}
+	if cfg.OpenPositionRiskCapRatio > 0 {
+		out.RiskCapRatio = cfg.OpenPositionRiskCapRatio
+	}
+	return normalizeOpenPositionSizingConfig(out), nil
+}
+
+func (s *SystemConfigService) DefaultOpenPositionSizingConfig() *models.OpenPositionSizingConfig {
+	return normalizeOpenPositionSizingConfig(&models.OpenPositionSizingConfig{
+		TargetShareMin: defaultOpenPositionTargetShareMin,
+		TargetShareMax: defaultOpenPositionTargetShareMax,
+		RiskCapUSD:     defaultOpenPositionRiskCapUSD,
+		RiskCapRatio:   defaultOpenPositionRiskCapRatio,
+	})
+}
+
+func normalizeOpenPositionSizingConfig(cfg *models.OpenPositionSizingConfig) *models.OpenPositionSizingConfig {
+	if cfg == nil {
+		cfg = &models.OpenPositionSizingConfig{}
+	}
+	out := *cfg
+
+	if out.TargetShareMin <= 0 {
+		out.TargetShareMin = defaultOpenPositionTargetShareMin
+	}
+	if out.TargetShareMax <= 0 {
+		out.TargetShareMax = defaultOpenPositionTargetShareMax
+	}
+	if out.TargetShareMin > out.TargetShareMax {
+		out.TargetShareMin, out.TargetShareMax = out.TargetShareMax, out.TargetShareMin
+	}
+	if out.TargetShareMin <= 0 {
+		out.TargetShareMin = defaultOpenPositionTargetShareMin
+	}
+	if out.TargetShareMax <= 0 {
+		out.TargetShareMax = defaultOpenPositionTargetShareMax
+	}
+	if out.RiskCapUSD <= 0 {
+		out.RiskCapUSD = defaultOpenPositionRiskCapUSD
+	}
+	if out.RiskCapRatio <= 0 {
+		out.RiskCapRatio = defaultOpenPositionRiskCapRatio
+	}
+
+	return &out
 }

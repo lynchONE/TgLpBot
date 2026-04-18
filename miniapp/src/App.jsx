@@ -384,6 +384,48 @@ function parseOptionalPercent(raw) {
     return { valid: true, value: num };
 }
 
+function formatSharePercent(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num < 0) return '--';
+    const percent = num * 100;
+    if (percent >= 100) return `${Math.round(percent)}%`;
+    if (percent >= 10) return `${percent.toFixed(1).replace(/\.0$/, '')}%`;
+    return `${percent.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
+}
+
+function formatSizingModeLabel(mode) {
+    switch (String(mode || '').trim()) {
+        case 'conservative':
+            return '保守';
+        case 'neutral':
+            return '中性';
+        case 'aggressive':
+            return '激进';
+        default:
+            return '--';
+    }
+}
+
+function getSizingEfficiencyMeta(efficiency) {
+    switch (String(efficiency || '').trim()) {
+        case 'high':
+            return {
+                label: '高效率',
+                chipClass: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200',
+            };
+        case 'medium':
+            return {
+                label: '中效率',
+                chipClass: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200',
+            };
+        default:
+            return {
+                label: '低效率',
+                chipClass: 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-200',
+            };
+    }
+}
+
 const POSITION_SM_RANGE_STALE_MS = 60_000;
 const POSITION_SM_RANGE_BATCH_SIZE = 8;
 
@@ -572,6 +614,7 @@ export default function App() {
     const [openPositionEntrySwapPreviewError, setOpenPositionEntrySwapPreviewError] = useState('');
     const [openPositionPreparePrivateZapInfo, setOpenPositionPreparePrivateZapInfo] = useState(null);
     const [openPositionPrivateZapInfo, setOpenPositionPrivateZapInfo] = useState(null);
+    const [openPositionSizingAdvice, setOpenPositionSizingAdvice] = useState(null);
     const [openPositionEntrySwapSlippage, setOpenPositionEntrySwapSlippage] = useState('');
     const [openPositionEntrySwapSlippageDirty, setOpenPositionEntrySwapSlippageDirty] = useState(false);
     const [openPositionEntrySwapConfirm, setOpenPositionEntrySwapConfirm] = useState(false);
@@ -655,6 +698,15 @@ export default function App() {
             : []
     ), [activeOpenPositionChecks]);
     const openPositionShowPrivateZapProtectionHint = Boolean(activeOpenPositionPrivateZapInfo?.show_protection_hint);
+    const openPositionRecommendedPositions = Array.isArray(openPositionSizingAdvice?.recommended_positions)
+        ? openPositionSizingAdvice.recommended_positions
+        : [];
+    const openPositionSizingWarnings = Array.isArray(openPositionSizingAdvice?.warnings)
+        ? openPositionSizingAdvice.warnings
+        : [];
+    const openPositionSizingInputs = openPositionSizingAdvice?.inputs && typeof openPositionSizingAdvice.inputs === 'object'
+        ? openPositionSizingAdvice.inputs
+        : null;
     const [posWalletBalances, setPosWalletBalances] = useState(null);
     const userDefaultChain = useMemo(() => {
         const raw = String(globalConfig?.default_chain || 'bsc').trim().toLowerCase();
@@ -1605,6 +1657,7 @@ export default function App() {
         setOpenPositionEntrySwapPreviewError('');
         setOpenPositionPreparePrivateZapInfo(null);
         setOpenPositionPrivateZapInfo(null);
+        setOpenPositionSizingAdvice(null);
         setOpenPositionEntrySwapSlippage('');
         setOpenPositionEntrySwapSlippageDirty(false);
         setOpenPositionEntrySwapConfirm(false);
@@ -1815,6 +1868,7 @@ export default function App() {
             setOpenPositionEntrySwapPreviewLoading(false);
             setOpenPositionEntrySwapPreviewError('');
             setOpenPositionPrivateZapInfo(null);
+            setOpenPositionSizingAdvice(null);
             return undefined;
         }
 
@@ -1830,6 +1884,7 @@ export default function App() {
             setOpenPositionEntrySwapPreviewLoading(false);
             setOpenPositionEntrySwapPreviewError('');
             setOpenPositionPrivateZapInfo(null);
+            setOpenPositionSizingAdvice(null);
             setOpenPositionChecks([]);
             return undefined;
         }
@@ -1841,6 +1896,7 @@ export default function App() {
                 setOpenPositionEntrySwapPreviewLoading(false);
                 setOpenPositionEntrySwapPreviewError('');
                 setOpenPositionPrivateZapInfo(null);
+                setOpenPositionSizingAdvice(null);
                 return undefined;
             }
             if (walletsError) {
@@ -1848,6 +1904,7 @@ export default function App() {
                 setOpenPositionEntrySwapPreviewLoading(false);
                 setOpenPositionEntrySwapPreviewError('');
                 setOpenPositionPrivateZapInfo(null);
+                setOpenPositionSizingAdvice(null);
                 return undefined;
             }
             const list = Array.isArray(walletsData?.wallets) ? walletsData.wallets : [];
@@ -1856,6 +1913,7 @@ export default function App() {
                 setOpenPositionEntrySwapPreviewLoading(false);
                 setOpenPositionEntrySwapPreviewError('');
                 setOpenPositionPrivateZapInfo(null);
+                setOpenPositionSizingAdvice(null);
                 return undefined;
             }
             if (list.length > 1) {
@@ -1866,6 +1924,7 @@ export default function App() {
                     setOpenPositionEntrySwapPreviewLoading(false);
                     setOpenPositionEntrySwapPreviewError('');
                     setOpenPositionPrivateZapInfo(null);
+                    setOpenPositionSizingAdvice(null);
                     return undefined;
                 }
             } else {
@@ -1881,6 +1940,7 @@ export default function App() {
         setOpenPositionEntrySwapPreviewLoading(true);
         setOpenPositionEntrySwapPreviewError('');
         setOpenPositionPrivateZapInfo(null);
+        setOpenPositionSizingAdvice(null);
 
         const timer = setTimeout(async () => {
             try {
@@ -1904,6 +1964,7 @@ export default function App() {
                 setOpenPositionChecks(Array.isArray(resp?.checks) ? resp.checks : []);
                 setOpenPositionEntrySwapPreview(resp?.entry_swap || { required: false });
                 setOpenPositionPrivateZapInfo(resp?.private_zap && typeof resp.private_zap === 'object' ? resp.private_zap : null);
+                setOpenPositionSizingAdvice(resp?.sizing_advice && typeof resp.sizing_advice === 'object' ? resp.sizing_advice : null);
             } catch (e) {
                 if (!active || controller.signal.aborted) return;
                 const msg = String(e?.message || e || '').trim();
@@ -1914,6 +1975,7 @@ export default function App() {
                     : null;
                 setOpenPositionEntrySwapPreview(entrySwapInfo);
                 setOpenPositionPrivateZapInfo(payload?.private_zap && typeof payload.private_zap === 'object' ? payload.private_zap : null);
+                setOpenPositionSizingAdvice(payload?.sizing_advice && typeof payload.sizing_advice === 'object' ? payload.sizing_advice : null);
                 setOpenPositionChecks(failChecks);
                 setOpenPositionEntrySwapPreviewError(failChecks.length > 0 ? '' : (msg || '获取前置兑换预览失败'));
             } finally {
@@ -3724,6 +3786,81 @@ export default function App() {
                                     placeholder="例如 0.5（可选）"
                                 />
                             </div>
+
+                            {(openPositionRecommendedPositions.length > 0 || openPositionSizingWarnings.length > 0) ? (
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">最优加仓建议</div>
+                                    {openPositionSizingInputs ? (
+                                        <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-zinc-500 dark:text-white/45">
+                                            {Number.isFinite(Number(openPositionSizingInputs?.active_liquidity_usd)) ? (
+                                                <span>活跃流动性 {formatUsdCompact(openPositionSizingInputs.active_liquidity_usd)}</span>
+                                            ) : null}
+                                            {Number.isFinite(Number(openPositionSizingInputs?.capital_total)) ? (
+                                                <span>钱包资金 {formatUsdCompact(openPositionSizingInputs.capital_total)}</span>
+                                            ) : null}
+                                            {Number.isFinite(Number(openPositionSizingInputs?.effective_risk_cap_usd)) ? (
+                                                <span>有效上限 {formatUsdCompact(openPositionSizingInputs.effective_risk_cap_usd)}</span>
+                                            ) : null}
+                                        </div>
+                                    ) : null}
+
+                                    {openPositionRecommendedPositions.length > 0 ? (
+                                        <div className="mt-3 space-y-2">
+                                            {openPositionRecommendedPositions.map((item, index) => {
+                                                const efficiencyMeta = getSizingEfficiencyMeta(item?.efficiency);
+                                                return (
+                                                    <div
+                                                        key={`${item?.mode || 'mode'}-${index}`}
+                                                        className="rounded-xl border border-zinc-200/80 bg-white/70 p-3 dark:border-white/10 dark:bg-white/[0.04]"
+                                                    >
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <div className="text-[13px] font-semibold text-zinc-900 dark:text-white/85">
+                                                                {formatSizingModeLabel(item?.mode)}
+                                                            </div>
+                                                            <span className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${efficiencyMeta.chipClass}`}>
+                                                                {efficiencyMeta.label}
+                                                            </span>
+                                                        </div>
+                                                        <div className="mt-3 grid grid-cols-3 gap-2">
+                                                            <div>
+                                                                <div className="text-[11px] text-zinc-500 dark:text-white/45">推荐加仓</div>
+                                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/85">
+                                                                    {formatUsdCompact(item?.liquidity_to_add)}
+                                                                </div>
+                                                            </div>
+                                                            <div>
+                                                                <div className="text-[11px] text-zinc-500 dark:text-white/45">预期占比</div>
+                                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/85">
+                                                                    {formatSharePercent(item?.expected_share)}
+                                                                </div>
+                                                            </div>
+                                                            <div>
+                                                                <div className="text-[11px] text-zinc-500 dark:text-white/45">风险暴露</div>
+                                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/85">
+                                                                    {formatUsdCompact(item?.risk_exposure)}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    ) : null}
+
+                                    {openPositionSizingWarnings.length > 0 ? (
+                                        <div className="mt-3 space-y-2">
+                                            {openPositionSizingWarnings.map((warning, index) => (
+                                                <div
+                                                    key={`${warning}-${index}`}
+                                                    className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] leading-tight text-amber-700 dark:text-amber-200"
+                                                >
+                                                    {warning}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : null}
+                                </div>
+                            ) : null}
 
                             {(openPositionEntrySwapPreviewLoading || openPositionDisplayChecks.length > 0 || openPositionEntrySwapPreviewError) ? (
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">

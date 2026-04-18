@@ -87,14 +87,24 @@ func normalizeLiquidityGuardHex(raw string) string {
 }
 
 func poolSnapshotLiquidityUSD(row *models.Pool) float64 {
+	liquidityUSD, _ := poolSnapshotLiquidityUSDWithSource(row)
+	return liquidityUSD
+}
+
+func poolSnapshotLiquidityUSDWithSource(row *models.Pool) (float64, string) {
 	if row == nil {
-		return 0
+		return 0, ""
 	}
-	return firstPositiveLiquidityUSD(
-		row.ActiveLiquidityUSD,
-		row.CurrentPoolValue,
-		row.ReserveInUSD,
-	)
+	switch {
+	case row.ActiveLiquidityUSD > 0:
+		return row.ActiveLiquidityUSD, "pool_snapshot.active_liquidity_usd"
+	case row.CurrentPoolValue > 0:
+		return row.CurrentPoolValue, "pool_snapshot.current_pool_value"
+	case row.ReserveInUSD > 0:
+		return row.ReserveInUSD, "pool_snapshot.reserve_in_usd"
+	default:
+		return 0, ""
+	}
 }
 
 func normalizeDexScreenerGuardChain(chain string) string {
@@ -109,13 +119,18 @@ func normalizeDexScreenerGuardChain(chain string) string {
 }
 
 func readPoolSnapshotLiquidityUSD(chain string, poolID string) float64 {
+	liquidityUSD, _, _ := readPoolSnapshotLiquidityUSDWithSource(chain, poolID)
+	return liquidityUSD
+}
+
+func readPoolSnapshotLiquidityUSDWithSource(chain string, poolID string) (float64, string, error) {
 	if database.DB == nil {
-		return 0
+		return 0, "", nil
 	}
 	normalizedChain := config.NormalizeChain(chain)
 	normalizedPoolID := normalizeLiquidityGuardHex(poolID)
 	if normalizedChain == "" || normalizedPoolID == "" {
-		return 0
+		return 0, "", nil
 	}
 
 	var row models.Pool
@@ -126,10 +141,12 @@ func readPoolSnapshotLiquidityUSD(chain string, poolID string) float64 {
 	if err != nil {
 		if err != nil && err != gorm.ErrRecordNotFound {
 			log.Printf("[Liquidity] guard: load pool snapshot failed: chain=%s pool=%s err=%v", normalizedChain, normalizedPoolID, err)
+			return 0, "", err
 		}
-		return 0
+		return 0, "", nil
 	}
-	return poolSnapshotLiquidityUSD(&row)
+	liquidityUSD, source := poolSnapshotLiquidityUSDWithSource(&row)
+	return liquidityUSD, source, nil
 }
 
 func fetchDexScreenerLiquidityUSD(chain string, poolID string) (float64, error) {
@@ -185,14 +202,24 @@ func fetchDexScreenerLiquidityUSD(chain string, poolID string) (float64, error) 
 }
 
 func resolvePoolLiquidityUSD(chain string, poolID string) (float64, error) {
-	if liquidityUSD := readPoolSnapshotLiquidityUSD(chain, poolID); liquidityUSD > 0 {
-		return liquidityUSD, nil
+	liquidityUSD, _, err := ResolvePoolLiquidityUSDWithSource(chain, poolID)
+	return liquidityUSD, err
+}
+
+func ResolvePoolLiquidityUSDWithSource(chain string, poolID string) (float64, string, error) {
+	if liquidityUSD, source, err := readPoolSnapshotLiquidityUSDWithSource(chain, poolID); err != nil {
+		return 0, source, err
+	} else if liquidityUSD > 0 {
+		return liquidityUSD, source, nil
 	}
 	liquidityUSD, err := fetchDexScreenerLiquidityUSD(chain, poolID)
 	if err != nil {
-		return 0, err
+		return 0, "dexscreener", err
 	}
-	return liquidityUSD, nil
+	if liquidityUSD > 0 {
+		return liquidityUSD, "dexscreener", nil
+	}
+	return 0, "", nil
 }
 
 func tokenDecimalsWithFallback(client *ethclient.Client, token common.Address, fallback int) int {

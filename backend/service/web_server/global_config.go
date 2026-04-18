@@ -151,6 +151,10 @@ func buildGlobalConfigUpdates(raw map[string]json.RawMessage) map[string]interfa
 	setBool("bark_enabled", "bark_enabled")
 	setString("bark_server", "bark_server")
 	setString("bark_group", "bark_group")
+	setFloat("open_position_target_share_min", "open_position_target_share_min")
+	setFloat("open_position_target_share_max", "open_position_target_share_max")
+	setFloat("open_position_risk_cap_usd", "open_position_risk_cap_usd")
+	setFloat("open_position_risk_cap_ratio", "open_position_risk_cap_ratio")
 
 	return updates
 }
