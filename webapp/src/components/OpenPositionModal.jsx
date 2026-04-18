@@ -582,8 +582,8 @@ export default function OpenPositionModal({
           </label>
 
           {recommendedPositions.length > 0 ? (
-            <div style={{ marginTop: 2, marginBottom: 8, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-hint, rgba(255, 255, 255, 0.6))', marginRight: 4 }}>参考建议:</span>
+            <div style={{ marginTop: 2, marginBottom: 8, display: 'flex', alignItems: 'center', flexWrap: 'nowrap', overflowX: 'auto', scrollbarWidth: 'none', gap: 4 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-hint, rgba(255, 255, 255, 0.6))', marginRight: 2, flexShrink: 0 }}>参考建议:</span>
               {recommendedPositions.map((item, index) => {
                 const tone = item?.mode === 'conservative'
                   ? { color: '#10b981', border: 'rgba(16, 185, 129, 0.3)', bg: 'rgba(16, 185, 129, 0.1)', icon: '🛡️' }
@@ -598,6 +598,7 @@ export default function OpenPositionModal({
                       setAmount(String(item?.liquidity_to_add || ''));
                     }}
                     style={{
+                      flexShrink: 0,
                       borderRadius: 14,
                       border: `1px solid ${tone.border}`,
                       background: tone.bg,
@@ -666,7 +667,7 @@ export default function OpenPositionModal({
                     );
                   })}
                 </div>
-                <div className="modal-range-hint">聪明钱近期开仓净额。</div>
+
               </>
             ) : null}
             <div className="modal-range-picks modal-range-picks-default">

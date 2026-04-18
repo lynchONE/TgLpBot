@@ -3679,8 +3679,8 @@ export default function App() {
                             </div>
 
                             {openPositionRecommendedPositions.length > 0 ? (
-                                <div className="mt-1 mb-3 flex flex-wrap items-center gap-2 text-zinc-900 dark:text-white/80">
-                                    <span className="text-[11px] font-semibold opacity-70">参考建议:</span>
+                                <div className="mt-1 mb-3 flex flex-nowrap overflow-x-auto items-center gap-2 text-zinc-900 dark:text-white/80" style={{ scrollbarWidth: 'none' }}>
+                                    <span className="text-[11px] font-semibold opacity-70 shrink-0">参考建议:</span>
                                     {openPositionRecommendedPositions.map((item, index) => {
                                         const tone = item?.mode === 'conservative'
                                             ? { border: 'border-emerald-500/30', bg: 'bg-emerald-500/10', text: 'text-emerald-700 dark:text-emerald-400', icon: '🛡️' }
@@ -3694,7 +3694,7 @@ export default function App() {
                                                     setOpenPositionAmount(String(item?.liquidity_to_add || ''));
                                                     setOpenPositionError('');
                                                 }}
-                                                className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold ${tone.border} ${tone.bg} ${tone.text} cursor-pointer transition-all duration-150 hover:brightness-110 active:scale-95`}
+                                                className={`shrink-0 flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold ${tone.border} ${tone.bg} ${tone.text} cursor-pointer transition-all duration-150 hover:brightness-110 active:scale-95`}
                                             >
                                                 <span className="grayscale-[0.2] text-[10px]">{tone.icon}</span>
                                                 <span>{formatSizingModeLabel(item?.mode)}</span>
