@@ -554,10 +554,8 @@ export default function OpenPositionModal({
                       {wallet.name || shortAddr(wallet.address)}
                       {wallet.is_default ? <span className="wallet-chip-default">默认</span> : null}
                     </span>
-                    <span className="wallet-chip-addr">{shortAddr(wallet.address)}</span>
                     <span className="wallet-chip-bal">
-                      {wallet.native_balance !== 'N/A' ? `${wallet.native_balance}` : ''}
-                      {wallet.stable_balance !== 'N/A' ? ` / $${wallet.stable_balance}` : ''}
+                      {wallet.stable_balance !== 'N/A' ? `$${wallet.stable_balance}` : ''}
                     </span>
                   </button>
                 );
@@ -583,7 +581,7 @@ export default function OpenPositionModal({
 
           {recommendedPositions.length > 0 ? (
             <div style={{ marginTop: 2, marginBottom: 8, display: 'flex', alignItems: 'center', flexWrap: 'nowrap', overflowX: 'auto', scrollbarWidth: 'none', gap: 4 }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-hint, rgba(255, 255, 255, 0.6))', marginRight: 2, flexShrink: 0 }}>参考建议:</span>
+
               {recommendedPositions.map((item, index) => {
                 const tone = item?.mode === 'conservative'
                   ? { color: '#10b981', border: 'rgba(16, 185, 129, 0.3)', bg: 'rgba(16, 185, 129, 0.1)', icon: '🛡️' }

@@ -3593,12 +3593,12 @@ export default function App() {
                                         <div className="mt-2 text-xs text-zinc-500 dark:text-white/50">未找到钱包</div>
                                     ) : null}
 
-                                    <div className="mt-2 max-h-56 overflow-y-auto overscroll-contain space-y-2 pr-1">
+                                    <div className="mt-2 flex flex-wrap gap-1.5">
                                         {(Array.isArray(walletsData?.wallets) ? walletsData.wallets : []).map((w) => {
                                             const id = String(w?.id || '').trim();
                                             const addr = String(w?.address || '').trim();
                                             const name = String(w?.name || '').trim();
-                                            const shortAddr = addr.length > 12 ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : addr;
+                                            const shortAddr = addr.length > 12 ? `${addr.slice(0, 6)}..${addr.slice(-4)}` : addr;
                                             const selected = id && id === String(openPositionWalletId || '').trim();
 
                                             return (
@@ -3612,36 +3612,16 @@ export default function App() {
                                                         setOpenPositionError('');
                                                         hapticSelection();
                                                     }}
-                                                    className={`w-full rounded-xl border px-3 py-2 text-left transition ${selected
+                                                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition whitespace-nowrap ${selected
                                                         ? brand.selectionClass
-                                                        : 'border-zinc-200 bg-white/70 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10'
+                                                        : 'border-zinc-200 bg-white/70 text-zinc-700 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
                                                         }`}
                                                 >
-                                                    <div className="flex items-center justify-between gap-3">
-                                                        <div className="min-w-0">
-                                                            <div className="flex items-center gap-2">
-                                                                <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/85">
-                                                                    {name || shortAddr || `钱包 ${id}`}
-                                                                </div>
-                                                                {w?.is_default ? (
-                                                                    <span className="shrink-0 rounded-full bg-zinc-500/10 px-2 py-0.5 text-[10px] font-semibold text-zinc-600 dark:text-white/60">
-                                                                        默认
-                                                                    </span>
-                                                                ) : null}
-                                                            </div>
-                                                            <div className="mt-0.5 truncate text-[11px] text-zinc-500 dark:text-white/40">
-                                                                {addr || '--'}
-                                                            </div>
-                                                        </div>
-                                                        <div className="shrink-0 text-right">
-                                                            <div className="text-xs font-semibold tabular-nums text-zinc-900 dark:text-white/85">
-                                                                {String(w?.stable_balance ?? '--')} {walletsData?.stable_symbol || 'USDT'}
-                                                            </div>
-                                                            <div className="mt-0.5 text-[11px] tabular-nums text-zinc-500 dark:text-white/45">
-                                                                {String(w?.native_balance ?? '--')} {walletsData?.native_symbol || 'BNB'}
-                                                            </div>
-                                                        </div>
-                                                    </div>
+                                                    <span className="font-bold">{name || shortAddr || `钱包${id}`}</span>
+                                                    {w?.is_default ? (
+                                                        <span className="rounded bg-zinc-500/10 px-1 py-px text-[9px] font-bold text-zinc-500 dark:text-white/50">默认</span>
+                                                    ) : null}
+                                                    <span className="tabular-nums opacity-70">${String(w?.stable_balance ?? '--')}</span>
                                                 </button>
                                             );
                                         })}
@@ -3680,7 +3660,7 @@ export default function App() {
 
                             {openPositionRecommendedPositions.length > 0 ? (
                                 <div className="mt-1 mb-3 flex flex-nowrap overflow-x-auto items-center gap-2 text-zinc-900 dark:text-white/80" style={{ scrollbarWidth: 'none' }}>
-                                    <span className="text-[11px] font-semibold opacity-70 shrink-0">参考建议:</span>
+
                                     {openPositionRecommendedPositions.map((item, index) => {
                                         const tone = item?.mode === 'conservative'
                                             ? { border: 'border-emerald-500/30', bg: 'bg-emerald-500/10', text: 'text-emerald-700 dark:text-emerald-400', icon: '🛡️' }
