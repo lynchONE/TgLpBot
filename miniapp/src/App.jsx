@@ -3664,7 +3664,7 @@ export default function App() {
                                 </div>
                             ) : null}
 
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                            <div className="mt-4">
                                 <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">开仓金额 (USDT)</div>
                                 <input
                                     value={openPositionAmount}
@@ -3678,7 +3678,34 @@ export default function App() {
                                 />
                             </div>
 
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                            {openPositionRecommendedPositions.length > 0 ? (
+                                <div className="mt-1 mb-3 flex flex-wrap items-center gap-2 text-zinc-900 dark:text-white/80">
+                                    <span className="text-[11px] font-semibold opacity-70">参考建议:</span>
+                                    {openPositionRecommendedPositions.map((item, index) => {
+                                        const tone = item?.mode === 'conservative'
+                                            ? { border: 'border-emerald-500/30', bg: 'bg-emerald-500/10', text: 'text-emerald-700 dark:text-emerald-400', icon: '🛡️' }
+                                            : item?.mode === 'neutral'
+                                                ? { border: 'border-amber-500/30', bg: 'bg-amber-500/10', text: 'text-amber-700 dark:text-amber-400', icon: '⚖️' }
+                                                : { border: 'border-red-500/30', bg: 'bg-red-500/10', text: 'text-red-700 dark:text-red-400', icon: '🚀' };
+                                        return (
+                                            <div
+                                                key={`${item?.mode || 'mode'}-${index}`}
+                                                onClick={() => {
+                                                    setOpenPositionAmount(String(item?.liquidity_to_add || ''));
+                                                    setOpenPositionError('');
+                                                }}
+                                                className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold ${tone.border} ${tone.bg} ${tone.text} cursor-pointer transition-all duration-150 hover:brightness-110 active:scale-95`}
+                                            >
+                                                <span className="grayscale-[0.2] text-[10px]">{tone.icon}</span>
+                                                <span>{formatSizingModeLabel(item?.mode)}</span>
+                                                <span className="font-mono text-zinc-900 dark:text-white/95 text-[12px]">{formatUsdCompact(item?.liquidity_to_add)}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ) : null}
+
+                            <div className="mt-4">
                                 <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">自定义区间 (%)</div>
                                 <div className="mt-2 grid grid-cols-2 gap-2">
                                     <input
@@ -3772,7 +3799,7 @@ export default function App() {
                                     输入下限和上限百分比。例如 1 / 3 表示下跌 1%、上涨 3%。                                </div>
                             </div>
 
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                            <div className="mt-4">
                                 <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">滑点 (%)</div>
                                 <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">留空则使用全局滑点设置。</div>
                                 <input
@@ -3787,68 +3814,10 @@ export default function App() {
                                 />
                             </div>
 
-                            {openPositionRecommendedPositions.length > 0 ? (
-                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">加仓建议</div>
-                                    {false ? (
-                                        <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-zinc-500 dark:text-white/45">
-                                            {Number.isFinite(Number(openPositionSizingInputs?.active_liquidity_usd)) ? (
-                                                <span>活跃流动性 {formatUsdCompact(openPositionSizingInputs.active_liquidity_usd)}</span>
-                                            ) : null}
-                                            {Number.isFinite(Number(openPositionSizingInputs?.capital_total)) ? (
-                                                <span>钱包资金 {formatUsdCompact(openPositionSizingInputs.capital_total)}</span>
-                                            ) : null}
-                                            {Number.isFinite(Number(openPositionSizingInputs?.effective_risk_cap_usd)) ? (
-                                                <span>有效上限 {formatUsdCompact(openPositionSizingInputs.effective_risk_cap_usd)}</span>
-                                            ) : null}
-                                        </div>
-                                    ) : null}
 
-                                    {openPositionRecommendedPositions.length > 0 ? (
-                                        <div className="mt-3 grid grid-cols-3 gap-2">
-                                            {openPositionRecommendedPositions.map((item, index) => {
-                                                const tone = item?.mode === 'conservative'
-                                                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200'
-                                                    : item?.mode === 'neutral'
-                                                        ? 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200'
-                                                        : 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-200';
-                                                return (
-                                                    <div
-                                                        key={`${item?.mode || 'mode'}-${index}`}
-                                                        className={`rounded-xl border p-3 ${tone}`}
-                                                    >
-                                                        <div className="text-[11px] font-bold">
-                                                            {formatSizingModeLabel(item?.mode)}
-                                                        </div>
-                                                        <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/85">
-                                                            {formatUsdCompact(item?.liquidity_to_add)}
-                                                        </div>
-                                                        <div className="mt-1 text-[11px] opacity-80">
-                                                            {formatSharePercent(item?.expected_share)}
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    ) : null}
-
-                                    {false ? (
-                                        <div className="mt-3 space-y-2">
-                                            {openPositionSizingWarnings.map((warning, index) => (
-                                                <div
-                                                    key={`${warning}-${index}`}
-                                                    className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] leading-tight text-amber-700 dark:text-amber-200"
-                                                >
-                                                    {warning}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    ) : null}
-                                </div>
-                            ) : null}
 
                             {(openPositionEntrySwapPreviewLoading || openPositionDisplayChecks.length > 0 || openPositionEntrySwapPreviewError) ? (
-                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="mt-4">
                                     <div className="text-xs font-semibold text-zinc-900 dark:text-white/80 mb-2">安全检查</div>
                                     {openPositionEntrySwapPreviewLoading ? (
                                         <div className="text-[11px] text-zinc-500 dark:text-white/40">正在检查...</div>

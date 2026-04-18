@@ -581,6 +581,64 @@ export default function OpenPositionModal({
             />
           </label>
 
+          {recommendedPositions.length > 0 ? (
+            <div style={{ marginTop: 2, marginBottom: 8, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-hint, rgba(255, 255, 255, 0.6))', marginRight: 4 }}>参考建议:</span>
+              {recommendedPositions.map((item, index) => {
+                const tone = item?.mode === 'conservative'
+                  ? { color: '#10b981', border: 'rgba(16, 185, 129, 0.3)', bg: 'rgba(16, 185, 129, 0.1)', icon: '🛡️' }
+                  : item?.mode === 'neutral'
+                    ? { color: '#f59e0b', border: 'rgba(245, 158, 11, 0.3)', bg: 'rgba(245, 158, 11, 0.1)', icon: '⚖️' }
+                    : { color: '#ef4444', border: 'rgba(239, 68, 68, 0.3)', bg: 'rgba(239, 68, 68, 0.1)', icon: '🚀' };
+                return (
+                  <div
+                    key={`${item?.mode || 'mode'}-${index}`}
+                    onClick={() => {
+                      clearErrors();
+                      setAmount(String(item?.liquidity_to_add || ''));
+                    }}
+                    style={{
+                      borderRadius: 14,
+                      border: `1px solid ${tone.border}`,
+                      background: tone.bg,
+                      padding: '4px 10px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.filter = 'brightness(1.15)';
+                      e.currentTarget.style.transform = 'translateY(-1px)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.filter = 'brightness(1)';
+                      e.currentTarget.style.transform = 'translateY(0)';
+                    }}
+                    onMouseDown={(e) => {
+                      e.currentTarget.style.transform = 'scale(0.96)';
+                    }}
+                    onMouseUp={(e) => {
+                      e.currentTarget.style.transform = 'translateY(-1px)';
+                    }}
+                  >
+                    <span style={{ fontSize: 11, filter: 'grayscale(0.2)' }}>{tone.icon}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: tone.color }}>
+                      {formatSizingModeLabel(item?.mode)}
+                    </span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary, #fff)', fontFamily: 'var(--font-mono)' }}>
+                      {formatUsdCompact(item?.liquidity_to_add)}
+                    </span>
+                    <span style={{ fontSize: 10, opacity: 0.6, color: 'var(--text-muted)' }}>
+                      {formatSharePercent(item?.expected_share)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+
           <div className="modal-range-section">
             <span className="modal-range-label">快捷区间</span>
             {smartRangesLoading ? (
@@ -669,78 +727,7 @@ export default function OpenPositionModal({
           </label>
         </div>
 
-        {recommendedPositions.length > 0 ? (
-          <div className="modal-info-note" style={{ marginTop: 12 }}>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>加仓建议</div>
-            {false ? (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 10, fontSize: 11, opacity: 0.82 }}>
-                {Number.isFinite(Number(sizingInputs?.active_liquidity_usd)) ? (
-                  <span>活跃流动性 {formatUsdCompact(sizingInputs.active_liquidity_usd)}</span>
-                ) : null}
-                {Number.isFinite(Number(sizingInputs?.capital_total)) ? (
-                  <span>钱包资金 {formatUsdCompact(sizingInputs.capital_total)}</span>
-                ) : null}
-                {Number.isFinite(Number(sizingInputs?.effective_risk_cap_usd)) ? (
-                  <span>有效上限 {formatUsdCompact(sizingInputs.effective_risk_cap_usd)}</span>
-                ) : null}
-              </div>
-            ) : null}
 
-            {recommendedPositions.length > 0 ? (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
-                {recommendedPositions.map((item, index) => {
-                  const tone = item?.mode === 'conservative'
-                    ? { color: '#047857', border: 'rgba(16, 185, 129, 0.35)', bg: 'rgba(16, 185, 129, 0.12)' }
-                    : item?.mode === 'neutral'
-                      ? { color: '#b45309', border: 'rgba(245, 158, 11, 0.35)', bg: 'rgba(245, 158, 11, 0.12)' }
-                      : { color: '#b91c1c', border: 'rgba(239, 68, 68, 0.35)', bg: 'rgba(239, 68, 68, 0.12)' };
-                  return (
-                    <div
-                      key={`${item?.mode || 'mode'}-${index}`}
-                      style={{
-                        borderRadius: 12,
-                        border: `1px solid ${tone.border}`,
-                        background: tone.bg,
-                        padding: '10px 12px',
-                        minWidth: 0,
-                      }}
-                    >
-                      <div style={{ fontSize: 11, fontWeight: 700, color: tone.color }}>
-                        {formatSizingModeLabel(item?.mode)}
-                      </div>
-                      <div style={{ marginTop: 4, fontSize: 13, fontWeight: 700 }}>
-                        {formatUsdCompact(item?.liquidity_to_add)}
-                      </div>
-                      <div style={{ marginTop: 2, fontSize: 11, opacity: 0.78 }}>
-                        {formatSharePercent(item?.expected_share)}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : null}
-
-            {false ? (
-              <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
-                {sizingWarnings.map((warning, index) => (
-                  <div
-                    key={`${warning}-${index}`}
-                    style={{
-                      borderRadius: 12,
-                      border: '1px solid rgba(245, 158, 11, 0.25)',
-                      background: 'rgba(245, 158, 11, 0.08)',
-                      padding: '10px 12px',
-                      fontSize: 12,
-                      lineHeight: 1.55,
-                    }}
-                  >
-                    {warning}
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
 
         {(entrySwapPreviewLoading || entrySwapPreview?.required) ? (
           <div className="modal-info-note" style={{ marginTop: 12 }}>
