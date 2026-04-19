@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Check, CheckCircle, X, XCircle } from 'lucide-react';
-import { previewOpenPosition } from '../api';
+import { fetchGlobalConfig, previewOpenPosition } from '../api';
 
 const PRESET_RANGES = [1, 2, 3, 5, 10, 20];
 
@@ -130,6 +130,19 @@ function extractOpenPositionErrorChecks(error, fallbackKey = 'preview_safety') {
   }];
 }
 
+function parseDCAPercentagesAny(raw) {
+  if (Array.isArray(raw)) return raw.map((v) => Number(v) || 0);
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) return arr.map((v) => Number(v) || 0);
+    } catch {
+      // ignore
+    }
+  }
+  return [50, 50];
+}
+
 export default function OpenPositionModal({
   apiBaseUrl,
   initData,
@@ -164,6 +177,10 @@ export default function OpenPositionModal({
   const [sizingAdvice, setSizingAdvice] = useState(null);
   const [error, setError] = useState('');
   const [riskAck, setRiskAck] = useState(false);
+  const [dcaEnabled, setDcaEnabled] = useState(false);
+  const [dcaPercentages, setDcaPercentages] = useState([50, 50]);
+  const [dcaInterval, setDcaInterval] = useState(30);
+  const [dcaDefaultsLoaded, setDcaDefaultsLoaded] = useState(false);
 
   const pair = pool?.trading_pair || '--';
   const addr = String(pool?.pool_address || '').trim();
@@ -380,6 +397,35 @@ export default function OpenPositionModal({
     setRangeUpper(value);
   }, [clearErrors]);
 
+  useEffect(() => {
+    if (!apiBaseUrl || !initData || dcaDefaultsLoaded) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    fetchGlobalConfig({ apiBaseUrl, initData, signal: controller.signal })
+      .then((resp) => {
+        if (cancelled) return;
+        const cfg = resp?.config || resp || {};
+        setDcaEnabled(Boolean(cfg.dca_enabled));
+        setDcaPercentages(parseDCAPercentagesAny(cfg.dca_percentages_json ?? cfg.dca_percentages));
+        const interval = Number(cfg.dca_interval_seconds);
+        if (Number.isFinite(interval) && interval > 0) setDcaInterval(interval);
+        setDcaDefaultsLoaded(true);
+      })
+      .catch(() => {
+        if (!cancelled) setDcaDefaultsLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [apiBaseUrl, initData, dcaDefaultsLoaded]);
+
+  const dcaSum = useMemo(
+    () => dcaPercentages.reduce((acc, v) => acc + (Number(v) || 0), 0),
+    [dcaPercentages],
+  );
+  const dcaSumValid = Math.abs(dcaSum - 100) < 0.01;
+
   const handleSubmit = useCallback(() => {
     if (!Number.isFinite(amountValue) || amountValue <= 0) {
       setError('请输入有效的开仓金额。');
@@ -426,6 +472,25 @@ export default function OpenPositionModal({
       return;
     }
 
+    if (dcaEnabled) {
+      if (dcaPercentages.length < 2 || dcaPercentages.length > 5) {
+        setError('分批次数必须在 2–5 批之间。');
+        return;
+      }
+      if (dcaPercentages.some((v) => !(Number(v) >= 5))) {
+        setError('每批占比必须 ≥ 5%。');
+        return;
+      }
+      if (!dcaSumValid) {
+        setError(`分批百分比之和必须等于 100%（当前 ${dcaSum.toFixed(2)}%）。`);
+        return;
+      }
+      if (!(Number(dcaInterval) >= 10 && Number(dcaInterval) <= 600)) {
+        setError('批次间隔必须在 10–600 秒之间。');
+        return;
+      }
+    }
+
     setError('');
     onSubmit({
       poolAddress: addr,
@@ -440,6 +505,9 @@ export default function OpenPositionModal({
       confirmEntrySwap: Boolean(entrySwapPreview?.required && entrySwapConfirmed),
       walletId: resolvedWalletId || undefined,
       ackLiquidityRisk: riskAck,
+      dcaEnabled,
+      dcaPercentages: dcaEnabled ? dcaPercentages.map((v) => Number(v) || 0) : undefined,
+      dcaIntervalSeconds: dcaEnabled ? Number(dcaInterval) : undefined,
     });
   }, [
     amountValue,
@@ -461,6 +529,11 @@ export default function OpenPositionModal({
     addr,
     version,
     chain,
+    dcaEnabled,
+    dcaPercentages,
+    dcaSum,
+    dcaSumValid,
+    dcaInterval,
   ]);
 
   return (
@@ -781,6 +854,128 @@ export default function OpenPositionModal({
             ) : null}
           </div>
         ) : null}
+
+        <div style={{
+          marginTop: 16,
+          padding: 16,
+          borderRadius: 16,
+          border: '1px solid rgba(6, 182, 212, 0.25)',
+          background: 'rgba(6, 182, 212, 0.06)',
+        }}>
+          <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
+            <span style={{ fontWeight: 600, fontSize: 13 }}>分批加仓（防插针）</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={dcaEnabled}
+                onChange={(e) => {
+                  clearErrors();
+                  setDcaEnabled(e.target.checked);
+                }}
+                disabled={busy}
+              />
+              <span style={{ fontSize: 12 }}>{dcaEnabled ? '本次启用' : '本次不启用'}</span>
+            </span>
+          </label>
+          <div style={{ fontSize: 11, opacity: 0.7, marginTop: 6, lineHeight: 1.5 }}>
+            首批按正常开仓创建仓位，后续批次按间隔向该仓位追加流动性。手动关仓或价格跑出区间时，剩余批次自动取消。
+          </div>
+          {dcaEnabled ? (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>每批占比（共 {dcaPercentages.length} 批）</div>
+              {dcaPercentages.map((value, idx) => (
+                <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                  <span style={{ minWidth: 56, fontSize: 11, opacity: 0.7 }}>
+                    {idx === 0 ? '首批' : `第 ${idx + 1} 批`}
+                  </span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="5"
+                    max="100"
+                    value={value}
+                    onChange={(e) => {
+                      clearErrors();
+                      const next = dcaPercentages.slice();
+                      next[idx] = Number(e.target.value) || 0;
+                      setDcaPercentages(next);
+                    }}
+                    disabled={busy}
+                    style={{ flex: 1, padding: '4px 8px' }}
+                  />
+                  <span style={{ fontSize: 11, opacity: 0.6 }}>%</span>
+                  {dcaPercentages.length > 2 ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        clearErrors();
+                        setDcaPercentages(dcaPercentages.filter((_, i) => i !== idx));
+                      }}
+                      disabled={busy}
+                      style={{ padding: '2px 8px', fontSize: 12 }}
+                    >
+                      ×
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, fontSize: 11 }}>
+                <span style={{ color: dcaSumValid ? '#10b981' : '#f59e0b', fontWeight: 600 }}>
+                  合计：{dcaSum.toFixed(2)}% {dcaSumValid ? '✓' : '（必须等于 100%）'}
+                </span>
+                <span style={{ display: 'flex', gap: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      clearErrors();
+                      const n = dcaPercentages.length || 2;
+                      const base = Math.floor((100 / n) * 100) / 100;
+                      const next = Array(n).fill(base);
+                      next[n - 1] = Math.round((100 - base * (n - 1)) * 100) / 100;
+                      setDcaPercentages(next);
+                    }}
+                    disabled={busy}
+                    style={{ padding: '2px 8px', fontSize: 11 }}
+                  >
+                    平均分配
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (dcaPercentages.length >= 5) return;
+                      clearErrors();
+                      const n = dcaPercentages.length + 1;
+                      const base = Math.floor((100 / n) * 100) / 100;
+                      const next = Array(n).fill(base);
+                      next[n - 1] = Math.round((100 - base * (n - 1)) * 100) / 100;
+                      setDcaPercentages(next);
+                    }}
+                    disabled={busy || dcaPercentages.length >= 5}
+                    style={{ padding: '2px 8px', fontSize: 11 }}
+                  >
+                    ＋ 追加批次
+                  </button>
+                </span>
+              </div>
+              <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, minWidth: 80 }}>批次间隔</span>
+                <input
+                  type="number"
+                  min="10"
+                  max="600"
+                  value={dcaInterval}
+                  onChange={(e) => {
+                    clearErrors();
+                    setDcaInterval(Number(e.target.value) || 0);
+                  }}
+                  disabled={busy}
+                  style={{ flex: 1, padding: '4px 8px' }}
+                />
+                <span style={{ fontSize: 11, opacity: 0.6 }}>秒 (10–600)</span>
+              </div>
+            </div>
+          ) : null}
+        </div>
 
         {visibleError ? (
           <div style={{

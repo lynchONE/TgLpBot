@@ -111,6 +111,15 @@ type StrategyTask struct {
 	RebalanceNextRetryAt *time.Time `json:"rebalance_next_retry_at"`
 	RebalanceLastError   string     `gorm:"type:text" json:"rebalance_last_error"`
 
+	// DCA (time-based batching) state — first batch is the mint, later batches call
+	// IncreaseLiquidity on this same position. See strategy/dca.go and strategy/strategy_dca.go.
+	DCAEnabled         bool       `gorm:"default:false" json:"dca_enabled"`
+	DCATotalAmountUSDT float64    `gorm:"type:decimal(20,8);default:0" json:"dca_total_amount_usdt"`
+	DCAPercentagesJSON string     `gorm:"type:varchar(128);default:''" json:"dca_percentages_json"`
+	DCAIntervalSeconds int        `gorm:"default:0" json:"dca_interval_seconds"`
+	DCAExecutedCount   int        `gorm:"default:0" json:"dca_executed_count"`
+	DCANextBatchAt     *time.Time `json:"dca_next_batch_at"`
+
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
@@ -143,6 +152,16 @@ func (t *StrategyTask) CreateOverrideUpdates() map[string]interface{} {
 	}
 	if !t.RebalanceEnabled {
 		updates["rebalance_enabled"] = false
+	}
+
+	if !t.DCAEnabled {
+		updates["dca_enabled"] = false
+	}
+	if t.DCAIntervalSeconds == 0 {
+		updates["dca_interval_seconds"] = 0
+	}
+	if t.DCAExecutedCount == 0 {
+		updates["dca_executed_count"] = 0
 	}
 
 	return updates

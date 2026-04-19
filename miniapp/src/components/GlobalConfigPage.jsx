@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle, Filter, Save, Settings2, Shield, Sparkles, Wallet } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, CheckCircle, Filter, Layers, Plus, Save, Settings2, Shield, Sparkles, Trash2, Wallet } from 'lucide-react';
 import BottomSheet from './BottomSheet.jsx';
 import ToggleSwitch from './ToggleSwitch.jsx';
 import CustomSelect from './CustomSelect.jsx';
@@ -10,6 +10,19 @@ const CHAIN_OPTIONS = [
     { value: 'bsc', label: 'BSC' },
     { value: 'base', label: 'Base' },
 ];
+
+function parseDCAPercentages(raw) {
+    if (Array.isArray(raw)) return raw.map((v) => Number(v) || 0);
+    if (typeof raw === 'string' && raw.trim()) {
+        try {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr)) return arr.map((v) => Number(v) || 0);
+        } catch {
+            // fall through
+        }
+    }
+    return [50, 50];
+}
 
 function buildDraft(cfg = {}) {
     return {
@@ -29,6 +42,9 @@ function buildDraft(cfg = {}) {
         bark_enabled: cfg.bark_enabled ?? false,
         bark_server: cfg.bark_server || '',
         bark_group: cfg.bark_group || '',
+        dca_enabled: cfg.dca_enabled ?? false,
+        dca_percentages: parseDCAPercentages(cfg.dca_percentages_json ?? cfg.dca_percentages),
+        dca_interval_seconds: cfg.dca_interval_seconds ?? 30,
     };
 }
 
@@ -292,6 +308,12 @@ export default function GlobalConfigPage({ open, onClose, apiBaseUrl, initData, 
                         />
                     </Section>
 
+                    <DCASection
+                        draft={draft}
+                        updateDraft={updateDraft}
+                        inputClass={inputClass}
+                    />
+
                     <Section
                         icon={Wallet}
                         iconClassName="bg-sky-500/10 text-sky-700 ring-1 ring-sky-500/20 dark:bg-sky-500/15 dark:text-sky-200 dark:ring-sky-500/25"
@@ -487,5 +509,129 @@ function MutedHint({ children }) {
         <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50/80 px-3 py-3 text-xs leading-5 text-zinc-500 dark:border-white/[0.08] dark:bg-white/[0.02] dark:text-white/45">
             {children}
         </div>
+    );
+}
+
+function DCASection({ draft, updateDraft, inputClass }) {
+    const percentages = Array.isArray(draft.dca_percentages) ? draft.dca_percentages : [];
+    const sum = useMemo(
+        () => percentages.reduce((acc, v) => acc + (Number(v) || 0), 0),
+        [percentages],
+    );
+    const sumValid = Math.abs(sum - 100) < 0.01;
+
+    const updatePct = (idx, value) => {
+        const next = percentages.slice();
+        next[idx] = Number(value) || 0;
+        updateDraft('dca_percentages', next);
+    };
+    const addBatch = () => {
+        if (percentages.length >= 5) return;
+        const even = Math.round((100 / (percentages.length + 1)) * 100) / 100;
+        const next = Array(percentages.length + 1).fill(even);
+        const diff = 100 - even * next.length;
+        next[next.length - 1] = Math.round((even + diff) * 100) / 100;
+        updateDraft('dca_percentages', next);
+    };
+    const removeBatch = (idx) => {
+        if (percentages.length <= 2) return;
+        const next = percentages.filter((_, i) => i !== idx);
+        updateDraft('dca_percentages', next);
+    };
+    const equalize = () => {
+        const n = percentages.length || 2;
+        const base = Math.floor((100 / n) * 100) / 100;
+        const next = Array(n).fill(base);
+        next[next.length - 1] = Math.round((100 - base * (n - 1)) * 100) / 100;
+        updateDraft('dca_percentages', next);
+    };
+
+    return (
+        <Section
+            icon={Layers}
+            iconClassName="bg-cyan-500/10 text-cyan-700 ring-1 ring-cyan-500/20 dark:bg-cyan-500/15 dark:text-cyan-200 dark:ring-cyan-500/25"
+            title="分批加仓（防插针）"
+            description="将一次开仓拆为 2–5 批：首批开仓，后续批次按间隔向同一仓位增加流动性，避免一次性打到插针高点。"
+        >
+            <ToggleSwitch
+                label="启用分批加仓"
+                description="作为默认策略，单次开仓时可覆盖。"
+                checked={draft.dca_enabled}
+                onChange={(value) => updateDraft('dca_enabled', value)}
+            />
+            {draft.dca_enabled ? (
+                <>
+                    <FieldCard label="每批占比" hint={`共 ${percentages.length} 批，之和必须等于 100%。`}>
+                        <div className="space-y-2">
+                            {percentages.map((value, idx) => (
+                                <div key={idx} className="flex items-center gap-2">
+                                    <div className="w-8 shrink-0 text-[11px] font-semibold text-zinc-500 dark:text-white/45">
+                                        {idx === 0 ? '首批' : `第 ${idx + 1} 批`}
+                                    </div>
+                                    <InputWithSuffix
+                                        type="number"
+                                        step="0.1"
+                                        min="5"
+                                        max="100"
+                                        value={value}
+                                        onChange={(e) => updatePct(idx, e.target.value)}
+                                        className={inputClass}
+                                        suffix="%"
+                                    />
+                                    {percentages.length > 2 ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => removeBatch(idx)}
+                                            className="shrink-0 rounded-xl border border-zinc-200/70 bg-white/80 p-2 text-zinc-500 transition hover:text-red-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-white/45 dark:hover:text-red-400"
+                                            aria-label="删除此批"
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </button>
+                                    ) : null}
+                                </div>
+                            ))}
+                        </div>
+                        <div className="mt-2 flex items-center justify-between gap-2">
+                            <div className={`text-[11px] font-semibold ${sumValid ? 'text-emerald-600 dark:text-emerald-300' : 'text-amber-600 dark:text-amber-300'}`}>
+                                合计：{sum.toFixed(2)}% {sumValid ? '✓' : '（必须等于 100%）'}
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={equalize}
+                                    className="rounded-xl border border-zinc-200/70 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 hover:text-zinc-900 dark:border-white/10 dark:bg-white/[0.04] dark:text-white/70 dark:hover:text-white"
+                                >
+                                    平均分配
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={addBatch}
+                                    disabled={percentages.length >= 5}
+                                    className="inline-flex items-center gap-1 rounded-xl border border-zinc-200/70 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 hover:text-zinc-900 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:bg-white/[0.04] dark:text-white/70 dark:hover:text-white"
+                                >
+                                    <Plus className="h-3 w-3" />
+                                    追加批次
+                                </button>
+                            </div>
+                        </div>
+                    </FieldCard>
+                    <FieldCard label="批次间隔" hint="每批之间的等待时间（10–600 秒）">
+                        <InputWithSuffix
+                            type="number"
+                            min="10"
+                            max="600"
+                            value={draft.dca_interval_seconds}
+                            onChange={(e) => updateDraft('dca_interval_seconds', Number(e.target.value) || 0)}
+                            className={inputClass}
+                            suffix="秒"
+                        />
+                    </FieldCard>
+                </>
+            ) : (
+                <MutedHint>
+                    关闭时，开仓一次性成交；开启后将按上面设置分批。单次开仓时仍可临时覆盖。
+                </MutedHint>
+            )}
+        </Section>
     );
 }

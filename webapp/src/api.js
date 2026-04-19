@@ -547,6 +547,9 @@ export async function openPosition({
   confirmEntrySwap,
   walletId,
   ackLiquidityRisk,
+  dcaEnabled,
+  dcaPercentages,
+  dcaIntervalSeconds,
   signal,
 }) {
   const base = normalizeBaseUrl(apiBaseUrl);
@@ -565,6 +568,9 @@ export async function openPosition({
     confirmEntrySwap,
     walletId,
     ackLiquidityRisk,
+    dcaEnabled,
+    dcaPercentages,
+    dcaIntervalSeconds,
   });
   return requestJson(url, {
     method: 'POST',
@@ -588,6 +594,9 @@ function buildOpenPositionPayload({
   confirmEntrySwap,
   walletId,
   ackLiquidityRisk,
+  dcaEnabled,
+  dcaPercentages,
+  dcaIntervalSeconds,
 }) {
   const payload = {
     initData,
@@ -607,6 +616,15 @@ function buildOpenPositionPayload({
   const wid = Number(walletId);
   if (Number.isFinite(wid) && wid > 0) payload.wallet_id = wid;
   if (ackLiquidityRisk) payload.ack_liquidity_risk = true;
+  if (dcaEnabled !== undefined && dcaEnabled !== null) {
+    payload.dca_enabled = Boolean(dcaEnabled);
+  }
+  if (Array.isArray(dcaPercentages) && dcaPercentages.length > 0) {
+    payload.dca_percentages = dcaPercentages.map((v) => Number(v));
+  }
+  if (Number.isFinite(dcaIntervalSeconds) && dcaIntervalSeconds > 0) {
+    payload.dca_interval_seconds = Math.round(dcaIntervalSeconds);
+  }
   return payload;
 }
 
@@ -642,6 +660,9 @@ export async function previewOpenPosition({
   allowEntrySwap,
   walletId,
   ackLiquidityRisk,
+  dcaEnabled,
+  dcaPercentages,
+  dcaIntervalSeconds,
   signal,
 }) {
   const base = normalizeBaseUrl(apiBaseUrl);
@@ -658,6 +679,9 @@ export async function previewOpenPosition({
     allowEntrySwap,
     walletId,
     ackLiquidityRisk,
+    dcaEnabled,
+    dcaPercentages,
+    dcaIntervalSeconds,
   });
   const urls = [
     `${base}/api/open_position_preview`,

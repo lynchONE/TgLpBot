@@ -38,6 +38,12 @@ type openPositionRequest struct {
 	AllowEntrySwap    bool     `json:"allow_entry_swap"`
 	ConfirmEntrySwap  bool     `json:"confirm_entry_swap,omitempty"`
 	AckLiquidityRisk  bool     `json:"ack_liquidity_risk,omitempty"`
+
+	// DCA overrides (single-open overrides over GlobalConfig defaults).
+	// When DCAEnabled is nil, global default is used; when set, any non-nil sibling fields override.
+	DCAEnabled         *bool     `json:"dca_enabled,omitempty"`
+	DCAPercentages     []float64 `json:"dca_percentages,omitempty"`
+	DCAIntervalSeconds *int      `json:"dca_interval_seconds,omitempty"`
 }
 
 type openPositionResponse struct {
@@ -152,6 +158,47 @@ func buildOpenPositionErrorFromSafety(err *liquidity.ZapSafetyError) openPositio
 	}
 	resp.RiskAckRequired = err.RiskAckRequired
 	return resp
+}
+
+// resolveDCAPlan merges the per-open DCA overrides onto the user's GlobalConfig defaults.
+// Returns (enabled, percentages, intervalSec, error). If both sides disable DCA, enabled is false
+// and the other return values are zero — callers should skip DCA wiring in that case.
+func resolveDCAPlan(cfg *models.GlobalConfig, req openPositionRequest) (bool, []float64, int, error) {
+	enabled := false
+	if cfg != nil {
+		enabled = cfg.DCAEnabled
+	}
+	if req.DCAEnabled != nil {
+		enabled = *req.DCAEnabled
+	}
+	if !enabled {
+		return false, nil, 0, nil
+	}
+
+	pcts := req.DCAPercentages
+	if len(pcts) == 0 && cfg != nil {
+		if parsed, ok := strategy.ParseDCAPercentages(cfg.DCAPercentagesJSON); ok {
+			pcts = parsed
+		}
+	}
+	normalized, err := strategy.NormalizeDCAPercentages(pcts)
+	if err != nil {
+		return false, nil, 0, err
+	}
+
+	interval := 0
+	if cfg != nil {
+		interval = cfg.DCAIntervalSeconds
+	}
+	if req.DCAIntervalSeconds != nil {
+		interval = *req.DCAIntervalSeconds
+	}
+	intervalNorm, err := strategy.NormalizeDCAInterval(interval)
+	if err != nil {
+		return false, nil, 0, err
+	}
+
+	return true, normalized, intervalNorm, nil
 }
 
 func isV4PoolId(text string) bool {
@@ -577,6 +624,20 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 		LastCheckTime:        time.Now(),
 	}
 
+	if dcaEnabled, dcaPcts, dcaInterval, err := resolveDCAPlan(cfg, req); err != nil {
+		return nil, &openPositionError{
+			Code:    "invalid_dca_plan",
+			Message: err.Error(),
+		}, http.StatusBadRequest
+	} else if dcaEnabled {
+		pctsJSON, _ := strategy.MarshalDCAPercentages(dcaPcts)
+		task.DCAEnabled = true
+		task.DCATotalAmountUSDT = req.Amount
+		task.DCAPercentagesJSON = pctsJSON
+		task.DCAIntervalSeconds = dcaInterval
+		task.AmountUSDT = req.Amount * dcaPcts[0] / 100.0
+	}
+
 	return &openPositionContext{
 		user:             user,
 		req:              req,
@@ -801,6 +862,17 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 	if err := applyEnterResult(ctx.task, enterRes); err != nil {
 		http.Error(w, "更新任务状态失败", http.StatusInternalServerError)
 		return
+	}
+
+	if ctx.task.DCAEnabled {
+		now := time.Now()
+		next := now.Add(time.Duration(ctx.task.DCAIntervalSeconds) * time.Second)
+		_ = database.DB.Model(ctx.task).Updates(map[string]interface{}{
+			"dca_executed_count": 1,
+			"dca_next_batch_at":  &next,
+		}).Error
+		ctx.task.DCAExecutedCount = 1
+		ctx.task.DCANextBatchAt = &next
 	}
 
 	go func() {

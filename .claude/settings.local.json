@@ -60,7 +60,13 @@
       "Bash(npm run:*)",
       "Bash(node_modules/.bin/vite build:*)",
       "Bash(curl -s \"https://www.okx.com/api/v5/dex/aggregator/all-tokens?chainId=56\")",
-      "Bash(curl -s \"https://web3.okx.com/api/v6/dex/balance/all-token-balances-by-address?chainIndex=56&address=0x0000000000000000000000000000000000000000\")"
+      "Bash(curl -s \"https://web3.okx.com/api/v6/dex/balance/all-token-balances-by-address?chainIndex=56&address=0x0000000000000000000000000000000000000000\")",
+      "Bash(GOTOOLCHAIN=local go version)",
+      "Bash(go env *)",
+      "Bash(GOTOOLCHAIN=local go env *)",
+      "Bash(GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=auto go build ./...)",
+      "Bash(GOTOOLCHAIN=local gofmt *)",
+      "Bash(GOPROXY=https://goproxy.io,direct GOTOOLCHAIN=auto go build ./...)"
     ]
   }
 }

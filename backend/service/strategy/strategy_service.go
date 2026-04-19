@@ -242,6 +242,9 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 	inRange := currentTick >= task.TickLower && currentTick <= task.TickUpper
 	alertLines := pricing.FormatRangeAlertLines(task, task.TickLower, task.TickUpper, currentTick)
 
+	// DCA batching: advance or cancel remaining batches based on current inRange state.
+	s.processDCABatch(task, inRange)
+
 	if inRange {
 		updates := map[string]interface{}{}
 

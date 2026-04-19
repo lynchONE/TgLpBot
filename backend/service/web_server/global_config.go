@@ -156,5 +156,25 @@ func buildGlobalConfigUpdates(raw map[string]json.RawMessage) map[string]interfa
 	setFloat("open_position_risk_cap_usd", "open_position_risk_cap_usd")
 	setFloat("open_position_risk_cap_ratio", "open_position_risk_cap_ratio")
 
+	setBool("dca_enabled", "dca_enabled")
+	if v, ok := raw["dca_interval_seconds"]; ok {
+		var n int
+		if json.Unmarshal(v, &n) == nil {
+			if normalized, err := strategy.NormalizeDCAInterval(n); err == nil {
+				updates["dca_interval_seconds"] = normalized
+			}
+		}
+	}
+	if v, ok := raw["dca_percentages"]; ok {
+		var arr []float64
+		if json.Unmarshal(v, &arr) == nil {
+			if normalized, err := strategy.NormalizeDCAPercentages(arr); err == nil {
+				if s, merr := strategy.MarshalDCAPercentages(normalized); merr == nil {
+					updates["dca_percentages_json"] = s
+				}
+			}
+		}
+	}
+
 	return updates
 }

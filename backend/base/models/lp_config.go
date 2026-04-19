@@ -57,6 +57,12 @@ type GlobalConfig struct {
 	OpenPositionRiskCapUSD     float64 `gorm:"type:decimal(20,4);default:0" json:"open_position_risk_cap_usd"`
 	OpenPositionRiskCapRatio   float64 `gorm:"type:decimal(6,4);default:0" json:"open_position_risk_cap_ratio"`
 
+	// DCA (dollar-cost average) batching defaults — split a single open into N batches to
+	// avoid taking the full position at a momentary price spike. See strategy/dca.go.
+	DCAEnabled         bool   `gorm:"default:false" json:"dca_enabled"`
+	DCAPercentagesJSON string `gorm:"type:varchar(128);default:'[50,50]'" json:"dca_percentages_json"`
+	DCAIntervalSeconds int    `gorm:"default:30" json:"dca_interval_seconds"`
+
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
