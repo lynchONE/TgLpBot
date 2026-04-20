@@ -106,6 +106,7 @@ export default function LiquidityDistributionChart({
     tokenLeftLabel = '',
     tokenRightLabel = '',
     titleText = '流动性分布',
+    quoteIsToken1 = undefined,
 }) {
     const containerRef = useRef(null);
     const [width, setWidth] = useState(0);
@@ -386,12 +387,13 @@ export default function LiquidityDistributionChart({
                 const priceUpper = tickToPriceRatio(bin.tick_upper, token0Decimals, token1Decimals);
                 const lowerDisp = invertPrice && priceLower ? 1 / priceLower : priceLower;
                 const upperDisp = invertPrice && priceUpper ? 1 / priceUpper : priceUpper;
-                const liquidityText = formatLiquidityCompact(bin.liquidity);
-                const tooltipWidth = 170;
+                const usd = computeBinUsd(bin, currentTick, token0Decimals, token1Decimals, quoteIsToken1);
+                const usdText = Number.isFinite(usd) ? formatUsdCompact(usd) : '--';
+                const tooltipWidth = 180;
                 const tipLeft = Math.max(4, Math.min((width || 0) - tooltipWidth - 4, cx - tooltipWidth / 2));
                 return (
                     <div style={{
-                        position: 'absolute', top: 18, left: tipLeft, width: tooltipWidth,
+                        position: 'absolute', top: 24, left: tipLeft, width: tooltipWidth,
                         padding: '8px 10px', borderRadius: 10,
                         background: 'rgba(10, 14, 22, 0.96)', border: '1px solid rgba(134, 153, 184, 0.35)',
                         boxShadow: '0 8px 20px rgba(0, 0, 0, 0.45)',
@@ -399,19 +401,17 @@ export default function LiquidityDistributionChart({
                         pointerEvents: 'none', zIndex: 30,
                     }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                            <span style={{ color: '#9aa8c4' }}>区间</span>
+                            <span style={{ color: '#9aa8c4' }}>价格区间</span>
                             {bin.is_active ? <span style={{ fontSize: 9, fontWeight: 700, color: '#ffd166' }}>当前</span> : null}
                         </div>
                         <div style={{ fontFamily: 'ui-monospace, SFMono-Regular, monospace', fontSize: 11 }}>
-                            {formatPriceCompact(lowerDisp)} → {formatPriceCompact(upperDisp)}
+                            {invertPrice
+                                ? `${formatPriceCompact(upperDisp)} → ${formatPriceCompact(lowerDisp)}`
+                                : `${formatPriceCompact(lowerDisp)} → ${formatPriceCompact(upperDisp)}`}
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-                            <span style={{ color: '#9aa8c4' }}>Tick</span>
-                            <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, monospace' }}>{bin.tick_lower} ~ {bin.tick_upper}</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <span style={{ color: '#9aa8c4' }}>流动性 L</span>
-                            <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, monospace', color: '#bcff2f', fontWeight: 700 }}>{liquidityText}</span>
+                            <span style={{ color: '#9aa8c4' }}>流动性</span>
+                            <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, monospace', color: '#bcff2f', fontWeight: 700 }}>{usdText}</span>
                         </div>
                     </div>
                 );
@@ -420,14 +420,52 @@ export default function LiquidityDistributionChart({
     );
 }
 
+// 将单个 bin 的流动性 L 换算成 USD 估算；quote 必须是稳定币（USDT/USDC）否则返回 NaN。
+function computeBinUsd(bin, currentTick, token0Decimals, token1Decimals, quoteIsToken1) {
+    if (!bin || typeof quoteIsToken1 !== 'boolean') return NaN;
+    const L = Number(bin.liquidity);
+    if (!Number.isFinite(L) || L === 0) return 0;
+    const tickMid = (bin.tick_lower + bin.tick_upper) / 2;
+    const sqrtPLower = Math.pow(1.0001, bin.tick_lower / 2);
+    const sqrtPUpper = Math.pow(1.0001, bin.tick_upper / 2);
+    const sqrtPCur = Number.isFinite(currentTick) ? Math.pow(1.0001, currentTick / 2) : sqrtPLower;
+    let amount0Raw = 0;
+    let amount1Raw = 0;
+    if (Number.isFinite(currentTick) && bin.tick_upper <= currentTick) {
+        amount1Raw = L * (sqrtPUpper - sqrtPLower);
+    } else if (Number.isFinite(currentTick) && bin.tick_lower >= currentTick) {
+        amount0Raw = L * (1 / sqrtPLower - 1 / sqrtPUpper);
+    } else {
+        amount0Raw = L * (1 / sqrtPCur - 1 / sqrtPUpper);
+        amount1Raw = L * (sqrtPCur - sqrtPLower);
+    }
+    const amount0 = amount0Raw / Math.pow(10, token0Decimals);
+    const amount1 = amount1Raw / Math.pow(10, token1Decimals);
+    const priceToken0InToken1 = Math.pow(1.0001, tickMid) * Math.pow(10, token0Decimals - token1Decimals);
+    return quoteIsToken1 ? amount0 * priceToken0InToken1 + amount1 : amount0 + amount1 / priceToken0InToken1;
+}
+
+function formatUsdCompact(v) {
+    if (!Number.isFinite(v) || v <= 0) return '$0';
+    if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(2)}B`;
+    if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}M`;
+    if (v >= 1_000) return `$${(v / 1_000).toFixed(2)}K`;
+    if (v >= 1) return `$${v.toFixed(2)}`;
+    if (v >= 0.01) return `$${v.toFixed(3)}`;
+    return `$${v.toExponential(2)}`;
+}
+
 function RangeHandle({ x, color, side, interactive, onDown }) {
+    // 柱子区域在容器内：top: 22px（标题下方），bottom: 28px（底部价格标签上方）。
+    // 手柄严格限制在这个区域内，不溢出；取消上下端圆点，只保留中间拖把。
     return (
         <div
             style={{
-                position: 'absolute', top: 0, bottom: 0,
+                position: 'absolute', top: 22, bottom: 28,
                 left: x - HANDLE_HIT_PX / 2, width: HANDLE_HIT_PX,
                 cursor: interactive ? 'ew-resize' : 'default',
                 zIndex: 20,
+                touchAction: 'none',
             }}
             onPointerDown={(e) => {
                 if (!interactive) return;
@@ -435,13 +473,32 @@ function RangeHandle({ x, color, side, interactive, onDown }) {
                 onDown?.();
             }}
         >
-            <div style={{ position: 'absolute', top: 0, bottom: 0, left: '50%', width: 0, borderLeft: `2px solid ${color}`, transform: 'translateX(-1px)', pointerEvents: 'none' }} />
-            <div style={{ position: 'absolute', top: 4, left: '50%', width: 12, height: 12, borderRadius: '50%', background: color, transform: 'translateX(-50%)', boxShadow: `0 0 8px ${color}99`, pointerEvents: 'none' }} />
-            <div style={{ position: 'absolute', bottom: 28, left: '50%', width: 12, height: 12, borderRadius: '50%', background: color, transform: 'translateX(-50%)', boxShadow: `0 0 8px ${color}99`, pointerEvents: 'none' }} />
+            {/* 竖线：半透明，限在区域内 */}
             <div style={{
-                position: 'absolute', top: -2, left: '50%', transform: 'translateX(-50%)',
-                fontSize: 9, fontWeight: 700, color, padding: '1px 4px', borderRadius: 3, pointerEvents: 'none',
-            }}>{side === 'lower' ? '下' : '上'}</div>
+                position: 'absolute', top: 0, bottom: 0, left: '50%', width: 0,
+                borderLeft: `2px solid ${color}`,
+                transform: 'translateX(-1px)',
+                pointerEvents: 'none',
+                opacity: 0.85,
+            }} />
+            {/* 中间拖把：圆角小条，便于点击抓取 */}
+            <div style={{
+                position: 'absolute', top: '50%', left: '50%',
+                width: 6, height: 36, borderRadius: 3,
+                background: color,
+                transform: 'translate(-50%, -50%)',
+                boxShadow: `0 0 6px ${color}aa, inset 0 1px 0 rgba(255,255,255,0.35)`,
+                pointerEvents: 'none',
+            }} />
+            {/* 把手中间两条凹槽，增强"可拖"视觉暗示 */}
+            <div style={{
+                position: 'absolute', top: 'calc(50% - 6px)', left: 'calc(50% - 2px)',
+                width: 1, height: 12, background: 'rgba(10, 14, 22, 0.55)', pointerEvents: 'none',
+            }} />
+            <div style={{
+                position: 'absolute', top: 'calc(50% - 6px)', left: 'calc(50% + 1px)',
+                width: 1, height: 12, background: 'rgba(10, 14, 22, 0.55)', pointerEvents: 'none',
+            }} />
         </div>
     );
 }

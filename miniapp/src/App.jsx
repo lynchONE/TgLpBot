@@ -162,8 +162,6 @@ const WEB_WORKBENCH_WIDGETS = [
 ]; const DEFAULT_WEB_WORKBENCH_WIDGETS = WEB_WORKBENCH_WIDGETS.map((item) => item.key);
 const OPEN_POSITION_RANGE_OPTIONS = [
     { key: 'percentage', label: '快捷%' },
-    { key: 'grid', label: 'Tick格子' },
-    { key: 'tick', label: '直接Tick' },
 ];
 const OPEN_POSITION_GRID_RADIUS = 8;
 
@@ -1986,6 +1984,8 @@ export default function App() {
         };
     }, [apiBaseUrl, openPositionPool]);
 
+    const openPositionLiqInFlightRef = useRef(false);
+
     useEffect(() => {
         if (!openPositionPool || !hasInitData) {
             setOpenPositionLiqProfile(null);
@@ -2001,6 +2001,8 @@ export default function App() {
             setOpenPositionLiqProfile(null);
             return undefined;
         }
+        // 池子切换时先清空旧数据，避免展示别的 pool
+        setOpenPositionLiqProfile(null);
         const ctrl = new AbortController();
         setOpenPositionLiqProfileLoading(true);
         setOpenPositionLiqProfileError('');
@@ -2021,7 +2023,6 @@ export default function App() {
                 if (ctrl.signal.aborted) return;
                 const msg = String(err?.message || err || '');
                 if (/page could not be found|<html|<!doctype/i.test(msg)) {
-                    // 后端路由未就绪 / 反代漏配，控制台留痕，避免在 UI 暴露大段 HTML
                     // eslint-disable-next-line no-console
                     console.warn('[liquidity_distribution] 接口未就绪', msg.slice(0, 200));
                     setOpenPositionLiqProfileError('接口未就绪');
@@ -2033,7 +2034,31 @@ export default function App() {
             .finally(() => {
                 if (!ctrl.signal.aborted) setOpenPositionLiqProfileLoading(false);
             });
-        return () => ctrl.abort();
+
+        // 3s 轮询（in-flight 去重；后端已去缓存，可近实时看到变化）
+        const timer = setInterval(() => {
+            if (document.hidden) return;
+            if (openPositionLiqInFlightRef.current) return;
+            openPositionLiqInFlightRef.current = true;
+            fetchPoolLiquidityDistribution({
+                apiBaseUrl, initData, chain, protocol, address: poolAddress, radius: 24,
+            })
+                .then((data) => { setOpenPositionLiqProfile(data); setOpenPositionLiqProfileError(''); })
+                .catch((err) => {
+                    const msg = String(err?.message || err || '');
+                    if (/page could not be found|<html|<!doctype/i.test(msg)) {
+                        setOpenPositionLiqProfileError('接口未就绪');
+                    } else {
+                        setOpenPositionLiqProfileError(msg.slice(0, 60));
+                    }
+                })
+                .finally(() => { openPositionLiqInFlightRef.current = false; });
+        }, 3000);
+
+        return () => {
+            ctrl.abort();
+            clearInterval(timer);
+        };
     }, [apiBaseUrl, initData, hasInitData, openPositionPool]);
 
     const openPositionChartLowerTick = useMemo(() => {

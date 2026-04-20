@@ -2,7 +2,6 @@ package web_server
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,7 +12,6 @@ import (
 )
 
 const (
-	liquidityDistCacheTTL    = 30 * time.Second
 	liquidityDistCallTimeout = 12 * time.Second
 )
 
@@ -57,12 +55,6 @@ func (s *Server) handleLiquidityDistribution(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	cacheKey := fmt.Sprintf("liq_dist:%s:%s:%s:%d", chain, protocol, strings.ToLower(address), radius)
-	if cached, ok := readRedisRawCache(cacheKey); ok {
-		writeJSONBytes(w, http.StatusOK, cached)
-		return
-	}
-
 	ctx, cancel := context.WithTimeout(r.Context(), liquidityDistCallTimeout)
 	defer cancel()
 
@@ -77,6 +69,5 @@ func (s *Server) handleLiquidityDistribution(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "encode failed", http.StatusInternalServerError)
 		return
 	}
-	writeRedisRawCache(cacheKey, payload, liquidityDistCacheTTL)
 	writeJSONBytes(w, http.StatusOK, payload)
 }

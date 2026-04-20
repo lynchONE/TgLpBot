@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Check, CheckCircle, X, XCircle } from 'lucide-react';
 import { fetchGlobalConfig, fetchPoolLiquidityDistribution, prepareOpenPosition, previewOpenPosition } from '../api';
 import LiquidityDistributionChart from './LiquidityDistributionChart.jsx';
@@ -771,15 +771,38 @@ export default function OpenPositionModal({
     return () => ctrl.abort();
   }, [apiBaseUrl, initData, addr, protocolKind, chain]);
 
-  // 定时刷新流动性分布（后端缓存 30s，这里 20s 轮询保证新鲜度）
+  // 定时刷新流动性分布：3s 一次，in-flight 去重防止堆请求；后端已无缓存，近似实时。
+  const liqInFlightRef = useRef(false);
+  const reloadLiqProfileSafe = useCallback(() => {
+    if (liqInFlightRef.current) return;
+    if (!addr || !protocolKind || !chain) return;
+    liqInFlightRef.current = true;
+    setLiqProfileError('');
+    fetchPoolLiquidityDistribution({
+      apiBaseUrl, initData, chain, protocol: protocolKind, address: addr, radius: 24,
+    })
+      .then((data) => { setLiqProfile(data); })
+      .catch((err) => {
+        const msg = String(err?.message || err || '');
+        if (/page could not be found|<html|<!doctype/i.test(msg)) {
+          // eslint-disable-next-line no-console
+          console.warn('[liquidity_distribution] backend route missing', msg.slice(0, 200));
+          setLiqProfileError('接口未就绪');
+        } else {
+          setLiqProfileError(msg.slice(0, 80));
+        }
+      })
+      .finally(() => { liqInFlightRef.current = false; });
+  }, [apiBaseUrl, initData, addr, protocolKind, chain]);
+
   useEffect(() => {
     if (!addr || !protocolKind || !chain) return undefined;
     const timer = setInterval(() => {
       if (document.hidden) return;
-      reloadLiqProfile();
-    }, 20000);
+      reloadLiqProfileSafe();
+    }, 3000);
     return () => clearInterval(timer);
-  }, [addr, protocolKind, chain, reloadLiqProfile]);
+  }, [addr, protocolKind, chain, reloadLiqProfileSafe]);
 
   const chartLowerTick = useMemo(() => {
     if (rangeInputMode !== 'percentage') {
@@ -1059,6 +1082,7 @@ export default function OpenPositionModal({
               invertPrice={invertPrice}
               tokenLeftLabel={invertPrice ? token0Symbol : token1Symbol}
               tokenRightLabel={invertPrice ? token1Symbol : token0Symbol}
+              quoteIsToken1={STABLE_OR_QUOTE.has(token1Symbol) ? true : (STABLE_OR_QUOTE.has(token0Symbol) ? false : undefined)}
               height={260}
             />
 

@@ -235,11 +235,20 @@ func getV4LiquidityDistribution(ctx context.Context, exec chainexec.EVMExecutor,
 		return nil, fmt.Errorf("v4 liquidity: %w", err)
 	}
 	tickSpacing, err := blockchain.GetUniswapV4PoolTickSpacing(poolManager, poolID)
-	if err != nil {
-		return nil, fmt.Errorf("v4 tick spacing: %w", err)
-	}
-	if tickSpacing <= 0 {
-		return nil, fmt.Errorf("v4 tick spacing invalid: %d", tickSpacing)
+	if err != nil || tickSpacing <= 0 {
+		// Fallback: PositionManager.poolKeys(bytes25) — 很多部署只在 PositionManager 存 PoolKey 映射。
+		pmHex := strings.TrimSpace(cc.UniswapV4PositionManagerAddress)
+		if pmHex != "" && common.IsHexAddress(pmHex) {
+			if _, _, _, ts, _, pmErr := blockchain.GetUniswapV4PoolKeyFromPositionManager(common.HexToAddress(pmHex), poolID); pmErr == nil && ts > 0 {
+				tickSpacing = ts
+				err = nil
+			} else if pmErr != nil {
+				err = fmt.Errorf("poolManager+positionManager both failed: %w", pmErr)
+			}
+		}
+		if err != nil || tickSpacing <= 0 {
+			return nil, fmt.Errorf("v4 tick spacing: %w", err)
+		}
 	}
 
 	parsed, err := parseV4TickInfoABI()
