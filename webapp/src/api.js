@@ -1202,6 +1202,6 @@ export async function fetchPoolLiquidityDistribution({ apiBaseUrl, initData, cha
   if (protocol) params.set('protocol', String(protocol));
   if (address) params.set('address', String(address));
   if (Number.isFinite(radius)) params.set('radius', String(radius));
-  const url = `${base}/api/pool/liquidity_distribution?${params.toString()}`;
+  const url = `${base}/api/pool_liquidity_distribution?${params.toString()}`;
   return requestJson(url, { method: 'GET', signal });
 }

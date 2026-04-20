@@ -55,6 +55,7 @@ const colors = {
     border: 'rgba(134, 153, 184, 0.2)',
     barInside: 'linear-gradient(to top, rgba(34, 211, 138, 0.85), rgba(34, 211, 138, 0.35))',
     barOutside: 'linear-gradient(to top, rgba(154, 168, 196, 0.45), rgba(154, 168, 196, 0.12))',
+    barActive: 'linear-gradient(to top, rgba(255, 196, 0, 0.95), rgba(255, 196, 0, 0.55))',
     rangeBg: 'rgba(34, 211, 138, 0.1)',
     handleLower: '#22d38a',
     handleUpper: '#ff5e76',
@@ -67,6 +68,26 @@ const colors = {
     currentTagText: '#ffd166',
     emptyText: '#9aa8c4',
 };
+
+function formatLiquidityCompact(value) {
+    try {
+        const bi = typeof value === 'bigint' ? value : BigInt(String(value || '0').trim() || '0');
+        if (bi === 0n) return '0';
+        const sign = bi < 0n ? '-' : '';
+        const abs = bi < 0n ? -bi : bi;
+        const str = abs.toString();
+        if (str.length <= 3) return sign + str;
+        const units = ['', 'K', 'M', 'B', 'T', 'Qa', 'Qi', 'Sx', 'Sp', 'Oc', 'No', 'Dc'];
+        const unitIdx = Math.floor((str.length - 1) / 3);
+        if (unitIdx >= units.length) return sign + str.slice(0, str.length - (units.length - 1) * 3) + 'e' + ((units.length - 1) * 3);
+        const intLen = str.length - unitIdx * 3;
+        const head = str.slice(0, intLen);
+        const tail = str.slice(intLen, intLen + 2).replace(/0+$/, '');
+        return sign + head + (tail ? '.' + tail : '') + units[unitIdx];
+    } catch {
+        return '0';
+    }
+}
 
 export default function LiquidityDistributionChart({
     bins = [],
@@ -86,6 +107,7 @@ export default function LiquidityDistributionChart({
     const containerRef = useRef(null);
     const [width, setWidth] = useState(0);
     const [draggingHandle, setDraggingHandle] = useState(null);
+    const [hoveredBin, setHoveredBin] = useState(null);
 
     useEffect(() => {
         const el = containerRef.current;
@@ -229,29 +251,51 @@ export default function LiquidityDistributionChart({
                 />
             ) : null}
 
-            <div style={{ position: 'absolute', left: 8, right: 8, top: 12, bottom: 26, display: 'flex', alignItems: 'flex-end', gap: 2 }}>
-                {sortedBins.map((bin) => {
+            <div style={{ position: 'absolute', left: 8, right: 8, top: 18, bottom: 26, display: 'flex', alignItems: 'flex-end', gap: 2 }}>
+                {sortedBins.map((bin, i) => {
                     const liq = bigIntToNumber(safeBigInt(bin.liquidity));
                     const ratio = liq / maxLiq;
                     const heightPct = Math.max(2, ratio * 100);
                     const inside = inRange(bin);
+                    const isActive = Boolean(bin.is_active);
+                    const isHovered = hoveredBin?.index === bin.index;
+                    const bg = isActive ? colors.barActive : (inside ? colors.barInside : colors.barOutside);
                     return (
                         <div
                             key={bin.index ?? `${bin.tick_lower}-${bin.tick_upper}`}
-                            title={`tick [${bin.tick_lower}, ${bin.tick_upper}) · L=${bin.liquidity}`}
+                            onPointerEnter={() => setHoveredBin({ index: bin.index, bin, barIdx: i })}
+                            onPointerLeave={() => setHoveredBin((prev) => (prev?.index === bin.index ? null : prev))}
                             style={{
                                 flex: 1,
                                 minWidth: 2,
                                 height: `${heightPct}%`,
                                 borderTopLeftRadius: 2,
                                 borderTopRightRadius: 2,
-                                background: inside ? colors.barInside : colors.barOutside,
+                                background: bg,
                                 transition: 'all 150ms ease',
+                                outline: isHovered ? '1px solid rgba(236, 242, 255, 0.55)' : 'none',
+                                cursor: 'default',
                             }}
                         />
                     );
                 })}
             </div>
+
+            {(() => {
+                if (!Number.isFinite(currentTick) || !tickRange) return null;
+                const activeBin = sortedBins.find((b) => b.is_active)
+                    || sortedBins.find((b) => currentTick >= b.tick_lower && currentTick < b.tick_upper);
+                if (!activeBin) return null;
+                const centerTick = (activeBin.tick_lower + activeBin.tick_upper) / 2;
+                const cx = tickToX(centerTick);
+                return (
+                    <div style={{ position: 'absolute', left: cx - 8, top: 0, width: 16, height: 14, pointerEvents: 'none', zIndex: 12 }}>
+                        <svg viewBox="0 0 16 14" width="16" height="14">
+                            <path d="M 8 12 L 2 2 L 14 2 Z" fill="rgba(255, 196, 0, 0.95)" stroke="rgba(30, 30, 30, 0.5)" strokeWidth="0.6" />
+                        </svg>
+                    </div>
+                );
+            })()}
 
             {Number.isFinite(lowerX) ? (
                 <RangeHandle
@@ -294,6 +338,45 @@ export default function LiquidityDistributionChart({
                 ) : null}
                 <span style={{ background: colors.priceTagBg, color: colors.priceTagText, padding: '2px 6px', borderRadius: 4 }}>{endPriceText}</span>
             </div>
+
+            {hoveredBin?.bin ? (() => {
+                const bin = hoveredBin.bin;
+                const center = (bin.tick_lower + bin.tick_upper) / 2;
+                const cx = tickToX(center);
+                const priceLower = tickToPriceRatio(bin.tick_lower, token0Decimals, token1Decimals);
+                const priceUpper = tickToPriceRatio(bin.tick_upper, token0Decimals, token1Decimals);
+                const lowerDisp = invertPrice && priceLower ? 1 / priceLower : priceLower;
+                const upperDisp = invertPrice && priceUpper ? 1 / priceUpper : priceUpper;
+                const liquidityText = formatLiquidityCompact(bin.liquidity);
+                const tooltipWidth = 170;
+                const tipLeft = Math.max(4, Math.min((width || 0) - tooltipWidth - 4, cx - tooltipWidth / 2));
+                return (
+                    <div style={{
+                        position: 'absolute', top: 18, left: tipLeft, width: tooltipWidth,
+                        padding: '8px 10px', borderRadius: 10,
+                        background: 'rgba(10, 14, 22, 0.96)', border: '1px solid rgba(134, 153, 184, 0.35)',
+                        boxShadow: '0 8px 20px rgba(0, 0, 0, 0.45)',
+                        fontSize: 11, lineHeight: 1.5, color: '#ecf2ff',
+                        pointerEvents: 'none', zIndex: 30,
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                            <span style={{ color: '#9aa8c4' }}>区间</span>
+                            {bin.is_active ? <span style={{ fontSize: 9, fontWeight: 700, color: '#ffd166' }}>当前</span> : null}
+                        </div>
+                        <div style={{ fontFamily: 'ui-monospace, SFMono-Regular, monospace', fontSize: 11 }}>
+                            {formatPriceCompact(lowerDisp)} → {formatPriceCompact(upperDisp)}
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+                            <span style={{ color: '#9aa8c4' }}>Tick</span>
+                            <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, monospace' }}>{bin.tick_lower} ~ {bin.tick_upper}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: '#9aa8c4' }}>流动性 L</span>
+                            <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, monospace', color: '#bcff2f', fontWeight: 700 }}>{liquidityText}</span>
+                        </div>
+                    </div>
+                );
+            })() : null}
         </div>
     );
 }

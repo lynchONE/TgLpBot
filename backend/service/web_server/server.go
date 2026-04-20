@@ -74,7 +74,7 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/open_position_prepare", s.handleOpenPositionPrepare)
 	mux.HandleFunc("/api/open_position_preview", s.handleOpenPositionPreview)
 	mux.HandleFunc("/api/open_position", s.handleOpenPosition)
-	mux.HandleFunc("/api/pool/liquidity_distribution", s.handleLiquidityDistribution)
+	mux.HandleFunc("/api/pool_liquidity_distribution", s.handleLiquidityDistribution)
 	mux.HandleFunc("/api/create_pool_preview", s.handleCreatePoolPreview)
 	mux.HandleFunc("/api/create_pool_execute", s.handleCreatePoolExecute)
 	mux.HandleFunc("/api/my_trade_markers", s.handleMyTradeMarkers)

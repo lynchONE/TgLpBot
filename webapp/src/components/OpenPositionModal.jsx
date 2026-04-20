@@ -762,6 +762,16 @@ export default function OpenPositionModal({
     return () => ctrl.abort();
   }, [apiBaseUrl, initData, addr, protocolKind, chain]);
 
+  // 定时刷新流动性分布（后端缓存 30s，这里 20s 轮询保证新鲜度）
+  useEffect(() => {
+    if (!addr || !protocolKind || !chain) return undefined;
+    const timer = setInterval(() => {
+      if (document.hidden) return;
+      reloadLiqProfile();
+    }, 20000);
+    return () => clearInterval(timer);
+  }, [addr, protocolKind, chain, reloadLiqProfile]);
+
   const chartLowerTick = useMemo(() => {
     if (rangeInputMode !== 'percentage') {
       return Number.isInteger(tickLowerValue) ? tickLowerValue : null;
