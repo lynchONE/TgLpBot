@@ -2019,7 +2019,15 @@ export default function App() {
             })
             .catch((err) => {
                 if (ctrl.signal.aborted) return;
-                setOpenPositionLiqProfileError(String(err?.message || err || '加载失败'));
+                const msg = String(err?.message || err || '');
+                if (/page could not be found|<html|<!doctype/i.test(msg)) {
+                    // 后端路由未就绪 / 反代漏配，控制台留痕，避免在 UI 暴露大段 HTML
+                    // eslint-disable-next-line no-console
+                    console.warn('[liquidity_distribution] 接口未就绪', msg.slice(0, 200));
+                    setOpenPositionLiqProfileError('接口未就绪');
+                } else {
+                    setOpenPositionLiqProfileError(msg.slice(0, 60));
+                }
                 setOpenPositionLiqProfile(null);
             })
             .finally(() => {

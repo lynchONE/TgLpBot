@@ -688,6 +688,41 @@ export default function OpenPositionModal({
   const token0Decimals = Number(pool?.token0_decimals ?? pool?.token0?.decimals ?? 18) || 18;
   const token1Decimals = Number(pool?.token1_decimals ?? pool?.token1?.decimals ?? 18) || 18;
 
+  const reloadLiqProfile = useCallback(() => {
+    if (!addr || !protocolKind || !chain) {
+      setLiqProfile(null);
+      return;
+    }
+    setLiqProfileLoading(true);
+    setLiqProfileError('');
+    fetchPoolLiquidityDistribution({
+      apiBaseUrl,
+      initData,
+      chain,
+      protocol: protocolKind,
+      address: addr,
+      radius: 24,
+    })
+      .then((data) => {
+        setLiqProfile(data);
+      })
+      .catch((err) => {
+        const msg = String(err?.message || err || '');
+        // 服务端 404 / SPA fallback 时只在控制台留痕，不把整段 HTML 抛到 UI
+        if (/page could not be found|<html|<!doctype/i.test(msg)) {
+          // eslint-disable-next-line no-console
+          console.warn('[liquidity_distribution] backend route missing or unreachable', msg.slice(0, 200));
+          setLiqProfileError('接口未就绪');
+        } else {
+          setLiqProfileError(msg.slice(0, 80));
+        }
+        setLiqProfile(null);
+      })
+      .finally(() => {
+        setLiqProfileLoading(false);
+      });
+  }, [apiBaseUrl, initData, addr, protocolKind, chain]);
+
   useEffect(() => {
     if (!addr || !protocolKind || !chain) {
       setLiqProfile(null);
@@ -711,7 +746,14 @@ export default function OpenPositionModal({
       })
       .catch((err) => {
         if (ctrl.signal.aborted) return;
-        setLiqProfileError(String(err?.message || err || '加载失败'));
+        const msg = String(err?.message || err || '');
+        if (/page could not be found|<html|<!doctype/i.test(msg)) {
+          // eslint-disable-next-line no-console
+          console.warn('[liquidity_distribution] backend route missing or unreachable', msg.slice(0, 200));
+          setLiqProfileError('接口未就绪');
+        } else {
+          setLiqProfileError(msg.slice(0, 80));
+        }
         setLiqProfile(null);
       })
       .finally(() => {
@@ -744,6 +786,29 @@ export default function OpenPositionModal({
     const ratio = 1 + upperPct / 100;
     return Math.round(Number(ed.current_tick) + Math.log(ratio) / Math.log(1.0001));
   }, [rangeInputMode, tickUpperValue, rangeEditor, rangeUpper]);
+
+  const priceRange = useMemo(() => {
+    const refTick = Number(liqProfile?.current_tick);
+    const fallbackTick = Number(rangeEditor?.current_tick);
+    const baseTick = Number.isFinite(refTick) ? refTick : (Number.isFinite(fallbackTick) ? fallbackTick : null);
+    if (baseTick === null) return null;
+    const decAdj = Math.pow(10, (Number(token0Decimals) || 18) - (Number(token1Decimals) || 18));
+    const tickToPrice = (t) => Math.pow(1.0001, t) * decAdj;
+    const fmt = (v) => {
+      if (!Number.isFinite(v) || v <= 0) return '--';
+      if (v >= 1_000_000) return v.toExponential(3);
+      if (v >= 1) return v.toLocaleString(undefined, { maximumFractionDigits: 4 });
+      if (v >= 0.0001) return v.toLocaleString(undefined, { maximumFractionDigits: 6 });
+      return v.toExponential(3);
+    };
+    const lowerTick = Number.isFinite(chartLowerTick) ? chartLowerTick : null;
+    const upperTick = Number.isFinite(chartUpperTick) ? chartUpperTick : null;
+    return {
+      currentText: fmt(tickToPrice(baseTick)),
+      lowerText: lowerTick !== null ? fmt(tickToPrice(lowerTick)) : '--',
+      upperText: upperTick !== null ? fmt(tickToPrice(upperTick)) : '--',
+    };
+  }, [liqProfile, rangeEditor, chartLowerTick, chartUpperTick, token0Decimals, token1Decimals]);
 
   const onChartRangeChange = useCallback(({ lower, upper }) => {
     if (!liqProfile) return;
@@ -927,238 +992,108 @@ export default function OpenPositionModal({
             />
 
             {liqProfileError ? (
-              <div className="opm-hint" style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 6 }}>
-                流动性分布加载失败：{liqProfileError}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', marginTop: 4, fontSize: 11, color: 'var(--text-muted)' }}>
+                <span>流动性分布 {liqProfileError}</span>
+                <button
+                  type="button"
+                  className="ghost-chip"
+                  style={{ padding: '2px 10px', fontSize: 11 }}
+                  onClick={reloadLiqProfile}
+                  disabled={liqProfileLoading}
+                >
+                  重试
+                </button>
               </div>
             ) : null}
 
             <div className="modal-range-section opm-section">
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                <span className="modal-range-label">{rangeInputMode === 'percentage' ? '快捷区间' : 'Tick 区间编辑'}</span>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {RANGE_INPUT_OPTIONS.map((option) => (
-                    <button
-                      key={option.key}
-                      type="button"
-                      className={`range-chip ${rangeInputMode === option.key ? 'active' : ''}`}
-                      onClick={() => handleRangeInputModeChange(option.key)}
-                      style={{ minWidth: 84, justifyContent: 'center' }}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                <span className="modal-range-label">区间设置</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>拖动图表上的绿/红边界选格子</span>
               </div>
 
-              {rangeInputMode === 'percentage' ? (
-                <>
-                  {smartRangesLoading ? (
-                    <div className="modal-range-hint">聪明钱区间加载中...</div>
-                  ) : null}
-                  {visibleSmartRanges.length > 0 ? (
-                    <div className="modal-range-picks">
-                      {visibleSmartRanges.map((item, index) => {
-                        const rangePct = Number(item?.range_percent);
-                        const positionCount = Math.max(0, Number(item?.position_count) || 0);
-                        const isActive =
-                          Math.abs(Number(rangeLower) - rangePct) < 0.05 &&
-                          Math.abs(Number(rangeUpper) - rangePct) < 0.05;
-                        return (
-                          <button
-                            key={`${rangePct}-${positionCount}-${index}`}
-                            type="button"
-                            className={`range-chip smart ${isActive ? 'active' : ''}`}
-                            onClick={() => applyRange(rangePct, rangePct)}
-                          >
-                            <span>{`${rangePct}%${positionCount > 1 ? ` +${positionCount - 1}` : ''}`}</span>
-                            <span className="range-chip-sub">{formatUsdCompact(item?.total_amount_usd)}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                  <div className="modal-range-picks modal-range-picks-default">
-                    {PRESET_RANGES.map((item) => {
-                      const isActive =
-                        Math.abs(Number(rangeLower) - item) < 0.05 &&
-                        Math.abs(Number(rangeUpper) - item) < 0.05;
-                      return (
-                        <button
-                          key={item}
-                          type="button"
-                          className={`range-chip ${isActive ? 'active' : ''}`}
-                          onClick={() => applyRange(item, item)}
-                        >
-                          {item}%
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="modal-row">
-                    <label className="modal-field">
-                      <span>下限 %</span>
-                      <input
-                        type="number"
-                        value={rangeLower}
-                        onChange={(e) => handleRangeLowerChange(e.target.value)}
-                        min="0.1"
-                        step="0.5"
-                      />
-                    </label>
-                    <label className="modal-field">
-                      <span>上限 %</span>
-                      <input
-                        type="number"
-                        value={rangeUpper}
-                        onChange={(e) => handleRangeUpperChange(e.target.value)}
-                        min="0.1"
-                        step="0.5"
-                      />
-                    </label>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div
-                    style={{
-                      marginTop: 12,
-                      padding: '14px 16px',
-                      borderRadius: 16,
-                      border: '1px solid rgba(56, 189, 248, 0.22)',
-                      background: 'linear-gradient(135deg, rgba(14, 165, 233, 0.12), rgba(14, 165, 233, 0.04))',
-                      display: 'grid',
-                      gap: 8,
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
-                      <span style={{ opacity: 0.72 }}>当前 Tick</span>
-                      <strong style={{ fontFamily: 'var(--font-mono)' }}>{Number.isFinite(Number(rangeEditor?.current_tick)) ? rangeEditor.current_tick : '--'}</strong>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
-                      <span style={{ opacity: 0.72 }}>Tick Spacing</span>
-                      <strong style={{ fontFamily: 'var(--font-mono)' }}>{Number.isFinite(Number(rangeEditor?.tick_spacing)) ? rangeEditor.tick_spacing : '--'}</strong>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
-                      <span style={{ opacity: 0.72 }}>当前价格</span>
-                      <strong>{formatPriceValue(rangeEditor?.current_price)}</strong>
-                    </div>
-                    {rangeShapeLabel ? (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
-                        <span style={{ opacity: 0.72 }}>仓位形态</span>
-                        <strong>{rangeShapeLabel}</strong>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  {rangeInputMode === 'grid' ? (
-                    <>
-                      <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <button
-                          type="button"
-                          className={`range-chip ${gridBoundaryTarget === 'lower' ? 'active' : ''}`}
-                          onClick={() => setGridBoundaryTarget('lower')}
-                        >
-                          调整下限
-                        </button>
-                        <button
-                          type="button"
-                          className={`range-chip ${gridBoundaryTarget === 'upper' ? 'active' : ''}`}
-                          onClick={() => setGridBoundaryTarget('upper')}
-                        >
-                          调整上限
-                        </button>
-                        <button
-                          type="button"
-                          className="range-chip"
-                          onClick={() => nudgeTickBoundary(gridBoundaryTarget, -1)}
-                        >
-                          -1 格
-                        </button>
-                        <button
-                          type="button"
-                          className="range-chip"
-                          onClick={() => nudgeTickBoundary(gridBoundaryTarget, 1)}
-                        >
-                          +1 格
-                        </button>
-                      </div>
-
-                      <div className="modal-range-picks" style={{ marginTop: 10 }}>
-                        {gridBins.map((bin) => {
-                          const isSelected = Number.isInteger(tickLowerValue) &&
-                            Number.isInteger(tickUpperValue) &&
-                            bin.lowerTick >= tickLowerValue &&
-                            bin.upperTick <= tickUpperValue;
-                          return (
-                            <button
-                              key={bin.key}
-                              type="button"
-                              className={`range-chip ${isSelected ? 'active' : ''}`}
-                              onClick={() => applyGridBin(bin)}
-                              style={{ minWidth: 96 }}
-                            >
-                              <span>{bin.isCurrent ? '当前格' : `${bin.lowerTick} ~ ${bin.upperTick}`}</span>
-                              <span className="range-chip-sub">{bin.isCurrent ? '锚点' : `第 ${Math.abs(bin.index)} 格`}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </>
-                  ) : null}
-
-                  <div className="modal-row" style={{ marginTop: 12 }}>
-                    <label className="modal-field">
-                      <span>下限 Tick</span>
-                      <input
-                        type="number"
-                        value={tickLowerInput}
-                        onChange={(e) => {
-                          clearErrors();
-                          setTickLowerInput(e.target.value);
-                        }}
-                        step={Number.isFinite(Number(rangeEditor?.tick_spacing)) ? Number(rangeEditor?.tick_spacing) : 1}
-                      />
-                    </label>
-                    <label className="modal-field">
-                      <span>上限 Tick</span>
-                      <input
-                        type="number"
-                        value={tickUpperInput}
-                        onChange={(e) => {
-                          clearErrors();
-                          setTickUpperInput(e.target.value);
-                        }}
-                        step={Number.isFinite(Number(rangeEditor?.tick_spacing)) ? Number(rangeEditor?.tick_spacing) : 1}
-                      />
-                    </label>
-                  </div>
-
-                  {rangeEditor ? (
-                    <div
-                      style={{
-                        marginTop: 10,
-                        padding: '12px 14px',
-                        borderRadius: 14,
-                        border: '1px solid rgba(148, 163, 184, 0.18)',
-                        background: 'rgba(15, 23, 42, 0.18)',
-                        display: 'grid',
-                        gap: 6,
-                        fontSize: 12,
-                      }}
+              {smartRangesLoading ? (
+                <div className="modal-range-hint">聪明钱区间加载中...</div>
+              ) : null}
+              {visibleSmartRanges.length > 0 ? (
+                <div className="modal-range-picks">
+                  {visibleSmartRanges.map((item, index) => {
+                    const rangePct = Number(item?.range_percent);
+                    const positionCount = Math.max(0, Number(item?.position_count) || 0);
+                    const isActive =
+                      Math.abs(Number(rangeLower) - rangePct) < 0.05 &&
+                      Math.abs(Number(rangeUpper) - rangePct) < 0.05;
+                    return (
+                      <button
+                        key={`${rangePct}-${positionCount}-${index}`}
+                        type="button"
+                        className={`range-chip smart ${isActive ? 'active' : ''}`}
+                        onClick={() => applyRange(rangePct, rangePct)}
+                      >
+                        <span>{`${rangePct}%${positionCount > 1 ? ` +${positionCount - 1}` : ''}`}</span>
+                        <span className="range-chip-sub">{formatUsdCompact(item?.total_amount_usd)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+              <div className="modal-range-picks modal-range-picks-default">
+                {PRESET_RANGES.map((item) => {
+                  const isActive =
+                    Math.abs(Number(rangeLower) - item) < 0.05 &&
+                    Math.abs(Number(rangeUpper) - item) < 0.05;
+                  return (
+                    <button
+                      key={item}
+                      type="button"
+                      className={`range-chip ${isActive ? 'active' : ''}`}
+                      onClick={() => applyRange(item, item)}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                        <span style={{ opacity: 0.72 }}>价格区间</span>
-                        <strong>{formatPriceValue(rangeEditor?.range_lower_price)} - {formatPriceValue(rangeEditor?.range_upper_price)}</strong>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                        <span style={{ opacity: 0.72 }}>百分比映射</span>
-                        <strong>{formatPercent(rangeEditor?.range_lower_pct)} / {formatPercent(rangeEditor?.range_upper_pct)}</strong>
-                      </div>
-                    </div>
-                  ) : null}
-                </>
-              )}
+                      {item}%
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="modal-row">
+                <label className="modal-field">
+                  <span>下限 %</span>
+                  <input
+                    type="number"
+                    value={rangeLower}
+                    onChange={(e) => handleRangeLowerChange(e.target.value)}
+                    min="0.1"
+                    step="0.5"
+                  />
+                </label>
+                <label className="modal-field">
+                  <span>上限 %</span>
+                  <input
+                    type="number"
+                    value={rangeUpper}
+                    onChange={(e) => handleRangeUpperChange(e.target.value)}
+                    min="0.1"
+                    step="0.5"
+                  />
+                </label>
+              </div>
+
+              {priceRange ? (
+                <div className="opm-price-range">
+                  <div className="opm-price-cell opm-price-cell-lower">
+                    <div className="opm-price-label">下限价</div>
+                    <div className="opm-price-value">{priceRange.lowerText}</div>
+                  </div>
+                  <div className="opm-price-cell opm-price-cell-current">
+                    <div className="opm-price-label">当前价</div>
+                    <div className="opm-price-value">{priceRange.currentText}</div>
+                  </div>
+                  <div className="opm-price-cell opm-price-cell-upper">
+                    <div className="opm-price-label">上限价</div>
+                    <div className="opm-price-value">{priceRange.upperText}</div>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
 

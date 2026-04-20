@@ -11203,19 +11203,19 @@ img.swap-token-glyph {
 
 /* ───────── Open Position Modal — 左右分栏布局 ───────── */
 .modal-box.modal-box-wide {
-  max-width: 980px;
+  max-width: 940px;
 }
 .opm-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-  gap: 18px;
-  align-items: stretch;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
 }
 .opm-left,
 .opm-right {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
   min-width: 0;
 }
 .opm-pair-info {
@@ -11244,6 +11244,34 @@ img.swap-token-glyph {
   font-size: 11px;
   color: var(--text-muted);
 }
+.opm-price-range {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.25);
+  border: 1px solid var(--line);
+}
+.opm-price-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.opm-price-cell-current { align-items: center; }
+.opm-price-cell-upper   { align-items: flex-end; }
+.opm-price-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+.opm-price-value {
+  font-size: 12px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-weight: 600;
+}
+.opm-price-cell-lower .opm-price-value { color: #22d38a; }
+.opm-price-cell-upper .opm-price-value { color: #ff5e76; }
 @media (max-width: 900px) {
   .modal-box.modal-box-wide {
     max-width: 520px;
