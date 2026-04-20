@@ -103,6 +103,9 @@ export default function LiquidityDistributionChart({
     loading = false,
     emptyText = '暂无流动性数据',
     style,
+    tokenLeftLabel = '',
+    tokenRightLabel = '',
+    titleText = '流动性分布',
 }) {
     const containerRef = useRef(null);
     const [width, setWidth] = useState(0);
@@ -218,7 +221,9 @@ export default function LiquidityDistributionChart({
         ...style,
     };
 
-    if (loading) {
+    const hasData = sortedBins.length > 0 && tickRange;
+
+    if (loading && !hasData) {
         return (
             <div ref={containerRef} style={{ ...containerStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', color: colors.emptyText, fontSize: 12 }}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -230,7 +235,7 @@ export default function LiquidityDistributionChart({
         );
     }
 
-    if (!sortedBins.length || !tickRange) {
+    if (!hasData) {
         return (
             <div ref={containerRef} style={{ ...containerStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', color: colors.emptyText, fontSize: 12 }}>
                 {emptyText}
@@ -245,21 +250,55 @@ export default function LiquidityDistributionChart({
 
     return (
         <div ref={containerRef} style={containerStyle}>
+            {/* 顶部头部：左 token symbol、标题、右 token symbol */}
+            <div style={{
+                position: 'absolute', left: 10, right: 10, top: 6,
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
+                color: 'rgba(154, 168, 196, 0.75)', pointerEvents: 'none', zIndex: 5,
+            }}>
+                <span>{tokenLeftLabel || ''}</span>
+                <span style={{ color: 'rgba(236, 242, 255, 0.5)', fontSize: 10, fontWeight: 500 }}>
+                    {titleText}
+                    {loading ? (
+                        <span style={{ marginLeft: 6, display: 'inline-block', width: 8, height: 8, borderRadius: '50%', border: '1.5px solid rgba(255, 196, 0, 0.4)', borderTopColor: 'rgba(255, 196, 0, 0.95)', animation: 'lpd-spin 0.8s linear infinite', verticalAlign: -1 }} />
+                    ) : null}
+                </span>
+                <span>{tokenRightLabel || ''}</span>
+            </div>
+            <style>{`@keyframes lpd-spin { to { transform: rotate(360deg); } }`}</style>
             {Number.isFinite(lowerX) && Number.isFinite(upperX) && upperX > lowerX ? (
                 <div
                     style={{ position: 'absolute', top: 0, bottom: 0, left: lowerX, width: upperX - lowerX, background: colors.rangeBg, pointerEvents: 'none' }}
                 />
             ) : null}
 
-            <div style={{ position: 'absolute', left: 8, right: 8, top: 18, bottom: 26, display: 'flex', alignItems: 'flex-end', gap: 2 }}>
+            <div style={{ position: 'absolute', left: 8, right: 8, top: 22, bottom: 28, display: 'flex', alignItems: 'flex-end', gap: 1 }}>
                 {sortedBins.map((bin, i) => {
                     const liq = bigIntToNumber(safeBigInt(bin.liquidity));
                     const ratio = liq / maxLiq;
-                    const heightPct = Math.max(2, ratio * 100);
+                    const heightPct = Math.max(3, ratio * 100);
                     const inside = inRange(bin);
-                    const isActive = Boolean(bin.is_active);
+                    const isActive = Boolean(bin.is_active) || (Number.isFinite(currentTick) && currentTick >= bin.tick_lower && currentTick < bin.tick_upper);
                     const isHovered = hoveredBin?.index === bin.index;
-                    const bg = isActive ? colors.barActive : (inside ? colors.barInside : colors.barOutside);
+                    const isBelow = Number.isFinite(currentTick) && bin.tick_upper <= currentTick;
+                    const isAbove = Number.isFinite(currentTick) && bin.tick_lower >= currentTick;
+
+                    let bg;
+                    if (isActive) {
+                        bg = 'linear-gradient(to top, rgba(255, 196, 0, 0.95), rgba(255, 196, 0, 0.55))';
+                    } else if (isBelow) {
+                        bg = inside
+                            ? 'linear-gradient(to top, rgba(52, 211, 153, 0.9), rgba(52, 211, 153, 0.4))'
+                            : 'linear-gradient(to top, rgba(52, 211, 153, 0.35), rgba(52, 211, 153, 0.1))';
+                    } else if (isAbove) {
+                        bg = inside
+                            ? 'linear-gradient(to top, rgba(96, 165, 250, 0.9), rgba(96, 165, 250, 0.4))'
+                            : 'linear-gradient(to top, rgba(96, 165, 250, 0.35), rgba(96, 165, 250, 0.1))';
+                    } else {
+                        bg = inside ? colors.barInside : colors.barOutside;
+                    }
+
                     return (
                         <div
                             key={bin.index ?? `${bin.tick_lower}-${bin.tick_upper}`}
@@ -269,10 +308,10 @@ export default function LiquidityDistributionChart({
                                 flex: 1,
                                 minWidth: 2,
                                 height: `${heightPct}%`,
-                                borderTopLeftRadius: 2,
-                                borderTopRightRadius: 2,
+                                borderTopLeftRadius: 3,
+                                borderTopRightRadius: 3,
                                 background: bg,
-                                transition: 'all 150ms ease',
+                                transition: 'height 260ms cubic-bezier(0.4, 0, 0.2, 1), background 200ms ease',
                                 outline: isHovered ? '1px solid rgba(236, 242, 255, 0.55)' : 'none',
                                 cursor: 'default',
                             }}

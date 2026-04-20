@@ -11272,6 +11272,28 @@ img.swap-token-glyph {
 }
 .opm-price-cell-lower .opm-price-value { color: #22d38a; }
 .opm-price-cell-upper .opm-price-value { color: #ff5e76; }
+.opm-share-card {
+  margin-top: 4px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(34, 211, 138, 0.10), rgba(96, 165, 250, 0.08));
+  border: 1px solid rgba(34, 211, 138, 0.20);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.opm-share-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+.opm-share-value {
+  font-size: 14px;
+  font-weight: 700;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--accent, #bcff2f);
+}
 @media (max-width: 900px) {
   .modal-box.modal-box-wide {
     max-width: 520px;

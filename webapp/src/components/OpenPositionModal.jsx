@@ -687,6 +687,14 @@ export default function OpenPositionModal({
 
   const token0Decimals = Number(pool?.token0_decimals ?? pool?.token0?.decimals ?? 18) || 18;
   const token1Decimals = Number(pool?.token1_decimals ?? pool?.token1?.decimals ?? 18) || 18;
+  const token0Symbol = String(pool?.token0_symbol || pool?.token0?.symbol || '').toUpperCase();
+  const token1Symbol = String(pool?.token1_symbol || pool?.token1?.symbol || '').toUpperCase();
+
+  // 默认以非稳定币为基准显示价格：若 token0 是 USDT/USDC 等计价币，就反转显示
+  const STABLE_OR_QUOTE = new Set(['USDT', 'USDC', 'BUSD', 'DAI', 'FDUSD', 'TUSD', 'USDD', 'USDE']);
+  const defaultInvert = STABLE_OR_QUOTE.has(token0Symbol);
+  const [invertPrice, setInvertPrice] = useState(defaultInvert);
+  useEffect(() => { setInvertPrice(defaultInvert); }, [defaultInvert]);
 
   const reloadLiqProfile = useCallback(() => {
     if (!addr || !protocolKind || !chain) {
@@ -708,7 +716,6 @@ export default function OpenPositionModal({
       })
       .catch((err) => {
         const msg = String(err?.message || err || '');
-        // 服务端 404 / SPA fallback 时只在控制台留痕，不把整段 HTML 抛到 UI
         if (/page could not be found|<html|<!doctype/i.test(msg)) {
           // eslint-disable-next-line no-console
           console.warn('[liquidity_distribution] backend route missing or unreachable', msg.slice(0, 200));
@@ -716,7 +723,7 @@ export default function OpenPositionModal({
         } else {
           setLiqProfileError(msg.slice(0, 80));
         }
-        setLiqProfile(null);
+        // 刷新失败时保留旧数据，避免画布闪烁清空
       })
       .finally(() => {
         setLiqProfileLoading(false);
@@ -729,6 +736,8 @@ export default function OpenPositionModal({
       return undefined;
     }
     const ctrl = new AbortController();
+    // 池子切换（addr/protocol/chain 改变）时清空旧数据；同一池子的刷新不清空
+    setLiqProfile(null);
     setLiqProfileLoading(true);
     setLiqProfileError('');
     fetchPoolLiquidityDistribution({
@@ -804,6 +813,7 @@ export default function OpenPositionModal({
     if (baseTick === null) return null;
     const decAdj = Math.pow(10, (Number(token0Decimals) || 18) - (Number(token1Decimals) || 18));
     const tickToPrice = (t) => Math.pow(1.0001, t) * decAdj;
+    const apply = (p) => (invertPrice && p > 0 ? 1 / p : p);
     const fmt = (v) => {
       if (!Number.isFinite(v) || v <= 0) return '--';
       if (v >= 1_000_000) return v.toExponential(3);
@@ -813,12 +823,60 @@ export default function OpenPositionModal({
     };
     const lowerTick = Number.isFinite(chartLowerTick) ? chartLowerTick : null;
     const upperTick = Number.isFinite(chartUpperTick) ? chartUpperTick : null;
+    const currentPrice = apply(tickToPrice(baseTick));
+    const lowerPrice = lowerTick !== null ? apply(tickToPrice(lowerTick)) : null;
+    const upperPrice = upperTick !== null ? apply(tickToPrice(upperTick)) : null;
+    // invert 情况下 tickLower 对应较大价格（现实"上限"），所以文字显示要互换
+    const lowerText = (invertPrice ? upperPrice : lowerPrice);
+    const upperText = (invertPrice ? lowerPrice : upperPrice);
+    // 计价代币单位：invert=true 时是 token0，否则是 token1
+    const quoteSymbol = invertPrice ? token0Symbol : token1Symbol;
+    const baseSymbol = invertPrice ? token1Symbol : token0Symbol;
     return {
-      currentText: fmt(tickToPrice(baseTick)),
-      lowerText: lowerTick !== null ? fmt(tickToPrice(lowerTick)) : '--',
-      upperText: upperTick !== null ? fmt(tickToPrice(upperTick)) : '--',
+      currentText: fmt(currentPrice),
+      lowerText: lowerText !== null ? fmt(lowerText) : '--',
+      upperText: upperText !== null ? fmt(upperText) : '--',
+      quoteSymbol,
+      baseSymbol,
     };
-  }, [liqProfile, rangeEditor, chartLowerTick, chartUpperTick, token0Decimals, token1Decimals]);
+  }, [liqProfile, rangeEditor, chartLowerTick, chartUpperTick, token0Decimals, token1Decimals, invertPrice, token0Symbol, token1Symbol]);
+
+  // 流动性占比估算（Uniswap V3 标准公式简化版）
+  const shareEstimate = useMemo(() => {
+    if (!liqProfile) return null;
+    const amt = Number(amount);
+    if (!Number.isFinite(amt) || amt <= 0) return null;
+    const curTick = Number(liqProfile?.current_tick);
+    const activeLiq = Number(liqProfile?.active_liquidity);
+    const lo = Number(chartLowerTick);
+    const hi = Number(chartUpperTick);
+    if (!Number.isFinite(curTick) || !Number.isFinite(activeLiq) || activeLiq <= 0) return null;
+    if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return null;
+
+    const d0 = Number(token0Decimals) || 18;
+    const d1 = Number(token1Decimals) || 18;
+    const sqrtP = Math.sqrt(Math.pow(1.0001, curTick) * Math.pow(10, d0 - d1));
+    const sqrtPLower = Math.sqrt(Math.pow(1.0001, lo) * Math.pow(10, d0 - d1));
+    const sqrtPUpper = Math.sqrt(Math.pow(1.0001, hi) * Math.pow(10, d0 - d1));
+    if (!Number.isFinite(sqrtP) || !Number.isFinite(sqrtPLower) || !Number.isFinite(sqrtPUpper)) return null;
+
+    // 假设用户金额以 token1 计（USDT/USDC 本位最常见），按 V3 公式估算 L_user
+    // 区间内：L = amount1 / (sqrtP - sqrtPLower)  [scaled by 10^d1]
+    // 价格已按 decimals 调整，token1 amount 用 raw unit（10^d1）
+    const amountToken1Raw = amt * Math.pow(10, d1);
+    let lUser;
+    if (curTick < lo) {
+      lUser = (amountToken1Raw * sqrtPUpper * sqrtPLower) / (sqrtPUpper - sqrtPLower);
+    } else if (curTick >= hi) {
+      lUser = amountToken1Raw / (sqrtPUpper - sqrtPLower);
+    } else {
+      lUser = amountToken1Raw / (sqrtP - sqrtPLower);
+    }
+    if (!Number.isFinite(lUser) || lUser <= 0) return null;
+    const share = (lUser / (activeLiq + lUser)) * 100;
+    if (!Number.isFinite(share) || share < 0) return null;
+    return Math.min(share, 100);
+  }, [liqProfile, amount, chartLowerTick, chartUpperTick, token0Decimals, token1Decimals]);
 
   const onChartRangeChange = useCallback(({ lower, upper }) => {
     if (!liqProfile) return;
@@ -998,23 +1056,39 @@ export default function OpenPositionModal({
               loading={liqProfileLoading}
               token0Decimals={token0Decimals}
               token1Decimals={token1Decimals}
+              invertPrice={invertPrice}
+              tokenLeftLabel={invertPrice ? token0Symbol : token1Symbol}
+              tokenRightLabel={invertPrice ? token1Symbol : token0Symbol}
               height={260}
             />
 
-            {liqProfileError ? (
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', marginTop: 4, fontSize: 11, color: 'var(--text-muted)' }}>
-                <span>流动性分布 {liqProfileError}</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-muted)' }}>
+                <span>计价：</span>
+                <strong style={{ color: 'var(--text)' }}>
+                  {priceRange?.baseSymbol || '--'}/<span style={{ color: 'var(--text-muted)' }}>{priceRange?.quoteSymbol || '--'}</span>
+                </strong>
                 <button
                   type="button"
                   className="ghost-chip"
-                  style={{ padding: '2px 10px', fontSize: 11 }}
-                  onClick={reloadLiqProfile}
-                  disabled={liqProfileLoading}
-                >
-                  重试
-                </button>
+                  style={{ padding: '2px 8px', fontSize: 11, minWidth: 0 }}
+                  onClick={() => setInvertPrice((v) => !v)}
+                  title="切换价格方向"
+                >⇄</button>
               </div>
-            ) : null}
+              {liqProfileError ? (
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11, color: 'var(--text-muted)' }}>
+                  <span>{liqProfileError}</span>
+                  <button
+                    type="button"
+                    className="ghost-chip"
+                    style={{ padding: '2px 10px', fontSize: 11 }}
+                    onClick={reloadLiqProfile}
+                    disabled={liqProfileLoading}
+                  >重试</button>
+                </div>
+              ) : null}
+            </div>
 
             <div className="modal-range-section opm-section">
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
@@ -1104,6 +1178,15 @@ export default function OpenPositionModal({
                   </div>
                 </div>
               ) : null}
+
+              <div className="opm-share-card">
+                <div className="opm-share-label">预计流动性占比</div>
+                <div className="opm-share-value">
+                  {shareEstimate !== null
+                    ? `${shareEstimate < 0.0001 ? shareEstimate.toFixed(6) : shareEstimate.toFixed(4)}%`
+                    : (Number(amount) > 0 ? '估算中...' : '--')}
+                </div>
+              </div>
             </div>
           </div>
 
