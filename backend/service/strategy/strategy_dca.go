@@ -153,7 +153,7 @@ func (s *StrategyService) runDCABatchAttempt(taskID uint, userID uint, batchIdx 
 	if newExecuted >= total {
 		updates["dca_next_batch_at"] = nil
 	} else {
-		next := now.Add(time.Duration(task.DCAIntervalSeconds) * time.Second)
+		next := now.Add(time.Duration(task.DCAIntervalSeconds * float64(time.Second)))
 		updates["dca_next_batch_at"] = &next
 	}
 	if err := database.DB.Model(&task).Updates(updates).Error; err != nil {
@@ -163,8 +163,20 @@ func (s *StrategyService) runDCABatchAttempt(taskID uint, userID uint, batchIdx 
 	if newExecuted >= total {
 		s.notify(task.UserID, fmt.Sprintf("✅ 分批加仓完成：共 %d/%d 批，累计投入约 $%.2f", newExecuted, total, task.AmountUSDT+spent))
 	} else {
-		s.notify(task.UserID, fmt.Sprintf("✅ 分批加仓 %d/%d 完成（本批 $%.2f），下一批 %ds 后执行", newExecuted, total, spent, task.DCAIntervalSeconds))
+		s.notify(task.UserID, fmt.Sprintf("✅ 分批加仓 %d/%d 完成（本批 $%.2f），下一批 %s 后执行", newExecuted, total, spent, formatDCAInterval(task.DCAIntervalSeconds)))
 	}
+}
+
+// formatDCAInterval renders an interval like "30s" or "300ms" depending on magnitude.
+func formatDCAInterval(seconds float64) string {
+	if seconds < 1 {
+		ms := int(seconds*1000 + 0.5)
+		return fmt.Sprintf("%dms", ms)
+	}
+	if seconds == float64(int(seconds)) {
+		return fmt.Sprintf("%ds", int(seconds))
+	}
+	return fmt.Sprintf("%.1fs", seconds)
 }
 
 func (s *StrategyService) cancelRemainingDCA(task *models.StrategyTask, reason string) {

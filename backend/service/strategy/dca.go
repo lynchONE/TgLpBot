@@ -11,8 +11,8 @@ const (
 	DCAMaxBatchCount      = 5
 	DCAMinBatchPercent    = 5.0
 	DCASumTolerance       = 0.01
-	DCAMinIntervalSeconds = 10
-	DCAMaxIntervalSeconds = 600
+	DCAMinIntervalSeconds = 0.0
+	DCAMaxIntervalSeconds = 300.0
 )
 
 // NormalizeDCAPercentages validates and rounds a batch percentage slice.
@@ -56,11 +56,12 @@ func ParseDCAPercentages(js string) ([]float64, bool) {
 }
 
 // NormalizeDCAInterval clamps the interval into the supported range.
-func NormalizeDCAInterval(seconds int) (int, error) {
-	if seconds < DCAMinIntervalSeconds || seconds > DCAMaxIntervalSeconds {
-		return 0, fmt.Errorf("批次间隔必须在 %d-%d 秒之间，当前为 %d", DCAMinIntervalSeconds, DCAMaxIntervalSeconds, seconds)
+// Supports fractional seconds (e.g. 0.3 = 300ms). Rounded to 3 decimals for stable storage.
+func NormalizeDCAInterval(seconds float64) (float64, error) {
+	if !isFinite(seconds) || seconds < DCAMinIntervalSeconds || seconds > DCAMaxIntervalSeconds {
+		return 0, fmt.Errorf("批次间隔必须在 %g-%g 秒之间，当前为 %g", DCAMinIntervalSeconds, DCAMaxIntervalSeconds, seconds)
 	}
-	return seconds, nil
+	return math.Round(seconds*1000) / 1000, nil
 }
 
 // MarshalDCAPercentages serialises a normalised slice back to the JSON form used for storage.

@@ -312,6 +312,7 @@ export default function GlobalConfigPage({ open, onClose, apiBaseUrl, initData, 
                         draft={draft}
                         updateDraft={updateDraft}
                         inputClass={inputClass}
+                        brand={brand}
                     />
 
                     <Section
@@ -512,7 +513,7 @@ function MutedHint({ children }) {
     );
 }
 
-function DCASection({ draft, updateDraft, inputClass }) {
+function DCASection({ draft, updateDraft, inputClass, brand }) {
     const percentages = Array.isArray(draft.dca_percentages) ? draft.dca_percentages : [];
     const sum = useMemo(
         () => percentages.reduce((acc, v) => acc + (Number(v) || 0), 0),
@@ -545,6 +546,9 @@ function DCASection({ draft, updateDraft, inputClass }) {
         next[next.length - 1] = Math.round((100 - base * (n - 1)) * 100) / 100;
         updateDraft('dca_percentages', next);
     };
+
+    const pillBtnClass = `inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-semibold transition ${brand.softButtonClass}`;
+    const pillBtnDisabledClass = 'disabled:cursor-not-allowed disabled:opacity-40';
 
     return (
         <Section
@@ -591,7 +595,7 @@ function DCASection({ draft, updateDraft, inputClass }) {
                                 </div>
                             ))}
                         </div>
-                        <div className="mt-2 flex items-center justify-between gap-2">
+                        <div className="mt-3 flex items-center justify-between gap-2">
                             <div className={`text-[11px] font-semibold ${sumValid ? 'text-emerald-600 dark:text-emerald-300' : 'text-amber-600 dark:text-amber-300'}`}>
                                 合计：{sum.toFixed(2)}% {sumValid ? '✓' : '（必须等于 100%）'}
                             </div>
@@ -599,7 +603,7 @@ function DCASection({ draft, updateDraft, inputClass }) {
                                 <button
                                     type="button"
                                     onClick={equalize}
-                                    className="rounded-xl border border-zinc-200/70 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 hover:text-zinc-900 dark:border-white/10 dark:bg-white/[0.04] dark:text-white/70 dark:hover:text-white"
+                                    className={pillBtnClass}
                                 >
                                     平均分配
                                 </button>
@@ -607,7 +611,7 @@ function DCASection({ draft, updateDraft, inputClass }) {
                                     type="button"
                                     onClick={addBatch}
                                     disabled={percentages.length >= 5}
-                                    className="inline-flex items-center gap-1 rounded-xl border border-zinc-200/70 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 hover:text-zinc-900 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:bg-white/[0.04] dark:text-white/70 dark:hover:text-white"
+                                    className={`${pillBtnClass} ${pillBtnDisabledClass}`}
                                 >
                                     <Plus className="h-3 w-3" />
                                     追加批次
@@ -615,11 +619,12 @@ function DCASection({ draft, updateDraft, inputClass }) {
                             </div>
                         </div>
                     </FieldCard>
-                    <FieldCard label="批次间隔" hint="每批之间的等待时间（10–600 秒）">
+                    <FieldCard label="批次间隔" hint="每批之间的等待时间（0–300 秒，支持小数，0.3 = 300ms）">
                         <InputWithSuffix
                             type="number"
-                            min="10"
-                            max="600"
+                            step="0.1"
+                            min="0"
+                            max="300"
                             value={draft.dca_interval_seconds}
                             onChange={(e) => updateDraft('dca_interval_seconds', Number(e.target.value) || 0)}
                             className={inputClass}

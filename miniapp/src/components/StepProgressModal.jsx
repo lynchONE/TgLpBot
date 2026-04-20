@@ -89,14 +89,19 @@ function CompactStatusIcon({ tone, brand }) {
     );
 }
 
-function resolveOpenPositionView(tone, error) {
+function resolveOpenPositionView(tone, error, progress) {
+    const isDCA = Boolean(progress?.dca);
+    const pair = String(progress?.pair || '').trim();
+    const currentStep = Number(progress?.currentStep || 0);
+    const totalSteps = Number(progress?.totalSteps || 0);
+
     if (tone === 'done') {
         return {
             tone,
             panelTitle: '开仓状态',
             badge: '已完成',
-            headline: '开仓成功',
-            summary: '私有合约检查完成后，仓位已经创建完成。',
+            headline: '开仓完成',
+            summary: pair ? `${pair} 仓位已创建。` : '仓位已创建完成。',
             detail: '持仓列表刷新后会显示最新结果。',
         };
     }
@@ -112,13 +117,36 @@ function resolveOpenPositionView(tone, error) {
         };
     }
 
+    // active_dca = first batch done, later batches run in the background ticker
+    if (progress?.status === 'active_dca' && isDCA && totalSteps > 1) {
+        return {
+            tone: 'active_dca',
+            panelTitle: '开仓状态',
+            badge: `批次 1 / ${totalSteps}`,
+            headline: '首批开仓完成',
+            summary: pair ? `${pair} 首批已成交，剩余 ${totalSteps - 1} 批将按间隔后台执行。` : `剩余 ${totalSteps - 1} 批将按间隔后台执行。`,
+            detail: '你可以关闭此提示，继续其他操作。',
+        };
+    }
+
+    if (isDCA && totalSteps > 1) {
+        return {
+            tone,
+            panelTitle: '开仓状态',
+            badge: '处理中',
+            headline: '首批开仓处理中',
+            summary: pair ? `${pair} · 首批 1 / ${totalSteps} 正在提交。` : `首批 1 / ${totalSteps} 正在提交。`,
+            detail: '处理完成前请勿重复提交。你可以关闭此提示继续操作页面，任务会在后台执行。',
+        };
+    }
+
     return {
         tone,
         panelTitle: '开仓状态',
         badge: '处理中',
         headline: '正在处理开仓流程',
-        summary: '系统正在检查当前钱包的私有合约绑定状态。',
-        detail: '如果这是当前钱包首次开仓，会先部署私有合约，部署完成后绑定到当前钱包，再继续后续开仓步骤。处理完成前请勿重复提交相同请求。',
+        summary: pair ? `${pair} · 系统正在检查私有合约并创建仓位。` : '系统正在检查当前钱包的私有合约绑定状态。',
+        detail: '如果这是当前钱包首次开仓，会先部署私有合约再继续。你可以关闭此提示，任务会在后台执行。',
     };
 }
 
@@ -128,40 +156,11 @@ function resolveView(operation, progress) {
     const error = String(progress?.error || '').trim();
 
     if (operation === 'open_position') {
-        return resolveOpenPositionView(tone, error);
+        return resolveOpenPositionView(tone, error, progress);
     }
 
     if (operation === 'open_position') {
-        if (tone === 'done') {
-            return {
-                tone,
-                panelTitle: '开仓状态',
-                badge: '已完成',
-                headline: '开仓成功',
-                summary: '新仓位已经创建完成。',
-                detail: '持仓列表刷新后会显示最新结果。',
-            };
-        }
-
-        if (tone === 'error') {
-            return {
-                tone,
-                panelTitle: '开仓状态',
-                badge: '失败',
-                headline: '开仓失败',
-                summary: error || '开仓请求执行失败。',
-                detail: '请检查参数、钱包余额和链上状态后重试。',
-            };
-        }
-
-        return {
-            tone,
-            panelTitle: '开仓状态',
-            badge: '处理中',
-            headline: '开仓请求已提交',
-            summary: '系统正在校验参数并创建仓位。',
-            detail: '处理完成前请勿重复提交相同请求。',
-        };
+        return resolveOpenPositionView(tone, error, progress);
     }
 
     if (tone === 'done') {
@@ -213,20 +212,33 @@ export default function StepProgressModal({ operation, progress, accentTheme = '
     const [allowClose, setAllowClose] = useState(false);
     const brand = useMemo(() => getBrandTheme(accentTheme), [accentTheme]);
     const view = useMemo(() => resolveView(operation, progress), [operation, progress]);
-    const isCompactClosePosition = operation === 'close_position';
+    const isCompact = operation === 'close_position' || operation === 'open_position';
 
     useEffect(() => {
-        if (isCompactClosePosition) {
+        if (isCompact) {
             setAllowClose(true);
             return undefined;
         }
         setAllowClose(false);
         const timer = setTimeout(() => setAllowClose(true), 10000);
         return () => clearTimeout(timer);
-    }, [isCompactClosePosition]);
+    }, [isCompact]);
 
-    const isActive = view.tone === 'active';
-    const canClose = isCompactClosePosition ? true : !isActive || allowClose;
+    // Auto-dismiss compact toast once the user has had time to read the result.
+    // Open-position: first-batch done (active_dca) → 8s; full done → 5s.
+    useEffect(() => {
+        if (!onClose) return undefined;
+        if (!isCompact) return undefined;
+        let delay = 0;
+        if (view.tone === 'done') delay = 5000;
+        else if (view.tone === 'active_dca') delay = 8000;
+        if (!delay) return undefined;
+        const timer = setTimeout(() => onClose(), delay);
+        return () => clearTimeout(timer);
+    }, [isCompact, view.tone, onClose]);
+
+    const isActive = view.tone === 'active' || view.tone === 'active_dca';
+    const canClose = isCompact ? true : !isActive || allowClose;
     const activeBadgeClass = brand.key === 'emerald'
         ? 'border border-emerald-500/25 bg-emerald-500/12 text-emerald-600 dark:text-emerald-300'
         : 'border border-[#bcff2f]/30 bg-[#bcff2f]/12 text-[#6f9616] dark:text-[#e3ffa0]';
@@ -257,7 +269,22 @@ export default function StepProgressModal({ operation, progress, accentTheme = '
                 ? 'text-emerald-700 dark:text-emerald-200'
                 : 'text-[#6f9616] dark:text-[#e3ffa0]';
 
-    if (isCompactClosePosition) {
+    if (isCompact) {
+        const isOpen = operation === 'open_position';
+        const aboutLabel = isOpen ? '开仓' : '撤仓';
+        const ariaLabel = isOpen ? '关闭开仓状态' : '关闭撤仓状态';
+        const activeHint = isOpen
+            ? '开仓处理中，你可以继续操作页面。'
+            : '后台继续撤仓中，你可以继续操作页面。';
+        const doneHint = isOpen
+            ? (Number(progress?.totalSteps || 0) > 1 && progress?.status === 'done'
+                ? '分批加仓全部完成。'
+                : '开仓已完成。')
+            : '撤仓已完成，不会再阻塞当前界面。';
+        const errorHint = isOpen
+            ? `${aboutLabel}失败，请检查参数或稍后重试。`
+            : `${aboutLabel}失败，可稍后重试或刷新列表确认状态。`;
+
         return (
             <div
                 className="pointer-events-none fixed inset-x-0 z-[180] flex justify-center px-3"
@@ -272,7 +299,7 @@ export default function StepProgressModal({ operation, progress, accentTheme = '
                             type="button"
                             onClick={onClose}
                             className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-zinc-100 text-zinc-400 transition-colors hover:text-zinc-600 dark:bg-white/[0.06] dark:text-white/30 dark:hover:text-white/60"
-                            aria-label="关闭撤仓状态"
+                            aria-label={ariaLabel}
                         >
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                                 <path d="M18 6 6 18M6 6l12 12" />
@@ -298,12 +325,12 @@ export default function StepProgressModal({ operation, progress, accentTheme = '
                                 {isActive ? (
                                     <>
                                         <span className={`h-1.5 w-1.5 rounded-full animate-pulse ${brand.key === 'emerald' ? 'bg-emerald-500' : 'bg-[#bcff2f]'}`} />
-                                        后台继续撤仓中，你可以继续操作页面。
+                                        {activeHint}
                                     </>
                                 ) : view.tone === 'done' ? (
-                                    '撤仓已完成，不会再阻塞当前界面。'
+                                    doneHint
                                 ) : (
-                                    '撤仓失败，可稍后重试或刷新列表确认状态。'
+                                    errorHint
                                 )}
                             </div>
                         </div>

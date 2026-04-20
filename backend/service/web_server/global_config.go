@@ -158,7 +158,7 @@ func buildGlobalConfigUpdates(raw map[string]json.RawMessage) map[string]interfa
 
 	setBool("dca_enabled", "dca_enabled")
 	if v, ok := raw["dca_interval_seconds"]; ok {
-		var n int
+		var n float64
 		if json.Unmarshal(v, &n) == nil {
 			if normalized, err := strategy.NormalizeDCAInterval(n); err == nil {
 				updates["dca_interval_seconds"] = normalized

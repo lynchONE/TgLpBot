@@ -43,7 +43,7 @@ type openPositionRequest struct {
 	// When DCAEnabled is nil, global default is used; when set, any non-nil sibling fields override.
 	DCAEnabled         *bool     `json:"dca_enabled,omitempty"`
 	DCAPercentages     []float64 `json:"dca_percentages,omitempty"`
-	DCAIntervalSeconds *int      `json:"dca_interval_seconds,omitempty"`
+	DCAIntervalSeconds *float64  `json:"dca_interval_seconds,omitempty"`
 }
 
 type openPositionResponse struct {
@@ -163,7 +163,7 @@ func buildOpenPositionErrorFromSafety(err *liquidity.ZapSafetyError) openPositio
 // resolveDCAPlan merges the per-open DCA overrides onto the user's GlobalConfig defaults.
 // Returns (enabled, percentages, intervalSec, error). If both sides disable DCA, enabled is false
 // and the other return values are zero — callers should skip DCA wiring in that case.
-func resolveDCAPlan(cfg *models.GlobalConfig, req openPositionRequest) (bool, []float64, int, error) {
+func resolveDCAPlan(cfg *models.GlobalConfig, req openPositionRequest) (bool, []float64, float64, error) {
 	enabled := false
 	if cfg != nil {
 		enabled = cfg.DCAEnabled
@@ -186,7 +186,7 @@ func resolveDCAPlan(cfg *models.GlobalConfig, req openPositionRequest) (bool, []
 		return false, nil, 0, err
 	}
 
-	interval := 0
+	interval := 0.0
 	if cfg != nil {
 		interval = cfg.DCAIntervalSeconds
 	}
@@ -866,7 +866,7 @@ func (s *Server) handleOpenPosition(w http.ResponseWriter, r *http.Request) {
 
 	if ctx.task.DCAEnabled {
 		now := time.Now()
-		next := now.Add(time.Duration(ctx.task.DCAIntervalSeconds) * time.Second)
+		next := now.Add(time.Duration(ctx.task.DCAIntervalSeconds * float64(time.Second)))
 		_ = database.DB.Model(ctx.task).Updates(map[string]interface{}{
 			"dca_executed_count": 1,
 			"dca_next_batch_at":  &next,

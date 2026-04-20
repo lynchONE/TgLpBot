@@ -66,7 +66,8 @@
       "Bash(GOTOOLCHAIN=local go env *)",
       "Bash(GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=auto go build ./...)",
       "Bash(GOTOOLCHAIN=local gofmt *)",
-      "Bash(GOPROXY=https://goproxy.io,direct GOTOOLCHAIN=auto go build ./...)"
+      "Bash(GOPROXY=https://goproxy.io,direct GOTOOLCHAIN=auto go build ./...)",
+      "Bash(git stash *)"
     ]
   }
 }

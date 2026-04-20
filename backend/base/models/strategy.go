@@ -116,7 +116,7 @@ type StrategyTask struct {
 	DCAEnabled         bool       `gorm:"default:false" json:"dca_enabled"`
 	DCATotalAmountUSDT float64    `gorm:"type:decimal(20,8);default:0" json:"dca_total_amount_usdt"`
 	DCAPercentagesJSON string     `gorm:"type:varchar(128);default:''" json:"dca_percentages_json"`
-	DCAIntervalSeconds int        `gorm:"default:0" json:"dca_interval_seconds"`
+	DCAIntervalSeconds float64    `gorm:"type:decimal(10,3);default:0" json:"dca_interval_seconds"`
 	DCAExecutedCount   int        `gorm:"default:0" json:"dca_executed_count"`
 	DCANextBatchAt     *time.Time `json:"dca_next_batch_at"`
 

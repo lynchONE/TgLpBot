@@ -384,6 +384,14 @@ function parseOptionalPercent(raw) {
     return { valid: true, value: num };
 }
 
+function formatDCAIntervalHint(seconds) {
+    const n = Number(seconds);
+    if (!Number.isFinite(n) || n <= 0) return '立即';
+    if (n < 1) return `${Math.round(n * 1000)}ms`;
+    if (Number.isInteger(n)) return `${n}s`;
+    return `${n.toFixed(1)}s`;
+}
+
 function formatSharePercent(value) {
     const num = Number(value);
     if (!Number.isFinite(num) || num < 0) return '--';
@@ -1702,7 +1710,6 @@ export default function App() {
     };
 
     const closeOpenPosition = () => {
-        if (openPositionLoading) return;
         setOpenPositionPool(null);
         setOpenPositionSmartRanges([]);
         setOpenPositionSmartRangesLoading(false);
@@ -2121,38 +2128,44 @@ export default function App() {
             setOpenPositionError(openPositionEntrySwapPreviewError);
             return;
         }
-        if (openPositionEntrySwapPreview?.required && !openPositionEntrySwapConfirm) {
-            setOpenPositionError('请先确认前置兑换，再继续开仓。');
-            return;
+
+        if (openPositionDCAEnabled) {
+            if (openPositionDCAPercentages.length < 2 || openPositionDCAPercentages.length > 5) {
+                setOpenPositionError('分批次数必须在 2–5 批之间。');
+                return;
+            }
+            if (openPositionDCAPercentages.some((v) => !(Number(v) >= 5))) {
+                setOpenPositionError('每批占比必须 ≥ 5%。');
+                return;
+            }
+            const sum = openPositionDCAPercentages.reduce((acc, v) => acc + (Number(v) || 0), 0);
+            if (Math.abs(sum - 100) > 0.01) {
+                setOpenPositionError(`分批百分比之和必须等于 100%（当前 ${sum.toFixed(2)}%）。`);
+                return;
+            }
+            const iv = Number(openPositionDCAInterval);
+            if (!(Number.isFinite(iv) && iv >= 0 && iv <= 300)) {
+                setOpenPositionError('批次间隔必须在 0–300 秒之间。');
+                return;
+            }
         }
 
+        const totalBatches = openPositionDCAEnabled ? openPositionDCAPercentages.length : 1;
+        const pairTitle = openPositionPool?.trading_pair || '';
         setOpenPositionLoading(true);
         setOpenPositionError('');
-        setOperationProgress({ operation: 'open_position', currentStep: 1, totalSteps: 4, status: 'active', error: '' });
+        setOperationProgress({
+            operation: 'open_position',
+            currentStep: 1,
+            totalSteps: totalBatches,
+            status: 'active',
+            error: '',
+            pair: pairTitle,
+            dca: openPositionDCAEnabled,
+        });
+        setOpenPositionPool(null);
+        resetOpenPositionDraft();
         try {
-            if (openPositionDCAEnabled) {
-                if (openPositionDCAPercentages.length < 2 || openPositionDCAPercentages.length > 5) {
-                    setOpenPositionError('分批次数必须在 2–5 批之间。');
-                    setOpenPositionLoading(false);
-                    return;
-                }
-                if (openPositionDCAPercentages.some((v) => !(Number(v) >= 5))) {
-                    setOpenPositionError('每批占比必须 ≥ 5%。');
-                    setOpenPositionLoading(false);
-                    return;
-                }
-                const sum = openPositionDCAPercentages.reduce((acc, v) => acc + (Number(v) || 0), 0);
-                if (Math.abs(sum - 100) > 0.01) {
-                    setOpenPositionError(`分批百分比之和必须等于 100%（当前 ${sum.toFixed(2)}%）。`);
-                    setOpenPositionLoading(false);
-                    return;
-                }
-                if (!(Number(openPositionDCAInterval) >= 10 && Number(openPositionDCAInterval) <= 600)) {
-                    setOpenPositionError('批次间隔必须在 10–600 秒之间。');
-                    setOpenPositionLoading(false);
-                    return;
-                }
-            }
             await openPosition({
                 apiBaseUrl,
                 initData,
@@ -2165,7 +2178,7 @@ export default function App() {
                 slippageTolerance: slippageParsed.value,
                 entrySwapSlippageTolerance: openPositionEntrySwapPreview?.required ? entrySwapSlippageParsed.value : undefined,
                 allowEntrySwap: true,
-                confirmEntrySwap: Boolean(openPositionEntrySwapPreview?.required && openPositionEntrySwapConfirm),
+                confirmEntrySwap: Boolean(openPositionEntrySwapPreview?.required),
                 walletId,
                 ackLiquidityRisk: requiresAck && openPositionRiskAck,
                 dcaEnabled: openPositionDCAEnabled,
@@ -2178,9 +2191,7 @@ export default function App() {
             setOpenPositionEntrySwapPreviewError('');
             setOpenPositionEntrySwapConfirm(false);
             setOperationProgress(prev => prev?.operation === 'open_position'
-                ? { ...prev, currentStep: 4, status: 'done' } : prev);
-            setOpenPositionPool(null);
-            resetOpenPositionDraft();
+                ? { ...prev, currentStep: openPositionDCAEnabled ? 1 : totalBatches, status: openPositionDCAEnabled ? 'active_dca' : 'done' } : prev);
         } catch (e) {
             const msg = String(e?.message || e || '').trim();
             const payload = resolveOpenPositionErrorPayload(e);
@@ -3839,125 +3850,40 @@ export default function App() {
                                 />
                             </div>
 
-                            <div className="mt-4 rounded-xl border border-cyan-500/25 bg-cyan-500/5 p-3 dark:border-cyan-400/20 dark:bg-cyan-400/5">
-                                <label className="flex items-center justify-between gap-2 cursor-pointer">
-                                    <div>
-                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/85">分批加仓（防插针）</div>
-                                        <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/45">首批开仓，后续按间隔追加流动性；关仓或跑出区间自动取消剩余批次。</div>
+                            {openPositionDCAEnabled && Array.isArray(openPositionDCAPercentages) && openPositionDCAPercentages.length >= 2 ? (
+                                <div className="mt-4 rounded-xl border border-cyan-500/25 bg-gradient-to-br from-cyan-500/10 via-cyan-500/5 to-transparent p-3 dark:border-cyan-400/25 dark:from-cyan-400/10 dark:via-cyan-400/5">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <div className="flex items-center gap-1.5 text-[12px] font-bold text-cyan-700 dark:text-cyan-200">
+                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M6 12h12M9 18h6"/></svg>
+                                            分批加仓 · 共 {openPositionDCAPercentages.length} 批
+                                        </div>
+                                        <div className="text-[10px] font-semibold text-cyan-600/80 dark:text-cyan-300/70">
+                                            间隔 {formatDCAIntervalHint(openPositionDCAInterval)}
+                                        </div>
                                     </div>
-                                    <input
-                                        type="checkbox"
-                                        checked={openPositionDCAEnabled}
-                                        onChange={(e) => {
-                                            setOpenPositionDCAEnabled(e.target.checked);
-                                            setOpenPositionError('');
-                                        }}
-                                        disabled={openPositionLoading}
-                                        className="h-4 w-4"
-                                    />
-                                </label>
-                                {openPositionDCAEnabled ? (
-                                    <div className="mt-3 space-y-2">
-                                        <div className="text-[11px] font-semibold text-zinc-700 dark:text-white/65">每批占比（共 {openPositionDCAPercentages.length} 批）</div>
-                                        {openPositionDCAPercentages.map((value, idx) => (
-                                            <div key={idx} className="flex items-center gap-2">
-                                                <span className="w-12 shrink-0 text-[11px] text-zinc-500 dark:text-white/45">
-                                                    {idx === 0 ? '首批' : `第 ${idx + 1} 批`}
-                                                </span>
-                                                <input
-                                                    type="number"
-                                                    step="0.1"
-                                                    min="5"
-                                                    max="100"
-                                                    value={value}
-                                                    onChange={(e) => {
-                                                        const next = openPositionDCAPercentages.slice();
-                                                        next[idx] = Number(e.target.value) || 0;
-                                                        setOpenPositionDCAPercentages(next);
-                                                        setOpenPositionError('');
-                                                    }}
-                                                    disabled={openPositionLoading}
-                                                    className={`flex-1 rounded-lg border border-zinc-200 bg-white/70 px-2 py-1 text-sm outline-none ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90`}
-                                                />
-                                                <span className="text-[11px] text-zinc-500 dark:text-white/45">%</span>
-                                                {openPositionDCAPercentages.length > 2 ? (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setOpenPositionDCAPercentages(openPositionDCAPercentages.filter((_, i) => i !== idx));
-                                                            setOpenPositionError('');
-                                                        }}
-                                                        disabled={openPositionLoading}
-                                                        className="rounded-lg border border-zinc-200 bg-white/70 px-2 py-1 text-xs text-zinc-500 hover:text-red-600 dark:border-white/10 dark:bg-white/5"
-                                                    >
-                                                        ×
-                                                    </button>
-                                                ) : null}
-                                            </div>
-                                        ))}
-                                        <div className="flex items-center justify-between gap-2 text-[11px]">
-                                            {(() => {
-                                                const sum = openPositionDCAPercentages.reduce((acc, v) => acc + (Number(v) || 0), 0);
-                                                const valid = Math.abs(sum - 100) < 0.01;
-                                                return (
-                                                    <span className={valid ? 'text-emerald-600 dark:text-emerald-300 font-semibold' : 'text-amber-600 dark:text-amber-300 font-semibold'}>
-                                                        合计：{sum.toFixed(2)}% {valid ? '✓' : '（必须等于 100%）'}
+                                    <div className="mt-2 flex flex-wrap gap-1.5">
+                                        {openPositionDCAPercentages.map((pct, idx) => {
+                                            const amt = (Number(openPositionAmount) || 0) * (Number(pct) || 0) / 100;
+                                            return (
+                                                <div
+                                                    key={idx}
+                                                    className="flex min-w-[66px] flex-1 flex-col items-start gap-0.5 rounded-lg border border-cyan-500/20 bg-white/70 px-2 py-1.5 dark:border-cyan-400/20 dark:bg-white/5"
+                                                >
+                                                    <span className="text-[10px] font-semibold text-cyan-600 dark:text-cyan-300">
+                                                        {idx === 0 ? '首批' : `第 ${idx + 1} 批`} · {Number(pct).toFixed(0)}%
                                                     </span>
-                                                );
-                                            })()}
-                                            <span className="flex items-center gap-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        const n = openPositionDCAPercentages.length || 2;
-                                                        const base = Math.floor((100 / n) * 100) / 100;
-                                                        const next = Array(n).fill(base);
-                                                        next[n - 1] = Math.round((100 - base * (n - 1)) * 100) / 100;
-                                                        setOpenPositionDCAPercentages(next);
-                                                        setOpenPositionError('');
-                                                    }}
-                                                    disabled={openPositionLoading}
-                                                    className="rounded-lg border border-zinc-200 bg-white/70 px-2 py-0.5 text-[11px] text-zinc-600 hover:text-zinc-900 dark:border-white/10 dark:bg-white/5 dark:text-white/70"
-                                                >
-                                                    平均分配
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        if (openPositionDCAPercentages.length >= 5) return;
-                                                        const n = openPositionDCAPercentages.length + 1;
-                                                        const base = Math.floor((100 / n) * 100) / 100;
-                                                        const next = Array(n).fill(base);
-                                                        next[n - 1] = Math.round((100 - base * (n - 1)) * 100) / 100;
-                                                        setOpenPositionDCAPercentages(next);
-                                                        setOpenPositionError('');
-                                                    }}
-                                                    disabled={openPositionLoading || openPositionDCAPercentages.length >= 5}
-                                                    className="rounded-lg border border-zinc-200 bg-white/70 px-2 py-0.5 text-[11px] text-zinc-600 hover:text-zinc-900 disabled:opacity-40 dark:border-white/10 dark:bg-white/5 dark:text-white/70"
-                                                >
-                                                    ＋ 追加
-                                                </button>
-                                            </span>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <span className="w-20 shrink-0 text-[11px] font-semibold text-zinc-700 dark:text-white/65">批次间隔</span>
-                                            <input
-                                                type="number"
-                                                min="10"
-                                                max="600"
-                                                value={openPositionDCAInterval}
-                                                onChange={(e) => {
-                                                    setOpenPositionDCAInterval(Number(e.target.value) || 0);
-                                                    setOpenPositionError('');
-                                                }}
-                                                disabled={openPositionLoading}
-                                                className={`flex-1 rounded-lg border border-zinc-200 bg-white/70 px-2 py-1 text-sm outline-none ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90`}
-                                            />
-                                            <span className="text-[11px] text-zinc-500 dark:text-white/45">秒 (10–600)</span>
-                                        </div>
+                                                    <span className="text-[12px] font-bold tabular-nums text-zinc-900 dark:text-white/90">
+                                                        ${amt > 0 ? amt.toFixed(2) : '--'}
+                                                    </span>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
-                                ) : null}
-                            </div>
+                                    <div className="mt-2 text-[10px] leading-4 text-zinc-500 dark:text-white/45">
+                                        首批开仓成功后，后续批次按间隔后台执行；关仓或跑出区间自动取消。
+                                    </div>
+                                </div>
+                            ) : null}
 
 
 
@@ -4035,40 +3961,24 @@ export default function App() {
                             ) : null}
 
                             {(openPositionEntrySwapPreviewLoading || openPositionEntrySwapPreview?.required) ? (
-                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80 mb-2">前置兑换</div>
+                                <div className="rounded-xl border border-amber-400/30 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent px-3 py-2 dark:border-amber-400/25 dark:from-amber-400/10 dark:via-amber-400/5">
                                     {openPositionEntrySwapPreviewLoading ? (
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">正在获取推荐滑点和预计到账...</div>
-                                    ) : null}
-                                    {openPositionEntrySwapPreview?.required ? (
-                                        <div className="space-y-1 text-[11px] text-zinc-600 dark:text-white/60">
-                                            <div>推荐滑点：{Number(openPositionEntrySwapPreview?.recommended_slippage_tolerance).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}%</div>
-                                            <div>当前滑点：{Number(openPositionEntrySwapPreview?.current_slippage_tolerance).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}%</div>
-                                            <div>预计到账：{openPositionEntrySwapPreview?.expected_amount_out || '--'} {openPositionEntrySwapPreview?.to_token_symbol || ''}</div>
-                                            <div>兑换路径：{openPositionEntrySwapPreview?.amount_in || '--'} {openPositionEntrySwapPreview?.from_token_symbol || ''} → {openPositionEntrySwapPreview?.to_token_symbol || '--'}</div>
-                                            <input
-                                                value={openPositionEntrySwapSlippage}
-                                                onChange={(e) => {
-                                                    setOpenPositionEntrySwapSlippageDirty(true);
-                                                    setOpenPositionEntrySwapSlippage(e.target.value);
-                                                    setOpenPositionError('');
-                                                }}
-                                                inputMode="decimal"
-                                                className={`mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                                placeholder="前置兑换滑点（可选）"
-                                            />
-                                            <label className="mt-2 flex items-start gap-2">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={openPositionEntrySwapConfirm}
-                                                    onChange={(e) => {
-                                                        setOpenPositionEntrySwapConfirm(e.target.checked);
-                                                        setOpenPositionError('');
-                                                    }}
-                                                    disabled={openPositionLoading || openPositionEntrySwapPreviewLoading}
-                                                />
-                                                <span className="text-[11px] leading-tight">我已确认本次前置兑换，先执行兑换，再继续后续开仓。</span>
-                                            </label>
+                                        <div className="flex items-center gap-2 text-[11px] text-amber-700 dark:text-amber-200">
+                                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" className="animate-spin"><path d="M21 12a9 9 0 1 1-2.64-6.36"/></svg>
+                                            前置兑换预览中...
+                                        </div>
+                                    ) : openPositionEntrySwapPreview?.required ? (
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div className="flex min-w-0 items-center gap-1.5">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-amber-600 dark:text-amber-300"><path d="M7 17l5-5-5-5M13 17l5-5-5-5"/></svg>
+                                                <span className="text-[11px] font-bold text-amber-700 dark:text-amber-200">前置兑换</span>
+                                                <span className="truncate text-[11px] text-zinc-600 dark:text-white/60">
+                                                    {openPositionEntrySwapPreview?.amount_in || '--'} {openPositionEntrySwapPreview?.from_token_symbol || ''} → <span className="font-semibold text-zinc-900 dark:text-white/90">{openPositionEntrySwapPreview?.expected_amount_out || '--'} {openPositionEntrySwapPreview?.to_token_symbol || ''}</span>
+                                                </span>
+                                            </div>
+                                            <span className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/15 dark:text-amber-200">
+                                                滑点 {Number(openPositionEntrySwapPreview?.recommended_slippage_tolerance).toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%
+                                            </span>
                                         </div>
                                     ) : null}
                                 </div>
