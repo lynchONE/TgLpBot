@@ -622,8 +622,9 @@ function buildOpenPositionPayload({
   if (Array.isArray(dcaPercentages) && dcaPercentages.length > 0) {
     payload.dca_percentages = dcaPercentages.map((v) => Number(v));
   }
-  if (Number.isFinite(dcaIntervalSeconds) && dcaIntervalSeconds > 0) {
-    payload.dca_interval_seconds = Math.round(dcaIntervalSeconds);
+  const dcaInterval = Number(dcaIntervalSeconds);
+  if (Number.isFinite(dcaInterval) && dcaInterval >= 0) {
+    payload.dca_interval_seconds = Math.round(dcaInterval * 1000) / 1000;
   }
   return payload;
 }

@@ -1692,7 +1692,8 @@ export default function App() {
         setOpenPositionSmartRangesLoading(Boolean(poolAddress));
         // Seed DCA defaults from the (possibly cached) global config so the user can override per open.
         const cfgDCAEnabled = Boolean(globalConfig?.dca_enabled);
-        const cfgDCAInterval = Number(globalConfig?.dca_interval_seconds) || 30;
+        const cfgDCAIntervalRaw = Number(globalConfig?.dca_interval_seconds);
+        const cfgDCAInterval = Number.isFinite(cfgDCAIntervalRaw) && cfgDCAIntervalRaw >= 0 ? cfgDCAIntervalRaw : 30;
         let cfgDCAPcts = [50, 50];
         const rawPcts = globalConfig?.dca_percentages_json;
         if (typeof rawPcts === 'string' && rawPcts.trim()) {

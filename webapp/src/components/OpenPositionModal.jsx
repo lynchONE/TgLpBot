@@ -408,7 +408,7 @@ export default function OpenPositionModal({
         setDcaEnabled(Boolean(cfg.dca_enabled));
         setDcaPercentages(parseDCAPercentagesAny(cfg.dca_percentages_json ?? cfg.dca_percentages));
         const interval = Number(cfg.dca_interval_seconds);
-        if (Number.isFinite(interval) && interval > 0) setDcaInterval(interval);
+        if (Number.isFinite(interval) && interval >= 0) setDcaInterval(interval);
         setDcaDefaultsLoaded(true);
       })
       .catch(() => {
@@ -485,8 +485,9 @@ export default function OpenPositionModal({
         setError(`分批百分比之和必须等于 100%（当前 ${dcaSum.toFixed(2)}%）。`);
         return;
       }
-      if (!(Number(dcaInterval) >= 10 && Number(dcaInterval) <= 600)) {
-        setError('批次间隔必须在 10–600 秒之间。');
+      const intervalValue = Number(dcaInterval);
+      if (!(Number.isFinite(intervalValue) && intervalValue >= 0 && intervalValue <= 300)) {
+        setError('批次间隔必须在 0–300 秒之间。');
         return;
       }
     }
@@ -907,12 +908,12 @@ export default function OpenPositionModal({
                   {dcaPercentages.length > 2 ? (
                     <button
                       type="button"
+                      className="ghost-chip"
                       onClick={() => {
                         clearErrors();
                         setDcaPercentages(dcaPercentages.filter((_, i) => i !== idx));
                       }}
                       disabled={busy}
-                      style={{ padding: '2px 8px', fontSize: 12 }}
                     >
                       ×
                     </button>
@@ -926,6 +927,7 @@ export default function OpenPositionModal({
                 <span style={{ display: 'flex', gap: 6 }}>
                   <button
                     type="button"
+                    className="ghost-chip"
                     onClick={() => {
                       clearErrors();
                       const n = dcaPercentages.length || 2;
@@ -935,12 +937,12 @@ export default function OpenPositionModal({
                       setDcaPercentages(next);
                     }}
                     disabled={busy}
-                    style={{ padding: '2px 8px', fontSize: 11 }}
                   >
                     平均分配
                   </button>
                   <button
                     type="button"
+                    className="ghost-chip"
                     onClick={() => {
                       if (dcaPercentages.length >= 5) return;
                       clearErrors();
@@ -951,7 +953,6 @@ export default function OpenPositionModal({
                       setDcaPercentages(next);
                     }}
                     disabled={busy || dcaPercentages.length >= 5}
-                    style={{ padding: '2px 8px', fontSize: 11 }}
                   >
                     ＋ 追加批次
                   </button>
@@ -961,8 +962,9 @@ export default function OpenPositionModal({
                 <span style={{ fontSize: 12, fontWeight: 600, minWidth: 80 }}>批次间隔</span>
                 <input
                   type="number"
-                  min="10"
-                  max="600"
+                  step="0.001"
+                  min="0"
+                  max="300"
                   value={dcaInterval}
                   onChange={(e) => {
                     clearErrors();
@@ -971,7 +973,10 @@ export default function OpenPositionModal({
                   disabled={busy}
                   style={{ flex: 1, padding: '4px 8px' }}
                 />
-                <span style={{ fontSize: 11, opacity: 0.6 }}>秒 (10–600)</span>
+                <span style={{ fontSize: 11, opacity: 0.6 }}>秒 (0–300)</span>
+              </div>
+              <div style={{ marginTop: 4, fontSize: 11, opacity: 0.6 }}>
+                支持小数秒，0.3 = 300ms。
               </div>
             </div>
           ) : null}

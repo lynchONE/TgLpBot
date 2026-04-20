@@ -8671,6 +8671,10 @@ body {
   border-color: rgba(var(--accent-rgb), 0.3);
   color: var(--accent);
 }
+.toggle-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 .config-save-btn {
   display: block;
   width: 100%;

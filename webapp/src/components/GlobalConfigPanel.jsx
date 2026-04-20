@@ -264,8 +264,9 @@ function DCAConfigSection({ draft, updateDraft }) {
                                 {percentages.length > 2 ? (
                                     <button
                                         type="button"
+                                        className="toggle-btn"
                                         onClick={() => removeBatch(idx)}
-                                        style={{ padding: '4px 8px', fontSize: 12 }}
+                                        style={{ minWidth: 'auto', padding: '4px 8px' }}
                                     >
                                         ×
                                     </button>
@@ -277,14 +278,14 @@ function DCAConfigSection({ draft, updateDraft }) {
                                 合计：{sum.toFixed(2)}% {sumValid ? '✓' : '（必须等于 100%）'}
                             </span>
                             <span style={{ display: 'flex', gap: 8 }}>
-                                <button type="button" onClick={equalize} style={{ padding: '2px 8px', fontSize: 11 }}>
+                                <button type="button" className="toggle-btn" onClick={equalize}>
                                     平均分配
                                 </button>
                                 <button
                                     type="button"
+                                    className="toggle-btn"
                                     onClick={addBatch}
                                     disabled={percentages.length >= 5}
-                                    style={{ padding: '2px 8px', fontSize: 11 }}
                                 >
                                     ＋ 追加批次
                                 </button>
@@ -292,17 +293,18 @@ function DCAConfigSection({ draft, updateDraft }) {
                         </div>
                     </div>
                     <div className="config-row">
-                        <label>批次间隔（10–600 秒）</label>
+                        <label>批次间隔（0–300 秒）</label>
                         <input
                             type="number"
-                            min="10"
-                            max="600"
+                            step="0.001"
+                            min="0"
+                            max="300"
                             value={draft.dca_interval_seconds ?? 30}
                             onChange={(e) => updateDraft('dca_interval_seconds', Number(e.target.value) || 0)}
                         />
                     </div>
                     <small style={{ fontSize: 11, opacity: 0.6 }}>
-                        首批按正常开仓创建仓位；后续批次按间隔向该仓位追加流动性。手动关仓或价格跑出区间时，剩余批次自动取消。
+                        首批按正常开仓创建仓位；后续批次按间隔向该仓位追加流动性。支持 0–300 秒与小数秒，0.3 = 300ms。手动关仓或价格跑出区间时，剩余批次自动取消。
                     </small>
                 </>
             ) : (
