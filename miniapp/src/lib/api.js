@@ -1155,3 +1155,20 @@ export async function walletSwapSingleExecute({ apiBaseUrl, initData, chain, wal
     }
     return resp.json();
 }
+
+export async function fetchPoolLiquidityDistribution({ apiBaseUrl, initData, chain, protocol, address, radius, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const params = new URLSearchParams();
+    if (initData) params.set('initData', String(initData));
+    if (chain) params.set('chain', String(chain));
+    if (protocol) params.set('protocol', String(protocol));
+    if (address) params.set('address', String(address));
+    if (Number.isFinite(radius)) params.set('radius', String(radius));
+    const url = `${base}/api/pool/liquidity_distribution?${params.toString()}`;
+    const resp = await fetch(url, { method: 'GET', signal });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}

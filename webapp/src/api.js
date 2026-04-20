@@ -1193,3 +1193,15 @@ export async function fetchWalletSwapTokenMetadata({ apiBaseUrl, initData, chain
     signal,
   });
 }
+
+export async function fetchPoolLiquidityDistribution({ apiBaseUrl, initData, chain, protocol, address, radius, signal }) {
+  const base = normalizeBaseUrl(apiBaseUrl);
+  const params = new URLSearchParams();
+  if (initData) params.set('initData', String(initData));
+  if (chain) params.set('chain', String(chain));
+  if (protocol) params.set('protocol', String(protocol));
+  if (address) params.set('address', String(address));
+  if (Number.isFinite(radius)) params.set('radius', String(radius));
+  const url = `${base}/api/pool/liquidity_distribution?${params.toString()}`;
+  return requestJson(url, { method: 'GET', signal });
+}

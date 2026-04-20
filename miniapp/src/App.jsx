@@ -7,6 +7,7 @@ import BottomSheet from './components/BottomSheet.jsx';
 import ModuleHeader from './components/ModuleHeader.jsx';
 import NumberFlowValue from './components/NumberFlowValue.jsx';
 import StepProgressModal from './components/StepProgressModal.jsx';
+import LiquidityDistributionChart from './components/LiquidityDistributionChart.jsx';
 import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
 import SmartMoneyPage from './components/SmartMoneyPage.jsx';
 import { Bot, BarChart2, Droplets, Filter, Search, Moon, Sun, Settings, X, Check, RotateCcw, AlertTriangle, CheckCircle, XCircle, Flame, Eye, Wallet } from 'lucide-react';
@@ -19,6 +20,7 @@ import {
     fetchHotPools,
     fetchSearchPools,
     fetchMe,
+    fetchPoolLiquidityDistribution,
     fetchRealtimePositions,
     openPosition,
     prepareOpenPosition,
@@ -709,6 +711,9 @@ export default function App() {
     const [openPositionDCAPercentages, setOpenPositionDCAPercentages] = useState([50, 50]);
     const [openPositionDCAInterval, setOpenPositionDCAInterval] = useState(30);
     const [openPositionDCAExpanded, setOpenPositionDCAExpanded] = useState(false);
+    const [openPositionLiqProfile, setOpenPositionLiqProfile] = useState(null);
+    const [openPositionLiqProfileLoading, setOpenPositionLiqProfileLoading] = useState(false);
+    const [openPositionLiqProfileError, setOpenPositionLiqProfileError] = useState('');
     const [operationProgress, setOperationProgress] = useState(null);
     const [walletsData, setWalletsData] = useState(null);
     const [walletsError, setWalletsError] = useState('');
@@ -1980,6 +1985,96 @@ export default function App() {
             controller.abort();
         };
     }, [apiBaseUrl, openPositionPool]);
+
+    useEffect(() => {
+        if (!openPositionPool || !hasInitData) {
+            setOpenPositionLiqProfile(null);
+            return undefined;
+        }
+        const poolAddress = String(openPositionPool?.pool_address || '').trim();
+        const chain = String(openPositionPool?.chain || 'bsc').trim().toLowerCase();
+        const versionRaw = String(openPositionPool?.protocol_version || openPositionPool?.factory_name || '').toLowerCase();
+        let protocol = '';
+        if (versionRaw.includes('v4')) protocol = 'v4';
+        else if (versionRaw.includes('v3') || versionRaw.includes('pancake') || versionRaw.includes('aerodrome') || versionRaw.includes('slipstream')) protocol = 'v3';
+        if (!poolAddress || !protocol) {
+            setOpenPositionLiqProfile(null);
+            return undefined;
+        }
+        const ctrl = new AbortController();
+        setOpenPositionLiqProfileLoading(true);
+        setOpenPositionLiqProfileError('');
+        fetchPoolLiquidityDistribution({
+            apiBaseUrl,
+            initData,
+            chain,
+            protocol,
+            address: poolAddress,
+            radius: 24,
+            signal: ctrl.signal,
+        })
+            .then((data) => {
+                if (ctrl.signal.aborted) return;
+                setOpenPositionLiqProfile(data);
+            })
+            .catch((err) => {
+                if (ctrl.signal.aborted) return;
+                setOpenPositionLiqProfileError(String(err?.message || err || '加载失败'));
+                setOpenPositionLiqProfile(null);
+            })
+            .finally(() => {
+                if (!ctrl.signal.aborted) setOpenPositionLiqProfileLoading(false);
+            });
+        return () => ctrl.abort();
+    }, [apiBaseUrl, initData, hasInitData, openPositionPool]);
+
+    const openPositionChartLowerTick = useMemo(() => {
+        if (openPositionRangeInputMode !== 'percentage') {
+            return Number.isInteger(openPositionTickLowerValue) ? openPositionTickLowerValue : null;
+        }
+        const ed = openPositionEffectiveRangeEditor;
+        if (!ed || !Number.isFinite(Number(ed.current_tick))) return null;
+        const lowerPct = Number(openPositionRangeLower);
+        if (!Number.isFinite(lowerPct) || lowerPct <= 0) return null;
+        const ratio = 1 - lowerPct / 100;
+        if (ratio <= 0) return null;
+        return Math.round(Number(ed.current_tick) + Math.log(ratio) / Math.log(1.0001));
+    }, [openPositionRangeInputMode, openPositionTickLowerValue, openPositionEffectiveRangeEditor, openPositionRangeLower]);
+
+    const openPositionChartUpperTick = useMemo(() => {
+        if (openPositionRangeInputMode !== 'percentage') {
+            return Number.isInteger(openPositionTickUpperValue) ? openPositionTickUpperValue : null;
+        }
+        const ed = openPositionEffectiveRangeEditor;
+        if (!ed || !Number.isFinite(Number(ed.current_tick))) return null;
+        const upperPct = Number(openPositionRangeUpper);
+        if (!Number.isFinite(upperPct) || upperPct <= 0) return null;
+        const ratio = 1 + upperPct / 100;
+        return Math.round(Number(ed.current_tick) + Math.log(ratio) / Math.log(1.0001));
+    }, [openPositionRangeInputMode, openPositionTickUpperValue, openPositionEffectiveRangeEditor, openPositionRangeUpper]);
+
+    const onOpenPositionChartRangeChange = useCallback(({ lower, upper }) => {
+        if (!openPositionLiqProfile) return;
+        const currentTick = Number(openPositionLiqProfile.current_tick);
+        if (!Number.isFinite(currentTick)) return;
+        if (openPositionRangeInputMode === 'percentage') {
+            if (Number.isFinite(lower)) {
+                const ratio = Math.pow(1.0001, lower - currentTick);
+                const lowerPct = Math.max(0.1, (1 - ratio) * 100);
+                setOpenPositionRangeLower(String(Number(lowerPct.toFixed(2))));
+            }
+            if (Number.isFinite(upper)) {
+                const ratio = Math.pow(1.0001, upper - currentTick);
+                const upperPct = Math.max(0.1, (ratio - 1) * 100);
+                setOpenPositionRangeUpper(String(Number(upperPct.toFixed(2))));
+                setOpenPositionRangeUpperAuto(false);
+            }
+        } else {
+            if (Number.isFinite(lower)) setOpenPositionTickLower(String(lower));
+            if (Number.isFinite(upper)) setOpenPositionTickUpper(String(upper));
+        }
+        setOpenPositionError('');
+    }, [openPositionLiqProfile, openPositionRangeInputMode]);
 
     useEffect(() => {
         if (!openPositionPool || !hasInitData || !multiWalletEnabled) return;
@@ -3867,6 +3962,24 @@ export default function App() {
                         }
                     >
                         <div className="space-y-4">
+                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2.5 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="mb-1.5 flex items-center justify-between text-[11px]">
+                                    <span className="font-semibold text-zinc-700 dark:text-white/70">流动性分布</span>
+                                    <span className="text-zinc-500 dark:text-white/40">{openPositionLiqProfileError ? '加载失败' : (openPositionLiqProfile ? `${openPositionLiqProfile.protocol?.toUpperCase()} · spacing ${openPositionLiqProfile.tick_spacing}` : '')}</span>
+                                </div>
+                                <LiquidityDistributionChart
+                                    bins={openPositionLiqProfile?.bins || []}
+                                    currentTick={Number(openPositionLiqProfile?.current_tick)}
+                                    tickSpacing={Number(openPositionLiqProfile?.tick_spacing)}
+                                    rangeLowerTick={openPositionChartLowerTick}
+                                    rangeUpperTick={openPositionChartUpperTick}
+                                    onRangeChange={onOpenPositionChartRangeChange}
+                                    loading={openPositionLiqProfileLoading}
+                                    token0Decimals={Number(openPositionPool?.token0_decimals ?? openPositionPool?.token0?.decimals ?? 18) || 18}
+                                    token1Decimals={Number(openPositionPool?.token1_decimals ?? openPositionPool?.token1?.decimals ?? 18) || 18}
+                                    height={180}
+                                />
+                            </div>
                             {multiWalletEnabled ? (
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="flex items-center justify-between gap-2">

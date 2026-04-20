@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Check, CheckCircle, X, XCircle } from 'lucide-react';
-import { fetchGlobalConfig, prepareOpenPosition, previewOpenPosition } from '../api';
+import { fetchGlobalConfig, fetchPoolLiquidityDistribution, prepareOpenPosition, previewOpenPosition } from '../api';
+import LiquidityDistributionChart from './LiquidityDistributionChart.jsx';
 
 const PRESET_RANGES = [1, 2, 3, 5, 10, 20];
 const RANGE_INPUT_OPTIONS = [
@@ -255,6 +256,10 @@ export default function OpenPositionModal({
   const [dcaExpanded, setDcaExpanded] = useState(false);
   const [prepareRangeEditor, setPrepareRangeEditor] = useState(null);
   const [previewRangeEditor, setPreviewRangeEditor] = useState(null);
+
+  const [liqProfile, setLiqProfile] = useState(null);
+  const [liqProfileLoading, setLiqProfileLoading] = useState(false);
+  const [liqProfileError, setLiqProfileError] = useState('');
 
   const pair = pool?.trading_pair || '--';
   const addr = String(pool?.pool_address || '').trim();
@@ -673,6 +678,96 @@ export default function OpenPositionModal({
     setDcaExpanded(false);
   }, [addr]);
 
+  const protocolKind = useMemo(() => {
+    const v = String(version || '').toLowerCase();
+    if (v.includes('v4')) return 'v4';
+    if (v.includes('v3') || v.includes('pancake') || v.includes('aerodrome') || v.includes('slipstream')) return 'v3';
+    return '';
+  }, [version]);
+
+  const token0Decimals = Number(pool?.token0_decimals ?? pool?.token0?.decimals ?? 18) || 18;
+  const token1Decimals = Number(pool?.token1_decimals ?? pool?.token1?.decimals ?? 18) || 18;
+
+  useEffect(() => {
+    if (!addr || !protocolKind || !chain) {
+      setLiqProfile(null);
+      return undefined;
+    }
+    const ctrl = new AbortController();
+    setLiqProfileLoading(true);
+    setLiqProfileError('');
+    fetchPoolLiquidityDistribution({
+      apiBaseUrl,
+      initData,
+      chain,
+      protocol: protocolKind,
+      address: addr,
+      radius: 24,
+      signal: ctrl.signal,
+    })
+      .then((data) => {
+        if (ctrl.signal.aborted) return;
+        setLiqProfile(data);
+      })
+      .catch((err) => {
+        if (ctrl.signal.aborted) return;
+        setLiqProfileError(String(err?.message || err || '加载失败'));
+        setLiqProfile(null);
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setLiqProfileLoading(false);
+      });
+    return () => ctrl.abort();
+  }, [apiBaseUrl, initData, addr, protocolKind, chain]);
+
+  const chartLowerTick = useMemo(() => {
+    if (rangeInputMode !== 'percentage') {
+      return Number.isInteger(tickLowerValue) ? tickLowerValue : null;
+    }
+    const ed = rangeEditor;
+    if (!ed || !Number.isFinite(Number(ed.current_tick))) return null;
+    const lowerPct = Number(rangeLower);
+    if (!Number.isFinite(lowerPct) || lowerPct <= 0) return null;
+    const ratio = 1 - lowerPct / 100;
+    if (ratio <= 0) return null;
+    return Math.round(Number(ed.current_tick) + Math.log(ratio) / Math.log(1.0001));
+  }, [rangeInputMode, tickLowerValue, rangeEditor, rangeLower]);
+
+  const chartUpperTick = useMemo(() => {
+    if (rangeInputMode !== 'percentage') {
+      return Number.isInteger(tickUpperValue) ? tickUpperValue : null;
+    }
+    const ed = rangeEditor;
+    if (!ed || !Number.isFinite(Number(ed.current_tick))) return null;
+    const upperPct = Number(rangeUpper);
+    if (!Number.isFinite(upperPct) || upperPct <= 0) return null;
+    const ratio = 1 + upperPct / 100;
+    return Math.round(Number(ed.current_tick) + Math.log(ratio) / Math.log(1.0001));
+  }, [rangeInputMode, tickUpperValue, rangeEditor, rangeUpper]);
+
+  const onChartRangeChange = useCallback(({ lower, upper }) => {
+    if (!liqProfile) return;
+    const currentTick = Number(liqProfile.current_tick);
+    if (!Number.isFinite(currentTick)) return;
+    if (rangeInputMode === 'percentage') {
+      if (Number.isFinite(lower)) {
+        const ratio = Math.pow(1.0001, lower - currentTick);
+        const lowerPct = Math.max(0.1, (1 - ratio) * 100);
+        setRangeLower(String(Number(lowerPct.toFixed(2))));
+      }
+      if (Number.isFinite(upper)) {
+        const ratio = Math.pow(1.0001, upper - currentTick);
+        const upperPct = Math.max(0.1, (ratio - 1) * 100);
+        setRangeUpper(String(Number(upperPct.toFixed(2))));
+        setRangeUpperAuto(false);
+      }
+    } else {
+      if (Number.isFinite(lower)) setTickLowerInput(String(lower));
+      if (Number.isFinite(upper)) setTickUpperInput(String(upper));
+    }
+    clearErrors();
+  }, [liqProfile, rangeInputMode, clearErrors]);
+
   const handleSubmit = useCallback(() => {
     if (!Number.isFinite(amountValue) || amountValue <= 0) {
       setError('请输入有效的开仓金额。');
@@ -801,711 +896,721 @@ export default function OpenPositionModal({
     dcaInterval,
   ]);
 
+
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-box modal-box-wide" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>开仓</h3>
           <button type="button" className="modal-close" onClick={onClose} disabled={busy}>&times;</button>
         </div>
 
-        <div className="modal-content">
-        <div className="modal-pair">{pair}</div>
-        <div className="modal-addr">{addr ? `${addr.slice(0, 10)}...${addr.slice(-8)}` : '--'}</div>
-        {showPrivateZapProtectionHint ? (
-          <div className="modal-info-note" style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', padding: '14px', borderRadius: '16px', border: '1px solid rgba(16, 185, 129, 0.3)', background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1), transparent)' }}>
-            <div style={{ marginTop: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(16, 185, 129, 0.2)', color: '#10b981', flexShrink: 0 }}>
-              <Check size={12} strokeWidth={3} />
+        <div className="modal-content opm-grid">
+          {/* ───────── 左栏：池子信息 + 流动性分布 + 区间设置 ───────── */}
+          <div className="opm-left">
+            <div className="opm-pair-info">
+              <div className="modal-pair">{pair}</div>
+              <div className="modal-addr">{addr ? `${addr.slice(0, 10)}...${addr.slice(-8)}` : '--'}</div>
             </div>
-            <div style={{ fontSize: '12px', lineHeight: 1.6, color: 'var(--text-hint, rgba(255, 255, 255, 0.8))' }}>
-              <strong style={{ display: 'block', marginBottom: '4px' }}>私有合约保驾护航</strong>
-              首次开仓时会自动部署与您钱包绑定的专属合约，确保交易更安全私密。如遇网络中断，再次重试即可直接复用，不会重复产生部署消耗。
-            </div>
-          </div>
-        ) : null}
 
-        {riskMessage ? (
-          <div
-            style={{
-              marginTop: 12,
-              padding: 16,
-              borderRadius: 16,
-              border: '1px solid',
-              borderColor: riskRequiresAck ? 'rgba(245, 158, 11, 0.4)' : 'rgba(239, 68, 68, 0.4)',
-              background: riskRequiresAck ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(245, 158, 11, 0.05))' : 'linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(239, 68, 68, 0.05))',
-              color: 'var(--text-color)',
-              boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-              display: 'flex',
-              gap: 12,
-              alignItems: 'flex-start',
-            }}
-          >
-            <AlertTriangle size={20} style={{ color: riskRequiresAck ? '#f59e0b' : '#ef4444', flexShrink: 0, marginTop: 2 }} />
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ fontSize: 13, lineHeight: 1.5, fontWeight: 600, color: riskRequiresAck ? '#d97706' : '#dc2626' }}>{riskMessage}</div>
-              {((Number.isFinite(riskLiquidityUsd) && riskLiquidityUsd >= 0) || (Number.isFinite(riskMaxOpenAmount) && riskMaxOpenAmount > 0)) && (
-                <div style={{ backgroundColor: 'var(--bg-card-hover, rgba(255,255,255,0.08))', borderRadius: 12, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {Number.isFinite(riskLiquidityUsd) && riskLiquidityUsd >= 0 && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                      <span style={{ opacity: 0.8 }}>当前流动性</span>
-                      <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{formatUsdCompact(riskLiquidityUsd)}</span>
-                    </div>
-                  )}
-                  {Number.isFinite(riskMaxOpenAmount) && riskMaxOpenAmount > 0 && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                      <span style={{ opacity: 0.8 }}>最大允许开仓</span>
-                      <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{formatUsdCompact(riskMaxOpenAmount)}</span>
-                    </div>
-                  )}
-                </div>
-              )}
-              {warnChecks.length > 0 ? (
-                <div style={{ fontSize: 11, lineHeight: 1.5, opacity: 0.85 }}>
-                  已提示风险，可直接继续；若要开仓，请留意滑点、成交波动和单次限额。
-                </div>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-
-        {walletsLoading ? (
-          <div className="wallet-picker-loading">钱包加载中...</div>
-        ) : null}
-
-        {showWalletPicker && !walletsLoading ? (
-          <div className="wallet-picker">
-            <span className="wallet-picker-label">钱包</span>
-            <div className="wallet-picker-list">
-              {wallets.map((wallet) => {
-                const active = wallet.id === resolvedWalletId;
-                return (
-                  <button
-                    key={wallet.id}
-                    type="button"
-                    className={`wallet-chip ${active ? 'active' : ''}`}
-                    onClick={() => {
-                      clearErrors();
-                      onWalletSelect(wallet.id);
-                    }}
-                  >
-                    <span className="wallet-chip-name">
-                      {wallet.name || shortAddr(wallet.address)}
-                      {wallet.is_default ? <span className="wallet-chip-default">默认</span> : null}
-                    </span>
-                    <span className="wallet-chip-bal">
-                      {wallet.stable_balance !== 'N/A' ? `$${wallet.stable_balance}` : ''}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
-
-        <div className="modal-form">
-          <label className="modal-field">
-            <span>开仓金额 (USDT)</span>
-            <input
-              type="number"
-              value={amount}
-              onChange={(e) => {
-                clearErrors();
-                setAmount(e.target.value);
-              }}
-              min="1"
-              step="10"
+            <LiquidityDistributionChart
+              bins={liqProfile?.bins || []}
+              currentTick={Number(liqProfile?.current_tick)}
+              tickSpacing={Number(liqProfile?.tick_spacing)}
+              rangeLowerTick={chartLowerTick}
+              rangeUpperTick={chartUpperTick}
+              onRangeChange={onChartRangeChange}
+              loading={liqProfileLoading}
+              token0Decimals={token0Decimals}
+              token1Decimals={token1Decimals}
+              height={260}
             />
-          </label>
 
-          {recommendedPositions.length > 0 ? (
-            <div style={{ marginTop: 2, marginBottom: 8, display: 'flex', alignItems: 'center', flexWrap: 'nowrap', overflowX: 'auto', scrollbarWidth: 'none', gap: 4 }}>
-
-              {recommendedPositions.map((item, index) => {
-                const tone = item?.mode === 'conservative'
-                  ? { color: '#10b981', border: 'rgba(16, 185, 129, 0.3)', bg: 'rgba(16, 185, 129, 0.1)', icon: '🛡️' }
-                  : item?.mode === 'neutral'
-                    ? { color: '#f59e0b', border: 'rgba(245, 158, 11, 0.3)', bg: 'rgba(245, 158, 11, 0.1)', icon: '⚖️' }
-                    : { color: '#ef4444', border: 'rgba(239, 68, 68, 0.3)', bg: 'rgba(239, 68, 68, 0.1)', icon: '🚀' };
-                return (
-                  <div
-                    key={`${item?.mode || 'mode'}-${index}`}
-                    onClick={() => {
-                      clearErrors();
-                      setAmount(String(item?.liquidity_to_add || ''));
-                    }}
-                    style={{
-                      flexShrink: 0,
-                      borderRadius: 14,
-                      border: `1px solid ${tone.border}`,
-                      background: tone.bg,
-                      padding: '4px 10px',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4,
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.filter = 'brightness(1.15)';
-                      e.currentTarget.style.transform = 'translateY(-1px)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.filter = 'brightness(1)';
-                      e.currentTarget.style.transform = 'translateY(0)';
-                    }}
-                    onMouseDown={(e) => {
-                      e.currentTarget.style.transform = 'scale(0.96)';
-                    }}
-                    onMouseUp={(e) => {
-                      e.currentTarget.style.transform = 'translateY(-1px)';
-                    }}
-                  >
-                    <span style={{ fontSize: 11, filter: 'grayscale(0.2)' }}>{tone.icon}</span>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: tone.color }}>
-                      {formatSizingModeLabel(item?.mode)}
-                    </span>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary, #fff)', fontFamily: 'var(--font-mono)' }}>
-                      {formatUsdCompact(item?.liquidity_to_add)}
-                    </span>
-                    <span style={{ fontSize: 10, opacity: 0.6, color: 'var(--text-muted)' }}>
-                      {formatSharePercent(item?.expected_share)}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          ) : null}
-
-          <div className="modal-range-section">
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-              <span className="modal-range-label">{rangeInputMode === 'percentage' ? '快捷区间' : 'Tick 区间编辑'}</span>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {RANGE_INPUT_OPTIONS.map((option) => (
-                  <button
-                    key={option.key}
-                    type="button"
-                    className={`range-chip ${rangeInputMode === option.key ? 'active' : ''}`}
-                    onClick={() => handleRangeInputModeChange(option.key)}
-                    style={{ minWidth: 84, justifyContent: 'center' }}
-                  >
-                    {option.label}
-                  </button>
-                ))}
+            {liqProfileError ? (
+              <div className="opm-hint" style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 6 }}>
+                流动性分布加载失败：{liqProfileError}
               </div>
-            </div>
+            ) : null}
 
-            {rangeInputMode === 'percentage' ? (
-              <>
-                {smartRangesLoading ? (
-                  <div className="modal-range-hint">聪明钱区间加载中...</div>
-                ) : null}
-                {visibleSmartRanges.length > 0 ? (
-                  <div className="modal-range-picks">
-                    {visibleSmartRanges.map((item, index) => {
-                      const rangePct = Number(item?.range_percent);
-                      const positionCount = Math.max(0, Number(item?.position_count) || 0);
-                      const isActive =
-                        Math.abs(Number(rangeLower) - rangePct) < 0.05 &&
-                        Math.abs(Number(rangeUpper) - rangePct) < 0.05;
-                      return (
-                        <button
-                          key={`${rangePct}-${positionCount}-${index}`}
-                          type="button"
-                          className={`range-chip smart ${isActive ? 'active' : ''}`}
-                          onClick={() => applyRange(rangePct, rangePct)}
-                        >
-                          <span>{`${rangePct}%${positionCount > 1 ? ` +${positionCount - 1}` : ''}`}</span>
-                          <span className="range-chip-sub">{formatUsdCompact(item?.total_amount_usd)}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : null}
-                <div className="modal-range-picks modal-range-picks-default">
-                  {PRESET_RANGES.map((item) => {
-                    const isActive =
-                      Math.abs(Number(rangeLower) - item) < 0.05 &&
-                      Math.abs(Number(rangeUpper) - item) < 0.05;
-                    return (
-                      <button
-                        key={item}
-                        type="button"
-                        className={`range-chip ${isActive ? 'active' : ''}`}
-                        onClick={() => applyRange(item, item)}
-                      >
-                        {item}%
-                      </button>
-                    );
-                  })}
+            <div className="modal-range-section opm-section">
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span className="modal-range-label">{rangeInputMode === 'percentage' ? '快捷区间' : 'Tick 区间编辑'}</span>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {RANGE_INPUT_OPTIONS.map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      className={`range-chip ${rangeInputMode === option.key ? 'active' : ''}`}
+                      onClick={() => handleRangeInputModeChange(option.key)}
+                      style={{ minWidth: 84, justifyContent: 'center' }}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
                 </div>
+              </div>
 
-                <div className="modal-row">
-                  <label className="modal-field">
-                    <span>下限 %</span>
-                    <input
-                      type="number"
-                      value={rangeLower}
-                      onChange={(e) => handleRangeLowerChange(e.target.value)}
-                      min="0.1"
-                      step="0.5"
-                    />
-                  </label>
-                  <label className="modal-field">
-                    <span>上限 %</span>
-                    <input
-                      type="number"
-                      value={rangeUpper}
-                      onChange={(e) => handleRangeUpperChange(e.target.value)}
-                      min="0.1"
-                      step="0.5"
-                    />
-                  </label>
-                </div>
-              </>
-            ) : (
-              <>
-                <div
-                  style={{
-                    marginTop: 12,
-                    padding: '14px 16px',
-                    borderRadius: 16,
-                    border: '1px solid rgba(56, 189, 248, 0.22)',
-                    background: 'linear-gradient(135deg, rgba(14, 165, 233, 0.12), rgba(14, 165, 233, 0.04))',
-                    display: 'grid',
-                    gap: 8,
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
-                    <span style={{ opacity: 0.72 }}>当前 Tick</span>
-                    <strong style={{ fontFamily: 'var(--font-mono)' }}>{Number.isFinite(Number(rangeEditor?.current_tick)) ? rangeEditor.current_tick : '--'}</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
-                    <span style={{ opacity: 0.72 }}>Tick Spacing</span>
-                    <strong style={{ fontFamily: 'var(--font-mono)' }}>{Number.isFinite(Number(rangeEditor?.tick_spacing)) ? rangeEditor.tick_spacing : '--'}</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
-                    <span style={{ opacity: 0.72 }}>当前价格</span>
-                    <strong>{formatPriceValue(rangeEditor?.current_price)}</strong>
-                  </div>
-                  {rangeShapeLabel ? (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
-                      <span style={{ opacity: 0.72 }}>仓位形态</span>
-                      <strong>{rangeShapeLabel}</strong>
-                    </div>
+              {rangeInputMode === 'percentage' ? (
+                <>
+                  {smartRangesLoading ? (
+                    <div className="modal-range-hint">聪明钱区间加载中...</div>
                   ) : null}
-                </div>
-
-                {rangeInputMode === 'grid' ? (
-                  <>
-                    <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <button
-                        type="button"
-                        className={`range-chip ${gridBoundaryTarget === 'lower' ? 'active' : ''}`}
-                        onClick={() => setGridBoundaryTarget('lower')}
-                      >
-                        调整下限
-                      </button>
-                      <button
-                        type="button"
-                        className={`range-chip ${gridBoundaryTarget === 'upper' ? 'active' : ''}`}
-                        onClick={() => setGridBoundaryTarget('upper')}
-                      >
-                        调整上限
-                      </button>
-                      <button
-                        type="button"
-                        className="range-chip"
-                        onClick={() => nudgeTickBoundary(gridBoundaryTarget, -1)}
-                      >
-                        -1 格
-                      </button>
-                      <button
-                        type="button"
-                        className="range-chip"
-                        onClick={() => nudgeTickBoundary(gridBoundaryTarget, 1)}
-                      >
-                        +1 格
-                      </button>
-                    </div>
-
-                    <div className="modal-range-picks" style={{ marginTop: 10 }}>
-                      {gridBins.map((bin) => {
-                        const isSelected = Number.isInteger(tickLowerValue) &&
-                          Number.isInteger(tickUpperValue) &&
-                          bin.lowerTick >= tickLowerValue &&
-                          bin.upperTick <= tickUpperValue;
+                  {visibleSmartRanges.length > 0 ? (
+                    <div className="modal-range-picks">
+                      {visibleSmartRanges.map((item, index) => {
+                        const rangePct = Number(item?.range_percent);
+                        const positionCount = Math.max(0, Number(item?.position_count) || 0);
+                        const isActive =
+                          Math.abs(Number(rangeLower) - rangePct) < 0.05 &&
+                          Math.abs(Number(rangeUpper) - rangePct) < 0.05;
                         return (
                           <button
-                            key={bin.key}
+                            key={`${rangePct}-${positionCount}-${index}`}
                             type="button"
-                            className={`range-chip ${isSelected ? 'active' : ''}`}
-                            onClick={() => applyGridBin(bin)}
-                            style={{ minWidth: 96 }}
+                            className={`range-chip smart ${isActive ? 'active' : ''}`}
+                            onClick={() => applyRange(rangePct, rangePct)}
                           >
-                            <span>{bin.isCurrent ? '当前格' : `${bin.lowerTick} ~ ${bin.upperTick}`}</span>
-                            <span className="range-chip-sub">{bin.isCurrent ? '锚点' : `第 ${Math.abs(bin.index)} 格`}</span>
+                            <span>{`${rangePct}%${positionCount > 1 ? ` +${positionCount - 1}` : ''}`}</span>
+                            <span className="range-chip-sub">{formatUsdCompact(item?.total_amount_usd)}</span>
                           </button>
                         );
                       })}
                     </div>
-                  </>
-                ) : null}
-
-                <div className="modal-row" style={{ marginTop: 12 }}>
-                  <label className="modal-field">
-                    <span>下限 Tick</span>
-                    <input
-                      type="number"
-                      value={tickLowerInput}
-                      onChange={(e) => {
-                        clearErrors();
-                        setTickLowerInput(e.target.value);
-                      }}
-                      step={Number.isFinite(Number(rangeEditor?.tick_spacing)) ? Number(rangeEditor?.tick_spacing) : 1}
-                    />
-                  </label>
-                  <label className="modal-field">
-                    <span>上限 Tick</span>
-                    <input
-                      type="number"
-                      value={tickUpperInput}
-                      onChange={(e) => {
-                        clearErrors();
-                        setTickUpperInput(e.target.value);
-                      }}
-                      step={Number.isFinite(Number(rangeEditor?.tick_spacing)) ? Number(rangeEditor?.tick_spacing) : 1}
-                    />
-                  </label>
-                </div>
-
-                {rangeEditor ? (
-                  <div
-                    style={{
-                      marginTop: 10,
-                      padding: '12px 14px',
-                      borderRadius: 14,
-                      border: '1px solid rgba(148, 163, 184, 0.18)',
-                      background: 'rgba(15, 23, 42, 0.18)',
-                      display: 'grid',
-                      gap: 6,
-                      fontSize: 12,
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                      <span style={{ opacity: 0.72 }}>价格区间</span>
-                      <strong>{formatPriceValue(rangeEditor?.range_lower_price)} - {formatPriceValue(rangeEditor?.range_upper_price)}</strong>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                      <span style={{ opacity: 0.72 }}>百分比映射</span>
-                      <strong>{formatPercent(rangeEditor?.range_lower_pct)} / {formatPercent(rangeEditor?.range_upper_pct)}</strong>
-                    </div>
+                  ) : null}
+                  <div className="modal-range-picks modal-range-picks-default">
+                    {PRESET_RANGES.map((item) => {
+                      const isActive =
+                        Math.abs(Number(rangeLower) - item) < 0.05 &&
+                        Math.abs(Number(rangeUpper) - item) < 0.05;
+                      return (
+                        <button
+                          key={item}
+                          type="button"
+                          className={`range-chip ${isActive ? 'active' : ''}`}
+                          onClick={() => applyRange(item, item)}
+                        >
+                          {item}%
+                        </button>
+                      );
+                    })}
                   </div>
-                ) : null}
-              </>
-            )}
-          </div>
 
-          <label className="modal-field">
-            <span>任务滑点 %</span>
-            <input
-              type="number"
-              value={slippage}
-              onChange={(e) => {
-                clearErrors();
-                setSlippage(e.target.value);
-              }}
-              min="0"
-              step="0.1"
-              placeholder="留空则使用全局设置"
-            />
-          </label>
-        </div>
-
-
-
-        {(entrySwapPreviewLoading || entrySwapPreview?.required) ? (
-          <div className="modal-info-note" style={{ marginTop: 12 }}>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>前置兑换</div>
-            {entrySwapPreviewLoading ? (
-              <div>正在获取推荐滑点和预计到账数量...</div>
-            ) : null}
-            {entrySwapPreview?.required ? (
-              <>
-                <div style={{ marginTop: 6 }}>
-                  推荐滑点：{formatPercent(entrySwapPreview?.recommended_slippage_tolerance)}
-                </div>
-                <div style={{ marginTop: 4 }}>
-                  当前滑点：{formatPercent(entrySwapPreview?.current_slippage_tolerance)}
-                </div>
-                <div style={{ marginTop: 4 }}>
-                  预计到账：{entrySwapPreview?.expected_amount_out || '--'} {entrySwapPreview?.to_token_symbol || ''}
-                </div>
-                <div style={{ marginTop: 4 }}>
-                  兑换路径：{entrySwapPreview?.amount_in || '--'} {entrySwapPreview?.from_token_symbol || ''} 到 {entrySwapPreview?.to_token_symbol || ''}
-                </div>
-
-                <label className="modal-field" style={{ marginTop: 12 }}>
-                  <span>前置兑换滑点 %</span>
-                  <input
-                    type="number"
-                    value={entrySwapSlippage}
-                    onChange={(e) => {
-                      clearErrors();
-                      setEntrySwapSlippageDirty(true);
-                      setEntrySwapSlippage(e.target.value);
-                    }}
-                    min="0"
-                    step="0.1"
-                    placeholder="仅作用于本次前置兑换"
-                  />
-                </label>
-
-                <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 10, cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={entrySwapConfirmed}
-                    onChange={(e) => {
-                      clearErrors();
-                      setEntrySwapConfirmed(e.target.checked);
-                    }}
-                    disabled={busy || entrySwapPreviewLoading}
-                  />
-                  <span>我已确认本次前置兑换，先执行兑换，再继续后续开仓。</span>
-                </label>
-              </>
-            ) : null}
-          </div>
-        ) : null}
-
-        <div style={{
-          marginTop: 16,
-          padding: 16,
-          borderRadius: 16,
-          border: '1px solid rgba(6, 182, 212, 0.25)',
-          background: 'rgba(6, 182, 212, 0.06)',
-        }}>
-          <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
-            <span style={{ fontWeight: 600, fontSize: 13 }}>分批加仓（防插针）</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <input
-                type="checkbox"
-                checked={dcaEnabled}
-                onChange={(e) => {
-                  clearErrors();
-                  setDcaEnabled(e.target.checked);
-                }}
-                disabled={busy}
-              />
-              <span style={{ fontSize: 12 }}>{dcaEnabled ? '本次启用' : '本次不启用'}</span>
-            </span>
-          </label>
-          <button
-            type="button"
-            onClick={() => setDcaExpanded((v) => !v)}
-            disabled={busy}
-            style={{
-              width: '100%',
-              marginTop: 10,
-              padding: '9px 10px',
-              borderRadius: 12,
-              border: '1px solid rgba(6, 182, 212, 0.18)',
-              background: 'rgba(8, 47, 73, 0.22)',
-              color: 'inherit',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              cursor: busy ? 'not-allowed' : 'pointer',
-            }}
-          >
-            <div
-              style={{
-                flex: 1,
-                minWidth: 0,
-                display: 'flex',
-                gap: 6,
-                alignItems: 'center',
-                overflowX: 'auto',
-                whiteSpace: 'nowrap',
-                scrollbarWidth: 'none',
-              }}
-            >
-              {dcaEnabled ? (
-                <>
-                  {dcaSummaryItems.map((item) => (
-                    <span
-                      key={item.key}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 4,
-                        padding: '3px 8px',
-                        borderRadius: 999,
-                        border: '1px solid rgba(125, 211, 252, 0.18)',
-                        background: 'rgba(255, 255, 255, 0.05)',
-                        fontSize: 11,
-                        fontWeight: 600,
-                      }}
-                    >
-                      <span style={{ opacity: 0.72 }}>{item.label}</span>
-                      <span style={{ color: '#cffafe' }}>{item.amount}</span>
-                    </span>
-                  ))}
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      padding: '3px 8px',
-                      borderRadius: 999,
-                      border: '1px solid rgba(103, 232, 249, 0.22)',
-                      background: 'rgba(6, 182, 212, 0.12)',
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: '#a5f3fc',
-                    }}
-                  >
-                    间隔 {formatDCAIntervalHint(dcaInterval)}
-                  </span>
+                  <div className="modal-row">
+                    <label className="modal-field">
+                      <span>下限 %</span>
+                      <input
+                        type="number"
+                        value={rangeLower}
+                        onChange={(e) => handleRangeLowerChange(e.target.value)}
+                        min="0.1"
+                        step="0.5"
+                      />
+                    </label>
+                    <label className="modal-field">
+                      <span>上限 %</span>
+                      <input
+                        type="number"
+                        value={rangeUpper}
+                        onChange={(e) => handleRangeUpperChange(e.target.value)}
+                        min="0.1"
+                        step="0.5"
+                      />
+                    </label>
+                  </div>
                 </>
               ) : (
-                <span style={{ fontSize: 11, opacity: 0.78 }}>
-                  未启用，开仓将一次性成交。
-                </span>
+                <>
+                  <div
+                    style={{
+                      marginTop: 12,
+                      padding: '14px 16px',
+                      borderRadius: 16,
+                      border: '1px solid rgba(56, 189, 248, 0.22)',
+                      background: 'linear-gradient(135deg, rgba(14, 165, 233, 0.12), rgba(14, 165, 233, 0.04))',
+                      display: 'grid',
+                      gap: 8,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                      <span style={{ opacity: 0.72 }}>当前 Tick</span>
+                      <strong style={{ fontFamily: 'var(--font-mono)' }}>{Number.isFinite(Number(rangeEditor?.current_tick)) ? rangeEditor.current_tick : '--'}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                      <span style={{ opacity: 0.72 }}>Tick Spacing</span>
+                      <strong style={{ fontFamily: 'var(--font-mono)' }}>{Number.isFinite(Number(rangeEditor?.tick_spacing)) ? rangeEditor.tick_spacing : '--'}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                      <span style={{ opacity: 0.72 }}>当前价格</span>
+                      <strong>{formatPriceValue(rangeEditor?.current_price)}</strong>
+                    </div>
+                    {rangeShapeLabel ? (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                        <span style={{ opacity: 0.72 }}>仓位形态</span>
+                        <strong>{rangeShapeLabel}</strong>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {rangeInputMode === 'grid' ? (
+                    <>
+                      <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          className={`range-chip ${gridBoundaryTarget === 'lower' ? 'active' : ''}`}
+                          onClick={() => setGridBoundaryTarget('lower')}
+                        >
+                          调整下限
+                        </button>
+                        <button
+                          type="button"
+                          className={`range-chip ${gridBoundaryTarget === 'upper' ? 'active' : ''}`}
+                          onClick={() => setGridBoundaryTarget('upper')}
+                        >
+                          调整上限
+                        </button>
+                        <button
+                          type="button"
+                          className="range-chip"
+                          onClick={() => nudgeTickBoundary(gridBoundaryTarget, -1)}
+                        >
+                          -1 格
+                        </button>
+                        <button
+                          type="button"
+                          className="range-chip"
+                          onClick={() => nudgeTickBoundary(gridBoundaryTarget, 1)}
+                        >
+                          +1 格
+                        </button>
+                      </div>
+
+                      <div className="modal-range-picks" style={{ marginTop: 10 }}>
+                        {gridBins.map((bin) => {
+                          const isSelected = Number.isInteger(tickLowerValue) &&
+                            Number.isInteger(tickUpperValue) &&
+                            bin.lowerTick >= tickLowerValue &&
+                            bin.upperTick <= tickUpperValue;
+                          return (
+                            <button
+                              key={bin.key}
+                              type="button"
+                              className={`range-chip ${isSelected ? 'active' : ''}`}
+                              onClick={() => applyGridBin(bin)}
+                              style={{ minWidth: 96 }}
+                            >
+                              <span>{bin.isCurrent ? '当前格' : `${bin.lowerTick} ~ ${bin.upperTick}`}</span>
+                              <span className="range-chip-sub">{bin.isCurrent ? '锚点' : `第 ${Math.abs(bin.index)} 格`}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  ) : null}
+
+                  <div className="modal-row" style={{ marginTop: 12 }}>
+                    <label className="modal-field">
+                      <span>下限 Tick</span>
+                      <input
+                        type="number"
+                        value={tickLowerInput}
+                        onChange={(e) => {
+                          clearErrors();
+                          setTickLowerInput(e.target.value);
+                        }}
+                        step={Number.isFinite(Number(rangeEditor?.tick_spacing)) ? Number(rangeEditor?.tick_spacing) : 1}
+                      />
+                    </label>
+                    <label className="modal-field">
+                      <span>上限 Tick</span>
+                      <input
+                        type="number"
+                        value={tickUpperInput}
+                        onChange={(e) => {
+                          clearErrors();
+                          setTickUpperInput(e.target.value);
+                        }}
+                        step={Number.isFinite(Number(rangeEditor?.tick_spacing)) ? Number(rangeEditor?.tick_spacing) : 1}
+                      />
+                    </label>
+                  </div>
+
+                  {rangeEditor ? (
+                    <div
+                      style={{
+                        marginTop: 10,
+                        padding: '12px 14px',
+                        borderRadius: 14,
+                        border: '1px solid rgba(148, 163, 184, 0.18)',
+                        background: 'rgba(15, 23, 42, 0.18)',
+                        display: 'grid',
+                        gap: 6,
+                        fontSize: 12,
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                        <span style={{ opacity: 0.72 }}>价格区间</span>
+                        <strong>{formatPriceValue(rangeEditor?.range_lower_price)} - {formatPriceValue(rangeEditor?.range_upper_price)}</strong>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                        <span style={{ opacity: 0.72 }}>百分比映射</span>
+                        <strong>{formatPercent(rangeEditor?.range_lower_pct)} / {formatPercent(rangeEditor?.range_upper_pct)}</strong>
+                      </div>
+                    </div>
+                  ) : null}
+                </>
               )}
             </div>
-            <span style={{ fontSize: 11, fontWeight: 700, color: '#a5f3fc', flexShrink: 0 }}>
-              {dcaExpanded ? '收起 ▲' : '修改 ▾'}
-            </span>
-          </button>
-          {dcaExpanded ? (
-          <div style={{ fontSize: 11, opacity: 0.7, marginTop: 6, lineHeight: 1.5 }}>
-            首批按正常开仓创建仓位，后续批次按间隔向该仓位追加流动性。手动关仓或价格跑出区间时，剩余批次自动取消。
           </div>
-          ) : null}
-          {dcaExpanded && !dcaEnabled ? (
-            <div style={{ marginTop: 8, fontSize: 11, opacity: 0.7, lineHeight: 1.5 }}>
-              当前未启用分批加仓。勾选右上角开关后，系统将按批次和间隔拆分本次开仓。
-            </div>
-          ) : null}
-          {dcaExpanded && dcaEnabled ? (
-            <div style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>每批占比（共 {dcaPercentages.length} 批）</div>
-              {dcaPercentages.map((value, idx) => (
-                <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
-                  <span style={{ minWidth: 56, fontSize: 11, opacity: 0.7 }}>
-                    {idx === 0 ? '首批' : `第 ${idx + 1} 批`}
-                  </span>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="5"
-                    max="100"
-                    value={value}
-                    onChange={(e) => {
-                      clearErrors();
-                      const next = dcaPercentages.slice();
-                      next[idx] = Number(e.target.value) || 0;
-                      setDcaPercentages(next);
-                    }}
-                    disabled={busy}
-                    style={{ flex: 1, padding: '4px 8px' }}
-                  />
-                  <span style={{ fontSize: 11, opacity: 0.6 }}>%</span>
-                  {dcaPercentages.length > 2 ? (
-                    <button
-                      type="button"
-                      className="ghost-chip"
-                      onClick={() => {
-                        clearErrors();
-                        setDcaPercentages(dcaPercentages.filter((_, i) => i !== idx));
-                      }}
-                      disabled={busy}
-                    >
-                      ×
-                    </button>
+
+          {/* ───────── 右栏：钱包 + 金额 + 滑点 + 入场兑换 + DCA + 风险/错误 ───────── */}
+          <div className="opm-right">
+            {showPrivateZapProtectionHint ? (
+              <div className="modal-info-note opm-section" style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', padding: '14px', borderRadius: '16px', border: '1px solid rgba(16, 185, 129, 0.3)', background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1), transparent)' }}>
+                <div style={{ marginTop: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(16, 185, 129, 0.2)', color: '#10b981', flexShrink: 0 }}>
+                  <Check size={12} strokeWidth={3} />
+                </div>
+                <div style={{ fontSize: '12px', lineHeight: 1.6, color: 'var(--text-hint, rgba(255, 255, 255, 0.8))' }}>
+                  <strong style={{ display: 'block', marginBottom: '4px' }}>私有合约保驾护航</strong>
+                  首次开仓时会自动部署与您钱包绑定的专属合约，确保交易更安全私密。如遇网络中断，再次重试即可直接复用，不会重复产生部署消耗。
+                </div>
+              </div>
+            ) : null}
+
+            {riskMessage ? (
+              <div
+                className="opm-section"
+                style={{
+                  padding: 16,
+                  borderRadius: 16,
+                  border: '1px solid',
+                  borderColor: riskRequiresAck ? 'rgba(245, 158, 11, 0.4)' : 'rgba(239, 68, 68, 0.4)',
+                  background: riskRequiresAck ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(245, 158, 11, 0.05))' : 'linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(239, 68, 68, 0.05))',
+                  color: 'var(--text-color)',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                  display: 'flex',
+                  gap: 12,
+                  alignItems: 'flex-start',
+                }}
+              >
+                <AlertTriangle size={20} style={{ color: riskRequiresAck ? '#f59e0b' : '#ef4444', flexShrink: 0, marginTop: 2 }} />
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ fontSize: 13, lineHeight: 1.5, fontWeight: 600, color: riskRequiresAck ? '#d97706' : '#dc2626' }}>{riskMessage}</div>
+                  {((Number.isFinite(riskLiquidityUsd) && riskLiquidityUsd >= 0) || (Number.isFinite(riskMaxOpenAmount) && riskMaxOpenAmount > 0)) && (
+                    <div style={{ backgroundColor: 'var(--bg-card-hover, rgba(255,255,255,0.08))', borderRadius: 12, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {Number.isFinite(riskLiquidityUsd) && riskLiquidityUsd >= 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                          <span style={{ opacity: 0.8 }}>当前流动性</span>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{formatUsdCompact(riskLiquidityUsd)}</span>
+                        </div>
+                      )}
+                      {Number.isFinite(riskMaxOpenAmount) && riskMaxOpenAmount > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                          <span style={{ opacity: 0.8 }}>最大允许开仓</span>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{formatUsdCompact(riskMaxOpenAmount)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {warnChecks.length > 0 ? (
+                    <div style={{ fontSize: 11, lineHeight: 1.5, opacity: 0.85 }}>
+                      已提示风险，可直接继续；若要开仓，请留意滑点、成交波动和单次限额。
+                    </div>
                   ) : null}
                 </div>
-              ))}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, fontSize: 11 }}>
-                <span style={{ color: dcaSumValid ? '#10b981' : '#f59e0b', fontWeight: 600 }}>
-                  合计：{dcaSum.toFixed(2)}% {dcaSumValid ? '✓' : '（必须等于 100%）'}
-                </span>
-                <span style={{ display: 'flex', gap: 6 }}>
-                  <button
-                    type="button"
-                    className="ghost-chip"
-                    onClick={() => {
-                      clearErrors();
-                      const n = dcaPercentages.length || 2;
-                      const base = Math.floor((100 / n) * 100) / 100;
-                      const next = Array(n).fill(base);
-                      next[n - 1] = Math.round((100 - base * (n - 1)) * 100) / 100;
-                      setDcaPercentages(next);
-                    }}
-                    disabled={busy}
-                  >
-                    平均分配
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost-chip"
-                    onClick={() => {
-                      if (dcaPercentages.length >= 5) return;
-                      clearErrors();
-                      const n = dcaPercentages.length + 1;
-                      const base = Math.floor((100 / n) * 100) / 100;
-                      const next = Array(n).fill(base);
-                      next[n - 1] = Math.round((100 - base * (n - 1)) * 100) / 100;
-                      setDcaPercentages(next);
-                    }}
-                    disabled={busy || dcaPercentages.length >= 5}
-                  >
-                    ＋ 追加批次
-                  </button>
-                </span>
               </div>
-              <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
-                <span style={{ fontSize: 12, fontWeight: 600, minWidth: 80 }}>批次间隔</span>
+            ) : null}
+
+            {walletsLoading ? (
+              <div className="wallet-picker-loading">钱包加载中...</div>
+            ) : null}
+
+            {showWalletPicker && !walletsLoading ? (
+              <div className="wallet-picker opm-section">
+                <span className="wallet-picker-label">钱包</span>
+                <div className="wallet-picker-list">
+                  {wallets.map((wallet) => {
+                    const active = wallet.id === resolvedWalletId;
+                    return (
+                      <button
+                        key={wallet.id}
+                        type="button"
+                        className={`wallet-chip ${active ? 'active' : ''}`}
+                        onClick={() => {
+                          clearErrors();
+                          onWalletSelect(wallet.id);
+                        }}
+                      >
+                        <span className="wallet-chip-name">
+                          {wallet.name || shortAddr(wallet.address)}
+                          {wallet.is_default ? <span className="wallet-chip-default">默认</span> : null}
+                        </span>
+                        <span className="wallet-chip-bal">
+                          {wallet.stable_balance !== 'N/A' ? `$${wallet.stable_balance}` : ''}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="modal-form opm-section">
+              <label className="modal-field">
+                <span>开仓金额 (USDT)</span>
                 <input
                   type="number"
-                  step="0.001"
-                  min="0"
-                  max="300"
-                  value={dcaInterval}
+                  value={amount}
                   onChange={(e) => {
                     clearErrors();
-                    setDcaInterval(Number(e.target.value) || 0);
+                    setAmount(e.target.value);
                   }}
-                  disabled={busy}
-                  style={{ flex: 1, padding: '4px 8px' }}
+                  min="1"
+                  step="10"
                 />
-                <span style={{ fontSize: 11, opacity: 0.6 }}>秒 (0–300)</span>
-              </div>
-              <div style={{ marginTop: 4, fontSize: 11, opacity: 0.6 }}>
-                支持小数秒，0.3 = 300ms。
-              </div>
-            </div>
-          ) : null}
-        </div>
+              </label>
 
-        {visibleError ? (
-          <div style={{
-            marginTop: 16,
-            padding: 16,
-            borderRadius: 16,
-            border: '1px solid rgba(239, 68, 68, 0.4)',
-            background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(239, 68, 68, 0.05))',
-            color: 'var(--text-error, #fca5a5)',
-            display: 'flex',
-            gap: 12,
-            alignItems: 'flex-start',
-            boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-          }}>
-            <div style={{ marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', borderRadius: '50%', backgroundColor: 'rgba(239, 68, 68, 0.2)', color: '#ef4444', flexShrink: 0 }}>
-              <X size={12} strokeWidth={3} />
+              {recommendedPositions.length > 0 ? (
+                <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', flexWrap: 'nowrap', overflowX: 'auto', scrollbarWidth: 'none', gap: 4 }}>
+                  {recommendedPositions.map((item, index) => {
+                    const tone = item?.mode === 'conservative'
+                      ? { color: '#10b981', border: 'rgba(16, 185, 129, 0.3)', bg: 'rgba(16, 185, 129, 0.1)', icon: '🛡️' }
+                      : item?.mode === 'neutral'
+                        ? { color: '#f59e0b', border: 'rgba(245, 158, 11, 0.3)', bg: 'rgba(245, 158, 11, 0.1)', icon: '⚖️' }
+                        : { color: '#ef4444', border: 'rgba(239, 68, 68, 0.3)', bg: 'rgba(239, 68, 68, 0.1)', icon: '🚀' };
+                    return (
+                      <div
+                        key={`${item?.mode || 'mode'}-${index}`}
+                        onClick={() => {
+                          clearErrors();
+                          setAmount(String(item?.liquidity_to_add || ''));
+                        }}
+                        style={{
+                          flexShrink: 0,
+                          borderRadius: 14,
+                          border: `1px solid ${tone.border}`,
+                          background: tone.bg,
+                          padding: '4px 10px',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4,
+                        }}
+                      >
+                        <span style={{ fontSize: 11, filter: 'grayscale(0.2)' }}>{tone.icon}</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: tone.color }}>
+                          {formatSizingModeLabel(item?.mode)}
+                        </span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary, #fff)', fontFamily: 'var(--font-mono)' }}>
+                          {formatUsdCompact(item?.liquidity_to_add)}
+                        </span>
+                        <span style={{ fontSize: 10, opacity: 0.6, color: 'var(--text-muted)' }}>
+                          {formatSharePercent(item?.expected_share)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+
+              <label className="modal-field" style={{ marginTop: 12 }}>
+                <span>任务滑点 %</span>
+                <input
+                  type="number"
+                  value={slippage}
+                  onChange={(e) => {
+                    clearErrors();
+                    setSlippage(e.target.value);
+                  }}
+                  min="0"
+                  step="0.1"
+                  placeholder="留空则使用全局设置"
+                />
+              </label>
             </div>
-            <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.5 }}>{visibleError}</div>
+
+            {(entrySwapPreviewLoading || entrySwapPreview?.required) ? (
+              <div className="modal-info-note opm-section">
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>前置兑换</div>
+                {entrySwapPreviewLoading ? (
+                  <div>正在获取推荐滑点和预计到账数量...</div>
+                ) : null}
+                {entrySwapPreview?.required ? (
+                  <>
+                    <div style={{ marginTop: 6 }}>
+                      推荐滑点：{formatPercent(entrySwapPreview?.recommended_slippage_tolerance)}
+                    </div>
+                    <div style={{ marginTop: 4 }}>
+                      当前滑点：{formatPercent(entrySwapPreview?.current_slippage_tolerance)}
+                    </div>
+                    <div style={{ marginTop: 4 }}>
+                      预计到账：{entrySwapPreview?.expected_amount_out || '--'} {entrySwapPreview?.to_token_symbol || ''}
+                    </div>
+                    <div style={{ marginTop: 4 }}>
+                      兑换路径：{entrySwapPreview?.amount_in || '--'} {entrySwapPreview?.from_token_symbol || ''} 到 {entrySwapPreview?.to_token_symbol || ''}
+                    </div>
+
+                    <label className="modal-field" style={{ marginTop: 12 }}>
+                      <span>前置兑换滑点 %</span>
+                      <input
+                        type="number"
+                        value={entrySwapSlippage}
+                        onChange={(e) => {
+                          clearErrors();
+                          setEntrySwapSlippageDirty(true);
+                          setEntrySwapSlippage(e.target.value);
+                        }}
+                        min="0"
+                        step="0.1"
+                        placeholder="仅作用于本次前置兑换"
+                      />
+                    </label>
+
+                    <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 10, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={entrySwapConfirmed}
+                        onChange={(e) => {
+                          clearErrors();
+                          setEntrySwapConfirmed(e.target.checked);
+                        }}
+                        disabled={busy || entrySwapPreviewLoading}
+                      />
+                      <span>我已确认本次前置兑换，先执行兑换，再继续后续开仓。</span>
+                    </label>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className="opm-section" style={{
+              padding: 16,
+              borderRadius: 16,
+              border: '1px solid rgba(6, 182, 212, 0.25)',
+              background: 'rgba(6, 182, 212, 0.06)',
+            }}>
+              <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
+                <span style={{ fontWeight: 600, fontSize: 13 }}>分批加仓（防插针）</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input
+                    type="checkbox"
+                    checked={dcaEnabled}
+                    onChange={(e) => {
+                      clearErrors();
+                      setDcaEnabled(e.target.checked);
+                    }}
+                    disabled={busy}
+                  />
+                  <span style={{ fontSize: 12 }}>{dcaEnabled ? '本次启用' : '本次不启用'}</span>
+                </span>
+              </label>
+              <button
+                type="button"
+                onClick={() => setDcaExpanded((v) => !v)}
+                disabled={busy}
+                style={{
+                  width: '100%',
+                  marginTop: 10,
+                  padding: '9px 10px',
+                  borderRadius: 12,
+                  border: '1px solid rgba(6, 182, 212, 0.18)',
+                  background: 'rgba(8, 47, 73, 0.22)',
+                  color: 'inherit',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  cursor: busy ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <div
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    display: 'flex',
+                    gap: 6,
+                    alignItems: 'center',
+                    overflowX: 'auto',
+                    whiteSpace: 'nowrap',
+                    scrollbarWidth: 'none',
+                  }}
+                >
+                  {dcaEnabled ? (
+                    <>
+                      {dcaSummaryItems.map((item) => (
+                        <span
+                          key={item.key}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            padding: '3px 8px',
+                            borderRadius: 999,
+                            border: '1px solid rgba(125, 211, 252, 0.18)',
+                            background: 'rgba(255, 255, 255, 0.05)',
+                            fontSize: 11,
+                            fontWeight: 600,
+                          }}
+                        >
+                          <span style={{ opacity: 0.72 }}>{item.label}</span>
+                          <span style={{ color: '#cffafe' }}>{item.amount}</span>
+                        </span>
+                      ))}
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          padding: '3px 8px',
+                          borderRadius: 999,
+                          border: '1px solid rgba(103, 232, 249, 0.22)',
+                          background: 'rgba(6, 182, 212, 0.12)',
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: '#a5f3fc',
+                        }}
+                      >
+                        间隔 {formatDCAIntervalHint(dcaInterval)}
+                      </span>
+                    </>
+                  ) : (
+                    <span style={{ fontSize: 11, opacity: 0.78 }}>
+                      未启用，开仓将一次性成交。
+                    </span>
+                  )}
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#a5f3fc', flexShrink: 0 }}>
+                  {dcaExpanded ? '收起 ▲' : '修改 ▾'}
+                </span>
+              </button>
+              {dcaExpanded ? (
+                <div style={{ fontSize: 11, opacity: 0.7, marginTop: 6, lineHeight: 1.5 }}>
+                  首批按正常开仓创建仓位，后续批次按间隔向该仓位追加流动性。手动关仓或价格跑出区间时，剩余批次自动取消。
+                </div>
+              ) : null}
+              {dcaExpanded && !dcaEnabled ? (
+                <div style={{ marginTop: 8, fontSize: 11, opacity: 0.7, lineHeight: 1.5 }}>
+                  当前未启用分批加仓。勾选右上角开关后，系统将按批次和间隔拆分本次开仓。
+                </div>
+              ) : null}
+              {dcaExpanded && dcaEnabled ? (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>每批占比（共 {dcaPercentages.length} 批）</div>
+                  {dcaPercentages.map((value, idx) => (
+                    <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ minWidth: 56, fontSize: 11, opacity: 0.7 }}>
+                        {idx === 0 ? '首批' : `第 ${idx + 1} 批`}
+                      </span>
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="5"
+                        max="100"
+                        value={value}
+                        onChange={(e) => {
+                          clearErrors();
+                          const next = dcaPercentages.slice();
+                          next[idx] = Number(e.target.value) || 0;
+                          setDcaPercentages(next);
+                        }}
+                        disabled={busy}
+                        style={{ flex: 1, padding: '4px 8px' }}
+                      />
+                      <span style={{ fontSize: 11, opacity: 0.6 }}>%</span>
+                      {dcaPercentages.length > 2 ? (
+                        <button
+                          type="button"
+                          className="ghost-chip"
+                          onClick={() => {
+                            clearErrors();
+                            setDcaPercentages(dcaPercentages.filter((_, i) => i !== idx));
+                          }}
+                          disabled={busy}
+                        >
+                          ×
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, fontSize: 11 }}>
+                    <span style={{ color: dcaSumValid ? '#10b981' : '#f59e0b', fontWeight: 600 }}>
+                      合计：{dcaSum.toFixed(2)}% {dcaSumValid ? '✓' : '（必须等于 100%）'}
+                    </span>
+                    <span style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        type="button"
+                        className="ghost-chip"
+                        onClick={() => {
+                          clearErrors();
+                          const n = dcaPercentages.length || 2;
+                          const base = Math.floor((100 / n) * 100) / 100;
+                          const next = Array(n).fill(base);
+                          next[n - 1] = Math.round((100 - base * (n - 1)) * 100) / 100;
+                          setDcaPercentages(next);
+                        }}
+                        disabled={busy}
+                      >
+                        平均分配
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-chip"
+                        onClick={() => {
+                          if (dcaPercentages.length >= 5) return;
+                          clearErrors();
+                          const n = dcaPercentages.length + 1;
+                          const base = Math.floor((100 / n) * 100) / 100;
+                          const next = Array(n).fill(base);
+                          next[n - 1] = Math.round((100 - base * (n - 1)) * 100) / 100;
+                          setDcaPercentages(next);
+                        }}
+                        disabled={busy || dcaPercentages.length >= 5}
+                      >
+                        ＋ 追加批次
+                      </button>
+                    </span>
+                  </div>
+                  <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, minWidth: 80 }}>批次间隔</span>
+                    <input
+                      type="number"
+                      step="0.001"
+                      min="0"
+                      max="300"
+                      value={dcaInterval}
+                      onChange={(e) => {
+                        clearErrors();
+                        setDcaInterval(Number(e.target.value) || 0);
+                      }}
+                      disabled={busy}
+                      style={{ flex: 1, padding: '4px 8px' }}
+                    />
+                    <span style={{ fontSize: 11, opacity: 0.6 }}>秒 (0–300)</span>
+                  </div>
+                  <div style={{ marginTop: 4, fontSize: 11, opacity: 0.6 }}>
+                    支持小数秒，0.3 = 300ms。
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            {visibleError ? (
+              <div className="opm-section" style={{
+                padding: 16,
+                borderRadius: 16,
+                border: '1px solid rgba(239, 68, 68, 0.4)',
+                background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(239, 68, 68, 0.05))',
+                color: 'var(--text-error, #fca5a5)',
+                display: 'flex',
+                gap: 12,
+                alignItems: 'flex-start',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+              }}>
+                <div style={{ marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', borderRadius: '50%', backgroundColor: 'rgba(239, 68, 68, 0.2)', color: '#ef4444', flexShrink: 0 }}>
+                  <X size={12} strokeWidth={3} />
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.5 }}>{visibleError}</div>
+              </div>
+            ) : null}
           </div>
-        ) : null}
         </div>
 
         <div className="modal-actions">
