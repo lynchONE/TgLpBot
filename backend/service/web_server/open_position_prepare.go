@@ -24,11 +24,12 @@ type openPositionPrepareRequest struct {
 }
 
 type openPositionPrepareResponse struct {
-	Status                  string                     `json:"status"`
-	Checks                  []openPositionCheckItem    `json:"checks,omitempty"`
-	PrivateZap              openPositionPrivateZapInfo `json:"private_zap"`
-	WalletSelectionRequired bool                       `json:"wallet_selection_required,omitempty"`
-	ResolvedWalletID        uint                       `json:"resolved_wallet_id,omitempty"`
+	Status                  string                       `json:"status"`
+	Checks                  []openPositionCheckItem      `json:"checks,omitempty"`
+	PrivateZap              openPositionPrivateZapInfo   `json:"private_zap"`
+	WalletSelectionRequired bool                         `json:"wallet_selection_required,omitempty"`
+	ResolvedWalletID        uint                         `json:"resolved_wallet_id,omitempty"`
+	RangeEditor             *openPositionRangeEditorInfo `json:"range_editor,omitempty"`
 }
 
 type openPositionPrepareContext struct {
@@ -38,6 +39,7 @@ type openPositionPrepareContext struct {
 	poolVersion             string
 	liquidityService        *liquidity.LiquidityService
 	task                    *models.StrategyTask
+	currentTick             int
 	walletSelectionRequired bool
 }
 
@@ -189,6 +191,10 @@ func (s *Server) prepareOpenPositionCheckContext(req openPositionPrepareRequest)
 		return nil, &openPositionError{Code: "pool_info_error", Message: "池子 TickSpacing 无效"}, http.StatusInternalServerError
 	}
 
+	currentTick, err := loadOpenPositionCurrentTick(chain, poolVersion, poolAddress)
+	if err != nil {
+		return nil, &openPositionError{Code: "open_position_failed", Message: "璇诲彇褰撳墠 Tick 澶辫触"}, http.StatusInternalServerError
+	}
 	hooksAddr := normalizeHexPrefixed(poolInfo.HooksAddress)
 	if !common.IsHexAddress(hooksAddr) {
 		hooksAddr = "0x0000000000000000000000000000000000000000"
@@ -219,6 +225,7 @@ func (s *Server) prepareOpenPositionCheckContext(req openPositionPrepareRequest)
 		poolVersion:             poolVersion,
 		liquidityService:        liquidity.NewLiquidityService(),
 		task:                    task,
+		currentTick:             currentTick,
 		walletSelectionRequired: walletSelectionRequired,
 	}, nil, 0
 }
@@ -254,6 +261,7 @@ func (s *Server) handleOpenPositionPrepare(w http.ResponseWriter, r *http.Reques
 			break
 		}
 	}
+	rangeEditor := buildOpenPositionRangeEditorInfo(ctx.task, ctx.currentTick, ctx.task.TickSpacing, nil)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(openPositionPrepareResponse{
@@ -262,5 +270,6 @@ func (s *Server) handleOpenPositionPrepare(w http.ResponseWriter, r *http.Reques
 		PrivateZap:              buildOpenPositionPrivateZapInfo(ctx.liquidityService, ctx.chain, ctx.selectedWallet.ID),
 		WalletSelectionRequired: ctx.walletSelectionRequired,
 		ResolvedWalletID:        ctx.selectedWallet.ID,
+		RangeEditor:             rangeEditor,
 	})
 }

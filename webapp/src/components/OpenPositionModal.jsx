@@ -1,8 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Check, CheckCircle, X, XCircle } from 'lucide-react';
-import { fetchGlobalConfig, previewOpenPosition } from '../api';
+import { fetchGlobalConfig, prepareOpenPosition, previewOpenPosition } from '../api';
 
 const PRESET_RANGES = [1, 2, 3, 5, 10, 20];
+const RANGE_INPUT_OPTIONS = [
+  { key: 'percentage', label: '快捷%' },
+  { key: 'grid', label: 'Tick格子' },
+  { key: 'tick', label: '直接Tick' },
+];
+const GRID_RADIUS = 8;
 
 function shortAddr(addr) {
   const value = String(addr || '').trim();
@@ -143,12 +149,64 @@ function parseDCAPercentagesAny(raw) {
   return [50, 50];
 }
 
+function formatPriceValue(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return '--';
+  if (num >= 1000) return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (num >= 1) return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+  return Number(num.toPrecision(6)).toString();
+}
+
 function formatDCAIntervalHint(seconds) {
   const n = Number(seconds);
   if (!Number.isFinite(n) || n <= 0) return '立即';
   if (n < 1) return `${Math.round(n * 1000)}ms`;
   if (Number.isInteger(n)) return `${n}s`;
   return `${n.toFixed(1).replace(/\.0$/, '')}s`;
+}
+
+function roundDownToTickSpacing(tick, tickSpacing) {
+  const spacing = Number(tickSpacing);
+  const value = Number(tick);
+  if (!Number.isFinite(spacing) || spacing <= 0 || !Number.isFinite(value)) return 0;
+  const remainder = value % spacing;
+  if (remainder === 0) return value;
+  return value < 0 ? value - remainder - spacing : value - remainder;
+}
+
+function buildGridBins(editor, radius = GRID_RADIUS) {
+  const currentTick = Number(editor?.current_tick);
+  const tickSpacing = Number(editor?.tick_spacing);
+  if (!Number.isFinite(currentTick) || !Number.isFinite(tickSpacing) || tickSpacing <= 0) return [];
+  const anchorLower = Number.isFinite(Number(editor?.anchor_tick_lower))
+    ? Number(editor.anchor_tick_lower)
+    : roundDownToTickSpacing(currentTick, tickSpacing);
+  const anchorUpper = Number.isFinite(Number(editor?.anchor_tick_upper))
+    ? Number(editor.anchor_tick_upper)
+    : anchorLower + tickSpacing;
+  const bins = [];
+  for (let idx = -radius; idx <= radius; idx += 1) {
+    let lowerTick;
+    let upperTick;
+    if (idx === 0) {
+      lowerTick = anchorLower;
+      upperTick = anchorUpper;
+    } else if (idx > 0) {
+      lowerTick = anchorUpper + (idx - 1) * tickSpacing;
+      upperTick = lowerTick + tickSpacing;
+    } else {
+      upperTick = anchorLower + (idx + 1) * tickSpacing;
+      lowerTick = upperTick - tickSpacing;
+    }
+    bins.push({
+      key: `grid-${idx}`,
+      index: idx,
+      lowerTick,
+      upperTick,
+      isCurrent: idx === 0,
+    });
+  }
+  return bins;
 }
 
 export default function OpenPositionModal({
@@ -170,9 +228,13 @@ export default function OpenPositionModal({
   busy,
 }) {
   const [amount, setAmount] = useState('100');
+  const [rangeInputMode, setRangeInputMode] = useState('percentage');
   const [rangeLower, setRangeLower] = useState('2');
   const [rangeUpper, setRangeUpper] = useState('2');
   const [rangeUpperAuto, setRangeUpperAuto] = useState(true);
+  const [tickLowerInput, setTickLowerInput] = useState('');
+  const [tickUpperInput, setTickUpperInput] = useState('');
+  const [gridBoundaryTarget, setGridBoundaryTarget] = useState('lower');
   const [slippage, setSlippage] = useState('');
   const [entrySwapSlippage, setEntrySwapSlippage] = useState('');
   const [entrySwapSlippageDirty, setEntrySwapSlippageDirty] = useState(false);
@@ -181,6 +243,7 @@ export default function OpenPositionModal({
   const [entrySwapPreviewLoading, setEntrySwapPreviewLoading] = useState(false);
   const [entrySwapPreviewError, setEntrySwapPreviewError] = useState('');
   const [privateZapInfo, setPrivateZapInfo] = useState(null);
+  const [preparePrivateZapInfo, setPreparePrivateZapInfo] = useState(null);
   const [previewChecks, setPreviewChecks] = useState([]);
   const [sizingAdvice, setSizingAdvice] = useState(null);
   const [error, setError] = useState('');
@@ -190,15 +253,22 @@ export default function OpenPositionModal({
   const [dcaInterval, setDcaInterval] = useState(30);
   const [dcaDefaultsLoaded, setDcaDefaultsLoaded] = useState(false);
   const [dcaExpanded, setDcaExpanded] = useState(false);
+  const [prepareRangeEditor, setPrepareRangeEditor] = useState(null);
+  const [previewRangeEditor, setPreviewRangeEditor] = useState(null);
 
   const pair = pool?.trading_pair || '--';
   const addr = String(pool?.pool_address || '').trim();
   const version = String(pool?.protocol_version || pool?.factory_name || '').trim();
-  const checks = useMemo(() => (
-    Array.isArray(previewChecks)
-      ? previewChecks.filter((item) => String(item?.key || '').trim() !== 'entry_swap')
+  const activeChecks = useMemo(() => (
+    Array.isArray(previewChecks) && previewChecks.length > 0
+      ? previewChecks
       : []
   ), [previewChecks]);
+  const checks = useMemo(() => (
+    Array.isArray(activeChecks)
+      ? activeChecks.filter((item) => String(item?.key || '').trim() !== 'entry_swap')
+      : []
+  ), [activeChecks]);
   const warnChecks = checks.filter(c => c.status === 'warn');
   const failChecks = checks.filter(c => c.status === 'fail');
   const blockingFailChecks = failChecks;
@@ -240,35 +310,62 @@ export default function OpenPositionModal({
   const amountValue = Number(amount);
   const rangeLowerValue = Number(rangeLower);
   const rangeUpperValue = Number(rangeUpper);
+  const tickLowerValue = Number(String(tickLowerInput || '').trim());
+  const tickUpperValue = Number(String(tickUpperInput || '').trim());
   const submitRiskMessage = String(submitRisk?.message || '').trim();
   const visibleError = error || entrySwapPreviewError || blockingSafetyMessage || submitRiskMessage || String(submitError || '').trim();
-  const showPrivateZapProtectionHint = Boolean(privateZapInfo?.show_protection_hint);
+  const showPrivateZapProtectionHint = Boolean(privateZapInfo?.show_protection_hint || preparePrivateZapInfo?.show_protection_hint);
   const recommendedPositions = Array.isArray(sizingAdvice?.recommended_positions) ? sizingAdvice.recommended_positions : [];
   const sizingWarnings = Array.isArray(sizingAdvice?.warnings) ? sizingAdvice.warnings : [];
   const sizingInputs = sizingAdvice?.inputs && typeof sizingAdvice.inputs === 'object' ? sizingAdvice.inputs : null;
+  const rangeEditor = previewRangeEditor || prepareRangeEditor;
+  const gridBins = useMemo(() => buildGridBins(rangeEditor), [rangeEditor]);
+  const rangeShapeLabel = useMemo(() => {
+    switch (String(rangeEditor?.position_shape || '').trim()) {
+      case 'single_token0':
+      case 'single_token1':
+        return `单边 ${rangeEditor?.dominant_token_symbol || '--'}`;
+      case 'dual_sided':
+        return '双边';
+      default:
+        return '';
+    }
+  }, [rangeEditor]);
 
   const previewRequest = useMemo(() => {
     if (!apiBaseUrl || !initData || !addr || !version) return null;
     if (!Number.isFinite(amountValue) || amountValue <= 0) return null;
-    if (!Number.isFinite(rangeLowerValue) || rangeLowerValue <= 0 || rangeLowerValue >= 100) return null;
-    if (!Number.isFinite(rangeUpperValue) || rangeUpperValue <= 0 || rangeUpperValue >= 100) return null;
     if (!taskSlippage.valid || !entrySwapSlippageValue.valid) return null;
     if (walletsLoading) return null;
     if (showWalletPicker && !resolvedWalletId) return null;
-    return {
+    const base = {
       apiBaseUrl,
       initData,
       chain,
       poolAddress: addr,
       poolVersion: version,
       amount: amountValue,
-      rangeLowerPct: rangeLowerValue,
-      rangeUpperPct: rangeUpperValue,
+      rangeInputMode,
       slippageTolerance: taskSlippage.value,
       entrySwapSlippageTolerance: entrySwapSlippageValue.value,
       allowEntrySwap: true,
       walletId: resolvedWalletId || undefined,
       ackLiquidityRisk: riskAck,
+    };
+    if (rangeInputMode === 'percentage') {
+      if (!Number.isFinite(rangeLowerValue) || rangeLowerValue <= 0 || rangeLowerValue >= 100) return null;
+      if (!Number.isFinite(rangeUpperValue) || rangeUpperValue <= 0 || rangeUpperValue >= 100) return null;
+      return {
+        ...base,
+        rangeLowerPct: rangeLowerValue,
+        rangeUpperPct: rangeUpperValue,
+      };
+    }
+    if (!Number.isInteger(tickLowerValue) || !Number.isInteger(tickUpperValue) || tickLowerValue >= tickUpperValue) return null;
+    return {
+      ...base,
+      tickLower: tickLowerValue,
+      tickUpper: tickUpperValue,
     };
   }, [
     apiBaseUrl,
@@ -277,14 +374,16 @@ export default function OpenPositionModal({
     version,
     chain,
     amountValue,
+    rangeInputMode,
     rangeLowerValue,
     rangeUpperValue,
+    tickLowerValue,
+    tickUpperValue,
     taskSlippage,
     entrySwapSlippageValue,
     walletsLoading,
     showWalletPicker,
     resolvedWalletId,
-    riskRequiresAck,
     riskAck,
   ]);
 
@@ -300,11 +399,54 @@ export default function OpenPositionModal({
     setEntrySwapPreviewError('');
     setEntrySwapPreviewLoading(false);
     setPrivateZapInfo(null);
+    setPreparePrivateZapInfo(null);
     setSizingAdvice(null);
     setEntrySwapSlippage('');
     setEntrySwapSlippageDirty(false);
     setEntrySwapConfirmed(false);
+    setPrepareRangeEditor(null);
+    setPreviewRangeEditor(null);
+    setRangeInputMode('percentage');
+    setTickLowerInput('');
+    setTickUpperInput('');
+    setGridBoundaryTarget('lower');
   }, [addr, version]);
+
+  useEffect(() => {
+    if (!apiBaseUrl || !initData || !addr || !version) {
+      setPrepareRangeEditor(null);
+      setPreparePrivateZapInfo(null);
+      return undefined;
+    }
+    if (walletsLoading) return undefined;
+    if (showWalletPicker && !resolvedWalletId) return undefined;
+
+    let active = true;
+    const controller = new AbortController();
+    prepareOpenPosition({
+      apiBaseUrl,
+      initData,
+      chain,
+      poolAddress: addr,
+      poolVersion: version,
+      walletId: resolvedWalletId || undefined,
+      signal: controller.signal,
+    })
+      .then((resp) => {
+        if (!active) return;
+        setPrepareRangeEditor(resp?.range_editor && typeof resp.range_editor === 'object' ? resp.range_editor : null);
+        setPreparePrivateZapInfo(resp?.private_zap && typeof resp.private_zap === 'object' ? resp.private_zap : null);
+      })
+      .catch(() => {
+        if (!active || controller.signal.aborted) return;
+        setPrepareRangeEditor(null);
+        setPreparePrivateZapInfo(null);
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [apiBaseUrl, initData, addr, version, chain, walletsLoading, showWalletPicker, resolvedWalletId]);
 
   useEffect(() => {
     if (!riskRequiresAck) setRiskAck(false);
@@ -331,6 +473,7 @@ export default function OpenPositionModal({
       setPrivateZapInfo(null);
       setSizingAdvice(null);
       setPreviewChecks([]);
+      setPreviewRangeEditor(null);
       return undefined;
     }
 
@@ -351,6 +494,7 @@ export default function OpenPositionModal({
         setEntrySwapPreview(resp?.entry_swap || { required: false });
         setPrivateZapInfo(resp?.private_zap && typeof resp.private_zap === 'object' ? resp.private_zap : null);
         setSizingAdvice(resp?.sizing_advice && typeof resp.sizing_advice === 'object' ? resp.sizing_advice : null);
+        setPreviewRangeEditor(resp?.range_editor && typeof resp.range_editor === 'object' ? resp.range_editor : null);
       } catch (e) {
         if (!active || controller.signal.aborted) return;
         const payload = resolveOpenPositionErrorPayload(e);
@@ -362,6 +506,7 @@ export default function OpenPositionModal({
         setPrivateZapInfo(payload?.private_zap && typeof payload.private_zap === 'object' ? payload.private_zap : null);
         setSizingAdvice(payload?.sizing_advice && typeof payload.sizing_advice === 'object' ? payload.sizing_advice : null);
         setPreviewChecks(failChecks);
+        setPreviewRangeEditor(payload?.range_editor && typeof payload.range_editor === 'object' ? payload.range_editor : null);
         setEntrySwapPreviewError(failChecks.length > 0 ? '' : String(e?.message || e || '获取前置兑换预览失败'));
       } finally {
         if (active) {
@@ -385,6 +530,7 @@ export default function OpenPositionModal({
 
   const applyRange = useCallback((lo, hi) => {
     clearErrors();
+    setRangeInputMode('percentage');
     setRangeLower(String(lo));
     setRangeUpper(String(hi));
     setRangeUpperAuto(true);
@@ -405,6 +551,81 @@ export default function OpenPositionModal({
     setRangeUpperAuto(false);
     setRangeUpper(value);
   }, [clearErrors]);
+
+  const syncTicksFromEditor = useCallback((editor) => {
+    const lower = Number(editor?.tick_lower);
+    const upper = Number(editor?.tick_upper);
+    if (!Number.isInteger(lower) || !Number.isInteger(upper)) return false;
+    setTickLowerInput(String(lower));
+    setTickUpperInput(String(upper));
+    return true;
+  }, []);
+
+  const applyDefaultTickRange = useCallback(() => {
+    if (syncTicksFromEditor(previewRangeEditor)) return;
+    const lower = Number(rangeEditor?.anchor_tick_lower);
+    const upper = Number(rangeEditor?.anchor_tick_upper);
+    if (Number.isInteger(lower) && Number.isInteger(upper)) {
+      setTickLowerInput(String(lower));
+      setTickUpperInput(String(upper));
+    }
+  }, [previewRangeEditor, rangeEditor, syncTicksFromEditor]);
+
+  const handleRangeInputModeChange = useCallback((mode) => {
+    clearErrors();
+    setRangeInputMode(mode);
+    if (mode !== 'percentage') {
+      if (!syncTicksFromEditor(previewRangeEditor)) {
+        applyDefaultTickRange();
+      }
+    }
+  }, [clearErrors, previewRangeEditor, applyDefaultTickRange, syncTicksFromEditor]);
+
+  const nudgeTickBoundary = useCallback((target, delta) => {
+    const spacing = Number(rangeEditor?.tick_spacing);
+    if (!Number.isFinite(spacing) || spacing <= 0) return;
+    const minTick = Number(rangeEditor?.min_tick);
+    const maxTick = Number(rangeEditor?.max_tick);
+    let nextLower = Number.isInteger(tickLowerValue) ? tickLowerValue : Number(rangeEditor?.anchor_tick_lower);
+    let nextUpper = Number.isInteger(tickUpperValue) ? tickUpperValue : Number(rangeEditor?.anchor_tick_upper);
+    if (!Number.isInteger(nextLower) || !Number.isInteger(nextUpper)) return;
+    if (target === 'lower') {
+      nextLower += delta * spacing;
+      if (Number.isFinite(minTick)) nextLower = Math.max(nextLower, minTick);
+      if (nextLower >= nextUpper) nextUpper = nextLower + spacing;
+    } else {
+      nextUpper += delta * spacing;
+      if (Number.isFinite(maxTick)) nextUpper = Math.min(nextUpper, maxTick);
+      if (nextUpper <= nextLower) nextLower = nextUpper - spacing;
+    }
+    setTickLowerInput(String(nextLower));
+    setTickUpperInput(String(nextUpper));
+    clearErrors();
+  }, [rangeEditor, tickLowerValue, tickUpperValue, clearErrors]);
+
+  const applyGridBin = useCallback((bin) => {
+    if (!bin) return;
+    const spacing = Number(rangeEditor?.tick_spacing);
+    if (!Number.isFinite(spacing) || spacing <= 0) return;
+    let nextLower = Number.isInteger(tickLowerValue) ? tickLowerValue : Number(rangeEditor?.anchor_tick_lower);
+    let nextUpper = Number.isInteger(tickUpperValue) ? tickUpperValue : Number(rangeEditor?.anchor_tick_upper);
+    if (gridBoundaryTarget === 'lower') {
+      nextLower = bin.lowerTick;
+      if (nextLower >= nextUpper) nextUpper = nextLower + spacing;
+    } else {
+      nextUpper = bin.upperTick;
+      if (nextUpper <= nextLower) nextLower = nextUpper - spacing;
+    }
+    setTickLowerInput(String(nextLower));
+    setTickUpperInput(String(nextUpper));
+    clearErrors();
+  }, [rangeEditor, tickLowerValue, tickUpperValue, gridBoundaryTarget, clearErrors]);
+
+  useEffect(() => {
+    if (rangeInputMode === 'percentage') return;
+    if (String(tickLowerInput || '').trim() && String(tickUpperInput || '').trim()) return;
+    applyDefaultTickRange();
+  }, [rangeInputMode, tickLowerInput, tickUpperInput, applyDefaultTickRange]);
 
   useEffect(() => {
     if (!apiBaseUrl || !initData || dcaDefaultsLoaded) return;
@@ -457,12 +678,17 @@ export default function OpenPositionModal({
       setError('请输入有效的开仓金额。');
       return;
     }
-    if (!Number.isFinite(rangeLowerValue) || rangeLowerValue <= 0 || rangeLowerValue >= 100) {
-      setError('请输入有效的下限范围。');
-      return;
-    }
-    if (!Number.isFinite(rangeUpperValue) || rangeUpperValue <= 0 || rangeUpperValue >= 100) {
-      setError('请输入有效的上限范围。');
+    if (rangeInputMode === 'percentage') {
+      if (!Number.isFinite(rangeLowerValue) || rangeLowerValue <= 0 || rangeLowerValue >= 100) {
+        setError('请输入有效的下限范围。');
+        return;
+      }
+      if (!Number.isFinite(rangeUpperValue) || rangeUpperValue <= 0 || rangeUpperValue >= 100) {
+        setError('请输入有效的上限范围。');
+        return;
+      }
+    } else if (!Number.isInteger(tickLowerValue) || !Number.isInteger(tickUpperValue) || tickLowerValue >= tickUpperValue) {
+      setError('请输入有效的 Tick 区间。');
       return;
     }
     if (!taskSlippage.valid) {
@@ -519,13 +745,22 @@ export default function OpenPositionModal({
     }
 
     setError('');
+    const rangePayload = rangeInputMode === 'percentage'
+      ? {
+        rangeLowerPct: rangeLowerValue,
+        rangeUpperPct: rangeUpperValue,
+      }
+      : {
+        tickLower: tickLowerValue,
+        tickUpper: tickUpperValue,
+      };
     onSubmit({
       poolAddress: addr,
       poolVersion: version,
       chain,
       amount: amountValue,
-      rangeLowerPct: rangeLowerValue,
-      rangeUpperPct: rangeUpperValue,
+      rangeInputMode,
+      ...rangePayload,
       slippageTolerance: taskSlippage.value,
       entrySwapSlippageTolerance: entrySwapPreview?.required ? entrySwapSlippageValue.value : undefined,
       allowEntrySwap: true,
@@ -538,8 +773,11 @@ export default function OpenPositionModal({
     });
   }, [
     amountValue,
+    rangeInputMode,
     rangeLowerValue,
     rangeUpperValue,
+    tickLowerValue,
+    tickUpperValue,
     taskSlippage,
     entrySwapSlippageValue,
     showWalletPicker,
@@ -739,75 +977,232 @@ export default function OpenPositionModal({
           ) : null}
 
           <div className="modal-range-section">
-            <span className="modal-range-label">快捷区间</span>
-            {smartRangesLoading ? (
-              <div className="modal-range-hint">聪明钱区间加载中...</div>
-            ) : null}
-            {visibleSmartRanges.length > 0 ? (
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span className="modal-range-label">{rangeInputMode === 'percentage' ? '快捷区间' : 'Tick 区间编辑'}</span>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {RANGE_INPUT_OPTIONS.map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    className={`range-chip ${rangeInputMode === option.key ? 'active' : ''}`}
+                    onClick={() => handleRangeInputModeChange(option.key)}
+                    style={{ minWidth: 84, justifyContent: 'center' }}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {rangeInputMode === 'percentage' ? (
               <>
-                <div className="modal-range-picks">
-                  {visibleSmartRanges.map((item, index) => {
-                    const rangePct = Number(item?.range_percent);
-                    const positionCount = Math.max(0, Number(item?.position_count) || 0);
+                {smartRangesLoading ? (
+                  <div className="modal-range-hint">聪明钱区间加载中...</div>
+                ) : null}
+                {visibleSmartRanges.length > 0 ? (
+                  <div className="modal-range-picks">
+                    {visibleSmartRanges.map((item, index) => {
+                      const rangePct = Number(item?.range_percent);
+                      const positionCount = Math.max(0, Number(item?.position_count) || 0);
+                      const isActive =
+                        Math.abs(Number(rangeLower) - rangePct) < 0.05 &&
+                        Math.abs(Number(rangeUpper) - rangePct) < 0.05;
+                      return (
+                        <button
+                          key={`${rangePct}-${positionCount}-${index}`}
+                          type="button"
+                          className={`range-chip smart ${isActive ? 'active' : ''}`}
+                          onClick={() => applyRange(rangePct, rangePct)}
+                        >
+                          <span>{`${rangePct}%${positionCount > 1 ? ` +${positionCount - 1}` : ''}`}</span>
+                          <span className="range-chip-sub">{formatUsdCompact(item?.total_amount_usd)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+                <div className="modal-range-picks modal-range-picks-default">
+                  {PRESET_RANGES.map((item) => {
                     const isActive =
-                      Math.abs(Number(rangeLower) - rangePct) < 0.05 &&
-                      Math.abs(Number(rangeUpper) - rangePct) < 0.05;
+                      Math.abs(Number(rangeLower) - item) < 0.05 &&
+                      Math.abs(Number(rangeUpper) - item) < 0.05;
                     return (
                       <button
-                        key={`${rangePct}-${positionCount}-${index}`}
+                        key={item}
                         type="button"
-                        className={`range-chip smart ${isActive ? 'active' : ''}`}
-                        onClick={() => applyRange(rangePct, rangePct)}
+                        className={`range-chip ${isActive ? 'active' : ''}`}
+                        onClick={() => applyRange(item, item)}
                       >
-                        <span>{`${rangePct}%${positionCount > 1 ? ` +${positionCount - 1}` : ''}`}</span>
-                        <span className="range-chip-sub">{formatUsdCompact(item?.total_amount_usd)}</span>
+                        {item}%
                       </button>
                     );
                   })}
                 </div>
 
+                <div className="modal-row">
+                  <label className="modal-field">
+                    <span>下限 %</span>
+                    <input
+                      type="number"
+                      value={rangeLower}
+                      onChange={(e) => handleRangeLowerChange(e.target.value)}
+                      min="0.1"
+                      step="0.5"
+                    />
+                  </label>
+                  <label className="modal-field">
+                    <span>上限 %</span>
+                    <input
+                      type="number"
+                      value={rangeUpper}
+                      onChange={(e) => handleRangeUpperChange(e.target.value)}
+                      min="0.1"
+                      step="0.5"
+                    />
+                  </label>
+                </div>
               </>
-            ) : null}
-            <div className="modal-range-picks modal-range-picks-default">
-              {PRESET_RANGES.map((item) => {
-                const isActive =
-                  Math.abs(Number(rangeLower) - item) < 0.05 &&
-                  Math.abs(Number(rangeUpper) - item) < 0.05;
-                return (
-                  <button
-                    key={item}
-                    type="button"
-                    className={`range-chip ${isActive ? 'active' : ''}`}
-                    onClick={() => applyRange(item, item)}
-                  >
-                    {item}%
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+            ) : (
+              <>
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: '14px 16px',
+                    borderRadius: 16,
+                    border: '1px solid rgba(56, 189, 248, 0.22)',
+                    background: 'linear-gradient(135deg, rgba(14, 165, 233, 0.12), rgba(14, 165, 233, 0.04))',
+                    display: 'grid',
+                    gap: 8,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                    <span style={{ opacity: 0.72 }}>当前 Tick</span>
+                    <strong style={{ fontFamily: 'var(--font-mono)' }}>{Number.isFinite(Number(rangeEditor?.current_tick)) ? rangeEditor.current_tick : '--'}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                    <span style={{ opacity: 0.72 }}>Tick Spacing</span>
+                    <strong style={{ fontFamily: 'var(--font-mono)' }}>{Number.isFinite(Number(rangeEditor?.tick_spacing)) ? rangeEditor.tick_spacing : '--'}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                    <span style={{ opacity: 0.72 }}>当前价格</span>
+                    <strong>{formatPriceValue(rangeEditor?.current_price)}</strong>
+                  </div>
+                  {rangeShapeLabel ? (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
+                      <span style={{ opacity: 0.72 }}>仓位形态</span>
+                      <strong>{rangeShapeLabel}</strong>
+                    </div>
+                  ) : null}
+                </div>
 
-          <div className="modal-row">
-            <label className="modal-field">
-              <span>下限 %</span>
-              <input
-                type="number"
-                value={rangeLower}
-                onChange={(e) => handleRangeLowerChange(e.target.value)}
-                min="0.1"
-                step="0.5"
-              />
-            </label>
-            <label className="modal-field">
-              <span>上限 %</span>
-              <input
-                type="number"
-                value={rangeUpper}
-                onChange={(e) => handleRangeUpperChange(e.target.value)}
-                min="0.1"
-                step="0.5"
-              />
-            </label>
+                {rangeInputMode === 'grid' ? (
+                  <>
+                    <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className={`range-chip ${gridBoundaryTarget === 'lower' ? 'active' : ''}`}
+                        onClick={() => setGridBoundaryTarget('lower')}
+                      >
+                        调整下限
+                      </button>
+                      <button
+                        type="button"
+                        className={`range-chip ${gridBoundaryTarget === 'upper' ? 'active' : ''}`}
+                        onClick={() => setGridBoundaryTarget('upper')}
+                      >
+                        调整上限
+                      </button>
+                      <button
+                        type="button"
+                        className="range-chip"
+                        onClick={() => nudgeTickBoundary(gridBoundaryTarget, -1)}
+                      >
+                        -1 格
+                      </button>
+                      <button
+                        type="button"
+                        className="range-chip"
+                        onClick={() => nudgeTickBoundary(gridBoundaryTarget, 1)}
+                      >
+                        +1 格
+                      </button>
+                    </div>
+
+                    <div className="modal-range-picks" style={{ marginTop: 10 }}>
+                      {gridBins.map((bin) => {
+                        const isSelected = Number.isInteger(tickLowerValue) &&
+                          Number.isInteger(tickUpperValue) &&
+                          bin.lowerTick >= tickLowerValue &&
+                          bin.upperTick <= tickUpperValue;
+                        return (
+                          <button
+                            key={bin.key}
+                            type="button"
+                            className={`range-chip ${isSelected ? 'active' : ''}`}
+                            onClick={() => applyGridBin(bin)}
+                            style={{ minWidth: 96 }}
+                          >
+                            <span>{bin.isCurrent ? '当前格' : `${bin.lowerTick} ~ ${bin.upperTick}`}</span>
+                            <span className="range-chip-sub">{bin.isCurrent ? '锚点' : `第 ${Math.abs(bin.index)} 格`}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                ) : null}
+
+                <div className="modal-row" style={{ marginTop: 12 }}>
+                  <label className="modal-field">
+                    <span>下限 Tick</span>
+                    <input
+                      type="number"
+                      value={tickLowerInput}
+                      onChange={(e) => {
+                        clearErrors();
+                        setTickLowerInput(e.target.value);
+                      }}
+                      step={Number.isFinite(Number(rangeEditor?.tick_spacing)) ? Number(rangeEditor?.tick_spacing) : 1}
+                    />
+                  </label>
+                  <label className="modal-field">
+                    <span>上限 Tick</span>
+                    <input
+                      type="number"
+                      value={tickUpperInput}
+                      onChange={(e) => {
+                        clearErrors();
+                        setTickUpperInput(e.target.value);
+                      }}
+                      step={Number.isFinite(Number(rangeEditor?.tick_spacing)) ? Number(rangeEditor?.tick_spacing) : 1}
+                    />
+                  </label>
+                </div>
+
+                {rangeEditor ? (
+                  <div
+                    style={{
+                      marginTop: 10,
+                      padding: '12px 14px',
+                      borderRadius: 14,
+                      border: '1px solid rgba(148, 163, 184, 0.18)',
+                      background: 'rgba(15, 23, 42, 0.18)',
+                      display: 'grid',
+                      gap: 6,
+                      fontSize: 12,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                      <span style={{ opacity: 0.72 }}>价格区间</span>
+                      <strong>{formatPriceValue(rangeEditor?.range_lower_price)} - {formatPriceValue(rangeEditor?.range_upper_price)}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                      <span style={{ opacity: 0.72 }}>百分比映射</span>
+                      <strong>{formatPercent(rangeEditor?.range_lower_pct)} / {formatPercent(rangeEditor?.range_upper_pct)}</strong>
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            )}
           </div>
 
           <label className="modal-field">

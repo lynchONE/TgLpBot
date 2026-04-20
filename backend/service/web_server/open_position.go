@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"TgLpBot/base/blockchain"
 	"TgLpBot/base/config"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
@@ -31,8 +30,11 @@ type openPositionRequest struct {
 	PoolAddress       string   `json:"pool_address"`
 	PoolVersion       string   `json:"pool_version"`
 	Amount            float64  `json:"amount"`
+	RangeInputMode    string   `json:"range_input_mode,omitempty"`
 	RangeLowerPct     float64  `json:"range_lower_pct"`
 	RangeUpperPct     float64  `json:"range_upper_pct"`
+	TickLower         *int     `json:"tick_lower,omitempty"`
+	TickUpper         *int     `json:"tick_upper,omitempty"`
 	Slippage          *float64 `json:"slippage_tolerance,omitempty"`
 	EntrySwapSlippage *float64 `json:"entry_swap_slippage_tolerance,omitempty"`
 	AllowEntrySwap    bool     `json:"allow_entry_swap"`
@@ -58,6 +60,7 @@ type openPositionPreviewResponse struct {
 	EntrySwap    *openPositionEntrySwapInfo          `json:"entry_swap,omitempty"`
 	PrivateZap   openPositionPrivateZapInfo          `json:"private_zap"`
 	SizingAdvice *liquidity.OpenPositionSizingAdvice `json:"sizing_advice,omitempty"`
+	RangeEditor  *openPositionRangeEditorInfo        `json:"range_editor,omitempty"`
 }
 
 type openPositionEntrySwapInfo struct {
@@ -110,6 +113,7 @@ type openPositionContext struct {
 	liquidityService *liquidity.LiquidityService
 	task             *models.StrategyTask
 	currentTick      int
+	resolvedRange    resolvedOpenPositionRange
 }
 
 func float64Ptr(v float64) *float64 {
@@ -299,6 +303,7 @@ func decodeOpenPositionRequest(w http.ResponseWriter, r *http.Request) (*openPos
 	req.Chain = strings.TrimSpace(req.Chain)
 	req.PoolAddress = strings.TrimSpace(req.PoolAddress)
 	req.PoolVersion = strings.ToLower(strings.TrimSpace(req.PoolVersion))
+	req.RangeInputMode = normalizeOpenPositionRangeInputMode(req.RangeInputMode)
 
 	if req.PoolAddress == "" {
 		http.Error(w, "缺少池子地址", http.StatusBadRequest)
@@ -308,9 +313,21 @@ func decodeOpenPositionRequest(w http.ResponseWriter, r *http.Request) (*openPos
 		http.Error(w, "开仓金额无效", http.StatusBadRequest)
 		return nil, false
 	}
-	if req.RangeLowerPct <= 0 || req.RangeUpperPct <= 0 || req.RangeLowerPct >= 100 || req.RangeUpperPct >= 100 {
+	if req.RangeInputMode == "" {
 		http.Error(w, "区间参数无效", http.StatusBadRequest)
 		return nil, false
+	}
+	switch req.RangeInputMode {
+	case openPositionRangeInputPercentage:
+		if req.RangeLowerPct <= 0 || req.RangeUpperPct <= 0 || req.RangeLowerPct >= 100 || req.RangeUpperPct >= 100 {
+			http.Error(w, "鍖洪棿鍙傛暟鏃犳晥", http.StatusBadRequest)
+			return nil, false
+		}
+	case openPositionRangeInputTick, openPositionRangeInputGrid:
+		if req.TickLower == nil || req.TickUpper == nil {
+			http.Error(w, "鍖洪棿鍙傛暟鏃犳晥", http.StatusBadRequest)
+			return nil, false
+		}
 	}
 	if req.Slippage != nil && (*req.Slippage < 0 || *req.Slippage > 100) {
 		http.Error(w, "任务滑点参数无效", http.StatusBadRequest)
@@ -538,36 +555,18 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 		AmountUSDT:    req.Amount,
 	}
 
-	tickLowerPctReq, tickUpperPctReq := pricing.TickPercentagesFromStablePercentages(tmpTask, req.RangeLowerPct, req.RangeUpperPct)
-	if tickLowerPctReq <= 0 || tickUpperPctReq <= 0 {
-		return nil, &openPositionError{
-			Code:    "invalid_range",
-			Message: "区间参数无效",
-		}, http.StatusBadRequest
+	tickLowerPctReq, tickUpperPctReq := 1.0, 1.0
+	if req.RangeInputMode == openPositionRangeInputPercentage {
+		tickLowerPctReq, tickUpperPctReq = pricing.TickPercentagesFromStablePercentages(tmpTask, req.RangeLowerPct, req.RangeUpperPct)
+		if tickLowerPctReq <= 0 || tickUpperPctReq <= 0 {
+			return nil, &openPositionError{
+				Code:    "invalid_range",
+				Message: "区间参数无效",
+			}, http.StatusBadRequest
+		}
 	}
 
-	var currentTick int
-	switch poolVersion {
-	case "v4":
-		if !common.IsHexAddress(config.AppConfig.UniswapV4PoolManagerAddress) {
-			return nil, &openPositionError{Code: "open_position_failed", Message: "未配置 UNISWAP_V4_POOL_MANAGER_ADDRESS"}, http.StatusInternalServerError
-		}
-		if !common.IsHexAddress(config.AppConfig.UniswapV4StateViewAddress) {
-			return nil, &openPositionError{Code: "open_position_failed", Message: "未配置 UNISWAP_V4_STATE_VIEW_ADDRESS"}, http.StatusInternalServerError
-		}
-		poolManager := common.HexToAddress(config.AppConfig.UniswapV4PoolManagerAddress)
-		stateView := common.HexToAddress(config.AppConfig.UniswapV4StateViewAddress)
-		currentTick, err = blockchain.GetUniswapV4PoolCurrentTickViaStateView(stateView, poolManager, poolAddress)
-	default:
-		if !common.IsHexAddress(poolAddress) {
-			return nil, &openPositionError{Code: "invalid_pool_address", Message: "池子地址无效"}, http.StatusBadRequest
-		}
-		client, _, cerr := blockchain.GetEVMClient(chain)
-		if cerr != nil {
-			return nil, &openPositionError{Code: "open_position_failed", Message: cerr.Error()}, http.StatusInternalServerError
-		}
-		currentTick, err = blockchain.GetV3PoolCurrentTickWithClient(client, common.HexToAddress(poolAddress))
-	}
+	currentTick, err := loadOpenPositionCurrentTick(chain, poolVersion, poolAddress)
 	if err != nil {
 		return nil, &openPositionError{
 			Code:    "open_position_failed",
@@ -575,10 +574,10 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 		}, http.StatusInternalServerError
 	}
 
-	tc := pool.NewTickCalculator()
-	tickLower, tickUpper := tc.CalculateTickFromPercentagesBestFit(currentTick, tickLowerPctReq, tickUpperPctReq, poolInfo.TickSpacing)
-	tickLowerPctEff, tickUpperPctEff := tc.CalculatePercentagesFromTicks(currentTick, tickLower, tickUpper)
-	rangePctEff := (tickLowerPctEff + tickUpperPctEff) / 2.0
+	resolvedRange, errResp, status := resolveOpenPositionRange(tmpTask, req, currentTick, poolInfo.TickSpacing)
+	if errResp != nil {
+		return nil, errResp, status
+	}
 
 	taskSlippage := cfg.SlippageTolerance
 	if req.Slippage != nil {
@@ -606,11 +605,11 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 		HooksAddress:         hooksAddr,
 		Fee:                  poolInfo.Fee,
 		TickSpacing:          poolInfo.TickSpacing,
-		TickLower:            tickLower,
-		TickUpper:            tickUpper,
-		RangePercentage:      rangePctEff,
-		RangeLowerPercentage: tickLowerPctEff,
-		RangeUpperPercentage: tickUpperPctEff,
+		TickLower:            resolvedRange.TickLower,
+		TickUpper:            resolvedRange.TickUpper,
+		RangePercentage:      resolvedRange.RangePct,
+		RangeLowerPercentage: resolvedRange.TickLowerPct,
+		RangeUpperPercentage: resolvedRange.TickUpperPct,
 		AmountUSDT:           req.Amount,
 		CurrentLiquidity:     "0",
 		ReopenDelaySeconds:   strategy.NormalizeRebalanceTimeout(cfg.RebalanceTimeout),
@@ -648,6 +647,7 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 		liquidityService: liquidityService,
 		task:             task,
 		currentTick:      currentTick,
+		resolvedRange:    resolvedRange,
 	}, nil, 0
 }
 
@@ -689,6 +689,7 @@ func (s *Server) handleOpenPositionPreview(w http.ResponseWriter, r *http.Reques
 	}
 
 	sizingAdvice := buildOpenPositionSizingAdvice(ctx)
+	rangeEditor := buildOpenPositionRangeEditorInfo(ctx.task, ctx.currentTick, ctx.task.TickSpacing, &ctx.resolvedRange)
 
 	// Check for hard failures
 	hasFail := false
@@ -706,6 +707,7 @@ func (s *Server) handleOpenPositionPreview(w http.ResponseWriter, r *http.Reques
 			Checks:       checks,
 			PrivateZap:   buildOpenPositionPrivateZapInfo(ctx.liquidityService, ctx.chain, ctx.selectedWallet.ID),
 			SizingAdvice: sizingAdvice,
+			RangeEditor:  rangeEditor,
 		})
 		return
 	}
@@ -747,6 +749,7 @@ func (s *Server) handleOpenPositionPreview(w http.ResponseWriter, r *http.Reques
 		EntrySwap:    entrySwapInfo,
 		PrivateZap:   buildOpenPositionPrivateZapInfo(ctx.liquidityService, ctx.chain, ctx.selectedWallet.ID),
 		SizingAdvice: sizingAdvice,
+		RangeEditor:  rangeEditor,
 	})
 }
 

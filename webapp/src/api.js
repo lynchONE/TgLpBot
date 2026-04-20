@@ -539,8 +539,11 @@ export async function openPosition({
   poolAddress,
   poolVersion,
   amount,
+  rangeInputMode,
   rangeLowerPct,
   rangeUpperPct,
+  tickLower,
+  tickUpper,
   slippageTolerance,
   entrySwapSlippageTolerance,
   allowEntrySwap,
@@ -560,8 +563,11 @@ export async function openPosition({
     poolAddress,
     poolVersion,
     amount,
+    rangeInputMode,
     rangeLowerPct,
     rangeUpperPct,
+    tickLower,
+    tickUpper,
     slippageTolerance,
     entrySwapSlippageTolerance,
     allowEntrySwap,
@@ -586,8 +592,11 @@ function buildOpenPositionPayload({
   poolAddress,
   poolVersion,
   amount,
+  rangeInputMode,
   rangeLowerPct,
   rangeUpperPct,
+  tickLower,
+  tickUpper,
   slippageTolerance,
   entrySwapSlippageTolerance,
   allowEntrySwap,
@@ -604,10 +613,19 @@ function buildOpenPositionPayload({
     pool_address: poolAddress,
     pool_version: poolVersion,
     amount,
-    range_lower_pct: rangeLowerPct,
-    range_upper_pct: rangeUpperPct,
+    range_input_mode: rangeInputMode || 'percentage',
     allow_entry_swap: Boolean(allowEntrySwap),
   };
+  if ((rangeInputMode || 'percentage') === 'percentage') {
+    payload.range_lower_pct = rangeLowerPct;
+    payload.range_upper_pct = rangeUpperPct;
+  }
+  if ((rangeInputMode === 'tick' || rangeInputMode === 'grid')) {
+    const lowerTick = Number(tickLower);
+    const upperTick = Number(tickUpper);
+    if (Number.isInteger(lowerTick)) payload.tick_lower = lowerTick;
+    if (Number.isInteger(upperTick)) payload.tick_upper = upperTick;
+  }
   if (Number.isFinite(slippageTolerance)) payload.slippage_tolerance = slippageTolerance;
   if (Number.isFinite(entrySwapSlippageTolerance)) {
     payload.entry_swap_slippage_tolerance = entrySwapSlippageTolerance;
@@ -654,8 +672,11 @@ export async function previewOpenPosition({
   poolAddress,
   poolVersion,
   amount,
+  rangeInputMode,
   rangeLowerPct,
   rangeUpperPct,
+  tickLower,
+  tickUpper,
   slippageTolerance,
   entrySwapSlippageTolerance,
   allowEntrySwap,
@@ -670,12 +691,15 @@ export async function previewOpenPosition({
   const payload = buildOpenPositionPayload({
     initData,
     chain,
-    poolAddress,
-    poolVersion,
-    amount,
-    rangeLowerPct,
-    rangeUpperPct,
-    slippageTolerance,
+      poolAddress,
+      poolVersion,
+      amount,
+      rangeInputMode,
+      rangeLowerPct,
+      rangeUpperPct,
+      tickLower,
+      tickUpper,
+      slippageTolerance,
     entrySwapSlippageTolerance,
     allowEntrySwap,
     walletId,
