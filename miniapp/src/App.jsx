@@ -244,6 +244,13 @@ function formatRangePercentCompact(value) {
     return `${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
 }
 
+function formatSignedPercentCompact(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '--';
+    if (Math.abs(num) < 0.0001) return '0%';
+    return `${num > 0 ? '+' : '-'}${formatRangePercentCompact(Math.abs(num))}`;
+}
+
 function parseAmountInput(value) {
     return Number(String(value || '').replace(/,/g, '').trim());
 }
@@ -1000,12 +1007,21 @@ export default function App() {
         const currentDisplay = applyDisplay(currentPoolPrice);
         const lowerDisplay = lowerPoolPrice ? applyDisplay(lowerPoolPrice) : null;
         const upperDisplay = upperPoolPrice ? applyDisplay(upperPoolPrice) : null;
+        const displayMin = lowerDisplay !== null && upperDisplay !== null ? Math.min(lowerDisplay, upperDisplay) : null;
+        const displayMax = lowerDisplay !== null && upperDisplay !== null ? Math.max(lowerDisplay, upperDisplay) : null;
+        const toPct = (value) => {
+            if (!Number.isFinite(currentDisplay) || currentDisplay <= 0 || !Number.isFinite(value) || value <= 0) return null;
+            return ((value / currentDisplay) - 1) * 100;
+        };
         return {
             currentText: fmt(currentDisplay),
-            lowerText: lowerDisplay !== null && upperDisplay !== null ? fmt(Math.min(lowerDisplay, upperDisplay)) : '--',
-            upperText: lowerDisplay !== null && upperDisplay !== null ? fmt(Math.max(lowerDisplay, upperDisplay)) : '--',
+            lowerText: displayMin !== null ? fmt(displayMin) : '--',
+            upperText: displayMax !== null ? fmt(displayMax) : '--',
+            lowerPctText: displayMin !== null ? formatSignedPercentCompact(toPct(displayMin)) : '--',
+            upperPctText: displayMax !== null ? formatSignedPercentCompact(toPct(displayMax)) : '--',
             baseSymbol: openPositionInvertPrice ? openPositionToken1Symbol : openPositionToken0Symbol,
             quoteSymbol: openPositionInvertPrice ? openPositionToken0Symbol : openPositionToken1Symbol,
+            tickSpacing: Number(openPositionEffectiveRangeEditor?.tick_spacing),
         };
     }, [
         openPositionLiqProfile,
@@ -1885,12 +1901,12 @@ export default function App() {
     const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
 
     const defaultQuickRangeOptions = useMemo(() => ([
-        { key: '1', label: '1%', lowerValue: '1', upperValue: '1' },
-        { key: '2', label: '2%', lowerValue: '2', upperValue: '2' },
-        { key: '3', label: '3%', lowerValue: '3', upperValue: '3' },
-        { key: '5', label: '5%', lowerValue: '5', upperValue: '5' },
-        { key: '10', label: '10%', lowerValue: '10', upperValue: '10' },
-        { key: '20', label: '20%', lowerValue: '20', upperValue: '20' },
+        { key: '1', label: '1%', lowerValue: '1', upperValue: '1', subLabel: '快捷区间' },
+        { key: '2', label: '2%', lowerValue: '2', upperValue: '2', subLabel: '快捷区间' },
+        { key: '3', label: '3%', lowerValue: '3', upperValue: '3', subLabel: '快捷区间' },
+        { key: '5', label: '5%', lowerValue: '5', upperValue: '5', subLabel: '快捷区间' },
+        { key: '10', label: '10%', lowerValue: '10', upperValue: '10', subLabel: '快捷区间' },
+        { key: '20', label: '20%', lowerValue: '20', upperValue: '20', subLabel: '快捷区间' },
     ]), []);
     const smartQuickRangeOptions = useMemo(() => (
         Array.isArray(openPositionSmartRanges)
@@ -1911,7 +1927,31 @@ export default function App() {
                 })
             : []
     ), [openPositionSmartRanges]);
-    const primaryQuickRangeOptions = smartQuickRangeOptions.length > 0 ? smartQuickRangeOptions : defaultQuickRangeOptions;
+    const openPositionQuickRangeOptions = useMemo(() => {
+        const merged = [];
+        const seen = new Set();
+        for (const option of [...smartQuickRangeOptions, ...defaultQuickRangeOptions]) {
+            const key = `${option.lowerValue}-${option.upperValue}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            merged.push(option);
+        }
+        return merged;
+    }, [smartQuickRangeOptions, defaultQuickRangeOptions]);
+    const applyOpenPositionQuickRange = useCallback((option) => {
+        if (!option) return;
+        setOpenPositionRangeInputMode('percentage');
+        setOpenPositionRangeLower(option.lowerValue);
+        setOpenPositionRangeUpper(option.upperValue);
+        setOpenPositionRangeUpperAuto(true);
+        setOpenPositionError('');
+    }, []);
+    const openPositionDisplayedLowerPct = Number(
+        openPositionEffectiveRangeEditor?.range_lower_pct ?? openPositionRangeLower,
+    );
+    const openPositionDisplayedUpperPct = Number(
+        openPositionEffectiveRangeEditor?.range_upper_pct ?? openPositionRangeUpper,
+    );
 
     const parseRangeInput = (lowerRaw, upperRaw) => {
         const lower = Number(String(lowerRaw || '').trim());
@@ -1975,10 +2015,12 @@ export default function App() {
         const maxTick = Number(openPositionEffectiveRangeEditor?.max_tick);
         let nextLower = Number.isInteger(openPositionSelectedManualTickLower)
             ? openPositionSelectedManualTickLower
-            : Number(openPositionEffectiveRangeEditor?.anchor_tick_lower);
+            : Number(openPositionEffectiveRangeEditor?.tick_lower);
         let nextUpper = Number.isInteger(openPositionSelectedManualTickUpper)
             ? openPositionSelectedManualTickUpper
-            : Number(openPositionEffectiveRangeEditor?.anchor_tick_upper);
+            : Number(openPositionEffectiveRangeEditor?.tick_upper);
+        if (!Number.isInteger(nextLower)) nextLower = Number(openPositionEffectiveRangeEditor?.anchor_tick_lower);
+        if (!Number.isInteger(nextUpper)) nextUpper = Number(openPositionEffectiveRangeEditor?.anchor_tick_upper);
         if (!Number.isInteger(nextLower) || !Number.isInteger(nextUpper)) return;
         if (target === 'lower') {
             nextLower += delta * spacing;
@@ -1989,6 +2031,7 @@ export default function App() {
             if (Number.isFinite(maxTick)) nextUpper = Math.min(nextUpper, maxTick);
             if (nextUpper <= nextLower) nextLower = nextUpper - spacing;
         }
+        setOpenPositionRangeInputMode('tick');
         applyOpenPositionTickRange(nextLower, nextUpper);
     }, [
         openPositionEffectiveRangeEditor,
@@ -2031,8 +2074,14 @@ export default function App() {
         if (!Number.isInteger(anchorLower) || !Number.isInteger(anchorUpper)) return;
         const minTick = Number(openPositionEffectiveRangeEditor?.min_tick);
         const maxTick = Number(openPositionEffectiveRangeEditor?.max_tick);
-        const currentLower = Number.isInteger(openPositionSelectedManualTickLower) ? openPositionSelectedManualTickLower : anchorLower;
-        const currentUpper = Number.isInteger(openPositionSelectedManualTickUpper) ? openPositionSelectedManualTickUpper : anchorUpper;
+        const resolvedCurrentLower = Number(openPositionEffectiveRangeEditor?.tick_lower);
+        const resolvedCurrentUpper = Number(openPositionEffectiveRangeEditor?.tick_upper);
+        const currentLower = Number.isInteger(openPositionSelectedManualTickLower)
+            ? openPositionSelectedManualTickLower
+            : (Number.isInteger(resolvedCurrentLower) ? resolvedCurrentLower : anchorLower);
+        const currentUpper = Number.isInteger(openPositionSelectedManualTickUpper)
+            ? openPositionSelectedManualTickUpper
+            : (Number.isInteger(resolvedCurrentUpper) ? resolvedCurrentUpper : anchorUpper);
         const width = Math.max(spacing, currentUpper - currentLower);
         let nextLower = currentLower;
         let nextUpper = currentUpper;
@@ -2051,6 +2100,7 @@ export default function App() {
                 nextLower = nextUpper - width;
             }
         }
+        setOpenPositionRangeInputMode('tick');
         applyOpenPositionTickRange(nextLower, nextUpper);
     }, [
         openPositionEffectiveRangeEditor,
@@ -2337,41 +2387,32 @@ export default function App() {
 
     const onOpenPositionChartRangeChange = useCallback(({ lower, upper }) => {
         if (!openPositionLiqProfile) return;
-        const currentTick = Number(openPositionLiqProfile.current_tick);
-        if (!Number.isFinite(currentTick)) return;
-        if (openPositionRangeInputMode === 'percentage') {
-            if (Number.isFinite(lower)) {
-                const ratio = Math.pow(1.0001, lower - currentTick);
-                const lowerPct = Math.max(0.1, (1 - ratio) * 100);
-                setOpenPositionRangeLower(String(Number(lowerPct.toFixed(2))));
-            }
-            if (Number.isFinite(upper)) {
-                const ratio = Math.pow(1.0001, upper - currentTick);
-                const upperPct = Math.max(0.1, (ratio - 1) * 100);
-                setOpenPositionRangeUpper(String(Number(upperPct.toFixed(2))));
-                setOpenPositionRangeUpperAuto(false);
-            }
-            setOpenPositionError('');
-        } else {
-            const nextLower = Number.isFinite(lower) ? lower : openPositionSelectedManualTickLower;
-            const nextUpper = Number.isFinite(upper) ? upper : openPositionSelectedManualTickUpper;
-            applyOpenPositionTickRange(nextLower, nextUpper);
-        }
+        const nextLower = Number.isFinite(lower)
+            ? lower
+            : (Number.isInteger(openPositionSelectedManualTickLower) ? openPositionSelectedManualTickLower : openPositionChartLowerTick);
+        const nextUpper = Number.isFinite(upper)
+            ? upper
+            : (Number.isInteger(openPositionSelectedManualTickUpper) ? openPositionSelectedManualTickUpper : openPositionChartUpperTick);
+        if (!Number.isInteger(nextLower) || !Number.isInteger(nextUpper) || nextUpper <= nextLower) return;
+        setOpenPositionRangeInputMode('tick');
+        applyOpenPositionTickRange(nextLower, nextUpper);
     }, [
         openPositionLiqProfile,
-        openPositionRangeInputMode,
         openPositionSelectedManualTickLower,
         openPositionSelectedManualTickUpper,
+        openPositionChartLowerTick,
+        openPositionChartUpperTick,
         applyOpenPositionTickRange,
     ]);
 
     const onOpenPositionChartBinSelect = useCallback((bin) => {
-        if (!bin || openPositionRangeInputMode === 'percentage') return;
+        if (!bin) return;
         const lower = Number(bin?.tick_lower);
         const upper = Number(bin?.tick_upper);
         if (!Number.isInteger(lower) || !Number.isInteger(upper) || upper <= lower) return;
+        setOpenPositionRangeInputMode('tick');
         applyOpenPositionTickRange(lower, upper);
-    }, [openPositionRangeInputMode, applyOpenPositionTickRange]);
+    }, [applyOpenPositionTickRange]);
 
     useEffect(() => {
         if (!openPositionPool || !hasInitData || !multiWalletEnabled) return;
@@ -4278,7 +4319,7 @@ export default function App() {
                                     rangeLowerTick={openPositionChartLowerTick}
                                     rangeUpperTick={openPositionChartUpperTick}
                                     onRangeChange={onOpenPositionChartRangeChange}
-                                    onBinSelect={openPositionRangeInputMode === 'grid' || openPositionRangeInputMode === 'tick' || openPositionRangeInputMode === 'price' ? onOpenPositionChartBinSelect : undefined}
+                                    onBinSelect={onOpenPositionChartBinSelect}
                                     loading={openPositionLiqProfileLoading}
                                     token0Decimals={openPositionToken0Decimals}
                                     token1Decimals={openPositionToken1Decimals}
@@ -4290,11 +4331,11 @@ export default function App() {
                                     titlePlacement="left"
                                     height={180}
                                 />
-                                {openPositionRangeInputMode === 'grid' || openPositionRangeInputMode === 'tick' || openPositionRangeInputMode === 'price' ? (
+                                <>
                                     <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40">
                                         点图上的柱子可直接选中一格。
                                     </div>
-                                ) : null}
+                                </>
                             </div>
                             {multiWalletEnabled ? (
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
@@ -4414,7 +4455,180 @@ export default function App() {
                                 </div>
                             ) : null}
 
-                            <div className="mt-4">
+                            <div className="mt-4 rounded-3xl border border-zinc-200/80 bg-white/80 p-3 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/85">区间设置</div>
+                                        <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/45">
+                                            快捷区间、聪明钱区间和价格微调统一在这里，拖动图表后会自动切到 Tick 区间。
+                                        </div>
+                                    </div>
+                                    {Number.isFinite(Number(openPositionPriceRange?.tickSpacing)) ? (
+                                        <div className="shrink-0 rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[10px] font-semibold text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
+                                            每次 {openPositionPriceRange.tickSpacing} Tick
+                                        </div>
+                                    ) : null}
+                                </div>
+
+                                <div className="mt-3 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+                                    <div className="flex min-w-max flex-nowrap gap-2">
+                                        {openPositionQuickRangeOptions.map((option) => {
+                                            const lowerValue = Number(option.lowerValue);
+                                            const upperValue = Number(option.upperValue);
+                                            const isActive =
+                                                Number.isFinite(openPositionDisplayedLowerPct) &&
+                                                Number.isFinite(openPositionDisplayedUpperPct) &&
+                                                Math.abs(openPositionDisplayedLowerPct - lowerValue) < 0.05 &&
+                                                Math.abs(openPositionDisplayedUpperPct - upperValue) < 0.05;
+                                            const subLabel = option.smart
+                                                ? `聪明钱 · ${option.subLabel || '--'}`
+                                                : (option.subLabel || '快捷区间');
+                                            return (
+                                                <button
+                                                    key={option.key}
+                                                    type="button"
+                                                    onClick={() => applyOpenPositionQuickRange(option)}
+                                                    className={`shrink-0 rounded-2xl border px-3 py-2 text-left transition ${isActive
+                                                        ? `${brand.selectionClass} text-zinc-900 shadow-sm dark:text-white`
+                                                        : 'border-zinc-200 bg-white/80 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
+                                                        }`}
+                                                >
+                                                    <div className="text-[12px] font-semibold leading-none">{option.label}</div>
+                                                    <div className="mt-1 text-[10px] font-medium opacity-70">{subLabel}</div>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                                {openPositionSmartRangesLoading ? (
+                                    <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/45">
+                                        聪明钱区间加载中...
+                                    </div>
+                                ) : null}
+
+                                <div className="mt-3 rounded-2xl border border-zinc-200 bg-zinc-50/80 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div>
+                                            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500 dark:text-white/45">Price Range</div>
+                                            <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/90">
+                                                {openPositionPriceRange?.baseSymbol || '--'}/{openPositionPriceRange?.quoteSymbol || '--'}
+                                            </div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => setOpenPositionInvertPrice((prev) => !prev)}
+                                            className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                        >
+                                            切换计价
+                                        </button>
+                                    </div>
+
+                                    <div className="mt-3 grid grid-cols-2 gap-2">
+                                        <div className="rounded-2xl border border-zinc-200 bg-white/90 p-3 dark:border-white/10 dark:bg-white/5">
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/45">下限价格</div>
+                                            <div className="mt-1 flex items-end gap-1.5">
+                                                <div className="text-base font-semibold text-zinc-900 dark:text-white/90">{openPositionPriceRange?.lowerText || '--'}</div>
+                                                <div className="pb-0.5 text-[11px] text-zinc-500 dark:text-white/45">{openPositionPriceRange?.lowerPctText || '--'}</div>
+                                            </div>
+                                            <div className="mt-3 flex gap-1.5">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => nudgeOpenPositionTickBoundary('lower', -1)}
+                                                    className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                                >
+                                                    -1格
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => nudgeOpenPositionTickBoundary('lower', 1)}
+                                                    className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                                >
+                                                    +1格
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        <div className="rounded-2xl border border-zinc-200 bg-white/90 p-3 dark:border-white/10 dark:bg-white/5">
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/45">上限价格</div>
+                                            <div className="mt-1 flex items-end gap-1.5">
+                                                <div className="text-base font-semibold text-zinc-900 dark:text-white/90">{openPositionPriceRange?.upperText || '--'}</div>
+                                                <div className="pb-0.5 text-[11px] text-zinc-500 dark:text-white/45">{openPositionPriceRange?.upperPctText || '--'}</div>
+                                            </div>
+                                            <div className="mt-3 flex gap-1.5">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => nudgeOpenPositionTickBoundary('upper', -1)}
+                                                    className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                                >
+                                                    -1格
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => nudgeOpenPositionTickBoundary('upper', 1)}
+                                                    className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                                >
+                                                    +1格
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-3 grid gap-2 text-[11px] text-zinc-600 dark:text-white/60">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <span>当前价格</span>
+                                            <span className="font-semibold text-zinc-900 dark:text-white/90">{openPositionPriceRange?.currentText || '--'}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between gap-3">
+                                            <span>映射 Tick</span>
+                                            <span className="font-mono font-semibold text-zinc-900 dark:text-white/90">
+                                                {Number.isInteger(openPositionSelectedManualTickLower) ? openPositionSelectedManualTickLower : (Number.isInteger(openPositionChartLowerTick) ? openPositionChartLowerTick : '--')} ~ {Number.isInteger(openPositionSelectedManualTickUpper) ? openPositionSelectedManualTickUpper : (Number.isInteger(openPositionChartUpperTick) ? openPositionChartUpperTick : '--')}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className={`mt-3 rounded-2xl border p-3 ${String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
+                                    ? 'border-emerald-500/25 bg-emerald-500/10'
+                                    : 'border-sky-500/20 bg-sky-500/10'
+                                    }`}>
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div className="text-[12px] font-semibold text-zinc-900 dark:text-white/90">
+                                            {String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_') ? '当前将开单边池' : '当前将开双边池'}
+                                        </div>
+                                        {openPositionRangeShapeLabel ? (
+                                            <span className="rounded-full bg-white/70 px-2 py-1 text-[10px] font-bold text-zinc-700 dark:bg-white/10 dark:text-white/80">
+                                                {openPositionRangeShapeLabel}
+                                            </span>
+                                        ) : null}
+                                    </div>
+                                    <div className="mt-1 text-[11px] leading-5 text-zinc-600 dark:text-white/60">
+                                        {String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
+                                            ? `从 USDT 入场后，最终会更偏向 ${openPositionEffectiveRangeEditor?.dominant_token_symbol || '--'} 单边资产。`
+                                            : '当前区间覆盖现价，执行时会自动分配到两侧资产。'}
+                                    </div>
+                                    <div className="mt-3 flex flex-wrap gap-1.5">
+                                        <button
+                                            type="button"
+                                            onClick={() => shiftOpenPositionRangeToSingleSide('lower')}
+                                            className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                        >
+                                            单边下限
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => shiftOpenPositionRangeToSingleSide('upper')}
+                                            className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                        >
+                                            单边上限
+                                        </button>
+                                    </div>
+                                    <div className="mt-2 text-[10px] text-zinc-500 dark:text-white/45">
+                                        保留当前宽度，整体移动到现价下方或上方，也允许继续越过活跃格微调。
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="hidden">
                                 <div className="flex items-center justify-between gap-3">
                                     <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">
                                         {openPositionRangeInputMode === 'percentage' ? '自定义区间 (%)' : 'Tick 区间编辑'}
@@ -4459,7 +4673,7 @@ export default function App() {
                                     </div>
                                 ) : null}
                                 <div className="mt-2 flex flex-wrap gap-1.5">
-                                    {primaryQuickRangeOptions.map((option) => {
+                                    {openPositionQuickRangeOptions.map((option) => {
                                         const lowerValue = Number(option.lowerValue);
                                         const upperValue = Number(option.upperValue);
                                         const isActive =
