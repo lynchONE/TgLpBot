@@ -164,6 +164,12 @@ const OPEN_POSITION_RANGE_OPTIONS = [
     { key: 'percentage', label: '快捷%' },
 ];
 const OPEN_POSITION_GRID_RADIUS = 8;
+const OPEN_POSITION_MANUAL_OPTIONS = [
+    { key: 'percentage', label: '快捷%' },
+    { key: 'grid', label: 'Tick格子' },
+    { key: 'tick', label: '直接Tick' },
+    { key: 'price', label: '价格区间' },
+];
 
 const GMGN_STABLE_SYMBOLS = new Set(['usdc', 'usdt', 'busd', 'dai', 'frax', 'usdd', 'fdusd', 'wbnb', 'weth', 'wsol', 'bnb', 'eth', 'sol']);
 
@@ -406,6 +412,85 @@ function formatPriceValue(value) {
     return Number(num.toPrecision(6)).toString();
 }
 
+function formatPriceInputValue(value) {
+    const text = formatPriceValue(value);
+    return text === '--' ? '' : text;
+}
+
+function tickToPoolPrice(tick, token0Decimals, token1Decimals) {
+    const tickValue = Number(tick);
+    if (!Number.isFinite(tickValue)) return NaN;
+    const decAdj = Math.pow(10, (Number(token0Decimals) || 18) - (Number(token1Decimals) || 18));
+    return Math.pow(1.0001, tickValue) * decAdj;
+}
+
+function poolPriceToTick(price, token0Decimals, token1Decimals) {
+    const priceValue = Number(price);
+    if (!Number.isFinite(priceValue) || priceValue <= 0) return NaN;
+    const decAdj = Math.pow(10, (Number(token0Decimals) || 18) - (Number(token1Decimals) || 18));
+    const ratio = priceValue / decAdj;
+    if (!Number.isFinite(ratio) || ratio <= 0) return NaN;
+    return Math.log(ratio) / Math.log(1.0001);
+}
+
+function normalizeDisplayPriceTickRange(
+    lowerRaw,
+    upperRaw,
+    invertPrice,
+    token0Decimals,
+    token1Decimals,
+    tickSpacing,
+    minTick,
+    maxTick,
+) {
+    const lowerDisplay = Number(String(lowerRaw || '').trim());
+    const upperDisplay = Number(String(upperRaw || '').trim());
+    if (!Number.isFinite(lowerDisplay) || !Number.isFinite(upperDisplay) || lowerDisplay <= 0 || upperDisplay <= 0) {
+        return null;
+    }
+    const firstPoolPrice = invertPrice ? 1 / lowerDisplay : lowerDisplay;
+    const secondPoolPrice = invertPrice ? 1 / upperDisplay : upperDisplay;
+    const firstTick = poolPriceToTick(firstPoolPrice, token0Decimals, token1Decimals);
+    const secondTick = poolPriceToTick(secondPoolPrice, token0Decimals, token1Decimals);
+    if (!Number.isFinite(firstTick) || !Number.isFinite(secondTick)) return null;
+    const spacing = Number(tickSpacing);
+    const resolvedMinTick = Number(minTick);
+    const resolvedMaxTick = Number(maxTick);
+    let lowerTick = Number.isFinite(spacing) && spacing > 0
+        ? roundDownToTickSpacing(Math.min(firstTick, secondTick), spacing)
+        : Math.floor(Math.min(firstTick, secondTick));
+    let upperTick = Number.isFinite(spacing) && spacing > 0
+        ? roundUpToTickSpacing(Math.max(firstTick, secondTick), spacing)
+        : Math.ceil(Math.max(firstTick, secondTick));
+    if (Number.isFinite(resolvedMinTick)) lowerTick = Math.max(lowerTick, resolvedMinTick);
+    if (Number.isFinite(resolvedMaxTick)) upperTick = Math.min(upperTick, resolvedMaxTick);
+    if (Number.isFinite(spacing) && spacing > 0 && upperTick <= lowerTick) {
+        if (Number.isFinite(resolvedMaxTick) && lowerTick + spacing > resolvedMaxTick) {
+            lowerTick = upperTick - spacing;
+        } else {
+            upperTick = lowerTick + spacing;
+        }
+    }
+    if (!Number.isFinite(lowerTick) || !Number.isFinite(upperTick) || upperTick <= lowerTick) return null;
+    return { lowerTick: Math.trunc(lowerTick), upperTick: Math.trunc(upperTick) };
+}
+
+function buildDisplayPriceRangeFromTicks(lowerTick, upperTick, invertPrice, token0Decimals, token1Decimals) {
+    if (!Number.isInteger(lowerTick) || !Number.isInteger(upperTick) || upperTick <= lowerTick) return null;
+    const firstPrice = tickToPoolPrice(lowerTick, token0Decimals, token1Decimals);
+    const secondPrice = tickToPoolPrice(upperTick, token0Decimals, token1Decimals);
+    if (!Number.isFinite(firstPrice) || !Number.isFinite(secondPrice) || firstPrice <= 0 || secondPrice <= 0) return null;
+    const firstDisplay = invertPrice ? 1 / firstPrice : firstPrice;
+    const secondDisplay = invertPrice ? 1 / secondPrice : secondPrice;
+    if (!Number.isFinite(firstDisplay) || !Number.isFinite(secondDisplay) || firstDisplay <= 0 || secondDisplay <= 0) {
+        return null;
+    }
+    return {
+        lowerPrice: Math.min(firstDisplay, secondDisplay),
+        upperPrice: Math.max(firstDisplay, secondDisplay),
+    };
+}
+
 function roundDownToTickSpacing(tick, tickSpacing) {
     const spacing = Number(tickSpacing);
     const value = Number(tick);
@@ -413,6 +498,14 @@ function roundDownToTickSpacing(tick, tickSpacing) {
     const remainder = value % spacing;
     if (remainder === 0) return value;
     return value < 0 ? value - remainder - spacing : value - remainder;
+}
+
+function roundUpToTickSpacing(tick, tickSpacing) {
+    const spacing = Number(tickSpacing);
+    const value = Number(tick);
+    if (!Number.isFinite(spacing) || spacing <= 0 || !Number.isFinite(value)) return 0;
+    const down = roundDownToTickSpacing(value, spacing);
+    return down === value ? value : down + spacing;
 }
 
 function buildGridBins(editor, radius = OPEN_POSITION_GRID_RADIUS) {
@@ -684,6 +777,9 @@ export default function App() {
     const [openPositionRangeInputMode, setOpenPositionRangeInputMode] = useState('percentage');
     const [openPositionTickLower, setOpenPositionTickLower] = useState('');
     const [openPositionTickUpper, setOpenPositionTickUpper] = useState('');
+    const [openPositionPriceLower, setOpenPositionPriceLower] = useState('');
+    const [openPositionPriceUpper, setOpenPositionPriceUpper] = useState('');
+    const [openPositionInvertPrice, setOpenPositionInvertPrice] = useState(false);
     const [openPositionGridBoundaryTarget, setOpenPositionGridBoundaryTarget] = useState('lower');
     const [openPositionSlippage, setOpenPositionSlippage] = useState('');
     const [openPositionAllowSwap, setOpenPositionAllowSwap] = useState(false);
@@ -801,6 +897,68 @@ export default function App() {
         : null;
     const openPositionTickLowerValue = Number(String(openPositionTickLower || '').trim());
     const openPositionTickUpperValue = Number(String(openPositionTickUpper || '').trim());
+    const openPositionToken0Decimals = Number(openPositionPool?.token0_decimals ?? openPositionPool?.token0?.decimals ?? 18) || 18;
+    const openPositionToken1Decimals = Number(openPositionPool?.token1_decimals ?? openPositionPool?.token1?.decimals ?? 18) || 18;
+    const openPositionToken0Symbol = String(openPositionPool?.token0_symbol || openPositionPool?.token0?.symbol || '').toUpperCase();
+    const openPositionToken1Symbol = String(openPositionPool?.token1_symbol || openPositionPool?.token1?.symbol || '').toUpperCase();
+    const openPositionStableOrQuote = useMemo(
+        () => new Set(['USDT', 'USDC', 'BUSD', 'DAI', 'FDUSD', 'TUSD', 'USDD', 'USDE']),
+        [],
+    );
+    const openPositionQuoteIsToken1 = openPositionStableOrQuote.has(openPositionToken1Symbol)
+        ? true
+        : (openPositionStableOrQuote.has(openPositionToken0Symbol) ? false : undefined);
+    const openPositionDefaultInvert = openPositionStableOrQuote.has(openPositionToken0Symbol);
+    const openPositionPriceTickRange = useMemo(() => (
+        normalizeDisplayPriceTickRange(
+            openPositionPriceLower,
+            openPositionPriceUpper,
+            openPositionInvertPrice,
+            openPositionToken0Decimals,
+            openPositionToken1Decimals,
+            Number(openPositionEffectiveRangeEditor?.tick_spacing),
+            Number(openPositionEffectiveRangeEditor?.min_tick),
+            Number(openPositionEffectiveRangeEditor?.max_tick),
+        )
+    ), [
+        openPositionPriceLower,
+        openPositionPriceUpper,
+        openPositionInvertPrice,
+        openPositionToken0Decimals,
+        openPositionToken1Decimals,
+        openPositionEffectiveRangeEditor?.tick_spacing,
+        openPositionEffectiveRangeEditor?.min_tick,
+        openPositionEffectiveRangeEditor?.max_tick,
+    ]);
+    const openPositionSelectedManualTickLower = useMemo(() => {
+        if (openPositionRangeInputMode === 'price') return openPositionPriceTickRange?.lowerTick ?? null;
+        return Number.isInteger(openPositionTickLowerValue) ? openPositionTickLowerValue : null;
+    }, [openPositionRangeInputMode, openPositionPriceTickRange, openPositionTickLowerValue]);
+    const openPositionSelectedManualTickUpper = useMemo(() => {
+        if (openPositionRangeInputMode === 'price') return openPositionPriceTickRange?.upperTick ?? null;
+        return Number.isInteger(openPositionTickUpperValue) ? openPositionTickUpperValue : null;
+    }, [openPositionRangeInputMode, openPositionPriceTickRange, openPositionTickUpperValue]);
+    const openPositionSyncPriceInputsFromTicks = useCallback((lowerTick, upperTick) => {
+        const displayRange = buildDisplayPriceRangeFromTicks(
+            lowerTick,
+            upperTick,
+            openPositionInvertPrice,
+            openPositionToken0Decimals,
+            openPositionToken1Decimals,
+        );
+        if (!displayRange) return false;
+        setOpenPositionPriceLower(formatPriceInputValue(displayRange.lowerPrice));
+        setOpenPositionPriceUpper(formatPriceInputValue(displayRange.upperPrice));
+        return true;
+    }, [openPositionInvertPrice, openPositionToken0Decimals, openPositionToken1Decimals]);
+    const applyOpenPositionTickRange = useCallback((lowerTick, upperTick, options = {}) => {
+        if (!Number.isInteger(lowerTick) || !Number.isInteger(upperTick) || upperTick <= lowerTick) return false;
+        setOpenPositionTickLower(String(lowerTick));
+        setOpenPositionTickUpper(String(upperTick));
+        openPositionSyncPriceInputsFromTicks(lowerTick, upperTick);
+        if (options.clear !== false) setOpenPositionError('');
+        return true;
+    }, [openPositionSyncPriceInputsFromTicks]);
     const openPositionGridBins = useMemo(
         () => buildGridBins(openPositionEffectiveRangeEditor),
         [openPositionEffectiveRangeEditor],
@@ -816,6 +974,50 @@ export default function App() {
                 return '';
         }
     }, [openPositionEffectiveRangeEditor]);
+    useEffect(() => {
+        setOpenPositionInvertPrice(openPositionDefaultInvert);
+    }, [openPositionDefaultInvert]);
+    const openPositionPriceRange = useMemo(() => {
+        const refTick = Number(openPositionLiqProfile?.current_tick);
+        const fallbackTick = Number(openPositionEffectiveRangeEditor?.current_tick);
+        const baseTick = Number.isFinite(refTick) ? refTick : (Number.isFinite(fallbackTick) ? fallbackTick : null);
+        if (baseTick === null) return null;
+        const applyDisplay = (value) => (openPositionInvertPrice && value > 0 ? 1 / value : value);
+        const fmt = (value) => {
+            if (!Number.isFinite(value) || value <= 0) return '--';
+            if (value >= 1_000_000) return value.toExponential(3);
+            if (value >= 1) return value.toLocaleString(undefined, { maximumFractionDigits: 4 });
+            if (value >= 0.0001) return value.toLocaleString(undefined, { maximumFractionDigits: 6 });
+            return value.toExponential(3);
+        };
+        const currentPoolPrice = tickToPoolPrice(baseTick, openPositionToken0Decimals, openPositionToken1Decimals);
+        const lowerPoolPrice = Number.isInteger(openPositionSelectedManualTickLower)
+            ? tickToPoolPrice(openPositionSelectedManualTickLower, openPositionToken0Decimals, openPositionToken1Decimals)
+            : null;
+        const upperPoolPrice = Number.isInteger(openPositionSelectedManualTickUpper)
+            ? tickToPoolPrice(openPositionSelectedManualTickUpper, openPositionToken0Decimals, openPositionToken1Decimals)
+            : null;
+        const currentDisplay = applyDisplay(currentPoolPrice);
+        const lowerDisplay = lowerPoolPrice ? applyDisplay(lowerPoolPrice) : null;
+        const upperDisplay = upperPoolPrice ? applyDisplay(upperPoolPrice) : null;
+        return {
+            currentText: fmt(currentDisplay),
+            lowerText: lowerDisplay !== null && upperDisplay !== null ? fmt(Math.min(lowerDisplay, upperDisplay)) : '--',
+            upperText: lowerDisplay !== null && upperDisplay !== null ? fmt(Math.max(lowerDisplay, upperDisplay)) : '--',
+            baseSymbol: openPositionInvertPrice ? openPositionToken1Symbol : openPositionToken0Symbol,
+            quoteSymbol: openPositionInvertPrice ? openPositionToken0Symbol : openPositionToken1Symbol,
+        };
+    }, [
+        openPositionLiqProfile,
+        openPositionEffectiveRangeEditor,
+        openPositionSelectedManualTickLower,
+        openPositionSelectedManualTickUpper,
+        openPositionInvertPrice,
+        openPositionToken0Decimals,
+        openPositionToken1Decimals,
+        openPositionToken0Symbol,
+        openPositionToken1Symbol,
+    ]);
     const openPositionDCASum = useMemo(
         () => openPositionDCAPercentages.reduce((acc, v) => acc + (Number(v) || 0), 0),
         [openPositionDCAPercentages],
@@ -1746,21 +1948,15 @@ export default function App() {
     const syncOpenPositionTicksFromEditor = useCallback((editor) => {
         const lower = Number(editor?.tick_lower);
         const upper = Number(editor?.tick_upper);
-        if (!Number.isInteger(lower) || !Number.isInteger(upper)) return false;
-        setOpenPositionTickLower(String(lower));
-        setOpenPositionTickUpper(String(upper));
-        return true;
-    }, []);
+        return applyOpenPositionTickRange(lower, upper, { clear: false });
+    }, [applyOpenPositionTickRange]);
 
     const applyDefaultOpenPositionTickRange = useCallback(() => {
         if (syncOpenPositionTicksFromEditor(openPositionPreviewRangeEditor)) return;
         const lower = Number(openPositionEffectiveRangeEditor?.anchor_tick_lower);
         const upper = Number(openPositionEffectiveRangeEditor?.anchor_tick_upper);
-        if (Number.isInteger(lower) && Number.isInteger(upper)) {
-            setOpenPositionTickLower(String(lower));
-            setOpenPositionTickUpper(String(upper));
-        }
-    }, [openPositionPreviewRangeEditor, openPositionEffectiveRangeEditor, syncOpenPositionTicksFromEditor]);
+        applyOpenPositionTickRange(lower, upper, { clear: false });
+    }, [openPositionPreviewRangeEditor, openPositionEffectiveRangeEditor, syncOpenPositionTicksFromEditor, applyOpenPositionTickRange]);
 
     const handleOpenPositionRangeInputModeChange = useCallback((mode) => {
         setOpenPositionRangeInputMode(mode);
@@ -1777,11 +1973,11 @@ export default function App() {
         if (!Number.isFinite(spacing) || spacing <= 0) return;
         const minTick = Number(openPositionEffectiveRangeEditor?.min_tick);
         const maxTick = Number(openPositionEffectiveRangeEditor?.max_tick);
-        let nextLower = Number.isInteger(openPositionTickLowerValue)
-            ? openPositionTickLowerValue
+        let nextLower = Number.isInteger(openPositionSelectedManualTickLower)
+            ? openPositionSelectedManualTickLower
             : Number(openPositionEffectiveRangeEditor?.anchor_tick_lower);
-        let nextUpper = Number.isInteger(openPositionTickUpperValue)
-            ? openPositionTickUpperValue
+        let nextUpper = Number.isInteger(openPositionSelectedManualTickUpper)
+            ? openPositionSelectedManualTickUpper
             : Number(openPositionEffectiveRangeEditor?.anchor_tick_upper);
         if (!Number.isInteger(nextLower) || !Number.isInteger(nextUpper)) return;
         if (target === 'lower') {
@@ -1793,24 +1989,23 @@ export default function App() {
             if (Number.isFinite(maxTick)) nextUpper = Math.min(nextUpper, maxTick);
             if (nextUpper <= nextLower) nextLower = nextUpper - spacing;
         }
-        setOpenPositionTickLower(String(nextLower));
-        setOpenPositionTickUpper(String(nextUpper));
-        setOpenPositionError('');
+        applyOpenPositionTickRange(nextLower, nextUpper);
     }, [
         openPositionEffectiveRangeEditor,
-        openPositionTickLowerValue,
-        openPositionTickUpperValue,
+        openPositionSelectedManualTickLower,
+        openPositionSelectedManualTickUpper,
+        applyOpenPositionTickRange,
     ]);
 
     const applyOpenPositionGridBin = useCallback((bin) => {
         if (!bin) return;
         const spacing = Number(openPositionEffectiveRangeEditor?.tick_spacing);
         if (!Number.isFinite(spacing) || spacing <= 0) return;
-        let nextLower = Number.isInteger(openPositionTickLowerValue)
-            ? openPositionTickLowerValue
+        let nextLower = Number.isInteger(openPositionSelectedManualTickLower)
+            ? openPositionSelectedManualTickLower
             : Number(openPositionEffectiveRangeEditor?.anchor_tick_lower);
-        let nextUpper = Number.isInteger(openPositionTickUpperValue)
-            ? openPositionTickUpperValue
+        let nextUpper = Number.isInteger(openPositionSelectedManualTickUpper)
+            ? openPositionSelectedManualTickUpper
             : Number(openPositionEffectiveRangeEditor?.anchor_tick_upper);
         if (openPositionGridBoundaryTarget === 'lower') {
             nextLower = bin.lowerTick;
@@ -1819,14 +2014,49 @@ export default function App() {
             nextUpper = bin.upperTick;
             if (nextUpper <= nextLower) nextLower = nextUpper - spacing;
         }
-        setOpenPositionTickLower(String(nextLower));
-        setOpenPositionTickUpper(String(nextUpper));
-        setOpenPositionError('');
+        applyOpenPositionTickRange(nextLower, nextUpper);
     }, [
         openPositionEffectiveRangeEditor,
-        openPositionTickLowerValue,
-        openPositionTickUpperValue,
+        openPositionSelectedManualTickLower,
+        openPositionSelectedManualTickUpper,
         openPositionGridBoundaryTarget,
+        applyOpenPositionTickRange,
+    ]);
+
+    const shiftOpenPositionRangeToSingleSide = useCallback((side) => {
+        const spacing = Number(openPositionEffectiveRangeEditor?.tick_spacing);
+        if (!Number.isFinite(spacing) || spacing <= 0) return;
+        const anchorLower = Number(openPositionEffectiveRangeEditor?.anchor_tick_lower);
+        const anchorUpper = Number(openPositionEffectiveRangeEditor?.anchor_tick_upper);
+        if (!Number.isInteger(anchorLower) || !Number.isInteger(anchorUpper)) return;
+        const minTick = Number(openPositionEffectiveRangeEditor?.min_tick);
+        const maxTick = Number(openPositionEffectiveRangeEditor?.max_tick);
+        const currentLower = Number.isInteger(openPositionSelectedManualTickLower) ? openPositionSelectedManualTickLower : anchorLower;
+        const currentUpper = Number.isInteger(openPositionSelectedManualTickUpper) ? openPositionSelectedManualTickUpper : anchorUpper;
+        const width = Math.max(spacing, currentUpper - currentLower);
+        let nextLower = currentLower;
+        let nextUpper = currentUpper;
+        if (side === 'lower') {
+            nextUpper = anchorLower;
+            nextLower = nextUpper - width;
+            if (Number.isFinite(minTick) && nextLower < minTick) {
+                nextLower = minTick;
+                nextUpper = nextLower + width;
+            }
+        } else {
+            nextLower = anchorUpper;
+            nextUpper = nextLower + width;
+            if (Number.isFinite(maxTick) && nextUpper > maxTick) {
+                nextUpper = maxTick;
+                nextLower = nextUpper - width;
+            }
+        }
+        applyOpenPositionTickRange(nextLower, nextUpper);
+    }, [
+        openPositionEffectiveRangeEditor,
+        openPositionSelectedManualTickLower,
+        openPositionSelectedManualTickUpper,
+        applyOpenPositionTickRange,
     ]);
 
     useEffect(() => {
@@ -1838,6 +2068,23 @@ export default function App() {
         openPositionTickLower,
         openPositionTickUpper,
         applyDefaultOpenPositionTickRange,
+    ]);
+
+    const openPositionLastInvertRef = useRef(openPositionInvertPrice);
+    useEffect(() => {
+        if (openPositionLastInvertRef.current === openPositionInvertPrice) return;
+        openPositionLastInvertRef.current = openPositionInvertPrice;
+        if (openPositionRangeInputMode !== 'price') return;
+        if (!Number.isInteger(openPositionSelectedManualTickLower) || !Number.isInteger(openPositionSelectedManualTickUpper) || openPositionSelectedManualTickUpper <= openPositionSelectedManualTickLower) {
+            return;
+        }
+        openPositionSyncPriceInputsFromTicks(openPositionSelectedManualTickLower, openPositionSelectedManualTickUpper);
+    }, [
+        openPositionInvertPrice,
+        openPositionRangeInputMode,
+        openPositionSelectedManualTickLower,
+        openPositionSelectedManualTickUpper,
+        openPositionSyncPriceInputsFromTicks,
     ]);
 
     const handleTaskRangeLowerChange = useCallback((value) => {
@@ -1868,6 +2115,8 @@ export default function App() {
         setOpenPositionRangeInputMode('percentage');
         setOpenPositionTickLower('');
         setOpenPositionTickUpper('');
+        setOpenPositionPriceLower('');
+        setOpenPositionPriceUpper('');
         setOpenPositionGridBoundaryTarget('lower');
         setOpenPositionSlippage('');
         setOpenPositionPrepareChecks([]);
@@ -2063,7 +2312,7 @@ export default function App() {
 
     const openPositionChartLowerTick = useMemo(() => {
         if (openPositionRangeInputMode !== 'percentage') {
-            return Number.isInteger(openPositionTickLowerValue) ? openPositionTickLowerValue : null;
+            return Number.isInteger(openPositionSelectedManualTickLower) ? openPositionSelectedManualTickLower : null;
         }
         const ed = openPositionEffectiveRangeEditor;
         if (!ed || !Number.isFinite(Number(ed.current_tick))) return null;
@@ -2072,11 +2321,11 @@ export default function App() {
         const ratio = 1 - lowerPct / 100;
         if (ratio <= 0) return null;
         return Math.round(Number(ed.current_tick) + Math.log(ratio) / Math.log(1.0001));
-    }, [openPositionRangeInputMode, openPositionTickLowerValue, openPositionEffectiveRangeEditor, openPositionRangeLower]);
+    }, [openPositionRangeInputMode, openPositionSelectedManualTickLower, openPositionEffectiveRangeEditor, openPositionRangeLower]);
 
     const openPositionChartUpperTick = useMemo(() => {
         if (openPositionRangeInputMode !== 'percentage') {
-            return Number.isInteger(openPositionTickUpperValue) ? openPositionTickUpperValue : null;
+            return Number.isInteger(openPositionSelectedManualTickUpper) ? openPositionSelectedManualTickUpper : null;
         }
         const ed = openPositionEffectiveRangeEditor;
         if (!ed || !Number.isFinite(Number(ed.current_tick))) return null;
@@ -2084,7 +2333,7 @@ export default function App() {
         if (!Number.isFinite(upperPct) || upperPct <= 0) return null;
         const ratio = 1 + upperPct / 100;
         return Math.round(Number(ed.current_tick) + Math.log(ratio) / Math.log(1.0001));
-    }, [openPositionRangeInputMode, openPositionTickUpperValue, openPositionEffectiveRangeEditor, openPositionRangeUpper]);
+    }, [openPositionRangeInputMode, openPositionSelectedManualTickUpper, openPositionEffectiveRangeEditor, openPositionRangeUpper]);
 
     const onOpenPositionChartRangeChange = useCallback(({ lower, upper }) => {
         if (!openPositionLiqProfile) return;
@@ -2102,22 +2351,27 @@ export default function App() {
                 setOpenPositionRangeUpper(String(Number(upperPct.toFixed(2))));
                 setOpenPositionRangeUpperAuto(false);
             }
+            setOpenPositionError('');
         } else {
-            if (Number.isFinite(lower)) setOpenPositionTickLower(String(lower));
-            if (Number.isFinite(upper)) setOpenPositionTickUpper(String(upper));
+            const nextLower = Number.isFinite(lower) ? lower : openPositionSelectedManualTickLower;
+            const nextUpper = Number.isFinite(upper) ? upper : openPositionSelectedManualTickUpper;
+            applyOpenPositionTickRange(nextLower, nextUpper);
         }
-        setOpenPositionError('');
-    }, [openPositionLiqProfile, openPositionRangeInputMode]);
+    }, [
+        openPositionLiqProfile,
+        openPositionRangeInputMode,
+        openPositionSelectedManualTickLower,
+        openPositionSelectedManualTickUpper,
+        applyOpenPositionTickRange,
+    ]);
 
     const onOpenPositionChartBinSelect = useCallback((bin) => {
         if (!bin || openPositionRangeInputMode === 'percentage') return;
         const lower = Number(bin?.tick_lower);
         const upper = Number(bin?.tick_upper);
         if (!Number.isInteger(lower) || !Number.isInteger(upper) || upper <= lower) return;
-        setOpenPositionTickLower(String(lower));
-        setOpenPositionTickUpper(String(upper));
-        setOpenPositionError('');
-    }, [openPositionRangeInputMode]);
+        applyOpenPositionTickRange(lower, upper);
+    }, [openPositionRangeInputMode, applyOpenPositionTickRange]);
 
     useEffect(() => {
         if (!openPositionPool || !hasInitData || !multiWalletEnabled) return;
@@ -2344,7 +2598,7 @@ export default function App() {
                     poolAddress: openPositionPool?.pool_address,
                     poolVersion: openPositionPool?.protocol_version,
                     amount,
-                    rangeInputMode: openPositionRangeInputMode,
+                    rangeInputMode: openPositionRangeInputMode === 'price' ? 'tick' : openPositionRangeInputMode,
                     slippageTolerance: taskSlippage.value,
                     entrySwapSlippageTolerance: entrySwapSlippage.value,
                     allowEntrySwap: true,
@@ -2356,8 +2610,8 @@ export default function App() {
                     previewPayload.rangeLowerPct = range.lower;
                     previewPayload.rangeUpperPct = range.upper;
                 } else {
-                    previewPayload.tickLower = openPositionTickLowerValue;
-                    previewPayload.tickUpper = openPositionTickUpperValue;
+                    previewPayload.tickLower = openPositionSelectedManualTickLower;
+                    previewPayload.tickUpper = openPositionSelectedManualTickUpper;
                 }
                 const resp = await previewOpenPosition(previewPayload);
                 if (!active) return;
@@ -2403,6 +2657,8 @@ export default function App() {
         openPositionRangeUpper,
         openPositionTickLower,
         openPositionTickUpper,
+        openPositionPriceLower,
+        openPositionPriceUpper,
         openPositionSlippage,
         openPositionEntrySwapSlippage,
         openPositionRiskAck,
@@ -2411,8 +2667,8 @@ export default function App() {
         walletsError,
         walletsData,
         openPositionWalletId,
-        openPositionTickLowerValue,
-        openPositionTickUpperValue,
+        openPositionSelectedManualTickLower,
+        openPositionSelectedManualTickUpper,
     ]);
 
     const handleOpenPosition = async () => {
@@ -2447,8 +2703,13 @@ export default function App() {
                 setOpenPositionError('区间必须在 0 到 100 之间。');
                 return;
             }
-        } else if (!Number.isInteger(openPositionTickLowerValue) || !Number.isInteger(openPositionTickUpperValue) || openPositionTickLowerValue >= openPositionTickUpperValue) {
+        } else if (openPositionRangeInputMode !== 'price' && (!Number.isInteger(openPositionTickLowerValue) || !Number.isInteger(openPositionTickUpperValue) || openPositionTickLowerValue >= openPositionTickUpperValue)) {
             setOpenPositionError('请输入有效的 Tick 区间。');
+            return;
+        }
+
+        if (openPositionRangeInputMode !== 'percentage' && (!Number.isInteger(openPositionSelectedManualTickLower) || !Number.isInteger(openPositionSelectedManualTickUpper) || openPositionSelectedManualTickLower >= openPositionSelectedManualTickUpper)) {
+            setOpenPositionError(openPositionRangeInputMode === 'price' ? '请输入有效的价格区间。' : '请输入有效的 Tick 区间。');
             return;
         }
 
@@ -2548,7 +2809,7 @@ export default function App() {
                 poolAddress: openPositionPool?.pool_address,
                 poolVersion: openPositionPool?.protocol_version,
                 amount,
-                rangeInputMode: openPositionRangeInputMode,
+                rangeInputMode: openPositionRangeInputMode === 'price' ? 'tick' : openPositionRangeInputMode,
                 slippageTolerance: slippageParsed.value,
                 entrySwapSlippageTolerance: openPositionEntrySwapPreview?.required ? entrySwapSlippageParsed.value : undefined,
                 allowEntrySwap: true,
@@ -2563,8 +2824,8 @@ export default function App() {
                 submitPayload.rangeLowerPct = range.lower;
                 submitPayload.rangeUpperPct = range.upper;
             } else {
-                submitPayload.tickLower = openPositionTickLowerValue;
-                submitPayload.tickUpper = openPositionTickUpperValue;
+                submitPayload.tickLower = openPositionSelectedManualTickLower;
+                submitPayload.tickUpper = openPositionSelectedManualTickUpper;
             }
             await openPosition(submitPayload);
             setOpenPositionError('');
@@ -4017,15 +4278,19 @@ export default function App() {
                                     rangeLowerTick={openPositionChartLowerTick}
                                     rangeUpperTick={openPositionChartUpperTick}
                                     onRangeChange={onOpenPositionChartRangeChange}
-                                    onBinSelect={openPositionRangeInputMode === 'grid' || openPositionRangeInputMode === 'tick' ? onOpenPositionChartBinSelect : undefined}
+                                    onBinSelect={openPositionRangeInputMode === 'grid' || openPositionRangeInputMode === 'tick' || openPositionRangeInputMode === 'price' ? onOpenPositionChartBinSelect : undefined}
                                     loading={openPositionLiqProfileLoading}
-                                    token0Decimals={Number(openPositionPool?.token0_decimals ?? openPositionPool?.token0?.decimals ?? 18) || 18}
-                                    token1Decimals={Number(openPositionPool?.token1_decimals ?? openPositionPool?.token1?.decimals ?? 18) || 18}
+                                    token0Decimals={openPositionToken0Decimals}
+                                    token1Decimals={openPositionToken1Decimals}
+                                    invertPrice={openPositionInvertPrice}
+                                    tokenLeftLabel={openPositionInvertPrice ? openPositionToken0Symbol : openPositionToken1Symbol}
+                                    tokenRightLabel={openPositionInvertPrice ? openPositionToken1Symbol : openPositionToken0Symbol}
+                                    quoteIsToken1={openPositionQuoteIsToken1}
                                     titleText="流动性分布"
                                     titlePlacement="left"
                                     height={180}
                                 />
-                                {openPositionRangeInputMode === 'grid' || openPositionRangeInputMode === 'tick' ? (
+                                {openPositionRangeInputMode === 'grid' || openPositionRangeInputMode === 'tick' || openPositionRangeInputMode === 'price' ? (
                                     <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40">
                                         点图上的柱子可直接选中一格。
                                     </div>
@@ -4155,7 +4420,7 @@ export default function App() {
                                         {openPositionRangeInputMode === 'percentage' ? '自定义区间 (%)' : 'Tick 区间编辑'}
                                     </div>
                                     <div className="flex flex-wrap justify-end gap-1.5">
-                                        {OPEN_POSITION_RANGE_OPTIONS.map((option) => (
+                                        {OPEN_POSITION_MANUAL_OPTIONS.map((option) => (
                                             <button
                                                 key={option.key}
                                                 type="button"
@@ -4297,6 +4562,46 @@ export default function App() {
                                             </div>
                                         </div>
 
+                                        <div className={`mt-3 rounded-2xl border p-3 ${String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
+                                            ? 'border-emerald-500/25 bg-emerald-500/10'
+                                            : 'border-sky-500/20 bg-sky-500/10'
+                                            }`}>
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div className="text-[12px] font-semibold text-zinc-900 dark:text-white/90">
+                                                    {String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_') ? '当前将开单边仓' : '当前将开双边仓'}
+                                                </div>
+                                                {openPositionRangeShapeLabel ? (
+                                                    <span className="rounded-full bg-white/70 px-2 py-1 text-[10px] font-bold text-zinc-700 dark:bg-white/10 dark:text-white/80">
+                                                        {openPositionRangeShapeLabel}
+                                                    </span>
+                                                ) : null}
+                                            </div>
+                                            <div className="mt-1 text-[11px] leading-5 text-zinc-600 dark:text-white/60">
+                                                {String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
+                                                    ? `从 USDT 入场后，最终会更偏向 ${openPositionEffectiveRangeEditor?.dominant_token_symbol || '--'} 单边资产。`
+                                                    : '当前区间覆盖现价，执行时会自动分配到两侧资产。'}
+                                            </div>
+                                            <div className="mt-3 flex flex-wrap gap-1.5">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => shiftOpenPositionRangeToSingleSide('lower')}
+                                                    className="rounded-full border border-zinc-200 bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                                >
+                                                    单边下限
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => shiftOpenPositionRangeToSingleSide('upper')}
+                                                    className="rounded-full border border-zinc-200 bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                                >
+                                                    单边上限
+                                                </button>
+                                            </div>
+                                            <div className="mt-2 text-[10px] text-zinc-500 dark:text-white/45">
+                                                保留当前宽度，整体挪到当前价下方或上方，也允许继续越过活跃格调整。
+                                            </div>
+                                        </div>
+
                                         {openPositionRangeInputMode === 'grid' ? (
                                             <>
                                                 <div className="mt-3 flex flex-wrap gap-1.5">
@@ -4362,6 +4667,48 @@ export default function App() {
                                             </>
                                         ) : null}
 
+                                        {openPositionRangeInputMode === 'price' ? (
+                                            <>
+                                                <div className="mt-3 grid grid-cols-2 gap-2">
+                                                    <input
+                                                        value={openPositionPriceLower}
+                                                        onChange={(e) => {
+                                                            setOpenPositionPriceLower(e.target.value);
+                                                            setOpenPositionError('');
+                                                        }}
+                                                        inputMode="decimal"
+                                                        className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
+                                                        placeholder="下限价格"
+                                                    />
+                                                    <input
+                                                        value={openPositionPriceUpper}
+                                                        onChange={(e) => {
+                                                            setOpenPositionPriceUpper(e.target.value);
+                                                            setOpenPositionError('');
+                                                        }}
+                                                        inputMode="decimal"
+                                                        className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
+                                                        placeholder="上限价格"
+                                                    />
+                                                </div>
+                                                <div className="mt-3 rounded-2xl border border-zinc-200 bg-white/70 p-3 dark:border-white/10 dark:bg-white/5">
+                                                    <div className="grid gap-2 text-[11px] text-zinc-600 dark:text-white/60">
+                                                        <div className="flex items-center justify-between gap-3">
+                                                            <span>价格计价</span>
+                                                            <span className="font-semibold text-zinc-900 dark:text-white/90">
+                                                                {openPositionPriceRange?.baseSymbol || '--'}/{openPositionPriceRange?.quoteSymbol || '--'}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex items-center justify-between gap-3">
+                                                            <span>映射 Tick</span>
+                                                            <span className="font-mono font-semibold text-zinc-900 dark:text-white/90">
+                                                                {Number.isInteger(openPositionSelectedManualTickLower) ? openPositionSelectedManualTickLower : '--'} ~ {Number.isInteger(openPositionSelectedManualTickUpper) ? openPositionSelectedManualTickUpper : '--'}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </>
+                                        ) : (
                                         <div className="mt-3 grid grid-cols-2 gap-2">
                                             <input
                                                 value={openPositionTickLower}
@@ -4384,6 +4731,7 @@ export default function App() {
                                                 placeholder="上限 Tick"
                                             />
                                         </div>
+                                        )}
 
                                         {openPositionEffectiveRangeEditor ? (
                                             <div className="mt-3 rounded-2xl border border-zinc-200 bg-white/70 p-3 dark:border-white/10 dark:bg-white/5">

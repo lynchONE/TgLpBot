@@ -158,6 +158,85 @@ function formatPriceValue(value) {
   return Number(num.toPrecision(6)).toString();
 }
 
+function formatPriceInputValue(value) {
+  const text = formatPriceValue(value);
+  return text === '--' ? '' : text;
+}
+
+function tickToPoolPrice(tick, token0Decimals, token1Decimals) {
+  const tickValue = Number(tick);
+  if (!Number.isFinite(tickValue)) return NaN;
+  const decAdj = Math.pow(10, (Number(token0Decimals) || 18) - (Number(token1Decimals) || 18));
+  return Math.pow(1.0001, tickValue) * decAdj;
+}
+
+function poolPriceToTick(price, token0Decimals, token1Decimals) {
+  const priceValue = Number(price);
+  if (!Number.isFinite(priceValue) || priceValue <= 0) return NaN;
+  const decAdj = Math.pow(10, (Number(token0Decimals) || 18) - (Number(token1Decimals) || 18));
+  const ratio = priceValue / decAdj;
+  if (!Number.isFinite(ratio) || ratio <= 0) return NaN;
+  return Math.log(ratio) / Math.log(1.0001);
+}
+
+function normalizeDisplayPriceTickRange(
+  lowerRaw,
+  upperRaw,
+  invertPrice,
+  token0Decimals,
+  token1Decimals,
+  tickSpacing,
+  minTick,
+  maxTick,
+) {
+  const lowerDisplay = Number(String(lowerRaw || '').trim());
+  const upperDisplay = Number(String(upperRaw || '').trim());
+  if (!Number.isFinite(lowerDisplay) || !Number.isFinite(upperDisplay) || lowerDisplay <= 0 || upperDisplay <= 0) {
+    return null;
+  }
+  const firstPoolPrice = invertPrice ? 1 / lowerDisplay : lowerDisplay;
+  const secondPoolPrice = invertPrice ? 1 / upperDisplay : upperDisplay;
+  const firstTick = poolPriceToTick(firstPoolPrice, token0Decimals, token1Decimals);
+  const secondTick = poolPriceToTick(secondPoolPrice, token0Decimals, token1Decimals);
+  if (!Number.isFinite(firstTick) || !Number.isFinite(secondTick)) return null;
+  const spacing = Number(tickSpacing);
+  const resolvedMinTick = Number(minTick);
+  const resolvedMaxTick = Number(maxTick);
+  let lowerTick = Number.isFinite(spacing) && spacing > 0
+    ? roundDownToTickSpacing(Math.min(firstTick, secondTick), spacing)
+    : Math.floor(Math.min(firstTick, secondTick));
+  let upperTick = Number.isFinite(spacing) && spacing > 0
+    ? roundUpToTickSpacing(Math.max(firstTick, secondTick), spacing)
+    : Math.ceil(Math.max(firstTick, secondTick));
+  if (Number.isFinite(resolvedMinTick)) lowerTick = Math.max(lowerTick, resolvedMinTick);
+  if (Number.isFinite(resolvedMaxTick)) upperTick = Math.min(upperTick, resolvedMaxTick);
+  if (Number.isFinite(spacing) && spacing > 0 && upperTick <= lowerTick) {
+    if (Number.isFinite(resolvedMaxTick) && lowerTick + spacing > resolvedMaxTick) {
+      lowerTick = upperTick - spacing;
+    } else {
+      upperTick = lowerTick + spacing;
+    }
+  }
+  if (!Number.isFinite(lowerTick) || !Number.isFinite(upperTick) || upperTick <= lowerTick) return null;
+  return { lowerTick: Math.trunc(lowerTick), upperTick: Math.trunc(upperTick) };
+}
+
+function buildDisplayPriceRangeFromTicks(lowerTick, upperTick, invertPrice, token0Decimals, token1Decimals) {
+  if (!Number.isInteger(lowerTick) || !Number.isInteger(upperTick) || upperTick <= lowerTick) return null;
+  const firstPrice = tickToPoolPrice(lowerTick, token0Decimals, token1Decimals);
+  const secondPrice = tickToPoolPrice(upperTick, token0Decimals, token1Decimals);
+  if (!Number.isFinite(firstPrice) || !Number.isFinite(secondPrice) || firstPrice <= 0 || secondPrice <= 0) return null;
+  const firstDisplay = invertPrice ? 1 / firstPrice : firstPrice;
+  const secondDisplay = invertPrice ? 1 / secondPrice : secondPrice;
+  if (!Number.isFinite(firstDisplay) || !Number.isFinite(secondDisplay) || firstDisplay <= 0 || secondDisplay <= 0) {
+    return null;
+  }
+  return {
+    lowerPrice: Math.min(firstDisplay, secondDisplay),
+    upperPrice: Math.max(firstDisplay, secondDisplay),
+  };
+}
+
 function formatRangePercentCompact(value) {
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0) return '--';
@@ -211,6 +290,14 @@ function roundDownToTickSpacing(tick, tickSpacing) {
   const remainder = value % spacing;
   if (remainder === 0) return value;
   return value < 0 ? value - remainder - spacing : value - remainder;
+}
+
+function roundUpToTickSpacing(tick, tickSpacing) {
+  const spacing = Number(tickSpacing);
+  const value = Number(tick);
+  if (!Number.isFinite(spacing) || spacing <= 0 || !Number.isFinite(value)) return 0;
+  const down = roundDownToTickSpacing(value, spacing);
+  return down === value ? value : down + spacing;
 }
 
 function buildGridBins(editor, radius = GRID_RADIUS) {
@@ -273,6 +360,8 @@ export default function OpenPositionModal({
   const [rangeUpperAuto, setRangeUpperAuto] = useState(true);
   const [tickLowerInput, setTickLowerInput] = useState('');
   const [tickUpperInput, setTickUpperInput] = useState('');
+  const [priceLowerInput, setPriceLowerInput] = useState('');
+  const [priceUpperInput, setPriceUpperInput] = useState('');
   const [gridBoundaryTarget, setGridBoundaryTarget] = useState('lower');
   const [slippage, setSlippage] = useState('');
   const [entrySwapSlippage, setEntrySwapSlippage] = useState('');
@@ -381,6 +470,7 @@ export default function OpenPositionModal({
     if (!taskSlippage.valid || !entrySwapSlippageValue.valid) return null;
     if (walletsLoading) return null;
     if (showWalletPicker && !resolvedWalletId) return null;
+    const requestRangeInputMode = rangeInputMode === 'price' ? 'tick' : rangeInputMode;
     const base = {
       apiBaseUrl,
       initData,
@@ -388,14 +478,14 @@ export default function OpenPositionModal({
       poolAddress: addr,
       poolVersion: version,
       amount: amountValue,
-      rangeInputMode,
+      rangeInputMode: requestRangeInputMode,
       slippageTolerance: taskSlippage.value,
       entrySwapSlippageTolerance: entrySwapSlippageValue.value,
       allowEntrySwap: true,
       walletId: resolvedWalletId || undefined,
       ackLiquidityRisk: riskAck,
     };
-    if (rangeInputMode === 'percentage') {
+    if (requestRangeInputMode === 'percentage') {
       if (!Number.isFinite(rangeLowerValue) || rangeLowerValue <= 0 || rangeLowerValue >= 100) return null;
       if (!Number.isFinite(rangeUpperValue) || rangeUpperValue <= 0 || rangeUpperValue >= 100) return null;
       return {
@@ -404,11 +494,13 @@ export default function OpenPositionModal({
         rangeUpperPct: rangeUpperValue,
       };
     }
-    if (!Number.isInteger(tickLowerValue) || !Number.isInteger(tickUpperValue) || tickLowerValue >= tickUpperValue) return null;
+    if (!Number.isInteger(selectedManualTickLower) || !Number.isInteger(selectedManualTickUpper) || selectedManualTickLower >= selectedManualTickUpper) {
+      return null;
+    }
     return {
       ...base,
-      tickLower: tickLowerValue,
-      tickUpper: tickUpperValue,
+      tickLower: selectedManualTickLower,
+      tickUpper: selectedManualTickUpper,
     };
   }, [
     apiBaseUrl,
@@ -420,8 +512,8 @@ export default function OpenPositionModal({
     rangeInputMode,
     rangeLowerValue,
     rangeUpperValue,
-    tickLowerValue,
-    tickUpperValue,
+    selectedManualTickLower,
+    selectedManualTickUpper,
     taskSlippage,
     entrySwapSlippageValue,
     walletsLoading,
@@ -452,6 +544,8 @@ export default function OpenPositionModal({
     setRangeInputMode('percentage');
     setTickLowerInput('');
     setTickUpperInput('');
+    setPriceLowerInput('');
+    setPriceUpperInput('');
     setGridBoundaryTarget('lower');
   }, [addr, version]);
 
@@ -598,21 +692,15 @@ export default function OpenPositionModal({
   const syncTicksFromEditor = useCallback((editor) => {
     const lower = Number(editor?.tick_lower);
     const upper = Number(editor?.tick_upper);
-    if (!Number.isInteger(lower) || !Number.isInteger(upper)) return false;
-    setTickLowerInput(String(lower));
-    setTickUpperInput(String(upper));
-    return true;
-  }, []);
+    return applyResolvedTickRange(lower, upper, { clear: false });
+  }, [applyResolvedTickRange]);
 
   const applyDefaultTickRange = useCallback(() => {
     if (syncTicksFromEditor(previewRangeEditor)) return;
     const lower = Number(rangeEditor?.anchor_tick_lower);
     const upper = Number(rangeEditor?.anchor_tick_upper);
-    if (Number.isInteger(lower) && Number.isInteger(upper)) {
-      setTickLowerInput(String(lower));
-      setTickUpperInput(String(upper));
-    }
-  }, [previewRangeEditor, rangeEditor, syncTicksFromEditor]);
+    applyResolvedTickRange(lower, upper, { clear: false });
+  }, [previewRangeEditor, rangeEditor, syncTicksFromEditor, applyResolvedTickRange]);
 
   const handleRangeInputModeChange = useCallback((mode) => {
     clearErrors();
@@ -629,8 +717,8 @@ export default function OpenPositionModal({
     if (!Number.isFinite(spacing) || spacing <= 0) return;
     const minTick = Number(rangeEditor?.min_tick);
     const maxTick = Number(rangeEditor?.max_tick);
-    let nextLower = Number.isInteger(tickLowerValue) ? tickLowerValue : Number(rangeEditor?.anchor_tick_lower);
-    let nextUpper = Number.isInteger(tickUpperValue) ? tickUpperValue : Number(rangeEditor?.anchor_tick_upper);
+    let nextLower = Number.isInteger(selectedManualTickLower) ? selectedManualTickLower : Number(rangeEditor?.anchor_tick_lower);
+    let nextUpper = Number.isInteger(selectedManualTickUpper) ? selectedManualTickUpper : Number(rangeEditor?.anchor_tick_upper);
     if (!Number.isInteger(nextLower) || !Number.isInteger(nextUpper)) return;
     if (target === 'lower') {
       nextLower += delta * spacing;
@@ -641,17 +729,15 @@ export default function OpenPositionModal({
       if (Number.isFinite(maxTick)) nextUpper = Math.min(nextUpper, maxTick);
       if (nextUpper <= nextLower) nextLower = nextUpper - spacing;
     }
-    setTickLowerInput(String(nextLower));
-    setTickUpperInput(String(nextUpper));
-    clearErrors();
-  }, [rangeEditor, tickLowerValue, tickUpperValue, clearErrors]);
+    applyResolvedTickRange(nextLower, nextUpper);
+  }, [rangeEditor, selectedManualTickLower, selectedManualTickUpper, applyResolvedTickRange]);
 
   const applyGridBin = useCallback((bin) => {
     if (!bin) return;
     const spacing = Number(rangeEditor?.tick_spacing);
     if (!Number.isFinite(spacing) || spacing <= 0) return;
-    let nextLower = Number.isInteger(tickLowerValue) ? tickLowerValue : Number(rangeEditor?.anchor_tick_lower);
-    let nextUpper = Number.isInteger(tickUpperValue) ? tickUpperValue : Number(rangeEditor?.anchor_tick_upper);
+    let nextLower = Number.isInteger(selectedManualTickLower) ? selectedManualTickLower : Number(rangeEditor?.anchor_tick_lower);
+    let nextUpper = Number.isInteger(selectedManualTickUpper) ? selectedManualTickUpper : Number(rangeEditor?.anchor_tick_upper);
     if (gridBoundaryTarget === 'lower') {
       nextLower = bin.lowerTick;
       if (nextLower >= nextUpper) nextUpper = nextLower + spacing;
@@ -659,16 +745,56 @@ export default function OpenPositionModal({
       nextUpper = bin.upperTick;
       if (nextUpper <= nextLower) nextLower = nextUpper - spacing;
     }
-    setTickLowerInput(String(nextLower));
-    setTickUpperInput(String(nextUpper));
-    clearErrors();
-  }, [rangeEditor, tickLowerValue, tickUpperValue, gridBoundaryTarget, clearErrors]);
+    applyResolvedTickRange(nextLower, nextUpper);
+  }, [rangeEditor, selectedManualTickLower, selectedManualTickUpper, gridBoundaryTarget, applyResolvedTickRange]);
+
+  const shiftRangeToSingleSide = useCallback((side) => {
+    const spacing = Number(rangeEditor?.tick_spacing);
+    if (!Number.isFinite(spacing) || spacing <= 0) return;
+    const anchorLower = Number(rangeEditor?.anchor_tick_lower);
+    const anchorUpper = Number(rangeEditor?.anchor_tick_upper);
+    if (!Number.isInteger(anchorLower) || !Number.isInteger(anchorUpper)) return;
+    const minTick = Number(rangeEditor?.min_tick);
+    const maxTick = Number(rangeEditor?.max_tick);
+    const currentLower = Number.isInteger(selectedManualTickLower) ? selectedManualTickLower : anchorLower;
+    const currentUpper = Number.isInteger(selectedManualTickUpper) ? selectedManualTickUpper : anchorUpper;
+    const width = Math.max(spacing, currentUpper - currentLower);
+    let nextLower = currentLower;
+    let nextUpper = currentUpper;
+    if (side === 'lower') {
+      nextUpper = anchorLower;
+      nextLower = nextUpper - width;
+      if (Number.isFinite(minTick) && nextLower < minTick) {
+        nextLower = minTick;
+        nextUpper = nextLower + width;
+      }
+    } else {
+      nextLower = anchorUpper;
+      nextUpper = nextLower + width;
+      if (Number.isFinite(maxTick) && nextUpper > maxTick) {
+        nextUpper = maxTick;
+        nextLower = nextUpper - width;
+      }
+    }
+    applyResolvedTickRange(nextLower, nextUpper);
+  }, [rangeEditor, selectedManualTickLower, selectedManualTickUpper, applyResolvedTickRange]);
 
   useEffect(() => {
     if (rangeInputMode === 'percentage') return;
     if (String(tickLowerInput || '').trim() && String(tickUpperInput || '').trim()) return;
     applyDefaultTickRange();
   }, [rangeInputMode, tickLowerInput, tickUpperInput, applyDefaultTickRange]);
+
+  const lastInvertRef = useRef(invertPrice);
+  useEffect(() => {
+    if (lastInvertRef.current === invertPrice) return;
+    lastInvertRef.current = invertPrice;
+    if (rangeInputMode !== 'price') return;
+    if (!Number.isInteger(selectedManualTickLower) || !Number.isInteger(selectedManualTickUpper) || selectedManualTickUpper <= selectedManualTickLower) {
+      return;
+    }
+    syncPriceInputsFromTicks(selectedManualTickLower, selectedManualTickUpper);
+  }, [invertPrice, rangeInputMode, selectedManualTickLower, selectedManualTickUpper, syncPriceInputsFromTicks]);
 
   useEffect(() => {
     if (!apiBaseUrl || !initData || dcaDefaultsLoaded) return;
@@ -734,6 +860,55 @@ export default function OpenPositionModal({
   const defaultInvert = STABLE_OR_QUOTE.has(token0Symbol);
   const [invertPrice, setInvertPrice] = useState(defaultInvert);
   useEffect(() => { setInvertPrice(defaultInvert); }, [defaultInvert]);
+  const manualRangeInputOptions = useMemo(() => (
+    [...RANGE_INPUT_OPTIONS, { key: 'price', label: '价格区间' }]
+  ), []);
+  const priceTickRange = useMemo(() => (
+    normalizeDisplayPriceTickRange(
+      priceLowerInput,
+      priceUpperInput,
+      invertPrice,
+      token0Decimals,
+      token1Decimals,
+      Number(rangeEditor?.tick_spacing),
+      Number(rangeEditor?.min_tick),
+      Number(rangeEditor?.max_tick),
+    )
+  ), [
+    priceLowerInput,
+    priceUpperInput,
+    invertPrice,
+    token0Decimals,
+    token1Decimals,
+    rangeEditor?.tick_spacing,
+    rangeEditor?.min_tick,
+    rangeEditor?.max_tick,
+  ]);
+  const selectedManualTickLower = useMemo(() => {
+    if (rangeInputMode === 'price') return priceTickRange?.lowerTick ?? null;
+    return Number.isInteger(tickLowerValue) ? tickLowerValue : null;
+  }, [rangeInputMode, priceTickRange, tickLowerValue]);
+  const selectedManualTickUpper = useMemo(() => {
+    if (rangeInputMode === 'price') return priceTickRange?.upperTick ?? null;
+    return Number.isInteger(tickUpperValue) ? tickUpperValue : null;
+  }, [rangeInputMode, priceTickRange, tickUpperValue]);
+
+  const syncPriceInputsFromTicks = useCallback((lowerTick, upperTick) => {
+    const displayRange = buildDisplayPriceRangeFromTicks(lowerTick, upperTick, invertPrice, token0Decimals, token1Decimals);
+    if (!displayRange) return false;
+    setPriceLowerInput(formatPriceInputValue(displayRange.lowerPrice));
+    setPriceUpperInput(formatPriceInputValue(displayRange.upperPrice));
+    return true;
+  }, [invertPrice, token0Decimals, token1Decimals]);
+
+  const applyResolvedTickRange = useCallback((lowerTick, upperTick, options = {}) => {
+    if (!Number.isInteger(lowerTick) || !Number.isInteger(upperTick) || upperTick <= lowerTick) return false;
+    setTickLowerInput(String(lowerTick));
+    setTickUpperInput(String(upperTick));
+    syncPriceInputsFromTicks(lowerTick, upperTick);
+    if (options.clear !== false) clearErrors();
+    return true;
+  }, [clearErrors, syncPriceInputsFromTicks]);
 
   const reloadLiqProfile = useCallback(() => {
     if (!addr || !protocolKind || !chain) {
@@ -845,7 +1020,7 @@ export default function OpenPositionModal({
 
   const chartLowerTick = useMemo(() => {
     if (rangeInputMode !== 'percentage') {
-      return Number.isInteger(tickLowerValue) ? tickLowerValue : null;
+      return Number.isInteger(selectedManualTickLower) ? selectedManualTickLower : null;
     }
     const ed = rangeEditor;
     if (!ed || !Number.isFinite(Number(ed.current_tick))) return null;
@@ -854,11 +1029,11 @@ export default function OpenPositionModal({
     const ratio = 1 - lowerPct / 100;
     if (ratio <= 0) return null;
     return Math.round(Number(ed.current_tick) + Math.log(ratio) / Math.log(1.0001));
-  }, [rangeInputMode, tickLowerValue, rangeEditor, rangeLower]);
+  }, [rangeInputMode, selectedManualTickLower, rangeEditor, rangeLower]);
 
   const chartUpperTick = useMemo(() => {
     if (rangeInputMode !== 'percentage') {
-      return Number.isInteger(tickUpperValue) ? tickUpperValue : null;
+      return Number.isInteger(selectedManualTickUpper) ? selectedManualTickUpper : null;
     }
     const ed = rangeEditor;
     if (!ed || !Number.isFinite(Number(ed.current_tick))) return null;
@@ -866,7 +1041,7 @@ export default function OpenPositionModal({
     if (!Number.isFinite(upperPct) || upperPct <= 0) return null;
     const ratio = 1 + upperPct / 100;
     return Math.round(Number(ed.current_tick) + Math.log(ratio) / Math.log(1.0001));
-  }, [rangeInputMode, tickUpperValue, rangeEditor, rangeUpper]);
+  }, [rangeInputMode, selectedManualTickUpper, rangeEditor, rangeUpper]);
 
   const priceRange = useMemo(() => {
     const refTick = Number(liqProfile?.current_tick);
@@ -905,19 +1080,19 @@ export default function OpenPositionModal({
 
   const selectedShareRangeLowerTick = useMemo(() => {
     if (rangeInputMode !== 'percentage') {
-      return Number.isInteger(tickLowerValue) ? tickLowerValue : null;
+      return Number.isInteger(selectedManualTickLower) ? selectedManualTickLower : null;
     }
     const resolvedLower = Number(rangeEditor?.tick_lower);
     return Number.isInteger(resolvedLower) ? resolvedLower : chartLowerTick;
-  }, [rangeInputMode, tickLowerValue, rangeEditor, chartLowerTick]);
+  }, [rangeInputMode, selectedManualTickLower, rangeEditor, chartLowerTick]);
 
   const selectedShareRangeUpperTick = useMemo(() => {
     if (rangeInputMode !== 'percentage') {
-      return Number.isInteger(tickUpperValue) ? tickUpperValue : null;
+      return Number.isInteger(selectedManualTickUpper) ? selectedManualTickUpper : null;
     }
     const resolvedUpper = Number(rangeEditor?.tick_upper);
     return Number.isInteger(resolvedUpper) ? resolvedUpper : chartUpperTick;
-  }, [rangeInputMode, tickUpperValue, rangeEditor, chartUpperTick]);
+  }, [rangeInputMode, selectedManualTickUpper, rangeEditor, chartUpperTick]);
 
   const shareEstimateInfo = useMemo(() => {
     if (!liqProfile) return null;
@@ -964,8 +1139,13 @@ export default function OpenPositionModal({
     let hasUsdSample = false;
     for (const bin of overlappingBins) {
       const usd = estimateBinLiquidityUsd(bin, currentTick, token0Decimals, token1Decimals, quoteIsToken1);
-      if (Number.isFinite(usd) && usd >= 0) {
-        existingLiquidityUsd += usd;
+      const binLower = Number(bin?.tick_lower);
+      const binUpper = Number(bin?.tick_upper);
+      const overlapSpan = Math.max(0, Math.min(binUpper, upperTick) - Math.max(binLower, lowerTick));
+      const binSpan = binUpper - binLower;
+      const overlapRatio = binSpan > 0 ? Math.min(1, overlapSpan / binSpan) : 0;
+      if (Number.isFinite(usd) && usd >= 0 && overlapRatio > 0) {
+        existingLiquidityUsd += usd * overlapRatio;
         hasUsdSample = true;
       }
     }
@@ -1011,22 +1191,21 @@ export default function OpenPositionModal({
         setRangeUpper(String(Number(upperPct.toFixed(2))));
         setRangeUpperAuto(false);
       }
+      clearErrors();
     } else {
-      if (Number.isFinite(lower)) setTickLowerInput(String(lower));
-      if (Number.isFinite(upper)) setTickUpperInput(String(upper));
+      const nextLower = Number.isFinite(lower) ? lower : selectedManualTickLower;
+      const nextUpper = Number.isFinite(upper) ? upper : selectedManualTickUpper;
+      applyResolvedTickRange(nextLower, nextUpper);
     }
-    clearErrors();
-  }, [liqProfile, rangeInputMode, clearErrors]);
+  }, [liqProfile, rangeInputMode, selectedManualTickLower, selectedManualTickUpper, applyResolvedTickRange, clearErrors]);
 
   const handleChartBinSelect = useCallback((bin) => {
     if (!bin || rangeInputMode === 'percentage') return;
     const lower = Number(bin?.tick_lower);
     const upper = Number(bin?.tick_upper);
     if (!Number.isInteger(lower) || !Number.isInteger(upper) || upper <= lower) return;
-    setTickLowerInput(String(lower));
-    setTickUpperInput(String(upper));
-    clearErrors();
-  }, [rangeInputMode, clearErrors]);
+    applyResolvedTickRange(lower, upper);
+  }, [rangeInputMode, applyResolvedTickRange]);
 
   const handleSubmit = useCallback(() => {
     if (!Number.isFinite(amountValue) || amountValue <= 0) {
@@ -1042,8 +1221,12 @@ export default function OpenPositionModal({
         setError('请输入有效的上限范围。');
         return;
       }
-    } else if (!Number.isInteger(tickLowerValue) || !Number.isInteger(tickUpperValue) || tickLowerValue >= tickUpperValue) {
+    } else if (rangeInputMode !== 'price' && (!Number.isInteger(tickLowerValue) || !Number.isInteger(tickUpperValue) || tickLowerValue >= tickUpperValue)) {
       setError('请输入有效的 Tick 区间。');
+      return;
+    }
+    if (rangeInputMode !== 'percentage' && (!Number.isInteger(selectedManualTickLower) || !Number.isInteger(selectedManualTickUpper) || selectedManualTickLower >= selectedManualTickUpper)) {
+      setError(rangeInputMode === 'price' ? '请输入有效的价格区间。' : '请输入有效的 Tick 区间。');
       return;
     }
     if (!taskSlippage.valid) {
@@ -1106,15 +1289,16 @@ export default function OpenPositionModal({
         rangeUpperPct: rangeUpperValue,
       }
       : {
-        tickLower: tickLowerValue,
-        tickUpper: tickUpperValue,
+        tickLower: selectedManualTickLower,
+        tickUpper: selectedManualTickUpper,
       };
+    const requestRangeInputMode = rangeInputMode === 'price' ? 'tick' : rangeInputMode;
     onSubmit({
       poolAddress: addr,
       poolVersion: version,
       chain,
       amount: amountValue,
-      rangeInputMode,
+      rangeInputMode: requestRangeInputMode,
       ...rangePayload,
       slippageTolerance: taskSlippage.value,
       entrySwapSlippageTolerance: entrySwapPreview?.required ? entrySwapSlippageValue.value : undefined,
@@ -1131,8 +1315,8 @@ export default function OpenPositionModal({
     rangeInputMode,
     rangeLowerValue,
     rangeUpperValue,
-    tickLowerValue,
-    tickUpperValue,
+    selectedManualTickLower,
+    selectedManualTickUpper,
     taskSlippage,
     entrySwapSlippageValue,
     showWalletPicker,
@@ -1180,7 +1364,7 @@ export default function OpenPositionModal({
               rangeLowerTick={chartLowerTick}
               rangeUpperTick={chartUpperTick}
               onRangeChange={onChartRangeChange}
-              onBinSelect={rangeInputMode === 'grid' || rangeInputMode === 'tick' ? handleChartBinSelect : undefined}
+              onBinSelect={rangeInputMode === 'grid' || rangeInputMode === 'tick' || rangeInputMode === 'price' ? handleChartBinSelect : undefined}
               loading={liqProfileLoading}
               token0Decimals={token0Decimals}
               token1Decimals={token1Decimals}
@@ -1225,7 +1409,7 @@ export default function OpenPositionModal({
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
                 <span className="modal-range-label">区间设置</span>
                 <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 6 }}>
-                  {RANGE_INPUT_OPTIONS.map((option) => {
+                  {manualRangeInputOptions.map((option) => {
                     const active = rangeInputMode === option.key;
                     return (
                       <button
@@ -1363,6 +1547,64 @@ export default function OpenPositionModal({
                     ) : null}
                   </div>
 
+                  <div style={{
+                    marginTop: 12,
+                    padding: 12,
+                    borderRadius: 14,
+                    border: String(rangeEditor?.position_shape || '').startsWith('single_')
+                      ? '1px solid rgba(16, 185, 129, 0.28)'
+                      : '1px solid rgba(59, 130, 246, 0.24)',
+                    background: String(rangeEditor?.position_shape || '').startsWith('single_')
+                      ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(16, 185, 129, 0.04))'
+                      : 'linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(59, 130, 246, 0.04))',
+                    display: 'grid',
+                    gap: 8,
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                      <strong style={{ color: 'var(--text)' }}>
+                        {String(rangeEditor?.position_shape || '').startsWith('single_') ? '当前将开单边仓' : '当前将开双边仓'}
+                      </strong>
+                      {rangeShapeLabel ? (
+                        <span style={{
+                          padding: '3px 8px',
+                          borderRadius: 999,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          background: 'rgba(255, 255, 255, 0.08)',
+                          color: 'var(--text)',
+                        }}>
+                          {rangeShapeLabel}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                      {String(rangeEditor?.position_shape || '').startsWith('single_')
+                        ? `从 USDT 入场后，最终会更偏向 ${rangeEditor?.dominant_token_symbol || '--'} 单边资产。`
+                        : '当前区间覆盖现价，执行时会自动分配到两侧资产。'}
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      <button
+                        type="button"
+                        className="ghost-chip"
+                        style={{ minWidth: 0, padding: '4px 10px', fontSize: 11 }}
+                        onClick={() => shiftRangeToSingleSide('lower')}
+                      >
+                        单边下限
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-chip"
+                        style={{ minWidth: 0, padding: '4px 10px', fontSize: 11 }}
+                        onClick={() => shiftRangeToSingleSide('upper')}
+                      >
+                        单边上限
+                      </button>
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                      保留当前宽度，整体挪到当前价下方或上方，也允许继续越过活跃格调整。
+                    </div>
+                  </div>
+
                   {rangeInputMode === 'grid' ? (
                     <>
                       <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -1452,6 +1694,62 @@ export default function OpenPositionModal({
                     </>
                   ) : null}
 
+                  {rangeInputMode === 'price' ? (
+                    <>
+                      <div className="modal-row" style={{ marginTop: 12 }}>
+                        <label className="modal-field">
+                          <span>下限价格</span>
+                          <input
+                            type="number"
+                            value={priceLowerInput}
+                            onChange={(e) => {
+                              clearErrors();
+                              setPriceLowerInput(e.target.value);
+                            }}
+                            min="0"
+                            step="any"
+                          />
+                        </label>
+                        <label className="modal-field">
+                          <span>上限价格</span>
+                          <input
+                            type="number"
+                            value={priceUpperInput}
+                            onChange={(e) => {
+                              clearErrors();
+                              setPriceUpperInput(e.target.value);
+                            }}
+                            min="0"
+                            step="any"
+                          />
+                        </label>
+                      </div>
+                      <div style={{
+                        marginTop: 10,
+                        padding: 12,
+                        borderRadius: 14,
+                        border: '1px solid rgba(148, 163, 184, 0.18)',
+                        background: 'rgba(15, 23, 42, 0.22)',
+                        display: 'grid',
+                        gap: 8,
+                        fontSize: 11,
+                        color: 'var(--text-muted)',
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                          <span>价格计价</span>
+                          <strong style={{ color: 'var(--text)' }}>
+                            {priceRange?.baseSymbol || '--'}/{priceRange?.quoteSymbol || '--'}
+                          </strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                          <span>映射 Tick</span>
+                          <strong style={{ color: 'var(--text)', fontFamily: 'var(--font-mono, ui-monospace, monospace)' }}>
+                            {Number.isInteger(selectedManualTickLower) ? selectedManualTickLower : '--'} ~ {Number.isInteger(selectedManualTickUpper) ? selectedManualTickUpper : '--'}
+                          </strong>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
                   <div className="modal-row" style={{ marginTop: 12 }}>
                     <label className="modal-field">
                       <span>下限 Tick</span>
@@ -1478,6 +1776,7 @@ export default function OpenPositionModal({
                       />
                     </label>
                   </div>
+                  )}
 
                   {rangeEditor?.range_lower_pct || rangeEditor?.range_upper_pct ? (
                     <div style={{

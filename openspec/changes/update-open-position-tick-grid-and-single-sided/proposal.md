@@ -1,26 +1,24 @@
-# Change: 开仓支持按 Tick/格子选区间并支持单边池交互
+# Change: 更新开仓 Tick/格子编辑器并补充价格区间与单边快捷模式
 
 ## Why
-- 当前开仓流程只支持输入上下百分比区间，虽然底层最终也会换算到 tick，但前端无法直接按 tick 或格子精确选区间，精度和可控性都不够。
-- 用户希望像主流 CLMM 产品一样，直接围绕当前价选择离散格子区间，并且能一眼看出区间落点、单边/双边形态和资金分布，而不是只看两个百分比输入框。
-- 当前系统从 USDT 一键开仓，缺少“单边池”这一用户心智的明确反馈。用户需要知道自己当前选中的区间是否会形成单边仓位，以及预估会偏向哪一侧资产。
-- WebApp 与 MiniApp 现在的开仓交互割裂，缺少统一的产品结构，不利于后续继续扩展按 tick、按格子、自动区间等高级交互。
+- 现有变更已经覆盖按百分比、Tick、格子编辑区间，以及单边/双边结果回显，但仍缺少用户最直观的按价格输入区间能力，例如直接输入 `0.05 - 0.07`。
+- 用户需要更明确的“当前将开单边仓还是双边仓”提示，以及一键把当前区间整体推到当前价下方或上方的快捷操作，降低单边仓位的操作门槛。
+- 后端已经支持按规范化后的 `tick_lower` / `tick_upper` 预览和执行，再新增一个后端 `price` 输入模式收益不高，反而会扩张协议面。
 
 ## What Changes
-- 扩展开仓接口与预览接口，支持三种区间输入方式：百分比、直接 tick、围绕当前价的格子数量。
-- 扩展开仓预览返回值，增加当前 tick、tick spacing、规范化后的 tick 下上界、格子数量、价格边界、单边/双边形态、预估资产占比和可视化所需的区间分布数据。
-- 重做 WebApp 与 MiniApp 的开仓交互，参考用户提供的竞品结构，采用“左侧区间编辑 / 右侧资金与执行参数”的信息架构，并在移动端折叠为分步卡片式布局。
-- 在开仓界面中明确支持“单边池”心智：当区间完全位于当前价一侧时，界面与预览都要明确展示这是单边仓位，并展示预估偏向的资产侧。
-- 保留现有百分比模式兼容性，旧客户端继续传 `range_lower_pct` / `range_upper_pct` 时不受影响。
+- 保持后端开仓协议不变：后端继续支持 `percentage`、`tick`、`grid` 三种执行输入，不新增后端 `price` 模式。
+- WebApp 与 MiniApp 新增前端“价格区间”编辑层，用户输入价格上下限后，由前端映射成 Tick 区间，并复用现有 `tick` 预览/提交链路。
+- 在 Tick/格子/价格编辑层上补充 `单边下限` / `单边上限` 快捷按钮，将当前选中宽度整体移动到当前价下方或上方。
+- 在提交前摘要中更显式地展示“当前将开单边仓 / 双边仓”、主偏向资产、规范化后的 Tick 区间和价格区间。
 
 ## Impact
 - Affected specs:
   - `open-position-grid-range`
   - `open-position-visual-editor`
 - Affected code:
-  - Backend: `backend/service/web_server/open_position.go`, `backend/service/web_server/open_position_prepare.go`, `backend/service/liquidity/*`, `backend/service/pricing/*`
-  - WebApp: `webapp/src/components/OpenPositionModal.jsx`, `webapp/src/api.js`, 相关样式与可视化组件
-  - MiniApp: `miniapp/src/App.jsx`, `miniapp/src/lib/api.js`, 相关卡片与可视化组件
+  - WebApp: `webapp/src/components/OpenPositionModal.jsx`
+  - MiniApp: `miniapp/src/App.jsx`
+  - 共用可视化组件：流动性分布图相关组件
 - Compatibility:
-  - 现有百分比开仓请求继续可用
-  - 新交互优先消费增强后的 prepare/preview 数据；若后端未升级，前端不得误导用户进入 tick/格子模式
+  - 现有按百分比、按 Tick、按格子的预览与开仓请求继续可用
+  - 新增价格区间仅是前端编辑能力，不要求后端新增字段

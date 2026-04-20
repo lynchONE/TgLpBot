@@ -114,7 +114,7 @@ export default function LiquidityDistributionChart({
     const [width, setWidth] = useState(0);
     const [draggingHandle, setDraggingHandle] = useState(null);
     const [hoveredBin, setHoveredBin] = useState(null);
-    const dragStateRef = useRef({ pointerId: null, suppressClickUntil: 0 });
+    const dragStateRef = useRef({ pointerId: null, suppressClickUntil: 0, target: null });
 
     useEffect(() => {
         const el = containerRef.current;
@@ -164,9 +164,31 @@ export default function LiquidityDistributionChart({
         return Math.round(raw);
     }, [tickRange, width, tickSpacing]);
 
+    const stopDragging = useCallback((event) => {
+        const activePointerId = dragStateRef.current.pointerId;
+        const eventPointerId = event && typeof event.pointerId === 'number' ? event.pointerId : null;
+        if (activePointerId !== null && eventPointerId !== null && eventPointerId !== activePointerId) return;
+        const target = dragStateRef.current.target;
+        if (target && activePointerId !== null && typeof target.hasPointerCapture === 'function' && target.hasPointerCapture(activePointerId)) {
+            try {
+                target.releasePointerCapture(activePointerId);
+            } catch {
+                // ignore
+            }
+        }
+        dragStateRef.current.pointerId = null;
+        dragStateRef.current.target = null;
+        dragStateRef.current.suppressClickUntil = Date.now() + 120;
+        setDraggingHandle(null);
+    }, []);
+
     const onPointerMove = useCallback((event) => {
         if (!draggingHandle || !containerRef.current) return;
         if (dragStateRef.current.pointerId !== null && event.pointerId !== dragStateRef.current.pointerId) return;
+        if (event.pointerType === 'mouse' && (event.buttons & 1) === 0) {
+            stopDragging(event);
+            return;
+        }
         const rect = containerRef.current.getBoundingClientRect();
         const x = event.clientX - rect.left;
         const tick = xToTick(x);
@@ -178,24 +200,23 @@ export default function LiquidityDistributionChart({
             const lowerBound = Number.isFinite(rangeLowerTick) ? rangeLowerTick + (tickSpacing || 1) : tickRange.min;
             onRangeChange({ upper: clampTick(tick, lowerBound, tickRange.max) });
         }
-    }, [draggingHandle, xToTick, onRangeChange, rangeLowerTick, rangeUpperTick, tickRange, tickSpacing]);
+    }, [draggingHandle, xToTick, onRangeChange, rangeLowerTick, rangeUpperTick, tickRange, tickSpacing, stopDragging]);
 
     const onPointerUp = useCallback((event) => {
-        if (dragStateRef.current.pointerId !== null && event.pointerId !== dragStateRef.current.pointerId) return;
-        dragStateRef.current.pointerId = null;
-        dragStateRef.current.suppressClickUntil = Date.now() + 120;
-        setDraggingHandle(null);
-    }, []);
+        stopDragging(event);
+    }, [stopDragging]);
 
     useEffect(() => {
         if (!draggingHandle) return undefined;
         window.addEventListener('pointermove', onPointerMove);
         window.addEventListener('pointerup', onPointerUp);
         window.addEventListener('pointercancel', onPointerUp);
+        window.addEventListener('blur', onPointerUp);
         return () => {
             window.removeEventListener('pointermove', onPointerMove);
             window.removeEventListener('pointerup', onPointerUp);
             window.removeEventListener('pointercancel', onPointerUp);
+            window.removeEventListener('blur', onPointerUp);
         };
     }, [draggingHandle, onPointerMove, onPointerUp]);
 
@@ -375,9 +396,19 @@ export default function LiquidityDistributionChart({
                     side="lower"
                     interactive={typeof onRangeChange === 'function'}
                     onDown={(event) => {
+                        if (typeof event.currentTarget?.setPointerCapture === 'function') {
+                            try {
+                                event.currentTarget.setPointerCapture(event.pointerId);
+                            } catch {
+                                // ignore
+                            }
+                        }
                         dragStateRef.current.pointerId = event.pointerId;
+                        dragStateRef.current.target = event.currentTarget;
                         setDraggingHandle('lower');
                     }}
+                    onUp={onPointerUp}
+                    onLostCapture={onPointerUp}
                 />
             ) : null}
             {Number.isFinite(upperX) ? (
@@ -387,9 +418,19 @@ export default function LiquidityDistributionChart({
                     side="upper"
                     interactive={typeof onRangeChange === 'function'}
                     onDown={(event) => {
+                        if (typeof event.currentTarget?.setPointerCapture === 'function') {
+                            try {
+                                event.currentTarget.setPointerCapture(event.pointerId);
+                            } catch {
+                                // ignore
+                            }
+                        }
                         dragStateRef.current.pointerId = event.pointerId;
+                        dragStateRef.current.target = event.currentTarget;
                         setDraggingHandle('upper');
                     }}
+                    onUp={onPointerUp}
+                    onLostCapture={onPointerUp}
                 />
             ) : null}
 
@@ -492,7 +533,7 @@ function formatUsdCompact(v) {
     return `$${v.toExponential(2)}`;
 }
 
-function RangeHandle({ x, color, side, interactive, onDown }) {
+function RangeHandle({ x, color, side, interactive, onDown, onUp, onLostCapture }) {
     // 柱子区域在容器内：top: 22px（标题下方），bottom: 28px（底部价格标签上方）。
     // 手柄严格限制在这个区域内，不溢出；取消上下端圆点，只保留中间拖把。
     return (
@@ -509,6 +550,18 @@ function RangeHandle({ x, color, side, interactive, onDown }) {
                 e.preventDefault();
                 e.stopPropagation();
                 onDown?.(e);
+            }}
+            onPointerUp={(e) => {
+                if (!interactive) return;
+                onUp?.(e);
+            }}
+            onPointerCancel={(e) => {
+                if (!interactive) return;
+                onUp?.(e);
+            }}
+            onLostPointerCapture={(e) => {
+                if (!interactive) return;
+                onLostCapture?.(e);
             }}
         >
             {/* 竖线：半透明，限在区域内 */}
