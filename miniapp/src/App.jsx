@@ -2109,6 +2109,16 @@ export default function App() {
         setOpenPositionError('');
     }, [openPositionLiqProfile, openPositionRangeInputMode]);
 
+    const onOpenPositionChartBinSelect = useCallback((bin) => {
+        if (!bin || openPositionRangeInputMode === 'percentage') return;
+        const lower = Number(bin?.tick_lower);
+        const upper = Number(bin?.tick_upper);
+        if (!Number.isInteger(lower) || !Number.isInteger(upper) || upper <= lower) return;
+        setOpenPositionTickLower(String(lower));
+        setOpenPositionTickUpper(String(upper));
+        setOpenPositionError('');
+    }, [openPositionRangeInputMode]);
+
     useEffect(() => {
         if (!openPositionPool || !hasInitData || !multiWalletEnabled) return;
 
@@ -4007,11 +4017,19 @@ export default function App() {
                                     rangeLowerTick={openPositionChartLowerTick}
                                     rangeUpperTick={openPositionChartUpperTick}
                                     onRangeChange={onOpenPositionChartRangeChange}
+                                    onBinSelect={openPositionRangeInputMode === 'grid' || openPositionRangeInputMode === 'tick' ? onOpenPositionChartBinSelect : undefined}
                                     loading={openPositionLiqProfileLoading}
                                     token0Decimals={Number(openPositionPool?.token0_decimals ?? openPositionPool?.token0?.decimals ?? 18) || 18}
                                     token1Decimals={Number(openPositionPool?.token1_decimals ?? openPositionPool?.token1?.decimals ?? 18) || 18}
+                                    titleText="流动性分布"
+                                    titlePlacement="left"
                                     height={180}
                                 />
+                                {openPositionRangeInputMode === 'grid' || openPositionRangeInputMode === 'tick' ? (
+                                    <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40">
+                                        点图上的柱子可直接选中一格。
+                                    </div>
+                                ) : null}
                             </div>
                             {multiWalletEnabled ? (
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">

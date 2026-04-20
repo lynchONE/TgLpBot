@@ -96,6 +96,7 @@ export default function LiquidityDistributionChart({
     rangeLowerTick = null,
     rangeUpperTick = null,
     onRangeChange,
+    onBinSelect,
     height = DEFAULT_HEIGHT,
     token0Decimals = 18,
     token1Decimals = 18,
@@ -106,12 +107,14 @@ export default function LiquidityDistributionChart({
     tokenLeftLabel = '',
     tokenRightLabel = '',
     titleText = '流动性分布',
+    titlePlacement = 'center',
     quoteIsToken1 = undefined,
 }) {
     const containerRef = useRef(null);
     const [width, setWidth] = useState(0);
     const [draggingHandle, setDraggingHandle] = useState(null);
     const [hoveredBin, setHoveredBin] = useState(null);
+    const dragStateRef = useRef({ pointerId: null, suppressClickUntil: 0 });
 
     useEffect(() => {
         const el = containerRef.current;
@@ -163,20 +166,26 @@ export default function LiquidityDistributionChart({
 
     const onPointerMove = useCallback((event) => {
         if (!draggingHandle || !containerRef.current) return;
+        if (dragStateRef.current.pointerId !== null && event.pointerId !== dragStateRef.current.pointerId) return;
         const rect = containerRef.current.getBoundingClientRect();
         const x = event.clientX - rect.left;
         const tick = xToTick(x);
         if (typeof onRangeChange !== 'function') return;
         if (draggingHandle === 'lower') {
             const upperBound = Number.isFinite(rangeUpperTick) ? rangeUpperTick - (tickSpacing || 1) : tickRange.max;
-            onRangeChange({ lower: clampTick(tick, tickRange.min, upperBound), upper: rangeUpperTick });
+            onRangeChange({ lower: clampTick(tick, tickRange.min, upperBound) });
         } else if (draggingHandle === 'upper') {
             const lowerBound = Number.isFinite(rangeLowerTick) ? rangeLowerTick + (tickSpacing || 1) : tickRange.min;
-            onRangeChange({ lower: rangeLowerTick, upper: clampTick(tick, lowerBound, tickRange.max) });
+            onRangeChange({ upper: clampTick(tick, lowerBound, tickRange.max) });
         }
     }, [draggingHandle, xToTick, onRangeChange, rangeLowerTick, rangeUpperTick, tickRange, tickSpacing]);
 
-    const onPointerUp = useCallback(() => setDraggingHandle(null), []);
+    const onPointerUp = useCallback((event) => {
+        if (dragStateRef.current.pointerId !== null && event.pointerId !== dragStateRef.current.pointerId) return;
+        dragStateRef.current.pointerId = null;
+        dragStateRef.current.suppressClickUntil = Date.now() + 120;
+        setDraggingHandle(null);
+    }, []);
 
     useEffect(() => {
         if (!draggingHandle) return undefined;
@@ -258,14 +267,32 @@ export default function LiquidityDistributionChart({
                 fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
                 color: 'rgba(154, 168, 196, 0.75)', pointerEvents: 'none', zIndex: 5,
             }}>
-                <span>{tokenLeftLabel || ''}</span>
-                <span style={{ color: 'rgba(236, 242, 255, 0.5)', fontSize: 10, fontWeight: 500 }}>
-                    {titleText}
-                    {loading ? (
-                        <span style={{ marginLeft: 6, display: 'inline-block', width: 8, height: 8, borderRadius: '50%', border: '1.5px solid rgba(255, 196, 0, 0.4)', borderTopColor: 'rgba(255, 196, 0, 0.95)', animation: 'lpd-spin 0.8s linear infinite', verticalAlign: -1 }} />
-                    ) : null}
-                </span>
-                <span>{tokenRightLabel || ''}</span>
+                {titlePlacement === 'left' ? (
+                    <span style={{ color: 'rgba(236, 242, 255, 0.5)', fontSize: 10, fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        {titleText}
+                        {tokenLeftLabel ? <span style={{ color: 'rgba(154, 168, 196, 0.75)' }}>{tokenLeftLabel}</span> : null}
+                        {loading ? (
+                            <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', border: '1.5px solid rgba(255, 196, 0, 0.4)', borderTopColor: 'rgba(255, 196, 0, 0.95)', animation: 'lpd-spin 0.8s linear infinite', verticalAlign: -1 }} />
+                        ) : null}
+                    </span>
+                ) : (
+                    <span>{tokenLeftLabel || ''}</span>
+                )}
+                {titlePlacement === 'left' ? (
+                    <span>{tokenRightLabel || ''}</span>
+                ) : (
+                    <>
+                        {(titleText || loading) ? (
+                            <span style={{ color: 'rgba(236, 242, 255, 0.5)', fontSize: 10, fontWeight: 500 }}>
+                                {titleText}
+                                {loading ? (
+                                    <span style={{ marginLeft: titleText ? 6 : 0, display: 'inline-block', width: 8, height: 8, borderRadius: '50%', border: '1.5px solid rgba(255, 196, 0, 0.4)', borderTopColor: 'rgba(255, 196, 0, 0.95)', animation: 'lpd-spin 0.8s linear infinite', verticalAlign: -1 }} />
+                                ) : null}
+                            </span>
+                        ) : <span />}
+                        <span>{tokenRightLabel || ''}</span>
+                    </>
+                )}
             </div>
             <style>{`@keyframes lpd-spin { to { transform: rotate(360deg); } }`}</style>
             {Number.isFinite(lowerX) && Number.isFinite(upperX) && upperX > lowerX ? (
@@ -305,6 +332,10 @@ export default function LiquidityDistributionChart({
                             key={bin.index ?? `${bin.tick_lower}-${bin.tick_upper}`}
                             onPointerEnter={() => setHoveredBin({ index: bin.index, bin, barIdx: i })}
                             onPointerLeave={() => setHoveredBin((prev) => (prev?.index === bin.index ? null : prev))}
+                            onClick={() => {
+                                if (Date.now() < dragStateRef.current.suppressClickUntil) return;
+                                onBinSelect?.(bin);
+                            }}
                             style={{
                                 flex: 1,
                                 minWidth: 2,
@@ -314,7 +345,7 @@ export default function LiquidityDistributionChart({
                                 background: bg,
                                 transition: 'height 260ms cubic-bezier(0.4, 0, 0.2, 1), background 200ms ease',
                                 outline: isHovered ? '1px solid rgba(236, 242, 255, 0.55)' : 'none',
-                                cursor: 'default',
+                                cursor: typeof onBinSelect === 'function' ? 'pointer' : 'default',
                             }}
                         />
                     );
@@ -343,7 +374,10 @@ export default function LiquidityDistributionChart({
                     color={colors.handleLower}
                     side="lower"
                     interactive={typeof onRangeChange === 'function'}
-                    onDown={() => setDraggingHandle('lower')}
+                    onDown={(event) => {
+                        dragStateRef.current.pointerId = event.pointerId;
+                        setDraggingHandle('lower');
+                    }}
                 />
             ) : null}
             {Number.isFinite(upperX) ? (
@@ -352,7 +386,10 @@ export default function LiquidityDistributionChart({
                     color={colors.handleUpper}
                     side="upper"
                     interactive={typeof onRangeChange === 'function'}
-                    onDown={() => setDraggingHandle('upper')}
+                    onDown={(event) => {
+                        dragStateRef.current.pointerId = event.pointerId;
+                        setDraggingHandle('upper');
+                    }}
                 />
             ) : null}
 
@@ -470,7 +507,8 @@ function RangeHandle({ x, color, side, interactive, onDown }) {
             onPointerDown={(e) => {
                 if (!interactive) return;
                 e.preventDefault();
-                onDown?.();
+                e.stopPropagation();
+                onDown?.(e);
             }}
         >
             {/* 竖线：半透明，限在区域内 */}
