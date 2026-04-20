@@ -392,6 +392,18 @@ function formatDCAIntervalHint(seconds) {
     return `${n.toFixed(1)}s`;
 }
 
+function buildDCASummaryItems(amount, percentages) {
+    const totalAmount = Number(amount);
+    if (!Array.isArray(percentages) || percentages.length === 0) return [];
+    return percentages.map((pct, idx) => ({
+        key: `batch-${idx}`,
+        label: idx === 0 ? '首批' : `第${idx + 1}批`,
+        amount: Number.isFinite(totalAmount) && totalAmount > 0
+            ? formatUsdCompact(totalAmount * (Number(pct) || 0) / 100)
+            : '$--',
+    }));
+}
+
 function formatSharePercent(value) {
     const num = Number(value);
     if (!Number.isFinite(num) || num < 0) return '--';
@@ -632,6 +644,7 @@ export default function App() {
     const [openPositionDCAEnabled, setOpenPositionDCAEnabled] = useState(false);
     const [openPositionDCAPercentages, setOpenPositionDCAPercentages] = useState([50, 50]);
     const [openPositionDCAInterval, setOpenPositionDCAInterval] = useState(30);
+    const [openPositionDCAExpanded, setOpenPositionDCAExpanded] = useState(false);
     const [operationProgress, setOperationProgress] = useState(null);
     const [walletsData, setWalletsData] = useState(null);
     const [walletsError, setWalletsError] = useState('');
@@ -718,6 +731,15 @@ export default function App() {
     const openPositionSizingInputs = openPositionSizingAdvice?.inputs && typeof openPositionSizingAdvice.inputs === 'object'
         ? openPositionSizingAdvice.inputs
         : null;
+    const openPositionDCASum = useMemo(
+        () => openPositionDCAPercentages.reduce((acc, v) => acc + (Number(v) || 0), 0),
+        [openPositionDCAPercentages],
+    );
+    const openPositionDCASumValid = Math.abs(openPositionDCASum - 100) < 0.01;
+    const openPositionDCASummaryItems = useMemo(
+        () => buildDCASummaryItems(openPositionAmount, openPositionDCAPercentages),
+        [openPositionAmount, openPositionDCAPercentages],
+    );
     const [posWalletBalances, setPosWalletBalances] = useState(null);
     const userDefaultChain = useMemo(() => {
         const raw = String(globalConfig?.default_chain || 'bsc').trim().toLowerCase();
@@ -1672,6 +1694,7 @@ export default function App() {
         setOpenPositionEntrySwapSlippage('');
         setOpenPositionEntrySwapSlippageDirty(false);
         setOpenPositionEntrySwapConfirm(false);
+        setOpenPositionDCAExpanded(false);
 
         setOpenPositionError('');
         setOpenPositionChecks([]);
@@ -1707,6 +1730,7 @@ export default function App() {
         setOpenPositionDCAEnabled(cfgDCAEnabled);
         setOpenPositionDCAPercentages(cfgDCAPcts);
         setOpenPositionDCAInterval(cfgDCAInterval);
+        setOpenPositionDCAExpanded(false);
         resetOpenPositionDraft();
     };
 
@@ -1714,6 +1738,7 @@ export default function App() {
         setOpenPositionPool(null);
         setOpenPositionSmartRanges([]);
         setOpenPositionSmartRangesLoading(false);
+        setOpenPositionDCAExpanded(false);
     };
 
     // Refresh config when opening the modal so toggles from the bot take effect without a full reload.
@@ -3851,7 +3876,176 @@ export default function App() {
                                 />
                             </div>
 
-                            {openPositionDCAEnabled && Array.isArray(openPositionDCAPercentages) && openPositionDCAPercentages.length >= 2 ? (
+                            <div className="mt-4 rounded-xl border border-cyan-500/25 bg-gradient-to-br from-cyan-500/10 via-cyan-500/5 to-transparent p-3 dark:border-cyan-400/25 dark:from-cyan-400/10 dark:via-cyan-400/5">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="flex items-center gap-1.5 text-[12px] font-bold text-cyan-700 dark:text-cyan-200">
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M6 12h12M9 18h6" /></svg>
+                                        分批加仓（防插针）
+                                    </div>
+                                    <label className="flex items-center gap-2 text-[11px] font-semibold text-zinc-600 dark:text-white/60">
+                                        <input
+                                            type="checkbox"
+                                            checked={openPositionDCAEnabled}
+                                            onChange={(e) => {
+                                                setOpenPositionDCAEnabled(e.target.checked);
+                                                setOpenPositionError('');
+                                            }}
+                                            disabled={openPositionLoading}
+                                        />
+                                        <span>{openPositionDCAEnabled ? '本次启用' : '本次不启用'}</span>
+                                    </label>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setOpenPositionDCAExpanded((v) => !v)}
+                                    disabled={openPositionLoading}
+                                    className="mt-3 flex w-full items-center gap-2 rounded-xl border border-cyan-500/15 bg-white/70 px-3 py-2 text-left transition hover:bg-white dark:border-cyan-400/15 dark:bg-white/5 dark:hover:bg-white/10"
+                                >
+                                    <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto whitespace-nowrap" style={{ scrollbarWidth: 'none' }}>
+                                        {openPositionDCAEnabled ? (
+                                            <>
+                                                {openPositionDCASummaryItems.map((item) => (
+                                                    <span
+                                                        key={item.key}
+                                                        className="inline-flex items-center gap-1 rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold text-cyan-700 dark:border-cyan-400/20 dark:bg-cyan-400/10 dark:text-cyan-200"
+                                                    >
+                                                        <span className="opacity-70">{item.label}</span>
+                                                        <span>{item.amount}</span>
+                                                    </span>
+                                                ))}
+                                                <span className="inline-flex items-center rounded-full border border-cyan-500/25 bg-cyan-500/15 px-2 py-1 text-[10px] font-bold text-cyan-700 dark:border-cyan-400/25 dark:bg-cyan-400/15 dark:text-cyan-200">
+                                                    间隔 {formatDCAIntervalHint(openPositionDCAInterval)}
+                                                </span>
+                                            </>
+                                        ) : (
+                                            <span className="text-[11px] text-zinc-500 dark:text-white/45">
+                                                未启用，开仓将一次性成交。
+                                            </span>
+                                        )}
+                                    </div>
+                                    <span className="shrink-0 text-[11px] font-semibold text-cyan-700 dark:text-cyan-200">
+                                        {openPositionDCAExpanded ? '收起 ▲' : '修改 ▾'}
+                                    </span>
+                                </button>
+                                {openPositionDCAExpanded ? (
+                                    <div className="mt-3">
+                                        <div className="text-[10px] leading-4 text-zinc-500 dark:text-white/45">
+                                            首批正常开仓创建仓位，后续批次按间隔向该仓位追加流动性。手动关仓或价格跑出区间时，剩余批次自动取消。
+                                        </div>
+                                        {openPositionDCAEnabled ? (
+                                            <>
+                                                <div className="mt-3 text-[11px] font-semibold text-zinc-900 dark:text-white/85">
+                                                    每批占比（共 {openPositionDCAPercentages.length} 批）
+                                                </div>
+                                                <div className="mt-2 space-y-2">
+                                                    {openPositionDCAPercentages.map((value, idx) => (
+                                                        <div key={idx} className="flex items-center gap-2">
+                                                            <span className="w-10 shrink-0 text-[11px] font-semibold text-zinc-500 dark:text-white/45">
+                                                                {idx === 0 ? '首批' : `第${idx + 1}批`}
+                                                            </span>
+                                                            <input
+                                                                type="number"
+                                                                step="0.1"
+                                                                min="5"
+                                                                max="100"
+                                                                value={value}
+                                                                onChange={(e) => {
+                                                                    const next = openPositionDCAPercentages.slice();
+                                                                    next[idx] = Number(e.target.value) || 0;
+                                                                    setOpenPositionDCAPercentages(next);
+                                                                    setOpenPositionError('');
+                                                                }}
+                                                                inputMode="decimal"
+                                                                disabled={openPositionLoading}
+                                                                className={`flex-1 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90`}
+                                                            />
+                                                            <span className="text-[11px] text-zinc-500 dark:text-white/45">%</span>
+                                                            {openPositionDCAPercentages.length > 2 ? (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setOpenPositionDCAPercentages(openPositionDCAPercentages.filter((_, i) => i !== idx));
+                                                                        setOpenPositionError('');
+                                                                    }}
+                                                                    disabled={openPositionLoading}
+                                                                    className="rounded-xl border border-zinc-200 bg-white/70 px-2 py-2 text-[11px] font-semibold text-zinc-600 transition hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/60 dark:hover:bg-white/10"
+                                                                >
+                                                                    ×
+                                                                </button>
+                                                            ) : null}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <div className="mt-3 flex items-center justify-between gap-2">
+                                                    <div className={`text-[11px] font-semibold ${openPositionDCASumValid ? 'text-emerald-600 dark:text-emerald-300' : 'text-amber-600 dark:text-amber-300'}`}>
+                                                        合计：{openPositionDCASum.toFixed(2)}% {openPositionDCASumValid ? '✓' : '（必须等于 100%）'}
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                const n = openPositionDCAPercentages.length || 2;
+                                                                const base = Math.floor((100 / n) * 100) / 100;
+                                                                const next = Array(n).fill(base);
+                                                                next[n - 1] = Math.round((100 - base * (n - 1)) * 100) / 100;
+                                                                setOpenPositionDCAPercentages(next);
+                                                                setOpenPositionError('');
+                                                            }}
+                                                            disabled={openPositionLoading}
+                                                            className="rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-[11px] font-semibold text-zinc-700 transition hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
+                                                        >
+                                                            平均分配
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                if (openPositionDCAPercentages.length >= 5) return;
+                                                                const n = openPositionDCAPercentages.length + 1;
+                                                                const base = Math.floor((100 / n) * 100) / 100;
+                                                                const next = Array(n).fill(base);
+                                                                next[n - 1] = Math.round((100 - base * (n - 1)) * 100) / 100;
+                                                                setOpenPositionDCAPercentages(next);
+                                                                setOpenPositionError('');
+                                                            }}
+                                                            disabled={openPositionLoading || openPositionDCAPercentages.length >= 5}
+                                                            className="rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-[11px] font-semibold text-zinc-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
+                                                        >
+                                                            + 追加批次
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <div className="mt-3 flex items-center gap-2">
+                                                    <span className="w-16 shrink-0 text-[11px] font-semibold text-zinc-600 dark:text-white/60">批次间隔</span>
+                                                    <input
+                                                        type="number"
+                                                        step="0.001"
+                                                        min="0"
+                                                        max="300"
+                                                        value={openPositionDCAInterval}
+                                                        onChange={(e) => {
+                                                            setOpenPositionDCAInterval(Number(e.target.value) || 0);
+                                                            setOpenPositionError('');
+                                                        }}
+                                                        inputMode="decimal"
+                                                        disabled={openPositionLoading}
+                                                        className={`flex-1 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90`}
+                                                    />
+                                                    <span className="text-[11px] text-zinc-500 dark:text-white/45">秒</span>
+                                                </div>
+                                                <div className="mt-1 text-[10px] leading-4 text-zinc-500 dark:text-white/45">
+                                                    支持小数秒，0.3 = 300ms。
+                                                </div>
+                                            </>
+                                        ) : (
+                                            <div className="mt-3 text-[10px] leading-4 text-zinc-500 dark:text-white/45">
+                                                当前未启用分批加仓。勾选右上角开关后，系统将按批次和间隔拆分本次开仓。
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : null}
+                            </div>
+
+                            {false && openPositionDCAEnabled && Array.isArray(openPositionDCAPercentages) && openPositionDCAPercentages.length >= 2 ? (
                                 <div className="mt-4 rounded-xl border border-cyan-500/25 bg-gradient-to-br from-cyan-500/10 via-cyan-500/5 to-transparent p-3 dark:border-cyan-400/25 dark:from-cyan-400/10 dark:via-cyan-400/5">
                                     <div className="flex items-center justify-between gap-2">
                                         <div className="flex items-center gap-1.5 text-[12px] font-bold text-cyan-700 dark:text-cyan-200">

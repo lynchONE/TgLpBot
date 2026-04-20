@@ -143,6 +143,14 @@ function parseDCAPercentagesAny(raw) {
   return [50, 50];
 }
 
+function formatDCAIntervalHint(seconds) {
+  const n = Number(seconds);
+  if (!Number.isFinite(n) || n <= 0) return '立即';
+  if (n < 1) return `${Math.round(n * 1000)}ms`;
+  if (Number.isInteger(n)) return `${n}s`;
+  return `${n.toFixed(1).replace(/\.0$/, '')}s`;
+}
+
 export default function OpenPositionModal({
   apiBaseUrl,
   initData,
@@ -181,6 +189,7 @@ export default function OpenPositionModal({
   const [dcaPercentages, setDcaPercentages] = useState([50, 50]);
   const [dcaInterval, setDcaInterval] = useState(30);
   const [dcaDefaultsLoaded, setDcaDefaultsLoaded] = useState(false);
+  const [dcaExpanded, setDcaExpanded] = useState(false);
 
   const pair = pool?.trading_pair || '--';
   const addr = String(pool?.pool_address || '').trim();
@@ -425,6 +434,23 @@ export default function OpenPositionModal({
     [dcaPercentages],
   );
   const dcaSumValid = Math.abs(dcaSum - 100) < 0.01;
+  const dcaSummaryItems = useMemo(() => {
+    if (!Array.isArray(dcaPercentages) || dcaPercentages.length === 0) return [];
+    return dcaPercentages.map((pct, idx) => {
+      const batchAmount = Number.isFinite(amountValue) && amountValue > 0
+        ? formatUsdCompact(amountValue * (Number(pct) || 0) / 100)
+        : '$--';
+      return {
+        key: `batch-${idx}`,
+        label: idx === 0 ? '首批' : `第${idx + 1}批`,
+        amount: batchAmount,
+      };
+    });
+  }, [amountValue, dcaPercentages]);
+
+  useEffect(() => {
+    setDcaExpanded(false);
+  }, [addr]);
 
   const handleSubmit = useCallback(() => {
     if (!Number.isFinite(amountValue) || amountValue <= 0) {
@@ -878,10 +904,94 @@ export default function OpenPositionModal({
               <span style={{ fontSize: 12 }}>{dcaEnabled ? '本次启用' : '本次不启用'}</span>
             </span>
           </label>
+          <button
+            type="button"
+            onClick={() => setDcaExpanded((v) => !v)}
+            disabled={busy}
+            style={{
+              width: '100%',
+              marginTop: 10,
+              padding: '9px 10px',
+              borderRadius: 12,
+              border: '1px solid rgba(6, 182, 212, 0.18)',
+              background: 'rgba(8, 47, 73, 0.22)',
+              color: 'inherit',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              cursor: busy ? 'not-allowed' : 'pointer',
+            }}
+          >
+            <div
+              style={{
+                flex: 1,
+                minWidth: 0,
+                display: 'flex',
+                gap: 6,
+                alignItems: 'center',
+                overflowX: 'auto',
+                whiteSpace: 'nowrap',
+                scrollbarWidth: 'none',
+              }}
+            >
+              {dcaEnabled ? (
+                <>
+                  {dcaSummaryItems.map((item) => (
+                    <span
+                      key={item.key}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        padding: '3px 8px',
+                        borderRadius: 999,
+                        border: '1px solid rgba(125, 211, 252, 0.18)',
+                        background: 'rgba(255, 255, 255, 0.05)',
+                        fontSize: 11,
+                        fontWeight: 600,
+                      }}
+                    >
+                      <span style={{ opacity: 0.72 }}>{item.label}</span>
+                      <span style={{ color: '#cffafe' }}>{item.amount}</span>
+                    </span>
+                  ))}
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      padding: '3px 8px',
+                      borderRadius: 999,
+                      border: '1px solid rgba(103, 232, 249, 0.22)',
+                      background: 'rgba(6, 182, 212, 0.12)',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: '#a5f3fc',
+                    }}
+                  >
+                    间隔 {formatDCAIntervalHint(dcaInterval)}
+                  </span>
+                </>
+              ) : (
+                <span style={{ fontSize: 11, opacity: 0.78 }}>
+                  未启用，开仓将一次性成交。
+                </span>
+              )}
+            </div>
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#a5f3fc', flexShrink: 0 }}>
+              {dcaExpanded ? '收起 ▲' : '修改 ▾'}
+            </span>
+          </button>
+          {dcaExpanded ? (
           <div style={{ fontSize: 11, opacity: 0.7, marginTop: 6, lineHeight: 1.5 }}>
             首批按正常开仓创建仓位，后续批次按间隔向该仓位追加流动性。手动关仓或价格跑出区间时，剩余批次自动取消。
           </div>
-          {dcaEnabled ? (
+          ) : null}
+          {dcaExpanded && !dcaEnabled ? (
+            <div style={{ marginTop: 8, fontSize: 11, opacity: 0.7, lineHeight: 1.5 }}>
+              当前未启用分批加仓。勾选右上角开关后，系统将按批次和间隔拆分本次开仓。
+            </div>
+          ) : null}
+          {dcaExpanded && dcaEnabled ? (
             <div style={{ marginTop: 12 }}>
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>每批占比（共 {dcaPercentages.length} 批）</div>
               {dcaPercentages.map((value, idx) => (
