@@ -46,6 +46,8 @@ type openPositionRequest struct {
 	DCAEnabled         *bool     `json:"dca_enabled,omitempty"`
 	DCAPercentages     []float64 `json:"dca_percentages,omitempty"`
 	DCAIntervalSeconds *float64  `json:"dca_interval_seconds,omitempty"`
+	RebalanceEnabled   *bool     `json:"rebalance_enabled,omitempty"`
+	StopLossEnabled    *bool     `json:"stop_loss_enabled,omitempty"`
 }
 
 type openPositionResponse struct {
@@ -203,6 +205,18 @@ func resolveDCAPlan(cfg *models.GlobalConfig, req openPositionRequest) (bool, []
 	}
 
 	return true, normalized, intervalNorm, nil
+}
+
+func resolveOpenPositionExecutionFlags(req openPositionRequest) (bool, bool) {
+	rebalanceEnabled := true
+	stopLossEnabled := true
+	if req.RebalanceEnabled != nil {
+		rebalanceEnabled = *req.RebalanceEnabled
+	}
+	if req.StopLossEnabled != nil {
+		stopLossEnabled = *req.StopLossEnabled
+	}
+	return rebalanceEnabled, stopLossEnabled
 }
 
 func isV4PoolId(text string) bool {
@@ -589,6 +603,7 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 	if !common.IsHexAddress(hooksAddr) {
 		hooksAddr = "0x0000000000000000000000000000000000000000"
 	}
+	rebalanceEnabled, stopLossEnabled := resolveOpenPositionExecutionFlags(req)
 
 	task := &models.StrategyTask{
 		UserID:               user.ID,
@@ -616,9 +631,9 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 		SlippageTolerance:    taskSlippage,
 		AutoReinvest:         cfg.AutoReinvest,
 		AllowEntrySwap:       req.AllowEntrySwap,
-		StopLossEnabled:      cfg.StopLossEnabled,
+		StopLossEnabled:      stopLossEnabled,
 		StopLossDelaySeconds: cfg.StopLossDelaySeconds,
-		RebalanceEnabled:     false, // New positions default to rebalance disabled
+		RebalanceEnabled:     rebalanceEnabled,
 		Status:               models.StrategyStatusRunning,
 		LastCheckTime:        time.Now(),
 	}

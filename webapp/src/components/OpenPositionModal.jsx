@@ -506,6 +506,8 @@ export default function OpenPositionModal({
   const [dcaInterval, setDcaInterval] = useState(30);
   const [dcaDefaultsLoaded, setDcaDefaultsLoaded] = useState(false);
   const [dcaExpanded, setDcaExpanded] = useState(false);
+  const [rebalanceEnabled, setRebalanceEnabled] = useState(true);
+  const [stopLossEnabled, setStopLossEnabled] = useState(true);
   const [prepareRangeEditor, setPrepareRangeEditor] = useState(null);
   const [previewRangeEditor, setPreviewRangeEditor] = useState(null);
 
@@ -705,6 +707,8 @@ export default function OpenPositionModal({
       allowEntrySwap: true,
       walletId: resolvedWalletId || undefined,
       ackLiquidityRisk: riskAck,
+      rebalanceEnabled,
+      stopLossEnabled,
     };
     if (requestRangeInputMode === 'percentage') {
       if (!Number.isFinite(rangeLowerValue) || rangeLowerValue <= 0 || rangeLowerValue >= 100) return null;
@@ -741,6 +745,8 @@ export default function OpenPositionModal({
     showWalletPicker,
     resolvedWalletId,
     riskAck,
+    rebalanceEnabled,
+    stopLossEnabled,
   ]);
 
   const entrySwapConfirmKey = useMemo(
@@ -1086,6 +1092,8 @@ export default function OpenPositionModal({
 
   useEffect(() => {
     setDcaExpanded(false);
+    setRebalanceEnabled(true);
+    setStopLossEnabled(true);
   }, [addr]);
 
   const protocolKind = useMemo(() => {
@@ -1505,6 +1513,8 @@ export default function OpenPositionModal({
       dcaEnabled,
       dcaPercentages: dcaEnabled ? dcaPercentages.map((v) => Number(v) || 0) : undefined,
       dcaIntervalSeconds: dcaEnabled ? Number(dcaInterval) : undefined,
+      rebalanceEnabled,
+      stopLossEnabled,
     });
   }, [
     amountValue,
@@ -1534,6 +1544,8 @@ export default function OpenPositionModal({
     dcaSum,
     dcaSumValid,
     dcaInterval,
+    rebalanceEnabled,
+    stopLossEnabled,
   ]);
 
 
@@ -1625,8 +1637,7 @@ export default function OpenPositionModal({
                   ) : null}
                 </div>
 
-                <div style={{ overflowX: 'auto', paddingBottom: 4 }}>
-                  <div style={{ display: 'flex', gap: 8, minWidth: 'max-content', flexWrap: 'nowrap' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(112px, 1fr))', gap: 8 }}>
                     {quickRangeOptions.map((option) => {
                       const isActive =
                         Number.isFinite(displayedLowerPct) &&
@@ -1639,73 +1650,71 @@ export default function OpenPositionModal({
                           type="button"
                           onClick={() => applyRange(option.lowerValue, option.upperValue)}
                           style={{
-                            minWidth: 88,
-                            padding: '10px 12px',
-                            borderRadius: 16,
+                            minWidth: 0,
+                            padding: '9px 10px',
+                            borderRadius: 14,
                             border: `1px solid ${isActive ? 'rgba(188, 255, 47, 0.38)' : 'rgba(148, 163, 184, 0.18)'}`,
-                            background: isActive ? 'rgba(188, 255, 47, 0.12)' : 'rgba(15, 23, 42, 0.22)',
+                            background: isActive ? 'rgba(188, 255, 47, 0.12)' : 'rgba(15, 23, 42, 0.18)',
                             color: isActive ? 'var(--text)' : 'var(--text-muted)',
                             textAlign: 'left',
                             display: 'grid',
-                            gap: 4,
-                            flexShrink: 0,
+                            gap: 3,
                           }}
                         >
-                          <span style={{ fontSize: 12, fontWeight: 600, lineHeight: 1 }}>{option.label}</span>
+                          <span style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.1 }}>{option.label}</span>
                           <span style={{ fontSize: 10, opacity: 0.72 }}>{option.subLabel}</span>
                         </button>
                       );
                     })}
-                  </div>
                 </div>
                 {smartRangesLoading ? (
                   <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>聪明钱区间加载中...</div>
                 ) : null}
 
                 <div style={{
-                  padding: 14,
-                  borderRadius: 18,
+                  padding: 12,
+                  borderRadius: 16,
                   border: '1px solid rgba(148, 163, 184, 0.18)',
-                  background: 'rgba(15, 23, 42, 0.22)',
+                  background: 'rgba(15, 23, 42, 0.18)',
                   display: 'grid',
-                  gap: 12,
+                  gap: 10,
                 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                     <div style={{ display: 'grid', gap: 4 }}>
                       <span style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 700 }}>Price Range</span>
-                      <strong style={{ color: 'var(--text)' }}>{priceRange?.baseSymbol || '--'}/{priceRange?.quoteSymbol || '--'}</strong>
+                      <strong style={{ color: 'var(--text)', fontSize: 14 }}>{priceRange?.baseSymbol || '--'}/{priceRange?.quoteSymbol || '--'}</strong>
                     </div>
                     <button
                       type="button"
                       className="ghost-chip"
-                      style={{ minWidth: 0, padding: '4px 10px', fontSize: 11 }}
+                      style={{ minWidth: 0, padding: '3px 9px', fontSize: 11 }}
                       onClick={() => setInvertPrice((v) => !v)}
                     >
                       切换计价
                     </button>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
                     <div style={{
-                      padding: 12,
-                      borderRadius: 16,
-                      border: '1px solid rgba(148, 163, 184, 0.18)',
+                      padding: 10,
+                      borderRadius: 14,
+                      border: '1px solid rgba(148, 163, 184, 0.14)',
                       background: 'rgba(255, 255, 255, 0.04)',
                       display: 'grid',
-                      gap: 10,
+                      gap: 8,
                     }}>
                       <div style={{ display: 'grid', gap: 4 }}>
                         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>下限价格</span>
-                        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, flexWrap: 'wrap' }}>
-                          <strong style={{ color: 'var(--text)', fontSize: 18 }}>{priceRange?.lowerText || '--'}</strong>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+                          <strong style={{ color: 'var(--text)', fontSize: 16 }}>{priceRange?.lowerText || '--'}</strong>
                           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{priceRange?.lowerPctText || '--'}</span>
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
                         <button
                           type="button"
                           className="ghost-chip"
-                          style={{ minWidth: 0, padding: '4px 10px', fontSize: 11 }}
+                          style={{ minWidth: 0, padding: '4px 0', fontSize: 11 }}
                           onClick={() => nudgeTickBoundary('lower', -1)}
                         >
                           -1格
@@ -1713,7 +1722,7 @@ export default function OpenPositionModal({
                         <button
                           type="button"
                           className="ghost-chip"
-                          style={{ minWidth: 0, padding: '4px 10px', fontSize: 11 }}
+                          style={{ minWidth: 0, padding: '4px 0', fontSize: 11 }}
                           onClick={() => nudgeTickBoundary('lower', 1)}
                         >
                           +1格
@@ -1722,25 +1731,25 @@ export default function OpenPositionModal({
                     </div>
 
                     <div style={{
-                      padding: 12,
-                      borderRadius: 16,
-                      border: '1px solid rgba(148, 163, 184, 0.18)',
+                      padding: 10,
+                      borderRadius: 14,
+                      border: '1px solid rgba(148, 163, 184, 0.14)',
                       background: 'rgba(255, 255, 255, 0.04)',
                       display: 'grid',
-                      gap: 10,
+                      gap: 8,
                     }}>
                       <div style={{ display: 'grid', gap: 4 }}>
                         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>上限价格</span>
-                        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, flexWrap: 'wrap' }}>
-                          <strong style={{ color: 'var(--text)', fontSize: 18 }}>{priceRange?.upperText || '--'}</strong>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+                          <strong style={{ color: 'var(--text)', fontSize: 16 }}>{priceRange?.upperText || '--'}</strong>
                           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{priceRange?.upperPctText || '--'}</span>
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
                         <button
                           type="button"
                           className="ghost-chip"
-                          style={{ minWidth: 0, padding: '4px 10px', fontSize: 11 }}
+                          style={{ minWidth: 0, padding: '4px 0', fontSize: 11 }}
                           onClick={() => nudgeTickBoundary('upper', -1)}
                         >
                           -1格
@@ -1748,7 +1757,7 @@ export default function OpenPositionModal({
                         <button
                           type="button"
                           className="ghost-chip"
-                          style={{ minWidth: 0, padding: '4px 10px', fontSize: 11 }}
+                          style={{ minWidth: 0, padding: '4px 0', fontSize: 11 }}
                           onClick={() => nudgeTickBoundary('upper', 1)}
                         >
                           +1格
@@ -2514,7 +2523,89 @@ export default function OpenPositionModal({
                   </>
                 ) : null}
               </div>
-            ) : null}
+                ) : null}
+
+            <div className="opm-section" style={{
+              padding: 14,
+              borderRadius: 16,
+              border: '1px solid rgba(168, 85, 247, 0.18)',
+              background: 'rgba(168, 85, 247, 0.06)',
+              display: 'grid',
+              gap: 8,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: 600, fontSize: 13 }}>{'\u672c\u6b21\u5f00\u4ed3'}</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{'\u53ef\u4ee5\u5355\u72ec\u5173\u95ed'}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  clearErrors();
+                  setRebalanceEnabled((v) => !v);
+                }}
+                disabled={busy}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: 14,
+                  border: `1px solid ${rebalanceEnabled ? 'rgba(168, 85, 247, 0.32)' : 'rgba(148, 163, 184, 0.18)'}`,
+                  background: rebalanceEnabled ? 'rgba(168, 85, 247, 0.12)' : 'rgba(15, 23, 42, 0.16)',
+                  color: 'inherit',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  cursor: busy ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <span style={{ fontSize: 12, fontWeight: 600 }}>{'\u518d\u5e73\u8861'}</span>
+                <span style={{
+                  padding: '4px 9px',
+                  borderRadius: 999,
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  background: rebalanceEnabled ? 'rgba(255, 255, 255, 0.14)' : 'rgba(15, 23, 42, 0.26)',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: rebalanceEnabled ? '#e9d5ff' : 'var(--text-muted)',
+                }}>
+                  {rebalanceEnabled ? '\u5f00\u542f' : '\u5df2\u5173'}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  clearErrors();
+                  setStopLossEnabled((v) => !v);
+                }}
+                disabled={busy}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: 14,
+                  border: `1px solid ${stopLossEnabled ? 'rgba(236, 72, 153, 0.28)' : 'rgba(148, 163, 184, 0.18)'}`,
+                  background: stopLossEnabled ? 'rgba(236, 72, 153, 0.1)' : 'rgba(15, 23, 42, 0.16)',
+                  color: 'inherit',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  cursor: busy ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <span style={{ fontSize: 12, fontWeight: 600 }}>{'\u6b62\u635f'}</span>
+                <span style={{
+                  padding: '4px 9px',
+                  borderRadius: 999,
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  background: stopLossEnabled ? 'rgba(255, 255, 255, 0.14)' : 'rgba(15, 23, 42, 0.26)',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: stopLossEnabled ? '#fbcfe8' : 'var(--text-muted)',
+                }}>
+                  {stopLossEnabled ? '\u5f00\u542f' : '\u5df2\u5173'}
+                </span>
+              </button>
+            </div>
 
             <div className="opm-section" style={{
               padding: 16,

@@ -604,6 +604,8 @@ function buildOpenPositionPayload({
     dcaEnabled,
     dcaPercentages,
     dcaIntervalSeconds,
+    rebalanceEnabled,
+    stopLossEnabled,
 }) {
     const payload = {
         initData,
@@ -650,6 +652,12 @@ function buildOpenPositionPayload({
     if (Number.isFinite(dcaInterval) && dcaInterval >= 0) {
         payload.dca_interval_seconds = Math.round(dcaInterval * 1000) / 1000;
     }
+    if (rebalanceEnabled !== undefined && rebalanceEnabled !== null) {
+        payload.rebalance_enabled = Boolean(rebalanceEnabled);
+    }
+    if (stopLossEnabled !== undefined && stopLossEnabled !== null) {
+        payload.stop_loss_enabled = Boolean(stopLossEnabled);
+    }
     return payload;
 }
 
@@ -673,6 +681,8 @@ export async function previewOpenPosition({
     dcaEnabled,
     dcaPercentages,
     dcaIntervalSeconds,
+    rebalanceEnabled,
+    stopLossEnabled,
     signal,
 }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
@@ -695,6 +705,8 @@ export async function previewOpenPosition({
         dcaEnabled,
         dcaPercentages,
         dcaIntervalSeconds,
+        rebalanceEnabled,
+        stopLossEnabled,
     });
     const urls = [
         `${base}/api/open_position_preview`,
@@ -819,6 +831,8 @@ export async function openPosition({
     dcaEnabled,
     dcaPercentages,
     dcaIntervalSeconds,
+    rebalanceEnabled,
+    stopLossEnabled,
     signal,
 }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
@@ -843,6 +857,8 @@ export async function openPosition({
         dcaEnabled,
         dcaPercentages,
         dcaIntervalSeconds,
+        rebalanceEnabled,
+        stopLossEnabled,
     });
     const resp = await fetch(url, {
         method: 'POST',

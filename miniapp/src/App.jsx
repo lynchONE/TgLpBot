@@ -961,6 +961,8 @@ export default function App() {
     const [openPositionDCAPercentages, setOpenPositionDCAPercentages] = useState([50, 50]);
     const [openPositionDCAInterval, setOpenPositionDCAInterval] = useState(30);
     const [openPositionDCAExpanded, setOpenPositionDCAExpanded] = useState(false);
+    const [openPositionRebalanceEnabled, setOpenPositionRebalanceEnabled] = useState(true);
+    const [openPositionStopLossEnabled, setOpenPositionStopLossEnabled] = useState(true);
     const [openPositionLiqProfile, setOpenPositionLiqProfile] = useState(null);
     const [openPositionLiqProfileLoading, setOpenPositionLiqProfileLoading] = useState(false);
     const [openPositionLiqProfileError, setOpenPositionLiqProfileError] = useState('');
@@ -2396,6 +2398,8 @@ export default function App() {
         setOpenPositionEntrySwapSlippageDirty(false);
         setOpenPositionEntrySwapConfirm(false);
         setOpenPositionDCAExpanded(false);
+        setOpenPositionRebalanceEnabled(true);
+        setOpenPositionStopLossEnabled(true);
 
         setOpenPositionError('');
         setOpenPositionChecks([]);
@@ -2862,6 +2866,8 @@ export default function App() {
                     allowEntrySwap: true,
                     walletId,
                     ackLiquidityRisk: openPositionRiskAck,
+                    rebalanceEnabled: openPositionRebalanceEnabled,
+                    stopLossEnabled: openPositionStopLossEnabled,
                     signal: controller.signal,
                 };
                 if (openPositionRangeInputMode === 'percentage') {
@@ -2927,6 +2933,8 @@ export default function App() {
         openPositionWalletId,
         openPositionSelectedManualTickLower,
         openPositionSelectedManualTickUpper,
+        openPositionRebalanceEnabled,
+        openPositionStopLossEnabled,
     ]);
 
     const handleOpenPosition = async () => {
@@ -3077,6 +3085,8 @@ export default function App() {
                 dcaEnabled: openPositionDCAEnabled,
                 dcaPercentages: openPositionDCAEnabled ? openPositionDCAPercentages.map((v) => Number(v) || 0) : undefined,
                 dcaIntervalSeconds: openPositionDCAEnabled ? Number(openPositionDCAInterval) : undefined,
+                rebalanceEnabled: openPositionRebalanceEnabled,
+                stopLossEnabled: openPositionStopLossEnabled,
             };
             if (openPositionRangeInputMode === 'percentage') {
                 submitPayload.rangeLowerPct = range.lower;
@@ -4713,8 +4723,7 @@ export default function App() {
                                     ) : null}
                                 </div>
 
-                                <div className="mt-3 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
-                                    <div className="flex min-w-max flex-nowrap gap-2">
+                                <div className="mt-3 grid grid-cols-2 gap-2">
                                         {openPositionQuickRangeOptions.map((option) => {
                                             const lowerValue = Number(option.lowerValue);
                                             const upperValue = Number(option.upperValue);
@@ -4731,7 +4740,7 @@ export default function App() {
                                                     key={option.key}
                                                     type="button"
                                                     onClick={() => applyOpenPositionQuickRange(option)}
-                                                    className={`shrink-0 rounded-2xl border px-3 py-2 text-left transition ${isActive
+                                                    className={`rounded-xl border px-2.5 py-2 text-left transition ${isActive
                                                         ? `${brand.selectionClass} text-zinc-900 shadow-sm dark:text-white`
                                                         : 'border-zinc-200 bg-white/80 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
                                                         }`}
@@ -4741,7 +4750,6 @@ export default function App() {
                                                 </button>
                                             );
                                         })}
-                                    </div>
                                 </div>
                                 {openPositionSmartRangesLoading ? (
                                     <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/45">
@@ -4749,7 +4757,7 @@ export default function App() {
                                     </div>
                                 ) : null}
 
-                                <div className="mt-3 rounded-2xl border border-zinc-200 bg-zinc-50/80 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="mt-3 rounded-2xl border border-zinc-200 bg-zinc-50/80 p-2.5 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="flex items-center justify-between gap-3">
                                         <div>
                                             <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500 dark:text-white/45">Price Range</div>
@@ -4766,49 +4774,49 @@ export default function App() {
                                         </button>
                                     </div>
 
-                                    <div className="mt-3 grid grid-cols-2 gap-2">
-                                        <div className="rounded-2xl border border-zinc-200 bg-white/90 p-3 dark:border-white/10 dark:bg-white/5">
+                                    <div className="mt-2.5 grid grid-cols-2 gap-2">
+                                        <div className="rounded-xl border border-zinc-200/80 bg-white/90 p-2.5 dark:border-white/10 dark:bg-white/5">
                                             <div className="text-[11px] text-zinc-500 dark:text-white/45">下限价格</div>
                                             <div className="mt-1 flex items-end gap-1.5">
-                                                <div className="text-base font-semibold text-zinc-900 dark:text-white/90">{openPositionPriceRange?.lowerText || '--'}</div>
-                                                <div className="pb-0.5 text-[11px] text-zinc-500 dark:text-white/45">{openPositionPriceRange?.lowerPctText || '--'}</div>
+                                                <div className="text-[15px] font-semibold text-zinc-900 dark:text-white/90">{openPositionPriceRange?.lowerText || '--'}</div>
+                                                <div className="pb-0.5 text-[10px] text-zinc-500 dark:text-white/45">{openPositionPriceRange?.lowerPctText || '--'}</div>
                                             </div>
-                                            <div className="mt-3 flex gap-1.5">
+                                            <div className="mt-2 grid grid-cols-2 gap-1.5">
                                                 <button
                                                     type="button"
                                                     onClick={() => nudgeOpenPositionTickBoundary('lower', -1)}
-                                                    className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                                    className="rounded-full border border-zinc-200 bg-white/80 px-0 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
                                                 >
                                                     -1格
                                                 </button>
                                                 <button
                                                     type="button"
                                                     onClick={() => nudgeOpenPositionTickBoundary('lower', 1)}
-                                                    className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                                    className="rounded-full border border-zinc-200 bg-white/80 px-0 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
                                                 >
                                                     +1格
                                                 </button>
                                             </div>
                                         </div>
 
-                                        <div className="rounded-2xl border border-zinc-200 bg-white/90 p-3 dark:border-white/10 dark:bg-white/5">
+                                        <div className="rounded-xl border border-zinc-200/80 bg-white/90 p-2.5 dark:border-white/10 dark:bg-white/5">
                                             <div className="text-[11px] text-zinc-500 dark:text-white/45">上限价格</div>
                                             <div className="mt-1 flex items-end gap-1.5">
-                                                <div className="text-base font-semibold text-zinc-900 dark:text-white/90">{openPositionPriceRange?.upperText || '--'}</div>
-                                                <div className="pb-0.5 text-[11px] text-zinc-500 dark:text-white/45">{openPositionPriceRange?.upperPctText || '--'}</div>
+                                                <div className="text-[15px] font-semibold text-zinc-900 dark:text-white/90">{openPositionPriceRange?.upperText || '--'}</div>
+                                                <div className="pb-0.5 text-[10px] text-zinc-500 dark:text-white/45">{openPositionPriceRange?.upperPctText || '--'}</div>
                                             </div>
-                                            <div className="mt-3 flex gap-1.5">
+                                            <div className="mt-2 grid grid-cols-2 gap-1.5">
                                                 <button
                                                     type="button"
                                                     onClick={() => nudgeOpenPositionTickBoundary('upper', -1)}
-                                                    className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                                    className="rounded-full border border-zinc-200 bg-white/80 px-0 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
                                                 >
                                                     -1格
                                                 </button>
                                                 <button
                                                     type="button"
                                                     onClick={() => nudgeOpenPositionTickBoundary('upper', 1)}
-                                                    className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                                    className="rounded-full border border-zinc-200 bg-white/80 px-0 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
                                                 >
                                                     +1格
                                                 </button>
@@ -5240,6 +5248,55 @@ export default function App() {
                                     className={`mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                     placeholder="例如 0.5（可选）"
                                 />
+                            </div>
+
+                            <div className="mt-4 rounded-xl border border-fuchsia-500/20 bg-gradient-to-br from-fuchsia-500/10 via-fuchsia-500/5 to-transparent p-3 dark:border-fuchsia-400/20 dark:from-fuchsia-400/10 dark:via-fuchsia-400/5">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="text-[12px] font-bold text-zinc-900 dark:text-white/85">{'\u672c\u6b21\u5f00\u4ed3'}</div>
+                                    <div className="text-[10px] font-medium text-zinc-500 dark:text-white/45">{'\u53ef\u4ee5\u5355\u72ec\u5173\u95ed'}</div>
+                                </div>
+                                <div className="mt-3 space-y-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setOpenPositionRebalanceEnabled((v) => !v);
+                                            setOpenPositionError('');
+                                        }}
+                                        disabled={openPositionLoading}
+                                        className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left transition ${openPositionRebalanceEnabled
+                                            ? 'border-fuchsia-500/30 bg-fuchsia-500/10 text-zinc-900 dark:text-white'
+                                            : 'border-zinc-200 bg-white/70 text-zinc-700 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
+                                            }`}
+                                    >
+                                        <span className="text-[12px] font-semibold">{'\u518d\u5e73\u8861'}</span>
+                                        <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${openPositionRebalanceEnabled
+                                            ? 'bg-white/70 text-fuchsia-700 dark:bg-white/10 dark:text-fuchsia-200'
+                                            : 'bg-zinc-100 text-zinc-500 dark:bg-white/10 dark:text-white/45'
+                                            }`}>
+                                            {openPositionRebalanceEnabled ? '\u5f00\u542f' : '\u5df2\u5173'}
+                                        </span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setOpenPositionStopLossEnabled((v) => !v);
+                                            setOpenPositionError('');
+                                        }}
+                                        disabled={openPositionLoading}
+                                        className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left transition ${openPositionStopLossEnabled
+                                            ? 'border-pink-500/30 bg-pink-500/10 text-zinc-900 dark:text-white'
+                                            : 'border-zinc-200 bg-white/70 text-zinc-700 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
+                                            }`}
+                                    >
+                                        <span className="text-[12px] font-semibold">{'\u6b62\u635f'}</span>
+                                        <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${openPositionStopLossEnabled
+                                            ? 'bg-white/70 text-pink-700 dark:bg-white/10 dark:text-pink-200'
+                                            : 'bg-zinc-100 text-zinc-500 dark:bg-white/10 dark:text-white/45'
+                                            }`}>
+                                            {openPositionStopLossEnabled ? '\u5f00\u542f' : '\u5df2\u5173'}
+                                        </span>
+                                    </button>
+                                </div>
                             </div>
 
                             <div className="mt-4 rounded-xl border border-cyan-500/25 bg-gradient-to-br from-cyan-500/10 via-cyan-500/5 to-transparent p-3 dark:border-cyan-400/25 dark:from-cyan-400/10 dark:via-cyan-400/5">
