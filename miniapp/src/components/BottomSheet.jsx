@@ -11,6 +11,8 @@ export default function BottomSheet({
     contentClassName = 'px-5 pb-6 sm:pb-5',
     headerClassName = 'px-5 pt-3 sm:pt-5 pb-3',
     headerRight = null,
+    footer = null,
+    footerClassName = 'px-5 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]',
 }) {
     const [isVisible, setIsVisible] = useState(false);
     const [isAnimating, setIsAnimating] = useState(false);
@@ -86,6 +88,12 @@ export default function BottomSheet({
                 >
                     {children}
                 </div>
+
+                {footer ? (
+                    <div className={`shrink-0 border-t border-zinc-200/70 bg-white/95 backdrop-blur-xl dark:border-white/10 dark:bg-[#111318]/95 ${footerClassName}`}>
+                        {footer}
+                    </div>
+                ) : null}
             </div>
         </div >
     );

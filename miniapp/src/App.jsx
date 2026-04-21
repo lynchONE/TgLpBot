@@ -4682,7 +4682,35 @@ export default function App() {
                         maxHeightClass="max-h-[92vh]"
                         className="bg-white dark:bg-[#111318] backdrop-blur-none"
                         headerClassName="px-4 pt-3 pb-2.5"
-                        contentClassName="px-4 pb-28"
+                        contentClassName="px-4 pb-5"
+                        footerClassName="px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.85rem)]"
+                        footer={
+                            <div className="space-y-3">
+                                {openPositionError ? (
+                                    <div className="rounded-2xl border border-red-500/40 bg-gradient-to-br from-red-500/10 to-transparent p-4 text-red-800 shadow-sm dark:border-red-500/30 dark:text-red-200">
+                                        <div className="flex items-start gap-3">
+                                            <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-500/20 text-red-600 dark:text-red-400">
+                                                <X className="h-3 w-3" strokeWidth={3} />
+                                            </div>
+                                            <div className="text-[12px] font-medium leading-relaxed">
+                                                {openPositionError}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : null}
+                                <button
+                                    type="button"
+                                    onClick={handleOpenPosition}
+                                    disabled={openPositionSubmitDisabled}
+                                    className={`w-full rounded-2xl px-3 py-3 text-sm font-semibold shadow-sm transition ${openPositionSubmitDisabled
+                                        ? 'cursor-not-allowed bg-zinc-200 text-zinc-500 shadow-none dark:bg-white/10 dark:text-white/30'
+                                        : brand.solidButtonClass
+                                        }`}
+                                >
+                                    {openPositionLoading ? '提交中...' : '确认开仓'}
+                                </button>
+                            </div>
+                        }
                         title={
                             <div className="min-w-0">
                                 <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/90">开仓</div>
@@ -4782,18 +4810,18 @@ export default function App() {
                                                         setOpenPositionError('');
                                                         hapticSelection();
                                                     }}
-                                                    className={`flex min-h-[74px] w-full min-w-0 flex-col items-start justify-between rounded-xl border px-2.5 py-2 text-left transition ${selected
+                                                    className={`flex min-h-[52px] w-full min-w-0 items-center rounded-2xl border px-2.5 py-2 text-left transition ${selected
                                                         ? `${brand.selectionClass} shadow-sm`
                                                         : 'border-zinc-200 bg-white/80 text-zinc-700 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
                                                         }`}
                                                 >
-                                                    <div className="flex w-full items-start justify-between gap-1.5">
+                                                    <div className="flex min-w-0 flex-1 items-center gap-1">
                                                         <span className="line-clamp-2 text-[11px] font-semibold leading-4">{name || shortAddr || `钱包${id}`}</span>
                                                         {w?.is_default ? (
                                                             <span className="shrink-0 rounded bg-zinc-500/10 px-1 py-px text-[9px] font-bold text-zinc-500 dark:text-white/50">默认</span>
                                                         ) : null}
                                                     </div>
-                                                    <span className="w-full truncate text-[11px] font-medium tabular-nums text-zinc-900/75 dark:text-white/70">
+                                                    <span className="shrink-0 pl-2 text-[10px] font-semibold tabular-nums text-zinc-900/75 dark:text-white/70">
                                                         {openPositionWalletBalancesHidden ? '****' : `$${String(w?.stable_balance ?? '--')}`}
                                                     </span>
                                                 </button>
@@ -5789,29 +5817,7 @@ export default function App() {
                                 </div>
                             ) : null}
 
-                            {openPositionError ? (
-                                <div className="rounded-2xl border border-red-500/40 bg-gradient-to-br from-red-500/10 to-transparent p-4 shadow-sm text-red-800 dark:border-red-500/30 dark:text-red-200">
-                                    <div className="flex items-start gap-3">
-                                        <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-500/20 text-red-600 dark:text-red-400">
-                                            <X className="h-3 w-3" strokeWidth={3} />
-                                        </div>
-                                        <div className="text-[12px] font-medium leading-relaxed">
-                                            {openPositionError}
-                                        </div>
-                                    </div>
-                                </div>
-                            ) : null}
-                            <button
-                                type="button"
-                                onClick={handleOpenPosition}
-                                disabled={openPositionSubmitDisabled}
-                                className={`sticky bottom-2 z-10 mt-3 w-full rounded-2xl px-3 py-3 text-sm font-semibold shadow-sm transition ${openPositionSubmitDisabled
-                                    ? 'cursor-not-allowed bg-zinc-200 text-zinc-500 shadow-none dark:bg-white/10 dark:text-white/30'
-                                    : brand.solidButtonClass
-                                    }`}
-                            >
-                                {openPositionLoading ? '提交中...' : '确认开仓'}
-                            </button>
+                            {/* footer action rendered above */}
                         </div>
                     </BottomSheet>
                 ) : null
