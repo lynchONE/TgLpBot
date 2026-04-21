@@ -109,6 +109,8 @@ export default function LiquidityDistributionChart({
     titleText = '流动性分布',
     titlePlacement = 'center',
     quoteIsToken1 = undefined,
+    onRangeDragStart,
+    onRangeDragEnd,
 }) {
     const containerRef = useRef(null);
     const [width, setWidth] = useState(0);
@@ -120,6 +122,7 @@ export default function LiquidityDistributionChart({
         target: null,
         lockedLowerTick: null,
         lockedUpperTick: null,
+        handle: null,
     });
 
     useEffect(() => {
@@ -191,13 +194,15 @@ export default function LiquidityDistributionChart({
                 // ignore
             }
         }
+        onRangeDragEnd?.(dragStateRef.current.handle || null);
         dragStateRef.current.pointerId = null;
         dragStateRef.current.target = null;
         dragStateRef.current.lockedLowerTick = null;
         dragStateRef.current.lockedUpperTick = null;
+        dragStateRef.current.handle = null;
         dragStateRef.current.suppressClickUntil = Date.now() + 120;
         setDraggingHandle(null);
-    }, []);
+    }, [onRangeDragEnd]);
 
     const onPointerMove = useCallback((event) => {
         if (!draggingHandle || !containerRef.current) return;
@@ -439,6 +444,12 @@ export default function LiquidityDistributionChart({
                         dragStateRef.current.target = event.currentTarget;
                         dragStateRef.current.lockedLowerTick = Number.isFinite(rangeLowerTick) ? rangeLowerTick : null;
                         dragStateRef.current.lockedUpperTick = Number.isFinite(rangeUpperTick) ? rangeUpperTick : null;
+                        dragStateRef.current.handle = 'lower';
+                        onRangeDragStart?.({
+                            handle: 'lower',
+                            lower: Number.isFinite(rangeLowerTick) ? rangeLowerTick : null,
+                            upper: Number.isFinite(rangeUpperTick) ? rangeUpperTick : null,
+                        });
                         setDraggingHandle('lower');
                     }}
                     onUp={onPointerUp}
@@ -463,6 +474,12 @@ export default function LiquidityDistributionChart({
                         dragStateRef.current.target = event.currentTarget;
                         dragStateRef.current.lockedLowerTick = Number.isFinite(rangeLowerTick) ? rangeLowerTick : null;
                         dragStateRef.current.lockedUpperTick = Number.isFinite(rangeUpperTick) ? rangeUpperTick : null;
+                        dragStateRef.current.handle = 'upper';
+                        onRangeDragStart?.({
+                            handle: 'upper',
+                            lower: Number.isFinite(rangeLowerTick) ? rangeLowerTick : null,
+                            upper: Number.isFinite(rangeUpperTick) ? rangeUpperTick : null,
+                        });
                         setDraggingHandle('upper');
                     }}
                     onUp={onPointerUp}

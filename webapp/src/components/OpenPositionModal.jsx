@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, CheckCircle, X, XCircle } from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle, Eye, EyeOff, X, XCircle } from 'lucide-react';
 import { fetchGlobalConfig, fetchPoolLiquidityDistribution, prepareOpenPosition, previewOpenPosition } from '../api';
 import LiquidityDistributionChart from './LiquidityDistributionChart.jsx';
 
@@ -493,8 +493,12 @@ export default function OpenPositionModal({
   const [entrySwapConfirmed, setEntrySwapConfirmed] = useState(false);
   const [entrySwapPreview, setEntrySwapPreview] = useState(null);
   const [entrySwapPreviewLoading, setEntrySwapPreviewLoading] = useState(false);
+  const [previewPending, setPreviewPending] = useState(false);
+  const [previewSuspended, setPreviewSuspended] = useState(false);
   const [entrySwapPreviewError, setEntrySwapPreviewError] = useState('');
   const defaultRangeSeededRef = useRef(false);
+  const previewResumeTimerRef = useRef(null);
+  const autoSingleSideRangeRef = useRef('');
   const [privateZapInfo, setPrivateZapInfo] = useState(null);
   const [preparePrivateZapInfo, setPreparePrivateZapInfo] = useState(null);
   const [previewChecks, setPreviewChecks] = useState([]);
@@ -508,12 +512,28 @@ export default function OpenPositionModal({
   const [dcaExpanded, setDcaExpanded] = useState(false);
   const [rebalanceEnabled, setRebalanceEnabled] = useState(true);
   const [stopLossEnabled, setStopLossEnabled] = useState(true);
+  const [walletBalancesHidden, setWalletBalancesHidden] = useState(false);
   const [prepareRangeEditor, setPrepareRangeEditor] = useState(null);
   const [previewRangeEditor, setPreviewRangeEditor] = useState(null);
 
   const [liqProfile, setLiqProfile] = useState(null);
   const [liqProfileLoading, setLiqProfileLoading] = useState(false);
   const [liqProfileError, setLiqProfileError] = useState('');
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem('tglp_open_position_hide_wallet_balances');
+      setWalletBalancesHidden(saved === '1');
+    } catch {
+      // ignore
+    }
+  }, []);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('tglp_open_position_hide_wallet_balances', walletBalancesHidden ? '1' : '0');
+    } catch {
+      // ignore
+    }
+  }, [walletBalancesHidden]);
 
   const pair = pool?.trading_pair || '--';
   const addr = String(pool?.pool_address || '').trim();
@@ -686,6 +706,24 @@ export default function OpenPositionModal({
     if (options.clear !== false) clearErrors();
     return true;
   }, [clearErrors, syncPriceInputsFromTicks]);
+  const suppressPreview = useCallback((delay = 900) => {
+    setPreviewSuspended(true);
+    setEntrySwapPreviewLoading(false);
+    setPreviewPending(false);
+    if (previewResumeTimerRef.current) {
+      window.clearTimeout(previewResumeTimerRef.current);
+    }
+    previewResumeTimerRef.current = window.setTimeout(() => {
+      setPreviewSuspended(false);
+      previewResumeTimerRef.current = null;
+    }, delay);
+  }, []);
+
+  useEffect(() => () => {
+    if (previewResumeTimerRef.current) {
+      window.clearTimeout(previewResumeTimerRef.current);
+    }
+  }, []);
 
   const previewRequest = useMemo(() => {
     if (!apiBaseUrl || !initData || !addr || !version) return null;
@@ -761,6 +799,8 @@ export default function OpenPositionModal({
     setEntrySwapPreview(null);
     setEntrySwapPreviewError('');
     setEntrySwapPreviewLoading(false);
+    setPreviewPending(false);
+    setPreviewSuspended(false);
     setPrivateZapInfo(null);
     setPreparePrivateZapInfo(null);
     setSizingAdvice(null);
@@ -778,6 +818,11 @@ export default function OpenPositionModal({
     setPriceLowerInput('');
     setPriceUpperInput('');
     setGridBoundaryTarget('lower');
+    autoSingleSideRangeRef.current = '';
+    if (previewResumeTimerRef.current) {
+      window.clearTimeout(previewResumeTimerRef.current);
+      previewResumeTimerRef.current = null;
+    }
   }, [addr, version]);
 
   useEffect(() => {
@@ -834,9 +879,15 @@ export default function OpenPositionModal({
   }, [entrySwapConfirmKey]);
 
   useEffect(() => {
+    if (previewSuspended) {
+      setEntrySwapPreviewLoading(false);
+      setPreviewPending(false);
+      return undefined;
+    }
     if (!previewRequest) {
       setEntrySwapPreview(null);
       setEntrySwapPreviewLoading(false);
+      setPreviewPending(false);
       setEntrySwapPreviewError('');
       setPrivateZapInfo(null);
       setSizingAdvice(null);
@@ -847,9 +898,9 @@ export default function OpenPositionModal({
 
     let active = true;
     const controller = new AbortController();
-    setEntrySwapPreviewLoading(true);
+    setPreviewPending(true);
+    setEntrySwapPreviewLoading(false);
     setEntrySwapPreviewError('');
-    setPrivateZapInfo(null);
 
     const timer = window.setTimeout(async () => {
       try {
@@ -879,6 +930,7 @@ export default function OpenPositionModal({
       } finally {
         if (active) {
           setEntrySwapPreviewLoading(false);
+          setPreviewPending(false);
         }
       }
     }, 350);
@@ -888,33 +940,36 @@ export default function OpenPositionModal({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [previewRequest]);
+  }, [previewRequest, previewSuspended]);
 
   const applyRange = useCallback((lo, hi) => {
     clearErrors();
+    suppressPreview();
     setRangeInputMode('percentage');
     setRangeLower(String(lo));
     setRangeUpper(String(hi));
     setRangeUpperAuto(true);
-  }, [clearErrors]);
+  }, [clearErrors, suppressPreview]);
   const displayedLowerPct = Number(rangeEditor?.range_lower_pct ?? rangeLower);
   const displayedUpperPct = Number(rangeEditor?.range_upper_pct ?? rangeUpper);
 
   const handleRangeLowerChange = useCallback((value) => {
     clearErrors();
+    suppressPreview();
     setRangeLower((prevLower) => {
       if (rangeUpperAuto || String(rangeUpper || '').trim() === '' || String(rangeUpper) === String(prevLower)) {
         setRangeUpper(value);
       }
       return value;
     });
-  }, [clearErrors, rangeUpper, rangeUpperAuto]);
+  }, [clearErrors, rangeUpper, rangeUpperAuto, suppressPreview]);
 
   const handleRangeUpperChange = useCallback((value) => {
     clearErrors();
+    suppressPreview();
     setRangeUpperAuto(false);
     setRangeUpper(value);
-  }, [clearErrors]);
+  }, [clearErrors, suppressPreview]);
 
   const syncTicksFromEditor = useCallback((editor) => {
     const lower = Number(editor?.tick_lower);
@@ -934,13 +989,14 @@ export default function OpenPositionModal({
 
   const handleRangeInputModeChange = useCallback((mode) => {
     clearErrors();
+    suppressPreview();
     setRangeInputMode(mode);
     if (mode !== 'percentage') {
       if (!syncTicksFromEditor(previewRangeEditor)) {
         applyDefaultTickRange();
       }
     }
-  }, [clearErrors, previewRangeEditor, applyDefaultTickRange, syncTicksFromEditor]);
+  }, [clearErrors, previewRangeEditor, applyDefaultTickRange, syncTicksFromEditor, suppressPreview]);
 
   const nudgeTickBoundary = useCallback((target, delta) => {
     const spacing = Number(rangeEditor?.tick_spacing);
@@ -963,9 +1019,10 @@ export default function OpenPositionModal({
       maxTick,
     );
     if (!nextRange) return;
+    suppressPreview();
     setRangeInputMode('tick');
     applyResolvedTickRange(nextRange.lowerTick, nextRange.upperTick);
-  }, [rangeEditor, selectedManualTickLower, selectedManualTickUpper, invertPrice, applyResolvedTickRange]);
+  }, [rangeEditor, selectedManualTickLower, selectedManualTickUpper, invertPrice, applyResolvedTickRange, suppressPreview]);
 
   const applyGridBin = useCallback((bin) => {
     if (!bin) return;
@@ -980,8 +1037,9 @@ export default function OpenPositionModal({
       nextUpper = bin.upperTick;
       if (nextUpper <= nextLower) nextLower = nextUpper - spacing;
     }
+    suppressPreview();
     applyResolvedTickRange(nextLower, nextUpper);
-  }, [rangeEditor, selectedManualTickLower, selectedManualTickUpper, gridBoundaryTarget, applyResolvedTickRange]);
+  }, [rangeEditor, selectedManualTickLower, selectedManualTickUpper, gridBoundaryTarget, applyResolvedTickRange, suppressPreview]);
 
   const shiftRangeToSingleSide = useCallback((side) => {
     const spacing = Number(rangeEditor?.tick_spacing);
@@ -1017,9 +1075,10 @@ export default function OpenPositionModal({
         nextLower = nextUpper - width;
       }
     }
+    suppressPreview();
     setRangeInputMode('tick');
     applyResolvedTickRange(nextLower, nextUpper);
-  }, [rangeEditor, selectedManualTickLower, selectedManualTickUpper, applyResolvedTickRange]);
+  }, [rangeEditor, selectedManualTickLower, selectedManualTickUpper, applyResolvedTickRange, suppressPreview]);
 
   useEffect(() => {
     if (rangeInputMode !== 'percentage') return;
@@ -1291,6 +1350,22 @@ export default function OpenPositionModal({
       tickSpacing: Number(rangeEditor?.tick_spacing),
     };
   }, [liqProfile, rangeEditor, chartLowerTick, chartUpperTick, token0Decimals, token1Decimals, invertPrice, token0Symbol, token1Symbol]);
+  const resolvedSelectionShape = useMemo(() => {
+    const currentTick = Number(liqProfile?.current_tick ?? rangeEditor?.current_tick);
+    const lowerTick = Number(chartLowerTick);
+    const upperTick = Number(chartUpperTick);
+    if (!Number.isFinite(currentTick) || !Number.isFinite(lowerTick) || !Number.isFinite(upperTick) || upperTick <= lowerTick) {
+      return { shape: '', dominantTokenSymbol: '' };
+    }
+    if (currentTick < lowerTick) {
+      return { shape: 'single_token0', dominantTokenSymbol: token0Symbol };
+    }
+    if (currentTick >= upperTick) {
+      return { shape: 'single_token1', dominantTokenSymbol: token1Symbol };
+    }
+    return { shape: 'dual_sided', dominantTokenSymbol: '' };
+  }, [liqProfile, rangeEditor, chartLowerTick, chartUpperTick, token0Symbol, token1Symbol]);
+  const isSingleSidedSelection = String(resolvedSelectionShape.shape || '').startsWith('single_');
 
   const selectedShareRangeLowerTick = useMemo(() => {
     if (rangeInputMode !== 'percentage') {
@@ -1389,8 +1464,28 @@ export default function OpenPositionModal({
 
   const shareEstimate = Number.isFinite(Number(shareEstimateInfo?.share)) ? Number(shareEstimateInfo.share) : null;
 
+  useEffect(() => {
+    if (!isSingleSidedSelection) {
+      autoSingleSideRangeRef.current = '';
+      return;
+    }
+    const signature = `${resolvedSelectionShape.shape}:${chartLowerTick}:${chartUpperTick}`;
+    if (!signature || autoSingleSideRangeRef.current === signature) return;
+    autoSingleSideRangeRef.current = signature;
+    if (rebalanceEnabled) setRebalanceEnabled(false);
+    if (stopLossEnabled) setStopLossEnabled(false);
+  }, [
+    isSingleSidedSelection,
+    resolvedSelectionShape.shape,
+    chartLowerTick,
+    chartUpperTick,
+    rebalanceEnabled,
+    stopLossEnabled,
+  ]);
+
   const onChartRangeChange = useCallback(({ lower, upper }) => {
     if (!liqProfile) return;
+    suppressPreview(1100);
     const nextLower = Number.isFinite(lower)
       ? lower
       : (Number.isInteger(selectedManualTickLower) ? selectedManualTickLower : chartLowerTick);
@@ -1400,16 +1495,28 @@ export default function OpenPositionModal({
     if (!Number.isInteger(nextLower) || !Number.isInteger(nextUpper) || nextUpper <= nextLower) return;
     setRangeInputMode('tick');
     applyResolvedTickRange(nextLower, nextUpper);
-  }, [liqProfile, selectedManualTickLower, selectedManualTickUpper, chartLowerTick, chartUpperTick, applyResolvedTickRange]);
+  }, [liqProfile, selectedManualTickLower, selectedManualTickUpper, chartLowerTick, chartUpperTick, applyResolvedTickRange, suppressPreview]);
+
+  const handleChartRangeDragStart = useCallback(() => {
+    suppressPreview(1200);
+    if (!Number.isInteger(chartLowerTick) || !Number.isInteger(chartUpperTick) || chartUpperTick <= chartLowerTick) return;
+    setRangeInputMode('tick');
+    applyResolvedTickRange(chartLowerTick, chartUpperTick, { clear: false });
+  }, [chartLowerTick, chartUpperTick, applyResolvedTickRange, suppressPreview]);
+
+  const handleChartRangeDragEnd = useCallback(() => {
+    suppressPreview(850);
+  }, [suppressPreview]);
 
   const handleChartBinSelect = useCallback((bin) => {
     if (!bin) return;
     const lower = Number(bin?.tick_lower);
     const upper = Number(bin?.tick_upper);
     if (!Number.isInteger(lower) || !Number.isInteger(upper) || upper <= lower) return;
+    suppressPreview();
     setRangeInputMode('tick');
     applyResolvedTickRange(lower, upper);
-  }, [applyResolvedTickRange]);
+  }, [applyResolvedTickRange, suppressPreview]);
 
   const handleSubmit = useCallback(() => {
     if (!Number.isFinite(amountValue) || amountValue <= 0) {
@@ -1453,7 +1560,7 @@ export default function OpenPositionModal({
       setError(`当前池子单次开仓金额不能高于 ${riskMaxOpenAmount} USDT。`);
       return;
     }
-    if (previewRequest && entrySwapPreviewLoading) {
+    if (previewRequest && (previewPending || previewSuspended)) {
       setError('前置兑换预览仍在加载，请稍后再试。');
       return;
     }
@@ -1532,7 +1639,8 @@ export default function OpenPositionModal({
     riskAck,
     failChecks,
     previewRequest,
-    entrySwapPreviewLoading,
+    previewPending,
+    previewSuspended,
     entrySwapPreview,
     entrySwapConfirmed,
     onSubmit,
@@ -1572,6 +1680,8 @@ export default function OpenPositionModal({
               rangeLowerTick={chartLowerTick}
               rangeUpperTick={chartUpperTick}
               onRangeChange={onChartRangeChange}
+              onRangeDragStart={handleChartRangeDragStart}
+              onRangeDragEnd={handleChartRangeDragEnd}
               onBinSelect={handleChartBinSelect}
               loading={liqProfileLoading}
               token0Decimals={token0Decimals}
@@ -1656,8 +1766,8 @@ export default function OpenPositionModal({
                         className={`opm-range-chip${isActive ? ' active' : ''}${isSmart ? ' is-smart' : ''}`}
                         title={option.subLabel}
                       >
-                        <span className="opm-range-chip-label">{option.label}</span>
                         {isSmart ? <span className="opm-range-chip-dot" aria-hidden="true" /> : null}
+                        <span className="opm-range-chip-label">{option.label}</span>
                       </button>
                     );
                   })}
@@ -2164,6 +2274,7 @@ export default function OpenPositionModal({
                             value={priceLowerInput}
                             onChange={(e) => {
                               clearErrors();
+                              suppressPreview();
                               setPriceLowerInput(e.target.value);
                             }}
                             min="0"
@@ -2177,6 +2288,7 @@ export default function OpenPositionModal({
                             value={priceUpperInput}
                             onChange={(e) => {
                               clearErrors();
+                              suppressPreview();
                               setPriceUpperInput(e.target.value);
                             }}
                             min="0"
@@ -2212,6 +2324,7 @@ export default function OpenPositionModal({
                         value={tickLowerInput}
                         onChange={(e) => {
                           clearErrors();
+                          suppressPreview();
                           setTickLowerInput(e.target.value);
                         }}
                         step="1"
@@ -2224,6 +2337,7 @@ export default function OpenPositionModal({
                         value={tickUpperInput}
                         onChange={(e) => {
                           clearErrors();
+                          suppressPreview();
                           setTickUpperInput(e.target.value);
                         }}
                         step="1"
@@ -2363,7 +2477,18 @@ export default function OpenPositionModal({
 
             {showWalletPicker && !walletsLoading ? (
               <div className="wallet-picker opm-section">
-                <span className="wallet-picker-label">钱包</span>
+                <div className="wallet-picker-header">
+                  <span className="wallet-picker-label">钱包</span>
+                  <button
+                    type="button"
+                    className="wallet-visibility-btn"
+                    onClick={() => setWalletBalancesHidden((prev) => !prev)}
+                    title={walletBalancesHidden ? '显示钱包金额' : '隐藏钱包金额'}
+                    aria-label={walletBalancesHidden ? '显示钱包金额' : '隐藏钱包金额'}
+                  >
+                    {walletBalancesHidden ? <Eye className="wallet-visibility-icon" /> : <EyeOff className="wallet-visibility-icon" />}
+                  </button>
+                </div>
                 <div className="wallet-picker-list">
                   {wallets.map((wallet) => {
                     const active = wallet.id === resolvedWalletId;
@@ -2382,7 +2507,9 @@ export default function OpenPositionModal({
                           {wallet.is_default ? <span className="wallet-chip-default">默认</span> : null}
                         </span>
                         <span className="wallet-chip-bal">
-                          {wallet.stable_balance !== 'N/A' ? `$${wallet.stable_balance}` : ''}
+                          {wallet.stable_balance !== 'N/A'
+                            ? (walletBalancesHidden ? '****' : `$${wallet.stable_balance}`)
+                            : ''}
                         </span>
                       </button>
                     );
@@ -2513,7 +2640,7 @@ export default function OpenPositionModal({
                           clearErrors();
                           setEntrySwapConfirmed(e.target.checked);
                         }}
-                        disabled={busy || entrySwapPreviewLoading}
+                        disabled={busy || previewPending || previewSuspended}
                       />
                       <span>我已确认本次前置兑换，先执行兑换，再继续后续开仓。</span>
                     </label>
@@ -2565,7 +2692,9 @@ export default function OpenPositionModal({
                 </button>
               </div>
               <div className="opm-inline-hint">
-                两个都关闭时仅提醒，不会自动再平衡或止损。
+                {isSingleSidedSelection
+                  ? `当前区间会开成单边池，已默认关闭再平衡和止损。${resolvedSelectionShape.dominantTokenSymbol ? ` 资金会更偏向 ${resolvedSelectionShape.dominantTokenSymbol}。` : ''}`
+                  : '两个都关闭时仅提醒，不会自动再平衡或止损。'}
               </div>
             </div>
 
@@ -2801,7 +2930,7 @@ export default function OpenPositionModal({
 
         <div className="modal-actions">
           <button type="button" className="ghost-chip" onClick={onClose} disabled={busy}>取消</button>
-          <button type="button" className={`accent-btn ${hasBlockingSafetyFailure ? 'is-blocked' : ''}`} onClick={handleSubmit} disabled={busy || entrySwapPreviewLoading || hasBlockingSafetyFailure}>
+          <button type="button" className={`accent-btn ${hasBlockingSafetyFailure ? 'is-blocked' : ''}`} onClick={handleSubmit} disabled={busy || previewPending || previewSuspended || hasBlockingSafetyFailure}>
             {busy ? '提交中...' : '确认开仓'}
           </button>
         </div>
