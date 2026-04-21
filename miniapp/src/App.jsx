@@ -3077,14 +3077,6 @@ export default function App() {
             return;
         }
         const requiresAck = warnChecks.some(c => c.extra?.risk_ack_required);
-        const maxOpenAmount = warnChecks.reduce((m, c) => {
-            const v = Number(c.extra?.max_open_amount);
-            return (Number.isFinite(v) && v > 0 && (m === null || v < m)) ? v : m;
-        }, null);
-        if (maxOpenAmount !== null && amount > maxOpenAmount) {
-            setOpenPositionError(`当前池子单次开仓金额不能高于 ${maxOpenAmount} USDT`);
-            return;
-        }
         const range = parseRangeInput(openPositionRangeLower, openPositionRangeUpper);
         if (openPositionRangeInputMode === 'percentage') {
             if (!range || range.lower <= 0 || range.upper <= 0 || range.lower >= 100 || range.upper >= 100) {

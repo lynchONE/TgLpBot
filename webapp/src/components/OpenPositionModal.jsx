@@ -556,10 +556,6 @@ export default function OpenPositionModal({
     ? blockingFailChecks.map(c => c.detail || c.label).filter(Boolean).join('; ')
     : '';
   const riskRequiresAck = warnChecks.some(c => c.extra?.risk_ack_required);
-  const riskMaxOpenAmount = warnChecks.reduce((m, c) => {
-    const v = Number(c.extra?.max_open_amount);
-    return (Number.isFinite(v) && v > 0 && (m === null || v < m)) ? v : m;
-  }, null);
   const riskLiquidityUsd = warnChecks.reduce((m, c) => {
     const v = Number(c.extra?.liquidity_usd);
     return (Number.isFinite(v) && v >= 0 && m === null) ? v : m;
@@ -1556,10 +1552,6 @@ export default function OpenPositionModal({
       setError(failChecks.map(c => c.detail || c.label).join('; '));
       return;
     }
-    if (riskMaxOpenAmount !== null && amountValue > riskMaxOpenAmount) {
-      setError(`当前池子单次开仓金额不能高于 ${riskMaxOpenAmount} USDT。`);
-      return;
-    }
     if (previewRequest && (previewPending || previewSuspended)) {
       setError('前置兑换预览仍在加载，请稍后再试。');
       return;
@@ -1634,7 +1626,6 @@ export default function OpenPositionModal({
     entrySwapSlippageValue,
     showWalletPicker,
     resolvedWalletId,
-    riskMaxOpenAmount,
     riskRequiresAck,
     riskAck,
     failChecks,
@@ -2446,18 +2437,12 @@ export default function OpenPositionModal({
                 <AlertTriangle size={20} style={{ color: riskRequiresAck ? '#f59e0b' : '#ef4444', flexShrink: 0, marginTop: 2 }} />
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <div style={{ fontSize: 13, lineHeight: 1.5, fontWeight: 600, color: riskRequiresAck ? '#d97706' : '#dc2626' }}>{riskMessage}</div>
-                  {((Number.isFinite(riskLiquidityUsd) && riskLiquidityUsd >= 0) || (Number.isFinite(riskMaxOpenAmount) && riskMaxOpenAmount > 0)) && (
+                  {Number.isFinite(riskLiquidityUsd) && riskLiquidityUsd >= 0 && (
                     <div style={{ backgroundColor: 'var(--bg-card-hover, rgba(255,255,255,0.08))', borderRadius: 12, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
                       {Number.isFinite(riskLiquidityUsd) && riskLiquidityUsd >= 0 && (
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
                           <span style={{ opacity: 0.8 }}>当前流动性</span>
                           <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{formatUsdCompact(riskLiquidityUsd)}</span>
-                        </div>
-                      )}
-                      {Number.isFinite(riskMaxOpenAmount) && riskMaxOpenAmount > 0 && (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                          <span style={{ opacity: 0.8 }}>最大允许开仓</span>
-                          <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{formatUsdCompact(riskMaxOpenAmount)}</span>
                         </div>
                       )}
                     </div>

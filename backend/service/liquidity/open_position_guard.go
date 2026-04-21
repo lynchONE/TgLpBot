@@ -28,7 +28,6 @@ import (
 const (
 	hardRejectMinLiquidityUSD = 200.0
 	softWarnMaxLiquidityUSD   = 1000.0
-	softWarnMaxOpenAmountUSD  = 200.0
 )
 
 type OpenPositionRiskOptions struct {
@@ -380,7 +379,7 @@ func hardMinLiquidityUSD(configuredMin float64) float64 {
 	return hardRejectMinLiquidityUSD
 }
 
-func evaluateLiquidityRisk(liquidityUSD float64, configuredMin float64, amountUSDT float64, options OpenPositionRiskOptions) *ZapSafetyError {
+func evaluateLiquidityRisk(liquidityUSD float64, configuredMin float64, options OpenPositionRiskOptions) *ZapSafetyError {
 	minLiquidityUSD := hardMinLiquidityUSD(configuredMin)
 	if liquidityUSD <= 0 {
 		return &ZapSafetyError{
@@ -401,42 +400,28 @@ func evaluateLiquidityRisk(liquidityUSD float64, configuredMin float64, amountUS
 	if liquidityUSD >= softWarnMaxLiquidityUSD {
 		return nil
 	}
-	if amountUSDT > softWarnMaxOpenAmountUSD {
-		return &ZapSafetyError{
-			Code:            "pool_liquidity_warning",
-			Reason:          fmt.Sprintf("该池子当前流动性为 %.2fU，低流动性池单次开仓金额不能高于 %.0fU", liquidityUSD, softWarnMaxOpenAmountUSD),
-			LiquidityUSD:    liquidityUSD,
-			MinLiquidityUSD: minLiquidityUSD,
-			MaxOpenAmount:   softWarnMaxOpenAmountUSD,
-		}
-	}
 	if options.RequireLiquidityAck && !options.AckLiquidityRisk {
 		return &ZapSafetyError{
 			Code:            "pool_liquidity_warning",
 			Reason:          fmt.Sprintf("该池子当前流动性为 %.2fU，请确认低流动性风险后再继续开仓", liquidityUSD),
 			LiquidityUSD:    liquidityUSD,
 			MinLiquidityUSD: minLiquidityUSD,
-			MaxOpenAmount:   softWarnMaxOpenAmountUSD,
 			RiskAckRequired: true,
 		}
 	}
 	return nil
 }
 
-func buildSoftLiquidityWarning(liquidityUSD float64, configuredMin float64, amountUSDT float64) *ZapSafetyError {
+func buildSoftLiquidityWarning(liquidityUSD float64, configuredMin float64) *ZapSafetyError {
 	minLiquidityUSD := hardMinLiquidityUSD(configuredMin)
 	if liquidityUSD <= 0 || liquidityUSD < minLiquidityUSD || liquidityUSD >= softWarnMaxLiquidityUSD {
 		return nil
 	}
-	if amountUSDT > softWarnMaxOpenAmountUSD {
-		return nil
-	}
 	return &ZapSafetyError{
 		Code:            "pool_liquidity_warning",
-		Reason:          fmt.Sprintf("该池子当前流动性为 %.2fU，属于低流动性池，请留意滑点与成交波动（单次开仓限额 %.0fU）", liquidityUSD, softWarnMaxOpenAmountUSD),
+		Reason:          fmt.Sprintf("该池子当前流动性为 %.2fU，属于低流动性池，请留意滑点与成交波动", liquidityUSD),
 		LiquidityUSD:    liquidityUSD,
 		MinLiquidityUSD: minLiquidityUSD,
-		MaxOpenAmount:   softWarnMaxOpenAmountUSD,
 	}
 }
 
@@ -600,7 +585,7 @@ func (s *LiquidityService) CheckOpenPositionSafety(task *models.StrategyTask, op
 		return err
 	}
 
-	if err := evaluateLiquidityRisk(state.LiquidityUSD, safety.MinPoolLiquidityUSD, task.AmountUSDT, options); err != nil {
+	if err := evaluateLiquidityRisk(state.LiquidityUSD, safety.MinPoolLiquidityUSD, options); err != nil {
 		return err
 	}
 
@@ -644,9 +629,9 @@ func (s *LiquidityService) CollectOpenPositionChecks(task *models.StrategyTask, 
 	}
 
 	// 2. Liquidity USD check
-	liqErr := evaluateLiquidityRisk(state.LiquidityUSD, safety.MinPoolLiquidityUSD, task.AmountUSDT, options)
+	liqErr := evaluateLiquidityRisk(state.LiquidityUSD, safety.MinPoolLiquidityUSD, options)
 	if liqErr == nil {
-		if warn := buildSoftLiquidityWarning(state.LiquidityUSD, safety.MinPoolLiquidityUSD, task.AmountUSDT); warn != nil {
+		if warn := buildSoftLiquidityWarning(state.LiquidityUSD, safety.MinPoolLiquidityUSD); warn != nil {
 			liqVal := state.LiquidityUSD
 			checks = append(checks, CheckResult{
 				Key:    "liquidity",
@@ -655,8 +640,7 @@ func (s *LiquidityService) CollectOpenPositionChecks(task *models.StrategyTask, 
 				Detail: warn.Reason,
 				Value:  &liqVal,
 				Extra: map[string]interface{}{
-					"liquidity_usd":   warn.LiquidityUSD,
-					"max_open_amount": warn.MaxOpenAmount,
+					"liquidity_usd": warn.LiquidityUSD,
 				},
 			})
 		} else {
@@ -676,8 +660,7 @@ func (s *LiquidityService) CollectOpenPositionChecks(task *models.StrategyTask, 
 			Label: "池子流动性",
 			Value: &liqVal,
 			Extra: map[string]interface{}{
-				"liquidity_usd":   liqErr.LiquidityUSD,
-				"max_open_amount": liqErr.MaxOpenAmount,
+				"liquidity_usd": liqErr.LiquidityUSD,
 			},
 		}
 		if liqErr.RiskAckRequired {

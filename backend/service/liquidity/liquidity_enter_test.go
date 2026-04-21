@@ -129,7 +129,7 @@ func TestEnsurePoolHasLiquidityAllowsPositive(t *testing.T) {
 func TestEvaluateLiquidityRiskRejectsBelowConfiguredMin(t *testing.T) {
 	t.Parallel()
 
-	err := evaluateLiquidityRisk(403, 500, 150, OpenPositionRiskOptions{})
+	err := evaluateLiquidityRisk(403, 500, OpenPositionRiskOptions{})
 	if err == nil {
 		t.Fatal("expected below-min liquidity to be rejected")
 	}
@@ -144,7 +144,7 @@ func TestEvaluateLiquidityRiskRejectsBelowConfiguredMin(t *testing.T) {
 func TestEvaluateLiquidityRiskRequiresAckInWarningBand(t *testing.T) {
 	t.Parallel()
 
-	err := evaluateLiquidityRisk(650, 0, 180, OpenPositionRiskOptions{
+	err := evaluateLiquidityRisk(650, 0, OpenPositionRiskOptions{
 		RequireLiquidityAck: true,
 	})
 	if err == nil {
@@ -161,7 +161,7 @@ func TestEvaluateLiquidityRiskRequiresAckInWarningBand(t *testing.T) {
 func TestEvaluateLiquidityRiskAllowsAckedWarningBand(t *testing.T) {
 	t.Parallel()
 
-	err := evaluateLiquidityRisk(650, 0, 180, OpenPositionRiskOptions{
+	err := evaluateLiquidityRisk(650, 0, OpenPositionRiskOptions{
 		AckLiquidityRisk:    true,
 		RequireLiquidityAck: true,
 	})
@@ -173,24 +173,18 @@ func TestEvaluateLiquidityRiskAllowsAckedWarningBand(t *testing.T) {
 func TestEvaluateLiquidityRiskAllowsWarningBandWithoutAckRequirement(t *testing.T) {
 	t.Parallel()
 
-	err := evaluateLiquidityRisk(650, 0, 180, OpenPositionRiskOptions{})
+	err := evaluateLiquidityRisk(650, 0, OpenPositionRiskOptions{})
 	if err != nil {
 		t.Fatalf("expected warning-band liquidity to pass without forced acknowledgement, got %v", err)
 	}
 }
 
-func TestEvaluateLiquidityRiskRejectsExcessOpenAmountWithoutAckRequirement(t *testing.T) {
+func TestEvaluateLiquidityRiskAllowsHigherOpenAmountInWarningBand(t *testing.T) {
 	t.Parallel()
 
-	err := evaluateLiquidityRisk(650, 0, 220, OpenPositionRiskOptions{})
-	if err == nil {
-		t.Fatal("expected excess open amount to be rejected")
-	}
-	if err.Code != "pool_liquidity_warning" {
-		t.Fatalf("unexpected code: %s", err.Code)
-	}
-	if err.RiskAckRequired {
-		t.Fatal("expected excess open amount rejection to not require acknowledgement")
+	err := evaluateLiquidityRisk(650, 0, OpenPositionRiskOptions{})
+	if err != nil {
+		t.Fatalf("expected higher open amount to pass in warning band, got %v", err)
 	}
 }
 
