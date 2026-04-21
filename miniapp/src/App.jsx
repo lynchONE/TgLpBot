@@ -164,6 +164,7 @@ const OPEN_POSITION_RANGE_OPTIONS = [
     { key: 'percentage', label: '快捷%' },
 ];
 const OPEN_POSITION_GRID_RADIUS = 8;
+const OPEN_POSITION_DEFAULT_GRID_OFFSET = 3;
 const OPEN_POSITION_MANUAL_OPTIONS = [
     { key: 'percentage', label: '快捷%' },
     { key: 'grid', label: 'Tick格子' },
@@ -249,6 +250,14 @@ function formatSignedPercentCompact(value) {
     if (!Number.isFinite(num)) return '--';
     if (Math.abs(num) < 0.0001) return '0%';
     return `${num > 0 ? '+' : '-'}${formatRangePercentCompact(Math.abs(num))}`;
+}
+
+function formatPercentInputValue(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return '';
+    if (num >= 10) return num.toFixed(1).replace(/\.0$/, '');
+    if (num >= 1) return num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+    return num.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
 }
 
 function parseAmountInput(value) {
@@ -498,6 +507,23 @@ function buildDisplayPriceRangeFromTicks(lowerTick, upperTick, invertPrice, toke
     };
 }
 
+function estimateDisplayGridStepPercent(currentTick, tickSpacing, invertPrice, token0Decimals, token1Decimals) {
+    const baseTick = Number(currentTick);
+    const spacing = Number(tickSpacing);
+    if (!Number.isFinite(baseTick) || !Number.isFinite(spacing) || spacing <= 0) return null;
+    const currentPoolPrice = tickToPoolPrice(baseTick, token0Decimals, token1Decimals);
+    const nextPoolPrice = tickToPoolPrice(baseTick + spacing, token0Decimals, token1Decimals);
+    if (!Number.isFinite(currentPoolPrice) || currentPoolPrice <= 0 || !Number.isFinite(nextPoolPrice) || nextPoolPrice <= 0) {
+        return null;
+    }
+    const currentDisplay = invertPrice ? 1 / currentPoolPrice : currentPoolPrice;
+    const nextDisplay = invertPrice ? 1 / nextPoolPrice : nextPoolPrice;
+    if (!Number.isFinite(currentDisplay) || currentDisplay <= 0 || !Number.isFinite(nextDisplay) || nextDisplay <= 0) {
+        return null;
+    }
+    return Math.abs(((nextDisplay / currentDisplay) - 1) * 100);
+}
+
 function nudgeDisplayPriceBoundary(target, delta, invertPrice, tickSpacing, lowerTick, upperTick, minTick, maxTick) {
     const spacing = Number(tickSpacing);
     let nextLower = Number(lowerTick);
@@ -597,6 +623,48 @@ function buildGridBins(editor, radius = OPEN_POSITION_GRID_RADIUS) {
         });
     }
     return bins;
+}
+
+function buildDefaultFocusedTickRange(editor, gridOffset = OPEN_POSITION_DEFAULT_GRID_OFFSET) {
+    const currentTick = Number(editor?.current_tick);
+    const tickSpacing = Number(editor?.tick_spacing);
+    if (!Number.isFinite(currentTick) || !Number.isFinite(tickSpacing) || tickSpacing <= 0) return null;
+    const offset = Math.max(1, Number(gridOffset) || OPEN_POSITION_DEFAULT_GRID_OFFSET);
+    const anchorLower = Number.isFinite(Number(editor?.anchor_tick_lower))
+        ? Number(editor.anchor_tick_lower)
+        : roundDownToTickSpacing(currentTick, tickSpacing);
+    const anchorUpper = Number.isFinite(Number(editor?.anchor_tick_upper))
+        ? Number(editor.anchor_tick_upper)
+        : anchorLower + tickSpacing;
+    if (!Number.isInteger(anchorLower) || !Number.isInteger(anchorUpper) || anchorUpper <= anchorLower) return null;
+    let lowerTick = anchorLower - offset * tickSpacing;
+    let upperTick = anchorUpper + offset * tickSpacing;
+    const minTick = Number(editor?.min_tick);
+    const maxTick = Number(editor?.max_tick);
+    if (Number.isFinite(minTick)) lowerTick = Math.max(lowerTick, minTick);
+    if (Number.isFinite(maxTick)) upperTick = Math.min(upperTick, maxTick);
+    if (upperTick <= lowerTick) {
+        upperTick = lowerTick + tickSpacing;
+        if (Number.isFinite(maxTick) && upperTick > maxTick) {
+            upperTick = maxTick;
+            lowerTick = upperTick - tickSpacing;
+        }
+    }
+    if (!Number.isInteger(lowerTick) || !Number.isInteger(upperTick) || upperTick <= lowerTick) return null;
+    return { lowerTick, upperTick };
+}
+
+function buildDefaultFocusedPercentageRange(editor, gridOffset = OPEN_POSITION_DEFAULT_GRID_OFFSET) {
+    const focused = buildDefaultFocusedTickRange(editor, gridOffset);
+    const currentTick = Number(editor?.current_tick);
+    if (!focused || !Number.isFinite(currentTick)) return null;
+    const lowerPct = (1 - Math.pow(1.0001, focused.lowerTick - currentTick)) * 100;
+    const upperPct = (Math.pow(1.0001, focused.upperTick - currentTick) - 1) * 100;
+    if (!(lowerPct > 0) || !(upperPct > 0)) return null;
+    return {
+        lowerValue: formatPercentInputValue(lowerPct),
+        upperValue: formatPercentInputValue(upperPct),
+    };
 }
 
 function buildDCASummaryItems(amount, percentages) {
@@ -877,6 +945,7 @@ export default function App() {
     const [openPositionEntrySwapPreview, setOpenPositionEntrySwapPreview] = useState(null);
     const [openPositionEntrySwapPreviewLoading, setOpenPositionEntrySwapPreviewLoading] = useState(false);
     const [openPositionEntrySwapPreviewError, setOpenPositionEntrySwapPreviewError] = useState('');
+    const openPositionDefaultRangeSeededRef = useRef(false);
     const [openPositionPreparePrivateZapInfo, setOpenPositionPreparePrivateZapInfo] = useState(null);
     const [openPositionPrivateZapInfo, setOpenPositionPrivateZapInfo] = useState(null);
     const [openPositionRangeEditor, setOpenPositionRangeEditor] = useState(null);
@@ -1050,6 +1119,14 @@ export default function App() {
         () => buildGridBins(openPositionEffectiveRangeEditor),
         [openPositionEffectiveRangeEditor],
     );
+    const openPositionDefaultFocusedRange = useMemo(
+        () => buildDefaultFocusedTickRange(openPositionEffectiveRangeEditor),
+        [openPositionEffectiveRangeEditor],
+    );
+    const openPositionDefaultFocusedPercentageRange = useMemo(
+        () => buildDefaultFocusedPercentageRange(openPositionEffectiveRangeEditor),
+        [openPositionEffectiveRangeEditor],
+    );
     const openPositionRangeShapeLabel = useMemo(() => {
         switch (String(openPositionEffectiveRangeEditor?.position_shape || '').trim()) {
             case 'single_token0':
@@ -1077,18 +1154,48 @@ export default function App() {
             if (value >= 0.0001) return value.toLocaleString(undefined, { maximumFractionDigits: 6 });
             return value.toExponential(3);
         };
+        const resolvedLowerTick = (() => {
+            if (openPositionRangeInputMode !== 'percentage') {
+                return Number.isInteger(openPositionSelectedManualTickLower)
+                    ? openPositionSelectedManualTickLower
+                    : (openPositionDefaultFocusedRange?.lowerTick ?? null);
+            }
+            const lowerPct = Number(openPositionRangeLower);
+            if (!Number.isFinite(lowerPct) || lowerPct <= 0) return openPositionDefaultFocusedRange?.lowerTick ?? null;
+            const ratio = 1 - lowerPct / 100;
+            if (ratio <= 0) return openPositionDefaultFocusedRange?.lowerTick ?? null;
+            return Math.round(baseTick + Math.log(ratio) / Math.log(1.0001));
+        })();
+        const resolvedUpperTick = (() => {
+            if (openPositionRangeInputMode !== 'percentage') {
+                return Number.isInteger(openPositionSelectedManualTickUpper)
+                    ? openPositionSelectedManualTickUpper
+                    : (openPositionDefaultFocusedRange?.upperTick ?? null);
+            }
+            const upperPct = Number(openPositionRangeUpper);
+            if (!Number.isFinite(upperPct) || upperPct <= 0) return openPositionDefaultFocusedRange?.upperTick ?? null;
+            const ratio = 1 + upperPct / 100;
+            return Math.round(baseTick + Math.log(ratio) / Math.log(1.0001));
+        })();
         const currentPoolPrice = tickToPoolPrice(baseTick, openPositionToken0Decimals, openPositionToken1Decimals);
-        const lowerPoolPrice = Number.isInteger(openPositionSelectedManualTickLower)
-            ? tickToPoolPrice(openPositionSelectedManualTickLower, openPositionToken0Decimals, openPositionToken1Decimals)
+        const lowerPoolPrice = Number.isInteger(resolvedLowerTick)
+            ? tickToPoolPrice(resolvedLowerTick, openPositionToken0Decimals, openPositionToken1Decimals)
             : null;
-        const upperPoolPrice = Number.isInteger(openPositionSelectedManualTickUpper)
-            ? tickToPoolPrice(openPositionSelectedManualTickUpper, openPositionToken0Decimals, openPositionToken1Decimals)
+        const upperPoolPrice = Number.isInteger(resolvedUpperTick)
+            ? tickToPoolPrice(resolvedUpperTick, openPositionToken0Decimals, openPositionToken1Decimals)
             : null;
         const currentDisplay = applyDisplay(currentPoolPrice);
         const lowerDisplay = lowerPoolPrice ? applyDisplay(lowerPoolPrice) : null;
         const upperDisplay = upperPoolPrice ? applyDisplay(upperPoolPrice) : null;
         const displayMin = lowerDisplay !== null && upperDisplay !== null ? Math.min(lowerDisplay, upperDisplay) : null;
         const displayMax = lowerDisplay !== null && upperDisplay !== null ? Math.max(lowerDisplay, upperDisplay) : null;
+        const gridStepPct = estimateDisplayGridStepPercent(
+            baseTick,
+            Number(openPositionEffectiveRangeEditor?.tick_spacing),
+            openPositionInvertPrice,
+            openPositionToken0Decimals,
+            openPositionToken1Decimals,
+        );
         const toPct = (value) => {
             if (!Number.isFinite(currentDisplay) || currentDisplay <= 0 || !Number.isFinite(value) || value <= 0) return null;
             return ((value / currentDisplay) - 1) * 100;
@@ -1101,13 +1208,18 @@ export default function App() {
             upperPctText: displayMax !== null ? formatSignedPercentCompact(toPct(displayMax)) : '--',
             baseSymbol: openPositionInvertPrice ? openPositionToken1Symbol : openPositionToken0Symbol,
             quoteSymbol: openPositionInvertPrice ? openPositionToken0Symbol : openPositionToken1Symbol,
+            gridStepPctText: Number.isFinite(gridStepPct) ? formatRangePercentCompact(gridStepPct) : '--',
             tickSpacing: Number(openPositionEffectiveRangeEditor?.tick_spacing),
         };
     }, [
         openPositionLiqProfile,
         openPositionEffectiveRangeEditor,
+        openPositionRangeInputMode,
+        openPositionRangeLower,
+        openPositionRangeUpper,
         openPositionSelectedManualTickLower,
         openPositionSelectedManualTickUpper,
+        openPositionDefaultFocusedRange,
         openPositionInvertPrice,
         openPositionToken0Decimals,
         openPositionToken1Decimals,
@@ -2073,10 +2185,13 @@ export default function App() {
 
     const applyDefaultOpenPositionTickRange = useCallback(() => {
         if (syncOpenPositionTicksFromEditor(openPositionPreviewRangeEditor)) return;
+        if (openPositionDefaultFocusedRange && applyOpenPositionTickRange(openPositionDefaultFocusedRange.lowerTick, openPositionDefaultFocusedRange.upperTick, { clear: false })) {
+            return;
+        }
         const lower = Number(openPositionEffectiveRangeEditor?.anchor_tick_lower);
         const upper = Number(openPositionEffectiveRangeEditor?.anchor_tick_upper);
         applyOpenPositionTickRange(lower, upper, { clear: false });
-    }, [openPositionPreviewRangeEditor, openPositionEffectiveRangeEditor, syncOpenPositionTicksFromEditor, applyOpenPositionTickRange]);
+    }, [openPositionPreviewRangeEditor, openPositionDefaultFocusedRange, openPositionEffectiveRangeEditor, syncOpenPositionTicksFromEditor, applyOpenPositionTickRange]);
 
     const handleOpenPositionRangeInputModeChange = useCallback((mode) => {
         setOpenPositionRangeInputMode(mode);
@@ -2193,6 +2308,21 @@ export default function App() {
     ]);
 
     useEffect(() => {
+        if (openPositionRangeInputMode !== 'percentage') return;
+        if (openPositionDefaultRangeSeededRef.current) return;
+        if (String(openPositionRangeLower || '').trim() || String(openPositionRangeUpper || '').trim()) return;
+        if (!openPositionDefaultFocusedPercentageRange) return;
+        setOpenPositionRangeLower(openPositionDefaultFocusedPercentageRange.lowerValue);
+        setOpenPositionRangeUpper(openPositionDefaultFocusedPercentageRange.upperValue);
+        openPositionDefaultRangeSeededRef.current = true;
+    }, [
+        openPositionRangeInputMode,
+        openPositionRangeLower,
+        openPositionRangeUpper,
+        openPositionDefaultFocusedPercentageRange,
+    ]);
+
+    useEffect(() => {
         if (openPositionRangeInputMode === 'percentage') return;
         if (String(openPositionTickLower || '').trim() && String(openPositionTickUpper || '').trim()) return;
         applyDefaultOpenPositionTickRange();
@@ -2241,6 +2371,7 @@ export default function App() {
     }, []);
 
     const resetOpenPositionDraft = () => {
+        openPositionDefaultRangeSeededRef.current = false;
         setOpenPositionAmount('');
         setOpenPositionRangeLower('');
         setOpenPositionRangeUpper('');
@@ -2442,28 +2573,32 @@ export default function App() {
 
     const openPositionChartLowerTick = useMemo(() => {
         if (openPositionRangeInputMode !== 'percentage') {
-            return Number.isInteger(openPositionSelectedManualTickLower) ? openPositionSelectedManualTickLower : null;
+            return Number.isInteger(openPositionSelectedManualTickLower)
+                ? openPositionSelectedManualTickLower
+                : (openPositionDefaultFocusedRange?.lowerTick ?? null);
         }
         const ed = openPositionEffectiveRangeEditor;
         if (!ed || !Number.isFinite(Number(ed.current_tick))) return null;
         const lowerPct = Number(openPositionRangeLower);
-        if (!Number.isFinite(lowerPct) || lowerPct <= 0) return null;
+        if (!Number.isFinite(lowerPct) || lowerPct <= 0) return openPositionDefaultFocusedRange?.lowerTick ?? null;
         const ratio = 1 - lowerPct / 100;
-        if (ratio <= 0) return null;
+        if (ratio <= 0) return openPositionDefaultFocusedRange?.lowerTick ?? null;
         return Math.round(Number(ed.current_tick) + Math.log(ratio) / Math.log(1.0001));
-    }, [openPositionRangeInputMode, openPositionSelectedManualTickLower, openPositionEffectiveRangeEditor, openPositionRangeLower]);
+    }, [openPositionRangeInputMode, openPositionSelectedManualTickLower, openPositionEffectiveRangeEditor, openPositionRangeLower, openPositionDefaultFocusedRange]);
 
     const openPositionChartUpperTick = useMemo(() => {
         if (openPositionRangeInputMode !== 'percentage') {
-            return Number.isInteger(openPositionSelectedManualTickUpper) ? openPositionSelectedManualTickUpper : null;
+            return Number.isInteger(openPositionSelectedManualTickUpper)
+                ? openPositionSelectedManualTickUpper
+                : (openPositionDefaultFocusedRange?.upperTick ?? null);
         }
         const ed = openPositionEffectiveRangeEditor;
         if (!ed || !Number.isFinite(Number(ed.current_tick))) return null;
         const upperPct = Number(openPositionRangeUpper);
-        if (!Number.isFinite(upperPct) || upperPct <= 0) return null;
+        if (!Number.isFinite(upperPct) || upperPct <= 0) return openPositionDefaultFocusedRange?.upperTick ?? null;
         const ratio = 1 + upperPct / 100;
         return Math.round(Number(ed.current_tick) + Math.log(ratio) / Math.log(1.0001));
-    }, [openPositionRangeInputMode, openPositionSelectedManualTickUpper, openPositionEffectiveRangeEditor, openPositionRangeUpper]);
+    }, [openPositionRangeInputMode, openPositionSelectedManualTickUpper, openPositionEffectiveRangeEditor, openPositionRangeUpper, openPositionDefaultFocusedRange]);
 
     const onOpenPositionChartRangeChange = useCallback(({ lower, upper }) => {
         if (!openPositionLiqProfile) return;
@@ -3529,6 +3664,32 @@ export default function App() {
                                 <div className="text-sm font-semibold tabular-nums">
                                     <NumberFlowValue value={pollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s
                                 </div>
+                                <div className="hidden mt-3 flex flex-wrap items-center justify-between gap-2">
+                                    <div className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold ${String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
+                                        ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200'
+                                        : 'border-sky-500/20 bg-sky-500/10 text-sky-700 dark:text-sky-200'
+                                        }`}>
+                                        {String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
+                                            ? `当前：${openPositionRangeShapeLabel || `单边 ${openPositionEffectiveRangeEditor?.dominant_token_symbol || '--'}`}`
+                                            : '当前：双边池'}
+                                    </div>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        <button
+                                            type="button"
+                                            onClick={() => shiftOpenPositionRangeToSingleSide('lower')}
+                                            className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                        >
+                                            单边下限
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => shiftOpenPositionRangeToSingleSide('upper')}
+                                            className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                        >
+                                            单边上限
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         ) : null}
                     >
@@ -4392,7 +4553,7 @@ export default function App() {
                             <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2.5 dark:border-white/10 dark:bg-[#0f1116]">
                                 <div className="mb-1.5 flex items-center justify-between text-[11px]">
                                     <span className="font-semibold text-zinc-700 dark:text-white/70">流动性分布</span>
-                                    <span className="text-zinc-500 dark:text-white/40">{openPositionLiqProfileError ? '加载失败' : (openPositionLiqProfile ? `${openPositionLiqProfile.protocol?.toUpperCase()} · spacing ${openPositionLiqProfile.tick_spacing}` : '')}</span>
+                                    <span className="text-zinc-500 dark:text-white/40">{openPositionLiqProfileError ? '加载失败' : (openPositionLiqProfile ? [openPositionLiqProfile.protocol?.toUpperCase(), openPositionPriceRange?.gridStepPctText && openPositionPriceRange.gridStepPctText !== '--' ? `每格约 ${openPositionPriceRange.gridStepPctText}` : ''].filter(Boolean).join(' · ') : '')}</span>
                                 </div>
                                 <LiquidityDistributionChart
                                     bins={openPositionLiqProfile?.bins || []}
@@ -4545,9 +4706,9 @@ export default function App() {
                                             快捷区间、聪明钱区间和价格微调统一在这里，拖动图表后会自动切到 Tick 区间。
                                         </div>
                                     </div>
-                                    {Number.isFinite(Number(openPositionPriceRange?.tickSpacing)) ? (
+                                    {openPositionPriceRange?.gridStepPctText && openPositionPriceRange.gridStepPctText !== '--' ? (
                                         <div className="shrink-0 rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[10px] font-semibold text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                                            每次 {openPositionPriceRange.tickSpacing} Tick
+                                            每格约 {openPositionPriceRange.gridStepPctText}
                                         </div>
                                     ) : null}
                                 </div>
@@ -4663,7 +4824,7 @@ export default function App() {
                                     </div>
                                 </div>
 
-                                <div className={`mt-3 rounded-2xl border p-3 ${String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
+                                <div className={`hidden mt-3 rounded-2xl border p-3 ${String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
                                     ? 'border-emerald-500/25 bg-emerald-500/10'
                                     : 'border-sky-500/20 bg-sky-500/10'
                                     }`}>
@@ -4701,6 +4862,33 @@ export default function App() {
                                     <div className="mt-2 text-[10px] text-zinc-500 dark:text-white/45">
                                         保留当前宽度，整体移动到现价下方或上方，也允许继续越过活跃格微调。
                                     </div>
+                                </div>
+                            </div>
+
+                            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                                <div className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold ${String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
+                                    ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200'
+                                    : 'border-sky-500/20 bg-sky-500/10 text-sky-700 dark:text-sky-200'
+                                    }`}>
+                                    {String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
+                                        ? `当前：${openPositionRangeShapeLabel || `单边 ${openPositionEffectiveRangeEditor?.dominant_token_symbol || '--'}`}`
+                                        : '当前：双边池'}
+                                </div>
+                                <div className="flex flex-wrap gap-1.5">
+                                    <button
+                                        type="button"
+                                        onClick={() => shiftOpenPositionRangeToSingleSide('lower')}
+                                        className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                    >
+                                        单边下限
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => shiftOpenPositionRangeToSingleSide('upper')}
+                                        className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                    >
+                                        单边上限
+                                    </button>
                                 </div>
                             </div>
 

@@ -10,6 +10,7 @@ const RANGE_INPUT_OPTIONS = [
   { key: 'tick', label: '直接Tick' },
 ];
 const GRID_RADIUS = 8;
+const DEFAULT_GRID_OFFSET = 3;
 
 function shortAddr(addr) {
   const value = String(addr || '').trim();
@@ -237,6 +238,23 @@ function buildDisplayPriceRangeFromTicks(lowerTick, upperTick, invertPrice, toke
   };
 }
 
+function estimateDisplayGridStepPercent(currentTick, tickSpacing, invertPrice, token0Decimals, token1Decimals) {
+  const baseTick = Number(currentTick);
+  const spacing = Number(tickSpacing);
+  if (!Number.isFinite(baseTick) || !Number.isFinite(spacing) || spacing <= 0) return null;
+  const currentPoolPrice = tickToPoolPrice(baseTick, token0Decimals, token1Decimals);
+  const nextPoolPrice = tickToPoolPrice(baseTick + spacing, token0Decimals, token1Decimals);
+  if (!Number.isFinite(currentPoolPrice) || currentPoolPrice <= 0 || !Number.isFinite(nextPoolPrice) || nextPoolPrice <= 0) {
+    return null;
+  }
+  const currentDisplay = invertPrice ? 1 / currentPoolPrice : currentPoolPrice;
+  const nextDisplay = invertPrice ? 1 / nextPoolPrice : nextPoolPrice;
+  if (!Number.isFinite(currentDisplay) || currentDisplay <= 0 || !Number.isFinite(nextDisplay) || nextDisplay <= 0) {
+    return null;
+  }
+  return Math.abs(((nextDisplay / currentDisplay) - 1) * 100);
+}
+
 function nudgeDisplayPriceBoundary(target, delta, invertPrice, tickSpacing, lowerTick, upperTick, minTick, maxTick) {
   const spacing = Number(tickSpacing);
   let nextLower = Number(lowerTick);
@@ -299,6 +317,14 @@ function formatSignedPercentCompact(value) {
   if (!Number.isFinite(num)) return '--';
   if (Math.abs(num) < 0.0001) return '0%';
   return `${num > 0 ? '+' : '-'}${formatRangePercentCompact(Math.abs(num))}`;
+}
+
+function formatPercentInputValue(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return '';
+  if (num >= 10) return num.toFixed(1).replace(/\.0$/, '');
+  if (num >= 1) return num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  return num.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
 }
 
 function formatDCAIntervalHint(seconds) {
@@ -391,6 +417,48 @@ function buildGridBins(editor, radius = GRID_RADIUS) {
   return bins;
 }
 
+function buildDefaultFocusedTickRange(editor, gridOffset = DEFAULT_GRID_OFFSET) {
+  const currentTick = Number(editor?.current_tick);
+  const tickSpacing = Number(editor?.tick_spacing);
+  if (!Number.isFinite(currentTick) || !Number.isFinite(tickSpacing) || tickSpacing <= 0) return null;
+  const offset = Math.max(1, Number(gridOffset) || DEFAULT_GRID_OFFSET);
+  const anchorLower = Number.isFinite(Number(editor?.anchor_tick_lower))
+    ? Number(editor.anchor_tick_lower)
+    : roundDownToTickSpacing(currentTick, tickSpacing);
+  const anchorUpper = Number.isFinite(Number(editor?.anchor_tick_upper))
+    ? Number(editor.anchor_tick_upper)
+    : anchorLower + tickSpacing;
+  if (!Number.isInteger(anchorLower) || !Number.isInteger(anchorUpper) || anchorUpper <= anchorLower) return null;
+  let lowerTick = anchorLower - offset * tickSpacing;
+  let upperTick = anchorUpper + offset * tickSpacing;
+  const minTick = Number(editor?.min_tick);
+  const maxTick = Number(editor?.max_tick);
+  if (Number.isFinite(minTick)) lowerTick = Math.max(lowerTick, minTick);
+  if (Number.isFinite(maxTick)) upperTick = Math.min(upperTick, maxTick);
+  if (upperTick <= lowerTick) {
+    upperTick = lowerTick + tickSpacing;
+    if (Number.isFinite(maxTick) && upperTick > maxTick) {
+      upperTick = maxTick;
+      lowerTick = upperTick - tickSpacing;
+    }
+  }
+  if (!Number.isInteger(lowerTick) || !Number.isInteger(upperTick) || upperTick <= lowerTick) return null;
+  return { lowerTick, upperTick };
+}
+
+function buildDefaultFocusedPercentageRange(editor, gridOffset = DEFAULT_GRID_OFFSET) {
+  const focused = buildDefaultFocusedTickRange(editor, gridOffset);
+  const currentTick = Number(editor?.current_tick);
+  if (!focused || !Number.isFinite(currentTick)) return null;
+  const lowerPct = (1 - Math.pow(1.0001, focused.lowerTick - currentTick)) * 100;
+  const upperPct = (Math.pow(1.0001, focused.upperTick - currentTick) - 1) * 100;
+  if (!(lowerPct > 0) || !(upperPct > 0)) return null;
+  return {
+    lowerValue: formatPercentInputValue(lowerPct),
+    upperValue: formatPercentInputValue(upperPct),
+  };
+}
+
 export default function OpenPositionModal({
   apiBaseUrl,
   initData,
@@ -411,8 +479,8 @@ export default function OpenPositionModal({
 }) {
   const [amount, setAmount] = useState('100');
   const [rangeInputMode, setRangeInputMode] = useState('percentage');
-  const [rangeLower, setRangeLower] = useState('2');
-  const [rangeUpper, setRangeUpper] = useState('2');
+  const [rangeLower, setRangeLower] = useState('');
+  const [rangeUpper, setRangeUpper] = useState('');
   const [rangeUpperAuto, setRangeUpperAuto] = useState(true);
   const [tickLowerInput, setTickLowerInput] = useState('');
   const [tickUpperInput, setTickUpperInput] = useState('');
@@ -426,6 +494,7 @@ export default function OpenPositionModal({
   const [entrySwapPreview, setEntrySwapPreview] = useState(null);
   const [entrySwapPreviewLoading, setEntrySwapPreviewLoading] = useState(false);
   const [entrySwapPreviewError, setEntrySwapPreviewError] = useState('');
+  const defaultRangeSeededRef = useRef(false);
   const [privateZapInfo, setPrivateZapInfo] = useState(null);
   const [preparePrivateZapInfo, setPreparePrivateZapInfo] = useState(null);
   const [previewChecks, setPreviewChecks] = useState([]);
@@ -540,6 +609,8 @@ export default function OpenPositionModal({
   const sizingInputs = sizingAdvice?.inputs && typeof sizingAdvice.inputs === 'object' ? sizingAdvice.inputs : null;
   const rangeEditor = previewRangeEditor || prepareRangeEditor;
   const gridBins = useMemo(() => buildGridBins(rangeEditor), [rangeEditor]);
+  const defaultFocusedRange = useMemo(() => buildDefaultFocusedTickRange(rangeEditor), [rangeEditor]);
+  const defaultFocusedPercentageRange = useMemo(() => buildDefaultFocusedPercentageRange(rangeEditor), [rangeEditor]);
   const rangeShapeLabel = useMemo(() => {
     switch (String(rangeEditor?.position_shape || '').trim()) {
       case 'single_token0':
@@ -678,6 +749,7 @@ export default function OpenPositionModal({
   );
 
   useEffect(() => {
+    defaultRangeSeededRef.current = false;
     setRiskAck(false);
     setPreviewChecks([]);
     setEntrySwapPreview(null);
@@ -691,6 +763,9 @@ export default function OpenPositionModal({
     setEntrySwapConfirmed(false);
     setPrepareRangeEditor(null);
     setPreviewRangeEditor(null);
+    setRangeLower('');
+    setRangeUpper('');
+    setRangeUpperAuto(true);
     setRangeInputMode('percentage');
     setTickLowerInput('');
     setTickUpperInput('');
@@ -843,10 +918,13 @@ export default function OpenPositionModal({
 
   const applyDefaultTickRange = useCallback(() => {
     if (syncTicksFromEditor(previewRangeEditor)) return;
+    if (defaultFocusedRange && applyResolvedTickRange(defaultFocusedRange.lowerTick, defaultFocusedRange.upperTick, { clear: false })) {
+      return;
+    }
     const lower = Number(rangeEditor?.anchor_tick_lower);
     const upper = Number(rangeEditor?.anchor_tick_upper);
     applyResolvedTickRange(lower, upper, { clear: false });
-  }, [previewRangeEditor, rangeEditor, syncTicksFromEditor, applyResolvedTickRange]);
+  }, [previewRangeEditor, defaultFocusedRange, rangeEditor, syncTicksFromEditor, applyResolvedTickRange]);
 
   const handleRangeInputModeChange = useCallback((mode) => {
     clearErrors();
@@ -936,6 +1014,16 @@ export default function OpenPositionModal({
     setRangeInputMode('tick');
     applyResolvedTickRange(nextLower, nextUpper);
   }, [rangeEditor, selectedManualTickLower, selectedManualTickUpper, applyResolvedTickRange]);
+
+  useEffect(() => {
+    if (rangeInputMode !== 'percentage') return;
+    if (defaultRangeSeededRef.current) return;
+    if (String(rangeLower || '').trim() || String(rangeUpper || '').trim()) return;
+    if (!defaultFocusedPercentageRange) return;
+    setRangeLower(defaultFocusedPercentageRange.lowerValue);
+    setRangeUpper(defaultFocusedPercentageRange.upperValue);
+    defaultRangeSeededRef.current = true;
+  }, [rangeInputMode, rangeLower, rangeUpper, defaultFocusedPercentageRange]);
 
   useEffect(() => {
     if (rangeInputMode === 'percentage') return;
@@ -1121,36 +1209,38 @@ export default function OpenPositionModal({
 
   const chartLowerTick = useMemo(() => {
     if (rangeInputMode !== 'percentage') {
-      return Number.isInteger(selectedManualTickLower) ? selectedManualTickLower : null;
+      return Number.isInteger(selectedManualTickLower)
+        ? selectedManualTickLower
+        : (defaultFocusedRange?.lowerTick ?? null);
     }
     const ed = rangeEditor;
     if (!ed || !Number.isFinite(Number(ed.current_tick))) return null;
     const lowerPct = Number(rangeLower);
-    if (!Number.isFinite(lowerPct) || lowerPct <= 0) return null;
+    if (!Number.isFinite(lowerPct) || lowerPct <= 0) return defaultFocusedRange?.lowerTick ?? null;
     const ratio = 1 - lowerPct / 100;
-    if (ratio <= 0) return null;
+    if (ratio <= 0) return defaultFocusedRange?.lowerTick ?? null;
     return Math.round(Number(ed.current_tick) + Math.log(ratio) / Math.log(1.0001));
-  }, [rangeInputMode, selectedManualTickLower, rangeEditor, rangeLower]);
+  }, [rangeInputMode, selectedManualTickLower, rangeEditor, rangeLower, defaultFocusedRange]);
 
   const chartUpperTick = useMemo(() => {
     if (rangeInputMode !== 'percentage') {
-      return Number.isInteger(selectedManualTickUpper) ? selectedManualTickUpper : null;
+      return Number.isInteger(selectedManualTickUpper)
+        ? selectedManualTickUpper
+        : (defaultFocusedRange?.upperTick ?? null);
     }
     const ed = rangeEditor;
     if (!ed || !Number.isFinite(Number(ed.current_tick))) return null;
     const upperPct = Number(rangeUpper);
-    if (!Number.isFinite(upperPct) || upperPct <= 0) return null;
+    if (!Number.isFinite(upperPct) || upperPct <= 0) return defaultFocusedRange?.upperTick ?? null;
     const ratio = 1 + upperPct / 100;
     return Math.round(Number(ed.current_tick) + Math.log(ratio) / Math.log(1.0001));
-  }, [rangeInputMode, selectedManualTickUpper, rangeEditor, rangeUpper]);
+  }, [rangeInputMode, selectedManualTickUpper, rangeEditor, rangeUpper, defaultFocusedRange]);
 
   const priceRange = useMemo(() => {
     const refTick = Number(liqProfile?.current_tick);
     const fallbackTick = Number(rangeEditor?.current_tick);
     const baseTick = Number.isFinite(refTick) ? refTick : (Number.isFinite(fallbackTick) ? fallbackTick : null);
     if (baseTick === null) return null;
-    const decAdj = Math.pow(10, (Number(token0Decimals) || 18) - (Number(token1Decimals) || 18));
-    const tickToPrice = (t) => Math.pow(1.0001, t) * decAdj;
     const apply = (p) => (invertPrice && p > 0 ? 1 / p : p);
     const fmt = (v) => {
       if (!Number.isFinite(v) || v <= 0) return '--';
@@ -1161,9 +1251,16 @@ export default function OpenPositionModal({
     };
     const lowerTick = Number.isFinite(chartLowerTick) ? chartLowerTick : null;
     const upperTick = Number.isFinite(chartUpperTick) ? chartUpperTick : null;
-    const currentPrice = apply(tickToPrice(baseTick));
-    const lowerPrice = lowerTick !== null ? apply(tickToPrice(lowerTick)) : null;
-    const upperPrice = upperTick !== null ? apply(tickToPrice(upperTick)) : null;
+    const currentPrice = apply(tickToPoolPrice(baseTick, token0Decimals, token1Decimals));
+    const lowerPrice = lowerTick !== null ? apply(tickToPoolPrice(lowerTick, token0Decimals, token1Decimals)) : null;
+    const upperPrice = upperTick !== null ? apply(tickToPoolPrice(upperTick, token0Decimals, token1Decimals)) : null;
+    const gridStepPct = estimateDisplayGridStepPercent(
+      baseTick,
+      Number(rangeEditor?.tick_spacing),
+      invertPrice,
+      token0Decimals,
+      token1Decimals,
+    );
     // invert 情况下 tickLower 对应较大价格（现实"上限"），所以文字显示要互换
     const lowerText = lowerPrice !== null && upperPrice !== null ? Math.min(lowerPrice, upperPrice) : null;
     const upperText = lowerPrice !== null && upperPrice !== null ? Math.max(lowerPrice, upperPrice) : null;
@@ -1182,6 +1279,7 @@ export default function OpenPositionModal({
       upperPctText: upperText !== null ? formatSignedPercentCompact(toPct(upperText)) : '--',
       quoteSymbol,
       baseSymbol,
+      gridStepPctText: Number.isFinite(gridStepPct) ? formatRangePercentCompact(gridStepPct) : '--',
       tickSpacing: Number(rangeEditor?.tick_spacing),
     };
   }, [liqProfile, rangeEditor, chartLowerTick, chartUpperTick, token0Decimals, token1Decimals, invertPrice, token0Symbol, token1Symbol]);
@@ -1512,7 +1610,7 @@ export default function OpenPositionModal({
                       快捷区间、聪明钱区间和价格微调统一在这里，拖动图表后会自动切到 Tick 区间。
                     </div>
                   </div>
-                  {Number.isFinite(Number(priceRange?.tickSpacing)) ? (
+                  {priceRange?.gridStepPctText && priceRange.gridStepPctText !== '--' ? (
                     <div style={{
                       padding: '5px 10px',
                       borderRadius: 999,
@@ -1522,7 +1620,7 @@ export default function OpenPositionModal({
                       fontWeight: 600,
                       color: 'var(--text-muted)',
                     }}>
-                      每次 {priceRange.tickSpacing} Tick
+                      每格约 {priceRange.gridStepPctText}
                     </div>
                   ) : null}
                 </div>
@@ -1668,7 +1766,7 @@ export default function OpenPositionModal({
                   </div>
                 </div>
 
-                <div style={{
+                <div style={{ display: 'none',
                   padding: 14,
                   borderRadius: 18,
                   border: String(rangeEditor?.position_shape || '').startsWith('single_')
@@ -1677,7 +1775,6 @@ export default function OpenPositionModal({
                   background: String(rangeEditor?.position_shape || '').startsWith('single_')
                     ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(16, 185, 129, 0.04))'
                     : 'linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(59, 130, 246, 0.04))',
-                  display: 'grid',
                   gap: 8,
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1723,6 +1820,45 @@ export default function OpenPositionModal({
                   <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
                     保留当前宽度，整体移动到现价下方或上方，也允许继续越过活跃格微调。
                   </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '4px 10px',
+                  borderRadius: 999,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  border: String(rangeEditor?.position_shape || '').startsWith('single_')
+                    ? '1px solid rgba(16, 185, 129, 0.28)'
+                    : '1px solid rgba(59, 130, 246, 0.24)',
+                  background: String(rangeEditor?.position_shape || '').startsWith('single_')
+                    ? 'rgba(16, 185, 129, 0.12)'
+                    : 'rgba(59, 130, 246, 0.10)',
+                  color: String(rangeEditor?.position_shape || '').startsWith('single_') ? '#34d399' : '#7dd3fc',
+                }}>
+                  {String(rangeEditor?.position_shape || '').startsWith('single_')
+                    ? `当前：${rangeShapeLabel || `单边 ${rangeEditor?.dominant_token_symbol || '--'}`}`
+                    : '当前：双边池'}
+                </span>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="ghost-chip"
+                    style={{ minWidth: 0, padding: '4px 10px', fontSize: 11 }}
+                    onClick={() => shiftRangeToSingleSide('lower')}
+                  >
+                    单边下限
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-chip"
+                    style={{ minWidth: 0, padding: '4px 10px', fontSize: 11 }}
+                    onClick={() => shiftRangeToSingleSide('upper')}
+                  >
+                    单边上限
+                  </button>
                 </div>
               </div>
               <div style={{ display: 'none' }}>
