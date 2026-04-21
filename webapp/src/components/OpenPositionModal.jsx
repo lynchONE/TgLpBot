@@ -1613,12 +1613,6 @@ export default function OpenPositionModal({
                       <span>当前价格</span>
                       <strong style={{ color: 'var(--text)' }}>{priceRange?.currentText || '--'}</strong>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                      <span>映射 Tick</span>
-                      <strong style={{ color: 'var(--text)', fontFamily: 'var(--font-mono, ui-monospace, monospace)' }}>
-                        {Number.isInteger(selectedManualTickLower) ? selectedManualTickLower : (Number.isInteger(chartLowerTick) ? chartLowerTick : '--')} ~ {Number.isInteger(selectedManualTickUpper) ? selectedManualTickUpper : (Number.isInteger(chartUpperTick) ? chartUpperTick : '--')}
-                      </strong>
-                    </div>
                     <div>点击柱子会直接选中该 Tick 区间，拖动两侧边界可继续微调，也支持越过当前活跃格。</div>
                   </div>
                 </div>
@@ -2014,12 +2008,6 @@ export default function OpenPositionModal({
                           <span>价格计价</span>
                           <strong style={{ color: 'var(--text)' }}>
                             {priceRange?.baseSymbol || '--'}/{priceRange?.quoteSymbol || '--'}
-                          </strong>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                          <span>映射 Tick</span>
-                          <strong style={{ color: 'var(--text)', fontFamily: 'var(--font-mono, ui-monospace, monospace)' }}>
-                            {Number.isInteger(selectedManualTickLower) ? selectedManualTickLower : '--'} ~ {Number.isInteger(selectedManualTickUpper) ? selectedManualTickUpper : '--'}
                           </strong>
                         </div>
                       </div>

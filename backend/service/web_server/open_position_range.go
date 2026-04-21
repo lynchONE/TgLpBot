@@ -143,7 +143,7 @@ func resolveOpenPositionRange(task *models.StrategyTask, req openPositionRequest
 	}
 
 	resolved.TickLowerPct, resolved.TickUpperPct = tc.CalculatePercentagesFromTicks(currentTick, resolved.TickLower, resolved.TickUpper)
-	if resolved.TickLowerPct <= 0 || resolved.TickUpperPct <= 0 {
+	if resolved.TickLowerPct <= 0 && resolved.TickUpperPct <= 0 {
 		return resolvedOpenPositionRange{}, &openPositionError{
 			Code:    "invalid_range",
 			Message: "unable to resolve range",

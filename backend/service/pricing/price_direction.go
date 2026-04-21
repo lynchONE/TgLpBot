@@ -78,7 +78,7 @@ func TickPercentagesFromStablePercentages(task *models.StrategyTask, stableLower
 // tickLowerPct/tickUpperPct are in Uniswap tick price (token1/token0) terms: price down/up from current.
 // Returned stableLowerPct/stableUpperPct are in stable price terms when a stable side is known.
 func StablePercentagesFromTickPercentages(task *models.StrategyTask, tickLowerPct, tickUpperPct float64) (stableLowerPct, stableUpperPct float64) {
-	if tickLowerPct <= 0 || tickUpperPct <= 0 {
+	if tickLowerPct < 0 || tickUpperPct < 0 {
 		return 0, 0
 	}
 
@@ -91,15 +91,11 @@ func StablePercentagesFromTickPercentages(task *models.StrategyTask, tickLowerPc
 	// Quote-like side is token0: displayed price = 1 / tickPrice.
 	// When tickPrice goes UP by u, displayed price goes DOWN by u/(100+u).
 	// When tickPrice goes DOWN by d, displayed price goes UP by d/(100-d).
-	stableLowerPct = (tickUpperPct / (100.0 + tickUpperPct)) * 100.0
-	if tickLowerPct >= 100 {
-		stableUpperPct = 0
-	} else {
-		stableUpperPct = (tickLowerPct / (100.0 - tickLowerPct)) * 100.0
+	if tickUpperPct > 0 {
+		stableLowerPct = (tickUpperPct / (100.0 + tickUpperPct)) * 100.0
 	}
-
-	if stableLowerPct <= 0 || stableUpperPct <= 0 {
-		return 0, 0
+	if tickLowerPct > 0 && tickLowerPct < 100 {
+		stableUpperPct = (tickLowerPct / (100.0 - tickLowerPct)) * 100.0
 	}
 	return stableLowerPct, stableUpperPct
 }

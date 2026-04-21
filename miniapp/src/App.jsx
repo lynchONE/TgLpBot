@@ -2554,13 +2554,15 @@ export default function App() {
         const taskSlippage = parseOptionalPercent(openPositionSlippage);
         const entrySwapSlippage = parseOptionalPercent(openPositionEntrySwapSlippage);
         const invalidPercentageRange = !range || range.lower <= 0 || range.upper <= 0 || range.lower >= 100 || range.upper >= 100;
-        const invalidTickRange = !Number.isInteger(openPositionTickLowerValue) || !Number.isInteger(openPositionTickUpperValue) || openPositionTickLowerValue >= openPositionTickUpperValue;
+        const invalidManualTickRange = !Number.isInteger(openPositionSelectedManualTickLower)
+            || !Number.isInteger(openPositionSelectedManualTickUpper)
+            || openPositionSelectedManualTickLower >= openPositionSelectedManualTickUpper;
         if (
             !Number.isFinite(amount) ||
             amount <= 0 ||
             !taskSlippage.valid ||
             !entrySwapSlippage.valid ||
-            (openPositionRangeInputMode === 'percentage' ? invalidPercentageRange : invalidTickRange)
+            (openPositionRangeInputMode === 'percentage' ? invalidPercentageRange : invalidManualTickRange)
         ) {
             setOpenPositionEntrySwapPreview(null);
             setOpenPositionEntrySwapPreviewLoading(false);
@@ -4578,12 +4580,6 @@ export default function App() {
                                             <span>当前价格</span>
                                             <span className="font-semibold text-zinc-900 dark:text-white/90">{openPositionPriceRange?.currentText || '--'}</span>
                                         </div>
-                                        <div className="flex items-center justify-between gap-3">
-                                            <span>映射 Tick</span>
-                                            <span className="font-mono font-semibold text-zinc-900 dark:text-white/90">
-                                                {Number.isInteger(openPositionSelectedManualTickLower) ? openPositionSelectedManualTickLower : (Number.isInteger(openPositionChartLowerTick) ? openPositionChartLowerTick : '--')} ~ {Number.isInteger(openPositionSelectedManualTickUpper) ? openPositionSelectedManualTickUpper : (Number.isInteger(openPositionChartUpperTick) ? openPositionChartUpperTick : '--')}
-                                            </span>
-                                        </div>
                                     </div>
                                 </div>
 
@@ -4911,12 +4907,6 @@ export default function App() {
                                                             <span>价格计价</span>
                                                             <span className="font-semibold text-zinc-900 dark:text-white/90">
                                                                 {openPositionPriceRange?.baseSymbol || '--'}/{openPositionPriceRange?.quoteSymbol || '--'}
-                                                            </span>
-                                                        </div>
-                                                        <div className="flex items-center justify-between gap-3">
-                                                            <span>映射 Tick</span>
-                                                            <span className="font-mono font-semibold text-zinc-900 dark:text-white/90">
-                                                                {Number.isInteger(openPositionSelectedManualTickLower) ? openPositionSelectedManualTickLower : '--'} ~ {Number.isInteger(openPositionSelectedManualTickUpper) ? openPositionSelectedManualTickUpper : '--'}
                                                             </span>
                                                         </div>
                                                     </div>
