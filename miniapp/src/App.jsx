@@ -10,7 +10,7 @@ import StepProgressModal from './components/StepProgressModal.jsx';
 import LiquidityDistributionChart from './components/LiquidityDistributionChart.jsx';
 import { SkeletonHotPoolCard, SkeletonPositionCard, SkeletonList } from './components/Skeleton.jsx';
 import SmartMoneyPage from './components/SmartMoneyPage.jsx';
-import { Bot, BarChart2, Droplets, Filter, Search, Moon, Sun, Settings, X, Check, RotateCcw, AlertTriangle, CheckCircle, XCircle, Flame, Eye, Wallet } from 'lucide-react';
+import { Bot, BarChart2, Droplets, Filter, Search, Moon, Sun, Settings, X, Check, RotateCcw, AlertTriangle, CheckCircle, XCircle, Flame, Eye, EyeOff, Wallet } from 'lucide-react';
 import {
     deleteTask,
     fetchAdminRealtimePositions,
@@ -153,6 +153,7 @@ const STORAGE_ACCENT_THEME = 'tglp_accent_theme';
 const STORAGE_POLL_SEC = 'tglp_poll_interval_sec';
 const STORAGE_HOT_POOLS_FILTER = 'tglp_hot_pools_filter_v1';
 const STORAGE_OPEN_POSITION_WALLET_ID = 'tglp_open_position_wallet_id';
+const STORAGE_OPEN_POSITION_HIDE_WALLET_BALANCES = 'tglp_open_position_hide_wallet_balances';
 const STORAGE_WEB_WORKBENCH_WIDGETS = 'tglp_web_workbench_widgets_v1';
 
 const WEB_WORKBENCH_WIDGETS = [
@@ -944,8 +945,12 @@ export default function App() {
     const [openPositionRiskAck, setOpenPositionRiskAck] = useState(false);
     const [openPositionEntrySwapPreview, setOpenPositionEntrySwapPreview] = useState(null);
     const [openPositionEntrySwapPreviewLoading, setOpenPositionEntrySwapPreviewLoading] = useState(false);
+    const [openPositionPreviewPending, setOpenPositionPreviewPending] = useState(false);
+    const [openPositionPreviewSuspended, setOpenPositionPreviewSuspended] = useState(false);
     const [openPositionEntrySwapPreviewError, setOpenPositionEntrySwapPreviewError] = useState('');
     const openPositionDefaultRangeSeededRef = useRef(false);
+    const openPositionPreviewResumeTimerRef = useRef(null);
+    const openPositionAutoSingleSideRangeRef = useRef('');
     const [openPositionPreparePrivateZapInfo, setOpenPositionPreparePrivateZapInfo] = useState(null);
     const [openPositionPrivateZapInfo, setOpenPositionPrivateZapInfo] = useState(null);
     const [openPositionRangeEditor, setOpenPositionRangeEditor] = useState(null);
@@ -963,6 +968,7 @@ export default function App() {
     const [openPositionDCAExpanded, setOpenPositionDCAExpanded] = useState(false);
     const [openPositionRebalanceEnabled, setOpenPositionRebalanceEnabled] = useState(true);
     const [openPositionStopLossEnabled, setOpenPositionStopLossEnabled] = useState(true);
+    const [openPositionWalletBalancesHidden, setOpenPositionWalletBalancesHidden] = useState(() => storage.get(STORAGE_OPEN_POSITION_HIDE_WALLET_BALANCES) === '1');
     const [openPositionLiqProfile, setOpenPositionLiqProfile] = useState(null);
     const [openPositionLiqProfileLoading, setOpenPositionLiqProfileLoading] = useState(false);
     const [openPositionLiqProfileError, setOpenPositionLiqProfileError] = useState('');
@@ -1028,6 +1034,12 @@ export default function App() {
 
     const multiChainEnabled = globalConfig?.multi_chain_enabled ?? true;
     const multiWalletEnabled = globalConfig?.multi_wallet_enabled ?? false;
+    useEffect(() => {
+        storage.set(
+            STORAGE_OPEN_POSITION_HIDE_WALLET_BALANCES,
+            openPositionWalletBalancesHidden ? '1' : '0',
+        );
+    }, [openPositionWalletBalancesHidden]);
     const activeOpenPositionChecks = useMemo(() => (
         Array.isArray(openPositionChecks) && openPositionChecks.length > 0
             ? openPositionChecks
@@ -1037,16 +1049,23 @@ export default function App() {
     const openPositionEffectiveRangeEditor = openPositionPreviewRangeEditor || openPositionRangeEditor;
     const openPositionFailChecks = activeOpenPositionChecks.filter((item) => item.status === 'fail');
     const openPositionHasBlockingSafetyFailure = openPositionFailChecks.length > 0;
-    const openPositionSubmitDisabled = openPositionLoading || openPositionEntrySwapPreviewLoading || openPositionHasBlockingSafetyFailure;
+    const openPositionSubmitDisabled = openPositionLoading
+        || openPositionPreviewPending
+        || openPositionPreviewSuspended
+        || openPositionHasBlockingSafetyFailure;
     const openPositionDisplayChecks = useMemo(() => (
         Array.isArray(activeOpenPositionChecks)
-            ? activeOpenPositionChecks.filter((item) => String(item?.key || '').trim() !== 'entry_swap')
+            ? activeOpenPositionChecks.filter((item) => {
+                const key = String(item?.key || '').trim();
+                return key !== 'entry_swap' && String(item?.status || '').trim() !== 'pass';
+            })
             : []
     ), [activeOpenPositionChecks]);
     const openPositionShowPrivateZapProtectionHint = Boolean(activeOpenPositionPrivateZapInfo?.show_protection_hint);
     const openPositionRecommendedPositions = Array.isArray(openPositionSizingAdvice?.recommended_positions)
         ? openPositionSizingAdvice.recommended_positions
         : [];
+    const openPositionWalletOptions = Array.isArray(walletsData?.wallets) ? walletsData.wallets : [];
     const openPositionSizingWarnings = Array.isArray(openPositionSizingAdvice?.warnings)
         ? openPositionSizingAdvice.warnings
         : [];
@@ -2132,14 +2151,6 @@ export default function App() {
         }
         return merged;
     }, [smartQuickRangeOptions, defaultQuickRangeOptions]);
-    const applyOpenPositionQuickRange = useCallback((option) => {
-        if (!option) return;
-        setOpenPositionRangeInputMode('percentage');
-        setOpenPositionRangeLower(option.lowerValue);
-        setOpenPositionRangeUpper(option.upperValue);
-        setOpenPositionRangeUpperAuto(true);
-        setOpenPositionError('');
-    }, []);
     const openPositionDisplayedLowerPct = Number(
         openPositionEffectiveRangeEditor?.range_lower_pct ?? openPositionRangeLower,
     );
@@ -2159,7 +2170,37 @@ export default function App() {
         [openPositionEntrySwapPreview, openPositionEntrySwapSlippage],
     );
 
+    const suppressOpenPositionPreview = useCallback((delay = 900) => {
+        setOpenPositionPreviewSuspended(true);
+        setOpenPositionEntrySwapPreviewLoading(false);
+        setOpenPositionPreviewPending(false);
+        if (openPositionPreviewResumeTimerRef.current) {
+            window.clearTimeout(openPositionPreviewResumeTimerRef.current);
+        }
+        openPositionPreviewResumeTimerRef.current = window.setTimeout(() => {
+            setOpenPositionPreviewSuspended(false);
+            openPositionPreviewResumeTimerRef.current = null;
+        }, delay);
+    }, []);
+
+    useEffect(() => () => {
+        if (openPositionPreviewResumeTimerRef.current) {
+            window.clearTimeout(openPositionPreviewResumeTimerRef.current);
+        }
+    }, []);
+
+    const applyOpenPositionQuickRange = useCallback((option) => {
+        if (!option) return;
+        suppressOpenPositionPreview();
+        setOpenPositionRangeInputMode('percentage');
+        setOpenPositionRangeLower(option.lowerValue);
+        setOpenPositionRangeUpper(option.upperValue);
+        setOpenPositionRangeUpperAuto(true);
+        setOpenPositionError('');
+    }, [suppressOpenPositionPreview]);
+
     const handleOpenPositionRangeLowerChange = useCallback((value) => {
+        suppressOpenPositionPreview();
         setOpenPositionRangeLower((prevLower) => {
             if (
                 openPositionRangeUpperAuto ||
@@ -2171,13 +2212,14 @@ export default function App() {
             return value;
         });
         setOpenPositionError('');
-    }, [openPositionRangeUpper, openPositionRangeUpperAuto]);
+    }, [openPositionRangeUpper, openPositionRangeUpperAuto, suppressOpenPositionPreview]);
 
     const handleOpenPositionRangeUpperChange = useCallback((value) => {
+        suppressOpenPositionPreview();
         setOpenPositionRangeUpperAuto(false);
         setOpenPositionRangeUpper(value);
         setOpenPositionError('');
-    }, []);
+    }, [suppressOpenPositionPreview]);
 
     const syncOpenPositionTicksFromEditor = useCallback((editor) => {
         const lower = Number(editor?.tick_lower);
@@ -2196,6 +2238,7 @@ export default function App() {
     }, [openPositionPreviewRangeEditor, openPositionDefaultFocusedRange, openPositionEffectiveRangeEditor, syncOpenPositionTicksFromEditor, applyOpenPositionTickRange]);
 
     const handleOpenPositionRangeInputModeChange = useCallback((mode) => {
+        suppressOpenPositionPreview();
         setOpenPositionRangeInputMode(mode);
         setOpenPositionError('');
         if (mode !== 'percentage') {
@@ -2203,7 +2246,7 @@ export default function App() {
                 applyDefaultOpenPositionTickRange();
             }
         }
-    }, [openPositionPreviewRangeEditor, applyDefaultOpenPositionTickRange, syncOpenPositionTicksFromEditor]);
+    }, [openPositionPreviewRangeEditor, applyDefaultOpenPositionTickRange, syncOpenPositionTicksFromEditor, suppressOpenPositionPreview]);
 
     const nudgeOpenPositionTickBoundary = useCallback((target, delta) => {
         const spacing = Number(openPositionEffectiveRangeEditor?.tick_spacing);
@@ -2230,6 +2273,7 @@ export default function App() {
             maxTick,
         );
         if (!nextRange) return;
+        suppressOpenPositionPreview();
         setOpenPositionRangeInputMode('tick');
         applyOpenPositionTickRange(nextRange.lowerTick, nextRange.upperTick);
     }, [
@@ -2238,6 +2282,7 @@ export default function App() {
         openPositionSelectedManualTickUpper,
         openPositionInvertPrice,
         applyOpenPositionTickRange,
+        suppressOpenPositionPreview,
     ]);
 
     const applyOpenPositionGridBin = useCallback((bin) => {
@@ -2257,6 +2302,7 @@ export default function App() {
             nextUpper = bin.upperTick;
             if (nextUpper <= nextLower) nextLower = nextUpper - spacing;
         }
+        suppressOpenPositionPreview();
         applyOpenPositionTickRange(nextLower, nextUpper);
     }, [
         openPositionEffectiveRangeEditor,
@@ -2264,6 +2310,7 @@ export default function App() {
         openPositionSelectedManualTickUpper,
         openPositionGridBoundaryTarget,
         applyOpenPositionTickRange,
+        suppressOpenPositionPreview,
     ]);
 
     const shiftOpenPositionRangeToSingleSide = useCallback((side) => {
@@ -2300,6 +2347,7 @@ export default function App() {
                 nextLower = nextUpper - width;
             }
         }
+        suppressOpenPositionPreview();
         setOpenPositionRangeInputMode('tick');
         applyOpenPositionTickRange(nextLower, nextUpper);
     }, [
@@ -2307,6 +2355,7 @@ export default function App() {
         openPositionSelectedManualTickLower,
         openPositionSelectedManualTickUpper,
         applyOpenPositionTickRange,
+        suppressOpenPositionPreview,
     ]);
 
     useEffect(() => {
@@ -2374,6 +2423,11 @@ export default function App() {
 
     const resetOpenPositionDraft = () => {
         openPositionDefaultRangeSeededRef.current = false;
+        openPositionAutoSingleSideRangeRef.current = '';
+        if (openPositionPreviewResumeTimerRef.current) {
+            window.clearTimeout(openPositionPreviewResumeTimerRef.current);
+            openPositionPreviewResumeTimerRef.current = null;
+        }
         setOpenPositionAmount('');
         setOpenPositionRangeLower('');
         setOpenPositionRangeUpper('');
@@ -2388,6 +2442,8 @@ export default function App() {
         setOpenPositionPrepareChecks([]);
         setOpenPositionEntrySwapPreview(null);
         setOpenPositionEntrySwapPreviewLoading(false);
+        setOpenPositionPreviewPending(false);
+        setOpenPositionPreviewSuspended(false);
         setOpenPositionEntrySwapPreviewError('');
         setOpenPositionPreparePrivateZapInfo(null);
         setOpenPositionPrivateZapInfo(null);
@@ -2603,9 +2659,52 @@ export default function App() {
         const ratio = 1 + upperPct / 100;
         return Math.round(Number(ed.current_tick) + Math.log(ratio) / Math.log(1.0001));
     }, [openPositionRangeInputMode, openPositionSelectedManualTickUpper, openPositionEffectiveRangeEditor, openPositionRangeUpper, openPositionDefaultFocusedRange]);
+    const openPositionResolvedSelectionShape = useMemo(() => {
+        const currentTick = Number(openPositionLiqProfile?.current_tick ?? openPositionEffectiveRangeEditor?.current_tick);
+        const lowerTick = Number(openPositionChartLowerTick);
+        const upperTick = Number(openPositionChartUpperTick);
+        if (!Number.isFinite(currentTick) || !Number.isFinite(lowerTick) || !Number.isFinite(upperTick) || upperTick <= lowerTick) {
+            return { shape: '', dominantTokenSymbol: '' };
+        }
+        if (currentTick < lowerTick) {
+            return { shape: 'single_token0', dominantTokenSymbol: openPositionToken0Symbol };
+        }
+        if (currentTick >= upperTick) {
+            return { shape: 'single_token1', dominantTokenSymbol: openPositionToken1Symbol };
+        }
+        return { shape: 'dual_sided', dominantTokenSymbol: '' };
+    }, [
+        openPositionLiqProfile,
+        openPositionEffectiveRangeEditor,
+        openPositionChartLowerTick,
+        openPositionChartUpperTick,
+        openPositionToken0Symbol,
+        openPositionToken1Symbol,
+    ]);
+    const openPositionIsSingleSidedSelection = String(openPositionResolvedSelectionShape.shape || '').startsWith('single_');
+
+    useEffect(() => {
+        if (!openPositionIsSingleSidedSelection) {
+            openPositionAutoSingleSideRangeRef.current = '';
+            return;
+        }
+        const signature = `${openPositionResolvedSelectionShape.shape}:${openPositionChartLowerTick}:${openPositionChartUpperTick}`;
+        if (!signature || openPositionAutoSingleSideRangeRef.current === signature) return;
+        openPositionAutoSingleSideRangeRef.current = signature;
+        if (openPositionRebalanceEnabled) setOpenPositionRebalanceEnabled(false);
+        if (openPositionStopLossEnabled) setOpenPositionStopLossEnabled(false);
+    }, [
+        openPositionIsSingleSidedSelection,
+        openPositionResolvedSelectionShape.shape,
+        openPositionChartLowerTick,
+        openPositionChartUpperTick,
+        openPositionRebalanceEnabled,
+        openPositionStopLossEnabled,
+    ]);
 
     const onOpenPositionChartRangeChange = useCallback(({ lower, upper }) => {
         if (!openPositionLiqProfile) return;
+        suppressOpenPositionPreview(1100);
         const nextLower = Number.isFinite(lower)
             ? lower
             : (Number.isInteger(openPositionSelectedManualTickLower) ? openPositionSelectedManualTickLower : openPositionChartLowerTick);
@@ -2622,16 +2721,29 @@ export default function App() {
         openPositionChartLowerTick,
         openPositionChartUpperTick,
         applyOpenPositionTickRange,
+        suppressOpenPositionPreview,
     ]);
+
+    const handleOpenPositionChartRangeDragStart = useCallback(() => {
+        suppressOpenPositionPreview(1200);
+        if (!Number.isInteger(openPositionChartLowerTick) || !Number.isInteger(openPositionChartUpperTick) || openPositionChartUpperTick <= openPositionChartLowerTick) return;
+        setOpenPositionRangeInputMode('tick');
+        applyOpenPositionTickRange(openPositionChartLowerTick, openPositionChartUpperTick, { clear: false });
+    }, [openPositionChartLowerTick, openPositionChartUpperTick, applyOpenPositionTickRange, suppressOpenPositionPreview]);
+
+    const handleOpenPositionChartRangeDragEnd = useCallback(() => {
+        suppressOpenPositionPreview(850);
+    }, [suppressOpenPositionPreview]);
 
     const onOpenPositionChartBinSelect = useCallback((bin) => {
         if (!bin) return;
         const lower = Number(bin?.tick_lower);
         const upper = Number(bin?.tick_upper);
         if (!Number.isInteger(lower) || !Number.isInteger(upper) || upper <= lower) return;
+        suppressOpenPositionPreview();
         setOpenPositionRangeInputMode('tick');
         applyOpenPositionTickRange(lower, upper);
-    }, [applyOpenPositionTickRange]);
+    }, [applyOpenPositionTickRange, suppressOpenPositionPreview]);
 
     useEffect(() => {
         if (!openPositionPool || !hasInitData || !multiWalletEnabled) return;
@@ -2755,9 +2867,15 @@ export default function App() {
     }, [openPositionEntrySwapConfirmKey]);
 
     useEffect(() => {
+        if (openPositionPreviewSuspended) {
+            setOpenPositionEntrySwapPreviewLoading(false);
+            setOpenPositionPreviewPending(false);
+            return undefined;
+        }
         if (!openPositionPool || !hasInitData) {
             setOpenPositionEntrySwapPreview(null);
             setOpenPositionEntrySwapPreviewLoading(false);
+            setOpenPositionPreviewPending(false);
             setOpenPositionEntrySwapPreviewError('');
             setOpenPositionPrivateZapInfo(null);
             setOpenPositionSizingAdvice(null);
@@ -2785,6 +2903,7 @@ export default function App() {
         ) {
             setOpenPositionEntrySwapPreview(null);
             setOpenPositionEntrySwapPreviewLoading(false);
+            setOpenPositionPreviewPending(false);
             setOpenPositionEntrySwapPreviewError('');
             setOpenPositionPrivateZapInfo(null);
             setOpenPositionSizingAdvice(null);
@@ -2798,6 +2917,7 @@ export default function App() {
             if (walletsLoading) {
                 setOpenPositionEntrySwapPreview(null);
                 setOpenPositionEntrySwapPreviewLoading(false);
+                setOpenPositionPreviewPending(false);
                 setOpenPositionEntrySwapPreviewError('');
                 setOpenPositionPrivateZapInfo(null);
                 setOpenPositionSizingAdvice(null);
@@ -2807,6 +2927,7 @@ export default function App() {
             if (walletsError) {
                 setOpenPositionEntrySwapPreview(null);
                 setOpenPositionEntrySwapPreviewLoading(false);
+                setOpenPositionPreviewPending(false);
                 setOpenPositionEntrySwapPreviewError('');
                 setOpenPositionPrivateZapInfo(null);
                 setOpenPositionSizingAdvice(null);
@@ -2817,6 +2938,7 @@ export default function App() {
             if (list.length === 0) {
                 setOpenPositionEntrySwapPreview(null);
                 setOpenPositionEntrySwapPreviewLoading(false);
+                setOpenPositionPreviewPending(false);
                 setOpenPositionEntrySwapPreviewError('');
                 setOpenPositionPrivateZapInfo(null);
                 setOpenPositionSizingAdvice(null);
@@ -2829,6 +2951,7 @@ export default function App() {
                 if (!Number.isFinite(wid) || wid <= 0) {
                     setOpenPositionEntrySwapPreview(null);
                     setOpenPositionEntrySwapPreviewLoading(false);
+                    setOpenPositionPreviewPending(false);
                     setOpenPositionEntrySwapPreviewError('');
                     setOpenPositionPrivateZapInfo(null);
                     setOpenPositionSizingAdvice(null);
@@ -2845,11 +2968,9 @@ export default function App() {
 
         let active = true;
         const controller = new AbortController();
-        setOpenPositionEntrySwapPreviewLoading(true);
+        setOpenPositionPreviewPending(true);
+        setOpenPositionEntrySwapPreviewLoading(false);
         setOpenPositionEntrySwapPreviewError('');
-        setOpenPositionPrivateZapInfo(null);
-        setOpenPositionSizingAdvice(null);
-        setOpenPositionPreviewRangeEditor(null);
 
         const timer = setTimeout(async () => {
             try {
@@ -2901,6 +3022,7 @@ export default function App() {
             } finally {
                 if (active) {
                     setOpenPositionEntrySwapPreviewLoading(false);
+                    setOpenPositionPreviewPending(false);
                 }
             }
         }, 350);
@@ -2935,6 +3057,7 @@ export default function App() {
         openPositionSelectedManualTickUpper,
         openPositionRebalanceEnabled,
         openPositionStopLossEnabled,
+        openPositionPreviewSuspended,
     ]);
 
     const handleOpenPosition = async () => {
@@ -3022,7 +3145,7 @@ export default function App() {
             }
         }
 
-        if (openPositionEntrySwapPreviewLoading) {
+        if (openPositionPreviewPending || openPositionPreviewSuspended) {
             setOpenPositionError('前置兑换预览仍在加载，请稍后再试。');
             return;
         }
@@ -4086,7 +4209,7 @@ export default function App() {
                             </div>
 
                             <div className="mt-4 space-y-3 pb-20">
-                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="rounded-2xl border border-zinc-200 bg-zinc-50/90 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="text-[11px] text-zinc-500 dark:text-white/40">鎼滅储姹犲瓙 (姹犲瓙ID/浠ｅ竵鍚嶇О)</div>
                                     <div className="mt-2 flex items-center gap-2">
                                         <div className="text-[11px] text-zinc-500 dark:text-white/40">链</div>
@@ -4208,7 +4331,7 @@ export default function App() {
                             </div>
 
                             <div className="mt-4 space-y-4 pb-20">
-                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="rounded-2xl border border-zinc-200 bg-zinc-50/90 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="flex items-center justify-between gap-3">
                                         <div className="min-w-0">
                                             <div className="text-[11px] font-semibold text-zinc-700 dark:text-white/80">筛选状态</div>
@@ -4230,7 +4353,7 @@ export default function App() {
                                         </button>
                                     </div>
                                 </div>
-                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="rounded-2xl border border-zinc-200 bg-zinc-50/90 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="mt-1">
                                         <div className="text-[11px] text-zinc-500 dark:text-white/40">搜索 (交易对 / 地址)</div>
                                         <input
@@ -4458,7 +4581,7 @@ export default function App() {
                             </div>
 
                             <div className="mt-4 space-y-4">
-                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="rounded-2xl border border-zinc-200 bg-zinc-50/90 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">涓昏壊</div>
                                     <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">默认新绿，也可以切回原来的绿色。</div>
                                     <div className="mt-3 flex flex-wrap gap-2">
@@ -4546,10 +4669,10 @@ export default function App() {
                     <BottomSheet
                         open={Boolean(openPositionPool)}
                         onClose={closeOpenPosition}
-                        maxHeightClass="max-h-[85vh]"
+                        maxHeightClass="max-h-[92vh]"
                         className="bg-white dark:bg-[#111318] backdrop-blur-none"
-                        headerClassName="px-4 pt-4 pb-3"
-                        contentClassName="px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+                        headerClassName="px-4 pt-3 pb-2.5"
+                        contentClassName="px-4 pb-28"
                         title={
                             <div className="min-w-0">
                                 <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/90">开仓</div>
@@ -4559,9 +4682,9 @@ export default function App() {
                             </div>
                         }
                     >
-                        <div className="space-y-4">
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2.5 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="mb-1.5 flex items-center justify-between text-[11px]">
+                        <div className="space-y-3.5 pb-2">
+                            <div className="rounded-2xl border border-zinc-200 bg-zinc-50/90 p-2 dark:border-white/10 dark:bg-[#0f1116]">
+                                <div className="mb-1 flex items-center justify-between gap-2 text-[10px]">
                                     <span className="font-semibold text-zinc-700 dark:text-white/70">流动性分布</span>
                                     <span className="text-zinc-500 dark:text-white/40">{openPositionLiqProfileError ? '加载失败' : (openPositionLiqProfile ? [openPositionLiqProfile.protocol?.toUpperCase(), openPositionPriceRange?.gridStepPctText && openPositionPriceRange.gridStepPctText !== '--' ? `每格约 ${openPositionPriceRange.gridStepPctText}` : ''].filter(Boolean).join(' · ') : '')}</span>
                                 </div>
@@ -4572,6 +4695,8 @@ export default function App() {
                                     rangeLowerTick={openPositionChartLowerTick}
                                     rangeUpperTick={openPositionChartUpperTick}
                                     onRangeChange={onOpenPositionChartRangeChange}
+                                    onRangeDragStart={handleOpenPositionChartRangeDragStart}
+                                    onRangeDragEnd={handleOpenPositionChartRangeDragEnd}
                                     onBinSelect={onOpenPositionChartBinSelect}
                                     loading={openPositionLiqProfileLoading}
                                     token0Decimals={openPositionToken0Decimals}
@@ -4582,7 +4707,7 @@ export default function App() {
                                     quoteIsToken1={openPositionQuoteIsToken1}
                                     titleText="流动性分布"
                                     titlePlacement="left"
-                                    height={180}
+                                    height={148}
                                 />
                                 <>
                                     <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40">
@@ -4604,6 +4729,15 @@ export default function App() {
                                                         : '',
                                                 ].filter(Boolean).join(' | ')}
                                         </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => setOpenPositionWalletBalancesHidden((prev) => !prev)}
+                                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-white/80 text-zinc-600 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/65 dark:hover:bg-white/10"
+                                            title={openPositionWalletBalancesHidden ? '显示钱包金额' : '隐藏钱包金额'}
+                                            aria-label={openPositionWalletBalancesHidden ? '显示钱包金额' : '隐藏钱包金额'}
+                                        >
+                                            {openPositionWalletBalancesHidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                                        </button>
                                     </div>
 
                                     {walletsError ? (
@@ -4612,12 +4746,15 @@ export default function App() {
                                         </div>
                                     ) : null}
 
-                                    {!walletsLoading && !walletsError && Array.isArray(walletsData?.wallets) && walletsData.wallets.length === 0 ? (
+                                    {!walletsLoading && !walletsError && openPositionWalletOptions.length === 0 ? (
                                         <div className="mt-2 text-xs text-zinc-500 dark:text-white/50">未找到钱包</div>
                                     ) : null}
 
-                                    <div className="mt-2 flex flex-wrap gap-1.5">
-                                        {(Array.isArray(walletsData?.wallets) ? walletsData.wallets : []).map((w) => {
+                                    <div
+                                        className="mt-2 grid gap-2"
+                                        style={{ gridTemplateColumns: `repeat(${Math.min(Math.max(openPositionWalletOptions.length, 1), 2)}, minmax(0, 1fr))` }}
+                                    >
+                                        {openPositionWalletOptions.map((w) => {
                                             const id = String(w?.id || '').trim();
                                             const addr = String(w?.address || '').trim();
                                             const name = String(w?.name || '').trim();
@@ -4635,16 +4772,18 @@ export default function App() {
                                                         setOpenPositionError('');
                                                         hapticSelection();
                                                     }}
-                                                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition whitespace-nowrap ${selected
-                                                        ? brand.selectionClass
-                                                        : 'border-zinc-200 bg-white/70 text-zinc-700 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
+                                                    className={`flex w-full min-w-0 items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left transition ${selected
+                                                        ? `${brand.selectionClass} shadow-sm`
+                                                        : 'border-zinc-200 bg-white/80 text-zinc-700 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
                                                         }`}
                                                 >
                                                     <span className="font-bold">{name || shortAddr || `钱包${id}`}</span>
                                                     {w?.is_default ? (
                                                         <span className="rounded bg-zinc-500/10 px-1 py-px text-[9px] font-bold text-zinc-500 dark:text-white/50">默认</span>
                                                     ) : null}
-                                                    <span className="tabular-nums opacity-70">${String(w?.stable_balance ?? '--')}</span>
+                                                    <span className="tabular-nums opacity-70">
+                                                        {openPositionWalletBalancesHidden ? '****' : `$${String(w?.stable_balance ?? '--')}`}
+                                                    </span>
                                                 </button>
                                             );
                                         })}
@@ -4667,7 +4806,7 @@ export default function App() {
                                 </div>
                             ) : null}
 
-                            <div className="mt-4">
+                            <div className="rounded-2xl border border-zinc-200 bg-zinc-50/90 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                 <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">开仓金额 (USDT)</div>
                                 <input
                                     value={openPositionAmount}
@@ -4682,7 +4821,10 @@ export default function App() {
                             </div>
 
                             {openPositionRecommendedPositions.length > 0 ? (
-                                <div className="mt-1 mb-3 flex flex-nowrap overflow-x-auto items-center gap-2 text-zinc-900 dark:text-white/80" style={{ scrollbarWidth: 'none' }}>
+                                <div
+                                    className="mt-2 grid gap-2 text-zinc-900 dark:text-white/80"
+                                    style={{ gridTemplateColumns: `repeat(${Math.min(Math.max(openPositionRecommendedPositions.length, 1), 3)}, minmax(0, 1fr))` }}
+                                >
 
                                     {openPositionRecommendedPositions.map((item, index) => {
                                         const tone = item?.mode === 'conservative'
@@ -4691,24 +4833,25 @@ export default function App() {
                                                 ? { border: 'border-amber-500/30', bg: 'bg-amber-500/10', text: 'text-amber-700 dark:text-amber-400', icon: '⚖️' }
                                                 : { border: 'border-red-500/30', bg: 'bg-red-500/10', text: 'text-red-700 dark:text-red-400', icon: '🚀' };
                                         return (
-                                            <div
+                                            <button
                                                 key={`${item?.mode || 'mode'}-${index}`}
+                                                type="button"
                                                 onClick={() => {
                                                     setOpenPositionAmount(String(item?.liquidity_to_add || ''));
                                                     setOpenPositionError('');
                                                 }}
-                                                className={`shrink-0 flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold ${tone.border} ${tone.bg} ${tone.text} cursor-pointer transition-all duration-150 hover:brightness-110 active:scale-95`}
+                                                className={`flex min-w-0 items-center gap-1.5 rounded-xl border px-2.5 py-2 text-left text-[11px] font-bold ${tone.border} ${tone.bg} ${tone.text} transition-all duration-150 hover:brightness-110 active:scale-[0.99]`}
                                             >
                                                 <span className="grayscale-[0.2] text-[10px]">{tone.icon}</span>
-                                                <span>{formatSizingModeLabel(item?.mode)}</span>
-                                                <span className="font-mono text-zinc-900 dark:text-white/95 text-[12px]">{formatUsdCompact(item?.liquidity_to_add)}</span>
-                                            </div>
+                                                <span className="truncate">{formatSizingModeLabel(item?.mode)}</span>
+                                                <span className="ml-auto shrink-0 font-mono text-zinc-900 dark:text-white/95 text-[11px]">{formatUsdCompact(item?.liquidity_to_add)}</span>
+                                            </button>
                                         );
                                     })}
                                 </div>
                             ) : null}
 
-                            <div className="mt-4 rounded-3xl border border-zinc-200/80 bg-white/80 p-3 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5">
+                            <div className="rounded-2xl border border-zinc-200/80 bg-white/80 p-3 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5">
                                 <div className="flex items-start justify-between gap-3">
                                     <div>
                                         <div className="text-xs font-semibold text-zinc-900 dark:text-white/85">区间设置</div>
@@ -4723,7 +4866,10 @@ export default function App() {
                                     ) : null}
                                 </div>
 
-                                <div className="mt-3 grid grid-cols-2 gap-2">
+                                <div
+                                    className="mt-3 grid gap-2"
+                                    style={{ gridTemplateColumns: `repeat(${Math.min(Math.max(openPositionQuickRangeOptions.length, 1), 3)}, minmax(0, 1fr))` }}
+                                >
                                         {openPositionQuickRangeOptions.map((option) => {
                                             const lowerValue = Number(option.lowerValue);
                                             const upperValue = Number(option.upperValue);
@@ -4740,13 +4886,15 @@ export default function App() {
                                                     key={option.key}
                                                     type="button"
                                                     onClick={() => applyOpenPositionQuickRange(option)}
-                                                    className={`rounded-xl border px-2.5 py-2 text-left transition ${isActive
+                                                    className={`rounded-xl border px-2 py-2 text-left transition ${isActive
                                                         ? `${brand.selectionClass} text-zinc-900 shadow-sm dark:text-white`
                                                         : 'border-zinc-200 bg-white/80 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
                                                         }`}
                                                 >
-                                                    <div className="text-[12px] font-semibold leading-none">{option.label}</div>
-                                                    <div className="mt-1 text-[10px] font-medium opacity-70">{subLabel}</div>
+                                                    <div className="truncate text-[12px] font-semibold leading-none">{option.label}</div>
+                                                    {isActive ? (
+                                                        <div className="mt-1 truncate text-[10px] font-medium opacity-70">{subLabel}</div>
+                                                    ) : null}
                                                 </button>
                                             );
                                         })}
@@ -5159,6 +5307,7 @@ export default function App() {
                                                     <input
                                                         value={openPositionPriceLower}
                                                         onChange={(e) => {
+                                                            suppressOpenPositionPreview();
                                                             setOpenPositionPriceLower(e.target.value);
                                                             setOpenPositionError('');
                                                         }}
@@ -5169,6 +5318,7 @@ export default function App() {
                                                     <input
                                                         value={openPositionPriceUpper}
                                                         onChange={(e) => {
+                                                            suppressOpenPositionPreview();
                                                             setOpenPositionPriceUpper(e.target.value);
                                                             setOpenPositionError('');
                                                         }}
@@ -5193,6 +5343,7 @@ export default function App() {
                                             <input
                                                 value={openPositionTickLower}
                                                 onChange={(e) => {
+                                                    suppressOpenPositionPreview();
                                                     setOpenPositionTickLower(e.target.value);
                                                     setOpenPositionError('');
                                                 }}
@@ -5203,6 +5354,7 @@ export default function App() {
                                             <input
                                                 value={openPositionTickUpper}
                                                 onChange={(e) => {
+                                                    suppressOpenPositionPreview();
                                                     setOpenPositionTickUpper(e.target.value);
                                                     setOpenPositionError('');
                                                 }}
@@ -5235,7 +5387,7 @@ export default function App() {
                                 )}
                             </div>
 
-                            <div className="mt-4">
+                            <div className="rounded-2xl border border-zinc-200 bg-zinc-50/90 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                 <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">滑点 (%)</div>
                                 <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">留空则使用全局滑点设置。</div>
                                 <input
@@ -5250,12 +5402,12 @@ export default function App() {
                                 />
                             </div>
 
-                            <div className="mt-4 rounded-xl border border-fuchsia-500/20 bg-gradient-to-br from-fuchsia-500/10 via-fuchsia-500/5 to-transparent p-3 dark:border-fuchsia-400/20 dark:from-fuchsia-400/10 dark:via-fuchsia-400/5">
+                            <div className="rounded-2xl border border-fuchsia-500/20 bg-gradient-to-br from-fuchsia-500/10 via-fuchsia-500/5 to-transparent p-3 dark:border-fuchsia-400/20 dark:from-fuchsia-400/10 dark:via-fuchsia-400/5">
                                 <div className="flex items-center justify-between gap-3">
                                     <div className="text-[12px] font-bold text-zinc-900 dark:text-white/85">{'\u672c\u6b21\u5f00\u4ed3'}</div>
                                     <div className="text-[10px] font-medium text-zinc-500 dark:text-white/45">{'\u53ef\u4ee5\u5355\u72ec\u5173\u95ed'}</div>
                                 </div>
-                                <div className="mt-3 space-y-2">
+                                <div className="mt-3 grid grid-cols-2 gap-2">
                                     <button
                                         type="button"
                                         onClick={() => {
@@ -5296,6 +5448,11 @@ export default function App() {
                                             {openPositionStopLossEnabled ? '\u5f00\u542f' : '\u5df2\u5173'}
                                         </span>
                                     </button>
+                                </div>
+                                <div className="mt-2 text-[10px] leading-4 text-zinc-600 dark:text-white/55">
+                                    {openPositionIsSingleSidedSelection
+                                        ? `褰撳墠鍖洪棿浼氬紑鎴愬崟杈规睜锛屽凡榛樿鍏抽棴鍐嶅钩琛″拰姝㈡崯銆${openPositionResolvedSelectionShape.dominantTokenSymbol ? ` 璧勯噾浼氭洿鍋忓悜 ${openPositionResolvedSelectionShape.dominantTokenSymbol}銆` : ''}`
+                                        : '涓や釜閮藉叧闂椂浠呮彁閱掞紝涓嶄細鑷姩鍐嶅钩琛℃垨姝㈡崯銆'}
                                 </div>
                             </div>
 
@@ -5559,7 +5716,7 @@ export default function App() {
                                                                                     setOpenPositionEntrySwapConfirm(e.target.checked);
                                                                                     setOpenPositionError('');
                                                                                 }}
-                                                                                disabled={openPositionLoading || openPositionEntrySwapPreviewLoading}
+                                                                                disabled={openPositionLoading || openPositionPreviewPending || openPositionPreviewSuspended}
                                                                             />
                                                                             <span className="text-[11px] leading-tight">我已确认本次前置兑换</span>
                                                                         </label>
@@ -5618,7 +5775,7 @@ export default function App() {
                                 type="button"
                                 onClick={handleOpenPosition}
                                 disabled={openPositionSubmitDisabled}
-                                className={`w-full rounded-xl px-3 py-2 text-sm font-semibold shadow-sm transition ${openPositionSubmitDisabled
+                                className={`sticky bottom-2 z-10 mt-3 w-full rounded-2xl px-3 py-3 text-sm font-semibold shadow-sm transition ${openPositionSubmitDisabled
                                     ? 'cursor-not-allowed bg-zinc-200 text-zinc-500 shadow-none dark:bg-white/10 dark:text-white/30'
                                     : brand.solidButtonClass
                                     }`}
