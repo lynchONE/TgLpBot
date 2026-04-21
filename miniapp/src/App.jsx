@@ -689,6 +689,23 @@ function formatSharePercent(value) {
     return `${percent.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
 }
 
+function formatPercentValue(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num < 0) return '--';
+    if (num >= 10) return `${num.toFixed(1).replace(/\.0$/, '')}%`;
+    if (num >= 1) return `${num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%`;
+    return `${num.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}%`;
+}
+
+function formatUSDTValue(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num < 0) return '--';
+    if (num === 0) return '0';
+    if (num >= 1000) return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    if (num >= 1) return num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+    return num.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+}
+
 function formatSizingModeLabel(mode) {
     switch (String(mode || '').trim()) {
         case 'conservative':
@@ -1256,6 +1273,21 @@ export default function App() {
         () => buildDCASummaryItems(openPositionAmount, openPositionDCAPercentages),
         [openPositionAmount, openPositionDCAPercentages],
     );
+    const openPositionAmountValue = Number(String(openPositionAmount || '').trim());
+    const openPositionGlobalDCAMinSplitAmount = useMemo(() => {
+        const n = Number(globalConfig?.dca_min_split_amount_usdt);
+        return Number.isFinite(n) && n > 0 ? n : 0;
+    }, [globalConfig?.dca_min_split_amount_usdt]);
+    const openPositionDCAAmountBelowThreshold = openPositionGlobalDCAMinSplitAmount > 0
+        && Number.isFinite(openPositionAmountValue)
+        && openPositionAmountValue > 0
+        && openPositionAmountValue < openPositionGlobalDCAMinSplitAmount;
+    const openPositionEffectiveDCAEnabled = openPositionDCAEnabled && !openPositionDCAAmountBelowThreshold;
+    const openPositionGlobalSlippageHint = useMemo(() => {
+        const n = Number(globalConfig?.slippage_tolerance);
+        if (!Number.isFinite(n) || n < 0) return '留空则使用全局配置';
+        return `本次开仓采用全局配置滑点: ${formatPercentValue(n)}`;
+    }, [globalConfig?.slippage_tolerance]);
     const [posWalletBalances, setPosWalletBalances] = useState(null);
     const userDefaultChain = useMemo(() => {
         const raw = String(globalConfig?.default_chain || 'bsc').trim().toLowerCase();
@@ -2690,6 +2722,7 @@ export default function App() {
         const signature = `${openPositionResolvedSelectionShape.shape}:${openPositionChartLowerTick}:${openPositionChartUpperTick}`;
         if (!signature || openPositionAutoSingleSideRangeRef.current === signature) return;
         openPositionAutoSingleSideRangeRef.current = signature;
+        if (openPositionDCAEnabled) setOpenPositionDCAEnabled(false);
         if (openPositionRebalanceEnabled) setOpenPositionRebalanceEnabled(false);
         if (openPositionStopLossEnabled) setOpenPositionStopLossEnabled(false);
     }, [
@@ -2697,6 +2730,7 @@ export default function App() {
         openPositionResolvedSelectionShape.shape,
         openPositionChartLowerTick,
         openPositionChartUpperTick,
+        openPositionDCAEnabled,
         openPositionRebalanceEnabled,
         openPositionStopLossEnabled,
     ]);
@@ -3145,7 +3179,11 @@ export default function App() {
             return;
         }
 
-        if (openPositionDCAEnabled) {
+        const effectiveOpenPositionDCAEnabled = openPositionDCAEnabled
+            && !openPositionIsSingleSidedSelection
+            && !(openPositionGlobalDCAMinSplitAmount > 0 && amount < openPositionGlobalDCAMinSplitAmount);
+
+        if (effectiveOpenPositionDCAEnabled) {
             if (openPositionDCAPercentages.length < 2 || openPositionDCAPercentages.length > 5) {
                 setOpenPositionError('分批次数必须在 2-5 批之间。');
                 return;
@@ -3177,7 +3215,7 @@ export default function App() {
             if (!ok) return;
         }
 
-        const totalBatches = openPositionDCAEnabled ? openPositionDCAPercentages.length : 1;
+        const totalBatches = effectiveOpenPositionDCAEnabled ? openPositionDCAPercentages.length : 1;
         const pairTitle = openPositionPool?.trading_pair || '';
         setOpenPositionLoading(true);
         setOpenPositionError('');
@@ -3188,7 +3226,7 @@ export default function App() {
             status: 'active',
             error: '',
             pair: pairTitle,
-            dca: openPositionDCAEnabled,
+            dca: effectiveOpenPositionDCAEnabled,
         });
         setOpenPositionPool(null);
         resetOpenPositionDraft();
@@ -3207,9 +3245,9 @@ export default function App() {
                 confirmEntrySwap: Boolean(openPositionEntrySwapPreview?.required),
                 walletId,
                 ackLiquidityRisk: requiresAck && openPositionRiskAck,
-                dcaEnabled: openPositionDCAEnabled,
-                dcaPercentages: openPositionDCAEnabled ? openPositionDCAPercentages.map((v) => Number(v) || 0) : undefined,
-                dcaIntervalSeconds: openPositionDCAEnabled ? Number(openPositionDCAInterval) : undefined,
+                dcaEnabled: effectiveOpenPositionDCAEnabled,
+                dcaPercentages: effectiveOpenPositionDCAEnabled ? openPositionDCAPercentages.map((v) => Number(v) || 0) : undefined,
+                dcaIntervalSeconds: effectiveOpenPositionDCAEnabled ? Number(openPositionDCAInterval) : undefined,
                 rebalanceEnabled: openPositionRebalanceEnabled,
                 stopLossEnabled: openPositionStopLossEnabled,
             };
@@ -3227,7 +3265,7 @@ export default function App() {
             setOpenPositionEntrySwapPreviewError('');
             setOpenPositionEntrySwapConfirm(false);
             setOperationProgress(prev => prev?.operation === 'open_position'
-                ? { ...prev, currentStep: openPositionDCAEnabled ? 1 : totalBatches, status: openPositionDCAEnabled ? 'active_dca' : 'done' } : prev);
+                ? { ...prev, currentStep: effectiveOpenPositionDCAEnabled ? 1 : totalBatches, status: effectiveOpenPositionDCAEnabled ? 'active_dca' : 'done' } : prev);
         } catch (e) {
             const msg = String(e?.message || e || '').trim();
             const payload = resolveOpenPositionErrorPayload(e);
@@ -4802,18 +4840,18 @@ export default function App() {
                                                         setOpenPositionError('');
                                                         hapticSelection();
                                                     }}
-                                                    className={`flex min-h-[52px] w-full min-w-0 items-center rounded-2xl border px-2.5 py-2 text-left transition ${selected
+                                                    className={`flex min-h-[30px] w-full min-w-0 items-center rounded-[15px] border px-2 py-1 text-left transition ${selected
                                                         ? `${brand.selectionClass} shadow-sm`
                                                         : 'border-zinc-200 bg-white/80 text-zinc-700 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
                                                         }`}
                                                 >
                                                     <div className="flex min-w-0 flex-1 items-center gap-1">
-                                                        <span className="line-clamp-2 text-[11px] font-semibold leading-4">{name || shortAddr || `钱包${id}`}</span>
+                                                        <span className="truncate text-[9px] font-semibold leading-3">{name || shortAddr || `钱包${id}`}</span>
                                                         {w?.is_default ? (
-                                                            <span className="shrink-0 rounded bg-zinc-500/10 px-1 py-px text-[9px] font-bold text-zinc-500 dark:text-white/50">默认</span>
+                                                            <span className="shrink-0 rounded bg-zinc-500/10 px-1 py-px text-[8px] font-bold text-zinc-500 dark:text-white/50">默认</span>
                                                         ) : null}
                                                     </div>
-                                                    <span className="shrink-0 pl-2 text-[10px] font-semibold tabular-nums text-zinc-900/75 dark:text-white/70">
+                                                    <span className="shrink-0 pl-1 text-[8px] font-semibold tabular-nums text-zinc-900/75 dark:text-white/70">
                                                         {openPositionWalletBalancesHidden ? '****' : `$${String(w?.stable_balance ?? '--')}`}
                                                     </span>
                                                 </button>
@@ -4869,7 +4907,7 @@ export default function App() {
                                             }}
                                             inputMode="decimal"
                                             className={`mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                            placeholder="0.5"
+                                            placeholder={String(openPositionSlippage || '').trim() ? '0.5' : openPositionGlobalSlippageHint}
                                         />
                                     </div>
                                 </div>
@@ -4880,7 +4918,7 @@ export default function App() {
                                 >
                                     {openPositionNeedsHighSlippageConfirm
                                         ? `当前滑点 ${openPositionTaskSlippage.value}% 已超过 1%，提交时会二次确认。`
-                                        : '滑点留空则使用全局设置。'}
+                                        : openPositionGlobalSlippageHint}
                                 </div>
                             </div>
 
@@ -5501,7 +5539,7 @@ export default function App() {
                                 </div>
                                 <div className="mt-2 text-[10px] leading-4 text-zinc-600 dark:text-white/55">
                                     {openPositionIsSingleSidedSelection
-                                        ? `当前区间会开成单边池，已默认关闭再平衡和止损。${openPositionResolvedSelectionShape.dominantTokenSymbol ? ` 资金会更偏向 ${openPositionResolvedSelectionShape.dominantTokenSymbol}。` : ''}`
+                                        ? `当前区间会开成单边池，已默认关闭分批加仓、再平衡和止损。${openPositionResolvedSelectionShape.dominantTokenSymbol ? ` 资金会更偏向 ${openPositionResolvedSelectionShape.dominantTokenSymbol}。` : ''}`
                                         : '两个都关闭时只提醒，不会自动再平衡或止损。'}
                                 </div>
                             </div>
@@ -5520,9 +5558,9 @@ export default function App() {
                                                 setOpenPositionDCAEnabled(e.target.checked);
                                                 setOpenPositionError('');
                                             }}
-                                            disabled={openPositionLoading}
+                                            disabled={openPositionLoading || openPositionIsSingleSidedSelection}
                                         />
-                                        <span>{openPositionDCAEnabled ? '本次启用' : '本次不启用'}</span>
+                                        <span>{openPositionIsSingleSidedSelection ? '单边池不支持' : (openPositionDCAEnabled ? '本次启用' : '本次不启用')}</span>
                                     </label>
                                 </div>
                                 <button
@@ -5546,6 +5584,15 @@ export default function App() {
                                                 <span className="inline-flex items-center rounded-full border border-cyan-500/25 bg-cyan-500/15 px-2 py-1 text-[10px] font-bold text-cyan-700 dark:border-cyan-400/25 dark:bg-cyan-400/15 dark:text-cyan-200">
                                                     间隔 {formatDCAIntervalHint(openPositionDCAInterval)}
                                                 </span>
+                                                {openPositionGlobalDCAMinSplitAmount > 0 ? (
+                                                    <span className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${openPositionDCAAmountBelowThreshold
+                                                        ? 'border-amber-500/25 bg-amber-500/10 text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/12 dark:text-amber-200'
+                                                        : 'border-zinc-200/80 bg-white/70 text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-white/55'
+                                                        }`}
+                                                    >
+                                                        低于 {formatUSDTValue(openPositionGlobalDCAMinSplitAmount)} USDT 不拆分
+                                                    </span>
+                                                ) : null}
                                             </>
                                         ) : (
                                             <span className="text-[11px] text-zinc-500 dark:text-white/45">
@@ -5562,6 +5609,21 @@ export default function App() {
                                         <div className="text-[10px] leading-4 text-zinc-500 dark:text-white/45">
                                             首批正常开仓创建仓位，后续批次按间隔向该仓位追加流动性。手动关仓或价格跑出区间时，剩余批次自动取消。
                                         </div>
+                                        {openPositionGlobalDCAMinSplitAmount > 0 ? (
+                                            <div className="mt-2 text-[10px] leading-4 text-zinc-500 dark:text-white/45">
+                                                低于 {formatUSDTValue(openPositionGlobalDCAMinSplitAmount)} USDT 的本次开仓不会拆成多批。
+                                            </div>
+                                        ) : null}
+                                        {openPositionIsSingleSidedSelection ? (
+                                            <div className="mt-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-[10px] leading-4 text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/10 dark:text-amber-200">
+                                                单边池会被策略判定为价格已出区间，所以本次开仓不支持分批加仓。
+                                            </div>
+                                        ) : null}
+                                        {openPositionDCAEnabled && !openPositionEffectiveDCAEnabled && openPositionDCAAmountBelowThreshold ? (
+                                            <div className="mt-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-[10px] leading-4 text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/10 dark:text-amber-200">
+                                                当前金额 {formatUSDTValue(openPositionAmountValue)} USDT 低于阈值，本次提交会按单笔开仓处理。
+                                            </div>
+                                        ) : null}
                                         {openPositionDCAEnabled ? (
                                             <>
                                                 <div className="mt-3 text-[11px] font-semibold text-zinc-900 dark:text-white/85">
@@ -5666,11 +5728,11 @@ export default function App() {
                                                     支持小数秒，0.3 = 300ms。
                                                 </div>
                                             </>
-                                        ) : (
+                                        ) : !openPositionIsSingleSidedSelection ? (
                                             <div className="mt-3 text-[10px] leading-4 text-zinc-500 dark:text-white/45">
                                                 当前未启用分批加仓。勾选右上角开关后，系统将按批次和间隔拆分本次开仓。
                                             </div>
-                                        )}
+                                        ) : null}
                                     </div>
                                 ) : null}
                             </div>

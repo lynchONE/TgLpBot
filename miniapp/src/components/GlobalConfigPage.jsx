@@ -45,6 +45,7 @@ function buildDraft(cfg = {}) {
         dca_enabled: cfg.dca_enabled ?? false,
         dca_percentages: parseDCAPercentages(cfg.dca_percentages_json ?? cfg.dca_percentages),
         dca_interval_seconds: cfg.dca_interval_seconds ?? 30,
+        dca_min_split_amount_usdt: cfg.dca_min_split_amount_usdt ?? 0,
     };
 }
 
@@ -628,6 +629,17 @@ function DCASection({ draft, updateDraft, inputClass, brand }) {
                             onChange={(e) => updateDraft('dca_interval_seconds', Number(e.target.value) || 0)}
                             className={inputClass}
                             suffix="秒"
+                        />
+                    </FieldCard>
+                    <FieldCard label="涓嶆媶鍗曢槇鍊?" hint="褰撳崟娆″紑浠撻噾棰濅綆浜庤鍊兼椂锛屾湰娆″紑浠撶洿鎺ヤ竴娆℃€ф垚浜わ紝涓嶅啀鎸夊垎鎵瑰姞浠撴墽琛屻€?">
+                        <InputWithSuffix
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            value={draft.dca_min_split_amount_usdt}
+                            onChange={(e) => updateDraft('dca_min_split_amount_usdt', Number(e.target.value) || 0)}
+                            className={inputClass}
+                            suffix="USDT"
                         />
                     </FieldCard>
                 </>

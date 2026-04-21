@@ -118,6 +118,7 @@ type StrategyTask struct {
 	DCAPercentagesJSON string     `gorm:"type:varchar(128);default:''" json:"dca_percentages_json"`
 	DCAIntervalSeconds float64    `gorm:"type:decimal(10,3);default:0" json:"dca_interval_seconds"`
 	DCAExecutedCount   int        `gorm:"default:0" json:"dca_executed_count"`
+	DCARetryCount      int        `gorm:"default:0" json:"dca_retry_count"`
 	DCANextBatchAt     *time.Time `json:"dca_next_batch_at"`
 
 	CreatedAt time.Time      `json:"created_at"`

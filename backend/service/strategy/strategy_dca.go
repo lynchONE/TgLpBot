@@ -10,6 +10,89 @@ import (
 	"time"
 )
 
+var dcaRetrySchedule = []time.Duration{
+	500 * time.Millisecond,
+	1 * time.Second,
+	2 * time.Second,
+	3 * time.Second,
+	5 * time.Second,
+	10 * time.Second,
+}
+
+func dcaRetryDelay(attempt int) (time.Duration, bool) {
+	if attempt <= 0 {
+		attempt = 1
+	}
+	idx := attempt - 1
+	if idx < 0 || idx >= len(dcaRetrySchedule) {
+		return 0, false
+	}
+	return dcaRetrySchedule[idx], true
+}
+
+func isRetryableDCASlippageError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	if text == "" {
+		return false
+	}
+	markers := []string{
+		"slippage",
+		"price move",
+		"price moved",
+		"too little received",
+		"insufficient_output_amount",
+		"minimum amount",
+		"maximum amount exceeded",
+		"maximumamountexceeded",
+		"0x31e30ad0",
+	}
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *StrategyService) scheduleDCARetryWake(taskID uint, userID uint, delay time.Duration) {
+	if taskID == 0 || userID == 0 {
+		return
+	}
+	if delay < 0 {
+		delay = 0
+	}
+	go func() {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+
+		select {
+		case <-timer.C:
+		case <-s.stopChan:
+			return
+		}
+
+		var task models.StrategyTask
+		if err := database.DB.Where("id = ? AND user_id = ?", taskID, userID).First(&task).Error; err != nil {
+			log.Printf("[Strategy] load task for scheduled DCA retry wake failed: task_id=%d user_id=%d err=%v", taskID, userID, err)
+			return
+		}
+		if !task.DCAEnabled {
+			return
+		}
+
+		currentTick, err := s.getCurrentTick(&task)
+		if err != nil {
+			log.Printf("[Strategy] scheduled DCA retry wake failed to load tick: task_id=%d err=%v", taskID, err)
+			return
+		}
+		inRange := currentTick >= task.TickLower && currentTick <= task.TickUpper
+		s.processDCABatch(&task, inRange)
+	}()
+}
+
 // processDCABatch advances or cancels a task's DCA plan.
 // Must be called inside StrategyService.handleRunningTask after currentTick/inRange
 // have been computed (we reuse that work rather than duplicating RPC calls).
@@ -25,13 +108,11 @@ func (s *StrategyService) processDCABatch(task *models.StrategyTask, inRange boo
 		return
 	}
 
-	// Task is being torn down — cancel any remaining batches.
 	if strings.TrimSpace(task.ExitPendingAction) != "" || task.RebalancePending {
 		s.cancelRemainingDCA(task, "任务正在停止或再平衡，剩余批次已取消")
 		return
 	}
 
-	// Price left the range — cancel remaining batches.
 	if !inRange {
 		s.cancelRemainingDCA(task, "价格已跑出区间，剩余批次已取消")
 		return
@@ -42,7 +123,6 @@ func (s *StrategyService) processDCABatch(task *models.StrategyTask, inRange boo
 		return
 	}
 
-	// Reentrancy guard — reuse the same inflight map other flows use so we don't double-submit.
 	s.inflightTasksMu.Lock()
 	if submitTime, exists := s.inflightTasks[task.ID]; exists {
 		if now.Sub(submitTime) < 10*time.Minute {
@@ -58,7 +138,7 @@ func (s *StrategyService) processDCABatch(task *models.StrategyTask, inRange boo
 		return
 	}
 
-	batchIdx := task.DCAExecutedCount // 0-based slot we're about to execute
+	batchIdx := task.DCAExecutedCount
 	pct := pcts[batchIdx]
 	amount := task.DCATotalAmountUSDT * pct / 100.0
 	if amount <= 0 {
@@ -66,12 +146,10 @@ func (s *StrategyService) processDCABatch(task *models.StrategyTask, inRange boo
 		return
 	}
 
-	// Mark inflight before dispatching so overlapping ticks bail out.
 	s.inflightTasksMu.Lock()
 	s.inflightTasks[task.ID] = now
 	s.inflightTasksMu.Unlock()
 
-	// Push next_batch_at forward to prevent re-entry from the next tick while this batch runs.
 	hold := now.Add(5 * time.Minute)
 	task.DCANextBatchAt = &hold
 	_ = database.DB.Model(task).Update("dca_next_batch_at", &hold).Error
@@ -84,7 +162,7 @@ func (s *StrategyService) processDCABatch(task *models.StrategyTask, inRange boo
 			delete(s.inflightTasks, taskID)
 			s.inflightTasksMu.Unlock()
 			if r := recover(); r != nil {
-				log.Printf("[Strategy] DCA 任务 #%d 批次 %d panic: %v", taskID, batchIdx+1, r)
+				log.Printf("[Strategy] DCA task #%d batch %d panic: %v", taskID, batchIdx+1, r)
 			}
 		}()
 		s.runDCABatchAttempt(taskID, userID, batchIdx, amount, len(pcts))
@@ -94,13 +172,11 @@ func (s *StrategyService) processDCABatch(task *models.StrategyTask, inRange boo
 		delete(s.inflightTasks, task.ID)
 		s.inflightTasksMu.Unlock()
 		log.Printf("[Strategy] DCA schedule failed: task_id=%d err=%v", task.ID, err)
-		// Reset the hold so next tick can try again.
 		task.DCANextBatchAt = &now
 		_ = database.DB.Model(task).Update("dca_next_batch_at", &now).Error
 		return
 	}
 	if !ok2 {
-		// Wallet busy — back off; the next tick will retry.
 		s.inflightTasksMu.Lock()
 		delete(s.inflightTasks, task.ID)
 		s.inflightTasksMu.Unlock()
@@ -117,7 +193,6 @@ func (s *StrategyService) runDCABatchAttempt(taskID uint, userID uint, batchIdx 
 		return
 	}
 	if !task.DCAEnabled || task.DCAExecutedCount != batchIdx {
-		// State changed between tick and execution — skip.
 		return
 	}
 	if strings.TrimSpace(task.ExitPendingAction) != "" || task.RebalancePending {
@@ -126,12 +201,39 @@ func (s *StrategyService) runDCABatchAttempt(taskID uint, userID uint, batchIdx 
 	}
 
 	batchNum := batchIdx + 1
-	log.Printf("[Strategy] DCA 任务 #%d 开始第 %d/%d 批：$%.4f", task.ID, batchNum, total, amountUSDT)
-	s.notify(task.UserID, fmt.Sprintf("💧 分批加仓 %d/%d 开始：$%.2f", batchNum, total, amountUSDT))
+	if task.DCARetryCount > 0 {
+		log.Printf("[Strategy] DCA task #%d retry %d/%d for batch %d/%d: $%.4f", task.ID, task.DCARetryCount, len(dcaRetrySchedule), batchNum, total, amountUSDT)
+		s.notify(task.UserID, fmt.Sprintf("🔁 分批加仓 %d/%d 重试 %d/%d 开始：$%.2f", batchNum, total, task.DCARetryCount, len(dcaRetrySchedule), amountUSDT))
+	} else {
+		log.Printf("[Strategy] DCA task #%d start batch %d/%d: $%.4f", task.ID, batchNum, total, amountUSDT)
+		s.notify(task.UserID, fmt.Sprintf("🧧 分批加仓 %d/%d 开始：$%.2f", batchNum, total, amountUSDT))
+	}
 
 	res, err := s.liquidityService.IncreaseLiquidityForTask(task.UserID, &task, amountUSDT)
 	if err != nil {
-		log.Printf("[Strategy] DCA 任务 #%d 第 %d 批失败: %v", task.ID, batchNum, err)
+		log.Printf("[Strategy] DCA task #%d batch %d failed: %v", task.ID, batchNum, err)
+		if isRetryableDCASlippageError(err) {
+			nextAttempt := task.DCARetryCount + 1
+			if delay, ok := dcaRetryDelay(nextAttempt); ok {
+				nextAt := time.Now().Add(delay)
+				updates := map[string]interface{}{
+					"dca_retry_count":   nextAttempt,
+					"dca_next_batch_at": &nextAt,
+				}
+				if updateErr := database.DB.Model(&task).Updates(updates).Error; updateErr != nil {
+					log.Printf("[Strategy] DCA task #%d batch %d failed to persist retry state: %v", task.ID, batchNum, updateErr)
+					s.cancelRemainingDCA(&task, fmt.Sprintf("分批加仓第 %d 批记录重试状态失败：%v", batchNum, updateErr))
+					return
+				}
+				task.DCARetryCount = nextAttempt
+				task.DCANextBatchAt = &nextAt
+				s.notify(task.UserID, fmt.Sprintf("⚠️ 分批加仓 %d/%d 因滑点不足失败，将在 %s 后重试（%d/%d）：%v", batchNum, total, formatDCAInterval(delay.Seconds()), nextAttempt, len(dcaRetrySchedule), err))
+				s.scheduleDCARetryWake(task.ID, task.UserID, delay)
+				return
+			}
+			s.cancelRemainingDCA(&task, fmt.Sprintf("分批加仓第 %d 批因滑点连续重试 %d 次后仍失败，已终止：%v", batchNum, len(dcaRetrySchedule), err))
+			return
+		}
 		s.cancelRemainingDCA(&task, fmt.Sprintf("分批加仓第 %d 批失败：%v", batchNum, err))
 		return
 	}
@@ -145,6 +247,7 @@ func (s *StrategyService) runDCABatchAttempt(taskID uint, userID uint, batchIdx 
 	newExecuted := batchIdx + 1
 	updates := map[string]interface{}{
 		"dca_executed_count": newExecuted,
+		"dca_retry_count":    0,
 		"amount_usdt":        task.AmountUSDT + spent,
 	}
 	if res != nil && res.CurrentLiquidity != "" {
@@ -157,7 +260,7 @@ func (s *StrategyService) runDCABatchAttempt(taskID uint, userID uint, batchIdx 
 		updates["dca_next_batch_at"] = &next
 	}
 	if err := database.DB.Model(&task).Updates(updates).Error; err != nil {
-		log.Printf("[Strategy] DCA 任务 #%d 第 %d 批 DB 更新失败 (链上已成功): %v", task.ID, batchNum, err)
+		log.Printf("[Strategy] DCA task #%d batch %d DB update failed after on-chain success: %v", task.ID, batchNum, err)
 	}
 
 	if newExecuted >= total {
@@ -183,11 +286,18 @@ func (s *StrategyService) cancelRemainingDCA(task *models.StrategyTask, reason s
 	if task == nil {
 		return
 	}
-	if task.DCANextBatchAt == nil {
+	if task.DCANextBatchAt == nil && task.DCARetryCount == 0 {
 		return
 	}
-	_ = database.DB.Model(task).Update("dca_next_batch_at", nil).Error
+
+	if err := database.DB.Model(task).Updates(map[string]interface{}{
+		"dca_next_batch_at": nil,
+		"dca_retry_count":   0,
+	}).Error; err != nil {
+		log.Printf("[Strategy] DCA task #%d failed to clear remaining batches: %v", task.ID, err)
+	}
 	task.DCANextBatchAt = nil
-	s.notify(task.UserID, fmt.Sprintf("⚠️ %s", reason))
-	log.Printf("[Strategy] DCA 任务 #%d 已取消后续批次: %s", task.ID, reason)
+	task.DCARetryCount = 0
+	s.notify(task.UserID, fmt.Sprintf("ℹ️ %s", reason))
+	log.Printf("[Strategy] DCA task #%d cancelled remaining batches: %s", task.ID, reason)
 }

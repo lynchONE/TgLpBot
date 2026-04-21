@@ -45,6 +45,15 @@ function formatPercent(value) {
   return `${num.toFixed(num >= 1 ? 2 : 3).replace(/0+$/, '').replace(/\.$/, '')}%`;
 }
 
+function formatUSDTValue(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return '--';
+  if (num === 0) return '0';
+  if (num >= 1000) return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (num >= 1) return num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  return num.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+}
+
 function formatSharePercent(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return '--';
@@ -509,6 +518,8 @@ export default function OpenPositionModal({
   const [dcaPercentages, setDcaPercentages] = useState([50, 50]);
   const [dcaInterval, setDcaInterval] = useState(30);
   const [dcaDefaultsLoaded, setDcaDefaultsLoaded] = useState(false);
+  const [globalDcaMinSplitAmount, setGlobalDcaMinSplitAmount] = useState(0);
+  const [globalSlippageTolerance, setGlobalSlippageTolerance] = useState(NaN);
   const [dcaExpanded, setDcaExpanded] = useState(false);
   const [rebalanceEnabled, setRebalanceEnabled] = useState(true);
   const [stopLossEnabled, setStopLossEnabled] = useState(true);
@@ -615,6 +626,17 @@ export default function OpenPositionModal({
   const taskSlippage = useMemo(() => parseOptionalPercent(slippage), [slippage]);
   const entrySwapSlippageValue = useMemo(() => parseOptionalPercent(entrySwapSlippage), [entrySwapSlippage]);
   const amountValue = Number(amount);
+  const effectiveGlobalDcaMinSplitAmount = Number.isFinite(Number(globalDcaMinSplitAmount)) && Number(globalDcaMinSplitAmount) > 0
+    ? Number(globalDcaMinSplitAmount)
+    : 0;
+  const dcaAmountBelowThreshold = effectiveGlobalDcaMinSplitAmount > 0
+    && Number.isFinite(amountValue)
+    && amountValue > 0
+    && amountValue < effectiveGlobalDcaMinSplitAmount;
+  const effectiveDcaEnabled = dcaEnabled && !dcaAmountBelowThreshold;
+  const globalSlippageHint = Number.isFinite(Number(globalSlippageTolerance)) && Number(globalSlippageTolerance) >= 0
+    ? `本次开仓采用全局配置滑点: ${formatPercent(globalSlippageTolerance)}`
+    : '留空则使用全局配置';
   const rangeLowerValue = Number(rangeLower);
   const rangeUpperValue = Number(rangeUpper);
   const tickLowerValue = Number(String(tickLowerInput || '').trim());
@@ -1113,6 +1135,8 @@ export default function OpenPositionModal({
         const cfg = resp?.config || resp || {};
         setDcaEnabled(Boolean(cfg.dca_enabled));
         setDcaPercentages(parseDCAPercentagesAny(cfg.dca_percentages_json ?? cfg.dca_percentages));
+        setGlobalDcaMinSplitAmount(Number(cfg.dca_min_split_amount_usdt) || 0);
+        setGlobalSlippageTolerance(Number(cfg.slippage_tolerance));
         const interval = Number(cfg.dca_interval_seconds);
         if (Number.isFinite(interval) && interval >= 0) setDcaInterval(interval);
         setDcaDefaultsLoaded(true);
@@ -1468,6 +1492,7 @@ export default function OpenPositionModal({
     const signature = `${resolvedSelectionShape.shape}:${chartLowerTick}:${chartUpperTick}`;
     if (!signature || autoSingleSideRangeRef.current === signature) return;
     autoSingleSideRangeRef.current = signature;
+    if (dcaEnabled) setDcaEnabled(false);
     if (rebalanceEnabled) setRebalanceEnabled(false);
     if (stopLossEnabled) setStopLossEnabled(false);
   }, [
@@ -1475,9 +1500,11 @@ export default function OpenPositionModal({
     resolvedSelectionShape.shape,
     chartLowerTick,
     chartUpperTick,
+    dcaEnabled,
     rebalanceEnabled,
     stopLossEnabled,
   ]);
+  const submitDcaEnabled = effectiveDcaEnabled && !isSingleSidedSelection;
 
   const onChartRangeChange = useCallback(({ lower, upper }) => {
     if (!liqProfile) return;
@@ -1565,7 +1592,7 @@ export default function OpenPositionModal({
       return;
     }
 
-    if (dcaEnabled) {
+    if (submitDcaEnabled) {
       if (dcaPercentages.length < 2 || dcaPercentages.length > 5) {
         setError('分批次数必须在 2–5 批之间。');
         return;
@@ -1609,9 +1636,9 @@ export default function OpenPositionModal({
       confirmEntrySwap: Boolean(entrySwapPreview?.required && entrySwapConfirmed),
       walletId: resolvedWalletId || undefined,
       ackLiquidityRisk: riskAck,
-      dcaEnabled,
-      dcaPercentages: dcaEnabled ? dcaPercentages.map((v) => Number(v) || 0) : undefined,
-      dcaIntervalSeconds: dcaEnabled ? Number(dcaInterval) : undefined,
+      dcaEnabled: submitDcaEnabled,
+      dcaPercentages: submitDcaEnabled ? dcaPercentages.map((v) => Number(v) || 0) : undefined,
+      dcaIntervalSeconds: submitDcaEnabled ? Number(dcaInterval) : undefined,
       rebalanceEnabled,
       stopLossEnabled,
     });
@@ -1639,6 +1666,8 @@ export default function OpenPositionModal({
     version,
     chain,
     dcaEnabled,
+    effectiveDcaEnabled,
+    submitDcaEnabled,
     dcaPercentages,
     dcaSum,
     dcaSumValid,
@@ -2533,9 +2562,14 @@ export default function OpenPositionModal({
                     }}
                     min="0"
                     step="0.1"
-                    placeholder="留空则使用全局设置"
+                    placeholder={String(slippage || '').trim() ? '0.5' : globalSlippageHint}
                   />
                 </label>
+                {!String(slippage || '').trim() ? (
+                  <div style={{ marginTop: 6, fontSize: 11, opacity: 0.58, lineHeight: 1.45 }}>
+                    {globalSlippageHint}
+                  </div>
+                ) : null}
               </div>
 
               {recommendedPositions.length > 0 ? (
@@ -2684,7 +2718,7 @@ export default function OpenPositionModal({
               </div>
               <div className="opm-inline-hint">
                 {isSingleSidedSelection
-                  ? `当前区间会开成单边池，已默认关闭再平衡和止损。${resolvedSelectionShape.dominantTokenSymbol ? ` 资金会更偏向 ${resolvedSelectionShape.dominantTokenSymbol}。` : ''}`
+                  ? `当前区间会开成单边池，已默认关闭分批加仓、再平衡和止损。${resolvedSelectionShape.dominantTokenSymbol ? ` 资金会更偏向 ${resolvedSelectionShape.dominantTokenSymbol}。` : ''}`
                   : '两个都关闭时仅提醒，不会自动再平衡或止损。'}
               </div>
             </div>
@@ -2705,9 +2739,11 @@ export default function OpenPositionModal({
                       clearErrors();
                       setDcaEnabled(e.target.checked);
                     }}
-                    disabled={busy}
+                    disabled={busy || isSingleSidedSelection}
                   />
-                  <span style={{ fontSize: 12 }}>{dcaEnabled ? '本次启用' : '本次不启用'}</span>
+                  <span style={{ fontSize: 12 }}>
+                    {isSingleSidedSelection ? '单边池不支持' : (dcaEnabled ? '本次启用' : '本次不启用')}
+                  </span>
                 </span>
               </label>
               <button
@@ -2776,6 +2812,23 @@ export default function OpenPositionModal({
                       >
                         间隔 {formatDCAIntervalHint(dcaInterval)}
                       </span>
+                      {effectiveGlobalDcaMinSplitAmount > 0 ? (
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            padding: '3px 8px',
+                            borderRadius: 999,
+                            border: dcaAmountBelowThreshold ? '1px solid rgba(251, 191, 36, 0.32)' : '1px solid rgba(255, 255, 255, 0.1)',
+                            background: dcaAmountBelowThreshold ? 'rgba(245, 158, 11, 0.12)' : 'rgba(255, 255, 255, 0.05)',
+                            fontSize: 11,
+                            fontWeight: 600,
+                            color: dcaAmountBelowThreshold ? '#fde68a' : 'rgba(255, 255, 255, 0.72)',
+                          }}
+                        >
+                          低于 {formatUSDTValue(effectiveGlobalDcaMinSplitAmount)} USDT 不拆分
+                        </span>
+                      ) : null}
                     </>
                   ) : (
                     <span style={{ fontSize: 11, opacity: 0.78 }}>
@@ -2792,7 +2845,40 @@ export default function OpenPositionModal({
                   首批按正常开仓创建仓位，后续批次按间隔向该仓位追加流动性。手动关仓或价格跑出区间时，剩余批次自动取消。
                 </div>
               ) : null}
-              {dcaExpanded && !dcaEnabled ? (
+              {dcaExpanded && effectiveGlobalDcaMinSplitAmount > 0 ? (
+                <div style={{ marginTop: 8, fontSize: 11, opacity: 0.7, lineHeight: 1.5 }}>
+                  低于 {formatUSDTValue(effectiveGlobalDcaMinSplitAmount)} USDT 的本次开仓不会拆成多批。
+                </div>
+              ) : null}
+              {dcaExpanded && isSingleSidedSelection ? (
+                <div style={{
+                  marginTop: 8,
+                  padding: '8px 10px',
+                  borderRadius: 12,
+                  border: '1px solid rgba(251, 191, 36, 0.28)',
+                  background: 'rgba(245, 158, 11, 0.1)',
+                  color: '#fde68a',
+                  fontSize: 11,
+                  lineHeight: 1.5,
+                }}>
+                  单边池会被策略判定为价格已出区间，所以本次开仓不支持分批加仓。
+                </div>
+              ) : null}
+              {dcaExpanded && dcaEnabled && dcaAmountBelowThreshold ? (
+                <div style={{
+                  marginTop: 8,
+                  padding: '8px 10px',
+                  borderRadius: 12,
+                  border: '1px solid rgba(251, 191, 36, 0.28)',
+                  background: 'rgba(245, 158, 11, 0.1)',
+                  color: '#fde68a',
+                  fontSize: 11,
+                  lineHeight: 1.5,
+                }}>
+                  当前金额 {formatUSDTValue(amountValue)} USDT 低于阈值，本次提交会按单笔开仓处理。
+                </div>
+              ) : null}
+              {dcaExpanded && !dcaEnabled && !isSingleSidedSelection ? (
                 <div style={{ marginTop: 8, fontSize: 11, opacity: 0.7, lineHeight: 1.5 }}>
                   当前未启用分批加仓。勾选右上角开关后，系统将按批次和间隔拆分本次开仓。
                 </div>

@@ -13,6 +13,7 @@ const (
 	DCASumTolerance       = 0.01
 	DCAMinIntervalSeconds = 0.0
 	DCAMaxIntervalSeconds = 300.0
+	DCAMinSplitAmountMin  = 0.0
 )
 
 // NormalizeDCAPercentages validates and rounds a batch percentage slice.
@@ -62,6 +63,15 @@ func NormalizeDCAInterval(seconds float64) (float64, error) {
 		return 0, fmt.Errorf("批次间隔必须在 %g-%g 秒之间，当前为 %g", DCAMinIntervalSeconds, DCAMaxIntervalSeconds, seconds)
 	}
 	return math.Round(seconds*1000) / 1000, nil
+}
+
+// NormalizeDCAMinSplitAmountUSDT validates the threshold below which a single open should not be split.
+// 0 disables the threshold. Rounded to 4 decimals for stable storage.
+func NormalizeDCAMinSplitAmountUSDT(amount float64) (float64, error) {
+	if !isFinite(amount) || amount < DCAMinSplitAmountMin {
+		return 0, fmt.Errorf("dca min split amount must be >= %g, got %g", DCAMinSplitAmountMin, amount)
+	}
+	return math.Round(amount*10000) / 10000, nil
 }
 
 // MarshalDCAPercentages serialises a normalised slice back to the JSON form used for storage.

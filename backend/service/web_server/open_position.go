@@ -204,6 +204,18 @@ func resolveDCAPlan(cfg *models.GlobalConfig, req openPositionRequest) (bool, []
 		return false, nil, 0, err
 	}
 
+	minSplitAmount := 0.0
+	if cfg != nil {
+		minSplitAmount = cfg.DCAMinSplitAmountUSDT
+	}
+	minSplitAmountNorm, err := strategy.NormalizeDCAMinSplitAmountUSDT(minSplitAmount)
+	if err != nil {
+		return false, nil, 0, err
+	}
+	if minSplitAmountNorm > 0 && req.Amount < minSplitAmountNorm {
+		return false, nil, 0, nil
+	}
+
 	return true, normalized, intervalNorm, nil
 }
 
@@ -637,13 +649,15 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 		Status:               models.StrategyStatusRunning,
 		LastCheckTime:        time.Now(),
 	}
+	positionShape, _ := classifyOpenPositionShape(task, currentTick, resolvedRange.TickLower, resolvedRange.TickUpper)
+	singleSidedSelection := strings.HasPrefix(positionShape, "single_")
 
 	if dcaEnabled, dcaPcts, dcaInterval, err := resolveDCAPlan(cfg, req); err != nil {
 		return nil, &openPositionError{
 			Code:    "invalid_dca_plan",
 			Message: err.Error(),
 		}, http.StatusBadRequest
-	} else if dcaEnabled {
+	} else if dcaEnabled && !singleSidedSelection {
 		pctsJSON, _ := strategy.MarshalDCAPercentages(dcaPcts)
 		task.DCAEnabled = true
 		task.DCATotalAmountUSDT = req.Amount

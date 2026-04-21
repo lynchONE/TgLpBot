@@ -63,6 +63,7 @@ export default function GlobalConfigPanel({ apiBaseUrl, initData, hasInitData })
                 dca_enabled: cfg.dca_enabled ?? false,
                 dca_percentages: parseDCAPercentages(cfg.dca_percentages_json ?? cfg.dca_percentages),
                 dca_interval_seconds: cfg.dca_interval_seconds ?? 30,
+                dca_min_split_amount_usdt: cfg.dca_min_split_amount_usdt ?? 0,
             });
         } catch (e) {
             setError(String(e?.message || e));
@@ -301,6 +302,16 @@ function DCAConfigSection({ draft, updateDraft }) {
                             max="300"
                             value={draft.dca_interval_seconds ?? 30}
                             onChange={(e) => updateDraft('dca_interval_seconds', Number(e.target.value) || 0)}
+                        />
+                    </div>
+                    <div className="config-row">
+                        <label>涓嶆媶鍗曢槇鍊?(USDT)</label>
+                        <input
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            value={draft.dca_min_split_amount_usdt ?? 0}
+                            onChange={(e) => updateDraft('dca_min_split_amount_usdt', Number(e.target.value) || 0)}
                         />
                     </div>
                     <small style={{ fontSize: 11, opacity: 0.6 }}>

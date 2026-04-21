@@ -138,6 +138,8 @@ func autoMigrate() error {
 	ensureColumn("global_configs", "open_position_target_share_max", "DECIMAL(6,4) NOT NULL DEFAULT 0 AFTER open_position_target_share_min")
 	ensureColumn("global_configs", "open_position_risk_cap_usd", "DECIMAL(20,4) NOT NULL DEFAULT 0 AFTER open_position_target_share_max")
 	ensureColumn("global_configs", "open_position_risk_cap_ratio", "DECIMAL(6,4) NOT NULL DEFAULT 0 AFTER open_position_risk_cap_usd")
+	ensureColumn("global_configs", "dca_min_split_amount_usdt", "DECIMAL(20,4) NOT NULL DEFAULT 0 AFTER dca_interval_seconds")
+	ensureColumn("strategy_tasks", "dca_retry_count", "INT NOT NULL DEFAULT 0 AFTER dca_executed_count")
 	ensureColumn("system_configs", "open_position_target_share_min", "DECIMAL(6,4) NOT NULL DEFAULT 0 AFTER zap_min_pool_liquidity_usd")
 	ensureColumn("system_configs", "open_position_target_share_max", "DECIMAL(6,4) NOT NULL DEFAULT 0 AFTER open_position_target_share_min")
 	ensureColumn("system_configs", "open_position_risk_cap_usd", "DECIMAL(20,4) NOT NULL DEFAULT 0 AFTER open_position_target_share_max")

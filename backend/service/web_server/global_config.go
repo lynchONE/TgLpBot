@@ -175,6 +175,14 @@ func buildGlobalConfigUpdates(raw map[string]json.RawMessage) map[string]interfa
 			}
 		}
 	}
+	if v, ok := raw["dca_min_split_amount_usdt"]; ok {
+		var n float64
+		if json.Unmarshal(v, &n) == nil {
+			if normalized, err := strategy.NormalizeDCAMinSplitAmountUSDT(n); err == nil {
+				updates["dca_min_split_amount_usdt"] = normalized
+			}
+		}
+	}
 
 	return updates
 }
