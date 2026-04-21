@@ -237,6 +237,55 @@ function buildDisplayPriceRangeFromTicks(lowerTick, upperTick, invertPrice, toke
   };
 }
 
+function nudgeDisplayPriceBoundary(target, delta, invertPrice, tickSpacing, lowerTick, upperTick, minTick, maxTick) {
+  const spacing = Number(tickSpacing);
+  let nextLower = Number(lowerTick);
+  let nextUpper = Number(upperTick);
+  if (!Number.isFinite(spacing) || spacing <= 0) return null;
+  if (!Number.isInteger(nextLower) || !Number.isInteger(nextUpper) || nextUpper <= nextLower) return null;
+
+  const changedRawBoundary = target === 'lower'
+    ? (invertPrice ? 'upper' : 'lower')
+    : (invertPrice ? 'lower' : 'upper');
+
+  if (target === 'lower') {
+    if (invertPrice) nextUpper += delta * spacing;
+    else nextLower -= delta * spacing;
+  } else if (invertPrice) {
+    nextLower -= delta * spacing;
+  } else {
+    nextUpper += delta * spacing;
+  }
+
+  const resolvedMinTick = Number(minTick);
+  const resolvedMaxTick = Number(maxTick);
+  if (Number.isFinite(resolvedMinTick)) nextLower = Math.max(nextLower, resolvedMinTick);
+  if (Number.isFinite(resolvedMaxTick)) nextUpper = Math.min(nextUpper, resolvedMaxTick);
+
+  if (changedRawBoundary === 'lower') {
+    if (Number.isFinite(resolvedMaxTick) && nextLower > resolvedMaxTick - spacing) {
+      nextLower = resolvedMaxTick - spacing;
+    }
+    if (nextLower >= nextUpper) nextUpper = nextLower + spacing;
+    if (Number.isFinite(resolvedMaxTick) && nextUpper > resolvedMaxTick) {
+      nextUpper = resolvedMaxTick;
+      nextLower = nextUpper - spacing;
+    }
+  } else {
+    if (Number.isFinite(resolvedMinTick) && nextUpper < resolvedMinTick + spacing) {
+      nextUpper = resolvedMinTick + spacing;
+    }
+    if (nextUpper <= nextLower) nextLower = nextUpper - spacing;
+    if (Number.isFinite(resolvedMinTick) && nextLower < resolvedMinTick) {
+      nextLower = resolvedMinTick;
+      nextUpper = nextLower + spacing;
+    }
+  }
+
+  if (!Number.isInteger(nextLower) || !Number.isInteger(nextUpper) || nextUpper <= nextLower) return null;
+  return { lowerTick: nextLower, upperTick: nextUpper };
+}
+
 function formatRangePercentCompact(value) {
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0) return '--';
@@ -819,18 +868,20 @@ export default function OpenPositionModal({
     if (!Number.isInteger(nextLower)) nextLower = Number(rangeEditor?.anchor_tick_lower);
     if (!Number.isInteger(nextUpper)) nextUpper = Number(rangeEditor?.anchor_tick_upper);
     if (!Number.isInteger(nextLower) || !Number.isInteger(nextUpper)) return;
-    if (target === 'lower') {
-      nextLower += delta * spacing;
-      if (Number.isFinite(minTick)) nextLower = Math.max(nextLower, minTick);
-      if (nextLower >= nextUpper) nextUpper = nextLower + spacing;
-    } else {
-      nextUpper += delta * spacing;
-      if (Number.isFinite(maxTick)) nextUpper = Math.min(nextUpper, maxTick);
-      if (nextUpper <= nextLower) nextLower = nextUpper - spacing;
-    }
+    const nextRange = nudgeDisplayPriceBoundary(
+      target,
+      delta,
+      invertPrice,
+      spacing,
+      nextLower,
+      nextUpper,
+      minTick,
+      maxTick,
+    );
+    if (!nextRange) return;
     setRangeInputMode('tick');
-    applyResolvedTickRange(nextLower, nextUpper);
-  }, [rangeEditor, selectedManualTickLower, selectedManualTickUpper, applyResolvedTickRange]);
+    applyResolvedTickRange(nextRange.lowerTick, nextRange.upperTick);
+  }, [rangeEditor, selectedManualTickLower, selectedManualTickUpper, invertPrice, applyResolvedTickRange]);
 
   const applyGridBin = useCallback((bin) => {
     if (!bin) return;
@@ -1416,8 +1467,8 @@ export default function OpenPositionModal({
               token0Decimals={token0Decimals}
               token1Decimals={token1Decimals}
               invertPrice={invertPrice}
-              tokenLeftLabel={invertPrice ? token0Symbol : token1Symbol}
-              tokenRightLabel={invertPrice ? token1Symbol : token0Symbol}
+              tokenLeftLabel={invertPrice ? token1Symbol : token0Symbol}
+              tokenRightLabel={invertPrice ? token0Symbol : token1Symbol}
               quoteIsToken1={quoteIsToken1}
               titleText="流动性分布"
               titlePlacement="left"

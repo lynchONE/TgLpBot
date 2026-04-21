@@ -131,6 +131,10 @@ export default function LiquidityDistributionChart({
         if (!Array.isArray(bins) || bins.length === 0) return [];
         return [...bins].sort((a, b) => (a.tick_lower ?? 0) - (b.tick_lower ?? 0));
     }, [bins]);
+    const visualBins = useMemo(
+        () => (invertPrice ? [...sortedBins].reverse() : sortedBins),
+        [sortedBins, invertPrice],
+    );
 
     const tickRange = useMemo(() => {
         if (sortedBins.length === 0) return null;
@@ -151,18 +155,23 @@ export default function LiquidityDistributionChart({
     const tickToX = useCallback((tick) => {
         if (!tickRange || tickRange.span === 0 || width === 0) return 0;
         const t = clampTick(tick, tickRange.min, tickRange.max);
-        return ((t - tickRange.min) / tickRange.span) * width;
-    }, [tickRange, width]);
+        const ratio = invertPrice
+            ? ((tickRange.max - t) / tickRange.span)
+            : ((t - tickRange.min) / tickRange.span);
+        return ratio * width;
+    }, [tickRange, width, invertPrice]);
 
     const xToTick = useCallback((x) => {
         if (!tickRange || tickRange.span === 0 || width === 0) return tickRange?.min ?? 0;
         const ratio = Math.max(0, Math.min(1, x / width));
-        const raw = tickRange.min + ratio * tickRange.span;
+        const raw = invertPrice
+            ? tickRange.max - ratio * tickRange.span
+            : tickRange.min + ratio * tickRange.span;
         if (Number.isFinite(tickSpacing) && tickSpacing > 0) {
             return Math.round(raw / tickSpacing) * tickSpacing;
         }
         return Math.round(raw);
-    }, [tickRange, width, tickSpacing]);
+    }, [tickRange, width, tickSpacing, invertPrice]);
 
     const stopDragging = useCallback((event) => {
         const activePointerId = dragStateRef.current.pointerId;
@@ -223,16 +232,20 @@ export default function LiquidityDistributionChart({
     const lowerX = Number.isFinite(rangeLowerTick) ? tickToX(rangeLowerTick) : null;
     const upperX = Number.isFinite(rangeUpperTick) ? tickToX(rangeUpperTick) : null;
     const currentX = Number.isFinite(currentTick) ? tickToX(currentTick) : null;
+    const rangeLeftX = Number.isFinite(lowerX) && Number.isFinite(upperX) ? Math.min(lowerX, upperX) : null;
+    const rangeRightX = Number.isFinite(lowerX) && Number.isFinite(upperX) ? Math.max(lowerX, upperX) : null;
 
     const startPriceText = useMemo(() => {
         if (!tickRange) return '';
-        const p = tickToPriceRatio(tickRange.min, token0Decimals, token1Decimals);
+        const edgeTick = invertPrice ? tickRange.max : tickRange.min;
+        const p = tickToPriceRatio(edgeTick, token0Decimals, token1Decimals);
         return formatPriceCompact(invertPrice && p ? 1 / p : p);
     }, [tickRange, token0Decimals, token1Decimals, invertPrice]);
 
     const endPriceText = useMemo(() => {
         if (!tickRange) return '';
-        const p = tickToPriceRatio(tickRange.max, token0Decimals, token1Decimals);
+        const edgeTick = invertPrice ? tickRange.min : tickRange.max;
+        const p = tickToPriceRatio(edgeTick, token0Decimals, token1Decimals);
         return formatPriceCompact(invertPrice && p ? 1 / p : p);
     }, [tickRange, token0Decimals, token1Decimals, invertPrice]);
 
@@ -316,14 +329,14 @@ export default function LiquidityDistributionChart({
                 )}
             </div>
             <style>{`@keyframes lpd-spin { to { transform: rotate(360deg); } }`}</style>
-            {Number.isFinite(lowerX) && Number.isFinite(upperX) && upperX > lowerX ? (
+            {Number.isFinite(rangeLeftX) && Number.isFinite(rangeRightX) && rangeRightX > rangeLeftX ? (
                 <div
-                    style={{ position: 'absolute', top: 0, bottom: 0, left: lowerX, width: upperX - lowerX, background: colors.rangeBg, pointerEvents: 'none' }}
+                    style={{ position: 'absolute', top: 0, bottom: 0, left: rangeLeftX, width: rangeRightX - rangeLeftX, background: colors.rangeBg, pointerEvents: 'none' }}
                 />
             ) : null}
 
             <div style={{ position: 'absolute', left: 8, right: 8, top: 22, bottom: 28, display: 'flex', alignItems: 'flex-end', gap: 1 }}>
-                {sortedBins.map((bin, i) => {
+                {visualBins.map((bin, i) => {
                     const liq = bigIntToNumber(safeBigInt(bin.liquidity));
                     const ratio = liq / maxLiq;
                     const heightPct = Math.max(3, ratio * 100);
@@ -392,7 +405,7 @@ export default function LiquidityDistributionChart({
             {Number.isFinite(lowerX) ? (
                 <RangeHandle
                     x={lowerX}
-                    color={colors.handleLower}
+                    color={invertPrice ? colors.handleUpper : colors.handleLower}
                     side="lower"
                     interactive={typeof onRangeChange === 'function'}
                     onDown={(event) => {
@@ -414,7 +427,7 @@ export default function LiquidityDistributionChart({
             {Number.isFinite(upperX) ? (
                 <RangeHandle
                     x={upperX}
-                    color={colors.handleUpper}
+                    color={invertPrice ? colors.handleLower : colors.handleUpper}
                     side="upper"
                     interactive={typeof onRangeChange === 'function'}
                     onDown={(event) => {

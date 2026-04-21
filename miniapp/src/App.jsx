@@ -498,6 +498,55 @@ function buildDisplayPriceRangeFromTicks(lowerTick, upperTick, invertPrice, toke
     };
 }
 
+function nudgeDisplayPriceBoundary(target, delta, invertPrice, tickSpacing, lowerTick, upperTick, minTick, maxTick) {
+    const spacing = Number(tickSpacing);
+    let nextLower = Number(lowerTick);
+    let nextUpper = Number(upperTick);
+    if (!Number.isFinite(spacing) || spacing <= 0) return null;
+    if (!Number.isInteger(nextLower) || !Number.isInteger(nextUpper) || nextUpper <= nextLower) return null;
+
+    const changedRawBoundary = target === 'lower'
+        ? (invertPrice ? 'upper' : 'lower')
+        : (invertPrice ? 'lower' : 'upper');
+
+    if (target === 'lower') {
+        if (invertPrice) nextUpper += delta * spacing;
+        else nextLower -= delta * spacing;
+    } else if (invertPrice) {
+        nextLower -= delta * spacing;
+    } else {
+        nextUpper += delta * spacing;
+    }
+
+    const resolvedMinTick = Number(minTick);
+    const resolvedMaxTick = Number(maxTick);
+    if (Number.isFinite(resolvedMinTick)) nextLower = Math.max(nextLower, resolvedMinTick);
+    if (Number.isFinite(resolvedMaxTick)) nextUpper = Math.min(nextUpper, resolvedMaxTick);
+
+    if (changedRawBoundary === 'lower') {
+        if (Number.isFinite(resolvedMaxTick) && nextLower > resolvedMaxTick - spacing) {
+            nextLower = resolvedMaxTick - spacing;
+        }
+        if (nextLower >= nextUpper) nextUpper = nextLower + spacing;
+        if (Number.isFinite(resolvedMaxTick) && nextUpper > resolvedMaxTick) {
+            nextUpper = resolvedMaxTick;
+            nextLower = nextUpper - spacing;
+        }
+    } else {
+        if (Number.isFinite(resolvedMinTick) && nextUpper < resolvedMinTick + spacing) {
+            nextUpper = resolvedMinTick + spacing;
+        }
+        if (nextUpper <= nextLower) nextLower = nextUpper - spacing;
+        if (Number.isFinite(resolvedMinTick) && nextLower < resolvedMinTick) {
+            nextLower = resolvedMinTick;
+            nextUpper = nextLower + spacing;
+        }
+    }
+
+    if (!Number.isInteger(nextLower) || !Number.isInteger(nextUpper) || nextUpper <= nextLower) return null;
+    return { lowerTick: nextLower, upperTick: nextUpper };
+}
+
 function roundDownToTickSpacing(tick, tickSpacing) {
     const spacing = Number(tickSpacing);
     const value = Number(tick);
@@ -615,6 +664,37 @@ function normalizePoolKey(value) {
         return '';
     }
     return `0x${body.toLowerCase()}`;
+}
+
+function resolveOpenPositionPoolChain(pool, fallbackChain = 'bsc') {
+    const explicitChain = String(pool?.chain || '').trim().toLowerCase();
+    if (explicitChain) return explicitChain;
+    if (Number(pool?.chain_id) === 8453) return 'base';
+    return String(fallbackChain || 'bsc').trim().toLowerCase() || 'bsc';
+}
+
+function normalizeOpenPositionPoolVersion(pool) {
+    const directCandidates = [
+        pool?.protocol_version,
+        pool?.pool_version,
+        pool?.protocol,
+        pool?.factory_name,
+        pool?.dex,
+    ];
+    for (const candidate of directCandidates) {
+        const raw = String(candidate || '').trim().toLowerCase();
+        if (!raw) continue;
+        const matched = raw.match(/v?\d+/)?.[0] ?? '';
+        if (matched) return matched.startsWith('v') ? matched : `v${matched}`;
+    }
+    const aliasCandidates = [pool?.protocol, pool?.factory_name, pool?.dex];
+    for (const candidate of aliasCandidates) {
+        const raw = String(candidate || '').trim().toLowerCase();
+        if (!raw) continue;
+        if (raw.includes('v4')) return 'v4';
+        if (raw.includes('v3') || raw.includes('pancake') || raw.includes('aerodrome') || raw.includes('slipstream')) return 'v3';
+    }
+    return '';
 }
 
 function normalizePositionSmartMoneyGroups(groups) {
@@ -2022,21 +2102,24 @@ export default function App() {
         if (!Number.isInteger(nextLower)) nextLower = Number(openPositionEffectiveRangeEditor?.anchor_tick_lower);
         if (!Number.isInteger(nextUpper)) nextUpper = Number(openPositionEffectiveRangeEditor?.anchor_tick_upper);
         if (!Number.isInteger(nextLower) || !Number.isInteger(nextUpper)) return;
-        if (target === 'lower') {
-            nextLower += delta * spacing;
-            if (Number.isFinite(minTick)) nextLower = Math.max(nextLower, minTick);
-            if (nextLower >= nextUpper) nextUpper = nextLower + spacing;
-        } else {
-            nextUpper += delta * spacing;
-            if (Number.isFinite(maxTick)) nextUpper = Math.min(nextUpper, maxTick);
-            if (nextUpper <= nextLower) nextLower = nextUpper - spacing;
-        }
+        const nextRange = nudgeDisplayPriceBoundary(
+            target,
+            delta,
+            openPositionInvertPrice,
+            spacing,
+            nextLower,
+            nextUpper,
+            minTick,
+            maxTick,
+        );
+        if (!nextRange) return;
         setOpenPositionRangeInputMode('tick');
-        applyOpenPositionTickRange(nextLower, nextUpper);
+        applyOpenPositionTickRange(nextRange.lowerTick, nextRange.upperTick);
     }, [
         openPositionEffectiveRangeEditor,
         openPositionSelectedManualTickLower,
         openPositionSelectedManualTickUpper,
+        openPositionInvertPrice,
         applyOpenPositionTickRange,
     ]);
 
@@ -2189,10 +2272,10 @@ export default function App() {
     };
 
     const openPositionModal = (pool) => {
-        let chain = String(pool?.chain || hotPoolsData?.chain || 'bsc').trim().toLowerCase() || 'bsc';
+        let chain = resolveOpenPositionPoolChain(pool, hotPoolsData?.chain || 'bsc');
         if (!multiChainEnabled) chain = userDefaultChain;
         const poolAddress = String(pool?.pool_address || '').trim();
-        const poolVersion = String(pool?.protocol_version || pool?.pool_version || '').trim().toLowerCase();
+        const poolVersion = normalizeOpenPositionPoolVersion(pool);
         setOpenPositionPool({
             ...pool,
             chain,
@@ -2291,11 +2374,8 @@ export default function App() {
             return undefined;
         }
         const poolAddress = String(openPositionPool?.pool_address || '').trim();
-        const chain = String(openPositionPool?.chain || 'bsc').trim().toLowerCase();
-        const versionRaw = String(openPositionPool?.protocol_version || openPositionPool?.factory_name || '').toLowerCase();
-        let protocol = '';
-        if (versionRaw.includes('v4')) protocol = 'v4';
-        else if (versionRaw.includes('v3') || versionRaw.includes('pancake') || versionRaw.includes('aerodrome') || versionRaw.includes('slipstream')) protocol = 'v3';
+        const chain = resolveOpenPositionPoolChain(openPositionPool, 'bsc');
+        const protocol = normalizeOpenPositionPoolVersion(openPositionPool);
         if (!poolAddress || !protocol) {
             setOpenPositionLiqProfile(null);
             return undefined;
@@ -4326,8 +4406,8 @@ export default function App() {
                                     token0Decimals={openPositionToken0Decimals}
                                     token1Decimals={openPositionToken1Decimals}
                                     invertPrice={openPositionInvertPrice}
-                                    tokenLeftLabel={openPositionInvertPrice ? openPositionToken0Symbol : openPositionToken1Symbol}
-                                    tokenRightLabel={openPositionInvertPrice ? openPositionToken1Symbol : openPositionToken0Symbol}
+                                    tokenLeftLabel={openPositionInvertPrice ? openPositionToken1Symbol : openPositionToken0Symbol}
+                                    tokenRightLabel={openPositionInvertPrice ? openPositionToken0Symbol : openPositionToken1Symbol}
                                     quoteIsToken1={openPositionQuoteIsToken1}
                                     titleText="流动性分布"
                                     titlePlacement="left"
