@@ -2970,7 +2970,7 @@ export default function App() {
                         <span>再平衡</span>
                       </button>
                       <button className={`pos-action-btn toggle ${p?.task_rebalance_enabled !== false ? 'on' : 'off'}`}
-                        title={p?.task_rebalance_enabled !== false ? '关闭再平衡（超区间直接停止）' : '开启再平衡'}
+                        title={p?.task_rebalance_enabled !== false ? '关闭自动再平衡（超区间仅提醒）' : '开启自动再平衡'}
                         onClick={() => handleToggleRebalance(taskId, p?.task_rebalance_enabled === false)}
                         disabled={statusLabel.includes('已停止') || statusLabel.includes('停止中') || statusLabel.includes('撤出中')}>
                         <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">

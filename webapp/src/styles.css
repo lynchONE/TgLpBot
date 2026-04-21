@@ -11203,19 +11203,27 @@ img.swap-token-glyph {
 
 /* ───────── Open Position Modal — 左右分栏布局 ───────── */
 .modal-box.modal-box-wide {
-  max-width: 940px;
+  max-width: 1080px;
+  min-height: auto;
+  max-height: min(820px, calc(100vh - 28px));
+  padding: 16px;
+}
+.modal-box.modal-box-wide .modal-content {
+  overflow: visible;
+  padding-right: 0;
+  margin-right: 0;
 }
 .opm-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: minmax(0, 1.24fr) minmax(340px, 0.92fr);
+  gap: 12px;
   align-items: start;
 }
 .opm-left,
 .opm-right {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 .opm-pair-info {
@@ -11223,7 +11231,7 @@ img.swap-token-glyph {
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  padding-bottom: 6px;
+  padding-bottom: 4px;
   border-bottom: 1px solid var(--line);
 }
 .opm-pair-info .modal-pair {
@@ -11239,6 +11247,116 @@ img.swap-token-glyph {
 }
 .opm-section {
   margin: 0;
+}
+.opm-compact-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.opm-range-strip {
+  display: grid;
+  gap: 8px;
+}
+.opm-range-chip {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 6px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.18);
+  color: var(--text-muted);
+  transition: border-color 120ms, background 120ms, color 120ms, transform 120ms;
+}
+.opm-range-chip:hover {
+  transform: translateY(-1px);
+}
+.opm-range-chip.active {
+  border-color: rgba(188, 255, 47, 0.4);
+  background: rgba(188, 255, 47, 0.12);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px rgba(188, 255, 47, 0.08);
+}
+.opm-range-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+.opm-range-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #60a5fa;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.12);
+}
+.opm-range-chip.active .opm-range-chip-dot {
+  background: var(--accent, #bcff2f);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.16);
+}
+.opm-toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.opm-toggle-btn {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.16);
+  color: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  transition: border-color 120ms, background 120ms, transform 120ms;
+}
+.opm-toggle-btn:hover {
+  transform: translateY(-1px);
+}
+.opm-toggle-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+}
+.opm-toggle-btn.active.is-rebalance {
+  border-color: rgba(168, 85, 247, 0.32);
+  background: rgba(168, 85, 247, 0.12);
+}
+.opm-toggle-btn.active.is-stoploss {
+  border-color: rgba(236, 72, 153, 0.28);
+  background: rgba(236, 72, 153, 0.1);
+}
+.opm-toggle-pill {
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(15, 23, 42, 0.26);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.opm-toggle-btn.active.is-rebalance .opm-toggle-pill {
+  background: rgba(255, 255, 255, 0.14);
+  color: #e9d5ff;
+}
+.opm-toggle-btn.active.is-stoploss .opm-toggle-pill {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fbcfe8;
+}
+.opm-inline-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.45;
 }
 .opm-hint {
   font-size: 11px;
@@ -11294,11 +11412,28 @@ img.swap-token-glyph {
   font-family: var(--font-mono, ui-monospace, monospace);
   color: var(--accent, #bcff2f);
 }
+@media (max-width: 1180px) {
+  .modal-box.modal-box-wide {
+    max-width: 980px;
+  }
+}
 @media (max-width: 900px) {
   .modal-box.modal-box-wide {
     max-width: 520px;
   }
+  .modal-box.modal-box-wide .modal-content {
+    overflow-y: auto;
+    padding-right: 4px;
+    margin-right: -4px;
+  }
   .opm-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .opm-compact-fields,
+  .opm-toggle-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .opm-range-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
   }
 }

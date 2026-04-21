@@ -1582,7 +1582,7 @@ export default function OpenPositionModal({
               quoteIsToken1={quoteIsToken1}
               titleText="流动性分布"
               titlePlacement="left"
-              height={260}
+              height={220}
             />
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 4 }}>
@@ -1619,7 +1619,7 @@ export default function OpenPositionModal({
                   <div style={{ display: 'grid', gap: 4 }}>
                     <span className="modal-range-label">区间设置</span>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                      快捷区间、聪明钱区间和价格微调统一在这里，拖动图表后会自动切到 Tick 区间。
+                      快捷区间、聪明钱区间和 Tick 微调统一在这里。
                     </div>
                   </div>
                   {priceRange?.gridStepPctText && priceRange.gridStepPctText !== '--' ? (
@@ -1637,35 +1637,30 @@ export default function OpenPositionModal({
                   ) : null}
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(112px, 1fr))', gap: 8 }}>
-                    {quickRangeOptions.map((option) => {
-                      const isActive =
-                        Number.isFinite(displayedLowerPct) &&
-                        Number.isFinite(displayedUpperPct) &&
-                        Math.abs(displayedLowerPct - Number(option.lowerValue)) < 0.05 &&
-                        Math.abs(displayedUpperPct - Number(option.upperValue)) < 0.05;
-                      return (
-                        <button
-                          key={option.key}
-                          type="button"
-                          onClick={() => applyRange(option.lowerValue, option.upperValue)}
-                          style={{
-                            minWidth: 0,
-                            padding: '9px 10px',
-                            borderRadius: 14,
-                            border: `1px solid ${isActive ? 'rgba(188, 255, 47, 0.38)' : 'rgba(148, 163, 184, 0.18)'}`,
-                            background: isActive ? 'rgba(188, 255, 47, 0.12)' : 'rgba(15, 23, 42, 0.18)',
-                            color: isActive ? 'var(--text)' : 'var(--text-muted)',
-                            textAlign: 'left',
-                            display: 'grid',
-                            gap: 3,
-                          }}
-                        >
-                          <span style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.1 }}>{option.label}</span>
-                          <span style={{ fontSize: 10, opacity: 0.72 }}>{option.subLabel}</span>
-                        </button>
-                      );
-                    })}
+                <div
+                  className="opm-range-strip"
+                  style={{ gridTemplateColumns: `repeat(${Math.max(quickRangeOptions.length, 1)}, minmax(0, 1fr))` }}
+                >
+                  {quickRangeOptions.map((option) => {
+                    const isActive =
+                      Number.isFinite(displayedLowerPct) &&
+                      Number.isFinite(displayedUpperPct) &&
+                      Math.abs(displayedLowerPct - Number(option.lowerValue)) < 0.05 &&
+                      Math.abs(displayedUpperPct - Number(option.upperValue)) < 0.05;
+                    const isSmart = String(option.key || '').startsWith('smart-');
+                    return (
+                      <button
+                        key={option.key}
+                        type="button"
+                        onClick={() => applyRange(option.lowerValue, option.upperValue)}
+                        className={`opm-range-chip${isActive ? ' active' : ''}${isSmart ? ' is-smart' : ''}`}
+                        title={option.subLabel}
+                      >
+                        <span className="opm-range-chip-label">{option.label}</span>
+                        {isSmart ? <span className="opm-range-chip-dot" aria-hidden="true" /> : null}
+                      </button>
+                    );
+                  })}
                 </div>
                 {smartRangesLoading ? (
                   <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>聪明钱区间加载中...</div>
@@ -2397,19 +2392,36 @@ export default function OpenPositionModal({
             ) : null}
 
             <div className="modal-form opm-section">
-              <label className="modal-field">
-                <span>开仓金额 (USDT)</span>
-                <input
-                  type="number"
-                  value={amount}
-                  onChange={(e) => {
-                    clearErrors();
-                    setAmount(e.target.value);
-                  }}
-                  min="1"
-                  step="10"
-                />
-              </label>
+              <div className="opm-compact-fields">
+                <label className="modal-field">
+                  <span>开仓金额 (USDT)</span>
+                  <input
+                    type="number"
+                    value={amount}
+                    onChange={(e) => {
+                      clearErrors();
+                      setAmount(e.target.value);
+                    }}
+                    min="1"
+                    step="10"
+                  />
+                </label>
+
+                <label className="modal-field">
+                  <span>任务滑点 %</span>
+                  <input
+                    type="number"
+                    value={slippage}
+                    onChange={(e) => {
+                      clearErrors();
+                      setSlippage(e.target.value);
+                    }}
+                    min="0"
+                    step="0.1"
+                    placeholder="留空则使用全局设置"
+                  />
+                </label>
+              </div>
 
               {recommendedPositions.length > 0 ? (
                 <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', flexWrap: 'nowrap', overflowX: 'auto', scrollbarWidth: 'none', gap: 4 }}>
@@ -2454,21 +2466,6 @@ export default function OpenPositionModal({
                   })}
                 </div>
               ) : null}
-
-              <label className="modal-field" style={{ marginTop: 12 }}>
-                <span>任务滑点 %</span>
-                <input
-                  type="number"
-                  value={slippage}
-                  onChange={(e) => {
-                    clearErrors();
-                    setSlippage(e.target.value);
-                  }}
-                  min="0"
-                  step="0.1"
-                  placeholder="留空则使用全局设置"
-                />
-              </label>
             </div>
 
             {(entrySwapPreviewLoading || entrySwapPreview?.required) ? (
@@ -2537,74 +2534,39 @@ export default function OpenPositionModal({
                 <span style={{ fontWeight: 600, fontSize: 13 }}>{'\u672c\u6b21\u5f00\u4ed3'}</span>
                 <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{'\u53ef\u4ee5\u5355\u72ec\u5173\u95ed'}</span>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  clearErrors();
-                  setRebalanceEnabled((v) => !v);
-                }}
-                disabled={busy}
-                style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  borderRadius: 14,
-                  border: `1px solid ${rebalanceEnabled ? 'rgba(168, 85, 247, 0.32)' : 'rgba(148, 163, 184, 0.18)'}`,
-                  background: rebalanceEnabled ? 'rgba(168, 85, 247, 0.12)' : 'rgba(15, 23, 42, 0.16)',
-                  color: 'inherit',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                  cursor: busy ? 'not-allowed' : 'pointer',
-                }}
-              >
-                <span style={{ fontSize: 12, fontWeight: 600 }}>{'\u518d\u5e73\u8861'}</span>
-                <span style={{
-                  padding: '4px 9px',
-                  borderRadius: 999,
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  background: rebalanceEnabled ? 'rgba(255, 255, 255, 0.14)' : 'rgba(15, 23, 42, 0.26)',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  color: rebalanceEnabled ? '#e9d5ff' : 'var(--text-muted)',
-                }}>
-                  {rebalanceEnabled ? '\u5f00\u542f' : '\u5df2\u5173'}
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  clearErrors();
-                  setStopLossEnabled((v) => !v);
-                }}
-                disabled={busy}
-                style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  borderRadius: 14,
-                  border: `1px solid ${stopLossEnabled ? 'rgba(236, 72, 153, 0.28)' : 'rgba(148, 163, 184, 0.18)'}`,
-                  background: stopLossEnabled ? 'rgba(236, 72, 153, 0.1)' : 'rgba(15, 23, 42, 0.16)',
-                  color: 'inherit',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                  cursor: busy ? 'not-allowed' : 'pointer',
-                }}
-              >
-                <span style={{ fontSize: 12, fontWeight: 600 }}>{'\u6b62\u635f'}</span>
-                <span style={{
-                  padding: '4px 9px',
-                  borderRadius: 999,
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  background: stopLossEnabled ? 'rgba(255, 255, 255, 0.14)' : 'rgba(15, 23, 42, 0.26)',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  color: stopLossEnabled ? '#fbcfe8' : 'var(--text-muted)',
-                }}>
-                  {stopLossEnabled ? '\u5f00\u542f' : '\u5df2\u5173'}
-                </span>
-              </button>
+              <div className="opm-toggle-grid">
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearErrors();
+                    setRebalanceEnabled((v) => !v);
+                  }}
+                  disabled={busy}
+                  className={`opm-toggle-btn is-rebalance${rebalanceEnabled ? ' active' : ''}`}
+                >
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>{'\u518d\u5e73\u8861'}</span>
+                  <span className="opm-toggle-pill">
+                    {rebalanceEnabled ? '\u5f00\u542f' : '\u5df2\u5173'}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearErrors();
+                    setStopLossEnabled((v) => !v);
+                  }}
+                  disabled={busy}
+                  className={`opm-toggle-btn is-stoploss${stopLossEnabled ? ' active' : ''}`}
+                >
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>{'\u6b62\u635f'}</span>
+                  <span className="opm-toggle-pill">
+                    {stopLossEnabled ? '\u5f00\u542f' : '\u5df2\u5173'}
+                  </span>
+                </button>
+              </div>
+              <div className="opm-inline-hint">
+                两个都关闭时仅提醒，不会自动再平衡或止损。
+              </div>
             </div>
 
             <div className="opm-section" style={{

@@ -3333,7 +3333,7 @@ export default function App() {
         if (!Number.isFinite(id) || id <= 0) return;
         try {
             const resp = await toggleRebalance({ apiBaseUrl, initData, taskId: id, rebalanceEnabled: enabled });
-            showNotice(enabled ? '再平衡已开启' : '再平衡已关闭（超区间将直接停止）', 'success');
+            showNotice(enabled ? '再平衡已开启' : '再平衡已关闭，超区间仅提醒', 'success');
         } catch (e) {
             showNotice(String(e?.message || e), 'error');
         }

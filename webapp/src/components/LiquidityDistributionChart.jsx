@@ -114,7 +114,13 @@ export default function LiquidityDistributionChart({
     const [width, setWidth] = useState(0);
     const [draggingHandle, setDraggingHandle] = useState(null);
     const [hoveredBin, setHoveredBin] = useState(null);
-    const dragStateRef = useRef({ pointerId: null, suppressClickUntil: 0, target: null });
+    const dragStateRef = useRef({
+        pointerId: null,
+        suppressClickUntil: 0,
+        target: null,
+        lockedLowerTick: null,
+        lockedUpperTick: null,
+    });
 
     useEffect(() => {
         const el = containerRef.current;
@@ -187,6 +193,8 @@ export default function LiquidityDistributionChart({
         }
         dragStateRef.current.pointerId = null;
         dragStateRef.current.target = null;
+        dragStateRef.current.lockedLowerTick = null;
+        dragStateRef.current.lockedUpperTick = null;
         dragStateRef.current.suppressClickUntil = Date.now() + 120;
         setDraggingHandle(null);
     }, []);
@@ -202,12 +210,23 @@ export default function LiquidityDistributionChart({
         const x = event.clientX - rect.left;
         const tick = xToTick(x);
         if (typeof onRangeChange !== 'function') return;
+        const spacing = Number.isFinite(tickSpacing) && tickSpacing > 0 ? tickSpacing : 1;
+        const lockedLowerTick = Number.isFinite(dragStateRef.current.lockedLowerTick)
+            ? dragStateRef.current.lockedLowerTick
+            : rangeLowerTick;
+        const lockedUpperTick = Number.isFinite(dragStateRef.current.lockedUpperTick)
+            ? dragStateRef.current.lockedUpperTick
+            : rangeUpperTick;
         if (draggingHandle === 'lower') {
-            const upperBound = Number.isFinite(rangeUpperTick) ? rangeUpperTick - (tickSpacing || 1) : tickRange.max;
-            onRangeChange({ lower: clampTick(tick, tickRange.min, upperBound) });
+            const upperBound = Number.isFinite(lockedUpperTick) ? lockedUpperTick - spacing : tickRange.max;
+            const nextLower = clampTick(tick, tickRange.min, upperBound);
+            dragStateRef.current.lockedLowerTick = nextLower;
+            onRangeChange({ lower: nextLower });
         } else if (draggingHandle === 'upper') {
-            const lowerBound = Number.isFinite(rangeLowerTick) ? rangeLowerTick + (tickSpacing || 1) : tickRange.min;
-            onRangeChange({ upper: clampTick(tick, lowerBound, tickRange.max) });
+            const lowerBound = Number.isFinite(lockedLowerTick) ? lockedLowerTick + spacing : tickRange.min;
+            const nextUpper = clampTick(tick, lowerBound, tickRange.max);
+            dragStateRef.current.lockedUpperTick = nextUpper;
+            onRangeChange({ upper: nextUpper });
         }
     }, [draggingHandle, xToTick, onRangeChange, rangeLowerTick, rangeUpperTick, tickRange, tickSpacing, stopDragging]);
 
@@ -418,6 +437,8 @@ export default function LiquidityDistributionChart({
                         }
                         dragStateRef.current.pointerId = event.pointerId;
                         dragStateRef.current.target = event.currentTarget;
+                        dragStateRef.current.lockedLowerTick = Number.isFinite(rangeLowerTick) ? rangeLowerTick : null;
+                        dragStateRef.current.lockedUpperTick = Number.isFinite(rangeUpperTick) ? rangeUpperTick : null;
                         setDraggingHandle('lower');
                     }}
                     onUp={onPointerUp}
@@ -440,6 +461,8 @@ export default function LiquidityDistributionChart({
                         }
                         dragStateRef.current.pointerId = event.pointerId;
                         dragStateRef.current.target = event.currentTarget;
+                        dragStateRef.current.lockedLowerTick = Number.isFinite(rangeLowerTick) ? rangeLowerTick : null;
+                        dragStateRef.current.lockedUpperTick = Number.isFinite(rangeUpperTick) ? rangeUpperTick : null;
                         setDraggingHandle('upper');
                     }}
                     onUp={onPointerUp}

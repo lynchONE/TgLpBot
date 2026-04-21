@@ -298,15 +298,14 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 
 	// 1. Price above range (涨破)
 	if isUp {
-		if ShouldStopOutOfRangeImmediately(task, isUp, isDown) {
+		if ShouldMonitorOutOfRangeOnly(task, isUp, isDown) {
 			if isFirstTimeOutOfRange {
 				if s.extraNotificationsEnabled(task.UserID) {
-					s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 涨破区间上界\n%s\n%s\n再平衡已关闭，已自动停止任务",
+					s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 涨破区间上界\n%s\n%s\n再平衡已关闭，当前仅提醒，不会自动撤仓",
 						task.ID, alertLines.Current, alertLines.Upper))
 				}
-				log.Printf("[Strategy] 任务 #%d 涨破区间，再平衡已关闭，立即停止任务", task.ID)
+				log.Printf("[Strategy] 任务 #%d 涨破区间，再平衡已关闭，仅提醒不自动撤仓", task.ID)
 			}
-			s.executeRebalance(task, currentTick, now, "🛑 超出区间且再平衡已关闭，自动停止")
 			return
 		}
 
@@ -361,15 +360,14 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 				s.executeStopLoss(task, now, "⚠️ 跌破区间触发止损")
 			}
 		} else {
-			if ShouldStopOutOfRangeImmediately(task, isUp, isDown) {
+			if ShouldMonitorOutOfRangeOnly(task, isUp, isDown) {
 				if isFirstTimeOutOfRange {
 					if s.extraNotificationsEnabled(task.UserID) {
-						s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 跌破区间下界\n%s\n%s\n再平衡已关闭，已自动停止任务",
+						s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d 跌破区间下界\n%s\n%s\n再平衡和止损均已关闭，当前仅提醒，不会自动撤仓",
 							task.ID, alertLines.Current, alertLines.Lower))
 					}
-					log.Printf("[Strategy] 任务 #%d 跌破区间，再平衡已关闭，立即停止任务", task.ID)
+					log.Printf("[Strategy] 任务 #%d 跌破区间，再平衡和止损均已关闭，仅提醒不自动撤仓", task.ID)
 				}
-				s.executeRebalance(task, currentTick, now, "🛑 超出区间且再平衡已关闭，自动停止")
 				return
 			}
 
@@ -396,14 +394,14 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 	}
 }
 
-func ShouldStopOutOfRangeImmediately(task *models.StrategyTask, isUp bool, isDown bool) bool {
-	if task == nil || task.RebalanceEnabled {
+func ShouldMonitorOutOfRangeOnly(task *models.StrategyTask, isUp bool, isDown bool) bool {
+	if task == nil {
 		return false
 	}
 	if isUp {
-		return true
+		return !task.RebalanceEnabled
 	}
-	return isDown && !task.StopLossEnabled
+	return isDown && !task.RebalanceEnabled && !task.StopLossEnabled
 }
 
 // formatDelayTime 格式化延迟时间，小于60秒显示秒，否则显示分钟
@@ -757,10 +755,9 @@ func (s *StrategyService) executeRebalance(task *models.StrategyTask, currentTic
 		return
 	}
 
-	// When rebalance is disabled, stop the task instead of rebalancing
+	// A disabled rebalance policy should never force an exit.
 	if !task.RebalanceEnabled {
-		log.Printf("[Strategy] 任务 #%d %s，再平衡已关闭，执行停止", task.ID, reason)
-		s.requestExitToUSDT(task, ExitActionManualStop, "🛑 超出区间且再平衡已关闭，自动停止")
+		log.Printf("[Strategy] 任务 #%d %s，再平衡已关闭，仅保留监控", task.ID, reason)
 		return
 	}
 

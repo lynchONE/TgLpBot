@@ -5,37 +5,37 @@ import (
 	"testing"
 )
 
-func TestShouldStopOutOfRangeImmediately(t *testing.T) {
+func TestShouldMonitorOutOfRangeOnly(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name              string
-		task              *models.StrategyTask
-		isUp              bool
-		isDown            bool
-		wantImmediateStop bool
+		name            string
+		task            *models.StrategyTask
+		isUp            bool
+		isDown          bool
+		wantMonitorOnly bool
 	}{
 		{
-			name:              "nil task",
-			task:              nil,
-			isUp:              true,
-			wantImmediateStop: false,
+			name:            "nil task",
+			task:            nil,
+			isUp:            true,
+			wantMonitorOnly: false,
 		},
 		{
 			name: "rebalance enabled above range",
 			task: &models.StrategyTask{
 				RebalanceEnabled: true,
 			},
-			isUp:              true,
-			wantImmediateStop: false,
+			isUp:            true,
+			wantMonitorOnly: false,
 		},
 		{
 			name: "rebalance disabled above range",
 			task: &models.StrategyTask{
 				RebalanceEnabled: false,
 			},
-			isUp:              true,
-			wantImmediateStop: true,
+			isUp:            true,
+			wantMonitorOnly: true,
 		},
 		{
 			name: "rebalance disabled below range without stoploss",
@@ -43,8 +43,8 @@ func TestShouldStopOutOfRangeImmediately(t *testing.T) {
 				RebalanceEnabled: false,
 				StopLossEnabled:  false,
 			},
-			isDown:            true,
-			wantImmediateStop: true,
+			isDown:          true,
+			wantMonitorOnly: true,
 		},
 		{
 			name: "rebalance disabled below range with stoploss",
@@ -52,8 +52,8 @@ func TestShouldStopOutOfRangeImmediately(t *testing.T) {
 				RebalanceEnabled: false,
 				StopLossEnabled:  true,
 			},
-			isDown:            true,
-			wantImmediateStop: false,
+			isDown:          true,
+			wantMonitorOnly: false,
 		},
 	}
 
@@ -62,9 +62,9 @@ func TestShouldStopOutOfRangeImmediately(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := ShouldStopOutOfRangeImmediately(tc.task, tc.isUp, tc.isDown)
-			if got != tc.wantImmediateStop {
-				t.Fatalf("ShouldStopOutOfRangeImmediately(...) = %v, want %v", got, tc.wantImmediateStop)
+			got := ShouldMonitorOutOfRangeOnly(tc.task, tc.isUp, tc.isDown)
+			if got != tc.wantMonitorOnly {
+				t.Fatalf("ShouldMonitorOutOfRangeOnly(...) = %v, want %v", got, tc.wantMonitorOnly)
 			}
 		})
 	}

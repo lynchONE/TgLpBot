@@ -2777,7 +2777,7 @@ func formatOutOfRange(task *models.StrategyTask, tickLower, tickUpper int, curre
 		return "⏸"
 	}
 	_, _, priceUp, priceDown := pricing.PriceDirectionFromTicks(task, tickLower, tickUpper, currentTick)
-	if strategy.ShouldStopOutOfRangeImmediately(task, priceUp, priceDown) {
+	if strategy.ShouldMonitorOutOfRangeOnly(task, priceUp, priceDown) {
 		return "0/0"
 	}
 	threshold := task.ReopenDelaySeconds
