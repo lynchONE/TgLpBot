@@ -2489,7 +2489,10 @@ export default function OpenPositionModal({
                     {walletBalancesHidden ? <Eye className="wallet-visibility-icon" /> : <EyeOff className="wallet-visibility-icon" />}
                   </button>
                 </div>
-                <div className="wallet-picker-list">
+                <div
+                  className="wallet-picker-list"
+                  style={{ gridTemplateColumns: `repeat(${Math.min(wallets.length, 3) || 1}, minmax(0, 1fr))` }}
+                >
                   {wallets.map((wallet) => {
                     const active = wallet.id === resolvedWalletId;
                     return (
@@ -2551,7 +2554,10 @@ export default function OpenPositionModal({
               </div>
 
               {recommendedPositions.length > 0 ? (
-                <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', flexWrap: 'nowrap', overflowX: 'auto', scrollbarWidth: 'none', gap: 4 }}>
+                <div
+                  className="opm-suggestion-strip"
+                  style={{ gridTemplateColumns: `repeat(${Math.min(recommendedPositions.length, 3) || 1}, minmax(0, 1fr))` }}
+                >
                   {recommendedPositions.map((item, index) => {
                     const tone = item?.mode === 'conservative'
                       ? { color: '#10b981', border: 'rgba(16, 185, 129, 0.3)', bg: 'rgba(16, 185, 129, 0.1)', icon: '🛡️' }
@@ -2561,31 +2567,31 @@ export default function OpenPositionModal({
                     return (
                       <div
                         key={`${item?.mode || 'mode'}-${index}`}
+                        className="opm-suggestion-chip"
                         onClick={() => {
                           clearErrors();
                           setAmount(String(item?.liquidity_to_add || ''));
                         }}
                         style={{
-                          flexShrink: 0,
                           borderRadius: 14,
                           border: `1px solid ${tone.border}`,
                           background: tone.bg,
-                          padding: '4px 10px',
+                          padding: '7px 10px',
                           cursor: 'pointer',
                           transition: 'all 0.15s ease',
                           display: 'flex',
                           alignItems: 'center',
-                          gap: 4,
+                          gap: 6,
                         }}
                       >
-                        <span style={{ fontSize: 11, filter: 'grayscale(0.2)' }}>{tone.icon}</span>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: tone.color }}>
+                        <span className="opm-suggestion-chip-icon" style={{ color: tone.color }}>{tone.icon}</span>
+                        <span className="opm-suggestion-chip-mode" style={{ color: tone.color }}>
                           {formatSizingModeLabel(item?.mode)}
                         </span>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary, #fff)', fontFamily: 'var(--font-mono)' }}>
+                        <span className="opm-suggestion-chip-value">
                           {formatUsdCompact(item?.liquidity_to_add)}
                         </span>
-                        <span style={{ fontSize: 10, opacity: 0.6, color: 'var(--text-muted)' }}>
+                        <span className="opm-suggestion-chip-share">
                           {formatSharePercent(item?.expected_share)}
                         </span>
                       </div>
