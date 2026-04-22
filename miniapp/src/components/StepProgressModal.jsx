@@ -206,13 +206,29 @@ function resolveView(operation, progress) {
     };
 }
 
-export default function StepProgressModal({ operation, progress, accentTheme = 'lime', onClose }) {
+export default function StepProgressModal({ operation, progress, accentTheme = 'lime', onClose, onRetry }) {
     if (!operation) return null;
 
     const [allowClose, setAllowClose] = useState(false);
+    const [retrying, setRetrying] = useState(false);
     const brand = useMemo(() => getBrandTheme(accentTheme), [accentTheme]);
     const view = useMemo(() => resolveView(operation, progress), [operation, progress]);
     const isCompact = operation === 'close_position' || operation === 'open_position';
+    const canRetry = view.tone === 'error' && typeof onRetry === 'function';
+
+    useEffect(() => {
+        if (view.tone !== 'error') setRetrying(false);
+    }, [view.tone, progress?.status]);
+
+    const handleRetry = async () => {
+        if (!canRetry || retrying) return;
+        setRetrying(true);
+        try {
+            await onRetry?.();
+        } finally {
+            setRetrying(false);
+        }
+    };
 
     useEffect(() => {
         if (isCompact) {
@@ -335,6 +351,30 @@ export default function StepProgressModal({ operation, progress, accentTheme = '
                             </div>
                         </div>
                     </div>
+
+                    {canRetry ? (
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                            <button
+                                type="button"
+                                onClick={handleRetry}
+                                disabled={retrying}
+                                className={`rounded-xl px-3 py-2.5 text-[12px] font-bold transition-all active:scale-[0.98] ${
+                                    retrying
+                                        ? 'cursor-not-allowed bg-zinc-200 text-zinc-500 dark:bg-white/[0.08] dark:text-white/35'
+                                        : brand.gradientButtonClass
+                                }`}
+                            >
+                                {retrying ? '重试中...' : '按原设置重试'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={onClose}
+                                className="rounded-xl bg-red-500/10 px-3 py-2.5 text-[12px] font-bold text-red-500 transition-all hover:bg-red-500/15 active:scale-[0.98] dark:text-red-400"
+                            >
+                                关闭
+                            </button>
+                        </div>
+                    ) : null}
                 </div>
 
                 <style>{`
@@ -421,13 +461,29 @@ export default function StepProgressModal({ operation, progress, accentTheme = '
                                 完成
                             </button>
                         ) : view.tone === 'error' ? (
-                            <button
-                                type="button"
-                                onClick={onClose}
-                                className="w-full rounded-xl bg-red-500/10 px-4 py-2.5 text-[13px] font-bold text-red-500 transition-all hover:bg-red-500/15 active:scale-[0.98] dark:text-red-400"
-                            >
-                                关闭
-                            </button>
+                            <div className={`grid gap-2 ${canRetry ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                                {canRetry ? (
+                                    <button
+                                        type="button"
+                                        onClick={handleRetry}
+                                        disabled={retrying}
+                                        className={`rounded-xl px-4 py-2.5 text-[13px] font-bold transition-all active:scale-[0.98] ${
+                                            retrying
+                                                ? 'cursor-not-allowed bg-zinc-200 text-zinc-500 dark:bg-white/[0.08] dark:text-white/35'
+                                                : brand.gradientButtonClass
+                                        }`}
+                                    >
+                                        {retrying ? '重试中...' : '按原设置重试'}
+                                    </button>
+                                ) : null}
+                                <button
+                                    type="button"
+                                    onClick={onClose}
+                                    className="rounded-xl bg-red-500/10 px-4 py-2.5 text-[13px] font-bold text-red-500 transition-all hover:bg-red-500/15 active:scale-[0.98] dark:text-red-400"
+                                >
+                                    关闭
+                                </button>
+                            </div>
                         ) : allowClose ? (
                             <button
                                 type="button"

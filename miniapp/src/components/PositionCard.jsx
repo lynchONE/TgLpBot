@@ -119,8 +119,8 @@ function SmartMoneyRangeSummary({ groups }) {
     return (
         <div className="rounded-lg border border-lime-500/20 bg-lime-500/[0.08] px-2.5 py-2">
             <div className="flex items-center justify-between gap-2">
-                <div className="text-[10px] font-bold tracking-wide text-lime-700 dark:text-lime-300">閼鳖亝妲戦柦閬嶅櫨妫版繂灏梻?/div>
-                <div className="text-[10px] text-lime-700/70 dark:text-lime-300/70">{validGroups.length}濡?/div>
+                <div className="text-[10px] font-bold tracking-wide text-lime-700 dark:text-lime-300">聪明钱区间</div>
+                <div className="text-[10px] text-lime-700/70 dark:text-lime-300/70">{validGroups.length} 组</div>
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
                 {visibleGroups.map((group, index) => (
@@ -144,7 +144,7 @@ function SmartMoneyRangeSummary({ groups }) {
                     onClick={() => setExpanded((prev) => !prev)}
                     className="mt-2 text-[10px] font-semibold text-lime-700 transition hover:text-lime-800 dark:text-lime-300 dark:hover:text-lime-200"
                 >
-                    {expanded ? '閺€鎯版崳閸栨椽妫? : `閺囨潙顦块崠娲？ +${hiddenCount}`}
+                    {expanded ? '收起' : `展开更多 +${hiddenCount}`}
                 </button>
             ) : null}
         </div>
@@ -197,11 +197,11 @@ const formatPrice = (value) => {
 };
 
 const getStatusTheme = (label) => {
-    if (label?.includes('闁挎瑨顕?))
+    if (label?.includes('停止'))
         return { pill: 'bg-red-500/15 text-red-600 ring-red-500/25 dark:text-red-300 dark:ring-red-400/30', dot: 'bg-red-500', bar: 'bg-gradient-to-b from-red-500 to-red-600' };
-    if (label?.includes('閺嗗倸浠?) || label?.includes('閸嬫粍顒?) || label?.includes('閸愬秴閽╃悰?) || label?.includes('閹俱倕鍤?))
+    if (label?.includes('暂停') || label?.includes('停止中') || label?.includes('撤仓中') || label?.includes('处理中'))
         return { pill: 'bg-amber-500/15 text-amber-700 ring-amber-500/25 dark:text-amber-300 dark:ring-amber-400/30', dot: 'bg-amber-500', bar: 'bg-gradient-to-b from-amber-400 to-amber-500' };
-    if (label?.includes('缁涘绶?))
+    if (label?.includes('等待') || label?.includes('排队'))
         return { pill: 'bg-sky-500/15 text-sky-700 ring-sky-500/25 dark:text-sky-300 dark:ring-sky-400/30', dot: 'bg-sky-500', bar: 'bg-gradient-to-b from-sky-400 to-sky-500' };
     return { pill: 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/25 dark:text-emerald-300 dark:ring-emerald-400/30', dot: 'bg-emerald-500', bar: 'bg-gradient-to-b from-emerald-400 to-emerald-500' };
 };
@@ -408,13 +408,13 @@ export default function PositionCard({
         const asymmetric = Math.abs(low - up) >= 0.01;
         const avg = (low + up) / 2;
         const totalWidth = low + up;
-        const summaryText = asymmetric ? `娑?${low.toFixed(2)}% / 娑?${up.toFixed(2)}%` : `鍗?{avg.toFixed(2)}%`;
-        let text = `${summaryText}閿涘牊鈧顔?${totalWidth.toFixed(2)}%閿涘ˇ;
+        const summaryText = asymmetric ? `下 ${low.toFixed(2)}% / 上 ${up.toFixed(2)}%` : `±${avg.toFixed(2)}%`;
+        let text = `${summaryText} · 总宽度 ${totalWidth.toFixed(2)}%`;
         const amountUsdt = Number(position?.task_amount_usdt);
         if (Number.isFinite(amountUsdt) && amountUsdt > 0) {
             text += ` | $${amountUsdt.toFixed(2)}`;
         }
-        return { text, badgeText: `閹顔?${totalWidth.toFixed(2)}%` };
+        return { text, badgeText: `宽度 ${totalWidth.toFixed(2)}%` };
     }, [position?.task_range_lower_pct, position?.task_range_upper_pct, position?.task_amount_usdt]);
 
     const taskId = useMemo(() => {
@@ -425,8 +425,8 @@ export default function PositionCard({
     const taskPaused = Boolean(position?.task_paused);
     const currentTaskMode = normalizeTaskMode(position?.task_mode, position?.task_paused);
     const statusLabel = String(position?.status_label || '');
-    const isStopped = statusLabel.includes('瀹告彃浠犲?);
-    const isStopping = statusLabel.includes('閸嬫粍顒涙稉?) || statusLabel.includes('閹俱倕鍤稉?);
+    const isStopped = statusLabel.includes('停止') || statusLabel.includes('结束');
+    const isStopping = statusLabel.includes('停止中') || statusLabel.includes('撤仓中') || statusLabel.includes('处理中');
     const hasActions = typeof onSetTaskPaused === 'function' || typeof onStopTask === 'function' || typeof onDeleteTask === 'function' || typeof onUpdateTaskRange === 'function';
     const canTaskAction = Boolean(allowTaskActions) && hasActions && taskId > 0;
     const canPauseAction = canTaskAction && typeof onSetTaskPaused === 'function' && !isStopping;
@@ -525,7 +525,7 @@ export default function PositionCard({
                             <div className="flex flex-wrap items-center gap-1.5 pr-1">
                                 <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 shrink-0 ${statusTheme.pill}`}>
                                     <span className={`h-1 w-1 rounded-full shrink-0 ${statusTheme.dot}`} />
-                                    <span className="truncate max-w-[70px]">{statusLabel || '鏉╂劘顢戞稉?}</span>
+                                    <span className="truncate max-w-[70px]">{statusLabel || '状态未知'}</span>
                                 </span>
                                 {taskId > 0 && (
                                     <span className="text-[10px] font-medium text-zinc-400 dark:text-white/30 shrink-0">
@@ -545,7 +545,7 @@ export default function PositionCard({
                     <div className="ml-auto flex shrink-0 items-start gap-2 pl-2">
                         {/* 閹鐜崐?+ PnL */}
                         <div className="text-right">
-                            <div className="text-[9px] font-medium text-zinc-400 dark:text-white/35 uppercase tracking-wide mb-0.5">閹槒顓?/div>
+                            <div className="mb-0.5 text-[9px] font-medium uppercase tracking-wide text-zinc-400 dark:text-white/35">价值</div>
                             <div className="text-lg font-extrabold text-zinc-900 dark:text-white/95 tabular-nums leading-none">
                                 <NumberFlowValue value={totalValue} formatter={(v) => formatUsd(v)} />
                             </div>
@@ -583,31 +583,31 @@ export default function PositionCard({
                                         {typeof onSetTaskPaused === 'function' && (
                                             <button type="button" onClick={togglePause} disabled={!canPauseAction || Boolean(actionPending)}
                                                 className="w-full px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:text-white/70 dark:hover:bg-white/5">
-                                                {actionPending === 'pause' ? '婢跺嫮鎮婃稉?..' : taskPaused ? '閹垹顦叉禒璇插' : '閺嗗倸浠犳禒璇插'}
+                                                {actionPending === 'pause' ? '处理中...' : taskPaused ? '恢复任务' : '暂停任务'}
                                             </button>
                                         )}
                                         {typeof onUpdateTaskRange === 'function' && (
                                             <button type="button" onClick={editRange} disabled={!canUpdateRangeAction || Boolean(actionPending)}
                                                 className="w-full border-t border-zinc-100/80 px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:border-white/5 dark:text-white/70 dark:hover:bg-white/5">
-                                                {actionPending === 'range' ? '婢跺嫮鎮婃稉?..' : '娣囶喗鏁奸崘宥呴挬鐞涒€冲棘閺?}
+                                                {actionPending === 'range' ? '处理中...' : '修改区间'}
                                             </button>
                                         )}
                                         {typeof onStopTask === 'function' && (
                                             <button type="button" onClick={stopTask} disabled={!canStopAction || Boolean(actionPending)}
                                                 className="w-full border-t border-zinc-100/80 px-3 py-2 text-left text-xs font-semibold text-amber-600 hover:bg-amber-50 disabled:opacity-40 transition-colors dark:border-white/5 dark:text-amber-400 dark:hover:bg-amber-500/10">
-                                                {actionPending === 'stop' ? '婢跺嫮鎮婃稉?..' : isStopping ? '閸嬫粍顒涙稉?..' : '閸嬫粍顒涙禒璇插'}
+                                                {actionPending === 'stop' ? '处理中...' : isStopping ? '停止中...' : '停止任务'}
                                             </button>
                                         )}
                                         {typeof onAddLiquidity === 'function' && (
                                             <button type="button" onClick={addLiquidity} disabled={!canAddLiquidity || Boolean(actionPending)}
                                                 className="w-full border-t border-zinc-100/80 px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:border-white/5 dark:text-white/70 dark:hover:bg-white/5">
-                                                {actionPending === 'addLiq' ? '婢跺嫮鎮婃稉?..' : '鐞涖儱鍘栧ù浣稿З閹?}
+                                                {actionPending === 'addLiq' ? '处理中...' : '补充流动性'}
                                             </button>
                                         )}
                                         {typeof onDeleteTask === 'function' && (
                                             <button type="button" onClick={deleteTask} disabled={!canDeleteAction || Boolean(actionPending)}
                                                 className="w-full border-t border-zinc-100/80 px-3 py-2 text-left text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-40 transition-colors dark:border-white/5 dark:text-red-400 dark:hover:bg-red-500/10">
-                                                {actionPending === 'delete' ? '閸掔娀娅庢稉?..' : '閸掔娀娅庢禒璇插'}
+                                                {actionPending === 'delete' ? '删除中...' : '删除任务'}
                                             </button>
                                         )}
                                     </div>
@@ -621,39 +621,39 @@ export default function PositionCard({
                     閹垮秳缍旈幐澶愭尦鐞?
                 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?*/}
                 {canTaskAction && (
-                    <div className="flex items-center gap-1.5 flex-wrap">
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none]">
                         {/* 閺嗗倸浠?閹垹顦?*/}
                         {/* 閸欐牕娲栧ù浣稿З閹?*/}
                         {typeof onWithdrawLiquidity === 'function' && (
                             <button type="button" onClick={withdrawLiquidity} disabled={!canWithdraw || Boolean(actionPending)}
-                                title="閸欐牕娲栧ù浣稿З閹?
-                                className="inline-flex h-7 items-center gap-1 rounded-xl border border-sky-400/40 bg-sky-50 px-2.5 text-[10.5px] font-semibold text-sky-700 shadow-sm transition-all active:scale-95 disabled:opacity-40 hover:bg-sky-100 dark:bg-sky-500/15 dark:text-sky-400 dark:border-sky-500/25 dark:hover:bg-sky-500/25">
+                                title="撤出流动性"
+                                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-xl border border-sky-400/40 bg-sky-50 px-2.5 text-[10.5px] font-semibold text-sky-700 shadow-sm transition-all active:scale-95 disabled:opacity-40 hover:bg-sky-100 dark:bg-sky-500/15 dark:text-sky-400 dark:border-sky-500/25 dark:hover:bg-sky-500/25">
                                 <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
                                     <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
                                 </svg>
-                                <span>{actionPending === 'withdraw' ? '...' : '閸欐牕娲?}</span>
+                                <span>{actionPending === 'withdraw' ? '...' : '撤仓'}</span>
                             </button>
                         )}
                         {/* 閸忔垶宕插▓瀣╃稇 */}
                         {typeof onSwapDust === 'function' && (
                             <button type="button" onClick={swapDust} disabled={!canSwapDust || Boolean(actionPending)}
-                                title="閸忔垶宕插▓瀣╃稇"
-                                className="inline-flex h-7 items-center gap-1 rounded-xl border border-violet-400/40 bg-violet-50 px-2.5 text-[10.5px] font-semibold text-violet-700 shadow-sm transition-all active:scale-95 disabled:opacity-40 hover:bg-violet-100 dark:bg-violet-500/15 dark:text-violet-400 dark:border-violet-500/25 dark:hover:bg-violet-500/25">
+                                title="兑换碎币"
+                                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-xl border border-violet-400/40 bg-violet-50 px-2.5 text-[10.5px] font-semibold text-violet-700 shadow-sm transition-all active:scale-95 disabled:opacity-40 hover:bg-violet-100 dark:bg-violet-500/15 dark:text-violet-400 dark:border-violet-500/25 dark:hover:bg-violet-500/25">
                                 <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
                                     <path d="M7.5 21H2V9h5.5v12zm7.25-18h-5.5v18h5.5V3zM22 11h-5.5v10H22V11z" />
                                 </svg>
-                                <span>{actionPending === 'dust' ? '...' : '閸忔垶鐣?}</span>
+                                <span>{actionPending === 'dust' ? '...' : '碎币兑换'}</span>
                             </button>
                         )}
                         {/* 鐟欙箑褰傞崘宥呴挬鐞?*/}
                         {typeof onTriggerRebalance === 'function' && (
                             <button type="button" onClick={triggerRebalance} disabled={!canTriggerRebalance || Boolean(actionPending)}
-                                title="缁斿宓嗙憴锕€褰傞崘宥呴挬鐞?
-                                className="inline-flex h-7 items-center gap-1 rounded-xl border border-blue-400/40 bg-blue-50 px-2.5 text-[10.5px] font-semibold text-blue-700 shadow-sm transition-all active:scale-95 disabled:opacity-40 hover:bg-blue-100 dark:bg-blue-500/15 dark:text-blue-400 dark:border-blue-500/25 dark:hover:bg-blue-500/25">
+                                title="立即触发再平衡"
+                                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-xl border border-blue-400/40 bg-blue-50 px-2.5 text-[10.5px] font-semibold text-blue-700 shadow-sm transition-all active:scale-95 disabled:opacity-40 hover:bg-blue-100 dark:bg-blue-500/15 dark:text-blue-400 dark:border-blue-500/25 dark:hover:bg-blue-500/25">
                                 <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
                                     <path d="M12 6V1.5l-4.5 4.5L12 10.5V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 9.74C4.46 10.97 4 12.43 4 14c0 4.42 3.58 8 8 8v4.5l4.5-4.5L12 17.5V20z" />
                                 </svg>
-                                <span>{actionPending === 'rebalance' ? '...' : '閸愬秴閽╃悰?}</span>
+                                <span>{actionPending === 'rebalance' ? '...' : '再平衡'}</span>
                             </button>
                         )}
                         {/* 閸愬秴閽╃悰鈥崇磻閸?*/}
@@ -662,7 +662,7 @@ export default function PositionCard({
                                 {TASK_MODE_OPTIONS.map((option) => (
                                     <button key={option.value} type="button" onClick={() => updateTaskMode(option.value)} disabled={!canUpdateTaskMode || Boolean(actionPending)}
                                         title={option.description}
-                                        className={`inline-flex h-7 items-center rounded-xl border px-2.5 text-[10.5px] font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-40 ${currentTaskMode === option.value
+                                        className={`inline-flex h-7 shrink-0 items-center rounded-xl border px-2.5 text-[10.5px] font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-40 ${currentTaskMode === option.value
                                             ? 'border-emerald-400/40 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/25 dark:hover:bg-emerald-500/25'
                                             : 'border-zinc-300/60 bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-white/5 dark:text-zinc-400 dark:border-white/10 dark:hover:bg-white/10'
                                             }`}>
@@ -704,10 +704,10 @@ export default function PositionCard({
                             <div className="grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2 pb-1.5 border-b border-zinc-200/60 dark:border-white/10">
                                 <div className="text-[11px] font-bold text-zinc-500 dark:text-white/60 tracking-wide uppercase">Token</div>
                                 <div className="text-[11px] font-bold text-zinc-500 dark:text-white/60 tracking-wide uppercase text-right flex items-center justify-end gap-1">
-                                    <Icon path={icons.wallet} className="h-2.5 w-2.5" />闁藉崬瀵?
+                                    <Icon path={icons.wallet} className="h-2.5 w-2.5" />钱包
                                 </div>
-                                <div className="text-[11px] font-bold text-zinc-500 dark:text-white/60 tracking-wide uppercase text-right">娴犳挷缍?/div>
-                                <div className="text-[11px] font-bold text-emerald-600/80 dark:text-emerald-500/80 tracking-wide uppercase text-right">閹靛鐢荤拹?/div>
+                                <div className="text-[11px] font-bold text-zinc-500 dark:text-white/60 tracking-wide uppercase text-right">仓位</div>
+                                <div className="text-[11px] font-bold text-emerald-600/80 dark:text-emerald-500/80 tracking-wide uppercase text-right">手续费</div>
                             </div>
 
                             {/* Token 鐞?*/}
@@ -752,8 +752,8 @@ export default function PositionCard({
                             <div className="pt-2">
                                 <div className="grid grid-cols-4 gap-1.5">
                                     {[
-                                        { key: 'wallet', label: '闁藉崬瀵?, onClick: openWallet, disabled: false },
-                                        { key: 'pool', label: '濮圭姴鐡?, onClick: openPool, disabled: !poolLink },
+                                        { key: 'wallet', label: '钱包', onClick: openWallet, disabled: false },
+                                        { key: 'pool', label: '池子', onClick: openPool, disabled: !poolLink },
                                         { key: 'token0', label: token0?.symbol || 'Token0', onClick: () => openToken(token0?.address), disabled: !token0?.address },
                                         { key: 'token1', label: token1?.symbol || 'Token1', onClick: () => openToken(token1?.address), disabled: !token1?.address },
                                     ].map(({ key, label, onClick, disabled }) => (
@@ -772,7 +772,7 @@ export default function PositionCard({
 
                             {/* 閻忓繐绻楅鍝ユ偘?*/}
                             <div className="pt-2 grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2 mt-1 border-t border-zinc-100/60 dark:border-white/10">
-                                <div className="text-xs font-bold text-zinc-500 dark:text-white/70">鐏忓繗顓?/div>
+                                <div className="text-xs font-bold text-zinc-500 dark:text-white/70">合计</div>
                                 <div className="text-right text-xs font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">
                                     <NumberFlowValue value={position?.totals?.wallet_usd} formatter={(v) => formatUsd(v)} />
                                 </div>

@@ -584,7 +584,7 @@ function DCASection({ draft, updateDraft, inputClass, brand }) {
                             suffix="秒"
                         />
                     </FieldCard>
-                    <FieldCard label="涓嶆媶鍗曢槇鍊?" hint="褰撳崟娆″紑浠撻噾棰濅綆浜庤鍊兼椂锛屾湰娆″紑浠撶洿鎺ヤ竴娆℃€ф垚浜わ紝涓嶅啀鎸夊垎鎵瑰姞浠撴墽琛屻€?">
+                    <FieldCard label="最小拆分金额" hint="当本次开仓金额低于该阈值时，将直接按单笔成交，不再拆成多批执行。">
                         <InputWithSuffix
                             type="number"
                             step="0.1"

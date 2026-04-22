@@ -280,7 +280,7 @@ function DCAConfigSection({ draft, updateDraft }) {
                         />
                     </div>
                     <div className="config-row">
-                        <label>涓嶆媶鍗曢槇鍊?(USDT)</label>
+                        <label>最小拆分金额 (USDT)</label>
                         <input
                             type="number"
                             step="0.1"
