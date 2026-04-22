@@ -4774,7 +4774,7 @@ export default function App() {
                                                 }}
                                                 inputMode="decimal"
                                                 className={`w-full rounded-xl border border-zinc-200/50 bg-white/70 pl-3 pr-8 py-1.5 text-sm text-right text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                                placeholder={"留空使用默认 " + String(openPositionGlobalSlippageHint).replace('%', '').trim()}
+                                                placeholder={String(openPositionGlobalSlippageHint).replace('%', '').trim()}
                                             />
                                             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-zinc-500 dark:text-white/50">%</span>
                                         </div>
