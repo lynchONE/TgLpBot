@@ -40,6 +40,9 @@ func TestStrategyTaskCreateOverrideUpdatesSkipsNonZeroDefaults(t *testing.T) {
 		ResidualTolerance:  1.0,
 		ZapLossTolerance:   0.5,
 		RebalanceEnabled:   true,
+		DCAEnabled:         true,
+		DCAIntervalSeconds: 15,
+		DCAExecutedCount:   1,
 	}
 
 	updates := task.CreateOverrideUpdates()

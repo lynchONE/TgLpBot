@@ -20,11 +20,6 @@ type GlobalConfig struct {
 	// Rebalance settings
 	RebalanceTimeout int `gorm:"default:10" json:"rebalance_timeout"` // Rebalance timeout in seconds (-1 = immediate)
 
-	// Stop loss settings
-	StopLossThreshold    float64 `gorm:"type:decimal(10,4);default:10.0" json:"stop_loss_threshold"` // Stop loss threshold (range width percentage)
-	StopLossEnabled      bool    `gorm:"default:false" json:"stop_loss_enabled"`
-	StopLossDelaySeconds int     `gorm:"default:0" json:"stop_loss_delay_seconds"` // Out-of-range seconds before stop-loss triggers (0 = immediately)
-
 	// Slippage settings
 	SlippageTolerance float64 `gorm:"type:decimal(5,2);default:0.5" json:"slippage_tolerance"` // Slippage tolerance in percentage
 

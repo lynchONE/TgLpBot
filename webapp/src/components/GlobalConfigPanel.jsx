@@ -45,9 +45,6 @@ export default function GlobalConfigPanel({ apiBaseUrl, initData, hasInitData })
             setConfig(cfg);
             setDraft({
                 rebalance_timeout: cfg.rebalance_timeout ?? 10,
-                stop_loss_enabled: cfg.stop_loss_enabled ?? false,
-                stop_loss_threshold: cfg.stop_loss_threshold ?? 10,
-                stop_loss_delay_seconds: cfg.stop_loss_delay_seconds ?? 0,
                 slippage_tolerance: cfg.slippage_tolerance ?? 0.5,
                 auto_reinvest: cfg.auto_reinvest ?? false,
                 residual_tolerance: cfg.residual_tolerance ?? 1.0,
@@ -94,7 +91,7 @@ export default function GlobalConfigPanel({ apiBaseUrl, initData, hasInitData })
     const updateDraft = (key, value) => setDraft(prev => ({ ...prev, [key]: value }));
 
     return (
-        <PanelShell title="全局配置" subtitle="管理交易、止损、通知等设置" icon={Settings}>
+        <PanelShell title="全局配置" subtitle="管理交易、通知和链路等设置" icon={Settings}>
             {error && <div className="panel-error">{error}</div>}
             {success && <div className="panel-success">{success}</div>}
 
@@ -117,28 +114,6 @@ export default function GlobalConfigPanel({ apiBaseUrl, initData, hasInitData })
                             <label>Zap 损耗容忍 (%)</label>
                             <input type="number" step="0.1" value={draft.zap_loss_tolerance} onChange={e => updateDraft('zap_loss_tolerance', Number(e.target.value) || 0)} />
                         </div>
-                    </div>
-
-                    <div className="config-section">
-                        <h3 className="config-section-title">止损设置</h3>
-                        <div className="config-row config-toggle">
-                            <label>止损开关</label>
-                            <button type="button" className={`toggle-btn ${draft.stop_loss_enabled ? 'active' : ''}`} onClick={() => updateDraft('stop_loss_enabled', !draft.stop_loss_enabled)}>
-                                {draft.stop_loss_enabled ? '开启' : '关闭'}
-                            </button>
-                        </div>
-                        {draft.stop_loss_enabled && (
-                            <>
-                                <div className="config-row">
-                                    <label>阈值 (%)</label>
-                                    <input type="number" step="0.1" value={draft.stop_loss_threshold} onChange={e => updateDraft('stop_loss_threshold', Number(e.target.value) || 0)} />
-                                </div>
-                                <div className="config-row">
-                                    <label>延迟 (秒)</label>
-                                    <input type="number" value={draft.stop_loss_delay_seconds} onChange={e => updateDraft('stop_loss_delay_seconds', Number(e.target.value) || 0)} />
-                                </div>
-                            </>
-                        )}
                     </div>
 
                     <div className="config-section">

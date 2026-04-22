@@ -2776,14 +2776,10 @@ func formatOutOfRange(task *models.StrategyTask, tickLower, tickUpper int, curre
 	if task.Paused && (task.Status == models.StrategyStatusRunning || task.Status == models.StrategyStatusWaiting) {
 		return "⏸"
 	}
-	_, _, priceUp, priceDown := pricing.PriceDirectionFromTicks(task, tickLower, tickUpper, currentTick)
-	if strategy.ShouldMonitorOutOfRangeOnly(task, priceUp, priceDown) {
+	if strategy.ShouldDelayOutOfRangeHandling(task) {
 		return "0/0"
 	}
 	threshold := task.ReopenDelaySeconds
-	if task.StopLossEnabled && task.StopLossDelaySeconds > 0 && priceDown {
-		threshold = task.StopLossDelaySeconds
-	}
 	if threshold <= 0 {
 		return "0/0"
 	}
@@ -2814,6 +2810,8 @@ func statusLabelFromTask(task *models.StrategyTask) string {
 			return "停止中"
 		case strategy.ExitActionStopLoss:
 			return "止损中"
+		case strategy.ExitActionOutOfRangeStop:
+			return "撤仓终止中"
 		case strategy.ExitActionRebalance:
 			return "再平衡中"
 		default:

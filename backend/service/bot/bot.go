@@ -454,10 +454,6 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleEntrySwapCancel(query, user)
 	case query.Data == "config_rebalance_timeout":
 		b.handleConfigRebalanceTimeout(query, user)
-	case query.Data == "config_stop_loss_toggle":
-		b.handleConfigStopLossToggle(query, user)
-	case query.Data == "config_stop_loss_delay":
-		b.handleConfigStopLossDelay(query, user)
 	case query.Data == "config_slippage":
 		b.handleConfigSlippage(query, user)
 	case query.Data == "config_reinvest_toggle":

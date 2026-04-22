@@ -91,22 +91,23 @@ func (s *StrategyService) autoStopNoLiquidity(task *models.StrategyTask, now tim
 	}
 
 	updates := map[string]interface{}{
-		"status":                  models.StrategyStatusStopped,
-		"last_exit_time":          &now,
-		"current_liquidity":       "0",
-		"out_of_range_since":      nil,
-		"rebalance_pending":       false,
-		"rebalance_retry_count":   0,
-		"rebalance_next_retry_at": nil,
-		"rebalance_last_error":    "",
-		"exit_pending_action":     "",
-		"exit_pending_reason":     "",
-		"exit_gas_multiplier":     1.0,
-		"exit_retry_count":        0,
-		"exit_next_retry_at":      nil,
-		"exit_last_error":         "",
-		"exit_give_up_at":         nil,
-		"error_message":           "",
+		"status":                   models.StrategyStatusStopped,
+		"last_exit_time":           &now,
+		"current_liquidity":        "0",
+		"out_of_range_since":       nil,
+		"range_activation_pending": false,
+		"rebalance_pending":        false,
+		"rebalance_retry_count":    0,
+		"rebalance_next_retry_at":  nil,
+		"rebalance_last_error":     "",
+		"exit_pending_action":      "",
+		"exit_pending_reason":      "",
+		"exit_gas_multiplier":      1.0,
+		"exit_retry_count":         0,
+		"exit_next_retry_at":       nil,
+		"exit_last_error":          "",
+		"exit_give_up_at":          nil,
+		"error_message":            "",
 	}
 	if err := database.DB.Model(task).Updates(updates).Error; err != nil {
 		log.Printf("[Strategy] 任务 #%d 自动停止失败: %v", task.ID, err)
@@ -117,6 +118,7 @@ func (s *StrategyService) autoStopNoLiquidity(task *models.StrategyTask, now tim
 	task.LastExitTime = &now
 	task.CurrentLiquidity = "0"
 	task.OutOfRangeSince = nil
+	task.RangeActivationPending = false
 	task.RebalancePending = false
 	task.RebalanceRetryCount = 0
 	task.RebalanceNextRetryAt = nil

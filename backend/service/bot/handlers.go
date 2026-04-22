@@ -31,8 +31,8 @@ func (b *Bot) handleStart(message *tgbotapi.Message, user *models.User) {
 • 💼 管理您的钱包
 • 📊 创建和管理流动性仓位
 • 🔄 自动再平衡
-• 🛡️ 止损保护
-• ⚙️ 全局配置（滑点、止损阈值等）
+? ??? ????
+? ?? ???????????????
 • 📈 跟踪您的交易和仓位
 
 使用 /help 查看所有可用命令。
@@ -58,7 +58,7 @@ func (b *Bot) handleHelp(message *tgbotapi.Message, user *models.User) {
 *仓位管理：*
 /newposition - 创建新仓位
 /positions - 查看我的仓位
-/config - 全局配置（滑点、止损、再平衡等）
+/config - ????????????????
 
 *信息查询：*
 /profit - 余额走势
@@ -68,7 +68,7 @@ func (b *Bot) handleHelp(message *tgbotapi.Message, user *models.User) {
 
 *使用方法：*
 1. 首先，使用 /wallet 导入钱包
-2. 使用 /config 配置全局参数（滑点、止损阈值、再平衡超时）
+2. ?? /config ????????????????????
 3. 使用 /newposition 创建新仓位（输入池子地址、tick范围、投入金额）
 4. 使用 /positions 查看和管理您的仓位
 
@@ -541,8 +541,6 @@ func (b *Bot) handleText(message *tgbotapi.Message, user *models.User) {
 	// Global config inputs
 	case "awaiting_global_rebalance_timeout":
 		b.handleGlobalRebalanceTimeoutInput(message.Chat.ID, user, message.Text)
-	case "awaiting_global_stop_loss_delay":
-		b.handleGlobalStopLossDelayInput(message.Chat.ID, user, message.Text)
 	case "awaiting_global_slippage":
 		b.handleGlobalSlippageInput(message.Chat.ID, user, message.Text)
 	case "awaiting_global_residual_tolerance":

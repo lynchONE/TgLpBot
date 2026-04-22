@@ -75,17 +75,18 @@ type StrategyTask struct {
 	AllowEntrySwap       bool    `gorm:"default:false" json:"allow_entry_swap"`                   // Allow swapping USDT to entry token when pool lacks USDT
 	StopLossEnabled      bool    `gorm:"default:false" json:"stop_loss_enabled"`
 	StopLossDelaySeconds int     `gorm:"default:0" json:"stop_loss_delay_seconds"` // Out-of-range seconds before stop-loss triggers (0 = immediately)
-	RebalanceEnabled     bool    `gorm:"default:false" json:"rebalance_enabled"`   // When false, out-of-range positions are stopped instead of rebalanced
+	RebalanceEnabled     bool    `gorm:"default:false" json:"rebalance_enabled"`   // When false, out-of-range positions exit to USDT and stop after the same delay
 
 	// State
-	Paused          bool           `gorm:"default:false;index" json:"paused"`
-	PausedAt        *time.Time     `json:"paused_at"`
-	Status          StrategyStatus `gorm:"size:20;default:'running'" json:"status"`
-	LastExitTime    *time.Time     `json:"last_exit_time"` // When did we exit/remove liquidity?
-	LastRebalanceAt *time.Time     `json:"last_rebalance_at"`
-	OutOfRangeSince *time.Time     `json:"out_of_range_since"`
-	LastCheckTime   time.Time      `json:"last_check_time"`
-	ErrorMessage    string         `gorm:"type:text" json:"error_message"`
+	Paused                 bool           `gorm:"default:false;index" json:"paused"`
+	PausedAt               *time.Time     `json:"paused_at"`
+	Status                 StrategyStatus `gorm:"size:20;default:'running'" json:"status"`
+	LastExitTime           *time.Time     `json:"last_exit_time"` // When did we exit/remove liquidity?
+	LastRebalanceAt        *time.Time     `json:"last_rebalance_at"`
+	OutOfRangeSince        *time.Time     `json:"out_of_range_since"`
+	RangeActivationPending bool           `gorm:"default:false" json:"range_activation_pending"` // Single-sided positions wait until first in-range before auto handling starts
+	LastCheckTime          time.Time      `json:"last_check_time"`
+	ErrorMessage           string         `gorm:"type:text" json:"error_message"`
 
 	// Exit retry state (keep task Status as running when exit fails).
 	ExitPendingAction string     `gorm:"size:20;default:''" json:"exit_pending_action"` // manual_stop | stoploss | rebalance | switch

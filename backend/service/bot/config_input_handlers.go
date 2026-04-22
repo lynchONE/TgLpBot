@@ -30,23 +30,6 @@ func (b *Bot) handleGlobalRebalanceTimeoutInput(messageChatID int64, user *model
 	b.sendMessage(messageChatID, fmt.Sprintf("✅ 已更新再平衡超时：%s", strategy.FormatDelayTime(seconds)))
 }
 
-func (b *Bot) handleGlobalStopLossDelayInput(messageChatID int64, user *models.User, text string) {
-	seconds, err := strconv.Atoi(strings.TrimSpace(text))
-	if err != nil || seconds < 0 || seconds > 86400 {
-		b.sendMessage(messageChatID, "数值无效。请输入 0-86400 之间的整数秒数，例如：`0` 或 `10`")
-		return
-	}
-	_, err = b.configService.Update(user.ID, map[string]interface{}{
-		"stop_loss_delay_seconds": seconds,
-	})
-	if err != nil {
-		b.sendMessage(messageChatID, fmt.Sprintf("❌ 更新配置失败：%v", err))
-		return
-	}
-	database.ClearUserSession(user.TelegramID)
-	b.sendMessage(messageChatID, fmt.Sprintf("✅ 已更新秒止损阈值：%d 秒", seconds))
-}
-
 func (b *Bot) handleGlobalSlippageInput(messageChatID int64, user *models.User, text string) {
 	value, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(text, "%")), 64)
 	if err != nil || value < 0 || value > 100 {

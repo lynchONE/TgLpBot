@@ -13,10 +13,11 @@ import (
 )
 
 const (
-	ExitActionManualStop = "manual_stop"
-	ExitActionStopLoss   = "stoploss"
-	ExitActionRebalance  = "rebalance"
-	ExitActionSwitch     = "switch"
+	ExitActionManualStop     = "manual_stop"
+	ExitActionStopLoss       = "stoploss"
+	ExitActionOutOfRangeStop = "range_stop"
+	ExitActionRebalance      = "rebalance"
+	ExitActionSwitch         = "switch"
 )
 
 var exitRetrySchedule = []time.Duration{
@@ -314,6 +315,8 @@ func (s *StrategyService) runExitRetryAttempt(taskID uint, userID uint) {
 		s.executeRebalanceAfterExit(&task, now)
 	case ExitActionStopLoss:
 		s.finishStopAfterExit(&task, now, reason, txHashes)
+	case ExitActionOutOfRangeStop:
+		s.finishStopAfterExit(&task, now, reason, txHashes)
 	case ExitActionSwitch:
 		s.executeSwitchAfterExit(&task, now, reason)
 	case ExitActionManualStop:
@@ -428,17 +431,18 @@ func (s *StrategyService) markRebalancePending(task *models.StrategyTask, now ti
 	}
 
 	updates := map[string]interface{}{
-		"status":                  models.StrategyStatusRunning,
-		"last_exit_time":          &now,
-		"current_liquidity":       "0",
-		"v3_token_id":             "",
-		"v4_token_id":             "",
-		"out_of_range_since":      nil,
-		"rebalance_pending":       true,
-		"rebalance_retry_count":   0,
-		"rebalance_next_retry_at": func() *time.Time { t := now.Add(5 * time.Minute); return &t }(), // 防止竞态条件导致重复触发
-		"rebalance_last_error":    "",
-		"error_message":           "",
+		"status":                   models.StrategyStatusRunning,
+		"last_exit_time":           &now,
+		"current_liquidity":        "0",
+		"v3_token_id":              "",
+		"v4_token_id":              "",
+		"out_of_range_since":       nil,
+		"range_activation_pending": false,
+		"rebalance_pending":        true,
+		"rebalance_retry_count":    0,
+		"rebalance_next_retry_at":  func() *time.Time { t := now.Add(5 * time.Minute); return &t }(), // 防止竞态条件导致重复触发
+		"rebalance_last_error":     "",
+		"error_message":            "",
 	}
 	_ = database.DB.Model(task).Updates(updates).Error
 
@@ -448,6 +452,7 @@ func (s *StrategyService) markRebalancePending(task *models.StrategyTask, now ti
 	task.V3TokenID = ""
 	task.V4TokenID = ""
 	task.OutOfRangeSince = nil
+	task.RangeActivationPending = false
 	task.RebalancePending = true
 	task.RebalanceRetryCount = 0
 	nextRetryAt := now.Add(5 * time.Minute)
@@ -519,6 +524,7 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 		"v3_token_id":                 enterRes.V3TokenID,
 		"v4_token_id":                 enterRes.V4TokenID,
 		"out_of_range_since":          nil,
+		"range_activation_pending":    false,
 		"rebalance_pending":           false,
 		"rebalance_retry_count":       0,
 		"rebalance_next_retry_at":     nil,
@@ -547,6 +553,7 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 			"v3_token_id":                 enterRes.V3TokenID,
 			"v4_token_id":                 enterRes.V4TokenID,
 			"out_of_range_since":          nil,
+			"range_activation_pending":    false,
 			"rebalance_pending":           false,
 			"rebalance_retry_count":       0,
 			"rebalance_next_retry_at":     nil,
@@ -569,6 +576,7 @@ func (s *StrategyService) attemptRebalanceEnter(task *models.StrategyTask, now t
 	task.V3TokenID = enterRes.V3TokenID
 	task.V4TokenID = enterRes.V4TokenID
 	task.OutOfRangeSince = nil
+	task.RangeActivationPending = false
 	task.RebalancePending = false
 	task.RebalanceRetryCount = 0
 	task.RebalanceNextRetryAt = nil
@@ -846,6 +854,7 @@ func (s *StrategyService) executeSwitchAfterExit(task *models.StrategyTask, now 
 		"v3_token_id":                 "",
 		"v4_token_id":                 "",
 		"out_of_range_since":          nil,
+		"range_activation_pending":    false,
 		"rebalance_pending":           true,
 		"rebalance_retry_count":       0,
 		"rebalance_next_retry_at":     func() *time.Time { t := now.Add(5 * time.Minute); return &t }(), // 防止竞态条件导致重复触发
@@ -862,6 +871,7 @@ func (s *StrategyService) executeSwitchAfterExit(task *models.StrategyTask, now 
 	task.V3TokenID = ""
 	task.V4TokenID = ""
 	task.OutOfRangeSince = nil
+	task.RangeActivationPending = false
 	task.RebalancePending = true
 	task.RebalanceRetryCount = 0
 	switchNextRetryAt := now.Add(5 * time.Minute)
@@ -885,17 +895,29 @@ func (s *StrategyService) finishStopAfterExit(task *models.StrategyTask, now tim
 	}
 
 	updates := map[string]interface{}{
-		"status":                  models.StrategyStatusStopped,
-		"last_exit_time":          &now,
-		"current_liquidity":       "0",
-		"out_of_range_since":      nil,
-		"rebalance_pending":       false,
-		"rebalance_retry_count":   0,
-		"rebalance_next_retry_at": nil,
-		"rebalance_last_error":    "",
-		"error_message":           "",
+		"status":                   models.StrategyStatusStopped,
+		"last_exit_time":           &now,
+		"current_liquidity":        "0",
+		"out_of_range_since":       nil,
+		"range_activation_pending": false,
+		"rebalance_pending":        false,
+		"rebalance_retry_count":    0,
+		"rebalance_next_retry_at":  nil,
+		"rebalance_last_error":     "",
+		"error_message":            "",
 	}
 	database.DB.Model(task).Updates(updates)
+
+	task.Status = models.StrategyStatusStopped
+	task.LastExitTime = &now
+	task.CurrentLiquidity = "0"
+	task.OutOfRangeSince = nil
+	task.RangeActivationPending = false
+	task.RebalancePending = false
+	task.RebalanceRetryCount = 0
+	task.RebalanceNextRetryAt = nil
+	task.RebalanceLastError = ""
+	task.ErrorMessage = ""
 
 	msg := fmt.Sprintf("✅ %s 完成，任务已停止。", title)
 	if len(txHashes) > 0 {

@@ -27,9 +27,6 @@ function parseDCAPercentages(raw) {
 function buildDraft(cfg = {}) {
     return {
         rebalance_timeout: cfg.rebalance_timeout ?? 10,
-        stop_loss_enabled: cfg.stop_loss_enabled ?? false,
-        stop_loss_threshold: cfg.stop_loss_threshold ?? 10,
-        stop_loss_delay_seconds: cfg.stop_loss_delay_seconds ?? 0,
         slippage_tolerance: cfg.slippage_tolerance ?? 0.5,
         auto_reinvest: cfg.auto_reinvest ?? false,
         residual_tolerance: cfg.residual_tolerance ?? 1.0,
@@ -61,7 +58,6 @@ function getChainLabel(value) {
 
 function countEnabledFeatures(draft) {
     return [
-        draft.stop_loss_enabled,
         draft.auto_reinvest,
         draft.extra_notifications_enabled,
         draft.filter_chinese_tokens,
@@ -176,7 +172,7 @@ export default function GlobalConfigPage({ open, onClose, apiBaseUrl, initData, 
                                     把重要开关做得更清楚
                                 </div>
                                 <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-white/55">
-                                    交易容忍度、止损、通知与链路切换都集中在这里。开关会直接显示状态，避免再出现“空按钮”。
+                                    交易容忍度、通知与链路切换都集中在这里。开关会直接显示状态，避免再出现“空按钮”。
                                 </p>
                             </div>
                         </div>
@@ -250,49 +246,6 @@ export default function GlobalConfigPage({ open, onClose, apiBaseUrl, initData, 
                                 />
                             </FieldCard>
                         </div>
-                    </Section>
-
-                    <Section
-                        icon={AlertTriangle}
-                        iconClassName="bg-amber-500/10 text-amber-700 ring-1 ring-amber-500/20 dark:bg-amber-500/15 dark:text-amber-200 dark:ring-amber-500/25"
-                        title="止损策略"
-                        description="在价格偏离范围后自动退出，减少拖延执行。"
-                    >
-                        <ToggleSwitch
-                            label="启用止损"
-                            description="超出价格区间后，按规则执行止损。"
-                            checked={draft.stop_loss_enabled}
-                            onChange={(value) => updateDraft('stop_loss_enabled', value)}
-                        />
-                        {draft.stop_loss_enabled ? (
-                            <div className="grid gap-3 sm:grid-cols-2">
-                                <FieldCard label="止损阈值" hint="按区间宽度计算的触发比例">
-                                    <InputWithSuffix
-                                        type="number"
-                                        step="0.1"
-                                        value={draft.stop_loss_threshold}
-                                        onChange={(e) => updateDraft('stop_loss_threshold', Number(e.target.value) || 0)}
-                                        className={inputClass}
-                                        placeholder="10"
-                                        suffix="%"
-                                    />
-                                </FieldCard>
-                                <FieldCard label="止损延迟" hint="触发后等待多久再执行">
-                                    <InputWithSuffix
-                                        type="number"
-                                        value={draft.stop_loss_delay_seconds}
-                                        onChange={(e) => updateDraft('stop_loss_delay_seconds', Number(e.target.value) || 0)}
-                                        className={inputClass}
-                                        placeholder="0"
-                                        suffix="秒"
-                                    />
-                                </FieldCard>
-                            </div>
-                        ) : (
-                            <MutedHint>
-                                当前未启用止损，开启后会出现阈值和延迟设置。
-                            </MutedHint>
-                        )}
                     </Section>
 
                     <Section

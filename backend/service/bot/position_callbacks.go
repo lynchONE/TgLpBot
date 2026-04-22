@@ -110,8 +110,7 @@ func (b *Bot) handleConfirmPosition(query *tgbotapi.CallbackQuery, user *models.
 		ReopenDelaySeconds:   strategy.NormalizeRebalanceTimeout(cfg.RebalanceTimeout),
 		SlippageTolerance:    slippage,
 		AutoReinvest:         cfg.AutoReinvest,
-		StopLossEnabled:      cfg.StopLossEnabled,
-		StopLossDelaySeconds: cfg.StopLossDelaySeconds,
+		RebalanceEnabled:     true,
 		Status:               models.StrategyStatusRunning,
 		LastCheckTime:        time.Now(),
 	}

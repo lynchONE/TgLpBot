@@ -11,11 +11,7 @@ import (
 func globalConfigKeyboard() tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("铃铛 再平衡超时", "config_rebalance_timeout"),
-			tgbotapi.NewInlineKeyboardButtonData("止损开关", "config_stop_loss_toggle"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("止损延迟", "config_stop_loss_delay"),
+			tgbotapi.NewInlineKeyboardButtonData("闹钟 再平衡超时", "config_rebalance_timeout"),
 			tgbotapi.NewInlineKeyboardButtonData("滑点配置", "config_slippage"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
@@ -71,12 +67,9 @@ func formatGlobalConfigMenuText(cfg *models.GlobalConfig) string {
 
 *当前配置*
 再平衡超时：%d 秒
-止损开关：%s
-止损延迟：%d 秒
 滑点：%.2f%%
 复投：%s
-Bark 通知：%s（%s）
-Bark Server：%s
+Bark 通知：%s，%s，Bark Server：%s
 Bark Group：%s
 日志通知：%s
 过滤中文代币：%s
@@ -86,8 +79,6 @@ Bark Group：%s
 
 请选择要配置的选项：`,
 		cfg.RebalanceTimeout,
-		boolToOnOff(cfg.StopLossEnabled),
-		cfg.StopLossDelaySeconds,
 		cfg.SlippageTolerance,
 		boolToOnOff(cfg.AutoReinvest),
 		barkStatus,

@@ -161,8 +161,12 @@ const WEB_WORKBENCH_WIDGETS = [
     { key: 'gmgn_kline', label: 'K线' },
     { key: 'positions', label: '仓位' },
 ]; const DEFAULT_WEB_WORKBENCH_WIDGETS = WEB_WORKBENCH_WIDGETS.map((item) => item.key);
-const OPEN_POSITION_RANGE_OPTIONS = [
+const OPEN_POSITION_RANGE_OPTIONS_UNUSED = [
     { key: 'percentage', label: '快捷%' },
+];
+const OPEN_POSITION_RANGE_OPTIONS = [
+    { key: 'percentage', label: '百分比区间' },
+    { key: 'grid', label: '流动性格子' },
 ];
 const OPEN_POSITION_GRID_RADIUS = 8;
 const OPEN_POSITION_DEFAULT_GRID_OFFSET = 3;
@@ -801,6 +805,13 @@ function buildEntrySwapConfirmKey(preview, entrySwapSlippage) {
     ].join('|');
 }
 
+function getOutOfRangeActionSummary(rebalanceEnabled) {
+    return {
+        above: rebalanceEnabled ? '自动再平衡' : '缓冲后自动撤仓终止',
+        below: rebalanceEnabled ? '自动再平衡' : '缓冲后自动撤仓终止',
+    };
+}
+
 function resolveOpenPositionErrorPayload(error) {
     if (!error || typeof error !== 'object') return null;
     if (error.payload && typeof error.payload === 'object') return error.payload;
@@ -984,7 +995,6 @@ export default function App() {
     const [openPositionDCAInterval, setOpenPositionDCAInterval] = useState(30);
     const [openPositionDCAExpanded, setOpenPositionDCAExpanded] = useState(false);
     const [openPositionRebalanceEnabled, setOpenPositionRebalanceEnabled] = useState(true);
-    const [openPositionStopLossEnabled, setOpenPositionStopLossEnabled] = useState(true);
     const [openPositionWalletBalancesHidden, setOpenPositionWalletBalancesHidden] = useState(() => storage.get(STORAGE_OPEN_POSITION_HIDE_WALLET_BALANCES) === '1');
     const [openPositionLiqProfile, setOpenPositionLiqProfile] = useState(null);
     const [openPositionLiqProfileLoading, setOpenPositionLiqProfileLoading] = useState(false);
@@ -2178,6 +2188,11 @@ export default function App() {
     const openPositionQuickRangeIntro = openPositionHasSmartQuickRanges
         ? '优先展示聪明钱区间，卡片下方直接显示对应金额。'
         : '预设 1 / 3 / 5 / 10 / 20，点一下即可快速填入区间。';
+    const openPositionVisibleRangeMode = openPositionRangeInputMode === 'percentage' ? 'percentage' : 'grid';
+    const openPositionOutOfRangeActions = useMemo(
+        () => getOutOfRangeActionSummary(openPositionRebalanceEnabled),
+        [openPositionRebalanceEnabled],
+    );
     const openPositionTaskSlippage = parseOptionalPercent(openPositionSlippage);
     const openPositionNeedsHighSlippageConfirm = openPositionTaskSlippage.valid
         && Number.isFinite(openPositionTaskSlippage.value)
@@ -2232,6 +2247,7 @@ export default function App() {
 
     const handleOpenPositionRangeLowerChange = useCallback((value) => {
         suppressOpenPositionPreview();
+        setOpenPositionRangeInputMode('percentage');
         setOpenPositionRangeLower((prevLower) => {
             if (
                 openPositionRangeUpperAuto ||
@@ -2247,6 +2263,7 @@ export default function App() {
 
     const handleOpenPositionRangeUpperChange = useCallback((value) => {
         suppressOpenPositionPreview();
+        setOpenPositionRangeInputMode('percentage');
         setOpenPositionRangeUpperAuto(false);
         setOpenPositionRangeUpper(value);
         setOpenPositionError('');
@@ -2486,7 +2503,6 @@ export default function App() {
         setOpenPositionEntrySwapConfirm(false);
         setOpenPositionDCAExpanded(false);
         setOpenPositionRebalanceEnabled(true);
-        setOpenPositionStopLossEnabled(true);
 
         setOpenPositionError('');
         setOpenPositionChecks([]);
@@ -2723,16 +2739,12 @@ export default function App() {
         if (!signature || openPositionAutoSingleSideRangeRef.current === signature) return;
         openPositionAutoSingleSideRangeRef.current = signature;
         if (openPositionDCAEnabled) setOpenPositionDCAEnabled(false);
-        if (openPositionRebalanceEnabled) setOpenPositionRebalanceEnabled(false);
-        if (openPositionStopLossEnabled) setOpenPositionStopLossEnabled(false);
     }, [
         openPositionIsSingleSidedSelection,
         openPositionResolvedSelectionShape.shape,
         openPositionChartLowerTick,
         openPositionChartUpperTick,
         openPositionDCAEnabled,
-        openPositionRebalanceEnabled,
-        openPositionStopLossEnabled,
     ]);
 
     const onOpenPositionChartRangeChange = useCallback(({ lower, upper }) => {
@@ -3021,7 +3033,6 @@ export default function App() {
                     walletId,
                     ackLiquidityRisk: openPositionRiskAck,
                     rebalanceEnabled: openPositionRebalanceEnabled,
-                    stopLossEnabled: openPositionStopLossEnabled,
                     signal: controller.signal,
                 };
                 if (openPositionRangeInputMode === 'percentage') {
@@ -3089,7 +3100,6 @@ export default function App() {
         openPositionSelectedManualTickLower,
         openPositionSelectedManualTickUpper,
         openPositionRebalanceEnabled,
-        openPositionStopLossEnabled,
         openPositionPreviewSuspended,
     ]);
 
@@ -3249,7 +3259,6 @@ export default function App() {
                 dcaPercentages: effectiveOpenPositionDCAEnabled ? openPositionDCAPercentages.map((v) => Number(v) || 0) : undefined,
                 dcaIntervalSeconds: effectiveOpenPositionDCAEnabled ? Number(openPositionDCAInterval) : undefined,
                 rebalanceEnabled: openPositionRebalanceEnabled,
-                stopLossEnabled: openPositionStopLossEnabled,
             };
             if (openPositionRangeInputMode === 'percentage') {
                 submitPayload.rangeLowerPct = range.lower;
@@ -3496,7 +3505,7 @@ export default function App() {
         if (!Number.isFinite(id) || id <= 0) return;
         try {
             const resp = await toggleRebalance({ apiBaseUrl, initData, taskId: id, rebalanceEnabled: enabled });
-            showNotice(enabled ? '再平衡已开启' : '再平衡已关闭，超区间仅提醒', 'success');
+            showNotice(enabled ? '再平衡已开启' : '再平衡已关闭，超区间后将撤仓终止', 'success');
         } catch (e) {
             showNotice(String(e?.message || e), 'error');
         }
@@ -3752,9 +3761,6 @@ export default function App() {
     const globalCfg = globalConfig || {};
     const rebalanceText = Number.isFinite(Number(globalCfg.rebalance_timeout))
         ? (Number(globalCfg.rebalance_timeout) <= 0 ? '立即' : `${Number(globalCfg.rebalance_timeout)} s`)
-        : '--';
-    const stopLossDelayText = Number.isFinite(Number(globalCfg.stop_loss_delay_seconds))
-        ? `${Number(globalCfg.stop_loss_delay_seconds)} s`
         : '--';
     const slippageText = Number.isFinite(Number(globalCfg.slippage_tolerance))
         ? `${Number(globalCfg.slippage_tolerance).toFixed(2)}%`
@@ -4554,16 +4560,6 @@ export default function App() {
                                                 </div>
                                             </div>
                                             <div>
-                                                <div>止损开关</div>
-                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.stop_loss_enabled)}</div>
-                                            </div>
-                                            <div>
-                                                <div>止损延迟</div>
-                                                <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">
-                                                    <NumberFlowValue value={stopLossDelayText} formatter={() => stopLossDelayText} />
-                                                </div>
-                                            </div>
-                                            <div>
                                                 <div>自动复投</div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.auto_reinvest)}</div>
                                             </div>
@@ -4958,7 +4954,9 @@ export default function App() {
                                     <div>
                                         <div className="text-xs font-semibold text-zinc-900 dark:text-white/85">区间设置</div>
                                         <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/45">
-                                            {openPositionQuickRangeIntro}
+                                            {openPositionVisibleRangeMode === 'percentage'
+                                                ? openPositionQuickRangeIntro
+                                                : '切到流动性格子后，可在上方分布图拖动区间，或在这里微调上下边界。'}
                                         </div>
                                     </div>
                                     {openPositionPriceRange?.gridStepPctText && openPositionPriceRange.gridStepPctText !== '--' ? (
@@ -4968,189 +4966,246 @@ export default function App() {
                                     ) : null}
                                 </div>
 
-                                <div
-                                    className="mt-3 grid gap-2"
-                                    style={{ gridTemplateColumns: `repeat(${openPositionHasSmartQuickRanges ? Math.min(Math.max(openPositionQuickRangeOptions.length, 1), 5) : 5}, minmax(0, 1fr))` }}
-                                >
-                                        {openPositionQuickRangeOptions.map((option) => {
-                                            const lowerValue = Number(option.lowerValue);
-                                            const upperValue = Number(option.upperValue);
-                                            const isActive =
-                                                Number.isFinite(openPositionDisplayedLowerPct) &&
-                                                Number.isFinite(openPositionDisplayedUpperPct) &&
-                                                Math.abs(openPositionDisplayedLowerPct - lowerValue) < 0.05 &&
-                                                Math.abs(openPositionDisplayedUpperPct - upperValue) < 0.05;
-                                            return (
+                                <div className="mt-3 grid grid-cols-2 gap-2">
+                                    {OPEN_POSITION_RANGE_OPTIONS.map((option) => (
+                                        <button
+                                            key={option.key}
+                                            type="button"
+                                            onClick={() => handleOpenPositionRangeInputModeChange(option.key)}
+                                            className={`rounded-xl border px-3 py-2 text-[12px] font-semibold transition ${openPositionVisibleRangeMode === option.key
+                                                ? `${brand.selectionClass} text-zinc-900 shadow-sm dark:text-white`
+                                                : 'border-zinc-200 bg-white/80 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
+                                                }`}
+                                        >
+                                            {option.label}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {openPositionVisibleRangeMode === 'percentage' ? (
+                                    <>
+                                        <div
+                                            className="mt-3 grid gap-2"
+                                            style={{ gridTemplateColumns: `repeat(${Math.min(Math.max(openPositionQuickRangeOptions.length, 1), 5)}, minmax(0, 1fr))` }}
+                                        >
+                                            {openPositionQuickRangeOptions.map((option) => {
+                                                const lowerValue = Number(option.lowerValue);
+                                                const upperValue = Number(option.upperValue);
+                                                const isActive =
+                                                    Number.isFinite(openPositionDisplayedLowerPct) &&
+                                                    Number.isFinite(openPositionDisplayedUpperPct) &&
+                                                    Math.abs(openPositionDisplayedLowerPct - lowerValue) < 0.05 &&
+                                                    Math.abs(openPositionDisplayedUpperPct - upperValue) < 0.05;
+                                                return (
+                                                    <button
+                                                        key={option.key}
+                                                        type="button"
+                                                        onClick={() => applyOpenPositionQuickRange(option)}
+                                                        className={`rounded-xl border px-2 py-2 transition ${isActive
+                                                            ? `${brand.selectionClass} text-zinc-900 shadow-sm dark:text-white`
+                                                            : 'border-zinc-200 bg-white/80 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
+                                                            }`}
+                                                    >
+                                                        {option.smart ? (
+                                                            <>
+                                                                <div className="truncate text-left text-[11px] font-semibold leading-none">{option.label}</div>
+                                                                <div className="mt-1 truncate text-left text-[10px] font-medium opacity-75">{option.subLabel || '--'}</div>
+                                                            </>
+                                                        ) : (
+                                                            <div className="text-center text-[12px] font-semibold leading-none">{option.label}</div>
+                                                        )}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                        {openPositionSmartRangesLoading ? (
+                                            <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/45">
+                                                聪明钱区间加载中...
+                                            </div>
+                                        ) : null}
+                                        <div className={`mt-3 rounded-2xl border p-3 ${openPositionRangeInputMode === 'percentage'
+                                            ? 'border-emerald-500/20 bg-emerald-500/10'
+                                            : 'border-zinc-200/80 bg-zinc-50/80 dark:border-white/10 dark:bg-[#0f1116]'
+                                            }`}>
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div>
+                                                    <div className="text-[12px] font-semibold text-zinc-900 dark:text-white/90">自定义百分比</div>
+                                                    <div className="mt-1 text-[10px] text-zinc-500 dark:text-white/45">
+                                                        固定档位之外，可直接输入上下限百分比。
+                                                    </div>
+                                                </div>
                                                 <button
-                                                    key={option.key}
                                                     type="button"
-                                                    onClick={() => applyOpenPositionQuickRange(option)}
-                                                    className={`rounded-xl border px-2 py-2 transition ${isActive
-                                                        ? `${brand.selectionClass} text-zinc-900 shadow-sm dark:text-white`
+                                                    onClick={() => handleOpenPositionRangeInputModeChange('percentage')}
+                                                    className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold transition ${openPositionRangeInputMode === 'percentage'
+                                                        ? `${brand.selectionClass} text-zinc-900 dark:text-white`
                                                         : 'border-zinc-200 bg-white/80 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
                                                         }`}
                                                 >
-                                                    {option.smart ? (
-                                                        <>
-                                                            <div className="truncate text-left text-[11px] font-semibold leading-none">{option.label}</div>
-                                                            <div className="mt-1 truncate text-left text-[10px] font-medium opacity-75">{option.subLabel || '--'}</div>
-                                                        </>
-                                                    ) : (
-                                                        <div className="text-center text-[12px] font-semibold leading-none">{option.label}</div>
-                                                    )}
+                                                    {openPositionRangeInputMode === 'percentage' ? '当前按百分比编辑' : '切换到百分比编辑'}
                                                 </button>
-                                            );
-                                        })}
-                                </div>
-                                {openPositionSmartRangesLoading ? (
-                                    <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/45">
-                                        聪明钱区间加载中...
-                                    </div>
-                                ) : null}
-
-                                <div className="mt-3 rounded-2xl border border-zinc-200 bg-zinc-50/80 p-2.5 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="flex items-center justify-between gap-3">
-                                        <div>
-                                            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500 dark:text-white/45">Price Range</div>
-                                            <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/90">
-                                                {openPositionPriceRange?.baseSymbol || '--'}/{openPositionPriceRange?.quoteSymbol || '--'}
                                             </div>
+                                            <div className="mt-3 grid grid-cols-2 gap-2">
+                                                <input
+                                                    value={openPositionRangeLower}
+                                                    onChange={(e) => handleOpenPositionRangeLowerChange(e.target.value)}
+                                                    inputMode="decimal"
+                                                    className={`w-full rounded-xl border border-zinc-200 bg-white/90 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
+                                                    placeholder="下限 %"
+                                                />
+                                                <input
+                                                    value={openPositionRangeUpper}
+                                                    onChange={(e) => handleOpenPositionRangeUpperChange(e.target.value)}
+                                                    inputMode="decimal"
+                                                    className={`w-full rounded-xl border border-zinc-200 bg-white/90 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
+                                                    placeholder="上限 %"
+                                                />
+                                            </div>
+                                            <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/45">
+                                                例如 `1 / 3` 表示下跌 1%、上涨 3%。之后切到格子模式时，会沿用映射后的 Tick 区间继续调整。
+                                            </div>
+                                            {openPositionEffectiveRangeEditor ? (
+                                                <div className="mt-3 rounded-2xl border border-zinc-200 bg-white/80 p-3 dark:border-white/10 dark:bg-white/5">
+                                                    <div className="grid gap-2 text-[11px] text-zinc-600 dark:text-white/60">
+                                                        <div className="flex items-center justify-between gap-3">
+                                                            <span>映射价格区间</span>
+                                                            <span className="font-semibold text-zinc-900 dark:text-white/90">
+                                                                {formatPriceValue(openPositionEffectiveRangeEditor?.range_lower_price)} - {formatPriceValue(openPositionEffectiveRangeEditor?.range_upper_price)}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex items-center justify-between gap-3">
+                                                            <span>当前价格</span>
+                                                            <span className="font-semibold text-zinc-900 dark:text-white/90">{openPositionPriceRange?.currentText || '--'}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ) : null}
                                         </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => setOpenPositionInvertPrice((prev) => !prev)}
-                                            className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
-                                        >
-                                            切换计价
-                                        </button>
-                                    </div>
-
-                                    <div className="mt-2.5 grid grid-cols-2 gap-2">
-                                        <div className="rounded-xl border border-zinc-200/80 bg-white/90 p-2.5 dark:border-white/10 dark:bg-white/5">
-                                            <div className="text-[11px] text-zinc-500 dark:text-white/45">下限价格</div>
-                                            <div className="mt-1 flex items-end gap-1.5">
-                                                <div className="text-[15px] font-semibold text-zinc-900 dark:text-white/90">{openPositionPriceRange?.lowerText || '--'}</div>
-                                                <div className="pb-0.5 text-[10px] text-zinc-500 dark:text-white/45">{openPositionPriceRange?.lowerPctText || '--'}</div>
-                                            </div>
-                                            <div className="mt-2 grid grid-cols-2 gap-1.5">
+                                    </>
+                                ) : (
+                                    <div className="mt-3 grid gap-3">
+                                        <div className="rounded-2xl border border-zinc-200 bg-zinc-50/80 p-2.5 dark:border-white/10 dark:bg-[#0f1116]">
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div>
+                                                    <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500 dark:text-white/45">Price Range</div>
+                                                    <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/90">
+                                                        {openPositionPriceRange?.baseSymbol || '--'}/{openPositionPriceRange?.quoteSymbol || '--'}
+                                                    </div>
+                                                </div>
                                                 <button
                                                     type="button"
-                                                    onClick={() => nudgeOpenPositionTickBoundary('lower', -1)}
-                                                    className="rounded-full border border-zinc-200 bg-white/80 px-0 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                                    onClick={() => setOpenPositionInvertPrice((prev) => !prev)}
+                                                    className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
                                                 >
-                                                    -1格
+                                                    切换计价
                                                 </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => nudgeOpenPositionTickBoundary('lower', 1)}
-                                                    className="rounded-full border border-zinc-200 bg-white/80 px-0 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
-                                                >
-                                                    +1格
-                                                </button>
+                                            </div>
+
+                                            <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/45">
+                                                上方流动性分布图可直接拖动区间，这里用于精细微调边界。
+                                            </div>
+
+                                            <div className="mt-2.5 grid grid-cols-2 gap-2">
+                                                <div className="rounded-xl border border-zinc-200/80 bg-white/90 p-2.5 dark:border-white/10 dark:bg-white/5">
+                                                    <div className="text-[11px] text-zinc-500 dark:text-white/45">下限价格</div>
+                                                    <div className="mt-1 flex items-end gap-1.5">
+                                                        <div className="text-[15px] font-semibold text-zinc-900 dark:text-white/90">{openPositionPriceRange?.lowerText || '--'}</div>
+                                                        <div className="pb-0.5 text-[10px] text-zinc-500 dark:text-white/45">{openPositionPriceRange?.lowerPctText || '--'}</div>
+                                                    </div>
+                                                    <div className="mt-2 grid grid-cols-2 gap-1.5">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => nudgeOpenPositionTickBoundary('lower', -1)}
+                                                            className="rounded-full border border-zinc-200 bg-white/80 px-0 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                                        >
+                                                            -1格
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => nudgeOpenPositionTickBoundary('lower', 1)}
+                                                            className="rounded-full border border-zinc-200 bg-white/80 px-0 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                                        >
+                                                            +1格
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                <div className="rounded-xl border border-zinc-200/80 bg-white/90 p-2.5 dark:border-white/10 dark:bg-white/5">
+                                                    <div className="text-[11px] text-zinc-500 dark:text-white/45">上限价格</div>
+                                                    <div className="mt-1 flex items-end gap-1.5">
+                                                        <div className="text-[15px] font-semibold text-zinc-900 dark:text-white/90">{openPositionPriceRange?.upperText || '--'}</div>
+                                                        <div className="pb-0.5 text-[10px] text-zinc-500 dark:text-white/45">{openPositionPriceRange?.upperPctText || '--'}</div>
+                                                    </div>
+                                                    <div className="mt-2 grid grid-cols-2 gap-1.5">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => nudgeOpenPositionTickBoundary('upper', -1)}
+                                                            className="rounded-full border border-zinc-200 bg-white/80 px-0 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                                        >
+                                                            -1格
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => nudgeOpenPositionTickBoundary('upper', 1)}
+                                                            className="rounded-full border border-zinc-200 bg-white/80 px-0 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                                        >
+                                                            +1格
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="mt-3 grid gap-2 text-[11px] text-zinc-600 dark:text-white/60">
+                                                <div className="flex items-center justify-between gap-3">
+                                                    <span>当前价格</span>
+                                                    <span className="font-semibold text-zinc-900 dark:text-white/90">{openPositionPriceRange?.currentText || '--'}</span>
+                                                </div>
                                             </div>
                                         </div>
 
-                                        <div className="rounded-xl border border-zinc-200/80 bg-white/90 p-2.5 dark:border-white/10 dark:bg-white/5">
-                                            <div className="text-[11px] text-zinc-500 dark:text-white/45">上限价格</div>
-                                            <div className="mt-1 flex items-end gap-1.5">
-                                                <div className="text-[15px] font-semibold text-zinc-900 dark:text-white/90">{openPositionPriceRange?.upperText || '--'}</div>
-                                                <div className="pb-0.5 text-[10px] text-zinc-500 dark:text-white/45">{openPositionPriceRange?.upperPctText || '--'}</div>
+                                        <div className={`rounded-2xl border p-3 ${String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
+                                            ? 'border-emerald-500/25 bg-emerald-500/10'
+                                            : 'border-sky-500/20 bg-sky-500/10'
+                                            }`}>
+                                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                                <div className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold ${String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
+                                                    ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200'
+                                                    : 'border-sky-500/20 bg-sky-500/10 text-sky-700 dark:text-sky-200'
+                                                    }`}>
+                                                    {String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
+                                                        ? `当前：${openPositionRangeShapeLabel || `单边 ${openPositionEffectiveRangeEditor?.dominant_token_symbol || '--'}`}`
+                                                        : '当前：双边池'}
+                                                </div>
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => shiftOpenPositionRangeToSingleSide('lower')}
+                                                        className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                                    >
+                                                        单边下限
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => shiftOpenPositionRangeToSingleSide('upper')}
+                                                        className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
+                                                    >
+                                                        单边上限
+                                                    </button>
+                                                </div>
                                             </div>
-                                            <div className="mt-2 grid grid-cols-2 gap-1.5">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => nudgeOpenPositionTickBoundary('upper', -1)}
-                                                    className="rounded-full border border-zinc-200 bg-white/80 px-0 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
-                                                >
-                                                    -1格
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => nudgeOpenPositionTickBoundary('upper', 1)}
-                                                    className="rounded-full border border-zinc-200 bg-white/80 px-0 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
-                                                >
-                                                    +1格
-                                                </button>
+                                            <div className="mt-2 text-[11px] leading-5 text-zinc-600 dark:text-white/60">
+                                                {String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
+                                                    ? `从 USDT 入场后，最终会更偏向 ${openPositionEffectiveRangeEditor?.dominant_token_symbol || '--'} 单边资产。`
+                                                    : '当前区间覆盖现价，执行时会自动分配到两侧资产。'}
+                                            </div>
+                                            <div className="mt-2 text-[10px] text-zinc-500 dark:text-white/45">
+                                                保留当前宽度，整体移动到现价下方或上方，也允许继续越过活跃格微调。
                                             </div>
                                         </div>
                                     </div>
+                                )}
 
-                                    <div className="mt-3 grid gap-2 text-[11px] text-zinc-600 dark:text-white/60">
-                                        <div className="flex items-center justify-between gap-3">
-                                            <span>当前价格</span>
-                                            <span className="font-semibold text-zinc-900 dark:text-white/90">{openPositionPriceRange?.currentText || '--'}</span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className={`hidden mt-3 rounded-2xl border p-3 ${String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
-                                    ? 'border-emerald-500/25 bg-emerald-500/10'
-                                    : 'border-sky-500/20 bg-sky-500/10'
-                                    }`}>
-                                    <div className="flex items-center justify-between gap-3">
-                                        <div className="text-[12px] font-semibold text-zinc-900 dark:text-white/90">
-                                            {String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_') ? '当前将开单边池' : '当前将开双边池'}
-                                        </div>
-                                        {openPositionRangeShapeLabel ? (
-                                            <span className="rounded-full bg-white/70 px-2 py-1 text-[10px] font-bold text-zinc-700 dark:bg-white/10 dark:text-white/80">
-                                                {openPositionRangeShapeLabel}
-                                            </span>
-                                        ) : null}
-                                    </div>
-                                    <div className="mt-1 text-[11px] leading-5 text-zinc-600 dark:text-white/60">
-                                        {String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
-                                            ? `从 USDT 入场后，最终会更偏向 ${openPositionEffectiveRangeEditor?.dominant_token_symbol || '--'} 单边资产。`
-                                            : '当前区间覆盖现价，执行时会自动分配到两侧资产。'}
-                                    </div>
-                                    <div className="mt-3 flex flex-wrap gap-1.5">
-                                        <button
-                                            type="button"
-                                            onClick={() => shiftOpenPositionRangeToSingleSide('lower')}
-                                            className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
-                                        >
-                                            单边下限
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => shiftOpenPositionRangeToSingleSide('upper')}
-                                            className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
-                                        >
-                                            单边上限
-                                        </button>
-                                    </div>
-                                    <div className="mt-2 text-[10px] text-zinc-500 dark:text-white/45">
-                                        保留当前宽度，整体移动到现价下方或上方，也允许继续越过活跃格微调。
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                                <div className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold ${String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
-                                    ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200'
-                                    : 'border-sky-500/20 bg-sky-500/10 text-sky-700 dark:text-sky-200'
-                                    }`}>
-                                    {String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
-                                        ? `当前：${openPositionRangeShapeLabel || `单边 ${openPositionEffectiveRangeEditor?.dominant_token_symbol || '--'}`}`
-                                        : '当前：双边池'}
-                                </div>
-                                <div className="flex flex-wrap gap-1.5">
-                                    <button
-                                        type="button"
-                                        onClick={() => shiftOpenPositionRangeToSingleSide('lower')}
-                                        className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
-                                    >
-                                        单边下限
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => shiftOpenPositionRangeToSingleSide('upper')}
-                                        className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
-                                    >
-                                        单边上限
-                                    </button>
-                                </div>
-                            </div>
-
+                            {/*
                             <div className="hidden">
                                 <div className="flex items-center justify-between gap-3">
                                     <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">
@@ -5489,6 +5544,8 @@ export default function App() {
                                     </>
                                 )}
                             </div>
+                            */}
+                            </div>
 
                             <div className="rounded-2xl border border-fuchsia-500/20 bg-gradient-to-br from-fuchsia-500/10 via-fuchsia-500/5 to-transparent p-3 dark:border-fuchsia-400/20 dark:from-fuchsia-400/10 dark:via-fuchsia-400/5">
                                 <div className="flex items-center justify-between gap-3">
@@ -5516,31 +5573,14 @@ export default function App() {
                                             {openPositionRebalanceEnabled ? '\u5f00\u542f' : '\u5df2\u5173'}
                                         </span>
                                     </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setOpenPositionStopLossEnabled((v) => !v);
-                                            setOpenPositionError('');
-                                        }}
-                                        disabled={openPositionLoading}
-                                        className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left transition ${openPositionStopLossEnabled
-                                            ? 'border-pink-500/30 bg-pink-500/10 text-zinc-900 dark:text-white'
-                                            : 'border-zinc-200 bg-white/70 text-zinc-700 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
-                                            }`}
-                                    >
-                                        <span className="text-[12px] font-semibold">{'\u6b62\u635f'}</span>
-                                        <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${openPositionStopLossEnabled
-                                            ? 'bg-white/70 text-pink-700 dark:bg-white/10 dark:text-pink-200'
-                                            : 'bg-zinc-100 text-zinc-500 dark:bg-white/10 dark:text-white/45'
-                                            }`}>
-                                            {openPositionStopLossEnabled ? '\u5f00\u542f' : '\u5df2\u5173'}
-                                        </span>
-                                    </button>
                                 </div>
                                 <div className="mt-2 text-[10px] leading-4 text-zinc-600 dark:text-white/55">
+                                    <div className="mb-1">
+                                        上破区间：{openPositionOutOfRangeActions.above}；下破区间：{openPositionOutOfRangeActions.below}
+                                    </div>
                                     {openPositionIsSingleSidedSelection
-                                        ? `当前区间会开成单边池，已默认关闭分批加仓、再平衡和止损。${openPositionResolvedSelectionShape.dominantTokenSymbol ? ` 资金会更偏向 ${openPositionResolvedSelectionShape.dominantTokenSymbol}。` : ''}`
-                                        : '两个都关闭时只提醒，不会自动再平衡或止损。'}
+                                        ? `当前区间会开成单边池，首次进入区间前不会触发自动处理。进入过区间后，会按当前再平衡模式处理越界。${openPositionResolvedSelectionShape.dominantTokenSymbol ? ` 资金会更偏向 ${openPositionResolvedSelectionShape.dominantTokenSymbol}。` : ''}`
+                                        : '关闭再平衡后，超区间会在缓冲结束后自动撤仓并终止任务。'}
                                 </div>
                             </div>
 

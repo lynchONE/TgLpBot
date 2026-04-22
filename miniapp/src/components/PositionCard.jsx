@@ -674,7 +674,7 @@ export default function PositionCard({
                         {/* 再平衡开关 */}
                         {typeof onToggleRebalance === 'function' && (
                             <button type="button" onClick={toggleRebalanceSwitch} disabled={!canToggleRebalance || Boolean(actionPending)}
-                                title={taskRebalanceEnabled ? '关闭自动再平衡（超区间仅提醒）' : '开启自动再平衡'}
+                                title={taskRebalanceEnabled ? '关闭自动再平衡（超区间后撤仓终止）' : '开启自动再平衡'}
                                 className={`inline-flex h-7 items-center gap-1 rounded-xl border px-2.5 text-[10.5px] font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-40 ${taskRebalanceEnabled
                                     ? 'border-emerald-400/40 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/25 dark:hover:bg-emerald-500/25'
                                     : 'border-zinc-300/60 bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-white/5 dark:text-zinc-400 dark:border-white/10 dark:hover:bg-white/10'

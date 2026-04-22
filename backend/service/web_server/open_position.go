@@ -47,7 +47,6 @@ type openPositionRequest struct {
 	DCAPercentages     []float64 `json:"dca_percentages,omitempty"`
 	DCAIntervalSeconds *float64  `json:"dca_interval_seconds,omitempty"`
 	RebalanceEnabled   *bool     `json:"rebalance_enabled,omitempty"`
-	StopLossEnabled    *bool     `json:"stop_loss_enabled,omitempty"`
 }
 
 type openPositionResponse struct {
@@ -219,16 +218,12 @@ func resolveDCAPlan(cfg *models.GlobalConfig, req openPositionRequest) (bool, []
 	return true, normalized, intervalNorm, nil
 }
 
-func resolveOpenPositionExecutionFlags(req openPositionRequest) (bool, bool) {
+func resolveOpenPositionRebalanceEnabled(req openPositionRequest) bool {
 	rebalanceEnabled := true
-	stopLossEnabled := true
 	if req.RebalanceEnabled != nil {
 		rebalanceEnabled = *req.RebalanceEnabled
 	}
-	if req.StopLossEnabled != nil {
-		stopLossEnabled = *req.StopLossEnabled
-	}
-	return rebalanceEnabled, stopLossEnabled
+	return rebalanceEnabled
 }
 
 func isV4PoolId(text string) bool {
@@ -615,39 +610,39 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 	if !common.IsHexAddress(hooksAddr) {
 		hooksAddr = "0x0000000000000000000000000000000000000000"
 	}
-	rebalanceEnabled, stopLossEnabled := resolveOpenPositionExecutionFlags(req)
+	rebalanceEnabled := resolveOpenPositionRebalanceEnabled(req)
+	rangeActivationPending := currentTick < resolvedRange.TickLower || currentTick > resolvedRange.TickUpper
 
 	task := &models.StrategyTask{
-		UserID:               user.ID,
-		Chain:                chain,
-		PoolId:               poolAddress,
-		PoolVersion:          poolVersion,
-		Exchange:             poolInfo.Exchange,
-		WalletID:             selectedWallet.ID,
-		WalletAddress:        selectedWallet.Address,
-		Token0Symbol:         poolInfo.Token0Symbol,
-		Token1Symbol:         poolInfo.Token1Symbol,
-		Token0Address:        poolInfo.Token0,
-		Token1Address:        poolInfo.Token1,
-		HooksAddress:         hooksAddr,
-		Fee:                  poolInfo.Fee,
-		TickSpacing:          poolInfo.TickSpacing,
-		TickLower:            resolvedRange.TickLower,
-		TickUpper:            resolvedRange.TickUpper,
-		RangePercentage:      resolvedRange.RangePct,
-		RangeLowerPercentage: resolvedRange.TickLowerPct,
-		RangeUpperPercentage: resolvedRange.TickUpperPct,
-		AmountUSDT:           req.Amount,
-		CurrentLiquidity:     "0",
-		ReopenDelaySeconds:   strategy.NormalizeRebalanceTimeout(cfg.RebalanceTimeout),
-		SlippageTolerance:    taskSlippage,
-		AutoReinvest:         cfg.AutoReinvest,
-		AllowEntrySwap:       req.AllowEntrySwap,
-		StopLossEnabled:      stopLossEnabled,
-		StopLossDelaySeconds: cfg.StopLossDelaySeconds,
-		RebalanceEnabled:     rebalanceEnabled,
-		Status:               models.StrategyStatusRunning,
-		LastCheckTime:        time.Now(),
+		UserID:                 user.ID,
+		Chain:                  chain,
+		PoolId:                 poolAddress,
+		PoolVersion:            poolVersion,
+		Exchange:               poolInfo.Exchange,
+		WalletID:               selectedWallet.ID,
+		WalletAddress:          selectedWallet.Address,
+		Token0Symbol:           poolInfo.Token0Symbol,
+		Token1Symbol:           poolInfo.Token1Symbol,
+		Token0Address:          poolInfo.Token0,
+		Token1Address:          poolInfo.Token1,
+		HooksAddress:           hooksAddr,
+		Fee:                    poolInfo.Fee,
+		TickSpacing:            poolInfo.TickSpacing,
+		TickLower:              resolvedRange.TickLower,
+		TickUpper:              resolvedRange.TickUpper,
+		RangePercentage:        resolvedRange.RangePct,
+		RangeLowerPercentage:   resolvedRange.TickLowerPct,
+		RangeUpperPercentage:   resolvedRange.TickUpperPct,
+		AmountUSDT:             req.Amount,
+		CurrentLiquidity:       "0",
+		ReopenDelaySeconds:     strategy.NormalizeRebalanceTimeout(cfg.RebalanceTimeout),
+		SlippageTolerance:      taskSlippage,
+		AutoReinvest:           cfg.AutoReinvest,
+		AllowEntrySwap:         req.AllowEntrySwap,
+		RebalanceEnabled:       rebalanceEnabled,
+		RangeActivationPending: rangeActivationPending,
+		Status:                 models.StrategyStatusRunning,
+		LastCheckTime:          time.Now(),
 	}
 	positionShape, _ := classifyOpenPositionShape(task, currentTick, resolvedRange.TickLower, resolvedRange.TickUpper)
 	singleSidedSelection := strings.HasPrefix(positionShape, "single_")

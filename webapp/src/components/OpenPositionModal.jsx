@@ -110,6 +110,13 @@ function buildEntrySwapConfirmKey(preview, entrySwapSlippage) {
   ].join('|');
 }
 
+function getOutOfRangeActionSummary(rebalanceEnabled) {
+  return {
+    above: rebalanceEnabled ? '自动再平衡' : '缓冲后自动撤仓终止',
+    below: rebalanceEnabled ? '自动再平衡' : '缓冲后自动撤仓终止',
+  };
+}
+
 function resolveOpenPositionErrorPayload(error) {
   if (!error || typeof error !== 'object') return null;
   if (error.payload && typeof error.payload === 'object') return error.payload;
@@ -522,7 +529,6 @@ export default function OpenPositionModal({
   const [globalSlippageTolerance, setGlobalSlippageTolerance] = useState(NaN);
   const [dcaExpanded, setDcaExpanded] = useState(false);
   const [rebalanceEnabled, setRebalanceEnabled] = useState(true);
-  const [stopLossEnabled, setStopLossEnabled] = useState(true);
   const [walletBalancesHidden, setWalletBalancesHidden] = useState(false);
   const [prepareRangeEditor, setPrepareRangeEditor] = useState(null);
   const [previewRangeEditor, setPreviewRangeEditor] = useState(null);
@@ -549,6 +555,10 @@ export default function OpenPositionModal({
   const pair = pool?.trading_pair || '--';
   const addr = String(pool?.pool_address || '').trim();
   const version = String(pool?.protocol_version || pool?.factory_name || '').trim();
+  const outOfRangeActions = useMemo(
+    () => getOutOfRangeActionSummary(rebalanceEnabled),
+    [rebalanceEnabled],
+  );
   const activeChecks = useMemo(() => (
     Array.isArray(previewChecks) && previewChecks.length > 0
       ? previewChecks
@@ -764,7 +774,6 @@ export default function OpenPositionModal({
       walletId: resolvedWalletId || undefined,
       ackLiquidityRisk: riskAck,
       rebalanceEnabled,
-      stopLossEnabled,
     };
     if (requestRangeInputMode === 'percentage') {
       if (!Number.isFinite(rangeLowerValue) || rangeLowerValue <= 0 || rangeLowerValue >= 100) return null;
@@ -802,7 +811,6 @@ export default function OpenPositionModal({
     resolvedWalletId,
     riskAck,
     rebalanceEnabled,
-    stopLossEnabled,
   ]);
 
   const entrySwapConfirmKey = useMemo(
@@ -974,6 +982,7 @@ export default function OpenPositionModal({
   const handleRangeLowerChange = useCallback((value) => {
     clearErrors();
     suppressPreview();
+    setRangeInputMode('percentage');
     setRangeLower((prevLower) => {
       if (rangeUpperAuto || String(rangeUpper || '').trim() === '' || String(rangeUpper) === String(prevLower)) {
         setRangeUpper(value);
@@ -985,6 +994,7 @@ export default function OpenPositionModal({
   const handleRangeUpperChange = useCallback((value) => {
     clearErrors();
     suppressPreview();
+    setRangeInputMode('percentage');
     setRangeUpperAuto(false);
     setRangeUpper(value);
   }, [clearErrors, suppressPreview]);
@@ -1172,7 +1182,6 @@ export default function OpenPositionModal({
   useEffect(() => {
     setDcaExpanded(false);
     setRebalanceEnabled(true);
-    setStopLossEnabled(true);
   }, [addr]);
 
   const protocolKind = useMemo(() => {
@@ -1493,16 +1502,12 @@ export default function OpenPositionModal({
     if (!signature || autoSingleSideRangeRef.current === signature) return;
     autoSingleSideRangeRef.current = signature;
     if (dcaEnabled) setDcaEnabled(false);
-    if (rebalanceEnabled) setRebalanceEnabled(false);
-    if (stopLossEnabled) setStopLossEnabled(false);
   }, [
     isSingleSidedSelection,
     resolvedSelectionShape.shape,
     chartLowerTick,
     chartUpperTick,
     dcaEnabled,
-    rebalanceEnabled,
-    stopLossEnabled,
   ]);
   const submitDcaEnabled = effectiveDcaEnabled && !isSingleSidedSelection;
 
@@ -1640,7 +1645,6 @@ export default function OpenPositionModal({
       dcaPercentages: submitDcaEnabled ? dcaPercentages.map((v) => Number(v) || 0) : undefined,
       dcaIntervalSeconds: submitDcaEnabled ? Number(dcaInterval) : undefined,
       rebalanceEnabled,
-      stopLossEnabled,
     });
   }, [
     amountValue,
@@ -1673,7 +1677,6 @@ export default function OpenPositionModal({
     dcaSumValid,
     dcaInterval,
     rebalanceEnabled,
-    stopLossEnabled,
   ]);
 
 
@@ -1795,6 +1798,68 @@ export default function OpenPositionModal({
                 {smartRangesLoading ? (
                   <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>聪明钱区间加载中...</div>
                 ) : null}
+
+                <div style={{
+                  padding: 12,
+                  borderRadius: 16,
+                  border: rangeInputMode === 'percentage'
+                    ? '1px solid rgba(188, 255, 47, 0.28)'
+                    : '1px solid rgba(148, 163, 184, 0.18)',
+                  background: rangeInputMode === 'percentage'
+                    ? 'rgba(188, 255, 47, 0.06)'
+                    : 'rgba(15, 23, 42, 0.14)',
+                  display: 'grid',
+                  gap: 10,
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'grid', gap: 4 }}>
+                      <strong style={{ fontSize: 13, color: 'var(--text)' }}>自定义百分比</strong>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        不止固定档位。这里可以直接输入下限 / 上限百分比。
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="ghost-chip"
+                      style={{
+                        minWidth: 0,
+                        padding: '4px 10px',
+                        fontSize: 11,
+                        borderColor: rangeInputMode === 'percentage' ? 'rgba(188, 255, 47, 0.4)' : undefined,
+                        color: rangeInputMode === 'percentage' ? 'var(--text)' : undefined,
+                        background: rangeInputMode === 'percentage' ? 'rgba(188, 255, 47, 0.1)' : undefined,
+                      }}
+                      onClick={() => handleRangeInputModeChange('percentage')}
+                    >
+                      {rangeInputMode === 'percentage' ? '当前按百分比编辑' : '切换到百分比编辑'}
+                    </button>
+                  </div>
+                  <div className="modal-row" style={{ marginTop: 0 }}>
+                    <label className="modal-field">
+                      <span>下限 %</span>
+                      <input
+                        type="number"
+                        value={rangeLower}
+                        onChange={(e) => handleRangeLowerChange(e.target.value)}
+                        min="0.1"
+                        step="0.1"
+                      />
+                    </label>
+                    <label className="modal-field">
+                      <span>上限 %</span>
+                      <input
+                        type="number"
+                        value={rangeUpper}
+                        onChange={(e) => handleRangeUpperChange(e.target.value)}
+                        min="0.1"
+                        step="0.1"
+                      />
+                    </label>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    示例：`1 / 3` 表示下跌 1%、上涨 3%。如果后续拖动图表或格子，界面会自动切到 Tick 结果。
+                  </div>
+                </div>
 
                 <div style={{
                   padding: 12,
@@ -2701,25 +2766,14 @@ export default function OpenPositionModal({
                     {rebalanceEnabled ? '\u5f00\u542f' : '\u5df2\u5173'}
                   </span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    clearErrors();
-                    setStopLossEnabled((v) => !v);
-                  }}
-                  disabled={busy}
-                  className={`opm-toggle-btn is-stoploss${stopLossEnabled ? ' active' : ''}`}
-                >
-                  <span style={{ fontSize: 12, fontWeight: 600 }}>{'\u6b62\u635f'}</span>
-                  <span className="opm-toggle-pill">
-                    {stopLossEnabled ? '\u5f00\u542f' : '\u5df2\u5173'}
-                  </span>
-                </button>
               </div>
               <div className="opm-inline-hint">
+                <div style={{ marginBottom: 4, fontSize: 11 }}>
+                  上破区间：{outOfRangeActions.above}；下破区间：{outOfRangeActions.below}
+                </div>
                 {isSingleSidedSelection
-                  ? `当前区间会开成单边池，已默认关闭分批加仓、再平衡和止损。${resolvedSelectionShape.dominantTokenSymbol ? ` 资金会更偏向 ${resolvedSelectionShape.dominantTokenSymbol}。` : ''}`
-                  : '两个都关闭时仅提醒，不会自动再平衡或止损。'}
+                  ? `当前区间会开成单边池，首次进入区间前不会触发自动处理。进入过区间后，会按当前再平衡模式处理越界。${resolvedSelectionShape.dominantTokenSymbol ? ` 资金会更偏向 ${resolvedSelectionShape.dominantTokenSymbol}。` : ''}`
+                  : '关闭再平衡后，超区间会在缓冲结束后自动撤仓并终止任务。'}
               </div>
             </div>
 
