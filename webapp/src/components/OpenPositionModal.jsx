@@ -581,7 +581,7 @@ export default function OpenPositionModal({
     && amountValue < effectiveGlobalDcaMinSplitAmount;
   const effectiveDcaEnabled = dcaEnabled && !dcaAmountBelowThreshold;
   const globalSlippageHint = Number.isFinite(Number(globalSlippageTolerance)) && Number(globalSlippageTolerance) >= 0
-    ? `本次开仓采用全局配置滑点: ${formatPercent(globalSlippageTolerance)}`
+    ? `滑点: ${formatPercent(globalSlippageTolerance)}`
     : '留空则使用全局配置';
   const rangeLowerValue = Number(rangeLower);
   const rangeUpperValue = Number(rangeUpper);
