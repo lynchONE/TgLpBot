@@ -11405,22 +11405,43 @@ img.swap-token-glyph {
 }
 .opm-toggle-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
+  align-items: stretch;
 }
 .opm-toggle-btn {
   width: 100%;
-  padding: 10px 12px;
+  min-height: 100%;
+  padding: 10px;
   border-radius: 14px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(15, 23, 42, 0.16);
   color: inherit;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: space-between;
+  align-items: start;
+  justify-items: start;
+  gap: 8px;
   cursor: pointer;
   transition: border-color 120ms, background 120ms, transform 120ms;
+}
+.opm-toggle-copy {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+}
+.opm-toggle-title {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.opm-toggle-desc {
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--text-muted);
 }
 .opm-toggle-btn:hover {
   transform: translateY(-1px);
@@ -11447,6 +11468,7 @@ img.swap-token-glyph {
   font-weight: 700;
   color: var(--text-muted);
   flex-shrink: 0;
+  align-self: flex-start;
 }
 .opm-toggle-btn.active.is-rebalance .opm-toggle-pill {
   background: rgba(255, 255, 255, 0.14);
@@ -11532,9 +11554,11 @@ img.swap-token-glyph {
   .opm-grid {
     grid-template-columns: minmax(0, 1fr);
   }
-  .opm-compact-fields,
-  .opm-toggle-grid {
+  .opm-compact-fields {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .opm-toggle-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .wallet-picker-list,
   .opm-suggestion-strip {
@@ -11542,5 +11566,10 @@ img.swap-token-glyph {
   }
   .opm-range-strip {
     grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+@media (max-width: 560px) {
+  .opm-toggle-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
