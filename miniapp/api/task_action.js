@@ -34,7 +34,7 @@ export default async function handler(req, res) {
 
     // 从 query 参数或 body 中获取 action
     const action = String(req.query?.action || '').trim();
-    const validActions = ['delete', 'pause', 'stop', 'update_range', 'withdraw_liquidity', 'swap_dust', 'trigger_rebalance', 'toggle_rebalance', 'add_liquidity'];
+    const validActions = ['delete', 'pause', 'stop', 'update_range', 'withdraw_liquidity', 'swap_dust', 'trigger_rebalance', 'toggle_rebalance', 'update_mode', 'add_liquidity'];
 
     if (!validActions.includes(action)) {
         res.statusCode = 400;

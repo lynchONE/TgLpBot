@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Check, CheckCircle, Eye, EyeOff, X, XCircle } from 'lucide-react';
 import { fetchGlobalConfig, fetchPoolLiquidityDistribution, prepareOpenPosition, previewOpenPosition } from '../api';
 import LiquidityDistributionChart from './LiquidityDistributionChart.jsx';
+import { TASK_MODE_OPTIONS, getOutOfRangeActionSummary as getTaskModeActionSummary } from '../taskModes';
 
 const PRESET_RANGES = [1, 2, 3, 5, 10, 20];
 const RANGE_INPUT_OPTIONS = [
@@ -52,69 +53,6 @@ function formatUSDTValue(value) {
   if (num >= 1000) return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
   if (num >= 1) return num.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
   return num.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
-}
-
-function formatSharePercent(value) {
-  const num = Number(value);
-  if (!Number.isFinite(num)) return '--';
-  return formatPercent(num * 100);
-}
-
-function formatSizingModeLabel(mode) {
-  switch (String(mode || '').trim()) {
-    case 'conservative':
-      return '保守';
-    case 'neutral':
-      return '中性';
-    case 'aggressive':
-      return '激进';
-    default:
-      return '--';
-  }
-}
-
-function getSizingEfficiencyMeta(efficiency) {
-  switch (String(efficiency || '').trim()) {
-    case 'high':
-      return {
-        label: '高效率',
-        textColor: '#047857',
-        borderColor: 'rgba(16, 185, 129, 0.35)',
-        background: 'rgba(16, 185, 129, 0.12)',
-      };
-    case 'medium':
-      return {
-        label: '中效率',
-        textColor: '#b45309',
-        borderColor: 'rgba(245, 158, 11, 0.35)',
-        background: 'rgba(245, 158, 11, 0.12)',
-      };
-    default:
-      return {
-        label: '低效率',
-        textColor: '#b91c1c',
-        borderColor: 'rgba(239, 68, 68, 0.35)',
-        background: 'rgba(239, 68, 68, 0.12)',
-      };
-  }
-}
-
-function buildEntrySwapConfirmKey(preview, entrySwapSlippage) {
-  return [
-    preview?.required ? '1' : '0',
-    preview?.from_token_address || '',
-    preview?.to_token_address || '',
-    preview?.amount_in_raw || '',
-    preview?.expected_amount_out_raw || '',
-    String(entrySwapSlippage || '').trim(),
-  ].join('|');
-}
-
-function getOutOfRangeActionSummary(rebalanceEnabled) {
-  return {
-    above: rebalanceEnabled ? '自动再平衡' : '缓冲后自动撤仓终止',
-    below: rebalanceEnabled ? '自动再平衡' : '缓冲后自动撤仓终止',
-  };
 }
 
 function resolveOpenPositionErrorPayload(error) {
@@ -506,7 +444,6 @@ export default function OpenPositionModal({
   const [slippage, setSlippage] = useState('');
   const [entrySwapSlippage, setEntrySwapSlippage] = useState('');
   const [entrySwapSlippageDirty, setEntrySwapSlippageDirty] = useState(false);
-  const [entrySwapConfirmed, setEntrySwapConfirmed] = useState(false);
   const [entrySwapPreview, setEntrySwapPreview] = useState(null);
   const [entrySwapPreviewLoading, setEntrySwapPreviewLoading] = useState(false);
   const [previewPending, setPreviewPending] = useState(false);
@@ -518,7 +455,6 @@ export default function OpenPositionModal({
   const [privateZapInfo, setPrivateZapInfo] = useState(null);
   const [preparePrivateZapInfo, setPreparePrivateZapInfo] = useState(null);
   const [previewChecks, setPreviewChecks] = useState([]);
-  const [sizingAdvice, setSizingAdvice] = useState(null);
   const [error, setError] = useState('');
   const [riskAck, setRiskAck] = useState(false);
   const [dcaEnabled, setDcaEnabled] = useState(false);
@@ -528,7 +464,7 @@ export default function OpenPositionModal({
   const [globalDcaMinSplitAmount, setGlobalDcaMinSplitAmount] = useState(0);
   const [globalSlippageTolerance, setGlobalSlippageTolerance] = useState(NaN);
   const [dcaExpanded, setDcaExpanded] = useState(false);
-  const [rebalanceEnabled, setRebalanceEnabled] = useState(true);
+  const [taskMode, setTaskMode] = useState('exit_all');
   const [walletBalancesHidden, setWalletBalancesHidden] = useState(false);
   const [prepareRangeEditor, setPrepareRangeEditor] = useState(null);
   const [previewRangeEditor, setPreviewRangeEditor] = useState(null);
@@ -556,8 +492,8 @@ export default function OpenPositionModal({
   const addr = String(pool?.pool_address || '').trim();
   const version = String(pool?.protocol_version || pool?.factory_name || '').trim();
   const outOfRangeActions = useMemo(
-    () => getOutOfRangeActionSummary(rebalanceEnabled),
-    [rebalanceEnabled],
+    () => getTaskModeActionSummary(taskMode),
+    [taskMode],
   );
   const activeChecks = useMemo(() => (
     Array.isArray(previewChecks) && previewChecks.length > 0
@@ -654,9 +590,6 @@ export default function OpenPositionModal({
   const submitRiskMessage = String(submitRisk?.message || '').trim();
   const visibleError = error || entrySwapPreviewError || blockingSafetyMessage || submitRiskMessage || String(submitError || '').trim();
   const showPrivateZapProtectionHint = Boolean(privateZapInfo?.show_protection_hint || preparePrivateZapInfo?.show_protection_hint);
-  const recommendedPositions = Array.isArray(sizingAdvice?.recommended_positions) ? sizingAdvice.recommended_positions : [];
-  const sizingWarnings = Array.isArray(sizingAdvice?.warnings) ? sizingAdvice.warnings : [];
-  const sizingInputs = sizingAdvice?.inputs && typeof sizingAdvice.inputs === 'object' ? sizingAdvice.inputs : null;
   const rangeEditor = previewRangeEditor || prepareRangeEditor;
   const gridBins = useMemo(() => buildGridBins(rangeEditor), [rangeEditor]);
   const defaultFocusedRange = useMemo(() => buildDefaultFocusedTickRange(rangeEditor), [rangeEditor]);
@@ -773,7 +706,7 @@ export default function OpenPositionModal({
       allowEntrySwap: true,
       walletId: resolvedWalletId || undefined,
       ackLiquidityRisk: riskAck,
-      rebalanceEnabled,
+      taskMode,
     };
     if (requestRangeInputMode === 'percentage') {
       if (!Number.isFinite(rangeLowerValue) || rangeLowerValue <= 0 || rangeLowerValue >= 100) return null;
@@ -810,13 +743,8 @@ export default function OpenPositionModal({
     showWalletPicker,
     resolvedWalletId,
     riskAck,
-    rebalanceEnabled,
+    taskMode,
   ]);
-
-  const entrySwapConfirmKey = useMemo(
-    () => buildEntrySwapConfirmKey(entrySwapPreview, entrySwapSlippage),
-    [entrySwapPreview, entrySwapSlippage],
-  );
 
   useEffect(() => {
     defaultRangeSeededRef.current = false;
@@ -829,10 +757,8 @@ export default function OpenPositionModal({
     setPreviewSuspended(false);
     setPrivateZapInfo(null);
     setPreparePrivateZapInfo(null);
-    setSizingAdvice(null);
     setEntrySwapSlippage('');
     setEntrySwapSlippageDirty(false);
-    setEntrySwapConfirmed(false);
     setPrepareRangeEditor(null);
     setPreviewRangeEditor(null);
     setRangeLower('');
@@ -901,10 +827,6 @@ export default function OpenPositionModal({
   }, [entrySwapPreview, entrySwapSlippageDirty]);
 
   useEffect(() => {
-    setEntrySwapConfirmed(false);
-  }, [entrySwapConfirmKey]);
-
-  useEffect(() => {
     if (previewSuspended) {
       setEntrySwapPreviewLoading(false);
       setPreviewPending(false);
@@ -916,7 +838,6 @@ export default function OpenPositionModal({
       setPreviewPending(false);
       setEntrySwapPreviewError('');
       setPrivateZapInfo(null);
-      setSizingAdvice(null);
       setPreviewChecks([]);
       setPreviewRangeEditor(null);
       return undefined;
@@ -938,7 +859,6 @@ export default function OpenPositionModal({
         setPreviewChecks(Array.isArray(resp?.checks) ? resp.checks : []);
         setEntrySwapPreview(resp?.entry_swap || { required: false });
         setPrivateZapInfo(resp?.private_zap && typeof resp.private_zap === 'object' ? resp.private_zap : null);
-        setSizingAdvice(resp?.sizing_advice && typeof resp.sizing_advice === 'object' ? resp.sizing_advice : null);
         setPreviewRangeEditor(resp?.range_editor && typeof resp.range_editor === 'object' ? resp.range_editor : null);
       } catch (e) {
         if (!active || controller.signal.aborted) return;
@@ -949,7 +869,6 @@ export default function OpenPositionModal({
           : null;
         setEntrySwapPreview(entrySwapInfo);
         setPrivateZapInfo(payload?.private_zap && typeof payload.private_zap === 'object' ? payload.private_zap : null);
-        setSizingAdvice(payload?.sizing_advice && typeof payload.sizing_advice === 'object' ? payload.sizing_advice : null);
         setPreviewChecks(failChecks);
         setPreviewRangeEditor(payload?.range_editor && typeof payload.range_editor === 'object' ? payload.range_editor : null);
         setEntrySwapPreviewError(failChecks.length > 0 ? '' : String(e?.message || e || '获取前置兑换预览失败'));
@@ -1181,7 +1100,7 @@ export default function OpenPositionModal({
 
   useEffect(() => {
     setDcaExpanded(false);
-    setRebalanceEnabled(true);
+    setTaskMode('exit_all');
   }, [addr]);
 
   const protocolKind = useMemo(() => {
@@ -1592,10 +1511,6 @@ export default function OpenPositionModal({
       setError('前置兑换预览尚未就绪，请稍后再试。');
       return;
     }
-    if (entrySwapPreview?.required && !entrySwapConfirmed) {
-      setError('请先确认前置兑换，再继续开仓。');
-      return;
-    }
 
     if (submitDcaEnabled) {
       if (dcaPercentages.length < 2 || dcaPercentages.length > 5) {
@@ -1638,13 +1553,13 @@ export default function OpenPositionModal({
       slippageTolerance: taskSlippage.value,
       entrySwapSlippageTolerance: entrySwapPreview?.required ? entrySwapSlippageValue.value : undefined,
       allowEntrySwap: true,
-      confirmEntrySwap: Boolean(entrySwapPreview?.required && entrySwapConfirmed),
+      confirmEntrySwap: Boolean(entrySwapPreview?.required),
       walletId: resolvedWalletId || undefined,
       ackLiquidityRisk: riskAck,
       dcaEnabled: submitDcaEnabled,
       dcaPercentages: submitDcaEnabled ? dcaPercentages.map((v) => Number(v) || 0) : undefined,
       dcaIntervalSeconds: submitDcaEnabled ? Number(dcaInterval) : undefined,
-      rebalanceEnabled,
+      taskMode,
     });
   }, [
     amountValue,
@@ -1664,7 +1579,6 @@ export default function OpenPositionModal({
     previewPending,
     previewSuspended,
     entrySwapPreview,
-    entrySwapConfirmed,
     onSubmit,
     addr,
     version,
@@ -1676,7 +1590,7 @@ export default function OpenPositionModal({
     dcaSum,
     dcaSumValid,
     dcaInterval,
-    rebalanceEnabled,
+    taskMode,
   ]);
 
 
@@ -2637,52 +2551,6 @@ export default function OpenPositionModal({
                 ) : null}
               </div>
 
-              {recommendedPositions.length > 0 ? (
-                <div
-                  className="opm-suggestion-strip"
-                  style={{ gridTemplateColumns: `repeat(${Math.min(recommendedPositions.length, 3) || 1}, minmax(0, 1fr))` }}
-                >
-                  {recommendedPositions.map((item, index) => {
-                    const tone = item?.mode === 'conservative'
-                      ? { color: '#10b981', border: 'rgba(16, 185, 129, 0.3)', bg: 'rgba(16, 185, 129, 0.1)', icon: '🛡️' }
-                      : item?.mode === 'neutral'
-                        ? { color: '#f59e0b', border: 'rgba(245, 158, 11, 0.3)', bg: 'rgba(245, 158, 11, 0.1)', icon: '⚖️' }
-                        : { color: '#ef4444', border: 'rgba(239, 68, 68, 0.3)', bg: 'rgba(239, 68, 68, 0.1)', icon: '🚀' };
-                    return (
-                      <div
-                        key={`${item?.mode || 'mode'}-${index}`}
-                        className="opm-suggestion-chip"
-                        onClick={() => {
-                          clearErrors();
-                          setAmount(String(item?.liquidity_to_add || ''));
-                        }}
-                        style={{
-                          borderRadius: 14,
-                          border: `1px solid ${tone.border}`,
-                          background: tone.bg,
-                          padding: '7px 10px',
-                          cursor: 'pointer',
-                          transition: 'all 0.15s ease',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 6,
-                        }}
-                      >
-                        <span className="opm-suggestion-chip-icon" style={{ color: tone.color }}>{tone.icon}</span>
-                        <span className="opm-suggestion-chip-mode" style={{ color: tone.color }}>
-                          {formatSizingModeLabel(item?.mode)}
-                        </span>
-                        <span className="opm-suggestion-chip-value">
-                          {formatUsdCompact(item?.liquidity_to_add)}
-                        </span>
-                        <span className="opm-suggestion-chip-share">
-                          {formatSharePercent(item?.expected_share)}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : null}
             </div>
 
             {(entrySwapPreviewLoading || entrySwapPreview?.required) ? (
@@ -2721,19 +2589,6 @@ export default function OpenPositionModal({
                         placeholder="仅作用于本次前置兑换"
                       />
                     </label>
-
-                    <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 10, cursor: 'pointer' }}>
-                      <input
-                        type="checkbox"
-                        checked={entrySwapConfirmed}
-                        onChange={(e) => {
-                          clearErrors();
-                          setEntrySwapConfirmed(e.target.checked);
-                        }}
-                        disabled={busy || previewPending || previewSuspended}
-                      />
-                      <span>我已确认本次前置兑换，先执行兑换，再继续后续开仓。</span>
-                    </label>
                   </>
                 ) : null}
               </div>
@@ -2752,20 +2607,26 @@ export default function OpenPositionModal({
                 <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{'\u53ef\u4ee5\u5355\u72ec\u5173\u95ed'}</span>
               </div>
               <div className="opm-toggle-grid">
-                <button
-                  type="button"
-                  onClick={() => {
-                    clearErrors();
-                    setRebalanceEnabled((v) => !v);
-                  }}
-                  disabled={busy}
-                  className={`opm-toggle-btn is-rebalance${rebalanceEnabled ? ' active' : ''}`}
-                >
-                  <span style={{ fontSize: 12, fontWeight: 600 }}>{'\u518d\u5e73\u8861'}</span>
-                  <span className="opm-toggle-pill">
-                    {rebalanceEnabled ? '\u5f00\u542f' : '\u5df2\u5173'}
-                  </span>
-                </button>
+                {TASK_MODE_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => {
+                      clearErrors();
+                      setTaskMode(option.value);
+                    }}
+                    disabled={busy}
+                    className={`opm-toggle-btn is-rebalance${taskMode === option.value ? ' active' : ''}`}
+                  >
+                    <span style={{ display: 'grid', gap: 4, textAlign: 'left' }}>
+                      <span style={{ fontSize: 12, fontWeight: 600 }}>{option.label}</span>
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{option.description}</span>
+                    </span>
+                    <span className="opm-toggle-pill">
+                      {taskMode === option.value ? '当前' : '切换'}
+                    </span>
+                  </button>
+                ))}
               </div>
               <div className="opm-inline-hint">
                 <div style={{ marginBottom: 4, fontSize: 11 }}>

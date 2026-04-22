@@ -139,12 +139,29 @@ func autoMigrate() error {
 	ensureColumn("global_configs", "open_position_risk_cap_usd", "DECIMAL(20,4) NOT NULL DEFAULT 0 AFTER open_position_target_share_max")
 	ensureColumn("global_configs", "open_position_risk_cap_ratio", "DECIMAL(6,4) NOT NULL DEFAULT 0 AFTER open_position_risk_cap_usd")
 	ensureColumn("global_configs", "dca_min_split_amount_usdt", "DECIMAL(20,4) NOT NULL DEFAULT 0 AFTER dca_interval_seconds")
+	ensureColumn("strategy_tasks", "out_of_range_mode", "VARCHAR(40) NOT NULL DEFAULT 'exit_all' AFTER rebalance_enabled")
 	ensureColumn("strategy_tasks", "dca_retry_count", "INT NOT NULL DEFAULT 0 AFTER dca_executed_count")
 	ensureColumn("strategy_tasks", "range_activation_pending", "TINYINT(1) NOT NULL DEFAULT 0 AFTER out_of_range_since")
 	ensureColumn("system_configs", "open_position_target_share_min", "DECIMAL(6,4) NOT NULL DEFAULT 0 AFTER zap_min_pool_liquidity_usd")
 	ensureColumn("system_configs", "open_position_target_share_max", "DECIMAL(6,4) NOT NULL DEFAULT 0 AFTER open_position_target_share_min")
 	ensureColumn("system_configs", "open_position_risk_cap_usd", "DECIMAL(20,4) NOT NULL DEFAULT 0 AFTER open_position_target_share_max")
 	ensureColumn("system_configs", "open_position_risk_cap_ratio", "DECIMAL(6,4) NOT NULL DEFAULT 0 AFTER open_position_risk_cap_usd")
+	DB.Exec(`
+		UPDATE strategy_tasks
+		SET out_of_range_mode = CASE
+			WHEN rebalance_enabled = 1 THEN 'rebalance_all'
+			ELSE 'exit_all'
+		END
+		WHERE COALESCE(TRIM(out_of_range_mode), '') = ''
+	`)
+	DB.Exec(`
+		UPDATE strategy_tasks
+		SET rebalance_enabled = CASE
+			WHEN out_of_range_mode IN ('rebalance_all', 'rebalance_up_exit_down') THEN 1
+			ELSE 0
+		END
+		WHERE COALESCE(TRIM(out_of_range_mode), '') <> ''
+	`)
 	normalizeTradeRecordProfitFormula()
 
 	return nil

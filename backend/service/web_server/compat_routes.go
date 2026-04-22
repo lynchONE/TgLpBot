@@ -74,6 +74,8 @@ func (s *Server) handleTaskAction(w http.ResponseWriter, r *http.Request) {
 		s.handleTaskTriggerRebalance(w, r)
 	case "toggle_rebalance":
 		s.handleTaskToggleRebalance(w, r)
+	case "update_mode":
+		s.handleTaskUpdateMode(w, r)
 	case "add_liquidity":
 		s.handleTaskAddLiquidity(w, r)
 	default:

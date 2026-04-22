@@ -1,6 +1,7 @@
 package models
 
 import (
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -16,6 +17,15 @@ const (
 	StrategyStatusStopping StrategyStatus = "stopping"
 	StrategyStatusStopped  StrategyStatus = "stopped"
 	StrategyStatusError    StrategyStatus = "error"
+)
+
+type StrategyOutOfRangeMode string
+
+const (
+	StrategyOutOfRangeModeRebalanceAll        StrategyOutOfRangeMode = "rebalance_all"
+	StrategyOutOfRangeModeExitAll             StrategyOutOfRangeMode = "exit_all"
+	StrategyOutOfRangeModeRebalanceUpExitDown StrategyOutOfRangeMode = "rebalance_up_exit_down"
+	StrategyTaskModePause                     string                 = "pause"
 )
 
 // StrategyTask represents a monitoring task for a V4 pool position
@@ -76,6 +86,7 @@ type StrategyTask struct {
 	StopLossEnabled      bool    `gorm:"default:false" json:"stop_loss_enabled"`
 	StopLossDelaySeconds int     `gorm:"default:0" json:"stop_loss_delay_seconds"` // Out-of-range seconds before stop-loss triggers (0 = immediately)
 	RebalanceEnabled     bool    `gorm:"default:false" json:"rebalance_enabled"`   // When false, out-of-range positions exit to USDT and stop after the same delay
+	OutOfRangeMode       string  `gorm:"size:40;not null;default:'exit_all'" json:"out_of_range_mode"`
 
 	// State
 	Paused                 bool           `gorm:"default:false;index" json:"paused"`
@@ -129,6 +140,78 @@ type StrategyTask struct {
 
 func (StrategyTask) TableName() string {
 	return "strategy_tasks"
+}
+
+func NormalizeStrategyOutOfRangeMode(value string) StrategyOutOfRangeMode {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(StrategyOutOfRangeModeRebalanceAll):
+		return StrategyOutOfRangeModeRebalanceAll
+	case string(StrategyOutOfRangeModeExitAll):
+		return StrategyOutOfRangeModeExitAll
+	case string(StrategyOutOfRangeModeRebalanceUpExitDown):
+		return StrategyOutOfRangeModeRebalanceUpExitDown
+	default:
+		return ""
+	}
+}
+
+func NormalizeStrategyTaskMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(StrategyOutOfRangeModeRebalanceAll):
+		return string(StrategyOutOfRangeModeRebalanceAll)
+	case string(StrategyOutOfRangeModeExitAll):
+		return string(StrategyOutOfRangeModeExitAll)
+	case string(StrategyOutOfRangeModeRebalanceUpExitDown):
+		return string(StrategyOutOfRangeModeRebalanceUpExitDown)
+	case StrategyTaskModePause:
+		return StrategyTaskModePause
+	default:
+		return ""
+	}
+}
+
+func RebalanceEnabledForOutOfRangeMode(mode StrategyOutOfRangeMode) bool {
+	switch mode {
+	case StrategyOutOfRangeModeRebalanceAll, StrategyOutOfRangeModeRebalanceUpExitDown:
+		return true
+	default:
+		return false
+	}
+}
+
+func ResolveStrategyOutOfRangeMode(task *StrategyTask) StrategyOutOfRangeMode {
+	if task == nil {
+		return ""
+	}
+	if mode := NormalizeStrategyOutOfRangeMode(task.OutOfRangeMode); mode != "" {
+		return mode
+	}
+	if task.RebalanceEnabled {
+		return StrategyOutOfRangeModeRebalanceAll
+	}
+	return StrategyOutOfRangeModeExitAll
+}
+
+func EffectiveStrategyTaskMode(task *StrategyTask) string {
+	if task == nil {
+		return ""
+	}
+	if task.Paused {
+		return StrategyTaskModePause
+	}
+	return string(ResolveStrategyOutOfRangeMode(task))
+}
+
+func (t *StrategyTask) SyncOutOfRangeModeFields() {
+	if t == nil {
+		return
+	}
+	mode := ResolveStrategyOutOfRangeMode(t)
+	if mode == "" {
+		mode = StrategyOutOfRangeModeExitAll
+	}
+	t.OutOfRangeMode = string(mode)
+	t.RebalanceEnabled = RebalanceEnabledForOutOfRangeMode(mode)
 }
 
 // CreateOverrideUpdates returns the zero/false values that must be persisted
@@ -186,4 +269,9 @@ func (t *StrategyTask) ApplyCreateOverrides(tx *gorm.DB) error {
 
 func (t *StrategyTask) AfterCreate(tx *gorm.DB) error {
 	return t.ApplyCreateOverrides(tx)
+}
+
+func (t *StrategyTask) BeforeSave(tx *gorm.DB) error {
+	t.SyncOutOfRangeModeFields()
+	return nil
 }

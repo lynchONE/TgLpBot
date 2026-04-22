@@ -210,6 +210,7 @@ type RealtimePosition struct {
 	TaskID               uint       `json:"task_id,omitempty"`
 	TaskPaused           bool       `json:"task_paused"`
 	TaskRebalanceEnabled bool       `json:"task_rebalance_enabled"`
+	TaskMode             string     `json:"task_mode,omitempty"`
 	TaskAmountUSDT       float64    `json:"task_amount_usdt,omitempty"`
 	StatusLabel          string     `json:"status_label"`
 	InRange              bool       `json:"in_range"`
@@ -1234,6 +1235,7 @@ func (s *RealtimePositionsService) buildV3Position(
 	taskID := uint(0)
 	taskPaused := false
 	taskRebalanceEnabled := true
+	taskMode := ""
 	initialCostUSD := 0.0
 	netInvestedUSD := 0.0
 	currentValueUSD := 0.0
@@ -1244,7 +1246,8 @@ func (s *RealtimePositionsService) buildV3Position(
 	if task != nil {
 		taskID = task.ID
 		taskPaused = task.Paused
-		taskRebalanceEnabled = task.RebalanceEnabled
+		taskRebalanceEnabled = models.RebalanceEnabledForOutOfRangeMode(models.ResolveStrategyOutOfRangeMode(task))
+		taskMode = models.EffectiveStrategyTaskMode(task)
 		pnlMetrics := s.getTaskPnLViewMetrics(task)
 		initialCostUSD = pnlMetrics.initialCost
 		netInvestedUSD = pnlMetrics.netInvested
@@ -1294,6 +1297,7 @@ func (s *RealtimePositionsService) buildV3Position(
 		TaskID:               taskID,
 		TaskPaused:           taskPaused,
 		TaskRebalanceEnabled: taskRebalanceEnabled,
+		TaskMode:             taskMode,
 		TaskAmountUSDT: func() float64 {
 			if task == nil || task.AmountUSDT <= 0 {
 				return 0
@@ -1638,7 +1642,8 @@ func (s *RealtimePositionsService) buildV4Position(walletAddr common.Address, to
 		}(),
 		TaskID:               task.ID,
 		TaskPaused:           task.Paused,
-		TaskRebalanceEnabled: task.RebalanceEnabled,
+		TaskRebalanceEnabled: models.RebalanceEnabledForOutOfRangeMode(models.ResolveStrategyOutOfRangeMode(task)),
+		TaskMode:             models.EffectiveStrategyTaskMode(task),
 		TaskAmountUSDT:       task.AmountUSDT,
 		StatusLabel:          statusLabelFromTask(task),
 		InRange:              inRange,
@@ -1881,7 +1886,8 @@ func (s *RealtimePositionsService) buildPendingTaskPosition(walletAddr common.Ad
 		}(),
 		TaskID:               task.ID,
 		TaskPaused:           task.Paused,
-		TaskRebalanceEnabled: task.RebalanceEnabled,
+		TaskRebalanceEnabled: models.RebalanceEnabledForOutOfRangeMode(models.ResolveStrategyOutOfRangeMode(task)),
+		TaskMode:             models.EffectiveStrategyTaskMode(task),
 		TaskAmountUSDT:       task.AmountUSDT,
 		StatusLabel:          statusLabelFromTask(task),
 		InRange:              inRange,

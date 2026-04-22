@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useMemo, useRef, useState, useCallback } from 'react';
+﻿import React, { Suspense, lazy, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import HotPoolCard from './components/HotPoolCard.jsx';
 import KlineModal from './components/KlineModal.jsx';
 import PositionCard from './components/PositionCard.jsx';
@@ -32,7 +32,7 @@ import {
     withdrawLiquidity,
     swapDust,
     triggerRebalance,
-    toggleRebalance,
+    updateTaskMode,
     addLiquidity,
 } from './lib/api';
 import { fetchSMPoolStats } from './lib/smartMoneyApi';
@@ -43,6 +43,7 @@ import {
     getBrandTheme,
     normalizeAccentTheme,
 } from './lib/brand';
+import { TASK_MODE_OPTIONS, getTaskModeMeta, getOutOfRangeActionSummary as getTaskModeActionSummary, normalizeTaskMode } from './lib/taskModes';
 
 const LazyAdminPage = lazy(() => import('./components/AdminPage.jsx'));
 const LazyAssetManagementPage = lazy(() => import('./components/AssetManagementPage.jsx'));
@@ -114,12 +115,12 @@ function localizeWebAppError(message, allowEmptyInitData = false) {
     if (!text) return '';
     if (text.includes('missing initData')) {
         if (allowEmptyInitData) {
-            return '缺少 Telegram initData。本地浏览器调试时，请在 backend/.env 中设置 TELEGRAM_WEBAPP_ALLOW_EMPTY_INITDATA=1，并重启后端。';
+            return '当前缺少 Telegram initData。若这是本地调试，可在 backend/.env 中设置 TELEGRAM_WEBAPP_ALLOW_EMPTY_INITDATA=1。';
         }
-        return '缺少 Telegram initData，请从 Telegram 内打开 Mini App。';
+        return '当前缺少 Telegram initData，请从 Telegram Mini App 内打开。';
     }
     if (text.includes('invalid initData')) {
-        return 'Telegram initData 校验失败，请检查 TELEGRAM_BOT_TOKEN 是否正确。';
+        return 'Telegram initData 校验失败，请检查 backend 侧 TELEGRAM_BOT_TOKEN 配置。';
     }
     return text;
 }
@@ -157,23 +158,24 @@ const STORAGE_OPEN_POSITION_HIDE_WALLET_BALANCES = 'tglp_open_position_hide_wall
 const STORAGE_WEB_WORKBENCH_WIDGETS = 'tglp_web_workbench_widgets_v1';
 
 const WEB_WORKBENCH_WIDGETS = [
-    { key: 'hot_pools', label: '热门池子' },
+    { key: 'hot_pools', label: '热门池' },
     { key: 'gmgn_kline', label: 'K线' },
     { key: 'positions', label: '仓位' },
-]; const DEFAULT_WEB_WORKBENCH_WIDGETS = WEB_WORKBENCH_WIDGETS.map((item) => item.key);
+];
+const DEFAULT_WEB_WORKBENCH_WIDGETS = WEB_WORKBENCH_WIDGETS.map((item) => item.key);
 const OPEN_POSITION_RANGE_OPTIONS_UNUSED = [
-    { key: 'percentage', label: '快捷%' },
+    { key: 'percentage', label: '百分比' },
 ];
 const OPEN_POSITION_RANGE_OPTIONS = [
     { key: 'percentage', label: '百分比区间' },
-    { key: 'grid', label: '流动性格子' },
+    { key: 'grid', label: 'Tick/价格' },
 ];
 const OPEN_POSITION_GRID_RADIUS = 8;
 const OPEN_POSITION_DEFAULT_GRID_OFFSET = 3;
 const OPEN_POSITION_MANUAL_OPTIONS = [
-    { key: 'percentage', label: '快捷%' },
-    { key: 'grid', label: 'Tick格子' },
-    { key: 'tick', label: '直接Tick' },
+    { key: 'percentage', label: '百分比' },
+    { key: 'grid', label: 'Tick网格' },
+    { key: 'tick', label: '直接 Tick' },
     { key: 'price', label: '价格区间' },
 ];
 
@@ -312,14 +314,14 @@ function buildAddLiquidityPresetOptions(referenceAmount) {
     };
 
     if (referenceAmount > 0) {
-        pushPreset(referenceAmount * 0.25, '25% 绛栫暐');
-        pushPreset(referenceAmount * 0.5, '50% 绛栫暐');
-        pushPreset(referenceAmount, '1x 绛栫暐');
+        pushPreset(referenceAmount * 0.25, '25% 参考仓位');
+        pushPreset(referenceAmount * 0.5, '50% 参考仓位');
+        pushPreset(referenceAmount, '1x 参考仓位');
     }
 
-    pushPreset(50, '甯哥敤');
-    pushPreset(100, '甯哥敤');
-    pushPreset(200, '甯哥敤');
+    pushPreset(50, '固定金额');
+    pushPreset(100, '固定金额');
+    pushPreset(200, '固定金额');
 
     return presets.slice(0, 4);
 }
@@ -419,7 +421,7 @@ function parseOptionalPercent(raw) {
 
 function formatDCAIntervalHint(seconds) {
     const n = Number(seconds);
-    if (!Number.isFinite(n) || n <= 0) return '立即';
+    if (!Number.isFinite(n) || n <= 0) return '缂佹柨顑呭畵?;'
     if (n < 1) return `${Math.round(n * 1000)}ms`;
     if (Number.isInteger(n)) return `${n}s`;
     return `${n.toFixed(1)}s`;
@@ -713,11 +715,11 @@ function formatUSDTValue(value) {
 function formatSizingModeLabel(mode) {
     switch (String(mode || '').trim()) {
         case 'conservative':
-            return '保守';
+            return '濞ｅ洦绻傞悾?';
         case 'neutral':
-            return '中性';
+            return '濞戞搩鍘介埀?';
         case 'aggressive':
-            return '激进';
+            return '婵犵鍋撻弶?';
         default:
             return '--';
     }
@@ -727,17 +729,17 @@ function getSizingEfficiencyMeta(efficiency) {
     switch (String(efficiency || '').trim()) {
         case 'high':
             return {
-                label: '高效率',
+                label: '濡ゅ倹蓱閺呫儵鎮?',
                 chipClass: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200',
             };
         case 'medium':
             return {
-                label: '中效率',
+                label: '濞戞搩鍘介弲銉╂偝?',
                 chipClass: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200',
             };
         default:
             return {
-                label: '低效率',
+                label: '濞达絽瀛╅弲銉╂偝?',
                 chipClass: 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-200',
             };
     }
@@ -807,8 +809,8 @@ function buildEntrySwapConfirmKey(preview, entrySwapSlippage) {
 
 function getOutOfRangeActionSummary(rebalanceEnabled) {
     return {
-        above: rebalanceEnabled ? '自动再平衡' : '缓冲后自动撤仓终止',
-        below: rebalanceEnabled ? '自动再平衡' : '缓冲后自动撤仓终止',
+        above: rebalanceEnabled ? '自动再平衡' : '自动撤仓并结束',
+        below: rebalanceEnabled ? '自动再平衡' : '自动撤仓并结束',
     };
 }
 
@@ -840,17 +842,17 @@ function extractOpenPositionErrorChecks(error, fallbackKey = 'submit_safety') {
     if (!isOpenPositionSafetyError(payload)) {
         return [];
     }
-    const detail = String(error?.message || payload?.message || '').trim() || '安全检查未通过';
+    const detail = String(error?.message || payload?.message || '').trim() || '校验失败，请稍后重试。';
     return [{
         key: fallbackKey,
         status: 'fail',
-        label: '安全检查',
+        label: '安全校验',
         detail,
     }];
 }
 
 function formatUserLabel(user) {
-    if (!user) return '未知用户';
+    if (!user) return '闁哄牜浜為悡锟犳偨閵婏箑鐓?;'
     const username = String(user.username || '').trim();
     if (username) return `@${username}`;
     const first = String(user.first_name || '').trim();
@@ -860,8 +862,8 @@ function formatUserLabel(user) {
     const telegramId = String(user.telegram_id || '').trim();
     if (telegramId) return `TG ${telegramId}`;
     const userId = String(user.user_id || '').trim();
-    if (userId) return `用户 ${userId}`;
-    return '未知用户';
+    if (userId) return `闁活潿鍔嶉崺?${userId}`;
+    return '闁哄牜浜為悡锟犳偨閵婏箑鐓?';
 }
 
 function formatOnOff(value) {
@@ -891,13 +893,13 @@ const Icon = ({ path: IconCmp, className = '' }) => {
 
 function buildTopNavItems({ isAdmin }) {
     const items = [
-        { key: 'hot_pools', label: '热门池子' },
+        { key: 'hot_pools', label: '热门池' },
         { key: 'positions', label: '仓位' },
-        { key: 'assets', label: '我的' },
+        { key: 'assets', label: '资产' },
         { key: 'smart_money', label: '聪明钱' },
     ];
     if (isAdmin) {
-        items.push({ key: 'admin_page', label: '管理员' });
+        items.push({ key: 'admin_page', label: '管理页' });
     }
     return items;
 }
@@ -908,7 +910,7 @@ const HOT_POOL_SORT_TABS = [
 ];
 export default function App() {
     const initData = useInitData();
-    const tick = useTick(); // 驱动相对时间与轮询状态展示
+    const tick = useTick(); // 濡炵懓宕慨鈺呮儎缁嬫鍤犻柡鍐ㄧ埣濡寧绋夋惔銈囨瀭閻犲洢鍨绘慨鎼佸箑娴ｅ摜娼旂紒鈧?
     const [me, setMe] = useState(null);
     const [data, setData] = useState(null);
     const [error, setError] = useState('');
@@ -986,7 +988,7 @@ export default function App() {
     const [openPositionSizingAdvice, setOpenPositionSizingAdvice] = useState(null);
     const [openPositionEntrySwapSlippage, setOpenPositionEntrySwapSlippage] = useState('');
     const [openPositionEntrySwapSlippageDirty, setOpenPositionEntrySwapSlippageDirty] = useState(false);
-    const [openPositionEntrySwapConfirm, setOpenPositionEntrySwapConfirm] = useState(false);
+    const [openPositionEntrySwapConfirm, setOpenPositionEntrySwapConfirm] = useState(true);
     const [openPositionLoading, setOpenPositionLoading] = useState(false);
     const [openPositionSmartRanges, setOpenPositionSmartRanges] = useState([]);
     const [openPositionSmartRangesLoading, setOpenPositionSmartRangesLoading] = useState(false);
@@ -994,7 +996,7 @@ export default function App() {
     const [openPositionDCAPercentages, setOpenPositionDCAPercentages] = useState([50, 50]);
     const [openPositionDCAInterval, setOpenPositionDCAInterval] = useState(30);
     const [openPositionDCAExpanded, setOpenPositionDCAExpanded] = useState(false);
-    const [openPositionRebalanceEnabled, setOpenPositionRebalanceEnabled] = useState(true);
+    const [openPositionTaskMode, setOpenPositionTaskMode] = useState('exit_all');
     const [openPositionWalletBalancesHidden, setOpenPositionWalletBalancesHidden] = useState(() => storage.get(STORAGE_OPEN_POSITION_HIDE_WALLET_BALANCES) === '1');
     const [openPositionLiqProfile, setOpenPositionLiqProfile] = useState(null);
     const [openPositionLiqProfileLoading, setOpenPositionLiqProfileLoading] = useState(false);
@@ -1089,16 +1091,8 @@ export default function App() {
             : []
     ), [activeOpenPositionChecks]);
     const openPositionShowPrivateZapProtectionHint = Boolean(activeOpenPositionPrivateZapInfo?.show_protection_hint);
-    const openPositionRecommendedPositions = Array.isArray(openPositionSizingAdvice?.recommended_positions)
-        ? openPositionSizingAdvice.recommended_positions
-        : [];
+    const openPositionRecommendedPositions = [];
     const openPositionWalletOptions = Array.isArray(walletsData?.wallets) ? walletsData.wallets : [];
-    const openPositionSizingWarnings = Array.isArray(openPositionSizingAdvice?.warnings)
-        ? openPositionSizingAdvice.warnings
-        : [];
-    const openPositionSizingInputs = openPositionSizingAdvice?.inputs && typeof openPositionSizingAdvice.inputs === 'object'
-        ? openPositionSizingAdvice.inputs
-        : null;
     const openPositionTickLowerValue = Number(String(openPositionTickLower || '').trim());
     const openPositionTickUpperValue = Number(String(openPositionTickUpper || '').trim());
     const openPositionToken0Decimals = Number(openPositionPool?.token0_decimals ?? openPositionPool?.token0?.decimals ?? 18) || 18;
@@ -1179,9 +1173,9 @@ export default function App() {
         switch (String(openPositionEffectiveRangeEditor?.position_shape || '').trim()) {
             case 'single_token0':
             case 'single_token1':
-                return `单边 ${openPositionEffectiveRangeEditor?.dominant_token_symbol || '--'}`;
+                return `闁告娲濈粩?${openPositionEffectiveRangeEditor?.dominant_token_symbol || '--'}`;
             case 'dual_sided':
-                return '双边';
+                return '闁告瑥鐭佺粩?';
             default:
                 return '';
         }
@@ -1295,8 +1289,8 @@ export default function App() {
     const openPositionEffectiveDCAEnabled = openPositionDCAEnabled && !openPositionDCAAmountBelowThreshold;
     const openPositionGlobalSlippageHint = useMemo(() => {
         const n = Number(globalConfig?.slippage_tolerance);
-        if (!Number.isFinite(n) || n < 0) return '留空则使用全局配置';
-        return `本次开仓采用全局配置滑点: ${formatPercentValue(n)}`;
+        if (!Number.isFinite(n) || n < 0) return '闁伙絾鐟ч埞鏍礆濞嗗骸鈻忛柣顫妼閸欏繒浠﹂埀顒勬煀瀹ュ洨鏋?;'
+        return `闁哄牜鍓氶鐓庮嚕閳ь剚绂掗幘璇叉珰闁活潿鍔岄崣蹇曚沪閳ь剟鏌婂鍥╂瀭婵犲﹥鍨归崑? ${formatPercentValue(n)}`;
     }, [globalConfig?.slippage_tolerance]);
     const [posWalletBalances, setPosWalletBalances] = useState(null);
     const userDefaultChain = useMemo(() => {
@@ -1380,8 +1374,8 @@ export default function App() {
         [addLiqReferenceAmount]
     );
     const addLiqHintText = Number.isFinite(addLiqParsedAmount) && addLiqParsedAmount > 0 && addLiqReferenceAmount > 0
-        ? `约为原策略金额的 ${formatRatioCompact((addLiqParsedAmount / addLiqReferenceAmount) * 100)}，会按当前池价买入并补进仓位。`
-        : '输入要追加的 USDT 金额，系统会按当前池价买入并补进当前仓位。';
+        ? `约为参考仓位的 ${formatRatioCompact((addLiqParsedAmount / addLiqReferenceAmount) * 100)}`
+        : '输入 USDT 金额后会显示与当前仓位的大致比例。';
 
     const activeError = showAdmin ? adminPositionsError : error;
     const activeLoading = showAdmin ? adminPositionsLoading : loading;
@@ -1415,7 +1409,7 @@ export default function App() {
     }, [positions]);
 
     const totalUsd = useMemo(() => {
-        // Multi-wallet: sum all wallets' stable balance + positions + fees
+        // Multi-wallet: sum all wallets' stable balance + positions + fees'
         const multiWallets = Array.isArray(posWalletBalances?.wallets) && posWalletBalances.wallets.length > 1;
         if (multiWallets) {
             const allWalletsUsd = posWalletBalances.wallets.reduce(
@@ -1459,9 +1453,9 @@ export default function App() {
         return [
             {
                 key: 'wallet',
-                label: '钱包',
+                label: '闂佽棄宕€?',
                 value: singleWalletValue,
-                detail: walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '未连接',
+                detail: walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '闁哄牜浜ｇ换娑㈠箳?,'
             },
         ];
     }, [multiWalletSummary, posWalletBalances, singleWalletUsd, walletAddress]);
@@ -1469,13 +1463,13 @@ export default function App() {
         ...walletSummaryCards,
         {
             key: 'position',
-            label: '仓位',
+            label: '濞寸姵鎸风紞?',
             value: formatUsd(totalsFromPositions.positionUsd),
             detail: '',
         },
         {
             key: 'fee',
-            label: '手续费',
+            label: '闁归潧顑囬悽鑽ゆ嫻?',
             value: formatUsd(totalsFromPositions.feeUsd),
             detail: '',
         },
@@ -1657,10 +1651,10 @@ export default function App() {
     const requestConfirm = (options) => new Promise((resolve) => {
         confirmResolveRef.current = resolve;
         setConfirmState({
-            title: options?.title || '确认操作',
+            title: options?.title || '缁绢収鍠涢濠氬箼瀹ュ嫮绋?',
             message: options?.message || '',
-            confirmText: options?.confirmText || '确认',
-            cancelText: options?.cancelText || '取消',
+            confirmText: options?.confirmText || '缁绢収鍠涢?',
+            cancelText: options?.cancelText || '闁告瑦鐗楃粔?',
             tone: options?.tone || 'primary',
         });
     });
@@ -2101,13 +2095,13 @@ export default function App() {
         if (poolSearchLoading) return;
         const keyword = String(poolSearchQuery || '').trim();
         if (!keyword) {
-            setPoolSearchError('请输入池子地址或关键词。');
+            setPoolSearchError('閻犲洨鏌夌欢顓㈠礂閵夛妇娼ㄩ悗娑欏姇濠€鎾锤閳ь剟骞嬮弽褍褰犻梺娆惧枦閻︽繈濡?');
             setPoolSearchResults([]);
             setPoolSearchPerformed(false);
             return;
         }
         if (!hasInitData) {
-            setPoolSearchError('缺少 Telegram initData。本地浏览器调试时，请在 backend/.env 中设置 TELEGRAM_WEBAPP_ALLOW_EMPTY_INITDATA=1。');
+            setPoolSearchError('缂傚倸鎼惃?Telegram initData闁靛棗鍊瑰﹢浼村捶閻楀牏銈婚悷娆忕墕濞呮帞鎷崘顓犳Ц闁哄啳顔愮槐婵堟嫚瀹勭増韬?backend/.env 濞戞搩鍙€椤旀洜绱?TELEGRAM_WEBAPP_ALLOW_EMPTY_INITDATA=1闁?');
             return;
         }
 
@@ -2156,11 +2150,11 @@ export default function App() {
     const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
 
     const defaultQuickRangeOptions = useMemo(() => ([
-        { key: '1', label: '1%', lowerValue: '1', upperValue: '1', subLabel: '快捷区间' },
-        { key: '3', label: '3%', lowerValue: '3', upperValue: '3', subLabel: '快捷区间' },
-        { key: '5', label: '5%', lowerValue: '5', upperValue: '5', subLabel: '快捷区间' },
-        { key: '10', label: '10%', lowerValue: '10', upperValue: '10', subLabel: '快捷区间' },
-        { key: '20', label: '20%', lowerValue: '20', upperValue: '20', subLabel: '快捷区间' },
+        { key: '1', label: '1%', lowerValue: '1', upperValue: '1', subLabel: '快捷范围' },
+        { key: '3', label: '3%', lowerValue: '3', upperValue: '3', subLabel: '快捷范围' },
+        { key: '5', label: '5%', lowerValue: '5', upperValue: '5', subLabel: '快捷范围' },
+        { key: '10', label: '10%', lowerValue: '10', upperValue: '10', subLabel: '快捷范围' },
+        { key: '20', label: '20%', lowerValue: '20', upperValue: '20', subLabel: '快捷范围' },
     ]), []);
     const smartQuickRangeOptions = useMemo(() => (
         Array.isArray(openPositionSmartRanges)
@@ -2186,12 +2180,12 @@ export default function App() {
         [openPositionHasSmartQuickRanges, smartQuickRangeOptions, defaultQuickRangeOptions],
     );
     const openPositionQuickRangeIntro = openPositionHasSmartQuickRanges
-        ? '优先展示聪明钱区间，卡片下方直接显示对应金额。'
-        : '预设 1 / 3 / 5 / 10 / 20，点一下即可快速填入区间。';
+        ? '濞村吋锚閸樻稓浠﹂弴鐘粵闁奸硸浜濆Σ鎴︽煢閸楃偛闅橀梻鍌濇彧缁辨繈宕￠敍鍕暬濞戞挸顑嗛弻鐔兼儎鐎涙ê澶嶉柡鍕⒔閵囨氨鈧數鎳撶花鏌ユ煂閹达富鏉洪柕?'
+        : '濡澘瀚?1 / 3 / 5 / 10 / 20闁挎稑鐬奸崑锝嗙▔閳ь剚绋夌€ｎ亜绁柛娆樺灠閹烩晠鏌呴悢鍑ょ稏闁稿繈鍎辩亸顖炴⒒濞ｎ兘鍋?';
     const openPositionVisibleRangeMode = openPositionRangeInputMode === 'percentage' ? 'percentage' : 'grid';
     const openPositionOutOfRangeActions = useMemo(
-        () => getOutOfRangeActionSummary(openPositionRebalanceEnabled),
-        [openPositionRebalanceEnabled],
+        () => getTaskModeActionSummary(openPositionTaskMode),
+        [openPositionTaskMode],
     );
     const openPositionTaskSlippage = parseOptionalPercent(openPositionSlippage);
     const openPositionNeedsHighSlippageConfirm = openPositionTaskSlippage.valid
@@ -2500,9 +2494,9 @@ export default function App() {
         setOpenPositionSizingAdvice(null);
         setOpenPositionEntrySwapSlippage('');
         setOpenPositionEntrySwapSlippageDirty(false);
-        setOpenPositionEntrySwapConfirm(false);
+        setOpenPositionEntrySwapConfirm(true);
         setOpenPositionDCAExpanded(false);
-        setOpenPositionRebalanceEnabled(true);
+        setOpenPositionTaskMode('exit_all');
 
         setOpenPositionError('');
         setOpenPositionChecks([]);
@@ -2618,7 +2612,7 @@ export default function App() {
             setOpenPositionLiqProfile(null);
             return undefined;
         }
-        // 池子切换时先清空旧数据，避免展示别的 pool
+        // 婵湱濮撮悺娆撳礆閸ャ劌搴婇柡鍐硾閸樻稑銆掗崨顖楁晞闁哄唲鍕闁硅鍣槐婵嬫焼閸喖甯抽悘鐐存礈閵囨岸宕氶銈嗙暠 pool
         setOpenPositionLiqProfile(null);
         const ctrl = new AbortController();
         setOpenPositionLiqProfileLoading(true);
@@ -2641,8 +2635,8 @@ export default function App() {
                 const msg = String(err?.message || err || '');
                 if (/page could not be found|<html|<!doctype/i.test(msg)) {
                     // eslint-disable-next-line no-console
-                    console.warn('[liquidity_distribution] 接口未就绪', msg.slice(0, 200));
-                    setOpenPositionLiqProfileError('接口未就绪');
+                    console.warn('[liquidity_distribution] endpoint unavailable', msg.slice(0, 200));
+                    setOpenPositionLiqProfileError('流动性分布接口不可用');
                 } else {
                     setOpenPositionLiqProfileError(msg.slice(0, 60));
                 }
@@ -2652,7 +2646,7 @@ export default function App() {
                 if (!ctrl.signal.aborted) setOpenPositionLiqProfileLoading(false);
             });
 
-        // 3s 轮询（in-flight 去重；后端已去缓存，可近实时看到变化）
+        // 3s 閺夌儐鍠涢妤呮晬閸ф樆-flight 闁告ê顭烽崳鎼佹晬濞戞ɑ鍊电紒鏃戝灠閸戯繝宕㈤懡銈囧閻庢稒锕槐婵嬪矗椤栨繄绠悗鍦仦濡炲倿鎯囩€ｎ亜鐓傞柛娆惷€垫煡鏁?
         const timer = setInterval(() => {
             if (document.hidden) return;
             if (openPositionLiqInFlightRef.current) return;
@@ -2664,7 +2658,7 @@ export default function App() {
                 .catch((err) => {
                     const msg = String(err?.message || err || '');
                     if (/page could not be found|<html|<!doctype/i.test(msg)) {
-                        setOpenPositionLiqProfileError('接口未就绪');
+                        setOpenPositionLiqProfileError('闁规亽鍎辫ぐ娑㈠嫉椤忓嫭鐨戠紓?');
                     } else {
                         setOpenPositionLiqProfileError(msg.slice(0, 60));
                     }
@@ -2908,7 +2902,7 @@ export default function App() {
     }, [openPositionEntrySwapPreview, openPositionEntrySwapSlippageDirty]);
 
     useEffect(() => {
-        setOpenPositionEntrySwapConfirm(false);
+        setOpenPositionEntrySwapConfirm(true);
     }, [openPositionEntrySwapConfirmKey]);
 
     useEffect(() => {
@@ -3032,7 +3026,7 @@ export default function App() {
                     allowEntrySwap: true,
                     walletId,
                     ackLiquidityRisk: openPositionRiskAck,
-                    rebalanceEnabled: openPositionRebalanceEnabled,
+                    taskMode: openPositionTaskMode,
                     signal: controller.signal,
                 };
                 if (openPositionRangeInputMode === 'percentage') {
@@ -3099,19 +3093,19 @@ export default function App() {
         openPositionWalletId,
         openPositionSelectedManualTickLower,
         openPositionSelectedManualTickUpper,
-        openPositionRebalanceEnabled,
+        openPositionTaskMode,
         openPositionPreviewSuspended,
     ]);
 
     const handleOpenPosition = async () => {
         if (!openPositionPool) return;
         if (!hasInitData) {
-            setOpenPositionError('缺少 Telegram 身份信息，请从机器人重新打开小程序。');
+            setOpenPositionError('缂傚倸鎼惃?Telegram 闂婎剦鍋傞崬銈嗙┍閳╁啩绱栭柨娑樼焷椤曨剚绂掓惔銏＄皻闁革絻鍔嬪Ч澶愭煂瀹ュ棙鐓€闁瑰灚鎸哥槐鎴犱焊韫囨洍鏌ら幖鏉戠箞閳?');
             return;
         }
         const amount = Number(String(openPositionAmount || '').trim());
         if (!Number.isFinite(amount) || amount <= 0) {
-            setOpenPositionError('请输入有效的开仓金额。');
+            setOpenPositionError('閻犲洨鏌夌欢顓㈠礂閵夛附绠掗柡浣哥墢濞堟垵顕ｉ埀顒佺閹捐娅ㄥΛ鐗堢缚閳?');
             return;
         }
         const warnChecks = activeOpenPositionChecks.filter(c => c.status === 'warn');
@@ -3124,11 +3118,11 @@ export default function App() {
         const range = parseRangeInput(openPositionRangeLower, openPositionRangeUpper);
         if (openPositionRangeInputMode === 'percentage') {
             if (!range || range.lower <= 0 || range.upper <= 0 || range.lower >= 100 || range.upper >= 100) {
-                setOpenPositionError('区间必须在 0 到 100 之间。');
+                setOpenPositionError('闁告牗妞藉Λ鑳疀閸涙番鈧繘宕?0 闁?100 濞戞柨顑夊Λ鍧楀Υ?');
                 return;
             }
         } else if (openPositionRangeInputMode !== 'price' && (!Number.isInteger(openPositionTickLowerValue) || !Number.isInteger(openPositionTickUpperValue) || openPositionTickLowerValue >= openPositionTickUpperValue)) {
-            setOpenPositionError('请输入有效的 Tick 区间。');
+            setOpenPositionError('閻犲洨鏌夌欢顓㈠礂閵夛附绠掗柡浣哥墢濞?Tick 闁告牗妞藉Λ鍧楀Υ?');
             return;
         }
 
@@ -3139,19 +3133,19 @@ export default function App() {
 
         const slippageParsed = parseOptionalPercent(openPositionSlippage);
         if (!slippageParsed.valid) {
-            setOpenPositionError('任务滑点必须在 0 到 100 之间。');
+            setOpenPositionError('濞寸姾顕ф慨鐔奉煥閹寸姴浠煫鍥ф嚇閵嗗繘宕?0 闁?100 濞戞柨顑夊Λ鍧楀Υ?');
             return;
         }
         const entrySwapSlippageParsed = parseOptionalPercent(openPositionEntrySwapSlippage);
         if (!entrySwapSlippageParsed.valid) {
-            setOpenPositionError('前置兑换滑点必须在 0 到 100 之间。');
+            setOpenPositionError('闁告挸绉堕悿鍡涘礂閹寸偛搴婃繝濠冨灩閸嬶綀绠涢崨娣偓蹇涘捶?0 闁?100 濞戞柨顑夊Λ鍧楀Υ?');
             return;
         }
         let walletId = openPositionWalletId;
 
         if (multiWalletEnabled) {
             if (walletsLoading) {
-                setOpenPositionError('钱包列表仍在加载，请稍后再试。');
+                setOpenPositionError('闂佽棄宕€垫﹢宕氬Δ鍕┾偓鍐╃瀹ュ懏韬柛鏃傚Ь濞村洭鏁嶅畝鍐惧殲缂佸绉撮幃妤呭礃瀹ュ牏妲搁柕?');
                 return;
             }
             if (walletsError) {
@@ -3160,14 +3154,14 @@ export default function App() {
             }
             const list = Array.isArray(walletsData?.wallets) ? walletsData.wallets : [];
             if (list.length === 0) {
-                setOpenPositionError('未找到可用钱包。');
+                setOpenPositionError('闁哄牜浜濇竟姗€宕氶弶鍨闁活潿鍔戦幐鍫曞礌閸涱偀鍋?');
                 return;
             }
             if (list.length > 1) {
                 const wid = Number(openPositionWalletId);
                 walletId = wid;
                 if (!Number.isFinite(wid) || wid <= 0) {
-                    setOpenPositionError('请选择钱包。');
+                    setOpenPositionError('閻犲洨鍏橀埀顒€顦扮€氥劑鏌﹂崡鐐茬樁闁?');
                     return;
                 }
             } else {
@@ -3181,7 +3175,7 @@ export default function App() {
         }
 
         if (openPositionPreviewPending || openPositionPreviewSuspended) {
-            setOpenPositionError('前置兑换预览仍在加载，请稍后再试。');
+            setOpenPositionError('闁告挸绉堕悿鍡涘礂閹寸偛搴婂Λ鏉垮椤秵绂掑鍛含闁告梻濮惧ù鍥晬瀹€鍐惧殲缂佸绉撮幃妤呭礃瀹ュ牏妲搁柕?');
             return;
         }
         if (openPositionEntrySwapPreviewError) {
@@ -3195,31 +3189,31 @@ export default function App() {
 
         if (effectiveOpenPositionDCAEnabled) {
             if (openPositionDCAPercentages.length < 2 || openPositionDCAPercentages.length > 5) {
-                setOpenPositionError('分批次数必须在 2-5 批之间。');
+                setOpenPositionError('闁告帒妫欐竟鎺戔枎閳╁啯娈堕煫鍥ф嚇閵嗗繘宕?2-5 闁圭敻鈧稓顓洪梻鍌涚暘閳?');
                 return;
             }
             if (openPositionDCAPercentages.some((v) => !(Number(v) >= 5))) {
-                setOpenPositionError('每批占比必须 ≥ 5%。');
+                setOpenPositionError('婵絽绻戞竟鎺楀础閻樺磭妲烽煫鍥ф嚇閵?闁?5%闁?');
                 return;
             }
             const sum = openPositionDCAPercentages.reduce((acc, v) => acc + (Number(v) || 0), 0);
             if (Math.abs(sum - 100) > 0.01) {
-                setOpenPositionError(`分批百分比之和必须等于 100%（当前 ${sum.toFixed(2)}%）。`);
+                setOpenPositionError(`分批比例总和必须等于 100%，当前为 ${sum.toFixed(2)}%。`);
                 return;
             }
             const iv = Number(openPositionDCAInterval);
             if (!(Number.isFinite(iv) && iv >= 0 && iv <= 300)) {
-                setOpenPositionError('批次间隔必须在 0–300 秒之间。');
+                setOpenPositionError('闁逛絻顫夐濂告⒒閹绢喗顓鹃煫鍥ф嚇閵嗗繘宕?0闁?00 缂佸甯婄粻锝夋⒒濞ｎ兘鍋?');
                 return;
             }
         }
 
         if (Number.isFinite(slippageParsed.value) && slippageParsed.value > 1) {
             const ok = await requestConfirm({
-                title: '确认高滑点',
-                message: `当前开仓滑点为 ${slippageParsed.value}% ，已超过 1%。\n请确认这不是误把金额输到了滑点里。`,
-                confirmText: '继续开仓',
-                cancelText: '返回检查',
+                title: '高滑点确认',
+                message: `当前任务滑点为 ${slippageParsed.value}% ，已超过 1%，请确认是否继续。`,
+                confirmText: '继续提交',
+                cancelText: '返回修改',
                 tone: 'danger',
             });
             if (!ok) return;
@@ -3258,7 +3252,7 @@ export default function App() {
                 dcaEnabled: effectiveOpenPositionDCAEnabled,
                 dcaPercentages: effectiveOpenPositionDCAEnabled ? openPositionDCAPercentages.map((v) => Number(v) || 0) : undefined,
                 dcaIntervalSeconds: effectiveOpenPositionDCAEnabled ? Number(openPositionDCAInterval) : undefined,
-                rebalanceEnabled: openPositionRebalanceEnabled,
+                taskMode: openPositionTaskMode,
             };
             if (openPositionRangeInputMode === 'percentage') {
                 submitPayload.rangeLowerPct = range.lower;
@@ -3272,7 +3266,7 @@ export default function App() {
             setOpenPositionChecks([]);
             setOpenPositionEntrySwapPreview(null);
             setOpenPositionEntrySwapPreviewError('');
-            setOpenPositionEntrySwapConfirm(false);
+            setOpenPositionEntrySwapConfirm(true);
             setOperationProgress(prev => prev?.operation === 'open_position'
                 ? { ...prev, currentStep: effectiveOpenPositionDCAEnabled ? 1 : totalBatches, status: effectiveOpenPositionDCAEnabled ? 'active_dca' : 'done' } : prev);
         } catch (e) {
@@ -3294,9 +3288,9 @@ export default function App() {
                     return [...merged, ...failChecks];
                 });
             }
-            setOpenPositionError(msg || '开仓失败。');
+            setOpenPositionError(msg || '鐎殿喒鍋撳ù鐘虫尭閵囨垹鎷归妷锝傚亾?');
             setOperationProgress(prev => prev?.operation === 'open_position'
-                ? { ...prev, status: 'error', error: msg || '开仓失败。' } : prev);
+                ? { ...prev, status: 'error', error: msg || '开仓执行失败。' } : prev);
         } finally {
             setOpenPositionLoading(false);
         }
@@ -3304,7 +3298,7 @@ export default function App() {
 
     const loadGlobalConfig = async () => {
         if (!hasInitData) {
-            setGlobalConfigError('缺少 Telegram 身份信息，请从机器人重新打开小程序。');
+            setGlobalConfigError('缂傚倸鎼惃?Telegram 闂婎剦鍋傞崬銈嗙┍閳╁啩绱栭柨娑樼焷椤曨剚绂掓惔銏＄皻闁革絻鍔嬪Ч澶愭煂瀹ュ棙鐓€闁瑰灚鎸哥槐鎴犱焊韫囨洍鏌ら幖鏉戠箞閳?');
             return;
         }
         setGlobalConfigLoading(true);
@@ -3461,15 +3455,15 @@ export default function App() {
         const id = Number(taskId);
         if (!Number.isFinite(id) || id <= 0) return;
         const ok = await requestConfirm({
-            title: '取回流动性',
-            message: '确认要取回流动性并兑换为 USDT？\n该操作会撤出仓位并停止任务。',
-            confirmText: '确认取回',
+            title: '闁告瑦鐗曞ú鏍规担绋啃楅柟?',
+            message: '缁绢収鍠涢鑽ゆ啺娴ｇ绲块柛銉у仦缁侊箓宕濋妸锔瑰亾瑜嶉懟鐔煎礂閹寸偛搴婂☉?USDT闁挎稓鍓爊閻犲洢鍎查幖閿嬫媴濠娾偓缁变即骞橀妶鍛瘔濞寸姵鎸风紞鍛寸嵁鐠鸿桨绮绘慨婵愭線閹广垽宕濇幊閳?',
+            confirmText: '缁绢収鍠涢濠氬矗閺嵮勭',
             tone: 'danger',
         });
         if (!ok) return;
         try {
             const resp = await withdrawLiquidity({ apiBaseUrl, initData, taskId: id });
-            showNotice(resp?.message || '流动性已取回', 'success');
+            showNotice(resp?.message || '婵炵繝绀佹慨鈺呭箑瑜嶉崙锟犲矗閺嵮勭', 'success');
         } catch (e) {
             showNotice(String(e?.message || e), 'error');
         }
@@ -3481,7 +3475,7 @@ export default function App() {
         if (!Number.isFinite(id) || id <= 0) return;
         try {
             const resp = await swapDust({ apiBaseUrl, initData, taskId: id });
-            showNotice(resp?.message || '残余已兑换', 'success');
+            showNotice(resp?.message || '婵炲牆顑勭紞鎴濐啅閹绘帒骞€闁?', 'success');
         } catch (e) {
             showNotice(String(e?.message || e), 'error');
         }
@@ -3493,19 +3487,19 @@ export default function App() {
         if (!Number.isFinite(id) || id <= 0) return;
         try {
             const resp = await triggerRebalance({ apiBaseUrl, initData, taskId: id });
-            showNotice(resp?.message || '鍐嶅钩琛″凡瑙﹀彂', 'success');
+            showNotice(resp?.message || '闂佸憡鍔曠粔鎾煢閳哄啯鍋橀柍銉ュ暱閸ゆ帡鎮峰▎娆戠暠鐟?', 'success');
         } catch (e) {
             showNotice(String(e?.message || e), 'error');
         }
     };
 
-    const handleToggleRebalance = async (taskId, enabled) => {
+    const handleUpdateTaskMode = async (taskId, taskMode) => {
         if (!hasInitData || showAdmin) return;
         const id = Number(taskId);
         if (!Number.isFinite(id) || id <= 0) return;
         try {
-            const resp = await toggleRebalance({ apiBaseUrl, initData, taskId: id, rebalanceEnabled: enabled });
-            showNotice(enabled ? '再平衡已开启' : '再平衡已关闭，超区间后将撤仓终止', 'success');
+            const resp = await updateTaskMode({ apiBaseUrl, initData, taskId: id, taskMode });
+            showNotice(resp?.ok ? `Mode: ${getTaskModeMeta(taskMode).label}` : 'Task mode updated.', 'success');
         } catch (e) {
             showNotice(String(e?.message || e), 'error');
         }
@@ -3517,7 +3511,7 @@ export default function App() {
         if (!Number.isFinite(id) || id <= 0) return;
         setAddLiqModal({
             taskId: id,
-            title: String(position?.title || '').trim() || `浠诲姟 #${id}`,
+            title: String(position?.title || '').trim() || `婵炲濮鹃褎鎱?#${id}`,
         });
         setAddLiqAmount('');
         setAddLiqError('');
@@ -3534,7 +3528,7 @@ export default function App() {
         if (!addLiqModal) return;
         const amount = parseAmountInput(addLiqAmount);
         if (!Number.isFinite(amount) || amount <= 0) {
-            setAddLiqError('请输入有效的金额');
+            setAddLiqError('閻犲洨鏌夌欢顓㈠礂閵夛附绠掗柡浣哥墢濞堟垿鏌岄幋锔绘澓');
             return;
         }
         setAddLiqLoading(true);
@@ -3543,7 +3537,7 @@ export default function App() {
             const resp = await addLiquidity({ apiBaseUrl, initData, taskId: addLiqModal.taskId, amountUsdt: amount });
             setAddLiqModal(null);
             setAddLiqAmount('');
-            showNotice(resp?.message || '补充流动性成功', 'success');
+            showNotice(resp?.message || '閻炴稏鍎遍崢鏍规担绋啃楅柟顑嫬鐏囬柛?', 'success');
         } catch (e) {
             setAddLiqError(String(e?.message || e));
         } finally {
@@ -3561,7 +3555,7 @@ export default function App() {
         const fallbackAmount = Number(position?.net_invested_usd ?? position?.initial_cost_usd);
         setTaskRangeEdit({
             taskId: id,
-            title: String(position?.title || '').trim() || `浠诲姟 #${id}`,
+            title: String(position?.title || '').trim() || `婵炲濮鹃褎鎱?#${id}`,
         });
         setTaskRangeLower(Number.isFinite(low) && low > 0 ? String(low) : '');
         setTaskRangeUpper(Number.isFinite(up) && up > 0 ? String(up) : '');
@@ -3595,7 +3589,7 @@ export default function App() {
             return;
         }
         if (!range || range.lower <= 0 || range.upper <= 0 || range.lower >= 100 || range.upper >= 100) {
-            setTaskRangeError('区间必须在 0 到 100 之间。');
+            setTaskRangeError('闁告牗妞藉Λ鑳疀閸涙番鈧繘宕?0 闁?100 濞戞柨顑夊Λ鍧楀Υ?');
             return;
         }
 
@@ -3617,7 +3611,7 @@ export default function App() {
                 rangeUpperPct: range.upper,
                 amountUSDT: amount,
             });
-            showNotice('任务区间已更新。', 'success');
+            showNotice('濞寸姾顕ф慨鐔煎礌濞差亝锛熺€圭寮跺ú鍧楀棘閼割兘鍋?', 'success');
             setTaskRangeEdit(null);
             setTaskRangeLower('');
             setTaskRangeUpper('');
@@ -3675,7 +3669,7 @@ export default function App() {
         setBatchMode(false);
         hapticNotification(failCount === 0 ? 'success' : 'warning');
         showNotice(
-            `批量${paused ? '暂停' : '恢复'}完成：成功 ${successCount}，失败 ${failCount}`,
+            `闁归潧缍婇崳?{paused ? '闁哄棗鍊告禒? : '闁诡厹鍨归ˇ?}閻庣懓鏈崹姘舵晬濮橆厼鐏囬柛?${successCount}闁挎稑鑻妵鎴犳嫻?${failCount}`,
             failCount === 0 ? 'success' : 'warning'
         );
     };
@@ -3687,40 +3681,40 @@ export default function App() {
 
     const moduleMetaByMode = useMemo(() => ({
         hot_pools: {
-            title: '热门池子',
+            title: '闁绘埈鍙冨Λ顒€效閻樿尙鎽?',
             icon: icons.fire,
-            subtitle: `5 分钟 | ${hotPoolsData ? `${localUpdateSecAgo} 秒前更新` : hotPoolsLoading ? '加载中...' : '未加载'} | 轮询 ${hotPoolsPollIntervalSec}s`,
+            subtitle: `5 闁告帒妫濋幐?| ${hotPoolsData ? `${localUpdateSecAgo} 缂佸甯掓晶鐘诲即鐎涙ɑ鐓€` : hotPoolsLoading ? '闁告梻濮惧ù鍥ㄧ▔?..'' : '闁哄牜浜滄慨鐐存姜?} | 閺夌儐鍠涢?${hotPoolsPollIntervalSec}s`,
         },
         positions: {
-            title: '仓位',
+            title: '濞寸姵鎸风紞?',
             icon: icons.bot,
-            subtitle: walletAddress ? `钱包 ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '钱包未连接',
+            subtitle: walletAddress ? `闂佽棄宕€?${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '闂佽棄宕€垫﹢寮甸鍥╃闁?,'
         },
         assets: {
-            title: '我的',
+            title: '闁瑰瓨鍨瑰▓?',
             icon: icons.wallet,
-            subtitle: '我的资产 / 全局配置 / 钱包 / 交易历史',
+            subtitle: '闁瑰瓨鍨瑰▓鎴犳導閸曨亪鐛?/ 闁稿繈鍔岄惇顒勬煀瀹ュ洨鏋?/ 闂佽棄宕€?/ 濞存嚎鍊栧Σ妤呭储閸℃钑?',
         },
         smart_money: {
-            title: '聪明钱',
+            title: '闁奸硸浜濆Σ鎴︽煢?',
             icon: icons.eye,
-            subtitle: '聪明钱监控 / 聪明钱资产',
+            subtitle: '闁奸硸浜濆Σ鎴︽煢鏉堚晜纾ч柟?/ 闁奸硸浜濆Σ鎴︽煢鏉堫偆銈ù?',
         },
         admin_page: {
-            title: '管理员',
+            title: '缂佺媴绱曢幃濠囧川?',
             icon: icons.gear,
-            subtitle: '运行管理 / 系统',
+            subtitle: '閺夆晜鍔橀、鎴犵不閿涘嫭鍊?/ 缂侇垵宕电划?',
         },
         admin: {
-            title: '管理',
+            title: '缂佺媴绱曢幃?',
             icon: icons.gear,
             subtitle: adminSelectedUser
-                ? `用户：${formatUserLabel(adminSelectedUser)}`
+                ? `闁活潿鍔嶉崺娑㈡晬?{formatUserLabel(adminSelectedUser)}`
                 : adminUsersLoading && adminUsers.length === 0
-                    ? '加载用户中...'
+                    ? '闁告梻濮惧ù鍥偨閵婏箑鐓曞☉?..'
                     : adminUsers.length
-                        ? `Auto 用户 ${adminUsers.length} 个`
-                        : '暂无可管理用户',
+                        ? `Auto 闁活潿鍔嶉崺?${adminUsers.length} 濞戞挾瀵?
+                        : '闁哄棗鍊瑰Λ銈夊矗椤栨粠鍚€闁荤偛妫涢弫銈夊箣?',
         },
     }), [
         adminSelectedUser,
@@ -3738,9 +3732,9 @@ export default function App() {
     const hasAdminPositions = Boolean(adminPositions);
     const adminSummaryPlaceholder = adminSelectedUserId
         ? adminPositionsLoading
-            ? '加载用户仓位中...'
-            : '该用户暂无仓位数据'
-        : '请先选择一个管理员用户';
+            ? '闁告梻濮惧ù鍥偨閵婏箑鐓曞ù鐘虫尫缂嶅懏绋?..'
+            : '閻犲洢鍎抽弫銈夊箣闁垮鐣柡鍐С缁劍鎷呭鍡樻闁?'
+        : '閻犲洤鍢查崢娑㈡焻婢跺顏ュ☉鎾亾濞戞搩浜為鎼佹偠閸℃鍠呴柣顫妽閸?';
     const showEmptyPositions = isPositions && Boolean(activeData) && visiblePositions.length === 0;
     const hotPoolsPairMap = useMemo(() => {
         const m = new Map();
@@ -3760,7 +3754,7 @@ export default function App() {
             : 'bg-zinc-900 text-white dark:bg-white/10 dark:text-white';
     const globalCfg = globalConfig || {};
     const rebalanceText = Number.isFinite(Number(globalCfg.rebalance_timeout))
-        ? (Number(globalCfg.rebalance_timeout) <= 0 ? '立即' : `${Number(globalCfg.rebalance_timeout)} s`)
+        ? (Number(globalCfg.rebalance_timeout) <= 0 ? '缂佹柨顑呭畵?' : `${Number(globalCfg.rebalance_timeout)} s`)
         : '--';
     const slippageText = Number.isFinite(Number(globalCfg.slippage_tolerance))
         ? `${Number(globalCfg.slippage_tolerance).toFixed(2)}%`
@@ -3787,7 +3781,7 @@ export default function App() {
                     </div>
                 </div>
             ) : null}
-            {/* 濠碉紕鍋戦崐鏇㈡偉婵傜纾块柟缁㈠枛缁€澶愭煟濡厧鍔嬬紒浣峰嵆瀵爼鍩￠崒婧炬闁诲氦顫夋繛濠傤嚕?*/}
+            {/* 婵犵數濮烽。顔炬閺囥垹纾婚柟杈剧畱绾惧綊鏌￠崶銉ョ仾闁稿顦埞鎴﹀磼濠婂海鍔哥紒鐐劤濞硷繝寮婚悢铏圭＜闁靛繒濮甸悘鍫㈢磽娴ｆ彃浜炬繝銏ｅ煐閸旀牠鎮￠悢闀愮箚妞ゆ牗绮岀敮鍫曟煕閺傛鍎戠紒杈ㄥ笚閹峰懎鐣￠弶璺ㄣ偖闁诲孩顔栭崰鏍偉婵傜鏄ラ柨鐔哄Т绾惧吋绻濊閸嬫捇锝炲澶嬧拺閻犲洤寮堕崬澶嬨亜椤愩埄妲圭紒缁樼⊕缁绘繈宕掗妶鍛吙?*/}
             <div className="progress-bar-container">
                 <div
                     className={`progress-bar ${loading || hotPoolsLoading ? 'loading' : ''}`}
@@ -3821,7 +3815,7 @@ export default function App() {
                             type="button"
                             onClick={() => setSettingsOpen(true)}
                             className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 shadow-sm hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                            aria-label="打开设置"
+                            aria-label="闁瑰灚鎸哥槐鎴犳媼閸撗呮瀭"
                         >
                             <Icon path={icons.gear} className="h-5 w-5" />
                         </button>
@@ -3831,15 +3825,15 @@ export default function App() {
 
                 {showAdmin ? (
                     <ModuleHeader
-                        title="管理面板"
+                        title="缂佺媴绱曢幃濠囨閵忊剝绶?
                         subtitle={hasAdminPositions
                             ? adminSelectedUser
-                                ? `用户 ${formatUserLabel(adminSelectedUser)}`
+                                ? `闁活潿鍔嶉崺?${formatUserLabel(adminSelectedUser)}`
                                 : ''
                             : adminSummaryPlaceholder}
                         actions={hasAdminPositions ? (
                             <div className="text-right">
-                                <div className="text-[11px] text-zinc-500 dark:text-white/40">自动刷新</div>
+                                <div className="text-[11px] text-zinc-500 dark:text-white/40">闁煎浜滄慨鈺呭礆闁垮鐓€</div>
                                 <div className="text-sm font-semibold tabular-nums">
                                     <NumberFlowValue value={pollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s
                                 </div>
@@ -3849,8 +3843,8 @@ export default function App() {
                                         : 'border-sky-500/20 bg-sky-500/10 text-sky-700 dark:text-sky-200'
                                         }`}>
                                         {String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
-                                            ? `当前：${openPositionRangeShapeLabel || `单边 ${openPositionEffectiveRangeEditor?.dominant_token_symbol || '--'}`}`
-                                            : '当前：双边池'}
+                                            ? `鐟滅増鎸告晶鐘绘晬?{openPositionRangeShapeLabel || `闁告娲濈粩?${openPositionEffectiveRangeEditor?.dominant_token_symbol || '--'}`}`
+                                            : '鐟滅増鎸告晶鐘绘晬濮橆剙钃熼弶鍫ｎ潐閻?'}
                                     </div>
                                     <div className="flex flex-wrap gap-1.5">
                                         <button
@@ -3858,14 +3852,14 @@ export default function App() {
                                             onClick={() => shiftOpenPositionRangeToSingleSide('lower')}
                                             className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
                                         >
-                                            单边下限
+                                            闁告娲濈粩鐔哥▔鐎ｎ喗顎?
                                         </button>
                                         <button
                                             type="button"
                                             onClick={() => shiftOpenPositionRangeToSingleSide('upper')}
                                             className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
                                         >
-                                            单边上限
+                                            闁告娲濈粩鐔哥▔婵犲洦顎?
                                         </button>
                                     </div>
                                 </div>
@@ -3874,7 +3868,7 @@ export default function App() {
                     >
                         {hasAdminPositions ? (
                             <div>
-                                <div className="text-[11px] text-zinc-500 dark:text-white/40">总资产</div>
+                                <div className="text-[11px] text-zinc-500 dark:text-white/40">闁诡剚妲掔粊顐ｇ?/div>
                                 <div className={`mt-0.5 text-2xl font-extrabold tabular-nums text-zinc-900 ${brand.textClass}`}>
                                     <NumberFlowValue value={totalUsd} formatter={(v) => formatUsd(v)} />
                                 </div>
@@ -3887,7 +3881,7 @@ export default function App() {
                     </ModuleHeader>
                 ) : isAssets ? (
                     <div className="mb-2">
-                        <Suspense fallback={<div className="rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">正在加载我的模块...</div>}>
+                        <Suspense fallback={<div className="rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">婵繐绲藉﹢顏堝礉閻樼儤绁伴柟瀛樺灩濞堟垵螣閳ヨ櫕鍋?..</div>}>
                             <LazyAssetManagementPage
                                 apiBaseUrl={apiBaseUrl}
                                 initData={initData}
@@ -3916,7 +3910,7 @@ export default function App() {
                     </div>
                 ) : isAdminPage ? (
                     <div className="mb-2">
-                        <Suspense fallback={<div className="rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">正在加载管理员模块...</div>}>
+                        <Suspense fallback={<div className="rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">婵繐绲藉﹢顏堝礉閻樼儤绁扮紒鐙呯磿閹﹪宕ㄥΟ鑽掍線宕?..</div>}>
                             <LazyAdminPage
                                 apiBaseUrl={apiBaseUrl}
                                 initData={initData}
@@ -3930,7 +3924,7 @@ export default function App() {
                     </div>
                 ) : isHotPools ? (
                     <ModuleHeader
-                        title={hotPoolsSort === 'fee_rate' ? '费率排行' : hotPoolsSort === 'volume' ? '交易量排行' : '手续费排行'}
+                        title={hotPoolsSort === 'fee_rate' ? '閻犳劕婀卞濂稿箳閹烘洦鏀? : hotPoolsSort === 'volume' ? '濞存嚎鍊栧Σ妤呮煂韫囨柨绗撻悶?' : '闁归潧顑囬悽鑽ゆ嫻鐟欏嫬绗撻悶?}
                         actions={(
                             <>
                                 <div className="flex shrink-0 p-0.5 bg-zinc-100/80 rounded-xl dark:bg-[#16181d] shadow-inner ring-1 ring-zinc-200/50 dark:ring-black/20">
@@ -3953,8 +3947,8 @@ export default function App() {
                                     type="button"
                                     onClick={openPoolSearch}
                                     className="inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-white/70 text-zinc-700 ring-1 ring-zinc-200 transition hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
-                                    aria-label="搜索池子"
-                                    title="搜索池子"
+                                    aria-label="闁瑰吋绮庨崒銊バч悩鑼憤"
+                                    title="闁瑰吋绮庨崒銊バч悩鑼憤"
                                 >
                                     <Icon path={icons.search} className="h-4 w-4" />
                                 </button>
@@ -3968,8 +3962,8 @@ export default function App() {
                                         ? brand.softButtonClass
                                         : 'bg-white/70 text-zinc-700 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10'
                                         }`}
-                                    aria-label="筛选"
-                                    title="筛选"
+                                    aria-label="缂佹稒鐩埀?
+                                    title="缂佹稒鐩埀?
                                 >
                                     <Icon path={icons.filter} className="h-3.5 w-3.5" />
                                     {hotPoolsFilterEnabled ? (
@@ -3985,16 +3979,16 @@ export default function App() {
                             <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0 flex-1">
                                     <div className="inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-300/90">
-                                        仓位总览
+                                        濞寸姵鎸风紞鍛村箑閺勫浚娼?
                                     </div>
-                                    <div className="mt-2.5 text-[10px] font-medium text-zinc-500 dark:text-white/45">总资产</div>
+                                    <div className="mt-2.5 text-[10px] font-medium text-zinc-500 dark:text-white/45">闁诡剚妲掔粊顐ｇ?/div>
                                     <div className="mt-1 text-[24px] font-black leading-none tracking-tight text-zinc-950 dark:text-white">
                                         <NumberFlowValue value={totalUsd} formatter={(v) => formatUsd(v)} />
                                     </div>
                                     <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-zinc-500 dark:text-white/50">
                                         {!multiWalletSummary ? (
                                             <span className="rounded-full border border-white/70 bg-white/70 px-2 py-1 font-mono dark:border-white/10 dark:bg-white/5">
-                                                {walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '未连接'}
+                                                {walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '闁哄牜浜ｇ换娑㈠箳?}'
                                             </span>
                                         ) : null}
                                         {!multiWalletSummary ? (
@@ -4015,11 +4009,11 @@ export default function App() {
                                             : 'cursor-not-allowed bg-zinc-100 text-zinc-400 ring-zinc-200 dark:bg-white/5 dark:text-white/30 dark:ring-white/10'
                                             }`}
                                     >
-                                        全局配置
+                                        闁稿繈鍔岄惇顒勬煀瀹ュ洨鏋?
                                     </button>
                                     {multiWalletSummary ? (
                                         <span className="rounded-full border border-white/70 bg-white/70 px-2 py-1 text-[10px] font-semibold text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-white/65">
-                                            {totalWalletCount} 个钱包                                        </span>
+                                            {totalWalletCount} 濞戞搩浜幐鍫曞礌?                                       </span>
                                     ) : null}
                                 </div>
                             </div>
@@ -4061,20 +4055,20 @@ export default function App() {
             {
                 isHotPools && !hotPoolsLoading && !hotPoolsError && hotPoolsData && hotPoolsRows.length === 0 ? (
                     <div className="mb-4 rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                        暂无热门池子数据。                    </div>
+                        闁哄棗鍊瑰Λ銈夋倻椤撱垺锛屾慨鍦Т閻℃瑩寮悧鍫濈ウ闁?                   </div>
                 ) : null
             }
 
             {
                 isHotPools && !hotPoolsLoading && !hotPoolsError && hotPoolsData && hotPoolsRows.length > 0 && hotPoolsFilterEnabled && hotPoolsVisibleRows.length === 0 ? (
                     <div className="mb-4 rounded-2xl border border-zinc-200 bg-white/70 p-6 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                        筛选后暂无热门池子数据。                    </div>
+                        缂佹稒鐩埀顒€顦幃妤呭汲閸屾稒锟ラ柣鎴弮濡剙效閻樿尙鎽嶉柡浣哄瀹撲線濡?                   </div>
                 ) : null
             }
 
             {
                 !isHotPools && showAdmin ? (
-                    <Suspense fallback={<div className="mb-4 rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">正在加载管理模块...</div>}>
+                    <Suspense fallback={<div className="mb-4 rounded-2xl border border-zinc-200/80 bg-white px-4 py-5 text-sm text-zinc-500 dark:border-white/5 dark:bg-[#131518] dark:text-white/45">婵繐绲藉﹢顏堝礉閻樼儤绁扮紒鐙呯磿閹﹤螣閳ヨ櫕鍋?..</div>}>
                         <LazyAdminPage
                             apiBaseUrl={apiBaseUrl}
                             initData={initData}
@@ -4091,7 +4085,7 @@ export default function App() {
             {
                 !isHotPools && initDataMissing ? (
                     <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-200">
-                        未获取到 Telegram initData，请从机器人入口打开页面。                    </div>
+                        闁哄牜浜ｉ獮蹇涘矗閺嵮冪厒 Telegram initData闁挎稑鐭侀顒佺鎼淬垺绨氶柛锝冨妺濮瑰宕楅妷銉ョ稉闁瑰灚鎸哥槐鎴炪亜閻㈠憡妗ㄩ柕?                   </div>
                 ) : null
             }
 
@@ -4118,7 +4112,7 @@ export default function App() {
                                 : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10'
                                 }`}
                         >
-                            {batchMode ? '退出批量模式' : '批量模式'}
+                            {batchMode ? '闂侇偀鍋撻柛鎴犲劋婢规帡鏌岃箛鏂堜礁顕?' : '闁归潧缍婇崳鍝勎熼垾宕囩'}
                         </button>
 
                         {batchMode && (
@@ -4128,10 +4122,10 @@ export default function App() {
                                     onClick={selectedTaskIds.size === visiblePositions.length ? deselectAllTasks : selectAllTasks}
                                     className="inline-flex items-center rounded-xl bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-600 hover:bg-zinc-200 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
                                 >
-                                    {selectedTaskIds.size === visiblePositions.length ? '取消全选' : '全选'}
+                                    {selectedTaskIds.size === visiblePositions.length ? '闁告瑦鐗楃粔鐑藉礂閵娾斁鍋? : '闁稿繈鍔戦埀?}
                                 </button>
                                 <span className="text-xs text-zinc-500 dark:text-white/50">
-                                    已选 {selectedTaskIds.size}
+                                    鐎瑰憡鐓￠埀?{selectedTaskIds.size}
                                 </span>
                                 <button
                                     type="button"
@@ -4139,7 +4133,7 @@ export default function App() {
                                     disabled={selectedTaskIds.size === 0 || batchLoading}
                                     className="inline-flex items-center rounded-xl bg-amber-500/15 px-2 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-500/25 disabled:opacity-50 dark:text-amber-200"
                                 >
-                                    {batchLoading ? '处理中...' : '暂停所选'}
+                                    {batchLoading ? '濠㈣泛瀚幃濠冪▔?..'' : '闁哄棗鍊告禒鐘诲箥閳ь剟鏌?}
                                 </button>
                                 <button
                                     type="button"
@@ -4147,7 +4141,7 @@ export default function App() {
                                     disabled={selectedTaskIds.size === 0 || batchLoading}
                                     className="inline-flex items-center rounded-xl bg-emerald-500/15 px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-500/25 disabled:opacity-50 dark:text-emerald-200"
                                 >
-                                    恢复所选
+                                    闁诡厹鍨归ˇ鏌ュ箥閳ь剟鏌?
                                 </button>
                             </div>
                         )}
@@ -4202,7 +4196,7 @@ export default function App() {
                                         onWithdrawLiquidity={handleWithdrawLiquidity}
                                         onSwapDust={handleSwapDust}
                                         onTriggerRebalance={handleTriggerRebalance}
-                                        onToggleRebalance={handleToggleRebalance}
+                                        onUpdateTaskMode={handleUpdateTaskMode}
                                         onAddLiquidity={handleAddLiquidity}
                                         batchMode={batchMode}
                                         isSelected={selectedTaskIds.has(p.task_id)}
@@ -4220,7 +4214,7 @@ export default function App() {
             {
                 isPositions && activeData?.warnings?.length ? (
                     <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-700 dark:text-amber-200">
-                        <div className="font-semibold">鎻愮ず</div>
+                        <div className="font-semibold">闂佸湱绮崝妤呭Φ?/div>
                         <ul className="mt-1 list-disc space-y-1 pl-4">
                             {activeData.warnings.map((w, i) => (
                                 <li key={String(i)}>{w}</li>
@@ -4237,7 +4231,7 @@ export default function App() {
                             type="button"
                             className="absolute inset-0 cursor-default bg-black/40"
                             onClick={closePoolSearch}
-                            aria-label="关闭搜索"
+                            aria-label="闁稿繑濞婂Λ鎾箹濠婂懎鍋?
                         />
                         <div className="absolute inset-x-0 bottom-0 max-h-[85vh] overflow-y-auto rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
                             <div className="flex items-center justify-between">
@@ -4248,7 +4242,7 @@ export default function App() {
                                     type="button"
                                     onClick={closePoolSearch}
                                     className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                    aria-label="关闭搜索"
+                                    aria-label="闁稿繑濞婂Λ鎾箹濠婂懎鍋?
                                 >
                                     <Icon path={icons.close} className="h-5 w-5" />
                                 </button>
@@ -4256,9 +4250,9 @@ export default function App() {
 
                             <div className="mt-4 space-y-3 pb-20">
                                 <div className="rounded-2xl border border-zinc-200 bg-zinc-50/90 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="text-[11px] text-zinc-500 dark:text-white/40">鎼滅储姹犲瓙 (姹犲瓙ID/浠ｅ竵鍚嶇О)</div>
+                                    <div className="text-[11px] text-zinc-500 dark:text-white/40">闂佺懓鍚嬬划搴ㄥ磼閵娿儛褔鎮╅懠顒佹啢 (濠殿喖婀辨慨鎾偤濮楊湂/婵炲濯寸徊鐣岀博閻㈢瑙︾€广儱娉?</div>
                                     <div className="mt-2 flex items-center gap-2">
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">链</div>
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">闂?/div>
                                         <select
                                             value={poolSearchChain}
                                             onChange={(e) => {
@@ -4291,7 +4285,7 @@ export default function App() {
                                                 }
                                             }}
                                             className={`flex-1 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                            placeholder="例如 USDT / WBNB / 0x..."
+                                            placeholder="濞撴艾顑呴々?USDT / WBNB / 0x..."
                                         />
                                         <button
                                             type="button"
@@ -4302,16 +4296,16 @@ export default function App() {
                                                 : `${brand.solidButtonClass} ${brand.solidRingClass}`
                                                 }`}
                                         >
-                                            {poolSearchLoading ? '搜索中...' : '搜索'}
+                                            {poolSearchLoading ? '闁瑰吋绮庨崒銊︾▔?..'' : '闁瑰吋绮庨崒?}
                                         </button>
                                     </div>
                                     <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                        支持按池子 ID 和代币名称搜索，结果按 TVL 倒序，最多 10 条。</div>
+                                        闁衡偓椤栨稑鐦柟绋款槹閻粎鈧?ID 闁告粌濂旈崬顒傛暜娴ｅ憡鍊崇紒澶屽閹磭妲愰～顔剧缂備焦鎸婚悘澶愬箰?TVL 闁稿﹥甯掔花顓㈡晬鐏炵偓浠樺?10 闁哄鎵冲亾?/div>
                                 </div>
 
                                 {!hasInitData ? (
                                     <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-200">
-                                        未获取到 Telegram initData，请从机器人入口打开页面。                                    </div>
+                                        闁哄牜浜ｉ獮蹇涘矗閺嵮冪厒 Telegram initData闁挎稑鐭侀顒佺鎼淬垺绨氶柛锝冨妺濮瑰宕楅妷銉ョ稉闁瑰灚鎸哥槐鎴炪亜閻㈠憡妗ㄩ柕?                                   </div>
                                 ) : null}
 
                                 {poolSearchError ? (
@@ -4322,7 +4316,7 @@ export default function App() {
 
                                 {poolSearchPerformed && !poolSearchLoading && !poolSearchError && poolSearchResults.length === 0 ? (
                                     <div className="rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                                        未找到相关池子。                                    </div>
+                                        闁哄牜浜濇竟姗€宕氶幍顔界ゲ闁稿繗娅曢惈婊呪偓娑欏姂閳?                                   </div>
                                 ) : null}
 
                                 {poolSearchResults.length > 0 ? (
@@ -4359,7 +4353,7 @@ export default function App() {
                             type="button"
                             className="absolute inset-0 cursor-default bg-black/40"
                             onClick={() => setHotPoolsFilterOpen(false)}
-                            aria-label="关闭筛选"
+                            aria-label="闁稿繑濞婂Λ瀵哥驳濞戔懇鍋?
                         />
                         <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
                             <div className="flex items-center justify-between">
@@ -4370,7 +4364,7 @@ export default function App() {
                                     type="button"
                                     onClick={() => setHotPoolsFilterOpen(false)}
                                     className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                    aria-label="关闭筛选"
+                                    aria-label="闁稿繑濞婂Λ瀵哥驳濞戔懇鍋?
                                 >
                                     <Icon path={icons.close} className="h-5 w-5" />
                                 </button>
@@ -4380,9 +4374,9 @@ export default function App() {
                                 <div className="rounded-2xl border border-zinc-200 bg-zinc-50/90 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="flex items-center justify-between gap-3">
                                         <div className="min-w-0">
-                                            <div className="text-[11px] font-semibold text-zinc-700 dark:text-white/80">筛选状态</div>
+                                            <div className="text-[11px] font-semibold text-zinc-700 dark:text-white/80">缂佹稒鐩埀顒€顦辨慨鎼佸箑?/div>
                                             <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40">
-                                                {hotPoolsFilterDraft.enabled ? '已启用，应用后会按下方条件筛选' : '已关闭，条件会保留但不会生效'}
+                                                {hotPoolsFilterDraft.enabled ? '鐎瑰憡褰冮幆搴ㄦ偨椤帞绀夐幖瀛樻⒒閺併倝宕ユ惔婵堢獥闁圭顦粭鍛村棘鐟欏嫭钂嬪ù鐘插閻☆偊鏌? : '鐎瑰憡褰冮崣褔姊婚銊х闁哄鈧弶顐藉ù鍏肩煯缁绘岸鎮惧▎搴ｇɑ濞戞挸绉崇槐浼存偨閻斿憡娅?}
                                             </div>
                                         </div>
                                         <button
@@ -4393,25 +4387,25 @@ export default function App() {
                                                 : 'bg-white/70 text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10 dark:hover:bg-white/10'
                                                 }`}
                                             aria-pressed={hotPoolsFilterDraft.enabled}
-                                            title={hotPoolsFilterDraft.enabled ? '关闭筛选' : '启用筛选'}
+                                            title={hotPoolsFilterDraft.enabled ? '闁稿繑濞婂Λ瀵哥驳濞戔懇鍋? : '闁告凹鍨抽弫銈囩驳濞戔懇鍋?}
                                         >
-                                            {hotPoolsFilterDraft.enabled ? '已启用' : '已关闭'}
+                                            {hotPoolsFilterDraft.enabled ? '鐎瑰憡褰冮幆搴ㄦ偨? : '鐎瑰憡褰冮崣褔姊?}
                                         </button>
                                     </div>
                                 </div>
                                 <div className="rounded-2xl border border-zinc-200 bg-zinc-50/90 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="mt-1">
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">搜索 (交易对 / 地址)</div>
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">闁瑰吋绮庨崒?(濞存嚎鍊栧Σ妤冣偓?/ 闁革附婢樺?</div>
                                         <input
                                             value={hotPoolsFilterDraft.keyword}
                                             onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, keyword: e.target.value }))}
                                             className={`mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                            placeholder="例如 USDT"
+                                            placeholder="濞撴艾顑呴々?USDT"
                                         />
                                     </div>
                                     <div className="mt-3 grid grid-cols-2 gap-3">
                                         <div>
-                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">手续费 &gt;= (USD)</div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">闁归潧顑囬悽鑽ゆ嫻?&gt;= (USD)</div>
                                             <input
                                                 value={hotPoolsFilterDraft.minFees}
                                                 onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFees: e.target.value }))}
@@ -4421,7 +4415,7 @@ export default function App() {
                                             />
                                         </div>
                                         <div>
-                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">费率 &gt;= (%)</div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">閻犳劕婀卞?&gt;= (%)</div>
                                             <input
                                                 value={hotPoolsFilterDraft.minFeeRate}
                                                 onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minFeeRate: e.target.value }))}
@@ -4431,13 +4425,13 @@ export default function App() {
                                             />
                                         </div>
                                         <div>
-                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">活跃费率 &gt;= (%)</div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">婵炲弶妲掔粚顒傛嫻閸︻厼鑺?&gt;= (%)</div>
                                             <input
                                                 value={hotPoolsFilterDraft.minActiveFeeRate}
                                                 onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minActiveFeeRate: e.target.value }))}
                                                 inputMode="decimal"
                                                 className={`mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                                placeholder="可选"
+                                                placeholder="闁告瑯鍨堕埀?
                                             />
                                         </div>
                                         <div>
@@ -4451,7 +4445,7 @@ export default function App() {
                                             />
                                         </div>
                                         <div>
-                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">交易量 &gt;= (USD)</div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">濞存嚎鍊栧Σ妤呮煂?&gt;= (USD)</div>
                                             <input
                                                 value={hotPoolsFilterDraft.minVolume}
                                                 onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minVolume: e.target.value }))}
@@ -4461,13 +4455,13 @@ export default function App() {
                                             />
                                         </div>
                                         <div>
-                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">交易笔数 &gt;=</div>
+                                            <div className="text-[11px] text-zinc-500 dark:text-white/40">濞存嚎鍊栧Σ妤冪箔閺冣偓閺?&gt;=</div>
                                             <input
                                                 value={hotPoolsFilterDraft.minTxCount}
                                                 onChange={(e) => setHotPoolsFilterDraft((prev) => ({ ...prev, minTxCount: e.target.value }))}
                                                 inputMode="decimal"
                                                 className={`mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                                placeholder="可选"
+                                                placeholder="闁告瑯鍨堕埀?
                                             />
                                         </div>
                                     </div>
@@ -4477,31 +4471,31 @@ export default function App() {
                                             type="button"
                                             onClick={applyHotPoolsFilter}
                                             className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold shadow-sm ${brand.solidButtonClass}`}
-                                            aria-label="应用筛选"
-                                            title="应用筛选"
+                                            aria-label="閹煎瓨姊婚弫銈囩驳濞戔懇鍋?
+                                            title="閹煎瓨姊婚弫銈囩驳濞戔懇鍋?
                                         >
                                             <Icon path={icons.check} className="h-4 w-4" />
-                                            应用
+                                            閹煎瓨姊婚弫?
                                         </button>
                                         <button
                                             type="button"
                                             onClick={resetHotPoolsFilter}
                                             className="inline-flex items-center gap-2 rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
-                                            aria-label="恢复默认筛选"
-                                            title="恢复默认筛选"
+                                            aria-label="闁诡厹鍨归ˇ鍙夘渶濡鍚囩紒娑欑洴閳?
+                                            title="闁诡厹鍨归ˇ鍙夘渶濡鍚囩紒娑欑洴閳?
                                         >
                                             <Icon path={icons.reset} className="h-4 w-4" />
-                                            默认
+                                            濮掓稒顭堥?
                                         </button>
                                         <button
                                             type="button"
                                             onClick={clearHotPoolsFilter}
                                             className="inline-flex items-center gap-2 rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
-                                            aria-label="清空筛选条件"
-                                            title="清空筛选条件"
+                                            aria-label="婵炴挸鎳愰埞鏍驳濞戔懇鍋撴径瀣拫濞?
+                                            title="婵炴挸鎳愰埞鏍驳濞戔懇鍋撴径瀣拫濞?
                                         >
                                             <Icon path={icons.close} className="h-4 w-4" />
-                                            清空条件
+                                            婵炴挸鎳愰埞鏍级閳ュ弶顐?
                                         </button>
                                     </div>
                                 </div>
@@ -4518,16 +4512,16 @@ export default function App() {
                             type="button"
                             className="absolute inset-0 cursor-default bg-black/40"
                             onClick={() => setGlobalConfigOpen(false)}
-                            aria-label="关闭全局配置"
+                            aria-label="闁稿繑濞婂Λ鎾礂閵娿儳婀伴梺鏉跨Ф閻?
                         />
                         <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
                             <div className="flex items-center justify-between">
-                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">全局配置</div>
+                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">闁稿繈鍔岄惇顒勬煀瀹ュ洨鏋?/div>
                                 <button
                                     type="button"
                                     onClick={() => setGlobalConfigOpen(false)}
                                     className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                    aria-label="关闭全局配置"
+                                    aria-label="闁稿繑濞婂Λ鎾礂閵娿儳婀伴梺鏉跨Ф閻?
                                 >
                                     <Icon path={icons.close} className="h-5 w-5" />
                                 </button>
@@ -4541,34 +4535,34 @@ export default function App() {
                                 ) : null}
                                 {globalConfigLoading && !globalConfig ? (
                                     <div className="rounded-xl border border-zinc-200 bg-white/70 p-3 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                                        加载中...
+                                        闁告梻濮惧ù鍥ㄧ▔?..
                                     </div>
                                 ) : null}
                                 {globalConfig ? (
                                     <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                         <div className="grid grid-cols-2 gap-3 text-xs text-zinc-500 dark:text-white/50">
                                             <div>
-                                                <div>再平衡超时</div>
+                                                <div>闁告劕绉撮柦鈺冩偘闄囩粔鎾籍?/div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">
                                                     <NumberFlowValue value={rebalanceText} formatter={() => rebalanceText} />
                                                 </div>
                                             </div>
                                             <div>
-                                                <div>滑点</div>
+                                                <div>婵犲﹥鍨归崑?/div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">
                                                     <NumberFlowValue value={slippageText} formatter={() => slippageText} />
                                                 </div>
                                             </div>
                                             <div>
-                                                <div>自动复投</div>
+                                                <div>闁煎浜滄慨鈺傚緞瀹ュ棗顫?/div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.auto_reinvest)}</div>
                                             </div>
                                             <div>
-                                                <div>日志通知</div>
+                                                <div>闁哄啨鍎辩换鏃堟焻濮樿京鍙€</div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.extra_notifications_enabled)}</div>
                                             </div>
                                             <div>
-                                                <div>过滤中文代币</div>
+                                                <div>閺夆晛娲﹂幎銈嗙▔椤撶喐鐎ù鐙呯到缁?/div>
                                                 <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-white/80">{formatOnOff(globalCfg.filter_chinese_tokens)}</div>
                                             </div>
                                         </div>
@@ -4586,7 +4580,7 @@ export default function App() {
                                         : `${brand.solidButtonClass} ${brand.solidRingClass}`
                                         }`}
                                 >
-                                    刷新
+                                    闁告帡鏀遍弻?
                                 </button>
                             </div>
                         </div>
@@ -4601,16 +4595,16 @@ export default function App() {
                             type="button"
                             className="absolute inset-0 cursor-default bg-black/40"
                             onClick={() => setSettingsOpen(false)}
-                            aria-label="关闭设置"
+                            aria-label="闁稿繑濞婂Λ瀵告媼閸撗呮瀭"
                         />
                         <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
                             <div className="flex items-center justify-between">
-                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">设置</div>
+                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">閻犱礁澧介悿?/div>
                                 <button
                                     type="button"
                                     onClick={() => setSettingsOpen(false)}
                                     className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                    aria-label="关闭设置"
+                                    aria-label="闁稿繑濞婂Λ瀵告媼閸撗呮瀭"
                                 >
                                     <Icon path={icons.close} className="h-5 w-5" />
                                 </button>
@@ -4618,8 +4612,8 @@ export default function App() {
 
                             <div className="mt-4 space-y-4">
                                 <div className="rounded-2xl border border-zinc-200 bg-zinc-50/90 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">主题色</div>
-                                    <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">默认新绿，也可以切回原来的绿色。</div>
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">濞戞挸顭烽。浠嬫嚌?/div>
+                                    <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">濮掓稒顭堥濠氬棘閹殿喛闆归柨娑樺缁″啴宕ｉ娆庣鞍闁告帒娲ゅú鏍储閻斿憡闄嶉柣銊ュ鐠炪垽鎳濈仦鍌楀亾?/div>
                                     <div className="mt-3 flex flex-wrap gap-2">
                                         {ACCENT_THEME_OPTIONS.map((option) => {
                                             const active = accentTheme === option.key;
@@ -4641,12 +4635,12 @@ export default function App() {
                                     </div>
                                 </div>
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">自动刷新</div>
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">闁煎浜滄慨鈺呭礆闁垮鐓€</div>
                                     <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40">
-                                        默认间隔 <NumberFlowValue value={settingsPollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s
+                                        濮掓稒顭堥濠氭⒒閹绢喗顓?<NumberFlowValue value={settingsPollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s
                                         {pollOverrideSec
-                                            ? '已启用自定义。'
-                                            : <>服务器默认 <NumberFlowValue value={settingsServerPollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s。</>}
+                                            ? '鐎瑰憡褰冮幆搴ㄦ偨閵娿劌娈伴悗瑙勭煯缁犵喖濡?'
+                                            : <>闁哄牆绉存慨鐔煎闯閵娾晝甯涢悹?<NumberFlowValue value={settingsServerPollIntervalSec} formatOptions={{ maximumFractionDigits: 0 }} />s闁?/>}
                                     </div>
                                     <div className="mt-3 flex flex-wrap gap-2">
                                         {[5, 10, 15, 30, 60].map((sec) => (
@@ -4667,7 +4661,7 @@ export default function App() {
                                             onClick={clearPollOverride}
                                             className="rounded-xl bg-white/70 px-3 py-1.5 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
                                         >
-                                            跟随默认
+                                            閻犺櫣鍠栧▓銏☆渶濡鍚?
                                         </button>
                                     </div>
 
@@ -4690,7 +4684,7 @@ export default function App() {
                                             onClick={applyPollDraft}
                                             className={`rounded-xl px-3 py-2 text-sm font-semibold shadow-sm ${brand.solidButtonClass}`}
                                         >
-                                            确定
+                                            缁绢収鍠栭悾?
                                         </button>
                                     </div>
                                 </div>
@@ -4733,13 +4727,13 @@ export default function App() {
                                         : brand.solidButtonClass
                                         }`}
                                 >
-                                    {openPositionLoading ? '提交中...' : '确认开仓'}
+                                    {openPositionLoading ? '闁圭粯鍔掑锔界▔?..'' : '缁绢収鍠涢璇差嚕閳ь剚绂?}
                                 </button>
                             </div>
                         }
                         title={
                             <div className="min-w-0">
-                                <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/90">开仓</div>
+                                <div className="truncate text-sm font-semibold text-zinc-900 dark:text-white/90">鐎殿喒鍋撳ù?/div>
                                 <div className="mt-0.5 truncate text-[11px] font-medium text-zinc-500 dark:text-white/40">
                                     {openPositionPool?.trading_pair || '--'}
                                 </div>
@@ -4749,8 +4743,8 @@ export default function App() {
                         <div className="space-y-3.5 pb-2">
                             <div className="rounded-2xl border border-zinc-200 bg-zinc-50/90 p-2 dark:border-white/10 dark:bg-[#0f1116]">
                                 <div className="mb-1 flex items-center justify-between gap-2 text-[10px]">
-                                    <span className="font-semibold text-zinc-700 dark:text-white/70">流动性分布</span>
-                                    <span className="text-zinc-500 dark:text-white/40">{openPositionLiqProfileError ? '加载失败' : (openPositionLiqProfile ? [openPositionLiqProfile.protocol?.toUpperCase(), openPositionPriceRange?.gridStepPctText && openPositionPriceRange.gridStepPctText !== '--' ? `每格约 ${openPositionPriceRange.gridStepPctText}` : ''].filter(Boolean).join(' · ') : '')}</span>
+                                    <span className="font-semibold text-zinc-700 dark:text-white/70">婵炵繝绀佹慨鈺呭箑瑜嶉崹搴ｆ暜?/span>
+                                    <span className="text-zinc-500 dark:text-white/40">{openPositionLiqProfileError ? '闁告梻濮惧ù鍥ㄥ緞鏉堫偉袝' : (openPositionLiqProfile ? [openPositionLiqProfile.protocol?.toUpperCase(), openPositionPriceRange?.gridStepPctText && openPositionPriceRange.gridStepPctText !== '--' ? `婵絽绻戦悧鍝ョ棯?${openPositionPriceRange.gridStepPctText}` : ''].filter(Boolean).join(' 鐠?') : '')}</span>
                                 </div>
                                 <LiquidityDistributionChart
                                     bins={openPositionLiqProfile?.bins || []}
@@ -4769,23 +4763,23 @@ export default function App() {
                                     tokenLeftLabel={openPositionInvertPrice ? openPositionToken1Symbol : openPositionToken0Symbol}
                                     tokenRightLabel={openPositionInvertPrice ? openPositionToken0Symbol : openPositionToken1Symbol}
                                     quoteIsToken1={openPositionQuoteIsToken1}
-                                    titleText="流动性分布"
+                                    titleText="婵炵繝绀佹慨鈺呭箑瑜嶉崹搴ｆ暜?
                                     titlePlacement="left"
                                     height={148}
                                 />
                                 <>
                                     <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/40">
-                                        点图上的柱子可直接选中一格。
+                                        闁绘劗鎳撳ù妯荤▔婵犲嫭鐣遍柡灞藉船閻℃瑩宕ｉ婊勭函闁规亽鍎甸埀顒€顦懙鎴炵▔閳ь剟寮界粭琛″亾?
                                     </div>
                                 </>
                             </div>
                             {multiWalletEnabled ? (
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="flex items-center justify-between gap-2">
-                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">选择钱包</div>
+                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">闂侇偄顦扮€氥劑鏌﹂崡鐐茬樁</div>
                                         <div className="text-[11px] text-zinc-500 dark:text-white/40">
                                             {walletsLoading
-                                                ? '加载中...'
+                                                ? '闁告梻濮惧ù鍥ㄧ▔?..'
                                                 : [
                                                     String(walletsData?.chain || '').toUpperCase(),
                                                     walletsData?.native_symbol && walletsData?.stable_symbol
@@ -4797,8 +4791,8 @@ export default function App() {
                                             type="button"
                                             onClick={() => setOpenPositionWalletBalancesHidden((prev) => !prev)}
                                             className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-white/80 text-zinc-600 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/65 dark:hover:bg-white/10"
-                                            title={openPositionWalletBalancesHidden ? '显示钱包金额' : '隐藏钱包金额'}
-                                            aria-label={openPositionWalletBalancesHidden ? '显示钱包金额' : '隐藏钱包金额'}
+                                            title={openPositionWalletBalancesHidden ? '闁哄嫬澧介妵姘舵煢閸楃偛鐦堕梺鍙夊灴椤? : '闂傚懏鍔樺Λ宀勬煢閸楃偛鐦堕梺鍙夊灴椤?}
+                                            aria-label={openPositionWalletBalancesHidden ? '闁哄嫬澧介妵姘舵煢閸楃偛鐦堕梺鍙夊灴椤? : '闂傚懏鍔樺Λ宀勬煢閸楃偛鐦堕梺鍙夊灴椤?}
                                         >
                                             {openPositionWalletBalancesHidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                                         </button>
@@ -4811,7 +4805,7 @@ export default function App() {
                                     ) : null}
 
                                     {!walletsLoading && !walletsError && openPositionWalletOptions.length === 0 ? (
-                                        <div className="mt-2 text-xs text-zinc-500 dark:text-white/50">未找到钱包</div>
+                                        <div className="mt-2 text-xs text-zinc-500 dark:text-white/50">闁哄牜浜濇竟姗€宕氭导瀛樺蔼闁?/div>
                                     ) : null}
 
                                     <div
@@ -4842,9 +4836,9 @@ export default function App() {
                                                         }`}
                                                 >
                                                     <div className="flex min-w-0 flex-1 items-center gap-1">
-                                                        <span className="truncate text-[9px] font-semibold leading-3">{name || shortAddr || `钱包${id}`}</span>
+                                                        <span className="truncate text-[9px] font-semibold leading-3">{name || shortAddr || `闂佽棄宕€?{id}`}</span>
                                                         {w?.is_default ? (
-                                                            <span className="shrink-0 rounded bg-zinc-500/10 px-1 py-px text-[8px] font-bold text-zinc-500 dark:text-white/50">默认</span>
+                                                            <span className="shrink-0 rounded bg-zinc-500/10 px-1 py-px text-[8px] font-bold text-zinc-500 dark:text-white/50">濮掓稒顭堥?/span>
                                                         ) : null}
                                                     </div>
                                                     <span className="shrink-0 pl-1 text-[8px] font-semibold tabular-nums text-zinc-900/75 dark:text-white/70">
@@ -4864,9 +4858,9 @@ export default function App() {
                                             <Check className="h-3 w-3" strokeWidth={3} />
                                         </div>
                                         <div className="min-w-0">
-                                            <div className="text-xs font-semibold text-zinc-900 dark:text-white/85">私有合约保驾护航</div>
+                                            <div className="text-xs font-semibold text-zinc-900 dark:text-white/85">缂佸鐒﹀﹢渚€宕ラ崼銏狀唺濞ｅ洦绻堥埞姘跺箮閵堝牆鐒?/div>
                                             <div className="mt-1 text-[11px] leading-5 text-zinc-600 dark:text-white/60">
-                                                首次开仓会自动部署与当前钱包绑定的专属合约。部署成功后可直接复用，不会重复产生部署消耗。                                            </div>
+                                                濡絾鐗楅鐓庮嚕閳ь剚绂掗幘鑼獥闁煎浜滄慨鈺呮焾閵娧嗩唹濞戞挸楠哥紞瀣礈瀹ュ灏柛鏍ф噽缁妇鈧姘ㄥ▓鎴炵▔閹惧磭娼ｉ柛姘墢鐎规娊濡撮崒鐐插姤缂傚啫寮堕崹姘跺礉閻旈攱鍊甸柛娆樺灣濞插潡骞掗妷銉Щ闁汇埄鐓夌槐婵囩▔瀹ュ嫮绐楅梺鎻掔Т椤﹀弶绂嶈閺佹捇鏌堥妸褑顔夋繛鎴濈墣閳ь剚銇滈埀?                                           </div>
                                         </div>
                                     </div>
                                 </div>
@@ -4878,7 +4872,7 @@ export default function App() {
                                     style={{ gridTemplateColumns: 'minmax(0, 1.45fr) minmax(108px, 0.95fr)' }}
                                 >
                                     <div className="min-w-0">
-                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">开仓金额 (USDT)</div>
+                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">鐎殿喒鍋撳ù鐘虫崌閸ｇ偓锛?(USDT)</div>
                                         <input
                                             value={openPositionAmount}
                                             onChange={(e) => {
@@ -4887,13 +4881,13 @@ export default function App() {
                                             }}
                                             inputMode="decimal"
                                             className={`mt-2 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                            placeholder="例如 100"
+                                            placeholder="濞撴艾顑呴々?100"
                                         />
                                     </div>
                                     <div className="min-w-0">
                                         <div className="flex items-center justify-between gap-2">
-                                            <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">滑点 (%)</div>
-                                            <div className="text-[10px] text-zinc-400 dark:text-white/35">可选</div>
+                                            <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">婵犲﹥鍨归崑?(%)</div>
+                                            <div className="text-[10px] text-zinc-400 dark:text-white/35">闁告瑯鍨堕埀?/div>
                                         </div>
                                         <input
                                             value={openPositionSlippage}
@@ -4913,7 +4907,7 @@ export default function App() {
                                     }`}
                                 >
                                     {openPositionNeedsHighSlippageConfirm
-                                        ? `当前滑点 ${openPositionTaskSlippage.value}% 已超过 1%，提交时会二次确认。`
+                                        ? `鐟滅増鎸告晶鐘差煥閹寸姴浠?${openPositionTaskSlippage.value}% 鐎规瓕灏粔瀛樻交?1%闁挎稑鏈ぐ浣圭閵堝棙顦уù鍏肩煯缁ㄢ晛鈻庨敍鍕ㄢ偓妯兼媼閵堝啠鍋撴穱?
                                         : openPositionGlobalSlippageHint}
                                 </div>
                             </div>
@@ -4926,10 +4920,10 @@ export default function App() {
 
                                     {openPositionRecommendedPositions.map((item, index) => {
                                         const tone = item?.mode === 'conservative'
-                                            ? { border: 'border-emerald-500/30', bg: 'bg-emerald-500/10', text: 'text-emerald-700 dark:text-emerald-400', icon: '🛡️' }
+                                            ? { border: 'border-emerald-500/30'', bg: 'bg-emerald-500/10', text: 'text-emerald-700 dark:text-emerald-400', icon: '妫ｅ啯绀夐柨? }
                                             : item?.mode === 'neutral'
-                                                ? { border: 'border-amber-500/30', bg: 'bg-amber-500/10', text: 'text-amber-700 dark:text-amber-400', icon: '⚖️' }
-                                                : { border: 'border-red-500/30', bg: 'bg-red-500/10', text: 'text-red-700 dark:text-red-400', icon: '🚀' };
+                                                ? { border: 'border-amber-500/30'', bg: 'bg-amber-500/10', text: 'text-amber-700 dark:text-amber-400', icon: '闁虫寧鐗粭? }
+                                                : { border: 'border-red-500/30'', bg: 'bg-red-500/10', text: 'text-red-700 dark:text-red-400', icon: '妫ｅ啯鐣? };
                                         return (
                                             <button
                                                 key={`${item?.mode || 'mode'}-${index}`}
@@ -4952,16 +4946,16 @@ export default function App() {
                             <div className="rounded-2xl border border-zinc-200/80 bg-white/80 p-3 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5">
                                 <div className="flex items-start justify-between gap-3">
                                     <div>
-                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/85">区间设置</div>
+                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/85">闁告牗妞藉Λ璺ㄦ媼閸撗呮瀭</div>
                                         <div className="mt-1 text-[11px] text-zinc-500 dark:text-white/45">
                                             {openPositionVisibleRangeMode === 'percentage'
                                                 ? openPositionQuickRangeIntro
-                                                : '切到流动性格子后，可在上方分布图拖动区间，或在这里微调上下边界。'}
+                                                : '闁告帒娲ら崺灞矫规担绋啃楅柟顑嫮澹愰悗娑欏姇閹鏁嶇仦钘夎闁革负鍔嬬粭鍌炲棘閻熸澘鐎婚悽顖氬暙濞存﹢骞忛弽褍袟闁告牗妞藉Λ鍧楁晬鐏炴儳鐏楅柛锔哄姀缁绘牠鏌岀仦鎴掔俺閻犲鍟╃粭鍌涚▔鐎ｎ厾鐝堕柣锝呰閳?'}
                                         </div>
                                     </div>
                                     {openPositionPriceRange?.gridStepPctText && openPositionPriceRange.gridStepPctText !== '--' ? (
                                         <div className="shrink-0 rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[10px] font-semibold text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-white/60">
-                                            每格约 {openPositionPriceRange.gridStepPctText}
+                                            婵絽绻戦悧鍝ョ棯?{openPositionPriceRange.gridStepPctText}
                                         </div>
                                     ) : null}
                                 </div>
@@ -5020,7 +5014,7 @@ export default function App() {
                                         </div>
                                         {openPositionSmartRangesLoading ? (
                                             <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/45">
-                                                聪明钱区间加载中...
+                                                闁奸硸浜濆Σ鎴︽煢閸楃偛闅橀梻鍌涙綑婵偞娼幋鎺曞幀...
                                             </div>
                                         ) : null}
                                         <div className={`mt-3 rounded-2xl border p-3 ${openPositionRangeInputMode === 'percentage'
@@ -5029,10 +5023,9 @@ export default function App() {
                                             }`}>
                                             <div className="flex items-center justify-between gap-3">
                                                 <div>
-                                                    <div className="text-[12px] font-semibold text-zinc-900 dark:text-white/90">自定义百分比</div>
+                                                    <div className="text-[12px] font-semibold text-zinc-900 dark:text-white/90">闁煎浜滈悾鐐▕婢跺本顏ラ柛鎺戞閻?/div>
                                                     <div className="mt-1 text-[10px] text-zinc-500 dark:text-white/45">
-                                                        固定档位之外，可直接输入上下限百分比。
-                                                    </div>
+                                                        闁搞儱鎼悾鎯ь浖閿濆嫮绉村☉鏂款儏椤﹀鏁嶇仦钘夎闁烩晛鐡ㄧ敮瀛樻綇閹惧啿寮冲☉鎾筹梗缁楀懘姊介幇顔筋仴闁告帒妫欓惁顕€濡?                                                    </div>
                                                 </div>
                                                 <button
                                                     type="button"
@@ -5042,7 +5035,7 @@ export default function App() {
                                                         : 'border-zinc-200 bg-white/80 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
                                                         }`}
                                                 >
-                                                    {openPositionRangeInputMode === 'percentage' ? '当前按百分比编辑' : '切换到百分比编辑'}
+                                                    {openPositionRangeInputMode === 'percentage' ? '鐟滅増鎸告晶鐘诲箰婢跺本顏ラ柛鎺戞閻︻喚绱撻弽顒傚竼' : '闁告帒娲﹀畷鏌ュ礆閹殿喗顏ラ柛鎺戞閻︻喚绱撻弽顒傚竼'}
                                                 </button>
                                             </div>
                                             <div className="mt-3 grid grid-cols-2 gap-2">
@@ -5051,30 +5044,29 @@ export default function App() {
                                                     onChange={(e) => handleOpenPositionRangeLowerChange(e.target.value)}
                                                     inputMode="decimal"
                                                     className={`w-full rounded-xl border border-zinc-200 bg-white/90 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                                    placeholder="下限 %"
+                                                    placeholder="濞戞挸顑夊?%"
                                                 />
                                                 <input
                                                     value={openPositionRangeUpper}
                                                     onChange={(e) => handleOpenPositionRangeUpperChange(e.target.value)}
                                                     inputMode="decimal"
                                                     className={`w-full rounded-xl border border-zinc-200 bg-white/90 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                                    placeholder="上限 %"
+                                                    placeholder="濞戞挸锕?%"
                                                 />
                                             </div>
                                             <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/45">
-                                                例如 `1 / 3` 表示下跌 1%、上涨 3%。之后切到格子模式时，会沿用映射后的 Tick 区间继续调整。
-                                            </div>
+                                                濞撴艾顑呴々?`1 / 3` 閻炴稏鍔庨妵姘▔鐎ｎ厾鈹?1%闁靛棔妞掔粭鍌氣槈?3%闁靛棗鍊风粻锝夊触鎼粹€崇€奸柛鎺斿閻楀摜鈧稒鍔栬啯鐎殿喖绻戝鍌炴晬鐏炶偐绐楁繛宀冩硶閺併倝寮伴悩鑼闁告艾娴峰▓?Tick 闁告牗妞藉Λ璺ㄧ磼瑜忛悽鑽ゆ嫬閸愨晜娈婚柕?                                            </div>
                                             {openPositionEffectiveRangeEditor ? (
                                                 <div className="mt-3 rounded-2xl border border-zinc-200 bg-white/80 p-3 dark:border-white/10 dark:bg-white/5">
                                                     <div className="grid gap-2 text-[11px] text-zinc-600 dark:text-white/60">
                                                         <div className="flex items-center justify-between gap-3">
-                                                            <span>映射价格区间</span>
+                                                            <span>闁哄嫮濮撮惃鐘崇闁垮澹愰柛鏍ㄦそ濡?/span>
                                                             <span className="font-semibold text-zinc-900 dark:text-white/90">
                                                                 {formatPriceValue(openPositionEffectiveRangeEditor?.range_lower_price)} - {formatPriceValue(openPositionEffectiveRangeEditor?.range_upper_price)}
                                                             </span>
                                                         </div>
                                                         <div className="flex items-center justify-between gap-3">
-                                                            <span>当前价格</span>
+                                                            <span>鐟滅増鎸告晶鐘崇闁垮澹?/span>
                                                             <span className="font-semibold text-zinc-900 dark:text-white/90">{openPositionPriceRange?.currentText || '--'}</span>
                                                         </div>
                                                     </div>
@@ -5097,17 +5089,15 @@ export default function App() {
                                                     onClick={() => setOpenPositionInvertPrice((prev) => !prev)}
                                                     className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
                                                 >
-                                                    切换计价
-                                                </button>
+                                                    闁告帒娲﹀畷鑼媼閳ヨ尙骞?                                                </button>
                                             </div>
 
                                             <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/45">
-                                                上方流动性分布图可直接拖动区间，这里用于精细微调边界。
-                                            </div>
+                                                濞戞挸锕ラ弻鐔访规担绋啃楅柟顑啫鐎婚悽顖氬暙濞存﹢宕ｉ婊勭函闁规亽鍎茬€氬宕濋妸銉ラ殬闂傚倽鎻槐婵囨交濞嗘挸娅￠柣顫妺缁剛鍒掗崜褏鐭庣€甸偊鍠涢惃鐔告綇閸︻厽娅曢柕?                                            </div>
 
                                             <div className="mt-2.5 grid grid-cols-2 gap-2">
                                                 <div className="rounded-xl border border-zinc-200/80 bg-white/90 p-2.5 dark:border-white/10 dark:bg-white/5">
-                                                    <div className="text-[11px] text-zinc-500 dark:text-white/45">下限价格</div>
+                                                    <div className="text-[11px] text-zinc-500 dark:text-white/45">濞戞挸顑夊鐑樼闁垮澹?/div>
                                                     <div className="mt-1 flex items-end gap-1.5">
                                                         <div className="text-[15px] font-semibold text-zinc-900 dark:text-white/90">{openPositionPriceRange?.lowerText || '--'}</div>
                                                         <div className="pb-0.5 text-[10px] text-zinc-500 dark:text-white/45">{openPositionPriceRange?.lowerPctText || '--'}</div>
@@ -5118,20 +5108,18 @@ export default function App() {
                                                             onClick={() => nudgeOpenPositionTickBoundary('lower', -1)}
                                                             className="rounded-full border border-zinc-200 bg-white/80 px-0 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
                                                         >
-                                                            -1格
-                                                        </button>
+                                                            -1闁?                                                        </button>
                                                         <button
                                                             type="button"
                                                             onClick={() => nudgeOpenPositionTickBoundary('lower', 1)}
                                                             className="rounded-full border border-zinc-200 bg-white/80 px-0 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
                                                         >
-                                                            +1格
-                                                        </button>
+                                                            +1闁?                                                        </button>
                                                     </div>
                                                 </div>
 
                                                 <div className="rounded-xl border border-zinc-200/80 bg-white/90 p-2.5 dark:border-white/10 dark:bg-white/5">
-                                                    <div className="text-[11px] text-zinc-500 dark:text-white/45">上限价格</div>
+                                                    <div className="text-[11px] text-zinc-500 dark:text-white/45">濞戞挸锕鐑樼闁垮澹?/div>
                                                     <div className="mt-1 flex items-end gap-1.5">
                                                         <div className="text-[15px] font-semibold text-zinc-900 dark:text-white/90">{openPositionPriceRange?.upperText || '--'}</div>
                                                         <div className="pb-0.5 text-[10px] text-zinc-500 dark:text-white/45">{openPositionPriceRange?.upperPctText || '--'}</div>
@@ -5142,22 +5130,20 @@ export default function App() {
                                                             onClick={() => nudgeOpenPositionTickBoundary('upper', -1)}
                                                             className="rounded-full border border-zinc-200 bg-white/80 px-0 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
                                                         >
-                                                            -1格
-                                                        </button>
+                                                            -1闁?                                                        </button>
                                                         <button
                                                             type="button"
                                                             onClick={() => nudgeOpenPositionTickBoundary('upper', 1)}
                                                             className="rounded-full border border-zinc-200 bg-white/80 px-0 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
                                                         >
-                                                            +1格
-                                                        </button>
+                                                            +1闁?                                                        </button>
                                                     </div>
                                                 </div>
                                             </div>
 
                                             <div className="mt-3 grid gap-2 text-[11px] text-zinc-600 dark:text-white/60">
                                                 <div className="flex items-center justify-between gap-3">
-                                                    <span>当前价格</span>
+                                                    <span>鐟滅増鎸告晶鐘崇闁垮澹?/span>
                                                     <span className="font-semibold text-zinc-900 dark:text-white/90">{openPositionPriceRange?.currentText || '--'}</span>
                                                 </div>
                                             </div>
@@ -5173,8 +5159,8 @@ export default function App() {
                                                     : 'border-sky-500/20 bg-sky-500/10 text-sky-700 dark:text-sky-200'
                                                     }`}>
                                                     {String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
-                                                        ? `当前：${openPositionRangeShapeLabel || `单边 ${openPositionEffectiveRangeEditor?.dominant_token_symbol || '--'}`}`
-                                                        : '当前：双边池'}
+                                                        ? `鐟滅増鎸告晶鐘绘晬?{openPositionRangeShapeLabel || `闁告娲濈粩?${openPositionEffectiveRangeEditor?.dominant_token_symbol || '--'}`}`
+                                                        : '鐟滅増鎸告晶鐘绘晬濮橆剙钃熼弶鍫ｎ潐閻?'}
                                                 </div>
                                                 <div className="flex flex-wrap gap-1.5">
                                                     <button
@@ -5182,25 +5168,22 @@ export default function App() {
                                                         onClick={() => shiftOpenPositionRangeToSingleSide('lower')}
                                                         className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
                                                     >
-                                                        单边下限
-                                                    </button>
+                                                        闁告娲濈粩鐔哥▔鐎ｎ喗顎?                                                    </button>
                                                     <button
                                                         type="button"
                                                         onClick={() => shiftOpenPositionRangeToSingleSide('upper')}
                                                         className="rounded-full border border-zinc-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
                                                     >
-                                                        单边上限
-                                                    </button>
+                                                        闁告娲濈粩鐔哥▔婵犲洦顎?                                                    </button>
                                                 </div>
                                             </div>
                                             <div className="mt-2 text-[11px] leading-5 text-zinc-600 dark:text-white/60">
                                                 {String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
-                                                    ? `从 USDT 入场后，最终会更偏向 ${openPositionEffectiveRangeEditor?.dominant_token_symbol || '--'} 单边资产。`
-                                                    : '当前区间覆盖现价，执行时会自动分配到两侧资产。'}
+                                                    ? `濞?USDT 闁稿繈鍎卞┃鈧柛姘嚱缁辨繈寮甸埀顒傜磼閸粎绐楅柡鍥ㄦ綑娴滄悂宕?${openPositionEffectiveRangeEditor?.dominant_token_symbol || '--'} 闁告娲濈粩鐔烘導閸曨亪鐛撻柕鍡曠箹
+                                                    : '鐟滅増鎸告晶鐘诲礌濞差亝锛熼悷鏇炴濞插﹪鎮虫０浣哄箚闁挎稑鏈晶鐣屾偘鐏炵偓顦уù鍏间亢閸ゆ粓宕濋妸銉ョ€婚梺鏉跨Т閸╁本绋夐妶鍕珷閻犙冨妤犲洭濡?'}
                                             </div>
                                             <div className="mt-2 text-[10px] text-zinc-500 dark:text-white/45">
-                                                保留当前宽度，整体移动到现价下方或上方，也允许继续越过活跃格微调。
-                                            </div>
+                                                濞ｅ洦绻勯弳鈧憸鐗堟尭婢х姷鈧妫勭€规娊鏁嶇仦鐐濞达絾鎸句簺闁告柣鍔岄崺宀勬偝妫颁胶骞嗗☉鎾愁儐閺岀喖骞嬮弽锔剧憪闁哄倻娅㈢槐婵囩▕閻斿嘲甯掗悹浣告憸閹撮绱掗锛勑ㄩ弶鈺佹处濡炶法鎹勯崘鈺冨鐎甸偊鍠涢惃鐔煎Υ?                                            </div>
                                         </div>
                                     </div>
                                 )}
@@ -5209,7 +5192,7 @@ export default function App() {
                             <div className="hidden">
                                 <div className="flex items-center justify-between gap-3">
                                     <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">
-                                        {openPositionRangeInputMode === 'percentage' ? '自定义区间 (%)' : 'Tick 区间编辑'}
+                                        {openPositionRangeInputMode === 'percentage' ? '闁煎浜滈悾鐐▕婢跺﹤闅橀梻?(%)'' : 'Tick 闁告牗妞藉Λ璺ㄧ磽閺嶎剛甯?}
                                     </div>
                                     <div className="flex flex-wrap justify-end gap-1.5">
                                         {OPEN_POSITION_MANUAL_OPTIONS.map((option) => (
@@ -5235,19 +5218,19 @@ export default function App() {
                                         onChange={(e) => handleOpenPositionRangeLowerChange(e.target.value)}
                                         inputMode="decimal"
                                         className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                        placeholder="下限 %"
+                                        placeholder="濞戞挸顑夊?%"
                                     />
                                     <input
                                         value={openPositionRangeUpper}
                                         onChange={(e) => handleOpenPositionRangeUpperChange(e.target.value)}
                                         inputMode="decimal"
                                         className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                        placeholder="上限 %"
+                                        placeholder="濞戞挸锕?%"
                                     />
                                 </div>
                                 {openPositionSmartRangesLoading ? (
                                     <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                        聪明钱区间加载中...
+                                        闁奸硸浜濆Σ鎴︽煢閸楃偛闅橀梻鍌涙綑婵偞娼幋鎺曞幀...
                                     </div>
                                 ) : null}
                                 <div className="mt-2 flex flex-wrap gap-1.5">
@@ -5286,7 +5269,7 @@ export default function App() {
                                 {smartQuickRangeOptions.length > 0 ? (
                                     <>
                                         <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                            聪明钱近期开仓金额                                        </div>
+                                            闁奸硸浜濆Σ鎴︽煢鏉堫偆绠柡鍫㈠枎缁辨垶绂掗幘璇叉濡?                                       </div>
                                         <div className="mt-2 flex flex-wrap gap-1.5">
                                             {defaultQuickRangeOptions.map((option) => {
                                                 const lowerValue = Number(option.lowerValue);
@@ -5316,11 +5299,11 @@ export default function App() {
                                             })}
                                         </div>
                                         <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                            下方为默认区间                                        </div>
+                                            濞戞挸顑嗛弻鐔哥▔濞差亞甯涢悹浣靛€曠亸顖炴⒒?                                       </div>
                                     </>
                                 ) : null}
                                 <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                    输入下限和上限百分比。例如 1 / 3 表示下跌 1%、上涨 3%。
+                                    閺夊牊鎸搁崣鍡樼▔鐎ｎ喗顎欓柛婊冨缁楀倿姊介幇顔筋仴闁告帒妫欓惁顕€濡撮崒娆戜紣濠?1 / 3 閻炴稏鍔庨妵姘▔鐎ｎ厾鈹?1%闁靛棔妞掔粭鍌氣槈?3%闁?
                                 </div>
                                     </>
                                 ) : (
@@ -5328,7 +5311,7 @@ export default function App() {
                                         <div className="mt-2 rounded-2xl border border-sky-400/20 bg-gradient-to-br from-sky-500/12 via-sky-500/6 to-transparent p-3 dark:border-sky-300/20">
                                             <div className="grid gap-2 text-[11px] text-zinc-600 dark:text-white/65">
                                                 <div className="flex items-center justify-between gap-3">
-                                                    <span>当前 Tick</span>
+                                                    <span>鐟滅増鎸告晶?Tick</span>
                                                     <span className="font-mono font-semibold text-zinc-900 dark:text-white/90">
                                                         {Number.isFinite(Number(openPositionEffectiveRangeEditor?.current_tick)) ? openPositionEffectiveRangeEditor.current_tick : '--'}
                                                     </span>
@@ -5340,14 +5323,14 @@ export default function App() {
                                                     </span>
                                                 </div>
                                                 <div className="flex items-center justify-between gap-3">
-                                                    <span>当前价格</span>
+                                                    <span>鐟滅増鎸告晶鐘崇闁垮澹?/span>
                                                     <span className="font-semibold text-zinc-900 dark:text-white/90">
                                                         {formatPriceValue(openPositionEffectiveRangeEditor?.current_price)}
                                                     </span>
                                                 </div>
                                                 {openPositionRangeShapeLabel ? (
                                                     <div className="flex items-center justify-between gap-3">
-                                                        <span>仓位形态</span>
+                                                        <span>濞寸姵鎸风紞鍛般亹閵忊檧鍋?/span>
                                                         <span className="font-semibold text-zinc-900 dark:text-white/90">{openPositionRangeShapeLabel}</span>
                                                     </div>
                                                 ) : null}
@@ -5360,7 +5343,7 @@ export default function App() {
                                             }`}>
                                             <div className="flex items-center justify-between gap-3">
                                                 <div className="text-[12px] font-semibold text-zinc-900 dark:text-white/90">
-                                                    {String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_') ? '当前将开单边仓' : '当前将开双边仓'}
+                                                    {String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_') ? '鐟滅増鎸告晶鐘典焊閸℃纾婚柛妤佹礉缁旂喐绂? : '鐟滅増鎸告晶鐘典焊閸℃纾婚柛娆忕焷缁旂喐绂?}
                                                 </div>
                                                 {openPositionRangeShapeLabel ? (
                                                     <span className="rounded-full bg-white/70 px-2 py-1 text-[10px] font-bold text-zinc-700 dark:bg-white/10 dark:text-white/80">
@@ -5370,8 +5353,8 @@ export default function App() {
                                             </div>
                                             <div className="mt-1 text-[11px] leading-5 text-zinc-600 dark:text-white/60">
                                                 {String(openPositionEffectiveRangeEditor?.position_shape || '').startsWith('single_')
-                                                    ? `从 USDT 入场后，最终会更偏向 ${openPositionEffectiveRangeEditor?.dominant_token_symbol || '--'} 单边资产。`
-                                                    : '当前区间覆盖现价，执行时会自动分配到两侧资产。'}
+                                                    ? `濞?USDT 闁稿繈鍎卞┃鈧柛姘嚱缁辨繈寮甸埀顒傜磼閸粎绐楅柡鍥ㄦ綑娴滄悂宕?${openPositionEffectiveRangeEditor?.dominant_token_symbol || '--'} 闁告娲濈粩鐔烘導閸曨亪鐛撻柕鍡曠箹
+                                                    : '鐟滅増鎸告晶鐘诲礌濞差亝锛熼悷鏇炴濞插﹪鎮虫０浣哄箚闁挎稑鏈晶鐣屾偘鐏炵偓顦уù鍏间亢閸ゆ粓宕濋妸銉ョ€婚梺鏉跨Т閸╁本绋夐妶鍕珷閻犙冨妤犲洭濡?'}
                                             </div>
                                             <div className="mt-3 flex flex-wrap gap-1.5">
                                                 <button
@@ -5379,18 +5362,18 @@ export default function App() {
                                                     onClick={() => shiftOpenPositionRangeToSingleSide('lower')}
                                                     className="rounded-full border border-zinc-200 bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
                                                 >
-                                                    单边下限
+                                                    闁告娲濈粩鐔哥▔鐎ｎ喗顎?
                                                 </button>
                                                 <button
                                                     type="button"
                                                     onClick={() => shiftOpenPositionRangeToSingleSide('upper')}
                                                     className="rounded-full border border-zinc-200 bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
                                                 >
-                                                    单边上限
+                                                    闁告娲濈粩鐔哥▔婵犲洦顎?
                                                 </button>
                                             </div>
                                             <div className="mt-2 text-[10px] text-zinc-500 dark:text-white/45">
-                                                保留当前宽度，整体挪到当前价下方或上方，也允许继续越过活跃格调整。
+                                                濞ｅ洦绻勯弳鈧憸鐗堟尭婢х姷鈧妫勭€规娊鏁嶇仦鐐濞达絾鎸荤亸鎾诲礆閺夎法绉奸柛鎾崇С閻滎垱绋夌€ｎ偅鐓欓柟瀛樼墧缁楀倿寮惂鍝ョ濞戞梻鍠庨崢鎴犳媼閸濄儲鍩涚紓渚囧弨缁夌儤娼婚崶銊︺仧閻犲搫鍟悧鍝ユ嫬閸愨晜娈婚柕?
                                             </div>
                                         </div>
 
@@ -5405,7 +5388,7 @@ export default function App() {
                                                             : 'border-zinc-200 bg-white/70 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
                                                             }`}
                                                     >
-                                                        调整下限
+                                                        閻犲鍟弳锝嗙▔鐎ｎ喗顎?
                                                     </button>
                                                     <button
                                                         type="button"
@@ -5415,21 +5398,21 @@ export default function App() {
                                                             : 'border-zinc-200 bg-white/70 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
                                                             }`}
                                                     >
-                                                        调整上限
+                                                        閻犲鍟弳锝嗙▔婵犲洦顎?
                                                     </button>
                                                     <button
                                                         type="button"
                                                         onClick={() => nudgeOpenPositionTickBoundary(openPositionGridBoundaryTarget, -1)}
                                                         className="rounded-full border border-zinc-200 bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
                                                     >
-                                                        -1 格
+                                                        -1 闁?
                                                     </button>
                                                     <button
                                                         type="button"
                                                         onClick={() => nudgeOpenPositionTickBoundary(openPositionGridBoundaryTarget, 1)}
                                                         className="rounded-full border border-zinc-200 bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10"
                                                     >
-                                                        +1 格
+                                                        +1 闁?
                                                     </button>
                                                 </div>
 
@@ -5450,8 +5433,8 @@ export default function App() {
                                                                     : 'border-zinc-200 bg-white/70 text-zinc-700 hover:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
                                                                     }`}
                                                             >
-                                                                <span>{bin.isCurrent ? '当前格' : `${bin.lowerTick} ~ ${bin.upperTick}`}</span>
-                                                                <span className="mt-1 text-[10px] font-medium opacity-70">{bin.isCurrent ? '锚点' : `第 ${Math.abs(bin.index)} 格`}</span>
+                                                                <span>{bin.isCurrent ? '鐟滅増鎸告晶鐘诲冀?' : `${bin.lowerTick} ~ ${bin.upperTick}`}</span>
+                                                                <span className="mt-1 text-[10px] font-medium opacity-70">{bin.isCurrent ? '闂佹寧姘ㄩ崑?' : `缂?${Math.abs(bin.index)} 闁哄秶閽瀩</span>
                                                             </button>
                                                         );
                                                     })}
@@ -5471,7 +5454,7 @@ export default function App() {
                                                         }}
                                                         inputMode="decimal"
                                                         className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                                        placeholder="下限价格"
+                                                        placeholder="濞戞挸顑夊鐑樼闁垮澹?
                                                     />
                                                     <input
                                                         value={openPositionPriceUpper}
@@ -5482,13 +5465,13 @@ export default function App() {
                                                         }}
                                                         inputMode="decimal"
                                                         className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                                        placeholder="上限价格"
+                                                        placeholder="濞戞挸锕鐑樼闁垮澹?
                                                     />
                                                 </div>
                                                 <div className="mt-3 rounded-2xl border border-zinc-200 bg-white/70 p-3 dark:border-white/10 dark:bg-white/5">
                                                     <div className="grid gap-2 text-[11px] text-zinc-600 dark:text-white/60">
                                                         <div className="flex items-center justify-between gap-3">
-                                                            <span>价格计价</span>
+                                                            <span>濞寸娀鏀遍悧鍝ユ媼閳ヨ尙骞?/span>
                                                             <span className="font-semibold text-zinc-900 dark:text-white/90">
                                                                 {openPositionPriceRange?.baseSymbol || '--'}/{openPositionPriceRange?.quoteSymbol || '--'}
                                                             </span>
@@ -5507,7 +5490,7 @@ export default function App() {
                                                 }}
                                                 inputMode="numeric"
                                                 className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                                placeholder="下限 Tick"
+                                                placeholder="濞戞挸顑夊?Tick"
                                             />
                                             <input
                                                 value={openPositionTickUpper}
@@ -5518,7 +5501,7 @@ export default function App() {
                                                 }}
                                                 inputMode="numeric"
                                                 className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                                placeholder="上限 Tick"
+                                                placeholder="濞戞挸锕?Tick"
                                             />
                                         </div>
                                         )}
@@ -5527,13 +5510,13 @@ export default function App() {
                                             <div className="mt-3 rounded-2xl border border-zinc-200 bg-white/70 p-3 dark:border-white/10 dark:bg-white/5">
                                                 <div className="grid gap-2 text-[11px] text-zinc-600 dark:text-white/60">
                                                     <div className="flex items-center justify-between gap-3">
-                                                        <span>价格区间</span>
+                                                        <span>濞寸娀鏀遍悧鎼佸礌濞差亝锛?/span>
                                                         <span className="font-semibold text-zinc-900 dark:text-white/90">
                                                             {formatPriceValue(openPositionEffectiveRangeEditor?.range_lower_price)} - {formatPriceValue(openPositionEffectiveRangeEditor?.range_upper_price)}
                                                         </span>
                                                     </div>
                                                     <div className="flex items-center justify-between gap-3">
-                                                        <span>百分比映射</span>
+                                                        <span>闁谎勫劤閸ㄥ骸袙閺冣偓濡惭呬焊?/span>
                                                         <span className="font-semibold text-zinc-900 dark:text-white/90">
                                                             {formatRangePercentCompact(openPositionEffectiveRangeEditor?.range_lower_pct)} / {formatRangePercentCompact(openPositionEffectiveRangeEditor?.range_upper_pct)}
                                                         </span>
@@ -5549,38 +5532,36 @@ export default function App() {
 
                             <div className="rounded-2xl border border-fuchsia-500/20 bg-gradient-to-br from-fuchsia-500/10 via-fuchsia-500/5 to-transparent p-3 dark:border-fuchsia-400/20 dark:from-fuchsia-400/10 dark:via-fuchsia-400/5">
                                 <div className="flex items-center justify-between gap-3">
-                                    <div className="text-[12px] font-bold text-zinc-900 dark:text-white/85">{'\u672c\u6b21\u5f00\u4ed3'}</div>
-                                    <div className="text-[10px] font-medium text-zinc-500 dark:text-white/45">{'\u53ef\u4ee5\u5355\u72ec\u5173\u95ed'}</div>
+                                    <div className="text-[12px] font-bold text-zinc-900 dark:text-white/85">{'閺堫剚顐煎鈧禒?'}</div>
+                                    <div className="text-[10px] font-medium text-zinc-500 dark:text-white/45">姒涙顓婚崣灞芥倻閹俱倕鍤?/div>
                                 </div>
                                 <div className="mt-3 grid grid-cols-2 gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setOpenPositionRebalanceEnabled((v) => !v);
-                                            setOpenPositionError('');
-                                        }}
-                                        disabled={openPositionLoading}
-                                        className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left transition ${openPositionRebalanceEnabled
-                                            ? 'border-fuchsia-500/30 bg-fuchsia-500/10 text-zinc-900 dark:text-white'
-                                            : 'border-zinc-200 bg-white/70 text-zinc-700 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
-                                            }`}
-                                    >
-                                        <span className="text-[12px] font-semibold">{'\u518d\u5e73\u8861'}</span>
-                                        <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${openPositionRebalanceEnabled
-                                            ? 'bg-white/70 text-fuchsia-700 dark:bg-white/10 dark:text-fuchsia-200'
-                                            : 'bg-zinc-100 text-zinc-500 dark:bg-white/10 dark:text-white/45'
-                                            }`}>
-                                            {openPositionRebalanceEnabled ? '\u5f00\u542f' : '\u5df2\u5173'}
-                                        </span>
-                                    </button>
+                                    {TASK_MODE_OPTIONS.map((option) => (
+                                        <button
+                                            key={option.value}
+                                            type="button"
+                                            onClick={() => {
+                                                setOpenPositionTaskMode(option.value);
+                                                setOpenPositionError('');
+                                            }}
+                                            disabled={openPositionLoading}
+                                            className={`rounded-xl border px-3 py-2 text-left transition ${openPositionTaskMode === option.value
+                                                ? 'border-fuchsia-500/30 bg-fuchsia-500/10 text-zinc-900 dark:text-white'
+                                                : 'border-zinc-200 bg-white/70 text-zinc-700 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
+                                                }`}
+                                        >
+                                            <div className="text-[12px] font-semibold">{option.label}</div>
+                                            <div className="mt-1 text-[10px] leading-4 text-zinc-500 dark:text-white/45">{option.description}</div>
+                                        </button>
+                                    ))}
                                 </div>
                                 <div className="mt-2 text-[10px] leading-4 text-zinc-600 dark:text-white/55">
                                     <div className="mb-1">
-                                        上破区间：{openPositionOutOfRangeActions.above}；下破区间：{openPositionOutOfRangeActions.below}
+                                        娑撳﹦鐗崠娲？閿涙openPositionOutOfRangeActions.above}閿涙稐绗呴惍鏉戝隘闂傝揪绱皗openPositionOutOfRangeActions.below}
                                     </div>
                                     {openPositionIsSingleSidedSelection
-                                        ? `当前区间会开成单边池，首次进入区间前不会触发自动处理。进入过区间后，会按当前再平衡模式处理越界。${openPositionResolvedSelectionShape.dominantTokenSymbol ? ` 资金会更偏向 ${openPositionResolvedSelectionShape.dominantTokenSymbol}。` : ''}`
-                                        : '关闭再平衡后，超区间会在缓冲结束后自动撤仓并终止任务。'}
+                                        ? `瑜版挸澧犻崠娲？娴兼艾绱戦幋鎰礋鏉堣鐫滈敍宀勵浕濞喡ょ箻閸忋儱灏梻鏉戝娑撳秳绱扮憴锕€褰傞懛顏勫З婢跺嫮鎮婇妴鍌濈箻閸忋儴绻冮崠娲？閸氬函绱濇导姘瘻瑜版挸澧犲Ο鈥崇础婢跺嫮鎮婄搾濠勬櫕閵?{openPositionResolvedSelectionShape.dominantTokenSymbol ? ` 鐠у嫰鍣炬导姘纯閸嬪繐鎮?${openPositionResolvedSelectionShape.dominantTokenSymbol}閵嗕繖 : ''}`
+                                        : '閸栨椽妫挎径鏍攽娑撶儤瀵滆ぐ鎾冲濡€崇础閹笛嗩攽閿涙稑鍨忛崚鐗堟畯閸嬫粈鎹㈤崝鈥虫倵閸欘亙绻氶悾娆愬閸斻劍鎼锋担婧库偓?'}
                                 </div>
                             </div>
 
@@ -5588,7 +5569,7 @@ export default function App() {
                                 <div className="flex items-center justify-between gap-3">
                                     <div className="flex items-center gap-1.5 text-[12px] font-bold text-cyan-700 dark:text-cyan-200">
                                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M6 12h12M9 18h6" /></svg>
-                                        分批加仓（防插针）
+                                        闁告帒妫欐竟鎺楀礉閻樿京娉㈤柨娑樼墦濡插骞撻幒妤佸珱闁?
                                     </div>
                                     <label className="flex items-center gap-2 text-[11px] font-semibold text-zinc-600 dark:text-white/60">
                                         <input
@@ -5600,7 +5581,7 @@ export default function App() {
                                             }}
                                             disabled={openPositionLoading || openPositionIsSingleSidedSelection}
                                         />
-                                        <span>{openPositionIsSingleSidedSelection ? '单边池不支持' : (openPositionDCAEnabled ? '本次启用' : '本次不启用')}</span>
+                                        <span>{openPositionIsSingleSidedSelection ? '闁告娲濈粩鐔沸ч悩杈╃憹闁衡偓椤栨稑鐦? : (openPositionDCAEnabled ? '闁哄牜鍓氶濂稿触椤栨粍鏆?' : '闁哄牜鍓氶鍏肩▔瀹ュ懏鍎欓柣?)}</span>
                                     </label>
                                 </div>
                                 <button
@@ -5622,7 +5603,7 @@ export default function App() {
                                                     </span>
                                                 ))}
                                                 <span className="inline-flex items-center rounded-full border border-cyan-500/25 bg-cyan-500/15 px-2 py-1 text-[10px] font-bold text-cyan-700 dark:border-cyan-400/25 dark:bg-cyan-400/15 dark:text-cyan-200">
-                                                    间隔 {formatDCAIntervalHint(openPositionDCAInterval)}
+                                                    闂傚倹鎸冲▓?{formatDCAIntervalHint(openPositionDCAInterval)}
                                                 </span>
                                                 {openPositionGlobalDCAMinSplitAmount > 0 ? (
                                                     <span className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-semibold ${openPositionDCAAmountBelowThreshold
@@ -5630,50 +5611,45 @@ export default function App() {
                                                         : 'border-zinc-200/80 bg-white/70 text-zinc-600 dark:border-white/10 dark:bg-white/5 dark:text-white/55'
                                                         }`}
                                                     >
-                                                        低于 {formatUSDTValue(openPositionGlobalDCAMinSplitAmount)} USDT 不拆分
-                                                    </span>
+                                                        濞达絽绨肩花?{formatUSDTValue(openPositionGlobalDCAMinSplitAmount)} USDT 濞戞挸绉垫刊鍫曞礆?                                                    </span>
                                                 ) : null}
                                             </>
                                         ) : (
                                             <span className="text-[11px] text-zinc-500 dark:text-white/45">
-                                                未启用，开仓将一次性成交。
+                                                闁哄牜浜滈幆搴ㄦ偨椤帞绀夌€殿喒鍋撳ù鐘虫尭閻ㄣ垺绋夐埀顒€鈻庨埄鍐ｅ亾瑜庨崹姘閵堝啠鍋?
                                             </span>
                                         )}
                                     </div>
                                     <span className="shrink-0 text-[11px] font-semibold text-cyan-700 dark:text-cyan-200">
-                                        {openPositionDCAExpanded ? '收起 ▲' : '修改 ▾'}
+                                        {openPositionDCAExpanded ? '闁衡偓閹増宕?闁? : '濞ｅ浂鍠楅弫?闁?}
                                     </span>
                                 </button>
                                 {openPositionDCAExpanded ? (
                                     <div className="mt-3">
                                         <div className="text-[10px] leading-4 text-zinc-500 dark:text-white/45">
-                                            首批正常开仓创建仓位，后续批次按间隔向该仓位追加流动性。手动关仓或价格跑出区间时，剩余批次自动取消。
-                                        </div>
+                                            濡絾鐗楁竟鎺戭潰閿濆懐鍩楃€殿喒鍋撳ù鐘虫尭閸ㄥ崬顕欐潪鎵尝濞达絽绋勭槐婵嬪触鎼达絿鏁鹃柟浣冾潐椤愬ジ骞愭径鎰紵闂傚懏鏌ㄩ幃婊呮嫚閵夈倗娉㈠ù锝呯Х閹风兘宕濋悩宕囥偊闁告柣鍔嶉埀顑讲鍋撻崒娑橆杹闁告柣鍔岄崣褎绂掗幘鏉戠仐濞寸娀鏀遍悧鍝ユ崉閹存繂姣夐柛鏍ㄦそ濡潡寮拋鍦闁告挴鏅欑紞鎴﹀箥鐟欏嫷鍋ч柤濂変簻婵晠宕ｉ弽銊ラ柕?                                        </div>
                                         {openPositionGlobalDCAMinSplitAmount > 0 ? (
                                             <div className="mt-2 text-[10px] leading-4 text-zinc-500 dark:text-white/45">
-                                                低于 {formatUSDTValue(openPositionGlobalDCAMinSplitAmount)} USDT 的本次开仓不会拆成多批。
-                                            </div>
+                                                濞达絽绨肩花?{formatUSDTValue(openPositionGlobalDCAMinSplitAmount)} USDT 闁汇劌瀚﹢鏉库枎閳ュ磭纾诲ù鐘虫尫缁楀瀵煎顓烆€曢柟瀛樺姇椤﹀潡骞嶉獮搴撳亾?                                            </div>
                                         ) : null}
                                         {openPositionIsSingleSidedSelection ? (
                                             <div className="mt-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-[10px] leading-4 text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/10 dark:text-amber-200">
-                                                单边池会被策略判定为价格已出区间，所以本次开仓不支持分批加仓。
-                                            </div>
+                                                闁告娲濈粩鐔沸ч悩杈╃獥閻炴凹鍋嗛悺銉╂偩閵夈儱鐏查悗瑙勭煯鐠愮喐绂掗柨瀣鐎瑰憡褰冮崵顓㈠礌濞差亝锛熼柨娑樻湰婢у秵绂掗妷锔芥嫳婵炲棌鈧磭纾诲ù鐘虫尫缁楀寮ㄩ娑樼槷闁告帒妫欐竟鎺楀礉閻樿京娉㈤柕?                                            </div>
                                         ) : null}
                                         {openPositionDCAEnabled && !openPositionEffectiveDCAEnabled && openPositionDCAAmountBelowThreshold ? (
                                             <div className="mt-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-[10px] leading-4 text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/10 dark:text-amber-200">
-                                                当前金额 {formatUSDTValue(openPositionAmountValue)} USDT 低于阈值，本次提交会按单笔开仓处理。
-                                            </div>
+                                                鐟滅増鎸告晶鐘绘煂閹达富鏉?{formatUSDTValue(openPositionAmountValue)} USDT 濞达絽绨肩花顒勬⒓閸績鍋撶涵椋庣闁哄牜鍓氶濂稿箵閹邦亝鍞夊ù鍏肩鐎垫粓宕￠弴鐘垫噳鐎殿喒鍋撳ù鐘虫尭椤︹晠鎮堕崱鎰ㄥ亾?                                            </div>
                                         ) : null}
                                         {openPositionDCAEnabled ? (
                                             <>
                                                 <div className="mt-3 text-[11px] font-semibold text-zinc-900 dark:text-white/85">
-                                                    每批占比（共 {openPositionDCAPercentages.length} 批）
+                                                    婵絽绻戞竟鎺楀础閻樺磭妲烽柨娑樼墕閸?{openPositionDCAPercentages.length} 闁圭數娅㈢槐?
                                                 </div>
                                                 <div className="mt-2 space-y-2">
                                                     {openPositionDCAPercentages.map((value, idx) => (
                                                         <div key={idx} className="flex items-center gap-2">
                                                             <span className="w-10 shrink-0 text-[11px] font-semibold text-zinc-500 dark:text-white/45">
-                                                                {idx === 0 ? '首批' : `第${idx + 1}批`}
+                                                                {idx === 0 ? '濡絾鐗楁竟?' : `缂?{idx + 1}闁圭數顒焳
                                                             </span>
                                                             <input
                                                                 type="number"
@@ -5702,7 +5678,7 @@ export default function App() {
                                                                     disabled={openPositionLoading}
                                                                     className="rounded-xl border border-zinc-200 bg-white/70 px-2 py-2 text-[11px] font-semibold text-zinc-600 transition hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/60 dark:hover:bg-white/10"
                                                                 >
-                                                                    ×
+                                                                    閼?
                                                                 </button>
                                                             ) : null}
                                                         </div>
@@ -5710,7 +5686,7 @@ export default function App() {
                                                 </div>
                                                 <div className="mt-3 flex items-center justify-between gap-2">
                                                     <div className={`text-[11px] font-semibold ${openPositionDCASumValid ? 'text-emerald-600 dark:text-emerald-300' : 'text-amber-600 dark:text-amber-300'}`}>
-                                                        合计：{openPositionDCASum.toFixed(2)}% {openPositionDCASumValid ? '✓' : '（必须等于 100%）'}
+                                                        闁告艾鐗愰鎼佹晬濮濈釜penPositionDCASum.toFixed(2)}% {openPositionDCASumValid ? '闁? : '闁挎稑鐗嗙换鈧銈堝吹閻℃垶绂?100%闁?}
                                                     </div>
                                                     <div className="flex items-center gap-2">
                                                         <button
@@ -5726,7 +5702,7 @@ export default function App() {
                                                             disabled={openPositionLoading}
                                                             className="rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-[11px] font-semibold text-zinc-700 transition hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
                                                         >
-                                                            平均分配
+                                                            妤犵偛鍟垮搴ㄥ礆閸℃稑甯?
                                                         </button>
                                                         <button
                                                             type="button"
@@ -5742,12 +5718,12 @@ export default function App() {
                                                             disabled={openPositionLoading || openPositionDCAPercentages.length >= 5}
                                                             className="rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-[11px] font-semibold text-zinc-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10"
                                                         >
-                                                            + 追加批次
+                                                            + 閺夆晞妫勬慨鐐哄箥鐟欏嫷鍋?
                                                         </button>
                                                     </div>
                                                 </div>
                                                 <div className="mt-3 flex items-center gap-2">
-                                                    <span className="w-16 shrink-0 text-[11px] font-semibold text-zinc-600 dark:text-white/60">批次间隔</span>
+                                                    <span className="w-16 shrink-0 text-[11px] font-semibold text-zinc-600 dark:text-white/60">闁逛絻顫夐濂告⒒閹绢喗顓?/span>
                                                     <input
                                                         type="number"
                                                         step="0.001"
@@ -5762,16 +5738,15 @@ export default function App() {
                                                         disabled={openPositionLoading}
                                                         className={`flex-1 rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90`}
                                                     />
-                                                    <span className="text-[11px] text-zinc-500 dark:text-white/45">秒</span>
+                                                    <span className="text-[11px] text-zinc-500 dark:text-white/45">缂?/span>
                                                 </div>
                                                 <div className="mt-1 text-[10px] leading-4 text-zinc-500 dark:text-white/45">
-                                                    支持小数秒，0.3 = 300ms。
+                                                    闁衡偓椤栨稑鐦悘蹇撶箲閺嗙喓绮旈幒鐐电0.3 = 300ms闁?
                                                 </div>
                                             </>
                                         ) : !openPositionIsSingleSidedSelection ? (
                                             <div className="mt-3 text-[10px] leading-4 text-zinc-500 dark:text-white/45">
-                                                当前未启用分批加仓。勾选右上角开关后，系统将按批次和间隔拆分本次开仓。
-                                            </div>
+                                                鐟滅増鎸告晶鐘诲嫉椤忓嫭鍎欓柣顫妼閸ㄥ酣骞嶉悷鏉款潱濞寸姵鎸堕埀顒€鍊哥€ｂ偓闂侇偄顦ぐ鍛婄▔婵犲拋娼＄€殿喒鍋撻柛蹇撳暱閹鏁嶅畝鈧柈瀵哥磼閻旈娈洪柟绋款槹婢规帒鈻庨垾铏闂傚倹鎸冲▓褔骞忛崱妤€鐎婚柡鍫墯椤愮厧顕ｉ埀顒佺閹炬墎鍋?                                            </div>
                                         ) : null}
                                     </div>
                                 ) : null}
@@ -5782,10 +5757,10 @@ export default function App() {
                                     <div className="flex items-center justify-between gap-2">
                                         <div className="flex items-center gap-1.5 text-[12px] font-bold text-cyan-700 dark:text-cyan-200">
                                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M6 12h12M9 18h6"/></svg>
-                                            分批加仓 · 共 {openPositionDCAPercentages.length} 批
+                                            闁告帒妫欐竟鎺楀礉閻樿京娉?鐠?闁?{openPositionDCAPercentages.length} 闁?
                                         </div>
                                         <div className="text-[10px] font-semibold text-cyan-600/80 dark:text-cyan-300/70">
-                                            间隔 {formatDCAIntervalHint(openPositionDCAInterval)}
+                                            闂傚倹鎸冲▓?{formatDCAIntervalHint(openPositionDCAInterval)}
                                         </div>
                                     </div>
                                     <div className="mt-2 flex flex-wrap gap-1.5">
@@ -5797,7 +5772,7 @@ export default function App() {
                                                     className="flex min-w-[66px] flex-1 flex-col items-start gap-0.5 rounded-lg border border-cyan-500/20 bg-white/70 px-2 py-1.5 dark:border-cyan-400/20 dark:bg-white/5"
                                                 >
                                                     <span className="text-[10px] font-semibold text-cyan-600 dark:text-cyan-300">
-                                                        {idx === 0 ? '首批' : `第 ${idx + 1} 批`} · {Number(pct).toFixed(0)}%
+                                                        {idx === 0 ? '濡絾鐗楁竟?' : `缂?${idx + 1} 闁圭數顒焳 鐠?{Number(pct).toFixed(0)}%
                                                     </span>
                                                     <span className="text-[12px] font-bold tabular-nums text-zinc-900 dark:text-white/90">
                                                         ${amt > 0 ? amt.toFixed(2) : '--'}
@@ -5807,7 +5782,7 @@ export default function App() {
                                         })}
                                     </div>
                                     <div className="mt-2 text-[10px] leading-4 text-zinc-500 dark:text-white/45">
-                                        首批开仓成功后，后续批次按间隔后台执行；关仓或跑出区间自动取消。
+                                        濡絾鐗楁竟鎺戭嚕閳ь剚绂掗幘鏉戠亣闁告梻鍠庨幃妤呮晬鐏炶姤鍊电紓渚囧幗婢规帒鈻庨埄鍐ㄧ樆闂傚倹鎸冲▓褔宕ユ惔鈥抽叡闁圭瑳鍡╂斀闁挎稒绋戦崣褎绂掗幘鏉戠仐閻犵儤鍨甸崵顓㈠礌濞差亝锛熼柤濂変簻婵晠宕ｉ弽銊ラ柕?
                                     </div>
                                 </div>
                             ) : null}
@@ -5816,9 +5791,9 @@ export default function App() {
 
                             {(openPositionEntrySwapPreviewLoading || openPositionDisplayChecks.length > 0 || openPositionEntrySwapPreviewError) ? (
                                 <div className="mt-4">
-                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80 mb-2">安全检查</div>
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80 mb-2">閻庣懓顦崣蹇撐涢埀顒勫蓟?/div>
                                     {openPositionEntrySwapPreviewLoading ? (
-                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">正在检查...</div>
+                                        <div className="text-[11px] text-zinc-500 dark:text-white/40">婵繐绲藉﹢顏勎涢埀顒勫蓟?..</div>
                                     ) : null}
                                     {openPositionEntrySwapPreviewError ? (
                                         <div className="mt-1 rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-[11px] text-red-700 dark:text-red-200">
@@ -5846,9 +5821,9 @@ export default function App() {
                                                                 </div>
                                                                 {false && openPositionEntrySwapPreview?.required ? (
                                                                     <div className="mt-2 space-y-1 text-[11px] text-zinc-600 dark:text-white/60">
-                                                                        <div>兑换路径：{openPositionEntrySwapPreview?.amount_in || '--'} {openPositionEntrySwapPreview?.from_token_symbol || ''} → {openPositionEntrySwapPreview?.to_token_symbol || '--'}</div>
-                                                                        <div>预计到账：{openPositionEntrySwapPreview?.expected_amount_out || '--'} {openPositionEntrySwapPreview?.to_token_symbol || ''}</div>
-                                                                        <div>推荐滑点：{Number(openPositionEntrySwapPreview?.recommended_slippage_tolerance).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}%</div>
+                                                                        <div>闁稿繑鍨跺畷鑼崉椤栨氨绐為柨娑欘劯openPositionEntrySwapPreview?.amount_in || '--'} {openPositionEntrySwapPreview?.from_token_symbol || ''} 闁?{openPositionEntrySwapPreview?.to_token_symbol || '--'}</div>
+                                                                        <div>濡澘瀚鎼佸礆閹峰苯顦╅柨娑欘劯openPositionEntrySwapPreview?.expected_amount_out || '--'} {openPositionEntrySwapPreview?.to_token_symbol || ''}</div>
+                                                                        <div>闁规亽鍔忓畷妯侯煥閹寸姴浠柨娑欘劯Number(openPositionEntrySwapPreview?.recommended_slippage_tolerance).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}%</div>
                                                                         <input
                                                                             value={openPositionEntrySwapSlippage}
                                                                             onChange={(e) => {
@@ -5858,9 +5833,9 @@ export default function App() {
                                                                             }}
                                                                             inputMode="decimal"
                                                                             className={`mt-1 w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-1.5 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                                                            placeholder="前置兑换滑点（可选）"
+                                                                            placeholder="闁告挸绉堕悿鍡涘礂閹寸偛搴婃繝濠冨灩閸嬶綁鏁嶉崼婵嗚闂侇偄顧€缁?
                                                                         />
-                                                                        <label className="mt-2 flex items-start gap-2">
+                                                                        <label className="mt-2 hidden items-start gap-2">
                                                                             <input
                                                                                 type="checkbox"
                                                                                 checked={openPositionEntrySwapConfirm}
@@ -5870,12 +5845,12 @@ export default function App() {
                                                                                 }}
                                                                                 disabled={openPositionLoading || openPositionPreviewPending || openPositionPreviewSuspended}
                                                                             />
-                                                                            <span className="text-[11px] leading-tight">我已确认本次前置兑换</span>
+                                                                            <span className="text-[11px] leading-tight">闁瑰瓨鍨甸崙锛勬兜椤旀鍚囬柡鍫墯椤愬ジ宕滃鍥╂瀭闁稿繑鍨跺畷?/span>
                                                                         </label>
                                                                     </div>
                                                                 ) : null}
                                                                 {isWarn ? (
-                                                                    <div className="mt-2 text-[11px] leading-tight opacity-80">已提示风险，可直接继续；若要开仓，请留意滑点、成交波动和单次限额。</div>
+                                                                    <div className="mt-2 text-[11px] leading-tight opacity-80">鐎圭寮惰ぐ浣虹矆濞差亶妫戦梻鍕ㄦ櫔缁辨繈宕ｉ婊勭函闁规亽鍎抽幋椋庣磼椤撱劎骞㈤柤姹囧劥椤╋箑顕ｉ埀顒佺閹垮嫮绀夐悹鍥棑閺嗏偓闁规澘绻戠划锕傛倷楠炲簱鍋撴担鐟扮亣濞存嚎鍊栫亸婵嬪礉閵娿儲瀚查柛妤佹礃椤愬ジ姊介幇閭︽澓闁?/div>
                                                                 ) : null}
                                                             </div>
                                                         </div>
@@ -5892,19 +5867,19 @@ export default function App() {
                                     {openPositionEntrySwapPreviewLoading ? (
                                         <div className="flex items-center gap-2 text-[11px] text-amber-700 dark:text-amber-200">
                                             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" className="animate-spin"><path d="M21 12a9 9 0 1 1-2.64-6.36"/></svg>
-                                            前置兑换预览中...
+                                            闁告挸绉堕悿鍡涘礂閹寸偛搴婂Λ鏉垮椤秵绋?..
                                         </div>
                                     ) : openPositionEntrySwapPreview?.required ? (
                                         <div className="flex items-center justify-between gap-3">
                                             <div className="flex min-w-0 items-center gap-1.5">
                                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-amber-600 dark:text-amber-300"><path d="M7 17l5-5-5-5M13 17l5-5-5-5"/></svg>
-                                                <span className="text-[11px] font-bold text-amber-700 dark:text-amber-200">前置兑换</span>
+                                                <span className="text-[11px] font-bold text-amber-700 dark:text-amber-200">闁告挸绉堕悿鍡涘礂閹寸偛搴?/span>
                                                 <span className="truncate text-[11px] text-zinc-600 dark:text-white/60">
-                                                    {openPositionEntrySwapPreview?.amount_in || '--'} {openPositionEntrySwapPreview?.from_token_symbol || ''} → <span className="font-semibold text-zinc-900 dark:text-white/90">{openPositionEntrySwapPreview?.expected_amount_out || '--'} {openPositionEntrySwapPreview?.to_token_symbol || ''}</span>
+                                                    {openPositionEntrySwapPreview?.amount_in || '--'} {openPositionEntrySwapPreview?.from_token_symbol || ''} 闁?<span className="font-semibold text-zinc-900 dark:text-white/90">{openPositionEntrySwapPreview?.expected_amount_out || '--'} {openPositionEntrySwapPreview?.to_token_symbol || ''}</span>
                                                 </span>
                                             </div>
                                             <span className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/15 dark:text-amber-200">
-                                                滑点 {Number(openPositionEntrySwapPreview?.recommended_slippage_tolerance).toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%
+                                                婵犲﹥鍨归崑?{Number(openPositionEntrySwapPreview?.recommended_slippage_tolerance).toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}%
                                             </span>
                                         </div>
                                     ) : null}
@@ -5929,7 +5904,7 @@ export default function App() {
                         <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
                             <div className="flex items-center justify-between gap-2">
                                 <div className="min-w-0">
-                                    <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">修改任务区间</div>
+                                    <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">濞ｅ浂鍠楅弫鍏肩鐠囨彃顫ら柛鏍ㄦそ濡?/div>
                                     <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40 truncate">
                                         {taskRangeEdit?.title || '--'}
                                     </div>
@@ -5947,29 +5922,29 @@ export default function App() {
 
                             <div className="mt-4 space-y-4">
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">新区间 (%)</div>
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">闁哄倹婢樼亸顖炴⒒?(%)</div>
                                     <div className="mt-2 grid grid-cols-2 gap-2">
                                         <input
                                             value={taskRangeLower}
                                             onChange={(e) => handleTaskRangeLowerChange(e.target.value)}
                                             inputMode="decimal"
                                             className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                            placeholder="下限 %"
+                                            placeholder="濞戞挸顑夊?%"
                                         />
                                         <input
                                             value={taskRangeUpper}
                                             onChange={(e) => handleTaskRangeUpperChange(e.target.value)}
                                             inputMode="decimal"
                                             className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
-                                            placeholder="上限 %"
+                                            placeholder="濞戞挸锕?%"
                                         />
                                     </div>
                                     <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                        修改后的区间将在【下次再平衡时】生效。                                    </div>
+                                        濞ｅ浂鍠楅弫濂稿触鎼达絾鐣遍柛鏍ㄦそ濡法浜搁崱妤佽含闁靛棙鍔掔粭鍛枎閳ュ啿鏅欐鐐茬枃閵嗏偓闁哄啳缈伴埀顒佸灩閺佹捇寮崼娑掑亾?                                   </div>
                                 </div>
 
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">下次重平衡金额 (USDT)</div>
+                                    <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">濞戞挸顑嗛濂告煂瀹ュ懘鎸悶娑崇節閸ｇ偓锛?(USDT)</div>
                                     <div className="mt-2">
                                         <input
                                             value={taskRangeAmount}
@@ -5983,7 +5958,7 @@ export default function App() {
                                         />
                                     </div>
                                     <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                        当前持仓不会直接变动，金额和区间都将在【下次再平衡时】生效。                                    </div>
+                                        鐟滅増鎸告晶鐘诲箰娴ｉ娉㈠☉鎾崇С缁变即鎯勭€涙ê澶嶉柛娆惷慨鈺呮晬瀹€鍕濡増绻傞幏浼村礌濞差亝锛熼梺顔挎閻ㄣ垽宕烽妸锝傚亾閹邦亞鐟撴繛鍡忊偓鍐叉櫃妤犵偛鐤囬妴鈧柡鍐堪閳ь剚鍨归弫鎾诲极閸稈鍋?                                   </div>
                                 </div>
 
                                 {taskRangeError ? (
@@ -6000,7 +5975,7 @@ export default function App() {
                                         : brand.solidButtonClass
                                         }`}
                                 >
-                                    {taskRangeLoading ? '保存中...' : '确认修改'}
+                                    {taskRangeLoading ? '濞ｅ洦绻傞悺銊︾▔?..'' : '缁绢収鍠涢缁樼┍椤旇姤鏆?}
                                 </button>
                             </div>
                         </div>
@@ -6008,19 +5983,19 @@ export default function App() {
                 ) : null
             }
 
-            {/* 补充流动性 Modal */}
+            {/* 閻炴稏鍎遍崢鏍规担绋啃楅柟?Modal */}
             {addLiqModal ? (
                 <div className="fixed inset-0 z-[60]">
                     <button
                         type="button"
                         className="absolute inset-0 bg-black/40"
                         onClick={closeAddLiqModal}
-                        aria-label="关闭"
+                        aria-label="闁稿繑濞婂Λ?
                     />
                     <div className="absolute inset-x-0 bottom-0 rounded-t-[28px] border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
                         <div className="flex items-center justify-between gap-2">
                             <div className="min-w-0">
-                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">补充流动性</div>
+                                <div className="text-sm font-semibold text-zinc-900 dark:text-white/90">閻炴稏鍎遍崢鏍规担绋啃楅柟?/div>
                                 <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-white/40 truncate">
                                     {addLiqPosition?.title || addLiqModal.title}
                                 </div>
@@ -6030,7 +6005,7 @@ export default function App() {
                                 onClick={closeAddLiqModal}
                                 disabled={addLiqLoading}
                                 className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                aria-label="关闭"
+                                aria-label="闁稿繑濞婂Λ?
                             >
                                 <X className="h-5 w-5" />
                             </button>
@@ -6044,7 +6019,7 @@ export default function App() {
                                     </div>
                                     <div className="min-w-0 flex-1">
                                         <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-zinc-500 dark:text-white/35">USDT Top-up</div>
-                                        <div className="mt-1 text-sm font-semibold text-zinc-950 dark:text-white">为当前仓位追加预算</div>
+                                        <div className="mt-1 text-sm font-semibold text-zinc-950 dark:text-white">濞戞挸鎼紞瀣礈瀹ュ嫮娉㈠ù锝呯Х閹风兘宕濋悩娲绘殨缂?/div>
                                         <div className="mt-1 text-[11px] leading-5 text-zinc-500 dark:text-white/45">
                                             {addLiqHintText}
                                         </div>
@@ -6053,13 +6028,13 @@ export default function App() {
 
                                 <div className="mt-4 grid grid-cols-2 gap-2">
                                     <div className="rounded-2xl border border-zinc-200/80 bg-white/80 px-3 py-3 dark:border-white/10 dark:bg-white/5">
-                                        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500 dark:text-white/35">当前仓位</div>
+                                        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500 dark:text-white/35">鐟滅増鎸告晶鐘崇閹捐尙绉?/div>
                                         <div className="mt-1 text-base font-semibold text-zinc-950 dark:text-white">
                                             {addLiqCurrentValue > 0 ? formatUsdCompact(addLiqCurrentValue) : '$--'}
                                         </div>
                                     </div>
                                     <div className="rounded-2xl border border-zinc-200/80 bg-white/80 px-3 py-3 dark:border-white/10 dark:bg-white/5">
-                                        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500 dark:text-white/35">策略参考</div>
+                                        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500 dark:text-white/35">缂佹稒鐗滈弳鎰板矗閸屾績鍋?/div>
                                         <div className="mt-1 text-base font-semibold text-zinc-950 dark:text-white">
                                             {addLiqReferenceAmount > 0 ? formatUsdCompact(addLiqReferenceAmount) : '$--'}
                                         </div>
@@ -6071,7 +6046,7 @@ export default function App() {
                                     : 'border-zinc-200 bg-white/80 dark:border-white/10 dark:bg-white/5'
                                 }`}>
                                     <div className="flex items-center justify-between gap-2">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-zinc-500 dark:text-white/35">补充金额</div>
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-zinc-500 dark:text-white/35">閻炴稏鍎遍崢鏍煂閹达富鏉?/div>
                                         <div className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${brand.softButtonClass}`}>
                                             Custom
                                         </div>
@@ -6127,17 +6102,17 @@ export default function App() {
                                 ) : null}
                             </div>
                             <div className="hidden rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
-                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80 mb-2">补充金额 (USDT)</div>
+                                <div className="text-xs font-semibold text-zinc-900 dark:text-white/80 mb-2">閻炴稏鍎遍崢鏍煂閹达富鏉?(USDT)</div>
                                 <input
                                     value={addLiqAmount}
                                     onChange={(e) => { setAddLiqAmount(e.target.value); setAddLiqError(''); }}
                                     inputMode="decimal"
-                                    placeholder="请输入 USDT 金额"
+                                    placeholder="閻犲洨鏌夌欢顓㈠礂?USDT 闂佸弶鍨块·?
                                     disabled={addLiqLoading}
                                     className={`w-full rounded-xl border border-zinc-200 bg-white/70 px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-0 placeholder:text-zinc-400 ${brand.inputFocusClass} dark:border-white/10 dark:bg-white/5 dark:text-white/90 dark:placeholder:text-white/30`}
                                 />
                                 <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/40">
-                                    将使用 USDT 按当前池价买入并补充至现有仓位。                                </div>
+                                    閻忓繐妫旀繛鍥偨?USDT 闁圭顦紞瀣礈瀹ュ棛娼ㄥù鐘烘腹閹烽亶宕楅妷銉ㄥ珯閻炴稏鍎遍崢鏍嚊瀹曞洤绠涢柡鍫濐槷缁劍鎷呭鍐ｅ亾?                               </div>
                             </div>
 
                             {addLiqError ? (
@@ -6161,9 +6136,9 @@ export default function App() {
                                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
                                         </svg>
-                                        处理中，请稍候...
+                                        濠㈣泛瀚幃濠冪▔椤撱劎绀夐悹鍥棑閳笺垽宕?..
                                     </span>
-                                ) : '确认补充'}
+                                ) : '缁绢収鍠涢鑽ゆ偘閵夈儱甯?}'
                             </button>
                         </div>
                     </div>
@@ -6177,7 +6152,7 @@ export default function App() {
                             type="button"
                             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                             onClick={() => closeConfirm(false)}
-                            aria-label="取消确认"
+                            aria-label="闁告瑦鐗楃粔椋庢兜椤旀鍚?
                         />
                         <div className="relative w-full max-w-md overflow-hidden rounded-t-2xl sm:rounded-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318]">
                             <div className="flex items-center justify-between gap-2">
@@ -6186,7 +6161,7 @@ export default function App() {
                                     type="button"
                                     onClick={() => closeConfirm(false)}
                                     className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                    aria-label="关闭确认弹窗"
+                                    aria-label="闁稿繑濞婂Λ瀵告兜椤旀鍚囩€殿喖婀遍悰?
                                 >
                                     <Icon path={icons.close} className="h-4 w-4" />
                                 </button>
@@ -6202,14 +6177,14 @@ export default function App() {
                                     onClick={() => closeConfirm(false)}
                                     className="flex-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 active:bg-zinc-100 dark:border-white/10 dark:bg-white/5 dark:text-white/70 dark:hover:bg-white/10 dark:active:bg-white/15"
                                 >
-                                    {confirmState.cancelText || '取消'}
+                                    {confirmState.cancelText || '闁告瑦鐗楃粔?'}
                                 </button>
                                 <button
                                     type="button"
                                     onClick={() => closeConfirm(true)}
                                     className={`flex-1 rounded-xl px-3 py-2 text-sm font-semibold ${confirmButtonClass}`}
                                 >
-                                    {confirmState.confirmText || '确认'}
+                                    {confirmState.confirmText || '缁绢収鍠涢?'}
                                 </button>
                             </div>
                         </div>

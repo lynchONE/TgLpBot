@@ -50,3 +50,40 @@ func TestStrategyTaskCreateOverrideUpdatesSkipsNonZeroDefaults(t *testing.T) {
 		t.Fatalf("len(updates) = %d, want 0", len(updates))
 	}
 }
+
+func TestResolveStrategyOutOfRangeModeFallsBackToLegacyFlag(t *testing.T) {
+	t.Parallel()
+
+	if got := ResolveStrategyOutOfRangeMode(&StrategyTask{RebalanceEnabled: true}); got != StrategyOutOfRangeModeRebalanceAll {
+		t.Fatalf("ResolveStrategyOutOfRangeMode(true) = %q, want %q", got, StrategyOutOfRangeModeRebalanceAll)
+	}
+	if got := ResolveStrategyOutOfRangeMode(&StrategyTask{RebalanceEnabled: false}); got != StrategyOutOfRangeModeExitAll {
+		t.Fatalf("ResolveStrategyOutOfRangeMode(false) = %q, want %q", got, StrategyOutOfRangeModeExitAll)
+	}
+}
+
+func TestStrategyTaskSyncOutOfRangeModeFields(t *testing.T) {
+	t.Parallel()
+
+	task := &StrategyTask{OutOfRangeMode: string(StrategyOutOfRangeModeRebalanceUpExitDown)}
+	task.SyncOutOfRangeModeFields()
+
+	if task.OutOfRangeMode != string(StrategyOutOfRangeModeRebalanceUpExitDown) {
+		t.Fatalf("OutOfRangeMode = %q, want %q", task.OutOfRangeMode, StrategyOutOfRangeModeRebalanceUpExitDown)
+	}
+	if !task.RebalanceEnabled {
+		t.Fatal("RebalanceEnabled = false, want true")
+	}
+}
+
+func TestEffectiveStrategyTaskModeReturnsPauseWhenPaused(t *testing.T) {
+	t.Parallel()
+
+	task := &StrategyTask{
+		Paused:         true,
+		OutOfRangeMode: string(StrategyOutOfRangeModeRebalanceAll),
+	}
+	if got := EffectiveStrategyTaskMode(task); got != StrategyTaskModePause {
+		t.Fatalf("EffectiveStrategyTaskMode() = %q, want %q", got, StrategyTaskModePause)
+	}
+}

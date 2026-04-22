@@ -3773,6 +3773,8 @@ body {
 .pos-action-btn.rebalance { border-color: rgba(96, 165, 250, 0.22); color: #60a5fa; background: rgba(96, 165, 250, 0.08); }
 .pos-action-btn.toggle.on { border-color: rgba(52, 211, 153, 0.22); color: #34d399; background: rgba(52, 211, 153, 0.08); }
 .pos-action-btn.toggle.off { border-color: rgba(161, 161, 170, 0.22); color: #a1a1aa; background: rgba(161, 161, 170, 0.06); }
+.pos-action-btn.mode { border-color: rgba(161, 161, 170, 0.22); color: #a1a1aa; background: rgba(161, 161, 170, 0.06); }
+.pos-action-btn.mode.active { border-color: rgba(52, 211, 153, 0.22); color: #34d399; background: rgba(52, 211, 153, 0.08); }
 
 /* ── 补充流动性弹窗 ── */
 .add-liq-overlay {

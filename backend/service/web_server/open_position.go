@@ -47,6 +47,7 @@ type openPositionRequest struct {
 	DCAPercentages     []float64 `json:"dca_percentages,omitempty"`
 	DCAIntervalSeconds *float64  `json:"dca_interval_seconds,omitempty"`
 	RebalanceEnabled   *bool     `json:"rebalance_enabled,omitempty"`
+	TaskMode           string    `json:"task_mode,omitempty"`
 }
 
 type openPositionResponse struct {
@@ -56,12 +57,11 @@ type openPositionResponse struct {
 }
 
 type openPositionPreviewResponse struct {
-	Status       string                              `json:"status"`
-	Checks       []openPositionCheckItem             `json:"checks,omitempty"`
-	EntrySwap    *openPositionEntrySwapInfo          `json:"entry_swap,omitempty"`
-	PrivateZap   openPositionPrivateZapInfo          `json:"private_zap"`
-	SizingAdvice *liquidity.OpenPositionSizingAdvice `json:"sizing_advice,omitempty"`
-	RangeEditor  *openPositionRangeEditorInfo        `json:"range_editor,omitempty"`
+	Status      string                       `json:"status"`
+	Checks      []openPositionCheckItem      `json:"checks,omitempty"`
+	EntrySwap   *openPositionEntrySwapInfo   `json:"entry_swap,omitempty"`
+	PrivateZap  openPositionPrivateZapInfo   `json:"private_zap"`
+	RangeEditor *openPositionRangeEditorInfo `json:"range_editor,omitempty"`
 }
 
 type openPositionEntrySwapInfo struct {
@@ -218,12 +218,26 @@ func resolveDCAPlan(cfg *models.GlobalConfig, req openPositionRequest) (bool, []
 	return true, normalized, intervalNorm, nil
 }
 
-func resolveOpenPositionRebalanceEnabled(req openPositionRequest) bool {
-	rebalanceEnabled := true
-	if req.RebalanceEnabled != nil {
-		rebalanceEnabled = *req.RebalanceEnabled
+func resolveOpenPositionTaskMode(req openPositionRequest) (models.StrategyOutOfRangeMode, bool) {
+	switch models.NormalizeStrategyTaskMode(req.TaskMode) {
+	case models.StrategyTaskModePause:
+		return models.StrategyOutOfRangeModeExitAll, true
+	case string(models.StrategyOutOfRangeModeRebalanceAll):
+		return models.StrategyOutOfRangeModeRebalanceAll, false
+	case string(models.StrategyOutOfRangeModeExitAll):
+		return models.StrategyOutOfRangeModeExitAll, false
+	case string(models.StrategyOutOfRangeModeRebalanceUpExitDown):
+		return models.StrategyOutOfRangeModeRebalanceUpExitDown, false
 	}
-	return rebalanceEnabled
+
+	if req.RebalanceEnabled != nil {
+		if *req.RebalanceEnabled {
+			return models.StrategyOutOfRangeModeRebalanceAll, false
+		}
+		return models.StrategyOutOfRangeModeExitAll, false
+	}
+
+	return models.StrategyOutOfRangeModeExitAll, false
 }
 
 func isV4PoolId(text string) bool {
@@ -324,6 +338,7 @@ func decodeOpenPositionRequest(w http.ResponseWriter, r *http.Request) (*openPos
 	req.Chain = strings.TrimSpace(req.Chain)
 	req.PoolAddress = strings.TrimSpace(req.PoolAddress)
 	req.PoolVersion = strings.ToLower(strings.TrimSpace(req.PoolVersion))
+	req.TaskMode = strings.TrimSpace(req.TaskMode)
 	req.RangeInputMode = normalizeOpenPositionRangeInputMode(req.RangeInputMode)
 
 	if req.PoolAddress == "" {
@@ -398,22 +413,6 @@ func buildOpenPositionPrivateZapInfo(liquidityService *liquidity.LiquidityServic
 	}
 	info.ShowProtectionHint = showHint
 	return info
-}
-
-func buildOpenPositionSizingAdvice(ctx *openPositionContext) *liquidity.OpenPositionSizingAdvice {
-	if ctx == nil || ctx.task == nil || ctx.selectedWallet == nil {
-		return nil
-	}
-	advice, err := liquidity.BuildOpenPositionSizingAdvice(ctx.task, ctx.selectedWallet, liquidity.OpenPositionSizingBuildOptions{
-		CurrentTick: ctx.currentTick,
-	})
-	if err != nil {
-		log.Printf("[OpenPosition] sizing advice failed: chain=%s pool=%s wallet_id=%d err=%v", ctx.chain, ctx.task.PoolId, ctx.selectedWallet.ID, err)
-		return &liquidity.OpenPositionSizingAdvice{
-			Warnings: []string{"加仓建议暂时不可用。"},
-		}
-	}
-	return advice
 }
 
 func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPositionContext, *openPositionError, int) {
@@ -610,8 +609,13 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 	if !common.IsHexAddress(hooksAddr) {
 		hooksAddr = "0x0000000000000000000000000000000000000000"
 	}
-	rebalanceEnabled := resolveOpenPositionRebalanceEnabled(req)
+	outOfRangeMode, paused := resolveOpenPositionTaskMode(req)
 	rangeActivationPending := currentTick < resolvedRange.TickLower || currentTick > resolvedRange.TickUpper
+	var pausedAt *time.Time
+	if paused {
+		now := time.Now()
+		pausedAt = &now
+	}
 
 	task := &models.StrategyTask{
 		UserID:                 user.ID,
@@ -639,7 +643,10 @@ func (s *Server) prepareOpenPositionContext(req openPositionRequest) (*openPosit
 		SlippageTolerance:      taskSlippage,
 		AutoReinvest:           cfg.AutoReinvest,
 		AllowEntrySwap:         req.AllowEntrySwap,
-		RebalanceEnabled:       rebalanceEnabled,
+		RebalanceEnabled:       models.RebalanceEnabledForOutOfRangeMode(outOfRangeMode),
+		OutOfRangeMode:         string(outOfRangeMode),
+		Paused:                 paused,
+		PausedAt:               pausedAt,
 		RangeActivationPending: rangeActivationPending,
 		Status:                 models.StrategyStatusRunning,
 		LastCheckTime:          time.Now(),
@@ -712,7 +719,6 @@ func (s *Server) handleOpenPositionPreview(w http.ResponseWriter, r *http.Reques
 		})
 	}
 
-	sizingAdvice := buildOpenPositionSizingAdvice(ctx)
 	rangeEditor := buildOpenPositionRangeEditorInfo(ctx.task, ctx.currentTick, ctx.task.TickSpacing, &ctx.resolvedRange)
 
 	// Check for hard failures
@@ -727,11 +733,10 @@ func (s *Server) handleOpenPositionPreview(w http.ResponseWriter, r *http.Reques
 	if hasFail {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(openPositionPreviewResponse{
-			Status:       "fail",
-			Checks:       checks,
-			PrivateZap:   buildOpenPositionPrivateZapInfo(ctx.liquidityService, ctx.chain, ctx.selectedWallet.ID),
-			SizingAdvice: sizingAdvice,
-			RangeEditor:  rangeEditor,
+			Status:      "fail",
+			Checks:      checks,
+			PrivateZap:  buildOpenPositionPrivateZapInfo(ctx.liquidityService, ctx.chain, ctx.selectedWallet.ID),
+			RangeEditor: rangeEditor,
 		})
 		return
 	}
@@ -768,12 +773,11 @@ func (s *Server) handleOpenPositionPreview(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(openPositionPreviewResponse{
-		Status:       "ok",
-		Checks:       checks,
-		EntrySwap:    entrySwapInfo,
-		PrivateZap:   buildOpenPositionPrivateZapInfo(ctx.liquidityService, ctx.chain, ctx.selectedWallet.ID),
-		SizingAdvice: sizingAdvice,
-		RangeEditor:  rangeEditor,
+		Status:      "ok",
+		Checks:      checks,
+		EntrySwap:   entrySwapInfo,
+		PrivateZap:  buildOpenPositionPrivateZapInfo(ctx.liquidityService, ctx.chain, ctx.selectedWallet.ID),
+		RangeEditor: rangeEditor,
 	})
 }
 

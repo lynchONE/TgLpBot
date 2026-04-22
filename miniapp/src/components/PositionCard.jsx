@@ -5,6 +5,7 @@ import PriceRangeVisualizer from './PriceRangeVisualizer';
 import NumberFlowValue from './NumberFlowValue.jsx';
 import uniswapIcon from '../image/uniswap.svg';
 import pancakeIcon from '../image/pancake.svg';
+import { TASK_MODE_OPTIONS, normalizeTaskMode } from '../lib/taskModes';
 
 const Icon = ({ path, className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -118,8 +119,8 @@ function SmartMoneyRangeSummary({ groups }) {
     return (
         <div className="rounded-lg border border-lime-500/20 bg-lime-500/[0.08] px-2.5 py-2">
             <div className="flex items-center justify-between gap-2">
-                <div className="text-[10px] font-bold tracking-wide text-lime-700 dark:text-lime-300">聪明钱金额区间</div>
-                <div className="text-[10px] text-lime-700/70 dark:text-lime-300/70">{validGroups.length}档</div>
+                <div className="text-[10px] font-bold tracking-wide text-lime-700 dark:text-lime-300">閼鳖亝妲戦柦閬嶅櫨妫版繂灏梻?/div>
+                <div className="text-[10px] text-lime-700/70 dark:text-lime-300/70">{validGroups.length}濡?/div>
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
                 {visibleGroups.map((group, index) => (
@@ -130,7 +131,7 @@ function SmartMoneyRangeSummary({ groups }) {
                         <span className="shrink-0 font-semibold text-zinc-900 dark:text-white/95">{formatRangePercentPlain(group?.range_percent)}</span>
                         {Math.max(0, Number(group?.position_count) || 0) > 1 ? (
                             <span className="shrink-0 rounded-full bg-white/70 px-1.5 py-0.5 text-[9px] font-semibold text-zinc-600 dark:bg-white/10 dark:text-zinc-300">
-                                {Number(group.position_count)}个
+                                {Number(group.position_count)}娑?
                             </span>
                         ) : null}
                         <span className="truncate text-zinc-500 dark:text-white/55">{formatUsdCompact(group?.total_amount_usd)}</span>
@@ -143,7 +144,7 @@ function SmartMoneyRangeSummary({ groups }) {
                     onClick={() => setExpanded((prev) => !prev)}
                     className="mt-2 text-[10px] font-semibold text-lime-700 transition hover:text-lime-800 dark:text-lime-300 dark:hover:text-lime-200"
                 >
-                    {expanded ? '收起区间' : `更多区间 +${hiddenCount}`}
+                    {expanded ? '閺€鎯版崳閸栨椽妫? : `閺囨潙顦块崠娲？ +${hiddenCount}`}
                 </button>
             ) : null}
         </div>
@@ -196,11 +197,11 @@ const formatPrice = (value) => {
 };
 
 const getStatusTheme = (label) => {
-    if (label?.includes('错误'))
+    if (label?.includes('闁挎瑨顕?))
         return { pill: 'bg-red-500/15 text-red-600 ring-red-500/25 dark:text-red-300 dark:ring-red-400/30', dot: 'bg-red-500', bar: 'bg-gradient-to-b from-red-500 to-red-600' };
-    if (label?.includes('暂停') || label?.includes('停止') || label?.includes('再平衡') || label?.includes('撤出'))
+    if (label?.includes('閺嗗倸浠?) || label?.includes('閸嬫粍顒?) || label?.includes('閸愬秴閽╃悰?) || label?.includes('閹俱倕鍤?))
         return { pill: 'bg-amber-500/15 text-amber-700 ring-amber-500/25 dark:text-amber-300 dark:ring-amber-400/30', dot: 'bg-amber-500', bar: 'bg-gradient-to-b from-amber-400 to-amber-500' };
-    if (label?.includes('等待'))
+    if (label?.includes('缁涘绶?))
         return { pill: 'bg-sky-500/15 text-sky-700 ring-sky-500/25 dark:text-sky-300 dark:ring-sky-400/30', dot: 'bg-sky-500', bar: 'bg-gradient-to-b from-sky-400 to-sky-500' };
     return { pill: 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/25 dark:text-emerald-300 dark:ring-emerald-400/30', dot: 'bg-emerald-500', bar: 'bg-gradient-to-b from-emerald-400 to-emerald-500' };
 };
@@ -212,7 +213,7 @@ const normalizeHexPrefixed = (v) => {
     return `0x${raw}`;
 };
 
-// 由 tickSpacing 推导费率标签
+// 閻?tickSpacing 閹恒劌顕辩拹鍦芳閺嶅洨顒?
 const FEE_TIER_BY_TICK_SPACING = {
     1: 100,
     10: 500,
@@ -259,7 +260,7 @@ export default function PositionCard({
     onWithdrawLiquidity,
     onSwapDust,
     onTriggerRebalance,
-    onToggleRebalance,
+    onUpdateTaskMode,
     onAddLiquidity,
     batchMode = false,
     isSelected = false,
@@ -407,13 +408,13 @@ export default function PositionCard({
         const asymmetric = Math.abs(low - up) >= 0.01;
         const avg = (low + up) / 2;
         const totalWidth = low + up;
-        const summaryText = asymmetric ? `下 ${low.toFixed(2)}% / 上 ${up.toFixed(2)}%` : `±${avg.toFixed(2)}%`;
-        let text = `${summaryText}（总宽 ${totalWidth.toFixed(2)}%）`;
+        const summaryText = asymmetric ? `娑?${low.toFixed(2)}% / 娑?${up.toFixed(2)}%` : `鍗?{avg.toFixed(2)}%`;
+        let text = `${summaryText}閿涘牊鈧顔?${totalWidth.toFixed(2)}%閿涘ˇ;
         const amountUsdt = Number(position?.task_amount_usdt);
         if (Number.isFinite(amountUsdt) && amountUsdt > 0) {
             text += ` | $${amountUsdt.toFixed(2)}`;
         }
-        return { text, badgeText: `总宽 ${totalWidth.toFixed(2)}%` };
+        return { text, badgeText: `閹顔?${totalWidth.toFixed(2)}%` };
     }, [position?.task_range_lower_pct, position?.task_range_upper_pct, position?.task_amount_usdt]);
 
     const taskId = useMemo(() => {
@@ -422,10 +423,10 @@ export default function PositionCard({
     }, [position?.task_id]);
 
     const taskPaused = Boolean(position?.task_paused);
-    const taskRebalanceEnabled = position?.task_rebalance_enabled !== false;
+    const currentTaskMode = normalizeTaskMode(position?.task_mode, position?.task_paused);
     const statusLabel = String(position?.status_label || '');
-    const isStopped = statusLabel.includes('已停止');
-    const isStopping = statusLabel.includes('停止中') || statusLabel.includes('撤出中');
+    const isStopped = statusLabel.includes('瀹告彃浠犲?);
+    const isStopping = statusLabel.includes('閸嬫粍顒涙稉?) || statusLabel.includes('閹俱倕鍤稉?);
     const hasActions = typeof onSetTaskPaused === 'function' || typeof onStopTask === 'function' || typeof onDeleteTask === 'function' || typeof onUpdateTaskRange === 'function';
     const canTaskAction = Boolean(allowTaskActions) && hasActions && taskId > 0;
     const canPauseAction = canTaskAction && typeof onSetTaskPaused === 'function' && !isStopping;
@@ -436,7 +437,7 @@ export default function PositionCard({
     const canWithdraw = canTaskAction && typeof onWithdrawLiquidity === 'function' && hasLiquidity && !isStopping;
     const canSwapDust = canTaskAction && typeof onSwapDust === 'function' && !isStopping;
     const canTriggerRebalance = canTaskAction && typeof onTriggerRebalance === 'function' && hasLiquidity && !isStopped && !isStopping;
-    const canToggleRebalance = canTaskAction && typeof onToggleRebalance === 'function' && !isStopped && !isStopping;
+    const canUpdateTaskMode = canTaskAction && typeof onUpdateTaskMode === 'function' && !isStopped && !isStopping;
     const canAddLiquidity = canTaskAction && typeof onAddLiquidity === 'function' && !isStopped && !isStopping;
 
     const [menuOpen, setMenuOpen] = useState(false);
@@ -470,13 +471,13 @@ export default function PositionCard({
     const withdrawLiquidity = () => runAction('withdraw', () => onWithdrawLiquidity?.(taskId));
     const swapDust = () => runAction('dust', () => onSwapDust?.(taskId));
     const triggerRebalance = () => runAction('rebalance', () => onTriggerRebalance?.(taskId));
-    const toggleRebalanceSwitch = () => runAction('rebalToggle', () => onToggleRebalance?.(taskId, !taskRebalanceEnabled));
+    const updateTaskMode = (nextMode) => runAction('taskMode', () => onUpdateTaskMode?.(taskId, nextMode));
     const addLiquidity = () => runAction('addLiq', () => onAddLiquidity?.(taskId, position));
 
     const pnlPositive = pnlAbsolute >= 0;
     const statusTheme = getStatusTheme(statusLabel);
 
-    // 费率标签（从 tickSpacing 推导）
+    // 鐠愬湱宸奸弽鍥╊劮閿涘牅绮?tickSpacing 閹恒劌顕遍敍?
     const feeLabel = useMemo(() => {
         const feeTier = Number(position?.fee_tier || 0) || inferFeeTierFromTickSpacing(position?.pool?.tickSpacing ?? position?.tick_spacing);
         return formatFeeTierPercent(feeTier);
@@ -485,13 +486,13 @@ export default function PositionCard({
     return (
         <div className="relative rounded-2xl border border-zinc-200/80 bg-white dark:border-white/5 dark:bg-[#131518] shadow-sm overflow-hidden transition-all duration-200 active:scale-[0.985]">
             <div className="px-3 pt-3 pb-2 flex flex-col gap-2">
-                {/* ══════════════════════════════════════════
-                    区域 1：标题行 & 操作菜单
-                ══════════════════════════════════════════ */}
+                {/* 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?
+                    閸栧搫鐓?1閿涙碍鐖ｆ０妯款攽 & 閹垮秳缍旈懣婊冨礋
+                閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?*/}
                 <div className="flex items-start justify-between gap-2">
-                    {/* 左侧主要信息 */}
+                    {/* 瀹革缚鏅舵稉鏄忣洣娣団剝浼?*/}
                     <div className="flex items-start gap-2 min-w-0 flex-1">
-                        {/* 批量复选框 */}
+                        {/* 閹靛綊鍣烘径宥夆偓澶嬵攱 */}
                         {batchMode && (
                             <button type="button" onClick={onToggleSelect}
                                 className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 transition-all active:scale-90 ${isSelected ? 'border-emerald-500 bg-emerald-500 text-white shadow-sm shadow-emerald-500/30' : 'border-zinc-300 bg-white dark:border-zinc-600 dark:bg-zinc-800'}`}>
@@ -503,7 +504,7 @@ export default function PositionCard({
                             </button>
                         )}
                         <div className="flex flex-col gap-1 min-w-0 flex-1">
-                            {/* 交易对名称 + 费率 */}
+                            {/* 娴溿倖妲楃€电懓鎮曠粔?+ 鐠愬湱宸?*/}
                             <div className="flex items-center gap-1.5 flex-wrap pr-1">
                                 {dexConfig ? (
                                     <span className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-1.5 py-0.5 text-[10px] font-bold ring-1 ${dexConfig.bgClass} ${dexConfig.textClass} ${dexConfig.ringClass}`}>
@@ -520,11 +521,11 @@ export default function PositionCard({
                                     </span>
                                 )}
                             </div>
-                            {/* 状态 + 任务ID */}
+                            {/* 閻樿埖鈧?+ 娴犺濮烮D */}
                             <div className="flex flex-wrap items-center gap-1.5 pr-1">
                                 <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 shrink-0 ${statusTheme.pill}`}>
                                     <span className={`h-1 w-1 rounded-full shrink-0 ${statusTheme.dot}`} />
-                                    <span className="truncate max-w-[70px]">{statusLabel || '运行中'}</span>
+                                    <span className="truncate max-w-[70px]">{statusLabel || '鏉╂劘顢戞稉?}</span>
                                 </span>
                                 {taskId > 0 && (
                                     <span className="text-[10px] font-medium text-zinc-400 dark:text-white/30 shrink-0">
@@ -533,18 +534,18 @@ export default function PositionCard({
                                 )}
                                 {updateTimeText ? (
                                     <span className="inline-flex items-center rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-600 ring-1 ring-zinc-200 dark:bg-white/10 dark:text-white/70 dark:ring-white/15">
-                                        更新 <NumberFlowValue value={updateTimeText} formatter={() => updateTimeText} />
+                                        閺囧瓨鏌?<NumberFlowValue value={updateTimeText} formatter={() => updateTimeText} />
                                     </span>
                                 ) : null}
                             </div>
                         </div>
                     </div>
 
-                    {/* 右侧：总价值 + 操作菜单 */}
+                    {/* 閸欏厖鏅堕敍姘偓璁崇幆閸?+ 閹垮秳缍旈懣婊冨礋 */}
                     <div className="ml-auto flex shrink-0 items-start gap-2 pl-2">
-                        {/* 总价值 + PnL */}
+                        {/* 閹鐜崐?+ PnL */}
                         <div className="text-right">
-                            <div className="text-[9px] font-medium text-zinc-400 dark:text-white/35 uppercase tracking-wide mb-0.5">总计</div>
+                            <div className="text-[9px] font-medium text-zinc-400 dark:text-white/35 uppercase tracking-wide mb-0.5">閹槒顓?/div>
                             <div className="text-lg font-extrabold text-zinc-900 dark:text-white/95 tabular-nums leading-none">
                                 <NumberFlowValue value={totalValue} formatter={(v) => formatUsd(v)} />
                             </div>
@@ -565,14 +566,14 @@ export default function PositionCard({
 
                         {headerAccessory}
 
-                        {/* 操作菜单 */}
+                        {/* 閹垮秳缍旈懣婊冨礋 */}
                         {canTaskAction && (
                             <div className="relative z-20" ref={menuRef}>
                                 <button
                                     type="button"
                                     onClick={() => setMenuOpen((v) => !v)}
                                     className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-200/80 bg-zinc-50 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 active:scale-95 transition-all dark:border-white/5 dark:bg-[#1a1c20] dark:text-white/50 dark:hover:bg-white/5 dark:hover:text-white/80"
-                                    aria-label="任务操作"
+                                    aria-label="娴犺濮熼幙宥勭稊"
                                     disabled={Boolean(actionPending)}
                                 >
                                     <Icon path={icons.kebab} className="h-4 w-4" />
@@ -582,31 +583,31 @@ export default function PositionCard({
                                         {typeof onSetTaskPaused === 'function' && (
                                             <button type="button" onClick={togglePause} disabled={!canPauseAction || Boolean(actionPending)}
                                                 className="w-full px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:text-white/70 dark:hover:bg-white/5">
-                                                {actionPending === 'pause' ? '处理中...' : taskPaused ? '恢复任务' : '暂停任务'}
+                                                {actionPending === 'pause' ? '婢跺嫮鎮婃稉?..' : taskPaused ? '閹垹顦叉禒璇插' : '閺嗗倸浠犳禒璇插'}
                                             </button>
                                         )}
                                         {typeof onUpdateTaskRange === 'function' && (
                                             <button type="button" onClick={editRange} disabled={!canUpdateRangeAction || Boolean(actionPending)}
                                                 className="w-full border-t border-zinc-100/80 px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:border-white/5 dark:text-white/70 dark:hover:bg-white/5">
-                                                {actionPending === 'range' ? '处理中...' : '修改再平衡参数'}
+                                                {actionPending === 'range' ? '婢跺嫮鎮婃稉?..' : '娣囶喗鏁奸崘宥呴挬鐞涒€冲棘閺?}
                                             </button>
                                         )}
                                         {typeof onStopTask === 'function' && (
                                             <button type="button" onClick={stopTask} disabled={!canStopAction || Boolean(actionPending)}
                                                 className="w-full border-t border-zinc-100/80 px-3 py-2 text-left text-xs font-semibold text-amber-600 hover:bg-amber-50 disabled:opacity-40 transition-colors dark:border-white/5 dark:text-amber-400 dark:hover:bg-amber-500/10">
-                                                {actionPending === 'stop' ? '处理中...' : isStopping ? '停止中...' : '停止任务'}
+                                                {actionPending === 'stop' ? '婢跺嫮鎮婃稉?..' : isStopping ? '閸嬫粍顒涙稉?..' : '閸嬫粍顒涙禒璇插'}
                                             </button>
                                         )}
                                         {typeof onAddLiquidity === 'function' && (
                                             <button type="button" onClick={addLiquidity} disabled={!canAddLiquidity || Boolean(actionPending)}
                                                 className="w-full border-t border-zinc-100/80 px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:border-white/5 dark:text-white/70 dark:hover:bg-white/5">
-                                                {actionPending === 'addLiq' ? '处理中...' : '补充流动性'}
+                                                {actionPending === 'addLiq' ? '婢跺嫮鎮婃稉?..' : '鐞涖儱鍘栧ù浣稿З閹?}
                                             </button>
                                         )}
                                         {typeof onDeleteTask === 'function' && (
                                             <button type="button" onClick={deleteTask} disabled={!canDeleteAction || Boolean(actionPending)}
                                                 className="w-full border-t border-zinc-100/80 px-3 py-2 text-left text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-40 transition-colors dark:border-white/5 dark:text-red-400 dark:hover:bg-red-500/10">
-                                                {actionPending === 'delete' ? '删除中...' : '删除任务'}
+                                                {actionPending === 'delete' ? '閸掔娀娅庢稉?..' : '閸掔娀娅庢禒璇插'}
                                             </button>
                                         )}
                                     </div>
@@ -616,84 +617,66 @@ export default function PositionCard({
                     </div>
                 </div>
 
-                {/* ══════════════════════════════════════════
-                    操作按钮行
-                ══════════════════════════════════════════ */}
+                {/* 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?
+                    閹垮秳缍旈幐澶愭尦鐞?
+                閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?*/}
                 {canTaskAction && (
                     <div className="flex items-center gap-1.5 flex-wrap">
-                        {/* 暂停/恢复 */}
-                        {typeof onSetTaskPaused === 'function' && (
-                            <button type="button" onClick={togglePause} disabled={!canPauseAction || Boolean(actionPending)}
-                                title={taskPaused ? '恢复任务' : '暂停任务'}
-                                className={`inline-flex h-7 items-center gap-1 rounded-xl border px-2.5 text-[10.5px] font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-40 ${taskPaused
-                                    ? 'border-emerald-400/40 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/25 dark:hover:bg-emerald-500/25'
-                                    : 'border-amber-400/40 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-400 dark:border-amber-500/25 dark:hover:bg-amber-500/25'
-                                }`}>
-                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
-                                    {taskPaused
-                                        ? <path d="M8 5v14l11-7z" />
-                                        : <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-                                    }
-                                </svg>
-                                <span>{actionPending === 'pause' ? '...' : taskPaused ? '恢复' : '暂停'}</span>
-                            </button>
-                        )}
-                        {/* 取回流动性 */}
+                        {/* 閺嗗倸浠?閹垹顦?*/}
+                        {/* 閸欐牕娲栧ù浣稿З閹?*/}
                         {typeof onWithdrawLiquidity === 'function' && (
                             <button type="button" onClick={withdrawLiquidity} disabled={!canWithdraw || Boolean(actionPending)}
-                                title="取回流动性"
+                                title="閸欐牕娲栧ù浣稿З閹?
                                 className="inline-flex h-7 items-center gap-1 rounded-xl border border-sky-400/40 bg-sky-50 px-2.5 text-[10.5px] font-semibold text-sky-700 shadow-sm transition-all active:scale-95 disabled:opacity-40 hover:bg-sky-100 dark:bg-sky-500/15 dark:text-sky-400 dark:border-sky-500/25 dark:hover:bg-sky-500/25">
                                 <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
                                     <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
                                 </svg>
-                                <span>{actionPending === 'withdraw' ? '...' : '取回'}</span>
+                                <span>{actionPending === 'withdraw' ? '...' : '閸欐牕娲?}</span>
                             </button>
                         )}
-                        {/* 兑换残余 */}
+                        {/* 閸忔垶宕插▓瀣╃稇 */}
                         {typeof onSwapDust === 'function' && (
                             <button type="button" onClick={swapDust} disabled={!canSwapDust || Boolean(actionPending)}
-                                title="兑换残余"
+                                title="閸忔垶宕插▓瀣╃稇"
                                 className="inline-flex h-7 items-center gap-1 rounded-xl border border-violet-400/40 bg-violet-50 px-2.5 text-[10.5px] font-semibold text-violet-700 shadow-sm transition-all active:scale-95 disabled:opacity-40 hover:bg-violet-100 dark:bg-violet-500/15 dark:text-violet-400 dark:border-violet-500/25 dark:hover:bg-violet-500/25">
                                 <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
                                     <path d="M7.5 21H2V9h5.5v12zm7.25-18h-5.5v18h5.5V3zM22 11h-5.5v10H22V11z" />
                                 </svg>
-                                <span>{actionPending === 'dust' ? '...' : '兑残'}</span>
+                                <span>{actionPending === 'dust' ? '...' : '閸忔垶鐣?}</span>
                             </button>
                         )}
-                        {/* 触发再平衡 */}
+                        {/* 鐟欙箑褰傞崘宥呴挬鐞?*/}
                         {typeof onTriggerRebalance === 'function' && (
                             <button type="button" onClick={triggerRebalance} disabled={!canTriggerRebalance || Boolean(actionPending)}
-                                title="立即触发再平衡"
+                                title="缁斿宓嗙憴锕€褰傞崘宥呴挬鐞?
                                 className="inline-flex h-7 items-center gap-1 rounded-xl border border-blue-400/40 bg-blue-50 px-2.5 text-[10.5px] font-semibold text-blue-700 shadow-sm transition-all active:scale-95 disabled:opacity-40 hover:bg-blue-100 dark:bg-blue-500/15 dark:text-blue-400 dark:border-blue-500/25 dark:hover:bg-blue-500/25">
                                 <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
                                     <path d="M12 6V1.5l-4.5 4.5L12 10.5V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 9.74C4.46 10.97 4 12.43 4 14c0 4.42 3.58 8 8 8v4.5l4.5-4.5L12 17.5V20z" />
                                 </svg>
-                                <span>{actionPending === 'rebalance' ? '...' : '再平衡'}</span>
+                                <span>{actionPending === 'rebalance' ? '...' : '閸愬秴閽╃悰?}</span>
                             </button>
                         )}
-                        {/* 再平衡开关 */}
-                        {typeof onToggleRebalance === 'function' && (
-                            <button type="button" onClick={toggleRebalanceSwitch} disabled={!canToggleRebalance || Boolean(actionPending)}
-                                title={taskRebalanceEnabled ? '关闭自动再平衡（超区间后撤仓终止）' : '开启自动再平衡'}
-                                className={`inline-flex h-7 items-center gap-1 rounded-xl border px-2.5 text-[10.5px] font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-40 ${taskRebalanceEnabled
-                                    ? 'border-emerald-400/40 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/25 dark:hover:bg-emerald-500/25'
-                                    : 'border-zinc-300/60 bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-white/5 dark:text-zinc-400 dark:border-white/10 dark:hover:bg-white/10'
-                                }`}>
-                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
-                                    {taskRebalanceEnabled
-                                        ? <path d="M17 7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h10c2.76 0 5-2.24 5-5s-2.24-5-5-5zm0 8c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z" />
-                                        : <path d="M17 7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h10c2.76 0 5-2.24 5-5s-2.24-5-5-5zM7 15c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z" />
-                                    }
-                                </svg>
-                                <span>{actionPending === 'rebalToggle' ? '...' : taskRebalanceEnabled ? '自动' : '手动'}</span>
-                            </button>
+                        {/* 閸愬秴閽╃悰鈥崇磻閸?*/}
+                                                {typeof onUpdateTaskMode === 'function' && (
+                            <>
+                                {TASK_MODE_OPTIONS.map((option) => (
+                                    <button key={option.value} type="button" onClick={() => updateTaskMode(option.value)} disabled={!canUpdateTaskMode || Boolean(actionPending)}
+                                        title={option.description}
+                                        className={`inline-flex h-7 items-center rounded-xl border px-2.5 text-[10.5px] font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-40 ${currentTaskMode === option.value
+                                            ? 'border-emerald-400/40 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/25 dark:hover:bg-emerald-500/25'
+                                            : 'border-zinc-300/60 bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-white/5 dark:text-zinc-400 dark:border-white/10 dark:hover:bg-white/10'
+                                            }`}>
+                                        <span>{option.shortLabel}</span>
+                                    </button>
+                                ))}
+                            </>
                         )}
                     </div>
                 )}
 
-                {/* ══════════════════════════════════════════
-                    区域 2：余额明细（可折叠）
-                ══════════════════════════════════════════ */}
+                {/* 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?
+                    閸栧搫鐓?2閿涙矮缍戞０婵囨缂佸棴绱欓崣顖涘閸欑媴绱?
+                閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?*/}
                 {Array.isArray(smartMoneyRangeGroups) && smartMoneyRangeGroups.length > 0 ? (
                     <SmartMoneyRangeSummary groups={smartMoneyRangeGroups} />
                 ) : null}
@@ -702,10 +685,10 @@ export default function PositionCard({
                     <button type="button" onClick={() => setExpanded(!expanded)}
                         className="w-full flex items-center justify-between px-2.5 py-1.5">
                         <div className="flex items-center gap-1.5">
-                            <div className="text-[10px] font-semibold text-zinc-500 dark:text-white/50 uppercase tracking-wide">余额明细</div>
+                            <div className="text-[10px] font-semibold text-zinc-500 dark:text-white/50 uppercase tracking-wide">娴ｆ瑩顤傞弰搴ｇ矎</div>
                             {!expanded && (
                                 <div className="text-[9px] text-zinc-400 dark:text-white/35 tabular-nums">
-                                    仓位 <NumberFlowValue value={position?.totals?.position_usd} formatter={(v) => formatUsd(v)} /> · 费用 <NumberFlowValue value={position?.totals?.fee_usd} formatter={(v) => formatFeeUsd(v)} />
+                                    娴犳挷缍?<NumberFlowValue value={position?.totals?.position_usd} formatter={(v) => formatUsd(v)} /> 璺?鐠愬湱鏁?<NumberFlowValue value={position?.totals?.fee_usd} formatter={(v) => formatFeeUsd(v)} />
                                 </div>
                             )}
                         </div>
@@ -717,17 +700,17 @@ export default function PositionCard({
 
                     <div className={`collapsible-content ${expanded ? 'expanded' : 'collapsed'}`}>
                         <div className="px-3 pb-3">
-                            {/* 表头 */}
+                            {/* 鐞涖劌銇?*/}
                             <div className="grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2 pb-1.5 border-b border-zinc-200/60 dark:border-white/10">
                                 <div className="text-[11px] font-bold text-zinc-500 dark:text-white/60 tracking-wide uppercase">Token</div>
                                 <div className="text-[11px] font-bold text-zinc-500 dark:text-white/60 tracking-wide uppercase text-right flex items-center justify-end gap-1">
-                                    <Icon path={icons.wallet} className="h-2.5 w-2.5" />钱包
+                                    <Icon path={icons.wallet} className="h-2.5 w-2.5" />闁藉崬瀵?
                                 </div>
-                                <div className="text-[11px] font-bold text-zinc-500 dark:text-white/60 tracking-wide uppercase text-right">仓位</div>
-                                <div className="text-[11px] font-bold text-emerald-600/80 dark:text-emerald-500/80 tracking-wide uppercase text-right">手续费</div>
+                                <div className="text-[11px] font-bold text-zinc-500 dark:text-white/60 tracking-wide uppercase text-right">娴犳挷缍?/div>
+                                <div className="text-[11px] font-bold text-emerald-600/80 dark:text-emerald-500/80 tracking-wide uppercase text-right">閹靛鐢荤拹?/div>
                             </div>
 
-                            {/* Token 行 */}
+                            {/* Token 鐞?*/}
                             {[token0, token1].filter(Boolean).map((row) => (
                                 <div key={row.address} className="grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2 items-center py-2 border-b border-zinc-100/60 dark:border-white/10 last:border-0">
                                     <div className="min-w-0 pr-1">
@@ -769,8 +752,8 @@ export default function PositionCard({
                             <div className="pt-2">
                                 <div className="grid grid-cols-4 gap-1.5">
                                     {[
-                                        { key: 'wallet', label: '钱包', onClick: openWallet, disabled: false },
-                                        { key: 'pool', label: '池子', onClick: openPool, disabled: !poolLink },
+                                        { key: 'wallet', label: '闁藉崬瀵?, onClick: openWallet, disabled: false },
+                                        { key: 'pool', label: '濮圭姴鐡?, onClick: openPool, disabled: !poolLink },
                                         { key: 'token0', label: token0?.symbol || 'Token0', onClick: () => openToken(token0?.address), disabled: !token0?.address },
                                         { key: 'token1', label: token1?.symbol || 'Token1', onClick: () => openToken(token1?.address), disabled: !token1?.address },
                                     ].map(({ key, label, onClick, disabled }) => (
@@ -787,9 +770,9 @@ export default function PositionCard({
                                 </div>
                             </div>
 
-                            {/* 灏忚琛?*/}
+                            {/* 閻忓繐绻楅鍝ユ偘?*/}
                             <div className="pt-2 grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2 mt-1 border-t border-zinc-100/60 dark:border-white/10">
-                                <div className="text-xs font-bold text-zinc-500 dark:text-white/70">小计</div>
+                                <div className="text-xs font-bold text-zinc-500 dark:text-white/70">鐏忓繗顓?/div>
                                 <div className="text-right text-xs font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">
                                     <NumberFlowValue value={position?.totals?.wallet_usd} formatter={(v) => formatUsd(v)} />
                                 </div>

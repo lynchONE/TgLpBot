@@ -1,24 +1,47 @@
 package web_server
 
-import "testing"
+import (
+	"TgLpBot/base/models"
+	"testing"
+)
 
-func TestResolveOpenPositionRebalanceEnabledDefaultsEnabled(t *testing.T) {
+func TestResolveOpenPositionTaskModeDefaultsExitAll(t *testing.T) {
 	t.Parallel()
 
-	rebalanceEnabled := resolveOpenPositionRebalanceEnabled(openPositionRequest{})
-	if !rebalanceEnabled {
-		t.Fatal("rebalanceEnabled = false, want true")
+	mode, paused := resolveOpenPositionTaskMode(openPositionRequest{})
+	if mode != models.StrategyOutOfRangeModeExitAll {
+		t.Fatalf("mode = %q, want %q", mode, models.StrategyOutOfRangeModeExitAll)
+	}
+	if paused {
+		t.Fatal("paused = true, want false")
 	}
 }
 
-func TestResolveOpenPositionRebalanceEnabledAppliesOverrides(t *testing.T) {
+func TestResolveOpenPositionTaskModeSupportsLegacyToggle(t *testing.T) {
 	t.Parallel()
 
-	rebalanceEnabled := false
-	gotRebalance := resolveOpenPositionRebalanceEnabled(openPositionRequest{
-		RebalanceEnabled: &rebalanceEnabled,
+	enabled := true
+	mode, paused := resolveOpenPositionTaskMode(openPositionRequest{
+		RebalanceEnabled: &enabled,
 	})
-	if gotRebalance {
-		t.Fatal("rebalanceEnabled = true, want false")
+	if mode != models.StrategyOutOfRangeModeRebalanceAll {
+		t.Fatalf("mode = %q, want %q", mode, models.StrategyOutOfRangeModeRebalanceAll)
+	}
+	if paused {
+		t.Fatal("paused = true, want false")
+	}
+}
+
+func TestResolveOpenPositionTaskModeSupportsPause(t *testing.T) {
+	t.Parallel()
+
+	mode, paused := resolveOpenPositionTaskMode(openPositionRequest{
+		TaskMode: models.StrategyTaskModePause,
+	})
+	if mode != models.StrategyOutOfRangeModeExitAll {
+		t.Fatalf("mode = %q, want %q", mode, models.StrategyOutOfRangeModeExitAll)
+	}
+	if !paused {
+		t.Fatal("paused = false, want true")
 	}
 }

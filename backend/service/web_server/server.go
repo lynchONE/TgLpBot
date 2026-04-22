@@ -70,6 +70,7 @@ func (s *Server) Start(port string) {
 	mux.HandleFunc("/api/task_swap_dust", s.handleTaskSwapDust)
 	mux.HandleFunc("/api/task_trigger_rebalance", s.handleTaskTriggerRebalance)
 	mux.HandleFunc("/api/task_toggle_rebalance", s.handleTaskToggleRebalance)
+	mux.HandleFunc("/api/task_update_mode", s.handleTaskUpdateMode)
 	mux.HandleFunc("/api/task_add_liquidity", s.handleTaskAddLiquidity)
 	mux.HandleFunc("/api/open_position_prepare", s.handleOpenPositionPrepare)
 	mux.HandleFunc("/api/open_position_preview", s.handleOpenPositionPreview)

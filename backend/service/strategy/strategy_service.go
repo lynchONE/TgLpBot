@@ -37,11 +37,18 @@ type StrategyService struct {
 
 	monitorLimiter *concurrency.KeyedLimiter
 
-	// inflightTasks 用于跟踪正在执行链上交易的任务ID，防止重复提交
-	// key: taskID, value: 提交时间
+	// inflightTasks 閻劋绨捄鐔婚嚋濮濓絽婀幍褑顢戦柧鍙ョ瑐娴溿倖妲楅惃鍕崲閸旑搹D閿涘矂妲诲銏ゅ櫢婢跺秵褰佹禍?	// key: taskID, value: 閹绘劒姘﹂弮鍫曟？
 	inflightTasks   map[uint]time.Time
 	inflightTasksMu sync.Mutex
 }
+
+type OutOfRangeAction string
+
+const (
+	OutOfRangeActionNone      OutOfRangeAction = ""
+	OutOfRangeActionRebalance OutOfRangeAction = "rebalance"
+	OutOfRangeActionExit      OutOfRangeAction = "exit"
+)
 
 // NewStrategyService creates a new strategy service
 func NewStrategyService() *StrategyService {
@@ -89,13 +96,13 @@ func (s *StrategyService) CreateTask(task *models.StrategyTask) error {
 
 // runLoop is the main monitoring loop
 func (s *StrategyService) runLoop() {
-	log.Println("[Strategy] 策略监控服务已启动...")
+	log.Println("[Strategy] 缁涙牜鏆愰惄鎴炲付閺堝秴濮熷鎻掓儙閸?..")
 	for {
 		select {
 		case <-s.ticker.C:
 			s.checkTasks()
 		case <-s.stopChan:
-			log.Println("[Strategy] 策略监控服务已停止")
+			log.Println("[Strategy] monitor loop stopped")
 			return
 		}
 	}
@@ -110,7 +117,7 @@ func (s *StrategyService) checkTasks() {
 		models.StrategyStatusWaiting,
 		models.StrategyStatusStopping,
 	}, false).Find(&tasks).Error; err != nil {
-		log.Printf("[Strategy] 获取任务失败: %v", err)
+		log.Printf("[Strategy] 閼惧嘲褰囨禒璇插婢惰精瑙? %v", err)
 		return
 	}
 
@@ -131,7 +138,7 @@ func (s *StrategyService) checkTasks() {
 		if s.accessService != nil {
 			check, err := s.accessService.CheckUserAccess(uid, time.Now())
 			if err != nil {
-				log.Printf("[Strategy] 检查用户授权失败: user_id=%d err=%v", uid, err)
+				log.Printf("[Strategy] 濡偓閺屻儳鏁ら幋閿嬪房閺夊啫銇戠拹? user_id=%d err=%v", uid, err)
 				continue
 			}
 			if !check.Allowed {
@@ -175,7 +182,7 @@ func (s *StrategyService) pauseUserTasks(userID uint, reason string) {
 		Where("user_id = ? AND paused = ?", userID, false).
 		Updates(updates)
 	if res.Error != nil {
-		log.Printf("[Strategy] 暂停用户任务失败: user_id=%d err=%v", userID, res.Error)
+		log.Printf("[Strategy] 閺嗗倸浠犻悽銊﹀煕娴犺濮熸径杈Е: user_id=%d err=%v", userID, res.Error)
 		return
 	}
 	if res.RowsAffected <= 0 {
@@ -184,9 +191,9 @@ func (s *StrategyService) pauseUserTasks(userID uint, reason string) {
 
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
-		reason = "未授权"
+		reason = "access expired"
 	}
-	s.notify(userID, fmt.Sprintf("⚠️ 授权状态变更：%s\n\n已自动暂停所有任务。", reason))
+	s.notify(userID, fmt.Sprintf("Task monitoring paused.\n\nReason: %s", reason))
 }
 
 // processTask handles the logic for a single task
@@ -231,13 +238,13 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 	} else {
 		currentTick, err = s.getCurrentTick(task)
 		if err != nil {
-			log.Printf("[Strategy] 任务 #%d 获取当前 tick 失败: %v", task.ID, err)
+			log.Printf("[Strategy] 娴犺濮?#%d 閼惧嘲褰囪ぐ鎾冲 tick 婢惰精瑙? %v", task.ID, err)
 			return
 		}
 		tickCache[cacheKey] = currentTick
 	}
 
-	log.Printf("[Strategy] 任务 #%d 监控中: Tick %d (范围 %d - %d)", task.ID, currentTick, task.TickLower, task.TickUpper)
+	log.Printf("[Strategy] 娴犺濮?#%d 閻╂垶甯舵稉? Tick %d (閼煎啫娲?%d - %d)", task.ID, currentTick, task.TickLower, task.TickUpper)
 
 	inRange := currentTick >= task.TickLower && currentTick <= task.TickUpper
 	alertLines := pricing.FormatRangeAlertLines(task, task.TickLower, task.TickUpper, currentTick)
@@ -251,17 +258,15 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 		if ShouldDelayOutOfRangeHandling(task) {
 			updates["range_activation_pending"] = false
 			if s.extraNotificationsEnabled(task.UserID) {
-				s.notify(task.UserID, fmt.Sprintf("✅ 任务 #%d 已首次进入区间，后续超区间将按当前模式自动处理", task.ID))
+				s.notify(task.UserID, fmt.Sprintf("Task #%d entered range and auto handling is active.", task.ID))
 			}
 			log.Printf("[Strategy] task #%d first entered range, auto handling enabled", task.ID)
 		}
 
-		// 如果之前超出范围，现在回到范围内，重置计时并通知用户
 		if task.OutOfRangeSince != nil {
 			updates["out_of_range_since"] = nil
-			s.notify(task.UserID, fmt.Sprintf("✅ 任务 #%d 价格已回到区间范围\n%s\n%s\n%s",
-				task.ID, alertLines.Current, alertLines.Lower, alertLines.Upper))
-			log.Printf("[Strategy] 任务 #%d 价格回到区间，重置再平衡计时", task.ID)
+			s.notify(task.UserID, fmt.Sprintf("Task #%d returned to range.\n%s\n%s\n%s", task.ID, alertLines.Current, alertLines.Lower, alertLines.Upper))
+			log.Printf("[Strategy] task #%d returned to range", task.ID)
 		}
 
 		// Clear any previous exit retry give-up state once price is back in range.
@@ -313,21 +318,26 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 		return
 	}
 
-	alertBoundary := alertLines.Upper
-	actionPrefix := "涨破区间"
-	if isDown {
-		alertBoundary = alertLines.Lower
-		actionPrefix = "跌破区间"
+	action := ResolveOutOfRangeAction(task, isUp, isDown)
+	if action == OutOfRangeActionNone {
+		return
 	}
 
-	actionText := "自动再平衡"
-	if ShouldStopOutOfRange(task) {
-		actionText = "自动撤仓并终止任务"
+	alertBoundary := alertLines.Upper
+	actionPrefix := "upper breakout"
+	if isDown {
+		alertBoundary = alertLines.Lower
+		actionPrefix = "lower breakout"
+	}
+
+	actionText := "rebalance"
+	if action == OutOfRangeActionExit {
+		actionText = "exit liquidity and stop"
 	}
 
 	if isFirstTimeOutOfRange {
 		if s.extraNotificationsEnabled(task.UserID) {
-			s.notify(task.UserID, fmt.Sprintf("⚠️ 任务 #%d %s\n%s\n%s\n如果 %s 内不回到区间，将%s",
+			s.notify(task.UserID, fmt.Sprintf("閳跨媴绗?娴犺濮?#%d %s\n%s\n%s\n婵″倹鐏?%s 閸愬懍绗夐崶鐐插煂閸栨椽妫块敍灞界殺%s",
 				task.ID,
 				actionPrefix,
 				alertLines.Current,
@@ -344,12 +354,12 @@ func (s *StrategyService) handleRunningTask(task *models.StrategyTask, tickCache
 		return
 	}
 
-	if ShouldStopOutOfRange(task) {
-		s.executeOutOfRangeStop(task, now, fmt.Sprintf("⚠️ %s触发撤仓终止", actionPrefix))
+	if action == OutOfRangeActionExit {
+		s.executeOutOfRangeStop(task, now, fmt.Sprintf("%s out of range: exit liquidity and stop", actionPrefix))
 		return
 	}
 
-	s.executeRebalance(task, currentTick, now, fmt.Sprintf("⚠️ %s触发自动再平衡", actionPrefix))
+	s.executeRebalance(task, currentTick, now, fmt.Sprintf("%s out of range: rebalance", actionPrefix))
 	return
 
 }
@@ -359,18 +369,39 @@ func ShouldDelayOutOfRangeHandling(task *models.StrategyTask) bool {
 }
 
 func ShouldStopOutOfRange(task *models.StrategyTask) bool {
-	return task != nil && !task.RebalanceEnabled
+	return task != nil && models.ResolveStrategyOutOfRangeMode(task) == models.StrategyOutOfRangeModeExitAll
 }
 
-// formatDelayTime 格式化延迟时间，小于60秒显示秒，否则显示分钟
+func ResolveOutOfRangeAction(task *models.StrategyTask, isUp, isDown bool) OutOfRangeAction {
+	if task == nil || (!isUp && !isDown) {
+		return OutOfRangeActionNone
+	}
+
+	switch models.ResolveStrategyOutOfRangeMode(task) {
+	case models.StrategyOutOfRangeModeExitAll:
+		return OutOfRangeActionExit
+	case models.StrategyOutOfRangeModeRebalanceUpExitDown:
+		if isDown {
+			return OutOfRangeActionExit
+		}
+		if isUp {
+			return OutOfRangeActionRebalance
+		}
+	case models.StrategyOutOfRangeModeRebalanceAll:
+		return OutOfRangeActionRebalance
+	}
+
+	return OutOfRangeActionNone
+}
+
 func formatDelayTime(seconds int) string {
 	if seconds <= 0 {
-		return "立即"
+		return "immediately"
 	}
 	if seconds < 60 {
-		return fmt.Sprintf("%d 秒", seconds)
+		return fmt.Sprintf("%d sec", seconds)
 	}
-	return fmt.Sprintf("%d 分钟", seconds/60)
+	return fmt.Sprintf("%d min", seconds/60)
 }
 
 func (s *StrategyService) notify(userID uint, message string) {
@@ -414,7 +445,7 @@ func (s *StrategyService) handleWaitingTask(task *models.StrategyTask) {
 	remaining := time.Duration(task.ReopenDelaySeconds)*time.Second - elapsed
 
 	if remaining <= 0 {
-		log.Printf("[Strategy] 任务 #%d 等待时间结束，准备重新开仓...", task.ID)
+		log.Printf("[Strategy] 娴犺濮?#%d 缁涘绶熼弮鍫曟？缂佹挻娼敍灞藉櫙婢跺洭鍣搁弬鏉跨磻娴?..", task.ID)
 		exec := txexec.Default()
 		if exec == nil {
 			return
@@ -455,7 +486,7 @@ func (s *StrategyService) runWaitingReopen(taskID uint, userID uint) {
 
 	currentTick, err := s.getCurrentTick(&task)
 	if err != nil {
-		log.Printf("[Strategy] 任务 #%d 获取当前 tick 失败: %v", task.ID, err)
+		log.Printf("[Strategy] 娴犺濮?#%d 閼惧嘲褰囪ぐ鎾冲 tick 婢惰精瑙? %v", task.ID, err)
 		return
 	}
 	// Update range around current tick (best-effort)
@@ -467,7 +498,7 @@ func (s *StrategyService) runWaitingReopen(taskID uint, userID uint) {
 
 	enterRes, err := s.liquidityService.EnterTaskFromUSDT(task.UserID, &task)
 	if err != nil {
-		log.Printf("[Strategy] 任务 #%d 开仓失败: %v", task.ID, err)
+		log.Printf("[Strategy] 娴犺濮?#%d 瀵偓娴犳挸銇戠拹? %v", task.ID, err)
 		_ = database.DB.Model(&task).Updates(map[string]interface{}{
 			"status":        models.StrategyStatusError,
 			"error_message": fmt.Sprintf("enter failed: %v", err),
@@ -488,7 +519,7 @@ func (s *StrategyService) runWaitingReopen(taskID uint, userID uint) {
 		"error_message":               "",
 	}
 	if dbErr := database.DB.Model(&task).Updates(updates).Error; dbErr != nil {
-		log.Printf("[Strategy] ⚠️ 任务 #%d 保存开仓结果失败 (链上交易已成功): %v", task.ID, dbErr)
+		log.Printf("[Strategy] 閳跨媴绗?娴犺濮?#%d 娣囨繂鐡ㄥ鈧禒鎾剁波閺嬫粌銇戠拹?(闁惧彞绗傛禍銈嗘瀹稿弶鍨氶崝?: %v", task.ID, dbErr)
 		criticalUpdates := map[string]interface{}{
 			"status":                      models.StrategyStatusRunning,
 			"current_liquidity":           enterRes.CurrentLiquidity,
@@ -502,29 +533,29 @@ func (s *StrategyService) runWaitingReopen(taskID uint, userID uint) {
 			"error_message":               "",
 		}
 		if cErr := database.DB.Model(&task).Updates(criticalUpdates).Error; cErr != nil {
-			log.Printf("[Strategy] ⚠️ 任务 #%d 兜底写入关键字段仍失败: %v", task.ID, cErr)
+			log.Printf("[Strategy] 閳跨媴绗?娴犺濮?#%d 閸忔粌绨抽崘娆忓弳閸忔娊鏁€涙顔屾禒宥呫亼鐠? %v", task.ID, cErr)
 		}
 	}
 
-	log.Printf("[Strategy] 任务 #%d 已重新开仓! 继续监控.", task.ID)
+	log.Printf("[Strategy] 娴犺濮?#%d 瀹告煡鍣搁弬鏉跨磻娴? 缂佈呯敾閻╂垶甯?", task.ID)
 }
 
 // Mock functions for V4 until V4 contract is ready
 func (s *StrategyService) mockV4Remove(task *models.StrategyTask) error {
 	time.Sleep(1 * time.Second)
-	log.Printf("[Strategy] [MOCK V4] 已从 V4 池 %s 移除流动性，转换为 USDT", task.PoolId)
+	log.Printf("[Strategy] [MOCK V4] 瀹歌弓绮?V4 濮?%s 缁夊娅庡ù浣稿З閹嶇礉鏉烆剚宕叉稉?USDT", task.PoolId)
 	return nil
 }
 
 func (s *StrategyService) mockV4Add(task *models.StrategyTask) error {
 	time.Sleep(1 * time.Second)
-	log.Printf("[Strategy] [MOCK V4] 已将 USDT 添加到 V4 池 %s", task.PoolId)
+	log.Printf("[Strategy] [MOCK V4] 瀹告彃鐨?USDT 濞ｈ濮為崚?V4 濮?%s", task.PoolId)
 	return nil
 }
 
 func (s *StrategyService) mockV3Add(task *models.StrategyTask) error {
 	time.Sleep(1 * time.Second)
-	log.Printf("[Strategy] [MOCK V3] 已将 USDT 添加到 V3 池 %s", task.PoolId)
+	log.Printf("[Strategy] [MOCK V3] 瀹告彃鐨?USDT 濞ｈ濮為崚?V3 濮?%s", task.PoolId)
 	return nil
 }
 
@@ -704,7 +735,7 @@ func (s *StrategyService) executeStopLoss(task *models.StrategyTask, now time.Ti
 		return
 	}
 
-	log.Printf("[Strategy] 任务 #%d %s，执行退出", task.ID, reason)
+	log.Printf("[Strategy] task #%d %s, execute stop loss", task.ID, reason)
 	s.requestExitToUSDT(task, ExitActionStopLoss, reason)
 }
 
@@ -722,12 +753,6 @@ func (s *StrategyService) executeRebalance(task *models.StrategyTask, currentTic
 		return
 	}
 
-	// A disabled rebalance policy should never force an exit.
-	if !task.RebalanceEnabled {
-		log.Printf("[Strategy] 任务 #%d %s，再平衡已关闭，仅保留监控", task.ID, reason)
-		return
-	}
-
-	log.Printf("[Strategy] 任务 #%d %s，执行再平衡", task.ID, reason)
+	log.Printf("[Strategy] task #%d %s, execute rebalance", task.ID, reason)
 	s.requestExitToUSDT(task, ExitActionRebalance, reason)
 }

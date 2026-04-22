@@ -10,27 +10,30 @@ import (
 	"TgLpBot/service/strategy"
 )
 
-type taskToggleRebalanceRequest struct {
-	InitData         string `json:"initData"`
-	TaskID           uint   `json:"taskId"`
-	RebalanceEnabled bool   `json:"rebalanceEnabled"`
+type taskUpdateModeRequest struct {
+	InitData string `json:"initData"`
+	TaskID   uint   `json:"taskId"`
+	TaskMode string `json:"taskMode"`
 }
 
-type taskToggleRebalanceResponse struct {
+type taskUpdateModeResponse struct {
 	OK               bool      `json:"ok"`
 	TaskID           uint      `json:"task_id"`
+	TaskMode         string    `json:"task_mode"`
+	Paused           bool      `json:"paused"`
+	OutOfRangeMode   string    `json:"out_of_range_mode"`
 	RebalanceEnabled bool      `json:"rebalance_enabled"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
-func (s *Server) handleTaskToggleRebalance(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleTaskUpdateMode(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, 8*1024)
-	var req taskToggleRebalanceRequest
+	var req taskUpdateModeRequest
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
@@ -39,8 +42,15 @@ func (s *Server) handleTaskToggleRebalance(w http.ResponseWriter, r *http.Reques
 	}
 
 	initData := strings.TrimSpace(req.InitData)
+	req.TaskMode = strings.TrimSpace(req.TaskMode)
 	if req.TaskID == 0 {
 		http.Error(w, "missing taskId", http.StatusBadRequest)
+		return
+	}
+
+	requestedMode := models.NormalizeStrategyTaskMode(req.TaskMode)
+	if requestedMode == "" {
+		http.Error(w, "invalid taskMode", http.StatusBadRequest)
 		return
 	}
 
@@ -70,17 +80,33 @@ func (s *Server) handleTaskToggleRebalance(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	outOfRangeMode := models.StrategyOutOfRangeModeExitAll
-	if req.RebalanceEnabled {
-		outOfRangeMode = models.StrategyOutOfRangeModeRebalanceAll
-	} else if models.ResolveStrategyOutOfRangeMode(task) == models.StrategyOutOfRangeModeRebalanceUpExitDown {
-		outOfRangeMode = models.StrategyOutOfRangeModeExitAll
+	now := time.Now()
+	outOfRangeMode := models.ResolveStrategyOutOfRangeMode(task)
+	paused := false
+	switch requestedMode {
+	case models.StrategyTaskModePause:
+		paused = true
+	default:
+		resolvedMode := models.NormalizeStrategyOutOfRangeMode(requestedMode)
+		if resolvedMode == "" {
+			http.Error(w, "invalid taskMode", http.StatusBadRequest)
+			return
+		}
+		outOfRangeMode = resolvedMode
 	}
 
 	updates := map[string]interface{}{
-		"rebalance_enabled": req.RebalanceEnabled,
-		"out_of_range_mode": string(outOfRangeMode),
+		"paused":             paused,
+		"out_of_range_since": nil,
+		"out_of_range_mode":  string(outOfRangeMode),
+		"rebalance_enabled":  models.RebalanceEnabledForOutOfRangeMode(outOfRangeMode),
 	}
+	if paused {
+		updates["paused_at"] = &now
+	} else {
+		updates["paused_at"] = nil
+	}
+
 	if err := taskService.Update(user.ID, req.TaskID, updates); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -90,12 +116,19 @@ func (s *Server) handleTaskToggleRebalance(w http.ResponseWriter, r *http.Reques
 		s.Realtime.InvalidateUser(user.ID)
 	}
 
-	now := time.Now()
+	taskMode := string(outOfRangeMode)
+	if paused {
+		taskMode = models.StrategyTaskModePause
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(taskToggleRebalanceResponse{
+	_ = json.NewEncoder(w).Encode(taskUpdateModeResponse{
 		OK:               true,
 		TaskID:           req.TaskID,
-		RebalanceEnabled: req.RebalanceEnabled,
+		TaskMode:         taskMode,
+		Paused:           paused,
+		OutOfRangeMode:   string(outOfRangeMode),
+		RebalanceEnabled: models.RebalanceEnabledForOutOfRangeMode(outOfRangeMode),
 		UpdatedAt:        now,
 	})
 }

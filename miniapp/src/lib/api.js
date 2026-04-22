@@ -228,6 +228,22 @@ export async function toggleRebalance({ apiBaseUrl, initData, taskId, rebalanceE
     return resp.json();
 }
 
+export async function updateTaskMode({ apiBaseUrl, initData, taskId, taskMode, signal }) {
+    const base = String(apiBaseUrl || '').replace(/\/$/, '');
+    const url = `${base}/api/task_action?action=update_mode`;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData, taskId, taskMode: String(taskMode || '').trim() }),
+        signal,
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+}
+
 export async function addLiquidity({ apiBaseUrl, initData, taskId, amountUsdt, signal }) {
     const base = String(apiBaseUrl || '').replace(/\/$/, '');
     const url = `${base}/api/task_action?action=add_liquidity`;
@@ -604,6 +620,7 @@ function buildOpenPositionPayload({
     dcaEnabled,
     dcaPercentages,
     dcaIntervalSeconds,
+    taskMode,
     rebalanceEnabled,
 }) {
     const payload = {
@@ -651,7 +668,9 @@ function buildOpenPositionPayload({
     if (Number.isFinite(dcaInterval) && dcaInterval >= 0) {
         payload.dca_interval_seconds = Math.round(dcaInterval * 1000) / 1000;
     }
-    if (rebalanceEnabled !== undefined && rebalanceEnabled !== null) {
+    if (taskMode !== undefined && taskMode !== null && String(taskMode).trim()) {
+        payload.task_mode = String(taskMode).trim();
+    } else if (rebalanceEnabled !== undefined && rebalanceEnabled !== null) {
         payload.rebalance_enabled = Boolean(rebalanceEnabled);
     }
     return payload;
@@ -677,6 +696,7 @@ export async function previewOpenPosition({
     dcaEnabled,
     dcaPercentages,
     dcaIntervalSeconds,
+    taskMode,
     rebalanceEnabled,
     signal,
 }) {
@@ -700,6 +720,7 @@ export async function previewOpenPosition({
         dcaEnabled,
         dcaPercentages,
         dcaIntervalSeconds,
+        taskMode,
         rebalanceEnabled,
     });
     const urls = [
@@ -825,6 +846,7 @@ export async function openPosition({
     dcaEnabled,
     dcaPercentages,
     dcaIntervalSeconds,
+    taskMode,
     rebalanceEnabled,
     signal,
 }) {
@@ -850,6 +872,7 @@ export async function openPosition({
         dcaEnabled,
         dcaPercentages,
         dcaIntervalSeconds,
+        taskMode,
         rebalanceEnabled,
     });
     const resp = await fetch(url, {
