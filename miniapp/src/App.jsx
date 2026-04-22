@@ -1288,8 +1288,8 @@ export default function App() {
     const openPositionEffectiveDCAEnabled = openPositionDCAEnabled && !openPositionDCAAmountBelowThreshold;
     const openPositionGlobalSlippageHint = useMemo(() => {
         const n = Number(globalConfig?.slippage_tolerance);
-        if (!Number.isFinite(n) || n < 0) return '闁伙絾鐟ч埞鏍礆濞嗗骸鈻忛柣顫妼閸欏繒浠﹂埀顒勬煀瀹ュ洨鏋?;'
-        return `闁哄牜鍓氶鐓庮嚕閳ь剚绂掗幘璇叉珰闁活潿鍔岄崣蹇曚沪閳ь剟鏌婂鍥╂瀭婵犲﹥鍨归崑? ${formatPercentValue(n)}`;
+        if (!Number.isFinite(n) || n < 0) return '留空则使用全局配置';
+        return `本次开仓采用全局配置滑点: ${formatPercentValue(n)}`;
     }, [globalConfig?.slippage_tolerance]);
     const [posWalletBalances, setPosWalletBalances] = useState(null);
     const userDefaultChain = useMemo(() => {
@@ -4655,10 +4655,10 @@ export default function App() {
                             {multiWalletEnabled ? (
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-white/10 dark:bg-[#0f1116]">
                                     <div className="flex items-center justify-between gap-2">
-                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">闂侇偄顦扮€氥劑鏌﹂崡鐐茬樁</div>
+                                        <div className="text-xs font-semibold text-zinc-900 dark:text-white/80">钱包</div>
                                         <div className="text-[11px] text-zinc-500 dark:text-white/40">
                                             {walletsLoading
-                                                ? '闁告梻濮惧ù鍥ㄧ▔?..'
+                                                ? '加载中...'
                                                 : [
                                                     String(walletsData?.chain || '').toUpperCase(),
                                                     walletsData?.native_symbol && walletsData?.stable_symbol
@@ -4893,7 +4893,7 @@ export default function App() {
                                         </div>
                                         {openPositionSmartRangesLoading ? (
                                             <div className="mt-2 text-[11px] text-zinc-500 dark:text-white/45">
-                                                闁奸硸浜濆Σ鎴︽煢閸楃偛闅橀梻鍌涙綑婵偞娼幋鎺曞幀...
+                                                聪明钱区间加载中...
                                             </div>
                                         ) : null}
                                         <div className={`mt-3 rounded-2xl border p-3 ${openPositionRangeInputMode === 'percentage'

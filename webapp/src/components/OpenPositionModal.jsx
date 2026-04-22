@@ -2618,9 +2618,9 @@ export default function OpenPositionModal({
                     disabled={busy}
                     className={`opm-toggle-btn is-rebalance${taskMode === option.value ? ' active' : ''}`}
                   >
-                    <span style={{ display: 'grid', gap: 4, textAlign: 'left' }}>
-                      <span style={{ fontSize: 12, fontWeight: 600 }}>{option.label}</span>
-                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{option.description}</span>
+                    <span className="opm-toggle-copy">
+                      <span className="opm-toggle-title">{option.label}</span>
+                      <span className="opm-toggle-desc">{option.description}</span>
                     </span>
                     <span className="opm-toggle-pill">
                       {taskMode === option.value ? '当前' : '切换'}
