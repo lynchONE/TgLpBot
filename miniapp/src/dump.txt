@@ -5427,6 +5427,35 @@ export default function App() {
                                     ))}
                                 </div>
                             </div>
+                                <div className="mt-3 grid grid-cols-4 gap-1.5">
+                                    {TASK_MODE_OPTIONS.map((option) => (
+                                        <button
+                                            key={option.value}
+                                            type="button"
+                                            onClick={() => {
+                                                setOpenPositionTaskMode(option.value);
+                                                setOpenPositionError('');
+                                            }}
+                                            disabled={openPositionLoading}
+                                            title={option.description}
+                                            className={`rounded-xl border px-1.5 py-2 text-center transition ${openPositionTaskMode === option.value
+                                                ? 'border-fuchsia-500/35 bg-fuchsia-500/12 text-zinc-900 shadow-sm dark:text-white'
+                                                : 'border-zinc-200 bg-white/70 text-zinc-700 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-white/75 dark:hover:bg-white/10'
+                                                }`}
+                                        >
+                                            <div className="text-[10px] font-semibold leading-3">{option.shortLabel}</div>
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="mt-2 text-[10px] leading-4 text-zinc-600 dark:text-white/55">
+                                    <div className="mb-1">
+                                        上破区间：{openPositionOutOfRangeActions.above}；下破区间：{openPositionOutOfRangeActions.below}
+                                    </div>
+                                    {openPositionIsSingleSidedSelection
+                                        ? `当前区间会开成单边池，首次进入区间前不会触发自动处理。进入过区间后，会按当前模式处理越界。${openPositionResolvedSelectionShape.dominantTokenSymbol ? ` 资金会更偏向 ${openPositionResolvedSelectionShape.dominantTokenSymbol}。` : ''}`
+                                        : '关闭再平衡后，超区间会在缓冲结束后自动撤仓并终止任务。'}
+                                </div>
+                            </div>
 
                             <div className="mt-2 rounded-2xl bg-zinc-50/50 p-3 dark:bg-white/5">
                                 <div className="flex items-center justify-between gap-3">
