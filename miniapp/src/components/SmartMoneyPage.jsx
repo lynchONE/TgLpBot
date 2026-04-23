@@ -937,6 +937,7 @@ function formatRangePercentPlain(value) {
 
 const POOL_CARD_RANGE_LIMIT = 5;
 const POSITION_PREVIEW_BATCH_SIZE = 4;
+const POOL_LIST_PAGE_SIZE = 10;
 const POSITION_LIST_PAGE_SIZE = 6;
 const WALLET_LIST_PAGE_SIZE = 10;
 const USD_PREVIEW_FORMATTER = new Intl.NumberFormat('en-US', {
@@ -1626,23 +1627,45 @@ function ConfirmDialog({ open, title, description, confirmLabel = '确认', busy
 
 function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand }) {
     const [pools, setPools] = useState([]);
+    const [poolsTotal, setPoolsTotal] = useState(0);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [protocolFilter, setProtocolFilter] = useState('all');
+    const [page, setPage] = useState(1);
+    const loadSeqRef = useRef(0);
+    const searchKeyword = useMemo(() => String(search || '').trim(), [search]);
 
     const load = useCallback((silent = false) => {
+        const seq = ++loadSeqRef.current;
         if (!silent) {
             setLoading(true);
         }
-        fetchSMPools({ apiBaseUrl })
-            .then(d => setPools(d?.list || []))
+        fetchSMPools({
+            apiBaseUrl,
+            page,
+            size: POOL_LIST_PAGE_SIZE,
+            keyword: searchKeyword || undefined,
+            protocol: protocolFilter !== 'all' ? protocolFilter : undefined,
+        })
+            .then((d) => {
+                if (seq !== loadSeqRef.current) return;
+                const total = Number(d?.total || 0);
+                const list = Array.isArray(d?.list) ? d.list : [];
+                const totalPages = Math.max(1, Math.ceil(total / POOL_LIST_PAGE_SIZE));
+                if (page > totalPages) {
+                    setPage(totalPages);
+                    return;
+                }
+                setPools(list);
+                setPoolsTotal(total);
+            })
             .catch(() => { })
             .finally(() => {
-                if (!silent) {
+                if (!silent && seq === loadSeqRef.current) {
                     setLoading(false);
                 }
             });
-    }, [apiBaseUrl]);
+    }, [apiBaseUrl, page, protocolFilter, searchKeyword]);
 
     useEffect(() => { load(); }, [load]);
     useEffect(() => {
@@ -1651,18 +1674,11 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand }) {
         }, 10000);
         return () => clearInterval(timer);
     }, [load]);
+    useEffect(() => {
+        setPage(1);
+    }, [protocolFilter, searchKeyword]);
 
-    const filtered = useMemo(() => {
-        let list = pools;
-        if (search) {
-            const q = search.toLowerCase();
-            list = list.filter(p => getPairLabel(p).toLowerCase().includes(q) || getPoolIdentifier(p).toLowerCase().includes(q));
-        }
-        if (protocolFilter !== 'all') {
-            list = list.filter(p => p.protocol === protocolFilter);
-        }
-        return list;
-    }, [pools, search, protocolFilter]);
+    const hasFilter = Boolean(searchKeyword) || protocolFilter !== 'all';
 
     return (
         <div>
@@ -1696,13 +1712,13 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand }) {
 
             {loading ? (
                 <div className="py-8 text-center text-zinc-500">加载中...</div>
-            ) : filtered.length === 0 ? (
+            ) : pools.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-white/[0.05] bg-zinc-900/45 px-4 py-8 text-center text-sm text-zinc-500">
-                    暂无活跃仓位的池子
+                    {hasFilter ? '暂无符合条件的池子' : '暂无活跃仓位的池子'}
                 </div>
             ) : (
                 <div className="space-y-3">
-                    {filtered.map(pool => (
+                    {pools.map(pool => (
                         <button
                             key={pool.pool_address}
                             type="button"
@@ -1757,6 +1773,7 @@ function PoolListPage({ apiBaseUrl, onSelectPool, onOpenPosition, brand }) {
                     ))}
                 </div>
             )}
+            <PositionPagination page={page} total={poolsTotal} brand={brand} pageSize={POOL_LIST_PAGE_SIZE} onChange={setPage} />
         </div>
     );
 }

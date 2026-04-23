@@ -183,8 +183,13 @@ export async function deleteSMContract({ apiBaseUrl, address, signal }) {
 }
 
 // Pools
-export async function fetchSMPools({ apiBaseUrl, signal }) {
-    return smRequest(buildSMUrl(apiBaseUrl, 'pools', ''), { signal });
+export async function fetchSMPools({ apiBaseUrl, page = 1, size = 10, keyword, protocol, signal }) {
+    const params = new URLSearchParams();
+    params.set('page', String(page));
+    params.set('size', String(size));
+    if (keyword) params.set('keyword', keyword);
+    if (protocol) params.set('protocol', protocol);
+    return smRequest(buildSMUrl(apiBaseUrl, 'pools', params.toString()), { signal });
 }
 
 export async function fetchSMPoolStats({ apiBaseUrl, poolAddress, signal }) {

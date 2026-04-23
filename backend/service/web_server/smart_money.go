@@ -451,12 +451,22 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Pool list
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	size, _ := strconv.Atoi(r.URL.Query().Get("size"))
+	if page <= 0 {
+		page = 1
+	}
+	if size <= 0 || size > 100 {
+		size = 10
+	}
+	keyword := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("keyword")))
+	protocol := strings.TrimSpace(r.URL.Query().Get("protocol"))
+
 	pools, err := repo.ListPoolsWithPositions(ctx)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	addressesByChain := make(map[string][]string)
 	for i := range pools {
 		pools[i].TradingPair = buildSmartMoneyTradingPair(pools[i].Token0Symbol, pools[i].Token1Symbol)
 		pools[i].DisplayTokenAddress, pools[i].DisplayTokenSymbol = smartMoneyPickDisplayToken(
@@ -465,34 +475,58 @@ func (s *Server) handleSMPools(w http.ResponseWriter, r *http.Request) {
 			pools[i].Token0Symbol,
 			pools[i].Token1Symbol,
 		)
-		if pools[i].DisplayTokenAddress != "" {
-			chain := smartMoneyChainSlug(pools[i].ChainID)
-			addressesByChain[chain] = append(addressesByChain[chain], pools[i].DisplayTokenAddress)
+	}
+
+	filtered := make([]sm.PoolAggRow, 0, len(pools))
+	for _, pool := range pools {
+		if protocol != "" && protocol != "all" && pool.Protocol != protocol {
+			continue
+		}
+		if keyword != "" {
+			pairText := strings.ToLower(strings.TrimSpace(pool.TradingPair))
+			poolAddrText := strings.ToLower(strings.TrimSpace(pool.PoolAddress))
+			if !strings.Contains(pairText, keyword) && !strings.Contains(poolAddrText, keyword) {
+				continue
+			}
+		}
+		filtered = append(filtered, pool)
+	}
+
+	total := len(filtered)
+	start := (page - 1) * size
+	if start > total {
+		start = total
+	}
+	end := start + size
+	if end > total {
+		end = total
+	}
+	pagedPools := filtered[start:end]
+
+	addressesByChain := make(map[string][]string)
+	for i := range pagedPools {
+		if pagedPools[i].DisplayTokenAddress != "" {
+			chain := smartMoneyChainSlug(pagedPools[i].ChainID)
+			addressesByChain[chain] = append(addressesByChain[chain], pagedPools[i].DisplayTokenAddress)
 		}
 	}
 	metaByChain := s.loadSmartMoneyTokenMetadataByChain(ctx, addressesByChain)
-	poolAmounts, _ := repo.GetPoolTotalAmountsUSD(ctx)
-	for i := range pools {
+	for i := range pagedPools {
 		applySmartMoneyDisplayToken(
-			smartMoneyChainSlug(pools[i].ChainID),
-			&pools[i].DisplayTokenAddress,
-			&pools[i].DisplayTokenSymbol,
-			&pools[i].DisplayTokenLogoURL,
+			smartMoneyChainSlug(pagedPools[i].ChainID),
+			&pagedPools[i].DisplayTokenAddress,
+			&pagedPools[i].DisplayTokenSymbol,
+			&pagedPools[i].DisplayTokenLogoURL,
 			metaByChain,
 		)
-		if poolAmounts != nil {
-			if amt, ok := poolAmounts[strings.ToLower(pools[i].PoolAddress)]; ok {
-				pools[i].TotalPositionAmountUSD = amt
-			}
-		}
 	}
-	if err := attachSmartMoneyRangeGroupsToPoolList(ctx, repo, pools); err != nil {
+	if err := attachSmartMoneyRangeGroupsToPoolList(ctx, repo, pagedPools); err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	jsonOK(w, map[string]interface{}{
-		"total": len(pools),
-		"list":  pools,
+		"total": total,
+		"list":  pagedPools,
 	})
 }
 
