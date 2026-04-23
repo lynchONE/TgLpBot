@@ -108,20 +108,12 @@ export default function PriceRangeVisualizer({
         return `${currentLabel} · ${TEXT.belowLower} ${formatPercent(outOfRangeInfo.percent)}`;
     }, [currentPriceNum, outOfRangeInfo, visualInRange]);
 
-    const currentRangeText = useMemo(() => {
-        const lower = Number(currentGridLower);
-        const upper = Number(currentGridUpper);
-        if (!Number.isFinite(lower) || !Number.isFinite(upper)) return '';
-        return `${TEXT.currentBand} ${formatPrice(lower)} - ${formatPrice(upper)}`;
-    }, [currentGridLower, currentGridUpper]);
-
     const detailText = useMemo(() => {
         const parts = [];
         if (taskRangeText) parts.push(`${TEXT.taskRange} ${taskRangeText}`);
-        if (currentRangeText) parts.push(currentRangeText);
         if (runningDuration) parts.push(`${TEXT.running} ${runningDuration}`);
         return parts.join(' · ');
-    }, [currentRangeText, runningDuration, taskRangeText]);
+    }, [runningDuration, taskRangeText]);
 
     const gridLines = useMemo(() => {
         if (!hasGridCount || Number(gridCount) < 2 || Number(gridCount) > 200) return [];
