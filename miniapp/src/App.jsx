@@ -4506,7 +4506,7 @@ export default function App() {
                             type="button"
                             className="absolute inset-0 cursor-default bg-black/40"
                             onClick={() => setSettingsOpen(false)}
-                            aria-label="闁稿繑濞婂Λ瀵告媼閸撗呮瀭"
+                            aria-label="关闭设置"
                         />
                         <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-white/10 dark:bg-[#111318] dark:shadow-none">
                             <div className="flex items-center justify-between">
@@ -4515,7 +4515,7 @@ export default function App() {
                                     type="button"
                                     onClick={() => setSettingsOpen(false)}
                                     className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100 text-zinc-900 hover:bg-zinc-200 active:bg-zinc-200 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:active:bg-white/15"
-                                    aria-label="闁稿繑濞婂Λ瀵告媼閸撗呮瀭"
+                                    aria-label="关闭设置"
                                 >
                                     <Icon path={icons.close} className="h-5 w-5" />
                                 </button>
@@ -4572,7 +4572,7 @@ export default function App() {
                                             onClick={clearPollOverride}
                                             className="rounded-xl bg-white/70 px-3 py-1.5 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 hover:bg-white dark:bg-white/5 dark:text-white/70 dark:ring-white/10"
                                         >
-                                            閻犺櫣鍠栧▓銏☆渶濡鍚?
+                                            恢复默认
                                         </button>
                                     </div>
 
@@ -4595,7 +4595,7 @@ export default function App() {
                                             onClick={applyPollDraft}
                                             className={`rounded-xl px-3 py-2 text-sm font-semibold shadow-sm ${brand.solidButtonClass}`}
                                         >
-                                            缁绢収鍠栭悾?
+                                            应用设置
                                         </button>
                                     </div>
                                 </div>
