@@ -646,7 +646,7 @@ export default function PositionCard({
                                 )}
                                 {updateTimeText ? (
                                     <span className="inline-flex items-center rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-600 ring-1 ring-zinc-200 dark:bg-white/10 dark:text-white/70 dark:ring-white/15">
-                                        閺囧瓨鏌?<NumberFlowValue value={updateTimeText} formatter={() => updateTimeText} />
+                                        更新 <NumberFlowValue value={updateTimeText} formatter={() => updateTimeText} />
                                     </span>
                                 ) : null}
                             </div>

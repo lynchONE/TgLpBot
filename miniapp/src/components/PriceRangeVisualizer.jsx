@@ -5,9 +5,26 @@ const formatPrice = (value) => {
     const n = Number(value);
     if (!Number.isFinite(n)) return '--';
     if (n === 0) return '0';
-    if (Math.abs(n) < 0.0001) return n.toExponential(4);
-    if (Math.abs(n) > 100000) return n.toExponential(4);
-    return n.toPrecision(6).replace(/\.?0+$/, '').replace(/e[-+]\d+/i, (match) => match.toLowerCase());
+
+    const abs = Math.abs(n);
+    if (abs < 0.001 || abs >= 100000) {
+        return n.toExponential(4).replace(/e\+?/i, 'e');
+    }
+    if (abs >= 1000) {
+        return n.toLocaleString('en-US', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2,
+        });
+    }
+    if (abs >= 1) {
+        return n
+            .toLocaleString('en-US', {
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 4,
+            })
+            .replace(/\.?0+$/, '');
+    }
+    return n.toPrecision(6).replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '');
 };
 
 const formatPercent = (value) => {
@@ -26,66 +43,78 @@ export default function PriceRangeVisualizer({
     gridStepPct = null,
     rangeBadgeText = '',
     inRange,
-    currentGridIndex,
     currentGridLower,
     currentGridUpper,
     taskRangeText = '',
     runningDuration = '',
 }) {
+    const currentPriceNum = Number(currentPrice);
+    const minPriceNum = Number(minPrice);
+    const maxPriceNum = Number(maxPrice);
+    const hasRange = Number.isFinite(currentPriceNum) && Number.isFinite(minPriceNum) && Number.isFinite(maxPriceNum);
+    const hasGridCount = Number.isFinite(Number(gridCount)) && Number(gridCount) > 0;
+
     const rawPercent = useMemo(() => {
-        if (!Number.isFinite(currentPrice) || !Number.isFinite(minPrice) || !Number.isFinite(maxPrice)) return null;
-        if (maxPrice === minPrice) return 50;
-        return ((currentPrice - minPrice) / (maxPrice - minPrice)) * 100;
-    }, [currentPrice, minPrice, maxPrice]);
+        if (!hasRange) return null;
+        if (maxPriceNum === minPriceNum) return 50;
+        return ((currentPriceNum - minPriceNum) / (maxPriceNum - minPriceNum)) * 100;
+    }, [currentPriceNum, hasRange, maxPriceNum, minPriceNum]);
 
     const clampedPercent = rawPercent === null ? null : Math.max(0, Math.min(100, rawPercent));
-    const midPrice = Number.isFinite(minPrice) && Number.isFinite(maxPrice) ? (minPrice + maxPrice) / 2 : null;
-    const hasRange = Number.isFinite(currentPrice) && Number.isFinite(minPrice) && Number.isFinite(maxPrice);
-    const hasGridCount = Number.isFinite(Number(gridCount)) && Number(gridCount) > 0;
+    const midPrice = Number.isFinite(minPriceNum) && Number.isFinite(maxPriceNum) ? (minPriceNum + maxPriceNum) / 2 : null;
 
     const outOfRangeInfo = useMemo(() => {
         if (!hasRange) return null;
-        if (currentPrice > maxPrice) {
-            const base = Math.abs(maxPrice) > 0 ? Math.abs(maxPrice) : 1;
-            return { direction: 'above', percent: Math.max(0, ((currentPrice - maxPrice) / base) * 100) };
+        if (currentPriceNum > maxPriceNum) {
+            const base = Math.abs(maxPriceNum) > 0 ? Math.abs(maxPriceNum) : 1;
+            return { direction: 'above', percent: Math.max(0, ((currentPriceNum - maxPriceNum) / base) * 100) };
         }
-        if (currentPrice < minPrice) {
-            const base = Math.abs(minPrice) > 0 ? Math.abs(minPrice) : 1;
-            return { direction: 'below', percent: Math.max(0, ((minPrice - currentPrice) / base) * 100) };
+        if (currentPriceNum < minPriceNum) {
+            const base = Math.abs(minPriceNum) > 0 ? Math.abs(minPriceNum) : 1;
+            return { direction: 'below', percent: Math.max(0, ((minPriceNum - currentPriceNum) / base) * 100) };
         }
         return null;
-    }, [hasRange, currentPrice, minPrice, maxPrice]);
+    }, [currentPriceNum, hasRange, maxPriceNum, minPriceNum]);
 
     const visualInRange = hasRange ? !outOfRangeInfo : Boolean(inRange);
 
     const statusText = useMemo(() => {
-        const currentLabel = `当前价 ${formatPrice(currentPrice)}`;
-        if (!Number.isFinite(currentPrice)) return `${currentLabel} · 暂不可用`;
+        const currentLabel = `当前价 ${formatPrice(currentPriceNum)}`;
+        if (!Number.isFinite(currentPriceNum)) return `${currentLabel} · 暂不可用`;
         if (visualInRange) return `${currentLabel} · 在区间内`;
         if (!outOfRangeInfo) return `${currentLabel} · 超出区间`;
         if (outOfRangeInfo.direction === 'above') return `${currentLabel} · 高于上限 ${formatPercent(outOfRangeInfo.percent)}`;
         return `${currentLabel} · 低于下限 ${formatPercent(outOfRangeInfo.percent)}`;
-    }, [currentPrice, visualInRange, outOfRangeInfo]);
+    }, [currentPriceNum, outOfRangeInfo, visualInRange]);
 
-    const gridInfoText = useMemo(() => {
-        if (currentGridIndex === null || currentGridLower === null || currentGridUpper === null) return '当前网格 --';
-        const currentGridLabel = hasGridCount
-            ? `第 ${currentGridIndex}/${Number(gridCount)} 格`
-            : `第 ${currentGridIndex} 格`;
-        return `${currentGridLabel} | ${formatPrice(currentGridLower)} - ${formatPrice(currentGridUpper)}`;
-    }, [currentGridIndex, currentGridLower, currentGridUpper, gridCount, hasGridCount]);
+    const currentRangeText = useMemo(() => {
+        const lower = Number(currentGridLower);
+        const upper = Number(currentGridUpper);
+        if (!Number.isFinite(lower) || !Number.isFinite(upper)) return '';
+        return `当前区间 ${formatPrice(lower)} - ${formatPrice(upper)}`;
+    }, [currentGridLower, currentGridUpper]);
+
+    const detailText = useMemo(() => {
+        const parts = [];
+        if (currentRangeText) parts.push(currentRangeText);
+        if (taskRangeText) parts.push(`任务区间 ${taskRangeText}`);
+        if (runningDuration) parts.push(`运行 ${runningDuration}`);
+        return parts.join(' · ');
+    }, [currentRangeText, runningDuration, taskRangeText]);
 
     const gridLines = useMemo(() => {
         if (!hasGridCount || Number(gridCount) < 2 || Number(gridCount) > 200) return [];
         const lines = [];
-        for (let i = 1; i < Number(gridCount); i += 1) lines.push((i / Number(gridCount)) * 100);
+        for (let i = 1; i < Number(gridCount); i += 1) {
+            lines.push((i / Number(gridCount)) * 100);
+        }
         return lines;
     }, [gridCount, hasGridCount]);
 
     const visibleGridLines = useMemo(() => {
         if (gridLines.length <= 40) return gridLines;
         const step = Math.ceil(gridLines.length / 40);
-        return gridLines.filter((_, i) => (i + 1) % step === 0);
+        return gridLines.filter((_, index) => (index + 1) % step === 0);
     }, [gridLines]);
 
     return (
@@ -126,8 +155,12 @@ export default function PriceRangeVisualizer({
                 <div className="absolute bottom-0 right-[3%] top-0 w-[2px] bg-rose-500" />
 
                 <div className="absolute bottom-0 left-[3%] right-[3%] top-0 flex items-end pb-1 opacity-40">
-                    {visibleGridLines.map((pct, i) => (
-                        <div key={i} className="absolute h-2 w-[1px] bg-zinc-500" style={{ left: `${pct}%`, transform: 'translateX(-50%)' }} />
+                    {visibleGridLines.map((pct, index) => (
+                        <div
+                            key={index}
+                            className="absolute h-2 w-[1px] bg-zinc-500"
+                            style={{ left: `${pct}%`, transform: 'translateX(-50%)' }}
+                        />
                     ))}
                 </div>
 
@@ -146,54 +179,37 @@ export default function PriceRangeVisualizer({
 
             <div className="mt-1 flex justify-between px-1 font-mono text-[10px] font-bold">
                 <span className="text-emerald-600 dark:text-emerald-500">
-                    <NumberFlowValue value={minPrice} formatter={(v) => formatPrice(v)} />
+                    <NumberFlowValue value={minPriceNum} formatter={(v) => formatPrice(v)} />
                 </span>
                 <span className="text-zinc-500 dark:text-zinc-400">
                     <NumberFlowValue value={midPrice} formatter={(v) => formatPrice(v)} />
                 </span>
                 <span className="text-rose-600 dark:text-rose-500">
-                    <NumberFlowValue value={maxPrice} formatter={(v) => formatPrice(v)} />
+                    <NumberFlowValue value={maxPriceNum} formatter={(v) => formatPrice(v)} />
                 </span>
             </div>
 
             <div
-                className={`mt-2 flex flex-col gap-1.5 rounded-lg border px-2 py-1.5 text-[10px] font-semibold sm:flex-row sm:items-center sm:justify-between ${
+                className={`mt-2 rounded-lg border px-2.5 py-2 text-[10px] font-semibold ${
                     visualInRange
                         ? 'border-emerald-200 bg-emerald-500/8 dark:border-emerald-500/20'
                         : 'border-rose-200 bg-rose-500/8 dark:border-rose-500/20'
                 }`}
             >
-                <div className="min-w-0 text-zinc-700 dark:text-zinc-300" title={gridInfoText}>
-                    <NumberFlowValue value={gridInfoText} formatter={() => gridInfoText} />
-                </div>
-
                 <div
-                    className={`min-w-0 text-left sm:text-right ${
+                    className={`leading-relaxed ${
                         visualInRange ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
                     }`}
                     title={statusText}
                 >
                     <NumberFlowValue value={statusText} formatter={() => statusText} />
                 </div>
+                {detailText ? (
+                    <div className="mt-1 break-words leading-relaxed text-zinc-700 dark:text-zinc-300" title={detailText}>
+                        <NumberFlowValue value={detailText} formatter={() => detailText} />
+                    </div>
+                ) : null}
             </div>
-
-            {(taskRangeText || runningDuration) ? (
-                <div className="mt-1.5 flex flex-wrap items-start gap-2">
-                    {taskRangeText ? (
-                        <span className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-md bg-sky-500/10 px-2 py-1 text-[10px] font-semibold leading-relaxed text-sky-700 ring-1 ring-sky-500/20 dark:bg-sky-500/15 dark:text-sky-300">
-                            <span className="shrink-0">任务区间</span>
-                            <span className="min-w-0 break-words">
-                                <NumberFlowValue value={taskRangeText} formatter={() => taskRangeText} />
-                            </span>
-                        </span>
-                    ) : null}
-                    {runningDuration ? (
-                        <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-500/20 dark:bg-emerald-500/15 dark:text-emerald-300">
-                            运行 <NumberFlowValue value={runningDuration} formatter={() => runningDuration} />
-                        </span>
-                    ) : null}
-                </div>
-            ) : null}
         </div>
     );
 }

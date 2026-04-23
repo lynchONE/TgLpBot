@@ -1452,9 +1452,9 @@ export default function App() {
         return [
             {
                 key: 'wallet',
-                label: '闂佽棄宕€?',
+                label: '钱包',
                 value: singleWalletValue,
-                detail: walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '闁哄牜浜ｇ换娑㈠箳?,'
+                detail: walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '未连接钱包',
             },
         ];
     }, [multiWalletSummary, posWalletBalances, singleWalletUsd, walletAddress]);
@@ -1462,13 +1462,13 @@ export default function App() {
         ...walletSummaryCards,
         {
             key: 'position',
-            label: '濞寸姵鎸风紞?',
+            label: '仓位',
             value: formatUsd(totalsFromPositions.positionUsd),
             detail: '',
         },
         {
             key: 'fee',
-            label: '闁归潧顑囬悽鑽ゆ嫻?',
+            label: '手续费',
             value: formatUsd(totalsFromPositions.feeUsd),
             detail: '',
         },
