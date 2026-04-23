@@ -2776,6 +2776,9 @@ func exchangeShort(exchange, fallback string) string {
 }
 
 func formatOutOfRange(task *models.StrategyTask, tickLower, tickUpper int, currentTick int) string {
+	if task != nil && task.Paused && (task.Status == models.StrategyStatusRunning || task.Status == models.StrategyStatusWaiting) {
+		return "暂停"
+	}
 	if task == nil {
 		return "0/0"
 	}
@@ -2807,6 +2810,44 @@ func formatOutOfRange(task *models.StrategyTask, tickLower, tickUpper int, curre
 }
 
 func statusLabelFromTask(task *models.StrategyTask) string {
+	if task == nil {
+		return "运行中"
+	}
+	if action := strings.TrimSpace(task.ExitPendingAction); action != "" {
+		switch action {
+		case strategy.ExitActionManualStop:
+			return "停止中"
+		case strategy.ExitActionStopLoss:
+			return "止损中"
+		case strategy.ExitActionOutOfRangeStop:
+			return "撤仓结束中"
+		case strategy.ExitActionRebalance:
+			return "再平衡中"
+		default:
+			return "撤仓中"
+		}
+	}
+	if task.RebalancePending {
+		return "再平衡中"
+	}
+	if task.Paused && (task.Status == models.StrategyStatusRunning || task.Status == models.StrategyStatusWaiting) {
+		return "已暂停"
+	}
+	switch task.Status {
+	case models.StrategyStatusRunning:
+		return "运行中"
+	case models.StrategyStatusWaiting:
+		return "等待中"
+	case models.StrategyStatusStopping:
+		return "停止中"
+	case models.StrategyStatusStopped:
+		return "已停止"
+	case models.StrategyStatusError:
+		return "错误"
+	default:
+		return "运行中"
+	}
+
 	if task == nil {
 		return "运行中"
 	}

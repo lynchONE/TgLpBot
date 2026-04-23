@@ -1,11 +1,14 @@
 package strategy
 
 import (
+	"TgLpBot/base/convert"
 	"TgLpBot/base/database"
 	"TgLpBot/base/models"
+	"TgLpBot/service/trade"
 	"TgLpBot/service/txexec"
 	"fmt"
 	"log"
+	"math/big"
 	"strings"
 	"time"
 )
@@ -261,6 +264,37 @@ func (s *StrategyService) runDCABatchAttempt(taskID uint, userID uint, batchIdx 
 	}
 	if err := database.DB.Model(&task).Updates(updates).Error; err != nil {
 		log.Printf("[Strategy] DCA task #%d batch %d DB update failed after on-chain success: %v", task.ID, batchNum, err)
+	}
+
+	var deltaWei *big.Int
+	if res != nil && res.ActualStableSpentWei != nil && res.ActualStableSpentWei.Sign() > 0 {
+		deltaWei = res.ActualStableSpentWei
+	} else if conv, convErr := convert.FloatUSDTToWei(spent); convErr == nil && conv != nil && conv.Sign() > 0 {
+		deltaWei = conv
+	}
+	if tradeErr := trade.NewTradeRecordService().ApplyAddLiquidityDelta(
+		&task,
+		deltaWei,
+		func() *big.Int {
+			if res != nil {
+				return res.GasSpentWei
+			}
+			return nil
+		}(),
+		func() *big.Int {
+			if res != nil {
+				return res.Dust0Wei
+			}
+			return nil
+		}(),
+		func() *big.Int {
+			if res != nil {
+				return res.Dust1Wei
+			}
+			return nil
+		}(),
+	); tradeErr != nil {
+		log.Printf("[Strategy] DCA task #%d batch %d failed to update trade record: %v", task.ID, batchNum, tradeErr)
 	}
 
 	if newExecuted >= total {

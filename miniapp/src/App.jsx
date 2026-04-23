@@ -3478,7 +3478,7 @@ export default function App() {
         if (!Number.isFinite(id) || id <= 0) return;
         try {
             const resp = await swapDust({ apiBaseUrl, initData, taskId: id });
-            showNotice(resp?.message || '婵炲牆顑勭紞鎴濐啅閹绘帒骞€闁?', 'success');
+            showNotice(resp?.message || '碎币兑换请求已提交。', 'success');
         } catch (e) {
             showNotice(String(e?.message || e), 'error');
         }
@@ -3490,7 +3490,7 @@ export default function App() {
         if (!Number.isFinite(id) || id <= 0) return;
         try {
             const resp = await triggerRebalance({ apiBaseUrl, initData, taskId: id });
-            showNotice(resp?.message || '闂佸憡鍔曠粔鎾煢閳哄啯鍋橀柍銉ュ暱閸ゆ帡鎮峰▎娆戠暠鐟?', 'success');
+            showNotice(resp?.message || '再平衡请求已提交。', 'success');
         } catch (e) {
             showNotice(String(e?.message || e), 'error');
         }
@@ -3514,7 +3514,7 @@ export default function App() {
         if (!Number.isFinite(id) || id <= 0) return;
         setAddLiqModal({
             taskId: id,
-            title: String(position?.title || '').trim() || `婵炲濮鹃褎鎱?#${id}`,
+            title: String(position?.title || '').trim() || `补充流动性 #${id}`,
         });
         setAddLiqAmount('');
         setAddLiqError('');
@@ -3531,7 +3531,7 @@ export default function App() {
         if (!addLiqModal) return;
         const amount = parseAmountInput(addLiqAmount);
         if (!Number.isFinite(amount) || amount <= 0) {
-            setAddLiqError('閻犲洨鏌夌欢顓㈠礂閵夛附绠掗柡浣哥墢濞堟垿鏌岄幋锔绘澓');
+            setAddLiqError('请输入有效的补仓金额。');
             return;
         }
         setAddLiqLoading(true);
@@ -3540,7 +3540,7 @@ export default function App() {
             const resp = await addLiquidity({ apiBaseUrl, initData, taskId: addLiqModal.taskId, amountUsdt: amount });
             setAddLiqModal(null);
             setAddLiqAmount('');
-            showNotice(resp?.message || '閻炴稏鍎遍崢鏍规担绋啃楅柟顑嫬鐏囬柛?', 'success');
+            showNotice(resp?.message || '补充流动性已提交。', 'success');
         } catch (e) {
             setAddLiqError(String(e?.message || e));
         } finally {
@@ -3558,7 +3558,7 @@ export default function App() {
         const fallbackAmount = Number(position?.net_invested_usd ?? position?.initial_cost_usd);
         setTaskRangeEdit({
             taskId: id,
-            title: String(position?.title || '').trim() || `婵炲濮鹃褎鎱?#${id}`,
+            title: String(position?.title || '').trim() || `修改任务区间 #${id}`,
         });
         setTaskRangeLower(Number.isFinite(low) && low > 0 ? String(low) : '');
         setTaskRangeUpper(Number.isFinite(up) && up > 0 ? String(up) : '');
@@ -5987,7 +5987,7 @@ export default function App() {
                                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
                                         </svg>
-                                        濠㈣泛瀚幃濠冪▔椤撱劎绀夐悹鍥棑閳笺垽宕?..
+                                        补仓提交中...
                                     </span>
                                 ) : '确认'}
                             </button>

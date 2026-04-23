@@ -214,6 +214,110 @@ const normalizeHexPrefixed = (v) => {
 };
 
 // 閻?tickSpacing 閹恒劌顕辩拹鍦芳閺嶅洨顒?
+function SmartMoneyRangeSummaryClean({ groups }) {
+    const [expanded, setExpanded] = useState(false);
+    const validGroups = useMemo(() => normalizeSmartMoneyRangeGroups(groups), [groups]);
+    const visibleGroups = expanded ? validGroups : validGroups.slice(0, SMART_MONEY_RANGE_LIMIT);
+    const hiddenCount = Math.max(0, validGroups.length - visibleGroups.length);
+    if (!validGroups.length) return null;
+    return (
+        <div className="rounded-lg border border-lime-500/20 bg-lime-500/[0.08] px-2.5 py-2">
+            <div className="flex items-center justify-between gap-2">
+                <div className="text-[10px] font-bold tracking-wide text-lime-700 dark:text-lime-300">聪明钱区间</div>
+                <div className="text-[10px] text-lime-700/70 dark:text-lime-300/70">{validGroups.length} 组</div>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+                {visibleGroups.map((group, index) => (
+                    <div
+                        key={`${Number(group?.range_percent || 0)}:${Number(group?.position_count || 0)}:${index}`}
+                        className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-lime-500/15 bg-black/10 px-2 py-1 text-[10px] text-zinc-600 dark:text-zinc-200"
+                    >
+                        <span className="shrink-0 font-semibold text-zinc-900 dark:text-white/95">{formatRangePercentPlain(group?.range_percent)}</span>
+                        {Math.max(0, Number(group?.position_count) || 0) > 1 ? (
+                            <span className="shrink-0 rounded-full bg-white/70 px-1.5 py-0.5 text-[9px] font-semibold text-zinc-600 dark:bg-white/10 dark:text-zinc-300">
+                                {Number(group.position_count)} 笔
+                            </span>
+                        ) : null}
+                        <span className="truncate text-zinc-500 dark:text-white/55">{formatUsdCompact(group?.total_amount_usd)}</span>
+                    </div>
+                ))}
+            </div>
+            {hiddenCount > 0 ? (
+                <button
+                    type="button"
+                    onClick={() => setExpanded((prev) => !prev)}
+                    className="mt-2 text-[10px] font-semibold text-lime-700 transition hover:text-lime-800 dark:text-lime-300 dark:hover:text-lime-200"
+                >
+                    {expanded ? '收起' : `展开更多 +${hiddenCount}`}
+                </button>
+            ) : null}
+        </div>
+    );
+}
+
+function getPositionStatusTheme(label) {
+    if (label?.includes('已停止') || label?.includes('错误')) {
+        return {
+            pill: 'bg-red-500/15 text-red-600 ring-red-500/25 dark:text-red-300 dark:ring-red-400/30',
+            dot: 'bg-red-500',
+        };
+    }
+    if (
+        label?.includes('已暂停')
+        || label?.includes('停止中')
+        || label?.includes('撤仓中')
+        || label?.includes('止损中')
+        || label?.includes('再平衡中')
+        || label?.includes('撤仓结束中')
+    ) {
+        return {
+            pill: 'bg-amber-500/15 text-amber-700 ring-amber-500/25 dark:text-amber-300 dark:ring-amber-400/30',
+            dot: 'bg-amber-500',
+        };
+    }
+    if (label?.includes('等待')) {
+        return {
+            pill: 'bg-sky-500/15 text-sky-700 ring-sky-500/25 dark:text-sky-300 dark:ring-sky-400/30',
+            dot: 'bg-sky-500',
+        };
+    }
+    return {
+        pill: 'bg-emerald-500/15 text-emerald-700 ring-emerald-500/25 dark:text-emerald-300 dark:ring-emerald-400/30',
+        dot: 'bg-emerald-500',
+    };
+}
+
+function buildTaskRangeDisplay(position) {
+    const low = Number(position?.task_range_lower_pct);
+    const up = Number(position?.task_range_upper_pct);
+    if (!Number.isFinite(low) || !Number.isFinite(up) || low <= 0 || up <= 0) return null;
+    const asymmetric = Math.abs(low - up) >= 0.01;
+    const avg = (low + up) / 2;
+    const totalWidth = low + up;
+    const summaryText = asymmetric ? `下 ${low.toFixed(2)}% / 上 ${up.toFixed(2)}%` : `±${avg.toFixed(2)}%`;
+    let text = summaryText;
+    const amountUsdt = Number(position?.task_amount_usdt);
+    if (Number.isFinite(amountUsdt) && amountUsdt > 0) {
+        text += ` · 金额 $${amountUsdt.toFixed(2)}`;
+    }
+    return { text, badgeText: `宽度 ${totalWidth.toFixed(2)}%` };
+}
+
+function isStoppedStatus(label) {
+    return String(label || '').includes('已停止');
+}
+
+function isBusyStatus(label) {
+    const text = String(label || '');
+    return (
+        text.includes('停止中')
+        || text.includes('撤仓中')
+        || text.includes('止损中')
+        || text.includes('再平衡中')
+        || text.includes('撤仓结束中')
+    );
+}
+
 const FEE_TIER_BY_TICK_SPACING = {
     1: 100,
     10: 500,
@@ -417,6 +521,12 @@ export default function PositionCard({
         return { text, badgeText: `宽度 ${totalWidth.toFixed(2)}%` };
     }, [position?.task_range_lower_pct, position?.task_range_upper_pct, position?.task_amount_usdt]);
 
+    const displayTaskRange = useMemo(() => buildTaskRangeDisplay(position), [
+        position?.task_range_lower_pct,
+        position?.task_range_upper_pct,
+        position?.task_amount_usdt,
+    ]);
+
     const taskId = useMemo(() => {
         const raw = Number(position?.task_id);
         return Number.isFinite(raw) && raw > 0 ? raw : 0;
@@ -427,18 +537,20 @@ export default function PositionCard({
     const statusLabel = String(position?.status_label || '');
     const isStopped = statusLabel.includes('停止') || statusLabel.includes('结束');
     const isStopping = statusLabel.includes('停止中') || statusLabel.includes('撤仓中') || statusLabel.includes('处理中');
+    const isStoppedState = isStoppedStatus(statusLabel);
+    const isBusyState = isBusyStatus(statusLabel);
     const hasActions = typeof onSetTaskPaused === 'function' || typeof onStopTask === 'function' || typeof onDeleteTask === 'function' || typeof onUpdateTaskRange === 'function';
     const canTaskAction = Boolean(allowTaskActions) && hasActions && taskId > 0;
-    const canPauseAction = canTaskAction && typeof onSetTaskPaused === 'function' && !isStopping;
-    const canUpdateRangeAction = canTaskAction && typeof onUpdateTaskRange === 'function' && !isStopping;
-    const canStopAction = canTaskAction && typeof onStopTask === 'function' && !isStopped && !isStopping;
-    const canDeleteAction = canTaskAction && typeof onDeleteTask === 'function' && !isStopping;
+    const canPauseAction = canTaskAction && typeof onSetTaskPaused === 'function' && !isBusyState;
+    const canUpdateRangeAction = canTaskAction && typeof onUpdateTaskRange === 'function' && !isBusyState;
+    const canStopAction = canTaskAction && typeof onStopTask === 'function' && !isStoppedState && !isBusyState;
+    const canDeleteAction = canTaskAction && typeof onDeleteTask === 'function' && !isBusyState;
     const hasLiquidity = Boolean(position?.has_liquidity);
-    const canWithdraw = canTaskAction && typeof onWithdrawLiquidity === 'function' && hasLiquidity && !isStopping;
-    const canSwapDust = canTaskAction && typeof onSwapDust === 'function' && !isStopping;
-    const canTriggerRebalance = canTaskAction && typeof onTriggerRebalance === 'function' && hasLiquidity && !isStopped && !isStopping;
-    const canUpdateTaskMode = canTaskAction && typeof onUpdateTaskMode === 'function' && !isStopped && !isStopping;
-    const canAddLiquidity = canTaskAction && typeof onAddLiquidity === 'function' && !isStopped && !isStopping;
+    const canWithdraw = canTaskAction && typeof onWithdrawLiquidity === 'function' && hasLiquidity && !isBusyState;
+    const canSwapDust = canTaskAction && typeof onSwapDust === 'function' && !isBusyState;
+    const canTriggerRebalance = canTaskAction && typeof onTriggerRebalance === 'function' && hasLiquidity && !isStoppedState && !isBusyState;
+    const canUpdateTaskMode = canTaskAction && typeof onUpdateTaskMode === 'function' && !isStoppedState && !isBusyState;
+    const canAddLiquidity = canTaskAction && typeof onAddLiquidity === 'function' && !isStoppedState && !isBusyState;
 
     const [menuOpen, setMenuOpen] = useState(false);
     const [actionPending, setActionPending] = useState('');
@@ -475,7 +587,7 @@ export default function PositionCard({
     const addLiquidity = () => runAction('addLiq', () => onAddLiquidity?.(taskId, position));
 
     const pnlPositive = pnlAbsolute >= 0;
-    const statusTheme = getStatusTheme(statusLabel);
+    const statusTheme = getPositionStatusTheme(statusLabel);
 
     // 鐠愬湱宸奸弽鍥╊劮閿涘牅绮?tickSpacing 閹恒劌顕遍敍?
     const feeLabel = useMemo(() => {
@@ -543,6 +655,26 @@ export default function PositionCard({
 
                     {/* 閸欏厖鏅堕敍姘偓璁崇幆閸?+ 閹垮秳缍旈懣婊冨礋 */}
                     <div className="ml-auto flex shrink-0 items-start gap-2 pl-2">
+                        {false && <>
+                        <div className="text-right">
+                            <div className="mb-0.5 text-[9px] font-medium uppercase tracking-wide text-zinc-400 dark:text-white/35">仓值</div>
+                            <div className="text-lg font-extrabold text-zinc-900 dark:text-white/95 tabular-nums leading-none">
+                                <NumberFlowValue value={totalValue} formatter={(v) => formatUsd(v)} />
+                            </div>
+                            {showAbsolutePnl && hasPnL && (
+                                <div className="mt-1.5">
+                                    <div className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[11px] font-bold tabular-nums shadow-sm ${pnlPositive
+                                        ? 'bg-emerald-500/15 text-emerald-500 dark:bg-emerald-500/20 dark:text-emerald-400 ring-1 ring-emerald-500/20'
+                                        : 'bg-red-500/15 text-red-500 dark:bg-red-500/20 dark:text-red-400 ring-1 ring-red-500/20'
+                                        }`}>
+                                        <NumberFlowValue
+                                            value={pnlAbsolute}
+                                            formatter={(v) => `${Number(v) >= 0 ? '+' : ''}${formatBotAmount(v)}`}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                         {/* 閹鐜崐?+ PnL */}
                         <div className="text-right">
                             <div className="mb-0.5 text-[9px] font-medium uppercase tracking-wide text-zinc-400 dark:text-white/35">价值</div>
@@ -563,11 +695,92 @@ export default function PositionCard({
                                 </div>
                             )}
                         </div>
+                        </>}
+
+                        <div className="text-right">
+                            <div className="mb-0.5 text-[9px] font-medium uppercase tracking-wide text-zinc-400 dark:text-white/35">仓值</div>
+                            <div className="text-lg font-extrabold text-zinc-900 dark:text-white/95 tabular-nums leading-none">
+                                <NumberFlowValue value={totalValue} formatter={(v) => formatUsd(v)} />
+                            </div>
+                            {showAbsolutePnl && hasPnL && (
+                                <div className="mt-1.5">
+                                    <div className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[11px] font-bold tabular-nums shadow-sm ${pnlPositive
+                                        ? 'bg-emerald-500/15 text-emerald-500 dark:bg-emerald-500/20 dark:text-emerald-400 ring-1 ring-emerald-500/20'
+                                        : 'bg-red-500/15 text-red-500 dark:bg-red-500/20 dark:text-red-400 ring-1 ring-red-500/20'
+                                        }`}>
+                                        <NumberFlowValue
+                                            value={pnlAbsolute}
+                                            formatter={(v) => `${Number(v) >= 0 ? '+' : ''}${formatBotAmount(v)}`}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+                        </div>
 
                         {headerAccessory}
 
-                        {/* 閹垮秳缍旈懣婊冨礋 */}
                         {canTaskAction && (
+                            <div className="relative z-20" ref={menuRef}>
+                                <button
+                                    type="button"
+                                    onClick={() => setMenuOpen((v) => !v)}
+                                    className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-200/80 bg-zinc-50 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 active:scale-95 transition-all dark:border-white/5 dark:bg-[#1a1c20] dark:text-white/50 dark:hover:bg-white/5 dark:hover:text-white/80"
+                                    aria-label="更多操作"
+                                    disabled={Boolean(actionPending)}
+                                >
+                                    <Icon path={icons.kebab} className="h-4 w-4" />
+                                </button>
+                                {menuOpen && (
+                                    <div className="absolute right-0 top-full z-30 mt-1.5 w-36 overflow-hidden rounded-xl border border-zinc-200/80 bg-white/95 backdrop-blur-xl shadow-xl dark:border-white/10 dark:bg-[#1f2126]/95">
+                                        {typeof onSetTaskPaused === 'function' && (
+                                            <button type="button" onClick={togglePause} disabled={!canPauseAction || Boolean(actionPending)}
+                                                className="w-full px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:text-white/70 dark:hover:bg-white/5">
+                                                {actionPending === 'pause' ? '处理中...' : taskPaused ? '恢复任务' : '暂停任务'}
+                                            </button>
+                                        )}
+                                        {typeof onUpdateTaskRange === 'function' && (
+                                            <button type="button" onClick={editRange} disabled={!canUpdateRangeAction || Boolean(actionPending)}
+                                                className="w-full border-t border-zinc-100/80 px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:border-white/5 dark:text-white/70 dark:hover:bg-white/5">
+                                                {actionPending === 'range' ? '处理中...' : '修改区间'}
+                                            </button>
+                                        )}
+                                        {typeof onAddLiquidity === 'function' && (
+                                            <button type="button" onClick={addLiquidity} disabled={!canAddLiquidity || Boolean(actionPending)}
+                                                className="w-full border-t border-zinc-100/80 px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-100/80 disabled:opacity-40 transition-colors dark:border-white/5 dark:text-white/70 dark:hover:bg-white/5">
+                                                {actionPending === 'addLiq' ? '处理中...' : '补充流动性'}
+                                            </button>
+                                        )}
+                                        {typeof onSwapDust === 'function' && (
+                                            <button type="button" onClick={swapDust} disabled={!canSwapDust || Boolean(actionPending)}
+                                                className="w-full border-t border-zinc-100/80 px-3 py-2 text-left text-xs font-semibold text-violet-600 hover:bg-violet-50 disabled:opacity-40 transition-colors dark:border-white/5 dark:text-violet-400 dark:hover:bg-violet-500/10">
+                                                {actionPending === 'dust' ? '处理中...' : '碎币兑换'}
+                                            </button>
+                                        )}
+                                        {typeof onTriggerRebalance === 'function' && (
+                                            <button type="button" onClick={triggerRebalance} disabled={!canTriggerRebalance || Boolean(actionPending)}
+                                                className="w-full border-t border-zinc-100/80 px-3 py-2 text-left text-xs font-semibold text-blue-600 hover:bg-blue-50 disabled:opacity-40 transition-colors dark:border-white/5 dark:text-blue-400 dark:hover:bg-blue-500/10">
+                                                {actionPending === 'rebalance' ? '处理中...' : '立即再平衡'}
+                                            </button>
+                                        )}
+                                        {typeof onStopTask === 'function' && (
+                                            <button type="button" onClick={stopTask} disabled={!canStopAction || Boolean(actionPending)}
+                                                className="w-full border-t border-zinc-100/80 px-3 py-2 text-left text-xs font-semibold text-amber-600 hover:bg-amber-50 disabled:opacity-40 transition-colors dark:border-white/5 dark:text-amber-400 dark:hover:bg-amber-500/10">
+                                                {actionPending === 'stop' ? '处理中...' : isBusyState ? '处理中...' : '停止任务'}
+                                            </button>
+                                        )}
+                                        {typeof onDeleteTask === 'function' && (
+                                            <button type="button" onClick={deleteTask} disabled={!canDeleteAction || Boolean(actionPending)}
+                                                className="w-full border-t border-zinc-100/80 px-3 py-2 text-left text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-40 transition-colors dark:border-white/5 dark:text-red-400 dark:hover:bg-red-500/10">
+                                                {actionPending === 'delete' ? '删除中...' : '删除任务'}
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* 閹垮秳缍旈懣婊冨礋 */}
+                        {false && canTaskAction && (
                             <div className="relative z-20" ref={menuRef}>
                                 <button
                                     type="button"
@@ -621,6 +834,35 @@ export default function PositionCard({
                     閹垮秳缍旈幐澶愭尦鐞?
                 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?*/}
                 {canTaskAction && (
+                    <div className="flex flex-wrap items-center gap-1.5 pb-0.5">
+                        {typeof onWithdrawLiquidity === 'function' && (
+                            <button type="button" onClick={withdrawLiquidity} disabled={!canWithdraw || Boolean(actionPending)}
+                                title="撤出流动性"
+                                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-xl border border-sky-400/40 bg-sky-50 px-2.5 text-[10.5px] font-semibold text-sky-700 shadow-sm transition-all active:scale-95 disabled:opacity-40 hover:bg-sky-100 dark:bg-sky-500/15 dark:text-sky-400 dark:border-sky-500/25 dark:hover:bg-sky-500/25">
+                                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
+                                    <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
+                                </svg>
+                                <span>{actionPending === 'withdraw' ? '...' : '撤仓'}</span>
+                            </button>
+                        )}
+                        {typeof onUpdateTaskMode === 'function' && (
+                            <>
+                                {TASK_MODE_OPTIONS.map((option) => (
+                                    <button key={option.value} type="button" onClick={() => updateTaskMode(option.value)} disabled={!canUpdateTaskMode || Boolean(actionPending)}
+                                        title={option.description}
+                                        className={`inline-flex h-7 shrink-0 items-center rounded-xl border px-2.5 text-[10.5px] font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-40 ${currentTaskMode === option.value
+                                            ? 'border-emerald-400/40 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/25 dark:hover:bg-emerald-500/25'
+                                            : 'border-zinc-300/60 bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-white/5 dark:text-zinc-400 dark:border-white/10 dark:hover:bg-white/10'
+                                            }`}>
+                                        <span>{option.shortLabel}</span>
+                                    </button>
+                                ))}
+                            </>
+                        )}
+                    </div>
+                )}
+
+                {false && canTaskAction && (
                     <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none]">
                         {/* 閺嗗倸浠?閹垹顦?*/}
                         {/* 閸欐牕娲栧ù浣稿З閹?*/}
@@ -678,9 +920,115 @@ export default function PositionCard({
                     閸栧搫鐓?2閿涙矮缍戞０婵囨缂佸棴绱欓崣顖涘閸欑媴绱?
                 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅?*/}
                 {Array.isArray(smartMoneyRangeGroups) && smartMoneyRangeGroups.length > 0 ? (
-                    <SmartMoneyRangeSummary groups={smartMoneyRangeGroups} />
+                    <SmartMoneyRangeSummaryClean groups={smartMoneyRangeGroups} />
                 ) : null}
 
+                <div className="rounded-lg border border-zinc-100 bg-zinc-50/50 dark:border-white/5 dark:bg-[#1a1c20]">
+                    <button type="button" onClick={() => setExpanded(!expanded)}
+                        className="w-full flex items-center justify-between px-2.5 py-1.5">
+                        <div className="flex items-center gap-1.5">
+                            <div className="text-[10px] font-semibold text-zinc-500 dark:text-white/50 uppercase tracking-wide">资产明细</div>
+                            {!expanded && (
+                                <div className="text-[9px] text-zinc-400 dark:text-white/35 tabular-nums">
+                                    仓位 <NumberFlowValue value={position?.totals?.position_usd} formatter={(v) => formatUsd(v)} />
+                                    {' · '}
+                                    手续费 <NumberFlowValue value={position?.totals?.fee_usd} formatter={(v) => formatFeeUsd(v)} />
+                                </div>
+                            )}
+                        </div>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                            className={`h-3 w-3 text-zinc-400 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}>
+                            <path d={icons.chevronDown} />
+                        </svg>
+                    </button>
+
+                    <div className={`collapsible-content ${expanded ? 'expanded' : 'collapsed'}`}>
+                        <div className="px-3 pb-3">
+                            <div className="grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2 border-b border-zinc-200/60 pb-1.5 dark:border-white/10">
+                                <div className="text-[11px] font-bold text-zinc-500 dark:text-white/60 tracking-wide uppercase">Token</div>
+                                <div className="text-[11px] font-bold text-zinc-500 dark:text-white/60 tracking-wide uppercase text-right flex items-center justify-end gap-1">
+                                    <Icon path={icons.wallet} className="h-2.5 w-2.5" />钱包
+                                </div>
+                                <div className="text-[11px] font-bold text-zinc-500 dark:text-white/60 tracking-wide uppercase text-right">仓位</div>
+                                <div className="text-[11px] font-bold text-emerald-600/80 dark:text-emerald-500/80 tracking-wide uppercase text-right">手续费</div>
+                            </div>
+
+                            {[token0, token1].filter(Boolean).map((row) => (
+                                <div key={row.address} className="grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2 items-center py-2 border-b border-zinc-100/60 dark:border-white/10 last:border-0">
+                                    <div className="min-w-0 pr-1">
+                                        <div className="text-[13px] font-bold text-zinc-900 dark:text-white/95 truncate">{row.symbol}</div>
+                                        <div className="text-xs text-zinc-500 dark:text-white/50 font-mono">
+                                            <NumberFlowValue
+                                                value={row.price_usd_text || `$${Number(row.price_usd || 0).toFixed(4)}`}
+                                                formatter={() => row.price_usd_text || `$${Number(row.price_usd || 0).toFixed(4)}`}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="text-right min-w-0">
+                                        <div className="text-[13px] font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">
+                                            <NumberFlowValue value={row.wallet_amount} formatter={() => String(row.wallet_amount ?? '--')} />
+                                        </div>
+                                        <div className="text-xs text-zinc-500 dark:text-white/50 font-mono tabular-nums truncate">
+                                            <NumberFlowValue value={row.wallet_usd} formatter={(v) => formatUsd(v)} />
+                                        </div>
+                                    </div>
+                                    <div className="text-right min-w-0">
+                                        <div className="text-[13px] font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">
+                                            <NumberFlowValue value={row.position_amount} formatter={() => String(row.position_amount ?? '--')} />
+                                        </div>
+                                        <div className="text-xs text-zinc-500 dark:text-white/50 font-mono tabular-nums truncate">
+                                            <NumberFlowValue value={row.position_usd} formatter={(v) => formatUsd(v)} />
+                                        </div>
+                                    </div>
+                                    <div className="text-right min-w-0">
+                                        <div className="text-[13px] font-bold text-emerald-600 dark:text-emerald-400 font-mono tabular-nums truncate">
+                                            <NumberFlowValue value={row.fee_amount} formatter={() => String(row.fee_amount ?? '--')} />
+                                        </div>
+                                        <div className="text-xs text-emerald-600/70 dark:text-emerald-400/70 font-mono tabular-nums truncate">
+                                            <NumberFlowValue value={row.fee_usd} formatter={(v) => formatFeeUsd(v)} />
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+
+                            <div className="pt-2">
+                                <div className="grid grid-cols-4 gap-1.5">
+                                    {[
+                                        { key: 'wallet', label: '钱包', onClick: openWallet, disabled: false },
+                                        { key: 'pool', label: '池子', onClick: openPool, disabled: !poolLink },
+                                        { key: 'token0', label: token0?.symbol || 'Token0', onClick: () => openToken(token0?.address), disabled: !token0?.address },
+                                        { key: 'token1', label: token1?.symbol || 'Token1', onClick: () => openToken(token1?.address), disabled: !token1?.address },
+                                    ].map(({ key, label, onClick, disabled }) => (
+                                        <button
+                                            key={key}
+                                            onClick={onClick}
+                                            disabled={disabled}
+                                            title={label}
+                                            className="inline-flex min-w-0 items-center justify-center rounded-lg border border-zinc-200 bg-white px-1.5 py-1 text-[10px] font-semibold text-zinc-700 hover:bg-zinc-100 active:scale-[0.98] disabled:opacity-40 dark:border-white/15 dark:bg-white/10 dark:text-white/80 dark:hover:bg-white/15"
+                                        >
+                                            <span className="truncate">{label}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="pt-2 grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-2 mt-1 border-t border-zinc-100/60 dark:border-white/10">
+                                <div className="text-xs font-bold text-zinc-500 dark:text-white/70">合计</div>
+                                <div className="text-right text-xs font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">
+                                    <NumberFlowValue value={position?.totals?.wallet_usd} formatter={(v) => formatUsd(v)} />
+                                </div>
+                                <div className="text-right text-xs font-bold text-zinc-900 dark:text-white/95 font-mono tabular-nums truncate">
+                                    <NumberFlowValue value={position?.totals?.position_usd} formatter={(v) => formatUsd(v)} />
+                                </div>
+                                <div className="text-right text-xs font-bold text-emerald-600 dark:text-emerald-400 font-mono tabular-nums truncate">
+                                    <NumberFlowValue value={position?.totals?.fee_usd} formatter={(v) => formatFeeUsd(v)} />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {false && (
                 <div className="rounded-lg border border-zinc-100 bg-zinc-50/50 dark:border-white/5 dark:bg-[#1a1c20]">
                     <button type="button" onClick={() => setExpanded(!expanded)}
                         className="w-full flex items-center justify-between px-2.5 py-1.5">
@@ -787,6 +1135,8 @@ export default function PositionCard({
                     </div>
                 </div>
 
+                )}
+
                 <PriceRangeVisualizer
                     currentPrice={currentPrice}
                     minPrice={rangeMin}
@@ -794,12 +1144,12 @@ export default function PositionCard({
                     pairLabel={pairLabel}
                     gridCount={gridCountRaw}
                     gridStepPct={gridStepPct}
-                    rangeBadgeText={taskRange?.badgeText || ''}
+                    rangeBadgeText={displayTaskRange?.badgeText || ''}
                     inRange={position?.in_range}
                     currentGridIndex={currentGridIndex}
                     currentGridLower={gridLower}
                     currentGridUpper={gridUpper}
-                    taskRangeText={taskRange?.text || ''}
+                    taskRangeText={displayTaskRange?.text || ''}
                     runningDuration={runningDuration}
                 />
 
